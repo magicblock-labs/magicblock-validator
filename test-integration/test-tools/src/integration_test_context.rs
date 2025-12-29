@@ -157,7 +157,9 @@ impl IntegrationTestContext {
         rpc_client: Option<&RpcClient>,
         label: &str,
     ) -> Option<Vec<String>> {
-        let rpc_client = rpc_client.or(self.chain_client.as_ref())?;
+        let rpc_client = rpc_client.unwrap_or_else(|| {
+            panic!("rpc_client for [{label}] does not exist")
+        });
 
         // Try this up to 50 times since devnet here returns the version response instead of
         // the EncodedConfirmedTransactionWithStatusMeta at times
@@ -166,6 +168,13 @@ impl IntegrationTestContext {
                 &sig,
                 RpcTransactionConfig {
                     commitment: Some(self.commitment),
+                    max_supported_transaction_version: if label == "chain" {
+                        // base chain cluster requires explicit v0 support,
+                        // while ephemeral uses default version handling
+                        Some(0)
+                    } else {
+                        None
+                    },
                     ..Default::default()
                 },
             ) {
@@ -594,11 +603,24 @@ impl IntegrationTestContext {
         payer_chain: &Keypair,
         payer_ephem: &Keypair,
     ) -> anyhow::Result<(Signature, bool)> {
+        self.delegate_account_to_validator(
+            payer_chain,
+            payer_ephem,
+            self.ephem_validator_identity,
+        )
+    }
+
+    pub fn delegate_account_to_validator(
+        &self,
+        payer_chain: &Keypair,
+        payer_ephem: &Keypair,
+        validator: Option<Pubkey>,
+    ) -> anyhow::Result<(Signature, bool)> {
         let ixs = dlp_interface::create_delegate_ixs(
             // We change the owner of the ephem account, thus cannot use it as payer
             payer_chain.pubkey(),
             payer_ephem.pubkey(),
-            self.ephem_validator_identity,
+            validator,
         );
         let mut tx =
             Transaction::new_with_payer(&ixs, Some(&payer_chain.pubkey()));
@@ -988,6 +1010,39 @@ impl IntegrationTestContext {
                     .collect()
             })?;
         Ok(res)
+    }
+
+    pub fn last_transaction_mentioning_account_ephem(
+        &self,
+        account: &Pubkey,
+    ) -> Result<Signature> {
+        self.last_transaction_mentioning_account(account, true)
+    }
+
+    pub fn last_transaction_mentioning_account_chain(
+        &self,
+        account: &Pubkey,
+    ) -> Result<Signature> {
+        self.last_transaction_mentioning_account(account, false)
+    }
+
+    fn last_transaction_mentioning_account(
+        &self,
+        account: &Pubkey,
+        is_ephem: bool,
+    ) -> Result<Signature> {
+        let statuses = if is_ephem {
+            self.get_signaturestats_for_address_ephem(account)?
+        } else {
+            self.get_signaturestats_for_address_chain(account)?
+        };
+
+        statuses
+            .first()
+            .map(|status| status.signature())
+            .ok_or_else(|| {
+                anyhow::anyhow!("No transactions found for account {}", account)
+            })
     }
 
     // -----------------

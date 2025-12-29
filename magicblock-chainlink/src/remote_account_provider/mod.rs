@@ -8,13 +8,14 @@ use std::{
 };
 
 pub(crate) use chain_pubsub_client::{
-    ChainPubsubClient, ChainPubsubClientImpl,
+    ChainPubsubClient, ChainPubsubClientImpl, ReconnectableClient,
 };
 pub(crate) use chain_rpc_client::{ChainRpcClient, ChainRpcClientImpl};
 use config::RemoteAccountProviderConfig;
 pub(crate) use errors::{
     RemoteAccountProviderError, RemoteAccountProviderResult,
 };
+use futures_util::future::try_join_all;
 use log::*;
 pub use lru_cache::AccountsLruCache;
 pub(crate) use remote_account::RemoteAccount;
@@ -37,16 +38,21 @@ use tokio::{
     time::{self, Duration},
 };
 
+pub(crate) mod chain_laser_actor;
+pub mod chain_laser_client;
 pub(crate) mod chain_pubsub_actor;
 pub mod chain_pubsub_client;
 pub mod chain_rpc_client;
+pub mod chain_updates_client;
 pub mod config;
+pub mod endpoint;
 pub mod errors;
 mod lru_cache;
 pub mod program_account;
+pub mod pubsub_common;
 mod remote_account;
 
-pub use chain_pubsub_actor::SubscriptionUpdate;
+pub use endpoint::{Endpoint, Endpoints};
 use magicblock_metrics::{
     metrics,
     metrics::{
@@ -58,7 +64,14 @@ use magicblock_metrics::{
 };
 pub use remote_account::{ResolvedAccount, ResolvedAccountSharedData};
 
-use crate::{errors::ChainlinkResult, submux::SubMuxClient};
+use crate::{
+    errors::ChainlinkResult,
+    remote_account_provider::{
+        chain_updates_client::ChainUpdatesClient,
+        pubsub_common::SubscriptionUpdate,
+    },
+    submux::SubMuxClient,
+};
 
 const ACTIVE_SUBSCRIPTIONS_UPDATE_INTERVAL_MS: u64 = 60_000;
 
@@ -132,20 +145,11 @@ impl Default for MatchSlotsConfig {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct Endpoint {
-    pub rpc_url: String,
-    pub pubsub_url: String,
-}
-
 impl
-    RemoteAccountProvider<
-        ChainRpcClientImpl,
-        SubMuxClient<ChainPubsubClientImpl>,
-    >
+    RemoteAccountProvider<ChainRpcClientImpl, SubMuxClient<ChainUpdatesClient>>
 {
     pub async fn try_from_urls_and_config(
-        endpoints: &[Endpoint],
+        endpoints: &Endpoints,
         commitment: CommitmentConfig,
         subscription_forwarder: mpsc::Sender<ForwardedSubscriptionUpdate>,
         config: &RemoteAccountProviderConfig,
@@ -153,7 +157,7 @@ impl
         Option<
             RemoteAccountProvider<
                 ChainRpcClientImpl,
-                SubMuxClient<ChainPubsubClientImpl>,
+                SubMuxClient<ChainUpdatesClient>,
             >,
         >,
     > {
@@ -165,8 +169,8 @@ impl
             Ok(Some(
                 RemoteAccountProvider::<
                     ChainRpcClientImpl,
-                    SubMuxClient<ChainPubsubClientImpl>,
-                >::try_new_from_urls(
+                    SubMuxClient<ChainUpdatesClient>,
+                >::try_new_from_endpoints(
                     endpoints,
                     commitment,
                     subscription_forwarder,
@@ -187,6 +191,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         subscription_forwarder: mpsc::Sender<ForwardedSubscriptionUpdate>,
         config: &RemoteAccountProviderConfig,
         lrucache_subscribed_accounts: Arc<AccountsLruCache>,
+        chain_slot: Arc<AtomicU64>,
     ) -> ChainlinkResult<Option<RemoteAccountProvider<T, U>>> {
         if config.lifecycle_mode().needs_remote_account_provider() {
             Ok(Some(
@@ -196,6 +201,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                     subscription_forwarder,
                     config,
                     lrucache_subscribed_accounts,
+                    chain_slot,
                 )
                 .await?,
             ))
@@ -218,20 +224,31 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             loop {
                 interval.tick().await;
                 let lru_count = subscribed_accounts.len();
-                let (pubsub_total, pubsub_without_never_evict) = pubsub_client
+                let subscription_counts = pubsub_client
                     .subscription_count(Some(&never_evicted))
                     .await;
 
                 let all_pubsub_subs = if log::log_enabled!(log::Level::Debug) {
-                    pubsub_client.subscriptions()
+                    pubsub_client.subscriptions().unwrap_or_default()
                 } else {
                     vec![]
                 };
+
+                let (pubsub_total, pubsub_without_never_evict) =
+                    match subscription_counts {
+                        Some(counts) => counts,
+                        None => {
+                            warn!(
+                                "No connected client that tracks subscriptions"
+                            );
+                            (0, 0)
+                        }
+                    };
                 if lru_count != pubsub_without_never_evict {
                     warn!(
-                        "User account subscription counts LRU cache={} pubsub client={} don't match",
-                        lru_count, pubsub_without_never_evict
-                    );
+                            "User account subscription counts LRU cache={} pubsub client={} don't match",
+                            lru_count, pubsub_without_never_evict
+                        );
                     if log::log_enabled!(log::Level::Debug) {
                         // Log all pubsub subscriptions for debugging
                         trace!(
@@ -285,6 +302,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         subscription_forwarder: mpsc::Sender<ForwardedSubscriptionUpdate>,
         config: &RemoteAccountProviderConfig,
         lrucache_subscribed_accounts: Arc<AccountsLruCache>,
+        chain_slot: Arc<AtomicU64>,
     ) -> RemoteAccountProviderResult<Self> {
         let (removed_account_tx, removed_account_rx) =
             tokio::sync::mpsc::channel(100);
@@ -303,7 +321,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             fetching_accounts: Arc::<FetchingAccounts>::default(),
             rpc_client,
             pubsub_client,
-            chain_slot: Arc::<AtomicU64>::default(),
+            chain_slot,
             last_update_slot: Arc::<AtomicU64>::default(),
             received_updates_count: Arc::<AtomicU64>::default(),
             lrucache_subscribed_accounts,
@@ -332,15 +350,15 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         }
     }
 
-    pub async fn try_new_from_urls(
-        endpoints: &[Endpoint],
+    pub async fn try_new_from_endpoints(
+        endpoints: &Endpoints,
         commitment: CommitmentConfig,
         subscription_forwarder: mpsc::Sender<ForwardedSubscriptionUpdate>,
         config: &RemoteAccountProviderConfig,
     ) -> RemoteAccountProviderResult<
         RemoteAccountProvider<
             ChainRpcClientImpl,
-            SubMuxClient<ChainPubsubClientImpl>,
+            SubMuxClient<ChainUpdatesClient>,
         >,
     > {
         if endpoints.is_empty() {
@@ -351,26 +369,32 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             );
         }
 
-        // Build RPC clients (use the first one for now)
-        let rpc_client = {
-            let first = &endpoints[0];
-            ChainRpcClientImpl::new_from_url(first.rpc_url.as_str(), commitment)
-        };
+        // Build RPC clients (use the first RPC endpoint found)
+        let rpc_url = endpoints.rpc_url().ok_or_else(|| {
+            RemoteAccountProviderError::AccountSubscriptionsTaskFailed(
+                "No RPC endpoint found".to_string(),
+            )
+        })?;
+        let rpc_client =
+            ChainRpcClientImpl::new_from_url(rpc_url.as_str(), commitment);
+
+        // Create chain_slot to be shared with all pubsub clients
+        let chain_slot = Arc::<AtomicU64>::default();
 
         // Build pubsub clients and wrap them into a SubMuxClient
-        let mut pubsubs: Vec<(Arc<ChainPubsubClientImpl>, mpsc::Receiver<()>)> =
-            Vec::with_capacity(endpoints.len());
-        for ep in endpoints {
+        let pubsubs = endpoints.pubsubs();
+        let pubsub_futs = pubsubs.iter().map(|ep| async {
             let (abort_tx, abort_rx) = mpsc::channel(1);
-            let client = ChainPubsubClientImpl::try_new_from_url(
-                ep.pubsub_url.as_str(),
-                abort_tx,
+            let client = ChainUpdatesClient::try_new_from_endpoint(
+                ep,
                 commitment,
+                abort_tx,
+                chain_slot.clone(),
             )
             .await?;
-            pubsubs.push((Arc::new(client), abort_rx));
-        }
-
+            Ok::<_, RemoteAccountProviderError>((Arc::new(client), abort_rx))
+        });
+        let pubsubs = try_join_all(pubsub_futs).await?;
         let subscribed_accounts = Arc::new(AccountsLruCache::new({
             // SAFETY: NonZeroUsize::new only returns None if the value is 0.
             // RemoteAccountProviderConfig can only be constructed with
@@ -389,20 +413,23 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                     &config.program_subs().iter().cloned().collect::<Vec<_>>()
                 )
             );
-            for program_id in config.program_subs() {
-                submux.subscribe_program(*program_id).await?;
-            }
+            let subscribe_program_futs = config
+                .program_subs()
+                .iter()
+                .map(|program_id| submux.subscribe_program(*program_id));
+            try_join_all(subscribe_program_futs).await?;
         }
 
         RemoteAccountProvider::<
             ChainRpcClientImpl,
-            SubMuxClient<ChainPubsubClientImpl>,
+            SubMuxClient<ChainUpdatesClient>,
         >::new(
             rpc_client,
             submux,
             subscription_forwarder,
             config,
             subscribed_accounts,
+            chain_slot,
         )
         .await
     }
@@ -446,7 +473,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         let subscription_forwarder = self.subscription_forwarder.clone();
         task::spawn(async move {
             while let Some(update) = updates.recv().await {
-                let slot = update.rpc_response.context.slot;
+                let slot = update.slot;
 
                 received_updates_count.fetch_add(1, Ordering::Relaxed);
                 last_update_slot.store(slot, Ordering::Relaxed);
@@ -462,21 +489,20 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                         update.pubkey,
                         slot
                     );
-                    let remote_account =
-                        match update.rpc_response.value.decode::<Account>() {
-                            Some(account) => RemoteAccount::from_fresh_account(
-                                account,
-                                slot,
-                                RemoteAccountUpdateSource::Subscription,
-                            ),
-                            None => {
-                                error!(
+                    let remote_account = match update.account {
+                        Some(account) => RemoteAccount::from_fresh_account(
+                            account,
+                            slot,
+                            RemoteAccountUpdateSource::Subscription,
+                        ),
+                        None => {
+                            error!(
                                 "Account for {} update could not be decoded",
                                 update.pubkey
                             );
-                                RemoteAccount::NotFound(slot)
-                            }
-                        };
+                            RemoteAccount::NotFound(slot)
+                        }
+                    };
 
                     // Check if we're currently fetching this account
                     let forward_update = {
@@ -1189,6 +1215,15 @@ impl
     }
 }
 
+impl
+    RemoteAccountProvider<ChainRpcClientImpl, SubMuxClient<ChainUpdatesClient>>
+{
+    #[cfg(any(test, feature = "dev-context"))]
+    pub fn rpc_client(&self) -> &RpcClient {
+        &self.rpc_client.rpc_client
+    }
+}
+
 fn all_slots_match(accs: &[RemoteAccount]) -> bool {
     if accs.is_empty() {
         return true;
@@ -1263,6 +1298,7 @@ mod test {
                 chain_pubsub_client::mock::ChainPubsubClientMock::new(tx, rx);
             let (fwd_tx, _fwd_rx) = mpsc::channel(100);
             let (subscribed_accounts, config) = create_test_lru_cache(1000);
+            let chain_slot = Arc::<AtomicU64>::default();
 
             RemoteAccountProvider::new(
                 rpc_client,
@@ -1270,6 +1306,7 @@ mod test {
                 fwd_tx,
                 &config,
                 subscribed_accounts,
+                chain_slot,
             )
             .await
             .unwrap()
@@ -1313,6 +1350,7 @@ mod test {
                     let (fwd_tx, _fwd_rx) = mpsc::channel(100);
                     let (subscribed_accounts, config) =
                         create_test_lru_cache(1000);
+                    let chain_slot = Arc::<AtomicU64>::default();
 
                     RemoteAccountProvider::new(
                         rpc_client.clone(),
@@ -1320,6 +1358,7 @@ mod test {
                         fwd_tx,
                         &config,
                         subscribed_accounts,
+                        chain_slot,
                     )
                     .await
                     .unwrap()
@@ -1390,6 +1429,7 @@ mod test {
 
         let (forward_tx, forward_rx) = mpsc::channel(100);
         let (subscribed_accounts, config) = create_test_lru_cache(1000);
+        let chain_slot = Arc::<AtomicU64>::default();
 
         (
             RemoteAccountProvider::new(
@@ -1398,6 +1438,7 @@ mod test {
                 forward_tx,
                 &config,
                 subscribed_accounts,
+                chain_slot,
             )
             .await
             .unwrap(),
@@ -1594,6 +1635,7 @@ mod test {
         let (forward_tx, forward_rx) = mpsc::channel(100);
         let (subscribed_accounts, config) =
             create_test_lru_cache(accounts_capacity);
+        let chain_slot = Arc::<AtomicU64>::default();
 
         let provider = RemoteAccountProvider::new(
             rpc_client,
@@ -1601,6 +1643,7 @@ mod test {
             forward_tx,
             &config,
             subscribed_accounts,
+            chain_slot,
         )
         .await
         .unwrap();
