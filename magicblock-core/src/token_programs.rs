@@ -13,7 +13,7 @@ pub const TOKEN_PROGRAM_ID: Pubkey =
 pub const ASSOCIATED_TOKEN_PROGRAM_ID: Pubkey =
     pubkey!("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
 
-// Enhanced ATA (eATA) Program ID (5iC4wK...)
+// Enhanced ATA (eATA) Program ID (SPLxh1...)
 pub const EATA_PROGRAM_ID: Pubkey =
     pubkey!("SPLxh1LVZzEkX99H6rqYizhytLWPZVV296zyYDPagv2");
 
@@ -242,7 +242,7 @@ impl From<EphemeralAta> for Account {
         data.extend_from_slice(&val.amount.to_le_bytes());
 
         Account {
-            lamports: Rent::default().minimum_balance(SplAccount::LEN),
+            lamports: Rent::default().minimum_balance(data.len()),
             data,
             owner: EATA_PROGRAM_ID,
             executable: false,
