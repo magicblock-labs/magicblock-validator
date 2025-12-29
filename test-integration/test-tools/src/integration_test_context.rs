@@ -497,11 +497,12 @@ impl IntegrationTestContext {
         pubkey: &Pubkey,
         lamports: u64,
     ) -> anyhow::Result<Signature> {
-        Self::airdrop(
+        Self::airdrop_impl(
             self.try_chain_client()?,
             pubkey,
             lamports,
             self.commitment,
+            Some(&(|sig| self.dump_chain_logs(sig))),
         )
     }
 
@@ -511,7 +512,13 @@ impl IntegrationTestContext {
         lamports: u64,
     ) -> anyhow::Result<Signature> {
         self.try_ephem_client().and_then(|ephem_client| {
-            Self::airdrop(ephem_client, pubkey, lamports, self.commitment)
+            Self::airdrop_impl(
+                ephem_client,
+                pubkey,
+                lamports,
+                self.commitment,
+                Some(&(|sig| self.dump_chain_logs(sig))),
+            )
         })
     }
     /// Airdrop lamports to the payer on-chain account and
@@ -637,6 +644,22 @@ impl IntegrationTestContext {
         lamports: u64,
         commitment_config: CommitmentConfig,
     ) -> anyhow::Result<Signature> {
+        Self::airdrop_impl(
+            rpc_client,
+            pubkey,
+            lamports,
+            commitment_config,
+            None,
+        )
+    }
+
+    fn airdrop_impl(
+        rpc_client: &RpcClient,
+        pubkey: &Pubkey,
+        lamports: u64,
+        commitment_config: CommitmentConfig,
+        on_error: Option<&dyn Fn(Signature)>,
+    ) -> anyhow::Result<Signature> {
         let sig = rpc_client.request_airdrop(pubkey, lamports).with_context(
             || format!("Failed to airdrop chain account '{:?}'", pubkey),
         )?;
@@ -650,6 +673,9 @@ impl IntegrationTestContext {
                     )
                 })?;
         if !succeeded {
+            if let Some(on_error) = on_error {
+                on_error(sig);
+            }
             return Err(anyhow::anyhow!(
                 "Failed to airdrop chain account '{:?}'",
                 pubkey
