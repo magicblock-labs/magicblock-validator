@@ -10,6 +10,7 @@ use log::*;
 use magicblock_config::{
     config::{
         accounts::AccountsDbConfig, chain::ChainLinkConfig, AllowedProgram,
+        LifecycleMode,
     },
     types::network::Remote,
     ValidatorParams,
@@ -49,7 +50,7 @@ fn run_allowed_programs(allow_committor_program: bool) {
 
     let config = ValidatorParams {
         programs: vec![],
-        lifecycle: magicblock_config::config::LifecycleMode::Ephemeral,
+        lifecycle: LifecycleMode::Ephemeral,
         remotes: vec![
             Remote::from_str(IntegrationTestContext::url_chain()).unwrap(),
             Remote::from_str(IntegrationTestContext::ws_url_chain()).unwrap(),
