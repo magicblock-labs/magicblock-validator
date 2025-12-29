@@ -28,9 +28,9 @@ impl Default for BindAddress {
 /// - **Grpc**: gRPC endpoint for streaming (schemes `grpc`/`grpcs` are converted to `http`/`https`)
 #[derive(Clone, DeserializeFromStr, SerializeDisplay, Display, Debug)]
 pub enum Remote {
-    Http(AliasedUrl),
-    Websocket(AliasedUrl),
-    Grpc(AliasedUrl),
+    Http(ResolvedUrl),
+    Websocket(ResolvedUrl),
+    Grpc(ResolvedUrl),
 }
 
 impl FromStr for Remote {
@@ -41,12 +41,10 @@ impl FromStr for Remote {
         let mut s = s.to_owned();
         let is_grpc = s.starts_with("grpc");
         if is_grpc {
-            // SAFETY:
-            // We made sure that "grpc" is the prefix and we are not violating Unicode invariants
-            unsafe { s.as_bytes_mut()[0..4].copy_from_slice(b"http") };
+            s.replace_range(0..4, "http");
         }
 
-        let parsed = AliasedUrl::from_str(&s)?;
+        let parsed = ResolvedUrl::from_str(&s)?;
         let remote = match parsed.0.scheme() {
             _ if is_grpc => Self::Grpc(parsed),
             "http" | "https" => Self::Http(parsed),
@@ -83,26 +81,26 @@ impl Remote {
             // As per solana convention websocket port is one greater than http
             let _ = url.set_port(Some(port + 1));
         }
-        Some(Self::Websocket(AliasedUrl(url)))
+        Some(Self::Websocket(ResolvedUrl(url)))
     }
 }
 
-/// A URL that can be aliased with shortcuts like "mainnet".
+/// A URL that whose alias like "mainnet" was resolved.
 ///
 /// Aliases are resolved during parsing and replaced with their full URLs.
 #[derive(
     Clone, Debug, Deserialize, SerializeDisplay, Display, PartialEq, Deref,
 )]
-pub struct AliasedUrl(pub Url);
+pub struct ResolvedUrl(pub Url);
 
-impl AliasedUrl {
+impl ResolvedUrl {
     /// Returns the URL as a string reference.
     pub fn as_str(&self) -> &str {
         self.0.as_str()
     }
 }
 
-impl FromStr for AliasedUrl {
+impl FromStr for ResolvedUrl {
     type Err = url::ParseError;
 
     /// Parses a string into an AliasedUrl, resolving known aliases to their full URLs.
