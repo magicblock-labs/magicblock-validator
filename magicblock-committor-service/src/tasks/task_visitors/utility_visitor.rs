@@ -1,10 +1,6 @@
 use solana_pubkey::Pubkey;
 
-use crate::tasks::{
-    args_task::{ArgsTask, ArgsTaskType},
-    buffer_task::{BufferTask, BufferTaskType},
-    visitor::Visitor,
-};
+use crate::tasks::{visitor::Visitor, Task};
 
 pub struct CommitMeta {
     pub committed_pubkey: Pubkey,
@@ -16,42 +12,17 @@ pub enum TaskVisitorUtils {
 }
 
 impl Visitor for TaskVisitorUtils {
-    fn visit_args_task(&mut self, task: &ArgsTask) {
+    fn visit_task(&mut self, task: &Task) {
         let Self::GetCommitMeta(commit_meta) = self;
 
-        match &task.task_type {
-            ArgsTaskType::Commit(task) => {
-                *commit_meta = Some(CommitMeta {
-                    committed_pubkey: task.committed_account.pubkey,
-                    commit_id: task.commit_id,
-                })
-            }
-            ArgsTaskType::CommitDiff(task) => {
-                *commit_meta = Some(CommitMeta {
-                    committed_pubkey: task.committed_account.pubkey,
-                    commit_id: task.commit_id,
-                })
-            }
-            _ => *commit_meta = None,
-        }
-    }
+        if let Task::Commit(ref commit_task) = task {
+            *commit_meta = Some(CommitMeta {
+                committed_pubkey: commit_task.committed_account.pubkey,
 
-    fn visit_buffer_task(&mut self, task: &BufferTask) {
-        let Self::GetCommitMeta(commit_meta) = self;
-
-        match &task.task_type {
-            BufferTaskType::Commit(task) => {
-                *commit_meta = Some(CommitMeta {
-                    committed_pubkey: task.committed_account.pubkey,
-                    commit_id: task.commit_id,
-                })
-            }
-            BufferTaskType::CommitDiff(task) => {
-                *commit_meta = Some(CommitMeta {
-                    committed_pubkey: task.committed_account.pubkey,
-                    commit_id: task.commit_id,
-                })
-            }
+                commit_id: commit_task.commit_id,
+            })
+        } else {
+            *commit_meta = None
         }
     }
 }

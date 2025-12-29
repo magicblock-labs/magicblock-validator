@@ -3,12 +3,10 @@ use magicblock_committor_program::Chunks;
 use magicblock_committor_service::{
     persist::IntentPersisterImpl,
     tasks::{
-        args_task::{ArgsTask, ArgsTaskType},
-        buffer_task::BufferTask,
         task_strategist::{TaskStrategist, TransactionStrategy},
         utils::TransactionUtils,
-        BaseActionTask, BaseTask, FinalizeTask, PreparationState,
-        TaskBuilderImpl, UndelegateTask,
+        BaseActionTask, CommitTask, FinalizeTask, PreparationState, Task,
+        UndelegateTask,
     },
     transaction_preparator::TransactionPreparator,
 };
@@ -35,15 +33,10 @@ async fn test_prepare_commit_tx_with_single_account() {
     let committed_account = create_committed_account(&account_data);
 
     let tasks = vec![
-        Box::new(TaskBuilderImpl::create_commit_task(
-            1,
-            true,
-            committed_account.clone(),
-            None,
-        )) as Box<dyn BaseTask>,
-        Box::new(ArgsTask::new(ArgsTaskType::Finalize(FinalizeTask {
+        Task::Commit(CommitTask::new(1, true, committed_account.clone(), None)),
+        Task::Finalize(FinalizeTask {
             delegated_account: committed_account.pubkey,
-        }))),
+        }),
     ];
     let mut tx_strategy = TransactionStrategy {
         optimized_tasks: tasks,
@@ -90,35 +83,31 @@ async fn test_prepare_commit_tx_with_multiple_accounts() {
     let account2_data = generate_random_bytes(12);
     let committed_account2 = create_committed_account(&account2_data);
 
-    let buffer_commit_task = BufferTask::new_preparation_required(
-        TaskBuilderImpl::create_commit_task(
-            1,
-            true,
-            committed_account2.clone(),
-            None,
-        )
-        .task_type
-        .into(),
-    );
+    let buffer_commit_task = Task::Commit(CommitTask::new(
+        1,
+        true,
+        committed_account2.clone(),
+        None,
+    ));
     // Create test data
     let tasks = vec![
         // account 1
-        Box::new(TaskBuilderImpl::create_commit_task(
+        Task::Commit(CommitTask::new(
             1,
             true,
             committed_account1.clone(),
             None,
-        )) as Box<dyn BaseTask>,
+        )),
         // account 2
-        Box::new(buffer_commit_task),
+        buffer_commit_task,
         // finalize account 1
-        Box::new(ArgsTask::new(ArgsTaskType::Finalize(FinalizeTask {
+        Task::Finalize(FinalizeTask {
             delegated_account: committed_account1.pubkey,
-        }))),
+        }),
         // finalize account 2
-        Box::new(ArgsTask::new(ArgsTaskType::Finalize(FinalizeTask {
+        Task::Finalize(FinalizeTask {
             delegated_account: committed_account2.pubkey,
-        }))),
+        }),
     ];
     let mut tx_strategy = TransactionStrategy {
         optimized_tasks: tasks,
@@ -191,27 +180,19 @@ async fn test_prepare_commit_tx_with_base_actions() {
         }],
     };
 
-    let buffer_commit_task = BufferTask::new_preparation_required(
-        TaskBuilderImpl::create_commit_task(
-            1,
-            true,
-            committed_account.clone(),
-            None,
-        )
-        .task_type
-        .into(),
-    );
+    let buffer_commit_task =
+        Task::Commit(CommitTask::new(1, true, committed_account.clone(), None));
     let tasks = vec![
         // commit account
-        Box::new(buffer_commit_task.clone()) as Box<dyn BaseTask>,
+        buffer_commit_task,
         // finalize account
-        Box::new(ArgsTask::new(ArgsTaskType::Finalize(FinalizeTask {
+        Task::Finalize(FinalizeTask {
             delegated_account: committed_account.pubkey,
-        }))),
+        }),
         // BaseAction
-        Box::new(ArgsTask::new(ArgsTaskType::BaseAction(BaseActionTask {
+        Task::BaseAction(BaseActionTask {
             action: base_action,
-        }))),
+        }),
     ];
 
     // Test preparation
@@ -272,17 +253,17 @@ async fn test_prepare_finalize_tx_with_undelegate_with_atls() {
 
     // Create test data
     let committed_account = create_committed_account(&[1, 2, 3]);
-    let tasks: Vec<Box<dyn BaseTask>> = vec![
+    let tasks: Vec<Task> = vec![
         // finalize account
-        Box::new(ArgsTask::new(ArgsTaskType::Finalize(FinalizeTask {
+        Task::Finalize(FinalizeTask {
             delegated_account: committed_account.pubkey,
-        }))),
+        }),
         // BaseAction
-        Box::new(ArgsTask::new(ArgsTaskType::Undelegate(UndelegateTask {
+        Task::Undelegate(UndelegateTask {
             delegated_account: committed_account.pubkey,
             owner_program: Pubkey::new_unique(),
             rent_reimbursement: Pubkey::new_unique(),
-        }))),
+        }),
     ];
 
     let lookup_tables_keys = TaskStrategist::collect_lookup_table_keys(

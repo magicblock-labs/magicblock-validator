@@ -2,11 +2,7 @@ use log::error;
 
 use crate::{
     persist::{CommitStrategy, IntentPersister},
-    tasks::{
-        args_task::{ArgsTask, ArgsTaskType},
-        buffer_task::{BufferTask, BufferTaskType},
-        visitor::Visitor,
-    },
+    tasks::{visitor::Visitor, DataDelivery, Task},
 };
 
 pub enum PersistorContext {
@@ -23,87 +19,46 @@ impl<P> Visitor for PersistorVisitor<'_, P>
 where
     P: IntentPersister,
 {
-    fn visit_args_task(&mut self, task: &ArgsTask) {
-        match self.context {
-            PersistorContext::PersistStrategy { uses_lookup_tables } => {
-                let commit_strategy = |is_diff: bool| {
-                    if is_diff {
+    fn visit_task(&mut self, task: &Task) {
+        let PersistorContext::PersistStrategy { uses_lookup_tables } =
+            self.context;
+
+        match &task {
+            Task::Commit(task) => {
+                let commit_strategy = match task.data_delivery() {
+                    DataDelivery::StateInArgs => {
+                        if uses_lookup_tables {
+                            CommitStrategy::StateArgsWithLookupTable
+                        } else {
+                            CommitStrategy::StateArgs
+                        }
+                    }
+                    DataDelivery::StateInBuffer => {
+                        if uses_lookup_tables {
+                            CommitStrategy::StateBufferWithLookupTable
+                        } else {
+                            CommitStrategy::StateBuffer
+                        }
+                    }
+                    DataDelivery::DiffInArgs => {
                         if uses_lookup_tables {
                             CommitStrategy::DiffArgsWithLookupTable
                         } else {
                             CommitStrategy::DiffArgs
                         }
-                    } else if uses_lookup_tables {
-                        CommitStrategy::StateArgsWithLookupTable
-                    } else {
-                        CommitStrategy::StateArgs
                     }
-                };
-
-                let (commit_id, pubkey, commit_strategy) = match &task.task_type
-                {
-                    ArgsTaskType::Commit(task) => (
-                        task.commit_id,
-                        &task.committed_account.pubkey,
-                        commit_strategy(false),
-                    ),
-                    ArgsTaskType::CommitDiff(task) => (
-                        task.commit_id,
-                        &task.committed_account.pubkey,
-                        commit_strategy(true),
-                    ),
-                    _ => return,
-                };
-
-                if let Err(err) = self.persistor.set_commit_strategy(
-                    commit_id,
-                    pubkey,
-                    commit_strategy,
-                ) {
-                    error!(
-                        "Failed to persist commit strategy {}: {}",
-                        commit_strategy.as_str(),
-                        err
-                    );
-                }
-            }
-        }
-    }
-
-    fn visit_buffer_task(&mut self, task: &BufferTask) {
-        match self.context {
-            PersistorContext::PersistStrategy { uses_lookup_tables } => {
-                let commit_strategy = |is_diff: bool| {
-                    if is_diff {
+                    DataDelivery::DiffInBuffer => {
                         if uses_lookup_tables {
                             CommitStrategy::DiffBufferWithLookupTable
                         } else {
                             CommitStrategy::DiffBuffer
                         }
-                    } else if uses_lookup_tables {
-                        CommitStrategy::StateBufferWithLookupTable
-                    } else {
-                        CommitStrategy::StateBuffer
                     }
                 };
 
-                let (commit_id, pubkey, commit_strategy) = match &task.task_type
-                {
-                    BufferTaskType::Commit(task) => (
-                        task.commit_id,
-                        &task.committed_account.pubkey,
-                        commit_strategy(false),
-                    ),
-                    BufferTaskType::CommitDiff(task) => (
-                        task.commit_id,
-                        &task.committed_account.pubkey,
-                        commit_strategy(true),
-                    ),
-                };
-
                 if let Err(err) = self.persistor.set_commit_strategy(
-                    commit_id,
-                    pubkey,
+                    task.commit_id,
+                    &task.committed_account.pubkey,
                     commit_strategy,
                 ) {
                     error!(
@@ -113,6 +68,7 @@ where
                     );
                 }
             }
-        }
+            Task::Finalize(_) | Task::Undelegate(_) | Task::BaseAction(_) => {}
+        };
     }
 }
