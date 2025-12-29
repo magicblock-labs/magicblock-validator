@@ -1,5 +1,6 @@
 use solana_account::{Account, AccountSharedData, ReadableAccount};
 use solana_program::{program_option::COption, program_pack::Pack, rent::Rent};
+use solana_program::program_error::ProgramError;
 use solana_pubkey::{pubkey, Pubkey};
 use spl_token::state::{Account as SplAccount, AccountState};
 
@@ -203,8 +204,10 @@ pub struct EphemeralAta {
     pub amount: u64,
 }
 
-impl From<EphemeralAta> for AccountSharedData {
-    fn from(val: EphemeralAta) -> Self {
+impl TryFrom<EphemeralAta> for AccountSharedData {
+    type Error = ProgramError;
+
+    fn try_from(val: EphemeralAta) -> Result<Self, Self::Error> {
         let token_account = SplAccount {
             mint: val.mint,
             owner: val.owner,
@@ -217,8 +220,8 @@ impl From<EphemeralAta> for AccountSharedData {
         };
 
         let mut data = vec![0u8; SplAccount::LEN];
-        SplAccount::pack(token_account, &mut data)
-            .expect("pack spl token account");
+        SplAccount::pack(token_account, &mut data)?;
+
         let lamports = Rent::default().minimum_balance(data.len());
 
         let account = Account {
@@ -229,7 +232,7 @@ impl From<EphemeralAta> for AccountSharedData {
             ..Default::default()
         };
 
-        AccountSharedData::from(account)
+        Ok(AccountSharedData::from(account))
     }
 }
 
@@ -273,6 +276,6 @@ impl MaybeIntoAta<AccountSharedData> for AccountSharedData {
             mint,
             amount,
         };
-        Some(eata.into())
+        eata.try_into().ok()
     }
 }
