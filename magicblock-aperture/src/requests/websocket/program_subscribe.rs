@@ -28,12 +28,16 @@ impl WsDispatcher {
         let pubkey = some_or_err!(pubkey);
         let config = config.unwrap_or_default();
 
-        let encoder: AccountEncoder = config
+        let encoding = config
             .account_config
             .encoding
-            .unwrap_or(UiAccountEncoding::Base58)
-            .into();
+            .unwrap_or(UiAccountEncoding::Base58);
+
         let filters = ProgramFilters::from(config.filters);
+        let encoder = AccountEncoder {
+            encoding,
+            data_slice: config.account_config.data_slice,
+        };
 
         // Bundle the encoding and filtering options for the subscription.
         let encoder = ProgramAccountEncoder { encoder, filters };

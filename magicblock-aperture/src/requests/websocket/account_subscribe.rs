@@ -2,7 +2,7 @@ use solana_account_decoder::UiAccountEncoding;
 use solana_rpc_client_api::config::RpcAccountInfoConfig;
 
 use super::prelude::*;
-use crate::some_or_err;
+use crate::{encoder::AccountEncoder, some_or_err};
 
 impl WsDispatcher {
     /// Handles the `accountSubscribe` WebSocket RPC request.
@@ -23,8 +23,11 @@ impl WsDispatcher {
 
         let pubkey = some_or_err!(pubkey);
         let config = config.unwrap_or_default();
-        let encoder =
-            config.encoding.unwrap_or(UiAccountEncoding::Base58).into();
+        let encoding = config.encoding.unwrap_or(UiAccountEncoding::Base58);
+        let encoder = AccountEncoder {
+            encoding,
+            data_slice: config.data_slice,
+        };
 
         // Register the subscription with the global database.
         let handle = self
