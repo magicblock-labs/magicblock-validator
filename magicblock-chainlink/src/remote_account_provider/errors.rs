@@ -108,6 +108,9 @@ pub enum RemoteAccountProviderError {
         "The LoaderV4 program {0} account state deserialization failed: {1}"
     )]
     LoaderV4StateDeserializationFailed(Pubkey, String),
+
+    #[error("Multiple photon endpoints provided")]
+    MultiplePhotonEndpointsProvided,
 }
 
 impl From<solana_pubsub_client::pubsub_client::PubsubClientError>

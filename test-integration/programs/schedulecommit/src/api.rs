@@ -61,9 +61,9 @@ pub fn init_order_book_instruction(
         AccountMeta::new_readonly(system_program::id(), false),
     ];
 
-    Instruction::new_with_borsh(
+    build_instruction(
         program_id,
-        &ScheduleCommitInstruction::InitOrderBook,
+        ScheduleCommitInstruction::InitOrderBook,
         account_metas,
     )
 }
@@ -82,50 +82,9 @@ pub fn grow_order_book_instruction(
         AccountMeta::new_readonly(system_program::id(), false),
     ];
 
-    Instruction::new_with_borsh(
+    build_instruction(
         program_id,
-        &ScheduleCommitInstruction::GrowOrderBook(additional_space),
-        account_metas,
-    )
-}
-
-pub fn init_order_book_instruction(
-    payer: Pubkey,
-    book_manager: Pubkey,
-    order_book: Pubkey,
-) -> Instruction {
-    let program_id = crate::id();
-    let account_metas = vec![
-        AccountMeta::new(payer, true),
-        AccountMeta::new_readonly(book_manager, true),
-        AccountMeta::new(order_book, false),
-        AccountMeta::new_readonly(system_program::id(), false),
-    ];
-
-    Instruction::new_with_borsh(
-        program_id,
-        &ScheduleCommitInstruction::InitOrderBook,
-        account_metas,
-    )
-}
-
-pub fn grow_order_book_instruction(
-    payer: Pubkey,
-    book_manager: Pubkey,
-    order_book: Pubkey,
-    additional_space: u64,
-) -> Instruction {
-    let program_id = crate::id();
-    let account_metas = vec![
-        AccountMeta::new(payer, true),
-        AccountMeta::new_readonly(book_manager, false),
-        AccountMeta::new(order_book, false),
-        AccountMeta::new_readonly(system_program::id(), false),
-    ];
-
-    Instruction::new_with_borsh(
-        program_id,
-        &ScheduleCommitInstruction::GrowOrderBook(additional_space),
+        ScheduleCommitInstruction::GrowOrderBook(additional_space),
         account_metas,
     )
 }
@@ -246,9 +205,9 @@ pub fn update_order_book_instruction(
         AccountMeta::new(order_book, false),
     ];
 
-    Instruction::new_with_borsh(
+    build_instruction(
         program_id,
-        &ScheduleCommitInstruction::UpdateOrderBook(update),
+        ScheduleCommitInstruction::UpdateOrderBook(update),
         account_metas,
     )
 }
@@ -267,9 +226,9 @@ pub fn schedule_commit_diff_instruction_for_order_book(
         AccountMeta::new_readonly(magic_program_id, false),
     ];
 
-    Instruction::new_with_borsh(
+    build_instruction(
         program_id,
-        &ScheduleCommitInstruction::ScheduleCommitForOrderBook,
+        ScheduleCommitInstruction::ScheduleCommitForOrderBook,
         account_metas,
     )
 }

@@ -75,6 +75,7 @@ use crate::{
         chain_updates_client::ChainUpdatesClient,
         photon_client::{PhotonClient, PhotonClientImpl},
         pubsub_common::SubscriptionUpdate,
+        remote_account::FetchedRemoteAccounts,
     },
     submux::SubMuxClient,
 };
@@ -426,7 +427,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
 
         let photon_client = endpoints
             .photon()?
-            .map(|e| PhotonClientImpl::new_from_endpoint(e))
+            .map(PhotonClientImpl::new_from_endpoint)
             .transpose()?;
 
         if !config.program_subs().is_empty() {
@@ -1365,16 +1366,15 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
         remote_accounts_results: Vec<FetchedRemoteAccounts>,
     ) -> Vec<RemoteAccount> {
         let (rpc_accounts, compressed_accounts) = {
-            use FetchedRemoteAccounts::*;
             if remote_accounts_results.is_empty() {
                 return vec![];
             }
             if remote_accounts_results.len() == 1 {
                 match &remote_accounts_results[0] {
-                    Rpc(rpc_accounts) => {
+                    FetchedRemoteAccounts::Rpc(rpc_accounts) => {
                         return rpc_accounts.clone();
                     }
-                    Compressed(compressed_accounts) => {
+                    FetchedRemoteAccounts::Compressed(compressed_accounts) => {
                         return compressed_accounts.clone();
                     }
                 }
@@ -1384,10 +1384,10 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
                 let mut compressed_accounts = None;
                 for res in remote_accounts_results {
                     match res {
-                        Rpc(rpc_accs) => {
+                        FetchedRemoteAccounts::Rpc(rpc_accs) => {
                             rpc_accounts.replace(rpc_accs);
                         }
-                        Compressed(comp_accs) => {
+                        FetchedRemoteAccounts::Compressed(comp_accs) => {
                             compressed_accounts.replace(comp_accs);
                         }
                     }
@@ -1471,7 +1471,11 @@ impl
 }
 
 impl
-    RemoteAccountProvider<ChainRpcClientImpl, SubMuxClient<ChainUpdatesClient>>
+    RemoteAccountProvider<
+        ChainRpcClientImpl,
+        SubMuxClient<ChainUpdatesClient>,
+        PhotonClientImpl,
+    >
 {
     #[cfg(any(test, feature = "dev-context"))]
     pub fn rpc_client(&self) -> &RpcClient {
@@ -2113,6 +2117,7 @@ mod test {
         let (forward_tx, forward_rx) = mpsc::channel(100);
         let (subscribed_accounts, config) =
             create_test_lru_cache(accounts_capacity);
+        let chain_slot = Arc::new(AtomicU64::default());
 
         let provider = RemoteAccountProvider::new(
             rpc_client,
@@ -2121,6 +2126,7 @@ mod test {
             forward_tx,
             &config,
             subscribed_accounts,
+            chain_slot,
         )
         .await
         .unwrap();

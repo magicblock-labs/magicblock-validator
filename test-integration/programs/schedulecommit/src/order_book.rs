@@ -53,7 +53,7 @@ impl From<&OrderBook<'_>> for OrderBookOwned {
 }
 
 impl borsh::de::BorshDeserialize for OrderBookOwned {
-    fn deserialize(buf: &mut &[u8]) -> Result<Self, borsh::io::Error> {
+    fn deserialize(buf: &mut &[u8]) -> Result<Self, std::io::Error> {
         let (book_bytes, rest) = buf.split_at(buf.len());
         *buf = rest; // rest is actually empty
 
@@ -71,12 +71,12 @@ impl borsh::de::BorshDeserialize for OrderBookOwned {
             slice::from_raw_parts_mut(book_bytes.as_mut_ptr(), book_bytes.len())
         })
         .map(|book| OrderBookOwned::from(&book))
-        .map_err(|_| borsh::io::Error::from(borsh::io::ErrorKind::InvalidData))
+        .map_err(|_| std::io::Error::from(std::io::ErrorKind::InvalidData))
     }
 
-    fn deserialize_reader<R: borsh::io::Read>(
+    fn deserialize_reader<R: std::io::Read>(
         _reader: &mut R,
-    ) -> ::core::result::Result<Self, borsh::io::Error> {
+    ) -> ::core::result::Result<Self, std::io::Error> {
         unimplemented!("deserialize_reader() not implemented. Please use buffer version as it needs to know size of the buffer")
     }
 }

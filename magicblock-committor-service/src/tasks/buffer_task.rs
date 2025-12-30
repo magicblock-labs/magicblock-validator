@@ -78,17 +78,6 @@ impl From<ArgsTaskType> for BufferTaskType {
     }
 }
 
-#[cfg(any(test, feature = "dev-context-only-utils"))]
-impl From<ArgsTaskType> for BufferTaskType {
-    fn from(value: ArgsTaskType) -> Self {
-        match value {
-            ArgsTaskType::Commit(task) => BufferTaskType::Commit(task),
-            ArgsTaskType::CommitDiff(_) => panic!("BufferTask doesn't support CommitDiff yet. Disable your tests (if any) temporarily till the next PR"),
-            _ => unimplemented!("Only commit task can be BufferTask currently. Fix your tests"),
-        }
-    }
-}
-
 impl BaseTask for BufferTask {
     fn instruction(&self, validator: &Pubkey) -> Instruction {
         let BufferTaskType::Commit(ref value) = self.task_type;

@@ -125,7 +125,7 @@ impl<
             SubMuxClient<ChainUpdatesClient>,
             V,
             C,
-            P,
+            PhotonClientImpl,
         >,
     > {
         // Extract accounts provider and create fetch cloner while connecting

@@ -1,4 +1,4 @@
-use std::ops::Deref;
+use std::ops::{Deref, DerefMut};
 
 use magicblock_config::types::network::Remote;
 use url::Url;
@@ -136,6 +136,12 @@ impl Deref for Endpoints {
     type Target = Vec<Endpoint>;
     fn deref(&self) -> &Self::Target {
         &self.0
+    }
+}
+
+impl DerefMut for Endpoints {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
     }
 }
 

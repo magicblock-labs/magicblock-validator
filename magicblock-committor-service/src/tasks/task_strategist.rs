@@ -421,10 +421,10 @@ mod tests {
         persist::IntentPersisterImpl,
         tasks::{
             task_builder::{
-                TaskBuilderImpl, TasksBuilder, COMMIT_STATE_SIZE_THRESHOLD,
+                CompressedData, TaskBuilderImpl, TasksBuilder,
+                COMMIT_STATE_SIZE_THRESHOLD,
             },
-            BaseActionTask, CommitTask, CompressedCommitTask, TaskStrategy,
-            UndelegateTask,
+            BaseActionTask, CompressedCommitTask, TaskStrategy, UndelegateTask,
         },
     };
 

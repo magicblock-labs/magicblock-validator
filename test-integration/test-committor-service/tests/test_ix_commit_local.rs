@@ -271,6 +271,7 @@ async fn commit_book_order_account(
         validator_auth.insecure_clone(),
         ":memory:",
         ChainConfig::local(ComputeBudgetConfig::new(1_000_000)),
+        None,
     )
     .unwrap();
     let service = CommittorServiceExt::new(Arc::new(service));

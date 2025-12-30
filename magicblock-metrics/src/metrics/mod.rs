@@ -45,10 +45,12 @@ lazy_static::lazy_static! {
         "Number of cloned accounts in the RemoteAccountClonerWorker"
     )
     .unwrap();
+}
 
-    // -----------------
-    // Ledger
-    // -----------------
+// -----------------
+// Ledger
+// -----------------
+lazy_static::lazy_static! {
     static ref LEDGER_SIZE_GAUGE: IntGauge = IntGauge::new(
         "ledger_size_gauge", "Ledger size in Bytes",
     ).unwrap();
@@ -137,10 +139,12 @@ lazy_static::lazy_static! {
             vec![0.1, 1.0, 2.0, 3.0, 10.0, 60.0]
         ),
         ).unwrap();
+}
 
-    // -----------------
-    // Accounts
-    // -----------------
+// -----------------
+// Accounts
+// -----------------
+lazy_static::lazy_static! {
     static ref ACCOUNTS_SIZE_GAUGE: IntGauge = IntGauge::new(
         "accounts_size_gauge", "Size of persisted accounts (in bytes) currently on disk",
     ).unwrap();
@@ -181,10 +185,12 @@ lazy_static::lazy_static! {
             &["client_id"],
         )
         .unwrap();
+}
 
-    // -----------------
-    // RPC/Aperture
-    // -----------------
+// -----------------
+// RPC/Aperture
+// -----------------
+lazy_static::lazy_static! {
     pub static ref ENSURE_ACCOUNTS_TIME: HistogramVec = HistogramVec::new(
         HistogramOpts::new("ensure_accounts_time", "Time spent in ensuring account presence")
             .buckets(
@@ -333,11 +339,12 @@ lazy_static::lazy_static! {
             "Total number of undelegating accounts found to be already undelegated on chain",
         )
         .unwrap();
+}
 
-
-    // -----------------
-    // Transaction Execution
-    // -----------------
+// -----------------
+// Transaction Execution
+// -----------------
+lazy_static::lazy_static! {
     pub static ref TRANSACTION_COUNT: IntCounter = IntCounter::new(
         "transaction_count", "Total number of executed transactions"
     ).unwrap();
@@ -349,14 +356,12 @@ lazy_static::lazy_static! {
         "max_lock_contention_queue_size",
         "Maximum observed queue size for an account lock contention"
     ).unwrap();
+}
 
-
-
-
-
-    // -----------------
-    // CommittorService
-    // -----------------
+// -----------------
+// CommittorService
+// -----------------
+lazy_static::lazy_static! {
     static ref COMMITTOR_INTENTS_COUNT: IntCounter = IntCounter::new(
         "committor_intents_count", "Total number of scheduled committor intents"
     ).unwrap();
@@ -431,10 +436,12 @@ lazy_static::lazy_static! {
             vec![1.0, 3.0, 5.0, 10.0, 15.0, 17.0, 20.0]
         ),
     ).unwrap();
+}
 
-    // -----------------
-    // Pubsub Clients
-    // -----------------
+// -----------------
+// Pubsub Clients
+// -----------------
+lazy_static::lazy_static! {
     static ref CONNECTED_PUBSUB_CLIENTS_GAUGE: IntGauge = IntGauge::new(
         "connected_pubsub_clients_gauge",
         "Total number of connected pubsub clients"

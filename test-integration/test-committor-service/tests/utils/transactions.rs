@@ -20,7 +20,8 @@ use solana_sdk::{
 use crate::utils::instructions::{
     init_account_and_delegate_compressed_ixs, init_account_and_delegate_ixs,
     init_order_book_account_and_delegate_ixs, init_validator_fees_vault_ix,
-    InitAccountAndDelegateIxs, InitOrderBookAndDelegateIxs,
+    InitAccountAndDelegateCompressedIxs, InitAccountAndDelegateIxs,
+    InitOrderBookAndDelegateIxs,
 };
 
 #[macro_export]

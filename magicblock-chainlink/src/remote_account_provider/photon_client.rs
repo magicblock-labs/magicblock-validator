@@ -11,7 +11,9 @@ use solana_account::Account;
 use solana_clock::Slot;
 use solana_pubkey::Pubkey;
 
-use crate::remote_account_provider::{Endpoint, RemoteAccountProviderResult};
+use crate::remote_account_provider::{
+    Endpoint, RemoteAccountProviderError, RemoteAccountProviderResult,
+};
 
 #[derive(Clone)]
 pub struct PhotonClientImpl(Arc<PhotonIndexer>);
@@ -41,7 +43,10 @@ impl PhotonClientImpl {
             );
         };
         debug!("Creating PhotonClient with URL: {}", url);
-        Self::new(Arc::new(PhotonIndexer::new(url.to_string(), api_key)))
+        Ok(Self::new(Arc::new(PhotonIndexer::new(
+            url.to_string(),
+            api_key.clone(),
+        ))))
     }
 }
 

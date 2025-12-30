@@ -3,17 +3,14 @@ use std::sync::Arc;
 use borsh::{BorshDeserialize, BorshSerialize};
 use compressed_delegation_client::{
     CommitArgs, CommitBuilder, CompressedAccountMeta,
-    CompressedDelegationRecord, DelegateArgs as DelegateArgsCpi, FinalizeArgs,
-    FinalizeBuilder, PackedAddressTreeInfo, UndelegateArgs, UndelegateBuilder,
+    CompressedDelegationRecord, FinalizeArgs, FinalizeBuilder,
+    PackedAddressTreeInfo, UndelegateArgs, UndelegateBuilder,
 };
-use dlp::args::DelegateEphemeralBalanceArgs;
 use integration_test_tools::dlp_interface;
 use light_client::indexer::{
     photon_indexer::PhotonIndexer, AddressWithTree, CompressedAccount, Indexer,
-    TreeInfo, ValidityProofWithContext,
+    ValidityProofWithContext,
 };
-use light_compressed_account::address::derive_address;
-use light_hasher::hash_to_field_size::hashv_to_bn254_field_size_be_const_array;
 use light_sdk::instruction::{PackedAccounts, SystemAccountMetaConfig};
 use log::*;
 use magicblock_chainlink::{
@@ -44,17 +41,12 @@ use solana_account::AccountSharedData;
 use solana_compute_budget_interface::ComputeBudgetInstruction;
 use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
-use solana_rpc_client_api::config::{
-    RpcSendTransactionConfig, RpcTransactionConfig,
-};
+use solana_rpc_client_api::config::RpcSendTransactionConfig;
 use solana_sdk::{
     commitment_config::CommitmentConfig, native_token::LAMPORTS_PER_SOL,
-    pubkey, signature::Keypair, signer::Signer, transaction::Transaction,
+    signature::Keypair, signer::Signer, transaction::Transaction,
 };
 use solana_sdk_ids::{native_loader, system_program};
-use solana_transaction_status::{
-    option_serializer::OptionSerializer, UiTransactionEncoding,
-};
 use tokio::task;
 
 use crate::sleep_ms;
@@ -109,7 +101,7 @@ impl IxtestContext {
         let bank = Arc::<AccountsBankStub>::default();
         let cloner = Arc::new(ClonerStub::new(bank.clone()));
         let (tx, rx) = tokio::sync::mpsc::channel(100);
-        let (fetch_cloner, remote_account_provider) = {
+        let (fetch_cloner, remote_account_provider, photon_indexer) = {
             let endpoints_vec = vec![
                 Endpoint::Rpc {
                     url: RPC_URL.to_string(),
@@ -404,8 +396,7 @@ impl IxtestContext {
         use program_flexi_counter::instruction::*;
 
         let auth = counter_auth.pubkey();
-        let pda_seeds = FlexiCounter::seeds(&auth);
-        let (pda, bump) = FlexiCounter::pda(&auth);
+        let (pda, _bump) = FlexiCounter::pda(&auth);
         let record_address = derive_cda_from_pda(&pda);
 
         let mut remaining_accounts = self.get_packed_accounts();
@@ -502,8 +493,7 @@ impl IxtestContext {
             latest_block_hash,
         );
         debug!("Delegate transaction: {:?}", tx.signatures[0]);
-        let res = self
-            .rpc_client
+        self.rpc_client
             .send_and_confirm_transaction_with_spinner_and_config(
                 &tx,
                 CommitmentConfig::confirmed(),
@@ -533,11 +523,14 @@ impl IxtestContext {
         let counter_pda = self.counter_pda(&counter_auth.pubkey());
         // The committor service will call this in order to have
         // chainlink subscribe to account updates of the counter account
-        self.chainlink.undelegation_requested(counter_pda).await;
+        self.chainlink
+            .undelegation_requested(counter_pda)
+            .await
+            .unwrap();
 
         // In order to make the account undelegatable we first need to
         // commmit and finalize
-        let (pda, bump) = FlexiCounter::pda(&counter_auth.pubkey());
+        let (pda, _bump) = FlexiCounter::pda(&counter_auth.pubkey());
         let record_address = derive_cda_from_pda(&pda);
         let (compressed_account, proof) =
             self.get_compressed_account_and_proof(&record_address).await;
