@@ -4,7 +4,7 @@ early_access: true
 enable_free_tier: true
 reviews:
   # Review style + summary placement
-  profile: chill
+  profile: assertive
   high_level_summary_placeholder: "<!-- coderabbit-summary -->"
   review_status: true
   collapse_walkthrough: true
