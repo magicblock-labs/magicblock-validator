@@ -195,36 +195,61 @@ impl TasksBuilder for TaskBuilderImpl {
                 .ok_or(TaskBuilderError::PhotonClientNotFound)?;
             let commit_ids = commit_ids.clone();
 
-            accounts.iter().map(|account| {
-                let commit_ids = commit_ids.clone();
-                async move {
-                    let commit_id = *commit_ids.get(&account.pubkey).expect("CommitIdFetcher provide commit ids for all listed pubkeys, or errors!");
-                    let compressed_data = get_compressed_data(&account.pubkey, photon_client, None)
-                    .await?;
-                    let task = ArgsTaskType::CompressedCommit(CompressedCommitTask {
-                        commit_id,
-                        allow_undelegation,
-                        committed_account: account.clone(),
-                        compressed_data
-                    });
-                    Ok::<_, TaskBuilderError>(Box::new(ArgsTask::new(task)) as Box<dyn BaseTask>)
-                }
-            })
-            .collect::<FuturesUnordered<_>>()
-            .try_collect()
-            .await?
+            accounts
+                .iter()
+                .map(|account| {
+                    let commit_ids = commit_ids.clone();
+                    async move {
+                        let commit_id = *commit_ids
+                            .get(&account.pubkey)
+                            .ok_or(TaskBuilderError::MissingCommitId(
+                                account.pubkey,
+                            ))?;
+                        let compressed_data = get_compressed_data(
+                            &account.pubkey,
+                            photon_client,
+                            None,
+                        )
+                        .await?;
+                        let task = ArgsTaskType::CompressedCommit(
+                            CompressedCommitTask {
+                                commit_id,
+                                allow_undelegation,
+                                committed_account: account.clone(),
+                                compressed_data,
+                            },
+                        );
+                        Ok::<_, TaskBuilderError>(
+                            Box::new(ArgsTask::new(task)) as Box<dyn BaseTask>
+                        )
+                    }
+                })
+                .collect::<FuturesUnordered<_>>()
+                .try_collect()
+                .await?
         } else {
             accounts
-            .iter()
-            .map(|account| {
-                let commit_id = *commit_ids.get(&account.pubkey).expect("CommitIdFetcher provide commit ids for all listed pubkeys, or errors!");
-                // TODO (snawaz): if accounts do not have duplicate, then we can use remove
-                // instead:
-                //  let base_account = base_accounts.remove(&account.pubkey);
-                let base_account = base_accounts.get(&account.pubkey).cloned();
-                let task = Self::create_commit_task(commit_id, allow_undelegation, account.clone(), base_account);
-                Box::new(task) as Box<dyn BaseTask>
-            }).collect()
+                .iter()
+                .map(|account| {
+                    let commit_id = *commit_ids.get(&account.pubkey).ok_or(
+                        TaskBuilderError::MissingCommitId(account.pubkey),
+                    )?;
+                    // TODO (snawaz): if accounts do not have duplicate, then we can use remove
+                    // instead:
+                    //  let base_account = base_accounts.remove(&account.pubkey);
+                    let base_account =
+                        base_accounts.get(&account.pubkey).cloned();
+                    let task = Self::create_commit_task(
+                        commit_id,
+                        allow_undelegation,
+                        account.clone(),
+                        base_account,
+                    );
+                    Ok::<_, TaskBuilderError>(
+                        Box::new(task) as Box<dyn BaseTask>
+                    )
+                })
+                .collect::<Result<_, _>>()?
         };
 
         Ok(tasks)
@@ -474,6 +499,8 @@ pub enum TaskBuilderError {
     PhotonClientNotFound,
     #[error("TaskStrategistError: {0}")]
     TaskStrategistError(#[from] TaskStrategistError),
+    #[error("MissingCommitId: {0}")]
+    MissingCommitId(Pubkey),
 }
 
 impl TaskBuilderError {
@@ -488,6 +515,7 @@ impl TaskBuilderError {
             Self::MissingCompressedData => None,
             Self::PhotonClientNotFound => None,
             Self::TaskStrategistError(_) => None,
+            Self::MissingCommitId(_) => None,
         }
     }
 }
