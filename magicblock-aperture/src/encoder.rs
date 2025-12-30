@@ -10,7 +10,9 @@ use magicblock_core::{
     Slot,
 };
 use solana_account::ReadableAccount;
-use solana_account_decoder::{encode_ui_account, UiAccountEncoding};
+use solana_account_decoder::{
+    encode_ui_account, UiAccountEncoding, UiDataSliceConfig,
+};
 use solana_pubkey::Pubkey;
 use solana_transaction_error::TransactionError;
 
@@ -33,35 +35,27 @@ pub(crate) trait Encoder: Ord + Eq + Clone + Debug {
 }
 
 /// A `accountSubscribe` payload encoder
-#[derive(Debug, PartialEq, PartialOrd, Eq, Ord, Clone)]
-pub(crate) enum AccountEncoder {
-    Base58,
-    Base64,
-    Base64Zstd,
-    JsonParsed,
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub(crate) struct AccountEncoder {
+    pub(crate) encoding: UiAccountEncoding,
+    pub(crate) data_slice: Option<UiDataSliceConfig>,
 }
 
-impl From<&AccountEncoder> for UiAccountEncoding {
-    fn from(value: &AccountEncoder) -> Self {
-        match value {
-            AccountEncoder::Base58 => Self::Base58,
-            AccountEncoder::Base64 => Self::Base64,
-            AccountEncoder::Base64Zstd => Self::Base64Zstd,
-            AccountEncoder::JsonParsed => Self::JsonParsed,
-        }
+impl PartialOrd for AccountEncoder {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
     }
 }
 
-impl From<UiAccountEncoding> for AccountEncoder {
-    fn from(value: UiAccountEncoding) -> Self {
-        match value {
-            UiAccountEncoding::Base58 | UiAccountEncoding::Binary => {
-                Self::Base58
-            }
-            UiAccountEncoding::Base64 => Self::Base64,
-            UiAccountEncoding::Base64Zstd => Self::Base64Zstd,
-            UiAccountEncoding::JsonParsed => Self::JsonParsed,
-        }
+impl Ord for AccountEncoder {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        let key = |e: &Self| {
+            (
+                e.encoding as u32,
+                e.data_slice.map(|ds| (ds.offset, ds.length)),
+            )
+        };
+        key(self).cmp(&key(other))
     }
 }
 
@@ -82,7 +76,7 @@ impl Encoder for AccountEncoder {
         id: SubscriptionID,
     ) -> Option<Bytes> {
         let encoded = data.read_locked(|pk, acc| {
-            encode_ui_account(pk, acc, self.into(), None, None)
+            encode_ui_account(pk, acc, self.encoding, None, self.data_slice)
         });
         let method = "accountNotification";
         NotificationPayload::encode(encoded, slot, method, id)
@@ -101,7 +95,11 @@ impl Encoder for ProgramAccountEncoder {
         data.read_locked(|_, acc| {
             self.filters.matches(acc.data()).then_some(())
         })?;
-        let value = AccountWithPubkey::new(data, (&self.encoder).into(), None);
+        let value = AccountWithPubkey::new(
+            data,
+            self.encoder.encoding,
+            self.encoder.data_slice,
+        );
         let method = "programNotification";
         NotificationPayload::encode(value, slot, method, id)
     }
