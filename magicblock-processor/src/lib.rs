@@ -7,6 +7,8 @@ use solana_feature_set::{
     FeatureSet,
 };
 use solana_program::feature;
+#[allow(deprecated)]
+use solana_rent_collector::RentCollector;
 use solana_svm::transaction_processor::TransactionProcessingEnvironment;
 
 /// Initialize an SVM enviroment for transaction processing
@@ -42,13 +44,19 @@ pub fn build_svm_env(
         accountsdb.insert_account(feature_id, &account);
     }
 
+    // We have a static rent which is setup once at startup,
+    // and never changes afterwards, so we just extend the
+    // lifetime to 'static by leaking the allocation.
+    #[allow(deprecated)]
+    let rent_collector = RentCollector::default();
+    let rent_collector = Box::leak(Box::new(rent_collector));
+
     TransactionProcessingEnvironment {
         blockhash,
         blockhash_lamports_per_signature: fee_per_signature,
         feature_set: featureset.into(),
         fee_lamports_per_signature: fee_per_signature,
-        // Rent fees collection is disabled via feature flag above, so no rent collector needed
-        rent_collector: None,
+        rent_collector: Some(rent_collector),
         epoch_total_stake: 0,
     }
 }
