@@ -197,3 +197,45 @@ pub fn init_order_book_account_and_delegate_ixs(
         order_book,
     }
 }
+
+pub struct InitOrderBookAndDelegateIxs {
+    pub init: Instruction,
+    pub delegate: Instruction,
+    pub book_manager: Keypair,
+    pub order_book: Pubkey,
+}
+
+pub fn init_order_book_account_and_delegate_ixs(
+    payer: Pubkey,
+) -> InitOrderBookAndDelegateIxs {
+    use program_schedulecommit::{api, ID};
+
+    let book_manager = Keypair::new();
+
+    println!("schedulecommit ID: {}", ID);
+
+    let (order_book, _bump) = Pubkey::find_program_address(
+        &[b"order_book", book_manager.pubkey().as_ref()],
+        &ID,
+    );
+
+    let init_ix = api::init_order_book_instruction(
+        payer,
+        book_manager.pubkey(),
+        order_book,
+    );
+
+    let delegate_ix = api::delegate_account_cpi_instruction(
+        payer,
+        None,
+        book_manager.pubkey(),
+        api::UserSeeds::OrderBook,
+    );
+
+    InitOrderBookAndDelegateIxs {
+        init: init_ix,
+        delegate: delegate_ix,
+        book_manager,
+        order_book,
+    }
+}

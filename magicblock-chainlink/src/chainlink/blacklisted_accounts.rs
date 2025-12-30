@@ -4,8 +4,9 @@ use magicblock_magic_program_api::{self as magic_program};
 use solana_pubkey::Pubkey;
 use solana_sdk_ids::{
     address_lookup_table, bpf_loader, bpf_loader_deprecated,
-    bpf_loader_upgradeable, ed25519_program, incinerator, native_loader,
-    secp256k1_program, stake, system_program, vote,
+    bpf_loader_upgradeable, compute_budget, config, ed25519_program,
+    incinerator, loader_v4, native_loader, secp256k1_program, stake,
+    system_program, vote,
 };
 use solana_sysvar;
 
@@ -52,24 +53,20 @@ pub fn sysvar_accounts() -> HashSet<Pubkey> {
 }
 
 pub fn native_program_accounts() -> HashSet<Pubkey> {
-    const NATIVE_TOKEN_PROGRAM_ID: Pubkey =
-        solana_pubkey::pubkey!("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
-
     let mut blacklisted_programs = HashSet::new();
     blacklisted_programs.insert(address_lookup_table::ID);
     blacklisted_programs.insert(bpf_loader::ID);
     blacklisted_programs.insert(bpf_loader_upgradeable::ID);
     blacklisted_programs.insert(bpf_loader_deprecated::ID);
-    blacklisted_programs.insert(solana_sdk_ids::compute_budget::ID);
-    blacklisted_programs.insert(solana_sdk_ids::config::ID);
+    blacklisted_programs.insert(compute_budget::ID);
+    blacklisted_programs.insert(config::ID);
     blacklisted_programs.insert(ed25519_program::ID);
     blacklisted_programs.insert(incinerator::ID);
-    blacklisted_programs.insert(solana_sdk_ids::loader_v4::ID);
+    blacklisted_programs.insert(loader_v4::ID);
     blacklisted_programs.insert(native_loader::ID);
     blacklisted_programs.insert(secp256k1_program::ID);
-    blacklisted_programs.insert(solana_sdk_ids::stake::ID);
+    blacklisted_programs.insert(stake::ID);
     blacklisted_programs.insert(system_program::ID);
     blacklisted_programs.insert(vote::ID);
-    blacklisted_programs.insert(NATIVE_TOKEN_PROGRAM_ID);
     blacklisted_programs
 }

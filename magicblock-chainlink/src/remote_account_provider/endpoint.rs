@@ -3,9 +3,8 @@ use std::ops::Deref;
 use magicblock_config::types::network::Remote;
 use url::Url;
 
-use crate::remote_account_provider::RemoteAccountProviderResult;
-
 use super::errors::RemoteAccountProviderError;
+use crate::remote_account_provider::RemoteAccountProviderResult;
 
 #[derive(Debug, Clone)]
 pub enum Endpoint {

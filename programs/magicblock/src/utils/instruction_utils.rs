@@ -222,7 +222,6 @@ impl InstructionUtils {
                     data_key: account_modification
                         .data
                         .map(set_account_mod_data),
-                    rent_epoch: account_modification.rent_epoch,
                     delegated: account_modification.delegated,
                     compressed: account_modification.compressed,
                     confined: account_modification.confined,

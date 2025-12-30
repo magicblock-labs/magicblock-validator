@@ -7,6 +7,7 @@ use solana_feature_set::{
     FeatureSet,
 };
 use solana_program::feature;
+#[allow(deprecated)]
 use solana_rent_collector::RentCollector;
 use solana_svm::transaction_processor::TransactionProcessingEnvironment;
 
@@ -46,6 +47,7 @@ pub fn build_svm_env(
     // We have a static rent which is setup once at startup,
     // and never changes afterwards, so we just extend the
     // lifetime to 'static by leaking the allocation.
+    #[allow(deprecated)]
     let rent_collector = RentCollector::default();
     let rent_collector = Box::leak(Box::new(rent_collector));
 

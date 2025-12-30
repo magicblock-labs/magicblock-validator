@@ -41,6 +41,8 @@ solana-signer = { workspace = true }
 solana-system-interface = { workspace = true }
 solana-transaction = { workspace = true }
 solana-transaction-error = { workspace = true }
+spl-token = { workspace = true }
+spl-token-2022 = { workspace = true }
 solana-clock = { workspace = true }
 solana-hash = { workspace = true }
 solana-sysvar = { workspace = true }

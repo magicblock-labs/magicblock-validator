@@ -153,9 +153,6 @@ pub struct AccountModification {
     pub owner: Option<Pubkey>,
     pub executable: Option<bool>,
     pub data: Option<Vec<u8>>,
-    // TODO(bmuddha/thlorenz): deprecate rent_epoch
-    // https://github.com/magicblock-labs/magicblock-validator/issues/580
-    pub rent_epoch: Option<u64>,
     pub delegated: Option<bool>,
     pub compressed: Option<bool>,
     pub confined: Option<bool>,
@@ -168,9 +165,6 @@ pub struct AccountModificationForInstruction {
     pub owner: Option<Pubkey>,
     pub executable: Option<bool>,
     pub data_key: Option<u64>,
-    // TODO(bmuddha/thlorenz): deprecate rent_epoch
-    // https://github.com/magicblock-labs/magicblock-validator/issues/580
-    pub rent_epoch: Option<u64>,
     pub delegated: Option<bool>,
     pub compressed: Option<bool>,
     pub confined: Option<bool>,

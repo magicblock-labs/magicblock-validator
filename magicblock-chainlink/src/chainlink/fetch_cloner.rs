@@ -15,7 +15,12 @@ use dlp::{
 };
 use log::*;
 use magicblock_config::config::AllowedProgram;
-use magicblock_core::traits::AccountsBank;
+use magicblock_core::{
+    token_programs::{
+        is_ata, try_derive_eata_address_and_bump, MaybeIntoAta, EATA_PROGRAM_ID,
+    },
+    traits::AccountsBank,
+};
 use magicblock_metrics::metrics::{self, AccountFetchOrigin};
 use solana_account::{AccountSharedData, ReadableAccount, WritableAccount};
 use solana_pubkey::Pubkey;
@@ -623,10 +628,16 @@ where
             delegation_record.authority.eq(&self.validator_pubkey)
                 || is_confined;
 
+        // Always update owner and confined flags
         account
             .set_owner(delegation_record.owner)
-            .set_confined(is_confined)
-            .set_delegated(is_delegated_to_us);
+            .set_confined(is_confined);
+
+        if is_delegated_to_us && delegation_record.owner != EATA_PROGRAM_ID {
+            account.set_delegated(true);
+        } else if !is_delegated_to_us {
+            account.set_delegated(false);
+        }
         if is_delegated_to_us {
             Some(delegation_record.commit_frequency_ms)
         } else {
@@ -778,15 +789,16 @@ where
 
         trace!("Fetched {accs:?}");
 
-        let (not_found, plain, owned_by_deleg, owned_by_deleg_compressed, programs) =
+        let (not_found, plain, owned_by_deleg, owned_by_deleg_compressed, programs, atas) =
             accs.into_iter().zip(pubkeys).fold(
-                (vec![], vec![], vec![], vec![], vec![]),
+                (vec![], vec![], vec![], vec![], vec![], vec![]),
                 |(
                     mut not_found,
                     mut plain,
                     mut owned_by_deleg,
                     mut owned_by_deleg_compressed,
                     mut programs,
+                    mut atas,
                 ),
                  (acc, &pubkey)| {
                     use RemoteAccount::*;
@@ -835,6 +847,13 @@ where
                                                 "Not cloning native loader program account: {pubkey} (should have been blacklisted)",
                                             );
                                         }
+                                    } else if let Some(ata) = is_ata(&pubkey, &account_shared_data) {
+                                        atas.push((
+                                            pubkey,
+                                            account_shared_data,
+                                            ata,
+                                            slot,
+                                        ));
                                     } else {
                                         plain.push(AccountCloneRequest {
                                             pubkey,
@@ -850,7 +869,7 @@ where
                             };
                         }
                     }
-                    (not_found, plain, owned_by_deleg, owned_by_deleg_compressed, programs)
+                    (not_found, plain, owned_by_deleg, owned_by_deleg_compressed, programs, atas)
                 },
             );
 
@@ -875,8 +894,12 @@ where
                 .iter()
                 .map(|(p, _, _)| p.to_string())
                 .collect::<Vec<_>>();
+            let atas = atas
+                .iter()
+                .map(|(a, _, _, _)| a.to_string())
+                .collect::<Vec<_>>();
             trace!(
-                "Fetched accounts: \nnot_found:      {not_found:?} \nplain:          {plain:?} \nowned_by_deleg: {owned_by_deleg:?} \nowned_by_deleg_compressed: {owned_by_deleg_compressed:?} \nprograms:       {programs:?}",
+                "Fetched accounts: \nnot_found:      {not_found:?} \nplain:          {plain:?} \nowned_by_deleg: {owned_by_deleg:?} \nowned_by_deleg_compressed: {owned_by_deleg_compressed:?} \nprograms:       {programs:?} \natas:       {atas:?}",
             );
         }
 
@@ -937,7 +960,7 @@ where
         let mut missing_delegation_record = vec![];
 
         // We remove all new subs for accounts that were not found or already in the bank
-        let (accounts_to_clone, record_subs) = {
+        let (mut accounts_to_clone, record_subs) = {
             let joined = fetch_with_delegation_record_join_set.join_all().await;
             let (errors, accounts_fully_resolved) = joined.into_iter().fold(
                 (vec![], vec![]),
@@ -1006,10 +1029,16 @@ where
                                 .authority
                                 .eq(&self.validator_pubkey),
                         );
+                        let delegated_to_other = if delegation_record.authority.eq(&self.validator_pubkey) || delegation_record.authority.eq(&Pubkey::default()) {
+                            None
+                        } else {
+                            Some(delegation_record.authority)
+                        };
                         Some(AccountCloneRequest {
                             pubkey,
                             account,
                             commit_frequency_ms: None,
+                            delegated_to_other,
                         })
                     },
                 ),
@@ -1034,7 +1063,7 @@ where
                     // NOTE: failing here is fine when resolving all accounts for a transaction
                     // since if something is off we better not run it anyways
                     // However we may consider a different behavior when user is getting
-                    // mutliple accounts.
+                    // multiple accounts.
                     let delegation_record = match Self::parse_delegation_record(
                         delegation_record_data.data(),
                         delegation_record_pubkey,
@@ -1259,14 +1288,118 @@ where
             ));
         }
 
-        // Cancel new subs for accounts we don't clone
+        // We will compute subscription cancellations after ATA handling, once accounts_to_clone is finalized
+
+        // Handle ATAs: for each detected ATA, we derive the eATA PDA, subscribe to both,
+        // and, if the ATA is delegated to us and the eATA exists, we clone the eATA data
+        // into the ATA in the bank.
+        if !atas.is_empty() {
+            let mut ata_join_set = JoinSet::new();
+
+            // Subscribe first so subsequent fetches are kept up-to-date
+            for (ata_pubkey, _, ata_info, slot_for_ata) in &atas {
+                let _ = self.subscribe_to_account(ata_pubkey).await;
+                if let Some((eata, _)) = try_derive_eata_address_and_bump(
+                    &ata_info.owner,
+                    &ata_info.mint,
+                ) {
+                    if let Err(err) = self.subscribe_to_account(&eata).await {
+                        warn!(
+                            "Failed to subscribe to derived eATA {}: {}",
+                            eata, err
+                        );
+                    }
+
+                    let effective_slot =
+                        if let Some(min_slot) = min_context_slot {
+                            min_slot.max(*slot_for_ata)
+                        } else {
+                            *slot_for_ata
+                        };
+                    ata_join_set.spawn(self.task_to_fetch_with_companion(
+                        *ata_pubkey,
+                        eata,
+                        effective_slot,
+                        fetch_origin,
+                    ));
+                }
+            }
+
+            let ata_results = ata_join_set.join_all().await;
+
+            for result in ata_results {
+                let AccountWithCompanion {
+                    pubkey: ata_pubkey,
+                    account: ata_account,
+                    companion_pubkey: eata_pubkey,
+                    companion_account: maybe_eata_account,
+                } = match result {
+                    Ok(Ok(v)) => v,
+                    Ok(Err(err)) => {
+                        warn!("Failed to resolve ATA/eATA companion: {err}");
+                        continue;
+                    }
+                    Err(join_err) => {
+                        warn!("Failed to join ATA/eATA fetch task: {join_err}");
+                        continue;
+                    }
+                };
+
+                // Defaults: clone the ATA as-is
+                let mut account_to_clone =
+                    ata_account.account_shared_data_cloned();
+                let mut commit_frequency_ms = None;
+                let mut delegated_to_other = None;
+
+                // If there's an eATA, try to use it + delegation record to project the ATA
+                if let Some(eata_acc) = maybe_eata_account {
+                    let eata_shared = eata_acc.account_shared_data_cloned();
+
+                    if let Some(deleg) = self
+                        .fetch_and_parse_delegation_record(
+                            eata_pubkey,
+                            self.remote_account_provider.chain_slot(),
+                            fetch_origin,
+                        )
+                        .await
+                    {
+                        delegated_to_other =
+                            self.get_delegated_to_other(&deleg);
+                        commit_frequency_ms = Some(deleg.commit_frequency_ms);
+
+                        let delegated_to_us =
+                            deleg.authority == self.validator_pubkey;
+
+                        if delegated_to_us {
+                            if let Some(projected_ata) =
+                                eata_shared.maybe_into_ata(deleg.owner)
+                            {
+                                account_to_clone = projected_ata;
+                                if account_to_clone.owner() != &EATA_PROGRAM_ID
+                                {
+                                    account_to_clone.set_delegated(true);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                accounts_to_clone.push(AccountCloneRequest {
+                    pubkey: ata_pubkey,
+                    account: account_to_clone,
+                    commit_frequency_ms,
+                    delegated_to_other,
+                });
+            }
+        }
+
+        // Compute sub cancellations now since we may potentially fail during a cloning step
         let acc_subs = pubkeys.iter().filter(|pubkey| {
             !accounts_to_clone
                 .iter()
                 .any(|request| request.pubkey.eq(pubkey))
                 && !loaded_programs.iter().any(|p| p.program_id.eq(pubkey))
         });
-
         // Cancel subs for delegated accounts (accounts we clone but don't need to watch)
         let delegated_acc_subs: HashSet<Pubkey> = accounts_to_clone
             .iter()
@@ -1279,7 +1412,6 @@ where
             })
             .collect();
 
-        // Handle sub cancelation now since we may potentially fail during a cloning step
         cancel_subs(
             &self.remote_account_provider,
             CancelStrategy::Hybrid {

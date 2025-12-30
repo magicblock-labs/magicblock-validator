@@ -89,6 +89,47 @@ pub fn grow_order_book_instruction(
     )
 }
 
+pub fn init_order_book_instruction(
+    payer: Pubkey,
+    book_manager: Pubkey,
+    order_book: Pubkey,
+) -> Instruction {
+    let program_id = crate::id();
+    let account_metas = vec![
+        AccountMeta::new(payer, true),
+        AccountMeta::new_readonly(book_manager, true),
+        AccountMeta::new(order_book, false),
+        AccountMeta::new_readonly(system_program::id(), false),
+    ];
+
+    Instruction::new_with_borsh(
+        program_id,
+        &ScheduleCommitInstruction::InitOrderBook,
+        account_metas,
+    )
+}
+
+pub fn grow_order_book_instruction(
+    payer: Pubkey,
+    book_manager: Pubkey,
+    order_book: Pubkey,
+    additional_space: u64,
+) -> Instruction {
+    let program_id = crate::id();
+    let account_metas = vec![
+        AccountMeta::new(payer, true),
+        AccountMeta::new_readonly(book_manager, false),
+        AccountMeta::new(order_book, false),
+        AccountMeta::new_readonly(system_program::id(), false),
+    ];
+
+    Instruction::new_with_borsh(
+        program_id,
+        &ScheduleCommitInstruction::GrowOrderBook(additional_space),
+        account_metas,
+    )
+}
+
 pub fn init_payer_escrow(payer: Pubkey) -> [Instruction; 2] {
     let top_up_ix = dlp::instruction_builder::top_up_ephemeral_balance(
         payer,

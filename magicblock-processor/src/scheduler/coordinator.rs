@@ -151,10 +151,10 @@ impl ExecutionCoordinator {
         transaction: &TransactionWithId,
     ) -> Result<(), BlockerId> {
         let message = transaction.txn.transaction.message();
-        let accounts_to_lock = message.account_keys().iter().enumerate();
+        let accounts_to_lock = message.account_keys().iter();
         let acquired_locks = &mut self.acquired_locks[executor as usize];
 
-        for (i, &acc) in accounts_to_lock.clone() {
+        for (i, &acc) in accounts_to_lock.clone().enumerate() {
             // Get or create the lock for the account.
             let lock = self.locks.entry(acc).or_default().clone();
             // See whether there's a contention for the given account
@@ -199,7 +199,7 @@ impl ExecutionCoordinator {
                     let mut lock = lock.borrow_mut();
                     lock.unlock(executor);
                 }
-                for (i, &acc) in accounts_to_lock {
+                for (i, &acc) in accounts_to_lock.clone().enumerate() {
                     // We only set contention for write locks,
                     // in order to prevent writer starvation
                     if message.is_writable(i) {
@@ -214,8 +214,8 @@ impl ExecutionCoordinator {
 
         // On success, the transaction is no longer blocking anything.
         self.transaction_contention.remove(&transaction.id);
-        for (_, acc) in accounts_to_lock {
-            self.clear_account_contention(acc, transaction.id);
+        for &acc in accounts_to_lock {
+            self.clear_account_contention(&acc, transaction.id);
         }
         Ok(())
     }

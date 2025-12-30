@@ -81,6 +81,7 @@ impl WsDispatcher {
             | SlotUnsubscribe | SignatureUnsubscribe => {
                 self.unsubscribe(request)
             }
+            Ping => Ok(SubResult::Pong("pong")),
         }?;
 
         Ok(WsDispatchResult {
@@ -152,6 +153,8 @@ pub(crate) enum SubResult {
     SubId(SubscriptionID),
     /// The result of an unsubscription request (`true` for success).
     Unsub(bool),
+    /// The heartbeat response message
+    Pong(&'static str),
 }
 
 /// A container for a successfully processed RPC request, pairing the result with

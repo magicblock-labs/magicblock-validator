@@ -204,14 +204,6 @@ pub(crate) fn process_mutate_accounts(
                 memory_data_mods.push(resolved_data);
             }
         }
-        if let Some(rent_epoch) = modification.rent_epoch {
-            ic_msg!(
-                invoke_context,
-                "MutateAccounts: setting rent_epoch to {}",
-                rent_epoch
-            );
-            account.borrow_mut().set_rent_epoch(rent_epoch);
-        }
         if let Some(delegated) = modification.delegated {
             ic_msg!(
                 invoke_context,
@@ -344,7 +336,6 @@ mod tests {
             owner: Some(owner_key),
             executable: Some(true),
             data: Some(vec![1, 2, 3, 4, 5]),
-            rent_epoch: Some(88),
             delegated: Some(true),
             compressed: Some(true),
             confined: Some(true),

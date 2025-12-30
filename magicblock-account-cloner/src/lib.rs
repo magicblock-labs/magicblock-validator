@@ -108,7 +108,6 @@ impl ChainlinkCloner {
             pubkey: request.pubkey,
             lamports: Some(request.account.lamports()),
             owner: Some(*request.account.owner()),
-            rent_epoch: Some(request.account.rent_epoch()),
             data: Some(request.account.data().to_owned()),
             executable: Some(request.account.executable()),
             delegated: Some(request.account.delegated()),

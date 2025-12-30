@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 
-use solana_account::{state_traits::StateMut, Account, ReadableAccount};
+// no direct token remap helpers needed here; handled in CommittedAccount builder
+use solana_account::{state_traits::StateMut, ReadableAccount};
 use solana_instruction::error::InstructionError;
 use solana_log_collector::ic_msg;
 use solana_program_runtime::invoke_context::InvokeContext;
@@ -138,7 +139,7 @@ fn schedule_commit(
     // Assert all accounts are delegated, owned by invoking program OR are signers
     // Also works if the validator authority is a signer
     // NOTE: we don't require PDAs to be signers as in our case verifying that the
-    // program owning the PDAs invoked us via CPI is sufficient
+    // program owning the PDAs invoked us directly via CPI is sufficient
     // Thus we can be `invoke`d unsigned and no seeds need to be provided
     let mut committed_accounts: Vec<CommittedAccount> = Vec::new();
     for idx in COMMITTEES_START..ix_accs_len {
@@ -157,13 +158,13 @@ fn schedule_commit(
         }
 
         {
+            let is_delegated = acc.borrow().delegated();
+
             if opts.request_undelegation {
-                // Check if account is writable and also undelegated
-                // SVM doesn't check delegated, so we need to do extra checks here
-                // Otherwise account could be undelegated twice
-                let acc_writable =
+                // Must be writable and delegated to avoid double-undelegation
+                let is_writable =
                     get_writable_with_idx(transaction_context, idx as u16)?;
-                if !acc_writable || !acc.borrow().delegated() {
+                if !is_writable || !is_delegated {
                     ic_msg!(
                         invoke_context,
                         "ScheduleCommit ERR: account {} is required to be writable and delegated in order to be undelegated",
@@ -171,14 +172,14 @@ fn schedule_commit(
                     );
                     return Err(InstructionError::ReadonlyDataModified);
                 }
-            } else if !acc.borrow().delegated() {
+            } else if !is_delegated {
                 ic_msg!(
                     invoke_context,
                     "ScheduleCommit ERR: account {} is required to be delegated to the current validator, in order to be committed",
                     acc_pubkey
                 );
                 return Err(InstructionError::IllegalOwner);
-            };
+            }
 
             // Validate committed account was scheduled by valid authority
             let acc_owner = *acc.borrow().owner();
@@ -190,14 +191,22 @@ fn schedule_commit(
                 &signers,
             )?;
 
-            let mut account: Account = acc.borrow().to_owned().into();
-            account.owner = parent_program_id.cloned().unwrap_or(account.owner);
+            let committed = CommittedAccount::from_account_shared(
+                *acc_pubkey,
+                &acc.borrow(),
+                parent_program_id.cloned(),
+            );
 
-            #[allow(clippy::unnecessary_literal_unwrap)]
-            committed_accounts.push(CommittedAccount {
-                pubkey: *acc_pubkey,
-                account,
-            });
+            if &committed.pubkey != acc_pubkey {
+                ic_msg!(
+                    invoke_context,
+                    "ScheduleCommit: remapping ATA {} -> eATA {}",
+                    acc_pubkey,
+                    committed.pubkey
+                );
+            }
+
+            committed_accounts.push(committed);
         }
 
         if opts.request_undelegation {

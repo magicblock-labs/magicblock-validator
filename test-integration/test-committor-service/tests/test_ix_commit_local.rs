@@ -55,6 +55,13 @@ mod utils;
 
 type ExpectedStrategies = HashMap<CommitStrategy, u8>;
 
+enum CommitAccountMode {
+    Commit,
+    CompressedCommit,
+    CommitAndUndelegate,
+    CompressedCommitAndUndelegate,
+}
+
 fn expect_strategies(
     strategies: &[(CommitStrategy, u8)],
 ) -> ExpectedStrategies {
@@ -123,13 +130,6 @@ async fn test_ix_commit_single_account_ten_kb() {
         CommitAccountMode::Commit,
     )
     .await;
-}
-
-enum CommitAccountMode {
-    Commit,
-    CompressedCommit,
-    CommitAndUndelegate,
-    CompressedCommitAndUndelegate,
 }
 
 #[tokio::test]
