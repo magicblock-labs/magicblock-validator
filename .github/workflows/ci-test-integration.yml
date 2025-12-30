@@ -30,22 +30,6 @@ jobs:
 
       - uses: ./magicblock-validator/.github/actions/setup-solana
 
-      - name: Install Photon indexer
-        shell: bash
-        env:
-          RUSTFLAGS: "-A dead-code"
-        run: cargo install --git https://github.com/lightprotocol/photon.git --rev 1a785036de52896b68d06413e3b0231122d6aa4a --locked --force
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-
-      - name: Install zk-compression CLI
-        run: |
-          npm i -g @lightprotocol/zk-compression-cli@0.27.1-alpha.2
-        shell: bash
-
       - name: Build project and test programs
         run: |
           cargo build --locked
@@ -86,6 +70,25 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: ./magicblock-validator/.github/actions/setup-solana
+
+      - name: Install Photon indexer
+        if: contains('table_mania committor chainlink', matrix.batch_tests)
+        shell: bash
+        env:
+          RUSTFLAGS: "-A dead-code"
+        run: cargo install --git https://github.com/lightprotocol/photon.git --rev 1a785036de52896b68d06413e3b0231122d6aa4a --locked --force
+
+      - name: Setup Node.js
+        if: contains('table_mania committor chainlink', matrix.batch_tests)
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install zk-compression CLI
+        if: contains('table_mania committor chainlink', matrix.batch_tests)
+        run: |
+          npm i -g @lightprotocol/zk-compression-cli@0.27.1-alpha.2
+        shell: bash
 
       - name: Run integration tests - ${{ matrix.batch_tests }}
         run: |
