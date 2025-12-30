@@ -30,6 +30,12 @@ jobs:
 
       - uses: ./magicblock-validator/.github/actions/setup-solana
 
+      - name: Install Photon indexer
+        shell: bash
+        env:
+          RUSTFLAGS: "-A dead-code"
+        run: cargo install --git https://github.com/lightprotocol/photon.git --rev 1a785036de52896b68d06413e3b0231122d6aa4a --locked --force
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
