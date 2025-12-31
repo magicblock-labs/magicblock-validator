@@ -217,8 +217,8 @@ features = ["dev-context-only-utils"]
 # Avoid the vendored bzip2 within rocksdb-sys that can cause linker conflicts
 # when also using the bzip2 crate
 version = "0.22.0"
-# default-features = false
-# features = ["lz4"]
+default-features = false
+features = ["lz4"]
 
 [patch.crates-io]
 # some solana dependencies have solana-storage-proto as dependency

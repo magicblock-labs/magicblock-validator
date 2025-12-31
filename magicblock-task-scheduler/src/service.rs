@@ -110,8 +110,9 @@ impl TaskSchedulerService {
             tasks.len()
         );
         for task in tasks {
+            debug!("Task: {:?}", task);
             if task.execution_interval_millis == 0
-                || task.execution_interval_millis > u32::MAX as i64
+                || task.execution_interval_millis >= u32::MAX as i64
             {
                 warn!(
                     "Task {} has an invalid execution interval: {}. Skipping.",
@@ -354,5 +355,70 @@ impl TaskSchedulerService {
             .send_transaction(&tx)
             .await
             .map_err(Box::new)?)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use solana_pubkey::Pubkey;
+    use tokio::{sync::mpsc, time::timeout};
+
+    use super::*;
+
+    #[tokio::test]
+    async fn test_remove_invalid_tasks_on_startup() {
+        let _ = env_logger::try_init();
+
+        let (_tx, rx) = mpsc::unbounded_channel();
+        let db = SchedulerDatabase::new(":memory:").unwrap();
+        // Invalid task interval
+        db.insert_task(&DbTask {
+            id: 1,
+            authority: Pubkey::new_unique(),
+            execution_interval_millis: u32::MAX as i64,
+            executions_left: 1,
+            last_execution_millis: chrono::Utc::now().timestamp_millis(),
+            instructions: vec![],
+        })
+        .await
+        .unwrap();
+        // Valid task interval
+        db.insert_task(&DbTask {
+            id: 2,
+            authority: Pubkey::new_unique(),
+            execution_interval_millis: u32::MAX as i64 - 1,
+            executions_left: 1,
+            last_execution_millis: chrono::Utc::now().timestamp_millis(),
+            instructions: vec![],
+        })
+        .await
+        .unwrap();
+        let service = TaskSchedulerService {
+            db: db.clone(),
+            rpc_client: RpcClient::new("http://localhost:8899".to_string()),
+            block: LatestBlock::default(),
+            task_queue: DelayQueue::new(),
+            task_queue_keys: HashMap::new(),
+            tx_counter: AtomicU64::default(),
+            token: CancellationToken::new(),
+            min_interval: Duration::from_millis(1000),
+            scheduled_tasks: rx,
+        };
+
+        let handle = service.start().await.unwrap();
+
+        // After starting, only one task should be in the database
+        timeout(Duration::from_secs(1), async move {
+            loop {
+                let tasks = db.get_tasks().await?;
+                if tasks.len() == 1 {
+                    return Ok::<_, TaskSchedulerError>(());
+                }
+            }
+        })
+        .await
+        .unwrap()
+        .unwrap();
+        handle.abort();
     }
 }
