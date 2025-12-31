@@ -360,10 +360,71 @@ impl TaskSchedulerService {
 
 #[cfg(test)]
 mod tests {
+    use magicblock_program::args::ScheduleTaskRequest;
     use solana_pubkey::Pubkey;
     use tokio::{sync::mpsc, time::timeout};
 
     use super::*;
+
+    #[tokio::test]
+    async fn test_schedule_invalid_tasks() {
+        let _ = env_logger::try_init();
+
+        let (tx, rx) = mpsc::unbounded_channel();
+        let db = SchedulerDatabase::new(":memory:").unwrap();
+
+        let service = TaskSchedulerService {
+            db: db.clone(),
+            rpc_client: RpcClient::new("http://localhost:8899".to_string()),
+            block: LatestBlock::default(),
+            task_queue: DelayQueue::new(),
+            task_queue_keys: HashMap::new(),
+            tx_counter: AtomicU64::default(),
+            token: CancellationToken::new(),
+            min_interval: Duration::from_millis(1000),
+            scheduled_tasks: rx,
+        };
+
+        let handle = service.start().await.unwrap();
+
+        // Invalid task interval
+        tx.send(TaskRequest::Schedule(ScheduleTaskRequest {
+            id: 1,
+            authority: Pubkey::new_unique(),
+            execution_interval_millis: u32::MAX as i64,
+            iterations: 1,
+            instructions: vec![],
+        }))
+        .unwrap();
+        // Valid task interval
+        tx.send(TaskRequest::Schedule(ScheduleTaskRequest {
+            id: 1,
+            authority: Pubkey::new_unique(),
+            execution_interval_millis: u32::MAX as i64 - 1,
+            iterations: 1,
+            instructions: vec![],
+        }))
+        .unwrap();
+
+        // After processing the requests, only one task stays in the DB
+        timeout(Duration::from_secs(1), async move {
+            loop {
+                let tasks = db.get_tasks().await.unwrap();
+                if tasks.len() > 1 {
+                    return Err::<(), String>(format!(
+                        "Tasks should be 1, got {}",
+                        tasks.len()
+                    ));
+                } else if tasks.len() == 1 {
+                    return Ok::<(), String>(());
+                }
+            }
+        })
+        .await
+        .unwrap_err();
+
+        handle.abort();
+    }
 
     #[tokio::test]
     async fn test_remove_invalid_tasks_on_startup() {
