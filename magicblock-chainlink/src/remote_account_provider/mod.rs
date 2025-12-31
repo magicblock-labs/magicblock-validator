@@ -20,7 +20,7 @@ use log::*;
 pub use lru_cache::AccountsLruCache;
 pub(crate) use remote_account::RemoteAccount;
 pub use remote_account::RemoteAccountUpdateSource;
-use solana_account::Account;
+use solana_account::{Account, ReadableAccount};
 use solana_account_decoder_client_types::UiAccountEncoding;
 use solana_commitment_config::CommitmentConfig;
 use solana_pubkey::Pubkey;
@@ -34,7 +34,7 @@ use solana_rpc_client_api::{
 use solana_sysvar::clock;
 use tokio::{
     sync::{mpsc, oneshot},
-    task::{self, JoinSet},
+    task,
     time::{self, Duration},
 };
 
@@ -953,31 +953,109 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
         fetch_origin: AccountFetchOrigin,
         program_ids: Option<&[Pubkey]>,
     ) {
+        const MAX_RETRIES: u64 = 10;
+
         let rpc_client = self.rpc_client.clone();
-        let photon_client = self.photon_client.clone();
+        let photon_client = Arc::new(self.photon_client.clone());
         let fetching_accounts = self.fetching_accounts.clone();
         let pubkeys = Arc::new(pubkeys);
         let mark_empty_if_not_found =
             mark_empty_if_not_found.unwrap_or(&[]).to_vec();
         let program_ids = program_ids.map(|ids| ids.to_vec());
         tokio::spawn(async move {
-            let mut join_set = JoinSet::new();
-            join_set.spawn(Self::fetch_from_rpc(
-                rpc_client,
-                pubkeys.clone(),
-                fetching_accounts.clone(),
-                mark_empty_if_not_found,
-                min_context_slot,
-                program_ids.clone(),
-            ));
-            if let Some(ref photon_client) = photon_client {
-                let photon_client = photon_client.clone();
-                join_set.spawn(Self::fetch_from_photon(
-                    photon_client,
+            // Fetch accounts from RPC
+            // If any are owned by the compressed delegation program then we also fetch from Photon with retries
+            let (rpc_accounts, found_count, not_found_count) =
+                Self::fetch_from_rpc(
+                    rpc_client,
                     pubkeys.clone(),
+                    fetching_accounts.clone(),
+                    mark_empty_if_not_found,
                     min_context_slot,
-                ));
-            }
+                    program_ids.clone(),
+                )
+                .await?;
+
+            let rpc_accounts_clone = rpc_accounts.clone();
+            let pubkeys_clone = pubkeys.clone();
+            let photon_client_clone = photon_client.clone();
+            let compressed_accounts = async move || {
+                let FetchedRemoteAccounts::Rpc(accounts) = &rpc_accounts_clone
+                else {
+                    return Err(
+                        RemoteAccountProviderError::FailedFetchingAccounts(
+                            "Failed to fetch RPC accounts".to_string(),
+                        ),
+                    );
+                };
+
+                let compressed_accounts_count = accounts
+                    .iter()
+                    .filter(|acc| {
+                        acc.is_owned_by_compressed_delegation_program()
+                    })
+                    .count()
+                    as u64;
+                if compressed_accounts_count == 0 {
+                    return Err(
+                        RemoteAccountProviderError::FailedFetchingAccounts(
+                            "No compressed accounts to fetch".to_string(),
+                        ),
+                    );
+                }
+
+                let Some(photon_client) = &*photon_client_clone else {
+                    return Err(
+                        RemoteAccountProviderError::FailedFetchingAccounts(
+                            "No photon client available".to_string(),
+                        ),
+                    );
+                };
+
+                let mut remaining_retries: u64 = MAX_RETRIES;
+                loop {
+                    let (compressed_accounts, found_count, not_found_count) =
+                        Self::fetch_from_photon(
+                            photon_client.clone(),
+                            pubkeys_clone.clone(),
+                            min_context_slot,
+                        )
+                        .await?;
+
+                    let FetchedRemoteAccounts::Compressed(compressed_accounts) =
+                        compressed_accounts
+                    else {
+                        let err_msg =
+                            "Failed to fetch compressed accounts".to_string();
+                        error!("{err_msg}");
+                        return Err(
+                            RemoteAccountProviderError::FailedFetchingAccounts(
+                                err_msg,
+                            ),
+                        );
+                    };
+
+                    if found_count == compressed_accounts_count {
+                        return Ok((
+                            FetchedRemoteAccounts::Compressed(
+                                compressed_accounts,
+                            ),
+                            found_count,
+                            not_found_count,
+                        ));
+                    }
+
+                    remaining_retries -= 1;
+                    if remaining_retries <= 0 {
+                        return Err(
+                            RemoteAccountProviderError::FailedFetchingAccounts(
+                                "Max photon retries reached".to_string(),
+                            ),
+                        );
+                    }
+                    tokio::time::sleep(Duration::from_millis(400)).await;
+                }
+            };
 
             let (
                 remote_accounts_results,
@@ -985,45 +1063,46 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
                 not_found_count,
                 compressed_found_count,
                 compressed_not_found_count,
-            ) = join_set
-                .join_all()
-                .await
-                .into_iter()
-                .filter_map(|result| match result {
-                    Ok(result) => Some(result),
-                    Err(err) => {
-                        error!("Failed to fetch accounts: {err:?}");
-                        None
+            ) = vec![
+                Ok((rpc_accounts, found_count, not_found_count)),
+                compressed_accounts().await,
+            ]
+            .into_iter()
+            .filter_map(|result| match result {
+                Ok(result) => Some(result),
+                Err(err) => {
+                    error!("Failed to fetch accounts: {err:?}");
+                    None
+                }
+            })
+            .fold(
+                (vec![], 0, 0, 0, 0),
+                |(
+                    remote_accounts_results,
+                    found_count,
+                    not_found_count,
+                    compressed_found_count,
+                    compressed_not_found_count,
+                ),
+                 (accs, found_cnt, not_found_cnt)| {
+                    match &accs {
+                        FetchedRemoteAccounts::Rpc(_) => (
+                            [remote_accounts_results, vec![accs]].concat(),
+                            found_count + found_cnt,
+                            not_found_count + not_found_cnt,
+                            compressed_found_count,
+                            compressed_not_found_count,
+                        ),
+                        FetchedRemoteAccounts::Compressed(_) => (
+                            [remote_accounts_results, vec![accs]].concat(),
+                            found_count,
+                            not_found_count,
+                            compressed_found_count + found_cnt,
+                            compressed_not_found_count + not_found_cnt,
+                        ),
                     }
-                })
-                .fold(
-                    (vec![], 0, 0, 0, 0),
-                    |(
-                        remote_accounts_results,
-                        found_count,
-                        not_found_count,
-                        compressed_found_count,
-                        compressed_not_found_count,
-                    ),
-                     (accs, found_cnt, not_found_cnt)| {
-                        match &accs {
-                            FetchedRemoteAccounts::Rpc(_) => (
-                                [remote_accounts_results, vec![accs]].concat(),
-                                found_count + found_cnt,
-                                not_found_count + not_found_cnt,
-                                compressed_found_count,
-                                compressed_not_found_count,
-                            ),
-                            FetchedRemoteAccounts::Compressed(_) => (
-                                [remote_accounts_results, vec![accs]].concat(),
-                                found_count,
-                                not_found_count,
-                                compressed_found_count + found_cnt,
-                                compressed_not_found_count + not_found_cnt,
-                            ),
-                        }
-                    },
-                );
+                },
+            );
             let remote_accounts = Self::consolidate_fetched_remote_accounts(
                 &pubkeys,
                 remote_accounts_results,
@@ -1034,7 +1113,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
             inc_account_fetches_found(fetch_origin, found_count);
             inc_account_fetches_not_found(fetch_origin, not_found_count);
 
-            if photon_client.is_some() {
+            if (*photon_client).is_some() {
                 // Update metrics for successful compressed fetch
                 inc_compressed_account_fetches_success(pubkeys.len() as u64);
                 inc_compressed_account_fetches_found(
@@ -1334,6 +1413,16 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
                 error!("Error fetching compressed accounts: {err:?}");
                 inc_compressed_account_fetches_failed(pubkeys.len() as u64);
             })?;
+
+        if log_enabled!(log::Level::Trace) {
+            let compressed_accounts_str = compressed_accounts
+                .iter()
+                .zip(&*pubkeys)
+                .map(|(acc, pk)| format!("{}: {:?}", pk, acc))
+                .collect::<Vec<_>>()
+                .join(", ");
+            trace!("Fetched compressed accounts {compressed_accounts_str}");
+        }
 
         let mut found_count = 0u64;
         let mut not_found_count = 0u64;

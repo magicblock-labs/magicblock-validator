@@ -1486,7 +1486,7 @@ where
                 in_bank.compressed()
             );
             if in_bank.compressed() {
-                debug!("Account {pubkey} is compressed, skipping delegation record fetch");
+                debug!("Account {pubkey} is compressed, no need to refresh it");
                 return RefreshDecision::No;
             } else {
                 let deleg_record = self
@@ -1526,6 +1526,8 @@ where
             debug!(
                 "Account {pubkey} owned by deleg program not marked as undelegating"
             );
+        } else if in_bank.owner().eq(&compressed_delegation_client::id()) {
+            debug!("Account {pubkey} owned by compressed delegation program not marked as undelegating");
         }
         RefreshDecision::No
     }

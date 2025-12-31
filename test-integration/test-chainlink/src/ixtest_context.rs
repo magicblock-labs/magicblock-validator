@@ -506,7 +506,7 @@ impl IxtestContext {
             .expect("Failed to delegate account");
 
         // Wait for the indexer to index the account
-        sleep_ms(500).await;
+        sleep_ms(1500).await;
 
         self
     }
@@ -643,7 +643,7 @@ impl IxtestContext {
             .expect("Failed to finalize account");
 
         // Wait for the indexer to index the account
-        sleep_ms(500).await;
+        sleep_ms(1500).await;
 
         let (compressed_account, proof) =
             self.get_compressed_account_and_proof(&record_address).await;
@@ -706,7 +706,7 @@ impl IxtestContext {
         // Build instructions and required signers
         if redelegate {
             // Wait for the indexer to index the account
-            sleep_ms(500).await;
+            sleep_ms(1500).await;
 
             self.delegate_compressed_counter(counter_auth, true).await
         } else {
