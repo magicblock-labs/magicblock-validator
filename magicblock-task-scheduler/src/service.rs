@@ -113,10 +113,11 @@ impl TaskSchedulerService {
             debug!("Task: {:?}", task);
             if task.execution_interval_millis == 0
                 || task.execution_interval_millis >= u32::MAX as i64
+                || task.executions_left < 0
             {
                 warn!(
-                    "Task {} has an invalid execution interval: {}. Skipping.",
-                    task.id, task.execution_interval_millis
+                    "Task {} has an invalid parameters: (interval={}, executions_left={}). Skipping.",
+                    task.id, task.execution_interval_millis, task.executions_left
                 );
                 self.db.remove_task(task.id).await?;
                 continue;
@@ -418,6 +419,7 @@ mod tests {
                 } else if tasks.len() == 1 {
                     return Ok::<(), String>(());
                 }
+                tokio::time::sleep(Duration::from_millis(100)).await;
             }
         })
         .await
@@ -475,6 +477,7 @@ mod tests {
                 if tasks.len() == 1 {
                     return Ok::<_, TaskSchedulerError>(());
                 }
+                tokio::time::sleep(Duration::from_millis(100)).await;
             }
         })
         .await
