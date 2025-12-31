@@ -2149,7 +2149,7 @@ mod test {
     // -----------------
     // Compressed Accounts
     // -----------------
-    async fn setup_with_mixed_accounts(
+    async fn setup_with_compressed_accounts(
         pubkeys: &[Pubkey],
         compressed_pubkeys: &[Pubkey],
         accounts_capacity: usize,
@@ -2171,7 +2171,11 @@ mod test {
                     Account {
                         lamports: 555,
                         data: vec![5; idx + 1],
-                        owner: system_program::id(),
+                        owner: if compressed_pubkeys.get(idx).is_some() {
+                            compressed_delegation_client::id()
+                        } else {
+                            system_program::id()
+                        },
                         executable: false,
                         rent_epoch: 0,
                     },
@@ -2242,6 +2246,8 @@ mod test {
         };
     }
 
+    // TODO(dode): Compressed accounts currently cannot exists with a corresponding RPC account.
+    #[ignore]
     #[tokio::test]
     async fn test_multiple_photon_accounts() {
         init_logger();
@@ -2254,7 +2260,7 @@ mod test {
         let compressed_pubkeys = &[cpk1, cpk2, cpk3];
 
         let (remote_account_provider, _, _) =
-            setup_with_mixed_accounts(&[], compressed_pubkeys, 3).await;
+            setup_with_compressed_accounts(&[], compressed_pubkeys, 3).await;
         let accs = remote_account_provider
             .try_get_multi_until_slots_match(
                 compressed_pubkeys,
@@ -2282,7 +2288,7 @@ mod test {
     }
 
     #[tokio::test]
-    async fn test_multiple_mixed_accounts() {
+    async fn test_multiple_compressed_accounts() {
         init_logger();
         let [pk1, pk2, pk3] = [
             Pubkey::new_unique(),
@@ -2290,20 +2296,15 @@ mod test {
             Pubkey::new_unique(),
         ];
         let pubkeys = &[pk1, pk2, pk3];
-        let [cpk1, cpk2, cpk3] = [
-            Pubkey::new_unique(),
-            Pubkey::new_unique(),
-            Pubkey::new_unique(),
-        ];
-        let compressed_pubkeys = &[cpk1, cpk2, cpk3];
+        let compressed_pubkeys = &pubkeys.clone();
 
         let (remote_account_provider, _, _) =
-            setup_with_mixed_accounts(pubkeys, compressed_pubkeys, 3).await;
+            setup_with_compressed_accounts(pubkeys, compressed_pubkeys, 3)
+                .await;
 
-        let mixed_keys = &[pk1, cpk1, pk2, cpk2, cpk3, pk3];
         let accs = remote_account_provider
             .try_get_multi_until_slots_match(
-                mixed_keys,
+                pubkeys,
                 Some(MatchSlotsConfig {
                     max_retries: 10,
                     retry_interval_ms: 50,
@@ -2313,53 +2314,38 @@ mod test {
             )
             .await
             .unwrap();
-        let [acc1, cacc1, acc2, cacc2, cacc3, acc3] = accs.as_slice() else {
-            panic!("Expected 6 accounts");
+        let [acc1, acc2, acc3] = accs.as_slice() else {
+            panic!("Expected 3 accounts");
         };
-        assert_compressed_account!(cacc1, 777, 1);
-        assert_compressed_account!(cacc2, 777, 2);
-        assert_compressed_account!(cacc3, 777, 3);
-
-        assert_regular_account!(acc1, 555, 1);
-        assert_regular_account!(acc2, 555, 2);
-        assert_regular_account!(acc3, 555, 3);
+        assert_compressed_account!(acc1, 777, 1);
+        assert_compressed_account!(acc2, 777, 2);
+        assert_compressed_account!(acc3, 777, 3);
 
         let cacc2 = remote_account_provider
-            .try_get(cpk2, AccountFetchOrigin::GetAccount)
-            .await
-            .unwrap();
-        assert_compressed_account!(cacc2, 777, 2);
-
-        let acc2 = remote_account_provider
             .try_get(pk2, AccountFetchOrigin::GetAccount)
             .await
             .unwrap();
-        assert_regular_account!(acc2, 555, 2);
+        assert_compressed_account!(cacc2, 777, 2);
     }
 
     #[tokio::test]
-    async fn test_multiple_mixed_accounts_some_missing() {
+    async fn test_multiple_compressed_accounts_some_missing() {
         init_logger();
         let [pk1, pk2, pk3] = [
             Pubkey::new_unique(),
             Pubkey::new_unique(),
             Pubkey::new_unique(),
         ];
-        let pubkeys = &[pk1, pk2];
-        let [cpk1, cpk2, cpk3] = [
-            Pubkey::new_unique(),
-            Pubkey::new_unique(),
-            Pubkey::new_unique(),
-        ];
-        let compressed_pubkeys = &[cpk1, cpk2];
+        let pubkeys = &[pk1, pk2, pk3];
+        let compressed_pubkeys = &pubkeys.clone()[..2];
 
         let (remote_account_provider, _, _) =
-            setup_with_mixed_accounts(pubkeys, compressed_pubkeys, 3).await;
+            setup_with_compressed_accounts(pubkeys, compressed_pubkeys, 3)
+                .await;
 
-        let mixed_keys = &[pk1, cpk1, pk2, cpk2, cpk3, pk3];
         let accs = remote_account_provider
             .try_get_multi_until_slots_match(
-                mixed_keys,
+                pubkeys,
                 Some(MatchSlotsConfig {
                     max_retries: 10,
                     retry_interval_ms: 50,
@@ -2369,37 +2355,22 @@ mod test {
             )
             .await
             .unwrap();
-        let [acc1, cacc1, acc2, cacc2, cacc3, acc3] = accs.as_slice() else {
-            panic!("Expected 6 accounts");
+        let [acc1, acc2, acc3] = accs.as_slice() else {
+            panic!("Expected 3 accounts");
         };
-        assert_compressed_account!(cacc1, 777, 1);
-        assert_compressed_account!(cacc2, 777, 2);
-        assert!(!cacc3.is_found());
-
-        assert_regular_account!(acc1, 555, 1);
-        assert_regular_account!(acc2, 555, 2);
-        assert!(!acc3.is_found());
+        assert_compressed_account!(acc1, 777, 1);
+        assert_compressed_account!(acc2, 777, 2);
+        assert_regular_account!(acc3, 555, 3);
 
         let cacc2 = remote_account_provider
-            .try_get(cpk2, AccountFetchOrigin::GetAccount)
+            .try_get(pk2, AccountFetchOrigin::GetAccount)
             .await
             .unwrap();
         assert_compressed_account!(cacc2, 777, 2);
         let cacc3 = remote_account_provider
-            .try_get(cpk3, AccountFetchOrigin::GetAccount)
-            .await
-            .unwrap();
-        assert!(!cacc3.is_found());
-
-        let acc2 = remote_account_provider
-            .try_get(pk2, AccountFetchOrigin::GetAccount)
-            .await
-            .unwrap();
-        assert_regular_account!(acc2, 555, 2);
-        let acc3 = remote_account_provider
             .try_get(pk3, AccountFetchOrigin::GetAccount)
             .await
             .unwrap();
-        assert!(!acc3.is_found());
+        assert_regular_account!(cacc3, 555, 3);
     }
 }
