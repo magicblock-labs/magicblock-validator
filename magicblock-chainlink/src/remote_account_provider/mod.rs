@@ -20,7 +20,7 @@ use log::*;
 pub use lru_cache::AccountsLruCache;
 pub(crate) use remote_account::RemoteAccount;
 pub use remote_account::RemoteAccountUpdateSource;
-use solana_account::{Account, ReadableAccount};
+use solana_account::Account;
 use solana_account_decoder_client_types::UiAccountEncoding;
 use solana_commitment_config::CommitmentConfig;
 use solana_pubkey::Pubkey;
@@ -1046,7 +1046,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
                     }
 
                     remaining_retries -= 1;
-                    if remaining_retries <= 0 {
+                    if remaining_retries == 0 {
                         return Err(
                             RemoteAccountProviderError::FailedFetchingAccounts(
                                 "Max photon retries reached".to_string(),
