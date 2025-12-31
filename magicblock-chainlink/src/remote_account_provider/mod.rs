@@ -984,7 +984,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
                 else {
                     return Err(
                         RemoteAccountProviderError::FailedFetchingAccounts(
-                            "Failed to fetch RPC accounts".to_string(),
+                            "Failed to fetch RPC accounts for compressed accounts".to_string(),
                         ),
                     );
                 };
@@ -997,11 +997,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
                     .count()
                     as u64;
                 if compressed_accounts_count == 0 {
-                    return Err(
-                        RemoteAccountProviderError::FailedFetchingAccounts(
-                            "No compressed accounts to fetch".to_string(),
-                        ),
-                    );
+                    return Ok(None);
                 }
 
                 let Some(photon_client) = &*photon_client_clone else {
@@ -1036,13 +1032,13 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
                     };
 
                     if found_count == compressed_accounts_count {
-                        return Ok((
+                        return Ok(Some((
                             FetchedRemoteAccounts::Compressed(
                                 compressed_accounts,
                             ),
                             found_count,
                             not_found_count,
-                        ));
+                        )));
                     }
 
                     remaining_retries -= 1;
@@ -1064,12 +1060,13 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
                 compressed_found_count,
                 compressed_not_found_count,
             ) = vec![
-                Ok((rpc_accounts, found_count, not_found_count)),
+                Ok(Some((rpc_accounts, found_count, not_found_count))),
                 compressed_accounts().await,
             ]
             .into_iter()
             .filter_map(|result| match result {
-                Ok(result) => Some(result),
+                Ok(Some(result)) => Some(result),
+                Ok(None) => None,
                 Err(err) => {
                     error!("Failed to fetch accounts: {err:?}");
                     None
