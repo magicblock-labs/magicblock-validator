@@ -1,17 +1,22 @@
 use std::sync::Arc;
 
-use log::info;
+use log::{info, warn};
+use magicblock_config::config::ApertureConfig;
 use magicblock_core::link::{
     accounts::AccountUpdateRx, blocks::BlockUpdateRx,
     transactions::TransactionStatusRx, DispatchEndpoints,
 };
 use tokio_util::sync::CancellationToken;
 
-use crate::state::{
-    blocks::BlocksCache,
-    subscriptions::SubscriptionsDb,
-    transactions::{SignatureResult, TransactionsCache},
-    SharedState,
+use crate::{
+    geyser::GeyserPluginManager,
+    state::{
+        blocks::BlocksCache,
+        subscriptions::SubscriptionsDb,
+        transactions::{SignatureResult, TransactionsCache},
+        SharedState,
+    },
+    ApertureResult,
 };
 
 /// A worker that processes and dispatches validator events.
@@ -31,7 +36,7 @@ pub(crate) struct EventProcessor {
     /// A handle to the global database of RPC subscriptions.
     subscriptions: SubscriptionsDb,
     /// A handle to the global cache of transaction statuses. This serves two purposes:
-    /// 1. To provide a 75-second (~187 slots) window to prevent transaction replay.
+    /// 1. To provide a 75-second (~187 solana slots) window to prevent transaction replay.
     /// 2. To serve `getSignatureStatuses` RPC requests efficiently without querying the ledger.
     transactions: TransactionsCache,
     /// A handle to the global cache of recently produced blocks. This serves several purposes:
@@ -45,19 +50,26 @@ pub(crate) struct EventProcessor {
     transaction_status_rx: TransactionStatusRx,
     /// A receiver for new block events.
     block_update_rx: BlockUpdateRx,
+    /// An entry point for communicating with loaded geyser plugins
+    geyser: Arc<GeyserPluginManager>,
 }
 
 impl EventProcessor {
     /// Creates a new `EventProcessor` instance by cloning handles to shared state and channels.
-    fn new(channels: &DispatchEndpoints, state: &SharedState) -> Self {
-        Self {
+    fn new(
+        channels: &DispatchEndpoints,
+        state: &SharedState,
+        geyser: Arc<GeyserPluginManager>,
+    ) -> ApertureResult<Self> {
+        Ok(Self {
             subscriptions: state.subscriptions.clone(),
             transactions: state.transactions.clone(),
             blocks: state.blocks.clone(),
             account_update_rx: channels.account_update.clone(),
             transaction_status_rx: channels.transaction_status.clone(),
             block_update_rx: channels.block_update.clone(),
-        }
+            geyser,
+        })
     }
 
     /// Spawns a specified number of `EventProcessor` workers.
@@ -71,15 +83,24 @@ impl EventProcessor {
     /// * `instances` - The number of concurrent worker tasks to spawn.
     /// * `cancel` - The token used for graceful shutdown.
     pub(crate) fn start(
+        config: &ApertureConfig,
         state: &SharedState,
         channels: &DispatchEndpoints,
-        instances: usize,
         cancel: CancellationToken,
-    ) {
-        for id in 0..instances {
-            let processor = EventProcessor::new(channels, state);
+    ) -> ApertureResult<()> {
+        // SAFETY:
+        // Geyser plugin system works with the FFI, and is inherently unsafe,
+        // the plugin must be 100% compatible with the validator to be used
+        // without any memory violations, and it is the responsibility of the
+        // node operator to ensure that loaded plugin is correct and safe to use.
+        let geyser: Arc<_> =
+            unsafe { GeyserPluginManager::new(&config.geyser_plugins) }?.into();
+        for id in 0..config.event_processors {
+            let geyser = geyser.clone();
+            let processor = EventProcessor::new(channels, state, geyser)?;
             tokio::spawn(processor.run(id, cancel.clone()));
         }
+        Ok(())
     }
 
     /// The main event processing loop for a single worker instance.
@@ -93,6 +114,14 @@ impl EventProcessor {
                 Ok(latest) = self.block_update_rx.recv_async() => {
                     // Notify subscribers waiting on slot updates.
                     self.subscriptions.send_slot(latest.meta.slot);
+                    // Notify registered geyser plugins (if any) of the latest slot.
+                    let _ = self.geyser.notify_slot(latest.meta.slot).inspect_err(|e| {
+                        warn!("Geyser slot update error: {e}");
+                    });
+                    // Notify listening geyser plugins
+                    let _ = self.geyser.notify_block(&latest).inspect_err(|e| {
+                        warn!("Geyser block update error: {e}");
+                    });
                     // Update the global blocks cache with the latest block.
                     self.blocks.set_latest(latest);
                 }
@@ -103,28 +132,32 @@ impl EventProcessor {
                     self.subscriptions.send_account_update(&state).await;
                     // Notify subscribers for the program that owns the account.
                     self.subscriptions.send_program_update(&state).await;
+                    // Notify registered geyser plugins (if any) of the account.
+                    let _ = self.geyser.notify_account(&state).inspect_err(|e| {
+                        warn!("Geyser account update error: {e}");
+                    });
                 }
 
                 // Process a new transaction status update.
                 Ok(status) = self.transaction_status_rx.recv_async() => {
                     // Notify subscribers waiting on this specific transaction signature.
-                    self.subscriptions.send_signature_update(
-                        &status.signature,
-                        &status.result.result,
-                        status.slot
-                    ).await;
+                    self.subscriptions.send_signature_update(&status).await;
 
                     // Notify subscribers interested in transaction logs.
                     self.subscriptions.send_logs_update(&status, status.slot);
 
+                    // Notify listening geyser plugins
+                    let _ = self.geyser.notify_transaction(&status).inspect_err(|e| {
+                        warn!("Geyser transaction update error: {e}");
+                    });
+
                     // Update the global transaction cache.
                     let result = SignatureResult {
                         slot: status.slot,
-                        result: status.result.result
+                        result: status.meta.status
                     };
-                    self.transactions.push(status.signature, Some(result));
+                    self.transactions.push(*status.txn.signature(), Some(result));
                 }
-
                 // Listen for the cancellation signal to gracefully shut down.
                 _ = cancel.cancelled() => {
                     break;

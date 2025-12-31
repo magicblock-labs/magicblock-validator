@@ -6,7 +6,7 @@ pub mod network;
 // Re-export types for easy access
 pub use crypto::{SerdeKeypair, SerdePubkey};
 use derive_more::{Deref, FromStr};
-pub use network::BindAddress;
+pub use network::{BindAddress, Remote};
 use serde_with::{DeserializeFromStr, SerializeDisplay};
 
 use crate::consts;

@@ -1,47 +1,23 @@
 use std::{
     fs,
     path::{Path, PathBuf},
-    str::FromStr,
 };
 
-use magicblock_config::types::network::Remote;
 use serde::Deserialize;
 
 #[derive(Deserialize)]
 struct Config {
     #[serde(default)]
-    remote: Vec<RemoteConfig>,
-    listen: String,
+    remotes: Vec<String>,
+    #[serde(default)]
+    aperture: Option<ApertureConfig>,
     #[serde(default)]
     programs: Vec<Program>,
 }
 
-#[derive(Deserialize, Clone)]
-struct RemoteConfig {
-    kind: String,
-    url: String,
-}
-
-impl RemoteConfig {
-    /// Returns the URL for this remote, parsing the kind and url into a Remote instance.
-    fn url(&self) -> String {
-        // Construct the full remote URL with the appropriate scheme
-        let full_url = match self.kind.as_str() {
-            "rpc" => format!("http://{}", self.url),
-            "websocket" => format!("ws://{}", self.url),
-            "grpc" => format!("grpc://{}", self.url),
-            // Default to http for unknown kinds
-            _ => format!("http://{}", self.url),
-        };
-
-        // Parse the full URL into a Remote instance to resolve aliases
-        if let Ok(remote) = Remote::from_str(&full_url) {
-            remote.url_str().to_string()
-        } else {
-            // If parsing fails, return the raw URL
-            self.url.clone()
-        }
-    }
+#[derive(Deserialize)]
+struct ApertureConfig {
+    listen: String,
 }
 
 #[derive(Deserialize)]
@@ -64,6 +40,10 @@ pub enum ProgramLoader {
     BpfProgram,
 }
 
+fn extract_port_from_listen(listen: &str) -> &str {
+    listen.split(':').nth(1).unwrap_or("8899")
+}
+
 pub fn config_to_args(
     config_path: &PathBuf,
     program_loader: Option<ProgramLoader>,
@@ -71,7 +51,12 @@ pub fn config_to_args(
     let config = parse_config(config_path);
     let program_loader = program_loader.unwrap_or_default();
 
-    let port = config.listen.split(':').nth(1).unwrap_or("8899");
+    let listen = config
+        .aperture
+        .as_ref()
+        .map(|a| a.listen.as_str())
+        .unwrap_or("127.0.0.1:8899");
+    let port = extract_port_from_listen(listen);
 
     let mut args = vec![
         "--log".to_string(),
@@ -108,10 +93,12 @@ pub fn config_to_args(
         }
     }
 
-    // Add the first RPC remote URL if available
-    if let Some(rpc_remote) = config.remote.iter().find(|r| r.kind == "rpc") {
+    // Add the first HTTP/HTTPS remote URL if available
+    if let Some(http_remote) =
+        config.remotes.iter().find(|r| r.starts_with("http"))
+    {
         args.push("--url".into());
-        args.push(rpc_remote.url());
+        args.push(http_remote.clone());
     }
 
     args
@@ -119,10 +106,10 @@ pub fn config_to_args(
 
 pub fn rpc_port_from_config(config_path: &PathBuf) -> u16 {
     let config = parse_config(config_path);
-    config
-        .listen
-        .split(':')
-        .nth(1)
-        .and_then(|p| p.parse().ok())
-        .unwrap_or(8899)
+    let listen = config
+        .aperture
+        .as_ref()
+        .map(|a| a.listen.as_str())
+        .unwrap_or("127.0.0.1:8899");
+    extract_port_from_listen(listen).parse().unwrap_or(8899)
 }

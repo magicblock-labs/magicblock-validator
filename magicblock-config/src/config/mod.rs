@@ -1,4 +1,5 @@
 pub mod accounts;
+pub mod aperture;
 pub mod chain;
 pub mod cli;
 pub mod ledger;
@@ -10,6 +11,7 @@ pub mod validator;
 
 // Re-export types for backward compatibility and easier access
 pub use accounts::{AccountsDbConfig, BlockSize};
+pub use aperture::ApertureConfig;
 pub use chain::{
     AllowedProgram, ChainLinkConfig, ChainOperationConfig, CommittorConfig,
 };

@@ -1,8 +1,11 @@
 lifecycle = "offline"
-commit = { compute-unit-price = 1_000_000 }
+remotes = ["devnet"]
+
+[aperture]
 listen = "0.0.0.0:7799"
 
-remotes = ["devnet"]
+[commit]
+compute-unit-price = 1_000_000
 
 [accountsdb]
 # size of the main storage, we have to preallocate in advance
