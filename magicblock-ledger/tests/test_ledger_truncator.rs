@@ -89,11 +89,12 @@ async fn test_truncator_non_empty_ledger() {
         .collect::<Vec<_>>();
 
     ledger.flush().unwrap();
+    ledger.set_lowest_cleanup_slot(FINAL_SLOT);
     let mut ledger_truncator =
         LedgerTruncator::new(ledger.clone(), TEST_TRUNCATION_TIME_INTERVAL, 0);
 
     ledger_truncator.start();
-    tokio::time::sleep(TEST_TRUNCATION_TIME_INTERVAL).await;
+    tokio::time::sleep(TEST_TRUNCATION_TIME_INTERVAL * 2).await;
 
     ledger_truncator.stop();
     assert!(ledger_truncator.join().is_ok());
