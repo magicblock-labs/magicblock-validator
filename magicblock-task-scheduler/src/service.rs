@@ -416,8 +416,6 @@ mod tests {
                         "Tasks should be 1, got {}",
                         tasks.len()
                     ));
-                } else if tasks.len() == 1 {
-                    return Ok::<(), String>(());
                 }
                 tokio::time::sleep(Duration::from_millis(100)).await;
             }
