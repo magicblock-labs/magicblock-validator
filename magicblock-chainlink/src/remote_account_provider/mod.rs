@@ -2337,7 +2337,7 @@ mod test {
             Pubkey::new_unique(),
         ];
         let pubkeys = &[pk1, pk2, pk3];
-        let compressed_pubkeys = &pubkeys.clone()[..2];
+        let compressed_pubkeys = &pubkeys[..2];
 
         let (remote_account_provider, _, _) =
             setup_with_compressed_accounts(pubkeys, compressed_pubkeys, 3)
