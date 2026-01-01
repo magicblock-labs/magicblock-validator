@@ -1,3 +1,4 @@
+use dlp::pda::ephemeral_balance_pda_from_payer;
 use integration_test_tools::IntegrationTestContext;
 use log::*;
 use program_flexi_counter::{
@@ -8,14 +9,13 @@ use program_flexi_counter::{
     state::FlexiCounter,
 };
 use solana_sdk::{
-    native_token::LAMPORTS_PER_SOL, pubkey::Pubkey, signature::Keypair,
-    signer::Signer, transaction::Transaction,
+    native_token::LAMPORTS_PER_SOL, pubkey::Pubkey, rent::Rent,
+    signature::Keypair, signer::Signer, transaction::Transaction,
 };
 use test_kit::init_logger;
 
 const LABEL: &str = "I am a label";
 
-#[ignore = "Will be enabled once MagicProgram support overrides of AccountMeta. Followup PR"]
 #[test]
 fn test_schedule_intent_basic() {
     // Init context
@@ -48,7 +48,6 @@ fn test_schedule_intent_basic() {
     );
 }
 
-#[ignore = "Will be enabled once MagicProgram support overrides of AccountMeta. Followup PR"]
 #[test]
 fn test_schedule_intent_and_undelegate() {
     // Init context
@@ -70,7 +69,6 @@ fn test_schedule_intent_and_undelegate() {
     verify_undelegation_in_ephem_via_owner(&[payer.pubkey()], &ctx);
 }
 
-#[ignore = "Will be enabled once MagicProgram support overrides of AccountMeta. Followup PR"]
 #[test]
 fn test_schedule_intent_2_commits() {
     // Init context
@@ -105,7 +103,6 @@ fn test_schedule_intent_2_commits() {
     );
 }
 
-#[ignore = "Will be enabled once MagicProgram support overrides of AccountMeta. Followup PR"]
 #[test]
 fn test_schedule_intent_undelegate_delegate_back_undelegate_again() {
     // Init context
@@ -199,7 +196,6 @@ fn test_2_payers_intent_with_undelegation() {
     );
 }
 
-#[ignore = "With sdk having ShortAccountMetas instead of u8s we hit limited_deserialize here as instruction exceeds 1232 bytes"]
 #[test]
 fn test_1_payers_intent_with_undelegation() {
     init_logger!();
@@ -300,6 +296,25 @@ fn setup_payer(ctx: &IntegrationTestContext) -> Keypair {
     let payer = Keypair::new();
     ctx.airdrop_chain(&payer.pubkey(), LAMPORTS_PER_SOL)
         .unwrap();
+
+    // Create actor escrow
+    let ix = dlp::instruction_builder::top_up_ephemeral_balance(
+        payer.pubkey(),
+        payer.pubkey(),
+        Some(LAMPORTS_PER_SOL / 2),
+        Some(1),
+    );
+    ctx.send_and_confirm_instructions_with_payer_chain(&[ix], &payer)
+        .unwrap();
+
+    // Confirm actor escrow
+    let escrow_pda = ephemeral_balance_pda_from_payer(&payer.pubkey(), 1);
+    let rent = Rent::default().minimum_balance(0);
+    assert_eq!(
+        ctx.fetch_chain_account(escrow_pda).unwrap().lamports,
+        LAMPORTS_PER_SOL / 2 + rent
+    );
+
     payer
 }
 
@@ -409,8 +424,6 @@ fn schedule_intent(
 
     let transfer_destination = Keypair::new();
     let payers_pubkeys = payers.iter().map(|payer| payer.pubkey()).collect();
-    // transfer destination is not writable in ephemeral which is why the below
-    // cannot work
     let ix = create_intent_ix(
         payers_pubkeys,
         transfer_destination.pubkey(),
@@ -440,7 +453,7 @@ fn schedule_intent(
     let mutiplier = if counter_diffs.is_some() { 2 } else { 1 };
     assert_eq!(
         transfer_destination_balance,
-        mutiplier * payers.len() as u64 * 1_000_000 + LAMPORTS_PER_SOL
+        mutiplier * payers.len() as u64 * 1_000_000
     );
 }
 

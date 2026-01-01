@@ -29,7 +29,7 @@ block-time = "50ms"
 id = "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh"
 path = "../schedulecommit/elfs/dlp.so"
 
-[[program]]
+[[programs]]
 id = "DEL2rPzhFaS5qzo8XY9ZNxSzuunWueySq3p2dxJfwPbT"
 path = "../programs/compressed_delegation/compressed_delegation.so"
 
