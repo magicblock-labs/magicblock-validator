@@ -819,15 +819,15 @@ where
                                             slot,
                                         ));
                                     } else if account_shared_data
-                                    .owner()
-                                    .eq(&compressed_delegation_client::id())
-                                {
-                                    owned_by_deleg_compressed.push((
-                                        pubkey,
-                                        account_shared_data,
-                                        slot,
-                                    ));
-                                } else if account_shared_data.executable() {
+                                        .owner()
+                                        .eq(&compressed_delegation_client::id())
+                                    {
+                                        owned_by_deleg_compressed.push((
+                                            pubkey,
+                                            account_shared_data,
+                                            slot,
+                                        ));
+                                    } else if account_shared_data.executable() {
                                         // We don't clone native loader programs.
                                         // They should not pass the blacklist in the first place,
                                         // but in case a new native program is introduced we don't want

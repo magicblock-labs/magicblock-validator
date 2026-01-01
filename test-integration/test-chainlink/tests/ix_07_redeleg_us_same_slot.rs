@@ -117,6 +117,7 @@ async fn ixtest_undelegate_redelegate_to_us_in_same_slot_compressed() {
             )
             .await
             .unwrap();
+        sleep_ms(1_500).await;
 
         // Account should be cloned as delegated
         let account = ctx.cloner.get_account(&counter_pda).unwrap();
