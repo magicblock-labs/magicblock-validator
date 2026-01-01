@@ -137,7 +137,13 @@ async fn test_undelegate_redelegate_to_other_in_same_slot_compressed() {
             program_pubkey,
             slot,
         );
-        rpc_client.add_account(pubkey, acc.clone());
+        rpc_client.add_account(
+            pubkey,
+            Account {
+                owner: compressed_delegation_client::id(),
+                ..acc
+            },
+        );
         photon_client
             .add_account(pubkey, compressed_account.clone().into(), slot)
             .await;

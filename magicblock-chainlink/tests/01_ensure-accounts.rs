@@ -368,6 +368,7 @@ async fn test_compressed_delegation_record_delegated() {
     let TestContext {
         chainlink,
         photon_client,
+        rpc_client,
         cloner,
         validator_pubkey,
         ..
@@ -384,6 +385,13 @@ async fn test_compressed_delegation_record_delegated() {
     photon_client
         .add_account(pubkey, compressed_account.clone().into(), CURRENT_SLOT)
         .await;
+    rpc_client.add_account(
+        pubkey,
+        Account {
+            owner: compressed_delegation_client::id(),
+            ..Account::default()
+        },
+    );
 
     let pubkeys = [pubkey];
     let res = chainlink
@@ -409,6 +417,7 @@ async fn test_compressed_delegation_record_delegated_to_other() {
     let TestContext {
         chainlink,
         photon_client,
+        rpc_client,
         cloner,
         ..
     } = setup(CURRENT_SLOT).await;
@@ -425,6 +434,13 @@ async fn test_compressed_delegation_record_delegated_to_other() {
     photon_client
         .add_account(pubkey, compressed_account.clone().into(), CURRENT_SLOT)
         .await;
+    rpc_client.add_account(
+        pubkey,
+        Account {
+            owner: compressed_delegation_client::id(),
+            ..Account::default()
+        },
+    );
 
     let pubkeys = [pubkey];
     let res = chainlink
@@ -443,49 +459,6 @@ async fn test_compressed_delegation_record_delegated_to_other() {
 }
 
 // -----------------
-// Compressed delegation record is initialized and delegated to us and the pda exists
-// -----------------
-#[tokio::test]
-async fn test_compressed_delegation_record_delegated_shadows_pda() {
-    let TestContext {
-        chainlink,
-        rpc_client,
-        photon_client,
-        cloner,
-        validator_pubkey,
-        ..
-    } = setup(CURRENT_SLOT).await;
-
-    let pubkey = Pubkey::new_unique();
-    let owner = Pubkey::new_unique();
-    let compressed_account = compressed_account_shared_with_owner_and_slot(
-        pubkey,
-        validator_pubkey,
-        owner,
-        CURRENT_SLOT,
-    );
-    photon_client
-        .add_account(pubkey, compressed_account.clone().into(), CURRENT_SLOT)
-        .await;
-    rpc_client.add_account(pubkey, Account::default());
-
-    let pubkeys = [pubkey];
-    let res = chainlink
-        .ensure_accounts(
-            &pubkeys,
-            None,
-            AccountFetchOrigin::GetMultipleAccounts,
-            None,
-        )
-        .await
-        .unwrap();
-    debug!("res: {res:?}");
-
-    assert_cloned_as_delegated!(cloner, &pubkeys, CURRENT_SLOT);
-    assert_not_subscribed!(chainlink, &[&pubkey]);
-}
-
-// -----------------
 // Compressed delegation record is initialized and empty (undelegated)
 // -----------------
 #[tokio::test]
@@ -493,11 +466,13 @@ async fn test_compressed_account_undelegated() {
     let TestContext {
         chainlink,
         photon_client,
+        rpc_client,
         cloner,
         ..
     } = setup(CURRENT_SLOT).await;
 
     let pubkey = Pubkey::new_unique();
+    rpc_client.add_account(pubkey, Account::default());
     photon_client
         .add_account(pubkey, Account::default(), CURRENT_SLOT)
         .await;

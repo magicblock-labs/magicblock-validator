@@ -163,7 +163,13 @@ async fn test_undelegate_redelegate_to_other_in_separate_slot_compressed() {
                 slot,
             );
         compressed_account.set_remote_slot(slot);
-        rpc_client.add_account(pubkey, acc.clone());
+        rpc_client.add_account(
+            pubkey,
+            Account {
+                owner: compressed_delegation_client::id(),
+                ..acc
+            },
+        );
         photon_client
             .add_account(pubkey, compressed_account.into(), slot)
             .await;
