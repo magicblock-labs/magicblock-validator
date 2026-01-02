@@ -541,14 +541,8 @@ impl IxtestContext {
             .state_trees
             .unwrap();
 
-        let tree_info = packed_tree_accounts
-            .packed_tree_infos
-            .first()
-            .copied()
-            .ok_or(TaskBuilderError::MissingStateTrees)?;
-
         let account_meta = CompressedAccountMeta {
-            tree_info,
+            tree_info: packed_tree_accounts.packed_tree_infos[0],
             address: compressed_account.address.unwrap(),
             output_state_tree_index: packed_tree_accounts.output_tree_index,
         };
@@ -607,14 +601,8 @@ impl IxtestContext {
             .state_trees
             .unwrap();
 
-        let tree_info = packed_tree_accounts
-            .packed_tree_infos
-            .first()
-            .copied()
-            .ok_or(TaskBuilderError::MissingStateTrees)?;
-
         let account_meta = CompressedAccountMeta {
-            tree_info,
+            tree_info: packed_tree_accounts.packed_tree_infos[0],
             address: compressed_account.address.unwrap(),
             output_state_tree_index: packed_tree_accounts.output_tree_index,
         };
