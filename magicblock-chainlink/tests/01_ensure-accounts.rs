@@ -405,7 +405,7 @@ async fn test_compressed_delegation_record_delegated() {
         .unwrap();
     debug!("res: {res:?}");
 
-    assert_cloned_as_delegated!(cloner, &pubkeys, CURRENT_SLOT);
+    assert_cloned_as_delegated!(cloner, &pubkeys, CURRENT_SLOT, owner);
     assert_not_subscribed!(chainlink, &[&pubkey]);
 }
 
@@ -454,7 +454,7 @@ async fn test_compressed_delegation_record_delegated_to_other() {
         .unwrap();
     debug!("res: {res:?}");
 
-    assert_cloned_as_undelegated!(cloner, &pubkeys, CURRENT_SLOT);
+    assert_cloned_as_undelegated!(cloner, &pubkeys, CURRENT_SLOT, owner);
     assert_subscribed_without_delegation_record!(chainlink, &[&pubkey]);
 }
 
