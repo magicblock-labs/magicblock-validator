@@ -9,7 +9,8 @@ use solana_pubkey::Pubkey;
 use super::{AccountsDbIndex, Allocation};
 use crate::error::AccountsDbError;
 
-const INSERT_ACCOUNT_TXN_ERR: &str = "failed to create transaction for account insertion";
+const INSERT_ACCOUNT_TXN_ERR: &str =
+    "failed to create transaction for account insertion";
 
 #[test]
 fn test_insert_account() {
@@ -28,7 +29,7 @@ fn test_insert_account() {
         "new account should not be reallocated"
     );
     txn.commit().expect("failed to commit transaction");
-    
+
     let reallocation = tenv.allocation();
     let mut txn = tenv.env.begin_rw_txn().expect(INSERT_ACCOUNT_TXN_ERR);
     let result = tenv.insert_account(&pubkey, &owner, reallocation, &mut txn);
@@ -185,7 +186,8 @@ fn test_ensure_correct_owner() {
     let new_owner = Pubkey::new_unique();
     let mut txn = tenv.env.begin_rw_txn().expect(INSERT_ACCOUNT_TXN_ERR);
     assert!(
-        tenv.ensure_correct_owner(&pubkey, &new_owner, &mut txn).is_ok(),
+        tenv.ensure_correct_owner(&pubkey, &new_owner, &mut txn)
+            .is_ok(),
         "failed to ensure correct account owner"
     );
     txn.commit().expect("failed to commit transaction");
@@ -336,7 +338,7 @@ fn test_recycle_allocation_split() {
     assert_eq!(result.blocks, allocation.blocks / 2);
     assert_eq!(result.offset, allocation.offset);
     txn.commit().expect("failed to commit transaction");
-    
+
     let mut txn = tenv.env.begin_rw_txn().expect(INSERT_ACCOUNT_TXN_ERR);
     let result = tenv
         .try_recycle_allocation(allocation.blocks / 2, &mut txn)

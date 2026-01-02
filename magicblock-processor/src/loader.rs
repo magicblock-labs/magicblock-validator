@@ -54,7 +54,8 @@ impl TransactionSchedulerState {
             &UPGRADEABLE_LOADER_ID,
         );
         data_account.set_data(data);
-        let _ = self.accountsdb
+        let _ = self
+            .accountsdb
             .insert_account(&programdata_address, &data_account);
 
         // 2. Create and store the executable Program account.

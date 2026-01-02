@@ -36,7 +36,7 @@ pub(crate) fn fund_account_with_data(
         AccountSharedData::new(lamports, size, &Default::default())
     };
     let _ = accountsdb.insert_account(pubkey, &account);
-    }
+}
 
 pub(crate) fn init_validator_identity(
     accountsdb: &AccountsDb,
@@ -46,7 +46,7 @@ pub(crate) fn init_validator_identity(
     let mut authority = accountsdb.get_account(validator_id).unwrap();
     authority.as_borrowed_mut().unwrap().set_privileged(true);
     let _ = accountsdb.insert_account(validator_id, &authority);
-    }
+}
 
 /// Funds the faucet account.
 /// If the [create_new] is `false` then the faucet keypair will be read from the
@@ -82,4 +82,4 @@ pub(crate) fn fund_magic_context(accountsdb: &AccountsDb) {
     magic_context.set_delegated(true);
     let _ = accountsdb
         .insert_account(&magic_program::MAGIC_CONTEXT_PUBKEY, &magic_context);
-    }
+}

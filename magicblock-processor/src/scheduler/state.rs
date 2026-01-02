@@ -105,7 +105,8 @@ impl TransactionSchedulerState {
         if !accountsdb.contains_account(&sysvar::slot_hashes::ID) {
             let sh = SlotHashes::new(&[(block.slot, block.blockhash)]);
             if let Ok(acc) = AccountSharedData::new_data(1, &sh, owner) {
-                let _ = accountsdb.insert_account(&sysvar::slot_hashes::ID, &acc);
+                let _ =
+                    accountsdb.insert_account(&sysvar::slot_hashes::ID, &acc);
             }
         }
 
@@ -113,7 +114,8 @@ impl TransactionSchedulerState {
         if !accountsdb.contains_account(&sysvar::epoch_schedule::ID) {
             let es = EpochSchedule::new(DEFAULT_SLOTS_PER_EPOCH);
             if let Ok(acc) = AccountSharedData::new_data(1, &es, owner) {
-                let _ = accountsdb.insert_account(&sysvar::epoch_schedule::ID, &acc);
+                let _ = accountsdb
+                    .insert_account(&sysvar::epoch_schedule::ID, &acc);
             }
         }
         if !accountsdb.contains_account(&sysvar::rent::ID) {

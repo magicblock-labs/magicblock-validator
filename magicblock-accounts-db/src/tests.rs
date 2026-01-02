@@ -561,13 +561,14 @@ fn test_many_insertions_to_accountsdb() {
                         .expect("account should be in database");
                     account
                         .set_data_from_slice(&vec![43; i % (SPACE * 20) + 13]);
-                    tenv_arc.insert_account(pk, &account)
+                    tenv_arc
+                        .insert_account(pk, &account)
                         .expect("failed to insert account");
-                    }
-                    });
-                    }
-                    });
-                    }
+                }
+            });
+        }
+    });
+}
 
 #[test]
 fn test_reallocation_split() {
@@ -672,7 +673,8 @@ impl AdbTestEnv {
         let mut account = AccountSharedData::new(LAMPORTS, size, &OWNER);
         account.data_as_mut_slice()[..INIT_DATA_LEN]
             .copy_from_slice(ACCOUNT_DATA);
-        self.adb.insert_account(&pubkey, &account)
+        self.adb
+            .insert_account(&pubkey, &account)
             .expect("failed to insert account");
         let account = self
             .get_account(&pubkey)

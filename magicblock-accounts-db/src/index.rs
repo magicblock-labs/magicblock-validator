@@ -288,10 +288,10 @@ impl AccountsDbIndex {
         let offset_and_pubkey =
             bytes!(#pack, allocation.offset, Offset, *pubkey, Pubkey);
         self.programs.put(txn, owner, offset_and_pubkey)?;
-         // track the reverse relation between account and its owner
-         self.owners.put(txn, pubkey, owner)?;
-         Ok(())
-        }
+        // track the reverse relation between account and its owner
+        self.owners.put(txn, pubkey, owner)?;
+        Ok(())
+    }
 
     fn remove_programs_index_entry(
         &self,
