@@ -554,8 +554,14 @@ pub(crate) async fn get_compressed_data(
         .state_trees
         .ok_or(TaskBuilderError::MissingStateTrees)?;
 
+    let tree_info = packed_tree_accounts
+        .packed_tree_infos
+        .first()
+        .copied()
+        .ok_or(TaskBuilderError::MissingStateTrees)?;
+
     let account_meta = CompressedAccountMeta {
-        tree_info: packed_tree_accounts.packed_tree_infos[0],
+        tree_info,
         address: compressed_delegation_record
             .address
             .ok_or(TaskBuilderError::MissingAddress)?,
