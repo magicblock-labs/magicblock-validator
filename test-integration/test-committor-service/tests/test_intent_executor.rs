@@ -275,7 +275,7 @@ async fn test_action_error_parsing() {
     assert!(
         execution_err.to_string().contains(EXPECTED_ERR_MSG),
         "{} != {}",
-        execution_err.to_string(),
+        execution_err,
         EXPECTED_ERR_MSG
     );
 }
