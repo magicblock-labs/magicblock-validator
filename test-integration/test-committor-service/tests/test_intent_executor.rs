@@ -272,7 +272,12 @@ async fn test_action_error_parsing() {
         execution_err,
         TransactionStrategyExecutionError::ActionsError(_, _)
     ));
-    assert!(execution_err.to_string().contains(EXPECTED_ERR_MSG));
+    assert!(
+        execution_err.to_string().contains(EXPECTED_ERR_MSG),
+        "{} != {}",
+        execution_err.to_string(),
+        EXPECTED_ERR_MSG
+    );
 }
 
 #[tokio::test]
