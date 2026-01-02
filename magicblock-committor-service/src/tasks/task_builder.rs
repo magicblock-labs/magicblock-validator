@@ -547,7 +547,7 @@ pub(crate) async fn get_compressed_data(
         SystemAccountMetaConfig::new(compressed_delegation_client::ID);
     let mut remaining_accounts = PackedAccounts::default();
     remaining_accounts
-        .add_system_accounts(system_account_meta_config)
+        .add_system_accounts_v2(system_account_meta_config)
         .map_err(TaskBuilderError::LightSdkError)?;
     let packed_tree_accounts = proof_result
         .pack_tree_infos(&mut remaining_accounts)
