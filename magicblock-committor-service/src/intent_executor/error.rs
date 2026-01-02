@@ -176,8 +176,8 @@ impl TransactionStrategyExecutionError {
         signature: Option<Signature>,
         tasks: &[Box<dyn BaseTask>],
     ) -> Result<Self, TransactionError> {
-        // There's always 2 budget instructions in front
-        const OFFSET: u8 = 2;
+        // There's always 3 budget instructions in front
+        const OFFSET: u8 = 3;
         const NONCE_OUT_OF_ORDER: u32 =
             dlp::error::DlpError::NonceOutOfOrder as u32;
 

@@ -197,6 +197,7 @@ impl TaskInfoFetcher for CacheTaskInfoFetcher {
                 cache.push(*pubkey, *id);
             });
 
+            println!("fetcher! commit_ids: {:?}", result);
             return Ok(result);
         }
 
@@ -229,6 +230,7 @@ impl TaskInfoFetcher for CacheTaskInfoFetcher {
                 });
         }
 
+        println!("fetcher commit_ids: {:?}", result);
         Ok(result)
     }
 

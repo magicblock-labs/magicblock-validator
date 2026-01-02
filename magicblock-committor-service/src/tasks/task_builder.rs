@@ -134,6 +134,8 @@ impl TasksBuilder for TaskBuilderImpl {
         let commit_ids =
             commit_ids.map_err(TaskBuilderError::CommitTasksBuildError)?;
 
+        println!("task_builder commit_ids: {:?}", commit_ids);
+
         let base_accounts = match base_accounts {
             Ok(map) => map,
             Err(err) => {

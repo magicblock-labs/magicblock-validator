@@ -69,6 +69,49 @@ macro_rules! get_account {
 }
 
 #[allow(dead_code)]
+pub async fn print_log_messages(rpc_client: &RpcClient, signature: &Signature) {
+    const MAX_RETRIES: usize = 5;
+    let mut retries = MAX_RETRIES;
+    let tx = loop {
+        match rpc_client
+            .get_transaction_with_config(
+                signature,
+                RpcTransactionConfig {
+                    commitment: Some(CommitmentConfig::confirmed()),
+                    max_supported_transaction_version: Some(0),
+                    ..Default::default()
+                },
+            )
+            .await
+        {
+            Ok(tx) => break tx,
+            Err(err) => {
+                log::error!("Failed to get transaction: {}", err);
+                retries -= 1;
+                if retries == 0 {
+                    panic!(
+                        "Failed to get transaction after {} retries",
+                        MAX_RETRIES
+                    );
+                }
+                tokio::time::sleep(tokio::time::Duration::from_millis(100))
+                    .await;
+            }
+        };
+    };
+    let logs = tx
+        .transaction
+        .meta
+        .as_ref()
+        .unwrap()
+        .log_messages
+        .clone()
+        .unwrap_or_else(Vec::new);
+
+    println!("logs: {:#?}", logs);
+}
+
+#[allow(dead_code)]
 pub async fn tx_logs_contain(
     rpc_client: &RpcClient,
     signature: &Signature,
