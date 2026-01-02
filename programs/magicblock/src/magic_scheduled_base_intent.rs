@@ -383,7 +383,7 @@ impl CommittedAccount {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CommitType {
     /// Regular commit without actions
-    Standalone(Vec<CommittedAccount>),
+    Standalone(Vec<CommittedAccount>), // accounts to commit
     /// Commits accounts and runs actions
     WithBaseActions {
         committed_accounts: Vec<CommittedAccount>,
@@ -453,9 +453,9 @@ impl CommitType {
         context: &ConstructionContext<'_, '_>,
     ) -> Result<CommitType, InstructionError> {
         match args {
-            CommitTypeArgs::Standalone(committed_accounts) => {
+            CommitTypeArgs::Standalone(accounts) => {
                 let committed_accounts_ref = Self::extract_commit_accounts(
-                    &committed_accounts,
+                    &accounts,
                     context.transaction_context,
                 )?;
                 Self::validate_accounts(&committed_accounts_ref, context)?;

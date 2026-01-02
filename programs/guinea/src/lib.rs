@@ -46,9 +46,9 @@ fn resize_account(
     let account = next_account_info(&mut accounts)?;
     let rent = <Rent as Sysvar>::get()?;
     let new_account_balance = rent.minimum_balance(size) as i64;
-    let delta = new_account_balance - account.lamports() as i64;
+    let delta = new_account_balance - account.try_lamports()? as i64;
     **account.try_borrow_mut_lamports()? = new_account_balance as u64;
-    let feepayer_balance = feepayer.lamports() as i64;
+    let feepayer_balance = feepayer.try_lamports()? as i64;
     **feepayer.try_borrow_mut_lamports()? = (feepayer_balance - delta) as u64;
 
     account.realloc(size, false)?;
