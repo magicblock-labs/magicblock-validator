@@ -9,6 +9,8 @@ use solana_pubkey::Pubkey;
 use super::{AccountsDbIndex, Allocation};
 use crate::error::AccountsDbError;
 
+const INSERT_ACCOUNT_TXN_ERR: &str = "failed to create transaction for account insertion";
+
 #[test]
 fn test_insert_account() {
     let tenv = setup();
@@ -18,14 +20,18 @@ fn test_insert_account() {
         allocation,
     } = tenv.account();
 
-    let result = tenv.insert_account(&pubkey, &owner, allocation);
+    let mut txn = tenv.env.begin_rw_txn().expect(INSERT_ACCOUNT_TXN_ERR);
+    let result = tenv.insert_account(&pubkey, &owner, allocation, &mut txn);
     assert!(result.is_ok(), "failed to insert account into index");
     assert!(
         result.unwrap().is_none(),
         "new account should not be reallocated"
     );
+    txn.commit().expect("failed to commit transaction");
+    
     let reallocation = tenv.allocation();
-    let result = tenv.insert_account(&pubkey, &owner, reallocation);
+    let mut txn = tenv.env.begin_rw_txn().expect(INSERT_ACCOUNT_TXN_ERR);
+    let result = tenv.insert_account(&pubkey, &owner, reallocation, &mut txn);
     assert!(result.is_ok(), "failed to RE-insert account into index");
     let previous_allocation = allocation.into();
     assert_eq!(
@@ -33,6 +39,7 @@ fn test_insert_account() {
         Some(previous_allocation),
         "account RE-insertion should return previous allocation"
     );
+    txn.commit().expect("failed to commit transaction");
 }
 
 #[test]
@@ -44,8 +51,10 @@ fn test_get_account_offset() {
         allocation,
     } = tenv.account();
 
-    tenv.insert_account(&pubkey, &owner, allocation)
+    let mut txn = tenv.env.begin_rw_txn().expect(INSERT_ACCOUNT_TXN_ERR);
+    tenv.insert_account(&pubkey, &owner, allocation, &mut txn)
         .expect("failed to insert account");
+    txn.commit().expect("failed to commit transaction");
     let result = tenv.get_account_offset(&pubkey);
     assert!(result.is_ok(), "failed to read offset for inserted account");
     assert_eq!(
@@ -81,8 +90,10 @@ fn test_reallocate_account() {
         allocation,
     } = tenv.account();
 
-    tenv.insert_account(&pubkey, &owner, allocation)
+    let mut txn = tenv.env.begin_rw_txn().expect(INSERT_ACCOUNT_TXN_ERR);
+    tenv.insert_account(&pubkey, &owner, allocation, &mut txn)
         .expect("failed to insert account");
+    txn.commit().expect("failed to commit transaction");
 
     let mut txn = tenv
         .env
@@ -120,8 +131,10 @@ fn test_remove_account() {
         allocation,
     } = tenv.account();
 
-    tenv.insert_account(&pubkey, &owner, allocation)
+    let mut txn = tenv.env.begin_rw_txn().expect(INSERT_ACCOUNT_TXN_ERR);
+    tenv.insert_account(&pubkey, &owner, allocation, &mut txn)
         .expect("failed to insert account");
+    txn.commit().expect("failed to commit transaction");
 
     let result = tenv.remove_account(&pubkey);
 
@@ -147,8 +160,10 @@ fn test_ensure_correct_owner() {
         allocation,
     } = tenv.account();
 
-    tenv.insert_account(&pubkey, &owner, allocation)
+    let mut txn = tenv.env.begin_rw_txn().expect(INSERT_ACCOUNT_TXN_ERR);
+    tenv.insert_account(&pubkey, &owner, allocation, &mut txn)
         .expect("failed to insert account");
+    txn.commit().expect("failed to commit transaction");
     let iter = tenv.get_program_accounts_iter(&owner);
     assert!(
         iter.is_ok(),
@@ -168,10 +183,12 @@ fn test_ensure_correct_owner() {
     drop(iter);
 
     let new_owner = Pubkey::new_unique();
+    let mut txn = tenv.env.begin_rw_txn().expect(INSERT_ACCOUNT_TXN_ERR);
     assert!(
-        tenv.ensure_correct_owner(&pubkey, &new_owner).is_ok(),
+        tenv.ensure_correct_owner(&pubkey, &new_owner, &mut txn).is_ok(),
         "failed to ensure correct account owner"
     );
+    txn.commit().expect("failed to commit transaction");
     let result = tenv.get_program_accounts_iter(&owner);
     assert!(
         matches!(result.map(|i| i.count()), Ok(0)),
@@ -197,8 +214,10 @@ fn test_program_index_cleanup() {
         allocation,
     } = tenv.account();
 
-    tenv.insert_account(&pubkey, &owner, allocation)
+    let mut txn = tenv.env.begin_rw_txn().expect(INSERT_ACCOUNT_TXN_ERR);
+    tenv.insert_account(&pubkey, &owner, allocation, &mut txn)
         .expect("failed to insert account");
+    txn.commit().expect("failed to commit transaction");
 
     let mut txn = tenv
         .env
@@ -229,8 +248,10 @@ fn test_recycle_allocation_after_realloc() {
         allocation,
     } = tenv.account();
 
-    tenv.insert_account(&pubkey, &owner, allocation)
+    let mut txn = tenv.env.begin_rw_txn().expect(INSERT_ACCOUNT_TXN_ERR);
+    tenv.insert_account(&pubkey, &owner, allocation, &mut txn)
         .expect("failed to insert account");
+    txn.commit().expect("failed to commit transaction");
 
     let mut txn = tenv
         .env
@@ -248,21 +269,25 @@ fn test_recycle_allocation_after_realloc() {
         "the number of deallocations should have increased after account realloc"
     );
 
-    let result = tenv.try_recycle_allocation(new_allocation.blocks);
+    let mut txn = tenv.env.begin_rw_txn().expect(INSERT_ACCOUNT_TXN_ERR);
+    let result = tenv.try_recycle_allocation(new_allocation.blocks, &mut txn);
     assert_eq!(
         result.expect("failed to recycle allocation"),
         allocation.into()
     );
+    txn.commit().expect("failed to commit transaction");
     assert_eq!(
         tenv.get_delloactions_count(),
         0,
         "the number of deallocations should have decreased after recycling"
     );
-    let result = tenv.try_recycle_allocation(new_allocation.blocks);
+    let mut txn = tenv.env.begin_rw_txn().expect(INSERT_ACCOUNT_TXN_ERR);
+    let result = tenv.try_recycle_allocation(new_allocation.blocks, &mut txn);
     assert!(
         matches!(result, Err(AccountsDbError::NotFound)),
         "deallocations index should have run out of existing allocations"
     );
+    txn.commit().expect("failed to commit transaction");
     tenv.remove_account(&pubkey)
         .expect("failed to remove account");
     assert_eq!(
@@ -270,11 +295,13 @@ fn test_recycle_allocation_after_realloc() {
         1,
         "the number of deallocations should have increased after account removal"
     );
-    let result = tenv.try_recycle_allocation(new_allocation.blocks);
+    let mut txn = tenv.env.begin_rw_txn().expect(INSERT_ACCOUNT_TXN_ERR);
+    let result = tenv.try_recycle_allocation(new_allocation.blocks, &mut txn);
     assert_eq!(
         result.expect("failed to recycle allocation after account removal"),
         new_allocation.into()
     );
+    txn.commit().expect("failed to commit transaction");
     assert_eq!(
         tenv.get_delloactions_count(),
         0,
@@ -291,8 +318,10 @@ fn test_recycle_allocation_split() {
         allocation,
     } = tenv.account();
 
-    tenv.insert_account(&pubkey, &owner, allocation)
+    let mut txn = tenv.env.begin_rw_txn().expect(INSERT_ACCOUNT_TXN_ERR);
+    tenv.insert_account(&pubkey, &owner, allocation, &mut txn)
         .expect("failed to insert account");
+    txn.commit().expect("failed to commit transaction");
     tenv.remove_account(&pubkey).unwrap();
     assert_eq!(
         tenv.get_delloactions_count(),
@@ -300,27 +329,34 @@ fn test_recycle_allocation_split() {
         "the number of deallocations should have increased after account removal"
     );
 
+    let mut txn = tenv.env.begin_rw_txn().expect(INSERT_ACCOUNT_TXN_ERR);
     let result = tenv
-        .try_recycle_allocation(allocation.blocks / 2)
+        .try_recycle_allocation(allocation.blocks / 2, &mut txn)
         .expect("failed to recycle allocation");
     assert_eq!(result.blocks, allocation.blocks / 2);
     assert_eq!(result.offset, allocation.offset);
+    txn.commit().expect("failed to commit transaction");
+    
+    let mut txn = tenv.env.begin_rw_txn().expect(INSERT_ACCOUNT_TXN_ERR);
     let result = tenv
-        .try_recycle_allocation(allocation.blocks / 2)
+        .try_recycle_allocation(allocation.blocks / 2, &mut txn)
         .expect("failed to recycle allocation");
     assert_eq!(result.blocks, allocation.blocks / 2);
     assert!(result.offset > allocation.offset);
+    txn.commit().expect("failed to commit transaction");
 
     assert_eq!(
         tenv.get_delloactions_count(),
         0,
         "the number of deallocations should have decreased after recycling"
     );
-    let result = tenv.try_recycle_allocation(allocation.blocks);
+    let mut txn = tenv.env.begin_rw_txn().expect(INSERT_ACCOUNT_TXN_ERR);
+    let result = tenv.try_recycle_allocation(allocation.blocks, &mut txn);
     assert!(
         matches!(result, Err(AccountsDbError::NotFound)),
         "deallocations index should have run out of existing allocations"
     );
+    txn.commit().expect("failed to commit transaction");
 }
 
 #[test]

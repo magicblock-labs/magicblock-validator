@@ -168,10 +168,10 @@ impl AccountsDbIndex {
         pubkey: &Pubkey,
         owner: &Pubkey,
         allocation: Allocation,
+        txn: &mut RwTransaction,
     ) -> AccountsDbResult<Option<ExistingAllocation>> {
         let Allocation { offset, blocks, .. } = allocation;
 
-        let mut txn = self.env.begin_rw_txn()?;
         let mut dealloc = None;
 
         // merge offset and block count into one single u64 and cast it to [u8; 8]
@@ -181,23 +181,21 @@ impl AccountsDbIndex {
 
         // optimisitically try to insert account to index, assuming that it doesn't exist
         let inserted =
-            self.accounts
-                .put_if_not_exists(&mut txn, pubkey, index_value)?;
+            self.accounts.put_if_not_exists(txn, pubkey, index_value)?;
         // if the account does exist, then it already occupies space in main storage
         if !inserted {
             // in which case we just move the account to a new allocation
             // adjusting all of the offsets and cleaning up the older ones
             let previous =
-                self.reallocate_account(pubkey, &mut txn, &index_value)?;
+                self.reallocate_account(pubkey, txn, &index_value)?;
             dealloc.replace(previous);
         };
 
         // track the account via programs' index as well
-        self.programs.put(&mut txn, owner, offset_and_pubkey)?;
+        self.programs.put(txn, owner, offset_and_pubkey)?;
         // track the reverse relation between account and its owner
-        self.owners.put(&mut txn, pubkey, owner)?;
+        self.owners.put(txn, pubkey, owner)?;
 
-        txn.commit()?;
         Ok(dealloc)
     }
 
@@ -267,9 +265,9 @@ impl AccountsDbIndex {
         &self,
         pubkey: &Pubkey,
         owner: &Pubkey,
+        txn: &mut RwTransaction,
     ) -> AccountsDbResult<()> {
-        let txn = self.env.begin_ro_txn()?;
-        let old_owner = match self.owners.get(&txn, pubkey)? {
+        let old_owner = match self.owners.get(txn, pubkey)? {
             // if current owner matches with that stored in index, then we are all set
             Some(val) if owner.as_ref() == val => {
                 return Ok(());
@@ -278,24 +276,22 @@ impl AccountsDbIndex {
             // if they don't match, then we have to remove old entries and create new ones
             Some(val) => Pubkey::try_from(val).ok(),
         };
-        let allocation = self.get_allocation(&txn, pubkey)?;
-        let mut txn = self.env.begin_rw_txn()?;
+        let allocation = self.get_allocation(txn, pubkey)?;
         // cleanup `programs` and `owners` index
         self.remove_programs_index_entry(
             pubkey,
             old_owner,
-            &mut txn,
+            txn,
             allocation.offset,
         )?;
         // track new owner of the account via programs' index
         let offset_and_pubkey =
             bytes!(#pack, allocation.offset, Offset, *pubkey, Pubkey);
-        self.programs.put(&mut txn, owner, offset_and_pubkey)?;
-        // track the reverse relation between account and its owner
-        self.owners.put(&mut txn, pubkey, owner)?;
-
-        txn.commit().map_err(Into::into)
-    }
+        self.programs.put(txn, owner, offset_and_pubkey)?;
+         // track the reverse relation between account and its owner
+         self.owners.put(txn, pubkey, owner)?;
+         Ok(())
+        }
 
     fn remove_programs_index_entry(
         &self,
@@ -379,9 +375,9 @@ impl AccountsDbIndex {
     pub(crate) fn try_recycle_allocation(
         &self,
         space: Blocks,
+        txn: &mut RwTransaction,
     ) -> AccountsDbResult<ExistingAllocation> {
-        let mut txn = self.env.begin_rw_txn()?;
-        let mut cursor = self.deallocations.cursor_rw(&mut txn)?;
+        let mut cursor = self.deallocations.cursor_rw(txn)?;
         // this is a neat lmdb trick where we can search for entry with matching
         // or greater key since we are interested in any allocation of at least
         // `blocks` size or greater, this works perfectly well for this case
@@ -401,9 +397,6 @@ impl AccountsDbIndex {
             let index_value = bytes!(#pack, new_offset, u32, remainder, u32);
             cursor.put(&remainder.to_le_bytes(), &index_value, WEMPTY)?;
         }
-
-        drop(cursor);
-        txn.commit()?;
 
         Ok(ExistingAllocation { offset, blocks })
     }
@@ -437,6 +430,11 @@ impl AccountsDbIndex {
             return 0;
         };
         self.deallocations.entries(&txn)
+    }
+
+    /// Initiate RW Transaction
+    pub(crate) fn rwtxn(&self) -> lmdb::Result<RwTransaction<'_>> {
+        self.env.begin_rw_txn()
     }
 }
 
