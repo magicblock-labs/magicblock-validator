@@ -55,9 +55,9 @@ lifecycle = "ephemeral"
 # If no remotes are specified, defaults to ["devnet"] with an auto-added WebSocket endpoint.
 # Default: ["https://api.devnet.solana.com/"]
 # Env: Not supported (must be configured via TOML or CLI)
-remotes = ["https://api.devnet.solana.com", "wss://api.devnet.solana.com","grpcs://solana.helius.com"]
+# Note: gRPC remote requires a Helius API key/token (see Helius gRPC docs).
+remotes = ["https://api.devnet.solana.com", "wss://api.devnet.solana.com", "grpcs://<your-helius-grpc-endpoint>"]
 
-# Example: Sync with Solana Devnet
 # Root directory for application storage (ledger, accountsdb, snapshots).
 # Default: "magicblock-test-storage" (created in current working directory)
 # CLI: --storage <PATH>
