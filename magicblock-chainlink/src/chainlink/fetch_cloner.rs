@@ -8,6 +8,28 @@ use std::{
     time::Duration,
 };
 
+use dlp::{
+    pda::delegation_record_pda_from_delegated_account, state::DelegationRecord,
+};
+use log::*;
+use magicblock_config::config::AllowedProgram;
+use magicblock_core::{
+    token_programs::{
+        is_ata, try_derive_eata_address_and_bump, MaybeIntoAta,
+        EATA_PROGRAM_ID, TOKEN_PROGRAM_ID,
+    },
+    traits::AccountsBank,
+};
+use magicblock_metrics::metrics::{self, AccountFetchOrigin};
+use solana_account::{AccountSharedData, ReadableAccount};
+use solana_pubkey::Pubkey;
+use solana_sdk_ids::system_program;
+use tokio::{
+    sync::{mpsc, oneshot},
+    task,
+    task::JoinSet,
+};
+
 use super::errors::{ChainlinkError, ChainlinkResult};
 use crate::{
     chainlink::{
@@ -24,27 +46,6 @@ use crate::{
         MatchSlotsConfig, RemoteAccount, RemoteAccountProvider,
         ResolvedAccount, ResolvedAccountSharedData,
     },
-};
-use dlp::{
-    pda::delegation_record_pda_from_delegated_account, state::DelegationRecord,
-};
-use log::*;
-use magicblock_config::config::AllowedProgram;
-use magicblock_core::token_programs::TOKEN_PROGRAM_ID;
-use magicblock_core::{
-    token_programs::{
-        is_ata, try_derive_eata_address_and_bump, MaybeIntoAta, EATA_PROGRAM_ID,
-    },
-    traits::AccountsBank,
-};
-use magicblock_metrics::metrics::{self, AccountFetchOrigin};
-use solana_account::{AccountSharedData, ReadableAccount};
-use solana_pubkey::Pubkey;
-use solana_sdk_ids::system_program;
-use tokio::{
-    sync::{mpsc, oneshot},
-    task,
-    task::JoinSet,
 };
 
 type RemoteAccountRequests = Vec<oneshot::Sender<()>>;
