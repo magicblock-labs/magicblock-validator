@@ -1110,7 +1110,7 @@ where
                                 account.data(),
                             )
                             .map_err(|err| {
-                                error!("Failed to deserialize compressed delegation record for {pubkey}: {err}\nAccount data: {:?}", account.data());
+                                error!("Failed to deserialize compressed delegation record for {pubkey}: {err}\nAccount: {:?}", account);
                                 err
                             })
                         else {
