@@ -453,11 +453,11 @@ impl TasksBuilder for TaskBuilderImpl {
                 // This could be solved by using the ephemeral payer to ensure the user can pay the rent.
                 // https://github.com/magicblock-labs/magicblock-validator/issues/651
 
-                // tasks.extend(
-                //     t.get_committed_accounts()
-                //         .iter()
-                //         .map(|account| undelegate_task(account, None, None)),
-                // );
+                // tasks.extend(accounts.iter().zip(rent_reimbursements).map(
+                //     |(account, rent_reimbursement)| {
+                //         undelegate_task(account, &rent_reimbursement, None)
+                //     },
+                // ));
 
                 match &t.undelegate_action {
                     UndelegateType::Standalone => Ok(tasks),
