@@ -16,7 +16,7 @@ use magicblock_config::config::AllowedProgram;
 use magicblock_core::{
     token_programs::{
         is_ata, try_derive_eata_address_and_bump, MaybeIntoAta,
-        EATA_PROGRAM_ID, TOKEN_PROGRAM_ID,
+        EATA_PROGRAM_ID,
     },
     traits::AccountsBank,
 };
@@ -417,13 +417,12 @@ where
         let ForwardedSubscriptionUpdate { pubkey, account } = update;
         let owned_by_delegation_program =
             account.is_owned_by_delegation_program();
-        let has_custom_mapping = account.owner().eq(&Some(TOKEN_PROGRAM_ID));
 
         if let Some(account) = account.fresh_account() {
             // If the account is owned by the delegation program we need to resolve
             // its true owner and determine if it is delegated to us.
             // Skip custom mappings, because even if they are delegated, the parent accounts might not be.
-            if owned_by_delegation_program && !has_custom_mapping {
+            if owned_by_delegation_program {
                 let delegation_record_pubkey =
                     delegation_record_pda_from_delegated_account(&pubkey);
 
@@ -540,7 +539,9 @@ where
                     {
                         // Best-effort: ensure we watch the derived eATA so we can keep the
                         // projected view stable across updates.
-                        if let Err(err) = self.subscribe_to_account(&eata_pubkey).await {
+                        if let Err(err) =
+                            self.subscribe_to_account(&eata_pubkey).await
+                        {
                             warn!(
                                 "Failed to subscribe to derived eATA {}: {}",
                                 eata_pubkey, err
