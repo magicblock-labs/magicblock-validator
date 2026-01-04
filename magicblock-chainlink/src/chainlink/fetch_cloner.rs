@@ -15,8 +15,7 @@ use log::*;
 use magicblock_config::config::AllowedProgram;
 use magicblock_core::{
     token_programs::{
-        is_ata, try_derive_eata_address_and_bump, MaybeIntoAta,
-        EATA_PROGRAM_ID,
+        is_ata, try_derive_eata_address_and_bump, MaybeIntoAta, EATA_PROGRAM_ID,
     },
     traits::AccountsBank,
 };
