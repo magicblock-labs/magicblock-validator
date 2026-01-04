@@ -1585,8 +1585,8 @@ where
                 in_bank.compressed()
             );
             if in_bank.compressed() {
-                debug!("Account {pubkey} is compressed, no need to refresh it");
-                return RefreshDecision::No;
+                debug!("Account {pubkey} is compressed, refreshing it");
+                return RefreshDecision::Yes;
             } else {
                 let deleg_record = self
                     .fetch_and_parse_delegation_record(
