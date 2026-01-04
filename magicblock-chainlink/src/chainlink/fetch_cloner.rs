@@ -580,8 +580,7 @@ where
                                     if let Some(deleg) = self
                                         .fetch_and_parse_delegation_record(
                                             eata_pubkey,
-                                            self.remote_account_provider
-                                                .chain_slot(),
+                                            effective_slot,
                                             AccountFetchOrigin::GetAccount,
                                         )
                                         .await
