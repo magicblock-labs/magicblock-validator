@@ -4479,6 +4479,7 @@ version = "0.5.1"
 dependencies = [
  "bincode",
  "chrono",
+ "env_logger 0.11.8",
  "futures-util",
  "log",
  "magicblock-config",
