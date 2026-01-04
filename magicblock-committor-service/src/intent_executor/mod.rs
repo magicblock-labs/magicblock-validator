@@ -4,7 +4,9 @@ pub mod single_stage_executor;
 pub mod task_info_fetcher;
 pub mod two_stage_executor;
 
-use std::{mem, ops::ControlFlow, sync::Arc, time::Duration};
+use std::{
+    future::Future, mem, ops::ControlFlow, pin::Pin, sync::Arc, time::Duration,
+};
 
 use async_trait::async_trait;
 use futures_util::future::{join, try_join_all};
@@ -57,6 +59,10 @@ use crate::{
     },
     utils::persist_status_update_by_message_set,
 };
+
+pub type BoxFut<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
+pub type CommitSlotFn<'a> =
+    Arc<dyn Fn() -> BoxFut<'a, Option<u64>> + Send + Sync + 'a>;
 
 #[derive(Clone, Copy, Debug)]
 pub enum ExecutionOutput {
@@ -626,11 +632,11 @@ where
         }
     }
 
-    pub async fn prepare_and_execute_strategy<P: IntentPersister>(
+    pub async fn prepare_and_execute_strategy<'a, P: IntentPersister>(
         &self,
         transaction_strategy: &mut TransactionStrategy,
         persister: &Option<P>,
-        commit_slot: Option<u64>,
+        commit_slot_fn: Option<CommitSlotFn<'a>>,
     ) -> IntentExecutorResult<
         IntentExecutorResult<Signature, TransactionStrategyExecutionError>,
         TransactionPreparatorError,
@@ -643,7 +649,7 @@ where
                 transaction_strategy,
                 persister,
                 &self.photon_client,
-                commit_slot,
+                commit_slot_fn,
             )
             .await?;
 

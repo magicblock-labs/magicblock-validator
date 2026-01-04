@@ -564,7 +564,6 @@ async fn test_ix_commit_single_compressed_account_500_bytes_and_undelegate() {
 
 #[tokio::test]
 async fn test_ix_commit_two_compressed_accounts_512kb() {
-    init_logger!();
     commit_multiple_accounts(
         &[512, 512],
         1,

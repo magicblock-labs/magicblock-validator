@@ -9,6 +9,7 @@ use solana_message::VersionedMessage;
 use solana_pubkey::Pubkey;
 
 use crate::{
+    intent_executor::CommitSlotFn,
     persist::IntentPersister,
     tasks::{
         task_strategist::TransactionStrategy, utils::TransactionUtils, BaseTask,
@@ -29,13 +30,13 @@ pub mod error;
 pub trait TransactionPreparator: Send + Sync + 'static {
     /// Return [`VersionedMessage`] corresponding to [`TransactionStrategy`]
     /// Handles all necessary preparation needed for successful [`BaseTask`] execution
-    async fn prepare_for_strategy<P: IntentPersister>(
+    async fn prepare_for_strategy<'a, P: IntentPersister>(
         &self,
         authority: &Keypair,
         transaction_strategy: &mut TransactionStrategy,
         intent_persister: &Option<P>,
         photon_client: &Option<Arc<PhotonIndexer>>,
-        commit_slot: Option<u64>,
+        commit_slot_fn: Option<CommitSlotFn<'a>>,
     ) -> PreparatorResult<VersionedMessage>;
 
     /// Cleans up after strategy
@@ -76,13 +77,13 @@ impl TransactionPreparatorImpl {
 
 #[async_trait]
 impl TransactionPreparator for TransactionPreparatorImpl {
-    async fn prepare_for_strategy<P: IntentPersister>(
+    async fn prepare_for_strategy<'a, P: IntentPersister>(
         &self,
         authority: &Keypair,
         tx_strategy: &mut TransactionStrategy,
         intent_persister: &Option<P>,
         photon_client: &Option<Arc<PhotonIndexer>>,
-        commit_slot: Option<u64>,
+        commit_slot_fn: Option<CommitSlotFn<'a>>,
     ) -> PreparatorResult<VersionedMessage> {
         // If message won't fit, there's no reason to prepare anything
         // Fail early
@@ -106,7 +107,7 @@ impl TransactionPreparator for TransactionPreparatorImpl {
                 tx_strategy,
                 intent_persister,
                 photon_client,
-                commit_slot,
+                commit_slot_fn,
             )
             .await?;
 

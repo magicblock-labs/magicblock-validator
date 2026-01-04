@@ -29,6 +29,7 @@ use solana_transaction::versioned::VersionedTransaction;
 use solana_transaction_error::TransactionError;
 
 use crate::{
+    intent_executor::CommitSlotFn,
     persist::{CommitStatus, IntentPersister},
     tasks::{
         task_builder::{get_compressed_data, TaskBuilderError},
@@ -60,28 +61,31 @@ impl DeliveryPreparator {
     }
 
     /// Prepares buffers and necessary pieces for optimized TX
-    pub async fn prepare_for_delivery<P: IntentPersister>(
+    pub async fn prepare_for_delivery<'a, P: IntentPersister>(
         &self,
         authority: &Keypair,
         strategy: &mut TransactionStrategy,
         persister: &Option<P>,
         photon_client: &Option<Arc<PhotonIndexer>>,
-        commit_slot: Option<u64>,
+        commit_slot_fn: Option<CommitSlotFn<'a>>,
     ) -> DeliveryPreparatorResult<Vec<AddressLookupTableAccount>> {
         let preparation_futures =
-            strategy.optimized_tasks.iter_mut().map(|task| async move {
-                let _timer =
-                    metrics::observe_committor_intent_task_preparation_time(
-                        task.as_ref(),
-                    );
-                self.prepare_task_handling_errors(
-                    authority,
-                    task,
-                    persister,
-                    photon_client,
-                    commit_slot,
-                )
-                .await
+            strategy.optimized_tasks.iter_mut().map(|task| {
+                let commit_slot_fn_clone = commit_slot_fn.clone();
+                async move {
+                    let _timer =
+                        metrics::observe_committor_intent_task_preparation_time(
+                            task.as_ref(),
+                        );
+                    self.prepare_task_handling_errors(
+                        authority,
+                        task,
+                        persister,
+                        photon_client,
+                        commit_slot_fn_clone,
+                    )
+                    .await
+                }
             });
 
         let task_preparations = join_all(preparation_futures);
@@ -103,13 +107,13 @@ impl DeliveryPreparator {
     }
 
     /// Prepares necessary parts for TX if needed, otherwise returns immediately
-    pub async fn prepare_task<P: IntentPersister>(
+    pub async fn prepare_task<'a, P: IntentPersister>(
         &self,
         authority: &Keypair,
         task: &mut dyn BaseTask,
         persister: &Option<P>,
         photon_client: &Option<Arc<PhotonIndexer>>,
-        commit_slot: Option<u64>,
+        commit_slot_fn: Option<CommitSlotFn<'a>>,
     ) -> DeliveryPreparatorResult<(), InternalError> {
         let PreparationState::Required(preparation_task) =
             task.preparation_state()
@@ -162,6 +166,12 @@ impl DeliveryPreparator {
             }
             PreparationTask::Compressed => {
                 // Trying to fetch fresh data from the indexer
+                let commit_slot = if let Some(commit_slot_fn) = commit_slot_fn {
+                    commit_slot_fn().await
+                } else {
+                    None
+                };
+                info!("Commit slot for task {:?}", commit_slot);
                 let photon_config = commit_slot.map(|slot| IndexerRpcConfig {
                     slot,
                     ..Default::default()
@@ -196,13 +206,13 @@ impl DeliveryPreparator {
 
     /// Runs `prepare_task` and, if the buffer was already initialized,
     /// performs cleanup and retries once.
-    pub async fn prepare_task_handling_errors<P: IntentPersister>(
+    pub async fn prepare_task_handling_errors<'a, P: IntentPersister>(
         &self,
         authority: &Keypair,
         task: &mut Box<dyn BaseTask>,
         persister: &Option<P>,
         photon_client: &Option<Arc<PhotonIndexer>>,
-        commit_slot: Option<u64>,
+        commit_slot_fn: Option<CommitSlotFn<'a>>,
     ) -> Result<(), InternalError> {
         let res = self
             .prepare_task(
@@ -210,7 +220,7 @@ impl DeliveryPreparator {
                 task.as_mut(),
                 persister,
                 photon_client,
-                commit_slot,
+                commit_slot_fn.clone(),
             )
             .await;
         match res {
@@ -250,7 +260,7 @@ impl DeliveryPreparator {
             task.as_mut(),
             persister,
             photon_client,
-            commit_slot,
+            commit_slot_fn,
         )
         .await
     }
