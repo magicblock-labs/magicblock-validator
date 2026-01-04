@@ -58,7 +58,11 @@ lifecycle = "ephemeral"
 # Note: gRPC remote requires a Helius API key/token.
 # Example format: grpcs://<network>.helius-rpc.com?api-key=<YOUR_API_KEY>
 # See Helius gRPC docs for available network endpoints.
-remotes = ["https://api.devnet.solana.com", "wss://api.devnet.solana.com", "grpcs://laserstream-devnet-ewr.helius-rpc.com?api-key=YOUR_API_KEY"]
+remotes = [
+    "https://api.devnet.solana.com",
+    "wss://api.devnet.solana.com",
+    "grpcs://laserstream-devnet-ewr.helius-rpc.com?api-key=YOUR_API_KEY",
+]
 
 # Root directory for application storage (ledger, accountsdb, snapshots).
 # Default: "magicblock-test-storage" (created in current working directory)
@@ -233,7 +237,7 @@ min-interval = "10ms"
 # The URL of the Photon indexer.
 # Default: None
 # Env: MBV_COMPRESSION__PHOTON_URL
-photon-url = "http://localhost:8784"
+# photon-url = "http://localhost:8784"
 
 # The API key for the Photon indexer.
 # Default: None
