@@ -1286,7 +1286,7 @@ where
             for (ata_pubkey, _, ata_info, slot_for_ata) in &atas {
                 if let Err(err) = self.subscribe_to_account(ata_pubkey).await {
                     error!(
-                        "Failed to subscribe to derived eATA {}: {}",
+                        "Failed to subscribe to ATA {}: {}",
                         ata_pubkey, err
                     );
                 }
