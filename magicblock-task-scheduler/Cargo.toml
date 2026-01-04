@@ -10,6 +10,7 @@ edition.workspace = true
 [dependencies]
 bincode = { workspace = true }
 chrono = { workspace = true }
+env_logger = { workspace = true }
 futures-util = { workspace = true }
 log = { workspace = true }
 magicblock-core = { workspace = true }
