@@ -540,7 +540,12 @@ where
                     {
                         // Best-effort: ensure we watch the derived eATA so we can keep the
                         // projected view stable across updates.
-                        let _ = self.subscribe_to_account(&eata_pubkey).await;
+                        if let Err(err) = self.subscribe_to_account(&eata_pubkey).await {
+                            warn!(
+                                "Failed to subscribe to derived eATA {}: {}",
+                                eata_pubkey, err
+                            );
+                        }
 
                         // Fetch ATA + eATA at a slot consistent with this update to avoid
                         // regressing state if chain_slot advanced.
