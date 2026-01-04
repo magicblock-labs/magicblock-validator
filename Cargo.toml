@@ -38,7 +38,7 @@ resolver = "2"
 
 [workspace.package]
 # Solana Version (2.2.x)
-version = "0.5.0"
+version = "0.5.1"
 authors = ["MagicBlock Maintainers <maintainers@magicblock.xyz>"]
 repository = "https://github.com/magicblock-labs/ephemeral-validator"
 homepage = "https://www.magicblock.xyz"
@@ -83,7 +83,9 @@ lazy_static = "1.4.0"
 libc = "0.2.153"
 log = { version = "0.4.20" }
 lru = "0.16.0"
-magic-domain-program = { git = "https://github.com/magicblock-labs/magic-domain-program.git", rev = "cffcfeb", default-features = false, features = ["modular-sdk"] }
+magic-domain-program = { git = "https://github.com/magicblock-labs/magic-domain-program.git", rev = "cffcfeb", default-features = false, features = [
+  "modular-sdk",
+] }
 magicblock-account-cloner = { path = "./magicblock-account-cloner" }
 magicblock-accounts = { path = "./magicblock-accounts" }
 magicblock-accounts-db = { path = "./magicblock-accounts-db" }
@@ -215,8 +217,8 @@ features = ["dev-context-only-utils"]
 # Avoid the vendored bzip2 within rocksdb-sys that can cause linker conflicts
 # when also using the bzip2 crate
 version = "0.22.0"
-# default-features = false
-# features = ["lz4"]
+default-features = false
+features = ["lz4"]
 
 [patch.crates-io]
 # some solana dependencies have solana-storage-proto as dependency

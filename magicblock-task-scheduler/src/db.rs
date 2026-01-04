@@ -1,4 +1,7 @@
-use std::path::{Path, PathBuf};
+use std::{
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 use chrono::Utc;
 use magicblock_program::args::ScheduleTaskRequest;
@@ -56,8 +59,9 @@ pub struct FailedTask {
     pub error: String,
 }
 
+#[derive(Clone)]
 pub struct SchedulerDatabase {
-    conn: Mutex<Connection>,
+    conn: Arc<Mutex<Connection>>,
 }
 
 impl SchedulerDatabase {
@@ -104,7 +108,7 @@ impl SchedulerDatabase {
         )?;
 
         Ok(Self {
-            conn: Mutex::new(conn),
+            conn: Arc::new(Mutex::new(conn)),
         })
     }
 
