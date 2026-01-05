@@ -1123,14 +1123,19 @@ where
                         account.set_data(delegation_record.data);
                         account.set_delegated(
                             delegation_record
-                                .authority
-                                .eq(&self.validator_pubkey),
+                            .authority
+                            .eq(&self.validator_pubkey),
                         );
-                        let delegated_to_other = if delegation_record.authority.eq(&self.validator_pubkey) || delegation_record.authority.eq(&Pubkey::default()) {
-                            None
-                        } else {
-                            Some(delegation_record.authority)
-                        };
+                        account.set_confined(delegation_record.authority.eq(&Pubkey::default()));
+                        
+                        let delegated_to_other =
+                        self.get_delegated_to_other(&DelegationRecord {
+                            authority: delegation_record.authority,
+                            owner: delegation_record.owner,
+                            delegation_slot: delegation_record.delegation_slot,
+                            lamports: delegation_record.lamports,
+                            commit_frequency_ms: 0,
+                        });
                         Some(AccountCloneRequest {
                             pubkey,
                             account,
