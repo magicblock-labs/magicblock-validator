@@ -1059,13 +1059,20 @@ where
                     fetch_origin,
                 )
                 .await
-                // SAFETY: we always get two results here
-                .map(|mut accs| {
-                    let acc_last = accs.pop().unwrap();
-                    let acc_first = accs.pop().unwrap();
-                    (acc_first, acc_last)
-                })
                 .map_err(ChainlinkError::from)
+                .and_then(|accs| {
+                    match accs.as_slice() {
+                        [acc_first, acc_last] => {
+                            Ok((acc_first.clone(), acc_last.clone()))
+                        }
+                        _ => Err(ChainlinkError::UnexpectedAccountCount(format!(
+                            "Expected exactly 2 accounts for pubkey {} and companion {}, got {}",
+                            pubkey,
+                            companion_pubkey,
+                            accs.len()
+                        ))),
+                    }
+                })
                 .and_then(|(acc, deleg)| {
                     Self::resolve_account_with_companion(
                         &bank,
