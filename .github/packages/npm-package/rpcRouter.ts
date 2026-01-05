@@ -55,8 +55,8 @@ function runRpcRouter(location: string): void {
   const env = {
     ...process.env,
   };
-  const ephemeralValidator = spawn(location, args, { stdio: "inherit", env});
-  runWithForwardedExit(ephemeralValidator);
+  const rpcRouter = spawn(location, args, { stdio: "inherit", env });
+  runWithForwardedExit(rpcRouter);
 }
 
 function tryPackageRpcRouter(): boolean {
