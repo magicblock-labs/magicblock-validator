@@ -3,7 +3,7 @@ import fs from "fs";
 import { spawn, spawnSync } from "child_process";
 import path from "path";
 import { arch, platform } from "os";
-import { VERSIONS } from "./versions";
+import { VERSIONS } from "./getVersions";
 
 const PACKAGE_VERSION = `rpc-router ${VERSIONS.RPC_ROUTER}`;
 
