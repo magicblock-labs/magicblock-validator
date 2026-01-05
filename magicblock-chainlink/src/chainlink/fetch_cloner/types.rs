@@ -26,10 +26,6 @@ pub(crate) enum RefreshDecision {
 // Pipeline helper types
 pub(crate) struct ExistingSubs {
     pub(crate) existing_subs: HashSet<Pubkey>,
-    #[allow(dead_code)]
-    pub(crate) delegation_records: HashSet<Pubkey>,
-    #[allow(dead_code)]
-    pub(crate) program_data_accounts: HashSet<Pubkey>,
 }
 
 pub(crate) struct ClassifiedAccounts {

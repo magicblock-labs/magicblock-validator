@@ -55,11 +55,7 @@ where
         .copied()
         .collect();
 
-    ExistingSubs {
-        existing_subs,
-        delegation_records,
-        program_data_accounts,
-    }
+    ExistingSubs { existing_subs }
 }
 
 /// Classifies fetched remote accounts into categories

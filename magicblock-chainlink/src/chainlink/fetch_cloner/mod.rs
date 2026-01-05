@@ -596,11 +596,8 @@ where
 
         // We keep all existing subscriptions including delegation records and program data
         // accounts that were directly requested
-        let ExistingSubs {
-            existing_subs,
-            delegation_records: _,
-            program_data_accounts: _,
-        } = pipeline::build_existing_subs(self, pubkeys);
+        let ExistingSubs { existing_subs } =
+            pipeline::build_existing_subs(self, pubkeys);
 
         // Track all new subscriptions created during this call
         let mut new_subs: HashSet<Pubkey> = HashSet::new();
