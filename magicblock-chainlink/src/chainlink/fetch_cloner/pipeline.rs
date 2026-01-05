@@ -12,7 +12,7 @@ use super::{
     subscription::{cancel_subs, CancelStrategy},
     types::{
         AccountWithCompanion, ClassifiedAccounts, ExistingSubs,
-        ResolvedDelegatedAccounts, ResolvedPrograms,
+        PartitionedNotFound, ResolvedDelegatedAccounts, ResolvedPrograms,
     },
     FetchCloner,
 };
@@ -178,17 +178,23 @@ fn classify_program(
 }
 
 /// Partitions not_found accounts into those to clone as empty and those to leave as not found
-#[allow(clippy::type_complexity)]
 pub(crate) fn partition_not_found(
     mark_empty_if_not_found: Option<&[Pubkey]>,
     not_found: Vec<(Pubkey, u64)>,
-) -> (Vec<(Pubkey, u64)>, Vec<(Pubkey, u64)>) {
+) -> PartitionedNotFound {
     if let Some(mark_empty) = mark_empty_if_not_found {
-        not_found
+        let (clone_as_empty, not_found) = not_found
             .into_iter()
-            .partition::<Vec<_>, _>(|(p, _)| mark_empty.contains(p))
+            .partition::<Vec<_>, _>(|(p, _)| mark_empty.contains(p));
+        PartitionedNotFound {
+            clone_as_empty,
+            not_found,
+        }
     } else {
-        (vec![], not_found)
+        PartitionedNotFound {
+            clone_as_empty: vec![],
+            not_found,
+        }
     }
 }
 

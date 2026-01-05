@@ -36,7 +36,8 @@ use self::{
     subscription::{cancel_subs, CancelStrategy},
     types::{
         AccountWithCompanion, ClassifiedAccounts, ExistingSubs,
-        RefreshDecision, ResolvedDelegatedAccounts, ResolvedPrograms,
+        PartitionedNotFound, RefreshDecision, ResolvedDelegatedAccounts,
+        ResolvedPrograms,
     },
 };
 use super::errors::{ChainlinkError, ChainlinkResult};
@@ -560,8 +561,10 @@ where
             );
         }
 
-        let (clone_as_empty, not_found) =
-            pipeline::partition_not_found(mark_empty_if_not_found, not_found);
+        let PartitionedNotFound {
+            clone_as_empty,
+            not_found,
+        } = pipeline::partition_not_found(mark_empty_if_not_found, not_found);
 
         // For accounts we couldn't find we cannot do anything. We will let code depending
         // on them to be in the bank fail on its own

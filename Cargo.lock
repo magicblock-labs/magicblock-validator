@@ -2975,6 +2975,7 @@ dependencies = [
  "magicblock-delegation-program",
  "magicblock-magic-program-api",
  "magicblock-metrics",
+ "parking_lot",
  "scc",
  "solana-account",
  "solana-account-decoder",

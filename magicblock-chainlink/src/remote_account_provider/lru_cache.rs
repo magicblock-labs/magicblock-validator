@@ -1,8 +1,9 @@
-use std::{collections::HashSet, num::NonZeroUsize, sync::Mutex};
+use std::{collections::HashSet, num::NonZeroUsize};
 
 use log::*;
 use lru::LruCache;
 use magicblock_metrics::metrics::inc_evicted_accounts_count;
+use parking_lot::Mutex;
 use solana_pubkey::Pubkey;
 use solana_sdk_ids::sysvar;
 
@@ -46,10 +47,7 @@ impl AccountsLruCache {
             trace!("Promoting: {pubkeys}");
         }
 
-        let mut subs = self
-            .subscribed_accounts
-            .lock()
-            .expect("subscribed_accounts lock poisoned");
+        let mut subs = self.subscribed_accounts.lock();
         for key in pubkeys {
             subs.promote(key);
         }
@@ -64,10 +62,7 @@ impl AccountsLruCache {
             return None;
         }
 
-        let mut subs = self
-            .subscribed_accounts
-            .lock()
-            .expect("subscribed_accounts lock poisoned");
+        let mut subs = self.subscribed_accounts.lock();
         // If the pubkey is already in the cache, we just promote it
         if subs.promote(&pubkey) {
             trace!("Account promoted: {pubkey}");
@@ -94,10 +89,7 @@ impl AccountsLruCache {
     }
 
     pub fn contains(&self, pubkey: &Pubkey) -> bool {
-        let subs = self
-            .subscribed_accounts
-            .lock()
-            .expect("subscribed_accounts lock poisoned");
+        let subs = self.subscribed_accounts.lock();
         subs.contains(pubkey)
     }
 
@@ -106,10 +98,7 @@ impl AccountsLruCache {
             !self.accounts_to_never_evict.contains(pubkey),
             "Cannot remove an account that is not supposed to be evicted: {pubkey}"
         );
-        let mut subs = self
-            .subscribed_accounts
-            .lock()
-            .expect("subscribed_accounts lock poisoned");
+        let mut subs = self.subscribed_accounts.lock();
         if subs.pop(pubkey).is_some() {
             trace!("Removed account: {pubkey}");
             true
@@ -119,10 +108,7 @@ impl AccountsLruCache {
     }
 
     pub fn len(&self) -> usize {
-        let subs = self
-            .subscribed_accounts
-            .lock()
-            .expect("subscribed_accounts lock poisoned");
+        let subs = self.subscribed_accounts.lock();
         subs.len()
     }
 
@@ -139,20 +125,14 @@ impl AccountsLruCache {
     }
 
     pub fn pubkeys(&self) -> Vec<Pubkey> {
-        let subs = self
-            .subscribed_accounts
-            .lock()
-            .expect("subscribed_accounts lock poisoned");
+        let subs = self.subscribed_accounts.lock();
         subs.iter().map(|(k, _)| *k).collect()
     }
 }
 
 impl SubscribedAccountsTracker for AccountsLruCache {
     fn subscribed_accounts(&self) -> HashSet<Pubkey> {
-        let subs = self
-            .subscribed_accounts
-            .lock()
-            .expect("subscribed_accounts lock poisoned");
+        let subs = self.subscribed_accounts.lock();
         subs.iter().map(|(k, _)| *k).collect()
     }
 }
