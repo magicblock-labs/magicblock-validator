@@ -98,18 +98,29 @@ jobs:
         if: matrix.build.OS == 'macos-latest'
         run: |
           # Install required tools for macOS builds
-          brew install protobuf
+          brew install protobuf llvm
+          # Add LLVM to PATH for libclang.dylib
+          echo "/opt/homebrew/opt/llvm/bin" >> $GITHUB_PATH
+          echo "LIBCLANG_PATH=/opt/homebrew/opt/llvm/lib" >> $GITHUB_ENV
+
+      - name: Set OpenSSL environment for non-Linux builds
+        if: matrix.build.OS != 'ubuntu-latest' && !startsWith(matrix.build.OS, 'ubuntu')
+        run: |
+          echo "OPENSSL_STATIC=1" >> $GITHUB_ENV
+          echo "OPENSSL_VENDORED=1" >> $GITHUB_ENV
+        shell: bash
+
+      - name: Set macOS specific environment
+        if: matrix.build.OS == 'macos-latest'
+        run: |
+          echo "PKG_CONFIG_ALLOW_CROSS=1" >> $GITHUB_ENV
+        shell: bash
 
       - name: Build (linux/macos/windows)
         uses: actions-rs/cargo@v1
         with:
           command: build
           args: --manifest-path=magicblock-validator/Cargo.toml --release --locked --target ${{ matrix.build.TARGET }}
-        env:
-          # Force vendored OpenSSL for macOS and Windows cross-compilation
-          OPENSSL_STATIC: ${{ (matrix.build.OS == 'macos-latest' || matrix.build.OS == 'windows-latest') && '1' || '' }}
-          OPENSSL_VENDORED: ${{ (matrix.build.OS == 'macos-latest' || matrix.build.OS == 'windows-latest') && '1' || '' }}
-          PKG_CONFIG_ALLOW_CROSS: ${{ matrix.build.OS == 'macos-latest' && '1' || '' }}
 
       - name: Check versions are aligned
         run: |
