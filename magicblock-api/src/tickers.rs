@@ -120,10 +120,7 @@ pub fn init_system_metrics_ticker(
     }
     fn set_accounts_count(accounts_db: &AccountsDb) {
         metrics::set_accounts_count(
-            accounts_db
-                .get_accounts_count()
-                .try_into()
-                .unwrap_or(i64::MAX),
+            accounts_db.account_count().try_into().unwrap_or(i64::MAX),
         );
     }
 
