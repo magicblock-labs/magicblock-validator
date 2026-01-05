@@ -548,7 +548,9 @@ where
                                 .await
                             {
                                 Ok(remote_acc) => {
-                                    if let Some(acc) = remote_acc.fresh_account().cloned() {
+                                    if let Some(acc) =
+                                        remote_acc.fresh_account().cloned()
+                                    {
                                         match CompressedDelegationRecord::try_from_slice(acc.data()) {
                                             Ok(delegation_record) => Some(delegation_record),
                                             Err(parse_err) => {
@@ -1135,7 +1137,7 @@ where
                             .eq(&self.validator_pubkey),
                         );
                         account.set_confined(delegation_record.authority.eq(&Pubkey::default()));
-                        
+
                         let delegated_to_other =
                         self.get_delegated_to_other(&DelegationRecord {
                             authority: delegation_record.authority,
