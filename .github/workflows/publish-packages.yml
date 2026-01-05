@@ -137,6 +137,20 @@ jobs:
           echo "OPENSSL_STATIC=1" >> $GITHUB_ENV
           echo "OPENSSL_VENDORED=1" >> $GITHUB_ENV
 
+      - name: Install protoc (Windows)
+        if: matrix.build.OS == 'windows-latest'
+        shell: powershell
+        run: |
+          choco install protoc -y
+          protoc --version
+
+      - name: Configure protoc env (Windows)
+        if: matrix.build.OS == 'windows-latest'
+        shell: powershell
+        run: |
+          # Most prost/protobuf build scripts respect PROTOC
+          "PROTOC=protoc" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
       - name: Install Windows dependencies and OpenSSL
         if: matrix.build.OS == 'windows-latest'
         shell: powershell
