@@ -4,6 +4,7 @@ version.workspace = true
 edition.workspace = true
 
 [dev-dependencies]
+borsh = { workspace = true }
 program-schedulecommit = { workspace = true, features = ["no-entrypoint"] }
 program-schedulecommit-security = { workspace = true, features = [
   "no-entrypoint",

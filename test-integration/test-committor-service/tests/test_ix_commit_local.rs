@@ -5,7 +5,12 @@ use std::{
 };
 
 use borsh::to_vec;
+use compressed_delegation_client::CompressedDelegationRecord;
+use light_client::indexer::{
+    photon_indexer::PhotonIndexer, CompressedAccount, Indexer,
+};
 use log::*;
+use magicblock_chainlink::testing::utils::{PHOTON_URL, RPC_URL};
 use magicblock_committor_service::{
     config::ChainConfig,
     intent_executor::ExecutionOutput,
@@ -14,6 +19,7 @@ use magicblock_committor_service::{
     types::{ScheduledBaseIntentWrapper, TriggerType},
     BaseIntentCommittor, CommittorService, ComputeBudgetConfig,
 };
+use magicblock_core::compression::derive_cda_from_pda;
 use magicblock_program::magic_scheduled_base_intent::{
     CommitAndUndelegate, CommitType, CommittedAccount, MagicBaseIntent,
     ScheduledBaseIntent, UndelegateType,
@@ -24,8 +30,8 @@ use solana_account::{Account, ReadableAccount};
 use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_sdk::{
-    commitment_config::CommitmentConfig, hash::Hash, signature::Keypair,
-    signer::Signer, transaction::Transaction,
+    commitment_config::CommitmentConfig, hash::Hash, rent::Rent,
+    signature::Keypair, signer::Signer, transaction::Transaction,
 };
 use test_kit::init_logger;
 use tokio::task::JoinSet;
@@ -37,6 +43,7 @@ use crate::utils::{
     transactions::{
         fund_validator_auth_and_ensure_validator_fees_vault,
         init_and_delegate_account_on_chain,
+        init_and_delegate_compressed_account_on_chain,
     },
 };
 
@@ -45,7 +52,15 @@ mod utils;
 // -----------------
 // Utilities and Setup
 // -----------------
+
 type ExpectedStrategies = HashMap<CommitStrategy, u8>;
+
+enum CommitAccountMode {
+    Commit,
+    CompressedCommit,
+    CommitAndUndelegate,
+    CompressedCommitAndUndelegate,
+}
 
 fn expect_strategies(
     strategies: &[(CommitStrategy, u8)],
@@ -67,32 +82,54 @@ fn expect_strategies(
 
 #[tokio::test]
 async fn test_ix_commit_single_account_100_bytes() {
-    commit_single_account(100, CommitStrategy::Args, false).await;
+    commit_single_account(100, CommitStrategy::Args, CommitAccountMode::Commit)
+        .await;
 }
 
 #[tokio::test]
 async fn test_ix_commit_single_account_100_bytes_and_undelegate() {
-    commit_single_account(100, CommitStrategy::Args, true).await;
+    commit_single_account(
+        100,
+        CommitStrategy::Args,
+        CommitAccountMode::CommitAndUndelegate,
+    )
+    .await;
 }
 
 #[tokio::test]
 async fn test_ix_commit_single_account_800_bytes() {
-    commit_single_account(800, CommitStrategy::Args, false).await;
+    commit_single_account(800, CommitStrategy::Args, CommitAccountMode::Commit)
+        .await;
 }
 
 #[tokio::test]
 async fn test_ix_commit_single_account_800_bytes_and_undelegate() {
-    commit_single_account(800, CommitStrategy::Args, true).await;
+    commit_single_account(
+        800,
+        CommitStrategy::Args,
+        CommitAccountMode::CommitAndUndelegate,
+    )
+    .await;
 }
 
 #[tokio::test]
 async fn test_ix_commit_single_account_one_kb() {
-    commit_single_account(1024, CommitStrategy::Args, false).await;
+    commit_single_account(
+        1024,
+        CommitStrategy::Args,
+        CommitAccountMode::Commit,
+    )
+    .await;
 }
 
 #[tokio::test]
 async fn test_ix_commit_single_account_ten_kb() {
-    commit_single_account(10 * 1024, CommitStrategy::Args, false).await;
+    commit_single_account(
+        10 * 1024,
+        CommitStrategy::Args,
+        CommitAccountMode::Commit,
+    )
+    .await;
 }
 
 #[tokio::test]
@@ -123,26 +160,44 @@ async fn test_ix_commit_order_book_change_10k_bytes() {
 async fn commit_single_account(
     bytes: usize,
     expected_strategy: CommitStrategy,
-    undelegate: bool,
+    mode: CommitAccountMode,
 ) {
     init_logger!();
 
     let validator_auth = ensure_validator_authority();
     fund_validator_auth_and_ensure_validator_fees_vault(&validator_auth).await;
 
+    let photon_client =
+        Some(Arc::new(PhotonIndexer::new(PHOTON_URL.to_string(), None)));
+
     // Run each test with and without finalizing
     let service = CommittorService::try_start(
         validator_auth.insecure_clone(),
         ":memory:",
         ChainConfig::local(ComputeBudgetConfig::new(1_000_000)),
+        photon_client,
     )
     .unwrap();
     let service = CommittorServiceExt::new(Arc::new(service));
 
     let counter_auth = Keypair::new();
-    let (pubkey, mut account) =
-        init_and_delegate_account_on_chain(&counter_auth, bytes as u64, None)
-            .await;
+    let (pubkey, mut account) = match mode {
+        CommitAccountMode::Commit | CommitAccountMode::CommitAndUndelegate => {
+            init_and_delegate_account_on_chain(
+                &counter_auth,
+                bytes as u64,
+                None,
+            )
+            .await
+        }
+        CommitAccountMode::CompressedCommit
+        | CommitAccountMode::CompressedCommitAndUndelegate => {
+            let (pubkey, _hash, account) =
+                init_and_delegate_compressed_account_on_chain(&counter_auth)
+                    .await;
+            (pubkey, account)
+        }
+    };
 
     let counter = FlexiCounter {
         label: "Counter".to_string(),
@@ -155,13 +210,29 @@ async fn commit_single_account(
     account.owner = program_flexi_counter::id();
 
     let account = CommittedAccount { pubkey, account };
-    let base_intent = if undelegate {
-        MagicBaseIntent::CommitAndUndelegate(CommitAndUndelegate {
-            commit_action: CommitType::Standalone(vec![account]),
-            undelegate_action: UndelegateType::Standalone,
-        })
-    } else {
-        MagicBaseIntent::Commit(CommitType::Standalone(vec![account]))
+    let base_intent = match mode {
+        CommitAccountMode::CommitAndUndelegate => {
+            MagicBaseIntent::CommitAndUndelegate(CommitAndUndelegate {
+                commit_action: CommitType::Standalone(vec![account]),
+                undelegate_action: UndelegateType::Standalone,
+            })
+        }
+        CommitAccountMode::Commit => {
+            MagicBaseIntent::Commit(CommitType::Standalone(vec![account]))
+        }
+        CommitAccountMode::CompressedCommit => {
+            MagicBaseIntent::CompressedCommit(CommitType::Standalone(vec![
+                account,
+            ]))
+        }
+        CommitAccountMode::CompressedCommitAndUndelegate => {
+            MagicBaseIntent::CompressedCommitAndUndelegate(
+                CommitAndUndelegate {
+                    commit_action: CommitType::Standalone(vec![account]),
+                    undelegate_action: UndelegateType::Standalone,
+                },
+            )
+        }
     };
 
     let intent = ScheduledBaseIntentWrapper {
@@ -200,6 +271,7 @@ async fn commit_book_order_account(
         validator_auth.insecure_clone(),
         ":memory:",
         ChainConfig::local(ComputeBudgetConfig::new(1_000_000)),
+        None,
     )
     .unwrap();
     let service = CommittorServiceExt::new(Arc::new(service));
@@ -263,7 +335,7 @@ async fn test_ix_commit_two_accounts_1kb_2kb() {
     commit_multiple_accounts(
         &[1024, 2048],
         1,
-        false,
+        CommitAccountMode::Commit,
         expect_strategies(&[(CommitStrategy::Args, 2)]),
     )
     .await;
@@ -275,7 +347,7 @@ async fn test_ix_commit_two_accounts_512kb() {
     commit_multiple_accounts(
         &[512, 512],
         1,
-        false,
+        CommitAccountMode::Commit,
         expect_strategies(&[(CommitStrategy::Args, 2)]),
     )
     .await;
@@ -287,7 +359,7 @@ async fn test_ix_commit_three_accounts_512kb() {
     commit_multiple_accounts(
         &[512, 512, 512],
         1,
-        false,
+        CommitAccountMode::Commit,
         expect_strategies(&[(CommitStrategy::Args, 3)]),
     )
     .await;
@@ -299,7 +371,7 @@ async fn test_ix_commit_six_accounts_512kb() {
     commit_multiple_accounts(
         &[512, 512, 512, 512, 512, 512],
         1,
-        false,
+        CommitAccountMode::Commit,
         expect_strategies(&[(CommitStrategy::Args, 6)]),
     )
     .await;
@@ -311,7 +383,7 @@ async fn test_ix_commit_four_accounts_1kb_2kb_5kb_10kb_single_bundle() {
     commit_multiple_accounts(
         &[1024, 2 * 1024, 5 * 1024, 10 * 1024],
         1,
-        false,
+        CommitAccountMode::Commit,
         expect_strategies(&[(CommitStrategy::Args, 4)]),
     )
     .await;
@@ -328,7 +400,7 @@ async fn test_commit_5_accounts_1kb_bundle_size_3() {
     commit_5_accounts_1kb(
         3,
         expect_strategies(&[(CommitStrategy::Args, 5)]),
-        false,
+        CommitAccountMode::Commit,
     )
     .await;
 }
@@ -342,7 +414,7 @@ async fn test_commit_5_accounts_1kb_bundle_size_3_undelegate_all() {
             (CommitStrategy::FromBufferWithLookupTable, 3),
             (CommitStrategy::Args, 2),
         ]),
-        true,
+        CommitAccountMode::CommitAndUndelegate,
     )
     .await;
 }
@@ -355,7 +427,7 @@ async fn test_commit_5_accounts_1kb_bundle_size_4() {
             (CommitStrategy::Args, 1),
             (CommitStrategy::FromBufferWithLookupTable, 4),
         ]),
-        false,
+        CommitAccountMode::Commit,
     )
     .await;
 }
@@ -368,7 +440,7 @@ async fn test_commit_5_accounts_1kb_bundle_size_4_undelegate_all() {
             (CommitStrategy::Args, 1),
             (CommitStrategy::FromBufferWithLookupTable, 4),
         ]),
-        true,
+        CommitAccountMode::CommitAndUndelegate,
     )
     .await;
 }
@@ -378,7 +450,7 @@ async fn test_commit_5_accounts_1kb_bundle_size_5_undelegate_all() {
     commit_5_accounts_1kb(
         5,
         expect_strategies(&[(CommitStrategy::FromBufferWithLookupTable, 5)]),
-        true,
+        CommitAccountMode::CommitAndUndelegate,
     )
     .await;
 }
@@ -446,20 +518,135 @@ async fn test_commit_20_accounts_1kb_bundle_size_8() {
     .await;
 }
 
+// -----------------
+// Compressed Account Commits
+// -----------------
+
+#[tokio::test]
+async fn test_ix_commit_single_compressed_account_100_bytes() {
+    commit_single_account(
+        100,
+        CommitStrategy::Args,
+        CommitAccountMode::CompressedCommit,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn test_ix_commit_single_compressed_account_100_bytes_and_undelegate() {
+    commit_single_account(
+        100,
+        CommitStrategy::Args,
+        CommitAccountMode::CompressedCommitAndUndelegate,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn test_ix_commit_single_compressed_account_500_bytes() {
+    commit_single_account(
+        500,
+        CommitStrategy::Args,
+        CommitAccountMode::CompressedCommit,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn test_ix_commit_single_compressed_account_500_bytes_and_undelegate() {
+    commit_single_account(
+        500,
+        CommitStrategy::Args,
+        CommitAccountMode::CompressedCommitAndUndelegate,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn test_ix_commit_two_compressed_accounts_512kb() {
+    commit_multiple_accounts(
+        &[512, 512],
+        1,
+        CommitAccountMode::CompressedCommit,
+        expect_strategies(&[(CommitStrategy::Args, 2)]),
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn test_ix_commit_three_compressed_accounts_512kb() {
+    init_logger!();
+    commit_multiple_accounts(
+        &[512, 512, 512],
+        1,
+        CommitAccountMode::CompressedCommit,
+        expect_strategies(&[(CommitStrategy::Args, 3)]),
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn test_ix_commit_six_compressed_accounts_512kb() {
+    init_logger!();
+    commit_multiple_accounts(
+        &[512, 512, 512, 512, 512, 512],
+        1,
+        CommitAccountMode::CompressedCommit,
+        expect_strategies(&[(CommitStrategy::Args, 6)]),
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn test_commit_20_compressed_accounts_100bytes_bundle_size_2() {
+    commit_20_compressed_accounts_100bytes(
+        2,
+        expect_strategies(&[(CommitStrategy::Args, 20)]),
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn test_commit_5_compressed_accounts_100bytes_bundle_size_2() {
+    commit_5_compressed_accounts_100bytes(
+        2,
+        expect_strategies(&[(CommitStrategy::Args, 5)]),
+        CommitAccountMode::CompressedCommit,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn test_commit_5_compressed_accounts_100bytes_bundle_size_2_undelegate_all(
+) {
+    commit_5_compressed_accounts_100bytes(
+        2,
+        expect_strategies(&[(CommitStrategy::Args, 5)]),
+        CommitAccountMode::CompressedCommitAndUndelegate,
+    )
+    .await;
+}
+
 async fn commit_5_accounts_1kb(
     bundle_size: usize,
     expected_strategies: ExpectedStrategies,
-    undelegate_all: bool,
+    mode_all: CommitAccountMode,
 ) {
     init_logger!();
     let accs = (0..5).map(|_| 1024).collect::<Vec<_>>();
-    commit_multiple_accounts(
-        &accs,
-        bundle_size,
-        undelegate_all,
-        expected_strategies,
-    )
-    .await;
+    commit_multiple_accounts(&accs, bundle_size, mode_all, expected_strategies)
+        .await;
+}
+
+async fn commit_5_compressed_accounts_100bytes(
+    bundle_size: usize,
+    expected_strategies: ExpectedStrategies,
+    mode_all: CommitAccountMode,
+) {
+    init_logger!();
+    let accs = (0..5).map(|_| 100).collect::<Vec<_>>();
+    commit_multiple_accounts(&accs, bundle_size, mode_all, expected_strategies)
+        .await;
 }
 
 async fn commit_8_accounts_1kb(
@@ -468,8 +655,13 @@ async fn commit_8_accounts_1kb(
 ) {
     init_logger!();
     let accs = (0..8).map(|_| 1024).collect::<Vec<_>>();
-    commit_multiple_accounts(&accs, bundle_size, false, expected_strategies)
-        .await;
+    commit_multiple_accounts(
+        &accs,
+        bundle_size,
+        CommitAccountMode::Commit,
+        expected_strategies,
+    )
+    .await;
 }
 
 async fn commit_20_accounts_1kb(
@@ -478,25 +670,55 @@ async fn commit_20_accounts_1kb(
 ) {
     init_logger!();
     let accs = (0..20).map(|_| 1024).collect::<Vec<_>>();
-    commit_multiple_accounts(&accs, bundle_size, false, expected_strategies)
-        .await;
+    commit_multiple_accounts(
+        &accs,
+        bundle_size,
+        CommitAccountMode::Commit,
+        expected_strategies,
+    )
+    .await;
+}
+
+async fn commit_20_compressed_accounts_100bytes(
+    bundle_size: usize,
+    expected_strategies: ExpectedStrategies,
+) {
+    init_logger!();
+    let accs = (0..20).map(|_| 100).collect::<Vec<_>>();
+    commit_multiple_accounts(
+        &accs,
+        bundle_size,
+        CommitAccountMode::CompressedCommit,
+        expected_strategies,
+    )
+    .await;
 }
 
 async fn create_bundles(
     bundle_size: usize,
     bytess: &[usize],
+    compressed: bool,
 ) -> Vec<Vec<CommittedAccount>> {
     let mut join_set = JoinSet::new();
     for bytes in bytess {
         let bytes = *bytes;
         join_set.spawn(async move {
             let counter_auth = Keypair::new();
-            let (pda, mut pda_acc) = init_and_delegate_account_on_chain(
-                &counter_auth,
-                bytes as u64,
-                None,
-            )
-            .await;
+            let (pda, mut pda_acc) = if !compressed {
+                init_and_delegate_account_on_chain(
+                    &counter_auth,
+                    bytes as u64,
+                    None,
+                )
+                .await
+            } else {
+                let (pda, _hash, pda_acc) =
+                    init_and_delegate_compressed_account_on_chain(
+                        &counter_auth,
+                    )
+                    .await;
+                (pda, pda_acc)
+            };
 
             pda_acc.owner = program_flexi_counter::id();
             pda_acc.data = vec![0u8; bytes];
@@ -518,7 +740,7 @@ async fn create_bundles(
 async fn commit_multiple_accounts(
     bytess: &[usize],
     bundle_size: usize,
-    undelegate_all: bool,
+    mode_all: CommitAccountMode,
     expected_strategies: ExpectedStrategies,
 ) {
     init_logger!();
@@ -526,27 +748,54 @@ async fn commit_multiple_accounts(
     let validator_auth = ensure_validator_authority();
     fund_validator_auth_and_ensure_validator_fees_vault(&validator_auth).await;
 
+    let photon_client =
+        Some(Arc::new(PhotonIndexer::new(PHOTON_URL.to_string(), None)));
+
     let service = CommittorService::try_start(
         validator_auth.insecure_clone(),
         ":memory:",
         ChainConfig::local(ComputeBudgetConfig::new(1_000_000)),
+        photon_client,
     )
     .unwrap();
     let service = CommittorServiceExt::new(Arc::new(service));
 
     // Create bundles of committed accounts
-    let bundles_of_committees = create_bundles(bundle_size, bytess).await;
+    let bundles_of_committees = create_bundles(
+        bundle_size,
+        bytess,
+        matches!(
+            mode_all,
+            CommitAccountMode::CompressedCommit
+                | CommitAccountMode::CompressedCommitAndUndelegate
+        ),
+    )
+    .await;
     // Create intent for each bundle
     let intents = bundles_of_committees
         .into_iter()
-        .map(|committees| {
-            if undelegate_all {
+        .map(|committees| match mode_all {
+            CommitAccountMode::CommitAndUndelegate => {
                 MagicBaseIntent::CommitAndUndelegate(CommitAndUndelegate {
                     commit_action: CommitType::Standalone(committees),
                     undelegate_action: UndelegateType::Standalone,
                 })
-            } else {
+            }
+            CommitAccountMode::Commit => {
                 MagicBaseIntent::Commit(CommitType::Standalone(committees))
+            }
+            CommitAccountMode::CompressedCommit => {
+                MagicBaseIntent::CompressedCommit(CommitType::Standalone(
+                    committees,
+                ))
+            }
+            CommitAccountMode::CompressedCommitAndUndelegate => {
+                MagicBaseIntent::CompressedCommitAndUndelegate(
+                    CommitAndUndelegate {
+                        commit_action: CommitType::Standalone(committees),
+                        undelegate_action: UndelegateType::Standalone,
+                    },
+                )
             }
         })
         .enumerate()
@@ -610,7 +859,8 @@ async fn ix_commit_local(
     assert_eq!(execution_outputs.len(), base_intents.len());
     service.release_common_pubkeys().await.unwrap();
 
-    let rpc_client = RpcClient::new("http://localhost:7799".to_string());
+    let rpc_client = RpcClient::new(RPC_URL.to_string());
+    let photon_indexer = PhotonIndexer::new(PHOTON_URL.to_string(), None);
     let mut strategies = ExpectedStrategies::new();
     for (execution_result, base_intent) in
         execution_outputs.into_iter().zip(base_intents.into_iter())
@@ -630,15 +880,15 @@ async fn ix_commit_local(
             "No errors expected to be patched"
         );
         assert!(
-            tx_logs_contain(&rpc_client, &commit_signature, "CommitState")
-                .await
+            tx_logs_contain(&rpc_client, &commit_signature, "Commit").await
         );
         assert!(
             tx_logs_contain(&rpc_client, &finalize_signature, "Finalize").await
         );
 
         let is_undelegate = base_intent.is_undelegate();
-        if is_undelegate {
+        let is_compressed = base_intent.is_compressed();
+        if is_undelegate && !is_compressed {
             // Undelegate is part of atomic Finalization Stage
             assert!(
                 tx_logs_contain(&rpc_client, &finalize_signature, "Undelegate")
@@ -675,26 +925,65 @@ async fn ix_commit_local(
 
         assert_eq!(statuses.len(), committed_accounts.len());
         for commit_status in statuses {
-            let account = committed_accounts
-                .remove(&commit_status.pubkey)
-                .expect("Account should be persisted");
-            let lamports = account.account.lamports;
-            get_account!(
-                rpc_client,
-                account.pubkey,
-                "delegated state",
-                |acc: &Account, remaining_tries: u8| {
-                    validate_account(
-                        acc,
-                        remaining_tries,
-                        &account.account.data,
-                        lamports,
-                        expected_owner,
-                        account.pubkey,
-                        is_undelegate,
-                    )
-                }
-            );
+            if is_compressed {
+                let account = committed_accounts
+                    .remove(&commit_status.pubkey)
+                    .expect("Account should be persisted");
+                let lamports = Rent::default().minimum_balance(0);
+                get_account!(
+                    rpc_client,
+                    account.pubkey,
+                    "delegated state",
+                    |acc: &Account, remaining_tries: u8| {
+                        validate_account(
+                            acc,
+                            remaining_tries,
+                            &[],
+                            lamports,
+                            compressed_delegation_client::ID,
+                            account.pubkey,
+                            is_undelegate,
+                        )
+                    }
+                );
+
+                let address = derive_cda_from_pda(&account.pubkey);
+                // NOTE: defaults to 10 retry
+                let compressed_account = photon_indexer
+                    .get_compressed_account(address.to_bytes(), None)
+                    .await
+                    .unwrap()
+                    .value;
+                assert!(validate_compressed_account(
+                    &compressed_account,
+                    &account.account.data,
+                    account.account.lamports,
+                    program_flexi_counter::id(),
+                    account.pubkey,
+                    is_undelegate
+                ));
+            } else {
+                let account = committed_accounts
+                    .remove(&commit_status.pubkey)
+                    .expect("Account should be persisted");
+                let lamports = account.account.lamports;
+                get_account!(
+                    rpc_client,
+                    account.pubkey,
+                    "delegated state",
+                    |acc: &Account, remaining_tries: u8| {
+                        validate_account(
+                            acc,
+                            remaining_tries,
+                            &account.account.data,
+                            lamports,
+                            expected_owner,
+                            account.pubkey,
+                            is_undelegate,
+                        )
+                    }
+                );
+            }
 
             // Track the strategy used
             let strategy = commit_status.commit_strategy;
@@ -816,6 +1105,56 @@ fn validate_account(
                     "undelegated"
                 },
                 acc.owner(),
+                expected_owner,
+            );
+        }
+    }
+    matches_all
+}
+
+fn validate_compressed_account(
+    acc: &CompressedAccount,
+    expected_data: &[u8],
+    expected_lamports: u64,
+    expected_owner: Pubkey,
+    account_pubkey: Pubkey,
+    is_undelegate: bool,
+) -> bool {
+    let Some(data) = acc.data.as_ref().and_then(|data| {
+        CompressedDelegationRecord::from_bytes(&data.data).ok()
+    }) else {
+        trace!(
+            "Compressed account ({}) data is not present",
+            account_pubkey
+        );
+        return false;
+    };
+    let matches_data =
+        data.data == expected_data && data.lamports == expected_lamports;
+    let matches_undelegation = data.owner.eq(&expected_owner);
+    let matches_all = matches_data && matches_undelegation;
+
+    if !matches_all {
+        if !matches_data {
+            trace!(
+                "Compressed account ({}) data {} != {} || {} != {}",
+                account_pubkey,
+                data.data.len(),
+                expected_data.len(),
+                data.lamports,
+                expected_lamports
+            );
+        }
+        if !matches_undelegation {
+            trace!(
+                "Compressed account ({}) is {} but should be. Owner {} != {}",
+                account_pubkey,
+                if is_undelegate {
+                    "not undelegated"
+                } else {
+                    "undelegated"
+                },
+                data.owner,
                 expected_owner,
             );
         }
