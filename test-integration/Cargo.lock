@@ -3445,6 +3445,7 @@ dependencies = [
  "magicblock-delegation-program 1.1.3 (git+https://github.com/magicblock-labs/delegation-program.git?rev=3edb41022)",
  "magicblock-magic-program-api 0.5.1",
  "magicblock-metrics",
+ "parking_lot",
  "scc",
  "solana-account",
  "solana-account-decoder",
