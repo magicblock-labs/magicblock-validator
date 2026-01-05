@@ -1,8 +1,9 @@
 lifecycle = "ephemeral"
 commit = { compute-unit-price = 1_000_000 }
-listen = "0.0.0.0:8899"
+listen = "0.0.0.0:7799"
 
-remotes = ["http://0.0.0.0:7799", "ws://0.0.0.0:7800"]
+remotes = ["https://rpc.magicblock.app/devnet", "wss://rpc.magicblock.app/devnet"]
+#remotes = ["http://localhost:18899", "ws://localhost:8900"]
 
 [chainlink]
 max-monitored-accounts = 3

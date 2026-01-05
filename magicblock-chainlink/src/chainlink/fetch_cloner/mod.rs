@@ -12,7 +12,10 @@ use dlp::{
 };
 use log::*;
 use magicblock_config::config::AllowedProgram;
-use magicblock_core::traits::AccountsBank;
+use magicblock_core::{
+    token_programs::{is_ata, try_derive_eata_address_and_bump, MaybeIntoAta},
+    traits::AccountsBank,
+};
 use magicblock_metrics::metrics::{self, AccountFetchOrigin};
 use solana_account::{AccountSharedData, ReadableAccount};
 use solana_pubkey::Pubkey;
@@ -402,8 +405,105 @@ where
                     }
                 }
             } else {
-                // Accounts not owned by the delegation program can be cloned as is
-                // No unsubscription needed for undelegated accounts
+                // Accounts not owned by the delegation program can be cloned as-is,
+                // except ATAs that have an eATA companion delegated to us.
+                // Skip custom mappings, because even if they are delegated, the parent accounts might not be.
+                if let Some(ata_info) = is_ata(&pubkey, &account) {
+                    if let Some((eata_pubkey, _)) =
+                        try_derive_eata_address_and_bump(
+                            &ata_info.owner,
+                            &ata_info.mint,
+                        )
+                    {
+                        // Best-effort: ensure we watch the derived eATA so we can keep the
+                        // projected view stable across updates.
+                        if let Err(err) =
+                            self.subscribe_to_account(&eata_pubkey).await
+                        {
+                            warn!(
+                                "Failed to subscribe to derived eATA {}: {}",
+                                eata_pubkey, err
+                            );
+                        }
+
+                        // Fetch ATA + eATA at a slot consistent with this update to avoid
+                        // regressing state if chain_slot advanced.
+                        let effective_slot = account
+                            .remote_slot()
+                            .max(self.remote_account_provider.chain_slot());
+
+                        match self
+                            .task_to_fetch_with_companion(
+                                pubkey,
+                                eata_pubkey,
+                                effective_slot,
+                                AccountFetchOrigin::GetAccount,
+                            )
+                            .await
+                        {
+                            Ok(Ok(AccountWithCompanion {
+                                account: ata_account,
+                                companion_account: maybe_eata_account,
+                                ..
+                            })) => {
+                                // Default: clone the ATA as-is.
+                                let mut account_to_clone =
+                                    ata_account.account_shared_data_cloned();
+
+                                // If eATA exists and is delegated to us, project the ATA view
+                                // from the eATA (same as the fetch path).
+                                if let Some(eata_acc) = maybe_eata_account {
+                                    let eata_shared =
+                                        eata_acc.account_shared_data_cloned();
+
+                                    if let Some(deleg) = self
+                                        .fetch_and_parse_delegation_record(
+                                            eata_pubkey,
+                                            effective_slot,
+                                            AccountFetchOrigin::GetAccount,
+                                        )
+                                        .await
+                                    {
+                                        let delegated_to_us = deleg.authority
+                                            == self.validator_pubkey;
+
+                                        if delegated_to_us {
+                                            if let Some(projected_ata) =
+                                                eata_shared
+                                                    .maybe_into_ata(deleg.owner)
+                                            {
+                                                account_to_clone =
+                                                    projected_ata;
+                                                account_to_clone
+                                                    .set_delegated(true);
+                                            }
+                                        }
+
+                                        account_to_clone.set_remote_slot(
+                                            account.remote_slot(),
+                                        );
+                                        return (
+                                            Some(account_to_clone),
+                                            Some(deleg),
+                                        );
+                                    }
+                                }
+
+                                account_to_clone
+                                    .set_remote_slot(account.remote_slot());
+                                return (Some(account_to_clone), None);
+                            }
+                            Ok(Err(err)) => {
+                                warn!("Failed to resolve ATA/eATA companion for {pubkey}: {err}");
+                            }
+                            Err(join_err) => {
+                                warn!("Failed to join ATA/eATA fetch task for {pubkey}: {join_err}");
+                            }
+                        }
+                    }
+                }
+
+                // Fallback: non-ATA (or ATA without usable eATA) clones as-is.
                 (Some(account), None)
             }
         } else {
