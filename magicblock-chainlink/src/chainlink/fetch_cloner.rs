@@ -1578,7 +1578,29 @@ where
         fetch_origin: AccountFetchOrigin,
     ) -> RefreshDecision {
         if in_bank.compressed() {
-            debug!("Account {pubkey} is compressed, do not refresh it");
+            let Some(record) =
+                CompressedDelegationRecord::from_bytes(in_bank.data()).ok()
+            else {
+                debug!("Account {pubkey} is compressed, but no compressed delegation record found, refresh it");
+                return RefreshDecision::Yes;
+            };
+            if !account_still_undelegating_on_chain(
+                pubkey,
+                record.authority.eq(&self.validator_pubkey),
+                in_bank.remote_slot(),
+                Some(DelegationRecord {
+                    authority: record.authority,
+                    owner: record.owner,
+                    delegation_slot: record.delegation_slot,
+                    lamports: record.lamports,
+                    commit_frequency_ms: 0,
+                }),
+                &self.validator_pubkey,
+            ) {
+                debug!("Account {pubkey} is compressed, but the compressed delegation record is not undelegating, refresh it");
+                return RefreshDecision::Yes;
+            };
+            debug!("Account {pubkey} is compressed, the compressed delegation record is undelegating, do not refresh it");
         } else if in_bank.undelegating() {
             debug!(
                 "Fetching undelegating account {pubkey}. delegated={}, undelegating={}, compressed={}",
