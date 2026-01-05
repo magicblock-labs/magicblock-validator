@@ -540,23 +540,31 @@ where
                         account.data(),
                     ) {
                         Ok(delegation_record) => Some(delegation_record),
-                        Err(_err) => {
-                            debug!("The account's data did not contain a valid compressed delegation record, fetching...");
-                            if let Some(acc) = self
+                        Err(parse_err) => {
+                            debug!("The account's data did not contain a valid compressed delegation record for {pubkey}: {parse_err}, fetching...");
+                            match self
                                 .remote_account_provider
                                 .try_get(pubkey, AccountFetchOrigin::GetAccount)
                                 .await
-                                .map(|acc| acc.fresh_account().cloned())
-                                .ok()
-                                .flatten()
                             {
-                                CompressedDelegationRecord::try_from_slice(
-                                    acc.data(),
-                                )
-                                .ok()
-                            } else {
-                                error!("Failed to parse compressed delegation record for {pubkey} directly from the data.");
-                                None
+                                Ok(remote_acc) => {
+                                    if let Some(acc) = remote_acc.fresh_account().cloned() {
+                                        match CompressedDelegationRecord::try_from_slice(acc.data()) {
+                                            Ok(delegation_record) => Some(delegation_record),
+                                            Err(parse_err) => {
+                                                error!("fetched account parse failed for {pubkey}: {parse_err}");
+                                                None
+                                            }
+                                        }
+                                    } else {
+                                        error!("remote fetch failed for {pubkey}: no fresh account returned");
+                                        None
+                                    }
+                                }
+                                Err(fetch_err) => {
+                                    error!("remote fetch failed for {pubkey}: {fetch_err}");
+                                    None
+                                }
                             }
                         }
                     };
