@@ -98,16 +98,35 @@ jobs:
         if: matrix.build.OS == 'macos-latest'
         run: |
           # Install required tools for macOS builds
-          brew install protobuf llvm
+          brew install protobuf llvm openssl@3
           # Add LLVM to PATH for libclang.dylib
           echo "/opt/homebrew/opt/llvm/bin" >> $GITHUB_PATH
           echo "LIBCLANG_PATH=/opt/homebrew/opt/llvm/lib" >> $GITHUB_ENV
 
-      - name: Set OpenSSL environment for non-Linux builds
-        if: matrix.build.OS != 'ubuntu-latest' && !startsWith(matrix.build.OS, 'ubuntu')
+      - name: Set OpenSSL environment for macOS
+        if: matrix.build.OS == 'macos-latest'
         run: |
-          echo "OPENSSL_STATIC=1" >> $GITHUB_ENV
-          echo "OPENSSL_VENDORED=1" >> $GITHUB_ENV
+          if [ "${{ matrix.build.TARGET }}" = "x86_64-apple-darwin" ]; then
+            # For Intel cross-compilation, use system OpenSSL with explicit paths
+            echo "OPENSSL_DIR=/opt/homebrew/opt/openssl@3" >> $GITHUB_ENV
+            echo "OPENSSL_LIB_DIR=/opt/homebrew/opt/openssl@3/lib" >> $GITHUB_ENV
+            echo "OPENSSL_INCLUDE_DIR=/opt/homebrew/opt/openssl@3/include" >> $GITHUB_ENV
+            echo "PKG_CONFIG_PATH=/opt/homebrew/opt/openssl@3/lib/pkgconfig" >> $GITHUB_ENV
+          else
+            # For native aarch64 compilation, use vendored
+            echo "OPENSSL_STATIC=1" >> $GITHUB_ENV
+            echo "OPENSSL_VENDORED=1" >> $GITHUB_ENV
+          fi
+        shell: bash
+
+      - name: Install Windows dependencies and OpenSSL
+        if: matrix.build.OS == 'windows-latest'
+        run: |
+          # Install vcpkg and OpenSSL for Windows
+          git clone https://github.com/microsoft/vcpkg.git vcpkg
+          .\vcpkg\bootstrap-vcpkg.bat
+          .\vcpkg\vcpkg.exe install openssl:x64-windows-static
+          echo "VCPKG_ROOT=${{ github.workspace }}\vcpkg" >> $GITHUB_ENV
         shell: bash
 
       - name: Set macOS specific environment
