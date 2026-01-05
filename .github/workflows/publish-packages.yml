@@ -88,17 +88,28 @@ jobs:
         with:
           version: latest
 
-      - name: Install build dependencies
+      - name: Install additional build dependencies
         if: startsWith(matrix.build.OS, 'ubuntu')
         run: |
           sudo apt-get update
-          sudo apt-get install -y libclang-dev protobuf-compiler cmake pkg-config libssl-dev ca-certificates openssh-client libudev-dev
+          sudo apt-get install -y cmake pkg-config libssl-dev
+
+      - name: Install macOS dependencies
+        if: matrix.build.OS == 'macos-latest'
+        run: |
+          # Install required tools for macOS builds
+          brew install protobuf
 
       - name: Build (linux/macos/windows)
         uses: actions-rs/cargo@v1
         with:
           command: build
           args: --manifest-path=magicblock-validator/Cargo.toml --release --locked --target ${{ matrix.build.TARGET }}
+        env:
+          # Force vendored OpenSSL for macOS and Windows cross-compilation
+          OPENSSL_STATIC: ${{ (matrix.build.OS == 'macos-latest' || matrix.build.OS == 'windows-latest') && '1' || '' }}
+          OPENSSL_VENDORED: ${{ (matrix.build.OS == 'macos-latest' || matrix.build.OS == 'windows-latest') && '1' || '' }}
+          PKG_CONFIG_ALLOW_CROSS: ${{ matrix.build.OS == 'macos-latest' && '1' || '' }}
 
       - name: Check versions are aligned
         run: |
