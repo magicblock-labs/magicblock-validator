@@ -1,3 +1,4 @@
+use futures_util::future::join_all;
 use log::*;
 use magicblock_core::{
     token_programs::{try_derive_eata_address_and_bump, MaybeIntoAta},
@@ -42,17 +43,18 @@ where
     let mut accounts_to_clone = vec![];
     let mut ata_join_set = JoinSet::new();
 
-    // Subscribe first so subsequent fetches are kept up-to-date
+    // Collect all pubkeys to subscribe to and spawn fetch tasks
+    let mut pubkeys_to_subscribe = vec![];
+
     for (ata_pubkey, _, ata_info, ata_account_slot) in &atas {
-        if let Err(err) = this.subscribe_to_account(ata_pubkey).await {
-            warn!("Failed to subscribe to ATA {}: {}", ata_pubkey, err);
-        }
+        // Collect ATA pubkey for subscription
+        pubkeys_to_subscribe.push(*ata_pubkey);
+
         if let Some((eata, _)) =
             try_derive_eata_address_and_bump(&ata_info.owner, &ata_info.mint)
         {
-            if let Err(err) = this.subscribe_to_account(&eata).await {
-                warn!("Failed to subscribe to derived eATA {}: {}", eata, err);
-            }
+            // Collect eATA pubkey for subscription
+            pubkeys_to_subscribe.push(eata);
 
             let effective_slot = if let Some(min_slot) = min_context_slot {
                 min_slot.max(*ata_account_slot)
@@ -66,6 +68,23 @@ where
                 effective_slot,
                 fetch_origin,
             ));
+        }
+    }
+
+    // Send all subscription requests in parallel and await their confirmations
+    let subscription_results = join_all(
+        pubkeys_to_subscribe
+            .iter()
+            .map(|pk| this.subscribe_to_account(pk)),
+    )
+    .await;
+
+    // Log any subscription errors
+    for (pubkey, result) in
+        pubkeys_to_subscribe.iter().zip(subscription_results.iter())
+    {
+        if let Err(err) = result {
+            error!("Failed to subscribe to account {}: {}", pubkey, err);
         }
     }
 

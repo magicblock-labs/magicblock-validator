@@ -806,10 +806,15 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                 .join(", ");
             trace!("Subscribing to accounts: {pubkeys}");
         }
-        for (pubkey, _) in subscribe_and_fetch.iter() {
-            // Register the subscription for the pubkey (handles LRU cache and eviction first)
-            self.subscribe(pubkey).await?;
-        }
+
+        // Send all subscription requests in parallel and await their confirmations
+        try_join_all(
+            subscribe_and_fetch
+                .iter()
+                .map(|(pubkey, _)| self.subscribe(pubkey)),
+        )
+        .await?;
+
         Ok(())
     }
 
