@@ -20,7 +20,7 @@ on:
 jobs:
   publish-binaries:
     name: Publish Binaries
-    runs-on: ${{ matrix.build.os }}
+    runs-on: ${{ matrix.build.OS }}
     strategy:
       fail-fast: false
       matrix:
@@ -45,7 +45,7 @@ jobs:
           }
           - {
             NAME: darwin-x64,
-            OS: macos-latest,
+            OS: macos-13,
             TOOLCHAIN: stable,
             TARGET: x86_64-apple-darwin
           }
@@ -69,7 +69,6 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install target
-        if: matrix.build.TARGET != matrix.build.HOST_TARGET
         run: rustup target add ${{ matrix.build.TARGET }}
         shell: bash
 
@@ -81,6 +80,19 @@ jobs:
         shell: bash
         run: echo "DRY_RUN=false" >> $GITHUB_ENV
         if: github.event_name == 'release' && github.event.action == 'published'
+
+      - name: Set release version
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "release" ]; then
+            echo "RELEASE_VERSION=${{ github.event.release.tag_name }}" >> $GITHUB_ENV
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "RELEASE_VERSION=${{ github.event.inputs.release_version }}" >> $GITHUB_ENV
+          elif [[ "${{ github.ref }}" == refs/heads/release/v* ]]; then
+            echo "RELEASE_VERSION=$(echo ${{ github.ref }} | sed 's|refs/heads/release/||')" >> $GITHUB_ENV
+          else
+            echo "RELEASE_VERSION=v0.0.0-dev" >> $GITHUB_ENV
+          fi
 
       - name: Set up GCC
         if: matrix.build.OS == 'ubuntu-latest'
@@ -95,45 +107,64 @@ jobs:
           sudo apt-get install -y cmake pkg-config libssl-dev
 
       - name: Install macOS dependencies
-        if: matrix.build.OS == 'macos-latest'
+        if: startsWith(matrix.build.OS, 'macos')
         run: |
           # Install required tools for macOS builds
-          brew install protobuf llvm openssl@3
+          brew install protobuf llvm
           # Add LLVM to PATH for libclang.dylib
-          echo "/opt/homebrew/opt/llvm/bin" >> $GITHUB_PATH
-          echo "LIBCLANG_PATH=/opt/homebrew/opt/llvm/lib" >> $GITHUB_ENV
-
-      - name: Set OpenSSL environment for macOS
-        if: matrix.build.OS == 'macos-latest'
-        run: |
-          if [ "${{ matrix.build.TARGET }}" = "x86_64-apple-darwin" ]; then
-            # For Intel cross-compilation, use system OpenSSL with explicit paths
-            echo "OPENSSL_DIR=/opt/homebrew/opt/openssl@3" >> $GITHUB_ENV
-            echo "OPENSSL_LIB_DIR=/opt/homebrew/opt/openssl@3/lib" >> $GITHUB_ENV
-            echo "OPENSSL_INCLUDE_DIR=/opt/homebrew/opt/openssl@3/include" >> $GITHUB_ENV
-            echo "PKG_CONFIG_PATH=/opt/homebrew/opt/openssl@3/lib/pkgconfig" >> $GITHUB_ENV
+          if [ "${{ matrix.build.OS }}" = "macos-latest" ]; then
+            echo "/opt/homebrew/opt/llvm/bin" >> $GITHUB_PATH
+            echo "LIBCLANG_PATH=/opt/homebrew/opt/llvm/lib" >> $GITHUB_ENV
           else
-            # For native aarch64 compilation, use vendored
-            echo "OPENSSL_STATIC=1" >> $GITHUB_ENV
-            echo "OPENSSL_VENDORED=1" >> $GITHUB_ENV
+            echo "/usr/local/opt/llvm/bin" >> $GITHUB_PATH
+            echo "LIBCLANG_PATH=/usr/local/opt/llvm/lib" >> $GITHUB_ENV
           fi
+
+      - name: Set macOS minimum version
+        if: startsWith(matrix.build.OS, 'macos')
         shell: bash
+        run: |
+          echo "MACOSX_DEPLOYMENT_TARGET=11.0" >> $GITHUB_ENV
+          echo "CFLAGS=-mmacosx-version-min=11.0" >> $GITHUB_ENV
+          echo "CXXFLAGS=-mmacosx-version-min=11.0" >> $GITHUB_ENV
+          echo "LDFLAGS=-mmacosx-version-min=11.0" >> $GITHUB_ENV
+
+      - name: Force vendored OpenSSL for macOS x86_64
+        if: matrix.build.OS == 'macos-13' && matrix.build.TARGET == 'x86_64-apple-darwin'
+        shell: bash
+        run: |
+          echo "OPENSSL_STATIC=1" >> $GITHUB_ENV
+          echo "OPENSSL_VENDORED=1" >> $GITHUB_ENV
+
+      - name: Force vendored OpenSSL for macOS arm64
+        if: matrix.build.OS == 'macos-latest' && matrix.build.TARGET == 'aarch64-apple-darwin'
+        shell: bash
+        run: |
+          echo "OPENSSL_STATIC=1" >> $GITHUB_ENV
+          echo "OPENSSL_VENDORED=1" >> $GITHUB_ENV
 
       - name: Install Windows dependencies and OpenSSL
         if: matrix.build.OS == 'windows-latest'
+        shell: powershell
         run: |
-          # Install vcpkg and OpenSSL for Windows
+          # Install vcpkg and OpenSSL for Windows with correct triplet
           git clone https://github.com/microsoft/vcpkg.git vcpkg
           .\vcpkg\bootstrap-vcpkg.bat
-          .\vcpkg\vcpkg.exe install openssl:x64-windows-static
-          echo "VCPKG_ROOT=${{ github.workspace }}\vcpkg" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-        shell: powershell
 
-      - name: Set macOS specific environment
-        if: matrix.build.OS == 'macos-latest'
-        run: |
-          echo "PKG_CONFIG_ALLOW_CROSS=1" >> $GITHUB_ENV
-        shell: bash
+          $triplet = "x64-windows-static-md"
+          .\vcpkg\vcpkg.exe install openssl:$triplet
+
+          $root = "${{ github.workspace }}\vcpkg"
+          $inst = "$root\installed\$triplet"
+
+          "VCPKG_ROOT=$root"                  | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "VCPKG_DEFAULT_TRIPLET=$triplet"    | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "VCPKG_TARGET_TRIPLET=$triplet"     | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+          "OPENSSL_DIR=$inst"                 | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "OPENSSL_INCLUDE_DIR=$inst\include" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "OPENSSL_LIB_DIR=$inst\lib"         | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
 
       - name: Build (linux/macos/windows)
         uses: actions-rs/cargo@v1
@@ -177,19 +208,6 @@ jobs:
           echo "release_name=${release_name}" >> $GITHUB_ENV
           mv "target/${{ matrix.build.TARGET }}/release/${bin}" "target/${{ matrix.build.TARGET }}/release/${release_name}"
 
-      - name: Set release version
-        if: ${{ env.DRY_RUN == 'false' }}
-        shell: bash
-        run: |
-          if [ "${{ github.event_name }}" = "release" ]; then
-            echo "RELEASE_VERSION=${{ github.event.release.tag_name }}" >> $GITHUB_ENV
-          elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "RELEASE_VERSION=${{ github.event.inputs.release_version }}" >> $GITHUB_ENV
-          elif [[ "${{ github.ref }}" == refs/heads/release/v* ]]; then
-            echo "RELEASE_VERSION=$(echo ${{ github.ref }} | sed 's|refs/heads/release/||')" >> $GITHUB_ENV
-          else
-            echo "RELEASE_VERSION=v0.0.0-dev" >> $GITHUB_ENV
-          fi
 
       - name: Publish binary to GitHub release
         if: ${{ env.DRY_RUN == 'false' }}
