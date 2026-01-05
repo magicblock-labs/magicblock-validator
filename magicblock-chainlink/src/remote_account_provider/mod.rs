@@ -15,7 +15,7 @@ use config::RemoteAccountProviderConfig;
 pub(crate) use errors::{
     RemoteAccountProviderError, RemoteAccountProviderResult,
 };
-use futures_util::future::try_join_all;
+use futures_util::future::{join_all, try_join_all};
 use log::*;
 pub use lru_cache::AccountsLruCache;
 pub(crate) use remote_account::RemoteAccount;
@@ -807,13 +807,40 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             trace!("Subscribing to accounts: {pubkeys}");
         }
 
-        // Send all subscription requests in parallel and await their confirmations
-        try_join_all(
+        // Send all subscription requests in parallel (non-fail-fast)
+        // We use join_all instead of try_join_all to ensure ALL subscribe attempts complete,
+        // even if some fail. This prevents resource leaks in fetching_accounts and ensures
+        // all oneshot receivers get a response (either success or error).
+        let subscription_results = join_all(
             subscribe_and_fetch
                 .iter()
                 .map(|(pubkey, _)| self.subscribe(pubkey)),
         )
-        .await?;
+        .await;
+
+        // Collect errors and log each individual failure
+        let mut errors = Vec::new();
+        for (result, (pubkey, _)) in
+            subscription_results.iter().zip(subscribe_and_fetch.iter())
+        {
+            if let Err(err) = result {
+                error!("Failed to subscribe to account {}: {}", pubkey, err);
+                errors.push(format!("{}: {}", pubkey, err));
+            }
+        }
+
+        // Fail if ANY subscription failed
+        if !errors.is_empty() {
+            return Err(
+                RemoteAccountProviderError::AccountSubscriptionsTaskFailed(
+                    format!(
+                        "{} subscription(s) failed: [{}]",
+                        errors.len(),
+                        errors.join(", ")
+                    ),
+                ),
+            );
+        }
 
         Ok(())
     }
