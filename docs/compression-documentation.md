@@ -229,8 +229,9 @@ When a compressed account is detected:
 
 Compressed accounts require special subscription handling:
 
-- Delegation records are subscribed to for updates
-- Accounts are unsubscribed when delegated to maintain sync
+- **Delegation records are never subscribed to by design** - no subscription occurs for compressed delegation records
+- **Accounts are unsubscribed when delegated** to maintain synchronization with compressed state
+- **Updates for delegated accounts must be retrieved via the Photon indexer** rather than subscriptions
 - Undelegating accounts are kept until undelegation completes
 
 ## Committor Service Integration
