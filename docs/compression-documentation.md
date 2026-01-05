@@ -67,6 +67,7 @@ This external program manages the delegation of compressed accounts to MagicBloc
 #### Key Data Structures
 
 **CompressedDelegationRecord**:
+
 ```rust
 pub struct CompressedDelegationRecord {
     pub pda: Pubkey,                    // The uncompressed account PDA
@@ -131,6 +132,7 @@ sequenceDiagram
 ```
 
 #### Steps:
+
 1. User calls a program's `delegate_compressed` instruction
 2. Program invokes the Compressed Delegation Program
 3. CDP creates a compressed account via Light Protocol
@@ -157,6 +159,7 @@ sequenceDiagram
 ```
 
 #### Steps:
+
 1. Transaction references a compressed account
 2. Chainlink ensures account availability
 3. FetchCloner detects compressed ownership
@@ -183,6 +186,7 @@ sequenceDiagram
 ```
 
 #### Steps:
+
 1. Validator schedules compressed commit via Committor Service
 2. Committor creates appropriate compression task
 3. Task executes commit instruction on Compressed Delegation Program
@@ -224,6 +228,21 @@ When a compressed account is detected:
 4. Set account data: `account.set_data(delegation_record.data)`
 5. Set lamports: `account.set_lamports(delegation_record.lamports)`
 6. Mark as delegated: `account.set_delegated(is_delegated_to_us)`
+
+### Undelegation Details
+
+**Ownership Reassignment Flow**:
+
+During undelegation, ownership reassignment follows a two-phase process:
+
+1. **Primary Undelegation**: The Compressed Delegation Program itself handles the core ownership reassignment, transferring ownership back to the original account owner and restoring the account to its fully compressed state on-chain.
+
+2. **Cleanup Callback**: The external undelegate handler (referenced by the `EXTERNAL_UNDELEGATE_DISCRIMINATOR`) is a program-specific callback invoked for cleanup operations after ownership has already been reassigned. This typically involves:
+   - Restoring lamports and data to the uncompressed account
+   - Performing any program-specific state transitions
+   - Ensuring the account is ready for local validator operations
+
+This separation ensures that critical ownership reassignment is handled by the trusted delegation program, while allowing programs to perform their own cleanup logic through the external handler.
 
 ### Subscription Management
 
