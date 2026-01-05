@@ -1594,8 +1594,8 @@ where
             let Some(record) =
                 CompressedDelegationRecord::from_bytes(in_bank.data()).ok()
             else {
-                debug!("Account {pubkey} is compressed, but no compressed delegation record found, refresh it");
-                return RefreshDecision::Yes;
+                debug!("Account {pubkey} is compressed, but the delegation has already been processed (account is delegated)");
+                return RefreshDecision::No;
             };
 
             if !account_still_undelegating_on_chain(
