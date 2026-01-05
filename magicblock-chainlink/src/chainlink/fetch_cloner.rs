@@ -1584,9 +1584,11 @@ where
                 debug!("Account {pubkey} is compressed, but no compressed delegation record found, refresh it");
                 return RefreshDecision::Yes;
             };
+
             if !account_still_undelegating_on_chain(
                 pubkey,
-                record.authority.eq(&self.validator_pubkey),
+                record.authority.eq(&self.validator_pubkey)
+                    || record.authority.eq(&Pubkey::default()),
                 in_bank.remote_slot(),
                 Some(DelegationRecord {
                     authority: record.authority,
