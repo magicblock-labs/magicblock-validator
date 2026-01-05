@@ -171,7 +171,6 @@ impl DeliveryPreparator {
                 } else {
                     None
                 };
-                info!("Commit slot for task {:?}", commit_slot);
                 let photon_config = commit_slot.map(|slot| IndexerRpcConfig {
                     slot,
                     ..Default::default()

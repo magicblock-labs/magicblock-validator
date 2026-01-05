@@ -1,6 +1,6 @@
 use std::{ops::ControlFlow, sync::Arc};
 
-use log::{error, info, warn};
+use log::{error, warn};
 use solana_commitment_config::CommitmentConfig;
 use solana_pubkey::Pubkey;
 use solana_rpc_client_api::config::RpcTransactionConfig;
@@ -207,10 +207,7 @@ where
                         }),
                     )
                     .await
-                    .map(|tx| {
-                        info!("Commit slot for tx {:?}", tx);
-                        tx.slot
-                    })
+                    .map(|tx| tx.slot)
                     .ok()
             })
         });
