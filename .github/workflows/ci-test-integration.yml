@@ -76,7 +76,7 @@ jobs:
         shell: bash
         env:
           RUSTFLAGS: "-A dead-code"
-        run: argo install --git https://github.com/lightprotocol/photon.git --rev ac7df6c388db847b7693a7a1cb766a7c9d7809b5 --locked --force
+        run: cargo install --git https://github.com/lightprotocol/photon.git --rev ac7df6c388db847b7693a7a1cb766a7c9d7809b5 --locked --force
 
       - name: Setup Node.js
         if: matrix.batch_tests == 'table_mania' || matrix.batch_tests == 'committor' || matrix.batch_tests == 'chainlink'
