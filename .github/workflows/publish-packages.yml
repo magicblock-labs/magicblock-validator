@@ -45,7 +45,7 @@ jobs:
           }
           - {
             NAME: darwin-x64,
-            OS: macos-13,
+            OS: macos-15-intel,
             TOOLCHAIN: stable,
             TARGET: x86_64-apple-darwin
           }
@@ -108,11 +108,12 @@ jobs:
 
       - name: Install macOS dependencies
         if: startsWith(matrix.build.OS, 'macos')
+        shell: bash
         run: |
           # Install required tools for macOS builds
           brew install protobuf llvm
-          # Add LLVM to PATH for libclang.dylib
-          if [ "${{ matrix.build.OS }}" = "macos-latest" ]; then
+          # Add LLVM to PATH for libclang.dylib - base on target architecture
+          if [ "${{ matrix.build.TARGET }}" = "aarch64-apple-darwin" ]; then
             echo "/opt/homebrew/opt/llvm/bin" >> $GITHUB_PATH
             echo "LIBCLANG_PATH=/opt/homebrew/opt/llvm/lib" >> $GITHUB_ENV
           else
@@ -129,15 +130,8 @@ jobs:
           echo "CXXFLAGS=-mmacosx-version-min=11.0" >> $GITHUB_ENV
           echo "LDFLAGS=-mmacosx-version-min=11.0" >> $GITHUB_ENV
 
-      - name: Force vendored OpenSSL for macOS x86_64
-        if: matrix.build.OS == 'macos-13' && matrix.build.TARGET == 'x86_64-apple-darwin'
-        shell: bash
-        run: |
-          echo "OPENSSL_STATIC=1" >> $GITHUB_ENV
-          echo "OPENSSL_VENDORED=1" >> $GITHUB_ENV
-
-      - name: Force vendored OpenSSL for macOS arm64
-        if: matrix.build.OS == 'macos-latest' && matrix.build.TARGET == 'aarch64-apple-darwin'
+      - name: Force vendored OpenSSL for macOS
+        if: startsWith(matrix.build.OS, 'macos')
         shell: bash
         run: |
           echo "OPENSSL_STATIC=1" >> $GITHUB_ENV
