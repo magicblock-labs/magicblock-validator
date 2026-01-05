@@ -173,6 +173,41 @@ jobs:
           "OPENSSL_INCLUDE_DIR=$inst\include" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "OPENSSL_LIB_DIR=$inst\lib"         | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
+      - name: Install MSYS2 (mingw64) for protobuf-src (Windows)
+        if: matrix.build.OS == 'windows-latest'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            base-devel
+            mingw-w64-x86_64-toolchain
+            autoconf
+            automake
+            libtool
+            make
+            perl
+            pkgconf
+
+      - name: Force autotools to use gcc (Windows)
+        if: matrix.build.OS == 'windows-latest'
+        shell: powershell
+        run: |
+          "C:\msys64\mingw64\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          "C:\msys64\usr\bin"     | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          "CC=gcc"      | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "CXX=g++"     | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "AR=ar"       | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "RANLIB=ranlib"| Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Debug toolchain (Windows)
+        if: matrix.build.OS == 'windows-latest'
+        shell: powershell
+        run: |
+          where sh
+          where gcc
+          where cl
+          gcc --version
 
       - name: Build (linux/macos/windows)
         uses: actions-rs/cargo@v1
