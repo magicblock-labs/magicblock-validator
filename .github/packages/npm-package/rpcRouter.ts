@@ -109,5 +109,5 @@ function trySystemRpcRouter(): void {
   runRpcRouter(absoluteBinaryPath);
 }
 
-// If the first argument is our special command, run the test validator and exit.
+// Try to run rpc-router from package first, then fall back to system installation.
 tryPackageRpcRouter() || trySystemRpcRouter();
