@@ -2,6 +2,11 @@ use compressed_delegation_client::types::{CommitArgs, FinalizeArgs};
 use dlp::{
     args::{CallHandlerArgs, CommitDiffArgs, CommitStateArgs},
     compute_diff,
+    instruction_builder::{
+        call_handler_size_budget, commit_diff_size_budget, commit_size_budget,
+        finalize_size_budget, undelegate_size_budget,
+    },
+    AccountSizeClass,
 };
 use magicblock_metrics::metrics::LabelValue;
 use solana_account::ReadableAccount;
@@ -248,6 +253,38 @@ impl BaseTask for ArgsTask {
             ArgsTaskType::CompressedCommit(_) => 250_000,
             ArgsTaskType::CompressedUndelegate(_) => 250_000,
             ArgsTaskType::CompressedFinalize(_) => 250_000,
+        }
+    }
+
+    fn accounts_size_budget(&self) -> u32 {
+        match &self.task_type {
+            ArgsTaskType::Commit(task) => {
+                commit_size_budget(AccountSizeClass::Dynamic(
+                    task.committed_account.account.data.len() as u32,
+                ))
+            }
+            ArgsTaskType::CommitDiff(task) => {
+                commit_diff_size_budget(AccountSizeClass::Dynamic(
+                    task.committed_account.account.data.len() as u32,
+                ))
+            }
+            ArgsTaskType::BaseAction(task) => {
+                // assume all other accounts are Small accounts.
+                let other_accounts_budget =
+                    task.action.account_metas_per_program.len() as u32
+                        * AccountSizeClass::Small.size_budget();
+
+                call_handler_size_budget(
+                    AccountSizeClass::Medium,
+                    other_accounts_budget,
+                )
+            }
+            ArgsTaskType::Undelegate(_) => {
+                undelegate_size_budget(AccountSizeClass::Huge)
+            }
+            ArgsTaskType::Finalize(_) => {
+                finalize_size_budget(AccountSizeClass::Huge)
+            }
         }
     }
 

@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 
+use dlp::DLP_PROGRAM_DATA_SIZE_CLASS;
 use solana_compute_budget_interface::ComputeBudgetInstruction;
 use solana_hash::Hash;
 use solana_instruction::Instruction;
@@ -66,6 +67,7 @@ impl TransactionUtils {
         let budget_instructions = Self::budget_instructions(
             Self::tasks_compute_units(tasks),
             compute_unit_price,
+            Self::tasks_accounts_size_budget(tasks),
         );
         let ixs = Self::tasks_instructions(&authority.pubkey(), tasks);
         Self::assemble_tx_raw(
@@ -127,16 +129,38 @@ impl TransactionUtils {
         tasks.iter().map(|task| task.as_ref().compute_units()).sum()
     }
 
+    pub fn tasks_accounts_size_budget(
+        tasks: &[impl AsRef<dyn BaseTask>],
+    ) -> u32 {
+        if tasks.is_empty() {
+            return 0;
+        }
+
+        let total_budget: u32 = tasks
+            .iter()
+            .map(|task| task.as_ref().accounts_size_budget())
+            .sum();
+
+        // DLP_PROGRAM_DATA_SIZE_CLASS has been added N times, once for each task.
+        // We need to add it once only, so minus (N-1) times.
+        total_budget
+            - (tasks.len() as u32 - 1)
+                * DLP_PROGRAM_DATA_SIZE_CLASS.size_budget()
+    }
+
     pub fn budget_instructions(
         compute_units: u32,
         compute_unit_price: u64,
-    ) -> [Instruction; 2] {
-        let compute_budget_ix =
-            ComputeBudgetInstruction::set_compute_unit_limit(compute_units);
-        let compute_unit_price_ix =
+        accounts_size_budget: u32,
+    ) -> [Instruction; 3] {
+        [
+            ComputeBudgetInstruction::set_compute_unit_limit(compute_units),
             ComputeBudgetInstruction::set_compute_unit_price(
                 compute_unit_price,
-            );
-        [compute_budget_ix, compute_unit_price_ix]
+            ),
+            ComputeBudgetInstruction::set_loaded_accounts_data_size_limit(
+                accounts_size_budget,
+            ),
+        ]
     }
 }

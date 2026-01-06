@@ -138,17 +138,17 @@ async fn test_ix_commit_order_book_change_100_bytes() {
 }
 
 #[tokio::test]
-async fn test_ix_commit_order_book_change_679_bytes() {
-    commit_book_order_account(679, CommitStrategy::Args, false).await;
+async fn test_ix_commit_order_book_change_671_bytes() {
+    commit_book_order_account(671, CommitStrategy::Args, false).await;
 }
 
 #[tokio::test]
-async fn test_ix_commit_order_book_change_680_bytes() {
-    // We cannot use 680 as changed_len because that both 679 and 680 produce encoded tx
-    // of size 1644 (which is the max limit), but while the size of raw bytes for 679 is within
-    // 1232 limit, the size for 680 execeds by 1 (1233). That is why we used
-    // 681 as changed_len where CommitStrategy goes from Args to FromBuffer.
-    commit_book_order_account(681, CommitStrategy::FromBuffer, false).await;
+async fn test_ix_commit_order_book_change_673_bytes() {
+    // We cannot use 672 as changed_len because that both 671 and 672 produce encoded tx
+    // of size 1644 (which is the max limit), but while the size of raw bytes for 671 is within
+    // 1232 limit, the size for 672 exceeds by 1 (1233). That is why we used
+    // 673 as changed_len where CommitStrategy goes from Args to FromBuffer.
+    commit_book_order_account(673, CommitStrategy::FromBuffer, false).await;
 }
 
 #[tokio::test]
