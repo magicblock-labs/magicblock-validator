@@ -70,18 +70,30 @@ jobs:
 
       - name: Install target
         run: rustup target add ${{ matrix.build.TARGET }}
-        shell: bash
+        shell: ${{ matrix.build.OS == 'windows-latest' && 'pwsh' || 'bash' }}
 
-      - name: Set DRY_RUN by default
+      - name: Set DRY_RUN by default (Non-Windows)
+        if: matrix.build.OS != 'windows-latest'
         shell: bash
         run: echo "DRY_RUN=true" >> $GITHUB_ENV
 
-      - name: Unset DRY_RUN for releases
+      - name: Set DRY_RUN by default (Windows)
+        if: matrix.build.OS == 'windows-latest'
+        shell: pwsh
+        run: "DRY_RUN=true" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Unset DRY_RUN for releases (Non-Windows)
+        if: matrix.build.OS != 'windows-latest' && github.event_name == 'release' && github.event.action == 'published'
         shell: bash
         run: echo "DRY_RUN=false" >> $GITHUB_ENV
-        if: github.event_name == 'release' && github.event.action == 'published'
 
-      - name: Set release version
+      - name: Unset DRY_RUN for releases (Windows)
+        if: matrix.build.OS == 'windows-latest' && github.event_name == 'release' && github.event.action == 'published'
+        shell: pwsh
+        run: "DRY_RUN=false" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Set release version (Non-Windows)
+        if: matrix.build.OS != 'windows-latest'
         shell: bash
         run: |
           if [ "${{ github.event_name }}" = "release" ]; then
@@ -93,6 +105,21 @@ jobs:
           else
             echo "RELEASE_VERSION=v0.0.0-dev" >> $GITHUB_ENV
           fi
+
+      - name: Set release version (Windows)
+        if: matrix.build.OS == 'windows-latest'
+        shell: pwsh
+        run: |
+          if ("${{ github.event_name }}" -eq "release") {
+            "RELEASE_VERSION=${{ github.event.release.tag_name }}" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          } elseif ("${{ github.event_name }}" -eq "workflow_dispatch") {
+            "RELEASE_VERSION=${{ github.event.inputs.release_version }}" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          } elseif ("${{ github.ref }}" -like "refs/heads/release/v*") {
+            $version = "${{ github.ref }}" -replace 'refs/heads/release/', ''
+            "RELEASE_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          } else {
+            "RELEASE_VERSION=v0.0.0-dev" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          }
 
       - name: Set up GCC
         if: matrix.build.OS == 'ubuntu-latest'
@@ -137,48 +164,38 @@ jobs:
           echo "OPENSSL_STATIC=1" >> $GITHUB_ENV
           echo "OPENSSL_VENDORED=1" >> $GITHUB_ENV
 
-      - name: Install protoc (Windows)
+      - name: Setup MSVC dev cmd (Windows)
         if: matrix.build.OS == 'windows-latest'
-        shell: powershell
-        run: |
-          choco install protoc -y
-          protoc --version
+        uses: ilammy/msvc-dev-cmd@v1
 
-      - name: Configure protoc env (Windows)
+      - name: Install Windows deps via vcpkg (OpenSSL + Protobuf)
         if: matrix.build.OS == 'windows-latest'
-        shell: powershell
+        shell: pwsh
         run: |
-          # Force prost/protobuf build scripts to use precompiled protoc
-          $protoc = "C:\hostedtoolcache\windows\protoc\v26.1\x64\bin\protoc.exe"
-          "PROTOC=$protoc" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          "PROTOBUF_PROTOC=$protoc" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          "PROST_BUILD_SKIP_VENDOR_PROTOBUF=1" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-
-      - name: Install Windows dependencies and OpenSSL
-        if: matrix.build.OS == 'windows-latest'
-        shell: powershell
-        run: |
-          # Install vcpkg and OpenSSL for Windows with correct triplet
           git clone https://github.com/microsoft/vcpkg.git vcpkg
           .\vcpkg\bootstrap-vcpkg.bat
 
           $triplet = "x64-windows-static-md"
-          .\vcpkg\vcpkg.exe install openssl:$triplet
+          .\vcpkg\vcpkg.exe install openssl:$triplet protobuf:$triplet
 
           $root = "${{ github.workspace }}\vcpkg"
           $inst = "$root\installed\$triplet"
 
-          "VCPKG_ROOT=$root"                  | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          "VCPKG_DEFAULT_TRIPLET=$triplet"    | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          "VCPKG_TARGET_TRIPLET=$triplet"     | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "VCPKG_ROOT=$root"               | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "VCPKG_DEFAULT_TRIPLET=$triplet" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "VCPKG_TARGET_TRIPLET=$triplet"  | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
           "OPENSSL_DIR=$inst"                 | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "OPENSSL_INCLUDE_DIR=$inst\include" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "OPENSSL_LIB_DIR=$inst\lib"         | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
-      - name: Setup MSVC dev cmd (Windows)
-        if: matrix.build.OS == 'windows-latest'
-        uses: ilammy/msvc-dev-cmd@v1
+          # --- protobuf: forza uso di protobuf "di sistema" (vcpkg), NON protobuf-src ---
+          "PROTOBUF_NO_VENDOR=1"              | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "PROTOBUF_DIR=$inst"                | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "Protobuf_ROOT=$inst"               | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+          # protoc da vcpkg (in genere sta qui)
+          "PROTOC=$inst\tools\protobuf\protoc.exe" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Build (linux/macos/windows)
         uses: actions-rs/cargo@v1
