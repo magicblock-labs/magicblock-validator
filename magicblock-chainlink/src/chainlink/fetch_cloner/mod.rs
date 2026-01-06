@@ -168,13 +168,18 @@ where
                         // record fetches. This allows multiple updates to be processed in parallel.
                         let this = Arc::clone(&self);
                         pending_tasks.spawn(async move {
-                            Self::process_subscription_update(&this, pubkey, update).await;
+                            Self::process_subscription_update(
+                                &this, pubkey, update,
+                            )
+                            .await;
                         });
 
                         // Drain any completed tasks before continuing
                         while let Some(result) = pending_tasks.try_join_next() {
                             if let Err(e) = result {
-                                error!("Subscription update task panicked: {e:?}");
+                                error!(
+                                    "Subscription update task panicked: {e:?}"
+                                );
                             }
                         }
                     }
@@ -204,7 +209,9 @@ where
                             }
                         }
                     }
-                    Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {
+                    Err(
+                        tokio::sync::mpsc::error::TryRecvError::Disconnected,
+                    ) => {
                         // Channel closed, drain remaining tasks and exit
                         while pending_tasks.join_next().await.is_some() {}
                         break;
@@ -220,16 +227,16 @@ where
         pubkey: Pubkey,
         update: ForwardedSubscriptionUpdate,
     ) {
-        let (resolved_account, deleg_record) =
-            this.resolve_account_to_clone_from_forwarded_sub_with_unsubscribe(update)
-                .await;
+        let (resolved_account, deleg_record) = this
+            .resolve_account_to_clone_from_forwarded_sub_with_unsubscribe(
+                update,
+            )
+            .await;
         if let Some(account) = resolved_account {
             // Ensure that the subscription update isn't out of order, i.e. we don't already
             // hold a newer version of the account in our bank
-            let out_of_order_slot = this
-                .accounts_bank
-                .get_account(&pubkey)
-                .and_then(|in_bank| {
+            let out_of_order_slot =
+                this.accounts_bank.get_account(&pubkey).and_then(|in_bank| {
                     if in_bank.remote_slot() >= account.remote_slot() {
                         Some(in_bank.remote_slot())
                     } else {
@@ -248,7 +255,8 @@ where
                 if in_bank.undelegating() {
                     // We expect the account to still be delegated, but with the delegation
                     // program owner
-                    debug!("Received update for undelegating account {pubkey} \
+                    debug!(
+                        "Received update for undelegating account {pubkey} \
                         in_bank.delegated={}, \
                         in_bank.owner={}, \
                         in_bank.remote_slot={}, \
@@ -285,9 +293,7 @@ where
                     );
                 }
             } else {
-                warn!(
-                    "Received update for {pubkey} which is not in bank"
-                );
+                warn!("Received update for {pubkey} which is not in bank");
             }
 
             // Determine if delegated to another validator
@@ -300,10 +306,8 @@ where
             // The subscription will be turned back on once the committor service schedules
             // a commit for it that includes undelegation
             if account.delegated() {
-                if let Err(err) = this
-                    .remote_account_provider
-                    .unsubscribe(&pubkey)
-                    .await
+                if let Err(err) =
+                    this.remote_account_provider.unsubscribe(&pubkey).await
                 {
                     error!(
                         "Failed to unsubscribe from delegated account {pubkey}: {err}"
@@ -323,9 +327,7 @@ where
                 })
                 .await
             {
-                error!(
-                    "Failed to clone account {pubkey} into bank: {err}"
-                );
+                error!("Failed to clone account {pubkey} into bank: {err}");
             }
         }
     }
