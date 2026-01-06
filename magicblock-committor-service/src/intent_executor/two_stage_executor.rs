@@ -14,8 +14,13 @@ use crate::{
         two_stage_executor::sealed::Sealed,
         IntentExecutorImpl,
     },
-    persist::IntentPersister,
-    tasks::task_strategist::TransactionStrategy,
+    persist::{IntentPersister, IntentPersisterImpl},
+    tasks::{
+        args_task::{ArgsTask, ArgsTaskType},
+        task_strategist::TransactionStrategy,
+        task_visitors::utility_visitor::TaskVisitorUtils,
+        BaseTask,
+    },
     transaction_preparator::TransactionPreparator,
 };
 
@@ -150,6 +155,31 @@ where
                     .await?;
                 Ok(ControlFlow::Continue(to_cleanup))
             }
+            err
+            @ TransactionStrategyExecutionError::UnfinalizedAccountError(
+                _,
+                signature,
+            ) => {
+                let optimized_tasks =
+                    commit_strategy.optimized_tasks.as_slice();
+                if let Some(task) = err
+                    .task_index()
+                    .and_then(|index| optimized_tasks.get(index as usize))
+                {
+                    Self::handle_unfinalized_account_error(
+                        inner,
+                        signature,
+                        task.as_ref(),
+                    )
+                    .await
+                } else {
+                    error!(
+                        "RPC returned unexpected task index: {}. optimized_tasks_len: {}",
+                        err, optimized_tasks.len()
+                    );
+                    Ok(ControlFlow::Break(()))
+                }
+            }
             TransactionStrategyExecutionError::ActionsError(_, _) => {
                 // Unexpected in Two Stage commit
                 // That would mean that Two Stage executes Standalone commit
@@ -172,6 +202,40 @@ where
                 Ok(ControlFlow::Break(()))
             }
         }
+    }
+
+    /// Handles unfinalized account error
+    /// Sends a separate tx to finalize account and then continues execution
+    async fn handle_unfinalized_account_error(
+        inner: &IntentExecutorImpl<T, F>,
+        failed_signature: &Option<Signature>,
+        task: &dyn BaseTask,
+    ) -> IntentExecutorResult<ControlFlow<(), TransactionStrategy>> {
+        let Some(commit_meta) = TaskVisitorUtils::commit_meta(task) else {
+            // Can't recover - break execution
+            return Ok(ControlFlow::Break(()));
+        };
+        let finalize_task: Box<dyn BaseTask> =
+            Box::new(ArgsTask::new(ArgsTaskType::Finalize(commit_meta.into())));
+        inner
+            .prepare_and_execute_strategy(
+                &mut TransactionStrategy {
+                    optimized_tasks: vec![finalize_task],
+                    lookup_tables_keys: vec![],
+                },
+                &None::<IntentPersisterImpl>,
+            )
+            .await
+            .map_err(IntentExecutorError::FailedCommitPreparationError)?
+            .map_err(|err| IntentExecutorError::FailedToCommitError {
+                err,
+                signature: *failed_signature,
+            })?;
+
+        Ok(ControlFlow::Continue(TransactionStrategy {
+            optimized_tasks: vec![],
+            lookup_tables_keys: vec![],
+        }))
     }
 }
 
@@ -261,7 +325,11 @@ where
         finalize_strategy: &mut TransactionStrategy,
     ) -> IntentExecutorResult<ControlFlow<(), TransactionStrategy>> {
         match err {
-            TransactionStrategyExecutionError::CommitIDError(_, _) => {
+            TransactionStrategyExecutionError::CommitIDError(_, _)
+            | TransactionStrategyExecutionError::UnfinalizedAccountError(
+                _,
+                _,
+            ) => {
                 // Unexpected error in Two Stage commit
                 error!("Unexpected error in two stage finalize flow: {}", err);
                 Ok(ControlFlow::Break(()))
