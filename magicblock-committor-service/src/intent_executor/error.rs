@@ -177,6 +177,8 @@ impl TransactionStrategyExecutionError {
         tasks: &[Box<dyn BaseTask>],
     ) -> Result<Self, TransactionError> {
         // There's always 3 budget instructions in front
+        // TODO (snawaz): this is offset-sensitive, if we add or remove any instruction from the
+        // front, that leads to incorrect error reporting. so if possible, make it offset-insensitive.
         const OFFSET: u8 = 3;
         const NONCE_OUT_OF_ORDER: u32 =
             dlp::error::DlpError::NonceOutOfOrder as u32;

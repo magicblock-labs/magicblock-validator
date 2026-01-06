@@ -15,7 +15,7 @@ use futures::future::join_all;
 use magicblock_committor_program::pdas;
 use magicblock_committor_service::{
     intent_executor::{
-        error::{IntentExecutorError, TransactionStrategyExecutionError},
+        error::TransactionStrategyExecutionError,
         task_info_fetcher::{CacheTaskInfoFetcher, TaskInfoFetcher},
         ExecutionOutput, IntentExecutionResult, IntentExecutor,
         IntentExecutorImpl,
@@ -52,7 +52,6 @@ use solana_sdk::{
     transaction::Transaction,
 };
 
-use self::utils::transactions::print_log_messages;
 use crate::{
     common::TestFixture,
     utils::{
@@ -363,16 +362,6 @@ async fn test_commit_id_error_recovery() {
         inner: res,
         patched_errors,
     } = res;
-
-    if let Err(IntentExecutorError::FailedToFinalizeError {
-        err: _,
-        commit_signature: _,
-        finalize_signature: Some(sig),
-    }) = &res
-    {
-        let rpc_client = RpcClient::new("http://localhost:7799".to_string());
-        print_log_messages(&rpc_client, sig).await;
-    }
 
     assert!(
         res.is_ok(),

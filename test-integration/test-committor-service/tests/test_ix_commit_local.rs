@@ -109,7 +109,7 @@ async fn test_ix_commit_order_book_change_671_bytes() {
 async fn test_ix_commit_order_book_change_673_bytes() {
     // We cannot use 672 as changed_len because that both 671 and 672 produce encoded tx
     // of size 1644 (which is the max limit), but while the size of raw bytes for 671 is within
-    // 1232 limit, the size for 672 execeds by 1 (1233). That is why we used
+    // 1232 limit, the size for 672 exceeds by 1 (1233). That is why we used
     // 673 as changed_len where CommitStrategy goes from Args to FromBuffer.
     commit_book_order_account(673, CommitStrategy::FromBuffer, false).await;
 }

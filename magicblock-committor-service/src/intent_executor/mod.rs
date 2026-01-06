@@ -619,8 +619,6 @@ where
             )
             .await?;
 
-        //      println!("prepared_message: {:#?}", prepared_message);
-
         // Execute strategy
         let execution_result = self
             .execute_message_with_retries(

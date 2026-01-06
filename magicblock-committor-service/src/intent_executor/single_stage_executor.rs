@@ -58,8 +58,6 @@ where
                 .await
                 .map_err(IntentExecutorError::FailedFinalizePreparationError)?;
 
-            println!("execution_result: {:#?}", execution_result);
-
             // Process error: Ok - return, Err - handle further
             let execution_err = match execution_result {
                 // break with result, strategy that was executed at this point has to be returned for cleanup
@@ -133,7 +131,6 @@ where
             TransactionStrategyExecutionError::CommitIDError(_, _) => {
                 // Here we patch strategy for it to be retried in next iteration
                 // & we also record data that has to be cleaned up after patch
-                println!("patch_strategy");
                 let to_cleanup = inner
                     .handle_commit_id_error(
                         committed_pubkeys,
