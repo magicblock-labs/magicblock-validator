@@ -36,7 +36,7 @@ impl TransactionProcessingCallback for super::TransactionExecutor {
             AccountSharedData::new(1, name.len(), &native_loader::id());
         account.set_data_from_slice(name.as_bytes());
         account.set_executable(true);
-        self.accountsdb.insert_account(program_id, &account);
+        let _ = self.accountsdb.insert_account(program_id, &account);
     }
 
     fn calculate_fee(

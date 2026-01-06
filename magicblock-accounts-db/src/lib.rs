@@ -4,6 +4,7 @@ use error::AccountsDbError;
 use index::{
     iterator::OffsetPubkeyIter, utils::AccountOffsetFinder, AccountsDbIndex,
 };
+use lmdb::{RwTransaction, Transaction};
 use log::{error, warn};
 use magicblock_config::config::AccountsDbConfig;
 use magicblock_core::traits::AccountsBank;
@@ -88,7 +89,20 @@ impl AccountsDb {
 
     /// Insert account with given pubkey into the database
     /// Note: this method removes zero lamport account from database
-    pub fn insert_account(&self, pubkey: &Pubkey, account: &AccountSharedData) {
+    pub fn insert_account(
+        &self,
+        pubkey: &Pubkey,
+        account: &AccountSharedData,
+    ) -> AccountsDbResult<()> {
+        let mut txn = Option::<RwTransaction>::None;
+        macro_rules! txn {
+            () => {
+                match txn.as_mut() {
+                    Some(t) => t,
+                    None => txn.insert(self.index.rwtxn()?),
+                }
+            };
+        }
         // NOTE: we don't check for non-zero lamports since we allow to store zero-lamport accounts
         // for the following two cases:
         // - when we clone a compressed account we reflect the exact lamports it has which maybe
@@ -97,23 +111,22 @@ impl AccountsDb {
         //   find it, i.e. in the case of an escrow account to avoid doing that over and over
         match account {
             AccountSharedData::Borrowed(acc) => {
+                // check whether the account's owner has changed
+                if acc.owner_changed() {
+                    self.index
+                        .ensure_correct_owner(pubkey, account.owner(), txn!())
+                        .inspect_err(log_err!(
+                            "failed to ensure correct account owner for {}",
+                            pubkey
+                        ))?;
+                }
+                // and perform some index bookkeeping to ensure a correct owner
                 // For borrowed variants everything is already written and we just increment the
                 // atomic counter. New readers will see the latest update.
                 acc.commit();
-                // check whether the account's owner has changed
-                if !acc.owner_changed() {
-                    return;
-                }
-                // and perform some index bookkeeping to ensure a correct owner
-                let _ = self
-                    .index
-                    .ensure_correct_owner(pubkey, account.owner())
-                    .inspect_err(log_err!(
-                        "failed to ensure correct account owner for {}",
-                        pubkey
-                    ));
             }
             AccountSharedData::Owned(acc) => {
+                let txn = txn!();
                 let datalen = account.data().len() as u32;
                 let block_size = self.storage.block_size() as u32;
                 let size = AccountSharedData::serialized_size_aligned(
@@ -123,7 +136,9 @@ impl AccountsDb {
                 let blocks = self.storage.get_block_count(size);
                 // TODO(bmuddha) perf optimization: use reallocs sparringly
                 // https://github.com/magicblock-labs/magicblock-validator/issues/327
-                let allocation = match self.index.try_recycle_allocation(blocks)
+                let allocation = match self
+                    .index
+                    .try_recycle_allocation(blocks, txn)
                 {
                     // if we could recycle some "hole" in the database, use it
                     Ok(recycled) => {
@@ -136,10 +151,19 @@ impl AccountsDb {
                     Err(err) => {
                         // This can only happen if we have catastrophic system mulfunction
                         error!("failed to insert account, index allocation check error: {err}");
-                        return;
+                        return Err(err);
                     }
                 };
 
+                // update accounts index
+                let dealloc = self
+                    .index
+                    .insert_account(pubkey, account.owner(), allocation, txn)
+                    .inspect_err(log_err!("account index insertion"))?;
+                if let Some(dealloc) = dealloc {
+                    // bookkeeping for deallocated (free hole) space
+                    self.storage.increment_deallocations(dealloc.blocks);
+                }
                 // SAFETY:
                 // Allocation object is constructed by obtaining a valid offset from storage, which
                 // is unoccupied by other accounts, points to valid memory within mmap and is
@@ -151,19 +175,136 @@ impl AccountsDb {
                         block_size * allocation.blocks,
                     )
                 };
-                // update accounts index
-                let dealloc = self
-                    .index
-                    .insert_account(pubkey, account.owner(), allocation)
-                    .inspect_err(log_err!("account index insertion"))
-                    .ok()
-                    .flatten();
-                if let Some(dealloc) = dealloc {
-                    // bookkeeping for deallocated (free hole) space
-                    self.storage.increment_deallocations(dealloc.blocks);
-                }
             }
         }
+        if let Some(txn) = txn {
+            txn.commit()?;
+        }
+        Ok(())
+    }
+
+    pub fn insert_batch<'a>(
+        &self,
+        accounts: impl Iterator<Item = &'a (Pubkey, AccountSharedData)> + Clone,
+    ) -> AccountsDbResult<()> {
+        let mut txn = Option::<RwTransaction>::None;
+        macro_rules! txn {
+            () => {
+                match txn.as_mut() {
+                    Some(t) => t,
+                    None => txn.insert(self.index.rwtxn()?),
+                }
+            };
+        }
+        let mut error = Option::<AccountsDbError>::None;
+        macro_rules! break_error {
+            ($error: expr, $msg: expr) => {
+                error!($msg, $error);
+                error.replace($error);
+                break;
+            };
+        }
+
+        let mut commited = 0;
+        for (pubkey, account) in accounts.clone() {
+            match account {
+                AccountSharedData::Borrowed(acc) => {
+                    // check whether the account's owner has changed
+                    if acc.owner_changed() {
+                        if let Err(err) = self.index.ensure_correct_owner(
+                            pubkey,
+                            account.owner(),
+                            txn!(),
+                        ) {
+                            break_error!(err, "account owner index update: {}");
+                        }
+                    }
+                    // and perform some index bookkeeping to ensure a correct owner
+                    // For borrowed variants everything is already written and we just increment the
+                    // atomic counter. New readers will see the latest update.
+                    acc.commit();
+                }
+                AccountSharedData::Owned(acc) => {
+                    let txn = txn!();
+                    let datalen = account.data().len() as u32;
+                    let block_size = self.storage.block_size() as u32;
+                    let size = AccountSharedData::serialized_size_aligned(
+                        datalen, block_size,
+                    ) as usize;
+
+                    let blocks = self.storage.get_block_count(size);
+                    // TODO(bmuddha) perf optimization: use reallocs sparringly
+                    // https://github.com/magicblock-labs/magicblock-validator/issues/327
+                    let allocation = match self
+                        .index
+                        .try_recycle_allocation(blocks, txn)
+                    {
+                        // if we could recycle some "hole" in the database, use it
+                        Ok(recycled) => {
+                            // bookkeeping for the deallocated (free hole) space
+                            self.storage
+                                .decrement_deallocations(recycled.blocks);
+                            self.storage.recycle(recycled)
+                        }
+                        // otherwise allocate from the end of memory map
+                        Err(AccountsDbError::NotFound) => {
+                            self.storage.alloc(size)
+                        }
+                        Err(err) => {
+                            // This can only happen if we have catastrophic system mulfunction
+                            break_error!(err, "failed to insert account, index allocation check error: {}");
+                        }
+                    };
+
+                    // update accounts index
+                    let result = self.index.insert_account(
+                        pubkey,
+                        account.owner(),
+                        allocation,
+                        txn,
+                    );
+                    match result {
+                        Ok(Some(dealloc)) => {
+                            // bookkeeping for deallocated (free hole) space
+                            self.storage
+                                .increment_deallocations(dealloc.blocks);
+                        }
+                        Ok(None) => (),
+                        Err(err) => {
+                            break_error!(
+                                err,
+                                "account index insertion failed: {}"
+                            );
+                        }
+                    }
+                    // SAFETY:
+                    // Allocation object is constructed by obtaining a valid offset from storage, which
+                    // is unoccupied by other accounts, points to valid memory within mmap and is
+                    // properly aligned to 8 bytes, so the contract of serialize_to_mmap is satisfied
+                    unsafe {
+                        AccountSharedData::serialize_to_mmap(
+                            acc,
+                            allocation.storage.as_ptr(),
+                            block_size * allocation.blocks,
+                        )
+                    };
+                }
+            }
+            commited += 1;
+        }
+        if let Some(error) = error {
+            for (_, account) in accounts.take(commited) {
+                // # Safety
+                // we are only rolling back account which we have just committed,
+                // thus it is guaranteed that the rollback buffer is initialized
+                unsafe { account.rollback() };
+            }
+            return Err(error);
+        }
+        if let Some(txn) = txn {
+            txn.commit()?;
+        }
+        Ok(())
     }
 
     /// Check whether given account is owned by any of the programs in the provided list

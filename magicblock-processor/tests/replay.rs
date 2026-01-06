@@ -58,7 +58,7 @@ async fn create_transaction_in_ledger(
 
     // Revert accounts to their previous state to simulate `AccountsDb` being behind the ledger.
     for (pubkey, acc) in &pre_account_states {
-        env.accountsdb.insert_account(pubkey, acc);
+        let _ = env.accountsdb.insert_account(pubkey, acc);
     }
 
     // Confirm the transaction is in the ledger and retrieve it.
