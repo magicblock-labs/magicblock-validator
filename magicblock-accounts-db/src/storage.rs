@@ -399,7 +399,7 @@ fn calculate_db_size(config: &AccountsDbConfig) -> usize {
     (block_num + meta_blocks) * block_size
 }
 
-#[cfg_attr(test, derive(Clone, Copy))]
+#[derive(Clone, Copy)]
 pub(crate) struct Allocation {
     pub(crate) storage: NonNull<u8>,
     pub(crate) offset: Offset,

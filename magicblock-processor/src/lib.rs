@@ -41,7 +41,7 @@ pub fn build_svm_env(
         else {
             continue;
         };
-        accountsdb.insert_account(feature_id, &account);
+        let _ = accountsdb.insert_account(feature_id, &account);
     }
 
     // We have a static rent which is setup once at startup,

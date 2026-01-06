@@ -99,13 +99,14 @@ impl TransactionSchedulerState {
         if !accountsdb.contains_account(&sysvar::clock::ID) {
             let clock = AccountSharedData::new_data(1, &block.clock, owner);
             if let Ok(acc) = clock {
-                accountsdb.insert_account(&sysvar::clock::ID, &acc);
+                let _ = accountsdb.insert_account(&sysvar::clock::ID, &acc);
             }
         }
         if !accountsdb.contains_account(&sysvar::slot_hashes::ID) {
             let sh = SlotHashes::new(&[(block.slot, block.blockhash)]);
             if let Ok(acc) = AccountSharedData::new_data(1, &sh, owner) {
-                accountsdb.insert_account(&sysvar::slot_hashes::ID, &acc);
+                let _ =
+                    accountsdb.insert_account(&sysvar::slot_hashes::ID, &acc);
             }
         }
 
@@ -113,7 +114,8 @@ impl TransactionSchedulerState {
         if !accountsdb.contains_account(&sysvar::epoch_schedule::ID) {
             let es = EpochSchedule::new(DEFAULT_SLOTS_PER_EPOCH);
             if let Ok(acc) = AccountSharedData::new_data(1, &es, owner) {
-                accountsdb.insert_account(&sysvar::epoch_schedule::ID, &acc);
+                let _ = accountsdb
+                    .insert_account(&sysvar::epoch_schedule::ID, &acc);
             }
         }
         if !accountsdb.contains_account(&sysvar::rent::ID) {
@@ -126,7 +128,7 @@ impl TransactionSchedulerState {
                     AccountSharedData::new_data(1, rent, owner).ok()
                 });
             if let Some(acc) = account {
-                accountsdb.insert_account(&sysvar::rent::ID, &acc);
+                let _ = accountsdb.insert_account(&sysvar::rent::ID, &acc);
             }
         }
     }

@@ -1,4 +1,5 @@
 use log::*;
+use magicblock_accounts_db::AccountsDbResult;
 use magicblock_core::{
     link::{
         accounts::{AccountWithSlot, LockedAccount},
@@ -12,7 +13,6 @@ use magicblock_core::{
 use magicblock_metrics::metrics::{
     FAILED_TRANSACTIONS_COUNT, TRANSACTION_COUNT,
 };
-use solana_account::ReadableAccount;
 use solana_pubkey::Pubkey;
 use solana_svm::{
     account_loader::{AccountsBalances, CheckedTransactionDetails},
@@ -61,7 +61,7 @@ impl super::TransactionExecutor {
                 // Transaction failed to load, we persist it to the
                 // ledger, only for the convenience of the user
                 let status = Err(err);
-                self.commit_failed_transaction(txn, status.clone());
+                self.commit_failed_transaction(txn, status.clone(), None);
                 FAILED_TRANSACTIONS_COUNT.inc();
                 tx.map(|tx| tx.send(status));
                 // NOTE:
@@ -76,7 +76,23 @@ impl super::TransactionExecutor {
         // Failed transactions still pay fees, so we need to
         // commit the accounts even if the transaction failed
         let feepayer = *txn.fee_payer();
-        self.commit_accounts(feepayer, &processed, is_replay);
+        if let Err(err) = self.commit_accounts(feepayer, &processed, is_replay)
+        {
+            let error = Err(TransactionError::CommitCancelled);
+            // Transaction failed to load, we persist it to the
+            // ledger, only for the convenience of the user
+            self.commit_failed_transaction(
+                txn,
+                error.clone(),
+                Some(vec![err.to_string()]),
+            );
+            FAILED_TRANSACTIONS_COUNT.inc();
+            tx.map(|tx| tx.send(error));
+            // NOTE:
+            // Transactions that failed to load, cannot have touched the thread
+            // local storage, thus there's no need to clear it before returning
+            return;
+        }
 
         let result = processed.status();
         if result.is_ok() && !is_replay {
@@ -254,11 +270,13 @@ impl super::TransactionExecutor {
         &self,
         txn: SanitizedTransaction,
         status: TransactionResult<()>,
+        logs: Option<Vec<String>>,
     ) {
         let meta = TransactionStatusMeta {
             status,
             pre_balances: vec![0; txn.message().account_keys().len()],
             post_balances: vec![0; txn.message().account_keys().len()],
+            log_messages: logs,
             ..Default::default()
         };
         let signature = *txn.signature();
@@ -278,7 +296,7 @@ impl super::TransactionExecutor {
         feepayer: Pubkey,
         result: &ProcessedTransaction,
         is_replay: bool,
-    ) {
+    ) -> AccountsDbResult<()> {
         let succeeded = result.status().is_ok();
         let accounts = match result {
             ProcessedTransaction::Executed(executed) => {
@@ -301,7 +319,7 @@ impl super::TransactionExecutor {
                 let RollbackAccounts::FeePayerOnly { fee_payer_account } =
                     &fo.rollback_accounts
                 else {
-                    return;
+                    return Ok(());
                 };
                 &[(feepayer, fee_payer_account.clone())]
             }
@@ -314,29 +332,29 @@ impl super::TransactionExecutor {
             .map(|feepayer| feepayer.1.privileged())
             .unwrap_or_default();
 
+        // only persist account's update if it was actually modified, ignore
+        // the rest, even if an account was writeable in the transaction.
+        //
+        // We also don't persist accounts that are empty, with an exception
+        // for special cases, when those are inserted forcefully as placeholders
+        // (for example by the chainlink), those cases can be distinguished from
+        // others by the fact that such a transaction is always running in a
+        // privileged mode.
+        let to_commit = accounts
+            .iter()
+            .filter(|(_, acc)| acc.is_dirty() || privileged);
+        self.accountsdb.insert_batch(to_commit)?;
+        if is_replay {
+            return Ok(());
+        }
         for (pubkey, account) in accounts {
-            // only persist account's update if it was actually modified, ignore
-            // the rest, even if an account was writeable in the transaction.
-            //
-            // We also don't persist accounts that are empty, with an exception
-            // for special cases, when those are inserted forcefully as placeholders
-            // (for example by the chainlink), those cases can be distinguished from
-            // others by the fact that such a transaction is always running in a
-            // privileged mode.
-            if !account.is_dirty() || (account.lamports() == 0 && !privileged) {
-                continue;
-            }
-            self.accountsdb.insert_account(pubkey, account);
-
-            if is_replay {
-                continue;
-            }
             let account = AccountWithSlot {
                 slot: self.processor.slot,
                 account: LockedAccount::new(*pubkey, account.clone()),
             };
             let _ = self.accounts_tx.send(account);
         }
+        Ok(())
     }
 
     /// Ensure that no post execution account state violations occurred:
