@@ -148,8 +148,11 @@ jobs:
         if: matrix.build.OS == 'windows-latest'
         shell: powershell
         run: |
-          # Most prost/protobuf build scripts respect PROTOC
-          "PROTOC=protoc" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          # Force prost/protobuf build scripts to use precompiled protoc
+          $protoc = "C:\hostedtoolcache\windows\protoc\v26.1\x64\bin\protoc.exe"
+          "PROTOC=$protoc" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "PROTOBUF_PROTOC=$protoc" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "PROST_BUILD_SKIP_VENDOR_PROTOBUF=1" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Install Windows dependencies and OpenSSL
         if: matrix.build.OS == 'windows-latest'
@@ -173,41 +176,9 @@ jobs:
           "OPENSSL_INCLUDE_DIR=$inst\include" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "OPENSSL_LIB_DIR=$inst\lib"         | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
-      - name: Install MSYS2 (mingw64) for protobuf-src (Windows)
+      - name: Setup MSVC dev cmd (Windows)
         if: matrix.build.OS == 'windows-latest'
-        uses: msys2/setup-msys2@v2
-        with:
-          msystem: MINGW64
-          update: true
-          install: >-
-            base-devel
-            mingw-w64-x86_64-toolchain
-            autoconf
-            automake
-            libtool
-            make
-            perl
-            pkgconf
-
-      - name: Force autotools to use gcc (Windows)
-        if: matrix.build.OS == 'windows-latest'
-        shell: powershell
-        run: |
-          "C:\msys64\mingw64\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-          "C:\msys64\usr\bin"     | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-          "CC=gcc"      | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          "CXX=g++"     | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          "AR=ar"       | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          "RANLIB=ranlib"| Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-
-      - name: Debug toolchain (Windows)
-        if: matrix.build.OS == 'windows-latest'
-        shell: powershell
-        run: |
-          where sh
-          where gcc
-          where cl
-          gcc --version
+        uses: ilammy/msvc-dev-cmd@v1
 
       - name: Build (linux/macos/windows)
         uses: actions-rs/cargo@v1
