@@ -154,131 +154,180 @@ where
         mut subscription_updates: mpsc::Receiver<ForwardedSubscriptionUpdate>,
     ) {
         tokio::spawn(async move {
-            while let Some(update) = subscription_updates.recv().await {
-                trace!("FetchCloner received subscription update for {} at slot {}",
-                    update.pubkey, update.account.slot());
-                let pubkey = update.pubkey;
+            let mut pending_tasks: JoinSet<()> = JoinSet::new();
 
-                // Process each subscription update concurrently to avoid blocking on delegation
-                // record fetches. This allows multiple updates to be processed in parallel.
-                let this = Arc::clone(&self);
-                tokio::spawn(async move {
-                    let (resolved_account, deleg_record) =
-                    this.resolve_account_to_clone_from_forwarded_sub_with_unsubscribe(update)
-                    .await;
-                    if let Some(account) = resolved_account {
-                        // Ensure that the subscription update isn't out of order, i.e. we don't already
-                        // hold a newer version of the account in our bank
-                        let out_of_order_slot = this
-                            .accounts_bank
-                            .get_account(&pubkey)
-                            .and_then(|in_bank| {
-                                if in_bank.remote_slot()
-                                    >= account.remote_slot()
-                                {
-                                    Some(in_bank.remote_slot())
-                                } else {
-                                    None
-                                }
-                            });
-                        if let Some(in_bank_slot) = out_of_order_slot {
-                            warn!(
-                            "Ignoring out-of-order subscription update for {pubkey}: bank slot {in_bank_slot}, update slot {}",
-                            account.remote_slot()
-                        );
-                            return;
-                        }
+            loop {
+                // Try to receive a new update without blocking to drain tasks first if available
+                match subscription_updates.try_recv() {
+                    Ok(update) => {
+                        trace!("FetchCloner received subscription update for {} at slot {}",
+                            update.pubkey, update.account.slot());
+                        let pubkey = update.pubkey;
 
-                        if let Some(in_bank) =
-                            this.accounts_bank.get_account(&pubkey)
-                        {
-                            if in_bank.undelegating() {
-                                // We expect the account to still be delegated, but with the delegation
-                                // program owner
-                                debug!("Received update for undelegating account {pubkey} \
-                                in_bank.delegated={}, \
-                                in_bank.owner={}, \
-                                in_bank.remote_slot={}, \
-                                chain.delegated={}, \
-                                chain.owner={}, \
-                                chain.remote_slot={}",
-                                in_bank.delegated(),
-                                in_bank.owner(),
-                                in_bank.remote_slot(),
-                                account.delegated(),
-                                account.owner(),
-                                account.remote_slot()
-                            );
+                        // Process each subscription update concurrently to avoid blocking on delegation
+                        // record fetches. This allows multiple updates to be processed in parallel.
+                        let this = Arc::clone(&self);
+                        pending_tasks.spawn(async move {
+                            Self::process_subscription_update(&this, pubkey, update).await;
+                        });
 
-                                // This will only be true in the following case:
-                                // 1. a commit was triggered for the account
-                                // 2. a commit + undelegate was triggered for the account -> undelegating
-                                // 3. we receive the update for (1.)
-                                //
-                                // Thus our state is more up to date and we don't need to update our
-                                // bank.
-                                if account_still_undelegating_on_chain(
-                                    &pubkey,
-                                    account.delegated(),
-                                    in_bank.remote_slot(),
-                                    deleg_record,
-                                    &this.validator_pubkey,
-                                ) {
-                                    return;
-                                }
-                            } else if in_bank.owner().eq(&dlp::id()) {
-                                debug!(
-                                "Received update for {pubkey} owned by deleg program not marked as undelegating"
-                            );
+                        // Drain any completed tasks before continuing
+                        while let Some(result) = pending_tasks.try_join_next() {
+                            if let Err(e) = result {
+                                error!("Subscription update task panicked: {e:?}");
                             }
-                        } else {
-                            warn!(
-                            "Received update for {pubkey} which is not in bank"
-                        );
-                        }
-
-                        // Determine if delegated to another validator
-                        let delegated_to_other = deleg_record
-                            .as_ref()
-                            .and_then(|dr| this.get_delegated_to_other(dr));
-
-                        // Once we clone an account that is delegated to us we no longer need
-                        // to receive updates for it from chain
-                        // The subscription will be turned back on once the committor service schedules
-                        // a commit for it that includes undelegation
-                        if account.delegated() {
-                            if let Err(err) = this
-                                .remote_account_provider
-                                .unsubscribe(&pubkey)
-                                .await
-                            {
-                                error!(
-                                "Failed to unsubscribe from delegated account {pubkey}: {err}"
-                            );
-                            }
-                        }
-
-                        if account.executable() {
-                            this.handle_executable_sub_update(pubkey, account)
-                                .await;
-                        } else if let Err(err) = this
-                            .cloner
-                            .clone_account(AccountCloneRequest {
-                                pubkey,
-                                account,
-                                commit_frequency_ms: None,
-                                delegated_to_other,
-                            })
-                            .await
-                        {
-                            error!(
-                            "Failed to clone account {pubkey} into bank: {err}"
-                        );
                         }
                     }
-                });
+                    Err(tokio::sync::mpsc::error::TryRecvError::Empty) => {
+                        // No messages available - wait for either a new message or task completion
+                        tokio::select! {
+                            maybe_update = subscription_updates.recv() => {
+                                let Some(update) = maybe_update else {
+                                    // Channel closed, drain remaining tasks and exit
+                                    while pending_tasks.join_next().await.is_some() {}
+                                    break;
+                                };
+
+                                trace!("FetchCloner received subscription update for {} at slot {}",
+                                    update.pubkey, update.account.slot());
+                                let pubkey = update.pubkey;
+
+                                let this = Arc::clone(&self);
+                                pending_tasks.spawn(async move {
+                                    Self::process_subscription_update(&this, pubkey, update).await;
+                                });
+                            }
+                            Some(result) = pending_tasks.join_next(), if !pending_tasks.is_empty() => {
+                                if let Err(e) = result {
+                                    error!("Subscription update task panicked: {e:?}");
+                                }
+                            }
+                        }
+                    }
+                    Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {
+                        // Channel closed, drain remaining tasks and exit
+                        while pending_tasks.join_next().await.is_some() {}
+                        break;
+                    }
+                }
             }
         });
+    }
+
+    /// Process a single subscription update
+    async fn process_subscription_update(
+        this: &Arc<Self>,
+        pubkey: Pubkey,
+        update: ForwardedSubscriptionUpdate,
+    ) {
+        let (resolved_account, deleg_record) =
+            this.resolve_account_to_clone_from_forwarded_sub_with_unsubscribe(update)
+                .await;
+        if let Some(account) = resolved_account {
+            // Ensure that the subscription update isn't out of order, i.e. we don't already
+            // hold a newer version of the account in our bank
+            let out_of_order_slot = this
+                .accounts_bank
+                .get_account(&pubkey)
+                .and_then(|in_bank| {
+                    if in_bank.remote_slot() >= account.remote_slot() {
+                        Some(in_bank.remote_slot())
+                    } else {
+                        None
+                    }
+                });
+            if let Some(in_bank_slot) = out_of_order_slot {
+                warn!(
+                    "Ignoring out-of-order subscription update for {pubkey}: bank slot {in_bank_slot}, update slot {}",
+                    account.remote_slot()
+                );
+                return;
+            }
+
+            if let Some(in_bank) = this.accounts_bank.get_account(&pubkey) {
+                if in_bank.undelegating() {
+                    // We expect the account to still be delegated, but with the delegation
+                    // program owner
+                    debug!("Received update for undelegating account {pubkey} \
+                        in_bank.delegated={}, \
+                        in_bank.owner={}, \
+                        in_bank.remote_slot={}, \
+                        chain.delegated={}, \
+                        chain.owner={}, \
+                        chain.remote_slot={}",
+                        in_bank.delegated(),
+                        in_bank.owner(),
+                        in_bank.remote_slot(),
+                        account.delegated(),
+                        account.owner(),
+                        account.remote_slot()
+                    );
+
+                    // This will only be true in the following case:
+                    // 1. a commit was triggered for the account
+                    // 2. a commit + undelegate was triggered for the account -> undelegating
+                    // 3. we receive the update for (1.)
+                    //
+                    // Thus our state is more up to date and we don't need to update our
+                    // bank.
+                    if account_still_undelegating_on_chain(
+                        &pubkey,
+                        account.delegated(),
+                        in_bank.remote_slot(),
+                        deleg_record,
+                        &this.validator_pubkey,
+                    ) {
+                        return;
+                    }
+                } else if in_bank.owner().eq(&dlp::id()) {
+                    debug!(
+                        "Received update for {pubkey} owned by deleg program not marked as undelegating"
+                    );
+                }
+            } else {
+                warn!(
+                    "Received update for {pubkey} which is not in bank"
+                );
+            }
+
+            // Determine if delegated to another validator
+            let delegated_to_other = deleg_record
+                .as_ref()
+                .and_then(|dr| this.get_delegated_to_other(dr));
+
+            // Once we clone an account that is delegated to us we no longer need
+            // to receive updates for it from chain
+            // The subscription will be turned back on once the committor service schedules
+            // a commit for it that includes undelegation
+            if account.delegated() {
+                if let Err(err) = this
+                    .remote_account_provider
+                    .unsubscribe(&pubkey)
+                    .await
+                {
+                    error!(
+                        "Failed to unsubscribe from delegated account {pubkey}: {err}"
+                    );
+                }
+            }
+
+            if account.executable() {
+                this.handle_executable_sub_update(pubkey, account).await;
+            } else if let Err(err) = this
+                .cloner
+                .clone_account(AccountCloneRequest {
+                    pubkey,
+                    account,
+                    commit_frequency_ms: None,
+                    delegated_to_other,
+                })
+                .await
+            {
+                error!(
+                    "Failed to clone account {pubkey} into bank: {err}"
+                );
+            }
+        }
     }
 
     async fn handle_executable_sub_update(
