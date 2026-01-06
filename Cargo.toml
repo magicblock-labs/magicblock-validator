@@ -98,7 +98,7 @@ magicblock-committor-program = { path = "./magicblock-committor-program", featur
 magicblock-committor-service = { path = "./magicblock-committor-service" }
 magicblock-config = { path = "./magicblock-config" }
 magicblock-core = { path = "./magicblock-core" }
-magicblock-delegation-program = { git = "https://github.com/magicblock-labs/delegation-program.git", rev = "3edb41022", features = [
+magicblock-delegation-program = { git = "https://github.com/magicblock-labs/delegation-program.git", rev = "1874b4f5f5f55cb9ab54b64de2cc0d41107d1435", features = [
   "no-entrypoint",
 ] }
 magicblock-ledger = { path = "./magicblock-ledger" }

@@ -85,6 +85,9 @@ pub trait BaseTask: Send + Sync + DynClone + LabelValue {
     /// Returns [`Task`] budget
     fn compute_units(&self) -> u32;
 
+    /// Returns the max accounts-data-size that can be used with SetLoadedAccountsDataSizeLimit
+    fn accounts_size_budget(&self) -> u32;
+
     /// Returns current [`TaskStrategy`]
     #[cfg(test)]
     fn strategy(&self) -> TaskStrategy;
