@@ -44,7 +44,9 @@ where
 
     // Subscribe first so subsequent fetches are kept up-to-date
     for (ata_pubkey, _, ata_info, ata_account_slot) in &atas {
-        let _ = this.subscribe_to_account(ata_pubkey).await;
+        if let Err(err) = this.subscribe_to_account(ata_pubkey).await {
+            warn!("Failed to subscribe to ATA {}: {}", ata_pubkey, err);
+        }
         if let Some((eata, _)) =
             try_derive_eata_address_and_bump(&ata_info.owner, &ata_info.mint)
         {
