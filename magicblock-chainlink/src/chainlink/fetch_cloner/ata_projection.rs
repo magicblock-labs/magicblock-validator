@@ -1,12 +1,10 @@
 use log::*;
 use magicblock_core::{
-    token_programs::{
-        try_derive_eata_address_and_bump, MaybeIntoAta, EATA_PROGRAM_ID,
-    },
+    token_programs::{try_derive_eata_address_and_bump, MaybeIntoAta},
     traits::AccountsBank,
 };
 use magicblock_metrics::metrics;
-use solana_account::{AccountSharedData, ReadableAccount};
+use solana_account::AccountSharedData;
 use solana_pubkey::Pubkey;
 use tokio::task::JoinSet;
 
@@ -117,9 +115,7 @@ where
                         eata_shared.maybe_into_ata(deleg.owner)
                     {
                         account_to_clone = projected_ata;
-                        if account_to_clone.owner() != &EATA_PROGRAM_ID {
-                            account_to_clone.set_delegated(true);
-                        }
+                        account_to_clone.set_delegated(true);
                     }
                 }
             }
