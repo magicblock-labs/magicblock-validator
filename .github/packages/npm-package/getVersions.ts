@@ -7,8 +7,7 @@ interface PackageJson {
 }
 
 function readPackageJson(): PackageJson {
-  // When compiled to lib/, we need to go up one directory to find package.json
-  const packageJsonPath = path.join(__dirname, "../package.json");
+  const packageJsonPath = path.join(__dirname, "./package.json");
   const packageJsonContent = fs.readFileSync(packageJsonPath, "utf8");
   return JSON.parse(packageJsonContent);
 }
