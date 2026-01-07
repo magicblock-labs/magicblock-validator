@@ -48,13 +48,13 @@ where
     // Subscribe first so subsequent fetches are kept up-to-date
     for (ata_pubkey, _, ata_info, ata_account_slot) in &atas {
         if let Err(err) = this.subscribe_to_account(ata_pubkey).await {
-            error!("Failed to subscribe to ATA {}: {}", ata_pubkey, err);
+            warn!("Failed to subscribe to ATA {}: {}", ata_pubkey, err);
         }
         if let Some((eata, _)) =
             try_derive_eata_address_and_bump(&ata_info.owner, &ata_info.mint)
         {
             if let Err(err) = this.subscribe_to_account(&eata).await {
-                error!("Failed to subscribe to derived eATA {}: {}", eata, err);
+                warn!("Failed to subscribe to derived eATA {}: {}", eata, err);
             }
 
             let effective_slot = if let Some(min_slot) = min_context_slot {
