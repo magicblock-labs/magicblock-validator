@@ -12,7 +12,7 @@ use super::{
     subscription::{cancel_subs, CancelStrategy},
     types::{
         AccountWithCompanion, ClassifiedAccounts, ExistingSubs,
-        ResolvedDelegatedAccounts, ResolvedPrograms,
+        PartitionedNotFound, ResolvedDelegatedAccounts, ResolvedPrograms,
     },
     FetchCloner,
 };
@@ -63,79 +63,23 @@ pub(crate) fn classify_remote_accounts(
     accs: Vec<RemoteAccount>,
     pubkeys: &[Pubkey],
 ) -> ClassifiedAccounts {
-    let (not_found, plain, owned_by_deleg, programs, atas) =
-        accs.into_iter().zip(pubkeys).fold(
-            (vec![], vec![], vec![], vec![], vec![]),
-            |(
-                mut not_found,
-                mut plain,
-                mut owned_by_deleg,
-                mut programs,
-                mut atas,
-            ),
-             (acc, &pubkey)| {
-                use RemoteAccount::*;
-                match acc {
-                    NotFound(slot) => not_found.push((pubkey, slot)),
-                    Found(remote_account_state) => {
-                        match remote_account_state.account {
-                            ResolvedAccount::Fresh(account_shared_data) => {
-                                let slot =
-                                    account_shared_data.remote_slot();
-                                if account_shared_data
-                                    .owner()
-                                    .eq(&dlp::id())
-                                {
-                                    owned_by_deleg.push((
-                                        pubkey,
-                                        account_shared_data,
-                                        slot,
-                                    ));
-                                } else if account_shared_data.executable() {
-                                    // We don't clone native loader programs.
-                                    // They should not pass the blacklist in the first place,
-                                    // but in case a new native program is introduced we don't want
-                                    // to fail
-                                    if !account_shared_data
-                                        .owner()
-                                        .eq(&solana_sdk_ids::native_loader::id(
-                                        ))
-                                    {
-                                        programs.push((
-                                            pubkey,
-                                            account_shared_data,
-                                            slot,
-                                        ));
-                                    } else {
-                                        warn!(
-                                            "Not cloning native loader program account: {pubkey} (should have been blacklisted)",
-                                        );
-                                    }
-                                } else if let Some(ata) = is_ata(&pubkey, &account_shared_data) {
-                                    atas.push((
-                                        pubkey,
-                                        account_shared_data,
-                                        ata,
-                                        slot,
-                                    ));
-                                } else {
-                                    plain.push(AccountCloneRequest {
-                                        pubkey,
-                                        account: account_shared_data,
-                                        commit_frequency_ms: None,
-                                        delegated_to_other: None,
-                                    });
-                                }
-                            }
-                            ResolvedAccount::Bank((pubkey, slot)) => {
-                                error!("We should not be fetching accounts that are already in bank: {pubkey}:{slot}");
-                            }
-                        };
-                    }
-                }
-                (not_found, plain, owned_by_deleg, programs, atas)
-            },
+    let mut not_found = Vec::new();
+    let mut plain = Vec::new();
+    let mut owned_by_deleg = Vec::new();
+    let mut programs = Vec::new();
+    let mut atas = Vec::new();
+
+    for (acc, &pubkey) in accs.into_iter().zip(pubkeys) {
+        classify_single_account(
+            acc,
+            pubkey,
+            &mut not_found,
+            &mut plain,
+            &mut owned_by_deleg,
+            &mut programs,
+            &mut atas,
         );
+    }
 
     ClassifiedAccounts {
         not_found,
@@ -146,18 +90,111 @@ pub(crate) fn classify_remote_accounts(
     }
 }
 
+/// Helper function to classify a single remote account
+#[inline]
+fn classify_single_account(
+    acc: RemoteAccount,
+    pubkey: Pubkey,
+    not_found: &mut Vec<(Pubkey, u64)>,
+    plain: &mut Vec<AccountCloneRequest>,
+    owned_by_deleg: &mut Vec<(Pubkey, AccountSharedData, u64)>,
+    programs: &mut Vec<(Pubkey, AccountSharedData, u64)>,
+    atas: &mut Vec<(
+        Pubkey,
+        AccountSharedData,
+        magicblock_core::token_programs::AtaInfo,
+        u64,
+    )>,
+) {
+    use RemoteAccount::*;
+    match acc {
+        NotFound(slot) => {
+            not_found.push((pubkey, slot));
+        }
+        Found(remote_account_state) => {
+            match remote_account_state.account {
+                ResolvedAccount::Fresh(account_shared_data) => {
+                    let slot = account_shared_data.remote_slot();
+
+                    if account_shared_data.owner().eq(&dlp::id()) {
+                        // Account owned by delegation program
+                        owned_by_deleg.push((
+                            pubkey,
+                            account_shared_data,
+                            slot,
+                        ));
+                    } else if account_shared_data.executable() {
+                        // Executable program account
+                        classify_program(
+                            pubkey,
+                            account_shared_data,
+                            slot,
+                            programs,
+                        );
+                    } else if let Some(ata) =
+                        is_ata(&pubkey, &account_shared_data)
+                    {
+                        // Associated Token Account
+                        atas.push((pubkey, account_shared_data, ata, slot));
+                    } else {
+                        // Plain account
+                        plain.push(AccountCloneRequest {
+                            pubkey,
+                            account: account_shared_data,
+                            commit_frequency_ms: None,
+                            delegated_to_other: None,
+                        });
+                    }
+                }
+                ResolvedAccount::Bank((pubkey, slot)) => {
+                    error!("We should not be fetching accounts that are already in bank: {pubkey}:{slot}");
+                }
+            }
+        }
+    }
+}
+
+/// Classifies an executable program account, filtering out native loader programs
+#[inline]
+fn classify_program(
+    pubkey: Pubkey,
+    account_shared_data: AccountSharedData,
+    slot: u64,
+    programs: &mut Vec<(Pubkey, AccountSharedData, u64)>,
+) {
+    // We don't clone native loader programs.
+    // They should not pass the blacklist in the first place,
+    // but in case a new native program is introduced we don't want to fail
+    if account_shared_data
+        .owner()
+        .eq(&solana_sdk_ids::native_loader::id())
+    {
+        warn!(
+            "Not cloning native loader program account: {pubkey} (should have been blacklisted)",
+        );
+    } else {
+        programs.push((pubkey, account_shared_data, slot));
+    }
+}
+
 /// Partitions not_found accounts into those to clone as empty and those to leave as not found
-#[allow(clippy::type_complexity)]
 pub(crate) fn partition_not_found(
     mark_empty_if_not_found: Option<&[Pubkey]>,
     not_found: Vec<(Pubkey, u64)>,
-) -> (Vec<(Pubkey, u64)>, Vec<(Pubkey, u64)>) {
+) -> PartitionedNotFound {
     if let Some(mark_empty) = mark_empty_if_not_found {
-        not_found
+        let (clone_as_empty, not_found) = not_found
             .into_iter()
-            .partition::<Vec<_>, _>(|(p, _)| mark_empty.contains(p))
+            .partition::<Vec<_>, _>(|(p, _)| mark_empty.contains(p));
+        PartitionedNotFound {
+            clone_as_empty,
+            not_found,
+        }
     } else {
-        (vec![], not_found)
+        PartitionedNotFound {
+            clone_as_empty: vec![],
+            not_found,
+        }
     }
 }
 

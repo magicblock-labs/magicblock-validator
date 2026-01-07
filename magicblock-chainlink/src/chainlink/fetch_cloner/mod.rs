@@ -1,8 +1,8 @@
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashSet,
     sync::{
         atomic::{AtomicU64, Ordering},
-        Arc, Mutex,
+        Arc,
     },
     time::Duration,
 };
@@ -12,11 +12,9 @@ use dlp::{
 };
 use log::*;
 use magicblock_config::config::AllowedProgram;
-use magicblock_core::{
-    token_programs::{is_ata, try_derive_eata_address_and_bump, MaybeIntoAta},
-    traits::AccountsBank,
-};
+use magicblock_core::traits::AccountsBank;
 use magicblock_metrics::metrics::{self, AccountFetchOrigin};
+use scc::{hash_map::Entry, HashMap};
 use solana_account::{AccountSharedData, ReadableAccount};
 use solana_pubkey::Pubkey;
 use solana_sdk_ids::system_program;
@@ -38,7 +36,8 @@ use self::{
     subscription::{cancel_subs, CancelStrategy},
     types::{
         AccountWithCompanion, ClassifiedAccounts, ExistingSubs,
-        RefreshDecision, ResolvedDelegatedAccounts, ResolvedPrograms,
+        PartitionedNotFound, RefreshDecision, ResolvedDelegatedAccounts,
+        ResolvedPrograms,
     },
 };
 use super::errors::{ChainlinkError, ChainlinkResult};
@@ -70,7 +69,7 @@ where
     remote_account_provider: Arc<RemoteAccountProvider<T, U>>,
     /// Tracks pending account fetch requests to avoid duplicate fetches in parallel
     /// Once an account is fetched and cloned into the bank, it's removed from here
-    pending_requests: Arc<Mutex<HashMap<Pubkey, RemoteAccountRequests>>>,
+    pending_requests: Arc<HashMap<Pubkey, RemoteAccountRequests>>,
     /// Counter to track the number of fetch operations for testing deduplication
     fetch_count: Arc<AtomicU64>,
 
@@ -114,7 +113,7 @@ where
             accounts_bank: accounts_bank.clone(),
             cloner: cloner.clone(),
             validator_pubkey,
-            pending_requests: Arc::new(Mutex::new(HashMap::new())),
+            pending_requests: Arc::new(HashMap::new()),
             fetch_count: Arc::new(AtomicU64::new(0)),
             blacklisted_accounts,
             allowed_programs,
@@ -160,40 +159,43 @@ where
                     update.pubkey, update.account.slot());
                 let pubkey = update.pubkey;
 
-                // TODO: if we get a lot of subs and cannot keep up we need to put this
-                // on a separate task so the fetches of delegation records can happen in
-                // parallel
-                let (resolved_account, deleg_record) =
-                    self.resolve_account_to_clone_from_forwarded_sub_with_unsubscribe(update)
+                // Process each subscription update concurrently to avoid blocking on delegation
+                // record fetches. This allows multiple updates to be processed in parallel.
+                let this = Arc::clone(&self);
+                tokio::spawn(async move {
+                    let (resolved_account, deleg_record) =
+                    this.resolve_account_to_clone_from_forwarded_sub_with_unsubscribe(update)
                     .await;
-                if let Some(account) = resolved_account {
-                    // Ensure that the subscription update isn't out of order, i.e. we don't already
-                    // hold a newer version of the account in our bank
-                    let out_of_order_slot = self
-                        .accounts_bank
-                        .get_account(&pubkey)
-                        .and_then(|in_bank| {
-                            if in_bank.remote_slot() >= account.remote_slot() {
-                                Some(in_bank.remote_slot())
-                            } else {
-                                None
-                            }
-                        });
-                    if let Some(in_bank_slot) = out_of_order_slot {
-                        warn!(
+                    if let Some(account) = resolved_account {
+                        // Ensure that the subscription update isn't out of order, i.e. we don't already
+                        // hold a newer version of the account in our bank
+                        let out_of_order_slot = this
+                            .accounts_bank
+                            .get_account(&pubkey)
+                            .and_then(|in_bank| {
+                                if in_bank.remote_slot()
+                                    >= account.remote_slot()
+                                {
+                                    Some(in_bank.remote_slot())
+                                } else {
+                                    None
+                                }
+                            });
+                        if let Some(in_bank_slot) = out_of_order_slot {
+                            warn!(
                             "Ignoring out-of-order subscription update for {pubkey}: bank slot {in_bank_slot}, update slot {}",
                             account.remote_slot()
                         );
-                        continue;
-                    }
+                            return;
+                        }
 
-                    if let Some(in_bank) =
-                        self.accounts_bank.get_account(&pubkey)
-                    {
-                        if in_bank.undelegating() {
-                            // We expect the account to still be delegated, but with the delegation
-                            // program owner
-                            debug!("Received update for undelegating account {pubkey} \
+                        if let Some(in_bank) =
+                            this.accounts_bank.get_account(&pubkey)
+                        {
+                            if in_bank.undelegating() {
+                                // We expect the account to still be delegated, but with the delegation
+                                // program owner
+                                debug!("Received update for undelegating account {pubkey} \
                                 in_bank.delegated={}, \
                                 in_bank.owner={}, \
                                 in_bank.remote_slot={}, \
@@ -208,72 +210,73 @@ where
                                 account.remote_slot()
                             );
 
-                            // This will only be true in the following case:
-                            // 1. a commit was triggered for the account
-                            // 2. a commit + undelegate was triggered for the account -> undelegating
-                            // 3. we receive the update for (1.)
-                            //
-                            // Thus our state is more up to date and we don't need to update our
-                            // bank.
-                            if account_still_undelegating_on_chain(
-                                &pubkey,
-                                account.delegated(),
-                                in_bank.remote_slot(),
-                                deleg_record,
-                                &self.validator_pubkey,
-                            ) {
-                                continue;
-                            }
-                        } else if in_bank.owner().eq(&dlp::id()) {
-                            debug!(
+                                // This will only be true in the following case:
+                                // 1. a commit was triggered for the account
+                                // 2. a commit + undelegate was triggered for the account -> undelegating
+                                // 3. we receive the update for (1.)
+                                //
+                                // Thus our state is more up to date and we don't need to update our
+                                // bank.
+                                if account_still_undelegating_on_chain(
+                                    &pubkey,
+                                    account.delegated(),
+                                    in_bank.remote_slot(),
+                                    deleg_record,
+                                    &this.validator_pubkey,
+                                ) {
+                                    return;
+                                }
+                            } else if in_bank.owner().eq(&dlp::id()) {
+                                debug!(
                                 "Received update for {pubkey} owned by deleg program not marked as undelegating"
                             );
-                        }
-                    } else {
-                        warn!(
+                            }
+                        } else {
+                            warn!(
                             "Received update for {pubkey} which is not in bank"
                         );
-                    }
+                        }
 
-                    // Determine if delegated to another validator
-                    let delegated_to_other = deleg_record
-                        .as_ref()
-                        .and_then(|dr| self.get_delegated_to_other(dr));
+                        // Determine if delegated to another validator
+                        let delegated_to_other = deleg_record
+                            .as_ref()
+                            .and_then(|dr| this.get_delegated_to_other(dr));
 
-                    // Once we clone an account that is delegated to us we no longer need
-                    // to receive updates for it from chain
-                    // The subscription will be turned back on once the committor service schedules
-                    // a commit for it that includes undelegation
-                    if account.delegated() {
-                        if let Err(err) = self
-                            .remote_account_provider
-                            .unsubscribe(&pubkey)
+                        // Once we clone an account that is delegated to us we no longer need
+                        // to receive updates for it from chain
+                        // The subscription will be turned back on once the committor service schedules
+                        // a commit for it that includes undelegation
+                        if account.delegated() {
+                            if let Err(err) = this
+                                .remote_account_provider
+                                .unsubscribe(&pubkey)
+                                .await
+                            {
+                                error!(
+                                "Failed to unsubscribe from delegated account {pubkey}: {err}"
+                            );
+                            }
+                        }
+
+                        if account.executable() {
+                            this.handle_executable_sub_update(pubkey, account)
+                                .await;
+                        } else if let Err(err) = this
+                            .cloner
+                            .clone_account(AccountCloneRequest {
+                                pubkey,
+                                account,
+                                commit_frequency_ms: None,
+                                delegated_to_other,
+                            })
                             .await
                         {
                             error!(
-                                "Failed to unsubscribe from delegated account {pubkey}: {err}"
-                            );
-                        }
-                    }
-
-                    if account.executable() {
-                        self.handle_executable_sub_update(pubkey, account)
-                            .await;
-                    } else if let Err(err) = self
-                        .cloner
-                        .clone_account(AccountCloneRequest {
-                            pubkey,
-                            account,
-                            commit_frequency_ms: None,
-                            delegated_to_other,
-                        })
-                        .await
-                    {
-                        error!(
                             "Failed to clone account {pubkey} into bank: {err}"
                         );
+                        }
                     }
-                }
+                });
             }
         });
     }
@@ -405,105 +408,8 @@ where
                     }
                 }
             } else {
-                // Accounts not owned by the delegation program can be cloned as-is,
-                // except ATAs that have an eATA companion delegated to us.
-                // Skip custom mappings, because even if they are delegated, the parent accounts might not be.
-                if let Some(ata_info) = is_ata(&pubkey, &account) {
-                    if let Some((eata_pubkey, _)) =
-                        try_derive_eata_address_and_bump(
-                            &ata_info.owner,
-                            &ata_info.mint,
-                        )
-                    {
-                        // Best-effort: ensure we watch the derived eATA so we can keep the
-                        // projected view stable across updates.
-                        if let Err(err) =
-                            self.subscribe_to_account(&eata_pubkey).await
-                        {
-                            warn!(
-                                "Failed to subscribe to derived eATA {}: {}",
-                                eata_pubkey, err
-                            );
-                        }
-
-                        // Fetch ATA + eATA at a slot consistent with this update to avoid
-                        // regressing state if chain_slot advanced.
-                        let effective_slot = account
-                            .remote_slot()
-                            .max(self.remote_account_provider.chain_slot());
-
-                        match self
-                            .task_to_fetch_with_companion(
-                                pubkey,
-                                eata_pubkey,
-                                effective_slot,
-                                AccountFetchOrigin::GetAccount,
-                            )
-                            .await
-                        {
-                            Ok(Ok(AccountWithCompanion {
-                                account: ata_account,
-                                companion_account: maybe_eata_account,
-                                ..
-                            })) => {
-                                // Default: clone the ATA as-is.
-                                let mut account_to_clone =
-                                    ata_account.account_shared_data_cloned();
-
-                                // If eATA exists and is delegated to us, project the ATA view
-                                // from the eATA (same as the fetch path).
-                                if let Some(eata_acc) = maybe_eata_account {
-                                    let eata_shared =
-                                        eata_acc.account_shared_data_cloned();
-
-                                    if let Some(deleg) = self
-                                        .fetch_and_parse_delegation_record(
-                                            eata_pubkey,
-                                            effective_slot,
-                                            AccountFetchOrigin::GetAccount,
-                                        )
-                                        .await
-                                    {
-                                        let delegated_to_us = deleg.authority
-                                            == self.validator_pubkey;
-
-                                        if delegated_to_us {
-                                            if let Some(projected_ata) =
-                                                eata_shared
-                                                    .maybe_into_ata(deleg.owner)
-                                            {
-                                                account_to_clone =
-                                                    projected_ata;
-                                                account_to_clone
-                                                    .set_delegated(true);
-                                            }
-                                        }
-
-                                        account_to_clone.set_remote_slot(
-                                            account.remote_slot(),
-                                        );
-                                        return (
-                                            Some(account_to_clone),
-                                            Some(deleg),
-                                        );
-                                    }
-                                }
-
-                                account_to_clone
-                                    .set_remote_slot(account.remote_slot());
-                                return (Some(account_to_clone), None);
-                            }
-                            Ok(Err(err)) => {
-                                warn!("Failed to resolve ATA/eATA companion for {pubkey}: {err}");
-                            }
-                            Err(join_err) => {
-                                warn!("Failed to join ATA/eATA fetch task for {pubkey}: {join_err}");
-                            }
-                        }
-                    }
-                }
-
-                // Fallback: non-ATA (or ATA without usable eATA) clones as-is.
+                // Accounts not owned by the delegation program can be cloned as is
+                // No unsubscription needed for undelegated accounts
                 (Some(account), None)
             }
         } else {
@@ -655,8 +561,10 @@ where
             );
         }
 
-        let (clone_as_empty, not_found) =
-            pipeline::partition_not_found(mark_empty_if_not_found, not_found);
+        let PartitionedNotFound {
+            clone_as_empty,
+            not_found,
+        } = pipeline::partition_not_found(mark_empty_if_not_found, not_found);
 
         // For accounts we couldn't find we cannot do anything. We will let code depending
         // on them to be in the bank fail on its own
@@ -906,28 +814,20 @@ where
         pubkeys.retain(|p| !in_bank.contains(p));
 
         // Check pending requests and bank synchronously
-        {
-            let mut pending = self
-                .pending_requests
-                .lock()
-                .expect("pending_requests lock poisoned");
-
-            for pubkey in pubkeys {
-                // Check if account fetch is already pending
-                if let Some(requests) = pending.get_mut(pubkey) {
+        for pubkey in pubkeys {
+            // Check if account fetch is already pending
+            match self.pending_requests.entry(*pubkey) {
+                Entry::Occupied(mut requests) => {
                     let (sender, receiver) = oneshot::channel();
-                    requests.push(sender);
+                    requests.get_mut().push(sender);
                     await_pending.push((*pubkey, receiver));
-                    continue;
                 }
-
-                // Account needs to be fetched - add to fetch list
-                fetch_new.push(*pubkey);
-            }
-
-            // Create pending entries for accounts we need to fetch
-            for &pubkey in &fetch_new {
-                pending.insert(pubkey, vec![]);
+                Entry::Vacant(e) => {
+                    // Reserve an entry for the new fetch request
+                    e.insert_entry(vec![]);
+                    // Account needs to be fetched - add to fetch list
+                    fetch_new.push(*pubkey);
+                }
             }
         }
 
@@ -961,20 +861,14 @@ where
 
         // Clear pending requests for fetched accounts - pending requesters can get
         // the accounts from the bank now since fetch_and_clone_accounts succeeded
-        {
-            let mut pending = self
-                .pending_requests
-                .lock()
-                .expect("pending_requests lock poisoned");
-            for &pubkey in &fetch_new {
-                if let Some(requests) = pending.remove(&pubkey) {
-                    // We signal completion but don't send the actual account data since:
-                    // 1. The account is now in the bank if it was successfully cloned
-                    // 2. If there was an error, the result will contain the error info
-                    // 3. Pending requesters can check the bank or result as needed
-                    for sender in requests {
-                        let _ = sender.send(());
-                    }
+        for &pubkey in &fetch_new {
+            if let Some((_, requests)) = self.pending_requests.remove(&pubkey) {
+                // We signal completion but don't send the actual account data since:
+                // 1. The account is now in the bank if it was successfully cloned
+                // 2. If there was an error, the result will contain the error info
+                // 3. Pending requesters can check the bank or result as needed
+                for sender in requests {
+                    let _ = sender.send(());
                 }
             }
         }
