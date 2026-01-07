@@ -6,7 +6,7 @@ use dlp::{
         call_handler_size_budget, commit_diff_size_budget, commit_size_budget,
         finalize_size_budget, undelegate_size_budget,
     },
-    AccountSizeClass,
+    total_size_budget, AccountSizeClass,
 };
 use magicblock_metrics::metrics::LabelValue;
 use solana_account::ReadableAccount;
@@ -267,6 +267,45 @@ impl BaseTask for ArgsTask {
                 commit_diff_size_budget(AccountSizeClass::Dynamic(
                     task.committed_account.account.data.len() as u32,
                 ))
+            }
+            ArgsTaskType::CompressedCommit(_task) => {
+                total_size_budget(&[
+                    AccountSizeClass::Tiny,       // validator
+                    AccountSizeClass::ExtraLarge, // Light System Program
+                    AccountSizeClass::Tiny,       // CPI Signer
+                    AccountSizeClass::Tiny,       // Registered Program PDA
+                    AccountSizeClass::Tiny, // Account Compression Authority
+                    AccountSizeClass::Tiny, // Account Compression Program
+                    AccountSizeClass::Tiny, // System Program
+                    AccountSizeClass::Huge, // Batch Merkle Tree
+                    AccountSizeClass::ExtraLarge, // Output Queue
+                ])
+            }
+            ArgsTaskType::CompressedFinalize(_task) => {
+                total_size_budget(&[
+                    AccountSizeClass::Tiny,       // validator
+                    AccountSizeClass::ExtraLarge, // Light System Program
+                    AccountSizeClass::Tiny,       // CPI Signer
+                    AccountSizeClass::Tiny,       // Registered Program PDA
+                    AccountSizeClass::Tiny, // Account Compression Authority
+                    AccountSizeClass::Tiny, // Account Compression Program
+                    AccountSizeClass::Tiny, // System Program
+                    AccountSizeClass::Huge, // Batch Merkle Tree
+                    AccountSizeClass::ExtraLarge, // Output Queue
+                ])
+            }
+            ArgsTaskType::CompressedUndelegate(_task) => {
+                total_size_budget(&[
+                    AccountSizeClass::Tiny,       // validator
+                    AccountSizeClass::ExtraLarge, // Light System Program
+                    AccountSizeClass::Tiny,       // CPI Signer
+                    AccountSizeClass::Tiny,       // Registered Program PDA
+                    AccountSizeClass::Tiny, // Account Compression Authority
+                    AccountSizeClass::Tiny, // Account Compression Program
+                    AccountSizeClass::Tiny, // System Program
+                    AccountSizeClass::Huge, // Batch Merkle Tree
+                    AccountSizeClass::ExtraLarge, // Output Queue
+                ])
             }
             ArgsTaskType::BaseAction(task) => {
                 // assume all other accounts are Small accounts.
