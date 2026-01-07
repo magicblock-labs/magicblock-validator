@@ -38,4 +38,7 @@ pub enum ChainlinkError {
 
     #[error("Failed to resolve/deserialize one or more accounts {0} when getting programs")]
     ProgramAccountResolutionsFailed(String),
+
+    #[error("Unexpected number of accounts returned when fetching account with companion: {0}")]
+    UnexpectedAccountCount(String),
 }
