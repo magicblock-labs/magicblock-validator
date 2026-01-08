@@ -24,9 +24,9 @@ pub struct CliParams {
     /// ALIASES: mainnet, devnet, testnet, localhost
     ///
     /// EXAMPLES:
-    /// - `--remote devnet`
-    /// - `--remote wss://devnet.solana.com`
-    /// - `--remote grpcs://grpc.example.com`
+    /// - `--remotes devnet`
+    /// - `--remotes wss://devnet.solana.com`
+    /// - `--remotes grpcs://grpc.example.com`
     ///
     /// DEFAULT: devnet (HTTP endpoint with auto-added WS endpoint)
     #[arg(long)]
