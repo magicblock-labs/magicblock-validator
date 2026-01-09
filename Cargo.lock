@@ -1078,7 +1078,7 @@ dependencies = [
 
 [[package]]
 name = "compressed-delegation-client"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "borsh 0.10.4",
  "light-compressed-account",
