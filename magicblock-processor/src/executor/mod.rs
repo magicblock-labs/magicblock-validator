@@ -1,7 +1,7 @@
 use std::sync::{Arc, RwLock};
 
 use log::info;
-use magicblock_accounts_db::{AccountsDb, StWLock};
+use magicblock_accounts_db::{AccountsDb, GlobalWriteLock};
 use magicblock_core::link::{
     accounts::AccountUpdateTx,
     transactions::{
@@ -57,7 +57,7 @@ pub(super) struct TransactionExecutor {
     ready_tx: Sender<ExecutorId>,
     /// A read lock held during a slot's processing to synchronize with critical global
     /// operations like `AccountsDb` snapshots.
-    sync: StWLock,
+    sync: GlobalWriteLock,
     /// Hacky temporary solution to allow automatic airdrops, the flag
     /// is tightly contolled and will be removed in the nearest future
     /// True when auto airdrop for fee payers is enabled (auto_airdrop_lamports > 0).
@@ -97,7 +97,7 @@ impl TransactionExecutor {
         });
         let this = Self {
             id,
-            sync: state.accountsdb.synchronizer(),
+            sync: state.accountsdb.write_lock(),
             processor,
             accountsdb: state.accountsdb.clone(),
             ledger: state.ledger.clone(),

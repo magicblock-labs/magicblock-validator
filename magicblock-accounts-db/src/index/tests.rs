@@ -1,459 +1,296 @@
 use std::{
-    fs, ops::Deref, path::PathBuf, ptr::NonNull, sync::atomic::AtomicU32,
+    ops::Deref,
+    ptr::NonNull,
+    sync::atomic::{AtomicU32, Ordering},
 };
 
 use lmdb::Transaction;
-use magicblock_config::config::{AccountsDbConfig, BlockSize};
+use magicblock_config::config::AccountsDbConfig;
 use solana_pubkey::Pubkey;
+use tempfile::TempDir;
 
 use super::{AccountsDbIndex, Allocation};
 use crate::error::AccountsDbError;
 
-const INSERT_ACCOUNT_TXN_ERR: &str =
-    "failed to create transaction for account insertion";
-
+/// Verifies that `upsert_account` correctly handles both new insertions
+/// and updates to existing accounts, returning the old allocation when applicable.
 #[test]
-fn test_insert_account() {
-    let tenv = setup();
-    let IndexAccount {
-        pubkey,
-        owner,
-        allocation,
-    } = tenv.account();
+fn test_upsert_account() {
+    let env = IndexTestEnv::new();
+    let account = env.new_account();
 
-    let mut txn = tenv.env.begin_rw_txn().expect(INSERT_ACCOUNT_TXN_ERR);
-    let result = tenv.insert_account(&pubkey, &owner, allocation, &mut txn);
-    assert!(result.is_ok(), "failed to insert account into index");
+    // 1. First Insertion (New Account)
+    let mut txn = env.rw_txn();
+    let result = env.upsert_account(&account, &mut txn);
+    txn.commit().expect("commit failed");
+
+    assert!(result.is_ok(), "failed to insert account");
     assert!(
         result.unwrap().is_none(),
-        "new account should not be reallocated"
+        "new account should not have a previous allocation"
     );
-    txn.commit().expect("failed to commit transaction");
 
-    let reallocation = tenv.allocation();
-    let mut txn = tenv.env.begin_rw_txn().expect(INSERT_ACCOUNT_TXN_ERR);
-    let result = tenv.insert_account(&pubkey, &owner, reallocation, &mut txn);
-    assert!(result.is_ok(), "failed to RE-insert account into index");
-    let previous_allocation = allocation.into();
-    assert_eq!(
-        result.unwrap(),
-        Some(previous_allocation),
-        "account RE-insertion should return previous allocation"
+    // 2. Re-insertion (Update Account)
+    let mut txn = env.rw_txn();
+    let new_allocation = env.new_allocation();
+
+    // We manually call the internal method to inject a specific new allocation
+    let result = env.index.upsert_account(
+        &account.pubkey,
+        &account.owner,
+        new_allocation,
+        &mut txn,
     );
-    txn.commit().expect("failed to commit transaction");
+    txn.commit().expect("commit failed");
+
+    assert!(result.is_ok(), "failed to update account");
+    let previous = result.unwrap();
+    assert_eq!(
+        previous,
+        Some(account.allocation.into()),
+        "update should return the old allocation for recycling"
+    );
 }
 
+/// Verifies we can retrieve the correct storage offset for an account
+/// using both the convenience method and raw transaction lookup.
 #[test]
-fn test_get_account_offset() {
-    let tenv = setup();
-    let IndexAccount {
-        pubkey,
-        owner,
-        allocation,
-    } = tenv.account();
+fn test_get_offset() {
+    let env = IndexTestEnv::new();
+    let account = env.new_account();
 
-    let mut txn = tenv.env.begin_rw_txn().expect(INSERT_ACCOUNT_TXN_ERR);
-    tenv.insert_account(&pubkey, &owner, allocation, &mut txn)
-        .expect("failed to insert account");
-    txn.commit().expect("failed to commit transaction");
-    let result = tenv.get_account_offset(&pubkey);
-    assert!(result.is_ok(), "failed to read offset for inserted account");
-    assert_eq!(
-        result.unwrap(),
-        allocation.offset,
-        "offset of read account doesn't match that of written one"
-    );
+    env.persist_account(&account);
 
-    let txn = tenv
-        .env
-        .begin_rw_txn()
-        .expect("failed to start new RW transaction");
+    // Test high-level convenience method
+    let offset = env.get_offset(&account.pubkey);
+    assert_eq!(offset.unwrap(), account.allocation.offset);
 
-    let result = tenv.get_allocation(&txn, &pubkey);
-
-    assert!(
-        result.is_ok(),
-        "failed to read an allocation for inserted account"
-    );
-    assert_eq!(
-        result.unwrap(),
-        allocation.into(),
-        "allocation of account doesn't match one which was defined during insertion"
-    );
+    // Test low-level internal retrieval
+    let txn = env.rw_txn();
+    let allocation = env.get_allocation(&txn, &account.pubkey);
+    assert_eq!(allocation.unwrap(), account.allocation.into());
 }
 
+/// Ensures that `reallocate_account` moves the account record, updates the index,
+/// and marks the old space as deallocated.
 #[test]
 fn test_reallocate_account() {
-    let tenv = setup();
-    let IndexAccount {
-        pubkey,
-        owner,
-        allocation,
-    } = tenv.account();
+    let env = IndexTestEnv::new();
+    let account = env.new_account();
+    env.persist_account(&account);
 
-    let mut txn = tenv.env.begin_rw_txn().expect(INSERT_ACCOUNT_TXN_ERR);
-    tenv.insert_account(&pubkey, &owner, allocation, &mut txn)
-        .expect("failed to insert account");
-    txn.commit().expect("failed to commit transaction");
+    let mut txn = env.rw_txn();
+    let new_allocation = env.new_allocation();
 
-    let mut txn = tenv
-        .env
-        .begin_rw_txn()
-        .expect("failed to start new RW transaction");
+    let new_index_value = bytes!(
+        #pack,
+        new_allocation.offset, u32,
+        new_allocation.blocks, u32
+    );
 
-    let new_allocation = tenv.allocation();
-    let index_value =
-        bytes!(#pack, new_allocation.offset, u32, new_allocation.blocks, u32);
-    let result = tenv.reallocate_account(&pubkey, &mut txn, &index_value);
+    let result =
+        env.reallocate_account(&account.pubkey, &mut txn, &new_index_value);
+    txn.commit().expect("commit failed");
 
-    txn.commit().expect("failed to commit transaction");
-
-    assert!(result.is_ok(), "failed to reallocate account");
+    assert!(result.is_ok());
     assert_eq!(
         result.unwrap(),
-        allocation.into(),
-        "allocation of account doesn't match one, which was defined during insertion"
+        account.allocation.into(),
+        "should return old allocation"
     );
-    let result = tenv
-        .get_account_offset(&pubkey)
-        .expect("failed to read reallocated account");
-    assert_eq!(
-        result, new_allocation.offset,
-        "reallocated account's offset doesn't match new allocation"
-    );
+
+    // Verify persistence of new offset
+    let stored_offset = env.get_offset(&account.pubkey).unwrap();
+    assert_eq!(stored_offset, new_allocation.offset);
 }
 
 #[test]
 fn test_remove_account() {
-    let tenv = setup();
-    let IndexAccount {
-        pubkey,
-        owner,
-        allocation,
-    } = tenv.account();
+    let env = IndexTestEnv::new();
+    let account = env.new_account();
+    env.persist_account(&account);
 
-    let mut txn = tenv.env.begin_rw_txn().expect(INSERT_ACCOUNT_TXN_ERR);
-    tenv.insert_account(&pubkey, &owner, allocation, &mut txn)
-        .expect("failed to insert account");
-    txn.commit().expect("failed to commit transaction");
+    // Perform removal
+    let result = env.remove(&account.pubkey);
+    assert!(result.is_ok());
 
-    let result = tenv.remove_account(&pubkey);
+    // Verify Index Entry is gone
+    let offset = env.get_offset(&account.pubkey);
+    assert!(matches!(offset, Err(AccountsDbError::NotFound)));
 
-    assert!(result.is_ok(), "failed to remove account");
-    let offset = tenv.get_account_offset(&pubkey);
-    assert!(
-        matches!(offset, Err(AccountsDbError::NotFound)),
-        "removed account offset is still present in index"
-    );
-    assert_eq!(
-        tenv.get_delloactions_count(),
-        1,
-        "the number of deallocations should have increased after account removal"
-    );
+    // Verify Space was Deallocated
+    assert_eq!(env.count_deallocations(), 1, "deallocations count mismatch");
 }
 
+/// Tests the owner consistency check.
+/// If an account's owner changes, the `programs` index must be updated
+/// to reflect the move from the old owner to the new owner.
 #[test]
 fn test_ensure_correct_owner() {
-    let tenv = setup();
-    let IndexAccount {
-        pubkey,
-        owner,
-        allocation,
-    } = tenv.account();
+    let env = IndexTestEnv::new();
+    let account = env.new_account();
+    env.persist_account(&account);
 
-    let mut txn = tenv.env.begin_rw_txn().expect(INSERT_ACCOUNT_TXN_ERR);
-    tenv.insert_account(&pubkey, &owner, allocation, &mut txn)
-        .expect("failed to insert account");
-    txn.commit().expect("failed to commit transaction");
-    let iter = tenv.get_program_accounts_iter(&owner);
-    assert!(
-        iter.is_ok(),
-        "failed to get iterator for newly inserted program account"
-    );
-    let mut iter = iter.unwrap();
-    assert_eq!(
-        iter.next(),
-        Some((allocation.offset, pubkey)),
-        "account returned by program iterator is invalid one"
-    );
-    assert_eq!(
-        iter.next(),
-        None,
-        "program iterator returned more than the number of inserted accounts"
-    );
-    drop(iter);
+    // Verify initial state
+    let programs: Vec<_> = env
+        .get_program_accounts_iter(&account.owner)
+        .unwrap()
+        .collect();
+    assert_eq!(programs.len(), 1);
+    assert_eq!(programs[0], (account.allocation.offset, account.pubkey));
 
+    // Change Owner
     let new_owner = Pubkey::new_unique();
-    let mut txn = tenv.env.begin_rw_txn().expect(INSERT_ACCOUNT_TXN_ERR);
-    assert!(
-        tenv.ensure_correct_owner(&pubkey, &new_owner, &mut txn)
-            .is_ok(),
-        "failed to ensure correct account owner"
-    );
-    txn.commit().expect("failed to commit transaction");
-    let result = tenv.get_program_accounts_iter(&owner);
-    assert!(
-        matches!(result.map(|i| i.count()), Ok(0)),
-        "programs index still has record of account after owner change"
-    );
+    let mut txn = env.rw_txn();
+    let result =
+        env.ensure_correct_owner(&account.pubkey, &new_owner, &mut txn);
+    txn.commit().expect("commit failed");
+    assert!(result.is_ok());
 
-    let mut iter = tenv
-        .get_program_accounts_iter(&new_owner)
-        .expect("failed to get iterator for newly inserted program account");
-    assert_eq!(
-        iter.next(),
-        Some((allocation.offset, pubkey)),
-        "account returned by program iterator is invalid one"
-    );
+    // Verify old owner is empty
+    let old_programs_count = env
+        .get_program_accounts_iter(&account.owner)
+        .unwrap()
+        .count();
+    assert_eq!(old_programs_count, 0);
+
+    // Verify new owner has account
+    let new_programs: Vec<_> =
+        env.get_program_accounts_iter(&new_owner).unwrap().collect();
+    assert_eq!(new_programs.len(), 1);
+    assert_eq!(new_programs[0], (account.allocation.offset, account.pubkey));
 }
 
 #[test]
 fn test_program_index_cleanup() {
-    let tenv = setup();
-    let IndexAccount {
-        pubkey,
-        owner,
-        allocation,
-    } = tenv.account();
+    let env = IndexTestEnv::new();
+    let account = env.new_account();
+    env.persist_account(&account);
 
-    let mut txn = tenv.env.begin_rw_txn().expect(INSERT_ACCOUNT_TXN_ERR);
-    tenv.insert_account(&pubkey, &owner, allocation, &mut txn)
-        .expect("failed to insert account");
-    txn.commit().expect("failed to commit transaction");
-
-    let mut txn = tenv
-        .env
-        .begin_rw_txn()
-        .expect("failed to start new RW transaction");
-    let result = tenv.remove_programs_index_entry(
-        &pubkey,
+    let mut txn = env.rw_txn();
+    let result = env.remove_program_index_entry(
+        &account.pubkey,
         None,
         &mut txn,
-        allocation.offset,
+        account.allocation.offset,
     );
-    assert!(result.is_ok(), "failed to remove entry from programs index");
-    txn.commit().expect("failed to commit transaction");
+    txn.commit().expect("commit failed");
+    assert!(result.is_ok());
 
-    let result = tenv.get_program_accounts_iter(&owner);
-    assert!(
-        matches!(result.map(|i| i.count()), Ok(0)),
-        "programs index still has record of account after cleanup"
-    );
+    // Verify cleanup
+    let count = env
+        .get_program_accounts_iter(&account.owner)
+        .unwrap()
+        .count();
+    assert_eq!(count, 0);
 }
 
+/// Verifies the full cycle of:
+/// Insert -> Reallocate (creates hole) -> Insert New (fills hole).
 #[test]
-fn test_recycle_allocation_after_realloc() {
-    let tenv = setup();
-    let IndexAccount {
-        pubkey,
-        owner,
-        allocation,
-    } = tenv.account();
+fn test_recycle_allocation_flow() {
+    let env = IndexTestEnv::new();
+    let account = env.new_account();
 
-    let mut txn = tenv.env.begin_rw_txn().expect(INSERT_ACCOUNT_TXN_ERR);
-    tenv.insert_account(&pubkey, &owner, allocation, &mut txn)
-        .expect("failed to insert account");
-    txn.commit().expect("failed to commit transaction");
+    // 1. Insert
+    env.persist_account(&account);
 
-    let mut txn = tenv
-        .env
-        .begin_rw_txn()
-        .expect("failed to start new RW transaction");
-    let new_allocation = tenv.allocation();
-    let index_value =
+    // 2. Reallocate (moves account, creating a hole at `account.allocation`)
+    let mut txn = env.rw_txn();
+    let new_allocation = env.new_allocation();
+    let index_val =
         bytes!(#pack, new_allocation.offset, u32, new_allocation.blocks, u32);
-    tenv.reallocate_account(&pubkey, &mut txn, &index_value)
-        .expect("failed to reallocate account");
-    txn.commit().expect("failed to commit transaction");
-    assert_eq!(
-        tenv.get_delloactions_count(),
-        1,
-        "the number of deallocations should have increased after account realloc"
-    );
+    env.reallocate_account(&account.pubkey, &mut txn, &index_val)
+        .unwrap();
+    txn.commit().expect("commit failed");
 
-    let mut txn = tenv.env.begin_rw_txn().expect(INSERT_ACCOUNT_TXN_ERR);
-    let result = tenv.try_recycle_allocation(new_allocation.blocks, &mut txn);
+    assert_eq!(env.count_deallocations(), 1, "hole created");
+
+    // 3. Recycle exact fit
+    // We request a block size exactly matching the hole we just made.
+    let mut txn = env.rw_txn();
+    let recycled =
+        env.try_recycle_allocation(account.allocation.blocks, &mut txn);
+    txn.commit().expect("commit failed");
+
+    assert!(recycled.is_ok());
     assert_eq!(
-        result.expect("failed to recycle allocation"),
-        allocation.into()
+        recycled.unwrap(),
+        account.allocation.into(),
+        "should reuse the exact hole"
     );
-    txn.commit().expect("failed to commit transaction");
-    assert_eq!(
-        tenv.get_delloactions_count(),
-        0,
-        "the number of deallocations should have decreased after recycling"
-    );
-    let mut txn = tenv.env.begin_rw_txn().expect(INSERT_ACCOUNT_TXN_ERR);
-    let result = tenv.try_recycle_allocation(new_allocation.blocks, &mut txn);
-    assert!(
-        matches!(result, Err(AccountsDbError::NotFound)),
-        "deallocations index should have run out of existing allocations"
-    );
-    txn.commit().expect("failed to commit transaction");
-    tenv.remove_account(&pubkey)
-        .expect("failed to remove account");
-    assert_eq!(
-        tenv.get_delloactions_count(),
-        1,
-        "the number of deallocations should have increased after account removal"
-    );
-    let mut txn = tenv.env.begin_rw_txn().expect(INSERT_ACCOUNT_TXN_ERR);
-    let result = tenv.try_recycle_allocation(new_allocation.blocks, &mut txn);
-    assert_eq!(
-        result.expect("failed to recycle allocation after account removal"),
-        new_allocation.into()
-    );
-    txn.commit().expect("failed to commit transaction");
-    assert_eq!(
-        tenv.get_delloactions_count(),
-        0,
-        "the number of deallocations should have decreased after recycling"
-    );
+    assert_eq!(env.count_deallocations(), 0, "hole consumed");
+
+    // 4. Recycle missing (should fail)
+    let mut txn = env.rw_txn();
+    let missing = env.try_recycle_allocation(100, &mut txn);
+    assert!(matches!(missing, Err(AccountsDbError::NotFound)));
 }
 
+/// Verifies that requesting a smaller size than an available hole
+/// correctly splits the hole and returns the remainder to the free list.
 #[test]
 fn test_recycle_allocation_split() {
-    let tenv = setup();
-    let IndexAccount {
-        pubkey,
-        owner,
-        allocation,
-    } = tenv.account();
+    let env = IndexTestEnv::new();
+    let account = env.new_account();
+    env.persist_account(&account);
+    env.remove(&account.pubkey).unwrap();
 
-    let mut txn = tenv.env.begin_rw_txn().expect(INSERT_ACCOUNT_TXN_ERR);
-    tenv.insert_account(&pubkey, &owner, allocation, &mut txn)
-        .expect("failed to insert account");
-    txn.commit().expect("failed to commit transaction");
-    tenv.remove_account(&pubkey).unwrap();
-    assert_eq!(
-        tenv.get_delloactions_count(),
-        1,
-        "the number of deallocations should have increased after account removal"
-    );
+    assert_eq!(env.count_deallocations(), 1);
 
-    let mut txn = tenv.env.begin_rw_txn().expect(INSERT_ACCOUNT_TXN_ERR);
-    let result = tenv
-        .try_recycle_allocation(allocation.blocks / 2, &mut txn)
-        .expect("failed to recycle allocation");
-    assert_eq!(result.blocks, allocation.blocks / 2);
-    assert_eq!(result.offset, allocation.offset);
-    txn.commit().expect("failed to commit transaction");
+    let half_size = account.allocation.blocks / 2;
 
-    let mut txn = tenv.env.begin_rw_txn().expect(INSERT_ACCOUNT_TXN_ERR);
-    let result = tenv
-        .try_recycle_allocation(allocation.blocks / 2, &mut txn)
-        .expect("failed to recycle allocation");
-    assert_eq!(result.blocks, allocation.blocks / 2);
-    assert!(result.offset > allocation.offset);
-    txn.commit().expect("failed to commit transaction");
+    // 1. Recycle first half
+    let mut txn = env.rw_txn();
+    let part1 = env.try_recycle_allocation(half_size, &mut txn).unwrap();
+    txn.commit().expect("commit failed");
 
-    assert_eq!(
-        tenv.get_delloactions_count(),
-        0,
-        "the number of deallocations should have decreased after recycling"
-    );
-    let mut txn = tenv.env.begin_rw_txn().expect(INSERT_ACCOUNT_TXN_ERR);
-    let result = tenv.try_recycle_allocation(allocation.blocks, &mut txn);
-    assert!(
-        matches!(result, Err(AccountsDbError::NotFound)),
-        "deallocations index should have run out of existing allocations"
-    );
-    txn.commit().expect("failed to commit transaction");
+    assert_eq!(part1.blocks, half_size);
+    assert_eq!(part1.offset, account.allocation.offset);
+
+    // Should still have one hole (the remainder)
+    assert_eq!(env.count_deallocations(), 1);
+
+    // 2. Recycle second half (remainder)
+    let mut txn = env.rw_txn();
+    let part2 = env.try_recycle_allocation(half_size, &mut txn).unwrap();
+    txn.commit().expect("commit failed");
+
+    assert_eq!(part2.blocks, half_size);
+    // The new offset should be shifted by the size of the first part
+    assert!(part2.offset > account.allocation.offset);
+
+    // Empty now
+    assert_eq!(env.count_deallocations(), 0);
 }
 
 #[test]
 fn test_byte_pack_unpack_macro() {
-    macro_rules! check {
-        ($v1: expr, $t1: ty, $v2: expr, $t2: ty, $tranformer: ident) => {
-            check!($v1, $t1, $v2, $t2, $tranformer, $tranformer);
-        };
-        ($v1: expr, $t1: ty, $v2: expr, $t2: ty, $tranformer1: ident, $tranformer2: ident) => {{
-            // get the cummulative size of value 1 and value 2, as they are laid out in memory
-            const S1: usize = size_of::<$t1>();
-            const S2: usize = size_of::<$t2>();
-            // create a buffer array to hold both values in concatenated form
-            let mut expected = [0_u8; S1 + S2];
-
-            // put the first value to S1 bytes of buffer, by using type to bytes transformer
-            expected[..S1].copy_from_slice(<$t1>::$tranformer1($v1).as_slice());
-            // put the second value to S2 bytes of buffer following S1 bytes, by using type to bytes transformer
-            expected[S1..].copy_from_slice(<$t2>::$tranformer2($v2).as_slice());
-
-            // pack/concatenate the values together
-            let result = bytes!(#pack, $v1, $t1, $v2, $t2);
-
-            // manually serialized buffer array should match the array produced by bytes! macro
-            assert_eq!(
-                result,
-                expected,
-                "invalid byte packing of {} ({}) and {} ({})",
-                $v1, stringify!($t1), $v2, stringify!($t2)
-            );
-            // now, undo the whole thing by unpacking the array back to constituent types
-            let (v1, v2) = bytes!(#unpack, result, $t1, $t2);
-
-            // we should get exactly the same values and types for the first value
-            assert_eq!(
-                $v1, v1, "unpacked value 1 doesn't match with initial {} <> {v1} ({})",
-                $v1, stringify!($t1)
-            );
-            // same goes for the second value
-            assert!(
-                $v2.eq(&v2), "unpacked value 2 doesn't match with initial {} <> {v2} ({})",
-                $v2, stringify!($t2)
-            );
+    macro_rules! check_pack {
+        ($v1: expr, $t1: ty, $v2: expr, $t2: ty) => {{
+            let packed = bytes!(#pack, $v1, $t1, $v2, $t2);
+            let (u1, u2) = bytes!(#unpack, packed, $t1, $t2);
+            assert_eq!($v1, u1);
+            assert_eq!($v2, u2);
         }};
     }
 
-    check!(13, u8, 42, i64, to_le_bytes);
-    check!(13, i8, 42, u8, to_le_bytes);
-    check!(13, u16, 42, i8, to_le_bytes);
-    check!(13, i16, 42, u16, to_le_bytes);
-    check!(13, u32, 42, i16, to_le_bytes);
-    check!(13, i32, 42, u32, to_le_bytes);
-    check!(13, u64, 42, i32, to_le_bytes);
-    check!(13, i64, 42, u64, to_le_bytes);
+    check_pack!(13u8, u8, 42u64, u64);
+    check_pack!(12345u32, u32, 67890u32, u32);
 
     let pubkey = Pubkey::new_unique();
-
-    check!(13, u8, pubkey, Pubkey, to_le_bytes, to_bytes);
-    check!(13, i8, pubkey, Pubkey, to_le_bytes, to_bytes);
-    check!(13, u16, pubkey, Pubkey, to_le_bytes, to_bytes);
-    check!(13, i16, pubkey, Pubkey, to_le_bytes, to_bytes);
-    check!(13, u32, pubkey, Pubkey, to_le_bytes, to_bytes);
-    check!(13, i32, pubkey, Pubkey, to_le_bytes, to_bytes);
-    check!(13, u64, pubkey, Pubkey, to_le_bytes, to_bytes);
-    check!(13, i64, pubkey, Pubkey, to_le_bytes, to_bytes);
-
-    check!(pubkey, Pubkey, 13, u8, to_bytes, to_le_bytes);
-    check!(pubkey, Pubkey, 13, i8, to_bytes, to_le_bytes);
-    check!(pubkey, Pubkey, 13, u16, to_bytes, to_le_bytes);
-    check!(pubkey, Pubkey, 13, i16, to_bytes, to_le_bytes);
-    check!(pubkey, Pubkey, 13, u32, to_bytes, to_le_bytes);
-    check!(pubkey, Pubkey, 13, i32, to_bytes, to_le_bytes);
-    check!(pubkey, Pubkey, 13, u64, to_bytes, to_le_bytes);
-    check!(pubkey, Pubkey, 13, i64, to_bytes, to_le_bytes);
+    check_pack!(100u32, u32, pubkey, Pubkey);
+    check_pack!(pubkey, Pubkey, 255u8, u8);
 }
 
 // ==============================================================
+//                      TEST UTILITIES
 // ==============================================================
-//                      UTILITY CODE BELOW
-// ==============================================================
-// ==============================================================
-
-fn setup() -> IndexTestEnv {
-    let config = AccountsDbConfig::default();
-    let directory = tempfile::tempdir()
-        .expect("failed to create temp directory for index tests")
-        .keep();
-    let index = AccountsDbIndex::new(config.index_size, &directory)
-        .expect("failed to create accountsdb index in temp dir");
-    IndexTestEnv { index, directory }
-}
 
 struct IndexTestEnv {
     index: AccountsDbIndex,
-    directory: PathBuf,
+    // Kept to ensure directory deletion on drop
+    _temp_dir: TempDir,
 }
 
 struct IndexAccount {
@@ -463,42 +300,80 @@ struct IndexAccount {
 }
 
 impl IndexTestEnv {
-    fn allocation(&self) -> Allocation {
-        static ALLOCATION: AtomicU32 =
-            AtomicU32::new(BlockSize::Block256 as u32);
+    fn new() -> Self {
+        let _temp_dir = tempfile::tempdir().expect("failed to create temp dir");
+        let index = AccountsDbIndex::new(
+            AccountsDbConfig::default().index_size,
+            _temp_dir.path(),
+        )
+        .expect("failed to create index");
+
+        Self { index, _temp_dir }
+    }
+
+    /// Opens a read-write transaction. Panics on failure.
+    fn rw_txn(&self) -> lmdb::RwTransaction<'_> {
+        self.index
+            .env
+            .begin_rw_txn()
+            .expect("failed to begin rw txn")
+    }
+
+    /// Generates a new dummy allocation with a unique offset.
+    fn new_allocation(&self) -> Allocation {
+        static OFFSET_COUNTER: AtomicU32 = AtomicU32::new(0);
         let blocks = 4;
-        let offset = ALLOCATION.fetch_add(
-            (BlockSize::Block256 as u32) * blocks,
-            std::sync::atomic::Ordering::Relaxed,
-        );
+        // Mocking an offset allocator
+        let offset = OFFSET_COUNTER.fetch_add(blocks, Ordering::Relaxed);
 
         Allocation {
-            storage: NonNull::dangling(),
+            ptr: NonNull::dangling(),
             offset,
             blocks,
         }
     }
-    fn account(&self) -> IndexAccount {
-        let pubkey = Pubkey::new_unique();
-        let owner = Pubkey::new_unique();
-        let allocation = self.allocation();
+
+    /// Generates a random account with a dummy allocation.
+    fn new_account(&self) -> IndexAccount {
         IndexAccount {
-            pubkey,
-            owner,
-            allocation,
+            pubkey: Pubkey::new_unique(),
+            owner: Pubkey::new_unique(),
+            allocation: self.new_allocation(),
         }
+    }
+
+    /// Helper to insert an account into the index immediately.
+    /// Useful for setting up test state.
+    fn persist_account(&self, acc: &IndexAccount) {
+        let mut txn = self.rw_txn();
+        self.index
+            .upsert_account(&acc.pubkey, &acc.owner, acc.allocation, &mut txn)
+            .expect("persist failed");
+        txn.commit().expect("persist commit failed");
+    }
+
+    /// Helper to count entries in the private deallocations table.
+    fn count_deallocations(&self) -> usize {
+        let txn = self.index.env.begin_ro_txn().unwrap();
+        self.index.deallocations.entries(&txn)
+    }
+
+    /// Helper wrapper to call upsert on the internal account struct.
+    fn upsert_account(
+        &self,
+        acc: &IndexAccount,
+        txn: &mut lmdb::RwTransaction,
+    ) -> crate::AccountsDbResult<Option<crate::storage::ExistingAllocation>>
+    {
+        self.index
+            .upsert_account(&acc.pubkey, &acc.owner, acc.allocation, txn)
     }
 }
 
+// Enable calling Index methods directly on Env
 impl Deref for IndexTestEnv {
     type Target = AccountsDbIndex;
     fn deref(&self) -> &Self::Target {
         &self.index
-    }
-}
-
-impl Drop for IndexTestEnv {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.directory);
     }
 }

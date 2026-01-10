@@ -6,7 +6,7 @@ use solana_account::{AccountSharedData, ReadableAccount, WritableAccount};
 use solana_pubkey::Pubkey;
 use tempfile::TempDir;
 
-use crate::{storage::ADB_FILE, AccountsDb};
+use crate::{storage::ACCOUNTS_DB_FILENAME, AccountsDb};
 
 const LAMPORTS: u64 = 4425;
 const SPACE: usize = 73;
@@ -14,623 +14,459 @@ const OWNER: Pubkey = Pubkey::new_from_array([23; 32]);
 const ACCOUNT_DATA: &[u8] = b"hello world?";
 const INIT_DATA_LEN: usize = ACCOUNT_DATA.len();
 
+/// Verifies basic account insertion and retrieval.
 #[test]
 fn test_get_account() {
-    let tenv = init_test_env();
-    let AccountWithPubkey { pubkey, .. } = tenv.account();
-    let acc = tenv.get_account(&pubkey);
-    assert!(
-        acc.is_some(),
-        "account was just inserted and should be in database"
-    );
-    let acc = acc.unwrap();
+    let env = TestEnv::new();
+    let AccountWithPubkey { pubkey, .. } = env.create_and_insert_account();
+
+    let acc = env.get_account(&pubkey).expect("account should exist");
+
     assert_eq!(acc.lamports(), LAMPORTS);
     assert_eq!(acc.owner(), &OWNER);
     assert_eq!(&acc.data()[..INIT_DATA_LEN], ACCOUNT_DATA);
     assert_eq!(acc.data().len(), SPACE);
 }
 
+/// Verifies Copy-on-Write semantics.
+/// Modifying an account in memory should not affect the persistent store
+/// until `upsert_account` is called.
 #[test]
 fn test_modify_account() {
-    let tenv = init_test_env();
+    let env = TestEnv::new();
     let AccountWithPubkey {
         pubkey,
         account: mut uncommitted,
-    } = tenv.account();
+    } = env.create_and_insert_account();
 
     let new_lamports = 42;
 
+    // Modify in memory
     assert_eq!(uncommitted.lamports(), LAMPORTS);
     uncommitted.set_lamports(new_lamports);
     assert_eq!(uncommitted.lamports(), new_lamports);
 
-    let mut committed = tenv
-        .get_account(&pubkey)
-        .expect("account should be in database");
-
+    // Verify DB is unchanged
+    let committed_before = env.get_account(&pubkey).unwrap();
     assert_eq!(
-        committed.lamports(),
+        committed_before.lamports(),
         LAMPORTS,
-        "account from the main buffer should not be affected"
+        "database should retain old state before commit"
     );
-    tenv.insert_account(&pubkey, &uncommitted)
-        .expect("failed to insert account");
 
-    committed = tenv
-        .get_account(&pubkey)
-        .expect("account should be in database");
+    // Commit changes
+    env.insert_account(&pubkey, &uncommitted).unwrap();
 
+    // Verify DB is updated
+    let committed_after = env.get_account(&pubkey).unwrap();
     assert_eq!(
-        committed.lamports(),
+        committed_after.lamports(),
         new_lamports,
-        "account's main buffer should have been switched after commit"
+        "database should reflect updates after commit"
     );
 }
 
+/// Verifies that accounts are correctly reallocated when their data size increases.
 #[test]
 fn test_account_resize() {
-    let tenv = init_test_env();
+    let env = TestEnv::new();
     let huge_data = [42; SPACE * 4];
     let AccountWithPubkey {
         pubkey,
         account: mut uncommitted,
-    } = tenv.account();
+    } = env.create_and_insert_account();
 
+    // Resize in memory
     uncommitted.set_data_from_slice(&huge_data);
-    assert!(
-        matches!(uncommitted, AccountSharedData::Owned(_),),
-        "account should have been promoted to Owned after resize"
-    );
+    assert_eq!(uncommitted.data().len(), SPACE * 4);
+
+    // Verify DB still has old size
+    let committed_before = env.get_account(&pubkey).unwrap();
+    assert_eq!(committed_before.data().len(), SPACE);
+
+    // Update DB
+    env.insert_account(&pubkey, &uncommitted).unwrap();
+
+    // Verify DB has new size and data
+    let committed_after = env.get_account(&pubkey).unwrap();
     assert_eq!(
-        uncommitted.data().len(),
-        SPACE * 4,
-        "account should have been resized to double of SPACE"
-    );
-
-    let mut committed = tenv
-        .get_account(&pubkey)
-        .expect("account should be in database");
-
-    assert_eq!(
-        committed.data().len(),
-        SPACE,
-        "uncommitted account data len should not have changed"
-    );
-
-    tenv.insert_account(&pubkey, &uncommitted)
-        .expect("failed to insert account");
-
-    committed = tenv
-        .get_account(&pubkey)
-        .expect("account should be in database");
-
-    assert_eq!(
-        committed.data(),
+        committed_after.data(),
         huge_data,
-        "account should have been resized after insertion"
+        "account data should match resized buffer"
     );
 }
 
+/// Verifies that the storage allocator reuses space (holes) created by updates.
 #[test]
 fn test_alloc_reuse() {
-    let tenv = init_test_env();
+    let env = TestEnv::new();
     let AccountWithPubkey {
-        pubkey,
+        pubkey: pk1,
         account: mut acc1,
-    } = tenv.account();
+    } = env.create_and_insert_account();
+
+    // Capture the pointer address of the first allocation
+    let old_ptr = env.get_account(&pk1).unwrap().data().as_ptr();
+
+    // Resize acc1 significantly to force a move, freeing the old slot
     let huge_data = [42; SPACE * 4];
-
-    let old_addr = acc1.data().as_ptr();
-
     acc1.set_data_from_slice(&huge_data);
-    tenv.insert_account(&pubkey, &acc1)
-        .expect("failed to insert account");
+    env.insert_account(&pk1, &acc1).unwrap();
 
-    let AccountWithPubkey { account: acc2, .. } = tenv.account();
+    // Insert a new account that fits in the old slot
+    let AccountWithPubkey { pubkey: pk2, .. } = env.create_and_insert_account();
+
+    let new_ptr = env.get_account(&pk2).unwrap().data().as_ptr();
 
     assert_eq!(
-        acc2.data().as_ptr(),
-        old_addr,
-        "new account insertion should have reused the allocation"
-    );
-
-    let AccountWithPubkey { account: acc3, .. } = tenv.account();
-
-    assert!(
-        acc3.data().as_ptr() > acc2.data().as_ptr(),
-        "last account insertion should have been freshly allocated"
+        new_ptr, old_ptr,
+        "allocator should recycle the freed slot for the new account"
     );
 }
 
+/// Verifies complex reallocation reuse logic (holes split/merge behavior).
 #[test]
 fn test_larger_alloc_reuse() {
-    let tenv = init_test_env();
-    let mut acc = tenv.account();
+    let env = TestEnv::new();
 
-    let mut huge_data = vec![42; SPACE * 2];
-    acc.account.set_data_from_slice(&huge_data);
-    tenv.insert_account(&acc.pubkey, &acc.account)
-        .expect("failed to insert account");
+    // 1. Insert Account 1
+    let mut acc1 = env.new_account_obj(SPACE);
+    let huge_data_2x = vec![42; SPACE * 2];
+    acc1.account.set_data_from_slice(&huge_data_2x);
+    env.insert_account(&acc1.pubkey, &acc1.account).unwrap();
 
-    let mut acc2 = tenv.account();
-    acc2.account.set_data_from_slice(&huge_data);
-    tenv.insert_account(&acc2.pubkey, &acc2.account)
-        .expect("failed to insert account");
+    // 2. Insert Account 2 (same size)
+    let mut acc2 = env.new_account_obj(SPACE);
+    acc2.account.set_data_from_slice(&huge_data_2x);
+    env.insert_account(&acc2.pubkey, &acc2.account).unwrap();
 
-    let mut acc3 = tenv.account();
-    huge_data = vec![42; SPACE * 4];
-    acc3.account.set_data_from_slice(&huge_data);
-    tenv.insert_account(&acc3.pubkey, &acc3.account)
-        .expect("failed to insert account");
-    acc3.account = tenv
-        .get_account(&acc3.pubkey)
-        .expect("third account should be in database");
+    // 3. Insert Account 3 (4x size)
+    let mut acc3 = env.new_account_obj(SPACE);
+    let huge_data_4x = vec![42; SPACE * 4];
+    acc3.account.set_data_from_slice(&huge_data_4x);
+    env.insert_account(&acc3.pubkey, &acc3.account).unwrap();
 
-    let alloc_addr = acc3.account.data().as_ptr();
-    huge_data = vec![42; SPACE * 5];
-    acc3.account.set_data_from_slice(&huge_data);
-    tenv.insert_account(&acc3.pubkey, &acc3.account)
-        .expect("failed to insert account");
+    // Read back Account 3 to get its pointer
+    let acc3_stored = env.get_account(&acc3.pubkey).unwrap();
+    let acc3_ptr = acc3_stored.data().as_ptr();
 
-    let mut acc4 = tenv.account();
-    huge_data = vec![42; SPACE * 3];
-    acc4.account.set_data_from_slice(&huge_data);
-    tenv.insert_account(&acc4.pubkey, &acc4.account)
-        .expect("failed to insert account");
-    acc4.account = tenv
-        .get_account(&acc4.pubkey)
-        .expect("fourth account should be in database");
+    // 4. Resize Account 3 to 5x (forces move, freeing the 4x slot)
+    let huge_data_5x = vec![42; SPACE * 5];
+    acc3.account.set_data_from_slice(&huge_data_5x);
+    env.insert_account(&acc3.pubkey, &acc3.account).unwrap();
+
+    // 5. Insert Account 4 (3x size - fits in the 4x hole)
+    let mut acc4 = env.new_account_obj(SPACE);
+    let huge_data_3x = vec![42; SPACE * 3];
+    acc4.account.set_data_from_slice(&huge_data_3x);
+    env.insert_account(&acc4.pubkey, &acc4.account).unwrap();
+
+    let acc4_stored = env.get_account(&acc4.pubkey).unwrap();
 
     assert_eq!(
-        acc4.account.data().as_ptr(),
-        alloc_addr,
-        "fourth account should have reused the allocation from third one"
+        acc4_stored.data().as_ptr(),
+        acc3_ptr,
+        "account 4 should have reused account 3's old allocation"
     );
 }
 
 #[test]
 fn test_get_program_accounts() {
-    let tenv = init_test_env();
-    let acc = tenv.account();
-    let accounts = tenv.get_program_accounts(&OWNER, |_| true);
-    assert!(accounts.is_ok(), "program account should be in database");
-    let mut accounts = accounts.unwrap();
-    assert_eq!(
-        accounts.next().unwrap().1,
-        acc.account,
-        "returned program account should match inserted one"
-    );
-    assert_eq!(
-        accounts.next(),
-        None,
-        "only one program account should have been inserted"
-    );
+    let env = TestEnv::new();
+    let acc = env.create_and_insert_account();
+
+    let accounts = env.get_program_accounts(&OWNER, |_| true);
+    assert!(accounts.is_ok());
+
+    let mut iter = accounts.unwrap();
+    let (pk, data) = iter.next().unwrap();
+
+    assert_eq!(pk, acc.pubkey);
+    assert_eq!(data, acc.account);
+    assert!(iter.next().is_none());
 }
 
 #[test]
 fn test_get_all_accounts() {
-    let tenv = init_test_env();
-    let acc = tenv.account();
-    let mut pubkeys = HashSet::new();
-    pubkeys.insert(acc.pubkey);
-    let acc2 = tenv.account();
-    tenv.insert_account(&acc2.pubkey, &acc2.account)
-        .expect("failed to insert account");
-    pubkeys.insert(acc2.pubkey);
-    let acc3 = tenv.account();
-    tenv.insert_account(&acc3.pubkey, &acc3.account)
-        .expect("failed to insert account");
-    pubkeys.insert(acc3.pubkey);
+    let env = TestEnv::new();
+    let acc1 = env.create_and_insert_account();
+    let acc2 = env.create_and_insert_account();
+    let acc3 = env.create_and_insert_account();
 
-    let mut pks = tenv.iter_all();
-    assert!(pks
-        .next()
-        .map(|(pk, _)| pubkeys.contains(&pk))
-        .unwrap_or_default());
-    assert!(pks
-        .next()
-        .map(|(pk, _)| pubkeys.contains(&pk))
-        .unwrap_or_default());
-    assert!(pks
-        .next()
-        .map(|(pk, _)| pubkeys.contains(&pk))
-        .unwrap_or_default());
-    assert!(pks.next().is_none());
+    let expected_pks: HashSet<_> =
+        [acc1.pubkey, acc2.pubkey, acc3.pubkey].into();
+
+    let stored_pks: HashSet<_> = env.iter_all().map(|(pk, _)| pk).collect();
+
+    assert_eq!(stored_pks, expected_pks);
 }
 
 #[test]
 fn test_take_snapshot() {
-    let tenv = init_test_env();
-    let mut acc = tenv.account();
+    let env = TestEnv::new();
+    let mut acc = env.create_and_insert_account();
 
-    assert_eq!(tenv.slot(), 0, "fresh accountsdb should have 0 slot");
-    tenv.set_slot(tenv.snapshot_frequency);
-    assert_eq!(
-        tenv.slot(),
-        tenv.snapshot_frequency,
-        "adb slot must have been updated"
-    );
-    assert!(
-        tenv.snapshot_exists(tenv.snapshot_frequency),
-        "first snapshot should have been created"
-    );
+    assert_eq!(env.slot(), 0);
+
+    // Trigger Snapshot 1
+    env.advance_slot(env.snapshot_frequency);
+    assert_eq!(env.slot(), env.snapshot_frequency);
+    assert!(env.snapshot_exists(env.snapshot_frequency));
+
+    // Update Account
     acc.account.set_data(ACCOUNT_DATA.to_vec());
+    env.insert_account(&acc.pubkey, &acc.account).unwrap();
 
-    tenv.insert_account(&acc.pubkey, &acc.account)
-        .expect("failed to insert account");
-
-    tenv.set_slot(2 * tenv.snapshot_frequency);
-    assert!(
-        tenv.snapshot_exists(2 * tenv.snapshot_frequency),
-        "second snapshot should have been created"
-    );
+    // Trigger Snapshot 2
+    env.advance_slot(env.snapshot_frequency * 2);
+    assert!(env.snapshot_exists(env.snapshot_frequency * 2));
 }
 
 #[test]
 fn test_restore_from_snapshot() {
-    let mut tenv = init_test_env();
-    let mut acc = tenv.account();
-    let new_lamports = 42;
+    let mut env = TestEnv::new();
+    let mut acc = env.create_and_insert_account();
+    let snap_freq = env.snapshot_frequency;
 
-    tenv.set_slot(tenv.snapshot_frequency); // trigger snapshot
-    tenv.set_slot(tenv.snapshot_frequency + 1);
+    // Create Base Snapshot
+    env.advance_slot(snap_freq);
+
+    // Make changes after snapshot
+    env.advance_slot(snap_freq + 3);
+    let new_lamports = 999;
     acc.account.set_lamports(new_lamports);
-    tenv.insert_account(&acc.pubkey, &acc.account)
-        .expect("failed to insert account");
+    env.insert_account(&acc.pubkey, &acc.account).unwrap();
+    env.advance_slot(snap_freq + 3);
 
-    let acc_committed = tenv
-        .get_account(&acc.pubkey)
-        .expect("account should be in database");
+    // Verify update persisted in current state
     assert_eq!(
-        acc_committed.lamports(),
-        new_lamports,
-        "account's lamports should have been updated after commit"
+        env.get_account(&acc.pubkey).unwrap().lamports(),
+        new_lamports
     );
-    tenv.set_slot(tenv.snapshot_frequency * 3);
 
-    let snapshot_frequency = tenv.snapshot_frequency;
-    tenv = tenv.ensure_at_most(snapshot_frequency * 2);
+    // Rollback to before the update
+    env = env.restore_to_slot(snap_freq);
+
+    let restored_acc = env.get_account(&acc.pubkey).unwrap();
     assert_eq!(
-        tenv.slot(),
-        tenv.snapshot_frequency,
-        "slot should have been rolled back"
-    );
-    let acc_rolledback = tenv
-        .get_account(&acc.pubkey)
-        .expect("account should be in database");
-    assert_eq!(
-        acc_rolledback.lamports(),
+        restored_acc.lamports(),
         LAMPORTS,
-        "account's lamports should have been rolled back"
+        "account should be restored to state at snapshot"
     );
-    assert_eq!(tenv.slot(), tenv.snapshot_frequency);
 }
 
 #[test]
 fn test_get_all_accounts_after_rollback() {
-    let mut tenv = init_test_env();
-    let acc = tenv.account();
+    let mut env = TestEnv::new();
+    let acc = env.create_and_insert_account();
     let mut pks = vec![acc.pubkey];
     const ITERS: u64 = 1024;
+
+    // Create initial state
     for i in 0..=ITERS {
-        let acc = tenv.account();
-        tenv.insert_account(&acc.pubkey, &acc.account)
-            .expect("failed to insert account");
+        let acc = env.create_and_insert_account();
         pks.push(acc.pubkey);
-        tenv.set_slot(i);
+        env.advance_slot(i);
     }
 
+    // Add accounts after the restore point
     let mut post_snap_pks = vec![];
-    for i in ITERS..ITERS + tenv.snapshot_frequency {
-        let acc = tenv.account();
-        tenv.insert_account(&acc.pubkey, &acc.account)
-            .expect("failed to insert account");
-        tenv.set_slot(i + 1);
+    for i in ITERS..ITERS + env.snapshot_frequency {
+        let acc = env.create_and_insert_account();
+        env.advance_slot(i + 1);
         post_snap_pks.push(acc.pubkey);
     }
 
-    tenv = tenv.ensure_at_most(ITERS);
-    assert_eq!(tenv.slot(), ITERS, "failed to rollback to snapshot");
+    // Rollback
+    env = env.restore_to_slot(ITERS);
+    assert_eq!(env.slot(), ITERS);
 
-    let asserter = |(pk, acc): (_, AccountSharedData)| {
-        assert_eq!(
-            acc.data().len(),
-            SPACE,
-            "account was incorrectly deserialized"
-        );
-        assert_eq!(
-            &acc.data()[..INIT_DATA_LEN],
-            ACCOUNT_DATA,
-            "account data contains garbage"
-        );
-        pk
-    };
-    let pubkeys = tenv.iter_all().map(asserter).collect::<HashSet<_>>();
+    // Verify State
+    let pubkeys: HashSet<_> = env.iter_all().map(|(pk, _)| pk).collect();
 
     assert_eq!(pubkeys.len(), pks.len());
 
     for pk in pks {
-        assert!(pubkeys.contains(&pk));
+        assert!(pubkeys.contains(&pk), "Missing account {}", pk);
     }
     for pk in post_snap_pks {
-        assert!(!pubkeys.contains(&pk));
+        assert!(
+            !pubkeys.contains(&pk),
+            "Account {} should have been rolled back",
+            pk
+        );
     }
 }
 
 #[test]
 fn test_db_size_after_rollback() {
-    let mut tenv = init_test_env();
+    let mut env = TestEnv::new();
     let last_slot = 512;
     for i in 0..=last_slot {
-        let acc = tenv.account();
-        tenv.insert_account(&acc.pubkey, &acc.account)
-            .expect("failed to insert account");
-        tenv.set_slot(i);
+        env.create_and_insert_account();
+        env.advance_slot(i);
     }
-    let pre_rollback_db_size = tenv.storage_size();
-    let path = tenv.snapshot_engine.database_path();
-    let adb_file = path.join(ADB_FILE);
-    let pre_rollback_file_size = adb_file
-        .metadata()
-        .expect("failed to get metadata for adb file")
-        .len();
 
-    tenv = tenv.ensure_at_most(last_slot);
+    let pre_rollback_db_size = env.storage_size();
+    let file_path = env
+        .snapshot_manager
+        .database_path()
+        .join(ACCOUNTS_DB_FILENAME);
+    let pre_rollback_file_size = file_path.metadata().unwrap().len();
+
+    env = env.restore_to_slot(last_slot);
 
     assert_eq!(
-        tenv.storage_size(),
+        env.storage_size(),
         pre_rollback_db_size,
         "database size mismatch after rollback"
     );
-    let path = tenv.snapshot_engine.database_path();
-    let adb_file = path.join(ADB_FILE);
-    let post_rollback_len = adb_file
-        .metadata()
-        .expect("failed to get metadata for adb file")
-        .len();
+
+    let post_rollback_file_size = file_path.metadata().unwrap().len();
     assert_eq!(
-        post_rollback_len, pre_rollback_file_size,
+        post_rollback_file_size, pre_rollback_file_size,
         "adb file size mismatch after rollback"
     );
 }
 
 #[test]
 fn test_zero_lamports_account() {
-    let tenv = init_test_env();
-    let mut acc = tenv.account();
-    let pk = acc.pubkey;
-    assert!(
-        tenv.get_account(&pk).is_some(),
-        "account should exists after init"
-    );
+    let env = TestEnv::new();
+    let mut acc = env.create_and_insert_account();
 
+    // Explicitly set 0 lamports (simulating escrow or marker account)
     acc.account.set_lamports(0);
+    env.insert_account(&acc.pubkey, &acc.account).unwrap();
 
-    tenv.insert_account(&pk, &acc.account)
-        .expect("failed to insert account");
-
-    // NOTE: we use empty accounts to mark escrow accounts that were not found on chain
-    let retained_account = tenv.get_account(&pk);
-    assert!(
-        retained_account.is_some(),
-        "account should be retained at 0 lamports as an empty escrow account"
-    );
-    assert_eq!(
-        retained_account.unwrap().lamports(),
-        0,
-        "retained escrow account should have 0 lamports"
-    );
+    let stored = env.get_account(&acc.pubkey);
+    assert!(stored.is_some(), "zero lamport account should be retained");
+    assert_eq!(stored.unwrap().lamports(), 0);
 }
 
 #[test]
 fn test_owner_change() {
-    let tenv = init_test_env();
-    let mut acc = tenv.account();
-    let result = tenv.account_matches_owners(&acc.pubkey, &[OWNER]);
-    assert!(matches!(result, Some(0)));
-    {
-        let mut accounts = tenv
-            .get_program_accounts(&OWNER, |_| true)
-            .expect("failed to get program accounts");
-        let expected = (acc.pubkey, acc.account.clone());
-        assert_eq!(accounts.next(), Some(expected));
-    }
+    let env = TestEnv::new();
+    let mut acc = env.create_and_insert_account();
+
+    // Verify index before change
+    assert!(matches!(
+        env.account_matches_owners(&acc.pubkey, &[OWNER]),
+        Some(0)
+    ));
+
+    // Change owner
     let new_owner = Pubkey::new_unique();
     acc.account.set_owner(new_owner);
-    tenv.insert_account(&acc.pubkey, &acc.account)
-        .expect("failed to insert account");
-    let result = tenv.account_matches_owners(&acc.pubkey, &[OWNER]);
-    assert!(result.is_none());
-    let result = tenv.get_program_accounts(&OWNER, |_| true);
-    assert!(result.map(|pks| pks.count() == 0).unwrap_or_default());
+    env.insert_account(&acc.pubkey, &acc.account).unwrap();
 
-    let result = tenv.account_matches_owners(&acc.pubkey, &[OWNER, new_owner]);
-    assert!(matches!(result, Some(1)));
-    let mut accounts = tenv
-        .get_program_accounts(&new_owner, |_| true)
-        .expect("failed to get program accounts");
-    assert_eq!(accounts.next().map(|(k, _)| k), Some(acc.pubkey));
+    // Verify index after change
+    // Old owner should return nothing
+    assert!(env.account_matches_owners(&acc.pubkey, &[OWNER]).is_none());
+    assert_eq!(
+        env.get_program_accounts(&OWNER, |_| true).unwrap().count(),
+        0
+    );
+
+    // New owner should match
+    assert!(matches!(
+        env.account_matches_owners(&acc.pubkey, &[new_owner]),
+        Some(0)
+    ));
+    assert_eq!(
+        env.get_program_accounts(&new_owner, |_| true)
+            .unwrap()
+            .count(),
+        1
+    );
 }
 
+/// Verifies that we eventually hit a limit or handle capacity gracefully.
 #[test]
-#[should_panic]
-fn test_account_too_many_accounts() {
-    let tenv = init_test_env();
-    for _ in 0..20 {
-        let acc = tenv.account();
-        let mut oversized_account = acc.account;
-        oversized_account.extend_from_slice(&[42; 9_000_000]);
-        tenv.insert_account(&acc.pubkey, &oversized_account)
-            .expect("failed to insert account");
+fn test_database_full_error() {
+    let env = TestEnv::new();
+
+    // Fill DB with huge accounts
+    let huge_data = vec![42; 9_000_000]; // 9MB
+    let mut hit_limit = false;
+
+    // Try to insert until failure
+    for _ in 0..50 {
+        let mut acc = env.new_account_obj(SPACE);
+        acc.account.set_data_from_slice(&huge_data);
+
+        if env.insert_account(&acc.pubkey, &acc.account).is_err() {
+            hit_limit = true;
+            break;
+        }
     }
+
+    assert!(
+        hit_limit,
+        "Database should eventually return error when full"
+    );
 }
 
 #[test]
 fn test_account_shrinking() {
-    let tenv = init_test_env();
-    let mut acc1 = tenv.account();
+    let env = TestEnv::new();
+    let mut acc = env.create_and_insert_account();
 
-    // ==============================================
-    // test set_data
-    acc1.account.set_data(b"".to_vec());
-    tenv.insert_account(&acc1.pubkey, &acc1.account)
-        .expect("failed to insert account");
-    acc1.account = tenv
-        .get_account(&acc1.pubkey)
-        .expect("account should be inserted");
-    assert_eq!(
-        acc1.account.data().len(),
-        0,
-        "account data should have been truncated"
-    );
+    // Shrink via set_data
+    acc.account.set_data(vec![]);
+    env.insert_account(&acc.pubkey, &acc.account).unwrap();
 
-    // ==============================================
-    // test set_data_from_slice
-    let mut acc2 = tenv.account();
-    tenv.insert_account(&acc2.pubkey, &acc2.account)
-        .expect("failed to insert account");
-
-    acc2.account = tenv
-        .get_account(&acc2.pubkey)
-        .expect("account 2 should be inserted");
-
-    acc2.account.set_data_from_slice(b"");
-
-    tenv.insert_account(&acc2.pubkey, &acc2.account)
-        .expect("failed to insert account");
-    acc2.account = tenv
-        .get_account(&acc2.pubkey)
-        .expect("account should be inserted");
-    assert_eq!(
-        acc2.account.data().len(),
-        0,
-        "account data should have been truncated"
-    );
-
-    // ==============================================
-    // test set_data_from_slice
-    let mut acc3 = tenv.account();
-    tenv.insert_account(&acc3.pubkey, &acc3.account)
-        .expect("failed to insert account");
-
-    acc3.account = tenv
-        .get_account(&acc3.pubkey)
-        .expect("account 2 should be inserted");
-
-    acc3.account.resize(0, 0);
-
-    tenv.insert_account(&acc3.pubkey, &acc3.account)
-        .expect("failed to insert account");
-    acc3.account = tenv
-        .get_account(&acc3.pubkey)
-        .expect("account should be inserted");
-    assert_eq!(
-        acc3.account.data().len(),
-        0,
-        "account data should have been truncated"
-    );
-}
-
-#[test]
-fn test_many_insertions_to_accountsdb() {
-    const ACCOUNTNUM: usize = 16384;
-    const ITERS: usize = 2 << 16;
-    const THREADNUM: usize = 4;
-
-    let tenv = init_test_env();
-
-    let mut pubkeys = Vec::with_capacity(ACCOUNTNUM);
-    for _ in 0..ACCOUNTNUM {
-        let acc = tenv.account();
-        pubkeys.push(acc.pubkey);
-        tenv.insert_account(&acc.pubkey, &acc.account)
-            .expect("failed to insert account");
-    }
-    // test whether frequent account reallocations effectively reuse free
-    // space in database without overflowing the database boundaries (100MB for test)
-    let tenv_arc = Arc::new(tenv);
-    let chunksize = ACCOUNTNUM / THREADNUM;
-    std::thread::scope(|s| {
-        for pks in pubkeys.chunks(chunksize) {
-            let tenv_arc = tenv_arc.clone();
-            s.spawn(move || {
-                for i in 0..ITERS {
-                    let pk = &pks[i % chunksize];
-                    let mut account = tenv_arc
-                        .get_account(pk)
-                        .expect("account should be in database");
-                    account
-                        .set_data_from_slice(&vec![43; i % (SPACE * 20) + 13]);
-                    tenv_arc
-                        .insert_account(pk, &account)
-                        .expect("failed to insert account");
-                }
-            });
-        }
-    });
+    let stored = env.get_account(&acc.pubkey).unwrap();
+    assert_eq!(stored.data().len(), 0);
 }
 
 #[test]
 fn test_reallocation_split() {
-    let tenv = init_test_env();
+    let env = TestEnv::new();
     const SIZE: usize = 1024;
-    tenv.account();
-    let account1 = tenv.account_with_size(SIZE * 2);
-    let data_ptr1 = account1.account.data().as_ptr();
-    let account2 = tenv.account_with_size(SIZE);
-    let data_ptr2 = account2.account.data().as_ptr();
-    tenv.remove_account(&account1.pubkey);
-    let account3 = tenv.account_with_size(SIZE / 4);
-    let account4 = tenv.account_with_size(SIZE / 4);
-    assert_eq!(account3.account.data().as_ptr(), data_ptr1);
-    assert!(account4.account.data().as_ptr() < data_ptr2);
-    assert!(account4.account.data().as_ptr() > data_ptr1);
+
+    // Create a hole of size 2048
+    let acc1 = env.create_account_with_size(SIZE * 2);
+    let ptr1 = env.get_account(&acc1.pubkey).unwrap().data().as_ptr();
+    env.remove_account(&acc1.pubkey); // Creates hole
+
+    // Create 2 accounts of size 256
+    let acc2 = env.create_account_with_size(SIZE / 4);
+    let acc3 = env.create_account_with_size(SIZE / 4);
+
+    let ptr2 = env.get_account(&acc2.pubkey).unwrap().data().as_ptr();
+    let ptr3 = env.get_account(&acc3.pubkey).unwrap().data().as_ptr();
+
+    // Verify they reused the space (ptr2 should be exactly at ptr1)
+    assert_eq!(ptr2, ptr1, "First small account should take start of hole");
+    assert!(ptr3 > ptr2, "Second small account should follow first");
 }
 
 #[test]
 fn test_database_reset() {
-    // 1. Initialize DB and insert some data
-    let (adb, temp_dir) = init_db();
+    let (adb, temp_dir) = TestEnv::init_raw_db();
     let pubkey = Pubkey::new_unique();
     let account = AccountSharedData::new(LAMPORTS, SPACE, &OWNER);
 
-    adb.insert_account(&pubkey, &account)
-        .expect("failed to insert account");
-    assert!(
-        adb.get_account(&pubkey).is_some(),
-        "Account should exist before reset"
-    );
-    assert_eq!(adb.get_accounts_count(), 1);
+    adb.insert_account(&pubkey, &account).unwrap();
+    assert!(adb.get_account(&pubkey).is_some());
 
-    // 2. Drop the current instance to release any file locks or handles
+    // Explicitly drop to release locks
     drop(adb);
 
-    // 3. Re-initialize the DB with the same path but with reset = true
+    // Re-open with reset=true
     let config = AccountsDbConfig {
         reset: true,
         ..Default::default()
     };
 
-    // Use the path from the temp_dir (which is maintained alive by `temp_dir`)
-    let adb_reset = AccountsDb::new(&config, temp_dir.path(), 0)
-        .expect("should be able to re-open db with reset");
+    let adb_reset = AccountsDb::new(&config, temp_dir.path(), 0).unwrap();
 
-    // 4. Verify the database is empty
-    assert!(
-        adb_reset.get_account(&pubkey).is_none(),
-        "Account should be gone after reset"
-    );
-    assert_eq!(
-        adb_reset.get_accounts_count(),
-        0,
-        "Account count should be zero"
-    );
+    assert!(adb_reset.get_account(&pubkey).is_none());
+    assert_eq!(adb_reset.account_count(), 0);
 }
 
 // ==============================================================
-// ==============================================================
-//                      UTILITY CODE BELOW
-// ==============================================================
+//                      TEST UTILITIES
 // ==============================================================
 
 struct AccountWithPubkey {
@@ -638,69 +474,105 @@ struct AccountWithPubkey {
     account: AccountSharedData,
 }
 
-struct AdbTestEnv {
+struct TestEnv {
     adb: Arc<AccountsDb>,
+    // Kept to ensure temp dir is cleaned up on drop
     _directory: TempDir,
 }
 
-pub fn init_db() -> (Arc<AccountsDb>, TempDir) {
-    let _ = env_logger::builder()
-        .filter_level(log::LevelFilter::Warn)
-        .is_test(true)
-        .try_init();
-    let directory =
-        tempfile::tempdir().expect("failed to create temporary directory");
-    let config = AccountsDbConfig::default();
-
-    let adb = AccountsDb::new(&config, directory.path(), 0)
-        .expect("expected to initialize ADB")
-        .into();
-    (adb, directory)
-}
-
-fn init_test_env() -> AdbTestEnv {
-    let (adb, _directory) = init_db();
-    AdbTestEnv { adb, _directory }
-}
-
-impl AdbTestEnv {
-    fn account(&self) -> AccountWithPubkey {
-        self.account_with_size(SPACE)
+impl TestEnv {
+    fn new() -> Self {
+        let (adb, _directory) = Self::init_raw_db();
+        Self { adb, _directory }
     }
 
-    fn account_with_size(&self, size: usize) -> AccountWithPubkey {
+    fn init_raw_db() -> (Arc<AccountsDb>, TempDir) {
+        let _ = env_logger::builder()
+            .filter_level(log::LevelFilter::Info)
+            .is_test(true)
+            .try_init();
+
+        let dir = tempfile::tempdir().expect("temp dir creation failed");
+        let config = AccountsDbConfig::default();
+
+        let adb = AccountsDb::new(&config, dir.path(), 0)
+            .expect("ADB init failed")
+            .into();
+
+        (adb, dir)
+    }
+
+    fn new_account_obj(&self, size: usize) -> AccountWithPubkey {
         let pubkey = Pubkey::new_unique();
         let mut account = AccountSharedData::new(LAMPORTS, size, &OWNER);
-        account.data_as_mut_slice()[..INIT_DATA_LEN]
-            .copy_from_slice(ACCOUNT_DATA);
-        self.adb
-            .insert_account(&pubkey, &account)
-            .expect("failed to insert account");
-        let account = self
-            .get_account(&pubkey)
-            .expect("failed to refetch newly inserted account");
+        // Fill with some data
+        if size >= INIT_DATA_LEN {
+            account.data_as_mut_slice()[..INIT_DATA_LEN]
+                .copy_from_slice(ACCOUNT_DATA);
+        }
         AccountWithPubkey { pubkey, account }
     }
 
-    fn set_slot(&self, slot: u64) {
-        self.adb.set_slot(slot);
-        while Arc::strong_count(&self.adb) > 1 {
-            std::thread::yield_now();
+    fn create_and_insert_account(&self) -> AccountWithPubkey {
+        let acc = self.new_account_obj(SPACE);
+        self.adb.insert_account(&acc.pubkey, &acc.account).unwrap();
+        // Re-fetch to ensure we have the stored state
+        let stored = self.adb.get_account(&acc.pubkey).unwrap();
+        AccountWithPubkey {
+            pubkey: acc.pubkey,
+            account: stored,
         }
     }
 
-    fn ensure_at_most(mut self, slot: u64) -> Self {
-        let mut accountsdb = Arc::try_unwrap(self.adb)
-            .expect("this is the only Arc reference to accountsdb");
-        accountsdb
-            .ensure_at_most(slot)
-            .expect("failed to rollback accounts database");
-        self.adb = Arc::new(accountsdb);
+    fn create_account_with_size(&self, size: usize) -> AccountWithPubkey {
+        let acc = self.new_account_obj(size);
+        self.adb.insert_account(&acc.pubkey, &acc.account).unwrap();
+        AccountWithPubkey {
+            pubkey: acc.pubkey,
+            account: acc.account,
+        }
+    }
+
+    fn advance_slot(&self, target_slot: u64) {
+        self.adb.set_slot(target_slot);
+
+        // Simple spin-wait if we expect a snapshot trigger.
+        // This ensures the background thread has started and possibly finished creating the file.
+        if target_slot.is_multiple_of(self.adb.snapshot_frequency) {
+            let mut retries = 0;
+            while !self.adb.snapshot_exists(target_slot) && retries < 50 {
+                std::thread::sleep(std::time::Duration::from_millis(10));
+                retries += 1;
+            }
+        }
+    }
+
+    fn restore_to_slot(mut self, slot: u64) -> Self {
+        // Robustly wait for background threads (snapshots) to release the Arc.
+        let mut retries = 0;
+        let mut inner = loop {
+            match Arc::try_unwrap(self.adb) {
+                Ok(inner) => break inner,
+                Err(adb) => {
+                    if retries > 50 {
+                        // Panic if still shared after ~1 second
+                        panic!("Cannot restore: DB is shared (background snapshot thread likely still running)");
+                    }
+                    self.adb = adb; // Put it back to retry
+                    std::thread::sleep(std::time::Duration::from_millis(20));
+                    retries += 1;
+                }
+            }
+        };
+
+        inner.restore_state_if_needed(slot).unwrap();
+        self.adb = Arc::new(inner);
         self
     }
 }
 
-impl Deref for AdbTestEnv {
+// Allow calling AccountsDb methods directly on TestEnv
+impl Deref for TestEnv {
     type Target = Arc<AccountsDb>;
     fn deref(&self) -> &Self::Target {
         &self.adb

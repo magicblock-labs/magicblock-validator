@@ -3,14 +3,14 @@ use lmdb::{
     Transaction, WriteFlags,
 };
 
-use super::WEMPTY;
-
+/// Wrapper around LMDB Database providing a safe, typed interface.
 #[cfg_attr(test, derive(Debug))]
 pub(super) struct Table {
     db: Database,
 }
 
 impl Table {
+    /// Opens or creates a database within the given environment.
     pub(super) fn new(
         env: &Environment,
         name: &str,
@@ -20,6 +20,7 @@ impl Table {
         Ok(Self { db })
     }
 
+    /// Retrieves a value by key. Returns `None` if the key does not exist.
     #[inline]
     pub(super) fn get<'txn, T: Transaction, K: AsRef<[u8]>>(
         &self,
@@ -33,18 +34,38 @@ impl Table {
         }
     }
 
+    /// Inserts a key-value pair, **overwriting** any existing value.
     #[inline]
-    pub(super) fn put<K: AsRef<[u8]>, V: AsRef<[u8]>>(
+    pub(super) fn upsert<K: AsRef<[u8]>, V: AsRef<[u8]>>(
         &self,
         txn: &mut RwTransaction,
         key: K,
         value: V,
     ) -> lmdb::Result<()> {
-        txn.put(self.db, &key, &value, WEMPTY)
+        txn.put(self.db, &key, &value, WriteFlags::empty())
     }
 
+    /// Inserts a key-value pair **only if the key does not already exist**.
+    /// Returns `true` if inserted, `false` if the key already existed.
     #[inline]
-    pub(super) fn del<K: AsRef<[u8]>>(
+    pub(super) fn insert<K: AsRef<[u8]>, V: AsRef<[u8]>>(
+        &self,
+        txn: &mut RwTransaction,
+        key: K,
+        value: V,
+    ) -> lmdb::Result<bool> {
+        match txn.put(self.db, &key, &value, WriteFlags::NO_OVERWRITE) {
+            Ok(_) => Ok(true),
+            Err(lmdb::Error::KeyExist) => Ok(false),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Removes a key. Returns `Ok(())` even if the key was not found (idempotent).
+    ///
+    /// If `value` is provided, the deletion only occurs if the data in the DB matches.
+    #[inline]
+    pub(super) fn remove<K: AsRef<[u8]>>(
         &self,
         txn: &mut RwTransaction,
         key: K,
@@ -56,21 +77,7 @@ impl Table {
         }
     }
 
-    #[inline]
-    pub(super) fn put_if_not_exists<K: AsRef<[u8]>, V: AsRef<[u8]>>(
-        &self,
-        txn: &mut RwTransaction,
-        key: K,
-        value: V,
-    ) -> lmdb::Result<bool> {
-        let result = txn.put(self.db, &key, &value, WriteFlags::NO_OVERWRITE);
-        match result {
-            Ok(_) => Ok(true),
-            Err(lmdb::Error::KeyExist) => Ok(false),
-            Err(err) => Err(err),
-        }
-    }
-
+    /// Opens a read-only cursor.
     #[inline]
     pub(super) fn cursor_ro<'txn, T: Transaction>(
         &self,
@@ -79,6 +86,7 @@ impl Table {
         txn.open_ro_cursor(self.db)
     }
 
+    /// Opens a read-write cursor.
     #[inline]
     pub(super) fn cursor_rw<'txn>(
         &self,
@@ -87,6 +95,7 @@ impl Table {
         txn.open_rw_cursor(self.db)
     }
 
+    /// Returns the number of entries in the database.
     pub(super) fn entries<T: Transaction>(&self, txn: &T) -> usize {
         txn.stat(self.db).map(|s| s.entries()).unwrap_or_default()
     }
