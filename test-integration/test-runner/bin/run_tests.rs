@@ -1,3 +1,5 @@
+#![allow(deprecated)]
+
 use std::{
     error::Error,
     io,

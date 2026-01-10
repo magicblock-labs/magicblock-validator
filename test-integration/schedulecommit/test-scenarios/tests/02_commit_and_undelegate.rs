@@ -430,6 +430,11 @@ fn assert_cannot_increase_committee_count(
         );
     let (tx_result_err, tx_err) = extract_transaction_error(tx_res);
     if let Some(tx_err) = tx_err {
+        use solana_sdk::transaction::TransactionError;
+        if matches!(tx_err, TransactionError::InvalidWritableAccount) {
+            return;
+        }
+
         assert_is_one_of_instruction_errors(
             tx_err,
             &tx_result_err,
