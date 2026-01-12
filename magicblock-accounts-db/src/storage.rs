@@ -1,9 +1,10 @@
 use std::{
     fs::File,
     io::{self, Write},
+    mem::size_of,
     path::Path,
     ptr::NonNull,
-    sync::atomic::{AtomicU32, AtomicU64, Ordering::*},
+    sync::atomic::{AtomicU32, AtomicU64, Ordering},
 };
 
 use log::error;
@@ -12,403 +13,452 @@ use memmap2::MmapMut;
 use solana_account::AccountSharedData;
 
 use crate::{
-    error::AccountsDbError,
+    error::{AccountsDbError, LogErr},
     index::{Blocks, Offset},
-    log_err, AccountsDbResult,
+    AccountsDbResult,
 };
 
-/// Extra space in database storage file reserved for metadata
-/// Currently most of it is unused, but still reserved for future extensions
+/// The reserved size in bytes at the beginning of the file for the `StorageHeader`.
+/// This area is excluded from the data region used for account storage.
 const METADATA_STORAGE_SIZE: usize = 256;
-pub(crate) const ADB_FILE: &str = "accounts.db";
 
-/// Different offsets into memory mapped file where various metadata fields are stored
-const SLOT_OFFSET: usize = size_of::<u64>();
-const BLOCKSIZE_OFFSET: usize = SLOT_OFFSET + size_of::<u64>();
-const TOTALBLOCKS_OFFSET: usize = BLOCKSIZE_OFFSET + size_of::<u32>();
-const DEALLOCATED_OFFSET: usize = TOTALBLOCKS_OFFSET + size_of::<u32>();
+// Size calculation:
+// write_cursor(8) + slot(8) + block_size(4) + capacity_blocks(4) + recycled_count(4) = 28 bytes used.
+const METADATA_HEADER_USED: usize = 28;
+const METADATA_PADDING_SIZE: usize =
+    METADATA_STORAGE_SIZE - METADATA_HEADER_USED;
 
-#[cfg_attr(test, derive(Debug))]
-pub(crate) struct AccountsStorage {
-    meta: StorageMeta,
-    /// a mutable pointer into memory mapped region
-    store: NonNull<u8>,
-    /// underlying memory mapped region, but we cannot use it directly as Rust
-    /// borrowing rules prevent us from mutably accessing it concurrently
-    mmap: MmapMut,
+/// The standard filename for the accounts database file.
+pub(crate) const ACCOUNTS_DB_FILENAME: &str = "accounts.db";
+
+/// The persistent memory layout of the storage metadata.
+///
+/// This struct maps directly to the first `METADATA_STORAGE_SIZE` bytes of the
+/// memory-mapped file. It uses atomic types to allow concurrent access/updates
+/// from multiple threads without external locking.
+#[repr(C)]
+struct StorageHeader {
+    /// The current write position (high-water mark) in blocks.
+    /// This is an index: `actual_offset = write_cursor * block_size`.
+    ///
+    /// This acts as the "head" of the append-only log. Atomic fetch_add is used
+    /// here to reserve space for new allocations.
+    write_cursor: AtomicU64,
+
+    /// The latest slot number that has been written to this storage.
+    /// Used for snapshotting and recovery to know the age of the data.
+    slot: AtomicU64,
+
+    /// The size of a single block in bytes (e.g., 128, 256, 512).
+    /// This is immutable once the database is created.
+    block_size: u32,
+
+    /// The total capacity of the database in blocks.
+    /// derived from: `(file_size - METADATA_STORAGE_SIZE) / block_size`.
+    capacity_blocks: u32,
+
+    /// A counter of blocks that have been marked as dead/recycled.
+    /// This is purely for metrics or fragmentation estimation; it does not
+    /// automatically reclaim space (this is an append-only structure).
+    recycled_count: AtomicU32,
+
+    /// Padding to ensure the struct size exactly matches `METADATA_STORAGE_SIZE`
+    /// and maintains alignment for future extensions.
+    _padding: [u8; METADATA_PADDING_SIZE],
 }
 
-// TODO(bmuddha/tacopaco): use Unique pointer types
-// from core::ptr once stable instead of raw pointers
+// Compile-time assertion to ensure the header definition matches the reserved space.
+const _: () = assert!(size_of::<StorageHeader>() == METADATA_STORAGE_SIZE);
+// Ensure 8-byte alignment for 64-bit atomics.
+const _: () = assert!(size_of::<StorageHeader>().is_multiple_of(8));
 
-/// Storage metadata manager
+/// A handle to the memory-mapped accounts database.
 ///
-/// Metadata is persisted along with the actual accounts and is used to track various control
-/// mechanisms of underlying storage
-///
-/// ----------------------------------------------------------
-/// | Metadata In Memory Layout                              |
-/// ----------------------------------------------------------
-/// | field         | description             | size in bytes|
-/// |---------------|-------------------------|---------------
-/// | head          | offset into storage     | 8            |
-/// | slot          | latest slot observed    | 8            |
-/// | block size    | size of block           | 4            |
-/// | total blocks  | total number of blocks  | 4            |
-/// | deallocated   | deallocated block count | 4            |
-/// ----------------------------------------------------------
+/// This struct provides safe wrappers around the raw memory map, handling
+/// atomic allocation, bounds checking, and pointer arithmetic.
 #[cfg_attr(test, derive(Debug))]
-struct StorageMeta {
-    /// offset into memory map, where next allocation will be served
-    head: &'static AtomicU64,
-    /// latest slot written to this account
-    slot: &'static AtomicU64,
-    /// size of the block (indivisible unit of allocation)
-    block_size: u32,
-    /// total number of blocks in database
-    total_blocks: u32,
-    /// blocks that were deallocated and now require defragmentation
-    deallocated: &'static AtomicU32,
+pub(crate) struct AccountsStorage {
+    /// The underlying memory-mapped file.
+    /// Kept alive here to ensure the memory region remains valid.
+    mmap: MmapMut,
+
+    /// A raw pointer to the start of the *data* segment (skipping the header).
+    ///
+    /// # Safety
+    /// This pointer is derived from `mmap` and is guaranteed to be valid
+    /// as long as `mmap` is alive.
+    data_region: NonNull<u8>,
+
+    /// A cached copy of `header.block_size` as a `usize`.
+    /// Optimization to avoid reading from the mmap (potential cache miss/atomic read)
+    /// on every allocation or read.
+    block_size: usize,
 }
 
 impl AccountsStorage {
-    /// Open (or create if doesn't exist) an accountsdb storage
+    /// Opens an existing accounts database or creates a new one if it doesn't exist.
     ///
-    /// NOTE:
-    /// passed config is partially ignored if the database file already
-    /// exists at the supplied path, for example, the size of main database
-    /// file can be adjusted only up, the blocksize cannot be changed at all
+    /// # Arguments
+    /// * `config` - Configuration defining block size and initial file size.
+    /// * `directory` - The directory path where `accounts.db` will be located.
+    ///
+    /// # Returns
+    /// * `AccountsDbResult<Self>` - The initialized storage handle.
     pub(crate) fn new(
         config: &AccountsDbConfig,
         directory: &Path,
     ) -> AccountsDbResult<Self> {
-        let dbpath = directory.join(ADB_FILE);
+        let db_path = directory.join(ACCOUNTS_DB_FILENAME);
+        let exists = db_path.exists();
+
         let mut file = File::options()
             .create(true)
             .truncate(false)
             .write(true)
             .read(true)
-            .open(&dbpath)
-            .inspect_err(log_err!(
-                "opening adb file at {}",
-                dbpath.display()
-            ))?;
+            .open(&db_path)
+            .log_err(|| {
+                format!("opening accounts db file at {}", db_path.display())
+            })?;
 
-        if file.metadata()?.len() == 0 {
-            // database is being created for the first time, resize the file and write metadata
-            StorageMeta::init_adb_file(&mut file, config).inspect_err(
-                log_err!("initializing new adb at {}", dbpath.display()),
-            )?;
+        // If the file is new or empty, we must initialize the header and resize it.
+        if !exists || file.metadata()?.len() == 0 {
+            initialize_db_file(&mut file, config).log_err(|| {
+                format!("initializing new accounts db at {}", db_path.display())
+            })?;
         } else {
-            let db_size = calculate_db_size(config);
-            adjust_database_file_size(&mut file, db_size as u64)?;
+            // If it exists, ensure it is at least the expected size from config.
+            let target_size = calculate_file_size(config);
+            ensure_file_size(&mut file, target_size as u64)?;
         }
 
+        Self::map_file(file)
+    }
+
+    /// Internal helper to memory-map the file and validate the header.
+    fn map_file(file: File) -> AccountsDbResult<Self> {
         // SAFETY:
-        // Only accountsdb from validator process is modifying the file contents
-        // through memory map, so the contract of MmapMut is upheld
+        // We are the exclusive owner of the File object here.
+        // We rely on the OS to ensure the mmap is valid.
         let mut mmap = unsafe { MmapMut::map_mut(&file) }?;
-        if mmap.len() <= METADATA_STORAGE_SIZE {
+
+        if mmap.len() < METADATA_STORAGE_SIZE {
             return Err(AccountsDbError::Internal(
-                "memory map length is less than metadata requirement",
+                "memory map length is less than metadata requirement"
+                    .to_string(),
             ));
+        }
+
+        // Validate and fixup metadata.
+        // We scope the mutable borrow of the header to this block.
+        let block_size = {
+            // SAFETY: We verified mmap.len() >= METADATA_STORAGE_SIZE above.
+            // Casting the first bytes to StorageHeader is safe because StorageHeader is #[repr(C)].
+            let header =
+                unsafe { &mut *(mmap.as_mut_ptr() as *mut StorageHeader) };
+            Self::validate_header(header)?;
+
+            // Check if the file was resized (e.g. by external tool or config change)
+            // and update capacity_blocks to reflect reality.
+            let actual_capacity = (mmap.len() - METADATA_STORAGE_SIZE)
+                / header.block_size as usize;
+
+            if actual_capacity as u32 != header.capacity_blocks {
+                header.capacity_blocks = actual_capacity as u32;
+            }
+
+            header.block_size as usize
         };
 
-        let meta = StorageMeta::new(&mut mmap);
-        // SAFETY:
-        // StorageMeta::init_adb_file made sure that the mmap is large enough to hold the metadata,
-        // so jumping to the end of that segment still lands us within the mmap region
-        let store = unsafe {
-            let pointer = mmap.as_mut_ptr().add(METADATA_STORAGE_SIZE);
-            // as mmap points to non-null memory, the `pointer` also points to non-null address
-            NonNull::new_unchecked(pointer)
-        };
-        Ok(Self { mmap, meta, store })
-    }
-
-    pub(crate) fn alloc(&self, size: usize) -> Allocation {
-        let blocks = self.get_block_count(size) as u64;
-
-        let head = self.head();
-
-        let offset = head.fetch_add(blocks, Relaxed) as usize;
-
-        // Ideally we should always have enough space to store accounts, 500 GB
-        // should be enough to store every single account in solana and more,
-        // but given that we operate on a tiny subset of that account pool, even
-        // 10GB should be more than enough.
-        //
-        // Here we check that we haven't overflown the memory map and backing
-        // file's size (and panic if we did), probably we need to implement
-        // remapping with file growth, but considering that disk is limited,
-        // this too can fail
-        // https://github.com/magicblock-labs/magicblock-validator/issues/334
-        let size = self.meta.total_blocks as usize;
-        assert!(offset < size, "database is full: {offset} > {size}",);
-
-        // SAFETY:
-        // we have validated above that we are within bounds of mmap and fetch_add
-        // on head, reserved the offset number of blocks for our exclusive use
-        let storage = unsafe { self.store.add(offset * self.block_size()) };
-        Allocation {
-            storage,
-            offset: offset as Offset,
-            blocks: blocks as Blocks,
-        }
-    }
-
-    #[inline(always)]
-    pub(crate) fn read_account(&self, offset: Offset) -> AccountSharedData {
-        let memptr = self.offset(offset).as_ptr();
-        // SAFETY:
-        // offset is obtained from index and later transformed by storage (to translate to actual
-        // address) always points to valid account allocation, as it's only possible to insert
-        // something in database going in reverse, i.e. obtaining valid offset from storage
-        // and then inserting it into index. So memory location pointed to memptr is valid.
-        unsafe { AccountSharedData::deserialize_from_mmap(memptr) }.into()
-    }
-
-    pub(crate) fn recycle(&self, recycled: ExistingAllocation) -> Allocation {
-        let offset = recycled.offset as usize * self.block_size();
-        // SAFETY:
-        // offset is calculated from existing allocation within the map, thus
-        // jumping to that offset will land us somewhere within those bounds
-        let storage = unsafe { self.store.add(offset) };
-        Allocation {
-            offset: recycled.offset,
-            blocks: recycled.blocks,
-            storage,
-        }
-    }
-
-    pub(crate) fn offset(&self, offset: Offset) -> NonNull<u8> {
-        // SAFETY:
-        // offset is calculated from existing allocation within the map, thus
-        // jumping to that offset will land us somewhere within those bounds
-        let offset = (offset * self.meta.block_size) as usize;
-        unsafe { self.store.add(offset) }
-    }
-
-    pub(crate) fn get_slot(&self) -> u64 {
-        self.meta.slot.load(Relaxed)
-    }
-
-    pub(crate) fn set_slot(&self, val: u64) {
-        self.meta.slot.store(val, Relaxed)
-    }
-
-    pub(crate) fn increment_deallocations(&self, val: Blocks) {
-        self.meta.deallocated.fetch_add(val, Relaxed);
-    }
-
-    pub(crate) fn decrement_deallocations(&self, val: Blocks) {
-        self.meta.deallocated.fetch_sub(val, Relaxed);
-    }
-
-    pub(crate) fn get_block_count(&self, size: usize) -> Blocks {
-        let block_size = self.block_size();
-        let blocks = size.div_ceil(block_size);
-        blocks as Blocks
-    }
-
-    pub(crate) fn flush(&self) {
-        let _ = self
-            .mmap
-            .flush()
-            .inspect_err(log_err!("failed to sync flush the mmap"));
-    }
-
-    /// Reopen database from a different directory
-    ///
-    /// NOTE: this is a very cheap operation, as fast as opening a file
-    pub(crate) fn reload(&mut self, dbpath: &Path) -> AccountsDbResult<()> {
-        let mut file = File::options()
-            .write(true)
-            .read(true)
-            .open(dbpath.join(ADB_FILE))
-            .inspect_err(log_err!(
-                "opening adb file from snapshot at {}",
-                dbpath.display()
-            ))?;
-        // snapshot files might be truncated, and contain only the actual
-        // data with no extra space to grow the database, so we readjust the
-        // file's length to the preconfigured value before performing mmap
-        adjust_database_file_size(&mut file, self.size())?;
-
-        // Only accountsdb from the validator process is modifying the file contents
-        // through memory map, so the contract of MmapMut is upheld
-        let mut mmap = unsafe { MmapMut::map_mut(&file) }?;
-        let meta = StorageMeta::new(&mut mmap);
-        // SAFETY:
-        // Snapshots are created from the same file used by the primary memory mapped file
-        // and it's already large enough to contain metadata and possibly some accounts
-        // so jumping to the end of that segment still lands us within the mmap region
-        let store = unsafe {
+        // Calculate the pointer to the data region (just past the header).
+        // SAFETY: We verified mmap.len() >= METADATA_STORAGE_SIZE.
+        // The pointer arithmetic remains within the valid mmap region.
+        let data_region = unsafe {
             NonNull::new_unchecked(mmap.as_mut_ptr().add(METADATA_STORAGE_SIZE))
         };
-        self.mmap = mmap;
-        self.meta = meta;
-        self.store = store;
-        Ok(())
+
+        Ok(Self {
+            mmap,
+            data_region,
+            block_size,
+        })
     }
 
-    /// Returns the utilized segment (containing written data) of internal memory map
-    pub(crate) fn utilized_mmap(&self) -> &[u8] {
-        // get the last byte where data was written in storage segment and add the size
-        // of metadata storage, this will give us the used storage in backing file
-        let head = self.meta.head.load(Relaxed) as usize;
-        let mut end = head * self.block_size() + METADATA_STORAGE_SIZE;
-        end = end.min(self.mmap.len());
-
-        &self.mmap[..end]
-    }
-
-    /// total number of bytes occupied by storage
-    pub(crate) fn size(&self) -> u64 {
-        (self.meta.total_blocks as u64 * self.meta.block_size as u64)
-            + METADATA_STORAGE_SIZE as u64
-    }
-
-    pub(crate) fn block_size(&self) -> usize {
-        self.meta.block_size as usize
-    }
-
-    #[inline(always)]
-    fn head(&self) -> &AtomicU64 {
-        self.meta.head
-    }
-}
-
-/// NOTE!: any change in metadata format should be reflected here
-impl StorageMeta {
-    fn init_adb_file(
-        file: &mut File,
-        config: &AccountsDbConfig,
-    ) -> AccountsDbResult<()> {
-        // Somewhat arbitrary min size for database, should be good enough for most test
-        // cases, and prevent accidental creation of few kilobyte large or 0 sized databases
-        const MIN_DB_SIZE: usize = 16 * 1024 * 1024;
-        assert!(
-            config.database_size > MIN_DB_SIZE,
-            "database file should be larger than {MIN_DB_SIZE} bytes in length"
-        );
-        let db_size = calculate_db_size(config);
-        let total_blocks = (db_size / config.block_size as usize) as Blocks;
-        // grow the backing file as necessary
-        adjust_database_file_size(file, db_size as u64)?;
-
-        // the storage itself starts immediately after metadata section
-        let head = 0_u64;
-        file.write_all(&head.to_le_bytes())?;
-
-        // fresh Accountsdb starts at slot 0
-        let slot = 0_u64;
-        file.write_all(&slot.to_le_bytes())?;
-
-        // write blocksize
-        file.write_all(&(config.block_size as u32).to_le_bytes())?;
-
-        file.write_all(&total_blocks.to_le_bytes())?;
-        // number of deallocated blocks, obviously it's zero in a new database
-        let deallocated = 0_u32;
-        file.write_all(&deallocated.to_le_bytes())?;
-
-        Ok(file.flush()?)
-    }
-
-    fn new(store: &mut MmapMut) -> Self {
-        // SAFETY:
-        // All pointer arithmethic operations are safe because they are performed
-        // on the metadata segment of the backing MmapMut, which is guarranteed to
-        // be large enough, due to previous call to Self::init_adb_file
-        //
-        // The pointer to static reference conversion is also sound, because the
-        // memmap is kept in the AccountsDb for the entirety of its lifecycle
-
-        let ptr = store.as_mut_ptr();
-
-        // first element is the head
-        let head = unsafe { &*(ptr as *const AtomicU64) };
-        // second element is the slot
-        let slot = unsafe { &*(ptr.add(SLOT_OFFSET) as *const AtomicU64) };
-        // third is the blocks size
-        let block_size =
-            unsafe { (ptr.add(BLOCKSIZE_OFFSET) as *const u32).read() };
-
-        let block_size_is_initialized = [
+    /// Validates the consistency of the storage header.
+    fn validate_header(header: &StorageHeader) -> AccountsDbResult<()> {
+        let block_size_valid = [
             BlockSize::Block128,
             BlockSize::Block256,
             BlockSize::Block512,
         ]
         .iter()
-        .any(|&bs| bs as u32 == block_size);
-        // fourth is the total blocks count
-        let mut total_blocks =
-            unsafe { (ptr.add(TOTALBLOCKS_OFFSET) as *const u32).read() };
-        // check whether the size of database file has been readjusted
-        let adjusted_total_blocks =
-            (store.len() / block_size as usize) as Blocks;
-        if adjusted_total_blocks != total_blocks {
-            // if so, use the adjusted number of total blocks
-            total_blocks = adjusted_total_blocks;
-            // and persist the new value to the disk via mmap
-            // SAFETY:
-            // we just read this value above, and now we are just overwriting it with new 4 bytes
-            unsafe {
-                (ptr.add(TOTALBLOCKS_OFFSET) as *mut u32)
-                    .write(adjusted_total_blocks)
-            };
-        }
+        .any(|&bs| bs as u32 == header.block_size);
 
-        if !(total_blocks != 0 && block_size_is_initialized) {
+        if header.capacity_blocks == 0 || !block_size_valid {
             error!(
-                "AccountsDB file is not initialized properly. Block Size - \
-                {block_size} and Total Block Count is: {total_blocks}"
+                "AccountsDB corrupt: Block Size: {}, Total Blocks: {}",
+                header.block_size, header.capacity_blocks
             );
-            let _ = std::io::stdout().flush();
-            std::process::exit(1);
+            return Err(AccountsDbError::Internal(
+                "AccountsDB file corrupted".to_string(),
+            ));
         }
-        // fifth is the number of deallocated blocks so far
-        let deallocated =
-            unsafe { &*(ptr.add(DEALLOCATED_OFFSET) as *const AtomicU32) };
+        Ok(())
+    }
 
-        Self {
-            head,
-            slot,
-            block_size,
-            total_blocks,
-            deallocated,
+    /// Reserves space for a new allocation in the storage.
+    ///
+    /// This method is thread-safe and lock-free. It uses atomic arithmetic to
+    /// advance the write cursor.
+    ///
+    /// # Arguments
+    /// * `size_bytes` - The number of bytes required for the account data.
+    ///
+    /// # Returns
+    /// * `Ok(Allocation)` - A handle containing the raw pointer and offset.
+    /// * `Err` - If the database is full.
+    pub(crate) fn allocate(
+        &self,
+        size_bytes: usize,
+    ) -> AccountsDbResult<Allocation> {
+        let blocks_needed = self.blocks_required(size_bytes) as u64;
+        let header = self.header();
+
+        // Atomic fetch_add reserves a range of blocks for this thread.
+        // `Relaxed` ordering is sufficient because we only care about uniqueness
+        // of the index, not synchronization with other memory operations yet.
+        let start_index = header
+            .write_cursor
+            .fetch_add(blocks_needed, Ordering::Relaxed);
+
+        let end_index = start_index as usize + blocks_needed as usize;
+        let capacity = header.capacity_blocks as usize;
+
+        // Check for overflow (Database Full).
+        if end_index > capacity {
+            // Note: We don't roll back the atomic here. The space is technically "leaked"
+            // at the end of the file, but since the DB is full/unusable anyway, this is acceptable.
+            return Err(AccountsDbError::Internal(format!(
+                "Database full: required {} blocks, available {}",
+                blocks_needed,
+                capacity.saturating_sub(start_index as usize)
+            )));
         }
+
+        // Calculate the raw memory address for this allocation.
+        // SAFETY: We validated `end_index <= capacity` above, so this pointer
+        // is guaranteed to be within the mapped data region.
+        let ptr = unsafe {
+            self.data_region.add(start_index as usize * self.block_size)
+        };
+
+        Ok(Allocation {
+            ptr,
+            offset: start_index as Offset,
+            blocks: blocks_needed as Blocks,
+        })
+    }
+
+    /// Reads an account from the storage at the given offset.
+    ///
+    /// # Arguments
+    /// * `offset` - The block index where the account starts.
+    ///
+    /// # Safety
+    /// This assumes `offset` points to a valid, previously allocated account.
+    /// The Index system ensures we only request valid offsets.
+    #[inline(always)]
+    pub(crate) fn read_account(&self, offset: Offset) -> AccountSharedData {
+        let ptr = self.resolve_ptr(offset).as_ptr();
+        // SAFETY:
+        // 1. `resolve_ptr` ensures the pointer is within bounds if `offset` is valid.
+        // 2. `deserialize_from_mmap` must handle potentially untrusted bytes safely.
+        unsafe { AccountSharedData::deserialize_from_mmap(ptr) }.into()
+    }
+
+    /// Reconstructs an `Allocation` handle from a previously stored offset.
+    ///
+    /// Used when reusing an existing slot in the index (though this append-only
+    /// implementation generally doesn't overwrite data in place, this supports
+    /// designs that might).
+    pub(crate) fn recycle(&self, recycled: ExistingAllocation) -> Allocation {
+        let ptr = self.resolve_ptr(recycled.offset);
+        Allocation {
+            offset: recycled.offset,
+            blocks: recycled.blocks,
+            ptr,
+        }
+    }
+
+    /// Translates an abstract `Offset` (block index) to a raw memory pointer.
+    #[inline]
+    pub(crate) fn resolve_ptr(&self, offset: Offset) -> NonNull<u8> {
+        let offset_bytes = offset as usize * self.block_size;
+        // SAFETY:
+        // The caller is responsible for ensuring `offset` is within valid bounds.
+        // In the context of `AccountsStorage`, offsets come from the Index which
+        // tracks valid allocations.
+        unsafe { self.data_region.add(offset_bytes) }
+    }
+
+    // --- Metadata Accessors ---
+
+    /// Helper to get a reference to the header structure.
+    #[inline(always)]
+    fn header(&self) -> &StorageHeader {
+        // SAFETY: `mmap` is guaranteed to be at least METADATA_STORAGE_SIZE large
+        // and properly aligned for `StorageHeader`.
+        unsafe { &*(self.mmap.as_ptr() as *const StorageHeader) }
+    }
+
+    pub(crate) fn slot(&self) -> u64 {
+        self.header().slot.load(Ordering::Relaxed)
+    }
+
+    pub(crate) fn update_slot(&self, val: u64) {
+        self.header().slot.store(val, Ordering::Relaxed)
+    }
+
+    pub(crate) fn inc_recycled_count(&self, val: Blocks) {
+        self.header()
+            .recycled_count
+            .fetch_add(val, Ordering::Relaxed);
+    }
+
+    pub(crate) fn dec_recycled_count(&self, val: Blocks) {
+        self.header()
+            .recycled_count
+            .fetch_sub(val, Ordering::Relaxed);
+    }
+
+    /// Calculates how many blocks are needed to store `size_bytes`.
+    pub(crate) fn blocks_required(&self, size_bytes: usize) -> Blocks {
+        size_bytes.div_ceil(self.block_size) as Blocks
+    }
+
+    /// Returns the slice of memory currently containing valid data (up to the write cursor).
+    pub(crate) fn active_segment(&self) -> &[u8] {
+        let cursor =
+            self.header().write_cursor.load(Ordering::Relaxed) as usize;
+        // Calculate length: Header Size + (Written Blocks * Block Size)
+        let len = (cursor * self.block_size + METADATA_STORAGE_SIZE)
+            .min(self.mmap.len());
+        &self.mmap[..len]
+    }
+
+    /// Flushes changes to disk.
+    pub(crate) fn flush(&self) {
+        let _ = self
+            .mmap
+            .flush()
+            .log_err(|| "failed to sync flush the mmap".to_string());
+    }
+
+    /// Reloads the database from a different path (used for snapshots).
+    ///
+    /// This drops the current mmap and opens a new one at `db_path`.
+    pub(crate) fn reload(&mut self, db_path: &Path) -> AccountsDbResult<()> {
+        let mut file = File::options()
+            .write(true)
+            .read(true)
+            .open(db_path.join(ACCOUNTS_DB_FILENAME))
+            .log_err(|| {
+                format!("opening adb file for reload at {}", db_path.display())
+            })?;
+
+        ensure_file_size(&mut file, self.size_bytes())?;
+        *self = Self::map_file(file)?;
+        Ok(())
+    }
+
+    /// Returns the total expected size of the file in bytes (Header + Data).
+    pub(crate) fn size_bytes(&self) -> u64 {
+        (self.header().capacity_blocks as u64 * self.block_size as u64)
+            + METADATA_STORAGE_SIZE as u64
+    }
+
+    pub(crate) fn block_size(&self) -> usize {
+        self.block_size
     }
 }
 
-/// Helper function to grow the size of the backing accounts db file
-/// NOTE: this function cannot be used to shrink the file, as the logic involved to
-/// ensure, that we don't accidentally truncate the written data, is a bit complex
-fn adjust_database_file_size(file: &mut File, size: u64) -> io::Result<()> {
-    if file.metadata()?.len() >= size {
-        return Ok(());
+/// Initializes a fresh accounts database file with the header.
+fn initialize_db_file(
+    file: &mut File,
+    config: &AccountsDbConfig,
+) -> AccountsDbResult<()> {
+    const MIN_DB_SIZE: usize = 16 * 1024 * 1024;
+    if config.database_size < MIN_DB_SIZE {
+        return Err(AccountsDbError::Internal(format!(
+            "database file should be larger than {} bytes",
+            MIN_DB_SIZE
+        )));
     }
-    file.set_len(size)
+
+    let target_size = calculate_file_size(config);
+    // Determine capacity based on file size minus header.
+    let total_blocks =
+        (target_size - METADATA_STORAGE_SIZE) / config.block_size as usize;
+
+    ensure_file_size(file, target_size as u64)?;
+
+    // Prepare the initial header state.
+    let header = StorageHeader {
+        write_cursor: AtomicU64::new(0),
+        slot: AtomicU64::new(0),
+        block_size: config.block_size as u32,
+        capacity_blocks: total_blocks as u32,
+        recycled_count: AtomicU32::new(0),
+        _padding: [0u8; METADATA_PADDING_SIZE],
+    };
+
+    // Serialize the header directly to bytes.
+    // SAFETY: StorageHeader is `repr(C)` and contains only POD (Plain Old Data) types.
+    let header_bytes = unsafe {
+        std::slice::from_raw_parts(
+            &header as *const StorageHeader as *const u8,
+            size_of::<StorageHeader>(),
+        )
+    };
+
+    file.write_all(header_bytes)?;
+    Ok(file.flush()?)
 }
 
-fn calculate_db_size(config: &AccountsDbConfig) -> usize {
+/// Grows the file to `size` if it is currently smaller.
+fn ensure_file_size(file: &mut File, size: u64) -> io::Result<()> {
+    if file.metadata()?.len() < size {
+        file.set_len(size)?;
+    }
+    Ok(())
+}
+
+/// Calculates the target file size, ensuring alignment with block size.
+fn calculate_file_size(config: &AccountsDbConfig) -> usize {
     let block_size = config.block_size as usize;
-    let block_num = config.database_size.div_ceil(block_size);
-    let meta_blocks = METADATA_STORAGE_SIZE.div_ceil(block_size);
-    (block_num + meta_blocks) * block_size
+    // Align total size to block size + metadata
+    let blocks = config.database_size.div_ceil(block_size);
+    blocks * block_size + METADATA_STORAGE_SIZE
 }
 
+/// Represents a successful allocation within the storage.
 #[derive(Clone, Copy)]
 pub(crate) struct Allocation {
-    pub(crate) storage: NonNull<u8>,
+    /// Raw pointer to the start of the allocated memory.
+    pub(crate) ptr: NonNull<u8>,
+    /// The block index (offset) of this allocation.
     pub(crate) offset: Offset,
+    /// The number of blocks reserved.
     pub(crate) blocks: Blocks,
 }
 
+/// A struct representing a previously known allocation.
+/// Used for recycling or testing equality.
 #[cfg_attr(test, derive(Debug, Eq, PartialEq))]
 pub(crate) struct ExistingAllocation {
+    /// The block index (offset) of this allocation.
     pub(crate) offset: Offset,
+    /// The number of blocks reserved.
     pub(crate) blocks: Blocks,
 }
 
