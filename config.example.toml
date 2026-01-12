@@ -2,7 +2,7 @@
 # MagicBlock Validator Configuration
 # ==============================================================================
 # This file serves as a reference for all available configuration options.
-# ALL FIELDS ARE OPTIONAL. If removed, the "Default" value listed in the 
+# ALL FIELDS ARE OPTIONAL. If removed, the "Default" value listed in the
 # comments will be used.
 #
 # CONFIGURATION PRECEDENCE (Highest to Lowest):
@@ -58,7 +58,11 @@ lifecycle = "ephemeral"
 # Note: gRPC remote requires a Helius API key/token.
 # Example format: grpcs://<network>.helius-rpc.com?api-key=<YOUR_API_KEY>
 # See Helius gRPC docs for available network endpoints.
-remotes = ["https://api.devnet.solana.com", "wss://api.devnet.solana.com", "grpcs://laserstream-devnet-ewr.helius-rpc.com?api-key=YOUR_API_KEY"]
+remotes = [
+  "https://api.devnet.solana.com",
+  "wss://api.devnet.solana.com",
+  "grpcs://laserstream-devnet-ewr.helius-rpc.com?api-key=YOUR_API_KEY",
+]
 
 # Root directory for application storage (ledger, accountsdb, snapshots).
 # Default: "magicblock-test-storage" (created in current working directory)
@@ -196,7 +200,7 @@ remove-confined-accounts = false
 # This throttles the rate at which we resubscribe to prevent overwhelming the RPC provider.
 # Supports humantime format (e.g. "50ms", "200ms", "1s").
 # For example, with 200ms delay, resubscribing to 1000 accounts would take ~3.3 minutes.
-# Default: "50ms"
+# Default: "200ms"
 # Env: MBV_CHAINLINK__RESUBSCRIPTION_DELAY
 # resubscription-delay = "200ms"
 
