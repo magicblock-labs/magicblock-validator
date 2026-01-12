@@ -25,10 +25,9 @@ use tokio::{
 };
 
 use super::{
-    chain_pubsub_actor::{
-        ChainPubsubActor, ChainPubsubActorMessage, SubscriptionUpdate,
-    },
+    chain_pubsub_actor::ChainPubsubActor,
     errors::RemoteAccountProviderResult,
+    pubsub_common::{ChainPubsubActorMessage, SubscriptionUpdate},
 };
 
 type UnsubscribeFn = Box<dyn FnOnce() -> BoxFuture<'static, ()> + Send>;
@@ -159,7 +158,7 @@ pub trait ChainPubsubClient: Send + Sync + Clone + 'static {
         &self,
         pubkey: Pubkey,
     ) -> RemoteAccountProviderResult<()>;
-    async fn shutdown(&self);
+    async fn shutdown(&self) -> RemoteAccountProviderResult<()>;
 
     fn take_updates(&self) -> mpsc::Receiver<SubscriptionUpdate>;
 
@@ -170,9 +169,13 @@ pub trait ChainPubsubClient: Send + Sync + Clone + 'static {
     async fn subscription_count(
         &self,
         exclude: Option<&[Pubkey]>,
-    ) -> (usize, usize);
+    ) -> Option<(usize, usize)>;
 
-    fn subscriptions(&self) -> Vec<Pubkey>;
+    fn subscriptions(&self) -> Option<Vec<Pubkey>>;
+
+    fn subs_immediately(&self) -> bool;
+
+    fn id(&self) -> &str;
 }
 
 #[async_trait]
@@ -194,16 +197,19 @@ pub trait ReconnectableClient {
 pub struct ChainPubsubClientImpl {
     actor: Arc<ChainPubsubActor>,
     updates_rcvr: Arc<Mutex<Option<mpsc::Receiver<SubscriptionUpdate>>>>,
+    client_id: String,
 }
 
 impl ChainPubsubClientImpl {
     pub async fn try_new_from_url(
         pubsub_url: &str,
+        client_id: String,
         abort_sender: mpsc::Sender<()>,
         commitment: CommitmentConfig,
     ) -> RemoteAccountProviderResult<Self> {
         let (actor, updates) = ChainPubsubActor::new_from_url(
             pubsub_url,
+            &client_id,
             abort_sender,
             commitment,
         )
@@ -211,14 +217,25 @@ impl ChainPubsubClientImpl {
         Ok(Self {
             actor: Arc::new(actor),
             updates_rcvr: Arc::new(Mutex::new(Some(updates))),
+            client_id,
         })
     }
 }
 
 #[async_trait]
 impl ChainPubsubClient for ChainPubsubClientImpl {
-    async fn shutdown(&self) {
-        self.actor.shutdown().await;
+    async fn shutdown(&self) -> RemoteAccountProviderResult<()> {
+        let (tx, rx) = oneshot::channel();
+        self.actor
+            .send_msg(ChainPubsubActorMessage::Shutdown { response: tx })
+            .await?;
+
+        rx.await.inspect_err(|err| {
+            warn!(
+                "ChainPubsubClientImpl::shutdown - RecvError \
+                     occurred while awaiting shutdown response: {err:?}"
+            );
+        })?
     }
 
     fn take_updates(&self) -> mpsc::Receiver<SubscriptionUpdate> {
@@ -290,18 +307,26 @@ impl ChainPubsubClient for ChainPubsubClientImpl {
     async fn subscription_count(
         &self,
         exclude: Option<&[Pubkey]>,
-    ) -> (usize, usize) {
+    ) -> Option<(usize, usize)> {
         let total = self.actor.subscription_count(&[]);
         let filtered = if let Some(exclude) = exclude {
             self.actor.subscription_count(exclude)
         } else {
             total
         };
-        (total, filtered)
+        Some((total, filtered))
     }
 
-    fn subscriptions(&self) -> Vec<Pubkey> {
-        self.actor.subscriptions()
+    fn subscriptions(&self) -> Option<Vec<Pubkey>> {
+        Some(self.actor.subscriptions())
+    }
+
+    fn subs_immediately(&self) -> bool {
+        true
+    }
+
+    fn id(&self) -> &str {
+        &self.client_id
     }
 }
 
@@ -336,9 +361,10 @@ impl ReconnectableClient for ChainPubsubClientImpl {
 // -----------------
 #[cfg(any(test, feature = "dev-context"))]
 pub mod mock {
-    use std::{collections::HashSet, sync::Mutex, time::Duration};
+    use std::{collections::HashSet, time::Duration};
 
     use log::*;
+    use parking_lot::Mutex;
     use solana_account::Account;
     use solana_account_decoder::{encode_ui_account, UiAccountEncoding};
     use solana_program::clock::Slot;
@@ -356,8 +382,10 @@ pub mod mock {
         updates_sndr: mpsc::Sender<SubscriptionUpdate>,
         updates_rcvr: Arc<Mutex<Option<mpsc::Receiver<SubscriptionUpdate>>>>,
         subscribed_pubkeys: Arc<Mutex<HashSet<Pubkey>>>,
+        subscription_count_at_disconnect: Arc<Mutex<usize>>,
         connected: Arc<Mutex<bool>>,
         pending_resubscribe_failures: Arc<Mutex<usize>>,
+        reconnectable: Arc<Mutex<bool>>,
     }
 
     impl ChainPubsubClientMock {
@@ -369,25 +397,28 @@ pub mod mock {
                 updates_sndr,
                 updates_rcvr: Arc::new(Mutex::new(Some(updates_rcvr))),
                 subscribed_pubkeys: Arc::new(Mutex::new(HashSet::new())),
+                subscription_count_at_disconnect: Arc::new(Mutex::new(0)),
                 connected: Arc::new(Mutex::new(true)),
                 pending_resubscribe_failures: Arc::new(Mutex::new(0)),
+                reconnectable: Arc::new(Mutex::new(true)),
             }
         }
 
         /// Simulate a disconnect: clear all subscriptions and mark client as disconnected.
         pub fn simulate_disconnect(&self) {
-            *self.connected.lock().unwrap() = false;
-            self.subscribed_pubkeys.lock().unwrap().clear();
+            *self.connected.lock() = false;
+            *self.subscription_count_at_disconnect.lock() =
+                self.subscribed_pubkeys.lock().len();
+            self.subscribed_pubkeys.lock().clear();
         }
 
         /// Fail the next N resubscription attempts in resub_multiple().
         pub fn fail_next_resubscriptions(&self, n: usize) {
-            *self.pending_resubscribe_failures.lock().unwrap() = n;
+            *self.pending_resubscribe_failures.lock() = n;
         }
 
         async fn send(&self, update: SubscriptionUpdate) {
-            let subscribed_pubkeys =
-                self.subscribed_pubkeys.lock().unwrap().clone();
+            let subscribed_pubkeys = self.subscribed_pubkeys.lock().clone();
             if subscribed_pubkeys.contains(&update.pubkey) {
                 let _ =
                     self.updates_sndr.send(update).await.inspect_err(|err| {
@@ -416,11 +447,22 @@ pub mod mock {
                 },
                 value: ui_acc,
             };
-            self.send(SubscriptionUpdate {
-                pubkey,
-                rpc_response,
-            })
-            .await;
+            let update = SubscriptionUpdate::from((pubkey, rpc_response));
+            self.send(update).await;
+        }
+
+        pub fn disable_reconnect(&self) {
+            *self.reconnectable.lock() = false;
+        }
+
+        pub fn enable_reconnect(&self) {
+            *self.reconnectable.lock() = true;
+        }
+
+        pub fn is_connected_and_resubscribed(&self) -> bool {
+            *self.connected.lock()
+                && self.subscribed_pubkeys.lock().len()
+                    == *self.subscription_count_at_disconnect.lock()
         }
     }
 
@@ -431,7 +473,7 @@ pub mod mock {
             // than once (double take). That would indicate a logic bug in the
             // calling code. Panicking here surfaces such a bug early and avoids
             // silently losing the updates stream.
-            self.updates_rcvr.lock().unwrap().take().expect(
+            self.updates_rcvr.lock().take().expect(
                 "ChainPubsubClientMock::take_updates called more than once",
             )
         }
@@ -439,15 +481,14 @@ pub mod mock {
             &self,
             pubkey: Pubkey,
         ) -> RemoteAccountProviderResult<()> {
-            if !*self.connected.lock().unwrap() {
+            if !*self.connected.lock() {
                 return Err(
                     RemoteAccountProviderError::AccountSubscriptionsTaskFailed(
                         "mock: subscribe while disconnected".to_string(),
                     ),
                 );
             }
-            let mut subscribed_pubkeys =
-                self.subscribed_pubkeys.lock().unwrap();
+            let mut subscribed_pubkeys = self.subscribed_pubkeys.lock();
             subscribed_pubkeys.insert(pubkey);
             Ok(())
         }
@@ -456,7 +497,7 @@ pub mod mock {
             &self,
             _program_id: Pubkey,
         ) -> RemoteAccountProviderResult<()> {
-            if !*self.connected.lock().unwrap() {
+            if !*self.connected.lock() {
                 return Err(
                     RemoteAccountProviderError::AccountSubscriptionsTaskFailed(
                         "mock: subscribe_program while disconnected"
@@ -472,20 +513,21 @@ pub mod mock {
             &self,
             pubkey: Pubkey,
         ) -> RemoteAccountProviderResult<()> {
-            let mut subscribed_pubkeys =
-                self.subscribed_pubkeys.lock().unwrap();
+            let mut subscribed_pubkeys = self.subscribed_pubkeys.lock();
             subscribed_pubkeys.remove(&pubkey);
             Ok(())
         }
 
-        async fn shutdown(&self) {}
+        async fn shutdown(&self) -> RemoteAccountProviderResult<()> {
+            Ok(())
+        }
 
         async fn subscription_count(
             &self,
             exclude: Option<&[Pubkey]>,
-        ) -> (usize, usize) {
+        ) -> Option<(usize, usize)> {
             let pubkeys: Vec<Pubkey> = {
-                let subs = self.subscribed_pubkeys.lock().unwrap();
+                let subs = self.subscribed_pubkeys.lock();
                 subs.iter().cloned().collect()
             };
             let total = pubkeys.len();
@@ -494,19 +536,34 @@ pub mod mock {
                 .iter()
                 .filter(|pubkey| !exclude.contains(pubkey))
                 .count();
-            (total, filtered)
+            Some((total, filtered))
         }
 
-        fn subscriptions(&self) -> Vec<Pubkey> {
-            let subs = self.subscribed_pubkeys.lock().unwrap();
-            subs.iter().copied().collect()
+        fn subscriptions(&self) -> Option<Vec<Pubkey>> {
+            let subs = self.subscribed_pubkeys.lock();
+            Some(subs.iter().copied().collect())
+        }
+
+        fn subs_immediately(&self) -> bool {
+            true
+        }
+
+        fn id(&self) -> &str {
+            "ChainPubsubClientMock"
         }
     }
 
     #[async_trait]
     impl ReconnectableClient for ChainPubsubClientMock {
         async fn try_reconnect(&self) -> RemoteAccountProviderResult<()> {
-            *self.connected.lock().unwrap() = true;
+            if !*self.reconnectable.lock() {
+                return Err(
+                    RemoteAccountProviderError::AccountSubscriptionsTaskFailed(
+                        "mock: reconnect failed".to_string(),
+                    ),
+                );
+            }
+            *self.connected.lock() = true;
             Ok(())
         }
 
@@ -516,8 +573,7 @@ pub mod mock {
         ) -> RemoteAccountProviderResult<()> {
             // Simulate transient resubscription failures
             {
-                let mut to_fail =
-                    self.pending_resubscribe_failures.lock().unwrap();
+                let mut to_fail = self.pending_resubscribe_failures.lock();
                 if *to_fail > 0 {
                     *to_fail -= 1;
                     return Err(

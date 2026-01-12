@@ -20,6 +20,7 @@ pub(crate) fn process_mutate_accounts(
     invoke_context: &InvokeContext,
     transaction_context: &TransactionContext,
     account_mods: &mut HashMap<Pubkey, AccountModificationForInstruction>,
+    message: Option<String>,
 ) -> Result<(), InstructionError> {
     let instruction_context =
         transaction_context.get_current_instruction_context()?;
@@ -124,6 +125,12 @@ pub(crate) fn process_mutate_accounts(
             account_key,
         );
 
+        // If provided log the extra message to give more context to the user, i.e.
+        // why an account is not cloned as delegated, etc.
+        if let Some(ref msg) = message {
+            ic_msg!(invoke_context, "MutateAccounts: {}", msg);
+        }
+
         // While an account is undelegating and the delegation is not completed,
         // we will never clone/mutate it. Thus we can safely untoggle this flag
         // here.
@@ -196,14 +203,6 @@ pub(crate) fn process_mutate_accounts(
             if resolved_data.is_from_memory() {
                 memory_data_mods.push(resolved_data);
             }
-        }
-        if let Some(rent_epoch) = modification.rent_epoch {
-            ic_msg!(
-                invoke_context,
-                "MutateAccounts: setting rent_epoch to {}",
-                rent_epoch
-            );
-            account.borrow_mut().set_rent_epoch(rent_epoch);
         }
         if let Some(delegated) = modification.delegated {
             ic_msg!(
@@ -329,14 +328,14 @@ mod tests {
             owner: Some(owner_key),
             executable: Some(true),
             data: Some(vec![1, 2, 3, 4, 5]),
-            rent_epoch: None,
             delegated: Some(true),
             confined: Some(true),
             remote_slot: None,
         };
-        let ix = InstructionUtils::modify_accounts_instruction(vec![
-            modification.clone(),
-        ]);
+        let ix = InstructionUtils::modify_accounts_instruction(
+            vec![modification.clone()],
+            None,
+        );
         let transaction_accounts = ix
             .accounts
             .iter()
@@ -407,18 +406,21 @@ mod tests {
         };
         ensure_started_validator(&mut account_data);
 
-        let ix = InstructionUtils::modify_accounts_instruction(vec![
-            AccountModification {
-                pubkey: mod_key1,
-                lamports: Some(300),
-                ..AccountModification::default()
-            },
-            AccountModification {
-                pubkey: mod_key2,
-                lamports: Some(400),
-                ..AccountModification::default()
-            },
-        ]);
+        let ix = InstructionUtils::modify_accounts_instruction(
+            vec![
+                AccountModification {
+                    pubkey: mod_key1,
+                    lamports: Some(300),
+                    ..AccountModification::default()
+                },
+                AccountModification {
+                    pubkey: mod_key2,
+                    lamports: Some(400),
+                    ..AccountModification::default()
+                },
+            ],
+            None,
+        );
         let transaction_accounts = ix
             .accounts
             .iter()
@@ -504,33 +506,36 @@ mod tests {
         };
         ensure_started_validator(&mut account_data);
 
-        let ix = InstructionUtils::modify_accounts_instruction(vec![
-            AccountModification {
-                pubkey: mod_key1,
-                lamports: Some(1000),
-                data: Some(vec![1, 2, 3, 4, 5]),
-                delegated: Some(true),
-                ..Default::default()
-            },
-            AccountModification {
-                pubkey: mod_key2,
-                owner: Some(mod_2_owner),
-                ..Default::default()
-            },
-            AccountModification {
-                pubkey: mod_key3,
-                lamports: Some(3000),
-                ..Default::default()
-            },
-            AccountModification {
-                pubkey: mod_key4,
-                lamports: Some(100),
-                executable: Some(true),
-                data: Some(vec![16, 17, 18, 19, 20]),
-                delegated: Some(true),
-                ..Default::default()
-            },
-        ]);
+        let ix = InstructionUtils::modify_accounts_instruction(
+            vec![
+                AccountModification {
+                    pubkey: mod_key1,
+                    lamports: Some(1000),
+                    data: Some(vec![1, 2, 3, 4, 5]),
+                    delegated: Some(true),
+                    ..Default::default()
+                },
+                AccountModification {
+                    pubkey: mod_key2,
+                    owner: Some(mod_2_owner),
+                    ..Default::default()
+                },
+                AccountModification {
+                    pubkey: mod_key3,
+                    lamports: Some(3000),
+                    ..Default::default()
+                },
+                AccountModification {
+                    pubkey: mod_key4,
+                    lamports: Some(100),
+                    executable: Some(true),
+                    data: Some(vec![16, 17, 18, 19, 20]),
+                    delegated: Some(true),
+                    ..Default::default()
+                },
+            ],
+            None,
+        );
 
         let transaction_accounts = ix
             .accounts
@@ -641,13 +646,14 @@ mod tests {
         };
         ensure_started_validator(&mut account_data);
 
-        let ix = InstructionUtils::modify_accounts_instruction(vec![
-            AccountModification {
+        let ix = InstructionUtils::modify_accounts_instruction(
+            vec![AccountModification {
                 pubkey: mod_key,
                 remote_slot: Some(remote_slot),
                 ..Default::default()
-            },
-        ]);
+            }],
+            None,
+        );
         let transaction_accounts = ix
             .accounts
             .iter()

@@ -603,11 +603,24 @@ impl IntegrationTestContext {
         payer_chain: &Keypair,
         payer_ephem: &Keypair,
     ) -> anyhow::Result<(Signature, bool)> {
+        self.delegate_account_to_validator(
+            payer_chain,
+            payer_ephem,
+            self.ephem_validator_identity,
+        )
+    }
+
+    pub fn delegate_account_to_validator(
+        &self,
+        payer_chain: &Keypair,
+        payer_ephem: &Keypair,
+        validator: Option<Pubkey>,
+    ) -> anyhow::Result<(Signature, bool)> {
         let ixs = dlp_interface::create_delegate_ixs(
             // We change the owner of the ephem account, thus cannot use it as payer
             payer_chain.pubkey(),
             payer_ephem.pubkey(),
-            self.ephem_validator_identity,
+            validator,
         );
         let mut tx =
             Transaction::new_with_payer(&ixs, Some(&payer_chain.pubkey()));
@@ -624,25 +637,69 @@ impl IntegrationTestContext {
         lamports: u64,
         commitment_config: CommitmentConfig,
     ) -> anyhow::Result<Signature> {
-        let sig = rpc_client.request_airdrop(pubkey, lamports).with_context(
-            || format!("Failed to airdrop chain account '{:?}'", pubkey),
-        )?;
+        // The chain RPC might not be immediately ready (especially in CI).
+        // Retry requesting the airdrop a few times before giving up.
+        const MAX_ATTEMPTS: u32 = 60; // Up to ~60s with adaptive backoff
+        const MILLIS_UNTIL_RETRY_NORMAL: u64 = 250;
+        const MILLIS_UNTIL_RETRY_RATE_LIMITED: u64 = 1500;
 
-        let succeeded =
-            confirm_transaction(&sig, rpc_client, commitment_config, None)
-                .with_context(|| {
-                    format!(
-                        "Failed to confirm airdrop chain account '{:?}'",
-                        pubkey
+        let mut last_err: Option<anyhow::Error> = None;
+        for attempt in 1..=MAX_ATTEMPTS {
+            match rpc_client.request_airdrop(pubkey, lamports) {
+                Ok(sig) => {
+                    let succeeded = confirm_transaction(
+                        &sig,
+                        rpc_client,
+                        commitment_config,
+                        None,
                     )
-                })?;
-        if !succeeded {
-            return Err(anyhow::anyhow!(
-                "Failed to airdrop chain account '{:?}'",
-                pubkey
-            ));
+                    .with_context(|| {
+                        format!(
+                            "Failed to confirm airdrop chain account '{:?}'",
+                            pubkey
+                        )
+                    })?;
+                    if !succeeded {
+                        return Err(anyhow::anyhow!(
+                            "Failed to airdrop chain account '{:?}'",
+                            pubkey
+                        ));
+                    }
+                    return Ok(sig);
+                }
+                Err(err) => {
+                    let err_msg = err.to_string();
+                    last_err = Some(err.into());
+                    let (reason, delay_ms) = if err_msg
+                        .to_ascii_lowercase()
+                        .contains("rate limit")
+                    {
+                        ("rate-limited", MILLIS_UNTIL_RETRY_RATE_LIMITED)
+                    } else {
+                        ("rpc-error", MILLIS_UNTIL_RETRY_NORMAL)
+                    };
+                    debug!(
+                        "Airdrop request failed for {} ({}; attempt {}/{}), retrying in {}ms...",
+                        pubkey,
+                        reason,
+                        attempt,
+                        MAX_ATTEMPTS,
+                        delay_ms
+                    );
+                    // Only sleep if we will retry again
+                    if attempt < MAX_ATTEMPTS {
+                        sleep(Duration::from_millis(delay_ms));
+                    }
+                }
+            }
         }
-        Ok(sig)
+
+        Err(last_err.unwrap_or_else(|| {
+            anyhow::anyhow!(
+                "Failed to airdrop chain account '{:?}' (unknown error)",
+                pubkey
+            )
+        }))
     }
 
     // -----------------
@@ -997,6 +1054,39 @@ impl IntegrationTestContext {
                     .collect()
             })?;
         Ok(res)
+    }
+
+    pub fn last_transaction_mentioning_account_ephem(
+        &self,
+        account: &Pubkey,
+    ) -> Result<Signature> {
+        self.last_transaction_mentioning_account(account, true)
+    }
+
+    pub fn last_transaction_mentioning_account_chain(
+        &self,
+        account: &Pubkey,
+    ) -> Result<Signature> {
+        self.last_transaction_mentioning_account(account, false)
+    }
+
+    fn last_transaction_mentioning_account(
+        &self,
+        account: &Pubkey,
+        is_ephem: bool,
+    ) -> Result<Signature> {
+        let statuses = if is_ephem {
+            self.get_signaturestats_for_address_ephem(account)?
+        } else {
+            self.get_signaturestats_for_address_chain(account)?
+        };
+
+        statuses
+            .first()
+            .map(|status| status.signature())
+            .ok_or_else(|| {
+                anyhow::anyhow!("No transactions found for account {}", account)
+            })
     }
 
     // -----------------

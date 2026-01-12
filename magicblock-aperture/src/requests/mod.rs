@@ -77,6 +77,12 @@ pub(crate) enum JsonRpcHttpMethod {
     RequestAirdrop,
     SendTransaction,
     SimulateTransaction,
+    /// Custom Magic Router-compatible method: mocked on validator.
+    GetRoutes,
+    /// Custom Magic Router-compatible method: alias of `getLatestBlockhash` on validator.
+    GetBlockhashForAccounts,
+    /// Custom Magic Router-compatible method: exposes simple delegation flag.
+    GetDelegationStatus,
 }
 
 /// All supported JSON-RPC Websocket method names.
@@ -87,6 +93,7 @@ pub(crate) enum JsonRpcWsMethod {
     AccountUnsubscribe,
     LogsSubscribe,
     LogsUnsubscribe,
+    Ping,
     ProgramSubscribe,
     ProgramUnsubscribe,
     SignatureSubscribe,
@@ -140,6 +147,9 @@ impl JsonRpcHttpMethod {
             Self::RequestAirdrop => "requestAirdrop",
             Self::SendTransaction => "sendTransaction",
             Self::SimulateTransaction => "simulateTransaction",
+            Self::GetRoutes => "getRoutes",
+            Self::GetBlockhashForAccounts => "getBlockhashForAccounts",
+            Self::GetDelegationStatus => "getDelegationStatus",
         }
     }
 }
@@ -151,6 +161,7 @@ impl JsonRpcWsMethod {
             Self::AccountUnsubscribe => "accountUnsubscribe",
             Self::LogsSubscribe => "logsSubscribe",
             Self::LogsUnsubscribe => "logsUnsubscribe",
+            Self::Ping => "ping",
             Self::ProgramSubscribe => "programSubscribe",
             Self::ProgramUnsubscribe => "programUnsubscribe",
             Self::SignatureSubscribe => "signatureSubscribe",

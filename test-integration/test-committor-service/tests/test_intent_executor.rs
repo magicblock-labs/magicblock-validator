@@ -113,7 +113,7 @@ impl TestEnv {
 #[tokio::test]
 async fn test_commit_id_error_parsing() {
     const COUNTER_SIZE: u64 = 70;
-    const EXPECTED_ERR_MSG: &str = "Accounts committed with an invalid Commit id: Error processing Instruction 2: custom program error: 0xc";
+    const EXPECTED_ERR_MSG: &str = "Accounts committed with an invalid Commit id: Error processing Instruction 3: custom program error: 0xc";
 
     let TestEnv {
         fixture,
@@ -154,17 +154,18 @@ async fn test_commit_id_error_parsing() {
     let execution_result = execution_result.unwrap();
     assert!(execution_result.is_err());
     let err = execution_result.unwrap_err();
-    assert!(matches!(
-        err,
-        TransactionStrategyExecutionError::CommitIDError(_, _)
-    ));
+    assert!(
+        matches!(err, TransactionStrategyExecutionError::CommitIDError(_, _)),
+        "err: {:?}",
+        err
+    );
     assert!(err.to_string().contains(EXPECTED_ERR_MSG));
 }
 
 #[tokio::test]
 async fn test_undelegation_error_parsing() {
     const COUNTER_SIZE: u64 = 70;
-    const EXPECTED_ERR_MSG: &str = "Invalid undelegation: Error processing Instruction 4: custom program error: 0x7a.";
+    const EXPECTED_ERR_MSG: &str = "Invalid undelegation: Error processing Instruction 5: custom program error: 0x7a.";
 
     let TestEnv {
         fixture,
@@ -213,7 +214,7 @@ async fn test_undelegation_error_parsing() {
 #[tokio::test]
 async fn test_action_error_parsing() {
     const COUNTER_SIZE: u64 = 70;
-    const EXPECTED_ERR_MSG: &str = "User supplied actions are ill-formed: Error processing Instruction 5: Program arithmetic overflowed";
+    const EXPECTED_ERR_MSG: &str = "User supplied actions are ill-formed: Error processing Instruction 6: Program arithmetic overflowed";
 
     let TestEnv {
         fixture,
@@ -273,7 +274,7 @@ async fn test_action_error_parsing() {
 async fn test_cpi_limits_error_parsing() {
     const COUNTER_SIZE: u64 = 102;
     const COUNTER_NUM: u64 = 10;
-    const EXPECTED_ERR_MSG: &str = "Max instruction trace length exceeded: Error processing Instruction 26: Max instruction trace length exceeded";
+    const EXPECTED_ERR_MSG: &str = "Max instruction trace length exceeded: Error processing Instruction 27: Max instruction trace length exceeded";
 
     let TestEnv {
         fixture,
@@ -362,7 +363,13 @@ async fn test_commit_id_error_recovery() {
         inner: res,
         patched_errors,
     } = res;
-    assert!(res.is_ok());
+
+    assert!(
+        res.is_ok(),
+        "res: {:?}, patched_errors: {:#?}",
+        res,
+        patched_errors
+    );
     assert!(matches!(res.unwrap(), ExecutionOutput::SingleStage(_)));
 
     assert_eq!(patched_errors.len(), 1, "Only 1 patch expected");

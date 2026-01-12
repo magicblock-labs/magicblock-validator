@@ -23,8 +23,8 @@ use magicblock_aperture::{
 use magicblock_chainlink::{
     config::ChainlinkConfig,
     remote_account_provider::{
-        chain_pubsub_client::ChainPubsubClientImpl,
         chain_rpc_client::ChainRpcClientImpl,
+        chain_updates_client::ChainUpdatesClient, Endpoints,
     },
     submux::SubMuxClient,
     Chainlink,
@@ -94,7 +94,7 @@ use crate::{
 
 type ChainlinkImpl = Chainlink<
     ChainRpcClientImpl,
-    SubMuxClient<ChainPubsubClientImpl>,
+    SubMuxClient<ChainUpdatesClient>,
     AccountsDb,
     ChainlinkCloner,
 >;
@@ -120,6 +120,7 @@ pub struct MagicValidator {
     _metrics: (MetricsService, tokio::task::JoinHandle<()>),
     claim_fees_task: ClaimFeesTask,
     task_scheduler: Option<TaskSchedulerService>,
+    transaction_execution: thread::JoinHandle<()>,
 }
 
 impl MagicValidator {
@@ -156,7 +157,7 @@ impl MagicValidator {
         let accountsdb =
             AccountsDb::new(&config.accountsdb, &config.storage, last_slot)?;
         for (pubkey, account) in genesis_config.accounts {
-            accountsdb.insert_account(&pubkey, &account.into());
+            let _ = accountsdb.insert_account(&pubkey, &account.into());
         }
 
         let exit = Arc::<AtomicBool>::default();
@@ -226,6 +227,7 @@ impl MagicValidator {
                 .chainlink
                 .auto_airdrop_lamports
                 > 0,
+            shutdown: token.clone(),
         };
         TRANSACTION_COUNT.inc_by(ledger.count_transactions()? as u64);
         txn_scheduler_state
@@ -255,7 +257,7 @@ impl MagicValidator {
             txn_scheduler_state,
         );
         info!("Running execution backend with {transaction_executors} threads");
-        transaction_scheduler.spawn();
+        let transaction_execution = transaction_scheduler.spawn();
 
         let shared_state = SharedState::new(
             node_context,
@@ -295,7 +297,7 @@ impl MagicValidator {
         let task_scheduler = TaskSchedulerService::new(
             &task_scheduler_db_path,
             &config.task_scheduler,
-            dispatch.transaction_scheduler.clone(),
+            config.listen.http(),
             dispatch
                 .tasks_service
                 .take()
@@ -323,6 +325,7 @@ impl MagicValidator {
             transaction_scheduler: dispatch.transaction_scheduler,
             block_udpate_tx: validator_channels.block_update,
             task_scheduler: Some(task_scheduler),
+            transaction_execution,
         })
     }
 
@@ -370,15 +373,12 @@ impl MagicValidator {
         accountsdb: &Arc<AccountsDb>,
         faucet_pubkey: Pubkey,
     ) -> ApiResult<ChainlinkImpl> {
-        use magicblock_chainlink::remote_account_provider::Endpoint;
-        let rpc_url = config.rpc_url().to_owned();
-        let endpoints = config
-            .websocket_urls()
-            .map(|pubsub_url| Endpoint {
-                rpc_url: rpc_url.clone(),
-                pubsub_url: pubsub_url.to_string(),
-            })
-            .collect::<Vec<_>>();
+        let endpoints = Endpoints::try_from(config.remotes.as_slice())
+            .map_err(|e| {
+                ApiError::from(
+                    magicblock_chainlink::errors::ChainlinkError::from(e),
+                )
+            })?;
 
         let cloner = ChainlinkCloner::new(
             committor_service,
@@ -681,16 +681,21 @@ impl MagicValidator {
                 error!("Failed to unregister: {}", err)
             }
         }
+        // we have two memory mapped databases,
+        // flush them to disk before exitting
         self.accountsdb.flush();
 
-        // we have two memory mapped databases, flush them to disk before exitting
         if let Err(err) = self.ledger.shutdown(true) {
             error!("Failed to shutdown ledger: {:?}", err);
         }
         let _ = self.rpc_handle.join();
+        if let Some(handle) = self.slot_ticker {
+            let _ = handle.await;
+        }
         if let Err(err) = self.ledger_truncator.join() {
             error!("Ledger truncator did not gracefully exit: {:?}", err);
         }
+        let _ = self.transaction_execution.join();
 
         info!("MagicValidator shutdown!");
     }

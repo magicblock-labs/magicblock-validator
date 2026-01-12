@@ -53,7 +53,8 @@ fn test_modify_account() {
         LAMPORTS,
         "account from the main buffer should not be affected"
     );
-    tenv.insert_account(&pubkey, &uncommitted);
+    tenv.insert_account(&pubkey, &uncommitted)
+        .expect("failed to insert account");
 
     committed = tenv
         .get_account(&pubkey)
@@ -96,7 +97,8 @@ fn test_account_resize() {
         "uncommitted account data len should not have changed"
     );
 
-    tenv.insert_account(&pubkey, &uncommitted);
+    tenv.insert_account(&pubkey, &uncommitted)
+        .expect("failed to insert account");
 
     committed = tenv
         .get_account(&pubkey)
@@ -121,7 +123,8 @@ fn test_alloc_reuse() {
     let old_addr = acc1.data().as_ptr();
 
     acc1.set_data_from_slice(&huge_data);
-    tenv.insert_account(&pubkey, &acc1);
+    tenv.insert_account(&pubkey, &acc1)
+        .expect("failed to insert account");
 
     let AccountWithPubkey { account: acc2, .. } = tenv.account();
 
@@ -146,16 +149,19 @@ fn test_larger_alloc_reuse() {
 
     let mut huge_data = vec![42; SPACE * 2];
     acc.account.set_data_from_slice(&huge_data);
-    tenv.insert_account(&acc.pubkey, &acc.account);
+    tenv.insert_account(&acc.pubkey, &acc.account)
+        .expect("failed to insert account");
 
     let mut acc2 = tenv.account();
     acc2.account.set_data_from_slice(&huge_data);
-    tenv.insert_account(&acc2.pubkey, &acc2.account);
+    tenv.insert_account(&acc2.pubkey, &acc2.account)
+        .expect("failed to insert account");
 
     let mut acc3 = tenv.account();
     huge_data = vec![42; SPACE * 4];
     acc3.account.set_data_from_slice(&huge_data);
-    tenv.insert_account(&acc3.pubkey, &acc3.account);
+    tenv.insert_account(&acc3.pubkey, &acc3.account)
+        .expect("failed to insert account");
     acc3.account = tenv
         .get_account(&acc3.pubkey)
         .expect("third account should be in database");
@@ -163,12 +169,14 @@ fn test_larger_alloc_reuse() {
     let alloc_addr = acc3.account.data().as_ptr();
     huge_data = vec![42; SPACE * 5];
     acc3.account.set_data_from_slice(&huge_data);
-    tenv.insert_account(&acc3.pubkey, &acc3.account);
+    tenv.insert_account(&acc3.pubkey, &acc3.account)
+        .expect("failed to insert account");
 
     let mut acc4 = tenv.account();
     huge_data = vec![42; SPACE * 3];
     acc4.account.set_data_from_slice(&huge_data);
-    tenv.insert_account(&acc4.pubkey, &acc4.account);
+    tenv.insert_account(&acc4.pubkey, &acc4.account)
+        .expect("failed to insert account");
     acc4.account = tenv
         .get_account(&acc4.pubkey)
         .expect("fourth account should be in database");
@@ -206,10 +214,12 @@ fn test_get_all_accounts() {
     let mut pubkeys = HashSet::new();
     pubkeys.insert(acc.pubkey);
     let acc2 = tenv.account();
-    tenv.insert_account(&acc2.pubkey, &acc2.account);
+    tenv.insert_account(&acc2.pubkey, &acc2.account)
+        .expect("failed to insert account");
     pubkeys.insert(acc2.pubkey);
     let acc3 = tenv.account();
-    tenv.insert_account(&acc3.pubkey, &acc3.account);
+    tenv.insert_account(&acc3.pubkey, &acc3.account)
+        .expect("failed to insert account");
     pubkeys.insert(acc3.pubkey);
 
     let mut pks = tenv.iter_all();
@@ -246,7 +256,8 @@ fn test_take_snapshot() {
     );
     acc.account.set_data(ACCOUNT_DATA.to_vec());
 
-    tenv.insert_account(&acc.pubkey, &acc.account);
+    tenv.insert_account(&acc.pubkey, &acc.account)
+        .expect("failed to insert account");
 
     tenv.set_slot(2 * tenv.snapshot_frequency);
     assert!(
@@ -264,7 +275,8 @@ fn test_restore_from_snapshot() {
     tenv.set_slot(tenv.snapshot_frequency); // trigger snapshot
     tenv.set_slot(tenv.snapshot_frequency + 1);
     acc.account.set_lamports(new_lamports);
-    tenv.insert_account(&acc.pubkey, &acc.account);
+    tenv.insert_account(&acc.pubkey, &acc.account)
+        .expect("failed to insert account");
 
     let acc_committed = tenv
         .get_account(&acc.pubkey)
@@ -302,7 +314,8 @@ fn test_get_all_accounts_after_rollback() {
     const ITERS: u64 = 1024;
     for i in 0..=ITERS {
         let acc = tenv.account();
-        tenv.insert_account(&acc.pubkey, &acc.account);
+        tenv.insert_account(&acc.pubkey, &acc.account)
+            .expect("failed to insert account");
         pks.push(acc.pubkey);
         tenv.set_slot(i);
     }
@@ -310,7 +323,8 @@ fn test_get_all_accounts_after_rollback() {
     let mut post_snap_pks = vec![];
     for i in ITERS..ITERS + tenv.snapshot_frequency {
         let acc = tenv.account();
-        tenv.insert_account(&acc.pubkey, &acc.account);
+        tenv.insert_account(&acc.pubkey, &acc.account)
+            .expect("failed to insert account");
         tenv.set_slot(i + 1);
         post_snap_pks.push(acc.pubkey);
     }
@@ -349,7 +363,8 @@ fn test_db_size_after_rollback() {
     let last_slot = 512;
     for i in 0..=last_slot {
         let acc = tenv.account();
-        tenv.insert_account(&acc.pubkey, &acc.account);
+        tenv.insert_account(&acc.pubkey, &acc.account)
+            .expect("failed to insert account");
         tenv.set_slot(i);
     }
     let pre_rollback_db_size = tenv.storage_size();
@@ -391,7 +406,8 @@ fn test_zero_lamports_account() {
 
     acc.account.set_lamports(0);
 
-    tenv.insert_account(&pk, &acc.account);
+    tenv.insert_account(&pk, &acc.account)
+        .expect("failed to insert account");
 
     // NOTE: we use empty accounts to mark escrow accounts that were not found on chain
     let retained_account = tenv.get_account(&pk);
@@ -421,7 +437,8 @@ fn test_owner_change() {
     }
     let new_owner = Pubkey::new_unique();
     acc.account.set_owner(new_owner);
-    tenv.insert_account(&acc.pubkey, &acc.account);
+    tenv.insert_account(&acc.pubkey, &acc.account)
+        .expect("failed to insert account");
     let result = tenv.account_matches_owners(&acc.pubkey, &[OWNER]);
     assert!(result.is_none());
     let result = tenv.get_program_accounts(&OWNER, |_| true);
@@ -443,7 +460,8 @@ fn test_account_too_many_accounts() {
         let acc = tenv.account();
         let mut oversized_account = acc.account;
         oversized_account.extend_from_slice(&[42; 9_000_000]);
-        tenv.insert_account(&acc.pubkey, &oversized_account);
+        tenv.insert_account(&acc.pubkey, &oversized_account)
+            .expect("failed to insert account");
     }
 }
 
@@ -455,7 +473,8 @@ fn test_account_shrinking() {
     // ==============================================
     // test set_data
     acc1.account.set_data(b"".to_vec());
-    tenv.insert_account(&acc1.pubkey, &acc1.account);
+    tenv.insert_account(&acc1.pubkey, &acc1.account)
+        .expect("failed to insert account");
     acc1.account = tenv
         .get_account(&acc1.pubkey)
         .expect("account should be inserted");
@@ -468,7 +487,8 @@ fn test_account_shrinking() {
     // ==============================================
     // test set_data_from_slice
     let mut acc2 = tenv.account();
-    tenv.insert_account(&acc2.pubkey, &acc2.account);
+    tenv.insert_account(&acc2.pubkey, &acc2.account)
+        .expect("failed to insert account");
 
     acc2.account = tenv
         .get_account(&acc2.pubkey)
@@ -476,7 +496,8 @@ fn test_account_shrinking() {
 
     acc2.account.set_data_from_slice(b"");
 
-    tenv.insert_account(&acc2.pubkey, &acc2.account);
+    tenv.insert_account(&acc2.pubkey, &acc2.account)
+        .expect("failed to insert account");
     acc2.account = tenv
         .get_account(&acc2.pubkey)
         .expect("account should be inserted");
@@ -489,7 +510,8 @@ fn test_account_shrinking() {
     // ==============================================
     // test set_data_from_slice
     let mut acc3 = tenv.account();
-    tenv.insert_account(&acc3.pubkey, &acc3.account);
+    tenv.insert_account(&acc3.pubkey, &acc3.account)
+        .expect("failed to insert account");
 
     acc3.account = tenv
         .get_account(&acc3.pubkey)
@@ -497,7 +519,8 @@ fn test_account_shrinking() {
 
     acc3.account.resize(0, 0);
 
-    tenv.insert_account(&acc3.pubkey, &acc3.account);
+    tenv.insert_account(&acc3.pubkey, &acc3.account)
+        .expect("failed to insert account");
     acc3.account = tenv
         .get_account(&acc3.pubkey)
         .expect("account should be inserted");
@@ -520,7 +543,8 @@ fn test_many_insertions_to_accountsdb() {
     for _ in 0..ACCOUNTNUM {
         let acc = tenv.account();
         pubkeys.push(acc.pubkey);
-        tenv.insert_account(&acc.pubkey, &acc.account);
+        tenv.insert_account(&acc.pubkey, &acc.account)
+            .expect("failed to insert account");
     }
     // test whether frequent account reallocations effectively reuse free
     // space in database without overflowing the database boundaries (100MB for test)
@@ -537,7 +561,9 @@ fn test_many_insertions_to_accountsdb() {
                         .expect("account should be in database");
                     account
                         .set_data_from_slice(&vec![43; i % (SPACE * 20) + 13]);
-                    tenv_arc.insert_account(pk, &account);
+                    tenv_arc
+                        .insert_account(pk, &account)
+                        .expect("failed to insert account");
                 }
             });
         }
@@ -568,7 +594,8 @@ fn test_database_reset() {
     let pubkey = Pubkey::new_unique();
     let account = AccountSharedData::new(LAMPORTS, SPACE, &OWNER);
 
-    adb.insert_account(&pubkey, &account);
+    adb.insert_account(&pubkey, &account)
+        .expect("failed to insert account");
     assert!(
         adb.get_account(&pubkey).is_some(),
         "Account should exist before reset"
@@ -646,7 +673,9 @@ impl AdbTestEnv {
         let mut account = AccountSharedData::new(LAMPORTS, size, &OWNER);
         account.data_as_mut_slice()[..INIT_DATA_LEN]
             .copy_from_slice(ACCOUNT_DATA);
-        self.adb.insert_account(&pubkey, &account);
+        self.adb
+            .insert_account(&pubkey, &account)
+            .expect("failed to insert account");
         let account = self
             .get_account(&pubkey)
             .expect("failed to refetch newly inserted account");

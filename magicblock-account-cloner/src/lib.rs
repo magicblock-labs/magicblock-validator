@@ -84,6 +84,21 @@ impl ChainlinkCloner {
         Ok(sig)
     }
 
+    fn build_clone_message(request: &AccountCloneRequest) -> Option<String> {
+        if request.account.delegated() {
+            // Account is delegated to us
+            None
+        } else if let Some(delegated_to_other) = request.delegated_to_other {
+            // Account is delegated to another validator
+            Some(format!(
+                "account is delegated to another validator: {}",
+                delegated_to_other
+            ))
+        } else {
+            Some("account is not delegated to any validator".to_string())
+        }
+    }
+
     fn transaction_to_clone_regular_account(
         &self,
         request: &AccountCloneRequest,
@@ -93,7 +108,6 @@ impl ChainlinkCloner {
             pubkey: request.pubkey,
             lamports: Some(request.account.lamports()),
             owner: Some(*request.account.owner()),
-            rent_epoch: Some(request.account.rent_epoch()),
             data: Some(request.account.data().to_owned()),
             executable: Some(request.account.executable()),
             delegated: Some(request.account.delegated()),
@@ -101,9 +115,12 @@ impl ChainlinkCloner {
             remote_slot: Some(request.account.remote_slot()),
         };
 
-        let modify_ix = InstructionUtils::modify_accounts_instruction(vec![
-            account_modification,
-        ]);
+        let message = Self::build_clone_message(request);
+
+        let modify_ix = InstructionUtils::modify_accounts_instruction(
+            vec![account_modification],
+            message,
+        );
         // Defined positive commit frequency means commits should be scheduled
         let ixs = match request.commit_frequency_ms {
             // TODO(GabrielePicco): Hotfix. Do not schedule frequency commits until we impose limits.
@@ -185,11 +202,13 @@ impl ChainlinkCloner {
                         &program,
                         deploy_slot,
                     )?;
-                let mod_ix =
-                    InstructionUtils::modify_accounts_instruction(vec![
+                let mod_ix = InstructionUtils::modify_accounts_instruction(
+                    vec![
                         modifications.program_id_modification,
                         modifications.program_data_modification,
-                    ]);
+                    ],
+                    None,
+                );
 
                 Ok(Some(Transaction::new_signed_with_payer(
                     &[mod_ix],
@@ -255,6 +274,7 @@ impl ChainlinkCloner {
                     }];
                     InstructionUtils::modify_accounts_instruction(
                         pre_deploy_mods,
+                        None,
                     )
                 };
 
@@ -268,6 +288,7 @@ impl ChainlinkCloner {
                     }];
                     InstructionUtils::modify_accounts_instruction(
                         post_deploy_mods,
+                        None,
                     )
                 };
 

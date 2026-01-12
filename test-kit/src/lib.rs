@@ -137,6 +137,7 @@ impl ExecutionTestEnv {
             tasks_tx: validator_channels.tasks_service,
             environment,
             is_auto_airdrop_lamports_enabled: false,
+            shutdown: Default::default(),
         };
 
         // Load test program
@@ -178,7 +179,7 @@ impl ExecutionTestEnv {
         let keypair = Keypair::new();
         let mut account = AccountSharedData::new(lamports, space, &owner);
         account.set_delegated(true);
-        self.accountsdb.insert_account(&keypair.pubkey(), &account);
+        let _ = self.accountsdb.insert_account(&keypair.pubkey(), &account);
         keypair
     }
 
@@ -203,7 +204,7 @@ impl ExecutionTestEnv {
     ) {
         let mut account = AccountSharedData::new(lamports, 0, &owner);
         account.set_delegated(true);
-        self.accountsdb.insert_account(&pubkey, &account);
+        let _ = self.accountsdb.insert_account(&pubkey, &account);
     }
 
     /// Retrieves a transaction's metadata from the ledger by its signature.
@@ -337,7 +338,7 @@ pub struct CommitableAccount<'db> {
 
 impl CommitableAccount<'_> {
     pub fn commit(self) {
-        self.db.insert_account(&self.pubkey, &self.account);
+        let _ = self.db.insert_account(&self.pubkey, &self.account);
     }
 }
 

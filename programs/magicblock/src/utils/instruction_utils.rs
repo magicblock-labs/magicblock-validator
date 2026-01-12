@@ -152,14 +152,17 @@ impl InstructionUtils {
     // -----------------
     pub fn modify_accounts(
         account_modifications: Vec<AccountModification>,
+        message: Option<String>,
         recent_blockhash: Hash,
     ) -> Transaction {
-        let ix = Self::modify_accounts_instruction(account_modifications);
+        let ix =
+            Self::modify_accounts_instruction(account_modifications, message);
         Self::into_transaction(&validator_authority(), ix, recent_blockhash)
     }
 
     pub fn modify_accounts_instruction(
         account_modifications: Vec<AccountModification>,
+        message: Option<String>,
     ) -> Instruction {
         let mut account_metas =
             vec![AccountMeta::new(validator_authority_id(), true)];
@@ -178,7 +181,6 @@ impl InstructionUtils {
                     data_key: account_modification
                         .data
                         .map(set_account_mod_data),
-                    rent_epoch: account_modification.rent_epoch,
                     delegated: account_modification.delegated,
                     confined: account_modification.confined,
                     remote_slot: account_modification.remote_slot,
@@ -190,7 +192,10 @@ impl InstructionUtils {
         }
         Instruction::new_with_bincode(
             crate::id(),
-            &MagicBlockInstruction::ModifyAccounts(account_mods),
+            &MagicBlockInstruction::ModifyAccounts {
+                accounts: account_mods,
+                message,
+            },
             account_metas,
         )
     }

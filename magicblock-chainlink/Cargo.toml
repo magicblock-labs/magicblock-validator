@@ -9,10 +9,12 @@ async-trait = { workspace = true }
 bincode = { workspace = true }
 env_logger = { workspace = true }
 futures-util = { workspace = true }
+helius-laserstream = { workspace = true }
 log = { workspace = true }
 lru = { workspace = true }
 magicblock-config = { workspace = true }
 magicblock-core = { workspace = true }
+parking_lot = { workspace = true }
 magicblock-magic-program-api = { workspace = true }
 magicblock-metrics = { workspace = true }
 magicblock-delegation-program = { workspace = true }
@@ -32,11 +34,14 @@ solana-pubsub-client = { workspace = true }
 solana-rpc-client = { workspace = true }
 solana-rpc-client-api = { workspace = true }
 solana-sdk-ids = { workspace = true }
+scc = { workspace = true }
 solana-signature = { workspace = true }
 solana-signer = { workspace = true }
 solana-system-interface = { workspace = true }
 solana-transaction = { workspace = true }
 solana-transaction-error = { workspace = true }
+spl-token = { workspace = true }
+spl-token-2022 = { workspace = true }
 solana-clock = { workspace = true }
 solana-hash = { workspace = true }
 solana-sysvar = { workspace = true }
@@ -45,6 +50,7 @@ thiserror = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 tokio-stream = { workspace = true }
 tokio-util = { workspace = true }
+url = { workspace = true }
 
 [dev-dependencies]
 assert_matches = { workspace = true }
