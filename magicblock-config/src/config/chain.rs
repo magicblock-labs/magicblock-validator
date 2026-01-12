@@ -77,7 +77,9 @@ impl Default for ChainLinkConfig {
             max_monitored_accounts: 0,
             remove_confined_accounts: false,
             allowed_programs: None,
-            resubscription_delay: Duration::from_millis(consts::DEFAULT_RESUBSCRIPTION_DELAY_MS),
+            resubscription_delay: Duration::from_millis(
+                consts::DEFAULT_RESUBSCRIPTION_DELAY_MS,
+            ),
         }
     }
 }
