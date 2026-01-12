@@ -111,8 +111,7 @@ impl TaskSchedulerService {
         );
         for task in tasks {
             debug!("Task: {:?}", task);
-            if task.execution_interval_millis == 0
-                || task.execution_interval_millis >= u32::MAX as i64
+            if !is_valid_task_interval(task.execution_interval_millis)
                 || task.executions_left < 0
             {
                 warn!(
@@ -126,7 +125,7 @@ impl TaskSchedulerService {
             let next_execution =
                 task.last_execution_millis + task.execution_interval_millis;
             let timeout = Duration::from_millis(
-                next_execution.saturating_sub(now) as u64,
+                next_execution.saturating_sub(now).max(0) as u64,
             );
             let task_id = task.id;
             let key = self.task_queue.insert(task, timeout);
@@ -142,9 +141,9 @@ impl TaskSchedulerService {
     ) -> TaskSchedulerResult<ProcessingOutcome> {
         match request {
             TaskRequest::Schedule(mut schedule_request) => {
-                if schedule_request.execution_interval_millis >= u32::MAX as i64
-                    || schedule_request.execution_interval_millis == 0
-                {
+                if !is_valid_task_interval(
+                    schedule_request.execution_interval_millis,
+                ) {
                     // If the interval is too large or zero, we don't schedule the task
                     return Ok(ProcessingOutcome::Success);
                 }
@@ -357,6 +356,10 @@ impl TaskSchedulerService {
             .await
             .map_err(Box::new)?)
     }
+}
+
+fn is_valid_task_interval(interval: i64) -> bool {
+    interval > 0 && interval < u32::MAX as i64
 }
 
 #[cfg(test)]
