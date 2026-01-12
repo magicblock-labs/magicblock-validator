@@ -31,7 +31,7 @@ impl ChainUpdatesClient {
         commitment: CommitmentConfig,
         abort_sender: mpsc::Sender<()>,
         chain_slot: Arc<AtomicU64>,
-        resubscription_delay_ms: u64,
+        resubscription_delay: std::time::Duration,
     ) -> RemoteAccountProviderResult<Self> {
         use Endpoint::*;
         static CLIENT_ID: AtomicU16 = AtomicU16::new(0);
@@ -49,7 +49,7 @@ impl ChainUpdatesClient {
                         client_id,
                         abort_sender,
                         commitment,
-                        resubscription_delay_ms,
+                        resubscription_delay,
                     )
                     .await?,
                 ))

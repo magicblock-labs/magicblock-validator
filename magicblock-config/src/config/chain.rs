@@ -62,10 +62,11 @@ pub struct ChainLinkConfig {
     /// If empty or not specified, all programs are allowed.
     pub allowed_programs: Option<Vec<AllowedProgram>>,
 
-    /// Delay in milliseconds between resubscribing to accounts after a pubsub
+    /// Delay between resubscribing to accounts after a pubsub
     /// reconnection. This throttles the rate at which we resubscribe to prevent
     /// overwhelming the RPC provider. Default is 50ms.
-    pub resubscription_delay_ms: u64,
+    #[serde(with = "humantime")]
+    pub resubscription_delay: Duration,
 }
 
 impl Default for ChainLinkConfig {
@@ -76,7 +77,7 @@ impl Default for ChainLinkConfig {
             max_monitored_accounts: 0,
             remove_confined_accounts: false,
             allowed_programs: None,
-            resubscription_delay_ms: consts::DEFAULT_RESUBSCRIPTION_DELAY_MS,
+            resubscription_delay: Duration::from_millis(consts::DEFAULT_RESUBSCRIPTION_DELAY_MS),
         }
     }
 }

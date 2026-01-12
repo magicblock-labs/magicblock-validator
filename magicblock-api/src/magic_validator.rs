@@ -396,7 +396,7 @@ impl MagicValidator {
             config.chainlink.remove_confined_accounts;
         chainlink_config.remote_account_provider = chainlink_config
             .remote_account_provider
-            .with_resubscription_delay_ms(config.chainlink.resubscription_delay_ms);
+            .with_resubscription_delay(config.chainlink.resubscription_delay);
         let commitment_config = {
             let level = CommitmentLevel::Confirmed;
             CommitmentConfig { commitment: level }
