@@ -29,114 +29,67 @@ use solana_transaction_status::{
 };
 
 impl super::TransactionExecutor {
-    /// Executes a transaction and conditionally commits its results to the
-    /// `AccountsDb` and `Ledger`.
-    ///
-    /// This is the primary entry point for processing transactions
-    /// that are intended to change the state of the blockchain.
-    ///
-    /// ## Commitment Logic
-    /// - **Successful transactions** are fully committed: account changes are saved to
-    ///   the `AccountsDb`, and the transaction itself is written to the `Ledger`.
-    /// - **"Fire-and-forget" failed transactions** (`tx` is `None`) have only the fee
-    ///   deducted from the payer account, which is then saved to the `AccountsDb`.
-    /// - **Awaited failed transactions** (`tx` is `Some`, e.g., an RPC preflight check)
-    ///   are **not committed** at all; their results are returned directly to the caller
-    ///   without any state changes.
-    /// - **Replayed transactions** (`is_replay` is `true`) commit account changes but do
-    ///   not write the transaction to the ledger, as it's already there.
+    /// Executes a transaction and conditionally commits its results.
     pub(super) fn execute(
         &self,
         transaction: [SanitizedTransaction; 1],
         tx: TxnExecutionResultTx,
         is_replay: bool,
     ) {
+        TRANSACTION_COUNT.inc();
         let (result, balances) = self.process(&transaction);
         let [txn] = transaction;
-        TRANSACTION_COUNT.inc();
 
+        // 1. Handle Loading/Processing Failures
         let processed = match result {
             Ok(processed) => processed,
             Err(err) => {
-                // Transaction failed to load, we persist it to the
-                // ledger, only for the convenience of the user
-                let status = Err(err);
-                self.commit_failed_transaction(txn, status.clone(), None);
-                FAILED_TRANSACTIONS_COUNT.inc();
-                tx.map(|tx| tx.send(status));
-                // NOTE:
-                // Transactions that failed to load, cannot have touched the thread
-                // local storage, thus there's no need to clear it before returning
-                return;
+                return self.handle_failure(txn, err, None, tx);
             }
         };
 
-        // The transaction has been processed, we can commit the account state changes
-        // NOTE:
-        // Failed transactions still pay fees, so we need to
-        // commit the accounts even if the transaction failed
-        let feepayer = *txn.fee_payer();
-        if let Err(err) = self.commit_accounts(feepayer, &processed, is_replay)
+        // 2. Commit Account State (DB Update)
+        // Note: Failed transactions still pay fees, so we attempt commit even on execution failure.
+        let fee_payer = *txn.fee_payer();
+        if let Err(err) = self.commit_accounts(fee_payer, &processed, is_replay)
         {
-            let error = Err(TransactionError::CommitCancelled);
-            // Transaction failed to load, we persist it to the
-            // ledger, only for the convenience of the user
-            self.commit_failed_transaction(
+            return self.handle_failure(
                 txn,
-                error.clone(),
+                TransactionError::CommitCancelled,
                 Some(vec![err.to_string()]),
+                tx,
             );
-            FAILED_TRANSACTIONS_COUNT.inc();
-            tx.map(|tx| tx.send(error));
-            // NOTE:
-            // Transactions that failed to load, cannot have touched the thread
-            // local storage, thus there's no need to clear it before returning
-            return;
         }
 
-        let result = processed.status();
-        if result.is_ok() && !is_replay {
-            // If the transaction succeeded, check for potential tasks
-            // that may have been scheduled during the transaction execution
-            // TODO: send intents here as well once implemented
-            while let Some(task) = ExecutionTlsStash::next_task() {
-                // This is a best effort send, if the tasks service has terminated
-                // for some reason, logging is the best we can do at this point
-                let _ = self.tasks_tx.send(task).inspect_err(|_|
-                    error!("Scheduled tasks service has hung up and is no longer running")
-                );
-            }
+        let status = processed.status();
+
+        // 3. Post-Processing (Tasks & Ledger)
+        if status.is_ok() && !is_replay {
+            self.process_scheduled_tasks();
         }
 
-        // We always commit transaction to the ledger (mostly for user convenience)
         if !is_replay {
-            self.commit_transaction(txn, processed, balances);
+            self.record_transaction(txn, processed, balances);
         }
 
-        // Make sure that no matter what happened to the transaction we clear the stash
         ExecutionTlsStash::clear();
-
-        // Send the final result back to the caller if they are waiting.
-        tx.map(|tx| tx.send(result));
+        if let Some(tx) = tx {
+            let _ = tx.send(status);
+        }
     }
 
-    /// Executes a transaction in a simulated, ephemeral environment.
-    ///
-    /// This method runs a transaction through the SVM but **never persists any state changes**
-    /// to the `AccountsDb` or `Ledger`. It returns a more detailed set of execution
-    /// results, including compute units, logs, and return data, which is required by
-    /// RPC `simulateTransaction` call.
+    /// Executes a transaction in simulation mode (no state persistence).
     pub(super) fn simulate(
         &self,
         transaction: [SanitizedTransaction; 1],
         tx: TxnSimulationResultTx,
     ) {
         let (result, _) = self.process(&transaction);
-        let result = match result {
+        let simulation_result = match result {
             Ok(processed) => {
-                let result = processed.status();
+                let status = processed.status();
                 let units_consumed = processed.executed_units();
-                let (logs, data, ixs) = match processed {
+                let (logs, return_data, inner_instructions) = match processed {
                     ProcessedTransaction::Executed(ex) => (
                         ex.execution_details.log_messages,
                         ex.execution_details.return_data,
@@ -145,11 +98,11 @@ impl super::TransactionExecutor {
                     ProcessedTransaction::FeesOnly(_) => Default::default(),
                 };
                 TransactionSimulationResult {
-                    result,
+                    result: status,
                     units_consumed,
                     logs,
-                    return_data: data,
-                    inner_instructions: ixs,
+                    return_data,
+                    inner_instructions,
                 }
             }
             Err(error) => TransactionSimulationResult {
@@ -160,14 +113,12 @@ impl super::TransactionExecutor {
                 inner_instructions: None,
             },
         };
-        // Make sure that we clear the stash, so that simulations
-        // don't interfere with actual transaction executions
+
         ExecutionTlsStash::clear();
-        let _ = tx.send(result);
+        let _ = tx.send(simulation_result);
     }
 
-    /// A convenience helper that wraps the core Solana SVM `load_and_execute` function.
-    /// It serves as the bridge between the executor's logic and the underlying SVM engine.
+    /// Wraps the SVM load_and_execute logic.
     fn process(
         &self,
         txn: &[SanitizedTransaction; 1],
@@ -184,13 +135,12 @@ impl super::TransactionExecutor {
                 &self.environment,
                 &self.config,
             );
-        // SAFETY:
-        // we passed a single transaction for execution, and
-        // we will get a guaranteed single result back.
-        let mut result = output.processing_results.pop().expect(
-            "single transaction result is always present in the output",
-        );
-        // Verify that account state invariants haven't been violated
+
+        let mut result = output
+            .processing_results
+            .pop()
+            .expect("single transaction result is guaranteed");
+
         if let Ok(ref mut processed) = result {
             self.verify_account_states(processed);
         }
@@ -198,10 +148,35 @@ impl super::TransactionExecutor {
         (result, output.balances)
     }
 
-    /// A helper method that persists a transaction and its metadata to
-    /// the ledger. After a successful write, it also forwards the
-    /// `TransactionStatus` to the rest of the system via corresponding channel.
-    fn commit_transaction(
+    /// Common handler for transaction failures (load error or commit error).
+    fn handle_failure(
+        &self,
+        txn: SanitizedTransaction,
+        err: TransactionError,
+        logs: Option<Vec<String>>,
+        tx: TxnExecutionResultTx,
+    ) {
+        FAILED_TRANSACTIONS_COUNT.inc();
+        self.record_failure(txn, Err(err.clone()), logs);
+
+        // Even on failure, ensure stash is clear (though likely empty if load failed).
+        ExecutionTlsStash::clear();
+
+        if let Some(tx) = tx {
+            let _ = tx.send(Err(err));
+        }
+    }
+
+    fn process_scheduled_tasks(&self) {
+        while let Some(task) = ExecutionTlsStash::next_task() {
+            if let Err(e) = self.tasks_tx.send(task) {
+                error!("Scheduled tasks service disconnected: {e}");
+            }
+        }
+    }
+
+    /// Writes a fully processed transaction to the Ledger.
+    fn record_transaction(
         &self,
         txn: SanitizedTransaction,
         result: ProcessedTransaction,
@@ -235,6 +210,33 @@ impl super::TransactionExecutor {
                 ..Default::default()
             },
         };
+
+        self.write_to_ledger(txn, meta);
+    }
+
+    /// Writes a failed transaction (load or commit error) to the Ledger.
+    fn record_failure(
+        &self,
+        txn: SanitizedTransaction,
+        status: TransactionResult<()>,
+        logs: Option<Vec<String>>,
+    ) {
+        let count = txn.message().account_keys().len();
+        let meta = TransactionStatusMeta {
+            status,
+            pre_balances: vec![0; count],
+            post_balances: vec![0; count],
+            log_messages: logs,
+            ..Default::default()
+        };
+        self.write_to_ledger(txn, meta);
+    }
+
+    fn write_to_ledger(
+        &self,
+        txn: SanitizedTransaction,
+        meta: TransactionStatusMeta,
+    ) {
         let signature = *txn.signature();
         let status = TransactionStatus {
             signature,
@@ -250,125 +252,109 @@ impl super::TransactionExecutor {
                 logs: meta.log_messages.clone(),
             },
         };
+
         if let Err(error) = self.ledger.write_transaction(
             signature,
             self.processor.slot,
             txn,
             meta,
         ) {
-            error!("failed to commit transaction to the ledger: {error}");
+            error!("Failed to commit transaction to ledger: {error}");
             return;
         }
-        // Send the final status to the listeners (EventProcessor workers).
+
+        // Notify listeners
         let _ = self.transaction_tx.send(status);
     }
 
-    /// A helper method that persists a transaction that couldn't even be loaded properly,
-    /// to the ledger. This is done primarily for the convenience of the user, so that the
-    /// status of transaction can always be queried, even if it didn't pass the load stage
-    fn commit_failed_transaction(
-        &self,
-        txn: SanitizedTransaction,
-        status: TransactionResult<()>,
-        logs: Option<Vec<String>>,
-    ) {
-        let meta = TransactionStatusMeta {
-            status,
-            pre_balances: vec![0; txn.message().account_keys().len()],
-            post_balances: vec![0; txn.message().account_keys().len()],
-            log_messages: logs,
-            ..Default::default()
-        };
-        let signature = *txn.signature();
-        if let Err(error) = self.ledger.write_transaction(
-            signature,
-            self.processor.slot,
-            txn,
-            meta,
-        ) {
-            error!("failed to commit transaction to the ledger: {error}");
-        }
-    }
-
-    /// A helper method that persists modified account states to the `AccountsDb`.
+    /// Persists account changes to AccountsDb and notifies listeners.
     fn commit_accounts(
         &self,
-        feepayer: Pubkey,
+        fee_payer: Pubkey,
         result: &ProcessedTransaction,
         is_replay: bool,
     ) -> AccountsDbResult<()> {
         let succeeded = result.status().is_ok();
         let accounts = match result {
             ProcessedTransaction::Executed(executed) => {
-                let programs = &executed.programs_modified_by_tx;
-                if !programs.is_empty() && succeeded {
+                if succeeded && !executed.programs_modified_by_tx.is_empty() {
                     self.processor
                         .program_cache
                         .write()
                         .unwrap()
-                        .merge(programs);
+                        .merge(&executed.programs_modified_by_tx);
                 }
+
                 if !succeeded {
-                    // For failed transactions, only persist the payer's account to charge the fee.
+                    // Only charge fee payer on failure
                     &executed.loaded_transaction.accounts[..1]
                 } else {
                     &executed.loaded_transaction.accounts
                 }
             }
             ProcessedTransaction::FeesOnly(fo) => {
-                let RollbackAccounts::FeePayerOnly { fee_payer_account } =
+                if let RollbackAccounts::FeePayerOnly { fee_payer_account } =
                     &fo.rollback_accounts
-                else {
-                    return Ok(());
-                };
-                &[(feepayer, fee_payer_account.clone())]
+                {
+                    // Temporary slice construction to match expected type
+                    // This is slightly inefficient but safe; the vector here is tiny (1 item)
+                    return self.insert_and_notify(
+                        &[(fee_payer, fee_payer_account.clone())],
+                        is_replay,
+                        false,
+                    );
+                }
+                return Ok(());
             }
         };
 
-        // The first loaded account is always a feepayer, check
-        // whether we are running in privileged execution mode
         let privileged = accounts
             .first()
-            .map(|feepayer| feepayer.1.privileged())
-            .unwrap_or_default();
+            .map(|(_, acc)| acc.privileged())
+            .unwrap_or(false);
 
-        // only persist account's update if it was actually modified, ignore
-        // the rest, even if an account was writeable in the transaction.
-        //
-        // We also don't persist accounts that are empty, with an exception
-        // for special cases, when those are inserted forcefully as placeholders
-        // (for example by the chainlink), those cases can be distinguished from
-        // others by the fact that such a transaction is always running in a
-        // privileged mode.
+        self.insert_and_notify(accounts, is_replay, privileged)
+    }
+
+    fn insert_and_notify(
+        &self,
+        accounts: &[(Pubkey, solana_account::AccountSharedData)],
+        is_replay: bool,
+        privileged: bool,
+    ) -> AccountsDbResult<()> {
+        // Filter: Persist only dirty or privileged accounts
         let to_commit = accounts
             .iter()
             .filter(|(_, acc)| acc.is_dirty() || privileged);
+
         self.accountsdb.insert_batch(to_commit)?;
+
         if is_replay {
             return Ok(());
         }
+
+        // Notify downstream
         for (pubkey, account) in accounts {
-            let account = AccountWithSlot {
+            let update = AccountWithSlot {
                 slot: self.processor.slot,
                 account: LockedAccount::new(*pubkey, account.clone()),
             };
-            let _ = self.accounts_tx.send(account);
+            let _ = self.accounts_tx.send(update);
         }
         Ok(())
     }
 
-    /// Ensure that no post execution account state violations occurred:
-    /// 1. No modification of the non-delegated feepayer in gasless mode
-    /// 2. No lamport modification of confined accounts
     fn verify_account_states(&self, processed: &mut ProcessedTransaction) {
         let ProcessedTransaction::Executed(executed) = processed else {
             return;
         };
         let txn = &executed.loaded_transaction;
-        let feepayer = txn.accounts.first();
-        // If the feepayer is priveleged we don't enforce any checks, as those
-        // are internal operations, that might violate some of those rules
-        if feepayer.as_ref().map(|a| a.1.privileged()).unwrap_or(false) {
+        let Some((_, fee_payer_acc)) = txn.accounts.first() else {
+            return;
+        };
+
+        // Privileged fee payers bypass all checks
+        if fee_payer_acc.privileged() {
             return;
         }
 
@@ -376,56 +362,45 @@ impl super::TransactionExecutor {
             .execution_details
             .log_messages
             .get_or_insert_default();
-        let gasless = self.environment.fee_lamports_per_signature == 0;
-        if gasless {
-            // If we are running in the gasless mode, we should not allow
-            // any mutation of the feepayer account, since that would make
-            // it possible for malicious actors to peform transfer operations
-            // from undelegated feepayers to delegated accounts, which would
-            // result in validator loosing funds upon balance settling.
-            let undelegated_feepayer_was_modified = feepayer
-                .map(|(_, acc)| {
-                    let mutated = acc
-                        .as_borrowed()
-                        .map(|a| a.lamports_changed())
-                        // NOTE: this branch can be taken only, if the account
-                        // has been upgraded to the Owned variant, which indicates
-                        // that it has been resized, which in turn is a clear
-                        // violation of the feepayer immutability rule in this mode
-                        .unwrap_or(true);
-                    !self.is_auto_airdrop_lamports_enabled
-                        && mutated
-                        && !acc.delegated()
-                })
-                .unwrap_or_default();
-            if undelegated_feepayer_was_modified {
+
+        // 1. Gasless Mode Integrity Check
+        // In gasless mode, non-delegated fee payers must NOT be modified (drained).
+        if self.environment.fee_lamports_per_signature == 0 {
+            let lamports_changed = fee_payer_acc
+                .as_borrowed()
+                .map(|a| a.lamports_changed())
+                .unwrap_or(true); // Owned/resized implies changed
+
+            if !self.is_auto_airdrop_lamports_enabled
+                && lamports_changed
+                && !fee_payer_acc.delegated()
+            {
                 executed.execution_details.status =
                     Err(TransactionError::InvalidAccountForFee);
-                let msg = "Feepayer balance has been illegally modified".into();
-                logs.push(msg);
+                logs.push(
+                    "Feepayer balance has been illegally modified".into(),
+                );
                 return;
             }
         }
-        for (pubkey, acc) in &txn.accounts {
-            if !acc.confined() {
-                continue;
-            }
-            // If the confined account was modified in any way that affected its lamport
-            // balance, then an corresponding marker must have been set, in which case we
-            // fail the transaction, since this is regarded as a validator draining attack
-            let balance_changed = acc
-                .as_borrowed()
-                .map(|a| a.lamports_changed())
-                .unwrap_or(true);
 
-            if balance_changed {
-                executed.execution_details.status =
-                    Err(TransactionError::UnbalancedTransaction);
-                let msg = format!(
-                    "Confined account {pubkey} has been illegally modified"
-                );
-                logs.push(msg);
-                break;
+        // 2. Confined Account Integrity Check
+        // Confined accounts must not have their lamport balance changed.
+        for (pubkey, acc) in &txn.accounts {
+            if acc.confined() {
+                let lamports_changed = acc
+                    .as_borrowed()
+                    .map(|a| a.lamports_changed())
+                    .unwrap_or(true);
+
+                if lamports_changed {
+                    executed.execution_details.status =
+                        Err(TransactionError::UnbalancedTransaction);
+                    logs.push(format!(
+                        "Confined account {pubkey} has been illegally modified"
+                    ));
+                    break;
+                }
             }
         }
     }

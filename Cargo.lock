@@ -3209,6 +3209,7 @@ dependencies = [
  "magicblock-program",
  "parking_lot",
  "rustc-hash 2.1.1",
+ "serde",
  "solana-account",
  "solana-bpf-loader-program",
  "solana-compute-budget-program",

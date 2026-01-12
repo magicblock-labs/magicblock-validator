@@ -1,59 +1,54 @@
 use magicblock_program::magicblock_processor;
 use solana_program_runtime::invoke_context::BuiltinFunctionWithContext;
 use solana_pubkey::Pubkey;
-use solana_sdk_ids::{bpf_loader_upgradeable, compute_budget};
+use solana_sdk_ids::{
+    bpf_loader_upgradeable, compute_budget, loader_v4, system_program,
+};
 
-pub struct BuiltinPrototype {
+/// Represents a builtin program to be registered with the SVM.
+pub struct Builtin {
     pub program_id: Pubkey,
     pub name: &'static str,
     pub entrypoint: BuiltinFunctionWithContext,
 }
 
-/// We support and load the following builtin programs at startup:
+/// The set of builtin programs loaded at startup.
 ///
-/// - `system_program`
-/// - `solana_bpf_loader_upgradeable_program`
-/// - `compute_budget_program"
-/// - `address_lookup_table_program`
-/// - `magicblock_program` which supports account mutations, etc.
+/// **Supported:**
+/// - `system_program`: Core system account management.
+/// - `bpf_loader_upgradeable`: Loads upgradeable BPF programs.
+/// - `loader_v4`: Loads V4 programs.
+/// - `compute_budget`: Manages transaction compute units.
+/// - `magicblock_program`: Validator-specific logic (e.g., account mutations).
 ///
-/// We don't support the following builtin programs:
-///
-/// - `vote_program` since we have no votes
-/// - `stake_program` since we don't support staking in our validator
-/// - `config_program` since we don't support configuration (_Add configuration data to the chain and the
-///   list of public keys that are permitted to modify it_)
-/// - `solana_bpf_loader_deprecated_program` because it's deprecated
-/// - `solana_bpf_loader_program` since we use the `solana_bpf_loader_upgradeable_program` instead
-/// - `zk_token_proof_program` it's behind a feature flag (`feature_set::zk_token_sdk_enabled`) in
-///   the solana validator and we don't support it yet
-/// - `solana_sdk::loader_v4` it's behind a feature flag (`feature_set::enable_program_runtime_v2_and_loader_v4`) in the solana
-///   validator and we don't support it yet
-///
-/// See: solana repo - runtime/src/builtins.rs
-pub static BUILTINS: &[BuiltinPrototype] = &[
-    BuiltinPrototype {
-        program_id: solana_system_program::id(),
+/// **Explicitly Unsupported:**
+/// - `vote_program`, `stake_program`: Consensus and staking are not supported.
+/// - `config_program`: On-chain configuration is not supported.
+/// - `bpf_loader_deprecated`, `bpf_loader`: Superseded by `upgradeable`.
+/// - `zk_token_proof_program`: ZK Token SDK features are not yet enabled.
+pub static BUILTINS: &[Builtin] = &[
+    Builtin {
+        program_id: system_program::ID,
         name: "system_program",
         entrypoint: solana_system_program::system_processor::Entrypoint::vm,
     },
-    BuiltinPrototype {
-        program_id: bpf_loader_upgradeable::id(),
+    Builtin {
+        program_id: bpf_loader_upgradeable::ID,
         name: "solana_bpf_loader_upgradeable_program",
         entrypoint: solana_bpf_loader_program::Entrypoint::vm,
     },
-    BuiltinPrototype {
-        program_id: solana_sdk_ids::loader_v4::id(),
+    Builtin {
+        program_id: loader_v4::ID,
         name: "solana_loader_v4_program",
         entrypoint: solana_loader_v4_program::Entrypoint::vm,
     },
-    BuiltinPrototype {
-        program_id: magicblock_program::id(),
+    Builtin {
+        program_id: magicblock_program::ID,
         name: "magicblock_program",
         entrypoint: magicblock_processor::Entrypoint::vm,
     },
-    BuiltinPrototype {
-        program_id: compute_budget::id(),
+    Builtin {
+        program_id: compute_budget::ID,
         name: "compute_budget_program",
         entrypoint: solana_compute_budget_program::Entrypoint::vm,
     },

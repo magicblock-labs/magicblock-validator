@@ -1,6 +1,6 @@
 use std::{
     collections::{HashMap, HashSet},
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use guinea::GuineaInstruction;
@@ -13,206 +13,74 @@ use solana_pubkey::Pubkey;
 use solana_signature::Signature;
 use solana_transaction::Transaction;
 use test_kit::{ExecutionTestEnv, Signer};
-use tokio::time;
+use tokio::time::timeout;
 
-const DEFAULT_TIMEOUT: Duration = Duration::from_secs(5);
-const STRESS_TEST_TIMEOUT: Duration = Duration::from_secs(10);
-const DEFAULT_LAMPORTS: u64 = LAMPORTS_PER_SOL * 10;
+const TIMEOUT: Duration = Duration::from_secs(5);
+const STRESS_TIMEOUT: Duration = Duration::from_secs(10);
+const DEFAULT_BALANCE: u64 = LAMPORTS_PER_SOL * 10;
 const TRANSFER_AMOUNT: u64 = 1000;
-const FEE: u64 = ExecutionTestEnv::BASE_FEE;
 
-// #################################################################
-// ## Helpers
-// #################################################################
+// --- Helpers ---
 
-/// Creates an `ExecutionTestEnv` with the specified executor count
-/// and `defer_startup` set to `true`.
 fn setup_env(executors: u32) -> ExecutionTestEnv {
-    ExecutionTestEnv::new_with_config(FEE, executors, true)
+    ExecutionTestEnv::new_with_config(
+        ExecutionTestEnv::BASE_FEE,
+        executors,
+        true,
+    )
 }
 
-/// Creates N accounts owned by the `guinea` program.
-/// These are used for `WriteByteToData` and `PrintSizes` instructions.
-fn create_accounts(env: &ExecutionTestEnv, count: usize) -> Vec<Pubkey> {
+fn create_accounts(env: &mut ExecutionTestEnv, count: usize) -> Vec<Pubkey> {
     (0..count)
         .map(|_| {
-            env.create_account_with_config(DEFAULT_LAMPORTS, 128, guinea::ID)
+            env.create_account_with_config(DEFAULT_BALANCE, 128, guinea::ID)
                 .pubkey()
         })
         .collect()
 }
 
-/// Builds a `Transfer` transaction from `from` to `to`.
-/// The `env.payer` pays the fee.
-fn build_transfer_tx(
-    env: &ExecutionTestEnv,
-    from: &Pubkey,
-    to: &Pubkey,
-    lamports: u64,
-) -> (Transaction, Signature) {
+fn tx_transfer(
+    env: &mut ExecutionTestEnv,
+    from: Pubkey,
+    to: Pubkey,
+) -> Transaction {
     let ix = Instruction::new_with_bincode(
         guinea::ID,
-        &GuineaInstruction::Transfer(lamports),
-        vec![AccountMeta::new(*from, false), AccountMeta::new(*to, false)],
+        &GuineaInstruction::Transfer(TRANSFER_AMOUNT),
+        vec![AccountMeta::new(from, false), AccountMeta::new(to, false)],
     );
-
-    // `env.build_transaction` signs with `env.payer`
-    let tx = env.build_transaction(&[ix]);
-    let sig = tx.signatures[0];
-    (tx, sig)
+    env.build_transaction(&[ix])
 }
 
-/// Builds a `WriteByteToData` transaction.
-/// The `account_pubkey` must be owned by `guinea::ID`.
-fn build_write_tx(
-    env: &ExecutionTestEnv,
-    account_pubkey: &Pubkey,
-    value: u8,
-) -> (Transaction, Signature) {
+fn tx_write(
+    env: &mut ExecutionTestEnv,
+    account: Pubkey,
+    val: u8,
+) -> Transaction {
     let ix = Instruction::new_with_bincode(
         guinea::ID,
-        &GuineaInstruction::WriteByteToData(value),
-        vec![AccountMeta::new(*account_pubkey, false)],
+        &GuineaInstruction::WriteByteToData(val),
+        vec![AccountMeta::new(account, false)],
     );
-    let tx = env.build_transaction(&[ix]);
-    let sig = tx.signatures[0];
-    (tx, sig)
+    env.build_transaction(&[ix])
 }
 
-/// Builds a `PrintSizes` (read-only) transaction.
-fn build_readonly_tx(
-    env: &ExecutionTestEnv,
-    accounts: &[Pubkey],
-) -> (Transaction, Signature) {
+fn tx_read(env: &mut ExecutionTestEnv, accounts: &[Pubkey]) -> Transaction {
     let metas = accounts
         .iter()
-        .map(|pk| AccountMeta::new_readonly(*pk, false))
+        .map(|k| AccountMeta::new_readonly(*k, false))
         .collect();
     let ix = Instruction::new_with_bincode(
         guinea::ID,
         &GuineaInstruction::PrintSizes,
         metas,
     );
-    let tx = env.build_transaction(&[ix]);
-    let sig = tx.signatures[0];
-    (tx, sig)
+    env.build_transaction(&[ix])
 }
 
-/// Drains the status channel and asserts all expected transactions were successful.
-async fn assert_statuses(
-    env: &ExecutionTestEnv,
-    mut expected_sigs: HashSet<Signature>,
-    timeout: Duration,
-) {
-    let start = std::time::Instant::now();
-
-    let count = expected_sigs.len();
-    while !expected_sigs.is_empty() {
-        // Check for overall test timeout
-        if start.elapsed() >= timeout {
-            panic!(
-                "Timeout waiting for transaction statuses. Expected: {count}, Missing: {}",
-                expected_sigs.len()
-            );
-        }
-
-        let recv = env.dispatch.transaction_status.recv_async();
-        match time::timeout(Duration::from_millis(100), recv).await {
-            Ok(Ok(status)) => {
-                // Received a status
-                assert!(
-                    status.result.result.is_ok(),
-                    "Transaction {} failed: {:?}",
-                    status.signature,
-                    status.result.result
-                );
-                // Check that we expected this signature
-                assert!(
-                    expected_sigs.remove(&status.signature),
-                    "Received unexpected signature: {}",
-                    status.signature
-                );
-            }
-            Ok(Err(e)) => {
-                // Channel disconnected
-                panic!("Transaction status channel disconnected: {:?}", e);
-            }
-            Err(_) => {
-                // `recv_async` timed out (poll), this is fine, loop again
-                continue;
-            }
-        }
-    }
-}
-
-/// Drains the status channel and asserts all transactions
-/// were successful *and* executed in the exact order specified.
-async fn assert_statuses_in_order(
-    env: &ExecutionTestEnv,
-    expected_sigs_order: Vec<Signature>,
-    timeout: Duration,
-) {
-    let start = std::time::Instant::now();
-    let mut received_sigs_order = Vec::with_capacity(expected_sigs_order.len());
-    let expected_len = expected_sigs_order.len();
-
-    while received_sigs_order.len() < expected_len {
-        // Check for overall test timeout
-        if start.elapsed() >= timeout {
-            panic!(
-                "Timeout waiting for transaction statuses. Expected {} statuses, but only got {}. Missing: {:?}",
-                expected_len,
-                received_sigs_order.len(),
-                &expected_sigs_order[received_sigs_order.len()..]
-            );
-        }
-
-        let recv = env.dispatch.transaction_status.recv_async();
-        match time::timeout(Duration::from_millis(100), recv).await {
-            Ok(Ok(status)) => {
-                // Received a status
-                assert!(
-                    status.result.result.is_ok(),
-                    "Transaction {} failed: {:?}",
-                    status.signature,
-                    status.result.result
-                );
-                received_sigs_order.push(status.signature);
-            }
-            Ok(Err(e)) => {
-                // Channel disconnected
-                panic!("Transaction status channel disconnected: {:?}", e);
-            }
-            Err(_) => {
-                // `recv_async` timed out (poll), this is fine, loop again
-                continue;
-            }
-        }
-    }
-
-    // Verify the execution order matches the scheduling order.
-    assert_eq!(
-        received_sigs_order, expected_sigs_order,
-        "Transactions were not executed in the expected order."
-    );
-}
-
-/// Schedules all transactions sequentially and returns their signatures.
-async fn schedule_all(
-    env: &ExecutionTestEnv,
-    txs: Vec<Transaction>,
-) -> HashSet<Signature> {
-    let sigs = txs.iter().map(|tx| tx.signatures[0]).collect();
-    for s in txs.into_iter().map(|tx| env.schedule_transaction(tx)) {
-        s.await;
-    }
-    sigs
-}
-
-/// Schedules all transactions sequentially and returns
-/// their signatures in an ordered Vec.
-async fn schedule_all_and_get_order(
-    env: &ExecutionTestEnv,
+/// Schedules transactions, starts the scheduler, and returns signatures in scheduling order.
+async fn schedule(
+    env: &mut ExecutionTestEnv,
     txs: Vec<Transaction>,
 ) -> Vec<Signature> {
     let mut sigs = Vec::with_capacity(txs.len());
@@ -220,566 +88,386 @@ async fn schedule_all_and_get_order(
         sigs.push(tx.signatures[0]);
         env.schedule_transaction(tx).await;
     }
+    env.run_scheduler();
+    env.advance_slot();
     sigs
 }
 
-// #################################################################
-// ## Test Scenarios
-// #################################################################
+/// Collects execution statuses until all expected signatures are accounted for or timeout.
+async fn collect_statuses(
+    env: &mut ExecutionTestEnv,
+    count: usize,
+    limit: Duration,
+    context: &str,
+) -> Vec<Signature> {
+    let start = Instant::now();
+    let mut results = Vec::with_capacity(count);
 
-/// **Scenario 1: Parallel Transfers (No Conflicts)**
-///
-/// Schedules N transactions that do not conflict (e.g., A->B, C->D, E->F).
-/// With multiple executors, these should all be processed in parallel.
+    while results.len() < count {
+        if start.elapsed() > limit {
+            panic!(
+                "[{context}] Timeout waiting for transactions. Got {}/{count}.",
+                results.len()
+            );
+        }
+        // Short poll interval
+        if let Ok(Ok(status)) = timeout(
+            Duration::from_millis(100),
+            env.dispatch.transaction_status.recv_async(),
+        )
+        .await
+        {
+            assert!(
+                status.result.result.is_ok(),
+                "[{context}] Transaction {} failed: {:?}",
+                status.signature,
+                status.result.result
+            );
+            results.push(status.signature);
+        }
+    }
+    results
+}
+
+/// Verifies that all signatures were processed successfully (order irrelevant).
+async fn verify_unordered(
+    env: &mut ExecutionTestEnv,
+    sigs: &[Signature],
+    limit: Duration,
+    context: &str,
+) {
+    let received = collect_statuses(env, sigs.len(), limit, context).await;
+    let expected_set: HashSet<_> = sigs.iter().cloned().collect();
+    let received_set: HashSet<_> = received.into_iter().collect();
+
+    if expected_set != received_set {
+        let missing: Vec<_> = expected_set.difference(&received_set).collect();
+        let extra: Vec<_> = received_set.difference(&expected_set).collect();
+        panic!("[{context}] Signature mismatch.\nMissing: {missing:?}\nExtra: {extra:?}");
+    }
+}
+
+/// Verifies that transactions were processed in the exact order they were scheduled.
+async fn verify_ordered(
+    env: &mut ExecutionTestEnv,
+    sigs: &[Signature],
+    limit: Duration,
+    context: &str,
+) {
+    let received = collect_statuses(env, sigs.len(), limit, context).await;
+    assert_eq!(
+        received,
+        sigs.to_vec(),
+        "[{context}] Execution order mismatch.\nExpected: {sigs:?}\nGot: {received:?}"
+    );
+}
+
+// --- Scenarios ---
+
 async fn scenario_parallel_transfers(executors: u32) {
+    let ctx = format!("Parallel Transfers ({executors} exec)");
     let mut env = setup_env(executors);
-    let num_pairs = 20;
-    let accounts = create_accounts(&env, num_pairs * 2);
-    let mut initial_balances = HashMap::new();
-    let mut txs = vec![];
+    let pairs = 20;
+    let accounts = create_accounts(&mut env, pairs * 2);
 
-    for i in 0..num_pairs {
-        let from = &accounts[i * 2];
-        let to = &accounts[i * 2 + 1];
-        initial_balances.insert(from, env.get_account(*from).lamports());
-        initial_balances.insert(to, env.get_account(*to).lamports());
+    let initial: HashMap<_, _> = accounts
+        .iter()
+        .map(|k| (*k, env.get_account(*k).lamports()))
+        .collect();
 
-        let (tx, _) = build_transfer_tx(&env, from, to, TRANSFER_AMOUNT);
-        txs.push(tx);
-        // we force a different slot to generate a new signature
+    let mut txs = Vec::with_capacity(pairs);
+    for i in 0..pairs {
         env.advance_slot();
+        txs.push(tx_transfer(&mut env, accounts[i * 2], accounts[i * 2 + 1]));
     }
 
-    let sigs = schedule_all(&env, txs).await;
-    env.run_scheduler();
-    env.advance_slot();
+    let sigs = schedule(&mut env, txs).await;
+    verify_unordered(&mut env, &sigs, TIMEOUT, &ctx).await;
 
-    assert_statuses(&env, sigs.clone(), DEFAULT_TIMEOUT).await;
-
-    // Verify final state
-    // Ensure all writes are committed
-    for i in 0..num_pairs {
-        let from_pk = accounts[i * 2];
-        let to_pk = accounts[i * 2 + 1];
-        let final_from = env.get_account(from_pk).lamports();
-        let final_to = env.get_account(to_pk).lamports();
-        let initial_from = initial_balances.get(&from_pk).unwrap();
-        let initial_to = initial_balances.get(&to_pk).unwrap();
-
-        // `from` account doesn't pay the fee, `env.payer` does.
-        assert_eq!(final_from, initial_from - TRANSFER_AMOUNT);
-        assert_eq!(final_to, initial_to + TRANSFER_AMOUNT);
-    }
-
-    // Verify ledger
-    for sig in sigs {
-        assert!(
-            env.get_transaction(sig).is_some(),
-            "Transaction {sig} not in ledger",
+    for i in 0..pairs {
+        let from = accounts[i * 2];
+        let to = accounts[i * 2 + 1];
+        assert_eq!(
+            env.get_account(from).lamports(),
+            initial[&from] - TRANSFER_AMOUNT,
+            "[{ctx}] Sender balance incorrect"
+        );
+        assert_eq!(
+            env.get_account(to).lamports(),
+            initial[&to] + TRANSFER_AMOUNT,
+            "[{ctx}] Recipient balance incorrect"
         );
     }
 }
 
-/// **Scenario 2: Conflicting Transfers (Write Lock on 1 Account)**
-///
-/// Schedules N transactions that all write to the *same account* (e.g., B->A, C->A, D->A).
-/// The scheduler must serialize these, regardless of executor count.
 async fn scenario_conflicting_transfers(executors: u32) {
+    let ctx = format!("Conflicting Transfers ({executors} exec)");
     let mut env = setup_env(executors);
-    let num_senders = 10;
-    let mut accounts = create_accounts(&env, num_senders + 1);
-    let recipient_pk = accounts.pop().unwrap(); // Account A
-    let senders = accounts; // B, C, D...
+    let senders_count = 10;
+    let mut accounts = create_accounts(&mut env, senders_count + 1);
+    let recipient = accounts.pop().unwrap();
+    let senders = accounts;
 
-    let initial_recipient_balance = env.get_account(recipient_pk).lamports();
-    let mut initial_sender_balances = HashMap::new();
-    let mut txs = vec![];
+    let initial_recip = env.get_account(recipient).lamports();
+    let initial_senders: HashMap<_, _> = senders
+        .iter()
+        .map(|k| (*k, env.get_account(*k).lamports()))
+        .collect();
 
+    let mut txs = Vec::with_capacity(senders.len());
     for sender in &senders {
-        initial_sender_balances
-            .insert(sender, env.get_account(*sender).lamports());
-        let (tx, _) =
-            build_transfer_tx(&env, sender, &recipient_pk, TRANSFER_AMOUNT);
-        txs.push(tx);
-        // we force a different slot to generate a new signature
         env.advance_slot();
+        txs.push(tx_transfer(&mut env, *sender, recipient));
     }
 
-    let sigs = schedule_all(&env, txs).await;
-    env.run_scheduler();
-    env.advance_slot();
+    let sigs = schedule(&mut env, txs).await;
+    verify_unordered(&mut env, &sigs, TIMEOUT, &ctx).await;
 
-    assert_statuses(&env, sigs, DEFAULT_TIMEOUT).await;
-
-    // Verify final state
-    let final_recipient_balance = env.get_account(recipient_pk).lamports();
-    let total_received = TRANSFER_AMOUNT * num_senders as u64;
     assert_eq!(
-        final_recipient_balance,
-        initial_recipient_balance + total_received
+        env.get_account(recipient).lamports(),
+        initial_recip + (TRANSFER_AMOUNT * senders_count as u64),
+        "[{ctx}] Recipient final balance incorrect"
     );
-
-    for sender in &senders {
-        let final_sender = env.get_account(*sender).lamports();
-        let initial_sender = initial_sender_balances.get(sender).unwrap();
-        // `sender` account doesn't pay the fee, `env.payer` does.
-        assert_eq!(final_sender, initial_sender - TRANSFER_AMOUNT);
+    for s in senders {
+        assert_eq!(
+            env.get_account(s).lamports(),
+            initial_senders[&s] - TRANSFER_AMOUNT,
+            "[{ctx}] Sender {s} final balance incorrect"
+        );
     }
 }
 
-/// **Scenario 3: Parallel ReadOnly Transactions**
-///
-/// Schedules N transactions that are all read-only.
-/// These should all execute in parallel.
 async fn scenario_readonly_parallel(executors: u32) {
+    let ctx = format!("Readonly Parallel ({executors} exec)");
     let mut env = setup_env(executors);
-    let num_txs = 50;
-    let accounts = create_accounts(&env, 10);
-    let mut txs = vec![];
+    let count = 50;
+    let accounts = create_accounts(&mut env, 10);
 
-    for i in 0..num_txs {
-        let acc_idx1 = i % 10;
-        let acc_idx2 = (i + 1) % 10;
-        let (tx, _) =
-            build_readonly_tx(&env, &[accounts[acc_idx1], accounts[acc_idx2]]);
-        txs.push(tx);
-        // we force a different slot to generate a new signature
+    let mut txs = Vec::with_capacity(count);
+    for i in 0..count {
         env.advance_slot();
+        txs.push(tx_read(
+            &mut env,
+            &[accounts[i % 10], accounts[(i + 1) % 10]],
+        ));
     }
 
-    let sigs = schedule_all(&env, txs).await;
-    env.run_scheduler();
-    env.advance_slot();
-
-    assert_statuses(&env, sigs, DEFAULT_TIMEOUT).await
+    let sigs = schedule(&mut env, txs).await;
+    verify_unordered(&mut env, &sigs, TIMEOUT, &ctx).await;
 }
 
-/// **Scenario 4: Mixed Workload (Conflicts + Parallel)**
-///
-/// Schedules a mix of conflicting and non-conflicting transactions.
-/// T1: A -> B (Conflicts with T3)
-/// T2: C -> D (Parallel)
-/// T3: B -> A (Conflicts with T1)
-/// T4: E -> F (Parallel)
 async fn scenario_mixed_workload(executors: u32) {
+    let ctx = format!("Mixed Workload ({executors} exec)");
     let mut env = setup_env(executors);
-    let num_sets = 10;
-    let accounts = create_accounts(&env, 6);
-    let (acc_a, acc_b, acc_c, acc_d, acc_e, acc_f) = (
-        &accounts[0],
-        &accounts[1],
-        &accounts[2],
-        &accounts[3],
-        &accounts[4],
-        &accounts[5],
-    );
+    let sets = 10;
+    let accs = create_accounts(&mut env, 6); // A..F
+    let initial: HashMap<_, _> = accs
+        .iter()
+        .map(|k| (*k, env.get_account(*k).lamports()))
+        .collect();
 
-    let mut initial_balances = HashMap::new();
-    for acc in &accounts {
-        initial_balances.insert(acc, env.get_account(*acc).lamports());
-    }
-
-    let mut txs = vec![];
-    for _ in 0..num_sets {
-        // T1: A -> B
-        let (tx1, _) = build_transfer_tx(&env, acc_a, acc_b, TRANSFER_AMOUNT);
-        txs.push(tx1);
-        // T2: C -> D
-        let (tx2, _) = build_transfer_tx(&env, acc_c, acc_d, TRANSFER_AMOUNT);
-        txs.push(tx2);
-        // T3: B -> A
-        let (tx3, _) = build_transfer_tx(&env, acc_b, acc_a, TRANSFER_AMOUNT);
-        txs.push(tx3);
-        // T4: E -> F
-        let (tx4, _) = build_transfer_tx(&env, acc_e, acc_f, TRANSFER_AMOUNT);
-        txs.push(tx4);
-        // we force a different slot to generate a new signature
+    let mut txs = Vec::new();
+    for _ in 0..sets {
+        txs.push(tx_transfer(&mut env, accs[0], accs[1])); // A->B
+        txs.push(tx_transfer(&mut env, accs[2], accs[3])); // C->D
+        txs.push(tx_transfer(&mut env, accs[1], accs[0])); // B->A (conflict T1)
+        txs.push(tx_transfer(&mut env, accs[4], accs[5])); // E->F
         env.advance_slot();
     }
 
-    let sigs = schedule_all(&env, txs).await;
-    env.run_scheduler();
-    env.advance_slot();
+    let sigs = schedule(&mut env, txs).await;
+    verify_unordered(&mut env, &sigs, TIMEOUT, &ctx).await;
 
-    assert_statuses(&env, sigs, DEFAULT_TIMEOUT).await;
+    let n = sets as u64;
+    // A & B net zero (transfer back and forth)
+    assert_eq!(
+        env.get_account(accs[0]).lamports(),
+        initial[&accs[0]],
+        "[{ctx}] Account A balance mismatch"
+    );
+    assert_eq!(
+        env.get_account(accs[1]).lamports(),
+        initial[&accs[1]],
+        "[{ctx}] Account B balance mismatch"
+    );
 
-    // Verify final state
-    env.advance_slot();
-    let n = num_sets as u64;
-
-    // A and B transferred back and forth `n` times.
-    // Their net change is 0, as they are not paying fees.
+    // C, E lose; D, F gain
     assert_eq!(
-        env.get_account(*acc_a).lamports(),
-        *initial_balances.get(acc_a).unwrap()
-    );
-    assert_eq!(
-        env.get_account(*acc_b).lamports(),
-        *initial_balances.get(acc_b).unwrap()
-    );
-    // C, D, E, F just did one-way transfers. No fees paid by them.
-    assert_eq!(
-        env.get_account(*acc_c).lamports(),
-        initial_balances.get(acc_c).unwrap() - (TRANSFER_AMOUNT * n)
-    );
-    assert_eq!(
-        env.get_account(*acc_d).lamports(),
-        initial_balances.get(acc_d).unwrap() + (TRANSFER_AMOUNT * n)
-    );
-    assert_eq!(
-        env.get_account(*acc_e).lamports(),
-        initial_balances.get(acc_e).unwrap() - (TRANSFER_AMOUNT * n)
-    );
-    assert_eq!(
-        env.get_account(*acc_f).lamports(),
-        initial_balances.get(acc_f).unwrap() + (TRANSFER_AMOUNT * n)
+        env.get_account(accs[2]).lamports(),
+        initial[&accs[2]] - (TRANSFER_AMOUNT * n),
+        "[{ctx}] Account C balance mismatch"
     );
 }
 
-/// **Scenario 5: Conflicting Data Writes**
-///
-/// Schedules N transactions that all write to the *same account's data*
-/// using `WriteByteToData`. This creates a write-lock conflict.
 async fn scenario_conflicting_writes(executors: u32) {
+    let ctx = format!("Conflicting Writes ({executors} exec)");
     let mut env = setup_env(executors);
-    let num_txs = 20;
-    let guinea_accounts = create_accounts(&env, 1);
-    let acc_a = &guinea_accounts[0];
-    let mut txs = vec![];
-    let mut written_values = HashSet::new();
+    let count = 20;
+    let acc = create_accounts(&mut env, 1)[0];
 
-    for i in 0..num_txs {
-        let value = (i + 1) as u8; // Write 1, 2, 3...
-        let (tx, _) = build_write_tx(&env, acc_a, value);
-        txs.push(tx);
-        written_values.insert(value);
-        // we force a different slot to generate a new signature
+    let mut txs = Vec::with_capacity(count);
+    for i in 1..=count {
         env.advance_slot();
+        txs.push(tx_write(&mut env, acc, i as u8));
     }
 
-    let sigs = schedule_all(&env, txs).await;
-    env.run_scheduler();
-    env.advance_slot();
-
-    assert_statuses(&env, sigs, DEFAULT_TIMEOUT).await;
-
-    // Verify final state
-    env.advance_slot();
-    let account_data = env.get_account(*acc_a).data().to_vec();
-    let final_value = account_data[0];
+    let sigs = schedule(&mut env, txs).await;
+    verify_unordered(&mut env, &sigs, TIMEOUT, &ctx).await;
 
     // We can't guarantee *which* write was last, but it must be one of them.
+    let data = env.get_account(acc).data()[0];
     assert!(
-        written_values.contains(&final_value),
-        "Final value {} was not in the set of written values",
-        final_value
+        data > 0 && data <= count as u8,
+        "[{ctx}] Final data value {data} out of expected range (1..={count})"
     );
 }
 
-/// **Scenario 6: Serial Conflicting Writes (Asserts Order)**
-///
-/// Schedules N transactions that all write to the *same account*.
-/// Asserts that they are executed sequentially in the *exact order*
-/// they were scheduled, regardless of executor count, due to the write lock.
 async fn scenario_serial_conflicting_writes(executors: u32) {
+    let ctx = format!("Serial Conflicting Writes ({executors} exec)");
     let mut env = setup_env(executors);
-    let num_txs = 20;
-    let guinea_accounts = create_accounts(&env, 1);
-    let acc_a = &guinea_accounts[0];
-    let mut txs = vec![];
+    let count = 20;
+    let acc = create_accounts(&mut env, 1)[0];
 
-    for i in 0..num_txs {
-        let value = i as u8; // Write 0, 1, 2... 19
-        let (tx, _) = build_write_tx(&env, acc_a, value);
-        txs.push(tx);
-        // we force a different slot to generate a new signature
+    let mut txs = Vec::with_capacity(count);
+    for i in 0..count {
         env.advance_slot();
+        txs.push(tx_write(&mut env, acc, i as u8));
     }
 
-    // Schedule sequentially and get the ordered signatures
-    let sigs_order = schedule_all_and_get_order(&env, txs).await;
-    env.run_scheduler();
-    env.advance_slot();
+    // Verify transactions executed in exact scheduling order due to write lock
+    let sigs = schedule(&mut env, txs).await;
+    verify_ordered(&mut env, &sigs, TIMEOUT, &ctx).await;
 
-    // Assert that the statuses were received in the *exact* order of scheduling
-    assert_statuses_in_order(&env, sigs_order, DEFAULT_TIMEOUT).await;
-
-    // Verify final state
-    env.advance_slot();
-    let account_data = env.get_account(*acc_a).data().to_vec();
-    let final_value = account_data[0];
-
-    // The final value *must* be the last value we wrote (19)
+    // Final state must match last write
+    let final_val = env.get_account(acc).data()[0];
     assert_eq!(
-        final_value,
-        (num_txs - 1) as u8,
-        "Final account data should be the last value written"
+        final_val,
+        (count - 1) as u8,
+        "[{ctx}] Final data value mismatch"
     );
 }
 
-/// **Scenario 7: Serial Transfer Chain (Asserts Order)**
-///
-/// Schedules N transactions in a dependency chain (A->B, B->C, C->D).
-/// Asserts that they are executed sequentially in the *exact order*
-/// they were scheduled, as each tx depends on the lock from the previous.
 async fn scenario_serial_transfer_chain(executors: u32) {
+    let ctx = format!("Serial Transfer Chain ({executors} exec)");
     let mut env = setup_env(executors);
-    let num_txs = 20;
-    let num_accounts = num_txs + 1;
-    let accounts = create_accounts(&env, num_accounts);
-    let mut initial_balances = HashMap::new();
-    let mut txs = vec![];
+    let count = 20;
+    let accs = create_accounts(&mut env, count + 1);
+    let initial: HashMap<_, _> = accs
+        .iter()
+        .map(|k| (*k, env.get_account(*k).lamports()))
+        .collect();
 
-    for acc in &accounts {
-        initial_balances.insert(acc, env.get_account(*acc).lamports());
-    }
-
-    for i in 0..num_txs {
-        let from = &accounts[i];
-        let to = &accounts[i + 1];
-        let (tx, _) = build_transfer_tx(&env, from, to, TRANSFER_AMOUNT);
-        txs.push(tx);
-        // we force a different slot to generate a new signature
+    let mut txs = Vec::with_capacity(count);
+    for i in 0..count {
         env.advance_slot();
+        txs.push(tx_transfer(&mut env, accs[i], accs[i + 1]));
     }
 
-    // Schedule sequentially and get the ordered signatures
-    let sigs_order = schedule_all_and_get_order(&env, txs).await;
-    env.run_scheduler();
-    env.advance_slot();
+    let sigs = schedule(&mut env, txs).await;
+    verify_ordered(&mut env, &sigs, TIMEOUT, &ctx).await;
 
-    // Assert that the statuses were received in the *exact* order of scheduling
-    assert_statuses_in_order(&env, sigs_order, DEFAULT_TIMEOUT).await;
-
-    // Verify final state
-    env.advance_slot();
-    // First account (A) should have lost lamports
-    let first_acc = &accounts[0];
+    // A loses, Last gains, Middle net zero
     assert_eq!(
-        env.get_account(*first_acc).lamports(),
-        initial_balances.get(first_acc).unwrap() - TRANSFER_AMOUNT
+        env.get_account(accs[0]).lamports(),
+        initial[&accs[0]] - TRANSFER_AMOUNT,
+        "[{ctx}] First account balance mismatch"
     );
-
-    // Intermediary accounts (B, C, ...) should have net-zero change
-    for int_acc in accounts.iter().take(num_txs).skip(1) {
+    assert_eq!(
+        env.get_account(accs[count]).lamports(),
+        initial[&accs[count]] + TRANSFER_AMOUNT,
+        "[{ctx}] Last account balance mismatch"
+    );
+    for i in 1..count {
         assert_eq!(
-            env.get_account(*int_acc).lamports(),
-            *initial_balances.get(int_acc).unwrap(),
-            "Intermediary account {} lamports changed",
-            int_acc
+            env.get_account(accs[i]).lamports(),
+            initial[&accs[i]],
+            "[{ctx}] Intermediate account {i} balance changed"
         );
     }
-
-    // Last account should have gained lamports
-    let last_acc = &accounts[num_accounts - 1];
-    assert_eq!(
-        env.get_account(*last_acc).lamports(),
-        initial_balances.get(last_acc).unwrap() + TRANSFER_AMOUNT
-    );
 }
 
-// #################################################################
-// ## Test Matrix
-// #################################################################
+async fn scenario_stress_test(executors: u32) {
+    let ctx = "Large Queue Stress Test";
+    let mut env = setup_env(executors);
+    let count = 1000;
+    let num_accs = 100;
 
-// --- Test Scenario 1: Parallel Transfers (No Conflicts) ---
-#[tokio::test]
-#[allow(non_snake_case)]
-async fn test_parallel_transfers_1_executor() {
-    scenario_parallel_transfers(1).await;
-}
-#[tokio::test]
-#[allow(non_snake_case)]
-async fn test_parallel_transfers_2_executors() {
-    scenario_parallel_transfers(2).await;
-}
-#[tokio::test]
-#[allow(non_snake_case)]
-async fn test_parallel_transfers_4_executors() {
-    scenario_parallel_transfers(4).await;
-}
-#[tokio::test]
-#[allow(non_snake_case)]
-async fn test_parallel_transfers_8_executors() {
-    scenario_parallel_transfers(8).await;
-}
+    let t_accs = create_accounts(&mut env, num_accs);
+    let g_accs = create_accounts(&mut env, num_accs);
 
-// --- Test Scenario 2: Conflicting Transfers (Write Lock on 1 Account) ---
-#[tokio::test]
-#[allow(non_snake_case)]
-async fn test_conflicting_transfers_1_executor() {
-    scenario_conflicting_transfers(1).await;
-}
-#[tokio::test]
-#[allow(non_snake_case)]
-async fn test_conflicting_transfers_2_executors() {
-    scenario_conflicting_transfers(2).await;
-}
-#[tokio::test]
-#[allow(non_snake_case)]
-async fn test_conflicting_transfers_4_executors() {
-    scenario_conflicting_transfers(4).await;
-}
-#[tokio::test]
-#[allow(non_snake_case)]
-async fn test_conflicting_transfers_8_executors() {
-    scenario_conflicting_transfers(8).await;
-}
-
-// --- Test Scenario 3: Parallel ReadOnly Txs ---
-#[tokio::test]
-#[allow(non_snake_case)]
-async fn test_readonly_parallel_1_executor() {
-    scenario_readonly_parallel(1).await;
-}
-#[tokio::test]
-#[allow(non_snake_case)]
-async fn test_readonly_parallel_2_executors() {
-    scenario_readonly_parallel(2).await;
-}
-#[tokio::test]
-#[allow(non_snake_case)]
-async fn test_readonly_parallel_4_executors() {
-    scenario_readonly_parallel(4).await;
-}
-#[tokio::test]
-#[allow(non_snake_case)]
-async fn test_readonly_parallel_8_executors() {
-    scenario_readonly_parallel(8).await;
-}
-
-// --- Test Scenario 4: Mixed Workload (Conflicts + Parallel) ---
-#[tokio::test]
-#[allow(non_snake_case)]
-async fn test_mixed_workload_1_executor() {
-    scenario_mixed_workload(1).await;
-}
-#[tokio::test]
-#[allow(non_snake_case)]
-async fn test_mixed_workload_2_executors() {
-    scenario_mixed_workload(2).await;
-}
-#[tokio::test]
-#[allow(non_snake_case)]
-async fn test_mixed_workload_4_executors() {
-    scenario_mixed_workload(4).await;
-}
-#[tokio::test]
-#[allow(non_snake_case)]
-async fn test_mixed_workload_8_executors() {
-    scenario_mixed_workload(8).await;
-}
-
-// --- Test Scenario 5: Conflicting Data Writes ---
-#[tokio::test]
-#[allow(non_snake_case)]
-async fn test_conflicting_writes_1_executor() {
-    scenario_conflicting_writes(1).await;
-}
-#[tokio::test]
-#[allow(non_snake_case)]
-async fn test_conflicting_writes_2_executors() {
-    scenario_conflicting_writes(2).await;
-}
-#[tokio::test]
-#[allow(non_snake_case)]
-async fn test_conflicting_writes_4_executors() {
-    scenario_conflicting_writes(4).await;
-}
-#[tokio::test]
-#[allow(non_snake_case)]
-async fn test_conflicting_writes_8_executors() {
-    scenario_conflicting_writes(8).await;
-}
-
-// --- Test Scenario 6: Serial Conflicting Writes (Asserts Order) ---
-#[tokio::test]
-async fn test_serial_conflicting_writes_1_executor() {
-    scenario_serial_conflicting_writes(1).await;
-}
-#[tokio::test]
-async fn test_serial_conflicting_writes_2_executors() {
-    scenario_serial_conflicting_writes(2).await;
-}
-#[tokio::test]
-async fn test_serial_conflicting_writes_4_executors() {
-    scenario_serial_conflicting_writes(4).await;
-}
-#[tokio::test]
-async fn test_serial_conflicting_writes_8_executors() {
-    scenario_serial_conflicting_writes(8).await;
-}
-
-// --- Test Scenario 7: Serial Transfer Chain (Asserts Order) ---
-#[tokio::test]
-async fn test_serial_transfer_chain_1_executor() {
-    scenario_serial_transfer_chain(1).await;
-}
-#[tokio::test]
-async fn test_serial_transfer_chain_2_executors() {
-    scenario_serial_transfer_chain(2).await;
-}
-#[tokio::test]
-async fn test_serial_transfer_chain_4_executors() {
-    scenario_serial_transfer_chain(4).await;
-}
-#[tokio::test]
-async fn test_serial_transfer_chain_8_executors() {
-    scenario_serial_transfer_chain(8).await;
-}
-
-// --- Test Scenario 8: Large Queue Stress Test ---
-/// **Scenario 8: Large Queue Stress Test**
-///
-/// Schedules 1000 transactions of mixed types to check for deadlocks or
-/// race conditions under heavy load.
-#[tokio::test]
-async fn test_large_queue_mixed_8_executors() {
-    let mut env = setup_env(8);
-    let num_txs = 1000;
-    let num_accounts = 100;
-
-    let transfer_accounts = create_accounts(&env, num_accounts);
-    let guinea_accounts = create_accounts(&env, num_accounts);
-    let mut txs = vec![];
-
-    for i in 0..num_txs {
-        let r = i % 4;
-        let idx = i % num_accounts;
-
-        let tx = match r {
-            // 0: Non-conflicting transfer (A->B, B->C, ...)
+    let mut txs = Vec::with_capacity(count);
+    for i in 0..count {
+        env.advance_slot();
+        let idx = i % num_accs;
+        let tx = match i % 4 {
             0 => {
-                let from = &transfer_accounts[idx];
-                let to_idx = (idx + 1) % num_accounts;
-                let to = &transfer_accounts[to_idx];
-                build_transfer_tx(&env, from, to, 10).0
+                tx_transfer(&mut env, t_accs[idx], t_accs[(idx + 1) % num_accs])
             }
-            // 1: Conflicting write (all write to guinea_accounts[0])
-            1 => build_write_tx(&env, &guinea_accounts[0], i as u8).0,
-            // 2: Non-conflicting write (A writes A, B writes B, ...)
-            2 => build_write_tx(&env, &guinea_accounts[idx], i as u8).0,
-            // 3: Readonly
+            1 => tx_write(&mut env, g_accs[0], (i % 255) as u8),
+            2 => tx_write(&mut env, g_accs[idx], (i % 255) as u8),
             _ => {
-                build_readonly_tx(
-                    &env,
-                    &[
-                        guinea_accounts[idx],
-                        guinea_accounts[(idx + 1) % num_accounts],
-                    ],
-                )
-                .0
+                tx_read(&mut env, &[g_accs[idx], g_accs[(idx + 1) % num_accs]])
             }
         };
         txs.push(tx);
-        // we force a different slot to generate a new signature
-        env.advance_slot();
     }
 
-    let sigs = schedule_all(&env, txs).await;
-    env.run_scheduler();
-    env.advance_slot();
+    let sigs = schedule(&mut env, txs).await;
+    verify_unordered(&mut env, &sigs, STRESS_TIMEOUT, ctx).await;
+}
 
-    // Use a longer timeout for the large queue
-    assert_statuses(&env, sigs, STRESS_TEST_TIMEOUT).await;
+// --- Tests ---
+
+#[tokio::test]
+async fn test_parallel_transfers() {
+    for executors in [1, 2, 4, 8] {
+        scenario_parallel_transfers(executors).await;
+    }
+}
+
+#[tokio::test]
+async fn test_conflicting_transfers() {
+    for executors in [1, 2, 4, 8] {
+        scenario_conflicting_transfers(executors).await;
+    }
+}
+
+#[tokio::test]
+async fn test_readonly_parallel() {
+    for executors in [1, 2, 4, 8] {
+        scenario_readonly_parallel(executors).await;
+    }
+}
+
+#[tokio::test]
+async fn test_mixed_workload() {
+    for executors in [1, 2, 4, 8] {
+        scenario_mixed_workload(executors).await;
+    }
+}
+
+#[tokio::test]
+async fn test_conflicting_writes() {
+    for executors in [1, 2, 4, 8] {
+        scenario_conflicting_writes(executors).await;
+    }
+}
+
+#[tokio::test]
+async fn test_serial_conflicting_writes() {
+    for executors in [1, 2, 4, 8] {
+        scenario_serial_conflicting_writes(executors).await;
+    }
+}
+
+#[tokio::test]
+async fn test_serial_transfer_chain() {
+    for executors in [1, 2, 4, 8] {
+        scenario_serial_transfer_chain(executors).await;
+    }
+}
+
+#[tokio::test]
+async fn test_large_queue_mixed_8_executors() {
+    scenario_stress_test(8).await;
 }

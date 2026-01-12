@@ -53,6 +53,7 @@ use magicblock_ledger::{
 use magicblock_metrics::{metrics::TRANSACTION_COUNT, MetricsService};
 use magicblock_processor::{
     build_svm_env,
+    loader::load_upgradeable_programs,
     scheduler::{state::TransactionSchedulerState, TransactionScheduler},
 };
 use magicblock_program::{
@@ -213,6 +214,14 @@ impl MagicValidator {
                 ))
             });
 
+        load_upgradeable_programs(
+            &accountsdb,
+            &programs_to_load(&config.programs),
+        )
+        .map_err(|err| {
+            ApiError::FailedToLoadProgramsIntoBank(format!("{:?}", err))
+        })?;
+
         validator::init_validator_authority(identity_keypair);
         let base_fee = config.validator.basefee;
         let txn_scheduler_state = TransactionSchedulerState {
@@ -230,12 +239,6 @@ impl MagicValidator {
             shutdown: token.clone(),
         };
         TRANSACTION_COUNT.inc_by(ledger.count_transactions()? as u64);
-        txn_scheduler_state
-            .load_upgradeable_programs(&programs_to_load(&config.programs))
-            .map_err(|err| {
-                ApiError::FailedToLoadProgramsIntoBank(format!("{:?}", err))
-            })?;
-
         // Faucet keypair is only used for airdrops, which are not allowed in
         // the Ephemeral mode by setting the faucet to None in node context
         // (used by the RPC implementation), we effectively disable airdrops
