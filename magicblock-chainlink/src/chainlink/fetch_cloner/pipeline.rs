@@ -329,6 +329,22 @@ where
                     &mut account,
                     &delegation_record,
                 );
+
+                // Subscribe to the original owner program for undelegation update
+                // resilience for the delegated account
+                if account.delegated() {
+                    if let Err(err) = this
+                        .remote_account_provider
+                        .subscribe_program(delegation_record.owner)
+                        .await
+                    {
+                        warn!(
+                            "Failed to subscribe to owner program {} for account {}: {}",
+                            delegation_record.owner, pubkey, err
+                        );
+                    }
+                }
+
                 (commit_freq, delegated_to_other)
             } else {
                 missing_delegation_record.push((pubkey, account.remote_slot()));

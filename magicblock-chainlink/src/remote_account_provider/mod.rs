@@ -879,6 +879,14 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         Ok(())
     }
 
+    /// Subscribe to program account updates
+    pub async fn subscribe_program(
+        &self,
+        program_id: Pubkey,
+    ) -> RemoteAccountProviderResult<()> {
+        self.pubsub_client.subscribe_program(program_id).await
+    }
+
     /// Unsubscribe from an account
     pub async fn unsubscribe(
         &self,
