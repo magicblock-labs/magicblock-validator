@@ -887,6 +887,12 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         self.pubsub_client.subscribe_program(program_id).await
     }
 
+    /// Get a reference to the pubsub client (for testing)
+    #[cfg(any(test, feature = "dev-context"))]
+    pub fn pubsub_client(&self) -> &U {
+        &self.pubsub_client
+    }
+
     /// Unsubscribe from an account
     pub async fn unsubscribe(
         &self,

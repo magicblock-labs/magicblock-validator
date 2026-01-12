@@ -368,8 +368,23 @@ where
                                 );
 
                                 // For accounts delegated to us, always unsubscribe from the delegated account
+                                // and subscribe to the original owner program for undelegation update resilience
                                 if account.delegated() {
                                     subs_to_remove.insert(pubkey);
+
+                                    // Subscribe to the original owner program for undelegation update resilience
+                                    if let Err(err) = self
+                                        .remote_account_provider
+                                        .subscribe_program(
+                                            delegation_record.owner,
+                                        )
+                                        .await
+                                    {
+                                        warn!(
+                                            "Failed to subscribe to owner program {} for account {}: {}",
+                                            delegation_record.owner, pubkey, err
+                                        );
+                                    }
                                 }
 
                                 (
