@@ -6,8 +6,7 @@ use solana_commitment_config::CommitmentConfig;
 use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_rpc_client_api::{
-    client_error::Result as ClientResult, config::RpcAccountInfoConfig,
-    response::RpcResult,
+    config::RpcAccountInfoConfig, response::RpcResult,
 };
 
 // -----------------
