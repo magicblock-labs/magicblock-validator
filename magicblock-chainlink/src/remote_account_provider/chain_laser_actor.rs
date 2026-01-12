@@ -46,6 +46,8 @@ const PER_STREAM_SUBSCRIPTION_LIMIT: usize = 1_000;
 const SUBSCRIPTION_ACTIVATION_INTERVAL_MILLIS: u64 = 10_000;
 const SLOTS_BETWEEN_ACTIVATIONS: u64 =
     SUBSCRIPTION_ACTIVATION_INTERVAL_MILLIS / 400;
+const ACTIVATION_LOOKBACK_MULTIPLIER: u64 = 2;
+const ACTIVATION_LOOKBACK_EXTRA_SLOTS: u64 = 5;
 
 // -----------------
 // AccountUpdateSource
@@ -441,7 +443,10 @@ impl ChainLaserActor {
             if chain_slot == 0 {
                 None
             } else {
-                Some(chain_slot.saturating_sub(SLOTS_BETWEEN_ACTIVATIONS + 1))
+                Some(chain_slot.saturating_sub(
+                    SLOTS_BETWEEN_ACTIVATIONS * ACTIVATION_LOOKBACK_MULTIPLIER
+                        + ACTIVATION_LOOKBACK_EXTRA_SLOTS,
+                ))
             }
         });
         if log::log_enabled!(log::Level::Trace) {
