@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use magicblock_config::config::LifecycleMode;
+use magicblock_config::{config::LifecycleMode, consts::DEFAULT_RESUBSCRIPTION_DELAY_MS};
 use solana_pubkey::Pubkey;
 
 use super::{RemoteAccountProviderError, RemoteAccountProviderResult};
@@ -8,9 +8,6 @@ use super::{RemoteAccountProviderError, RemoteAccountProviderResult};
 // TODO(thlorenz): make configurable
 // Tracked: https://github.com/magicblock-labs/magicblock-validator/issues/577
 pub const DEFAULT_SUBSCRIBED_ACCOUNTS_LRU_CAPACITY: usize = 10_000;
-
-/// Default delay in milliseconds between resubscribing to accounts after a pubsub reconnection
-pub const DEFAULT_RESUBSCRIPTION_DELAY_MS: u64 = 50;
 
 #[derive(Debug, Clone)]
 pub struct RemoteAccountProviderConfig {

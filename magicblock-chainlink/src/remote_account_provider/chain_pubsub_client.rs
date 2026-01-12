@@ -352,7 +352,7 @@ impl ReconnectableClient for ChainPubsubClientImpl {
     ) -> RemoteAccountProviderResult<()> {
         for pubkey in pubkeys {
             self.subscribe(pubkey).await?;
-            // Don't spam the RPC provider
+            // Configurable delay to prevent overwhelming the RPC provider during reconnection
             tokio::time::sleep(self.resubscription_delay).await;
         }
         Ok(())
