@@ -1,6 +1,7 @@
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex},
+    time::Duration,
 };
 
 use magicblock_chainlink::{
@@ -29,6 +30,7 @@ async fn setup() -> (ChainPubsubClientImpl, mpsc::Receiver<SubscriptionUpdate>)
         "test-pubsub".to_string(),
         tx,
         CommitmentConfig::confirmed(),
+        Duration::from_millis(200),
     )
     .await
     .unwrap();
