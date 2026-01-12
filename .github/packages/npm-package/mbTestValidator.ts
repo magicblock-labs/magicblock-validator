@@ -44,8 +44,8 @@ function runMbTestValidator(): void {
     "Vrf1RNUjXmQGjmQrQLvJHs9SNkvDJEsRVFPkfSQUwGz",
     p("Vrf1RNUjXmQGjmQrQLvJHs9SNkvDJEsRVFPkfSQUwGz.so"),
     "--bpf-program",
-    "noopb9bkMVfRPU8AsbpTUg8AQkHtKwMYZiFUjNRtMmV",
-    p("noopb9bkMVfRPU8AsbpTUg8AQkHtKwMYZiFUjNRtMmV.so"),
+    "DmnRGfyyftzacFb1XadYhWF6vWqXwtQk5tbr6XgR3BA1",
+    p("DmnRGfyyftzacFb1XadYhWF6vWqXwtQk5tbr6XgR3BA1.so"),
     // accounts
     "--account",
     "mAGicPQYBMvcYveUZA5F5UNNwyHvfYh5xkLS2Fr1mev",
@@ -65,18 +65,35 @@ function runMbTestValidator(): void {
     "--account",
     "F72HqCR8nwYsVyeVd38pgKkjXmXFzVAM8rjZZsXWbdE",
     p("F72HqCR8nwYsVyeVd38pgKkjXmXFzVAM8rjZZsXWbdE.json"),
+    "--account",
+    "paywJiVATrVDLYLmowJqzG6MsaCt77L8WyTnBb2754t",
+    p("paywJiVATrVDLYLmowJqzG6MsaCt77L8WyTnBb2754t.json"),
+    "--account",
+    "CXMc1eCiEp9YXjanBNB6HUvbWCmxeVmhcR3bPXw8exJA",
+    p("CXMc1eCiEp9YXjanBNB6HUvbWCmxeVmhcR3bPXw8exJA.json"),
+    "--account",
+    "GKE6d7iv8kCBrsxr78W3xVdjGLLLJnxsGiuzrsZCGEvb",
+    p("GKE6d7iv8kCBrsxr78W3xVdjGLLLJnxsGiuzrsZCGEvb.json"),
+    "--account",
+    "FRqXJqfCi3o6gF3Yqnkx1gKA3YnbRDJbBs6hKpme3NHJ",
+    p("FRqXJqfCi3o6gF3Yqnkx1gKA3YnbRDJbBs6hKpme3NHJ.json"),
   ];
 
   const expectedFiles = [
     "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh.so",
     "noopb9bkMVfRPU8AsbpTUg8AQkHtKwMYZiFUjNRtMmV.so",
     "Vrf1RNUjXmQGjmQrQLvJHs9SNkvDJEsRVFPkfSQUwGz.so",
+    "DmnRGfyyftzacFb1XadYhWF6vWqXwtQk5tbr6XgR3BA1.so",
     "mAGicPQYBMvcYveUZA5F5UNNwyHvfYh5xkLS2Fr1mev.json",
     "EpJnX7ueXk7fKojBymqmVuCuwyhDQsYcLVL1XMsBbvDX.json",
     "7JrkjmZPprHwtuvtuGTXp9hwfGYFAQLnLeFM52kqAgXg.json",
     "Cuj97ggrhhidhbu39TijNVqE74xvKJ69gDervRUXAxGh.json",
     "5hBR571xnXppuCPveTrctfTU7tJLSN94nq7kv7FRK5Tc.json",
     "F72HqCR8nwYsVyeVd38pgKkjXmXFzVAM8rjZZsXWbdE.json",
+    "paywJiVATrVDLYLmowJqzG6MsaCt77L8WyTnBb2754t.json",
+    "CXMc1eCiEp9YXjanBNB6HUvbWCmxeVmhcR3bPXw8exJA.json",
+    "GKE6d7iv8kCBrsxr78W3xVdjGLLLJnxsGiuzrsZCGEvb.json",
+    "FRqXJqfCi3o6gF3Yqnkx1gKA3YnbRDJbBs6hKpme3NHJ.json",
   ];
   const missingFiles = expectedFiles
     .map((f) => p(f))
