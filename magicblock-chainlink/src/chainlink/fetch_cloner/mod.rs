@@ -374,7 +374,8 @@ where
 
                                     // Subscribe to the original owner program for undelegation update resilience
                                     // Fire-and-forget to avoid blocking subscription updates
-                                    let provider = self.remote_account_provider.clone();
+                                    let provider =
+                                        self.remote_account_provider.clone();
                                     let owner = delegation_record.owner;
                                     tokio::spawn(async move {
                                         if let Err(err) = provider

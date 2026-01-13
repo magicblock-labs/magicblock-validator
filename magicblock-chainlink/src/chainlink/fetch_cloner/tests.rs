@@ -1800,6 +1800,7 @@ async fn test_no_program_subscription_for_undelegated_account() {
     );
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn send_subscription_update_and_get_subscribed_programs(
     remote_account_provider: &Arc<
         RemoteAccountProvider<ChainRpcClientMock, ChainPubsubClientMock>,

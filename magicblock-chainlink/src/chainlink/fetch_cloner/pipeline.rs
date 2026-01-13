@@ -359,7 +359,8 @@ where
                     owner_programs_to_subscribe.into_iter().map(|owner| {
                         let provider = remote_account_provider.clone();
                         async move {
-                            let result = provider.subscribe_program(owner).await;
+                            let result =
+                                provider.subscribe_program(owner).await;
                             (owner, result)
                         }
                     });
