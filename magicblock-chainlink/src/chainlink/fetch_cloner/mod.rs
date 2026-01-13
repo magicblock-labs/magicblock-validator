@@ -182,10 +182,10 @@ where
                                 }
                             });
                         if let Some(in_bank_slot) = out_of_order_slot {
-                            warn!(
-                            "Ignoring out-of-order subscription update for {pubkey}: bank slot {in_bank_slot}, update slot {}",
-                            account.remote_slot()
-                        );
+                            trace!(
+                                "Ignoring out-of-order subscription update for {pubkey}: bank slot {in_bank_slot}, update slot {}",
+                                account.remote_slot()
+                            );
                             return;
                         }
 
