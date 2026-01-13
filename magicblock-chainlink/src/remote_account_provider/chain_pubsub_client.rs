@@ -198,6 +198,7 @@ pub struct ChainPubsubClientImpl {
     actor: Arc<ChainPubsubActor>,
     updates_rcvr: Arc<Mutex<Option<mpsc::Receiver<SubscriptionUpdate>>>>,
     client_id: String,
+    resubscription_delay: Duration,
 }
 
 impl ChainPubsubClientImpl {
@@ -206,6 +207,7 @@ impl ChainPubsubClientImpl {
         client_id: String,
         abort_sender: mpsc::Sender<()>,
         commitment: CommitmentConfig,
+        resubscription_delay: Duration,
     ) -> RemoteAccountProviderResult<Self> {
         let (actor, updates) = ChainPubsubActor::new_from_url(
             pubsub_url,
@@ -218,6 +220,7 @@ impl ChainPubsubClientImpl {
             actor: Arc::new(actor),
             updates_rcvr: Arc::new(Mutex::new(Some(updates))),
             client_id,
+            resubscription_delay,
         })
     }
 }
@@ -349,8 +352,8 @@ impl ReconnectableClient for ChainPubsubClientImpl {
     ) -> RemoteAccountProviderResult<()> {
         for pubkey in pubkeys {
             self.subscribe(pubkey).await?;
-            // Don't spam the RPC provider - for 5,000 accounts we would take 250 secs = ~4 minutes
-            tokio::time::sleep(Duration::from_millis(50)).await;
+            // Configurable delay to prevent overwhelming the RPC provider during reconnection
+            tokio::time::sleep(self.resubscription_delay).await;
         }
         Ok(())
     }

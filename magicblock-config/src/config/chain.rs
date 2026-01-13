@@ -42,7 +42,7 @@ pub struct ChainOperationConfig {
 }
 
 /// Configuration for ChainLink (Cloning/BaseChain synchronization)
-#[derive(Deserialize, Serialize, Debug, Default, Clone)]
+#[derive(Deserialize, Serialize, Debug, Clone)]
 #[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
 pub struct ChainLinkConfig {
     /// If true, initializes address lookup tables for oracle accounts.
@@ -61,6 +61,27 @@ pub struct ChainLinkConfig {
     /// If specified, only these programs will be cloned into the validator.
     /// If empty or not specified, all programs are allowed.
     pub allowed_programs: Option<Vec<AllowedProgram>>,
+
+    /// Delay between resubscribing to accounts after a pubsub
+    /// reconnection. This throttles the rate at which we resubscribe to prevent
+    /// overwhelming the RPC provider. Default is 50ms.
+    #[serde(with = "humantime")]
+    pub resubscription_delay: Duration,
+}
+
+impl Default for ChainLinkConfig {
+    fn default() -> Self {
+        Self {
+            prepare_lookup_tables: false,
+            auto_airdrop_lamports: 0,
+            max_monitored_accounts: 0,
+            remove_confined_accounts: false,
+            allowed_programs: None,
+            resubscription_delay: Duration::from_millis(
+                consts::DEFAULT_RESUBSCRIPTION_DELAY_MS,
+            ),
+        }
+    }
 }
 
 /// A program that is allowed to be cloned into the validator.

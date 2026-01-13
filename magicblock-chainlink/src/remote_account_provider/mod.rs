@@ -383,6 +383,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
 
         // Build pubsub clients and wrap them into a SubMuxClient
         let pubsubs = endpoints.pubsubs();
+        let resubscription_delay = config.resubscription_delay();
         let pubsub_futs = pubsubs.iter().map(|ep| async {
             let (abort_tx, abort_rx) = mpsc::channel(1);
             let client = ChainUpdatesClient::try_new_from_endpoint(
@@ -390,6 +391,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                 commitment,
                 abort_tx,
                 chain_slot.clone(),
+                resubscription_delay,
             )
             .await?;
             Ok::<_, RemoteAccountProviderError>((Arc::new(client), abort_rx))

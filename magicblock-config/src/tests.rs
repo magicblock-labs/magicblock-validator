@@ -262,6 +262,7 @@ fn test_chainlink_config() {
         [chainlink]
         prepare-lookup-tables = true
         max-monitored-accounts = 5000
+        resubscription-delay = "200ms"
         "#,
     );
 
@@ -269,6 +270,10 @@ fn test_chainlink_config() {
 
     assert!(config.chainlink.prepare_lookup_tables);
     assert_eq!(config.chainlink.max_monitored_accounts, 5000);
+    assert_eq!(
+        config.chainlink.resubscription_delay,
+        std::time::Duration::from_millis(200)
+    );
 }
 
 // ============================================================================
@@ -493,6 +498,7 @@ fn test_env_vars_full_coverage() {
         EnvVarGuard::new("MBV_CHAINLINK__PREPARE_LOOKUP_TABLES", "true"),
         EnvVarGuard::new("MBV_CHAINLINK__AUTO_AIRDROP_LAMPORTS", "555"),
         EnvVarGuard::new("MBV_CHAINLINK__MAX_MONITORED_ACCOUNTS", "123"),
+        EnvVarGuard::new("MBV_CHAINLINK__RESUBSCRIPTION_DELAY", "150ms"),
         // --- Task Scheduler ---
         EnvVarGuard::new("MBV_TASK_SCHEDULER__RESET", "true"),
         EnvVarGuard::new("MBV_TASK_SCHEDULER__MIN_INTERVAL", "99ms"),
@@ -550,6 +556,10 @@ fn test_env_vars_full_coverage() {
     assert!(config.chainlink.prepare_lookup_tables);
     assert_eq!(config.chainlink.auto_airdrop_lamports, 555);
     assert_eq!(config.chainlink.max_monitored_accounts, 123);
+    assert_eq!(
+        config.chainlink.resubscription_delay,
+        Duration::from_millis(150)
+    );
 
     // Task Scheduler
     assert!(config.task_scheduler.reset);
