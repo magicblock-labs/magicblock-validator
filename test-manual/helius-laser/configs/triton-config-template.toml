@@ -1,5 +1,4 @@
 lifecycle = "ephemeral"
-listen = "127.0.0.1:9988"
 
 remotes = [
   "https://devnet.helius-rpc.com?api-key=<helius-api-key>",
@@ -8,6 +7,9 @@ remotes = [
 ]
 
 storage = "magicblock-test-storage"
+
+[aperture]
+listen = "127.0.0.1:9988"
 
 [chainlink]
 max-monitored-accounts = 100
