@@ -1,7 +1,10 @@
-use std::sync::{Arc, RwLock};
+use std::{
+    convert::identity,
+    sync::{Arc, RwLock},
+};
 
-use log::info;
-use magicblock_accounts_db::{AccountsDb, StWLock};
+use log::{info, warn};
+use magicblock_accounts_db::{AccountsDb, GlobalWriteLock};
 use magicblock_core::link::{
     accounts::AccountUpdateTx,
     transactions::{
@@ -14,6 +17,7 @@ use parking_lot::RwLockReadGuard;
 use solana_program_runtime::loaded_programs::{
     BlockRelation, ForkGraph, ProgramCache, ProgramCacheEntry,
 };
+use solana_sdk_ids::sysvar::slot_hashes;
 use solana_svm::transaction_processor::{
     ExecutionRecordingConfig, TransactionBatchProcessor,
     TransactionProcessingConfig, TransactionProcessingEnvironment,
@@ -57,7 +61,7 @@ pub(super) struct TransactionExecutor {
     ready_tx: Sender<ExecutorId>,
     /// A read lock held during a slot's processing to synchronize with critical global
     /// operations like `AccountsDb` snapshots.
-    sync: StWLock,
+    sync: GlobalWriteLock,
     /// Hacky temporary solution to allow automatic airdrops, the flag
     /// is tightly contolled and will be removed in the nearest future
     /// True when auto airdrop for fee payers is enabled (auto_airdrop_lamports > 0).
@@ -97,7 +101,7 @@ impl TransactionExecutor {
         });
         let this = Self {
             id,
-            sync: state.accountsdb.synchronizer(),
+            sync: state.accountsdb.write_lock(),
             processor,
             accountsdb: state.accountsdb.clone(),
             ledger: state.ledger.clone(),
@@ -232,8 +236,20 @@ impl TransactionExecutor {
             .ok()
             .and_then(Arc::into_inner)
             .unwrap_or_default();
+
         hashes.add(block.slot, block.blockhash);
         cache.set_sysvar_for_tests(&hashes);
+        let Ok(reader) = self.accountsdb.reader() else {
+            return;
+        };
+
+        // Persist slot hashes to accountsdb
+        if let Some(mut account) = reader.read(&slot_hashes::ID, identity) {
+            let _ = account
+                .serialize_data(&hashes)
+                .inspect_err(|e| warn!("Failed to serialize slot hashes: {e}"));
+            let _ = self.accountsdb.insert_account(&slot_hashes::ID, &account);
+        }
     }
 }
 

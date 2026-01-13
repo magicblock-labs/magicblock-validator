@@ -157,7 +157,7 @@ impl MagicValidator {
         let accountsdb =
             AccountsDb::new(&config.accountsdb, &config.storage, last_slot)?;
         for (pubkey, account) in genesis_config.accounts {
-            accountsdb.insert_account(&pubkey, &account.into());
+            let _ = accountsdb.insert_account(&pubkey, &account.into());
         }
 
         let exit = Arc::<AtomicBool>::default();

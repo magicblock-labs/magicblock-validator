@@ -224,8 +224,12 @@ impl TaskStrategist {
         let placeholder = Keypair::new();
         // Gather all involved keys in tx
         let budgets = TransactionUtils::tasks_compute_units(tasks);
-        let budget_instructions =
-            TransactionUtils::budget_instructions(budgets, u64::default());
+        let size_budgets = TransactionUtils::tasks_accounts_size_budget(tasks);
+        let budget_instructions = TransactionUtils::budget_instructions(
+            budgets,
+            u64::default(),
+            size_budgets,
+        );
         let unique_involved_pubkeys = TransactionUtils::unique_involved_pubkeys(
             tasks,
             &placeholder.pubkey(),
@@ -258,8 +262,12 @@ impl TaskStrategist {
         tasks: &[Box<dyn BaseTask>],
     ) -> Vec<Pubkey> {
         let budgets = TransactionUtils::tasks_compute_units(tasks);
-        let budget_instructions =
-            TransactionUtils::budget_instructions(budgets, u64::default());
+        let size_budgets = TransactionUtils::tasks_accounts_size_budget(tasks);
+        let budget_instructions = TransactionUtils::budget_instructions(
+            budgets,
+            u64::default(),
+            size_budgets,
+        );
 
         TransactionUtils::unique_involved_pubkeys(
             tasks,

@@ -86,7 +86,9 @@ libloading = "0.8"
 libc = "0.2.153"
 log = { version = "0.4.20" }
 lru = "0.16.0"
-magic-domain-program = { git = "https://github.com/magicblock-labs/magic-domain-program.git", rev = "cffcfeb", default-features = false, features = ["modular-sdk"] }
+magic-domain-program = { git = "https://github.com/magicblock-labs/magic-domain-program.git", rev = "cffcfeb", default-features = false, features = [
+  "modular-sdk",
+] }
 magicblock-account-cloner = { path = "./magicblock-account-cloner" }
 magicblock-accounts = { path = "./magicblock-accounts" }
 magicblock-accounts-db = { path = "./magicblock-accounts-db" }
@@ -99,7 +101,7 @@ magicblock-committor-program = { path = "./magicblock-committor-program", featur
 magicblock-committor-service = { path = "./magicblock-committor-service" }
 magicblock-config = { path = "./magicblock-config" }
 magicblock-core = { path = "./magicblock-core" }
-magicblock-delegation-program = { git = "https://github.com/magicblock-labs/delegation-program.git", rev = "3edb41022", features = [
+magicblock-delegation-program = { git = "https://github.com/magicblock-labs/delegation-program.git", rev = "1874b4f5f5f55cb9ab54b64de2cc0d41107d1435", features = [
   "no-entrypoint",
 ] }
 magicblock-ledger = { path = "./magicblock-ledger" }
@@ -136,7 +138,7 @@ serde_json = "1.0"
 serde_with = "3.16"
 serial_test = "3.2"
 sha3 = "0.10.8"
-solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "57158728" }
+solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "2246929" }
 solana-account-decoder = { version = "2.2" }
 solana-account-decoder-client-types = { version = "2.2" }
 solana-account-info = { version = "2.2" }
@@ -218,14 +220,14 @@ features = ["dev-context-only-utils"]
 # Avoid the vendored bzip2 within rocksdb-sys that can cause linker conflicts
 # when also using the bzip2 crate
 version = "0.22.0"
-# default-features = false
-# features = ["lz4"]
+default-features = false
+features = ["lz4"]
 
 [patch.crates-io]
 # some solana dependencies have solana-storage-proto as dependency
 # we need to patch them with our version, because they use protobuf-src v1.1.0
 # and we use protobuf-src v2.1.1. Otherwise compilation fails
-solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "57158728" }
+solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "2246929" }
 solana-storage-proto = { path = "./storage-proto" }
 solana-svm = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "3e9456ec4" }
 # Fork is used to enable `disable_manual_compaction` usage

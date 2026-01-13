@@ -8,7 +8,7 @@ use tempfile::TempDir;
 use crate::{
     config::{BlockSize, LifecycleMode},
     consts::{self, DEFAULT_VALIDATOR_KEYPAIR},
-    types::network::Remote,
+    types::network::{BindAddress, Remote},
     ValidatorParams,
 };
 
@@ -611,4 +611,70 @@ fn test_to_websocket_from_http() {
     let ws_remote = remote.to_websocket().unwrap();
     assert!(matches!(ws_remote, Remote::Websocket(_)));
     assert_eq!(ws_remote.url_str(), "ws://localhost:8900/");
+}
+
+// ============================================================================
+// 10. BindAddress Type Parsing
+// ============================================================================
+
+#[test]
+#[parallel]
+fn test_bind_address_from_str_accepts_port_only() {
+    let addr: BindAddress = "7799".parse().expect("should parse port-only");
+    assert_eq!(addr.0.to_string(), "127.0.0.1:7799");
+}
+
+#[test]
+#[parallel]
+fn test_bind_address_from_str_accepts_socket_addr() {
+    let addr: BindAddress =
+        "0.0.0.0:8899".parse().expect("should parse socket addr");
+    assert_eq!(addr.0.to_string(), "0.0.0.0:8899");
+}
+
+#[test]
+#[parallel]
+fn test_bind_address_toml_deserialize_from_integer() {
+    #[derive(serde::Deserialize)]
+    struct Cfg {
+        listen: BindAddress,
+    }
+
+    let cfg: Cfg =
+        toml::from_str("listen = 7799\n").expect("toml int to parse");
+    assert_eq!(cfg.listen.0.to_string(), "127.0.0.1:7799");
+}
+
+#[test]
+#[parallel]
+fn test_bind_address_toml_deserialize_from_string() {
+    #[derive(serde::Deserialize)]
+    struct Cfg {
+        listen: BindAddress,
+    }
+
+    let cfg: Cfg = toml::from_str("listen = \"0.0.0.0:8899\"\n")
+        .expect("toml str to parse");
+    assert_eq!(cfg.listen.0.to_string(), "0.0.0.0:8899");
+}
+
+#[test]
+#[parallel]
+fn test_bind_address_toml_deserialize_port_out_of_range_errors() {
+    #[derive(serde::Deserialize)]
+    struct Cfg {
+        #[allow(dead_code)]
+        listen: BindAddress,
+    }
+
+    let msg = toml::from_str::<Cfg>("listen = 70000\n")
+        .err()
+        .unwrap()
+        .to_string();
+    // Error message can vary, but it should mention invalid value or out of range
+    assert!(
+        msg.contains("out of range") || msg.contains("invalid"),
+        "unexpected error: {}",
+        msg
+    );
 }

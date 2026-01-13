@@ -1,4 +1,7 @@
-use dlp::args::CommitStateFromBufferArgs;
+use dlp::{
+    args::CommitStateFromBufferArgs, instruction_builder::commit_size_budget,
+    AccountSizeClass,
+};
 use magicblock_committor_program::Chunks;
 use magicblock_metrics::metrics::LabelValue;
 use solana_instruction::Instruction;
@@ -125,6 +128,14 @@ impl BaseTask for BufferTask {
     fn compute_units(&self) -> u32 {
         match self.task_type {
             BufferTaskType::Commit(_) => 70_000,
+        }
+    }
+
+    fn accounts_size_budget(&self) -> u32 {
+        match self.task_type {
+            BufferTaskType::Commit(_) => {
+                commit_size_budget(AccountSizeClass::Huge)
+            }
         }
     }
 

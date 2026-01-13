@@ -5,7 +5,7 @@ import path from "path";
 import { arch, platform } from "os";
 import { VERSIONS } from "./getVersions";
 
-const PACKAGE_VERSION = `ephemeral-validator ${VERSIONS.EPHEMERAL_VALIDATOR}`;
+const PACKAGE_VERSION = `rpc-router ${VERSIONS.RPC_ROUTER}`;
 
 function getBinaryVersion(location: string): [string | null, string | null] {
   const result = spawnSync(location, ["--version"]);
@@ -23,7 +23,7 @@ function getExePath(): string {
     os = "windows";
     extension = ".exe";
   }
-  const binaryName = `@magicblock-labs/ephemeral-validator-${os}-${arch()}/bin/ephemeral-validator${extension}`;
+  const binaryName = `@magicblock-labs/rpc-router-${os}-${arch()}/bin/rpc-router${extension}`;
   try {
     return require.resolve(binaryName);
   } catch (e) {
@@ -50,36 +50,35 @@ function runWithForwardedExit(child: ReturnType<typeof spawn>): void {
   });
 }
 
-function runEphemeralValidator(location: string): void {
+function runRpcRouter(location: string): void {
   const args = process.argv.slice(2);
   const env = {
     ...process.env,
-    RUST_LOG: "quiet",
   };
-  const ephemeralValidator = spawn(location, args, { stdio: "inherit", env});
-  runWithForwardedExit(ephemeralValidator);
+  const rpcRouter = spawn(location, args, { stdio: "inherit", env });
+  runWithForwardedExit(rpcRouter);
 }
 
-function tryPackageEphemeralValidator(): boolean {
+function tryPackageRpcRouter(): boolean {
   try {
     const path = getExePath();
-    runEphemeralValidator(path);
+    runRpcRouter(path);
     return true;
   } catch (e) {
     console.error(
-      "Failed to run bolt from package:",
+      "Failed to run rpc-router from package:",
       e instanceof Error ? e.message : e,
     );
     return false;
   }
 }
 
-function trySystemEphemeralValidator(): void {
+function trySystemRpcRouter(): void {
   const absolutePath = process.env.PATH?.split(path.delimiter)
     .filter((dir) => dir !== path.dirname(process.argv[1]))
     .find((dir) => {
       try {
-        fs.accessSync(`${dir}/ephemeral-validator`, fs.constants.X_OK);
+        fs.accessSync(`${dir}/rpc-router`, fs.constants.X_OK);
         return true;
       } catch {
         return false;
@@ -88,12 +87,12 @@ function trySystemEphemeralValidator(): void {
 
   if (!absolutePath) {
     console.error(
-      `Could not find globally installed ephemeral-validator, please install with cargo.`,
+      `Could not find globally installed rpc-router, please install with cargo.`,
     );
     process.exit(1);
   }
 
-  const absoluteBinaryPath = `${absolutePath}/ephemeral-validator`;
+  const absoluteBinaryPath = `${absolutePath}/rpc-router`;
   const [error, binaryVersion] = getBinaryVersion(absoluteBinaryPath);
 
   if (error !== null) {
@@ -102,13 +101,13 @@ function trySystemEphemeralValidator(): void {
   }
   if (binaryVersion !== PACKAGE_VERSION) {
     console.error(
-      `Globally installed ephemeral-validator version is not correct. Expected "${PACKAGE_VERSION}", found "${binaryVersion}".`,
+      `Globally installed rpc-router version is not correct. Expected "${PACKAGE_VERSION}", found "${binaryVersion}".`,
     );
     return;
   }
 
-  runEphemeralValidator(absoluteBinaryPath);
+  runRpcRouter(absoluteBinaryPath);
 }
 
-// If the first argument is our special command, run the test validator and exit.
-tryPackageEphemeralValidator() || trySystemEphemeralValidator();
+// Try to run rpc-router from package first, then fall back to system installation.
+tryPackageRpcRouter() || trySystemRpcRouter();

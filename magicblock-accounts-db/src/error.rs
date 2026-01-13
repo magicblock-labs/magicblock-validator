@@ -1,5 +1,7 @@
 use std::io;
 
+use log::error;
+
 #[derive(Debug, thiserror::Error)]
 pub enum AccountsDbError {
     #[error("requested account doesn't exist in adb")]
@@ -11,7 +13,7 @@ pub enum AccountsDbError {
     #[error("snapshot for slot {0} doesn't exist")]
     SnapshotMissing(u64),
     #[error("internal accountsdb error: {0}")]
-    Internal(&'static str),
+    Internal(String),
 }
 
 impl From<lmdb::Error> for AccountsDbError {
@@ -23,12 +25,28 @@ impl From<lmdb::Error> for AccountsDbError {
     }
 }
 
-#[macro_export]
-macro_rules! log_err {
-    ($msg: expr) => {
-        |err| ::log::warn!("{} error: {err}", $msg)
-    };
-    ($msg: expr, $($ctx:expr),* $(,)?) => {
-        |err| ::log::warn!("{} error: {err}", format!($msg, $($ctx),*))
-    };
+/// Extension trait to easily log errors in Result chains.
+pub trait LogErr<T, E> {
+    /// Logs the error if the result is `Err`, then returns the result unmodified.
+    fn log_err<F, S>(self, msg: F) -> Result<T, E>
+    where
+        F: FnOnce() -> S,
+        S: std::fmt::Display;
+}
+
+impl<T, E> LogErr<T, E> for Result<T, E>
+where
+    E: std::fmt::Display,
+{
+    #[track_caller]
+    fn log_err<F, S>(self, msg: F) -> Result<T, E>
+    where
+        F: FnOnce() -> S,
+        S: std::fmt::Display,
+    {
+        if let Err(e) = &self {
+            error!("{}: {}", msg(), e);
+        }
+        self
+    }
 }
