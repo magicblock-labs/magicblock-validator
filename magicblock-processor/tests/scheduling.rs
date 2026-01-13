@@ -120,17 +120,18 @@ async fn assert_statuses(
         match time::timeout(Duration::from_millis(100), recv).await {
             Ok(Ok(status)) => {
                 // Received a status
+                let signature = status.txn.signature();
                 assert!(
-                    status.result.result.is_ok(),
+                    status.meta.status.is_ok(),
                     "Transaction {} failed: {:?}",
-                    status.signature,
-                    status.result.result
+                    signature,
+                    status.meta.status
                 );
                 // Check that we expected this signature
                 assert!(
-                    expected_sigs.remove(&status.signature),
+                    expected_sigs.remove(signature),
                     "Received unexpected signature: {}",
-                    status.signature
+                    signature
                 );
             }
             Ok(Err(e)) => {
@@ -171,13 +172,14 @@ async fn assert_statuses_in_order(
         match time::timeout(Duration::from_millis(100), recv).await {
             Ok(Ok(status)) => {
                 // Received a status
+                let signature = *status.txn.signature();
                 assert!(
-                    status.result.result.is_ok(),
+                    status.meta.status.is_ok(),
                     "Transaction {} failed: {:?}",
-                    status.signature,
-                    status.result.result
+                    signature,
+                    status.meta.status
                 );
-                received_sigs_order.push(status.signature);
+                received_sigs_order.push(signature);
             }
             Ok(Err(e)) => {
                 // Channel disconnected
