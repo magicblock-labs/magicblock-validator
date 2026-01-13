@@ -55,6 +55,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "agave-geyser-plugin-interface"
+version = "2.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "df63ffb691b27f0253e893d083126cbe98a6b1ace29108992310f323f1ac50b0"
+dependencies = [
+ "log",
+ "solana-clock",
+ "solana-signature",
+ "solana-transaction",
+ "solana-transaction-status",
+ "thiserror 2.0.17",
+]
+
+[[package]]
 name = "ahash"
 version = "0.7.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2058,7 +2072,7 @@ checksum = "0cc23270f6e1808e30a928bdc84dea0b9b4136a8bc82338574f23baf47bbd280"
 
 [[package]]
 name = "guinea"
-version = "0.5.4"
+version = "0.6.0"
 dependencies = [
  "bincode",
  "magicblock-magic-program-api",
@@ -2886,6 +2900,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "37c93d8daa9d8a012fd8ab92f088405fb202ea0b6ab73ee2482ae66af4f42091"
 
 [[package]]
+name = "libloading"
+version = "0.8.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d7c4b02199fee7c5d21a5ae7d8cfa79a6ef5bb2fc834d6e9058e89c825efdc55"
+dependencies = [
+ "cfg-if",
+ "windows-link",
+]
+
+[[package]]
 name = "librocksdb-sys"
 version = "0.17.1+9.9.3"
 source = "git+https://github.com/magicblock-labs/rust-rocksdb.git?rev=6d975197#6d975197a647996a6f616dccdfd129ae06a7959c"
@@ -3388,7 +3412,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-account-cloner"
-version = "0.5.4"
+version = "0.6.0"
 dependencies = [
  "async-trait",
  "bincode",
@@ -3420,7 +3444,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-accounts"
-version = "0.5.4"
+version = "0.6.0"
 dependencies = [
  "async-trait",
  "log",
@@ -3442,7 +3466,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-accounts-db"
-version = "0.5.4"
+version = "0.6.0"
 dependencies = [
  "env_logger 0.11.8",
  "lmdb-rkv",
@@ -3460,8 +3484,9 @@ dependencies = [
 
 [[package]]
 name = "magicblock-aperture"
-version = "0.5.4"
+version = "0.6.0"
 dependencies = [
+ "agave-geyser-plugin-interface",
  "arc-swap",
  "base64 0.21.7",
  "bincode",
@@ -3471,6 +3496,7 @@ dependencies = [
  "http-body-util",
  "hyper 1.8.1",
  "hyper-util",
+ "libloading",
  "log",
  "magicblock-account-cloner",
  "magicblock-accounts-db",
@@ -3504,13 +3530,14 @@ dependencies = [
  "solana-transaction-status",
  "sonic-rs",
  "test-kit",
+ "thiserror 1.0.69",
  "tokio",
  "tokio-util",
 ]
 
 [[package]]
 name = "magicblock-api"
-version = "0.5.4"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "borsh 1.6.0",
@@ -3566,7 +3593,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-chainlink"
-version = "0.5.4"
+version = "0.6.0"
 dependencies = [
  "arc-swap",
  "assert_matches",
@@ -3624,7 +3651,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-committor-program"
-version = "0.5.4"
+version = "0.6.0"
 dependencies = [
  "borsh 0.10.4",
  "paste",
@@ -3636,7 +3663,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-committor-service"
-version = "0.5.4"
+version = "0.6.0"
 dependencies = [
  "async-trait",
  "base64 0.21.7",
@@ -3687,7 +3714,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-config"
-version = "0.5.4"
+version = "0.6.0"
 dependencies = [
  "clap 4.5.53",
  "derive_more",
@@ -3707,7 +3734,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-core"
-version = "0.5.4"
+version = "0.6.0"
 dependencies = [
  "bincode",
  "compressed-delegation-client",
@@ -3756,7 +3783,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-ledger"
-version = "0.5.4"
+version = "0.6.0"
 dependencies = [
  "arc-swap",
  "bincode",
@@ -3797,7 +3824,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-magic-program-api"
-version = "0.5.4"
+version = "0.6.0"
 dependencies = [
  "bincode",
  "serde",
@@ -3806,7 +3833,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-metrics"
-version = "0.5.4"
+version = "0.6.0"
 dependencies = [
  "http-body-util",
  "hyper 1.8.1",
@@ -3820,7 +3847,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-processor"
-version = "0.5.4"
+version = "0.6.0"
 dependencies = [
  "bincode",
  "guinea",
@@ -3860,7 +3887,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-program"
-version = "0.5.4"
+version = "0.6.0"
 dependencies = [
  "assert_matches",
  "bincode",
@@ -3896,7 +3923,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-rpc-client"
-version = "0.5.4"
+version = "0.6.0"
 dependencies = [
  "log",
  "solana-account",
@@ -3917,7 +3944,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-table-mania"
-version = "0.5.4"
+version = "0.6.0"
 dependencies = [
  "ed25519-dalek",
  "log",
@@ -3943,7 +3970,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-task-scheduler"
-version = "0.5.4"
+version = "0.6.0"
 dependencies = [
  "bincode",
  "chrono",
@@ -3970,7 +3997,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-validator"
-version = "0.5.4"
+version = "0.6.0"
 dependencies = [
  "console-subscriber",
  "env_logger 0.11.8",
@@ -3985,7 +4012,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-validator-admin"
-version = "0.5.4"
+version = "0.6.0"
 dependencies = [
  "log",
  "magicblock-delegation-program",
@@ -4002,7 +4029,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-version"
-version = "0.5.4"
+version = "0.6.0"
 dependencies = [
  "git-version",
  "rustc_version",
@@ -7895,7 +7922,7 @@ dependencies = [
 
 [[package]]
 name = "solana-storage-proto"
-version = "0.5.4"
+version = "0.6.0"
 dependencies = [
  "bincode",
  "bs58",
@@ -8983,7 +9010,7 @@ dependencies = [
 
 [[package]]
 name = "test-kit"
-version = "0.5.4"
+version = "0.6.0"
 dependencies = [
  "env_logger 0.11.8",
  "guinea",

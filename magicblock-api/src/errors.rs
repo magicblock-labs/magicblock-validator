@@ -9,8 +9,8 @@ pub enum ApiError {
     #[error("IO error: {0}")]
     IoError(#[from] std::io::Error),
 
-    #[error("RPC service error: {0}")]
-    RpcError(#[from] magicblock_aperture::error::RpcError),
+    #[error("Aperture service error: {0}")]
+    Aperture(#[from] magicblock_aperture::error::ApertureError),
 
     #[error("Accounts error: {0}")]
     AccountsError(Box<magicblock_accounts::errors::AccountsError>),
