@@ -1810,6 +1810,7 @@ async fn send_subscription_update_and_get_subscribed_programs(
     bank_account: Account,
     update_account: Account,
     slot: u64,
+    expected_program_id: Option<Pubkey>,
 ) -> std::collections::HashSet<Pubkey> {
     use crate::remote_account_provider::{
         RemoteAccount, RemoteAccountUpdateSource,
@@ -1835,9 +1836,36 @@ async fn send_subscription_update_and_get_subscribed_programs(
     };
     subscription_tx.send(update).await.unwrap();
 
-    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+    const POLL_INTERVAL: std::time::Duration = Duration::from_millis(10);
+    const TIMEOUT: std::time::Duration = Duration::from_millis(200);
 
-    pubsub_client.subscribed_program_ids()
+    let result = tokio::time::timeout(TIMEOUT, async {
+        loop {
+            let subscribed = pubsub_client.subscribed_program_ids();
+            match expected_program_id {
+                Some(expected) if subscribed.contains(&expected) => {
+                    return subscribed;
+                }
+                None if !subscribed.is_empty() => {
+                    return subscribed;
+                }
+                _ => {}
+            }
+            tokio::time::sleep(POLL_INTERVAL).await;
+        }
+    })
+    .await;
+
+    match result {
+        Ok(subscribed) => subscribed,
+        Err(_) if expected_program_id.is_some() => {
+            panic!(
+                "Timeout waiting for program subscription {:?}",
+                expected_program_id
+            )
+        }
+        Err(_) => pubsub_client.subscribed_program_ids(),
+    }
 }
 
 #[tokio::test]
@@ -1894,6 +1922,7 @@ async fn test_subscribe_to_original_owner_program_on_delegated_account_subscript
             bank_account,
             delegated_account,
             CURRENT_SLOT,
+            Some(account_owner),
         )
         .await;
 
@@ -1943,6 +1972,7 @@ async fn test_no_program_subscription_for_undelegated_account_subscription_updat
             undelegated_account.clone(),
             undelegated_account,
             CURRENT_SLOT,
+            None,
         )
         .await;
 
