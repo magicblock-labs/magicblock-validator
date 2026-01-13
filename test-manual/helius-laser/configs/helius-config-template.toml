@@ -30,6 +30,8 @@ index-size = 2048576
 max-snapshots = 7
 # how frequently (slot-wise) we should take snapshots
 snapshot-frequency = 1024
+# Wipes the accounts database on every startup.
+reset = true
 
 [ledger]
 reset = true
