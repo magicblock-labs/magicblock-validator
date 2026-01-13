@@ -779,12 +779,18 @@ impl ChainLaserActor {
             );
         }
 
-        match source {
-            AccountUpdateSource::Account => {
-                inc_account_subscription_account_updates_count(&self.client_id);
-            }
-            AccountUpdateSource::Program => {
-                inc_program_subscription_account_updates_count(&self.client_id);
+        if pubkey != clock::ID {
+            match source {
+                AccountUpdateSource::Account => {
+                    inc_account_subscription_account_updates_count(
+                        &self.client_id,
+                    );
+                }
+                AccountUpdateSource::Program => {
+                    inc_program_subscription_account_updates_count(
+                        &self.client_id,
+                    );
+                }
             }
         }
 
