@@ -19,7 +19,6 @@ use solana_commitment_config::CommitmentConfig;
 use solana_pubkey::Pubkey;
 #[cfg(any(test, feature = "dev-context"))]
 use solana_rpc_client_api::{
-    client_error::Result as ClientResult,
     config::RpcAccountInfoConfig,
     response::{Response, RpcResponseContext, RpcResult},
 };
@@ -315,12 +314,5 @@ impl ChainRpcClient for ChainRpcClientMock {
             value: accounts,
         };
         Ok(res)
-    }
-
-    async fn get_slot_with_commitment(
-        &self,
-        _commitment: CommitmentConfig,
-    ) -> ClientResult<u64> {
-        todo!("Implement get_slot_with_commitment for ChainRpcClientMock");
     }
 }
