@@ -504,11 +504,27 @@ impl ChainLaserActor {
         commitment: CommitmentLevel,
         laser_client_config: LaserstreamConfig,
     ) {
+        if self
+            .program_subscriptions
+            .as_ref()
+            .map(|(subscribed_programs, _)| {
+                subscribed_programs.contains(&program_id)
+            })
+            .unwrap_or(false)
+        {
+            trace!(
+                "[client_id={}] Program subscription for {program_id} already exists, ignoring add_program_sub request",
+                self.client_id
+            );
+            return;
+        }
+
         let mut subscribed_programs = self
             .program_subscriptions
             .as_ref()
             .map(|x| x.0.iter().cloned().collect::<HashSet<Pubkey>>())
             .unwrap_or_default();
+
         subscribed_programs.insert(program_id);
 
         let mut accounts = HashMap::new();

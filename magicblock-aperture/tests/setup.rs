@@ -14,10 +14,14 @@ use std::{
 
 use magicblock_accounts_db::AccountsDb;
 use magicblock_aperture::{
+    initialize_aperture,
     state::{ChainlinkImpl, NodeContext, SharedState},
     JsonRpcServer,
 };
-use magicblock_config::{config::ChainLinkConfig, types::BindAddress};
+use magicblock_config::{
+    config::{ApertureConfig, ChainLinkConfig},
+    types::BindAddress,
+};
 use magicblock_core::{
     link::accounts::LockedAccount, traits::AccountsBank, Slot,
 };
@@ -92,7 +96,7 @@ impl RpcTestEnv {
 
         // Try to find a free port, this is handy when using nextest
         // where each test needs to run in a separate process.
-        let (server, socket) = loop {
+        let (server, port) = loop {
             let port: u16 = rand::random_range(7000..u16::MAX - 1);
             let node_context = NodeContext {
                 identity: execution.get_payer().pubkey,
@@ -108,24 +112,27 @@ impl RpcTestEnv {
                 chainlink(&execution.accountsdb),
             );
             let cancel = CancellationToken::new();
-            let addr = "127.0.0.1".parse().unwrap();
-            let socket = SocketAddr::new(addr, port);
-            let server = JsonRpcServer::new(
-                BindAddress(socket),
+            let listen = format!("127.0.0.1:{port}").parse().unwrap();
+            let config = ApertureConfig {
+                listen,
+                ..Default::default()
+            };
+            let server = initialize_aperture(
+                &config,
                 state,
                 &execution.dispatch,
                 cancel,
             )
             .await;
             if let Ok(server) = server {
-                break (server, socket);
+                break (server, port);
             }
         };
 
         tokio::spawn(server.run());
 
-        let rpc_url = format!("http://{socket}");
-        let pubsub_url = format!("ws://{}:{}", socket.ip(), socket.port() + 1);
+        let rpc_url = format!("http://127.0.0.1:{port}");
+        let pubsub_url = format!("ws://127.0.0.1:{}", port + 1);
 
         let rpc = RpcClient::new(rpc_url);
         let pubsub = PubsubClient::new(&pubsub_url)
