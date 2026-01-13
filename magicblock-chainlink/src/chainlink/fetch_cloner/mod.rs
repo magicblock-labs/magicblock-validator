@@ -373,18 +373,20 @@ where
                                     subs_to_remove.insert(pubkey);
 
                                     // Subscribe to the original owner program for undelegation update resilience
-                                    if let Err(err) = self
-                                        .remote_account_provider
-                                        .subscribe_program(
-                                            delegation_record.owner,
-                                        )
-                                        .await
-                                    {
-                                        warn!(
-                                            "Failed to subscribe to owner program {} for account {}: {}",
-                                            delegation_record.owner, pubkey, err
-                                        );
-                                    }
+                                    // Fire-and-forget to avoid blocking subscription updates
+                                    let provider = self.remote_account_provider.clone();
+                                    let owner = delegation_record.owner;
+                                    tokio::spawn(async move {
+                                        if let Err(err) = provider
+                                            .subscribe_program(owner)
+                                            .await
+                                        {
+                                            warn!(
+                                                "Failed to subscribe to owner program {} for account {}: {}",
+                                                owner, pubkey, err
+                                            );
+                                        }
+                                    });
                                 }
 
                                 (
