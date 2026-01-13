@@ -473,6 +473,12 @@ pub mod mock {
         pub fn subscribed_program_ids(&self) -> HashSet<Pubkey> {
             self.subscribed_programs.lock().clone()
         }
+
+        /// Directly insert a subscription without going through subscribe().
+        /// Useful for testing reconciliation scenarios.
+        pub fn insert_subscription(&self, pubkey: Pubkey) {
+            self.subscribed_pubkeys.lock().insert(pubkey);
+        }
     }
 
     #[async_trait]
