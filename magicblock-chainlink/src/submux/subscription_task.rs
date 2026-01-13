@@ -1,9 +1,12 @@
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 
 use futures_util::stream::{FuturesUnordered, StreamExt};
 use log::*;
 use solana_pubkey::Pubkey;
 use tokio::sync::oneshot;
+
+const SUBSCRIBE_TIMEOUT: Duration = Duration::from_millis(2_000);
+const UNSUBSCRIBE_TIMEOUT: Duration = Duration::from_millis(1_000);
 
 use crate::remote_account_provider::{
     chain_pubsub_client::{ChainPubsubClient, ReconnectableClient},
@@ -88,16 +91,59 @@ impl AccountSubscriptionTask {
                 let task = self.clone();
                 futures.push(async move {
                     let (result, count_as_success) = match task {
-                        Subscribe(pubkey, _) => (
-                            client.subscribe(pubkey).await,
-                            client.subs_immediately(),
-                        ),
-                        SubscribeProgram(program_id, _) => (
-                            client.subscribe_program(program_id).await,
-                            client.subs_immediately(),
-                        ),
+                        Subscribe(pubkey, _) => {
+                            let result = match tokio::time::timeout(
+                                SUBSCRIBE_TIMEOUT,
+                                client.subscribe(pubkey),
+                            )
+                            .await
+                            {
+                                Ok(res) => res,
+                                Err(_) => Err(RemoteAccountProviderError::AccountSubscriptionsTaskFailed(
+                                    format!(
+                                        "Subscribe timed out after {:?} for client {}",
+                                        SUBSCRIBE_TIMEOUT,
+                                        client.id()
+                                    ),
+                                )),
+                            };
+                            (result, client.subs_immediately())
+                        }
+                        SubscribeProgram(program_id, _) => {
+                            let result = match tokio::time::timeout(
+                                SUBSCRIBE_TIMEOUT,
+                                client.subscribe_program(program_id),
+                            )
+                            .await
+                            {
+                                Ok(res) => res,
+                                Err(_) => Err(RemoteAccountProviderError::AccountSubscriptionsTaskFailed(
+                                    format!(
+                                        "SubscribeProgram timed out after {:?} for client {}",
+                                        SUBSCRIBE_TIMEOUT,
+                                        client.id()
+                                    ),
+                                )),
+                            };
+                            (result, client.subs_immediately())
+                        }
                         Unsubscribe(pubkey) => {
-                            (client.unsubscribe(pubkey).await, true)
+                            let result = match tokio::time::timeout(
+                                UNSUBSCRIBE_TIMEOUT,
+                                client.unsubscribe(pubkey),
+                            )
+                            .await
+                            {
+                                Ok(res) => res,
+                                Err(_) => Err(RemoteAccountProviderError::AccountSubscriptionsTaskFailed(
+                                    format!(
+                                        "Unsubscribe timed out after {:?} for client {}",
+                                        UNSUBSCRIBE_TIMEOUT,
+                                        client.id()
+                                    ),
+                                )),
+                            };
+                            (result, true)
                         }
                         Shutdown => (client.shutdown().await, true),
                     };
