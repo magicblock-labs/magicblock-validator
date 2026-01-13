@@ -215,6 +215,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
     fn start_active_subscriptions_updater<PubsubClient: ChainPubsubClient>(
         subscribed_accounts: Arc<AccountsLruCache>,
         pubsub_client: Arc<PubsubClient>,
+        removed_account_tx: mpsc::Sender<Pubkey>,
     ) -> task::JoinHandle<()> {
         task::spawn(async move {
             let mut interval = time::interval(Duration::from_millis(
@@ -290,6 +291,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                         &subscribed_accounts,
                         pubsub_client.as_ref(),
                         &never_evicted,
+                        &removed_account_tx,
                     )
                     .await;
                 }
@@ -320,6 +322,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                 Some(Self::start_active_subscriptions_updater(
                     lrucache_subscribed_accounts.clone(),
                     Arc::new(pubsub_client.clone()),
+                    removed_account_tx.clone(),
                 ))
             } else {
                 None
@@ -923,19 +926,15 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             return Ok(());
         }
 
-        match self.pubsub_client.unsubscribe(*pubkey).await {
-            Ok(()) => {
-                // Only remove from LRU cache after successful pubsub unsubscribe
-                self.lrucache_subscribed_accounts.remove(pubkey);
-                self.send_removal_update(*pubkey).await?;
-            }
-            Err(err) => {
-                warn!(
-                    "Failed to unsubscribe from pubsub for {pubkey}: {err:?}"
-                );
-                // Don't remove from LRU cache if pubsub unsubscribe failed
-                // This ensures LRU cache and pubsub client stay in sync
-            }
+        let success = subscription_reconciler::unsubscribe_and_notify_removal(
+            *pubkey,
+            &self.pubsub_client,
+            &self.removed_account_tx,
+        )
+        .await;
+
+        if success {
+            self.lrucache_subscribed_accounts.remove(pubkey);
         }
 
         Ok(())
@@ -1823,6 +1822,7 @@ mod test {
 
         let (tx, rx) = mpsc::channel(1);
         let pubsub_client = ChainPubsubClientMock::new(tx, rx);
+        let (removed_tx, _removed_rx) = mpsc::channel(10);
 
         let capacity = NonZeroUsize::new(10).unwrap();
         let lru_cache = Arc::new(AccountsLruCache::new(capacity));
@@ -1842,8 +1842,13 @@ mod test {
         let never_evicted: Vec<Pubkey> = vec![];
 
         // Reconcile should resubscribe pubkey2 and pubkey3
-        reconcile_subscriptions(&lru_cache, &pubsub_client, &never_evicted)
-            .await;
+        reconcile_subscriptions(
+            &lru_cache,
+            &pubsub_client,
+            &never_evicted,
+            &removed_tx,
+        )
+        .await;
 
         // Verify all accounts are now subscribed
         let subs = pubsub_client.subscriptions().unwrap();
@@ -1859,6 +1864,7 @@ mod test {
 
         let (tx, rx) = mpsc::channel(1);
         let pubsub_client = ChainPubsubClientMock::new(tx, rx);
+        let (removed_tx, mut removed_rx) = mpsc::channel(10);
 
         let capacity = NonZeroUsize::new(10).unwrap();
         let lru_cache = Arc::new(AccountsLruCache::new(capacity));
@@ -1878,8 +1884,13 @@ mod test {
         let never_evicted: Vec<Pubkey> = vec![];
 
         // Reconcile should unsubscribe pubkey2 and pubkey3
-        reconcile_subscriptions(&lru_cache, &pubsub_client, &never_evicted)
-            .await;
+        reconcile_subscriptions(
+            &lru_cache,
+            &pubsub_client,
+            &never_evicted,
+            &removed_tx,
+        )
+        .await;
 
         // Verify only pubkey1 remains subscribed
         let subs = pubsub_client.subscriptions().unwrap();
@@ -1887,6 +1898,12 @@ mod test {
         assert!(!subs.contains(&pubkey2));
         assert!(!subs.contains(&pubkey3));
         assert_eq!(subs.len(), 1);
+
+        // Verify removal notifications were sent for unsubscribed accounts
+        let removed = drain_removed_account_rx(&mut removed_rx);
+        assert_eq!(removed.len(), 2);
+        assert!(removed.contains(&pubkey2));
+        assert!(removed.contains(&pubkey3));
     }
 
     #[tokio::test]
@@ -1895,6 +1912,7 @@ mod test {
 
         let (tx, rx) = mpsc::channel(1);
         let pubsub_client = ChainPubsubClientMock::new(tx, rx);
+        let (removed_tx, mut removed_rx) = mpsc::channel(10);
 
         let capacity = NonZeroUsize::new(10).unwrap();
         let lru_cache = Arc::new(AccountsLruCache::new(capacity));
@@ -1915,8 +1933,13 @@ mod test {
         // preserved even though it's not in the LRU cache
         let never_evicted = vec![never_evicted_pubkey];
 
-        reconcile_subscriptions(&lru_cache, &pubsub_client, &never_evicted)
-            .await;
+        reconcile_subscriptions(
+            &lru_cache,
+            &pubsub_client,
+            &never_evicted,
+            &removed_tx,
+        )
+        .await;
 
         // Verify: pubkey_in_lru and never_evicted_pubkey remain, stale_pubkey
         // is unsubscribed
@@ -1935,5 +1958,10 @@ mod test {
              unsubscribed"
         );
         assert_eq!(subs.len(), 2);
+
+        // Verify removal notification was sent only for stale_pubkey
+        let removed = drain_removed_account_rx(&mut removed_rx);
+        assert_eq!(removed.len(), 1);
+        assert!(removed.contains(&stale_pubkey));
     }
 }

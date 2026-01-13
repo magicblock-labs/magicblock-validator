@@ -2,8 +2,34 @@ use std::collections::HashSet;
 
 use log::*;
 use solana_pubkey::Pubkey;
+use tokio::sync::mpsc;
 
 use super::{AccountsLruCache, ChainPubsubClient};
+
+/// Unsubscribes from pubsub and sends a removal notification to trigger bank
+/// removal.
+///
+/// This is the core logic shared between:
+/// - Normal unsubscribe flow (after removing from LRU cache)
+/// - Reconciliation flow (account missing from LRU cache)
+pub(crate) async fn unsubscribe_and_notify_removal<T: ChainPubsubClient>(
+    pubkey: Pubkey,
+    pubsub_client: &T,
+    removed_account_tx: &mpsc::Sender<Pubkey>,
+) -> bool {
+    match pubsub_client.unsubscribe(pubkey).await {
+        Ok(()) => {
+            if let Err(err) = removed_account_tx.send(pubkey).await {
+                warn!("Failed to send removal update for {pubkey}: {err:?}");
+            }
+            true
+        }
+        Err(err) => {
+            warn!("Failed to unsubscribe from pubsub for {pubkey}: {err:?}");
+            false
+        }
+    }
+}
 
 /// Reconciles subscription state between the LRU cache and the pubsub client.
 ///
@@ -36,10 +62,14 @@ use super::{AccountsLruCache, ChainPubsubClient};
 ///
 ///   Without filtering these out, the reconciler would incorrectly attempt to
 ///   unsubscribe them since they appear in pubsub but not in the LRU cache.
+///
+/// - `removed_account_tx`: Channel to notify upstream that an account was
+///   unsubscribed and should be removed from the bank.
 pub async fn reconcile_subscriptions<PubsubClient: ChainPubsubClient>(
     subscribed_accounts: &AccountsLruCache,
     pubsub_client: &PubsubClient,
     never_evicted: &[Pubkey],
+    removed_account_tx: &mpsc::Sender<Pubkey>,
 ) {
     let all_pubsub_subs = pubsub_client.subscriptions().unwrap_or_default();
     let lru_pubkeys = subscribed_accounts.pubkeys();
@@ -83,9 +113,12 @@ pub async fn reconcile_subscriptions<PubsubClient: ChainPubsubClient>(
             extra_in_pubsub
         );
         for pubkey in extra_in_pubsub {
-            if let Err(e) = pubsub_client.unsubscribe(pubkey).await {
-                warn!("Failed to unsubscribe account {}: {}", pubkey, e);
-            }
+            unsubscribe_and_notify_removal(
+                pubkey,
+                pubsub_client,
+                removed_account_tx,
+            )
+            .await;
         }
     }
 }
