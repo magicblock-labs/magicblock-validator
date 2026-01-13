@@ -65,7 +65,7 @@ fn test_defaults_are_sane() {
     assert_eq!(config.validator.basefee, consts::DEFAULT_BASE_FEE);
     // Remotes default to [devnet HTTP] + [devnet WS] (added by ensure_websocket)
     assert_eq!(config.remotes.len(), 2);
-    assert_eq!(config.listen.0.port(), 8899);
+    assert_eq!(config.aperture.listen.0.port(), 8899);
     assert_eq!(config.lifecycle, LifecycleMode::Ephemeral);
 
     // Verify internal config defaults (not exposed to CLI)
@@ -171,14 +171,23 @@ fn test_cli_overlay_is_non_destructive() {
         custom_keypair
     ));
 
-    // Change ONLY basefee via CLI
-    let config =
-        run_cli(vec![config_path.to_str().unwrap(), "--basefee", "500"]);
+    // Change ONLY basefee and listen address via CLI
+    let config = run_cli(vec![
+        config_path.to_str().unwrap(),
+        "--basefee",
+        "500",
+        "--listen",
+        "127.0.0.1:7000",
+    ]);
 
-    // Basefee updated
+    // Basefee is updated
     assert_eq!(config.validator.basefee, 500);
-    // Keypair PRESERVED from TOML
+    // Listen address is updated as well
+    assert_eq!(config.aperture.listen.0, "127.0.0.1:7000".parse().unwrap());
+    // Keypair is PRESERVED from TOML
     assert_eq!(config.validator.keypair, custom_keypair.parse().unwrap());
+    // Event processors count is PRESERVED from TOML
+    assert_eq!(config.aperture.event_processors, 1);
 }
 
 #[test]
@@ -362,7 +371,7 @@ fn test_example_config_full_coverage() {
     // Example config has 3 remotes: devnet HTTP, devnet WebSocket, and Helius gRPC
     assert_eq!(config.remotes.len(), 3);
     assert_eq!(config.remotes[0].url_str(), consts::DEVNET_URL);
-    assert_eq!(config.listen.0.port(), 8899);
+    assert_eq!(config.aperture.listen.0.port(), 8899);
     // Check that storage path is set (contains the expected folder name)
     assert!(config
         .storage
@@ -417,7 +426,13 @@ fn test_example_config_full_coverage() {
     assert_eq!(config.chainlink.max_monitored_accounts, 1000);
 
     // ========================================================================
-    // 10. Optional Sections
+    // 10. Aperture
+    // ========================================================================
+    assert_eq!(config.aperture.listen.0.port(), 8899);
+    assert_eq!(config.aperture.event_processors, 1);
+
+    // ========================================================================
+    // 11. Optional Sections
     // ========================================================================
     // Task scheduler reset should be false
     assert!(!config.task_scheduler.reset);
@@ -444,14 +459,15 @@ fn test_example_config_full_coverage() {
 #[serial]
 fn test_env_vars_full_coverage() {
     // We must keep these guards alive until the config is parsed.
-    // The `EnvVarGuard` helper (defined in your tests.rs) cleans them up on Drop.
     let _guards = vec![
         // --- Core ---
         EnvVarGuard::new("MBV_LIFECYCLE", "replica"),
         // Note: MBV_REMOTE is no longer supported for the new Vec<RemoteConfig> format
         // Use TOML [[remote]] array syntax instead
         EnvVarGuard::new("MBV_STORAGE", "/tmp/env-test-storage"),
-        EnvVarGuard::new("MBV_LISTEN", "127.0.0.1:9999"),
+        // --- Aperture ---
+        EnvVarGuard::new("MBV_APERTURE__LISTEN", "127.0.0.1:9999"),
+        EnvVarGuard::new("MBV_APERTURE__EVENT_PROCESSORS", "9"),
         // --- Metrics ---
         EnvVarGuard::new("MBV_METRICS__ADDRESS", "127.0.0.1:9091"),
         EnvVarGuard::new("MBV_METRICS__COLLECT_FREQUENCY", "15s"),
@@ -500,7 +516,10 @@ fn test_env_vars_full_coverage() {
     // Remotes default to devnet (HTTP) + devnet WebSocket (added by ensure_websocket)
     assert_eq!(config.remotes.len(), 2);
     assert_eq!(config.storage.to_string_lossy(), "/tmp/env-test-storage");
-    assert_eq!(config.listen.0.port(), 9999);
+
+    // Aperture
+    assert_eq!(config.aperture.listen.0.port(), 9999);
+    assert_eq!(config.aperture.event_processors, 9);
 
     // Metrics
     assert_eq!(config.metrics.address.0.port(), 9091);

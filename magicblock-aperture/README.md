@@ -37,6 +37,41 @@ The server's architecture is divided into logical components for handling HTTP a
 
 -   **`SharedState`**: The global, read-only context that is shared across all handlers. It provides `Arc`-wrapped access to the `AccountsDb`, `Ledger`, various caches, and the `DispatchEndpoints` for communicating with the processor.
 -   **`EventProcessor`**: A background worker that listens for broadcasted events from the validator core (e.g., `TransactionStatus`, `AccountUpdate`) and forwards them to the appropriate WebSocket subscribers via the `SubscriptionsDb`.
+-   **`GeyserPluginManager`**: Manages dynamically loaded Geyser plugins that subscribe to in-validator events. Plugins receive notifications for account updates, transactions, blocks, and slot status changes via the Geyser plugin interface.
+
+---
+
+## Geyser Plugin Support
+
+Aperture integrates with the Solana Geyser plugin system to enable extensible, real-time streaming of events. 
+
+### Configuration
+
+Geyser plugins are loaded from shared library files (`.so` on Linux, `.dylib` on macOS) specified in the server configuration. Each plugin requires a JSON configuration file with the following structure:
+
+```json
+{
+  "libpath": "/path/to/plugin.so"
+}
+```
+
+Multiple plugins can be loaded simultaneously by providing multiple configuration paths.
+
+### Important Requirements
+
+**Toolchain & Agave Version Compatibility**: Plugin binaries must be compiled with the same Rust toolchain and Agave (Solana) version as the validator and Aperture. Version mismatches can cause:
+
+- Binary incompatibility (symbol resolution failures)
+- Undefined behavior in C FFI boundaries
+- Data layout misalignment in shared structures
+
+Ensure that both your validator and any Geyser plugins are built against the same Agave version and toolchain.
+
+### Example Plugin
+
+Magicblock provides a customized Yellowstone gRPC plugin designed to work with the Magicblock validator. For details on building and configuring this plugin, see:
+
+[Yellowstone gRPC Geyser Plugin](https://github.com/magicblock-labs/yellowstone-grpc/blob/mbv-6.0/yellowstone-grpc-geyser/README.md)
 
 ---
 
@@ -73,4 +108,5 @@ The server's architecture is divided into logical components for handling HTTP a
 -   **Graceful Shutdown**: Utilizes `CancellationToken`s and RAII guards (`Shutdown`) to ensure the server and all active connections can terminate cleanly.
 -   **Performant Lookups**: Employs a two-level caching strategy for transaction statuses and server-side filtering for `getProgramAccounts` to minimize database load.
 -   **Solana API Compatibility**: Implements a large subset of the standard Solana JSON-RPC methods and subscription types.
+-   **Geyser Plugin Support**: Integrates with Solana's Geyser plugin system for extensible in-validator event streaming. Dynamically loads and manages plugins that receive real-time notifications for account updates, transactions, blocks, and slot status changes.
 
