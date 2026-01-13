@@ -1298,9 +1298,14 @@ fn pubkeys_str(pubkeys: &[Pubkey]) -> String {
 
 #[cfg(test)]
 mod test {
+    use std::num::NonZeroUsize;
+
     use solana_system_interface::program as system_program;
 
-    use super::{chain_pubsub_client::mock::ChainPubsubClientMock, *};
+    use super::{
+        chain_pubsub_client::mock::ChainPubsubClientMock,
+        subscription_reconciler::reconcile_subscriptions, *,
+    };
     use crate::testing::{
         init_logger,
         rpc_client_mock::{
@@ -1814,10 +1819,6 @@ mod test {
 
     #[tokio::test]
     async fn test_reconcile_resubscribes_accounts_missing_from_pubsub() {
-        use std::num::NonZeroUsize;
-
-        use super::subscription_reconciler::reconcile_subscriptions;
-
         init_logger();
 
         let (tx, rx) = mpsc::channel(1);
@@ -1854,10 +1855,6 @@ mod test {
 
     #[tokio::test]
     async fn test_reconcile_unsubscribes_accounts_not_in_lru() {
-        use std::num::NonZeroUsize;
-
-        use super::subscription_reconciler::reconcile_subscriptions;
-
         init_logger();
 
         let (tx, rx) = mpsc::channel(1);
@@ -1894,10 +1891,6 @@ mod test {
 
     #[tokio::test]
     async fn test_reconcile_preserves_never_evicted_accounts_not_in_lru() {
-        use std::num::NonZeroUsize;
-
-        use super::subscription_reconciler::reconcile_subscriptions;
-
         init_logger();
 
         let (tx, rx) = mpsc::channel(1);
