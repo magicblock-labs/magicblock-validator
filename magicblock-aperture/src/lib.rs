@@ -1,6 +1,6 @@
-use error::RpcError;
+use error::{ApertureError, RpcError};
 use log::*;
-use magicblock_config::types::BindAddress;
+use magicblock_config::config::aperture::ApertureConfig;
 use magicblock_core::link::DispatchEndpoints;
 use processor::EventProcessor;
 use server::{http::HttpServer, websocket::WebsocketServer};
@@ -9,6 +9,20 @@ use tokio::net::TcpListener;
 use tokio_util::sync::CancellationToken;
 
 type RpcResult<T> = Result<T, RpcError>;
+type ApertureResult<T> = Result<T, ApertureError>;
+
+pub async fn initialize_aperture(
+    config: &ApertureConfig,
+    state: SharedState,
+    dispatch: &DispatchEndpoints,
+    cancel: CancellationToken,
+) -> ApertureResult<JsonRpcServer> {
+    // Start up an event processor tasks, which will handle forwarding of any validator
+    // originating event to client subscribers, or use them to update server's caches
+    EventProcessor::start(config, &state, dispatch, cancel.clone())?;
+    let server = JsonRpcServer::new(config, state, dispatch, cancel).await?;
+    Ok(server)
+}
 
 /// An entrypoint to startup JSON-RPC server, for both HTTP and WS requests
 pub struct JsonRpcServer {
@@ -18,24 +32,17 @@ pub struct JsonRpcServer {
 
 impl JsonRpcServer {
     /// Create a new instance of JSON-RPC server, hooked into validator via dispatch channels
-    pub async fn new(
-        address: BindAddress,
+    async fn new(
+        config: &ApertureConfig,
         state: SharedState,
         dispatch: &DispatchEndpoints,
         cancel: CancellationToken,
-    ) -> RpcResult<Self> {
+    ) -> ApertureResult<Self> {
         // try to bind to socket before spawning anything (handy in tests)
-        let mut addr = address.0;
+        let mut addr = config.listen.0;
         let http = TcpListener::bind(addr).await.map_err(RpcError::internal)?;
         addr.set_port(addr.port() + 1);
         let ws = TcpListener::bind(addr).await.map_err(RpcError::internal)?;
-
-        // Start up an event processor task, which will handle forwarding of any validator
-        // originating event to client subscribers, or use them to update server's caches
-        //
-        // NOTE: currently we only start 2 instances, but it
-        // can be scaled to more if that becomes a bottleneck
-        EventProcessor::start(&state, dispatch, 2, cancel.clone());
 
         // initialize HTTP and Websocket servers
         let websocket = {
@@ -59,6 +66,7 @@ impl JsonRpcServer {
 
 mod encoder;
 pub mod error;
+mod geyser;
 mod processor;
 mod requests;
 pub mod server;

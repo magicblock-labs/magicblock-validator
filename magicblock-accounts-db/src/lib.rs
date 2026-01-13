@@ -273,7 +273,10 @@ impl AccountsDb {
     /// An optimized accountsdb accessor, which can be used for multiple reads,
     /// without incurring the overhead of repeated creation of index transaction
     pub fn reader(&self) -> AccountsDbResult<AccountsReader<'_>> {
-        let offset = self.index.offset_finder()?;
+        let offset = self
+            .index
+            .offset_finder()
+            .log_err(|| "Failed to create offset iterator")?;
         Ok(AccountsReader {
             offset,
             storage: &self.storage,

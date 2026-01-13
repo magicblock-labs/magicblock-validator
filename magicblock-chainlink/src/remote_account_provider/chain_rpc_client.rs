@@ -6,8 +6,7 @@ use solana_commitment_config::CommitmentConfig;
 use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_rpc_client_api::{
-    client_error::Result as ClientResult, config::RpcAccountInfoConfig,
-    response::RpcResult,
+    config::RpcAccountInfoConfig, response::RpcResult,
 };
 
 // -----------------
@@ -27,11 +26,6 @@ pub trait ChainRpcClient: Send + Sync + Clone + 'static {
         pubkeys: &[Pubkey],
         config: RpcAccountInfoConfig,
     ) -> RpcResult<Vec<Option<Account>>>;
-
-    async fn get_slot_with_commitment(
-        &self,
-        commitment: CommitmentConfig,
-    ) -> ClientResult<u64>;
 }
 
 // -----------------
@@ -79,11 +73,5 @@ impl ChainRpcClient for ChainRpcClientImpl {
         self.rpc_client
             .get_multiple_accounts_with_config(pubkeys, config)
             .await
-    }
-    async fn get_slot_with_commitment(
-        &self,
-        commitment: CommitmentConfig,
-    ) -> ClientResult<u64> {
-        self.rpc_client.get_slot_with_commitment(commitment).await
     }
 }

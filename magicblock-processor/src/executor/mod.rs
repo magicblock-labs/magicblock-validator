@@ -1,6 +1,9 @@
-use std::sync::{Arc, RwLock};
+use std::{
+    convert::identity,
+    sync::{Arc, RwLock},
+};
 
-use log::info;
+use log::{info, warn};
 use magicblock_accounts_db::{AccountsDb, GlobalWriteLock};
 use magicblock_core::link::{
     accounts::AccountUpdateTx,
@@ -14,6 +17,7 @@ use parking_lot::RwLockReadGuard;
 use solana_program_runtime::loaded_programs::{
     BlockRelation, ForkGraph, ProgramCache, ProgramCacheEntry,
 };
+use solana_sdk_ids::sysvar::slot_hashes;
 use solana_svm::transaction_processor::{
     ExecutionRecordingConfig, TransactionBatchProcessor,
     TransactionProcessingConfig, TransactionProcessingEnvironment,
@@ -232,8 +236,20 @@ impl TransactionExecutor {
             .ok()
             .and_then(Arc::into_inner)
             .unwrap_or_default();
+
         hashes.add(block.slot, block.blockhash);
         cache.set_sysvar_for_tests(&hashes);
+        let Ok(reader) = self.accountsdb.reader() else {
+            return;
+        };
+
+        // Persist slot hashes to accountsdb
+        if let Some(mut account) = reader.read(&slot_hashes::ID, identity) {
+            let _ = account
+                .serialize_data(&hashes)
+                .inspect_err(|e| warn!("Failed to serialize slot hashes: {e}"));
+            let _ = self.accountsdb.insert_account(&slot_hashes::ID, &account);
+        }
     }
 }
 
