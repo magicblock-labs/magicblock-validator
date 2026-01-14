@@ -3092,6 +3092,7 @@ dependencies = [
  "rand 0.9.2",
  "rusqlite",
  "solana-account",
+ "solana-account-decoder",
  "solana-address-lookup-table-interface",
  "solana-commitment-config",
  "solana-compute-budget-interface",

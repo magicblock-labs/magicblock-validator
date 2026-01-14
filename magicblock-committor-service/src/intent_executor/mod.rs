@@ -313,29 +313,41 @@ where
         committed_pubkeys: &[Pubkey],
         strategy: &mut TransactionStrategy,
     ) -> Result<TransactionStrategy, TaskBuilderError> {
-        // This means that some Tasks out of sync with base layer commit ids
+        let tasks_and_metas: Vec<_> = strategy
+            .optimized_tasks
+            .iter_mut()
+            .flat_map(|task| {
+                let mut visitor = TaskVisitorUtils::GetCommitMeta(None);
+                task.visit(&mut visitor);
+                if let TaskVisitorUtils::GetCommitMeta(Some(commit_meta)) =
+                    visitor
+                {
+                    Some((task, commit_meta))
+                } else {
+                    None
+                }
+            })
+            .collect();
+        let min_context_slot = tasks_and_metas
+            .iter()
+            .map(|(_, meta)| meta.remote_slot)
+            .max()
+            .unwrap_or(0);
+
         // We reset TaskInfoFetcher for all committed accounts
         // We re-fetch them to fix out of sync tasks
         self.task_info_fetcher
             .reset(ResetType::Specific(committed_pubkeys));
         let commit_ids = self
             .task_info_fetcher
-            .fetch_next_commit_ids(committed_pubkeys)
+            .fetch_next_commit_ids(committed_pubkeys, min_context_slot)
             .await
             .map_err(TaskBuilderError::CommitTasksBuildError)?;
 
         // Here we find the broken tasks and reset them
         // Broken tasks are prepared incorrectly so they have to be cleaned up
-        let mut visitor = TaskVisitorUtils::GetCommitMeta(None);
         let mut to_cleanup = Vec::new();
-        for task in strategy.optimized_tasks.iter_mut() {
-            task.visit(&mut visitor);
-            let TaskVisitorUtils::GetCommitMeta(Some(ref commit_meta)) =
-                visitor
-            else {
-                continue;
-            };
-
+        for (task, commit_meta) in tasks_and_metas {
             let Some(commit_id) = commit_ids.get(&commit_meta.committed_pubkey)
             else {
                 continue;

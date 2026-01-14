@@ -3560,6 +3560,7 @@ dependencies = [
  "magicblock-table-mania",
  "rusqlite",
  "solana-account",
+ "solana-account-decoder",
  "solana-address-lookup-table-interface",
  "solana-commitment-config",
  "solana-compute-budget-interface",

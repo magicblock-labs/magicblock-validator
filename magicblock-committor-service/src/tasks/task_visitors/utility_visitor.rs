@@ -9,6 +9,7 @@ use crate::tasks::{
 pub struct CommitMeta {
     pub committed_pubkey: Pubkey,
     pub commit_id: u64,
+    pub remote_slot: u64,
 }
 
 pub enum TaskVisitorUtils {
@@ -23,6 +24,7 @@ impl Visitor for TaskVisitorUtils {
             *commit_meta = Some(CommitMeta {
                 committed_pubkey: commit_task.committed_account.pubkey,
                 commit_id: commit_task.commit_id,
+                remote_slot: commit_task.committed_account.remote_slot,
             })
         } else {
             *commit_meta = None
@@ -36,6 +38,7 @@ impl Visitor for TaskVisitorUtils {
         *commit_meta = Some(CommitMeta {
             committed_pubkey: commit_task.committed_account.pubkey,
             commit_id: commit_task.commit_id,
+            remote_slot: commit_task.committed_account.remote_slot,
         })
     }
 }

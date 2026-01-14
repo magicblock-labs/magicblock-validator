@@ -20,7 +20,9 @@ use solana_rpc_client::{
 };
 use solana_rpc_client_api::{
     client_error::ErrorKind as RpcClientErrorKind,
-    config::{RpcSendTransactionConfig, RpcTransactionConfig},
+    config::{
+        RpcAccountInfoConfig, RpcSendTransactionConfig, RpcTransactionConfig,
+    },
     request::RpcError,
 };
 use solana_signature::Signature;
@@ -307,6 +309,37 @@ impl MagicblockRpcClient {
             join_set.spawn(async move {
                 client
                     .get_multiple_accounts_with_commitment(&pubkeys, commitment)
+                    .await
+            });
+        }
+        let chunked_results = join_set.join_all().await;
+        let mut results = Vec::new();
+        for result in chunked_results {
+            match result {
+                Ok(accs) => results.extend(accs.value),
+                Err(err) => return Err(err.into()),
+            }
+        }
+        Ok(results)
+    }
+
+    // TODO(edwin): simplify
+    pub async fn get_multiple_accounts_with_config(
+        &self,
+        pubkeys: &[Pubkey],
+        config: RpcAccountInfoConfig,
+        max_per_fetch: Option<usize>,
+    ) -> MagicBlockRpcClientResult<Vec<Option<Account>>> {
+        let max_per_fetch = max_per_fetch.unwrap_or(MAX_MULTIPLE_ACCOUNTS);
+
+        let mut join_set = JoinSet::new();
+        for pubkey_chunk in pubkeys.chunks(max_per_fetch) {
+            let client = self.client.clone();
+            let pubkeys = pubkey_chunk.to_vec();
+            let config = config.clone();
+            join_set.spawn(async move {
+                client
+                    .get_multiple_accounts_with_config(&pubkeys, config)
                     .await
             });
         }
