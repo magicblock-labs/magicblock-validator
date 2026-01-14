@@ -186,7 +186,7 @@ impl CacheTaskInfoFetcher {
         let commitment = rpc_client.commitment();
         let mut accounts = rpc_client
             .get_multiple_accounts_with_config(
-                &pubkeys,
+                pubkeys,
                 RpcAccountInfoConfig {
                     encoding: Some(UiAccountEncoding::Base64Zstd),
                     commitment: Some(commitment),
@@ -201,7 +201,7 @@ impl CacheTaskInfoFetcher {
             })?;
 
         let accounts = pubkeys
-            .into_iter()
+            .iter()
             .enumerate()
             .map(|(i, pubkey)| {
                 let account = if let Some(account) = accounts.get_mut(i) {
