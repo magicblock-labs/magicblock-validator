@@ -111,9 +111,14 @@ impl TasksBuilder for TaskBuilderImpl {
         };
 
         let (commit_ids, base_accounts) = {
+            let mut min_context_slot = 0;
             let committed_pubkeys = accounts
                 .iter()
-                .map(|account| account.pubkey)
+                .map(|account| {
+                    min_context_slot =
+                        std::cmp::max(min_context_slot, account.remote_slot);
+                    account.pubkey
+                })
                 .collect::<Vec<_>>();
 
             let diffable_pubkeys = accounts
@@ -125,9 +130,14 @@ impl TasksBuilder for TaskBuilderImpl {
                 .collect::<Vec<_>>();
 
             tokio::join!(
-                commit_id_fetcher.fetch_next_commit_ids(&committed_pubkeys),
-                commit_id_fetcher
-                    .get_base_accounts(diffable_pubkeys.as_slice())
+                commit_id_fetcher.fetch_next_commit_ids(
+                    &committed_pubkeys,
+                    min_context_slot
+                ),
+                commit_id_fetcher.get_base_accounts(
+                    diffable_pubkeys.as_slice(),
+                    min_context_slot
+                )
             )
         };
 
@@ -227,12 +237,19 @@ impl TasksBuilder for TaskBuilderImpl {
 
                 // Get rent reimbursments for undelegated accounts
                 let accounts = t.get_committed_accounts();
+                let mut min_context_slot = 0;
                 let pubkeys = accounts
                     .iter()
-                    .map(|account| account.pubkey)
+                    .map(|account| {
+                        min_context_slot = std::cmp::max(
+                            min_context_slot,
+                            account.remote_slot,
+                        );
+                        account.pubkey
+                    })
                     .collect::<Vec<_>>();
                 let rent_reimbursements = info_fetcher
-                    .fetch_rent_reimbursements(&pubkeys)
+                    .fetch_rent_reimbursements(&pubkeys, min_context_slot)
                     .await
                     .map_err(TaskBuilderError::FinalizedTasksBuildError)?;
 

@@ -31,6 +31,7 @@ magicblock-rpc-client = { workspace = true }
 magicblock-table-mania = { workspace = true }
 rusqlite = { workspace = true }
 solana-account = { workspace = true }
+solana-account-decoder = { workspace = true }
 solana-address-lookup-table-interface = { workspace = true }
 solana-commitment-config = { workspace = true }
 solana-compute-budget-interface = { workspace = true }

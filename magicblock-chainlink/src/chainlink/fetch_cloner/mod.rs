@@ -182,10 +182,10 @@ where
                                 }
                             });
                         if let Some(in_bank_slot) = out_of_order_slot {
-                            warn!(
-                            "Ignoring out-of-order subscription update for {pubkey}: bank slot {in_bank_slot}, update slot {}",
-                            account.remote_slot()
-                        );
+                            trace!(
+                                "Ignoring out-of-order subscription update for {pubkey}: bank slot {in_bank_slot}, update slot {}",
+                                account.remote_slot()
+                            );
                             return;
                         }
 
@@ -368,8 +368,26 @@ where
                                 );
 
                                 // For accounts delegated to us, always unsubscribe from the delegated account
+                                // and subscribe to the original owner program for undelegation update resilience
                                 if account.delegated() {
                                     subs_to_remove.insert(pubkey);
+
+                                    // Subscribe to the original owner program for undelegation update resilience
+                                    // Fire-and-forget to avoid blocking subscription updates
+                                    let provider =
+                                        self.remote_account_provider.clone();
+                                    let owner = delegation_record.owner;
+                                    tokio::spawn(async move {
+                                        if let Err(err) = provider
+                                            .subscribe_program(owner)
+                                            .await
+                                        {
+                                            warn!(
+                                                "Failed to subscribe to owner program {} for account {}: {}",
+                                                owner, pubkey, err
+                                            );
+                                        }
+                                    });
                                 }
 
                                 (

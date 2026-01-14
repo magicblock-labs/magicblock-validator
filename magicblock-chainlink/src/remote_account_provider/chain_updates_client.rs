@@ -13,7 +13,7 @@ use solana_pubkey::Pubkey;
 use tokio::sync::mpsc;
 
 use crate::remote_account_provider::{
-    chain_laser_client::ChainLaserClientImpl,
+    chain_laser_actor::Slots, chain_laser_client::ChainLaserClientImpl,
     pubsub_common::SubscriptionUpdate, ChainPubsubClient,
     ChainPubsubClientImpl, Endpoint, ReconnectableClient,
     RemoteAccountProviderError, RemoteAccountProviderResult,
@@ -31,6 +31,7 @@ impl ChainUpdatesClient {
         commitment: CommitmentConfig,
         abort_sender: mpsc::Sender<()>,
         chain_slot: Arc<AtomicU64>,
+        resubscription_delay: std::time::Duration,
     ) -> RemoteAccountProviderResult<Self> {
         use Endpoint::*;
         static CLIENT_ID: AtomicU16 = AtomicU16::new(0);
@@ -48,6 +49,7 @@ impl ChainUpdatesClient {
                         client_id,
                         abort_sender,
                         commitment,
+                        resubscription_delay,
                     )
                     .await?,
                 ))
@@ -67,7 +69,10 @@ impl ChainUpdatesClient {
                     CLIENT_ID.fetch_add(1, Ordering::SeqCst)
                 );
 
-                let chain_slot = supports_backfill.then_some(chain_slot);
+                let slots = supports_backfill.then_some(Slots {
+                    chain_slot,
+                    last_activation_slot: AtomicU64::new(0),
+                });
                 Ok(ChainUpdatesClient::Laser(
                     ChainLaserClientImpl::new_from_url(
                         url,
@@ -75,7 +80,7 @@ impl ChainUpdatesClient {
                         api_key,
                         commitment.commitment,
                         abort_sender,
-                        chain_slot,
+                        slots,
                     )
                     .await?,
                 ))

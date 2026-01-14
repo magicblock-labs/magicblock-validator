@@ -480,10 +480,12 @@ mod tests {
                 CommittedAccount {
                     pubkey: Pubkey::new_unique(),
                     account: account1,
+                    remote_slot: 1,
                 },
                 CommittedAccount {
                     pubkey: Pubkey::new_unique(),
                     account: account2,
+                    remote_slot: 2,
                 },
             ])),
         }
