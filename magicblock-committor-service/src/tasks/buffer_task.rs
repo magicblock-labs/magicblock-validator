@@ -14,8 +14,9 @@ use crate::tasks::TaskStrategy;
 use crate::{
     consts::MAX_WRITE_CHUNK_SIZE,
     tasks::{
-        visitor::Visitor, BaseTask, BaseTaskError, BaseTaskResult, CommitTask,
-        PreparationState, PreparationTask, TaskType,
+        visitor::Visitor, BaseTask, BaseTaskError, BaseTaskResult,
+        BufferPreparationTask, CommitTask, PreparationState, PreparationTask,
+        TaskType,
     },
 };
 
@@ -58,12 +59,14 @@ impl BufferTask {
             MAX_WRITE_CHUNK_SIZE,
         );
 
-        PreparationState::Required(PreparationTask {
-            commit_id: commit_task.commit_id,
-            pubkey: commit_task.committed_account.pubkey,
-            committed_data,
-            chunks,
-        })
+        PreparationState::Required(PreparationTask::Buffer(
+            BufferPreparationTask {
+                commit_id: commit_task.commit_id,
+                pubkey: commit_task.committed_account.pubkey,
+                committed_data,
+                chunks,
+            },
+        ))
     }
 }
 
@@ -163,6 +166,31 @@ impl BaseTask for BufferTask {
 
         commit_task.commit_id = commit_id;
         self.preparation_state = Self::preparation_required(&self.task_type)
+    }
+
+    fn is_compressed(&self) -> bool {
+        false
+    }
+
+    fn set_compressed_data(
+        &mut self,
+        _compressed_data: super::task_builder::CompressedData,
+    ) {
+        // No-op
+    }
+
+    fn get_compressed_data(
+        &self,
+    ) -> Option<&super::task_builder::CompressedData> {
+        None
+    }
+
+    fn delegated_account(&self) -> Option<Pubkey> {
+        match &self.task_type {
+            BufferTaskType::Commit(value) => {
+                Some(value.committed_account.pubkey)
+            }
+        }
     }
 }
 

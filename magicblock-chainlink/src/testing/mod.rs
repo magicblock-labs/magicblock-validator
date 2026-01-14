@@ -6,8 +6,9 @@ pub mod chain_pubsub;
 pub mod cloner_stub;
 #[cfg(any(test, feature = "dev-context"))]
 pub mod deleg;
-#[cfg(any(test, feature = "dev-context"))]
 pub mod eatas;
+#[cfg(any(test, feature = "dev-context"))]
+pub mod photon_client_mock;
 #[cfg(any(test, feature = "dev-context"))]
 pub mod rpc_client_mock;
 #[cfg(any(test, feature = "dev-context"))]

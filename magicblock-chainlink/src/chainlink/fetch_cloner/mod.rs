@@ -7,6 +7,8 @@ use std::{
     time::Duration,
 };
 
+use borsh::BorshDeserialize;
+use compressed_delegation_client::CompressedDelegationRecord;
 use dlp::{
     pda::delegation_record_pda_from_delegated_account, state::DelegationRecord,
 };
@@ -15,7 +17,7 @@ use magicblock_config::config::AllowedProgram;
 use magicblock_core::traits::AccountsBank;
 use magicblock_metrics::metrics::{self, AccountFetchOrigin};
 use scc::{hash_map::Entry, HashMap};
-use solana_account::{AccountSharedData, ReadableAccount};
+use solana_account::{AccountSharedData, ReadableAccount, WritableAccount};
 use solana_pubkey::Pubkey;
 use solana_sdk_ids::system_program;
 use tokio::{
@@ -48,6 +50,7 @@ use crate::{
     },
     cloner::{errors::ClonerResult, AccountCloneRequest, Cloner},
     remote_account_provider::{
+        photon_client::PhotonClient,
         program_account::get_loaderv3_get_program_data_address,
         ChainPubsubClient, ChainRpcClient, ForwardedSubscriptionUpdate,
         MatchSlotsConfig, RemoteAccount, RemoteAccountProvider,
@@ -58,15 +61,16 @@ use crate::{
 type RemoteAccountRequests = Vec<oneshot::Sender<()>>;
 
 #[derive(Clone)]
-pub struct FetchCloner<T, U, V, C>
+pub struct FetchCloner<T, U, V, C, P>
 where
     T: ChainRpcClient,
     U: ChainPubsubClient,
     V: AccountsBank,
     C: Cloner,
+    P: PhotonClient,
 {
     /// The RemoteAccountProvider to fetch accounts from
-    remote_account_provider: Arc<RemoteAccountProvider<T, U>>,
+    remote_account_provider: Arc<RemoteAccountProvider<T, U, P>>,
     /// Tracks pending account fetch requests to avoid duplicate fetches in parallel
     /// Once an account is fetched and cloned into the bank, it's removed from here
     pending_requests: Arc<HashMap<Pubkey, RemoteAccountRequests>>,
@@ -86,16 +90,17 @@ where
     allowed_programs: Option<HashSet<Pubkey>>,
 }
 
-impl<T, U, V, C> FetchCloner<T, U, V, C>
+impl<T, U, V, C, P> FetchCloner<T, U, V, C, P>
 where
     T: ChainRpcClient,
     U: ChainPubsubClient,
     V: AccountsBank,
     C: Cloner,
+    P: PhotonClient,
 {
     /// Create FetchCloner with subscription updates properly connected
     pub fn new(
-        remote_account_provider: &Arc<RemoteAccountProvider<T, U>>,
+        remote_account_provider: &Arc<RemoteAccountProvider<T, U, P>>,
         accounts_bank: &Arc<V>,
         cloner: &Arc<C>,
         validator_pubkey: Pubkey,
@@ -182,10 +187,10 @@ where
                                 }
                             });
                         if let Some(in_bank_slot) = out_of_order_slot {
-                            trace!(
-                                "Ignoring out-of-order subscription update for {pubkey}: bank slot {in_bank_slot}, update slot {}",
-                                account.remote_slot()
-                            );
+                            warn!(
+                            "Ignoring out-of-order subscription update for {pubkey}: bank slot {in_bank_slot}, update slot {}",
+                            account.remote_slot()
+                        );
                             return;
                         }
 
@@ -298,8 +303,10 @@ where
         let ForwardedSubscriptionUpdate { pubkey, account } = update;
         let owned_by_delegation_program =
             account.is_owned_by_delegation_program();
+        let owned_by_compressed_delegation_program =
+            account.is_owned_by_compressed_delegation_program();
 
-        if let Some(account) = account.fresh_account() {
+        if let Some(mut account) = account.fresh_account().cloned() {
             // If the account is owned by the delegation program we need to resolve
             // its true owner and determine if it is delegated to us
             if owned_by_delegation_program {
@@ -368,26 +375,8 @@ where
                                 );
 
                                 // For accounts delegated to us, always unsubscribe from the delegated account
-                                // and subscribe to the original owner program for undelegation update resilience
                                 if account.delegated() {
                                     subs_to_remove.insert(pubkey);
-
-                                    // Subscribe to the original owner program for undelegation update resilience
-                                    // Fire-and-forget to avoid blocking subscription updates
-                                    let provider =
-                                        self.remote_account_provider.clone();
-                                    let owner = delegation_record.owner;
-                                    tokio::spawn(async move {
-                                        if let Err(err) = provider
-                                            .subscribe_program(owner)
-                                            .await
-                                        {
-                                            warn!(
-                                                "Failed to subscribe to owner program {} for account {}: {}",
-                                                owner, pubkey, err
-                                            );
-                                        }
-                                    });
                                 }
 
                                 (
@@ -424,6 +413,68 @@ where
                         error!("failed to fetch delegation record for {pubkey}: {err}. not cloning account.");
                         (None, None)
                     }
+                }
+            } else if owned_by_compressed_delegation_program {
+                // If the account is compressed, the delegation record is in the account itself
+                let delegation_record =
+                    match CompressedDelegationRecord::try_from_slice(
+                        account.data(),
+                    ) {
+                        Ok(delegation_record) => Some(delegation_record),
+                        Err(parse_err) => {
+                            debug!("The account's data did not contain a valid compressed delegation record for {pubkey}: {parse_err}, fetching...");
+                            match self
+                                .remote_account_provider
+                                .try_get(pubkey, AccountFetchOrigin::GetAccount)
+                                .await
+                            {
+                                Ok(remote_acc) => {
+                                    if let Some(acc) =
+                                        remote_acc.fresh_account().cloned()
+                                    {
+                                        match CompressedDelegationRecord::try_from_slice(acc.data()) {
+                                            Ok(delegation_record) => Some(delegation_record),
+                                            Err(parse_err) => {
+                                                error!("fetched account parse failed for {pubkey}: {parse_err}");
+                                                None
+                                            }
+                                        }
+                                    } else {
+                                        error!("remote fetch failed for {pubkey}: no fresh account returned");
+                                        None
+                                    }
+                                }
+                                Err(fetch_err) => {
+                                    error!("remote fetch failed for {pubkey}: {fetch_err}");
+                                    None
+                                }
+                            }
+                        }
+                    };
+
+                if let Some(delegation_record) = delegation_record {
+                    account.set_compressed(true);
+                    account.set_owner(delegation_record.owner);
+                    account.set_data(delegation_record.data);
+                    account.set_lamports(delegation_record.lamports);
+
+                    let is_delegated_to_us =
+                        delegation_record.authority.eq(&self.validator_pubkey);
+                    account.set_delegated(is_delegated_to_us);
+
+                    // TODO(dode): commit frequency ms is not supported for compressed delegation records
+                    (
+                        Some(account),
+                        Some(DelegationRecord {
+                            authority: delegation_record.authority,
+                            owner: delegation_record.owner,
+                            delegation_slot: delegation_record.delegation_slot,
+                            lamports: delegation_record.lamports,
+                            commit_frequency_ms: 0,
+                        }),
+                    )
+                } else {
+                    (None, None)
                 }
             } else {
                 // Accounts not owned by the delegation program can be cloned as is
@@ -549,6 +600,7 @@ where
             not_found,
             plain,
             owned_by_deleg,
+            owned_by_deleg_compressed,
             programs,
             atas,
         } = pipeline::classify_remote_accounts(accs, pubkeys);
@@ -566,6 +618,10 @@ where
                 .iter()
                 .map(|(pubkey, _, slot)| (pubkey.to_string(), *slot))
                 .collect::<Vec<_>>();
+            let owned_by_deleg_compressed = owned_by_deleg_compressed
+                .iter()
+                .map(|(pubkey, _, slot)| (pubkey.to_string(), *slot))
+                .collect::<Vec<_>>();
             let programs = programs
                 .iter()
                 .map(|(p, _, _)| p.to_string())
@@ -575,7 +631,7 @@ where
                 .map(|(a, _, _, _)| a.to_string())
                 .collect::<Vec<_>>();
             trace!(
-                "Fetched accounts: \nnot_found:      {not_found:?} \nplain:          {plain:?} \nowned_by_deleg: {owned_by_deleg:?}\nprograms:       {programs:?} \natas:       {atas:?}",
+                "Fetched accounts: \nnot_found:      {not_found:?} \nplain:          {plain:?} \nowned_by_deleg: {owned_by_deleg:?} \nowned_by_deleg_compressed: {owned_by_deleg_compressed:?} \nprograms:       {programs:?} \natas:       {atas:?}",
             );
         }
 
@@ -663,6 +719,15 @@ where
         .await;
         accounts_to_clone.extend(ata_accounts);
 
+        // Handle compressed delegated accounts: for each compressed delegated account, we clone the account data into the bank.
+        let compressed_delegated_accounts =
+            pipeline::resolve_compressed_delegated_accounts(
+                self,
+                owned_by_deleg_compressed,
+            )
+            .await?;
+        accounts_to_clone.extend(compressed_delegated_accounts);
+
         // Compute sub cancellations now since we may potentially fail during a cloning step
         let cancel_strategy = pipeline::compute_cancel_strategy(
             pubkeys,
@@ -701,8 +766,39 @@ where
         in_bank: &AccountSharedData,
         fetch_origin: AccountFetchOrigin,
     ) -> RefreshDecision {
-        if in_bank.undelegating() {
-            debug!("Fetching undelegating account {pubkey}. delegated={}, undelegating={}", in_bank.delegated(), in_bank.undelegating());
+        if in_bank.compressed() {
+            let Some(record) =
+                CompressedDelegationRecord::from_bytes(in_bank.data()).ok()
+            else {
+                debug!("Account {pubkey} is compressed, but the delegation has already been processed (account is delegated)");
+                return RefreshDecision::No;
+            };
+
+            if !account_still_undelegating_on_chain(
+                pubkey,
+                record.authority.eq(&self.validator_pubkey)
+                    || record.authority.eq(&Pubkey::default()),
+                in_bank.remote_slot(),
+                Some(DelegationRecord {
+                    authority: record.authority,
+                    owner: record.owner,
+                    delegation_slot: record.delegation_slot,
+                    lamports: record.lamports,
+                    commit_frequency_ms: 0,
+                }),
+                &self.validator_pubkey,
+            ) {
+                debug!("Account {pubkey} is compressed, but the compressed delegation record is not undelegating, refresh it");
+                return RefreshDecision::Yes;
+            };
+            debug!("Account {pubkey} is compressed, the compressed delegation record is undelegating, do not refresh it");
+        } else if in_bank.undelegating() {
+            debug!(
+                "Fetching undelegating account {pubkey}. delegated={}, undelegating={}, compressed={}",
+                in_bank.delegated(),
+                in_bank.undelegating(),
+                in_bank.compressed()
+            );
             let deleg_record = self
                 .fetch_and_parse_delegation_record(
                     *pubkey,

@@ -18,6 +18,7 @@ use magicblock_chainlink::{
         accounts::account_shared_with_owner,
         cloner_stub::ClonerStub,
         deleg::add_delegation_record_for,
+        photon_client_mock::PhotonClientMock,
         rpc_client_mock::{ChainRpcClientMock, ChainRpcClientMockBuilder},
         utils::{create_test_lru_cache, create_test_lru_cache_with_config},
     },
@@ -35,16 +36,24 @@ pub type TestChainlink = Chainlink<
     ChainPubsubClientMock,
     AccountsBankStub,
     ClonerStub,
+    PhotonClientMock,
 >;
 
 #[derive(Clone)]
 pub struct TestContext {
     pub rpc_client: ChainRpcClientMock,
     pub pubsub_client: ChainPubsubClientMock,
+    pub photon_client: PhotonClientMock,
     pub chainlink: Arc<TestChainlink>,
     pub bank: Arc<AccountsBankStub>,
     pub remote_account_provider: Option<
-        Arc<RemoteAccountProvider<ChainRpcClientMock, ChainPubsubClientMock>>,
+        Arc<
+            RemoteAccountProvider<
+                ChainRpcClientMock,
+                ChainPubsubClientMock,
+                PhotonClientMock,
+            >,
+        >,
     >,
     pub cloner: Arc<ClonerStub>,
     pub validator_pubkey: Pubkey,
@@ -52,13 +61,14 @@ pub struct TestContext {
 
 impl TestContext {
     pub async fn init(slot: Slot) -> Self {
-        let (rpc_client, pubsub_client) = {
+        let (rpc_client, pubsub_client, photon_client) = {
             let rpc_client =
                 ChainRpcClientMockBuilder::new().slot(slot).build();
             let (updates_sndr, updates_rcvr) = mpsc::channel(100);
             let pubsub_client =
                 ChainPubsubClientMock::new(updates_sndr, updates_rcvr);
-            (rpc_client, pubsub_client)
+            let photon_client = PhotonClientMock::new();
+            (rpc_client, pubsub_client, photon_client)
         };
 
         let lifecycle_mode = LifecycleMode::Ephemeral;
@@ -79,6 +89,7 @@ impl TestContext {
                 RemoteAccountProvider::try_from_clients_and_mode(
                     rpc_client.clone(),
                     pubsub_client.clone(),
+                    Some(photon_client.clone()),
                     tx,
                     &config,
                     subscribed_accounts,
@@ -120,6 +131,7 @@ impl TestContext {
         Self {
             rpc_client,
             pubsub_client,
+            photon_client,
             chainlink: Arc::new(chainlink),
             bank,
             cloner,

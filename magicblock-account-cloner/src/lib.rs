@@ -111,6 +111,7 @@ impl ChainlinkCloner {
             data: Some(request.account.data().to_owned()),
             executable: Some(request.account.executable()),
             delegated: Some(request.account.delegated()),
+            compressed: Some(request.account.compressed()),
             confined: Some(request.account.confined()),
             remote_slot: Some(request.account.remote_slot()),
         };

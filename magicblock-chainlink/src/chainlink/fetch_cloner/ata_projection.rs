@@ -11,15 +11,17 @@ use tokio::task::JoinSet;
 use super::{delegation, types::AccountWithCompanion, FetchCloner};
 use crate::{
     cloner::{AccountCloneRequest, Cloner},
-    remote_account_provider::{ChainPubsubClient, ChainRpcClient},
+    remote_account_provider::{
+        photon_client::PhotonClient, ChainPubsubClient, ChainRpcClient,
+    },
 };
 
 /// Resolves ATAs with eATA projection.
 /// For each detected ATA, we derive the eATA PDA, subscribe to both,
 /// and, if the ATA is delegated to us and the eATA exists, we clone the eATA data
 /// into the ATA in the bank.
-pub(crate) async fn resolve_ata_with_eata_projection<T, U, V, C>(
-    this: &FetchCloner<T, U, V, C>,
+pub(crate) async fn resolve_ata_with_eata_projection<T, U, V, C, P>(
+    this: &FetchCloner<T, U, V, C, P>,
     atas: Vec<(
         Pubkey,
         AccountSharedData,
@@ -34,6 +36,7 @@ where
     U: ChainPubsubClient,
     V: AccountsBank,
     C: Cloner,
+    P: PhotonClient,
 {
     if atas.is_empty() {
         return vec![];

@@ -6,11 +6,11 @@ This crate centralizes the loading, parsing, and validation of configuration set
 
 ## Features
 
-* **Layered Configuration**: seamlessly merges settings from Defaults, TOML files, Environment Variables, and CLI arguments.
-* **Strict Precedence**: **CLI > Environment > File > Defaults**. Explicit user intent always wins.
-* **Overlay Logic**: CLI arguments act as an "overlay," modifying only the specific fields provided without resetting the rest of the configuration.
-* **Type Safety**: uses `serde` for deserialization, supporting complex types like Keypairs, Enums, and URL aliases.
-* **Domain Separation**: configuration is modularized into logical sections (Validator, Ledger, AccountsDB, etc.).
+- **Layered Configuration**: seamlessly merges settings from Defaults, TOML files, Environment Variables, and CLI arguments.
+- **Strict Precedence**: **CLI > Environment > File > Defaults**. Explicit user intent always wins.
+- **Overlay Logic**: CLI arguments act as an "overlay," modifying only the specific fields provided without resetting the rest of the configuration.
+- **Type Safety**: uses `serde` for deserialization, supporting complex types like Keypairs, Enums, and URL aliases.
+- **Domain Separation**: configuration is modularized into logical sections (Validator, Ledger, AccountsDB, etc.).
 
 ## Usage
 
@@ -47,16 +47,16 @@ The crate resolves configuration values in the following order (highest priority
 
 Environment variables are mapped using the `figment` provider.
 
-  * **Prefix**: `MBV_`
-  * **Separator**: Use a double underscore `__` to denote hierarchy (nesting).
-  * **Field Names**: Use `UPPER_SNAKE_CASE` for the actual field names.
+- **Prefix**: `MBV_`
+- **Separator**: Use a double underscore `__` to denote hierarchy (nesting).
+- **Field Names**: Use `UPPER_SNAKE_CASE` for the actual field names.
 
 ### Examples
 
-| Struct Field | Config Section | Environment Variable |
-| :--- | :--- | :--- |
-| `validator.basefee` | `[validator]` | `MBV_VALIDATOR__BASEFEE` |
-| `ledger.block_time` | `[ledger]` | `MBV_LEDGER__BLOCK_TIME` |
+| Struct Field                   | Config Section      | Environment Variable                |
+| :----------------------------- | :------------------ | :---------------------------------- |
+| `validator.basefee`            | `[validator]`       | `MBV_VALIDATOR__BASEFEE`            |
+| `ledger.block_time`            | `[ledger]`          | `MBV_LEDGER__BLOCK_TIME`            |
 | `chain_operation.country_code` | `[chain-operation]` | `MBV_CHAIN_OPERATION__COUNTRY_CODE` |
 
 ## Configuration File
@@ -86,13 +86,14 @@ block-size = "block256"
 
 The configuration is split into domain-specific structs available in `src/config/`:
 
-  * **`ValidatorConfig`**: Identity keypair, base fees.
-  * **`LedgerConfig`**: Block production timing, verification settings.
-  * **`AccountsDbConfig`**: Snapshotting, indexing, and storage size tuning.
-  * **`ChainOperationConfig`**: On-chain registration details (Country code, FQDN).
-  * **`ChainLinkConfig`**: Account cloning settings.
-  * **`CommitStrategy`**: Compute unit pricing for base chain commits.
-  * **`TaskSchedulerConfig`**: Task scheduling settings.
+- **`ValidatorConfig`**: Identity keypair, base fees.
+- **`LedgerConfig`**: Block production timing, verification settings.
+- **`AccountsDbConfig`**: Snapshotting, indexing, and storage size tuning.
+- **`ChainOperationConfig`**: On-chain registration details (Country code, FQDN).
+- **`ChainLinkConfig`**: Account cloning settings.
+- **`CommitStrategy`**: Compute unit pricing for base chain commits.
+- **`TaskSchedulerConfig`**: Task scheduling settings.
+- **`CompressionConfig`**: Compressed accounts and interactions settings.
 
 ## Testing
 
@@ -101,4 +102,3 @@ This crate includes a comprehensive test suite verifying the precedence logic, o
 ```bash
 cargo test -p magicblock-config
 ```
-

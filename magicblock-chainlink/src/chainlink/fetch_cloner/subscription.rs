@@ -5,7 +5,8 @@ use solana_pubkey::Pubkey;
 use tokio::task::JoinSet;
 
 use crate::remote_account_provider::{
-    ChainPubsubClient, ChainRpcClient, RemoteAccountProvider,
+    photon_client::PhotonClient, ChainPubsubClient, ChainRpcClient,
+    RemoteAccountProvider,
 };
 
 pub(crate) enum CancelStrategy {
@@ -101,8 +102,12 @@ impl fmt::Display for CancelStrategy {
     }
 }
 
-pub(crate) async fn cancel_subs<T: ChainRpcClient, U: ChainPubsubClient>(
-    provider: &Arc<RemoteAccountProvider<T, U>>,
+pub(crate) async fn cancel_subs<
+    T: ChainRpcClient,
+    U: ChainPubsubClient,
+    P: PhotonClient,
+>(
+    provider: &Arc<RemoteAccountProvider<T, U, P>>,
     strategy: CancelStrategy,
 ) {
     if strategy.is_empty() {

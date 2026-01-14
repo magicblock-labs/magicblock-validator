@@ -1,8 +1,6 @@
-use std::{collections::HashSet, time::Duration};
+use std::collections::HashSet;
 
-use magicblock_config::{
-    config::LifecycleMode, consts::DEFAULT_RESUBSCRIPTION_DELAY_MS,
-};
+use magicblock_config::config::LifecycleMode;
 use solana_pubkey::Pubkey;
 
 use super::{RemoteAccountProviderError, RemoteAccountProviderResult};
@@ -22,9 +20,6 @@ pub struct RemoteAccountProviderConfig {
     /// Set of program accounts to always subscribe to as backup
     /// for direct account subs
     program_subs: HashSet<Pubkey>,
-    /// Delay between resubscribing to accounts after a pubsub
-    /// reconnection
-    resubscription_delay: Duration,
 }
 
 impl RemoteAccountProviderConfig {
@@ -53,9 +48,6 @@ impl RemoteAccountProviderConfig {
             subscribed_accounts_lru_capacity,
             lifecycle_mode,
             enable_subscription_metrics,
-            resubscription_delay: std::time::Duration::from_millis(
-                DEFAULT_RESUBSCRIPTION_DELAY_MS,
-            ),
             ..Default::default()
         })
     }
@@ -65,11 +57,6 @@ impl RemoteAccountProviderConfig {
             lifecycle_mode,
             ..Default::default()
         }
-    }
-
-    pub fn with_resubscription_delay(mut self, delay: Duration) -> Self {
-        self.resubscription_delay = delay;
-        self
     }
 
     pub fn lifecycle_mode(&self) -> &LifecycleMode {
@@ -87,10 +74,6 @@ impl RemoteAccountProviderConfig {
     pub fn program_subs(&self) -> &HashSet<Pubkey> {
         &self.program_subs
     }
-
-    pub fn resubscription_delay(&self) -> Duration {
-        self.resubscription_delay
-    }
 }
 
 impl Default for RemoteAccountProviderConfig {
@@ -101,9 +84,6 @@ impl Default for RemoteAccountProviderConfig {
             lifecycle_mode: LifecycleMode::default(),
             enable_subscription_metrics: true,
             program_subs: vec![dlp::id()].into_iter().collect(),
-            resubscription_delay: std::time::Duration::from_millis(
-                DEFAULT_RESUBSCRIPTION_DELAY_MS,
-            ),
         }
     }
 }

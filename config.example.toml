@@ -2,7 +2,7 @@
 # MagicBlock Validator Configuration
 # ==============================================================================
 # This file serves as a reference for all available configuration options.
-# ALL FIELDS ARE OPTIONAL. If removed, the "Default" value listed in the
+# ALL FIELDS ARE OPTIONAL. If removed, the "Default" value listed in the 
 # comments will be used.
 #
 # CONFIGURATION PRECEDENCE (Highest to Lowest):
@@ -59,9 +59,9 @@ lifecycle = "ephemeral"
 # Example format: grpcs://<network>.helius-rpc.com?api-key=<YOUR_API_KEY>
 # See Helius gRPC docs for available network endpoints.
 remotes = [
-  "https://api.devnet.solana.com",
-  "wss://api.devnet.solana.com",
-  "grpcs://laserstream-devnet-ewr.helius-rpc.com?api-key=YOUR_API_KEY",
+    "https://api.devnet.solana.com",
+    "wss://api.devnet.solana.com",
+    "grpcs://laserstream-devnet-ewr.helius-rpc.com?api-key=YOUR_API_KEY",
 ]
 
 # Root directory for application storage (ledger, accountsdb, snapshots).
@@ -211,14 +211,6 @@ max-monitored-accounts = 1000
 # Env: MBV_CHAINLINK__REMOVE_CONFINED_ACCOUNTS
 remove-confined-accounts = false
 
-# Delay between resubscribing to accounts after a pubsub reconnection.
-# This throttles the rate at which we resubscribe to prevent overwhelming the RPC provider.
-# Supports humantime format (e.g. "50ms", "200ms", "1s").
-# For example, with 200ms delay, resubscribing to 1000 accounts would take ~3.3 minutes.
-# Default: "200ms"
-# Env: MBV_CHAINLINK__RESUBSCRIPTION_DELAY
-# resubscription-delay = "200ms"
-
 # ==============================================================================
 # On-Chain Registration (Optional)
 # ==============================================================================
@@ -252,6 +244,20 @@ reset = false
 # Default: "10ms"
 # Env: MBV_TASK_SCHEDULER__MIN_INTERVAL
 min-interval = "10ms"
+
+# ==============================================================================
+# Compression Service
+# ==============================================================================
+[compression]
+# The URL of the Photon indexer.
+# Default: None
+# Env: MBV_COMPRESSION__PHOTON_URL
+# photon-url = "http://localhost:8784"
+
+# The API key for the Photon indexer.
+# Default: None
+# Env: MBV_COMPRESSION__API_KEY
+# api-key = "your-api-key"
 
 # ==============================================================================
 # Pre-loaded Programs

@@ -198,7 +198,6 @@ pub struct ChainPubsubClientImpl {
     actor: Arc<ChainPubsubActor>,
     updates_rcvr: Arc<Mutex<Option<mpsc::Receiver<SubscriptionUpdate>>>>,
     client_id: String,
-    resubscription_delay: Duration,
 }
 
 impl ChainPubsubClientImpl {
@@ -207,7 +206,6 @@ impl ChainPubsubClientImpl {
         client_id: String,
         abort_sender: mpsc::Sender<()>,
         commitment: CommitmentConfig,
-        resubscription_delay: Duration,
     ) -> RemoteAccountProviderResult<Self> {
         let (actor, updates) = ChainPubsubActor::new_from_url(
             pubsub_url,
@@ -220,7 +218,6 @@ impl ChainPubsubClientImpl {
             actor: Arc::new(actor),
             updates_rcvr: Arc::new(Mutex::new(Some(updates))),
             client_id,
-            resubscription_delay,
         })
     }
 }
@@ -352,8 +349,8 @@ impl ReconnectableClient for ChainPubsubClientImpl {
     ) -> RemoteAccountProviderResult<()> {
         for pubkey in pubkeys {
             self.subscribe(pubkey).await?;
-            // Configurable delay to prevent overwhelming the RPC provider during reconnection
-            tokio::time::sleep(self.resubscription_delay).await;
+            // Don't spam the RPC provider - for 5,000 accounts we would take 250 secs = ~4 minutes
+            tokio::time::sleep(Duration::from_millis(50)).await;
         }
         Ok(())
     }
@@ -385,7 +382,6 @@ pub mod mock {
         updates_sndr: mpsc::Sender<SubscriptionUpdate>,
         updates_rcvr: Arc<Mutex<Option<mpsc::Receiver<SubscriptionUpdate>>>>,
         subscribed_pubkeys: Arc<Mutex<HashSet<Pubkey>>>,
-        subscribed_programs: Arc<Mutex<HashSet<Pubkey>>>,
         subscription_count_at_disconnect: Arc<Mutex<usize>>,
         connected: Arc<Mutex<bool>>,
         pending_resubscribe_failures: Arc<Mutex<usize>>,
@@ -401,7 +397,6 @@ pub mod mock {
                 updates_sndr,
                 updates_rcvr: Arc::new(Mutex::new(Some(updates_rcvr))),
                 subscribed_pubkeys: Arc::new(Mutex::new(HashSet::new())),
-                subscribed_programs: Arc::new(Mutex::new(HashSet::new())),
                 subscription_count_at_disconnect: Arc::new(Mutex::new(0)),
                 connected: Arc::new(Mutex::new(true)),
                 pending_resubscribe_failures: Arc::new(Mutex::new(0)),
@@ -469,10 +464,6 @@ pub mod mock {
                 && self.subscribed_pubkeys.lock().len()
                     == *self.subscription_count_at_disconnect.lock()
         }
-
-        pub fn subscribed_program_ids(&self) -> HashSet<Pubkey> {
-            self.subscribed_programs.lock().clone()
-        }
     }
 
     #[async_trait]
@@ -504,7 +495,7 @@ pub mod mock {
 
         async fn subscribe_program(
             &self,
-            program_id: Pubkey,
+            _program_id: Pubkey,
         ) -> RemoteAccountProviderResult<()> {
             if !*self.connected.lock() {
                 return Err(
@@ -514,8 +505,7 @@ pub mod mock {
                     ),
                 );
             }
-            let mut subscribed_programs = self.subscribed_programs.lock();
-            subscribed_programs.insert(program_id);
+            // Program subscriptions don't track individual accounts in the mock
             Ok(())
         }
 

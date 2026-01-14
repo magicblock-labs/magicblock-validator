@@ -1,4 +1,5 @@
 use dyn_clone::DynClone;
+use log::debug;
 use magicblock_committor_program::{
     instruction_builder::{
         close_buffer::{create_close_ix, CreateCloseIxArgs},
@@ -19,7 +20,7 @@ use solana_instruction::Instruction;
 use solana_pubkey::Pubkey;
 use thiserror::Error;
 
-use crate::tasks::visitor::Visitor;
+use crate::tasks::{task_builder::CompressedData, visitor::Visitor};
 
 pub mod args_task;
 pub mod buffer_task;
@@ -34,8 +35,11 @@ pub use task_builder::TaskBuilderImpl;
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum TaskType {
     Commit,
+    CompressedCommit,
     Finalize,
+    CompressedFinalize,
     Undelegate,
+    CompressedUndelegate,
     Action,
 }
 
@@ -98,6 +102,18 @@ pub trait BaseTask: Send + Sync + DynClone + LabelValue {
     /// Calls [`Visitor`] with specific task type
     fn visit(&self, visitor: &mut dyn Visitor);
 
+    /// Returns true if task is compressed
+    fn is_compressed(&self) -> bool;
+
+    /// Sets compressed data for task
+    fn set_compressed_data(&mut self, compressed_data: CompressedData);
+
+    /// Gets compressed data for task
+    fn get_compressed_data(&self) -> Option<&CompressedData>;
+
+    /// Delegated account for task
+    fn delegated_account(&self) -> Option<Pubkey>;
+
     /// Resets commit id
     fn reset_commit_id(&mut self, commit_id: u64);
 }
@@ -120,10 +136,25 @@ pub struct CommitDiffTask {
 }
 
 #[derive(Clone)]
+pub struct CompressedCommitTask {
+    pub commit_id: u64,
+    pub allow_undelegation: bool,
+    pub committed_account: CommittedAccount,
+    pub compressed_data: CompressedData,
+}
+
+#[derive(Clone)]
 pub struct UndelegateTask {
     pub delegated_account: Pubkey,
     pub owner_program: Pubkey,
     pub rent_reimbursement: Pubkey,
+}
+
+#[derive(Clone)]
+pub struct CompressedUndelegateTask {
+    pub delegated_account: Pubkey,
+    pub owner_program: Pubkey,
+    pub compressed_data: CompressedData,
 }
 
 #[derive(Clone)]
@@ -132,12 +163,30 @@ pub struct FinalizeTask {
 }
 
 #[derive(Clone)]
+pub struct CompressedFinalizeTask {
+    pub delegated_account: Pubkey,
+    pub compressed_data: CompressedData,
+}
+
+#[derive(Clone)]
 pub struct BaseActionTask {
     pub action: BaseAction,
 }
 
+/// Task that will be executed on Base layer via arguments
+#[derive(Clone)]
+pub enum ArgsTask {
+    Commit(CommitTask),
+    CompressedCommit(CompressedCommitTask),
+    Finalize(FinalizeTask),
+    CompressedFinalize(CompressedFinalizeTask),
+    Undelegate(UndelegateTask), // Special action really
+    CompressedUndelegate(CompressedUndelegateTask),
+    BaseAction(BaseActionTask),
+}
+
 #[derive(Clone, Debug)]
-pub struct PreparationTask {
+pub struct BufferPreparationTask {
     pub commit_id: u64,
     pub pubkey: Pubkey,
     pub chunks: Chunks,
@@ -146,17 +195,25 @@ pub struct PreparationTask {
     pub committed_data: Vec<u8>,
 }
 
-impl PreparationTask {
+#[derive(Clone, Debug)]
+pub enum PreparationTask {
+    Buffer(BufferPreparationTask),
+    Compressed,
+}
+
+impl BufferPreparationTask {
     /// Returns initialization [`Instruction`]
     pub fn init_instruction(&self, authority: &Pubkey) -> Instruction {
-        // // SAFETY: as object_length internally uses only already allocated or static buffers,
-        // // and we don't use any fs writers, so the only error that may occur here is of kind
-        // // OutOfMemory or WriteZero. This is impossible due to:
-        // // Chunks::new panics if its size exceeds MAX_ACCOUNT_ALLOC_PER_INSTRUCTION_SIZE or 10_240
-        // // https://github.com/near/borsh-rs/blob/f1b75a6b50740bfb6231b7d0b1bd93ea58ca5452/borsh/src/ser/helpers.rs#L59
         let chunks_account_size =
-            borsh::object_length(&self.chunks).unwrap() as u64;
+            Chunks::struct_size(self.chunks.count()) as u64;
         let buffer_account_size = self.committed_data.len() as u64;
+        debug!("Chunks: {:?}", self.chunks.count().div_ceil(8));
+        debug!("Chunks: {:?}", std::mem::size_of::<usize>());
+        debug!("Chunks: {:?}", std::mem::size_of::<u16>());
+        debug!("Chunks count: {}", self.chunks.count());
+        debug!("Chunks chunk size: {}", self.chunks.chunk_size());
+        debug!("Chunks account size: {}", chunks_account_size);
+        debug!("Buffer account size: {}", buffer_account_size);
 
         let (instruction, _, _) = create_init_ix(CreateInitIxArgs {
             authority: *authority,
@@ -429,6 +486,9 @@ mod serialization_safety_test {
             buffer_task.preparation_state()
         else {
             panic!("invalid preparation state on creation!");
+        };
+        let PreparationTask::Buffer(preparation_task) = preparation_task else {
+            panic!("invalid preparation task on creation!");
         };
         assert_serializable(&preparation_task.init_instruction(&authority));
         for ix in preparation_task.realloc_instructions(&authority) {

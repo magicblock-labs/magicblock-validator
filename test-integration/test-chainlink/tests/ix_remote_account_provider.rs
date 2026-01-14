@@ -3,15 +3,15 @@ use magicblock_chainlink::{
     remote_account_provider::{
         chain_rpc_client::ChainRpcClientImpl,
         chain_updates_client::ChainUpdatesClient,
-        config::RemoteAccountProviderConfig, Endpoint, Endpoints,
-        RemoteAccountProvider, RemoteAccountUpdateSource,
+        config::RemoteAccountProviderConfig, photon_client::PhotonClientImpl,
+        Endpoint, Endpoints, RemoteAccountProvider, RemoteAccountUpdateSource,
     },
     submux::SubMuxClient,
     testing::utils::{
         airdrop, await_next_slot, current_slot, dump_remote_account_lamports,
         dump_remote_account_update_source, get_remote_account_lamports,
         get_remote_account_update_sources, init_logger, random_pubkey,
-        sleep_ms, PUBSUB_URL, RPC_URL,
+        sleep_ms, PHOTON_URL, PUBSUB_URL, RPC_URL,
     },
     AccountFetchOrigin,
 };
@@ -22,9 +22,11 @@ use solana_rpc_client_api::{
 use solana_sdk::commitment_config::CommitmentConfig;
 use tokio::sync::mpsc;
 
-async fn init_remote_account_provider(
-) -> RemoteAccountProvider<ChainRpcClientImpl, SubMuxClient<ChainUpdatesClient>>
-{
+async fn init_remote_account_provider() -> RemoteAccountProvider<
+    ChainRpcClientImpl,
+    SubMuxClient<ChainUpdatesClient>,
+    PhotonClientImpl,
+> {
     let (fwd_tx, _fwd_rx) = mpsc::channel(100);
     let endpoints_vec = vec![
         Endpoint::Rpc {
@@ -35,11 +37,16 @@ async fn init_remote_account_provider(
             url: PUBSUB_URL.to_string(),
             label: "test-ws".to_string(),
         },
+        Endpoint::Compression {
+            url: PHOTON_URL.to_string(),
+            api_key: None,
+        },
     ];
     let endpoints = Endpoints::from(endpoints_vec.as_slice());
     RemoteAccountProvider::<
         ChainRpcClientImpl,
         SubMuxClient<ChainUpdatesClient>,
+        PhotonClientImpl,
     >::try_from_urls_and_config(
         &endpoints,
         CommitmentConfig::confirmed(),
@@ -47,7 +54,10 @@ async fn init_remote_account_provider(
         &RemoteAccountProviderConfig::default_with_lifecycle_mode(
             LifecycleMode::Ephemeral,
         ),
-    ).await.expect("Failed to create RemoteAccountProvider").unwrap()
+    )
+    .await
+    .expect("Failed to create RemoteAccountProvider")
+    .unwrap()
 }
 
 #[tokio::test]

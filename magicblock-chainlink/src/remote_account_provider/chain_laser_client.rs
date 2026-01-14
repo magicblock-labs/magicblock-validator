@@ -1,6 +1,6 @@
 use std::{
     collections::HashSet,
-    sync::{Arc, Mutex},
+    sync::{atomic::AtomicU64, Arc, Mutex},
 };
 
 use async_trait::async_trait;
@@ -10,7 +10,7 @@ use solana_pubkey::Pubkey;
 use tokio::sync::{mpsc, oneshot};
 
 use crate::remote_account_provider::{
-    chain_laser_actor::{ChainLaserActor, Slots},
+    chain_laser_actor::ChainLaserActor,
     pubsub_common::{ChainPubsubActorMessage, SubscriptionUpdate},
     ChainPubsubClient, ReconnectableClient, RemoteAccountProviderError,
     RemoteAccountProviderResult,
@@ -33,7 +33,7 @@ impl ChainLaserClientImpl {
         api_key: &str,
         commitment: CommitmentLevel,
         abort_sender: mpsc::Sender<()>,
-        slots: Option<Slots>,
+        chain_slot: Option<Arc<AtomicU64>>,
     ) -> RemoteAccountProviderResult<Self> {
         let (actor, messages, updates) = ChainLaserActor::new_from_url(
             pubsub_url,
@@ -41,7 +41,7 @@ impl ChainLaserClientImpl {
             api_key,
             commitment,
             abort_sender,
-            slots,
+            chain_slot,
         )?;
         let client = Self {
             updates: Arc::new(Mutex::new(Some(updates))),
