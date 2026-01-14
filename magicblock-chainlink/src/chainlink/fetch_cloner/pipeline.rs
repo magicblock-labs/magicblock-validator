@@ -64,38 +64,40 @@ where
     ExistingSubs { existing_subs }
 }
 
+/// Helper struct to hold classification buckets
+#[derive(Default)]
+struct ClassificationBuckets {
+    not_found: Vec<(Pubkey, u64)>,
+    plain: Vec<AccountCloneRequest>,
+    owned_by_deleg: Vec<(Pubkey, AccountSharedData, u64)>,
+    owned_by_deleg_compressed: Vec<(Pubkey, AccountSharedData, u64)>,
+    programs: Vec<(Pubkey, AccountSharedData, u64)>,
+    atas: Vec<(
+        Pubkey,
+        AccountSharedData,
+        magicblock_core::token_programs::AtaInfo,
+        u64,
+    )>,
+}
+
 /// Classifies fetched remote accounts into categories
 pub(crate) fn classify_remote_accounts(
     accs: Vec<RemoteAccount>,
     pubkeys: &[Pubkey],
 ) -> ClassifiedAccounts {
-    let mut not_found = Vec::new();
-    let mut plain = Vec::new();
-    let mut owned_by_deleg = Vec::new();
-    let mut owned_by_deleg_compressed = Vec::new();
-    let mut programs = Vec::new();
-    let mut atas = Vec::new();
+    let mut buckets = ClassificationBuckets::default();
 
     for (acc, &pubkey) in accs.into_iter().zip(pubkeys) {
-        classify_single_account(
-            acc,
-            pubkey,
-            &mut not_found,
-            &mut plain,
-            &mut owned_by_deleg,
-            &mut owned_by_deleg_compressed,
-            &mut programs,
-            &mut atas,
-        );
+        classify_single_account(acc, pubkey, &mut buckets);
     }
 
     ClassifiedAccounts {
-        not_found,
-        plain,
-        owned_by_deleg,
-        owned_by_deleg_compressed,
-        programs,
-        atas,
+        not_found: buckets.not_found,
+        plain: buckets.plain,
+        owned_by_deleg: buckets.owned_by_deleg,
+        owned_by_deleg_compressed: buckets.owned_by_deleg_compressed,
+        programs: buckets.programs,
+        atas: buckets.atas,
     }
 }
 
@@ -104,22 +106,12 @@ pub(crate) fn classify_remote_accounts(
 fn classify_single_account(
     acc: RemoteAccount,
     pubkey: Pubkey,
-    not_found: &mut Vec<(Pubkey, u64)>,
-    plain: &mut Vec<AccountCloneRequest>,
-    owned_by_deleg: &mut Vec<(Pubkey, AccountSharedData, u64)>,
-    owned_by_deleg_compressed: &mut Vec<(Pubkey, AccountSharedData, u64)>,
-    programs: &mut Vec<(Pubkey, AccountSharedData, u64)>,
-    atas: &mut Vec<(
-        Pubkey,
-        AccountSharedData,
-        magicblock_core::token_programs::AtaInfo,
-        u64,
-    )>,
+    buckets: &mut ClassificationBuckets,
 ) {
     use RemoteAccount::*;
     match acc {
         NotFound(slot) => {
-            not_found.push((pubkey, slot));
+            buckets.not_found.push((pubkey, slot));
         }
         Found(remote_account_state) => {
             match remote_account_state.account {
@@ -128,7 +120,7 @@ fn classify_single_account(
 
                     if account_shared_data.owner().eq(&dlp::id()) {
                         // Account owned by delegation program
-                        owned_by_deleg.push((
+                        buckets.owned_by_deleg.push((
                             pubkey,
                             account_shared_data,
                             slot,
@@ -137,7 +129,7 @@ fn classify_single_account(
                         .owner()
                         .eq(&compressed_delegation_client::id())
                     {
-                        owned_by_deleg_compressed.push((
+                        buckets.owned_by_deleg_compressed.push((
                             pubkey,
                             account_shared_data,
                             slot,
@@ -148,16 +140,21 @@ fn classify_single_account(
                             pubkey,
                             account_shared_data,
                             slot,
-                            programs,
+                            &mut buckets.programs,
                         );
                     } else if let Some(ata) =
                         is_ata(&pubkey, &account_shared_data)
                     {
                         // Associated Token Account
-                        atas.push((pubkey, account_shared_data, ata, slot));
+                        buckets.atas.push((
+                            pubkey,
+                            account_shared_data,
+                            ata,
+                            slot,
+                        ));
                     } else {
                         // Plain account
-                        plain.push(AccountCloneRequest {
+                        buckets.plain.push(AccountCloneRequest {
                             pubkey,
                             account: account_shared_data,
                             commit_frequency_ms: None,
