@@ -176,7 +176,7 @@ async fn test_fee_charged_for_failed_transaction() {
         .transaction_status
         .recv_timeout(TIMEOUT)
         .unwrap();
-    assert!(status.result.result.is_err(), "Transaction should fail");
+    assert!(status.meta.status.is_err(), "Transaction should fail");
     assert_eq!(
         env.get_payer().lamports(),
         initial_bal - BASE_FEE,
@@ -212,7 +212,7 @@ async fn test_escrow_charged_for_failed_transaction() {
         .transaction_status
         .recv_timeout(TIMEOUT)
         .unwrap();
-    assert!(status.result.result.is_err(), "Transaction should fail");
+    assert!(status.meta.status.is_err(), "Transaction should fail");
     assert_eq!(
         env.get_account(escrow).lamports(),
         initial_escrow_bal - BASE_FEE,
@@ -246,8 +246,8 @@ async fn test_transaction_gasless_mode() {
         .transaction_status
         .recv_timeout(TIMEOUT)
         .unwrap();
-    assert_eq!(status.signature, sig);
-    assert!(status.result.result.is_ok());
+    assert_eq!(status.txn.signatures()[0], sig);
+    assert!(status.meta.status.is_ok());
     assert_eq!(
         env.get_payer().lamports(),
         initial_bal,
@@ -281,7 +281,7 @@ async fn test_transaction_gasless_mode_with_non_existent_account() {
         .transaction_status
         .recv_timeout(TIMEOUT)
         .unwrap();
-    assert!(status.result.result.is_ok());
+    assert!(status.meta.status.is_ok());
     assert_eq!(
         env.get_payer().lamports(),
         initial_bal,

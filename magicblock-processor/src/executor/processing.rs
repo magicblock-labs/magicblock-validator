@@ -238,22 +238,7 @@ impl super::TransactionExecutor {
         meta: TransactionStatusMeta,
     ) {
         let signature = *txn.signature();
-        let status = TransactionStatus {
-            signature,
-            slot: self.processor.slot,
-            result: TransactionExecutionResult {
-                result: meta.status.clone(),
-                accounts: txn
-                    .message()
-                    .account_keys()
-                    .iter()
-                    .copied()
-                    .collect(),
-                logs: meta.log_messages.clone(),
-            },
-        };
-
-        if let Err(error) = self.ledger.write_transaction(
+        let index = match self.ledger.write_transaction(
             signature,
             self.processor.slot,
             &txn,
@@ -266,15 +251,13 @@ impl super::TransactionExecutor {
                 return;
             }
         };
+
         let status = TransactionStatus {
             slot: self.processor.slot,
             index,
             txn,
             meta,
-        ) {
-            error!("Failed to commit transaction to ledger: {error}");
-            return;
-        }
+        };
 
         // Notify listeners
         let _ = self.transaction_tx.send(status);

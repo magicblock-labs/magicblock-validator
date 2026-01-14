@@ -8,7 +8,6 @@ use solana_program::{
 };
 use solana_pubkey::Pubkey;
 use solana_signature::Signature;
-use solana_svm_transaction::svm_message::SVMMessage;
 use test_kit::{ExecutionTestEnv, Signer};
 
 const ACCOUNTS_COUNT: usize = 8;
@@ -77,8 +76,8 @@ async fn test_transaction_status_update() {
         .recv_timeout(TIMEOUT)
         .expect("Status update missing");
 
-    assert_eq!(status.signature, sig);
-    let logs = status.result.logs.expect("Logs missing");
+    assert_eq!(status.txn.signatures()[0], sig);
+    let logs = status.meta.log_messages.as_ref().expect("Logs missing");
     assert!(logs.len() > ACCOUNTS_COUNT, "Insufficient logs produced");
 }
 
@@ -97,7 +96,14 @@ async fn test_transaction_modifies_accounts() {
         .expect("Status update missing");
 
     // Skip fee payer, check the guinea accounts
-    for pubkey in status.result.accounts.iter().skip(1).take(ACCOUNTS_COUNT) {
+    let account_keys: Vec<_> = status
+        .txn
+        .message()
+        .account_keys()
+        .iter()
+        .copied()
+        .collect();
+    for pubkey in account_keys.iter().skip(1).take(ACCOUNTS_COUNT) {
         let account = env.get_account(*pubkey);
         assert_eq!(account.data()[0], 42, "Account data mismatch");
     }

@@ -118,12 +118,12 @@ async fn collect_statuses(
         .await
         {
             assert!(
-                status.result.result.is_ok(),
+                status.meta.status.is_ok(),
                 "[{context}] Transaction {} failed: {:?}",
-                status.signature,
-                status.result.result
+                status.txn.signatures()[0],
+                status.meta.status
             );
-            results.push(status.signature);
+            results.push(status.txn.signatures()[0]);
         }
     }
     results
