@@ -10,7 +10,7 @@ use std::{
 };
 
 use borsh::to_vec;
-use dlp::pda::ephemeral_balance_pda_from_payer;
+use dlp::{args::CommitStateArgs, pda::ephemeral_balance_pda_from_payer};
 use futures::future::join_all;
 use magicblock_committor_program::pdas;
 use magicblock_committor_service::{
@@ -35,6 +35,7 @@ use magicblock_program::{
     },
     validator::validator_authority_id,
 };
+use magicblock_rpc_client::MagicBlockSendTransactionConfig;
 use magicblock_table_mania::TableMania;
 use program_flexi_counter::{
     instruction::FlexiCounterInstruction,
@@ -829,6 +830,171 @@ async fn test_commit_id_actions_cpi_limit_errors_recovery() {
         &invalidated_keys,
     )
     .await;
+}
+
+#[tokio::test]
+async fn test_commit_unfinalized_account_recovery() {
+    let TestEnv {
+        fixture,
+        mut intent_executor,
+        task_info_fetcher: _,
+        pre_test_tablemania_state: _,
+    } = TestEnv::setup().await;
+
+    // Prepare multiple counters; each needs an escrow (payer) to be able to execute base actions.
+    // We also craft unique on-chain data so we can verify post-commit state exactly.
+    let (counter_auth, account) = setup_counter(40, None).await;
+    setup_payer_with_keypair(&counter_auth, fixture.rpc_client.get_inner())
+        .await;
+    let pda = FlexiCounter::pda(&counter_auth.pubkey()).0;
+
+    // Commit account without finalization
+    // This simulates finalization stage failure
+    {
+        let commit_allow_undelegation_ix =
+            dlp::instruction_builder::commit_state(
+                fixture.authority.pubkey(),
+                pda,
+                account.owner,
+                CommitStateArgs {
+                    nonce: 1,
+                    lamports: account.lamports,
+                    allow_undelegation: false,
+                    data: account.data.clone(),
+                },
+            );
+
+        let blockhash =
+            fixture.rpc_client.get_latest_blockhash().await.unwrap();
+        let tx = Transaction::new_signed_with_payer(
+            &[commit_allow_undelegation_ix],
+            Some(&fixture.authority.pubkey()),
+            &[&fixture.authority],
+            blockhash,
+        );
+
+        let result = fixture
+            .rpc_client
+            .send_transaction(
+                &tx,
+                &MagicBlockSendTransactionConfig::ensure_committed(),
+            )
+            .await;
+        assert!(result.is_ok());
+    }
+
+    // Now simulate user sending new intent
+    let committed_account = CommittedAccount {
+        pubkey: pda,
+        account,
+    };
+    let intent = create_intent(vec![committed_account], false);
+    let result = intent_executor
+        .execute(intent, None::<IntentPersisterImpl>)
+        .await;
+    assert!(result.inner.is_ok());
+    assert!(matches!(
+        result.inner.unwrap(),
+        ExecutionOutput::SingleStage(_)
+    ));
+
+    assert_eq!(result.patched_errors.len(), 2);
+    assert!(matches!(
+        result.patched_errors[0],
+        TransactionStrategyExecutionError::UnfinalizedAccountError(_, _)
+    ));
+    assert!(matches!(
+        result.patched_errors[1],
+        TransactionStrategyExecutionError::CommitIDError(_, _)
+    ))
+}
+
+#[tokio::test]
+async fn test_commit_unfinalized_account_recovery_two_stage() {
+    let TestEnv {
+        fixture,
+        mut intent_executor,
+        task_info_fetcher: _,
+        pre_test_tablemania_state: _,
+    } = TestEnv::setup().await;
+
+    // Prepare multiple counters; each needs an escrow (payer) to be able to execute base actions.
+    // We also craft unique on-chain data so we can verify post-commit state exactly.
+    let counters = (0..8).map(async |_| {
+        let (counter_auth, account) = setup_counter(40, None).await;
+        setup_payer_with_keypair(&counter_auth, fixture.rpc_client.get_inner())
+            .await;
+        let pda = FlexiCounter::pda(&counter_auth.pubkey()).0;
+        (counter_auth, pda, account)
+    });
+    let counters: Vec<(_, _, _)> = join_all(counters).await;
+
+    // Commit account without finalization
+    // This simulates finalization stage failure
+    {
+        let commit_allow_undelegation_ix =
+            dlp::instruction_builder::commit_state(
+                fixture.authority.pubkey(),
+                counters[0].1,
+                counters[0].2.owner,
+                CommitStateArgs {
+                    nonce: 1,
+                    lamports: counters[0].2.lamports,
+                    allow_undelegation: false,
+                    data: counters[0].2.data.clone(),
+                },
+            );
+
+        let blockhash =
+            fixture.rpc_client.get_latest_blockhash().await.unwrap();
+        let tx = Transaction::new_signed_with_payer(
+            &[commit_allow_undelegation_ix],
+            Some(&fixture.authority.pubkey()),
+            &[&fixture.authority],
+            blockhash,
+        );
+
+        let result = fixture
+            .rpc_client
+            .send_transaction(
+                &tx,
+                &MagicBlockSendTransactionConfig::ensure_committed(),
+            )
+            .await;
+        assert!(result.is_ok());
+    }
+
+    // Now simulate user sending new intent
+    let committed_accounts = counters
+        .into_iter()
+        .map(|el| CommittedAccount {
+            pubkey: el.1,
+            account: el.2,
+        })
+        .collect();
+    let intent = create_intent(committed_accounts, true);
+
+    let result = intent_executor
+        .execute(intent, None::<IntentPersisterImpl>)
+        .await;
+    assert!(result.inner.is_ok());
+    assert!(matches!(
+        result.inner.unwrap(),
+        ExecutionOutput::TwoStage {
+            commit_signature: _,
+            finalize_signature: _
+        }
+    ));
+
+    assert_eq!(result.patched_errors.len(), 2);
+    assert!(matches!(
+        result.patched_errors[0],
+        TransactionStrategyExecutionError::UnfinalizedAccountError(_, _)
+    ));
+    assert!(matches!(
+        result.patched_errors[1],
+        TransactionStrategyExecutionError::CommitIDError(_, _)
+    ))
 }
 
 fn failing_undelegate_action(
