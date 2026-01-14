@@ -15,14 +15,16 @@ use futures::future::join_all;
 use magicblock_committor_program::pdas;
 use magicblock_committor_service::{
     intent_executor::{
-        error::TransactionStrategyExecutionError,
-        task_info_fetcher::{CacheTaskInfoFetcher, TaskInfoFetcher},
+        error::{IntentExecutorError, TransactionStrategyExecutionError},
+        task_info_fetcher::{
+            CacheTaskInfoFetcher, TaskInfoFetcher, TaskInfoFetcherError,
+        },
         ExecutionOutput, IntentExecutionResult, IntentExecutor,
         IntentExecutorImpl,
     },
     persist::IntentPersisterImpl,
     tasks::{
-        task_builder::{TaskBuilderImpl, TasksBuilder},
+        task_builder::{TaskBuilderError, TaskBuilderImpl, TasksBuilder},
         task_strategist::{TaskStrategist, TransactionStrategy},
     },
     transaction_preparator::TransactionPreparatorImpl,
@@ -122,17 +124,23 @@ async fn test_commit_id_error_parsing() {
         pre_test_tablemania_state: _,
     } = TestEnv::setup().await;
     let (counter_auth, account) = setup_counter(COUNTER_SIZE, None).await;
+    let remote_slot = Default::default();
+
     let intent = create_intent(
         vec![CommittedAccount {
             pubkey: FlexiCounter::pda(&counter_auth.pubkey()).0,
             account,
+            remote_slot,
         }],
         true,
     );
 
     // Invalidate ids before execution
     task_info_fetcher
-        .fetch_next_commit_ids(&intent.get_committed_pubkeys().unwrap())
+        .fetch_next_commit_ids(
+            &intent.get_committed_pubkeys().unwrap(),
+            remote_slot,
+        )
         .await
         .unwrap();
 
@@ -182,6 +190,7 @@ async fn test_undelegation_error_parsing() {
         vec![CommittedAccount {
             pubkey: FlexiCounter::pda(&counter_auth.pubkey()).0,
             account,
+            remote_slot: Default::default(),
         }],
         true,
     );
@@ -230,6 +239,7 @@ async fn test_action_error_parsing() {
     let committed_account = CommittedAccount {
         pubkey: FlexiCounter::pda(&counter_auth.pubkey()).0,
         account,
+        remote_slot: Default::default(),
     };
 
     // Create Intent with invalid action
@@ -297,6 +307,7 @@ async fn test_cpi_limits_error_parsing() {
         .map(|(counter, account)| CommittedAccount {
             pubkey: FlexiCounter::pda(&counter.pubkey()).0,
             account: account.clone(),
+            remote_slot: Default::default(),
         })
         .collect();
 
@@ -329,6 +340,54 @@ async fn test_cpi_limits_error_parsing() {
 }
 
 #[tokio::test]
+async fn test_min_context_slot_not_reached_error_parsing() {
+    const COUNTER_SIZE: u64 = 70;
+    const EXPECTED_ERR_MSG: &str = "Minimum context slot";
+    const REMOTE_SLOT: u64 = 1_000_000_000;
+
+    let TestEnv {
+        fixture: _,
+        mut intent_executor,
+        task_info_fetcher: _,
+        pre_test_tablemania_state: _,
+    } = TestEnv::setup().await;
+    let (counter_auth, account) = setup_counter(COUNTER_SIZE, None).await;
+
+    let intent = create_intent(
+        vec![CommittedAccount {
+            pubkey: FlexiCounter::pda(&counter_auth.pubkey()).0,
+            account,
+            remote_slot: REMOTE_SLOT,
+        }],
+        true,
+    );
+
+    let execution_result = intent_executor
+        .execute(intent, None::<IntentPersisterImpl>)
+        .await;
+
+    // Verify that we got MinContextSlotNotReachedError
+    assert!(execution_result.inner.is_err());
+    let err = execution_result.inner.unwrap_err();
+    assert!(
+        matches!(
+            err,
+            IntentExecutorError::TaskBuilderError(
+                TaskBuilderError::CommitTasksBuildError(
+                    TaskInfoFetcherError::MinContextSlotNotReachedError(
+                        REMOTE_SLOT,
+                        _
+                    )
+                )
+            )
+        ),
+        "err: {:?}",
+        err
+    );
+    assert!(err.to_string().contains(EXPECTED_ERR_MSG));
+}
+
+#[tokio::test]
 async fn test_commit_id_error_recovery() {
     const COUNTER_SIZE: u64 = 100;
 
@@ -345,12 +404,17 @@ async fn test_commit_id_error_recovery() {
             .await;
 
     account.owner = program_flexi_counter::id();
-    let committed_account = CommittedAccount { pubkey, account };
+    let remote_slot = Default::default();
+    let committed_account = CommittedAccount {
+        pubkey,
+        account,
+        remote_slot,
+    };
     let intent = create_intent(vec![committed_account.clone()], false);
 
     // Invalidate commit nonce cache
     let res = task_info_fetcher
-        .fetch_next_commit_ids(&[committed_account.pubkey])
+        .fetch_next_commit_ids(&[committed_account.pubkey], remote_slot)
         .await;
     assert!(res.is_ok());
     assert!(res.unwrap().contains_key(&committed_account.pubkey));
@@ -421,7 +485,11 @@ async fn test_undelegation_error_recovery() {
     .await;
 
     account.owner = program_flexi_counter::id();
-    let committed_account = CommittedAccount { pubkey, account };
+    let committed_account = CommittedAccount {
+        pubkey,
+        account,
+        remote_slot: Default::default(),
+    };
     let intent = create_intent(vec![committed_account.clone()], true);
 
     // Execute intent
@@ -475,6 +543,7 @@ async fn test_action_error_recovery() {
     let committed_account = CommittedAccount {
         pubkey: counter_pubkey,
         account,
+        remote_slot: Default::default(),
     };
 
     // Create Intent with invalid action
@@ -537,14 +606,16 @@ async fn test_commit_id_and_action_errors_recovery() {
         init_and_delegate_account_on_chain(&payer, COUNTER_SIZE, None).await;
 
     account.owner = program_flexi_counter::id();
+    let remote_slot = Default::default();
     let committed_account = CommittedAccount {
         pubkey: counter_pubkey,
         account,
+        remote_slot,
     };
 
     // Invalidate commit nonce cache
     let res = task_info_fetcher
-        .fetch_next_commit_ids(&[committed_account.pubkey])
+        .fetch_next_commit_ids(&[committed_account.pubkey], remote_slot)
         .await;
     assert!(res.is_ok());
     assert!(res.unwrap().contains_key(&committed_account.pubkey));
@@ -639,6 +710,7 @@ async fn test_cpi_limits_error_recovery() {
             CommittedAccount {
                 pubkey: FlexiCounter::pda(&counter.pubkey()).0,
                 account,
+                remote_slot: Default::default(),
             }
         })
         .collect();
@@ -728,6 +800,7 @@ async fn test_commit_id_actions_cpi_limit_errors_recovery() {
             CommittedAccount {
                 pubkey: FlexiCounter::pda(&counter.pubkey()).0,
                 account,
+                remote_slot: Default::default(),
             }
         })
         .collect();
@@ -748,7 +821,7 @@ async fn test_commit_id_actions_cpi_limit_errors_recovery() {
     // Force CommitIDError by invalidating the commit-nonce cache before running
     let pubkeys: Vec<_> = committed_accounts.iter().map(|c| c.pubkey).collect();
     let mut invalidated_keys = task_info_fetcher
-        .fetch_next_commit_ids(&pubkeys)
+        .fetch_next_commit_ids(&pubkeys, Default::default())
         .await
         .unwrap();
 

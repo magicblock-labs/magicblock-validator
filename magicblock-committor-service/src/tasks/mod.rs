@@ -336,6 +336,7 @@ mod serialization_safety_test {
                     executable: false,
                     rent_epoch: 0,
                 },
+                remote_slot: Default::default(),
             },
         })
         .into();
@@ -396,6 +397,7 @@ mod serialization_safety_test {
                         executable: false,
                         rent_epoch: 0,
                     },
+                    remote_slot: Default::default(),
                 },
             }),
         );
@@ -421,6 +423,7 @@ mod serialization_safety_test {
                         executable: false,
                         rent_epoch: 0,
                     },
+                    remote_slot: Default::default(),
                 },
             }),
         );

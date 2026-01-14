@@ -667,6 +667,7 @@ mod complete_error_test {
             .push(CommittedAccount {
                 pubkey: pubkey3,
                 account: Account::default(),
+                remote_slot: Default::default(),
             });
 
         // Attempt to complete msg1 - should detect corrupted state
@@ -756,6 +757,7 @@ pub(crate) fn create_test_intent(
             .map(|&pubkey| CommittedAccount {
                 pubkey,
                 account: Account::default(),
+                remote_slot: Default::default(),
             })
             .collect();
 

@@ -7,6 +7,7 @@ use std::{
 
 use log::*;
 use solana_account::Account;
+use solana_account_decoder_client_types::UiAccountEncoding;
 use solana_address_lookup_table_interface::state::{
     AddressLookupTable, LookupTableMeta,
 };
@@ -20,7 +21,9 @@ use solana_rpc_client::{
 };
 use solana_rpc_client_api::{
     client_error::ErrorKind as RpcClientErrorKind,
-    config::{RpcSendTransactionConfig, RpcTransactionConfig},
+    config::{
+        RpcAccountInfoConfig, RpcSendTransactionConfig, RpcTransactionConfig,
+    },
     request::RpcError,
 };
 use solana_signature::Signature;
@@ -298,15 +301,35 @@ impl MagicblockRpcClient {
         commitment: CommitmentConfig,
         max_per_fetch: Option<usize>,
     ) -> MagicBlockRpcClientResult<Vec<Option<Account>>> {
+        self.get_multiple_accounts_with_config(
+            pubkeys,
+            RpcAccountInfoConfig {
+                encoding: Some(UiAccountEncoding::Base64Zstd),
+                commitment: Some(commitment),
+                data_slice: None,
+                min_context_slot: None,
+            },
+            max_per_fetch,
+        )
+        .await
+    }
+
+    pub async fn get_multiple_accounts_with_config(
+        &self,
+        pubkeys: &[Pubkey],
+        config: RpcAccountInfoConfig,
+        max_per_fetch: Option<usize>,
+    ) -> MagicBlockRpcClientResult<Vec<Option<Account>>> {
         let max_per_fetch = max_per_fetch.unwrap_or(MAX_MULTIPLE_ACCOUNTS);
 
         let mut join_set = JoinSet::new();
         for pubkey_chunk in pubkeys.chunks(max_per_fetch) {
             let client = self.client.clone();
             let pubkeys = pubkey_chunk.to_vec();
+            let config = config.clone();
             join_set.spawn(async move {
                 client
-                    .get_multiple_accounts_with_commitment(&pubkeys, commitment)
+                    .get_multiple_accounts_with_config(&pubkeys, config)
                     .await
             });
         }

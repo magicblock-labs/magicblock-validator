@@ -15,6 +15,7 @@ log = { workspace = true }
 solana-rpc-client = { workspace = true }
 solana-rpc-client-api = { workspace = true }
 solana-transaction-status-client-types = { workspace = true }
+solana-account-decoder-client-types = { workspace = true }
 solana-transaction-error = { workspace = true }
 solana-account = { workspace = true }
 solana-clock = { workspace = true }

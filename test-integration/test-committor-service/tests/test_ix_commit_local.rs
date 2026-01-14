@@ -154,7 +154,11 @@ async fn commit_single_account(
     account.data = data;
     account.owner = program_flexi_counter::id();
 
-    let account = CommittedAccount { pubkey, account };
+    let account = CommittedAccount {
+        pubkey,
+        account,
+        remote_slot: Default::default(),
+    };
     let base_intent = if undelegate {
         MagicBaseIntent::CommitAndUndelegate(CommitAndUndelegate {
             commit_action: CommitType::Standalone(vec![account]),
@@ -220,6 +224,7 @@ async fn commit_book_order_account(
     let account = CommittedAccount {
         pubkey: order_book_pk,
         account: order_book_ac,
+        remote_slot: Default::default(),
     };
     let base_intent = if undelegate {
         MagicBaseIntent::CommitAndUndelegate(CommitAndUndelegate {
@@ -503,6 +508,7 @@ async fn create_bundles(
             CommittedAccount {
                 pubkey: pda,
                 account: pda_acc,
+                remote_slot: Default::default(),
             }
         });
     }

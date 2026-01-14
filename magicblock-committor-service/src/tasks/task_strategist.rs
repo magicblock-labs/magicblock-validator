@@ -408,6 +408,7 @@ mod tests {
         async fn fetch_next_commit_ids(
             &self,
             pubkeys: &[Pubkey],
+            _: u64,
         ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>> {
             Ok(pubkeys.iter().map(|pubkey| (*pubkey, 0)).collect())
         }
@@ -415,6 +416,7 @@ mod tests {
         async fn fetch_rent_reimbursements(
             &self,
             pubkeys: &[Pubkey],
+            _: u64,
         ) -> TaskInfoFetcherResult<Vec<Pubkey>> {
             Ok(pubkeys.iter().map(|_| Pubkey::new_unique()).collect())
         }
@@ -428,6 +430,7 @@ mod tests {
         async fn get_base_accounts(
             &self,
             _pubkeys: &[Pubkey],
+            _: u64,
         ) -> TaskInfoFetcherResult<HashMap<Pubkey, Account>> {
             Ok(Default::default())
         }
@@ -448,6 +451,7 @@ mod tests {
                 executable: false,
                 rent_epoch: 0,
             },
+            remote_slot: Default::default(),
         };
 
         if diff_len == 0 {
