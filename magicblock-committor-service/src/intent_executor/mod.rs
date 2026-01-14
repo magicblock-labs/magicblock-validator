@@ -4,10 +4,13 @@ pub mod single_stage_executor;
 pub mod task_info_fetcher;
 pub mod two_stage_executor;
 
-use std::{mem, ops::ControlFlow, sync::Arc, time::Duration};
+use std::{
+    future::Future, mem, ops::ControlFlow, pin::Pin, sync::Arc, time::Duration,
+};
 
 use async_trait::async_trait;
 use futures_util::future::{join, try_join_all};
+use light_client::indexer::photon_indexer::PhotonIndexer;
 use log::{trace, warn};
 use magicblock_metrics::metrics;
 use magicblock_program::{
@@ -56,6 +59,10 @@ use crate::{
     },
     utils::persist_status_update_by_message_set,
 };
+
+pub type BoxFut<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
+pub type CommitSlotFn<'a> =
+    Arc<dyn Fn() -> BoxFut<'a, Option<u64>> + Send + Sync + 'a>;
 
 #[derive(Clone, Copy, Debug)]
 pub enum ExecutionOutput {
@@ -107,6 +114,7 @@ pub trait IntentExecutor: Send + Sync + 'static {
 pub struct IntentExecutorImpl<T, F> {
     authority: Keypair,
     rpc_client: MagicblockRpcClient,
+    photon_client: Option<Arc<PhotonIndexer>>,
     transaction_preparator: T,
     task_info_fetcher: Arc<F>,
 
@@ -123,6 +131,7 @@ where
 {
     pub fn new(
         rpc_client: MagicblockRpcClient,
+        photon_client: Option<Arc<PhotonIndexer>>,
         transaction_preparator: T,
         task_info_fetcher: Arc<F>,
     ) -> Self {
@@ -130,6 +139,7 @@ where
         Self {
             authority,
             rpc_client,
+            photon_client,
             transaction_preparator,
             task_info_fetcher,
             junk: vec![],
@@ -165,6 +175,7 @@ where
                     &self.task_info_fetcher,
                     &base_intent,
                     persister,
+                    &self.photon_client,
                 )
                 .await?;
 
@@ -190,10 +201,12 @@ where
                 &self.task_info_fetcher,
                 &base_intent,
                 persister,
+                &self.photon_client,
             );
             let finalize_tasks_fut = TaskBuilderImpl::finalize_tasks(
                 &self.task_info_fetcher,
                 &base_intent,
+                &self.photon_client,
             );
             let (commit_tasks, finalize_tasks) =
                 join(commit_tasks_fut, finalize_tasks_fut).await;
@@ -307,12 +320,18 @@ where
 
     /// Handles out of sync commit id error, fixes current strategy
     /// Returns strategy to be cleaned up
-    /// TODO(edwin): TransactionStrategy -> CleanuoStrategy or something, naming it confusing for something that is cleaned up
+    /// TODO(edwin): TransactionStrategy -> CleanupStrategy or something, naming it confusing for something that is cleaned up
     async fn handle_commit_id_error(
         &self,
         committed_pubkeys: &[Pubkey],
         strategy: &mut TransactionStrategy,
     ) -> Result<TransactionStrategy, TaskBuilderError> {
+        // TODO(dode): Handle cases where some tasks are compressed and some are not
+        let compressed = strategy
+            .optimized_tasks
+            .iter()
+            .any(|task| task.is_compressed());
+
         let tasks_and_metas: Vec<_> = strategy
             .optimized_tasks
             .iter_mut()
@@ -340,7 +359,11 @@ where
             .reset(ResetType::Specific(committed_pubkeys));
         let commit_ids = self
             .task_info_fetcher
-            .fetch_next_commit_ids(committed_pubkeys, min_context_slot)
+            .fetch_next_commit_ids(
+                committed_pubkeys,
+                min_context_slot,
+                compressed,
+            )
             .await
             .map_err(TaskBuilderError::CommitTasksBuildError)?;
 
@@ -365,6 +388,7 @@ where
         Ok(TransactionStrategy {
             optimized_tasks: to_cleanup,
             lookup_tables_keys: old_alts,
+            compressed: strategy.compressed,
         })
     }
 
@@ -386,6 +410,7 @@ where
         TransactionStrategy {
             optimized_tasks: action_tasks,
             lookup_tables_keys: old_alts,
+            compressed: strategy.compressed,
         }
     }
 
@@ -419,6 +444,7 @@ where
         let commit_strategy = TransactionStrategy {
             optimized_tasks: commit_stage_tasks,
             lookup_tables_keys: commit_alt_pubkeys,
+            compressed: strategy.compressed,
         };
 
         let finalize_alt_pubkeys = if strategy.lookup_tables_keys.is_empty() {
@@ -432,12 +458,14 @@ where
         let finalize_strategy = TransactionStrategy {
             optimized_tasks: finalize_stage_tasks,
             lookup_tables_keys: finalize_alt_pubkeys,
+            compressed: strategy.compressed,
         };
 
         // We clean up only ALTs
         let to_cleanup = TransactionStrategy {
             optimized_tasks: vec![],
             lookup_tables_keys: strategy.lookup_tables_keys,
+            compressed: strategy.compressed,
         };
 
         (commit_strategy, finalize_strategy, to_cleanup)
@@ -463,11 +491,13 @@ where
             TransactionStrategy {
                 optimized_tasks: removed_task,
                 lookup_tables_keys: old_alts,
+                compressed: strategy.compressed,
             }
         } else {
             TransactionStrategy {
                 optimized_tasks: vec![],
                 lookup_tables_keys: vec![],
+                compressed: strategy.compressed,
             }
         }
     }
@@ -547,9 +577,13 @@ where
             }
             Err(IntentExecutorError::EmptyIntentError)
             | Err(IntentExecutorError::FailedToFitError)
+            | Err(IntentExecutorError::InconsistentTaskCompression)
             | Err(IntentExecutorError::TaskBuilderError(_))
             | Err(IntentExecutorError::FailedCommitPreparationError(
                 TransactionPreparatorError::SignerError(_),
+            ))
+            | Err(IntentExecutorError::FailedCommitPreparationError(
+                TransactionPreparatorError::InconsistentTaskCompression,
             ))
             | Err(IntentExecutorError::FailedFinalizePreparationError(
                 TransactionPreparatorError::SignerError(_),
@@ -613,10 +647,11 @@ where
         }
     }
 
-    pub async fn prepare_and_execute_strategy<P: IntentPersister>(
+    pub async fn prepare_and_execute_strategy<'a, P: IntentPersister>(
         &self,
         transaction_strategy: &mut TransactionStrategy,
         persister: &Option<P>,
+        commit_slot_fn: Option<CommitSlotFn<'a>>,
     ) -> IntentExecutorResult<
         IntentExecutorResult<Signature, TransactionStrategyExecutionError>,
         TransactionPreparatorError,
@@ -628,6 +663,8 @@ where
                 &self.authority,
                 transaction_strategy,
                 persister,
+                &self.photon_client,
+                commit_slot_fn,
             )
             .await?;
 

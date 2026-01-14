@@ -247,6 +247,10 @@ impl MagicblockRpcClient {
         Self { client }
     }
 
+    pub fn url(&self) -> String {
+        self.client.url()
+    }
+
     pub async fn get_latest_blockhash(
         &self,
     ) -> MagicBlockRpcClientResult<Hash> {

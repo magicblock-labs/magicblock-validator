@@ -6,10 +6,15 @@ edition.workspace = true
 [dependencies]
 bincode = { workspace = true }
 borsh = { workspace = true }
+compressed-delegation-client = { workspace = true }
 ephemeral-rollups-sdk = { workspace = true }
+light-batched-merkle-tree = { workspace = true }
+light-hasher = { workspace = true }
+light-sdk = { workspace = true, features = ["v2"] }
+light-sdk-types = { workspace = true, features = ["v2"] }
+magicblock_magic_program_api = { workspace = true }
 serde = { workspace = true }
 solana-program = { workspace = true }
-magicblock_magic_program_api = { workspace = true }
 
 [lib]
 crate-type = ["cdylib", "lib"]

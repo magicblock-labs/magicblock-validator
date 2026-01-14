@@ -1,9 +1,10 @@
-use std::ops::Deref;
+use std::ops::{Deref, DerefMut};
 
 use magicblock_config::types::network::Remote;
 use url::Url;
 
 use super::errors::RemoteAccountProviderError;
+use crate::remote_account_provider::RemoteAccountProviderResult;
 
 #[derive(Debug, Clone)]
 pub enum Endpoint {
@@ -20,6 +21,10 @@ pub enum Endpoint {
         label: String,
         supports_backfill: bool,
         api_key: String,
+    },
+    Compression {
+        url: String,
+        api_key: Option<String>,
     },
 }
 
@@ -42,6 +47,19 @@ impl Endpoints {
                 matches!(ep, Endpoint::WebSocket { .. } | Endpoint::Grpc { .. })
             })
             .collect()
+    }
+
+    pub fn photon(&self) -> RemoteAccountProviderResult<Option<&Endpoint>> {
+        let photons = self
+            .iter()
+            .filter(|ep| matches!(ep, Endpoint::Compression { .. }))
+            .collect::<Vec<_>>();
+        if photons.len() > 1 {
+            return Err(
+                RemoteAccountProviderError::MultiplePhotonEndpointsProvided,
+            );
+        }
+        Ok(photons.first().copied())
     }
 }
 
@@ -118,6 +136,12 @@ impl Deref for Endpoints {
     type Target = Vec<Endpoint>;
     fn deref(&self) -> &Self::Target {
         &self.0
+    }
+}
+
+impl DerefMut for Endpoints {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
     }
 }
 

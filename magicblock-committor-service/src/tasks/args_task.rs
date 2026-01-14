@@ -1,3 +1,4 @@
+use compressed_delegation_client::types::{CommitArgs, FinalizeArgs};
 use dlp::{
     args::{CallHandlerArgs, CommitDiffArgs, CommitStateArgs},
     compute_diff,
@@ -5,29 +6,36 @@ use dlp::{
         call_handler_size_budget, commit_diff_size_budget, commit_size_budget,
         finalize_size_budget, undelegate_size_budget,
     },
-    AccountSizeClass,
+    total_size_budget, AccountSizeClass,
 };
 use magicblock_metrics::metrics::LabelValue;
 use solana_account::ReadableAccount;
 use solana_instruction::{AccountMeta, Instruction};
 use solana_pubkey::Pubkey;
+use solana_system_program::id as system_program_id;
 
 #[cfg(test)]
 use crate::tasks::TaskStrategy;
 use crate::tasks::{
     buffer_task::{BufferTask, BufferTaskType},
+    task_builder::CompressedData,
     visitor::Visitor,
     BaseActionTask, BaseTask, BaseTaskError, BaseTaskResult, CommitDiffTask,
-    CommitTask, FinalizeTask, PreparationState, TaskType, UndelegateTask,
+    CommitTask, CompressedCommitTask, CompressedFinalizeTask,
+    CompressedUndelegateTask, FinalizeTask, PreparationState, PreparationTask,
+    TaskType, UndelegateTask,
 };
 
 /// Task that will be executed on Base layer via arguments
 #[derive(Clone)]
 pub enum ArgsTaskType {
     Commit(CommitTask),
+    CompressedCommit(CompressedCommitTask),
     CommitDiff(CommitDiffTask),
     Finalize(FinalizeTask),
+    CompressedFinalize(CompressedFinalizeTask),
     Undelegate(UndelegateTask), // Special action really
+    CompressedUndelegate(CompressedUndelegateTask),
     BaseAction(BaseActionTask),
 }
 
@@ -45,8 +53,21 @@ impl From<ArgsTaskType> for ArgsTask {
 
 impl ArgsTask {
     pub fn new(task_type: ArgsTaskType) -> Self {
+        // Only prepare compressed tasks [`ArgsTaskType`] type
+        let preparation_state = match task_type {
+            ArgsTaskType::Commit(_)
+            | ArgsTaskType::CommitDiff(_)
+            | ArgsTaskType::Finalize(_)
+            | ArgsTaskType::Undelegate(_)
+            | ArgsTaskType::BaseAction(_) => PreparationState::NotNeeded,
+            ArgsTaskType::CompressedCommit(_)
+            | ArgsTaskType::CompressedFinalize(_)
+            | ArgsTaskType::CompressedUndelegate(_) => {
+                PreparationState::Required(PreparationTask::Compressed)
+            }
+        };
         Self {
-            preparation_state: PreparationState::NotNeeded,
+            preparation_state,
             task_type,
         }
     }
@@ -68,6 +89,26 @@ impl BaseTask for ArgsTask {
                     value.committed_account.account.owner,
                     args,
                 )
+            }
+            ArgsTaskType::CompressedCommit(value) => {
+                compressed_delegation_client::CommitBuilder::new()
+                    .validator(*validator)
+                    .delegated_account(value.committed_account.pubkey)
+                    .args(CommitArgs {
+                        current_compressed_delegated_account_data: value
+                            .compressed_data
+                            .compressed_delegation_record_bytes
+                            .clone(),
+                        new_data: value.committed_account.account.data.clone(),
+                        account_meta: value.compressed_data.account_meta,
+                        validity_proof: value.compressed_data.proof,
+                        update_nonce: value.commit_id,
+                        allow_undelegation: value.allow_undelegation,
+                    })
+                    .add_remaining_accounts(
+                        &value.compressed_data.remaining_accounts,
+                    )
+                    .instruction()
             }
             ArgsTaskType::CommitDiff(value) => {
                 let args = CommitDiffArgs {
@@ -93,6 +134,34 @@ impl BaseTask for ArgsTask {
                     *validator,
                     value.delegated_account,
                 )
+            }
+            ArgsTaskType::CompressedFinalize(value) => {
+                compressed_delegation_client::FinalizeBuilder::new()
+                    .validator(*validator)
+                    .delegated_account(value.delegated_account)
+                    .args(FinalizeArgs {
+                        current_compressed_delegated_account_data: value
+                            .compressed_data
+                            .compressed_delegation_record_bytes
+                            .clone(),
+                        account_meta: value.compressed_data.account_meta,
+                        validity_proof: value.compressed_data.proof,
+                    })
+                    .add_remaining_accounts(
+                        &value.compressed_data.remaining_accounts,
+                    )
+                    .instruction()
+            }
+            ArgsTaskType::CompressedUndelegate(value) => {
+                compressed_delegation_client::UndelegateBuilder::new()
+                    .payer(*validator)
+                    .delegated_account(value.delegated_account)
+                    .owner_program(value.owner_program)
+                    .system_program(system_program_id())
+                    .add_remaining_accounts(
+                        &value.compressed_data.remaining_accounts,
+                    )
+                    .instruction()
             }
             ArgsTaskType::Undelegate(value) => {
                 dlp::instruction_builder::undelegate(
@@ -143,11 +212,13 @@ impl BaseTask for ArgsTask {
             }
             ArgsTaskType::BaseAction(_)
             | ArgsTaskType::Finalize(_)
-            | ArgsTaskType::Undelegate(_) => Err(self),
+            | ArgsTaskType::Undelegate(_)
+            | ArgsTaskType::CompressedCommit(_)
+            | ArgsTaskType::CompressedFinalize(_)
+            | ArgsTaskType::CompressedUndelegate(_) => Err(self),
         }
     }
 
-    /// Nothing to prepare for [`ArgsTaskType`] type
     fn preparation_state(&self) -> &PreparationState {
         &self.preparation_state
     }
@@ -159,7 +230,7 @@ impl BaseTask for ArgsTask {
         if !matches!(new_state, PreparationState::NotNeeded) {
             Err(BaseTaskError::PreparationStateTransitionError)
         } else {
-            // Do nothing
+            self.preparation_state = new_state;
             Ok(())
         }
     }
@@ -171,6 +242,9 @@ impl BaseTask for ArgsTask {
             ArgsTaskType::BaseAction(task) => task.action.compute_units,
             ArgsTaskType::Undelegate(_) => 70_000,
             ArgsTaskType::Finalize(_) => 70_000,
+            ArgsTaskType::CompressedCommit(_) => 250_000,
+            ArgsTaskType::CompressedUndelegate(_) => 250_000,
+            ArgsTaskType::CompressedFinalize(_) => 250_000,
         }
     }
 
@@ -185,6 +259,45 @@ impl BaseTask for ArgsTask {
                 commit_diff_size_budget(AccountSizeClass::Dynamic(
                     task.committed_account.account.data.len() as u32,
                 ))
+            }
+            ArgsTaskType::CompressedCommit(_task) => {
+                total_size_budget(&[
+                    AccountSizeClass::Tiny,       // validator
+                    AccountSizeClass::ExtraLarge, // Light System Program
+                    AccountSizeClass::Tiny,       // CPI Signer
+                    AccountSizeClass::Tiny,       // Registered Program PDA
+                    AccountSizeClass::Tiny, // Account Compression Authority
+                    AccountSizeClass::Tiny, // Account Compression Program
+                    AccountSizeClass::Tiny, // System Program
+                    AccountSizeClass::Huge, // Batch Merkle Tree
+                    AccountSizeClass::ExtraLarge, // Output Queue
+                ])
+            }
+            ArgsTaskType::CompressedFinalize(_task) => {
+                total_size_budget(&[
+                    AccountSizeClass::Tiny,       // validator
+                    AccountSizeClass::ExtraLarge, // Light System Program
+                    AccountSizeClass::Tiny,       // CPI Signer
+                    AccountSizeClass::Tiny,       // Registered Program PDA
+                    AccountSizeClass::Tiny, // Account Compression Authority
+                    AccountSizeClass::Tiny, // Account Compression Program
+                    AccountSizeClass::Tiny, // System Program
+                    AccountSizeClass::Huge, // Batch Merkle Tree
+                    AccountSizeClass::ExtraLarge, // Output Queue
+                ])
+            }
+            ArgsTaskType::CompressedUndelegate(_task) => {
+                total_size_budget(&[
+                    AccountSizeClass::Tiny,       // validator
+                    AccountSizeClass::ExtraLarge, // Light System Program
+                    AccountSizeClass::Tiny,       // CPI Signer
+                    AccountSizeClass::Tiny,       // Registered Program PDA
+                    AccountSizeClass::Tiny, // Account Compression Authority
+                    AccountSizeClass::Tiny, // Account Compression Program
+                    AccountSizeClass::Tiny, // System Program
+                    AccountSizeClass::Huge, // Batch Merkle Tree
+                    AccountSizeClass::ExtraLarge, // Output Queue
+                ])
             }
             ArgsTaskType::BaseAction(task) => {
                 // assume all other accounts are Small accounts.
@@ -214,10 +327,15 @@ impl BaseTask for ArgsTask {
     fn task_type(&self) -> TaskType {
         match &self.task_type {
             ArgsTaskType::Commit(_) => TaskType::Commit,
+            ArgsTaskType::CompressedCommit(_) => TaskType::CompressedCommit,
             ArgsTaskType::CommitDiff(_) => TaskType::Commit,
             ArgsTaskType::BaseAction(_) => TaskType::Action,
             ArgsTaskType::Undelegate(_) => TaskType::Undelegate,
+            ArgsTaskType::CompressedUndelegate(_) => {
+                TaskType::CompressedUndelegate
+            }
             ArgsTaskType::Finalize(_) => TaskType::Finalize,
+            ArgsTaskType::CompressedFinalize(_) => TaskType::CompressedFinalize,
         }
     }
 
@@ -231,13 +349,78 @@ impl BaseTask for ArgsTask {
             ArgsTaskType::Commit(task) => {
                 task.commit_id = commit_id;
             }
+            ArgsTaskType::CompressedCommit(task) => {
+                task.commit_id = commit_id;
+            }
             ArgsTaskType::CommitDiff(task) => {
                 task.commit_id = commit_id;
             }
             ArgsTaskType::BaseAction(_)
             | ArgsTaskType::Finalize(_)
-            | ArgsTaskType::Undelegate(_) => {}
+            | ArgsTaskType::Undelegate(_)
+            | ArgsTaskType::CompressedFinalize(_)
+            | ArgsTaskType::CompressedUndelegate(_) => {}
         };
+    }
+
+    fn is_compressed(&self) -> bool {
+        matches!(
+            &self.task_type,
+            ArgsTaskType::CompressedCommit(_)
+                | ArgsTaskType::CompressedFinalize(_)
+                | ArgsTaskType::CompressedUndelegate(_)
+        )
+    }
+
+    fn set_compressed_data(&mut self, compressed_data: CompressedData) {
+        match &mut self.task_type {
+            ArgsTaskType::CompressedCommit(value) => {
+                value.compressed_data = compressed_data;
+            }
+            ArgsTaskType::CompressedFinalize(value) => {
+                value.compressed_data = compressed_data;
+            }
+            ArgsTaskType::CompressedUndelegate(value) => {
+                value.compressed_data = compressed_data;
+            }
+            _ => {}
+        }
+    }
+
+    fn get_compressed_data(&self) -> Option<&CompressedData> {
+        match &self.task_type {
+            ArgsTaskType::CompressedCommit(value) => {
+                Some(&value.compressed_data)
+            }
+            ArgsTaskType::CompressedFinalize(value) => {
+                Some(&value.compressed_data)
+            }
+            ArgsTaskType::CompressedUndelegate(value) => {
+                Some(&value.compressed_data)
+            }
+            _ => None,
+        }
+    }
+
+    fn delegated_account(&self) -> Option<Pubkey> {
+        match &self.task_type {
+            ArgsTaskType::Commit(value) => Some(value.committed_account.pubkey),
+            ArgsTaskType::CompressedCommit(value) => {
+                Some(value.committed_account.pubkey)
+            }
+            ArgsTaskType::CommitDiff(value) => {
+                Some(value.committed_account.pubkey)
+            }
+            ArgsTaskType::Finalize(value) => Some(value.delegated_account),
+            ArgsTaskType::CompressedFinalize(value) => {
+                Some(value.delegated_account)
+            }
+            ArgsTaskType::Undelegate(value) => Some(value.delegated_account),
+            ArgsTaskType::CompressedUndelegate(value) => {
+                Some(value.delegated_account)
+            }
+            ArgsTaskType::BaseAction(_) => None,
+        }
     }
 }
 
@@ -249,6 +432,11 @@ impl LabelValue for ArgsTask {
             ArgsTaskType::BaseAction(_) => "args_action",
             ArgsTaskType::Finalize(_) => "args_finalize",
             ArgsTaskType::Undelegate(_) => "args_undelegate",
+            ArgsTaskType::CompressedCommit(_) => "args_compressed_commit",
+            ArgsTaskType::CompressedFinalize(_) => "args_compressed_finalize",
+            ArgsTaskType::CompressedUndelegate(_) => {
+                "args_compressed_undelegate"
+            }
         }
     }
 }

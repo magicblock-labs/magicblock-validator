@@ -1,13 +1,26 @@
 use std::{
-    collections::HashMap, num::NonZeroUsize, sync::Mutex, time::Duration,
+    collections::HashMap,
+    num::NonZeroUsize,
+    sync::{Arc, Mutex},
+    time::Duration,
 };
 
 use async_trait::async_trait;
+use borsh::BorshDeserialize;
+use compressed_delegation_client::CompressedDelegationRecord;
 use dlp::{
     delegation_metadata_seeds_from_delegated_account, state::DelegationMetadata,
 };
+use light_client::{
+    indexer::{
+        photon_indexer::PhotonIndexer, Indexer, IndexerError, IndexerRpcConfig,
+        RetryConfig,
+    },
+    rpc::RpcError as LightRpcError,
+};
 use log::{error, info, warn};
 use lru::LruCache;
+use magicblock_core::compression::derive_cda_from_pda;
 use magicblock_metrics::metrics;
 use magicblock_rpc_client::{MagicBlockRpcClientError, MagicblockRpcClient};
 use solana_account::Account;
@@ -31,6 +44,7 @@ pub trait TaskInfoFetcher: Send + Sync + 'static {
         &self,
         pubkeys: &[Pubkey],
         min_context_slot: u64,
+        compressed: bool,
     ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>>;
 
     /// Fetches rent reimbursement address for pubkeys
@@ -60,15 +74,20 @@ pub enum ResetType<'a> {
 
 pub struct CacheTaskInfoFetcher {
     rpc_client: MagicblockRpcClient,
+    photon_client: Option<Arc<PhotonIndexer>>,
     cache: Mutex<LruCache<Pubkey, u64>>,
 }
 
 impl CacheTaskInfoFetcher {
-    pub fn new(rpc_client: MagicblockRpcClient) -> Self {
+    pub fn new(
+        rpc_client: MagicblockRpcClient,
+        photon_client: Option<Arc<PhotonIndexer>>,
+    ) -> Self {
         const CACHE_SIZE: NonZeroUsize = NonZeroUsize::new(1000).unwrap();
 
         Self {
             rpc_client,
+            photon_client,
             cache: Mutex::new(LruCache::new(CACHE_SIZE)),
         }
     }
@@ -161,6 +180,18 @@ impl CacheTaskInfoFetcher {
                 TaskInfoFetcherError::MagicBlockRpcClientError(ref err) => {
                     warn!("Fetch account error: {}, attempt: {}", err, i);
                 }
+                TaskInfoFetcherError::IndexerError(ref err) => {
+                    warn!("Fetch compressed delegation records error: {:?}, attempt: {}", err, i);
+                }
+                TaskInfoFetcherError::NoCompressedAccount(_) => break Err(err),
+                TaskInfoFetcherError::NoCompressedData(_) => break Err(err),
+                TaskInfoFetcherError::DeserializeError(ref err) => {
+                    warn!("Deserialize compressed delegation record error: {:?}, attempt: {}", err, i);
+                }
+                TaskInfoFetcherError::LightRpcError(ref err) => {
+                    warn!("Fetch account error: {:?}, attempt: {}", err, i);
+                }
+                TaskInfoFetcherError::PhotonClientNotFound => break Err(err),
             }
 
             if i >= max_retries.get() {
@@ -221,6 +252,64 @@ impl CacheTaskInfoFetcher {
 
         Ok(accounts)
     }
+
+    /// Fetches delegation records using Photon Indexer
+    /// Photon
+    pub async fn fetch_compressed_delegation_records_with_retries(
+        photon_client: &PhotonIndexer,
+        pubkeys: &[Pubkey],
+        min_context_slot: u64,
+        max_retries: NonZeroUsize,
+    ) -> TaskInfoFetcherResult<Vec<CompressedDelegationRecord>> {
+        // Early return if no pubkeys to process
+        if pubkeys.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let cdas = pubkeys
+            .iter()
+            .map(|pubkey| derive_cda_from_pda(pubkey).to_bytes())
+            .collect::<Vec<_>>();
+        let compressed_accounts = photon_client
+            .get_multiple_compressed_accounts(
+                Some(cdas),
+                None,
+                Some(IndexerRpcConfig {
+                    slot: min_context_slot,
+                    retry_config: RetryConfig {
+                        num_retries: max_retries.get() as u32,
+                        ..Default::default()
+                    },
+                }),
+            )
+            .await
+            .map_err(TaskInfoFetcherError::IndexerError)?
+            .value;
+
+        metrics::inc_task_info_fetcher_compressed_count();
+
+        let compressed_delegation_records = compressed_accounts
+            .items
+            .into_iter()
+            .zip(pubkeys.iter())
+            .map(|(acc, pubkey)| {
+                let delegation_record =
+                    CompressedDelegationRecord::try_from_slice(
+                        &acc.ok_or(TaskInfoFetcherError::NoCompressedAccount(
+                            *pubkey,
+                        ))?
+                        .data
+                        .ok_or(TaskInfoFetcherError::NoCompressedData(*pubkey))?
+                        .data,
+                    )
+                    .map_err(TaskInfoFetcherError::DeserializeError)?;
+
+                Ok::<_, TaskInfoFetcherError>(delegation_record)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(compressed_delegation_records)
+    }
 }
 
 /// TaskInfoFetcher implementation that also caches most used 1000 keys
@@ -232,6 +321,7 @@ impl TaskInfoFetcher for CacheTaskInfoFetcher {
         &self,
         pubkeys: &[Pubkey],
         min_context_slot: u64,
+        compressed: bool,
     ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>> {
         if pubkeys.is_empty() {
             return Ok(HashMap::new());
@@ -270,15 +360,32 @@ impl TaskInfoFetcher for CacheTaskInfoFetcher {
         to_request.sort();
         to_request.dedup();
 
-        let remaining_ids = Self::fetch_metadata_with_retries(
-            &self.rpc_client,
-            &to_request,
-            min_context_slot,
-            NUM_FETCH_RETRIES,
-        )
-        .await?
-        .into_iter()
-        .map(|metadata| metadata.last_update_nonce);
+        let remaining_ids = if compressed {
+            let Some(photon_client) = self.photon_client.as_ref() else {
+                return Err(TaskInfoFetcherError::PhotonClientNotFound);
+            };
+            Self::fetch_compressed_delegation_records_with_retries(
+                photon_client,
+                &to_request,
+                min_context_slot,
+                NUM_FETCH_RETRIES,
+            )
+            .await?
+            .into_iter()
+            .map(|metadata| metadata.last_update_nonce)
+            .collect::<Vec<_>>()
+        } else {
+            Self::fetch_metadata_with_retries(
+                &self.rpc_client,
+                &to_request,
+                min_context_slot,
+                NUM_FETCH_RETRIES,
+            )
+            .await?
+            .into_iter()
+            .map(|metadata| metadata.last_update_nonce)
+            .collect::<Vec<_>>()
+        };
 
         // We don't care if anything changed in between with cache - just update and return our ids.
         {
@@ -358,6 +465,8 @@ impl TaskInfoFetcher for CacheTaskInfoFetcher {
 
 #[derive(thiserror::Error, Debug)]
 pub enum TaskInfoFetcherError {
+    #[error("LightRpcError: {0}")]
+    LightRpcError(#[from] LightRpcError),
     #[error("Metadata not found for: {0}")]
     AccountNotFoundError(Pubkey),
     #[error("InvalidAccountDataError for: {0}")]
@@ -366,6 +475,16 @@ pub enum TaskInfoFetcherError {
     MinContextSlotNotReachedError(u64, Box<MagicBlockRpcClientError>),
     #[error("MagicBlockRpcClientError: {0}")]
     MagicBlockRpcClientError(Box<MagicBlockRpcClientError>),
+    #[error("IndexerError: {0}")]
+    IndexerError(#[from] IndexerError),
+    #[error("NoCompressedAccount: {0}")]
+    NoCompressedAccount(Pubkey),
+    #[error("CompressedAccountDataNotFound: {0}")]
+    NoCompressedData(Pubkey),
+    #[error("CompressedAccountDataDeserializeError: {0}")]
+    DeserializeError(#[from] std::io::Error),
+    #[error("PhotonClientNotFound")]
+    PhotonClientNotFound,
 }
 
 impl TaskInfoFetcherError {
@@ -416,6 +535,12 @@ impl TaskInfoFetcherError {
             Self::InvalidAccountDataError(_) => None,
             Self::MinContextSlotNotReachedError(_, err) => err.signature(),
             Self::MagicBlockRpcClientError(err) => err.signature(),
+            Self::IndexerError(_) => None,
+            Self::NoCompressedAccount(_) => None,
+            Self::NoCompressedData(_) => None,
+            Self::DeserializeError(_) => None,
+            Self::LightRpcError(_) => None,
+            Self::PhotonClientNotFound => None,
         }
     }
 }

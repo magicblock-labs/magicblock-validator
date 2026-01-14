@@ -1,5 +1,11 @@
+use std::collections::HashSet;
+
 use magicblock_magic_program_api::instruction::MagicBlockInstruction;
-use solana_program_runtime::declare_process_instruction;
+use solana_instruction::error::InstructionError;
+use solana_program_runtime::{
+    declare_process_instruction, invoke_context::InvokeContext,
+};
+use solana_pubkey::Pubkey;
 
 use crate::{
     mutate_accounts::process_mutate_accounts,
@@ -7,12 +13,38 @@ use crate::{
     schedule_task::{process_cancel_task, process_schedule_task},
     schedule_transactions::{
         process_accept_scheduled_commits, process_schedule_base_intent,
-        process_schedule_commit, ProcessScheduleCommitOptions,
+        process_schedule_commit, process_schedule_compressed_commit,
+        ProcessScheduleCommitOptions,
     },
     toggle_executable_check::process_toggle_executable_check,
 };
 
 pub const DEFAULT_COMPUTE_UNITS: u64 = 150;
+
+pub enum CommitKind {
+    Commit,
+    CommitAndUndelegate,
+    CompressedCommit,
+    CompressedCommitAndUndelegate,
+}
+
+impl CommitKind {
+    pub fn request_undelegation(&self) -> bool {
+        matches!(
+            self,
+            CommitKind::CommitAndUndelegate
+                | CommitKind::CompressedCommitAndUndelegate
+        )
+    }
+
+    pub fn compressed(&self) -> bool {
+        matches!(
+            self,
+            CommitKind::CompressedCommit
+                | CommitKind::CompressedCommitAndUndelegate
+        )
+    }
+}
 
 declare_process_instruction!(
     Entrypoint,
@@ -45,19 +77,23 @@ declare_process_instruction!(
                 &mut accounts,
                 message,
             ),
-            ScheduleCommit => process_schedule_commit(
+            ScheduleCommit => {
+                dispatch_commit(signers, invoke_context, CommitKind::Commit)
+            }
+            ScheduleCompressedCommit => dispatch_commit(
                 signers,
                 invoke_context,
-                ProcessScheduleCommitOptions {
-                    request_undelegation: false,
-                },
+                CommitKind::CompressedCommit,
             ),
-            ScheduleCommitAndUndelegate => process_schedule_commit(
+            ScheduleCommitAndUndelegate => dispatch_commit(
                 signers,
                 invoke_context,
-                ProcessScheduleCommitOptions {
-                    request_undelegation: true,
-                },
+                CommitKind::CommitAndUndelegate,
+            ),
+            ScheduleCompressedCommitAndUndelegate => dispatch_commit(
+                signers,
+                invoke_context,
+                CommitKind::CompressedCommitAndUndelegate,
             ),
             AcceptScheduleCommits => {
                 process_accept_scheduled_commits(signers, invoke_context)
@@ -87,3 +123,18 @@ declare_process_instruction!(
         }
     }
 );
+
+fn dispatch_commit(
+    signers: HashSet<Pubkey>,
+    invoke_context: &mut InvokeContext,
+    commit_kind: CommitKind,
+) -> Result<(), InstructionError> {
+    let opts = ProcessScheduleCommitOptions {
+        request_undelegation: commit_kind.request_undelegation(),
+    };
+    if commit_kind.compressed() {
+        process_schedule_compressed_commit(signers, invoke_context, opts)
+    } else {
+        process_schedule_commit(signers, invoke_context, opts)
+    }
+}

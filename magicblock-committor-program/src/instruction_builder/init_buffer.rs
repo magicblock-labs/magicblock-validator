@@ -4,7 +4,10 @@ use solana_program::{
 };
 use solana_pubkey::Pubkey;
 
-use crate::{instruction::CommittorInstruction, pdas};
+use crate::{
+    instruction::CommittorInstruction, instruction_builder::build_instruction,
+    pdas,
+};
 
 // -----------------
 // create_init_ix
@@ -48,7 +51,6 @@ pub fn create_init_ix(args: CreateInitIxArgs) -> (Instruction, Pubkey, Pubkey) {
         &pubkey,
         commit_id.to_le_bytes().as_slice(),
     );
-    let program_id = crate::id();
     let ix = CommittorInstruction::Init {
         pubkey,
         commit_id,
@@ -65,9 +67,5 @@ pub fn create_init_ix(args: CreateInitIxArgs) -> (Instruction, Pubkey, Pubkey) {
         AccountMeta::new(buffer_pda, false),
         AccountMeta::new_readonly(system_program::id(), false),
     ];
-    (
-        Instruction::new_with_borsh(program_id, &ix, accounts),
-        chunks_pda,
-        buffer_pda,
-    )
+    (build_instruction(ix, accounts), chunks_pda, buffer_pda)
 }
