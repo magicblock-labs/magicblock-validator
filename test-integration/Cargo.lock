@@ -3804,6 +3804,7 @@ version = "0.6.0"
 dependencies = [
  "log",
  "solana-account",
+ "solana-account-decoder-client-types",
  "solana-address-lookup-table-interface",
  "solana-clock",
  "solana-commitment-config",

@@ -349,7 +349,7 @@ impl CommittedAccount {
             return CommittedAccount {
                 pubkey: eata_pubkey,
                 account: eata.into(),
-                remote_slot, // TODO: verify
+                remote_slot,
             };
         }
 
