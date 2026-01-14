@@ -13,7 +13,11 @@ use magicblock_rpc_client::{MagicBlockRpcClientError, MagicblockRpcClient};
 use solana_account::Account;
 use solana_account_decoder::UiAccountEncoding;
 use solana_pubkey::Pubkey;
-use solana_rpc_client_api::config::RpcAccountInfoConfig;
+use solana_rpc_client_api::{
+    client_error::ErrorKind, config::RpcAccountInfoConfig,
+    custom_error::JSON_RPC_SERVER_ERROR_MIN_CONTEXT_SLOT_NOT_REACHED,
+    request::RpcError,
+};
 use solana_signature::Signature;
 
 const NUM_FETCH_RETRIES: NonZeroUsize = NonZeroUsize::new(5).unwrap();
@@ -90,13 +94,17 @@ impl CacheTaskInfoFetcher {
                 err @ Err(TaskInfoFetcherError::InvalidAccountDataError(_)) => {
                     return err
                 }
-                // TODO(edwin): verify
-                Err(TaskInfoFetcherError::MetadataNotFoundError(err)) => {
-                    warn!(
-                        "Metadata was not found with min_context_slot: {}, for: {}",
-                        min_context_slot, err
-                    );
-                    last_err = TaskInfoFetcherError::MetadataNotFoundError(err);
+                err @ Err(TaskInfoFetcherError::MetadataNotFoundError(_)) => {
+                    return err
+                }
+                Err(
+                    err @ TaskInfoFetcherError::MinContextSlotNotReachedError(
+                        _,
+                        _,
+                    ),
+                ) => {
+                    warn!("Retrying {:?}", err);
+                    last_err = err;
                 }
                 Err(TaskInfoFetcherError::MagicBlockRpcClientError(err)) => {
                     // TODO(edwin): RPC error handlings should be more robust
@@ -150,7 +158,10 @@ impl CacheTaskInfoFetcher {
                 },
                 None,
             )
-            .await?;
+            .await
+            .map_err(|err| {
+                TaskInfoFetcherError::map_client_error(min_context_slot, err)
+            })?;
 
         let metadatas = pda_accounts
             .into_iter()
@@ -336,8 +347,45 @@ pub enum TaskInfoFetcherError {
     MetadataNotFoundError(Pubkey),
     #[error("InvalidAccountDataError for: {0}")]
     InvalidAccountDataError(Pubkey),
+    #[error("Minimum context slot {0} not reached: {1}")]
+    MinContextSlotNotReachedError(u64, Box<MagicBlockRpcClientError>),
     #[error("MagicBlockRpcClientError: {0}")]
     MagicBlockRpcClientError(Box<MagicBlockRpcClientError>),
+}
+
+impl TaskInfoFetcherError {
+    pub fn map_client_error(
+        min_context_slot: u64,
+        e: MagicBlockRpcClientError,
+    ) -> Self {
+        const MIN_CONTEXT_SLOT_MSG1: &str =
+            "Minimum context slot has not been reached";
+
+        let orig = e;
+        let err = match &orig {
+            MagicBlockRpcClientError::RpcClientError(err)
+            | MagicBlockRpcClientError::SendTransaction(err) => Some(err),
+            _ => None,
+        };
+        let Some(err) = err else {
+            return Self::MagicBlockRpcClientError(Box::new(orig));
+        };
+
+        match &err.kind {
+            ErrorKind::RpcError(rpc_err) => match rpc_err {
+                RpcError::ForUser(msg)
+                if msg.contains(MIN_CONTEXT_SLOT_MSG1) => {
+                    Self::MinContextSlotNotReachedError(min_context_slot, Box::new(orig))
+                },
+                RpcError::RpcResponseError { code, .. }
+                if *code == JSON_RPC_SERVER_ERROR_MIN_CONTEXT_SLOT_NOT_REACHED => {
+                    Self::MinContextSlotNotReachedError(min_context_slot, Box::new(orig))
+                }
+                _ => Self::MagicBlockRpcClientError(Box::new(orig)),
+            },
+            _ => Self::MagicBlockRpcClientError(Box::new(orig)),
+        }
+    }
 }
 
 impl From<MagicBlockRpcClientError> for TaskInfoFetcherError {
@@ -351,6 +399,7 @@ impl TaskInfoFetcherError {
         match self {
             Self::MetadataNotFoundError(_) => None,
             Self::InvalidAccountDataError(_) => None,
+            Self::MinContextSlotNotReachedError(_, err) => err.signature(),
             Self::MagicBlockRpcClientError(err) => err.signature(),
         }
     }

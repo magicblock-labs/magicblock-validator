@@ -316,7 +316,7 @@ where
         let tasks_and_metas: Vec<_> = strategy
             .optimized_tasks
             .iter_mut()
-            .flat_map(|task| {
+            .filter_map(|task| {
                 let mut visitor = TaskVisitorUtils::GetCommitMeta(None);
                 task.visit(&mut visitor);
                 if let TaskVisitorUtils::GetCommitMeta(Some(commit_meta)) =
@@ -332,7 +332,7 @@ where
             .iter()
             .map(|(_, meta)| meta.remote_slot)
             .max()
-            .unwrap_or(0);
+            .unwrap_or_default();
 
         // We reset TaskInfoFetcher for all committed accounts
         // We re-fetch them to fix out of sync tasks
