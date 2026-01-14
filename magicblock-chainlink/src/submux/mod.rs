@@ -427,7 +427,9 @@ where
             let previous = connected_clients_subscribing_immediately
                 .fetch_add(1, Ordering::SeqCst);
             let current = previous.saturating_add(1);
-            metrics::set_connected_direct_pubsub_clients_count(current as usize);
+            metrics::set_connected_direct_pubsub_clients_count(
+                current as usize,
+            );
         }
 
         true
