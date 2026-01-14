@@ -1,84 +1,107 @@
-use std::{collections::HashSet, path::Path, sync::Arc};
+use std::{path::Path, sync::Arc, thread};
 
-use error::AccountsDbError;
+use error::{AccountsDbError, LogErr};
 use index::{
     iterator::OffsetPubkeyIter, utils::AccountOffsetFinder, AccountsDbIndex,
 };
 use lmdb::{RwTransaction, Transaction};
-use log::{error, warn};
+use log::{error, info, warn};
 use magicblock_config::config::AccountsDbConfig;
 use magicblock_core::traits::AccountsBank;
 use parking_lot::RwLock;
-use snapshot::SnapshotEngine;
 use solana_account::{
     cow::AccountBorrowed, AccountSharedData, ReadableAccount,
 };
 use solana_pubkey::Pubkey;
 use storage::AccountsStorage;
 
+// Use the refactored manager
+use crate::snapshot::SnapshotManager;
+
 pub type AccountsDbResult<T> = Result<T, AccountsDbError>;
-/// Stop the World Lock, used to halt all writes to the accountsdb
-/// while some critical operation is in action, e.g. snapshotting
-pub type StWLock = Arc<RwLock<()>>;
+
+/// A global lock used to suspend all write operations during critical
+/// sections (like snapshots).
+pub type GlobalWriteLock = Arc<RwLock<()>>;
 
 pub const ACCOUNTSDB_DIR: &str = "accountsdb";
 
+/// The main Accounts Database.
+///
+/// Coordinates:
+/// 1. **Storage**: Append-only memory-mapped log (`AccountsStorage`).
+/// 2. **Indexing**: LMDB-based key-value store (`AccountsDbIndex`).
+/// 3. **Persistence**: Snapshot management (`SnapshotManager`).
 #[cfg_attr(test, derive(Debug))]
 pub struct AccountsDb {
-    /// Main accounts storage, where actual account records are kept
+    /// Underlying append-only storage for account data.
     storage: AccountsStorage,
-    /// Index manager, used for various lookup operations
+    /// Fast index for account lookups (Pubkey -> Offset).
     index: AccountsDbIndex,
-    /// Snapshots manager
-    snapshot_engine: Arc<SnapshotEngine>,
-    /// Synchronization lock, employed for preventing other threads from
-    /// writing to accountsdb, currently used for snapshotting only
-    synchronizer: StWLock,
-    /// Slot wise frequency at which snapshots should be taken
+    /// Manages snapshots and state restoration.
+    snapshot_manager: Arc<SnapshotManager>,
+    /// Global lock ensures atomic snapshots by pausing writes.
+    /// Note: Reads are generally wait-free/lock-free via mmap,
+    /// unless they require index cursor stability.
+    write_lock: GlobalWriteLock,
+    /// Configured interval (in slots) for creating snapshots.
     snapshot_frequency: u64,
 }
 
 impl AccountsDb {
-    /// Open or create accounts database
+    /// Initializes the Accounts Database.
+    ///
+    /// This handles directory creation and potentially resets the state
+    /// if `config.reset` is true.
     pub fn new(
         config: &AccountsDbConfig,
-        directory: &Path,
+        root_dir: &Path,
         max_slot: u64,
     ) -> AccountsDbResult<Self> {
-        let directory = directory.join(format!("{ACCOUNTSDB_DIR}/main"));
-        let lock = StWLock::default();
+        let db_dir = root_dir.join(ACCOUNTSDB_DIR).join("main");
 
-        if config.reset && std::fs::exists(&directory)? {
-            std::fs::remove_dir_all(&directory).inspect_err(log_err!(
-                "failed to reset accountsdb root directory"
-            ))?;
+        if config.reset && db_dir.exists() {
+            info!("Resetting AccountsDb at {}", db_dir.display());
+            std::fs::remove_dir_all(&db_dir).log_err(|| {
+                "Failed to reset accountsdb directory".to_string()
+            })?;
         }
-        std::fs::create_dir_all(&directory).inspect_err(log_err!(
-            "ensuring existence of accountsdb directory"
-        ))?;
-        let storage = AccountsStorage::new(config, &directory)
-            .inspect_err(log_err!("storage creation"))?;
-        let index = AccountsDbIndex::new(config.index_size, &directory)
-            .inspect_err(log_err!("index creation"))?;
-        let snapshot_engine =
-            SnapshotEngine::new(directory, config.max_snapshots as usize)
-                .inspect_err(log_err!("snapshot engine creation"))?;
-        let snapshot_frequency = config.snapshot_frequency;
-        assert_ne!(snapshot_frequency, 0, "snapshot frequency cannot be zero");
+        std::fs::create_dir_all(&db_dir)
+            .log_err(|| "Failed to create accountsdb directory".to_string())?;
+
+        let storage = AccountsStorage::new(config, &db_dir)
+            .log_err(|| "Failed to initialize storage".to_string())?;
+
+        let index = AccountsDbIndex::new(config.index_size, &db_dir)
+            .log_err(|| "Failed to initialize index".to_string())?;
+
+        let snapshot_manager =
+            SnapshotManager::new(db_dir.clone(), config.max_snapshots as usize)
+                .log_err(|| {
+                    "Failed to initialize snapshot manager".to_string()
+                })?;
+
+        if config.snapshot_frequency == 0 {
+            return Err(AccountsDbError::Internal(
+                "Snapshot frequency cannot be zero".to_string(),
+            ));
+        }
 
         let mut this = Self {
             storage,
             index,
-            snapshot_engine,
-            synchronizer: lock,
-            snapshot_frequency,
+            snapshot_manager,
+            write_lock: GlobalWriteLock::default(),
+            snapshot_frequency: config.snapshot_frequency,
         };
-        this.ensure_at_most(max_slot)?;
+
+        // Recover state if the requested slot is older than our current state
+        this.restore_state_if_needed(max_slot)?;
+
         Ok(this)
     }
 
-    /// Opens existing database with given snapshot_frequency, used for tests and tools
-    /// most likely you want to use [new](AccountsDb::new) method
+    /// Opens an existing database (helper for tooling/tests).
     pub fn open(directory: &Path) -> AccountsDbResult<Self> {
         let config = AccountsDbConfig {
             snapshot_frequency: u64::MAX,
@@ -87,242 +110,146 @@ impl AccountsDb {
         Self::new(&config, directory, 0)
     }
 
-    /// Insert account with given pubkey into the database
-    /// Note: this method removes zero lamport account from database
+    /// Inserts or updates a single account.
     pub fn insert_account(
         &self,
         pubkey: &Pubkey,
         account: &AccountSharedData,
     ) -> AccountsDbResult<()> {
-        let mut txn = Option::<RwTransaction>::None;
-        macro_rules! txn {
-            () => {
-                match txn.as_mut() {
-                    Some(t) => t,
-                    None => txn.insert(self.index.rwtxn()?),
-                }
-            };
+        let mut txn = self.index.rwtxn()?;
+        self.perform_account_upsert(pubkey, account, &mut txn)?;
+        txn.commit()?;
+        Ok(())
+    }
+
+    /// Inserts multiple accounts atomically.
+    ///
+    /// If any insertion fails, the entire batch is rolled back (index changes are aborted).
+    pub fn insert_batch<'a>(
+        &self,
+        accounts: impl Iterator<Item = &'a (Pubkey, AccountSharedData)> + Clone,
+    ) -> AccountsDbResult<()> {
+        let mut txn = self.index.rwtxn()?;
+        let mut processed_count = 0;
+
+        // Optimistic execution
+        for (pubkey, account) in accounts.clone() {
+            let result = self.perform_account_upsert(pubkey, account, &mut txn);
+            if let Err(e) = result {
+                error!("Batch insert failed at {pubkey}: {e}");
+                // Rollback in-memory Cow changes for accounts processed so far
+                self.rollback_borrowed_accounts(accounts, processed_count);
+                // Abort LMDB transaction (implicit on drop, but explicit return here)
+                return Err(e);
+            }
+            processed_count += 1;
         }
-        // NOTE: we don't check for non-zero lamports since we allow to store zero-lamport accounts
-        // for the following two cases:
-        // - when we clone a compressed account we reflect the exact lamports it has which maybe
-        //   zero since compressed accounts don't need to be rent-exempt
-        // - when we clone an account to signal that we fetched it from chain already but did not
-        //   find it, i.e. in the case of an escrow account to avoid doing that over and over
+
+        if let Err(e) = txn.commit() {
+            error!("Batch insert commit failed {e}");
+            // Rollback in-memory CoW changes for all processed accounts
+            self.rollback_borrowed_accounts(accounts, processed_count);
+            return Err(e.into());
+        }
+        Ok(())
+    }
+
+    fn rollback_borrowed_accounts<'a>(
+        &self,
+        accounts: impl Iterator<Item = &'a (Pubkey, AccountSharedData)>,
+        count: usize,
+    ) {
+        for (_, account) in accounts.take(count) {
+            // SAFETY:
+            // We invoke rollback on the specific `AccountSharedData` instances
+            // that were modified in-memory during this failed transaction.
+            // This method is called only for accounts previously modified by
+            // perform_account_upsert.
+            unsafe { account.rollback() };
+        }
+    }
+
+    /// Core upsert logic: Storage Allocation -> Index Update -> Data Write.
+    fn perform_account_upsert(
+        &self,
+        pubkey: &Pubkey,
+        account: &AccountSharedData,
+        txn: &mut RwTransaction,
+    ) -> AccountsDbResult<()> {
         match account {
             AccountSharedData::Borrowed(acc) => {
-                // check whether the account's owner has changed
+                // Borrowed accounts are updated in-place in RAM.
+                // We only touch the index if ownership changes to ensure consistency.
                 if acc.owner_changed() {
                     self.index
-                        .ensure_correct_owner(pubkey, account.owner(), txn!())
-                        .inspect_err(log_err!(
-                            "failed to ensure correct account owner for {}",
-                            pubkey
-                        ))?;
+                        .ensure_correct_owner(pubkey, account.owner(), txn)
+                        .log_err(|| {
+                            "Failed to update owner index".to_string()
+                        })?;
                 }
-                // and perform some index bookkeeping to ensure a correct owner
-                // For borrowed variants everything is already written and we just increment the
-                // atomic counter. New readers will see the latest update.
                 acc.commit();
             }
             AccountSharedData::Owned(acc) => {
-                let txn = txn!();
-                let datalen = account.data().len() as u32;
+                // 1. Calculate size requirements
+                let data_len = account.data().len() as u32;
                 let block_size = self.storage.block_size() as u32;
-                let size = AccountSharedData::serialized_size_aligned(
-                    datalen, block_size,
+                let size_bytes = AccountSharedData::serialized_size_aligned(
+                    data_len, block_size,
                 ) as usize;
 
-                let blocks = self.storage.get_block_count(size);
-                // TODO(bmuddha) perf optimization: use reallocs sparringly
-                // https://github.com/magicblock-labs/magicblock-validator/issues/327
-                let allocation = match self
-                    .index
-                    .try_recycle_allocation(blocks, txn)
-                {
-                    // if we could recycle some "hole" in the database, use it
-                    Ok(recycled) => {
-                        // bookkeeping for the deallocated (free hole) space
-                        self.storage.decrement_deallocations(recycled.blocks);
-                        self.storage.recycle(recycled)
-                    }
-                    // otherwise allocate from the end of memory map
-                    Err(AccountsDbError::NotFound) => self.storage.alloc(size),
-                    Err(err) => {
-                        // This can only happen if we have catastrophic system mulfunction
-                        error!("failed to insert account, index allocation check error: {err}");
-                        return Err(err);
-                    }
-                };
+                let blocks_needed = self.storage.blocks_required(size_bytes);
 
-                // update accounts index
-                let dealloc = self
+                // 2. Allocate (Recycle or New)
+                let allocation =
+                    match self.index.try_recycle_allocation(blocks_needed, txn)
+                    {
+                        Ok(recycled) => {
+                            self.storage.dec_recycled_count(recycled.blocks);
+                            self.storage.recycle(recycled)
+                        }
+                        Err(AccountsDbError::NotFound) => {
+                            self.storage.allocate(size_bytes)?
+                        }
+                        Err(e) => return Err(e),
+                    };
+
+                // 3. Update Index
+                let old_allocation = self
                     .index
-                    .insert_account(pubkey, account.owner(), allocation, txn)
-                    .inspect_err(log_err!("account index insertion"))?;
-                if let Some(dealloc) = dealloc {
-                    // bookkeeping for deallocated (free hole) space
-                    self.storage.increment_deallocations(dealloc.blocks);
+                    .upsert_account(pubkey, account.owner(), allocation, txn)
+                    .log_err(|| "Index update failed".to_string())?;
+
+                if let Some(old) = old_allocation {
+                    self.storage.inc_recycled_count(old.blocks);
                 }
-                // SAFETY:
-                // Allocation object is constructed by obtaining a valid offset from storage, which
-                // is unoccupied by other accounts, points to valid memory within mmap and is
-                // properly aligned to 8 bytes, so the contract of serialize_to_mmap is satisfied
+
+                // 4. Write Data
+                // SAFETY: `allocation` provides a valid, exclusive pointer range managed by `AccountsStorage`.
                 unsafe {
                     AccountSharedData::serialize_to_mmap(
                         acc,
-                        allocation.storage.as_ptr(),
+                        allocation.ptr.as_ptr(),
                         block_size * allocation.blocks,
                     )
                 };
             }
         }
-        if let Some(txn) = txn {
-            txn.commit()?;
-        }
         Ok(())
     }
 
-    pub fn insert_batch<'a>(
-        &self,
-        accounts: impl Iterator<Item = &'a (Pubkey, AccountSharedData)> + Clone,
-    ) -> AccountsDbResult<()> {
-        let mut txn = Option::<RwTransaction>::None;
-        macro_rules! txn {
-            () => {
-                match txn.as_mut() {
-                    Some(t) => t,
-                    None => txn.insert(self.index.rwtxn()?),
-                }
-            };
-        }
-        let mut error = Option::<AccountsDbError>::None;
-        macro_rules! break_error {
-            ($error: expr, $msg: expr) => {
-                error!($msg, $error);
-                error.replace($error);
-                break;
-            };
-        }
-
-        let mut commited = 0;
-        for (pubkey, account) in accounts.clone() {
-            match account {
-                AccountSharedData::Borrowed(acc) => {
-                    // check whether the account's owner has changed
-                    if acc.owner_changed() {
-                        if let Err(err) = self.index.ensure_correct_owner(
-                            pubkey,
-                            account.owner(),
-                            txn!(),
-                        ) {
-                            break_error!(err, "account owner index update: {}");
-                        }
-                    }
-                    // and perform some index bookkeeping to ensure a correct owner
-                    // For borrowed variants everything is already written and we just increment the
-                    // atomic counter. New readers will see the latest update.
-                    acc.commit();
-                }
-                AccountSharedData::Owned(acc) => {
-                    let txn = txn!();
-                    let datalen = account.data().len() as u32;
-                    let block_size = self.storage.block_size() as u32;
-                    let size = AccountSharedData::serialized_size_aligned(
-                        datalen, block_size,
-                    ) as usize;
-
-                    let blocks = self.storage.get_block_count(size);
-                    // TODO(bmuddha) perf optimization: use reallocs sparringly
-                    // https://github.com/magicblock-labs/magicblock-validator/issues/327
-                    let allocation = match self
-                        .index
-                        .try_recycle_allocation(blocks, txn)
-                    {
-                        // if we could recycle some "hole" in the database, use it
-                        Ok(recycled) => {
-                            // bookkeeping for the deallocated (free hole) space
-                            self.storage
-                                .decrement_deallocations(recycled.blocks);
-                            self.storage.recycle(recycled)
-                        }
-                        // otherwise allocate from the end of memory map
-                        Err(AccountsDbError::NotFound) => {
-                            self.storage.alloc(size)
-                        }
-                        Err(err) => {
-                            // This can only happen if we have catastrophic system mulfunction
-                            break_error!(err, "failed to insert account, index allocation check error: {}");
-                        }
-                    };
-
-                    // update accounts index
-                    let result = self.index.insert_account(
-                        pubkey,
-                        account.owner(),
-                        allocation,
-                        txn,
-                    );
-                    match result {
-                        Ok(Some(dealloc)) => {
-                            // bookkeeping for deallocated (free hole) space
-                            self.storage
-                                .increment_deallocations(dealloc.blocks);
-                        }
-                        Ok(None) => (),
-                        Err(err) => {
-                            break_error!(
-                                err,
-                                "account index insertion failed: {}"
-                            );
-                        }
-                    }
-                    // SAFETY:
-                    // Allocation object is constructed by obtaining a valid offset from storage, which
-                    // is unoccupied by other accounts, points to valid memory within mmap and is
-                    // properly aligned to 8 bytes, so the contract of serialize_to_mmap is satisfied
-                    unsafe {
-                        AccountSharedData::serialize_to_mmap(
-                            acc,
-                            allocation.storage.as_ptr(),
-                            block_size * allocation.blocks,
-                        )
-                    };
-                }
-            }
-            commited += 1;
-        }
-        if let Some(error) = error {
-            for (_, account) in accounts.take(commited) {
-                // # Safety
-                // we are only rolling back account which we have just committed,
-                // thus it is guaranteed that the rollback buffer is initialized
-                unsafe { account.rollback() };
-            }
-            return Err(error);
-        }
-        if let Some(txn) = txn {
-            txn.commit()?;
-        }
-        Ok(())
-    }
-
-    /// Check whether given account is owned by any of the programs in the provided list
+    /// Checks if any of the `owners` own the `account`.
     pub fn account_matches_owners(
         &self,
         account: &Pubkey,
         owners: &[Pubkey],
     ) -> Option<usize> {
-        let offset = self.index.get_account_offset(account).ok()?;
-        let memptr = self.storage.offset(offset);
-        // SAFETY:
-        // memptr is obtained from the storage directly, which maintains
-        // the integrity of account records, by making sure, that they are
-        // initialized and laid out properly along with the shadow buffer
-        unsafe { AccountBorrowed::any_owner_matches(memptr.as_ptr(), owners) }
+        let offset = self.index.get_offset(account).ok()?;
+        let ptr = self.storage.resolve_ptr(offset);
+        // SAFETY: `ptr` is guaranteed valid by `AccountsStorage` for the duration of the map.
+        unsafe { AccountBorrowed::any_owner_matches(ptr.as_ptr(), owners) }
     }
 
-    /// Scans the database accounts of given program, satisfying the provided filter
+    /// Returns a filterable iterator over accounts owned by `program`.
     pub fn get_program_accounts<F>(
         &self,
         program: &Pubkey,
@@ -331,13 +258,11 @@ impl AccountsDb {
     where
         F: Fn(&AccountSharedData) -> bool + 'static,
     {
-        // TODO(bmuddha): perf optimization in scanning logic
-        // https://github.com/magicblock-labs/magicblock-validator/issues/328
+        let iterator =
+            self.index.get_program_accounts_iter(program).log_err(|| {
+                "Failed to create program accounts iterator".to_string()
+            })?;
 
-        let iterator = self
-            .index
-            .get_program_accounts_iter(program)
-            .inspect_err(log_err!("program accounts retrieval"))?;
         Ok(AccountsScanner {
             iterator,
             storage: &self.storage,
@@ -345,179 +270,183 @@ impl AccountsDb {
         })
     }
 
+    /// An optimized accountsdb accessor, which can be used for multiple reads,
+    /// without incurring the overhead of repeated creation of index transaction
     pub fn reader(&self) -> AccountsDbResult<AccountsReader<'_>> {
-        let offset = self.index.offset_finder()?;
+        let offset = self
+            .index
+            .offset_finder()
+            .log_err(|| "Failed to create offset iterator")?;
         Ok(AccountsReader {
             offset,
             storage: &self.storage,
         })
     }
 
-    /// Check whether account with given pubkey exists in the database
+    /// Check whether pubkey is present in the AccountsDB
     pub fn contains_account(&self, pubkey: &Pubkey) -> bool {
-        match self.index.get_account_offset(pubkey) {
-            Ok(_) => true,
-            Err(AccountsDbError::NotFound) => false,
-            Err(err) => {
-                warn!("failed to check {pubkey} existence: {err}");
-                false
-            }
-        }
+        self.index.get_offset(pubkey).is_ok()
     }
 
-    /// Get the number of accounts in the database
-    pub fn get_accounts_count(&self) -> usize {
+    /// Return total number of accounts present in the database
+    pub fn account_count(&self) -> usize {
         self.index.get_accounts_count()
     }
 
-    /// Get latest observed slot
+    /// Return the last slot written to AccountsDB
     #[inline(always)]
     pub fn slot(&self) -> u64 {
-        self.storage.get_slot()
+        self.storage.slot()
     }
 
-    /// Temporary hack for overriding accountsdb slot without snapshot checks
-    // TODO(bmuddha): remove with the ledger rewrite
-    pub fn override_slot(&self, slot: u64) {
-        self.storage.set_slot(slot);
-    }
-
-    /// Set latest observed slot
+    /// Updates the current slot. Triggers a background snapshot if the schedule matches.
     #[inline(always)]
     pub fn set_slot(self: &Arc<Self>, slot: u64) {
-        self.storage.set_slot(slot);
+        self.storage.update_slot(slot);
 
-        if !slot.is_multiple_of(self.snapshot_frequency) {
-            return;
+        if slot > 0 && slot.is_multiple_of(self.snapshot_frequency) {
+            self.trigger_background_snapshot(slot);
         }
+    }
+
+    /// Spawns a background thread to take a snapshot.
+    fn trigger_background_snapshot(self: &Arc<Self>, slot: u64) {
         let this = self.clone();
-        // Since `set_slot` is usually invoked in async context, we don't want to
-        // ever block it. Here we move the whole lock acquisition and snapshotting
-        // to a separate thread, considering that snapshot taking is extremely rare
-        // operation, the overhead should be negligible
-        std::thread::spawn(move || {
-            // acquire the lock, effectively stopping the world, nothing should be able
-            // to modify underlying accounts database while this lock is active
-            let locked = this.synchronizer.write();
-            // flush everything before taking the snapshot, in order to ensure consistent state
+
+        thread::spawn(move || {
+            // Acquire write lock to ensure consistent state capture
+            let write_guard = this.write_lock.write();
             this.flush();
 
-            let used_storage = this.storage.utilized_mmap();
-            if let Err(err) =
-                this.snapshot_engine.snapshot(slot, used_storage, locked)
-            {
-                warn!(
-                    "failed to take snapshot at {}, slot {slot}: {err}",
-                    this.snapshot_engine.database_path().display()
-                );
+            // Capture the active memory map region for the snapshot
+            let used_storage = this.storage.active_segment();
+
+            if let Err(err) = this.snapshot_manager.create_snapshot(
+                slot,
+                used_storage,
+                write_guard,
+            ) {
+                warn!("Snapshot failed for slot {}: {}", slot, err);
             }
         });
     }
 
-    /// Checks whether AccountsDB has "freshness", not exceeding given slot
-    /// Returns current slot if true, otherwise tries to rollback to the
-    /// most recent snapshot, which is older than the provided slot
+    /// Ensures the database state is at most `slot`.
     ///
-    /// Note: this will delete the current database state upon rollback.
-    /// But in most cases, the ledger slot and adb slot will match and
-    /// no rollback will take place, in any case use with care!
-    pub fn ensure_at_most(&mut self, slot: u64) -> AccountsDbResult<u64> {
-        // if this is a fresh start or we just match, then there's nothing to ensure
-        if slot >= self.slot().saturating_sub(1) {
+    /// If the current state is newer than `slot`, this performs a **rollback**
+    /// to the nearest valid snapshot.
+    pub fn restore_state_if_needed(
+        &mut self,
+        target_slot: u64,
+    ) -> AccountsDbResult<u64> {
+        // Allow slot-1 because we might be in the middle of processing the current slot
+        if target_slot >= self.slot().saturating_sub(1) {
             return Ok(self.slot());
         }
-        // make sure that no one is reading the database
-        let _locked = self.synchronizer.write();
 
-        let rb_slot = self
-            .snapshot_engine
-            .try_switch_to_snapshot(slot)
-            .inspect_err(log_err!(
-                "switching to snapshot before slot {}",
-                slot
-            ))?;
-        let path = self.snapshot_engine.database_path();
+        warn!(
+            "Current slot {} is ahead of target {}. Rolling back...",
+            self.slot(),
+            target_slot
+        );
 
+        // Block all writes during restoration
+        let _guard = self.write_lock.write();
+
+        let restored_slot = self
+            .snapshot_manager
+            .restore_from_snapshot(target_slot)
+            .log_err(|| {
+                format!(
+                    "Snapshot restoration failed for target {}",
+                    target_slot
+                )
+            })?;
+
+        // Reload components to reflect new FS state
+        let path = self.snapshot_manager.database_path();
         self.storage.reload(path)?;
         self.index.reload(path)?;
-        Ok(rb_slot)
+
+        info!("Successfully rolled back to slot {}", restored_slot);
+        Ok(restored_slot)
     }
 
-    /// Get the total number of bytes in storage
     pub fn storage_size(&self) -> u64 {
-        self.storage.size()
+        self.storage.size_bytes()
     }
 
-    /// Returns an iterator over all accounts in the database,
     pub fn iter_all(
         &self,
     ) -> impl Iterator<Item = (Pubkey, AccountSharedData)> + '_ {
-        let iter = self
-            .index
+        self.index
             .get_all_accounts()
-            .inspect_err(log_err!("iterating all over all account keys"))
-            .ok();
-        iter.into_iter()
+            .ok()
+            .into_iter()
             .flatten()
             .map(|(offset, pk)| (pk, self.storage.read_account(offset)))
     }
 
-    /// Flush primary storage and indexes to disk
     pub fn flush(&self) {
         self.storage.flush();
         self.index.flush();
     }
 
-    /// Get a clone of synchronization lock, to suspend all the writes,
-    /// while some critical operation, like snapshotting is in progress
-    pub fn synchronizer(&self) -> StWLock {
-        self.synchronizer.clone()
+    pub fn write_lock(&self) -> GlobalWriteLock {
+        self.write_lock.clone()
     }
 }
 
 impl AccountsBank for AccountsDb {
-    /// Read account from with given pubkey from the database (if exists)
     #[inline(always)]
     fn get_account(&self, pubkey: &Pubkey) -> Option<AccountSharedData> {
-        let offset = self.index.get_account_offset(pubkey).ok()?;
+        let offset = self.index.get_offset(pubkey).ok()?;
         Some(self.storage.read_account(offset))
     }
 
     fn remove_account(&self, pubkey: &Pubkey) {
         let _ = self
             .index
-            .remove_account(pubkey)
-            .inspect_err(log_err!("removing an account {}", pubkey));
+            .remove(pubkey)
+            .log_err(|| format!("Failed to remove account {pubkey}"));
     }
 
-    /// Remove all accounts matching the provided predicate
-    /// NOTE: accounts are not locked while this operation is in progress,
-    /// thus this should only be performed before the validator starts processing
-    /// transactions
+    /// Efficiently removes accounts matching a predicate.
     fn remove_where(
         &self,
         predicate: impl Fn(&Pubkey, &AccountSharedData) -> bool,
     ) -> usize {
-        let to_remove = self
-            .iter_all()
-            .filter(|(pk, acc)| predicate(pk, acc))
-            .map(|(pk, _)| pk)
-            .collect::<HashSet<_>>();
-        let removed = to_remove.len();
-        for pk in to_remove {
-            self.remove_account(&pk);
+        let mut count = 0;
+        let batch_size = 1024;
+        let mut keys_to_remove = Vec::with_capacity(batch_size);
+
+        // First pass: Identify keys (using iter_all which is read-only)
+        for (pk, acc) in self.iter_all() {
+            if predicate(&pk, &acc) {
+                keys_to_remove.push(pk);
+                if keys_to_remove.len() >= batch_size {
+                    for k in keys_to_remove.drain(..) {
+                        self.remove_account(&k);
+                        count += 1;
+                    }
+                }
+            }
         }
-        removed
+
+        // Final flush
+        for k in keys_to_remove {
+            self.remove_account(&k);
+            count += 1;
+        }
+
+        count
     }
 }
 
-// SAFETY:
-// We only ever use AccountsDb within the Arc and all
-// write access to it is synchronized via atomic operations
+// SAFETY: AccountsDb uses internal locking (LMDB + RwLock) to ensure thread safety.
 unsafe impl Sync for AccountsDb {}
 unsafe impl Send for AccountsDb {}
 
-/// Iterator to scan program accounts applying filtering logic on them
 pub struct AccountsScanner<'db, F> {
     storage: &'db AccountsStorage,
     filter: F,
@@ -530,31 +459,25 @@ where
 {
     type Item = (Pubkey, AccountSharedData);
     fn next(&mut self) -> Option<Self::Item> {
-        loop {
-            let (offset, pubkey) = self.iterator.next()?;
+        for (offset, pubkey) in self.iterator.by_ref() {
             let account = self.storage.read_account(offset);
             if (self.filter)(&account) {
-                break Some((pubkey, account));
+                return Some((pubkey, account));
             }
         }
+        None
     }
 }
 
-/// Versatile and reusable account reader, can be used to perform multiple account queries
-/// from the database more efficiently, avoiding the cost of index/cursor setups
 pub struct AccountsReader<'db> {
     offset: AccountOffsetFinder<'db>,
     storage: &'db AccountsStorage,
 }
 
-// SAFETY:
-// AccountsReader is only ever used to get readable access to the
-// underlying database, and never outlives the the backing storage
 unsafe impl Send for AccountsReader<'_> {}
 unsafe impl Sync for AccountsReader<'_> {}
 
 impl AccountsReader<'_> {
-    /// Find the account specified by the pubkey and pass it to the reader function
     pub fn read<F, R>(&self, pubkey: &Pubkey, reader: F) -> Option<R>
     where
         F: Fn(AccountSharedData) -> R,
@@ -564,7 +487,6 @@ impl AccountsReader<'_> {
         Some(reader(account))
     }
 
-    /// Check whether given account exists in the AccountsDB
     pub fn contains(&self, pubkey: &Pubkey) -> bool {
         self.offset.find(pubkey).is_some()
     }
@@ -573,7 +495,7 @@ impl AccountsReader<'_> {
 #[cfg(test)]
 impl AccountsDb {
     pub fn snapshot_exists(&self, slot: u64) -> bool {
-        self.snapshot_engine.snapshot_exists(slot)
+        self.snapshot_manager.snapshot_exists(slot)
     }
 }
 

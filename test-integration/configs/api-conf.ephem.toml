@@ -1,8 +1,11 @@
 lifecycle = "ephemeral"
-commit = { compute-unit-price = 1_000_000 }
+remotes = ["http://127.0.0.1:7799", "ws://127.0.0.1:7800"]
+
+[aperture]
 listen = "0.0.0.0:8899"
 
-remotes = ["http://127.0.0.1:7799", "ws://127.0.0.1:7800"]
+[commit]
+compute-unit-price = 1_000_000
 
 [accountsdb]
 # size of the main storage, we have to preallocate in advance

@@ -9,10 +9,7 @@ use std::{
 };
 
 use magicblock_core::{
-    link::{
-        accounts::AccountWithSlot,
-        transactions::{TransactionResult, TransactionStatus},
-    },
+    link::{accounts::AccountWithSlot, transactions::TransactionStatus},
     Slot,
 };
 use magicblock_metrics::metrics::RPC_WS_SUBSCRIPTIONS_COUNT;
@@ -193,17 +190,15 @@ impl SubscriptionsDb {
     /// Sends a notification to a signature subscriber and removes the subscription.
     pub(crate) async fn send_signature_update(
         &self,
-        signature: &Signature,
-        update: &TransactionResult,
-        slot: Slot,
+        update: &TransactionStatus,
     ) {
         // Atomically remove the subscriber to ensure it's only notified once.
         let Some((_, subscriber)) =
-            self.signatures.remove_async(signature).await
+            self.signatures.remove_async(update.txn.signature()).await
         else {
             return;
         };
-        subscriber.send(update, slot)
+        subscriber.send(&update.meta.status, update.slot)
     }
 
     /// Subscribes a connection to receive all transaction logs.

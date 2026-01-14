@@ -38,7 +38,7 @@ resolver = "2"
 
 [workspace.package]
 # Solana Version (2.2.x)
-version = "0.5.3"
+version = "0.6.0"
 authors = ["MagicBlock Maintainers <maintainers@magicblock.xyz>"]
 repository = "https://github.com/magicblock-labs/ephemeral-validator"
 homepage = "https://www.magicblock.xyz"
@@ -46,6 +46,7 @@ license = "Business Source License 1.1"
 edition = "2021"
 
 [workspace.dependencies]
+agave-geyser-plugin-interface = { version = "2.2" }
 anyhow = "1.0.86"
 arc-swap = { version = "1.7" }
 assert_matches = "1.5.0"
@@ -78,8 +79,10 @@ humantime = { version = "1.1", package = "humantime-serde" }
 hyper = "1.6.0"
 hyper-util = "0.1.15"
 isocountry = "0.3.2"
+itertools = "0.14"
 json = { package = "sonic-rs", version = "0.5.3" }
 lazy_static = "1.4.0"
+libloading = "0.8"
 libc = "0.2.153"
 log = { version = "0.4.20" }
 lru = "0.16.0"
@@ -217,8 +220,6 @@ features = ["dev-context-only-utils"]
 # Avoid the vendored bzip2 within rocksdb-sys that can cause linker conflicts
 # when also using the bzip2 crate
 version = "0.22.0"
-default-features = false
-features = ["lz4"]
 
 [patch.crates-io]
 # some solana dependencies have solana-storage-proto as dependency

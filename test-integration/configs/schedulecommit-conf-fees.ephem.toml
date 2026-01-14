@@ -1,8 +1,11 @@
 lifecycle = "ephemeral"
-commit = { compute-unit-price = 1_000_000 }
+remotes = ["http://0.0.0.0:7799", "ws://0.0.0.0:7800"]
+
+[aperture]
 listen = "0.0.0.0:8899"
 
-remotes = ["http://0.0.0.0:7799", "ws://0.0.0.0:7800"]
+[commit]
+compute-unit-price = 1_000_000
 
 [accountsdb]
 # size of the main storage, we have to preallocate in advance
@@ -20,8 +23,6 @@ index-size = 2048576
 max-snapshots = 7
 # how frequently (slot-wise) we should take snapshots
 snapshot-frequency = 1024
-
-reset = true
 
 [ledger]
 reset = true

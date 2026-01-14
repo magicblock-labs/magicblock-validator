@@ -11,6 +11,7 @@ use solana_program::{
 };
 use solana_pubkey::Pubkey;
 use solana_signature::Signature;
+use solana_svm_transaction::svm_message::SVMMessage;
 use test_kit::{ExecutionTestEnv, Signer};
 
 const ACCOUNTS_COUNT: usize = 8;
@@ -90,10 +91,10 @@ pub async fn test_transaction_status_update() {
         .recv_timeout(Duration::from_millis(200))
         .expect("transaction status should be delivered immediately after execution");
 
-    assert_eq!(status.signature, sig);
+    assert_eq!(*status.txn.signature(), sig);
     let logs = status
-        .result
-        .logs
+        .meta
+        .log_messages
         .expect("transaction should have produced logs");
     assert!(
         logs.len() > ACCOUNTS_COUNT,
@@ -122,7 +123,12 @@ pub async fn test_transaction_modifies_accounts() {
         .expect("successful transaction status should be delivered");
 
     let mut modified_accounts = HashSet::with_capacity(ACCOUNTS_COUNT);
-    for acc_pubkey in status.result.accounts.iter().skip(1).take(ACCOUNTS_COUNT)
+    for acc_pubkey in status
+        .txn
+        .account_keys()
+        .iter()
+        .skip(1)
+        .take(ACCOUNTS_COUNT)
     {
         let account = env
             .accountsdb

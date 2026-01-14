@@ -17,8 +17,8 @@ use magicblock_accounts::{
 };
 use magicblock_accounts_db::AccountsDb;
 use magicblock_aperture::{
+    initialize_aperture,
     state::{NodeContext, SharedState},
-    JsonRpcServer,
 };
 use magicblock_chainlink::{
     config::ChainlinkConfig,
@@ -265,8 +265,8 @@ impl MagicValidator {
             ledger.clone(),
             chainlink.clone(),
         );
-        let rpc = JsonRpcServer::new(
-            config.listen,
+        let rpc = initialize_aperture(
+            &config.aperture,
             shared_state,
             &dispatch,
             token.clone(),
@@ -297,7 +297,7 @@ impl MagicValidator {
         let task_scheduler = TaskSchedulerService::new(
             &task_scheduler_db_path,
             &config.task_scheduler,
-            config.listen.http(),
+            config.aperture.listen.http(),
             dispatch
                 .tasks_service
                 .take()
@@ -394,6 +394,9 @@ impl MagicValidator {
         );
         chainlink_config.remove_confined_accounts =
             config.chainlink.remove_confined_accounts;
+        chainlink_config.remote_account_provider = chainlink_config
+            .remote_account_provider
+            .with_resubscription_delay(config.chainlink.resubscription_delay);
         let commitment_config = {
             let level = CommitmentLevel::Confirmed;
             CommitmentConfig { commitment: level }
