@@ -4,8 +4,8 @@ use magicblock_core::{
     link::{
         accounts::{AccountWithSlot, LockedAccount},
         transactions::{
-            TransactionExecutionResult, TransactionSimulationResult,
-            TransactionStatus, TxnExecutionResultTx, TxnSimulationResultTx,
+            TransactionSimulationResult, TransactionStatus,
+            TxnExecutionResultTx, TxnSimulationResultTx,
         },
     },
     tls::ExecutionTlsStash,
@@ -256,6 +256,19 @@ impl super::TransactionExecutor {
         if let Err(error) = self.ledger.write_transaction(
             signature,
             self.processor.slot,
+            &txn,
+            // TODO(bmuddha): perf: remove clone with the new ledger
+            meta.clone(),
+        ) {
+            Ok(i) => i,
+            Err(error) => {
+                error!("failed to commit transaction to the ledger: {error}");
+                return;
+            }
+        };
+        let status = TransactionStatus {
+            slot: self.processor.slot,
+            index,
             txn,
             meta,
         ) {

@@ -8,6 +8,7 @@ use solana_program::{
 };
 use solana_pubkey::Pubkey;
 use solana_signature::Signature;
+use solana_svm_transaction::svm_message::SVMMessage;
 use test_kit::{ExecutionTestEnv, Signer};
 
 const ACCOUNTS_COUNT: usize = 8;

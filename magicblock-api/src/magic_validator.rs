@@ -17,8 +17,8 @@ use magicblock_accounts::{
 };
 use magicblock_accounts_db::AccountsDb;
 use magicblock_aperture::{
+    initialize_aperture,
     state::{NodeContext, SharedState},
-    JsonRpcServer,
 };
 use magicblock_chainlink::{
     config::ChainlinkConfig,
@@ -268,8 +268,8 @@ impl MagicValidator {
             ledger.clone(),
             chainlink.clone(),
         );
-        let rpc = JsonRpcServer::new(
-            config.listen,
+        let rpc = initialize_aperture(
+            &config.aperture,
             shared_state,
             &dispatch,
             token.clone(),
@@ -300,7 +300,7 @@ impl MagicValidator {
         let task_scheduler = TaskSchedulerService::new(
             &task_scheduler_db_path,
             &config.task_scheduler,
-            config.listen.http(),
+            config.aperture.listen.http(),
             dispatch
                 .tasks_service
                 .take()
