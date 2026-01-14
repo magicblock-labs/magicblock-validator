@@ -438,9 +438,11 @@ impl ChainPubsubActor {
                                 trace!("[client_id={client_id}] Received update for {pubkey}: {rpc_response:?}");
                             }
                             let update = SubscriptionUpdate::from((pubkey, rpc_response));
-                            inc_account_subscription_account_updates_count(
-                                &client_id,
-                            );
+                            if pubkey != clock::ID {
+                                inc_account_subscription_account_updates_count(
+                                    &client_id,
+                                );
+                            }
                             let _ = subscription_updates_sender.send(update).await.inspect_err(|err| {
                                 error!("[client_id={client_id}] Failed to send {pubkey} subscription update: {err:?}");
                             });
@@ -572,9 +574,11 @@ impl ChainPubsubActor {
                                     };
                                     let sub_update = SubscriptionUpdate::from((acc_pubkey, rpc_response));
                                     trace!("[client_id={client_id}] Sending program {program_pubkey} account update: {sub_update:?}");
-                                    inc_program_subscription_account_updates_count(
-                                        &client_id,
-                                    );
+                                    if acc_pubkey != clock::ID {
+                                        inc_program_subscription_account_updates_count(
+                                            &client_id,
+                                        );
+                                    }
                                     let _ = subscription_updates_sender.send(sub_update)
                                         .await
                                         .inspect_err(|err| {
