@@ -960,6 +960,7 @@ async fn test_commit_unfinalized_account_recovery() {
     let committed_account = CommittedAccount {
         pubkey: pda,
         account,
+        remote_slot: Default::default()
     };
     let intent = create_intent(vec![committed_account], false);
     let result = intent_executor
@@ -1043,6 +1044,7 @@ async fn test_commit_unfinalized_account_recovery_two_stage() {
         .map(|el| CommittedAccount {
             pubkey: el.1,
             account: el.2,
+            remote_slot: Default::default()
         })
         .collect();
     let intent = create_intent(committed_accounts, true);
