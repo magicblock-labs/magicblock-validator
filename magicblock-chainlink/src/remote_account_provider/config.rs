@@ -1,15 +1,12 @@
 use std::{collections::HashSet, time::Duration};
 
 use magicblock_config::{
-    config::LifecycleMode, consts::DEFAULT_RESUBSCRIPTION_DELAY_MS,
+    config::LifecycleMode,
+    consts::{DEFAULT_MAX_MONITORED_ACCOUNTS, DEFAULT_RESUBSCRIPTION_DELAY_MS},
 };
 use solana_pubkey::Pubkey;
 
 use super::{RemoteAccountProviderError, RemoteAccountProviderResult};
-
-// TODO(thlorenz): make configurable
-// Tracked: https://github.com/magicblock-labs/magicblock-validator/issues/577
-pub const DEFAULT_SUBSCRIBED_ACCOUNTS_LRU_CAPACITY: usize = 10_000;
 
 #[derive(Debug, Clone)]
 pub struct RemoteAccountProviderConfig {
@@ -111,8 +108,7 @@ impl RemoteAccountProviderConfig {
 impl Default for RemoteAccountProviderConfig {
     fn default() -> Self {
         Self {
-            subscribed_accounts_lru_capacity:
-                DEFAULT_SUBSCRIBED_ACCOUNTS_LRU_CAPACITY,
+            subscribed_accounts_lru_capacity: DEFAULT_MAX_MONITORED_ACCOUNTS,
             lifecycle_mode: LifecycleMode::default(),
             enable_subscription_metrics: true,
             program_subs: vec![dlp::id()].into_iter().collect(),

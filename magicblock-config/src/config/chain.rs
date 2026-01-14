@@ -74,7 +74,7 @@ impl Default for ChainLinkConfig {
         Self {
             prepare_lookup_tables: false,
             auto_airdrop_lamports: 0,
-            max_monitored_accounts: 5_000,
+            max_monitored_accounts: consts::DEFAULT_MAX_MONITORED_ACCOUNTS,
             remove_confined_accounts: false,
             allowed_programs: None,
             resubscription_delay: Duration::from_millis(
