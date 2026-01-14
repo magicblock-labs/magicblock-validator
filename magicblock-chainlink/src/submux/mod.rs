@@ -223,6 +223,7 @@ where
                 .iter()
                 .filter(|(client, _)| client.subs_immediately())
                 .count();
+            metrics::set_connected_direct_pubsub_clients_count(n);
             Arc::new(AtomicU16::new(n.try_into().unwrap_or(u16::MAX)))
         };
         for (client, _) in &clients {
@@ -423,12 +424,10 @@ where
         );
         metrics::set_pubsub_client_uptime(client.id(), true);
         if client.subs_immediately() {
-            connected_clients_subscribing_immediately
+            let previous = connected_clients_subscribing_immediately
                 .fetch_add(1, Ordering::SeqCst);
-            metrics::set_connected_direct_pubsub_clients_count(
-                connected_clients_subscribing_immediately.load(Ordering::SeqCst)
-                    as usize,
-            );
+            let current = previous.saturating_add(1);
+            metrics::set_connected_direct_pubsub_clients_count(current as usize);
         }
 
         true
