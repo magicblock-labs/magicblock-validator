@@ -389,14 +389,26 @@ impl MagicValidator {
         );
         let cloner = Arc::new(cloner);
         let accounts_bank = accountsdb.clone();
-        let mut chainlink_config = ChainlinkConfig::default_with_lifecycle_mode(
-            LifecycleMode::Ephemeral,
-        );
-        chainlink_config.remove_confined_accounts =
-            config.chainlink.remove_confined_accounts;
+        let mut chainlink_config =
+            ChainlinkConfig::default_with_lifecycle_mode(
+                LifecycleMode::Ephemeral,
+            )
+            .with_remove_confined_accounts(
+                config.chainlink.remove_confined_accounts,
+            );
         chainlink_config.remote_account_provider = chainlink_config
             .remote_account_provider
-            .with_resubscription_delay(config.chainlink.resubscription_delay);
+            .with_resubscription_delay(config.chainlink.resubscription_delay)
+            .and_then(|conf| {
+                conf.with_subscribed_accounts_lru_capacity(
+                    config.chainlink.max_monitored_accounts,
+                )
+            })
+            .map_err(|err| {
+                ApiError::from(
+                    magicblock_chainlink::errors::ChainlinkError::from(err),
+                )
+            })?;
         let commitment_config = {
             let level = CommitmentLevel::Confirmed;
             CommitmentConfig { commitment: level }

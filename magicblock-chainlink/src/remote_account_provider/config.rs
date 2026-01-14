@@ -45,9 +45,7 @@ impl RemoteAccountProviderConfig {
         enable_subscription_metrics: bool,
     ) -> RemoteAccountProviderResult<Self> {
         if subscribed_accounts_lru_capacity == 0 {
-            return Err(RemoteAccountProviderError::InvalidLruCapacity(
-                subscribed_accounts_lru_capacity,
-            ));
+            return Err(RemoteAccountProviderError::InvalidLruCapacity);
         }
         Ok(Self {
             subscribed_accounts_lru_capacity,
@@ -67,9 +65,26 @@ impl RemoteAccountProviderConfig {
         }
     }
 
-    pub fn with_resubscription_delay(mut self, delay: Duration) -> Self {
+    pub fn with_resubscription_delay(
+        mut self,
+        delay: Duration,
+    ) -> RemoteAccountProviderResult<Self> {
+        if delay == Duration::ZERO {
+            return Err(RemoteAccountProviderError::InvalidResubscriptionDelay);
+        }
         self.resubscription_delay = delay;
-        self
+        Ok(self)
+    }
+
+    pub fn with_subscribed_accounts_lru_capacity(
+        mut self,
+        capacity: usize,
+    ) -> RemoteAccountProviderResult<Self> {
+        if capacity == 0 {
+            return Err(RemoteAccountProviderError::InvalidLruCapacity);
+        }
+        self.subscribed_accounts_lru_capacity = capacity;
+        Ok(self)
     }
 
     pub fn lifecycle_mode(&self) -> &LifecycleMode {
