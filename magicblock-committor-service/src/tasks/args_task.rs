@@ -261,43 +261,13 @@ impl BaseTask for ArgsTask {
                 ))
             }
             ArgsTaskType::CompressedCommit(_task) => {
-                total_size_budget(&[
-                    AccountSizeClass::Tiny,       // validator
-                    AccountSizeClass::ExtraLarge, // Light System Program
-                    AccountSizeClass::Tiny,       // CPI Signer
-                    AccountSizeClass::Tiny,       // Registered Program PDA
-                    AccountSizeClass::Tiny, // Account Compression Authority
-                    AccountSizeClass::Tiny, // Account Compression Program
-                    AccountSizeClass::Tiny, // System Program
-                    AccountSizeClass::Huge, // Batch Merkle Tree
-                    AccountSizeClass::ExtraLarge, // Output Queue
-                ])
+                compressed_task_accounts_size_budget()
             }
             ArgsTaskType::CompressedFinalize(_task) => {
-                total_size_budget(&[
-                    AccountSizeClass::Tiny,       // validator
-                    AccountSizeClass::ExtraLarge, // Light System Program
-                    AccountSizeClass::Tiny,       // CPI Signer
-                    AccountSizeClass::Tiny,       // Registered Program PDA
-                    AccountSizeClass::Tiny, // Account Compression Authority
-                    AccountSizeClass::Tiny, // Account Compression Program
-                    AccountSizeClass::Tiny, // System Program
-                    AccountSizeClass::Huge, // Batch Merkle Tree
-                    AccountSizeClass::ExtraLarge, // Output Queue
-                ])
+                compressed_task_accounts_size_budget()
             }
             ArgsTaskType::CompressedUndelegate(_task) => {
-                total_size_budget(&[
-                    AccountSizeClass::Tiny,       // validator
-                    AccountSizeClass::ExtraLarge, // Light System Program
-                    AccountSizeClass::Tiny,       // CPI Signer
-                    AccountSizeClass::Tiny,       // Registered Program PDA
-                    AccountSizeClass::Tiny, // Account Compression Authority
-                    AccountSizeClass::Tiny, // Account Compression Program
-                    AccountSizeClass::Tiny, // System Program
-                    AccountSizeClass::Huge, // Batch Merkle Tree
-                    AccountSizeClass::ExtraLarge, // Output Queue
-                ])
+                compressed_task_accounts_size_budget()
             }
             ArgsTaskType::BaseAction(task) => {
                 // assume all other accounts are Small accounts.
@@ -422,6 +392,20 @@ impl BaseTask for ArgsTask {
             ArgsTaskType::BaseAction(_) => None,
         }
     }
+}
+
+fn compressed_task_accounts_size_budget() -> u32 {
+    total_size_budget(&[
+        AccountSizeClass::Tiny,       // validator
+        AccountSizeClass::ExtraLarge, // Light System Program
+        AccountSizeClass::Tiny,       // CPI Signer
+        AccountSizeClass::Tiny,       // Registered Program PDA
+        AccountSizeClass::Tiny,       // Account Compression Authority
+        AccountSizeClass::Tiny,       // Account Compression Program
+        AccountSizeClass::Tiny,       // System Program
+        AccountSizeClass::Huge,       // Batch Merkle Tree
+        AccountSizeClass::ExtraLarge, // Output Queue
+    ])
 }
 
 impl LabelValue for ArgsTask {
