@@ -274,6 +274,9 @@ where
                         }),
                     )
                     .await
+                    .inspect_err(|err| {
+                        error!("Failed to get commit slot: {}", err)
+                    })
                     .map(|tx| tx.slot)
                     .ok()
             })
