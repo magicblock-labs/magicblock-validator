@@ -411,7 +411,8 @@ fn build_instruction(
 ) -> Instruction {
     Instruction::new_with_bytes(
         program_id,
-        &borsh::to_vec(&instruction).unwrap(),
+        &borsh::to_vec(&instruction)
+            .expect("Serialization of instruction should never fail"),
         account_metas,
     )
 }
