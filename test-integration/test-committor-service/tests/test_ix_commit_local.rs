@@ -418,7 +418,7 @@ async fn test_ix_commit_two_accounts_1kb_2kb() {
 }
 
 #[tokio::test]
-async fn test_ix_commit_two_accounts_512kb() {
+async fn test_ix_commit_two_accounts_512_bytes() {
     init_logger!();
     commit_multiple_accounts(
         &[512, 512],
@@ -430,7 +430,7 @@ async fn test_ix_commit_two_accounts_512kb() {
 }
 
 #[tokio::test]
-async fn test_ix_commit_three_accounts_512kb() {
+async fn test_ix_commit_three_accounts_512_bytes() {
     init_logger!();
     commit_multiple_accounts(
         &[512, 512, 512],
@@ -442,7 +442,7 @@ async fn test_ix_commit_three_accounts_512kb() {
 }
 
 #[tokio::test]
-async fn test_ix_commit_six_accounts_512kb() {
+async fn test_ix_commit_six_accounts_512_bytes() {
     init_logger!();
     commit_multiple_accounts(
         &[512, 512, 512, 512, 512, 512],
@@ -644,7 +644,7 @@ async fn test_ix_commit_single_compressed_account_500_bytes_and_undelegate() {
 }
 
 #[tokio::test]
-async fn test_ix_commit_two_compressed_accounts_512kb() {
+async fn test_ix_commit_two_compressed_accounts_512_bytes() {
     commit_multiple_accounts(
         &[512, 512],
         1,
@@ -655,7 +655,7 @@ async fn test_ix_commit_two_compressed_accounts_512kb() {
 }
 
 #[tokio::test]
-async fn test_ix_commit_three_compressed_accounts_512kb() {
+async fn test_ix_commit_three_compressed_accounts_512_bytes() {
     init_logger!();
     commit_multiple_accounts(
         &[512, 512, 512],
@@ -667,7 +667,7 @@ async fn test_ix_commit_three_compressed_accounts_512kb() {
 }
 
 #[tokio::test]
-async fn test_ix_commit_six_compressed_accounts_512kb() {
+async fn test_ix_commit_six_compressed_accounts_512_bytes() {
     init_logger!();
     commit_multiple_accounts(
         &[512, 512, 512, 512, 512, 512],
