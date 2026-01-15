@@ -1,9 +1,6 @@
 use std::{collections::HashSet, time::Duration};
 
 use guinea::GuineaInstruction;
-use magicblock_core::{
-    link::transactions::TransactionResult, traits::AccountsBank,
-};
 use solana_account::ReadableAccount;
 use solana_program::{
     instruction::{AccountMeta, Instruction},
@@ -11,146 +8,115 @@ use solana_program::{
 };
 use solana_pubkey::Pubkey;
 use solana_signature::Signature;
-use solana_svm_transaction::svm_message::SVMMessage;
 use test_kit::{ExecutionTestEnv, Signer};
 
 const ACCOUNTS_COUNT: usize = 8;
+const TIMEOUT: Duration = Duration::from_millis(200);
 
-/// A generic helper to execute a transaction with a specific `GuineaInstruction`.
-///
-/// This function automates the common test pattern of:
-/// 1. Creating a set of test accounts.
-/// 2. Building an instruction with those accounts.
-/// 3. Building and executing the transaction.
-/// 4. Advancing the slot to finalize the block.
-async fn execute_transaction(
+/// Helper to execute a standard "Guinea" transaction on `ACCOUNTS_COUNT` new accounts.
+async fn execute_guinea(
     env: &ExecutionTestEnv,
-    metafn: fn(Pubkey, bool) -> AccountMeta,
     ix: GuineaInstruction,
-) -> (TransactionResult, Signature) {
+    is_writable: bool,
+) -> (Signature, Vec<Pubkey>) {
     let accounts: Vec<_> = (0..ACCOUNTS_COUNT)
         .map(|_| {
             env.create_account_with_config(LAMPORTS_PER_SOL, 128, guinea::ID)
         })
         .collect();
-    let account_metas =
-        accounts.iter().map(|a| metafn(a.pubkey(), false)).collect();
-    env.advance_slot();
 
-    let ix = Instruction::new_with_bincode(guinea::ID, &ix, account_metas);
+    let metas = accounts
+        .iter()
+        .map(|a| {
+            if is_writable {
+                AccountMeta::new(a.pubkey(), false)
+            } else {
+                AccountMeta::new_readonly(a.pubkey(), false)
+            }
+        })
+        .collect();
+
+    env.advance_slot();
+    let ix = Instruction::new_with_bincode(guinea::ID, &ix, metas);
     let txn = env.build_transaction(&[ix]);
     let sig = txn.signatures[0];
-    let result = env.execute_transaction(txn).await;
 
+    assert!(
+        env.execute_transaction(txn).await.is_ok(),
+        "Transaction execution failed"
+    );
     env.advance_slot();
-    (result, sig)
+
+    let pubkeys = accounts.iter().map(|a| a.pubkey()).collect();
+    (sig, pubkeys)
 }
 
-/// Verifies that transaction return data is correctly captured and persisted in the ledger.
 #[tokio::test]
-pub async fn test_transaction_with_return_data() {
+async fn test_transaction_with_return_data() {
     let env = ExecutionTestEnv::new();
-    let (result, sig) = execute_transaction(
-        &env,
-        AccountMeta::new_readonly,
-        GuineaInstruction::ComputeBalances,
-    )
-    .await;
-    assert!(
-        result.is_ok(),
-        "failed to execute compute balance transaction"
-    );
+    let (sig, _) =
+        execute_guinea(&env, GuineaInstruction::ComputeBalances, false).await;
 
-    let meta = env
-        .get_transaction(sig)
-        .expect("transaction meta should have been written to the ledger");
-    let retdata = meta
-        .return_data
-        .expect("transaction return data should have been set");
-    assert_eq!(
-        &retdata.data,
-        &(ACCOUNTS_COUNT as u64 * LAMPORTS_PER_SOL).to_le_bytes(),
-        "the total balance of accounts should have been placed in return data"
-    );
+    let meta = env.get_transaction(sig).expect("Transaction not in ledger");
+    let ret_data = meta.return_data.expect("Return data missing");
+
+    let expected = (ACCOUNTS_COUNT as u64 * LAMPORTS_PER_SOL).to_le_bytes();
+    assert_eq!(ret_data.data, expected, "Incorrect return data balance");
 }
 
-/// Verifies that a `TransactionStatus` update, including logs, is broadcast after execution.
 #[tokio::test]
-pub async fn test_transaction_status_update() {
+async fn test_transaction_status_update() {
     let env = ExecutionTestEnv::new();
-    let (result, sig) = execute_transaction(
-        &env,
-        AccountMeta::new_readonly,
-        GuineaInstruction::PrintSizes,
-    )
-    .await;
-    assert!(result.is_ok(), "failed to execute print sizes transaction");
+    let (sig, _) =
+        execute_guinea(&env, GuineaInstruction::PrintSizes, false).await;
 
-    let status = env.dispatch
-        .transaction_status
-        .recv_timeout(Duration::from_millis(200))
-        .expect("transaction status should be delivered immediately after execution");
-
-    assert_eq!(*status.txn.signature(), sig);
-    let logs = status
-        .meta
-        .log_messages
-        .expect("transaction should have produced logs");
-    assert!(
-        logs.len() > ACCOUNTS_COUNT,
-        "should produce more logs than accounts in the transaction"
-    );
-}
-
-/// Verifies that account modifications are written to the `AccountsDb`
-/// and that corresponding `AccountUpdate` notifications are sent.
-#[tokio::test]
-pub async fn test_transaction_modifies_accounts() {
-    let env = ExecutionTestEnv::new();
-    let (result, _) = execute_transaction(
-        &env,
-        AccountMeta::new,
-        GuineaInstruction::WriteByteToData(42),
-    )
-    .await;
-    assert!(result.is_ok(), "failed to execute write byte transaction");
-
-    // First, verify the state change directly in the AccountsDb.
     let status = env
         .dispatch
         .transaction_status
-        .recv_timeout(Duration::from_millis(200))
-        .expect("successful transaction status should be delivered");
+        .recv_timeout(TIMEOUT)
+        .expect("Status update missing");
 
-    let mut modified_accounts = HashSet::with_capacity(ACCOUNTS_COUNT);
-    for acc_pubkey in status
+    assert_eq!(status.txn.signatures()[0], sig);
+    let logs = status.meta.log_messages.as_ref().expect("Logs missing");
+    assert!(logs.len() > ACCOUNTS_COUNT, "Insufficient logs produced");
+}
+
+#[tokio::test]
+async fn test_transaction_modifies_accounts() {
+    let env = ExecutionTestEnv::new();
+    let (_, accounts) =
+        execute_guinea(&env, GuineaInstruction::WriteByteToData(42), true)
+            .await;
+
+    // 1. Verify DB state modifications
+    let status = env
+        .dispatch
+        .transaction_status
+        .recv_timeout(TIMEOUT)
+        .expect("Status update missing");
+
+    // Skip fee payer, check the guinea accounts
+    let account_keys: Vec<_> = status
         .txn
+        .message()
         .account_keys()
         .iter()
-        .skip(1)
-        .take(ACCOUNTS_COUNT)
-    {
-        let account = env
-            .accountsdb
-            .get_account(acc_pubkey)
-            .expect("transaction account should be in database");
-        assert_eq!(
-            account.data()[0],
-            42,
-            "the first byte of the account data should have been modified"
-        );
-        modified_accounts.insert(*acc_pubkey);
+        .copied()
+        .collect();
+    for pubkey in account_keys.iter().skip(1).take(ACCOUNTS_COUNT) {
+        let account = env.get_account(*pubkey);
+        assert_eq!(account.data()[0], 42, "Account data mismatch");
     }
 
-    // Second, verify that account update notifications were broadcast for all modified accounts.
-    let mut updated_accounts = HashSet::with_capacity(ACCOUNTS_COUNT);
-    // Drain the channel to collect all updates from the single transaction.
-    while let Ok(acc) = env.dispatch.account_update.try_recv() {
-        updated_accounts.insert(acc.account.pubkey);
+    // 2. Verify update notifications
+    let mut updated_accounts = HashSet::new();
+    while let Ok(update) = env.dispatch.account_update.try_recv() {
+        updated_accounts.insert(update.account.pubkey);
     }
 
+    let expected_accounts: HashSet<_> = HashSet::from_iter(accounts);
     assert!(
-        updated_accounts.is_superset(&modified_accounts),
-        "account updates should be forwarded for all modified accounts"
+        updated_accounts.is_superset(&expected_accounts),
+        "Missing account update notifications"
     );
 }
