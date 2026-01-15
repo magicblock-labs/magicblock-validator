@@ -9,6 +9,7 @@ impl DataHasher for CompressedDelegationRecord {
     fn hash<H: Hasher>(&self) -> Result<[u8; 32], HasherError> {
         let bytes = borsh::to_vec(self).map_err(|_| HasherError::BorshError)?;
         let mut hash = Sha256::hash(bytes.as_slice())?;
+        // Light uses 254bits field elements, so we zero out the first byte.
         hash[0] = 0;
         Ok(hash)
     }
