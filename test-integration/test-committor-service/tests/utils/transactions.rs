@@ -116,8 +116,8 @@ macro_rules! get_compressed_account {
             }
         }
     }};
-    ($rpc_client:ident, $pubkey:expr, $label:literal) => {{
-        get_compressed_account!($rpc_client, $pubkey, $label, |_: &light_client::indexer::CompressedAccount, _: u8| true)
+    ($photon_client:ident, $pubkey:expr, $label:literal) => {{
+        get_compressed_account!($photon_client, $pubkey, $label, |_: &light_client::indexer::CompressedAccount, _: u8| true)
     }};
 }
 
