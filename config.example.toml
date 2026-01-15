@@ -2,7 +2,7 @@
 # MagicBlock Validator Configuration
 # ==============================================================================
 # This file serves as a reference for all available configuration options.
-# ALL FIELDS ARE OPTIONAL. If removed, the "Default" value listed in the 
+# ALL FIELDS ARE OPTIONAL. If removed, the "Default" value listed in the
 # comments will be used.
 #
 # CONFIGURATION PRECEDENCE (Highest to Lowest):
