@@ -185,7 +185,13 @@ pub fn start_light_validator_with_config(
     .ok_or_else(|| anyhow::anyhow!("invalid validator args"))
     .unwrap();
 
-    let mut light_args = vec!["--rpc-port".to_string(), port.to_string()];
+    let prover_port = 3001;
+    let mut light_args = vec![
+        "--rpc-port".to_string(),
+        port.to_string(),
+        "--prover-port".to_string(),
+        prover_port.to_string(),
+    ];
     light_args.extend(validator_args);
 
     let mut script = "#!/bin/bash\nlight test-validator".to_string();
@@ -206,8 +212,6 @@ pub fn start_light_validator_with_config(
     eprintln!("{}", script);
     let validator = command.spawn().expect("Failed to start validator");
     // Waiting for the prover, which is the last thing to start
-    // Starts by default on port 3001
-    let prover_port = 3001;
     wait_for_validator(validator, prover_port)
 }
 
