@@ -10,8 +10,8 @@ edition.workspace = true
 [dependencies]
 compressed-delegation-client = { workspace = true }
 flume = { workspace = true }
-light-sdk = { workspace = true }
 light-compressed-account = { workspace = true }
+light-sdk = { workspace = true }
 magicblock-magic-program-api = { workspace = true }
 solana-account = { workspace = true }
 solana-account-decoder = { workspace = true }
