@@ -723,6 +723,19 @@ impl TableMania {
         released_tables: &Mutex<Vec<LookupTableRc>>,
         compute_budget: &TableManiaComputeBudget,
     ) {
+        // Avoid doing any work if there aren't any  deactivated tables to close.
+        // Mainly we avoid the `get_slot` call in that case
+        if released_tables
+            .lock()
+            .await
+            .iter()
+            .filter(|x| x.deactivate_triggered())
+            .count()
+            == 0
+        {
+            return;
+        }
+
         let Ok(latest_slot) = rpc_client
             .get_slot()
             .await
