@@ -46,7 +46,6 @@ pub enum PreparationState {
     Cleanup(CleanupTask),
 }
 
-#[cfg(test)]
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum TaskStrategy {
     Args,
@@ -67,8 +66,9 @@ pub trait BaseTask: Send + Sync + DynClone + LabelValue {
     /// Gets instruction for task execution
     fn instruction(&self, validator: &Pubkey) -> Instruction;
 
-    /// Optimizes Task strategy if possible, otherwise returns itself
-    fn optimize(
+    /// Optimize for transaction size so that more instructions can be buddled together in a single
+    /// transaction. Return Ok(new_tx_optimized_task), else Err(self) if task cannot be optimized.
+    fn try_optimize_tx_size(
         self: Box<Self>,
     ) -> Result<Box<dyn BaseTask>, Box<dyn BaseTask>>;
 

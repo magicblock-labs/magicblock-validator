@@ -26,6 +26,7 @@ use magicblock_core::{
 use magicblock_ledger::Ledger;
 use magicblock_processor::{
     build_svm_env,
+    loader::load_upgradeable_programs,
     scheduler::{state::TransactionSchedulerState, TransactionScheduler},
 };
 use solana_account::AccountSharedData;
@@ -128,6 +129,13 @@ impl ExecutionTestEnv {
         };
         this.advance_slot(); // Move to slot 1 to ensure a non-genesis state.
 
+        // Load test program
+        load_upgradeable_programs(
+            &accountsdb,
+            &[(guinea::ID, "../programs/elfs/guinea.so".into())],
+        )
+        .expect("failed to load test programs into test env");
+
         let scheduler_state = TransactionSchedulerState {
             accountsdb,
             ledger,
@@ -139,14 +147,6 @@ impl ExecutionTestEnv {
             is_auto_airdrop_lamports_enabled: false,
             shutdown: Default::default(),
         };
-
-        // Load test program
-        scheduler_state
-            .load_upgradeable_programs(&[(
-                guinea::ID,
-                "../programs/elfs/guinea.so".into(),
-            )])
-            .expect("failed to load test programs into test env");
 
         // Start/Defer the transaction processing backend.
         let scheduler = TransactionScheduler::new(executors, scheduler_state);
