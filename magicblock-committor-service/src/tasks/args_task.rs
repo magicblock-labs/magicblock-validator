@@ -1,4 +1,7 @@
-use compressed_delegation_client::types::{CommitArgs, FinalizeArgs};
+use compressed_delegation_client::{
+    types::{CommitArgs, FinalizeArgs},
+    CompressedDelegationRecord, UndelegateArgs,
+};
 use dlp::{
     args::{CallHandlerArgs, CommitDiffArgs, CommitStateArgs},
     compute_diff,
@@ -8,6 +11,7 @@ use dlp::{
     },
     total_size_budget, AccountSizeClass,
 };
+use log::warn;
 use magicblock_metrics::metrics::LabelValue;
 use solana_account::ReadableAccount;
 use solana_instruction::{AccountMeta, Instruction};
@@ -153,11 +157,31 @@ impl BaseTask for ArgsTask {
                     .instruction()
             }
             ArgsTaskType::CompressedUndelegate(value) => {
+                // NOTE: Undelegation should not be called as an intent
+                // This is because the validator would have to pay rent out of pocket.
+                // This could be solved by using the ephemeral payer to ensure the user can pay the rent.
+                // https://github.com/magicblock-labs/magicblock-validator/issues/651
+                warn!("Undelegation should not be called as an intent");
                 compressed_delegation_client::UndelegateBuilder::new()
                     .payer(*validator)
                     .delegated_account(value.delegated_account)
                     .owner_program(value.owner_program)
                     .system_program(system_program_id())
+                    .args(UndelegateArgs {
+                        validity_proof: value.compressed_data.proof,
+                        delegation_record_account_meta: value
+                            .compressed_data
+                            .account_meta,
+                        compressed_delegated_record:
+                            CompressedDelegationRecord::from_bytes(
+                                &value
+                                    .compressed_data
+                                    .compressed_delegation_record_bytes,
+                            )
+                            .expect(
+                                "Compressed delegation record should be valid",
+                            ),
+                    })
                     .add_remaining_accounts(
                         &value.compressed_data.remaining_accounts,
                     )
