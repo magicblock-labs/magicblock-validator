@@ -40,25 +40,43 @@ impl Visitor for TaskVisitorUtils {
     fn visit_args_task(&mut self, task: &ArgsTask) {
         let Self::GetCommitMeta(commit_meta) = self;
 
-        if let ArgsTaskType::Commit(ref commit_task) = task.task_type {
-            *commit_meta = Some(CommitMeta {
-                committed_pubkey: commit_task.committed_account.pubkey,
-                commit_id: commit_task.commit_id,
-                remote_slot: commit_task.committed_account.remote_slot,
-            })
-        } else {
-            *commit_meta = None
+        match &task.task_type {
+            ArgsTaskType::Commit(task) => {
+                *commit_meta = Some(CommitMeta {
+                    committed_pubkey: task.committed_account.pubkey,
+                    commit_id: task.commit_id,
+                    remote_slot: task.committed_account.remote_slot,
+                })
+            }
+            ArgsTaskType::CommitDiff(task) => {
+                *commit_meta = Some(CommitMeta {
+                    committed_pubkey: task.committed_account.pubkey,
+                    commit_id: task.commit_id,
+                    remote_slot: task.committed_account.remote_slot,
+                })
+            }
+            _ => *commit_meta = None,
         }
     }
 
     fn visit_buffer_task(&mut self, task: &BufferTask) {
         let Self::GetCommitMeta(commit_meta) = self;
 
-        let BufferTaskType::Commit(ref commit_task) = task.task_type;
-        *commit_meta = Some(CommitMeta {
-            committed_pubkey: commit_task.committed_account.pubkey,
-            commit_id: commit_task.commit_id,
-            remote_slot: commit_task.committed_account.remote_slot,
-        })
+        match &task.task_type {
+            BufferTaskType::Commit(task) => {
+                *commit_meta = Some(CommitMeta {
+                    committed_pubkey: task.committed_account.pubkey,
+                    commit_id: task.commit_id,
+                    remote_slot: task.committed_account.remote_slot,
+                })
+            }
+            BufferTaskType::CommitDiff(task) => {
+                *commit_meta = Some(CommitMeta {
+                    committed_pubkey: task.committed_account.pubkey,
+                    commit_id: task.commit_id,
+                    remote_slot: task.committed_account.remote_slot,
+                })
+            }
+        }
     }
 }

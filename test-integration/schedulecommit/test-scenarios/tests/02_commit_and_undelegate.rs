@@ -309,13 +309,13 @@ fn test_committing_and_undelegating_huge_order_book_account() {
             println!("Important: use {rng_seed} as seed to regenerate the random inputs in case of test failure");
             let mut random = StdRng::seed_from_u64(rng_seed);
             let mut update = BookUpdate::default();
-            update.bids.extend((0..random.gen_range(5..10)).map(|_| {
+            update.bids.extend((0..random.gen_range(5..100)).map(|_| {
                 OrderLevel {
                     price: random.gen_range(75000..90000),
                     size: random.gen_range(1..10),
                 }
             }));
-            update.asks.extend((0..random.gen_range(5..10)).map(|_| {
+            update.asks.extend((0..random.gen_range(5..100)).map(|_| {
                 OrderLevel {
                     price: random.gen_range(125000..150000),
                     size: random.gen_range(1..10),
