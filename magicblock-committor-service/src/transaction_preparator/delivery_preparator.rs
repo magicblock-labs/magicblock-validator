@@ -618,8 +618,6 @@ impl From<MagicBlockRpcClientError> for BufferExecutionError {
 
 #[derive(thiserror::Error, Debug)]
 pub enum InternalError {
-    #[error("Compressed data not found")]
-    CompressedDataNotFound,
     #[error("0 retries was requested")]
     ZeroRetriesRequestedError,
     #[error("Chunks PDA does not exist for writing. pda: {0}")]
