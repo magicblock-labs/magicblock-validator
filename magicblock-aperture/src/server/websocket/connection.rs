@@ -17,7 +17,7 @@ use tokio::{
     time::{self, Instant},
 };
 use tokio_util::sync::CancellationToken;
-use tracing::debug;
+use tracing::{debug, instrument};
 
 use super::{
     dispatch::{WsDispatchResult, WsDispatcher},
@@ -93,6 +93,7 @@ impl ConnectionHandler {
     /// - **Shutdown**: Listens for the global server shutdown signal.
     ///
     /// The loop terminates upon any I/O error, an inactivity timeout, or a shutdown signal.
+    #[instrument(skip(self), fields(connection_id = self.dispatcher.connection_id()))]
     pub(super) async fn run(mut self) {
         const MAX_INACTIVE_INTERVAL: Duration = Duration::from_secs(60);
         const PING_PERIOD: Duration = Duration::from_secs(30);
@@ -205,8 +206,8 @@ impl ConnectionHandler {
         payload: impl Into<Payload<'_>>,
     ) -> Result<(), WebSocketError> {
         let frame = Frame::text(payload.into());
-        self.ws.write_frame(frame).await.inspect_err(|e| {
-            debug!("failed to send websocket frame to the client: {e}")
-        })
+        self.ws.write_frame(frame).await.inspect_err(
+            |e| debug!(error = ?e, "Failed to send WebSocket frame"),
+        )
     }
 }

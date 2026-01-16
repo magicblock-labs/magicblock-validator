@@ -15,7 +15,7 @@ use tokio::{
     sync::oneshot::Receiver,
 };
 use tokio_util::sync::CancellationToken;
-use tracing::{info, warn};
+use tracing::{info, instrument, warn};
 
 use super::Shutdown;
 use crate::{
@@ -86,6 +86,7 @@ impl WebsocketServer {
     /// When the server's `cancel` token is triggered, the loop stops accepting new
     /// connections. It then waits for all active connections to complete their work
     /// and drop their `Shutdown` handles before the method returns and the server exits.
+    #[instrument(skip(self))]
     pub(crate) async fn run(mut self) {
         loop {
             tokio::select! {
@@ -95,7 +96,7 @@ impl WebsocketServer {
                 },
                 // The server shutdown signal has been received.
                 _ = self.state.cancel.cancelled() => {
-                    info!("Websocket server shutdown signal has been received");
+                    info!("WebSocket server shutdown signal received");
                     break
                 }
             }
@@ -104,7 +105,7 @@ impl WebsocketServer {
         drop(self.state);
         // Wait for all spawned connection tasks to finish.
         let _ = self.shutdown.await;
-        info!("Websocket server has shutdown");
+        info!("WebSocket server shutdown");
     }
 
     /// Spawns a task to handle a new TCP stream as a potential WebSocket connection.
@@ -125,7 +126,7 @@ impl WebsocketServer {
             let connection =
                 builder.serve_connection(io, handler).with_upgrades();
             if let Err(error) = connection.await {
-                warn!("websocket connection terminated with error: {error}");
+                warn!(error = ?error, "WebSocket connection terminated");
             }
         });
     }
@@ -146,7 +147,7 @@ async fn handle_upgrade(
     // Hyper service to handle other potential incoming connections.
     tokio::spawn(async move {
         let Ok(ws) = ws.await else {
-            warn!("failed http upgrade to ws connection");
+            warn!("HTTP upgrade to WebSocket failed");
             return;
         };
         // The `ConnectionHandler` will now take over the WebSocket stream.
