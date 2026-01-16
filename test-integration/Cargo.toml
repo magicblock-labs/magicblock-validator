@@ -104,6 +104,7 @@ test-ledger-restore = { path = "./test-ledger-restore" }
 test-kit = { path = "../test-kit" }
 tokio = "1.0"
 toml = "0.8.13"
+tracing = "0.1"
 ureq = "2.9.6"
 url = "2.5.0"
 

@@ -1,4 +1,3 @@
-use log::*;
 use magicblock_chainlink::{
     assert_cloned_as_delegated, assert_cloned_as_empty_placeholder,
     assert_cloned_as_undelegated, assert_not_cloned, assert_not_subscribed,
@@ -9,6 +8,7 @@ use test_chainlink::{
     accounts::{sanitized_transaction_with_accounts, TransactionAccounts},
     ixtest_context::IxtestContext,
 };
+use tracing::*;
 
 #[tokio::test]
 async fn ixtest_feepayer_with_delegated_ephemeral_balance() {

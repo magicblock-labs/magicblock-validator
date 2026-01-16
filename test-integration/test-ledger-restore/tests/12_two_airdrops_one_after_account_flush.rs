@@ -5,7 +5,6 @@ use integration_test_tools::{
     expect, loaded_accounts::LoadedAccounts, tmpdir::resolve_tmp_dir,
     validator::cleanup,
 };
-use log::*;
 use solana_sdk::{pubkey::Pubkey, signature::Keypair, signer::Signer};
 use test_kit::init_logger;
 use test_ledger_restore::{
@@ -13,6 +12,7 @@ use test_ledger_restore::{
     transfer_lamports, wait_for_ledger_persist, SNAPSHOT_FREQUENCY,
     TMP_DIR_LEDGER,
 };
+use tracing::*;
 
 // In this test we ensure that restoring from a later slot by hydrating the
 // bank with flushed accounts state works.

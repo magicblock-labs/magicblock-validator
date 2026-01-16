@@ -1,6 +1,5 @@
 #![allow(unused)]
 
-use log::*;
 use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_rpc_client_api::{
@@ -14,6 +13,7 @@ use solana_sdk::{
     signer::Signer,
     transaction::Transaction,
 };
+use tracing::*;
 
 /// The memo v1 program is predeployed with the v1 loader
 /// (BPFLoader1111111111111111111111111111111111)
@@ -164,9 +164,9 @@ pub mod resolve_deploy {
     #[macro_export]
     macro_rules! fetch_and_assert_loaded_program_v1_v2_v4 {
         ($rpc_client:expr, $program_id:expr, $expected:expr) => {{
-            use log::*;
             use solana_loader_v4_interface::state::LoaderV4Status;
             use solana_sdk::account::AccountSharedData;
+            use tracing::*;
 
             let program_account = $rpc_client
                 .get_account(&$program_id)
@@ -470,7 +470,7 @@ pub mod mini {
     #[macro_export]
     macro_rules! test_mini_program {
         ($rpc_client:expr, $program_id:expr, $auth_kp:expr) => {{
-            use log::*;
+            use tracing::*;
             // Initialize the counter
             let init_signature =
                 $crate::programs::mini::send_and_confirm_init_transaction(
@@ -544,7 +544,7 @@ pub mod mini {
     #[macro_export]
     macro_rules! test_mini_program_log_msg {
         ($rpc_client:expr, $program_id:expr, $auth_kp:expr, $msg:expr) => {{
-            use log::*;
+            use tracing::*;
             let log_msg_signature =
                 $crate::programs::mini::send_and_confirm_log_msg_transaction(
                     $rpc_client,
@@ -562,7 +562,6 @@ pub mod mini {
 pub mod deploy {
     use std::{fs, path::PathBuf, process::Command, sync::Arc};
 
-    use log::*;
     use solana_loader_v4_interface::instruction::LoaderV4Instruction as LoaderInstructionV4;
     use solana_rpc_client::nonblocking::rpc_client::RpcClient;
     use solana_sdk::{
@@ -573,6 +572,7 @@ pub mod deploy {
         signer::Signer,
     };
     use solana_system_interface::instruction as system_instruction;
+    use tracing::*;
 
     use super::{airdrop_sol, send_instructions, CHUNK_SIZE};
     use crate::programs::{mini, try_send_instructions};
@@ -804,7 +804,6 @@ pub mod deploy {
 pub mod not_working {
     use std::sync::Arc;
 
-    use log::*;
     use magicblock_chainlink::remote_account_provider::program_account::get_loaderv3_get_program_data_address;
     use solana_loader_v2_interface::LoaderInstruction as LoaderInstructionV2;
     use solana_loader_v3_interface::instruction::UpgradeableLoaderInstruction as LoaderInstructionV3;
@@ -817,6 +816,7 @@ pub mod not_working {
         transaction::Transaction,
     };
     use solana_system_interface::instruction as system_instruction;
+    use tracing::*;
 
     use super::{airdrop_sol, send_transaction, CHUNK_SIZE};
     pub async fn deploy_loader_v1(

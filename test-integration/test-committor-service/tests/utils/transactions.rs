@@ -1,4 +1,3 @@
-use log::{debug, error};
 use solana_account::Account;
 use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
@@ -11,6 +10,7 @@ use solana_sdk::{
     signature::{Keypair, Signature, Signer},
     transaction::Transaction,
 };
+use tracing::{debug, error};
 
 use crate::utils::instructions::{
     init_account_and_delegate_ixs, init_order_book_account_and_delegate_ixs,
@@ -99,7 +99,7 @@ pub async fn fetch_tx_logs(
         {
             Ok(tx) => break tx,
             Err(err) => {
-                log::error!("Failed to get transaction: {}", err);
+                tracing::error!("Failed to get transaction: {}", err);
                 retries -= 1;
                 if retries == 0 {
                     panic!(

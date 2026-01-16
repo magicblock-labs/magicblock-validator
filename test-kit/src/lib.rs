@@ -8,7 +8,6 @@ use std::{
 };
 
 pub use guinea;
-use log::error;
 use magicblock_accounts_db::AccountsDb;
 use magicblock_core::{
     link::{
@@ -40,6 +39,7 @@ pub use solana_signer::Signer;
 use solana_transaction::Transaction;
 use solana_transaction_status_client_types::TransactionStatusMeta;
 use tempfile::TempDir;
+use tracing::error;
 
 /// A simulated validator backend for integration tests.
 ///

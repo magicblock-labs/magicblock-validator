@@ -1,6 +1,5 @@
 use std::time::{Duration, Instant};
 
-use log::*;
 use magicblock_rpc_client::MagicblockRpcClient;
 use magicblock_table_mania::{GarbageCollectorConfig, TableMania};
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
@@ -8,6 +7,7 @@ use solana_sdk::{
     commitment_config::CommitmentConfig, native_token::LAMPORTS_PER_SOL,
     signature::Keypair, signer::Signer,
 };
+use tracing::*;
 
 #[allow(unused)] // used in tests
 pub const TEST_TABLE_CLOSE: bool = cfg!(feature = "test_table_close");

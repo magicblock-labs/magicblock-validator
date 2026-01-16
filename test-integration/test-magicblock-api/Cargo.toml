@@ -6,7 +6,7 @@ edition.workspace = true
 integration-test-tools = { workspace = true }
 
 [dev-dependencies]
-log = { workspace = true }
+tracing = { workspace = true }
 cleanass = { workspace = true }
 magicblock-api = { workspace = true }
 magicblock-config = { workspace = true }

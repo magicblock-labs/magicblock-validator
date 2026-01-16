@@ -4,7 +4,6 @@ use std::{
     time::{Duration, Instant},
 };
 
-use log::*;
 use magicblock_chainlink::{
     accounts_bank::mock::AccountsBankStub,
     errors::ChainlinkResult,
@@ -28,6 +27,7 @@ use solana_account::{Account, AccountSharedData};
 use solana_pubkey::Pubkey;
 use solana_sdk::{clock::Slot, sysvar::clock};
 use tokio::sync::mpsc;
+use tracing::*;
 
 use super::accounts::account_shared_with_owner_and_slot;
 pub type TestChainlink = Chainlink<

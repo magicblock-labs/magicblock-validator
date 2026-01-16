@@ -2,7 +2,6 @@ use std::{fmt, ops::Deref};
 
 use anyhow::{Context, Result};
 use integration_test_tools::IntegrationTestContext;
-use log::*;
 use program_schedulecommit::api::{
     delegate_account_cpi_instruction, init_account_instruction,
     init_order_book_instruction, init_payer_escrow, UserSeeds,
@@ -22,6 +21,7 @@ use solana_sdk::{
     system_program,
     transaction::Transaction,
 };
+use tracing::*;
 
 pub struct ScheduleCommitTestContext {
     // The first payer from the committees array which is used to fund transactions on chain

@@ -5,7 +5,6 @@ use std::{
 };
 
 use borsh::to_vec;
-use log::*;
 use magicblock_committor_service::{
     config::ChainConfig,
     intent_executor::ExecutionOutput,
@@ -29,6 +28,7 @@ use solana_sdk::{
 };
 use test_kit::init_logger;
 use tokio::task::JoinSet;
+use tracing::*;
 use utils::transactions::tx_logs_contain;
 
 use self::utils::transactions::init_and_delegate_order_book_on_chain;

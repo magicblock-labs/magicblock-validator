@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
 use integration_test_tools::dlp_interface;
-use log::*;
 use magicblock_chainlink::{
     accounts_bank::mock::AccountsBankStub,
     cloner::{AccountCloneRequest, Cloner},
@@ -29,6 +28,7 @@ use solana_sdk::{
 };
 use solana_sdk_ids::native_loader;
 use tokio::task;
+use tracing::*;
 
 use crate::sleep_ms;
 

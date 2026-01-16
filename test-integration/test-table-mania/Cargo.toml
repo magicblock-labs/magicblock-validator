@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 
 [dev-dependencies]
-log = { workspace = true }
+tracing = { workspace = true }
 magicblock-rpc-client = { workspace = true }
 magicblock-table-mania = { workspace = true, features = [
   "randomize_lookup_table_slot",

@@ -1,4 +1,3 @@
-use log::*;
 use magicblock_chainlink::{
     assert_cloned_as_delegated, assert_cloned_as_undelegated,
     assert_loaded_program_with_min_size, assert_loaded_program_with_size,
@@ -19,6 +18,7 @@ use test_chainlink::{
     sleep_ms,
 };
 use tokio::task;
+use tracing::*;
 
 #[tokio::test]
 async fn ixtest_accounts_for_tx_2_delegated_3_readonly_3_programs_one_native() {
