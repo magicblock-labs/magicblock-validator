@@ -8,7 +8,7 @@ listen = "0.0.0.0:8899"
 compute-unit-price = 1_000_000
 
 [chainlink]
-max-monitored-accounts = 3
+max-monitored-accounts = 300
 
 [accountsdb]
 # size of the main storage, we have to preallocate in advance

@@ -70,3 +70,6 @@ pub const DEFAULT_TASK_SCHEDULER_MIN_INTERVAL_MILLIS: u64 = 10;
 // ChainLink Defaults
 /// Default delay in milliseconds between resubscribing to accounts after a pubsub reconnection
 pub const DEFAULT_RESUBSCRIPTION_DELAY_MS: u64 = 200;
+
+/// Default capacity for the LRU cache of subscribed accounts
+pub const DEFAULT_MAX_MONITORED_ACCOUNTS: usize = 5_000;

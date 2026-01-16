@@ -59,8 +59,11 @@ pub enum RemoteAccountProviderError {
     #[error("Accounts matched same slot ({0}), but it's less than min required context slot {2} ")]
     MatchingSlotsNotSatisfyingMinContextSlot(String, Vec<u64>, u64),
 
-    #[error("LRU capacity must be greater than 0, got {0}")]
-    InvalidLruCapacity(usize),
+    #[error("LRU capacity must be greater than 0")]
+    InvalidLruCapacity,
+
+    #[error("Resubscription delay must be greater than 0")]
+    InvalidResubscriptionDelay,
 
     #[error(
         "Only one listener supported on lru cache removed accounts events"
