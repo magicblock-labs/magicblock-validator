@@ -147,7 +147,7 @@ fn classify_single_account(
                     }
                 }
                 ResolvedAccount::Bank((pubkey, slot)) => {
-                    error!("We should not be fetching accounts that are already in bank: {pubkey}:{slot}");
+                    error!(pubkey = %pubkey, slot = slot, "BUG: Should not be fetching accounts already in bank");
                 }
             }
         }
@@ -199,6 +199,7 @@ pub(crate) fn partition_not_found(
 }
 
 /// Resolves delegated accounts by fetching their delegation records
+#[instrument(skip(this, owned_by_deleg, plain, pubkeys, existing_subs), fields(pubkey_count = pubkeys.len()))]
 pub(crate) async fn resolve_delegated_accounts<T, U, V, C>(
     this: &FetchCloner<T, U, V, C>,
     owned_by_deleg: Vec<(Pubkey, AccountSharedData, u64)>,
@@ -323,7 +324,7 @@ where
                         }
                     };
 
-                trace!("Delegation record found for {pubkey}: {delegation_record:?}");
+                trace!(pubkey = %pubkey, "Delegation record found");
 
                 let delegated_to_other =
                     this.get_delegated_to_other(&delegation_record);
@@ -368,10 +369,7 @@ where
                     futures_util::future::join_all(subscribe_futures).await;
                 for (owner, result) in results {
                     if let Err(err) = result {
-                        warn!(
-                            "Failed to subscribe to owner program {}: {}",
-                            owner, err
-                        );
+                        warn!(program_id = %owner, error = %err, "Failed to subscribe to owner program");
                     }
                 }
             });
@@ -388,6 +386,7 @@ where
 }
 
 /// Resolves program accounts, fetching program data accounts for LoaderV3 programs
+#[instrument(skip(this, programs, pubkeys, existing_subs), fields(pubkey_count = pubkeys.len()))]
 pub(crate) async fn resolve_programs_with_program_data<T, U, V, C>(
     this: &FetchCloner<T, U, V, C>,
     programs: Vec<(Pubkey, AccountSharedData, u64)>,
@@ -639,6 +638,7 @@ pub(crate) fn compute_cancel_strategy(
 }
 
 /// Clones accounts and programs into the bank
+#[instrument(skip(this, accounts_to_clone, loaded_programs))]
 pub(crate) async fn clone_accounts_and_programs<T, U, V, C>(
     this: &FetchCloner<T, U, V, C>,
     accounts_to_clone: Vec<AccountCloneRequest>,
@@ -656,10 +656,10 @@ where
     for request in accounts_to_clone {
         if tracing::enabled!(tracing::Level::TRACE) {
             trace!(
-                "Cloning account: {} (remote slot {}, owner: {})",
-                request.pubkey,
-                request.account.remote_slot(),
-                request.account.owner()
+                pubkey = %request.pubkey,
+                slot = request.account.remote_slot(),
+                owner = %request.account.owner(),
+                "Cloning account"
             );
         };
 
@@ -669,10 +669,7 @@ where
 
     for acc in loaded_programs {
         if !this.is_program_allowed(&acc.program_id) {
-            debug!(
-                "Skipping clone of program {}: not in allowed_programs",
-                acc.program_id
-            );
+            debug!(program_id = %acc.program_id, "Skipping clone of program");
             continue;
         }
         let cloner = this.cloner.clone();

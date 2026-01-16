@@ -164,9 +164,7 @@ impl
     > {
         let mode = config.lifecycle_mode();
         if mode.needs_remote_account_provider() {
-            debug!(
-                "Creating RemoteAccountProvider with {endpoints:?} and {commitment:?}",
-            );
+            debug!("Creating RemoteAccountProvider");
             Ok(Some(
                 RemoteAccountProvider::<
                     ChainRpcClientImpl,
@@ -249,15 +247,14 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                     };
                 if lru_count != pubsub_without_never_evict {
                     warn!(
-                        "User account subscription counts LRU cache={} pubsub client={} don't match",
-                        lru_count, pubsub_without_never_evict
+                        lru_count,
+                        pubsub_count = pubsub_without_never_evict,
+                        "User account subscription counts don't match"
                     );
                     if tracing::enabled!(tracing::Level::DEBUG) {
                         // Log all pubsub subscriptions for debugging
-                        trace!(
-                            "All pubsub subscriptions: {:?}",
-                            all_pubsub_subs
-                        );
+                        let count = all_pubsub_subs.len();
+                        trace!(count, "All pubsub subscriptions");
 
                         // Find extra keys in pubsub that are not in LRU cache
                         let lru_pubkeys = subscribed_accounts.pubkeys();
@@ -281,10 +278,10 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                             .collect();
 
                         if !extra_in_pubsub.is_empty() {
-                            debug!("Extra pubkeys in pubsub client not in LRU cache: {:?}", extra_in_pubsub);
+                            debug!(count = extra_in_pubsub.len(), "Extra pubkeys in pubsub client not in LRU cache");
                         }
                         if !extra_in_lru.is_empty() {
-                            debug!("Extra pubkeys in LRU cache not in pubsub client: {:?}", extra_in_lru);
+                            debug!(count = extra_in_lru.len(), "Extra pubkeys in LRU cache not in pubsub client");
                         }
                     }
 
@@ -297,8 +294,11 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                     .await;
                 }
 
-                debug!("Updating active subscriptions: count={}", pubsub_total);
-                trace!("All subscriptions: {}", pubkeys_str(&all_pubsub_subs));
+                debug!(count = pubsub_total, "Updating active subscriptions");
+                if tracing::enabled!(tracing::Level::TRACE) {
+                    let subs_count = all_pubsub_subs.len();
+                    trace!(count = subs_count, "All subscriptions");
+                }
                 set_monitored_accounts_count(pubsub_total);
             }
         })
@@ -421,12 +421,8 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             SubMuxClient::new(pubsubs, subscribed_accounts.clone(), None);
 
         if !config.program_subs().is_empty() {
-            debug!(
-                "Subscribing to program accounts: [{}]",
-                pubkeys_str(
-                    &config.program_subs().iter().cloned().collect::<Vec<_>>()
-                )
-            );
+            let count = config.program_subs().len();
+            debug!(count, "Subscribing to program accounts");
             let subscribe_program_futs = config
                 .program_subs()
                 .iter()
@@ -499,9 +495,9 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                     // NOTE: we do not forward clock updates
                 } else {
                     trace!(
-                        "Received account update for {} at slot {}",
-                        update.pubkey,
-                        slot
+                        pubkey = %update.pubkey,
+                        slot,
+                        "Received account update"
                     );
                     let remote_account = match update.account {
                         Some(account) => RemoteAccount::from_fresh_account(
@@ -511,8 +507,8 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                         ),
                         None => {
                             error!(
-                                "Account for {} update could not be decoded",
-                                update.pubkey
+                                pubkey = %update.pubkey,
+                                "Account update could not be decoded"
                             );
                             RemoteAccount::NotFound(slot)
                         }
@@ -527,8 +523,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                             // If subscription update is newer than when we started fetching,
                             // resolve with the subscription data instead
                             if slot >= fetch_start_slot {
-                                trace!("Using subscription update for {} (slot {}) instead of fetch (started at slot {})",
-                                    update.pubkey, slot, fetch_start_slot);
+                                trace!(pubkey = %update.pubkey, slot = slot, fetch_start_slot = fetch_start_slot, "Using subscription update instead of fetch");
 
                                 // Resolve all pending requests with subscription data
                                 for sender in pending_requests {
@@ -538,8 +533,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                                 None
                             } else {
                                 // Subscription is stale, put the fetch tracking back
-                                warn!("Received stale subscription update for {} at slot {}. Fetch started at slot {}",
-                                    update.pubkey, slot, fetch_start_slot);
+                                warn!(pubkey = %update.pubkey, slot = slot, fetch_start_slot = fetch_start_slot, "Received stale subscription update");
                                 fetching.insert(
                                     update.pubkey,
                                     (fetch_start_slot, pending_requests),
@@ -572,6 +566,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
 
     /// Convenience wrapper around [`RemoteAccountProvider::try_get_multi`] to fetch
     /// a single account.
+    #[instrument(skip(self))]
     pub async fn try_get(
         &self,
         pubkey: Pubkey,
@@ -584,6 +579,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             .map(|mut accs| accs.drain(..).next().unwrap())
     }
 
+    #[instrument(skip(self, pubkeys, config))]
     pub async fn try_get_multi_until_slots_match(
         &self,
         pubkeys: &[Pubkey],
@@ -705,6 +701,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
     /// Gets the accounts for the given pubkeys by fetching from RPC.
     /// Always fetches fresh data. FetchCloner handles request deduplication.
     /// Subscribes first to catch any updates that arrive during fetch.
+    #[instrument(skip(self, pubkeys, mark_empty_if_not_found, program_ids))]
     pub async fn try_get_multi(
         &self,
         pubkeys: &[Pubkey],
@@ -717,7 +714,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         }
 
         if tracing::enabled!(tracing::Level::TRACE) {
-            trace!("Fetching accounts: [{}]", pubkeys_str(pubkeys));
+            trace!("Fetching accounts");
         }
 
         // Create channels for potential subscription updates to override fetch results
@@ -766,14 +763,13 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                         resolved_accounts.push(remote_account)
                     }
                     Err(err) => {
-                        error!("Failed to fetch account {pubkey}: {err}");
+                        error!(pubkey = %pubkey, error = %err, "Failed to fetch account");
                         errors.push((idx, err));
                     }
                 },
                 Err(err) => {
-                    warn!("RemoteAccountProvider::try_get_multi - Unexpected RecvError while awaiting account {pubkey} at index {idx}: {err:?}. This should not happen with Result-based channels. Context: fetch_start_slot={fetch_start_slot}, min_context_slot={min_context_slot}, total_pubkeys={}",
-                      pubkeys.len());
-                    error!("Failed to resolve account {pubkey}: {err:?}");
+                    warn!(pubkey = %pubkey, stream_index = idx, error = ?err, total_pubkeys = pubkeys.len(), "Unexpected RecvError while awaiting account");
+                    error!(pubkey = %pubkey, error = ?err, "Failed to resolve account");
                     errors.push((
                         idx,
                         RemoteAccountProviderError::RecvrError(err),
@@ -818,7 +814,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                 .map(|(pk, _)| pk.to_string())
                 .collect::<Vec<_>>()
                 .join(", ");
-            trace!("Subscribing to accounts: {pubkeys}");
+            trace!(pubkeys = pubkeys, "Subscribing to accounts");
         }
         for (pubkey, _) in subscribe_and_fetch.iter() {
             // Register the subscription for the pubkey (handles LRU cache and eviction first)
@@ -839,13 +835,12 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         // If an account is evicted then we need to unsubscribe from it
         // and then inform upstream that we are no longer tracking it
         if let Some(evicted) = self.lrucache_subscribed_accounts.add(*pubkey) {
-            trace!("Evicting {pubkey}");
+            trace!(pubkey = %pubkey, "Evicting account");
 
             // 1. Unsubscribe from the account directly (LRU has already removed it)
             if let Err(err) = self.pubsub_client.unsubscribe(evicted).await {
                 // Should we retry here?
-                warn!(
-                    "Failed to unsubscribe from pubsub for evicted account {evicted}: {err:?}");
+                warn!(evicted = %evicted, error = ?err, "Failed to unsubscribe from pubsub for evicted account");
             }
 
             // 2. Inform upstream so it can remove it from the store
@@ -879,6 +874,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
     }
 
     /// Subscribe to an account for updates
+    #[instrument(skip(self))]
     pub async fn subscribe(
         &self,
         pubkey: &Pubkey,
@@ -894,6 +890,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
     }
 
     /// Subscribe to program account updates
+    #[instrument(skip(self))]
     pub async fn subscribe_program(
         &self,
         program_id: Pubkey,
@@ -908,22 +905,17 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
     }
 
     /// Unsubscribe from an account
+    #[instrument(skip(self))]
     pub async fn unsubscribe(
         &self,
         pubkey: &Pubkey,
     ) -> RemoteAccountProviderResult<()> {
         if !self.lrucache_subscribed_accounts.can_evict(pubkey) {
-            warn!(
-                "Tried to unsubscribe from account {} that should never be evicted",
-                pubkey
-            );
+            warn!(pubkey = %pubkey, "Tried to unsubscribe from account that should never be evicted");
             return Ok(());
         }
         if !self.lrucache_subscribed_accounts.contains(pubkey) {
-            warn!(
-                "Tried to unsubscribe from account {} that was not subscribed in the LRU cache",
-                pubkey
-            );
+            warn!(pubkey = %pubkey, "Tried to unsubscribe from account not subscribed in LRU");
             return Ok(());
         }
 
@@ -999,7 +991,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             let mut remaining_retries: u64 = MAX_RETRIES;
 
             if tracing::enabled!(tracing::Level::TRACE) {
-                trace!("Fetch ({})", pubkeys_str(&pubkeys));
+                trace!(pubkeys = pubkeys_str(&pubkeys), "Fetching accounts");
             }
 
             macro_rules! retry {
@@ -1186,7 +1178,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                     .collect::<Vec<_>>()
                     .join(", ");
                 trace!(
-                    "Fetched({pubkeys}) {remote_accounts:?}, notifying pending requests"
+                    pubkeys = %pubkeys, remote_accounts = ?remote_accounts, "Fetched, notifying pending requests"
                 );
             }
 
@@ -1539,7 +1531,7 @@ mod test {
             )
             .await;
 
-        debug!("Result: {res:?}");
+        debug!(result = ?res, "Result");
         assert!(res.is_ok());
         let accs = res.unwrap();
 
@@ -1577,7 +1569,7 @@ mod test {
             )
             .await;
 
-        debug!("Result: {res:?}");
+        debug!(result = ?res, "Result");
 
         assert!(res.is_err());
         assert!(matches!(
@@ -1619,7 +1611,7 @@ mod test {
             )
             .await;
 
-        debug!("Result: {res:?}");
+        debug!(result = ?res, "Result");
 
         assert!(res.is_ok());
         let accs = res.unwrap();
@@ -1717,7 +1709,7 @@ mod test {
 
         // No evictions should occur
         let removed = drain_removed_account_rx(&mut removed_rx);
-        debug!("Removed accounts: {removed:?}");
+        debug!(removed = ?removed, "Removed accounts");
         assert!(removed.is_empty(), "Expected no removed accounts");
     }
 

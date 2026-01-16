@@ -74,7 +74,7 @@ pub fn get_remote_account_lamports<'a>(
 
 pub fn dump_remote_account_lamports(accs: &[(&Pubkey, u64)]) {
     for (pk, lamports) in accs.iter() {
-        tracing::info!("{pk}: {lamports}");
+        tracing::info!(pubkey = %pk, lamports = %lamports, "Account");
     }
 }
 
@@ -93,7 +93,7 @@ pub fn dump_remote_account_update_source(
     accs: &[(&Pubkey, Option<RemoteAccountUpdateSource>)],
 ) {
     for (pk, source) in accs.iter() {
-        tracing::info!("{pk}: {source:?}");
+        tracing::info!(pubkey = %pk, source = ?source, "Account update source");
     }
 }
 
