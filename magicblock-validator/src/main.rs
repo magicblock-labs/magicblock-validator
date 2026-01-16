@@ -1,50 +1,19 @@
 mod shutdown;
 
-use log::*;
 use magicblock_api::{ledger, magic_validator::MagicValidator};
 use magicblock_config::ValidatorParams;
 use solana_signer::Signer;
 use tokio::runtime::Builder;
+use tracing::{debug, error, info};
 
 use crate::shutdown::Shutdown;
 
 fn init_logger() {
-    let mut builder = env_logger::builder();
-    builder.format_timestamp_micros().is_test(false);
-
-    if let Ok(style) = std::env::var("RUST_LOG_STYLE") {
-        use std::io::Write;
-        match style.as_str() {
-            "EPHEM" => {
-                builder.format(|buf, record| {
-                    writeln!(
-                        buf,
-                        "EPHEM [{}] {}: {} {}",
-                        record.level(),
-                        buf.timestamp_millis(),
-                        record.module_path().unwrap_or_default(),
-                        record.args()
-                    )
-                });
-            }
-            "DEVNET" => {
-                builder.format(|buf, record| {
-                    writeln!(
-                        buf,
-                        "DEVNET [{}] {}: {} {}",
-                        record.level(),
-                        buf.timestamp_millis(),
-                        record.module_path().unwrap_or_default(),
-                        record.args()
-                    )
-                });
-            }
-            _ => {}
-        }
-    }
-    let _ = builder.try_init().inspect_err(|err| {
-        eprintln!("Failed to init logger: {}", err);
-    });
+    use magicblock_core::logger::{init_with_config, LogStyle, LoggingConfig};
+    let config = LoggingConfig {
+        style: LogStyle::from_env(),
+    };
+    init_with_config(config);
 }
 
 fn main() {
