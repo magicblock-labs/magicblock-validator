@@ -38,7 +38,7 @@ impl ChainUpdatesClient {
 
         match endpoint {
             WebSocket { url, label } => {
-                debug!("Initializing WebSocket client for endpoint: {}", url);
+                debug!(url = %url, "Initializing WebSocket client");
                 let client_id = format!(
                     "ws:{label}-{}",
                     CLIENT_ID.fetch_add(1, Ordering::SeqCst)
