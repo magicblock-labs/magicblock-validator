@@ -4,7 +4,7 @@ use solana_account::AccountSharedData;
 use solana_feature_set::{
     curve25519_restrict_msm_length, curve25519_syscall_enabled,
     disable_rent_fees_collection, enable_transaction_loading_failure_fees,
-    FeatureSet,
+    get_sysvar_syscall_enabled, FeatureSet,
 };
 use solana_program::{feature, pubkey::Pubkey};
 #[allow(deprecated)]
@@ -28,6 +28,7 @@ pub fn build_svm_env(
         curve25519_syscall_enabled::ID,
         curve25519_restrict_msm_length::ID,
         enable_transaction_loading_failure_fees::ID,
+        get_sysvar_syscall_enabled::ID,
     ] {
         feature_set.activate(&id, 0);
     }
