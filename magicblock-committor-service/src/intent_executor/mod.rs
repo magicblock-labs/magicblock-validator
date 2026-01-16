@@ -8,7 +8,6 @@ use std::{mem, ops::ControlFlow, sync::Arc, time::Duration};
 
 use async_trait::async_trait;
 use futures_util::future::{join, try_join_all};
-use log::{trace, warn};
 use magicblock_metrics::metrics;
 use magicblock_program::{
     magic_scheduled_base_intent::ScheduledBaseIntent,
@@ -29,6 +28,7 @@ use solana_rpc_client_api::config::RpcTransactionConfig;
 use solana_signature::Signature;
 use solana_signer::Signer;
 use solana_transaction::versioned::VersionedTransaction;
+use tracing::{trace, warn};
 
 use crate::{
     intent_executor::{
@@ -540,7 +540,10 @@ where
                 if let Err(err) =
                     persistor.finalize_base_intent(message_id, *value)
                 {
-                    log::error!("Failed to persist ExecutionOutput: {}", err);
+                    tracing::error!(
+                        "Failed to persist ExecutionOutput: {}",
+                        err
+                    );
                 }
 
                 return;

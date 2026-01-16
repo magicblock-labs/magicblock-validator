@@ -2,7 +2,6 @@ use std::io;
 
 use anyhow::Context;
 use borsh::BorshDeserialize;
-use log::info;
 use mdp::{
     consts::ER_RECORD_SEED,
     instructions::{sync::SyncInstruction, version::v0::SyncRecordV0},
@@ -18,6 +17,7 @@ use solana_pubkey::Pubkey;
 use solana_rpc_client::rpc_client::RpcClient;
 use solana_signer::Signer;
 use solana_transaction::Transaction;
+use tracing::info;
 pub struct DomainRegistryManager {
     client: RpcClient,
 }

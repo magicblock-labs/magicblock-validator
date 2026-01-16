@@ -1,5 +1,5 @@
-use log::error;
 use solana_pubkey::Pubkey;
+use tracing::error;
 
 use crate::persist::{CommitStatus, IntentPersister};
 

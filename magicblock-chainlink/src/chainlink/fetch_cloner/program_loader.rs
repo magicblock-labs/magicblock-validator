@@ -1,8 +1,8 @@
-use log::*;
 use magicblock_core::traits::AccountsBank;
 use magicblock_metrics::metrics::AccountFetchOrigin;
 use solana_account::{AccountSharedData, ReadableAccount};
 use solana_pubkey::Pubkey;
+use tracing::*;
 
 use super::FetchCloner;
 use crate::{

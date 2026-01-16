@@ -1,11 +1,11 @@
 use dlp::{
     pda::delegation_record_pda_from_delegated_account, state::DelegationRecord,
 };
-use log::*;
 use magicblock_core::{token_programs::EATA_PROGRAM_ID, traits::AccountsBank};
 use magicblock_metrics::metrics;
 use solana_account::ReadableAccount;
 use solana_pubkey::Pubkey;
+use tracing::*;
 
 use super::FetchCloner;
 use crate::{

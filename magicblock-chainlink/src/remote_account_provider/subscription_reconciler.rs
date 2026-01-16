@@ -1,8 +1,8 @@
 use std::collections::HashSet;
 
-use log::*;
 use solana_pubkey::Pubkey;
 use tokio::sync::mpsc;
+use tracing::*;
 
 use super::{AccountsLruCache, ChainPubsubClient};
 

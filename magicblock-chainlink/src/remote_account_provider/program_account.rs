@@ -1,7 +1,6 @@
 #![allow(unused)]
 use std::{fmt, sync::Arc};
 
-use log::*;
 use solana_account::{AccountSharedData, ReadableAccount};
 use solana_instruction::{AccountMeta, Instruction};
 use solana_loader_v3_interface::{
@@ -15,6 +14,7 @@ use solana_loader_v4_interface::{
 use solana_pubkey::{pubkey, Pubkey};
 use solana_system_interface::instruction as system_instruction;
 use solana_sysvar::rent::Rent;
+use tracing::*;
 
 use crate::{
     cloner::errors::ClonerResult,

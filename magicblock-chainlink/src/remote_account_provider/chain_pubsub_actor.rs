@@ -7,7 +7,6 @@ use std::{
 };
 
 use futures_util::stream::FuturesUnordered;
-use log::*;
 use magicblock_metrics::metrics::{
     inc_account_subscription_account_updates_count,
     inc_program_subscription_account_updates_count,
@@ -26,6 +25,7 @@ use tokio::{
 };
 use tokio_stream::StreamExt;
 use tokio_util::sync::CancellationToken;
+use tracing::*;
 
 use super::{
     chain_pubsub_client::PubSubConnection,
@@ -433,7 +433,7 @@ impl ChainPubsubActor {
                     }
                     update = update_stream.next() => {
                         if let Some(rpc_response) = update {
-                            if log_enabled!(log::Level::Trace) && (!pubkey.eq(&clock::ID) ||
+                            if tracing::enabled!(tracing::Level::TRACE) && (!pubkey.eq(&clock::ID) ||
                                 rpc_response.context.slot % CLOCK_LOG_SLOT_FREQ == 0) {
                                 trace!("[client_id={client_id}] Received update for {pubkey}: {rpc_response:?}");
                             }

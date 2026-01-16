@@ -1,4 +1,3 @@
-use log::*;
 use magicblock_core::{
     token_programs::{try_derive_eata_address_and_bump, MaybeIntoAta},
     traits::AccountsBank,
@@ -7,6 +6,7 @@ use magicblock_metrics::metrics;
 use solana_account::AccountSharedData;
 use solana_pubkey::Pubkey;
 use tokio::task::JoinSet;
+use tracing::*;
 
 use super::{delegation, types::AccountWithCompanion, FetchCloner};
 use crate::{

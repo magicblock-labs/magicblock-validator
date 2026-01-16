@@ -6,10 +6,10 @@ use hyper::{
     Response, StatusCode,
 };
 use hyper_util::rt::TokioIo;
-use log::*;
 use prometheus::TextEncoder;
 use tokio::{net::TcpListener, select};
 use tokio_util::sync::CancellationToken;
+use tracing::*;
 
 use crate::metrics;
 
@@ -96,7 +96,7 @@ impl MetricsService {
 async fn metrics_service_router(
     req: Request<hyper::body::Incoming>,
 ) -> Result<Response<BoxBody<Bytes, hyper::Error>>, hyper::Error> {
-    if log_enabled!(log::Level::Trace) {
+    if enabled!(Level::TRACE) {
         trace!(
             "[{}] {:?} from {} ({})",
             req.method(),

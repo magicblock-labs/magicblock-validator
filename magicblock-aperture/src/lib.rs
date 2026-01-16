@@ -1,5 +1,4 @@
 use error::{ApertureError, RpcError};
-use log::*;
 use magicblock_config::config::aperture::ApertureConfig;
 use magicblock_core::link::DispatchEndpoints;
 use processor::EventProcessor;
@@ -7,6 +6,7 @@ use server::{http::HttpServer, websocket::WebsocketServer};
 use state::SharedState;
 use tokio::net::TcpListener;
 use tokio_util::sync::CancellationToken;
+use tracing::*;
 
 type RpcResult<T> = Result<T, RpcError>;
 type ApertureResult<T> = Result<T, ApertureError>;

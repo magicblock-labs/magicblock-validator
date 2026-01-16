@@ -5,7 +5,6 @@ use std::{
 };
 
 use futures_util::StreamExt;
-use log::*;
 use magicblock_config::config::TaskSchedulerConfig;
 use magicblock_core::link::transactions::ScheduledTasksRx;
 use magicblock_ledger::LatestBlock;
@@ -24,6 +23,7 @@ use tokio_util::{
     sync::CancellationToken,
     time::{delay_queue::Key, DelayQueue},
 };
+use tracing::*;
 
 use crate::{
     db::{DbTask, SchedulerDatabase},
@@ -372,7 +372,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_schedule_invalid_tasks() {
-        let _ = env_logger::try_init();
+        magicblock_core::logger::init_for_tests();
 
         let (tx, rx) = mpsc::unbounded_channel();
         let db = SchedulerDatabase::new(":memory:").unwrap();
@@ -431,7 +431,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_remove_invalid_tasks_on_startup() {
-        let _ = env_logger::try_init();
+        magicblock_core::logger::init_for_tests();
 
         let (_tx, rx) = mpsc::unbounded_channel();
         let db = SchedulerDatabase::new(":memory:").unwrap();

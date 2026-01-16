@@ -2829,7 +2829,6 @@ version = "0.6.1"
 dependencies = [
  "async-trait",
  "bincode",
- "log",
  "magicblock-accounts-db",
  "magicblock-chainlink",
  "magicblock-committor-service",
@@ -2853,6 +2852,7 @@ dependencies = [
  "solana-transaction",
  "thiserror 1.0.69",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -2860,7 +2860,6 @@ name = "magicblock-accounts"
 version = "0.6.1"
 dependencies = [
  "async-trait",
- "log",
  "magicblock-account-cloner",
  "magicblock-accounts-db",
  "magicblock-chainlink",
@@ -2874,6 +2873,7 @@ dependencies = [
  "thiserror 1.0.69",
  "tokio",
  "tokio-util",
+ "tracing",
  "url",
 ]
 
@@ -2881,9 +2881,7 @@ dependencies = [
 name = "magicblock-accounts-db"
 version = "0.6.1"
 dependencies = [
- "env_logger 0.11.8",
  "lmdb-rkv",
- "log",
  "magicblock-config",
  "magicblock-core",
  "memmap2 0.9.9",
@@ -2893,6 +2891,7 @@ dependencies = [
  "solana-pubkey",
  "tempfile",
  "thiserror 1.0.69",
+ "tracing",
 ]
 
 [[package]]
@@ -2910,7 +2909,6 @@ dependencies = [
  "hyper 1.8.1",
  "hyper-util",
  "libloading",
- "log",
  "magicblock-account-cloner",
  "magicblock-accounts-db",
  "magicblock-chainlink",
@@ -2946,6 +2944,7 @@ dependencies = [
  "thiserror 1.0.69",
  "tokio",
  "tokio-util",
+ "tracing",
 ]
 
 [[package]]
@@ -2955,7 +2954,6 @@ dependencies = [
  "anyhow",
  "borsh 1.6.0",
  "fd-lock",
- "log",
  "magic-domain-program",
  "magicblock-account-cloner",
  "magicblock-accounts",
@@ -3001,6 +2999,7 @@ dependencies = [
  "thiserror 1.0.69",
  "tokio",
  "tokio-util",
+ "tracing",
 ]
 
 [[package]]
@@ -3011,10 +3010,8 @@ dependencies = [
  "assert_matches",
  "async-trait",
  "bincode",
- "env_logger 0.11.8",
  "futures-util",
  "helius-laserstream",
- "log",
  "lru",
  "magicblock-chainlink",
  "magicblock-config",
@@ -3055,6 +3052,7 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tokio-util",
+ "tracing",
  "url",
 ]
 
@@ -3081,7 +3079,6 @@ dependencies = [
  "dyn-clone",
  "futures-util",
  "lazy_static",
- "log",
  "lru",
  "magicblock-committor-program",
  "magicblock-delegation-program",
@@ -3115,6 +3112,7 @@ dependencies = [
  "thiserror 1.0.69",
  "tokio",
  "tokio-util",
+ "tracing",
 ]
 
 [[package]]
@@ -3223,6 +3221,7 @@ dependencies = [
  "thiserror 1.0.69",
  "tokio",
  "tokio-util",
+ "tracing",
 ]
 
 [[package]]
@@ -3242,10 +3241,10 @@ dependencies = [
  "hyper 1.8.1",
  "hyper-util",
  "lazy_static",
- "log",
  "prometheus",
  "tokio",
  "tokio-util",
+ "tracing",
 ]
 
 [[package]]
@@ -3254,7 +3253,6 @@ version = "0.6.1"
 dependencies = [
  "bincode",
  "guinea",
- "log",
  "magicblock-accounts-db",
  "magicblock-core",
  "magicblock-ledger",
@@ -3287,6 +3285,7 @@ dependencies = [
  "test-kit",
  "tokio",
  "tokio-util",
+ "tracing",
 ]
 
 [[package]]
@@ -3329,7 +3328,6 @@ dependencies = [
 name = "magicblock-rpc-client"
 version = "0.6.1"
 dependencies = [
- "log",
  "solana-account",
  "solana-account-decoder-client-types",
  "solana-address-lookup-table-interface",
@@ -3345,6 +3343,7 @@ dependencies = [
  "solana-transaction-status-client-types",
  "thiserror 1.0.69",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -3352,7 +3351,6 @@ name = "magicblock-table-mania"
 version = "0.6.1"
 dependencies = [
  "ed25519-dalek",
- "log",
  "magicblock-metrics",
  "magicblock-rpc-client",
  "rand 0.9.2",
@@ -3371,6 +3369,7 @@ dependencies = [
  "solana-transaction",
  "thiserror 1.0.69",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -3379,9 +3378,7 @@ version = "0.6.1"
 dependencies = [
  "bincode",
  "chrono",
- "env_logger 0.11.8",
  "futures-util",
- "log",
  "magicblock-config",
  "magicblock-core",
  "magicblock-ledger",
@@ -3398,6 +3395,7 @@ dependencies = [
  "thiserror 1.0.69",
  "tokio",
  "tokio-util",
+ "tracing",
 ]
 
 [[package]]
@@ -3419,7 +3417,6 @@ dependencies = [
 name = "magicblock-validator-admin"
 version = "0.6.1"
 dependencies = [
- "log",
  "magicblock-delegation-program",
  "magicblock-program",
  "magicblock-rpc-client",
@@ -3430,6 +3427,7 @@ dependencies = [
  "solana-transaction",
  "tokio",
  "tokio-util",
+ "tracing",
 ]
 
 [[package]]

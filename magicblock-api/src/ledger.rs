@@ -5,12 +5,12 @@ use std::{
 };
 
 use fd_lock::{RwLock, RwLockWriteGuard};
-use log::*;
 use magicblock_config::config::LedgerConfig;
 use magicblock_ledger::{Ledger, BLOCKSTORE_DIRECTORY_ROCKS_LEVEL};
 use solana_keypair::Keypair;
 use solana_program::clock::Slot;
 use solana_signer::EncodableKey;
+use tracing::*;
 
 use crate::errors::{ApiError, ApiResult};
 

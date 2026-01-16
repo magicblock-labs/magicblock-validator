@@ -4,10 +4,10 @@ use std::{
 };
 
 use async_trait::async_trait;
-use log::*;
 use solana_commitment_config::CommitmentLevel;
 use solana_pubkey::Pubkey;
 use tokio::sync::{mpsc, oneshot};
+use tracing::*;
 
 use crate::remote_account_provider::{
     chain_laser_actor::{ChainLaserActor, Slots},

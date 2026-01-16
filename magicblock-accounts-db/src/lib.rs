@@ -5,7 +5,6 @@ use index::{
     iterator::OffsetPubkeyIter, utils::AccountOffsetFinder, AccountsDbIndex,
 };
 use lmdb::{RwTransaction, Transaction};
-use log::{error, info, warn};
 use magicblock_config::config::AccountsDbConfig;
 use magicblock_core::traits::AccountsBank;
 use parking_lot::RwLock;
@@ -14,6 +13,7 @@ use solana_account::{
 };
 use solana_pubkey::Pubkey;
 use storage::AccountsStorage;
+use tracing::{error, info, warn};
 
 // Use the refactored manager
 use crate::snapshot::SnapshotManager;

@@ -1,11 +1,11 @@
 use std::{collections::HashSet, num::NonZeroUsize};
 
-use log::*;
 use lru::LruCache;
 use magicblock_metrics::metrics::inc_evicted_accounts_count;
 use parking_lot::Mutex;
 use solana_pubkey::Pubkey;
 use solana_sdk_ids::sysvar;
+use tracing::*;
 
 use crate::submux::SubscribedAccountsTracker;
 
@@ -38,7 +38,7 @@ impl AccountsLruCache {
     }
 
     pub fn promote_multi(&self, pubkeys: &[&Pubkey]) {
-        if log::log_enabled!(log::Level::Trace) {
+        if tracing::enabled!(tracing::Level::TRACE) {
             let pubkeys = pubkeys
                 .iter()
                 .map(|pk| pk.to_string())

@@ -1,4 +1,3 @@
-use log::*;
 use magicblock_accounts_db::AccountsDbResult;
 use magicblock_core::{
     link::{
@@ -27,6 +26,7 @@ use solana_transaction_error::{TransactionError, TransactionResult};
 use solana_transaction_status::{
     map_inner_instructions, TransactionStatusMeta,
 };
+use tracing::*;
 
 impl super::TransactionExecutor {
     /// Executes a transaction and conditionally commits its results.

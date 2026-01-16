@@ -10,8 +10,6 @@ use std::{
 #[cfg(any(test, feature = "dev-context"))]
 use async_trait::async_trait;
 #[cfg(any(test, feature = "dev-context"))]
-use log::*;
-#[cfg(any(test, feature = "dev-context"))]
 use solana_account::Account;
 #[cfg(any(test, feature = "dev-context"))]
 use solana_commitment_config::CommitmentConfig;
@@ -23,6 +21,8 @@ use solana_rpc_client_api::{
     response::{Response, RpcResponseContext, RpcResult},
 };
 use solana_sysvar::clock;
+#[cfg(any(test, feature = "dev-context"))]
+use tracing::*;
 
 #[cfg(any(test, feature = "dev-context"))]
 use crate::remote_account_provider::chain_rpc_client::ChainRpcClient;
@@ -288,7 +288,7 @@ impl ChainRpcClient for ChainRpcClientMock {
         pubkeys: &[Pubkey],
         config: RpcAccountInfoConfig,
     ) -> RpcResult<Vec<Option<Account>>> {
-        if log::log_enabled!(log::Level::Trace) {
+        if tracing::enabled!(tracing::Level::TRACE) {
             let pubkeys = pubkeys
                 .iter()
                 .map(|p| p.to_string())

@@ -11,7 +11,6 @@ use std::{
 
 use coordinator::{ExecutionCoordinator, TransactionWithId};
 use locks::{ExecutorId, MAX_SVM_EXECUTORS};
-use log::{error, info};
 use magicblock_core::link::transactions::{
     ProcessableTransaction, TransactionToProcessRx,
 };
@@ -23,6 +22,7 @@ use tokio::{
     sync::mpsc::{channel, Receiver, Sender},
 };
 use tokio_util::sync::CancellationToken;
+use tracing::{error, info};
 
 use crate::executor::{SimpleForkGraph, TransactionExecutor};
 

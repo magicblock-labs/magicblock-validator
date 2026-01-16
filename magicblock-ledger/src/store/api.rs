@@ -9,7 +9,6 @@ use std::{
 };
 
 use bincode::{deserialize, serialize};
-use log::*;
 use magicblock_core::link::blocks::BlockHash;
 use magicblock_metrics::metrics::{
     start_ledger_disable_compactions_timer, start_ledger_shutdown_timer,
@@ -31,6 +30,7 @@ use solana_transaction_status::{
     ConfirmedTransactionWithStatusMeta, TransactionStatusMeta,
     VersionedConfirmedBlock, VersionedTransactionWithStatusMeta,
 };
+use tracing::*;
 
 use crate::{
     conversions::transaction,

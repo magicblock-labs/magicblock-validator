@@ -10,7 +10,6 @@ use std::{
 use dlp::{
     pda::delegation_record_pda_from_delegated_account, state::DelegationRecord,
 };
-use log::*;
 use magicblock_config::config::AllowedProgram;
 use magicblock_core::traits::AccountsBank;
 use magicblock_metrics::metrics::{self, AccountFetchOrigin};
@@ -23,6 +22,7 @@ use tokio::{
     task,
     task::JoinSet,
 };
+use tracing::*;
 
 mod ata_projection;
 mod delegation;
@@ -353,7 +353,7 @@ where
                             // If the delegation record is valid we set the owner and delegation
                             // status on the account
                             if let Some(delegation_record) = delegation_record {
-                                if log::log_enabled!(log::Level::Trace) {
+                                if tracing::enabled!(tracing::Level::TRACE) {
                                     trace!("Delegation record found for {pubkey}: {delegation_record:?}");
                                     trace!(
                                         "Resolving delegated account: {pubkey} (remote slot {}, owner: {})",
@@ -508,7 +508,7 @@ where
         fetch_origin: AccountFetchOrigin,
         program_ids: Option<&[Pubkey]>,
     ) -> ChainlinkResult<FetchAndCloneResult> {
-        if log::log_enabled!(log::Level::Trace) {
+        if tracing::enabled!(tracing::Level::TRACE) {
             let pubkeys = pubkeys
                 .iter()
                 .map(|p| p.to_string())
@@ -553,7 +553,7 @@ where
             atas,
         } = pipeline::classify_remote_accounts(accs, pubkeys);
 
-        if log::log_enabled!(log::Level::Trace) {
+        if tracing::enabled!(tracing::Level::TRACE) {
             let not_found = not_found
                 .iter()
                 .map(|(pubkey, slot)| (pubkey.to_string(), *slot))
@@ -597,7 +597,9 @@ where
         }
 
         // We mark some accounts as empty if we know that they will never exist on chain
-        if log::log_enabled!(log::Level::Trace) && !clone_as_empty.is_empty() {
+        if tracing::enabled!(tracing::Level::TRACE)
+            && !clone_as_empty.is_empty()
+        {
             trace!(
                 "Cloning accounts as empty: {:?}",
                 clone_as_empty
@@ -767,7 +769,7 @@ where
             .iter()
             .filter(|p| !self.blacklisted_accounts.contains(p))
             .collect::<Vec<_>>();
-        if log::log_enabled!(log::Level::Trace) {
+        if tracing::enabled!(tracing::Level::TRACE) {
             let pubkeys_str = pubkeys
                 .iter()
                 .map(|p| p.to_string())
@@ -814,7 +816,7 @@ where
                     }
                     RefreshDecision::No => {
                         // Account is in bank and subscribed correctly - no fetch needed
-                        if log::log_enabled!(log::Level::Trace) {
+                        if tracing::enabled!(tracing::Level::TRACE) {
                             let undelegating = account_in_bank.undelegating();
                             let delegated = account_in_bank.delegated();
                             let owner = account_in_bank.owner().to_string();

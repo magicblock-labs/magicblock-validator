@@ -8,7 +8,6 @@ use std::{
 use arc_swap::ArcSwap;
 use async_trait::async_trait;
 use futures_util::{future::BoxFuture, stream::BoxStream};
-use log::*;
 use solana_account_decoder::UiAccount;
 use solana_commitment_config::CommitmentConfig;
 use solana_pubkey::Pubkey;
@@ -23,6 +22,7 @@ use tokio::{
     sync::{mpsc, oneshot, Mutex as AsyncMutex},
     time,
 };
+use tracing::*;
 
 use super::{
     chain_pubsub_actor::ChainPubsubActor,
@@ -366,7 +366,6 @@ impl ReconnectableClient for ChainPubsubClientImpl {
 pub mod mock {
     use std::{collections::HashSet, time::Duration};
 
-    use log::*;
     use parking_lot::Mutex;
     use solana_account::Account;
     use solana_account_decoder::{encode_ui_account, UiAccountEncoding};
@@ -374,6 +373,7 @@ pub mod mock {
     use solana_rpc_client_api::response::{
         Response as RpcResponse, RpcResponseContext,
     };
+    use tracing::*;
 
     use super::*;
     use crate::remote_account_provider::{

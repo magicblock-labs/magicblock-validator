@@ -7,7 +7,6 @@ use std::{
     time::{Duration, Instant},
 };
 
-use log::*;
 use magicblock_metrics::metrics;
 use magicblock_rpc_client::MagicblockRpcClient;
 use solana_address_lookup_table_interface::state::AddressLookupTable;
@@ -20,6 +19,7 @@ use tokio::{
     sync::{Mutex, RwLock},
     time::sleep,
 };
+use tracing::*;
 
 use crate::{
     error::{TableManiaError, TableManiaResult},

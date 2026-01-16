@@ -7,8 +7,8 @@ use std::{
     sync::Arc,
 };
 
-use log::{error, info, warn};
 use parking_lot::{Mutex, RwLockWriteGuard};
+use tracing::{error, info, warn};
 
 use crate::{
     error::{AccountsDbError, LogErr},

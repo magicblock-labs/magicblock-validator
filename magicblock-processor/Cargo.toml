@@ -9,7 +9,7 @@ edition.workspace = true
 
 [dependencies]
 bincode = { workspace = true }
-log = { workspace = true }
+tracing = { workspace = true }
 parking_lot = { workspace = true }
 serde = { workspace = true }
 tokio = { workspace = true }

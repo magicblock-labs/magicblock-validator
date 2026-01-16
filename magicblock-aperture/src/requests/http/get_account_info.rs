@@ -1,5 +1,5 @@
-use log::*;
 use solana_rpc_client_api::config::RpcAccountInfoConfig;
+use tracing::*;
 
 use super::prelude::*;
 

@@ -1,7 +1,6 @@
 use std::{collections::HashSet, ops::ControlFlow, time::Duration};
 
 use futures_util::future::{join, join_all, try_join_all};
-use log::{error, info};
 use magicblock_committor_program::{
     instruction_chunks::chunk_realloc_ixs, Chunks,
 };
@@ -26,6 +25,7 @@ use solana_signature::Signature;
 use solana_signer::{Signer, SignerError};
 use solana_transaction::versioned::VersionedTransaction;
 use solana_transaction_error::TransactionError;
+use tracing::{error, info};
 
 use crate::{
     persist::{CommitStatus, IntentPersister},

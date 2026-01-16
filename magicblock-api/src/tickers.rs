@@ -6,7 +6,6 @@ use std::{
     time::Duration,
 };
 
-use log::*;
 use magicblock_accounts::ScheduledCommitsProcessor;
 use magicblock_accounts_db::AccountsDb;
 use magicblock_core::{
@@ -19,6 +18,7 @@ use magicblock_metrics::metrics;
 use magicblock_program::{instruction_utils::InstructionUtils, MagicContext};
 use solana_account::ReadableAccount;
 use tokio_util::sync::CancellationToken;
+use tracing::*;
 
 use crate::slot::advance_slot_and_update_ledger;
 

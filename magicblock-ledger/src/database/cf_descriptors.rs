@@ -4,8 +4,8 @@ use std::{
     sync::{atomic::AtomicU64, Arc},
 };
 
-use log::*;
 use rocksdb::{ColumnFamilyDescriptor, DBCompressionType, Options, DB};
+use tracing::*;
 
 use super::{
     columns::{should_enable_compression, Column, ColumnName},

@@ -5,7 +5,6 @@ use std::{
     time::{Duration, Instant},
 };
 
-use log::*;
 use solana_account::Account;
 use solana_account_decoder_client_types::UiAccountEncoding;
 use solana_address_lookup_table_interface::state::{
@@ -32,6 +31,7 @@ use solana_transaction_status_client_types::{
     EncodedConfirmedTransactionWithStatusMeta, UiTransactionEncoding,
 };
 use tokio::task::JoinSet;
+use tracing::*;
 
 /// The encoding to use when sending transactions
 pub const SEND_TRANSACTION_ENCODING: UiTransactionEncoding =

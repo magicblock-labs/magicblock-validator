@@ -1,8 +1,8 @@
 use std::{collections::HashSet, fmt, sync::Arc};
 
-use log::*;
 use solana_pubkey::Pubkey;
 use tokio::task::JoinSet;
+use tracing::*;
 
 use crate::remote_account_provider::{
     ChainPubsubClient, ChainRpcClient, RemoteAccountProvider,
@@ -128,7 +128,7 @@ pub(crate) async fn cancel_subs<T: ChainRpcClient, U: ChainPubsubClient>(
             .chain(all.into_iter())
             .collect(),
     };
-    if log::log_enabled!(log::Level::Trace) {
+    if tracing::enabled!(tracing::Level::TRACE) {
         trace!(
             "Canceling subscriptions for: {}",
             subs_to_cancel

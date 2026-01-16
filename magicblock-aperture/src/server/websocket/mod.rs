@@ -10,12 +10,12 @@ use hyper::{
     Request, Response,
 };
 use hyper_util::rt::TokioIo;
-use log::{info, warn};
 use tokio::{
     net::{TcpListener, TcpStream},
     sync::oneshot::Receiver,
 };
 use tokio_util::sync::CancellationToken;
+use tracing::{info, warn};
 
 use super::Shutdown;
 use crate::{

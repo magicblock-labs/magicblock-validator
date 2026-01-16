@@ -1,6 +1,6 @@
 use dlp::state::DelegationRecord;
-use log::*;
 use solana_pubkey::Pubkey;
+use tracing::*;
 
 /// Decides if an account that is undelegating should be updated
 /// (overwritten) by the remote account state and the `undelegating` flag cleared.
