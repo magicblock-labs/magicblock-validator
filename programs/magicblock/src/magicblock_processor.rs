@@ -7,7 +7,8 @@ use crate::{
     schedule_task::{process_cancel_task, process_schedule_task},
     schedule_transactions::{
         process_accept_scheduled_commits, process_schedule_base_intent,
-        process_schedule_commit, ProcessScheduleCommitOptions,
+        process_schedule_commit, process_schedule_commit_finalize,
+        ProcessScheduleCommitOptions,
     },
     toggle_executable_check::process_toggle_executable_check,
 };
@@ -67,6 +68,13 @@ declare_process_instruction!(
                 invoke_context,
                 transaction_context,
                 id,
+            ),
+            ScheduleCommitFinalize => process_schedule_commit_finalize(
+                signers,
+                invoke_context,
+                ProcessScheduleCommitOptions {
+                    request_undelegation: false,
+                },
             ),
             ScheduleBaseIntent(args) => {
                 process_schedule_base_intent(signers, invoke_context, args)
