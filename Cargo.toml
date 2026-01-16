@@ -63,7 +63,6 @@ derive_more = "2.0"
 dyn-clone = "1.0.20"
 ed25519-dalek = "1.0.1"
 enum-iterator = "1.5.0"
-env_logger = "0.11.2"
 fastwebsockets = "0.10"
 fd-lock = "4.0.2"
 figment = "0.10"
@@ -84,6 +83,7 @@ json = { package = "sonic-rs", version = "0.5.3" }
 lazy_static = "1.4.0"
 libloading = "0.8"
 libc = "0.2.153"
+# Only used in magicblock-ledger for solana_metrics::datapoint_info!
 log = { version = "0.4.20" }
 lru = "0.16.0"
 magic-domain-program = { git = "https://github.com/magicblock-labs/magic-domain-program.git", rev = "cffcfeb", default-features = false, features = [

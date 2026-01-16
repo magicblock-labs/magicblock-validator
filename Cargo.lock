@@ -3093,7 +3093,6 @@ name = "magicblock-core"
 version = "0.6.1"
 dependencies = [
  "flume",
- "log",
  "magicblock-magic-program-api",
  "solana-account",
  "solana-account-decoder",

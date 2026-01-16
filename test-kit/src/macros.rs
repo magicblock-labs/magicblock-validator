@@ -30,10 +30,7 @@ pub fn init_logger_for_tests() {
                 let p = Path::new(&test_file);
                 if let Some(file_stem) = p.file_stem() {
                     if let Some(file_name) = file_stem.to_str() {
-                        rust_log.push_str(&format!(
-                            ",{}=debug",
-                            file_name
-                        ));
+                        rust_log.push_str(&format!(",{}=debug", file_name));
                     }
                 }
             }
@@ -64,14 +61,10 @@ pub fn init_logger_for_test_path(full_path_to_test_file: &str) {
         let p = Path::new(full_path_to_test_file);
         if let Some(file_stem) = p.file_stem() {
             if let Some(file_name) = file_stem.to_str() {
-                let test_level =
-                    env::var("RUST_LOG_LEVEL")
-                        .ok()
-                        .unwrap_or_else(|| "info".to_string());
-                rust_log.push_str(&format!(
-                    "{}={}",
-                    file_name, test_level
-                ));
+                let test_level = env::var("RUST_LOG_LEVEL")
+                    .ok()
+                    .unwrap_or_else(|| "info".to_string());
+                rust_log.push_str(&format!("{}={}", file_name, test_level));
             }
         }
     }

@@ -11,7 +11,6 @@ anyhow = "1.0"
 env_logger = "0.11"
 futures = "0.3"
 helius-laserstream = { git = "https://github.com/magicblock-labs/laserstream-sdk", branch = "v0.2.2-magicblock" }
-log = "0.4"
 magicblock-core = { path = "../magicblock-core" }
 solana-client = "2.1.8"
 solana-rpc-client = "2.1.8"

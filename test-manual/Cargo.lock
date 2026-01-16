@@ -2048,7 +2048,6 @@ name = "magicblock-core"
 version = "0.6.1"
 dependencies = [
  "flume",
- "log",
  "magicblock-magic-program-api",
  "solana-account 2.2.1 (git+https://github.com/magicblock-labs/solana-account.git?rev=2246929)",
  "solana-account-decoder",

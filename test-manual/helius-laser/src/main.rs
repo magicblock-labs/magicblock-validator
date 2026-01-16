@@ -1,7 +1,7 @@
 use std::{env, time::Duration};
 
 use anyhow::{Context, Result};
-use log::*;
+use tracing::{info, warn};
 use solana_client::rpc_config::{
     RpcSendTransactionConfig, RpcTransactionConfig,
 };
