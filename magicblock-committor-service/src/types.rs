@@ -25,6 +25,10 @@ impl metrics::LabelValue for ScheduledBaseIntentWrapper {
             MagicBaseIntent::BaseActions(_) => "actions",
             MagicBaseIntent::Commit(_) => "commit",
             MagicBaseIntent::CommitAndUndelegate(_) => "commit_and_undelegate",
+            MagicBaseIntent::CommitFinalize(_) => "commit_finalize",
+            MagicBaseIntent::CommitFinalizeAndUndelegate(_) => {
+                "commit_finalize_and_undelegate"
+            }
         }
     }
 }

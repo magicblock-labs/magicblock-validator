@@ -34,6 +34,7 @@ pub use task_builder::TaskBuilderImpl;
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum TaskType {
     Commit,
+    CommitFinalize,
     Finalize,
     Undelegate,
     Action,
@@ -117,6 +118,14 @@ pub struct CommitDiffTask {
     pub allow_undelegation: bool,
     pub committed_account: CommittedAccount,
     pub base_account: Account,
+}
+
+#[derive(Clone)]
+pub struct CommitFinalizeTask {
+    pub commit_id: u64,
+    pub allow_undelegation: bool,
+    pub base_account: Option<Account>, // None implies commit-full-bytes else commit-diff
+    pub committed_account: CommittedAccount,
 }
 
 #[derive(Clone)]
