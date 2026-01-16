@@ -12,7 +12,7 @@ use solana_signature::Signature;
 use solana_transaction_status_client_types::EncodedConfirmedTransactionWithStatusMeta;
 use tokio::sync::{broadcast, oneshot, oneshot::error::RecvError};
 use tokio_util::sync::WaitForCancellationFutureOwned;
-use tracing::{error, info};
+use tracing::{error, info, instrument};
 
 use crate::{
     error::{CommittorServiceError, CommittorServiceResult},
@@ -57,6 +57,7 @@ impl<CC: BaseIntentCommittor> CommittorServiceExt<CC> {
         }
     }
 
+    #[instrument(skip(pending_message, results_subscription))]
     async fn dispatcher(
         committor_stopped: WaitForCancellationFutureOwned,
         results_subscription: oneshot::Receiver<
@@ -71,20 +72,20 @@ impl<CC: BaseIntentCommittor> CommittorServiceExt<CC> {
             let execution_result = tokio::select! {
                 biased;
                 _ = &mut committor_stopped => {
-                    info!("Committor service stopped, stopping Committor extension");
+                    info!("Shutting down extension");
                     return;
                 }
                 execution_result = results_subscription.recv() => {
                     match execution_result {
                         Ok(result) => result,
                         Err(broadcast::error::RecvError::Closed) => {
-                            info!("Intent execution got shutdown, shutting down result Committor extension!");
+                            info!("Intent execution shutdown");
                             break;
                         }
                         Err(broadcast::error::RecvError::Lagged(skipped)) => {
                             // SAFETY: not really feasible to happen as this function is way faster than Intent execution
                             // requires investigation if ever happens!
-                            error!("CommittorServiceExt lags behind Intent execution! skipped: {}", skipped);
+                            error!(skipped, "Dispatcher lag detected");
                             continue;
                         }
                     }
@@ -102,9 +103,7 @@ impl<CC: BaseIntentCommittor> CommittorServiceExt<CC> {
             };
 
             if sender.send(execution_result).is_err() {
-                error!(
-                    "Failed to send BaseIntent execution result to listener"
-                );
+                error!("Failed to send result");
             }
         }
     }
