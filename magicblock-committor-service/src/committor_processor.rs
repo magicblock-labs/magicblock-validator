@@ -7,7 +7,7 @@ use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_signer::Signer;
 use tokio::sync::broadcast;
-use tracing::*;
+use tracing::{instrument, *};
 
 use crate::{
     config::ChainConfig,
@@ -121,6 +121,7 @@ impl CommittorProcessor {
         Ok(signatures)
     }
 
+    #[instrument(skip(self, base_intents))]
     pub async fn schedule_base_intents(
         &self,
         base_intents: Vec<ScheduledBaseIntentWrapper>,
@@ -133,17 +134,14 @@ impl CommittorProcessor {
             // We will still try to perform the commits, but the fact that we cannot
             // persist the intent is very serious and we should probably restart the
             // valiator
-            error!(
-                "DB EXCEPTION: Failed to persist changeset to be committed: {:?}",
-                err
-            );
+            error!(error = ?err, "DB EXCEPTION: Failed to persist changeset");
         };
 
         self.commits_scheduler
             .schedule(base_intents)
             .await
             .inspect_err(|err| {
-                error!("Failed to schedule base intent: {}", err);
+                error!(error = ?err, "Failed to schedule intent");
             })?;
 
         Ok(())

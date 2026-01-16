@@ -61,9 +61,9 @@ where
                     commit_strategy,
                 ) {
                     error!(
-                        "Failed to persist commit strategy {}: {}",
-                        commit_strategy.as_str(),
-                        err
+                        strategy = commit_strategy.as_str(),
+                        error = ?err,
+                        "Failed to persist commit strategy"
                     );
                 }
             }
@@ -107,9 +107,9 @@ where
                     commit_strategy,
                 ) {
                     error!(
-                        "Failed to persist commit strategy {}: {}",
-                        commit_strategy.as_str(),
-                        err
+                        strategy = commit_strategy.as_str(),
+                        error = ?err,
+                        "Failed to persist commit strategy"
                     );
                 }
             }

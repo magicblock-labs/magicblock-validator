@@ -3062,10 +3062,13 @@ dependencies = [
  "solana-transaction-status-client-types",
  "static_assertions",
  "tempfile",
+ "test-kit",
  "thiserror 1.0.69",
  "tokio",
  "tokio-util",
  "tracing",
+ "tracing-log",
+ "tracing-subscriber",
 ]
 
 [[package]]

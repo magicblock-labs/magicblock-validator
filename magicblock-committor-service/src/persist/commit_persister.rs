@@ -446,9 +446,13 @@ mod tests {
     use tempfile::NamedTempFile;
 
     use super::*;
-    use crate::persist::{types, CommitStatusSignatures};
+    use crate::{
+        persist::{types, CommitStatusSignatures},
+        test_utils,
+    };
 
     fn create_test_persister() -> (IntentPersisterImpl, NamedTempFile) {
+        test_utils::init_test_logger();
         let temp_file = NamedTempFile::new().unwrap();
         let persister = IntentPersisterImpl::try_new(temp_file.path()).unwrap();
         (persister, temp_file)
