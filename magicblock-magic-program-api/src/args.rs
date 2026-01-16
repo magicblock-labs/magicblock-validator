@@ -85,6 +85,8 @@ pub enum MagicBaseIntentArgs {
     BaseActions(Vec<BaseActionArgs>),
     Commit(CommitTypeArgs),
     CommitAndUndelegate(CommitAndUndelegateArgs),
+    CommitFinalize(CommitTypeArgs),
+    CommitFinalizeAndUndelegate(CommitAndUndelegateArgs),
 }
 
 /// A compact account meta used for base-layer actions.

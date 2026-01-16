@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use magicblock_program::magic_scheduled_base_intent::{
-    CommitType, CommittedAccount, MagicBaseIntent, ScheduledBaseIntent,
-    UndelegateType,
+    CommitAndUndelegate, CommitType, CommittedAccount, MagicBaseIntent,
+    ScheduledBaseIntent, UndelegateType,
 };
 use solana_account::Account;
 use solana_pubkey::Pubkey;
@@ -18,7 +18,8 @@ use crate::{
     persist::IntentPersister,
     tasks::{
         args_task::{ArgsTask, ArgsTaskType},
-        BaseActionTask, BaseTask, FinalizeTask, UndelegateTask,
+        BaseActionTask, BaseTask, CommitFinalizeTask, FinalizeTask,
+        UndelegateTask,
     },
 };
 
@@ -80,6 +81,28 @@ impl TaskBuilderImpl {
         }
         .into()
     }
+
+    pub fn create_commit_finalize_task(
+        commit_id: u64,
+        allow_undelegation: bool,
+        account: CommittedAccount,
+        base_account: Option<Account>,
+    ) -> ArgsTask {
+        let base_account =
+            if account.account.data.len() > COMMIT_STATE_SIZE_THRESHOLD {
+                base_account
+            } else {
+                None
+            };
+
+        ArgsTaskType::CommitFinalize(CommitFinalizeTask {
+            commit_id,
+            allow_undelegation,
+            committed_account: account,
+            base_account,
+        })
+        .into()
+    }
 }
 
 #[async_trait]
@@ -90,25 +113,34 @@ impl TasksBuilder for TaskBuilderImpl {
         base_intent: &ScheduledBaseIntent,
         persister: &Option<P>,
     ) -> TaskBuilderResult<Vec<Box<dyn BaseTask>>> {
-        let (accounts, allow_undelegation) = match &base_intent.base_intent {
-            MagicBaseIntent::BaseActions(actions) => {
-                let tasks = actions
-                    .iter()
-                    .map(|el| {
-                        let task = BaseActionTask { action: el.clone() };
-                        let task =
-                            ArgsTask::new(ArgsTaskType::BaseAction(task));
-                        Box::new(task) as Box<dyn BaseTask>
-                    })
-                    .collect();
+        let (accounts, allow_undelegation, finalize) =
+            match &base_intent.base_intent {
+                MagicBaseIntent::BaseActions(actions) => {
+                    let tasks = actions
+                        .iter()
+                        .map(|el| {
+                            let task = BaseActionTask { action: el.clone() };
+                            let task =
+                                ArgsTask::new(ArgsTaskType::BaseAction(task));
+                            Box::new(task) as Box<dyn BaseTask>
+                        })
+                        .collect();
 
-                return Ok(tasks);
-            }
-            MagicBaseIntent::Commit(t) => (t.get_committed_accounts(), false),
-            MagicBaseIntent::CommitAndUndelegate(t) => {
-                (t.commit_action.get_committed_accounts(), true)
-            }
-        };
+                    return Ok(tasks);
+                }
+                MagicBaseIntent::Commit(t) => {
+                    (t.get_committed_accounts(), false, false)
+                }
+                MagicBaseIntent::CommitAndUndelegate(t) => {
+                    (t.commit_action.get_committed_accounts(), true, false)
+                }
+                MagicBaseIntent::CommitFinalize(t) => {
+                    (t.get_committed_accounts(), false, true)
+                }
+                MagicBaseIntent::CommitFinalizeAndUndelegate(t) => {
+                    (t.commit_action.get_committed_accounts(), true, true)
+                }
+            };
 
         let (commit_ids, base_accounts) = {
             let mut min_context_slot = 0;
@@ -169,7 +201,9 @@ impl TasksBuilder for TaskBuilderImpl {
                 // instead:
                 //  let base_account = base_accounts.remove(&account.pubkey);
                 let base_account = base_accounts.get(&account.pubkey).cloned();
-                let task = Self::create_commit_task(commit_id, allow_undelegation, account.clone(), base_account);
+                let task = if finalize {
+                    Self::create_commit_finalize_task(commit_id, allow_undelegation, account.clone(), base_account)
+                } else { Self::create_commit_task(commit_id, allow_undelegation, account.clone(), base_account) };
                 Box::new(task) as Box<dyn BaseTask>
             }).collect();
 
@@ -203,7 +237,9 @@ impl TasksBuilder for TaskBuilderImpl {
         }
 
         // Helper to process commit types
-        fn process_commit(commit: &CommitType) -> Vec<Box<dyn BaseTask>> {
+        fn create_finalize_tasks(
+            commit: &CommitType,
+        ) -> Vec<Box<dyn BaseTask>> {
             match commit {
                 CommitType::Standalone(accounts) => {
                     accounts.iter().map(finalize_task).collect()
@@ -229,51 +265,64 @@ impl TasksBuilder for TaskBuilderImpl {
             }
         }
 
+        async fn handler<C: TaskInfoFetcher>(
+            commit_and_undelegate: &CommitAndUndelegate,
+            info_fetcher: &Arc<C>,
+        ) -> TaskBuilderResult<Vec<Box<dyn BaseTask>>> {
+            // Get rent reimbursments for undelegated accounts
+            let accounts = commit_and_undelegate.get_committed_accounts();
+            let mut min_context_slot = 0;
+            let pubkeys = accounts
+                .iter()
+                .map(|account| {
+                    min_context_slot =
+                        std::cmp::max(min_context_slot, account.remote_slot);
+                    account.pubkey
+                })
+                .collect::<Vec<_>>();
+            let rent_reimbursements = info_fetcher
+                .fetch_rent_reimbursements(&pubkeys, min_context_slot)
+                .await
+                .map_err(TaskBuilderError::FinalizedTasksBuildError)?;
+
+            let mut tasks = accounts
+                .iter()
+                .zip(rent_reimbursements)
+                .map(|(account, rent_reimbursement)| {
+                    undelegate_task(account, &rent_reimbursement)
+                })
+                .collect::<Vec<_>>();
+
+            match &commit_and_undelegate.undelegate_action {
+                UndelegateType::Standalone => Ok(tasks),
+                UndelegateType::WithBaseActions(actions) => {
+                    tasks.extend(actions.iter().map(|action| {
+                        let task = BaseActionTask {
+                            action: action.clone(),
+                        };
+                        let task =
+                            ArgsTask::new(ArgsTaskType::BaseAction(task));
+                        Box::new(task) as Box<dyn BaseTask>
+                    }));
+
+                    Ok(tasks)
+                }
+            }
+        }
+
         match &base_intent.base_intent {
             MagicBaseIntent::BaseActions(_) => Ok(vec![]),
-            MagicBaseIntent::Commit(commit) => Ok(process_commit(commit)),
+            MagicBaseIntent::Commit(commit) => {
+                Ok(create_finalize_tasks(commit))
+            }
             MagicBaseIntent::CommitAndUndelegate(t) => {
-                let mut tasks = process_commit(&t.commit_action);
-
-                // Get rent reimbursments for undelegated accounts
-                let accounts = t.get_committed_accounts();
-                let mut min_context_slot = 0;
-                let pubkeys = accounts
-                    .iter()
-                    .map(|account| {
-                        min_context_slot = std::cmp::max(
-                            min_context_slot,
-                            account.remote_slot,
-                        );
-                        account.pubkey
-                    })
-                    .collect::<Vec<_>>();
-                let rent_reimbursements = info_fetcher
-                    .fetch_rent_reimbursements(&pubkeys, min_context_slot)
-                    .await
-                    .map_err(TaskBuilderError::FinalizedTasksBuildError)?;
-
-                tasks.extend(accounts.iter().zip(rent_reimbursements).map(
-                    |(account, rent_reimbursement)| {
-                        undelegate_task(account, &rent_reimbursement)
-                    },
-                ));
-
-                match &t.undelegate_action {
-                    UndelegateType::Standalone => Ok(tasks),
-                    UndelegateType::WithBaseActions(actions) => {
-                        tasks.extend(actions.iter().map(|action| {
-                            let task = BaseActionTask {
-                                action: action.clone(),
-                            };
-                            let task =
-                                ArgsTask::new(ArgsTaskType::BaseAction(task));
-                            Box::new(task) as Box<dyn BaseTask>
-                        }));
-
-                        Ok(tasks)
-                    }
-                }
+                let mut tasks = create_finalize_tasks(&t.commit_action);
+                tasks.extend(handler(t, info_fetcher).await?);
+                Ok(tasks)
+            }
+            MagicBaseIntent::CommitFinalize(_) => Ok(vec![]),
+            MagicBaseIntent::CommitFinalizeAndUndelegate(t) => {
+                handler(t, info_fetcher).await
             }
         }
     }

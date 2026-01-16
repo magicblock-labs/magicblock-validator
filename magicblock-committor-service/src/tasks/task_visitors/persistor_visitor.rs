@@ -52,6 +52,11 @@ where
                         &task.committed_account.pubkey,
                         commit_strategy(true),
                     ),
+                    ArgsTaskType::CommitFinalize(task) => (
+                        task.commit_id,
+                        &task.committed_account.pubkey,
+                        commit_strategy(task.base_account.is_some()),
+                    ),
                     _ => return,
                 };
 
@@ -100,6 +105,11 @@ where
                         task.commit_id,
                         &task.committed_account.pubkey,
                         commit_strategy(true),
+                    ),
+                    BufferTaskType::CommitFinalize(task) => (
+                        task.commit_id,
+                        &task.committed_account.pubkey,
+                        commit_strategy(task.base_account.is_some()),
                     ),
                 };
 

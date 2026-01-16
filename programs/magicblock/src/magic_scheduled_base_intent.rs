@@ -107,6 +107,10 @@ impl ScheduledBaseIntent {
         self.base_intent.is_undelegate()
     }
 
+    pub fn is_commit_finalize(&self) -> bool {
+        self.base_intent.is_commit_finalize()
+    }
+
     pub fn is_empty(&self) -> bool {
         self.base_intent.is_empty()
     }
@@ -119,6 +123,8 @@ pub enum MagicBaseIntent {
     BaseActions(Vec<BaseAction>),
     Commit(CommitType),
     CommitAndUndelegate(CommitAndUndelegate),
+    CommitFinalize(CommitType),
+    CommitFinalizeAndUndelegate(CommitAndUndelegate),
 }
 
 impl MagicBaseIntent {
@@ -143,6 +149,17 @@ impl MagicBaseIntent {
                     CommitAndUndelegate::try_from_args(type_, context)?;
                 Ok(MagicBaseIntent::CommitAndUndelegate(commit_and_undelegate))
             }
+            MagicBaseIntentArgs::CommitFinalize(type_) => {
+                let commit = CommitType::try_from_args(type_, context)?;
+                Ok(MagicBaseIntent::CommitFinalize(commit))
+            }
+            MagicBaseIntentArgs::CommitFinalizeAndUndelegate(type_) => {
+                let commit_and_undelegate =
+                    CommitAndUndelegate::try_from_args(type_, context)?;
+                Ok(MagicBaseIntent::CommitFinalizeAndUndelegate(
+                    commit_and_undelegate,
+                ))
+            }
         }
     }
 
@@ -151,6 +168,18 @@ impl MagicBaseIntent {
             MagicBaseIntent::BaseActions(_) => false,
             MagicBaseIntent::Commit(_) => false,
             MagicBaseIntent::CommitAndUndelegate(_) => true,
+            MagicBaseIntent::CommitFinalize(_) => false,
+            MagicBaseIntent::CommitFinalizeAndUndelegate(_) => true,
+        }
+    }
+
+    pub fn is_commit_finalize(&self) -> bool {
+        match &self {
+            MagicBaseIntent::BaseActions(_) => false,
+            MagicBaseIntent::Commit(_) => false,
+            MagicBaseIntent::CommitAndUndelegate(_) => false,
+            MagicBaseIntent::CommitFinalize(_) => true,
+            MagicBaseIntent::CommitFinalizeAndUndelegate(_) => true,
         }
     }
 
@@ -159,6 +188,12 @@ impl MagicBaseIntent {
             MagicBaseIntent::BaseActions(_) => None,
             MagicBaseIntent::Commit(t) => Some(t.get_committed_accounts()),
             MagicBaseIntent::CommitAndUndelegate(t) => {
+                Some(t.get_committed_accounts())
+            }
+            MagicBaseIntent::CommitFinalize(t) => {
+                Some(t.get_committed_accounts())
+            }
+            MagicBaseIntent::CommitFinalizeAndUndelegate(t) => {
                 Some(t.get_committed_accounts())
             }
         }
@@ -171,6 +206,12 @@ impl MagicBaseIntent {
             MagicBaseIntent::BaseActions(_) => None,
             MagicBaseIntent::Commit(t) => Some(t.get_committed_accounts_mut()),
             MagicBaseIntent::CommitAndUndelegate(t) => {
+                Some(t.get_committed_accounts_mut())
+            }
+            MagicBaseIntent::CommitFinalize(t) => {
+                Some(t.get_committed_accounts_mut())
+            }
+            MagicBaseIntent::CommitFinalizeAndUndelegate(t) => {
                 Some(t.get_committed_accounts_mut())
             }
         }
@@ -187,6 +228,8 @@ impl MagicBaseIntent {
             MagicBaseIntent::BaseActions(actions) => actions.is_empty(),
             MagicBaseIntent::Commit(t) => t.is_empty(),
             MagicBaseIntent::CommitAndUndelegate(t) => t.is_empty(),
+            MagicBaseIntent::CommitFinalize(t) => t.is_empty(),
+            MagicBaseIntent::CommitFinalizeAndUndelegate(t) => t.is_empty(),
         }
     }
 }
