@@ -32,6 +32,7 @@ pub(crate) struct ClassifiedAccounts {
     pub(crate) not_found: Vec<(Pubkey, u64)>,
     pub(crate) plain: Vec<AccountCloneRequest>,
     pub(crate) owned_by_deleg: Vec<(Pubkey, AccountSharedData, u64)>,
+    pub(crate) owned_by_deleg_compressed: Vec<(Pubkey, AccountSharedData, u64)>,
     pub(crate) programs: Vec<(Pubkey, AccountSharedData, u64)>,
     pub(crate) atas: Vec<(
         Pubkey,

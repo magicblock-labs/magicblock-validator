@@ -726,13 +726,16 @@ impl IntegrationTestContext {
     }
 
     fn assert_transaction_error(res: &Result<Signature, ClientError>) {
-        assert!(matches!(
-            res,
-            Err(ClientError {
-                kind: ClientErrorKind::TransactionError(_),
-                ..
-            })
-        ));
+        assert!(
+            matches!(
+                res,
+                Err(ClientError {
+                    kind: ClientErrorKind::TransactionError(_),
+                    ..
+                })
+            ),
+            "Transaction error: {res:?}"
+        );
     }
 
     #[allow(clippy::result_large_err)]

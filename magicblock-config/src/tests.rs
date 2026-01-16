@@ -558,7 +558,7 @@ fn test_env_vars_full_coverage() {
     assert_eq!(config.chainlink.max_monitored_accounts, 123);
     assert_eq!(
         config.chainlink.resubscription_delay,
-        Duration::from_millis(150)
+        std::time::Duration::from_millis(150)
     );
 
     // Task Scheduler

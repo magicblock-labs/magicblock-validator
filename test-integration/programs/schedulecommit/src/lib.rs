@@ -32,7 +32,6 @@ use crate::{
 };
 
 pub mod api;
-pub mod magicblock_program;
 mod order_book;
 mod utils;
 

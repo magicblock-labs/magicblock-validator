@@ -4,11 +4,14 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
-arc-swap = "1.7"
+arc-swap = { workspace = true }
 async-trait = { workspace = true }
 bincode = { workspace = true }
+borsh = { workspace = true }
+compressed-delegation-client = { workspace = true }
 env_logger = { workspace = true }
 futures-util = { workspace = true }
+light-client = { workspace = true }
 helius-laserstream = { workspace = true }
 log = { workspace = true }
 lru = { workspace = true }

@@ -86,13 +86,14 @@ block-size = "block256"
 
 The configuration is split into domain-specific structs available in `src/config/`:
 
-  * **`ValidatorConfig`**: Identity keypair, base fees.
-  * **`LedgerConfig`**: Block production timing, verification settings.
-  * **`AccountsDbConfig`**: Snapshotting, indexing, and storage size tuning.
-  * **`ChainOperationConfig`**: On-chain registration details (Country code, FQDN).
-  * **`ChainLinkConfig`**: Account cloning settings.
-  * **`CommitStrategy`**: Compute unit pricing for base chain commits.
-  * **`TaskSchedulerConfig`**: Task scheduling settings.
+- **`ValidatorConfig`**: Identity keypair, base fees.
+- **`LedgerConfig`**: Block production timing, verification settings.
+- **`AccountsDbConfig`**: Snapshotting, indexing, and storage size tuning.
+- **`ChainOperationConfig`**: On-chain registration details (Country code, FQDN).
+- **`ChainLinkConfig`**: Account cloning settings.
+- **`CommitStrategy`**: Compute unit pricing for base chain commits.
+- **`TaskSchedulerConfig`**: Task scheduling settings.
+- **`CompressionConfig`**: Compressed accounts and interactions settings.
 
 ## Testing
 
@@ -101,4 +102,3 @@ This crate includes a comprehensive test suite verifying the precedence logic, o
 ```bash
 cargo test -p magicblock-config
 ```
-

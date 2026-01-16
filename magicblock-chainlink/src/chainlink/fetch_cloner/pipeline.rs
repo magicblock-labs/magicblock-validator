@@ -1,10 +1,14 @@
 use std::{collections::HashSet, sync::atomic::Ordering};
 
-use dlp::pda::delegation_record_pda_from_delegated_account;
+use borsh::BorshDeserialize;
+use compressed_delegation_client::CompressedDelegationRecord;
+use dlp::{
+    pda::delegation_record_pda_from_delegated_account, state::DelegationRecord,
+};
 use log::*;
 use magicblock_core::{token_programs::is_ata, traits::AccountsBank};
 use magicblock_metrics::metrics::AccountFetchOrigin;
-use solana_account::{AccountSharedData, ReadableAccount};
+use solana_account::{AccountSharedData, ReadableAccount, WritableAccount};
 use solana_pubkey::Pubkey;
 use tokio::task::JoinSet;
 
@@ -20,6 +24,7 @@ use crate::{
     chainlink::errors::{ChainlinkError, ChainlinkResult},
     cloner::{errors::ClonerResult, AccountCloneRequest, Cloner},
     remote_account_provider::{
+        photon_client::PhotonClient,
         program_account::{
             get_loaderv3_get_program_data_address, ProgramAccountResolver,
             LOADER_V3,
@@ -29,8 +34,8 @@ use crate::{
     },
 };
 
-pub(crate) fn build_existing_subs<T, U, V, C>(
-    this: &FetchCloner<T, U, V, C>,
+pub(crate) fn build_existing_subs<T, U, V, C, P>(
+    this: &FetchCloner<T, U, V, C, P>,
     pubkeys: &[Pubkey],
 ) -> ExistingSubs
 where
@@ -38,6 +43,7 @@ where
     U: ChainPubsubClient,
     V: AccountsBank,
     C: Cloner,
+    P: PhotonClient,
 {
     let delegation_records = pubkeys
         .iter()
@@ -58,35 +64,40 @@ where
     ExistingSubs { existing_subs }
 }
 
+/// Helper struct to hold classification buckets
+#[derive(Default)]
+struct ClassificationBuckets {
+    not_found: Vec<(Pubkey, u64)>,
+    plain: Vec<AccountCloneRequest>,
+    owned_by_deleg: Vec<(Pubkey, AccountSharedData, u64)>,
+    owned_by_deleg_compressed: Vec<(Pubkey, AccountSharedData, u64)>,
+    programs: Vec<(Pubkey, AccountSharedData, u64)>,
+    atas: Vec<(
+        Pubkey,
+        AccountSharedData,
+        magicblock_core::token_programs::AtaInfo,
+        u64,
+    )>,
+}
+
 /// Classifies fetched remote accounts into categories
 pub(crate) fn classify_remote_accounts(
     accs: Vec<RemoteAccount>,
     pubkeys: &[Pubkey],
 ) -> ClassifiedAccounts {
-    let mut not_found = Vec::new();
-    let mut plain = Vec::new();
-    let mut owned_by_deleg = Vec::new();
-    let mut programs = Vec::new();
-    let mut atas = Vec::new();
+    let mut buckets = ClassificationBuckets::default();
 
     for (acc, &pubkey) in accs.into_iter().zip(pubkeys) {
-        classify_single_account(
-            acc,
-            pubkey,
-            &mut not_found,
-            &mut plain,
-            &mut owned_by_deleg,
-            &mut programs,
-            &mut atas,
-        );
+        classify_single_account(acc, pubkey, &mut buckets);
     }
 
     ClassifiedAccounts {
-        not_found,
-        plain,
-        owned_by_deleg,
-        programs,
-        atas,
+        not_found: buckets.not_found,
+        plain: buckets.plain,
+        owned_by_deleg: buckets.owned_by_deleg,
+        owned_by_deleg_compressed: buckets.owned_by_deleg_compressed,
+        programs: buckets.programs,
+        atas: buckets.atas,
     }
 }
 
@@ -95,21 +106,12 @@ pub(crate) fn classify_remote_accounts(
 fn classify_single_account(
     acc: RemoteAccount,
     pubkey: Pubkey,
-    not_found: &mut Vec<(Pubkey, u64)>,
-    plain: &mut Vec<AccountCloneRequest>,
-    owned_by_deleg: &mut Vec<(Pubkey, AccountSharedData, u64)>,
-    programs: &mut Vec<(Pubkey, AccountSharedData, u64)>,
-    atas: &mut Vec<(
-        Pubkey,
-        AccountSharedData,
-        magicblock_core::token_programs::AtaInfo,
-        u64,
-    )>,
+    buckets: &mut ClassificationBuckets,
 ) {
     use RemoteAccount::*;
     match acc {
         NotFound(slot) => {
-            not_found.push((pubkey, slot));
+            buckets.not_found.push((pubkey, slot));
         }
         Found(remote_account_state) => {
             match remote_account_state.account {
@@ -118,7 +120,16 @@ fn classify_single_account(
 
                     if account_shared_data.owner().eq(&dlp::id()) {
                         // Account owned by delegation program
-                        owned_by_deleg.push((
+                        buckets.owned_by_deleg.push((
+                            pubkey,
+                            account_shared_data,
+                            slot,
+                        ));
+                    } else if account_shared_data
+                        .owner()
+                        .eq(&compressed_delegation_client::id())
+                    {
+                        buckets.owned_by_deleg_compressed.push((
                             pubkey,
                             account_shared_data,
                             slot,
@@ -129,16 +140,21 @@ fn classify_single_account(
                             pubkey,
                             account_shared_data,
                             slot,
-                            programs,
+                            &mut buckets.programs,
                         );
                     } else if let Some(ata) =
                         is_ata(&pubkey, &account_shared_data)
                     {
                         // Associated Token Account
-                        atas.push((pubkey, account_shared_data, ata, slot));
+                        buckets.atas.push((
+                            pubkey,
+                            account_shared_data,
+                            ata,
+                            slot,
+                        ));
                     } else {
                         // Plain account
-                        plain.push(AccountCloneRequest {
+                        buckets.plain.push(AccountCloneRequest {
                             pubkey,
                             account: account_shared_data,
                             commit_frequency_ms: None,
@@ -199,8 +215,8 @@ pub(crate) fn partition_not_found(
 }
 
 /// Resolves delegated accounts by fetching their delegation records
-pub(crate) async fn resolve_delegated_accounts<T, U, V, C>(
-    this: &FetchCloner<T, U, V, C>,
+pub(crate) async fn resolve_delegated_accounts<T, U, V, C, P>(
+    this: &FetchCloner<T, U, V, C, P>,
     owned_by_deleg: Vec<(Pubkey, AccountSharedData, u64)>,
     plain: Vec<AccountCloneRequest>,
     min_context_slot: Option<u64>,
@@ -213,6 +229,7 @@ where
     U: ChainPubsubClient,
     V: AccountsBank,
     C: Cloner,
+    P: PhotonClient,
 {
     // For potentially delegated accounts we update the owner and delegation state first
     let mut fetch_with_delegation_record_join_set = JoinSet::new();
@@ -276,9 +293,6 @@ where
         let mut record_subs = Vec::with_capacity(accounts_fully_resolved.len());
         let mut accounts_to_clone = plain;
 
-        // Collect unique owner programs to subscribe to concurrently
-        let mut owner_programs_to_subscribe: HashSet<Pubkey> = HashSet::new();
-
         // Now process the accounts (this can fail without affecting unsubscription)
         for AccountWithCompanion {
             pubkey,
@@ -300,7 +314,7 @@ where
                 // However we may consider a different behavior when user is getting
                 // multiple accounts.
                 let delegation_record =
-                    match FetchCloner::<T, U, V, C>::parse_delegation_record(
+                    match FetchCloner::<T, U, V, C, P>::parse_delegation_record(
                         delegation_record_data.data(),
                         delegation_record_pubkey,
                     ) {
@@ -332,12 +346,6 @@ where
                     &mut account,
                     &delegation_record,
                 );
-
-                // Collect unique owner programs to subscribe concurrently after the loop
-                if account.delegated() {
-                    owner_programs_to_subscribe.insert(delegation_record.owner);
-                }
-
                 (commit_freq, delegated_to_other)
             } else {
                 missing_delegation_record.push((pubkey, account.remote_slot()));
@@ -351,32 +359,6 @@ where
             });
         }
 
-        // Subscribe to owner programs concurrently in background (best-effort)
-        if !owner_programs_to_subscribe.is_empty() {
-            let remote_account_provider = this.remote_account_provider.clone();
-            tokio::spawn(async move {
-                let subscribe_futures =
-                    owner_programs_to_subscribe.into_iter().map(|owner| {
-                        let provider = remote_account_provider.clone();
-                        async move {
-                            let result =
-                                provider.subscribe_program(owner).await;
-                            (owner, result)
-                        }
-                    });
-                let results =
-                    futures_util::future::join_all(subscribe_futures).await;
-                for (owner, result) in results {
-                    if let Err(err) = result {
-                        warn!(
-                            "Failed to subscribe to owner program {}: {}",
-                            owner, err
-                        );
-                    }
-                }
-            });
-        }
-
         (accounts_to_clone, record_subs)
     };
 
@@ -387,9 +369,65 @@ where
     })
 }
 
+pub(crate) async fn resolve_compressed_delegated_accounts<T, U, V, C, P>(
+    this: &FetchCloner<T, U, V, C, P>,
+    owned_by_deleg_compressed: Vec<(Pubkey, AccountSharedData, u64)>,
+) -> ChainlinkResult<Vec<AccountCloneRequest>>
+where
+    T: ChainRpcClient,
+    U: ChainPubsubClient,
+    V: AccountsBank,
+    C: Cloner,
+    P: PhotonClient,
+{
+    Ok(owned_by_deleg_compressed.into_iter().filter_map(
+        |(pubkey, mut account, _)| {
+            let Ok(delegation_record) =
+                CompressedDelegationRecord::try_from_slice(
+                    account.data(),
+                )
+                .map_err(|err| {
+                    error!("Failed to deserialize compressed delegation record for {pubkey}: {err}\nAccount: {:?}", account);
+                    err
+                })
+            else {
+                return None;
+            };
+
+            account.set_compressed(true);
+            account.set_lamports(delegation_record.lamports);
+            account.set_owner(delegation_record.owner);
+            account.set_data(delegation_record.data);
+            account.set_delegated(
+                delegation_record
+                .authority
+                .eq(&this.validator_pubkey),
+            );
+            account.set_confined(delegation_record.authority.eq(&Pubkey::default()));
+
+            let delegated_to_other =
+            this.get_delegated_to_other(&DelegationRecord {
+                authority: delegation_record.authority,
+                owner: delegation_record.owner,
+                delegation_slot: delegation_record.delegation_slot,
+                lamports: delegation_record.lamports,
+                commit_frequency_ms: 0,
+            });
+            Some(AccountCloneRequest {
+                pubkey,
+                account,
+                commit_frequency_ms: None,
+                delegated_to_other,
+            })
+        },
+    )
+    .collect::<Vec<_>>()
+)
+}
+
 /// Resolves program accounts, fetching program data accounts for LoaderV3 programs
-pub(crate) async fn resolve_programs_with_program_data<T, U, V, C>(
-    this: &FetchCloner<T, U, V, C>,
+pub(crate) async fn resolve_programs_with_program_data<T, U, V, C, P>(
+    this: &FetchCloner<T, U, V, C, P>,
     programs: Vec<(Pubkey, AccountSharedData, u64)>,
     min_context_slot: Option<u64>,
     fetch_origin: AccountFetchOrigin,
@@ -401,6 +439,7 @@ where
     U: ChainPubsubClient,
     V: AccountsBank,
     C: Cloner,
+    P: PhotonClient,
 {
     // For LoaderV3 accounts we fetch the program data account
     let (loaderv3_programs, single_account_programs): (Vec<_>, Vec<_>) =
@@ -479,7 +518,7 @@ where
 
                     let account_program = account_pair[0].clone();
                     let account_data = account_pair[1].clone();
-                    let result = FetchCloner::<T, U, V, C>::resolve_account_with_companion(
+                    let result = FetchCloner::<T, U, V, C, P>::resolve_account_with_companion(
                         &this.accounts_bank,
                         pubkey,
                         program_data_pubkey,
@@ -639,8 +678,8 @@ pub(crate) fn compute_cancel_strategy(
 }
 
 /// Clones accounts and programs into the bank
-pub(crate) async fn clone_accounts_and_programs<T, U, V, C>(
-    this: &FetchCloner<T, U, V, C>,
+pub(crate) async fn clone_accounts_and_programs<T, U, V, C, P>(
+    this: &FetchCloner<T, U, V, C, P>,
     accounts_to_clone: Vec<AccountCloneRequest>,
     loaded_programs: Vec<
         crate::remote_account_provider::program_account::LoadedProgram,
@@ -651,6 +690,7 @@ where
     U: ChainPubsubClient,
     V: AccountsBank,
     C: Cloner,
+    P: PhotonClient,
 {
     let mut join_set = JoinSet::new();
     for request in accounts_to_clone {

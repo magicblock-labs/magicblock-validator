@@ -41,9 +41,9 @@ pub fn init_account_instruction(
         AccountMeta::new_readonly(system_program::id(), false),
     ];
 
-    Instruction::new_with_borsh(
+    build_instruction(
         program_id,
-        &ScheduleCommitInstruction::Init,
+        ScheduleCommitInstruction::Init,
         account_metas,
     )
 }
@@ -61,9 +61,9 @@ pub fn init_order_book_instruction(
         AccountMeta::new_readonly(system_program::id(), false),
     ];
 
-    Instruction::new_with_borsh(
+    build_instruction(
         program_id,
-        &ScheduleCommitInstruction::InitOrderBook,
+        ScheduleCommitInstruction::InitOrderBook,
         account_metas,
     )
 }
@@ -82,9 +82,9 @@ pub fn grow_order_book_instruction(
         AccountMeta::new_readonly(system_program::id(), false),
     ];
 
-    Instruction::new_with_borsh(
+    build_instruction(
         program_id,
-        &ScheduleCommitInstruction::GrowOrderBook(additional_space),
+        ScheduleCommitInstruction::GrowOrderBook(additional_space),
         account_metas,
     )
 }
@@ -138,9 +138,9 @@ pub fn delegate_account_cpi_instruction(
         delegate_metas.system_program,
     ];
 
-    Instruction::new_with_borsh(
+    build_instruction(
         program_id,
-        &match user_seed {
+        match user_seed {
             UserSeeds::MagicScheduleCommit => {
                 ScheduleCommitInstruction::DelegateCpi(DelegateCpiArgs {
                     valid_until: i64::MAX,
@@ -205,9 +205,9 @@ pub fn update_order_book_instruction(
         AccountMeta::new(order_book, false),
     ];
 
-    Instruction::new_with_borsh(
+    build_instruction(
         program_id,
-        &ScheduleCommitInstruction::UpdateOrderBook(update),
+        ScheduleCommitInstruction::UpdateOrderBook(update),
         account_metas,
     )
 }
@@ -226,9 +226,9 @@ pub fn schedule_commit_diff_instruction_for_order_book(
         AccountMeta::new_readonly(magic_program_id, false),
     ];
 
-    Instruction::new_with_borsh(
+    build_instruction(
         program_id,
-        &ScheduleCommitInstruction::ScheduleCommitForOrderBook,
+        ScheduleCommitInstruction::ScheduleCommitForOrderBook,
         account_metas,
     )
 }
@@ -303,7 +303,7 @@ fn schedule_commit_cpi_instruction_impl(
         commit_payer: args.commit_payer,
     };
     let ix = ScheduleCommitInstruction::ScheduleCommitCpi(cpi_args);
-    Instruction::new_with_borsh(program_id, &ix, account_metas)
+    build_instruction(program_id, ix, account_metas)
 }
 
 pub fn schedule_commit_and_undelegate_cpi_with_mod_after_instruction(
@@ -323,13 +323,10 @@ pub fn schedule_commit_and_undelegate_cpi_with_mod_after_instruction(
         account_metas.push(AccountMeta::new(*committee, false));
     }
 
-    Instruction::new_with_borsh(
-        program_id,
-        &ScheduleCommitInstruction::ScheduleCommitAndUndelegateCpiModAfter(
-            players.to_vec(),
-        ),
-        account_metas,
-    )
+    let ix = ScheduleCommitInstruction::ScheduleCommitAndUndelegateCpiModAfter(
+        players.to_vec(),
+    );
+    build_instruction(program_id, ix, account_metas)
 }
 
 pub fn schedule_commit_and_undelegate_cpi_twice(
@@ -349,9 +346,9 @@ pub fn schedule_commit_and_undelegate_cpi_twice(
         account_metas.push(AccountMeta::new(*committee, false));
     }
 
-    Instruction::new_with_borsh(
+    build_instruction(
         program_id,
-        &ScheduleCommitInstruction::ScheduleCommitAndUndelegateCpiTwice(
+        ScheduleCommitInstruction::ScheduleCommitAndUndelegateCpiTwice(
             players.to_vec(),
         ),
         account_metas,
@@ -361,9 +358,9 @@ pub fn schedule_commit_and_undelegate_cpi_twice(
 pub fn increase_count_instruction(committee: Pubkey) -> Instruction {
     let program_id = crate::id();
     let account_metas = vec![AccountMeta::new(committee, false)];
-    Instruction::new_with_borsh(
+    build_instruction(
         program_id,
-        &ScheduleCommitInstruction::IncreaseCount,
+        ScheduleCommitInstruction::IncreaseCount,
         account_metas,
     )
 }
@@ -371,9 +368,9 @@ pub fn increase_count_instruction(committee: Pubkey) -> Instruction {
 pub fn set_count_instruction(committee: Pubkey, count: u64) -> Instruction {
     let program_id = crate::id();
     let account_metas = vec![AccountMeta::new(committee, false)];
-    Instruction::new_with_borsh(
+    build_instruction(
         program_id,
-        &ScheduleCommitInstruction::SetCount(count),
+        ScheduleCommitInstruction::SetCount(count),
         account_metas,
     )
 }
@@ -405,4 +402,17 @@ pub fn pda_and_bump(acc_id: &Pubkey) -> (Pubkey, u8) {
     let program_id = crate::id();
     let seeds = pda_seeds(acc_id);
     Pubkey::find_program_address(&seeds, &program_id)
+}
+
+fn build_instruction(
+    program_id: Pubkey,
+    instruction: ScheduleCommitInstruction,
+    account_metas: Vec<AccountMeta>,
+) -> Instruction {
+    Instruction::new_with_bytes(
+        program_id,
+        &borsh::to_vec(&instruction)
+            .expect("Serialization of instruction should never fail"),
+        account_metas,
+    )
 }

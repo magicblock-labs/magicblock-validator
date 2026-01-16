@@ -60,6 +60,7 @@ where
                 .prepare_and_execute_strategy(
                     &mut self.transaction_strategy,
                     persister,
+                    None,
                 )
                 .await
                 .map_err(IntentExecutorError::FailedFinalizePreparationError)?;
@@ -207,8 +208,10 @@ where
                 &mut TransactionStrategy {
                     optimized_tasks: vec![finalize_task],
                     lookup_tables_keys: vec![],
+                    compressed: task.is_compressed(),
                 },
                 &None::<IntentPersisterImpl>,
+                None,
             )
             .await
             .map_err(IntentExecutorError::FailedFinalizePreparationError)?
@@ -221,6 +224,7 @@ where
         Ok(ControlFlow::Continue(TransactionStrategy {
             optimized_tasks: vec![],
             lookup_tables_keys: vec![],
+            compressed: task.is_compressed(),
         }))
     }
 }

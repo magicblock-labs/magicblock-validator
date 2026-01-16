@@ -120,7 +120,7 @@ pub struct ChainLaserActor {
     commitment: CommitmentLevel,
     /// Channel used to signal connection issues to the submux
     abort_sender: mpsc::Sender<()>,
-    /// Slot tracking for activation lookback
+    /// The current slot on chain, shared with RemoteAccountProvider
     /// This is only set when the gRPC provider supports backfilling subscription updates
     slots: Option<Slots>,
     /// Unique client ID including the gRPC provider name for this actor instance used in logs
@@ -566,7 +566,6 @@ impl ChainLaserActor {
             .as_ref()
             .map(|x| x.0.iter().cloned().collect::<HashSet<Pubkey>>())
             .unwrap_or_default();
-
         subscribed_programs.insert(program_id);
 
         let mut accounts = HashMap::new();

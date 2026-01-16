@@ -1,4 +1,7 @@
+use std::sync::Arc;
+
 use async_trait::async_trait;
+use light_client::indexer::photon_indexer::PhotonIndexer;
 use magicblock_rpc_client::MagicblockRpcClient;
 use magicblock_table_mania::TableMania;
 use solana_keypair::Keypair;
@@ -6,6 +9,7 @@ use solana_message::VersionedMessage;
 use solana_pubkey::Pubkey;
 
 use crate::{
+    intent_executor::CommitSlotFn,
     persist::IntentPersister,
     tasks::{
         task_strategist::TransactionStrategy, utils::TransactionUtils, BaseTask,
@@ -26,11 +30,13 @@ pub mod error;
 pub trait TransactionPreparator: Send + Sync + 'static {
     /// Return [`VersionedMessage`] corresponding to [`TransactionStrategy`]
     /// Handles all necessary preparation needed for successful [`BaseTask`] execution
-    async fn prepare_for_strategy<P: IntentPersister>(
+    async fn prepare_for_strategy<'a, P: IntentPersister>(
         &self,
         authority: &Keypair,
         transaction_strategy: &mut TransactionStrategy,
         intent_persister: &Option<P>,
+        photon_client: &Option<Arc<PhotonIndexer>>,
+        commit_slot_fn: Option<CommitSlotFn<'a>>,
     ) -> PreparatorResult<VersionedMessage>;
 
     /// Cleans up after strategy
@@ -71,11 +77,13 @@ impl TransactionPreparatorImpl {
 
 #[async_trait]
 impl TransactionPreparator for TransactionPreparatorImpl {
-    async fn prepare_for_strategy<P: IntentPersister>(
+    async fn prepare_for_strategy<'a, P: IntentPersister>(
         &self,
         authority: &Keypair,
         tx_strategy: &mut TransactionStrategy,
         intent_persister: &Option<P>,
+        photon_client: &Option<Arc<PhotonIndexer>>,
+        commit_slot_fn: Option<CommitSlotFn<'a>>,
     ) -> PreparatorResult<VersionedMessage> {
         // If message won't fit, there's no reason to prepare anything
         // Fail early
@@ -94,7 +102,13 @@ impl TransactionPreparator for TransactionPreparatorImpl {
         // Pre tx preparations. Create buffer accs + lookup tables
         let lookup_tables = self
             .delivery_preparator
-            .prepare_for_delivery(authority, tx_strategy, intent_persister)
+            .prepare_for_delivery(
+                authority,
+                tx_strategy,
+                intent_persister,
+                photon_client,
+                commit_slot_fn,
+            )
             .await?;
 
         let message = TransactionUtils::assemble_tasks_tx(
