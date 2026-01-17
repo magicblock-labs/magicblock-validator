@@ -47,10 +47,7 @@ impl MetricsService {
         });
     }
 
-    async fn run(
-        addr: SocketAddr,
-        cancellation_token: CancellationToken,
-    ) {
+    async fn run(addr: SocketAddr, cancellation_token: CancellationToken) {
         start_metrics_server(addr, cancellation_token).await;
     }
 }
