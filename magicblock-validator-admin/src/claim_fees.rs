@@ -35,11 +35,17 @@ impl ClaimFeesTask {
         self.handle = Some(handle);
     }
 
-    pub fn stop(&mut self) {
+    pub async fn stop(&mut self) {
         if let Some(handle) = self.handle.take() {
             info!("Stopping claim fees task");
             self.token.cancel();
-            handle.abort();
+            // Give the task a grace period to shut down gracefully
+            if tokio::time::timeout(Duration::from_secs(2), handle)
+                .await
+                .is_err()
+            {
+                error!("Claim fees task did not stop within grace period");
+            }
         }
     }
 }
