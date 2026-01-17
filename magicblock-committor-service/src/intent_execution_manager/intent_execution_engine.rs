@@ -342,9 +342,9 @@ where
 
         // Loki alerts
         if intent_execution_secs >= EXECUTION_TIME_THRESHOLD {
-            info!(duration_secs = intent_execution_secs, "Execution slow");
+            info!(duration_secs = intent_execution_secs, result = ?result, "Execution slow");
         } else {
-            trace!(duration_secs = intent_execution_secs, "Execution time");
+            trace!(duration_secs = intent_execution_secs, result = ?result, "Execution time");
         }
 
         // Alert
