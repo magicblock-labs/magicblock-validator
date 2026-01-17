@@ -9,7 +9,7 @@ use solana_signer::Signer;
 use solana_transaction::Transaction;
 use tokio::{task::JoinHandle, time::Instant};
 use tokio_util::sync::CancellationToken;
-use tracing::{error, info};
+use tracing::{error, info, instrument};
 
 pub struct ClaimFeesTask {
     pub handle: Option<JoinHandle<()>>,
@@ -31,23 +31,7 @@ impl ClaimFeesTask {
         }
 
         let token = self.token.clone();
-        let handle = tokio::spawn(async move {
-            info!("Starting claim fees task");
-            let start_time = Instant::now() + tick_period;
-            let mut interval =
-                tokio::time::interval_at(start_time, tick_period);
-            loop {
-                tokio::select! {
-                    _ = interval.tick() => {
-                        if let Err(err) = claim_fees(url.clone()).await {
-                            error!("Failed to claim fees: {:?}", err);
-                        }
-                    },
-                    _ = token.cancelled() => break,
-                }
-            }
-            info!("Claim fees task stopped");
-        });
+        let handle = tokio::spawn(run_claim_fees_loop(token, tick_period, url));
         self.handle = Some(handle);
     }
 
@@ -66,6 +50,29 @@ impl Default for ClaimFeesTask {
     }
 }
 
+#[instrument(skip(token), fields(tick_period_ms = tick_period.as_millis() as u64, url = %url))]
+async fn run_claim_fees_loop(
+    token: CancellationToken,
+    tick_period: Duration,
+    url: String,
+) {
+    info!("Starting claim fees task");
+    let start_time = Instant::now() + tick_period;
+    let mut interval = tokio::time::interval_at(start_time, tick_period);
+    loop {
+        tokio::select! {
+            _ = interval.tick() => {
+                if let Err(err) = claim_fees(url.clone()).await {
+                    error!(error = ?err, "Failed to claim fees");
+                }
+            },
+            _ = token.cancelled() => break,
+        }
+    }
+    info!("Claim fees task stopped");
+}
+
+#[instrument(fields(validator = %validator_authority().pubkey()))]
 async fn claim_fees(url: String) -> Result<(), MagicBlockRpcClientError> {
     info!("Claiming validator fees");
 
