@@ -835,7 +835,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         // If an account is evicted then we need to unsubscribe from it
         // and then inform upstream that we are no longer tracking it
         if let Some(evicted) = self.lrucache_subscribed_accounts.add(*pubkey) {
-            trace!(pubkey = %pubkey, "Evicting account");
+            trace!(evicted = %evicted, "Evicting account");
 
             // 1. Unsubscribe from the account directly (LRU has already removed it)
             if let Err(err) = self.pubsub_client.unsubscribe(evicted).await {
