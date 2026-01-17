@@ -293,7 +293,7 @@ impl AccountsDbIndex {
                     Pubkey::try_from(val).map_err(|_| lmdb::Error::Invalid)?
                 }
                 None => {
-                    warn!("account {pubkey} missing from owners index during cleanup");
+                    warn!(pubkey = %pubkey, "Account missing from owners index");
                     return Ok(());
                 }
             },

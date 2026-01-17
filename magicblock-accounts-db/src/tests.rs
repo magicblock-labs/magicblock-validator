@@ -5,6 +5,7 @@ use magicblock_core::traits::AccountsBank;
 use solana_account::{AccountSharedData, ReadableAccount, WritableAccount};
 use solana_pubkey::Pubkey;
 use tempfile::TempDir;
+use test_kit::init_logger;
 
 use crate::{storage::ACCOUNTS_DB_FILENAME, AccountsDb};
 
@@ -487,7 +488,7 @@ impl TestEnv {
     }
 
     fn init_raw_db() -> (Arc<AccountsDb>, TempDir) {
-        magicblock_core::logger::init_for_tests();
+        init_logger!();
 
         let dir = tempfile::tempdir().expect("temp dir creation failed");
         let config = AccountsDbConfig::default();

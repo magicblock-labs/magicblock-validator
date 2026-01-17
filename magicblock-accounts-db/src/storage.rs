@@ -196,8 +196,9 @@ impl AccountsStorage {
 
         if header.capacity_blocks == 0 || !block_size_valid {
             error!(
-                "AccountsDB corrupt: Block Size: {}, Total Blocks: {}",
-                header.block_size, header.capacity_blocks
+                block_size = header.block_size,
+                capacity_blocks = header.capacity_blocks,
+                "AccountsDB corruption detected"
             );
             return Err(AccountsDbError::Internal(
                 "AccountsDB file corrupted".to_string(),
