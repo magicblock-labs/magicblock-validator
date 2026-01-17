@@ -690,7 +690,7 @@ impl MagicValidator {
             committor_service.stop();
         }
 
-        self.claim_fees_task.stop();
+        self.claim_fees_task.stop().await;
 
         if self.config.chain_operation.is_some()
             && matches!(self.config.lifecycle, LifecycleMode::Ephemeral)
