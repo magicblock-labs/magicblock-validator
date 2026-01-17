@@ -399,6 +399,7 @@ mod completion_simple_test {
 
     #[test]
     fn test_multiple_blocked_intents() {
+        setup();
         let mut scheduler = IntentScheduler::new();
         let pubkey = pubkey!("1111111111111111111111111111111111111111111");
         let msg1 = create_test_intent(1, &[pubkey], false);
@@ -509,6 +510,7 @@ mod complex_blocking_test {
     /// `[c2, c1]` - Even there's no overlaps with executing
     #[test]
     fn test_edge_case_2_indirect_blocking_through_shared_key() {
+        setup();
         let mut scheduler = IntentScheduler::new();
         let a1 = pubkey!("1111111111111111111111111111111111111111111");
         let a2 = pubkey!("21111111111111111111111111111111111111111111");
@@ -561,6 +563,7 @@ mod complex_blocking_test {
 
     #[test]
     fn test_complex_contention_scenario() {
+        setup();
         let mut scheduler = IntentScheduler::new();
         let a = pubkey!("1111111111111111111111111111111111111111111");
         let b = pubkey!("21111111111111111111111111111111111111111111");

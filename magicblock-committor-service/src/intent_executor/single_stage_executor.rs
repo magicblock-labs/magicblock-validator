@@ -94,7 +94,12 @@ where
             self.inner.junk.push(cleanup);
 
             if i >= RECURSION_CEILING {
-                error!("CRITICAL! Recursion ceiling reached");
+                error!(
+                    attempt = i,
+                    ceiling = RECURSION_CEILING,
+                    error = ?execution_err,
+                    "Recursion ceiling exceeded"
+                );
                 break Err(execution_err);
             } else {
                 self.inner.patched_errors.push(execution_err);
@@ -165,7 +170,12 @@ where
                     )
                     .await
                 } else {
-                    error!(task_index = ?err, optimized_tasks_len = optimized_tasks.len(), "RPC returned unexpected task index");
+                    error!(
+                        task_index = err.task_index(),
+                        optimized_tasks_len = optimized_tasks.len(),
+                        error = ?err,
+                        "RPC returned unexpected task index"
+                    );
                     Ok(ControlFlow::Break(()))
                 }
             }

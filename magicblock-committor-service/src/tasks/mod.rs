@@ -466,9 +466,14 @@ fn test_close_buffer_limit() {
     use solana_transaction::Transaction;
     use tracing::info;
 
-    use crate::transactions::{
-        serialize_and_encode_base64, MAX_ENCODED_TRANSACTION_SIZE,
+    use crate::{
+        test_utils,
+        transactions::{
+            serialize_and_encode_base64, MAX_ENCODED_TRANSACTION_SIZE,
+        },
     };
+
+    test_utils::init_test_logger();
 
     let authority = Keypair::new();
 

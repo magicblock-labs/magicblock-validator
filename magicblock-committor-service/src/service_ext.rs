@@ -102,8 +102,11 @@ impl<CC: BaseIntentCommittor> CommittorServiceExt<CC> {
                 continue;
             };
 
-            if sender.send(execution_result).is_err() {
-                error!("Failed to send result");
+            if sender.send(execution_result.clone()).is_err() {
+                error!(
+                    intent_id = execution_result.id,
+                    "Failed to send execution result"
+                );
             }
         }
     }
