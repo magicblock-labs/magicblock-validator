@@ -151,7 +151,7 @@ fn try_address_table_lookup_from_generated(
     let account_key = match Pubkey::try_from(lookup.account_key) {
         Ok(pubkey) => pubkey,
         Err(err) => {
-            warn!("Invalid pubkey: {:?}", err);
+            warn!(error = ?err, "Invalid pubkey");
             return None;
         }
     };
@@ -170,7 +170,7 @@ fn signatures_from_slices(signatures: Vec<Vec<u8>>) -> Vec<Signature> {
         .flat_map(|slice| {
             Signature::try_from(slice.as_slice())
                 .inspect_err(|e| {
-                    warn!("Invalid signature: {:?}", e);
+                    warn!(error = ?e, "Invalid signature");
                 })
                 .ok()
         })
@@ -219,7 +219,7 @@ fn status_from_generated(
         Some(err) => {
             let e: Option<TransactionError> = bincode::deserialize(&err.err)
                 .map_err(|e| {
-                    warn!("Invalid transaction error: {:?}", e);
+                    warn!(error = ?e, "Invalid transaction error");
                     e
                 })
                 .ok();
@@ -264,7 +264,7 @@ fn pubkeys_from_slices(pubkeys: Vec<Vec<u8>>) -> Vec<Pubkey> {
         .flat_map(|slice| {
             Pubkey::try_from(slice)
                 .map_err(|e| {
-                    warn!("Invalid pubkey: {:?}", e);
+                    warn!(error = ?e, "Invalid pubkey");
                     e
                 })
                 .ok()
@@ -341,7 +341,7 @@ fn return_data_from_generated(
         None => None,
         Some(data) => match Pubkey::try_from(data.program_id) {
             Err(e) => {
-                warn!("Invalid pubkey: {:?}", e);
+                warn!(error = ?e, "Invalid pubkey");
                 None
             }
             Ok(program_id) => Some(TransactionReturnData {

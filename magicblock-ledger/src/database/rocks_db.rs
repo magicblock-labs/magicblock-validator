@@ -276,12 +276,14 @@ mod tests {
 
     use rocksdb::Options;
     use tempfile::tempdir;
+    use test_kit::init_logger;
 
     use super::*;
     use crate::database::columns::columns;
 
     #[test]
     fn test_cf_names_and_descriptors_equal_length() {
+        init_logger!();
         let path = PathBuf::default();
         let options = LedgerOptions::default();
         // The names and descriptors don't need to be in the same order for our use cases;
@@ -295,6 +297,7 @@ mod tests {
 
     #[test]
     fn test_open_unknown_columns() {
+        init_logger!();
         let temp_dir = tempdir().unwrap();
         let db_path = temp_dir.path();
 
