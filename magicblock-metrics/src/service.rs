@@ -42,16 +42,16 @@ impl MetricsService {
     fn spawn(&self) {
         let addr = self.addr;
         let cancellation_token = self.cancellation_token.clone();
-        tokio::spawn(Self::run(addr, cancellation_token));
+        tokio::spawn(async move {
+            Self::run(addr, cancellation_token).await;
+        });
     }
 
-    fn run(
+    async fn run(
         addr: SocketAddr,
         cancellation_token: CancellationToken,
-    ) -> tokio::task::JoinHandle<()> {
-        tokio::task::spawn(async move {
-            start_metrics_server(addr, cancellation_token).await;
-        })
+    ) {
+        start_metrics_server(addr, cancellation_token).await;
     }
 }
 
