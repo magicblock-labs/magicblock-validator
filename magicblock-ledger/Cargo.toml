@@ -46,6 +46,7 @@ rocksdb = { workspace = true }
 [dev-dependencies]
 tempfile = { workspace = true }
 solana-system-transaction = { workspace = true }
+test-kit = { workspace = true }
 
 [build-dependencies]
 
