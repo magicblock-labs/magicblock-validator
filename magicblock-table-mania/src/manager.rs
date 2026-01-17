@@ -220,7 +220,7 @@ impl TableMania {
     /// initializing/extending actual lookup tables on chain.
     #[instrument(
         skip(self, authority, pubkeys),
-        fields(pubkey_count = pubkeys.len(), stored_count = tracing::field::Empty, remaining_count = tracing::field::Empty)
+        fields(pubkey_count = pubkeys.len())
     )]
     async fn reserve_new_pubkeys(
         &self,
@@ -261,7 +261,7 @@ impl TableMania {
                                 table_address = %table.table_address(),
                                 "Failed to extend table"
                             );
-                            if extend_errors >= MAX_ALLOWED_EXTEND_ERRORS {
+                            if extend_errors <= MAX_ALLOWED_EXTEND_ERRORS {
                                 extend_errors += 1;
                             } else {
                                 return Err(err);
