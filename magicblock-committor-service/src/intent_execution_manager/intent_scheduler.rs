@@ -344,6 +344,7 @@ mod simple_test {
     /// Ensure intents conflicting intents get blocked
     #[test]
     fn test_conflicting_intents() {
+        setup();
         const NUM_INTENTS: u64 = 10;
 
         let mut scheduler = IntentScheduler::new();

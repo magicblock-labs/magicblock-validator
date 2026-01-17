@@ -249,6 +249,7 @@ mod test {
 
     #[test]
     fn test_max_close_per_tx() {
+        test_utils::init_test_logger();
         assert_eq!(super::MAX_CLOSE_PER_TX, *MAX_CLOSE_PER_TX);
         assert_eq!(
             super::MAX_CLOSE_PER_TX_USING_LOOKUP,
@@ -258,6 +259,7 @@ mod test {
 
     #[test]
     fn test_max_process_and_closes_per_tx() {
+        test_utils::init_test_logger();
         assert_eq!(
             super::MAX_PROCESS_AND_CLOSE_PER_TX,
             *MAX_PROCESS_AND_CLOSE_PER_TX
@@ -270,6 +272,7 @@ mod test {
 
     #[test]
     fn test_max_finalize_per_tx() {
+        test_utils::init_test_logger();
         assert_eq!(super::MAX_FINALIZE_PER_TX, *MAX_FINALIZE_PER_TX);
         assert_eq!(
             super::MAX_FINALIZE_PER_TX_USING_LOOKUP,
@@ -279,6 +282,7 @@ mod test {
 
     #[test]
     fn test_max_undelegate_per_tx() {
+        test_utils::init_test_logger();
         assert_eq!(super::MAX_UNDELEGATE_PER_TX, *MAX_UNDELEGATE_PER_TX);
         assert_eq!(
             super::MAX_UNDELEGATE_PER_TX_USING_LOOKUP,
@@ -291,6 +295,7 @@ mod test {
     // -----------------
     #[test]
     fn test_log_commit_args_ix_sizes() {
+        test_utils::init_test_logger();
         // This test is used to investigate the size of the transaction related to
         // the amount of committed accounts and their data size.
         fn run(auth: &Keypair, ixs: usize) {

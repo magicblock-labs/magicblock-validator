@@ -61,6 +61,8 @@ where
                     commit_strategy,
                 ) {
                     error!(
+                        %commit_id,
+                        %pubkey,
                         strategy = commit_strategy.as_str(),
                         error = ?err,
                         "Failed to persist commit strategy"
@@ -107,6 +109,8 @@ where
                     commit_strategy,
                 ) {
                     error!(
+                        %commit_id,
+                        %pubkey,
                         strategy = commit_strategy.as_str(),
                         error = ?err,
                         "Failed to persist commit strategy"

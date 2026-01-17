@@ -164,8 +164,8 @@ where
             ) => {
                 let optimized_tasks =
                     commit_strategy.optimized_tasks.as_slice();
-                if let Some(task) = err
-                    .task_index()
+                let task_index = err.task_index();
+                if let Some(task) = task_index
                     .and_then(|index| optimized_tasks.get(index as usize))
                 {
                     Self::handle_unfinalized_account_error(
@@ -175,7 +175,12 @@ where
                     )
                     .await
                 } else {
-                    error!(task_index = ?err, optimized_tasks_len = optimized_tasks.len(), "RPC returned unexpected task index");
+                    error!(
+                        task_index = ?task_index,
+                        optimized_tasks_len = optimized_tasks.len(),
+                        error = ?err,
+                        "RPC returned unexpected task index"
+                    );
                     Ok(ControlFlow::Break(()))
                 }
             }
