@@ -16,7 +16,7 @@ pub mod mock {
 
     impl AccountsBankStub {
         pub fn insert(&self, pubkey: Pubkey, account: AccountSharedData) {
-            trace!("Inserting account: {pubkey}");
+            trace!(pubkey = %pubkey, "Inserting account");
             self.accounts.lock().unwrap().insert(pubkey, account);
         }
 
@@ -25,7 +25,7 @@ pub mod mock {
         }
 
         pub fn set_owner(&self, pubkey: &Pubkey, owner: Pubkey) -> &Self {
-            trace!("Setting owner for account: {pubkey} to {owner}");
+            trace!(pubkey = %pubkey, owner = %owner, "Setting owner for account");
             let mut accounts = self.accounts.lock().unwrap();
             if let Some(account) = accounts.get_mut(pubkey) {
                 account.set_owner(owner);
@@ -36,7 +36,7 @@ pub mod mock {
         }
 
         fn set_delegated(&self, pubkey: &Pubkey, delegated: bool) -> &Self {
-            trace!("Setting delegated for account: {pubkey} to {delegated}");
+            trace!(pubkey = %pubkey, delegated = delegated, "Setting delegated for account");
             let mut accounts = self.accounts.lock().unwrap();
             if let Some(account) = accounts.get_mut(pubkey) {
                 account.set_delegated(delegated);
@@ -70,7 +70,7 @@ pub mod mock {
             pubkey: &Pubkey,
             undelegating: bool,
         ) -> &Self {
-            trace!("Set account {pubkey} undelegating={undelegating}");
+            trace!(pubkey = %pubkey, undelegating = undelegating, "Setting undelegating status");
             let mut accounts = self.accounts.lock().unwrap();
             if let Some(account) = accounts.get_mut(pubkey) {
                 account.set_undelegating(undelegating);

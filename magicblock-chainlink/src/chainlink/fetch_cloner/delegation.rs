@@ -80,6 +80,7 @@ where
     (!is_delegated_to_us).then_some(delegation_record.authority)
 }
 
+#[instrument(skip(this))]
 pub(crate) async fn fetch_and_parse_delegation_record<T, U, V, C>(
     this: &FetchCloner<T, U, V, C>,
     account_pubkey: Pubkey,
@@ -144,9 +145,7 @@ where
             .unsubscribe(&delegation_record_pubkey)
             .await
         {
-            error!(
-                "Failed to unsubscribe from delegation record {delegation_record_pubkey}: {err}"
-            );
+            error!(pubkey = %delegation_record_pubkey, error = %err, "Failed to unsubscribe from delegation record");
         }
     }
 

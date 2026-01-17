@@ -267,7 +267,7 @@ impl ChainPubsubClient for ChainPubsubClientImpl {
 
         rx.await
             .inspect_err(|err| {
-                warn!("ChainPubsubClientImpl::subscribe - RecvError occurred while awaiting subscription response for {}: {err:?}. This indicates the actor sender was dropped without responding.", pubkey);
+                warn!(pubkey = %pubkey, error = ?err, "ChainPubsubClientImpl::subscribe - RecvError awaiting subscription response, actor sender dropped");
             })?
     }
 
@@ -285,7 +285,7 @@ impl ChainPubsubClient for ChainPubsubClientImpl {
 
         rx.await
             .inspect_err(|err| {
-                warn!("ChainPubsubClientImpl::subscribe_program - RecvError occurred while awaiting subscription response for {}: {err:?}. This indicates the actor sender was dropped without responding.", program_id);
+                warn!(program_id = %program_id, error = ?err, "ChainPubsubClientImpl::subscribe_program - RecvError awaiting subscription response, actor sender dropped");
             })?
     }
 
@@ -303,7 +303,7 @@ impl ChainPubsubClient for ChainPubsubClientImpl {
 
         rx.await
             .inspect_err(|err| {
-                warn!("ChainPubsubClientImpl::unsubscribe - RecvError occurred while awaiting unsubscription response for {}: {err:?}. This indicates the actor sender was dropped without responding.", pubkey);
+                warn!(pubkey = %pubkey, error = ?err, "ChainPubsubClientImpl::unsubscribe - RecvError awaiting unsubscription response, actor sender dropped");
             })?
     }
 
@@ -342,7 +342,7 @@ impl ReconnectableClient for ChainPubsubClientImpl {
             .await?;
 
         rx.await.inspect_err(|err| {
-            warn!("RecvError occurred while awaiting reconnect response: {err:?}.");
+            warn!(error = ?err, "RecvError awaiting reconnect response");
         })?
     }
 
@@ -427,7 +427,7 @@ pub mod mock {
             if subscribed_pubkeys.contains(&update.pubkey) {
                 let _ =
                     self.updates_sndr.send(update).await.inspect_err(|err| {
-                        error!("Failed to send subscription update: {err:?}")
+                        error!(error = ?err, "Failed to send subscription update")
                     });
             }
         }

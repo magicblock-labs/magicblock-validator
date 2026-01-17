@@ -100,6 +100,13 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
     }
 
     #[allow(clippy::too_many_arguments)]
+    #[instrument(skip(
+        endpoints,
+        accounts_bank,
+        cloner,
+        config,
+        chainlink_config
+    ))]
     pub async fn try_new_from_endpoints(
         endpoints: &Endpoints,
         commitment: CommitmentConfig,
@@ -180,10 +187,14 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
                 }
                 return false;
             }
-            trace!(
-                "Removing non-delegated, non-DLP-owned account: {pubkey} {:#?}",
-                account
-            );
+            if tracing::enabled!(tracing::Level::TRACE) {
+                let account_fmt = format!("{:#?}", account);
+                trace!(
+                    pubkey = %pubkey,
+                    account = %account_fmt,
+                    "Removing non-delegated, non-DLP-owned account"
+                );
+            }
             remaining.fetch_add(1, Ordering::Relaxed);
             if account.lamports() == 0
                 && account.owner() != &solana_feature_set::ID.to_bytes().into()
@@ -199,20 +210,20 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
 
         let delegated_only = delegated_only.into_inner();
         let undelegating = undelegating.into_inner();
+        let remaining_empty_count = remaining_empty.into_inner();
+        let kept_delegated = delegated_only;
+        let kept_blacklisted = blacklisted.into_inner();
+        let total_removed = removed;
 
         info!(
-            "Removed {removed} accounts from bank:
-{} non-delegated non-blacklisted, no-feature non-empty.
-{} non-delegated non-blacklisted empty
-{} delegated not undelegating
-{} delegated and undelegating
-Kept: {} delegated, {} blacklisted",
+            total_removed,
             non_empty,
-            remaining_empty.into_inner(),
-            delegated_only,
-            undelegating,
-            delegated_only + undelegating,
-            blacklisted.into_inner()
+            empty = remaining_empty_count,
+            delegated_not_undelegating = delegated_only,
+            delegated_and_undelegating = undelegating,
+            kept_delegated,
+            kept_blacklisted,
+            "Removed accounts from bank"
         );
     }
 
@@ -240,15 +251,17 @@ Kept: {} delegated, {} blacklisted",
                         if tracing::enabled!(tracing::Level::TRACE) {
                             if remove {
                                 trace!(
-                                    "Removing unsubscribed account '{pubkey}' from bank"
+                                    pubkey = %pubkey,
+                                    "Removing unsubscribed account from bank"
                                 );
                             } else {
-                                let owner = account.owner().to_string();
+                                let owner = account.owner();
                                 trace!(
-                                    "Keeping unsubscribed account {pubkey} in bank \
-                                    undelegating = {undelegating}, \
-                                    delegated = {delegated}, \
-                                    owner={owner}"
+                                    pubkey = %pubkey,
+                                    undelegating,
+                                    delegated,
+                                    owner = %owner,
+                                    "Keeping unsubscribed account in bank"
                                 );
                             }
                         }
@@ -256,7 +269,7 @@ Kept: {} delegated, {} blacklisted",
                     },
                 );
             }
-            warn!("Removed accounts channel closed, stopping subscription");
+            warn!("Removed accounts channel closed");
         })
     }
 
@@ -279,14 +292,15 @@ Kept: {} delegated, {} blacklisted",
     /// is cloned in our validator.
     /// Returns the state of each account (writable and readonly) after the checks
     /// and cloning are done.
+    #[instrument(skip(self, tx))]
     pub async fn ensure_transaction_accounts(
         &self,
         tx: &SanitizedTransaction,
     ) -> ChainlinkResult<FetchAndCloneResult> {
         if is_noop_system_transfer(tx) {
             trace!(
-                "Skipping account ensure for noop system transfer transaction {}",
-                tx.signature()
+                tx_sig = %tx.signature(),
+                "Skipping account ensure for noop system transfer transaction"
             );
             return Ok(Default::default());
         }
@@ -308,7 +322,11 @@ Kept: {} delegated, {} blacklisted",
         // If cloning escrow, add the balance PDA
         if clone_escrow {
             let balance_pda = ephemeral_balance_pda_from_payer(feepayer, 0);
-            trace!("Adding balance PDA {balance_pda} for feepayer {feepayer}");
+            trace!(
+                balance_pda = %balance_pda,
+                feepayer = %feepayer,
+                "Adding balance PDA for feepayer"
+            );
             pubkeys.push(balance_pda);
         }
 
@@ -346,8 +364,9 @@ Kept: {} delegated, {} blacklisted",
                         .await
                     {
                         warn!(
-                            "Auto airdrop for feepayer {} failed: {:?}",
-                            feepayer, err
+                            feepayer = %feepayer,
+                            error = %err,
+                            "Auto airdrop for feepayer failed"
                         );
                     }
                 }
@@ -360,6 +379,7 @@ Kept: {} delegated, {} blacklisted",
     /// Same as fetch accounts, but does not return the accounts, just
     /// ensures were cloned into our validator if they exist on chain.
     /// If we're offline and not syncing accounts then this is a no-op.
+    #[instrument(skip(self, pubkeys, mark_empty_if_not_found, program_ids))]
     pub async fn ensure_accounts(
         &self,
         pubkeys: &[Pubkey],
@@ -384,6 +404,7 @@ Kept: {} delegated, {} blacklisted",
     /// Otherwise ensures that the accounts exist on chain and were cloned into our validator
     /// and returns their state from the bank (which may be None if the account does not
     /// exist locally or on chain).
+    #[instrument(skip(self, pubkeys, program_ids))]
     pub async fn fetch_accounts(
         &self,
         pubkeys: &[Pubkey],
@@ -391,12 +412,8 @@ Kept: {} delegated, {} blacklisted",
         program_ids: Option<&[Pubkey]>,
     ) -> ChainlinkResult<Vec<Option<AccountSharedData>>> {
         if tracing::enabled!(tracing::Level::TRACE) {
-            let pubkeys = pubkeys
-                .iter()
-                .map(|p| p.to_string())
-                .collect::<Vec<_>>()
-                .join(", ");
-            trace!("Fetching accounts: {pubkeys}");
+            let count = pubkeys.len();
+            trace!(count, "Fetching accounts");
         }
         let Some(fetch_cloner) = self.fetch_cloner() else {
             // If we're offline and not syncing accounts then we just get them from the bank
@@ -422,6 +439,13 @@ Kept: {} delegated, {} blacklisted",
         Ok(accounts)
     }
 
+    #[instrument(skip(
+        self,
+        fetch_cloner,
+        pubkeys,
+        mark_empty_if_not_found,
+        program_ids
+    ))]
     async fn fetch_accounts_common(
         &self,
         fetch_cloner: &FetchCloner<T, U, V, C>,
@@ -431,20 +455,9 @@ Kept: {} delegated, {} blacklisted",
         program_ids: Option<&[Pubkey]>,
     ) -> ChainlinkResult<FetchAndCloneResult> {
         if tracing::enabled!(tracing::Level::TRACE) {
-            let pubkeys_str = pubkeys
-                .iter()
-                .map(|p| p.to_string())
-                .collect::<Vec<_>>()
-                .join(", ");
-            let mark_empty_str = mark_empty_if_not_found
-                .map(|keys| {
-                    keys.iter()
-                        .map(|p| p.to_string())
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                })
-                .unwrap_or_default();
-            trace!("Fetching accounts: {pubkeys_str}, mark_empty_if_not_found: {mark_empty_str}");
+            let count = pubkeys.len();
+            let mark_empty_count = mark_empty_if_not_found.map(|k| k.len());
+            trace!(count, mark_empty_count, "Fetching accounts");
         }
         Self::promote_accounts(
             fetch_cloner,
@@ -462,7 +475,7 @@ Kept: {} delegated, {} blacklisted",
                 program_ids,
             )
             .await?;
-        trace!("Fetched and cloned accounts: {result:?}");
+        trace!("Fetched and cloned accounts");
         Ok(result)
     }
 
@@ -470,11 +483,12 @@ Kept: {} delegated, {} blacklisted",
     /// At this point we do the following:
     /// 1. Subscribe to updates for the account
     /// 2. When a subscription update is received we clone the new state as usual
+    #[instrument(skip(self))]
     pub async fn undelegation_requested(
         &self,
         pubkey: Pubkey,
     ) -> ChainlinkResult<()> {
-        debug!("Undelegation requested for account: {pubkey}");
+        debug!(pubkey = %pubkey, "Undelegation requested");
 
         magicblock_metrics::metrics::inc_undelegation_requested();
 
@@ -486,7 +500,7 @@ Kept: {} delegated, {} blacklisted",
         // once it's undelegated
         fetch_cloner.subscribe_to_account(&pubkey).await?;
 
-        debug!("Successfully subscribed to account {pubkey} for undelegation tracking");
+        debug!(pubkey = %pubkey, "Successfully subscribed for undelegation tracking");
         Ok(())
     }
 

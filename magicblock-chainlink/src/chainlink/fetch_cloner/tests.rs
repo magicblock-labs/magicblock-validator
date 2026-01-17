@@ -221,7 +221,7 @@ async fn test_fetch_and_clone_single_non_delegated_account() {
         )
         .await;
 
-    debug!("Test result: {result:?}");
+    debug!(result = ?result, "Test completed");
 
     assert!(result.is_ok());
     assert_cloned_undelegated_account!(
@@ -260,7 +260,7 @@ async fn test_fetch_and_clone_single_non_existing_account() {
         )
         .await;
 
-    debug!("Test result: {result:?}");
+    debug!(result = ?result, "Test completed");
 
     // Verify success (non-existing accounts are handled gracefully)
     assert!(result.is_ok());
@@ -320,7 +320,7 @@ async fn test_fetch_and_clone_single_delegated_account_with_valid_delegation_rec
         )
         .await;
 
-    debug!("Test result: {result:?}");
+    debug!(result = ?result, "Test completed");
 
     assert!(result.is_ok());
 
@@ -398,7 +398,7 @@ async fn test_fetch_and_clone_single_delegated_account_with_different_authority(
         )
         .await;
 
-    debug!("Test result: {result:?}");
+    debug!(result = ?result, "Test completed");
 
     assert!(result.is_ok());
 
@@ -592,7 +592,7 @@ async fn test_fetch_and_clone_multiple_accounts_mixed_types() {
         )
         .await;
 
-    debug!("Test result: {result:?}");
+    debug!(result = ?result, "Test completed");
 
     assert!(result.is_ok());
 
@@ -693,7 +693,7 @@ async fn test_fetch_and_clone_valid_delegated_account_and_account_with_invalid_d
         )
         .await;
 
-    debug!("Test result: {result:?}");
+    debug!(result = ?result, "Test completed");
 
     // Should return an error due to invalid delegation record
     assert!(result.is_err());
@@ -764,7 +764,7 @@ async fn test_deleg_record_stale() {
         )
         .await;
 
-    debug!("Test result: {result:?}");
+    debug!(result = ?result, "Test completed");
 
     // Should return a result indicating missing  delegation record
     assert!(result.is_ok());
@@ -785,7 +785,7 @@ async fn test_deleg_record_stale() {
             None,
         )
         .await;
-    debug!("Test result after updating delegation record: {result:?}");
+    debug!(result = ?result, "Test result after updating delegation record");
     assert!(result.is_ok());
     assert!(result.unwrap().is_ok());
 }
@@ -841,7 +841,7 @@ async fn test_account_stale() {
         )
         .await;
 
-    debug!("Test result: {result:?}");
+    debug!(result = ?result, "Test completed");
 
     // Should return a result indicating the account needs to be updated
     assert!(result.is_ok());
@@ -861,7 +861,7 @@ async fn test_account_stale() {
             None,
         )
         .await;
-    debug!("Test result after updating account: {result:?}");
+    debug!(result = ?result, "Test result after updating account");
     assert!(result.is_ok());
     assert!(result.unwrap().is_ok());
 }
@@ -1425,7 +1425,7 @@ async fn test_fetch_and_clone_undelegating_account_that_is_closed_on_chain() {
         )
         .await;
 
-    debug!("Test result: {result:?}");
+    debug!(result = ?result, "Test completed");
     assert!(result.is_ok());
 
     // Account should be replaced with empty account in bank
@@ -1511,7 +1511,7 @@ async fn test_allowed_programs_filters_programs() {
         )
         .await;
 
-    debug!("Test result: {result:?}");
+    debug!(result = ?result, "Test completed");
     assert!(result.is_ok());
 
     // The allowed program should be in the bank
@@ -1579,7 +1579,7 @@ async fn test_allowed_programs_none_allows_all() {
         )
         .await;
 
-    debug!("Test result: {result:?}");
+    debug!(result = ?result, "Test completed");
     assert!(result.is_ok());
 
     // Both programs should be in the bank
@@ -1646,7 +1646,7 @@ async fn test_allowed_programs_empty_allows_all() {
         )
         .await;
 
-    debug!("Test result: {result:?}");
+    debug!(result = ?result, "Test completed");
     assert!(result.is_ok());
 
     // Both programs should be in the bank (empty list is treated as unrestricted)

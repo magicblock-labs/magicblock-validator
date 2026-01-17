@@ -74,7 +74,7 @@ async fn test_subs_receive_out_of_order_updates() {
 
     // 2. Simulate update 3 arriving before update 2 because the latter is slow
     rpc_client.set_slot(3);
-    debug!("Sending update 3");
+    debug!(update_number = 3, "Sending update");
     ctx.send_and_receive_account_update(pubkey, acc_state_3.clone(), None)
         .await;
     let acc = cloner
@@ -84,7 +84,7 @@ async fn test_subs_receive_out_of_order_updates() {
     assert_eq!(acc.data(), vec![3; 10].as_slice());
 
     // 3. Now update two finally arrives
-    debug!("Sending delayed update 2");
+    debug!(update_number = 2, delayed = true, "Sending update");
     ctx.send_and_receive_account_update(pubkey, acc_state_2.clone(), None)
         .await;
     let acc = cloner
@@ -97,7 +97,7 @@ async fn test_subs_receive_out_of_order_updates() {
     // 4. Finally update 4 arrives
     // This should update the account to state 4
     rpc_client.set_slot(4);
-    debug!("Sending update 4");
+    debug!(update_number = 4, "Sending update");
     ctx.send_and_receive_account_update(pubkey, acc_state_4.clone(), None)
         .await;
     let acc = cloner
