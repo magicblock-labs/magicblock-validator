@@ -57,7 +57,11 @@ impl<CC: BaseIntentCommittor> CommittorServiceExt<CC> {
         }
     }
 
-    #[instrument(skip(pending_message, results_subscription))]
+    #[instrument(skip(
+        committor_stopped,
+        pending_message,
+        results_subscription
+    ))]
     async fn dispatcher(
         committor_stopped: WaitForCancellationFutureOwned,
         results_subscription: oneshot::Receiver<
@@ -102,7 +106,7 @@ impl<CC: BaseIntentCommittor> CommittorServiceExt<CC> {
                 continue;
             };
 
-            if sender.send(execution_result.clone()).is_err() {
+            if let Err(execution_result) = sender.send(execution_result) {
                 error!(
                     intent_id = execution_result.id,
                     "Failed to send execution result"

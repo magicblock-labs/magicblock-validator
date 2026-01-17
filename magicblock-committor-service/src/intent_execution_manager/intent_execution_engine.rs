@@ -349,10 +349,7 @@ where
 
         // Alert
         if intent.is_undelegate() && result.is_err() {
-            warn!(
-                "Intent execution resulted in stuck accounts: {:?}",
-                intent.get_committed_pubkeys()
-            );
+            warn!(stuck_accounts = ?intent.get_committed_pubkeys(), "Undelegate execution failed, accounts may be stuck");
         }
     }
 }

@@ -668,6 +668,7 @@ mod complete_error_test {
 
     #[test]
     fn test_corrupted_intent_state_more_keys_initially() {
+        setup();
         let mut scheduler = IntentScheduler::new();
         let pubkey1 = pubkey!("1111111111111111111111111111111111111111111");
         let pubkey2 = pubkey!("21111111111111111111111111111111111111111111");
@@ -692,6 +693,7 @@ mod complete_error_test {
 
     #[test]
     fn test_corrupted_intent_state_less_keys_initially() {
+        setup();
         let mut scheduler = IntentScheduler::new();
         let pubkey1 = pubkey!("1111111111111111111111111111111111111111111");
         let pubkey2 = pubkey!("21111111111111111111111111111111111111111111");
@@ -721,6 +723,7 @@ mod complete_error_test {
 
     #[test]
     fn test_completing_blocked_message_complex() {
+        setup();
         let mut scheduler = IntentScheduler::new();
         let pubkey1 = pubkey!("1111111111111111111111111111111111111111111");
         let pubkey2 = pubkey!("21111111111111111111111111111111111111111111");
@@ -744,6 +747,7 @@ mod complete_error_test {
 
     #[test]
     fn test_completing_blocked_message() {
+        setup();
         let mut scheduler = IntentScheduler::new();
         let pubkey = pubkey!("1111111111111111111111111111111111111111111");
 
