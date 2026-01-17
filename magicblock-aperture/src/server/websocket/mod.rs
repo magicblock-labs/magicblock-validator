@@ -146,9 +146,15 @@ async fn handle_upgrade(
     // Spawn a new task to manage the WebSocket communication, freeing up the
     // Hyper service to handle other potential incoming connections.
     tokio::spawn(async move {
-        let Ok(ws) = ws.await else {
-            warn!("HTTP upgrade to WebSocket failed");
-            return;
+        let ws = match ws.await {
+            Ok(ws) => ws,
+            Err(e) => {
+                warn!(
+                    error = ?e,
+                    "HTTP upgrade to WebSocket failed"
+                );
+                return;
+            }
         };
         // The `ConnectionHandler` will now take over the WebSocket stream.
         let handler = ConnectionHandler::new(ws, state);
