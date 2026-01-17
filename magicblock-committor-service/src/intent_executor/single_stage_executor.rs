@@ -2,7 +2,7 @@ use std::ops::ControlFlow;
 
 use solana_pubkey::Pubkey;
 use solana_signature::Signature;
-use tracing::error;
+use tracing::{error, instrument};
 
 use crate::{
     intent_executor::{
@@ -43,6 +43,10 @@ where
         }
     }
 
+    #[instrument(
+        skip(self, committed_pubkeys, persister),
+        fields(stage = "single_stage")
+    )]
     pub async fn execute<P: IntentPersister>(
         &mut self,
         committed_pubkeys: Option<&[Pubkey]>,
@@ -91,7 +95,10 @@ where
 
             if i >= RECURSION_CEILING {
                 error!(
-                    "CRITICAL! Recursion ceiling reached in intent execution."
+                    attempt = i,
+                    ceiling = RECURSION_CEILING,
+                    error = ?execution_err,
+                    "Recursion ceiling exceeded"
                 );
                 break Err(execution_err);
             } else {
@@ -164,8 +171,10 @@ where
                     .await
                 } else {
                     error!(
-                        "RPC returned unexpected task index: {}. optimized_tasks_len: {}",
-                        err, optimized_tasks.len()
+                        task_index = err.task_index(),
+                        optimized_tasks_len = optimized_tasks.len(),
+                        error = ?err,
+                        "RPC returned unexpected task index"
                     );
                     Ok(ControlFlow::Break(()))
                 }

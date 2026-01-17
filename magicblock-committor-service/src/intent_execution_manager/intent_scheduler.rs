@@ -90,7 +90,10 @@ impl IntentScheduler {
         if self.blocked_intents.contains_key(&intent_id) {
             // This is critical error as we shouldn't schedule duplicate Intents!
             // this requires investigation
-            error!("CRITICAL! Attempt to schedule already scheduled intent!");
+            error!(
+                intent_id,
+                "CRITICAL! Attempt to schedule already scheduled intent"
+            );
             return None;
         }
         let duplicate_executing = self.blocked_keys.iter().any(|(_, queue)| {
@@ -103,7 +106,10 @@ impl IntentScheduler {
         if duplicate_executing {
             // This is critical error as we shouldn't schedule duplicate Intents!
             // this requires investigation
-            error!("CRITICAL! Attempt to schedule already scheduled intent!");
+            error!(
+                intent_id,
+                "CRITICAL! Attempt to schedule already scheduled intent"
+            );
             return None;
         }
 
@@ -297,9 +303,15 @@ mod simple_test {
     use solana_pubkey::pubkey;
 
     use super::*;
+    use crate::test_utils;
+
+    fn setup() {
+        test_utils::init_test_logger();
+    }
 
     #[test]
     fn test_empty_scheduler() {
+        setup();
         let mut scheduler = IntentScheduler::new();
         assert_eq!(scheduler.intents_blocked(), 0);
         assert!(scheduler.pop_next_scheduled_intent().is_none());
@@ -308,6 +320,7 @@ mod simple_test {
     /// Ensure intents with non-conflicting set of keys can run in parallel
     #[test]
     fn test_non_conflicting_intents() {
+        setup();
         let mut scheduler = IntentScheduler::new();
         let msg1 = create_test_intent(
             1,
@@ -331,6 +344,7 @@ mod simple_test {
     /// Ensure intents conflicting intents get blocked
     #[test]
     fn test_conflicting_intents() {
+        setup();
         const NUM_INTENTS: u64 = 10;
 
         let mut scheduler = IntentScheduler::new();
@@ -356,9 +370,15 @@ mod completion_simple_test {
     use solana_pubkey::pubkey;
 
     use super::*;
+    use crate::test_utils;
+
+    fn setup() {
+        test_utils::init_test_logger();
+    }
 
     #[test]
     fn test_completion_unblocks_intents() {
+        setup();
         let mut scheduler = IntentScheduler::new();
         let pubkey = pubkey!("1111111111111111111111111111111111111111111");
         let msg1 = create_test_intent(1, &[pubkey], false);
@@ -380,6 +400,7 @@ mod completion_simple_test {
 
     #[test]
     fn test_multiple_blocked_intents() {
+        setup();
         let mut scheduler = IntentScheduler::new();
         let pubkey = pubkey!("1111111111111111111111111111111111111111111");
         let msg1 = create_test_intent(1, &[pubkey], false);
@@ -416,6 +437,11 @@ mod complex_blocking_test {
     use solana_pubkey::pubkey;
 
     use super::*;
+    use crate::test_utils;
+
+    fn setup() {
+        test_utils::init_test_logger();
+    }
 
     /// Case:
     /// executing: `[a1, a2, a3] [b1, b2, b3]` - 1
@@ -423,6 +449,7 @@ mod complex_blocking_test {
     /// arriving:  `[a1,     a3]` - 3
     #[test]
     fn test_edge_case_1_earlier_intent_blocks_later_overlapping() {
+        setup();
         let mut scheduler = IntentScheduler::new();
         let a1 = pubkey!("1111111111111111111111111111111111111111111");
         let a2 = pubkey!("21111111111111111111111111111111111111111111");
@@ -484,6 +511,7 @@ mod complex_blocking_test {
     /// `[c2, c1]` - Even there's no overlaps with executing
     #[test]
     fn test_edge_case_2_indirect_blocking_through_shared_key() {
+        setup();
         let mut scheduler = IntentScheduler::new();
         let a1 = pubkey!("1111111111111111111111111111111111111111111");
         let a2 = pubkey!("21111111111111111111111111111111111111111111");
@@ -536,6 +564,7 @@ mod complex_blocking_test {
 
     #[test]
     fn test_complex_contention_scenario() {
+        setup();
         let mut scheduler = IntentScheduler::new();
         let a = pubkey!("1111111111111111111111111111111111111111111");
         let b = pubkey!("21111111111111111111111111111111111111111111");
@@ -587,9 +616,15 @@ mod edge_cases_test {
     use magicblock_program::magic_scheduled_base_intent::MagicBaseIntent;
 
     use super::*;
+    use crate::test_utils;
+
+    fn setup() {
+        test_utils::init_test_logger();
+    }
 
     #[test]
     fn test_intent_without_pubkeys() {
+        setup();
         let mut scheduler = IntentScheduler::new();
         let mut msg = create_test_intent(1, &[], false);
         msg.inner.base_intent = MagicBaseIntent::BaseActions(vec![]);
@@ -607,9 +642,15 @@ mod complete_error_test {
     use solana_pubkey::pubkey;
 
     use super::*;
+    use crate::test_utils;
+
+    fn setup() {
+        test_utils::init_test_logger();
+    }
 
     #[test]
     fn test_complete_non_scheduled_message() {
+        setup();
         let mut scheduler = IntentScheduler::new();
         let msg = create_test_intent(
             1,
@@ -627,6 +668,7 @@ mod complete_error_test {
 
     #[test]
     fn test_corrupted_intent_state_more_keys_initially() {
+        setup();
         let mut scheduler = IntentScheduler::new();
         let pubkey1 = pubkey!("1111111111111111111111111111111111111111111");
         let pubkey2 = pubkey!("21111111111111111111111111111111111111111111");
@@ -651,6 +693,7 @@ mod complete_error_test {
 
     #[test]
     fn test_corrupted_intent_state_less_keys_initially() {
+        setup();
         let mut scheduler = IntentScheduler::new();
         let pubkey1 = pubkey!("1111111111111111111111111111111111111111111");
         let pubkey2 = pubkey!("21111111111111111111111111111111111111111111");
@@ -680,6 +723,7 @@ mod complete_error_test {
 
     #[test]
     fn test_completing_blocked_message_complex() {
+        setup();
         let mut scheduler = IntentScheduler::new();
         let pubkey1 = pubkey!("1111111111111111111111111111111111111111111");
         let pubkey2 = pubkey!("21111111111111111111111111111111111111111111");
@@ -703,6 +747,7 @@ mod complete_error_test {
 
     #[test]
     fn test_completing_blocked_message() {
+        setup();
         let mut scheduler = IntentScheduler::new();
         let pubkey = pubkey!("1111111111111111111111111111111111111111111");
 

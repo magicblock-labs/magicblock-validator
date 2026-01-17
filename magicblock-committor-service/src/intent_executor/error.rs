@@ -295,10 +295,7 @@ impl TransactionStrategyExecutionError {
             }
             // This means transaction failed to other reasons that we don't handle - propagate
             err => {
-                error!(
-                    "Message execution failed and we can not handle it: {}",
-                    err
-                );
+                error!(error = ?err, "Message execution failed");
                 Err(err)
             }
         }

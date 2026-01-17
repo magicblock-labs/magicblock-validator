@@ -32,6 +32,11 @@ pub(crate) fn now() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_utils;
+
+    fn setup() {
+        test_utils::init_test_logger();
+    }
 
     fn round_trip(u: u64) {
         let i = u64_into_i64(u);
@@ -41,6 +46,7 @@ mod tests {
 
     #[test]
     fn test_u64_i64_conversion_via_round_trip() {
+        setup();
         round_trip(0);
         round_trip(1);
         round_trip(i64::MAX as u64);

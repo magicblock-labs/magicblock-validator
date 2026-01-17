@@ -209,7 +209,7 @@ where
             persister,
         )? {
             StrategyExecutionMode::SingleStage(strategy) => {
-                trace!("Executing intent in single stage");
+                trace!("Single stage execution");
                 self.single_stage_execution_flow(
                     base_intent,
                     strategy,
@@ -221,7 +221,7 @@ where
                 commit_stage,
                 finalize_stage,
             } => {
-                trace!("Executing intent in two stages");
+                trace!("Two stage execution");
                 self.two_stage_execution_flow(
                     &committed_pubkeys,
                     commit_stage,
@@ -484,7 +484,7 @@ where
                 value.recent_blockhash = latest_blockhash;
             }
             VersionedMessage::Legacy(value) => {
-                warn!("TransactionPreparator v1 does not use Legacy message");
+                warn!("Legacy message not expected");
                 value.recent_blockhash = latest_blockhash;
             }
         };
@@ -540,10 +540,7 @@ where
                 if let Err(err) =
                     persistor.finalize_base_intent(message_id, *value)
                 {
-                    tracing::error!(
-                        "Failed to persist ExecutionOutput: {}",
-                        err
-                    );
+                    tracing::error!(error = ?err, "Failed to persist ExecutionOutput");
                 }
 
                 return;
@@ -756,10 +753,7 @@ where
             Ok(Some(cu)) => metrics::set_commmittor_intent_cu_usage(
                 i64::try_from(cu).unwrap_or(i64::MAX),
             ),
-            Err(err) => warn!(
-                "Failed to fetch CUs for intent: {:?}. {:?}",
-                err, execution_outcome
-            ),
+            Err(err) => warn!(error = ?err, "Failed to fetch CUs for intent"),
             _ => {}
         }
     }

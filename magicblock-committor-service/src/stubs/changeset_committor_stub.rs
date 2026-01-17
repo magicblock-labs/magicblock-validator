@@ -59,7 +59,10 @@ impl BaseIntentCommittor for ChangesetCommittorStub {
             .insert(committee, owner);
 
         tx.send(Ok(initiated)).unwrap_or_else(|_| {
-            tracing::error!("Failed to send response");
+            tracing::error!(
+                message_type = "ReservePubkeysForCommittee",
+                "Failed to send response"
+            );
         });
         rx
     }
@@ -118,7 +121,10 @@ impl BaseIntentCommittor for ChangesetCommittorStub {
             .remove(&message_id);
         let Some(base_intent) = commit else {
             tx.send(Ok(vec![])).unwrap_or_else(|_| {
-                tracing::error!("Failed to send commit status response");
+                tracing::error!(
+                    message_type = "GetCommitStatuses",
+                    "Failed to send response"
+                );
             });
             return rx;
         };
@@ -126,7 +132,10 @@ impl BaseIntentCommittor for ChangesetCommittorStub {
         let status_rows =
             IntentPersisterImpl::create_commit_rows(&base_intent.inner);
         tx.send(Ok(status_rows)).unwrap_or_else(|_| {
-            tracing::error!("Failed to send commit status response");
+            tracing::error!(
+                message_type = "GetCommitStatuses",
+                "Failed to send response"
+            );
         });
 
         rx
@@ -146,7 +155,10 @@ impl BaseIntentCommittor for ChangesetCommittorStub {
         };
 
         tx.send(Ok(Some(message_signature))).unwrap_or_else(|_| {
-            tracing::error!("Failed to send bundle signatures response");
+            tracing::error!(
+                message_type = "GetCommitSignatures",
+                "Failed to send response"
+            );
         });
 
         rx
@@ -172,7 +184,10 @@ impl BaseIntentCommittor for ChangesetCommittorStub {
                 block_time: None,
             }))
         {
-            tracing::error!("Failed to send get transaction response");
+            tracing::error!(
+                message_type = "GetTransaction",
+                "Failed to send response"
+            );
         };
 
         rx

@@ -18,6 +18,9 @@ pub mod tasks;
 pub mod transaction_preparator;
 pub(crate) mod utils;
 
+#[cfg(test)]
+pub mod test_utils;
+
 pub use compute_budget::ComputeBudgetConfig;
 pub use magicblock_committor_program::{
     ChangedAccount, Changeset, ChangesetMeta,

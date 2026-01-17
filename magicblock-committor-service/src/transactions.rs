@@ -93,6 +93,7 @@ mod test {
     use solana_pubkey::Pubkey;
     use solana_signer::Signer;
     use solana_transaction::versioned::VersionedTransaction;
+    use tracing::info;
 
     use super::*;
     use crate::{
@@ -104,6 +105,7 @@ mod test {
             CommittorServiceResult,
         },
         pubkeys_provider::{provide_committee_pubkeys, provide_common_pubkeys},
+        test_utils,
     };
 
     fn get_lookup_tables(
@@ -237,6 +239,7 @@ mod test {
 
     #[test]
     fn test_max_process_per_tx() {
+        test_utils::init_test_logger();
         assert_eq!(super::MAX_PROCESS_PER_TX, *MAX_PROCESS_PER_TX);
         assert_eq!(
             super::MAX_PROCESS_PER_TX_USING_LOOKUP,
@@ -246,6 +249,7 @@ mod test {
 
     #[test]
     fn test_max_close_per_tx() {
+        test_utils::init_test_logger();
         assert_eq!(super::MAX_CLOSE_PER_TX, *MAX_CLOSE_PER_TX);
         assert_eq!(
             super::MAX_CLOSE_PER_TX_USING_LOOKUP,
@@ -255,6 +259,7 @@ mod test {
 
     #[test]
     fn test_max_process_and_closes_per_tx() {
+        test_utils::init_test_logger();
         assert_eq!(
             super::MAX_PROCESS_AND_CLOSE_PER_TX,
             *MAX_PROCESS_AND_CLOSE_PER_TX
@@ -267,6 +272,7 @@ mod test {
 
     #[test]
     fn test_max_finalize_per_tx() {
+        test_utils::init_test_logger();
         assert_eq!(super::MAX_FINALIZE_PER_TX, *MAX_FINALIZE_PER_TX);
         assert_eq!(
             super::MAX_FINALIZE_PER_TX_USING_LOOKUP,
@@ -276,6 +282,7 @@ mod test {
 
     #[test]
     fn test_max_undelegate_per_tx() {
+        test_utils::init_test_logger();
         assert_eq!(super::MAX_UNDELEGATE_PER_TX, *MAX_UNDELEGATE_PER_TX);
         assert_eq!(
             super::MAX_UNDELEGATE_PER_TX_USING_LOOKUP,
@@ -288,6 +295,7 @@ mod test {
     // -----------------
     #[test]
     fn test_log_commit_args_ix_sizes() {
+        test_utils::init_test_logger();
         // This test is used to investigate the size of the transaction related to
         // the amount of committed accounts and their data size.
         fn run(auth: &Keypair, ixs: usize) {
@@ -316,7 +324,7 @@ mod test {
                 })
                 .collect::<Vec<_>>()
                 .join("\n");
-            eprintln!("{:3} ixs:\n{}", ixs, sizes);
+            info!(instruction_count = ixs, sizes = %sizes, "Transaction size report");
         }
         fn make_ix(auth: &Keypair, data_size: usize) -> Instruction {
             let data = vec![1; data_size];
@@ -543,7 +551,7 @@ mod test {
         label: &str,
         create_ixs: F,
     ) -> u8 {
-        eprintln!("{}", label);
+        info!(test_label = label, "Starting transaction chunking test");
 
         let auth = Keypair::new();
         let auth_pubkey = auth.pubkey();
@@ -566,7 +574,11 @@ mod test {
             )
             .unwrap();
             let encoded = serialize_and_encode_base64(&versioned_tx);
-            eprintln!("{} ixs -> {} bytes", chunks, encoded.len());
+            info!(
+                chunks = chunks,
+                size_bytes = encoded.len(),
+                "Transaction size measured"
+            );
             if encoded.len() > MAX_ENCODED_TRANSACTION_SIZE {
                 return chunks - 1;
             }
@@ -599,7 +611,7 @@ mod test {
         create_ixs: FI,
         start_at: Option<u8>,
     ) -> u8 {
-        eprintln!("{}", label);
+        info!(test_label = label, start_at = ?start_at, "Starting lookup table transaction test");
         let auth = Keypair::new();
         let auth_pubkey = auth.pubkey();
         let mut ixs = ComputeBudget::Process(Budget::default()).instructions(1);
@@ -651,7 +663,11 @@ mod test {
             )
             .unwrap();
             let encoded = serialize_and_encode_base64(&versioned_tx);
-            eprintln!("{} ixs -> {} bytes", chunks, encoded.len());
+            info!(
+                chunks = chunks,
+                size_bytes = encoded.len(),
+                "Transaction size measured with lookup table"
+            );
             if encoded.len() > MAX_ENCODED_TRANSACTION_SIZE {
                 return chunks - 1;
             }

@@ -147,19 +147,20 @@ impl CacheTaskInfoFetcher {
                     break Err(err)
                 }
                 err @ TaskInfoFetcherError::InvalidAccountDataError(_) => {
-                    error!("Unexpected error: {:?}", err);
+                    error!(error = ?err, "Unexpected error");
                     break Err(err);
                 }
                 TaskInfoFetcherError::MinContextSlotNotReachedError(_, _) => {
                     // Get some extra sleep
                     info!(
-                        "Min context slot not reached {}, attempt: {}",
-                        min_context_slot, i
+                        min_context_slot,
+                        attempt = i,
+                        "Min context slot not reached"
                     );
                     tokio::time::sleep(Duration::from_millis(100)).await;
                 }
                 TaskInfoFetcherError::MagicBlockRpcClientError(ref err) => {
-                    warn!("Fetch account error: {}, attempt: {}", err, i);
+                    warn!(error = ?err, attempt = i, "Fetch account error");
                 }
             }
 
