@@ -23,7 +23,7 @@ pub(crate) fn init(
 ) -> ApiResult<(Ledger, Slot)> {
     if config.reset {
         remove_ledger_directory_if_exists(path).map_err(|err| {
-            error!("Unable to remove the ledger {}: {}", path.display(), err);
+            error!(error = ?err, path = %path.display(), "Unable to remove ledger");
             ApiError::UnableToCleanLedgerDirectory(path.display().to_string())
         })?;
     };
