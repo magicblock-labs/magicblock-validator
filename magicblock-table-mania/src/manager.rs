@@ -464,6 +464,7 @@ impl TableMania {
     #[instrument(
         skip(self),
         fields(
+            pubkey_count = pubkeys.len(),
             table_count = tracing::field::Empty,
             timeout_ms = tracing::field::Empty,
             current_slot = tracing::field::Empty,
@@ -478,11 +479,9 @@ impl TableMania {
         // 1. Wait until all keys are present in a local table
         let matching_tables = {
             let start = Instant::now();
-            let table_count = pubkeys.len();
-            tracing::Span::current().record("table_count", table_count);
             tracing::Span::current().record(
                 "timeout_ms",
-                wait_for_remote_table_match.as_millis() as u64,
+                wait_for_local_table_match.as_millis() as u64,
             );
             loop {
                 {
@@ -515,6 +514,11 @@ impl TableMania {
                 sleep(Duration::from_millis(200)).await;
             }
         };
+        tracing::Span::current().record("table_count", matching_tables.len());
+        tracing::Span::current().record(
+            "timeout_ms",
+            wait_for_remote_table_match.as_millis() as u64,
+        );
 
         // 2. Ensure that all matching keys are also present remotely and have been finalized
         let remote_tables = {
@@ -689,7 +693,7 @@ impl TableMania {
     }
 
     /// Deactivates tables that were previously released
-    #[instrument(skip(rpc_client, authority, released_tables, compute_budget), fields(table_count = tracing::field::Empty))]
+    #[instrument(skip(rpc_client, authority, released_tables, compute_budget), fields(table_count = tracing::field::Empty, table_address = tracing::field::Empty))]
     async fn deactivate_tables(
         rpc_client: &MagicblockRpcClient,
         authority: &Keypair,
