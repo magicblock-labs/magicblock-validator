@@ -188,7 +188,7 @@ impl ChainlinkCloner {
                 // By nature of being immutable on chain this should never happen.
                 // Thus we avoid having to run the upgrade instruction and get
                 // away with just directly modifying the program and program data accounts.
-                debug!("Loading V1 program {}", program.program_id);
+                debug!(program_id = %program.program_id, "Loading V1 program");
                 let validator_kp = validator_authority();
 
                 // BPF Loader (non-upgradeable) cannot be loaded via newer loaders,
@@ -228,14 +228,14 @@ impl ChainlinkCloner {
                 // undelegated
                 if matches!(program.loader_status, LoaderV4Status::Retracted) {
                     debug!(
-                        "Program {} is retracted on chain, won't retract it. When it is deployed on chain we deploy the new version.",
-                        program.program_id
+                        program_id = %program.program_id,
+                        "Program is retracted on chain"
                     );
                     return Ok(None);
                 }
                 debug!(
-                    "Deploying program with V4 loader {}",
-                    program.program_id
+                    program_id = %program.program_id,
+                    "Deploying program with V4 loader"
                 );
 
                 // Create and initialize the program account in retracted state
@@ -316,30 +316,39 @@ impl ChainlinkCloner {
         }
     }
 
+    #[instrument(skip(committor), fields(pubkey = %pubkey, owner = %owner))]
+    async fn reserve_lookup_tables(
+        pubkey: Pubkey,
+        owner: Pubkey,
+        committor: Arc<CommittorService>,
+    ) {
+        match Self::map_committor_request_result(
+            committor.reserve_pubkeys_for_committee(pubkey, owner),
+            &committor,
+        )
+        .await
+        {
+            Ok(initiated) => {
+                trace!(
+                    duration_ms = initiated.elapsed().as_millis() as u64,
+                    "Lookup table reservation completed"
+                );
+            }
+            Err(err) => {
+                error!(error = ?err, "Failed to reserve lookup tables");
+            }
+        };
+    }
+
     fn maybe_prepare_lookup_tables(&self, pubkey: Pubkey, owner: Pubkey) {
         // Allow the committer service to reserve pubkeys in lookup tables
         // that could be needed when we commit this account
         if let Some(committor) = self.changeset_committor.as_ref() {
             if self.config.prepare_lookup_tables {
                 let committor = committor.clone();
-                tokio::spawn(async move {
-                    match Self::map_committor_request_result(
-                        committor.reserve_pubkeys_for_committee(pubkey, owner),
-                        &committor,
-                    )
-                    .await
-                    {
-                        Ok(initiated) => {
-                            trace!(
-                                "Reserving lookup keys for {pubkey} took {:?}",
-                                initiated.elapsed()
-                            );
-                        }
-                        Err(err) => {
-                            error!("Failed to reserve lookup keys for {pubkey}: {err:?}");
-                        }
-                    };
-                });
+                tokio::spawn(Self::reserve_lookup_tables(
+                    pubkey, owner, committor,
+                ));
             }
         }
     }
