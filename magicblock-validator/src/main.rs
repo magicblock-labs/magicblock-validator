@@ -4,7 +4,7 @@ use magicblock_api::{ledger, magic_validator::MagicValidator};
 use magicblock_config::ValidatorParams;
 use solana_signer::Signer;
 use tokio::runtime::Builder;
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, instrument};
 
 use crate::shutdown::Shutdown;
 
@@ -33,6 +33,7 @@ fn main() {
     info!("main runtime shutdown!");
 }
 
+#[instrument(skip_all)]
 async fn run() {
     init_logger();
     #[cfg(feature = "tokio-console")]
@@ -45,12 +46,13 @@ async fn run() {
             std::process::exit(1);
         }
     };
-    info!("Starting validator with config:\n{:#?}", config);
+    info!(config = %format!("{config:#?}"), "Starting validator");
     const WS_PORT_OFFSET: u16 = 1;
     let rpc_port = config.aperture.listen.port();
     let ws_port = rpc_port + WS_PORT_OFFSET; // WebSocket port is typically RPC port + 1
     let rpc_host = config.aperture.listen.ip();
     let validator_identity = config.validator.keypair.pubkey();
+    debug!(rpc_port, ws_port, "Validator configured");
     let mut api = match MagicValidator::try_from_config(config).await {
         Ok(api) => api,
         Err(error) => {
@@ -58,7 +60,7 @@ async fn run() {
             std::process::exit(1);
         }
     };
-    debug!("Created API .. starting things up");
+    debug!("Created API, starting things up");
     // We need to create and hold on to the ledger lock here in order to keep the
     // underlying file locked while the app is running.
     // This prevents other processes from locking it until we exit.
@@ -91,7 +93,7 @@ async fn run() {
     print_info("Ready for connections!");
     print_info("");
     if let Err(err) = Shutdown::wait().await {
-        error!("Failed to gracefully shutdown: {}", err);
+        error!(error = ?err, "Failed to gracefully shutdown");
     }
 
     api.prepare_ledger_for_shutdown();
