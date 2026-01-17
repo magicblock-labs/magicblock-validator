@@ -124,11 +124,11 @@ where
             }
         }
         err @
-        (MagicBlockRpcClientError::GetSlot(_)
-        | MagicBlockRpcClientError::LookupTableDeserialize(_)) => {
-            error!("Unexpected error during send transaction: {:?}", err);
-            err.into()
-        }
+         (MagicBlockRpcClientError::GetSlot(_)
+         | MagicBlockRpcClientError::LookupTableDeserialize(_)) => {
+             error!(error = ?err, "Unexpected error during send transaction");
+             err.into()
+         }
         err
         @ (MagicBlockRpcClientError::GetLatestBlockhash(_)
         | MagicBlockRpcClientError::CannotGetTransactionSignatureStatus(
