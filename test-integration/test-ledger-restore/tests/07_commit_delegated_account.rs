@@ -5,7 +5,6 @@ use integration_test_tools::{
     expect, loaded_accounts::LoadedAccounts, tmpdir::resolve_tmp_dir,
     validator::cleanup,
 };
-use log::*;
 use program_flexi_counter::{
     instruction::{
         create_add_and_schedule_commit_ix, create_add_ix, create_mul_ix,
@@ -21,6 +20,7 @@ use test_ledger_restore::{
     wait_for_cloned_accounts_hydration, wait_for_ledger_persist,
     TMP_DIR_LEDGER,
 };
+use tracing::*;
 
 const COUNTER: &str = "Counter of Payer";
 

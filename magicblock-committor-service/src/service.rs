@@ -1,6 +1,5 @@
 use std::{path::Path, sync::Arc, time::Instant};
 
-use log::*;
 use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
 use solana_signature::Signature;
@@ -14,6 +13,7 @@ use tokio::{
     },
 };
 use tokio_util::sync::{CancellationToken, WaitForCancellationFutureOwned};
+use tracing::*;
 
 use crate::{
     committor_processor::CommittorProcessor,

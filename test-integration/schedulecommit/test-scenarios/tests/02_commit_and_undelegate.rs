@@ -3,7 +3,6 @@ use integration_test_tools::{
     scheduled_commits::extract_scheduled_commit_sent_signature_from_logs,
     transactions::send_and_confirm_instructions_with_payer,
 };
-use log::*;
 use program_schedulecommit::{
     api::{
         increase_count_instruction,
@@ -32,6 +31,7 @@ use solana_sdk::{
     transaction::Transaction,
 };
 use test_kit::init_logger;
+use tracing::*;
 use utils::{
     assert_one_committee_account_was_undelegated_on_chain,
     assert_one_committee_synchronized_count,

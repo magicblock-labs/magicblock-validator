@@ -7,10 +7,10 @@ use std::{
 };
 
 use async_trait::async_trait;
-use log::*;
 use solana_commitment_config::CommitmentConfig;
 use solana_pubkey::Pubkey;
 use tokio::sync::mpsc;
+use tracing::*;
 
 use crate::remote_account_provider::{
     chain_laser_actor::Slots, chain_laser_client::ChainLaserClientImpl,

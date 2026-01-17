@@ -1,7 +1,7 @@
 use std::error::Error;
 
-use log::*;
 use magicblock_core::traits::PersistsAccountModData;
+use tracing::*;
 
 use crate::Ledger;
 
@@ -14,7 +14,7 @@ impl PersistsAccountModData for Ledger {
 
     fn load(&self, id: u64) -> Result<Option<Vec<u8>>, Box<dyn Error>> {
         let data = self.read_account_mod_data(id)?.map(|x| x.data);
-        if log_enabled!(Level::Trace) {
+        if enabled!(Level::TRACE) {
             if let Some(data) = &data {
                 trace!(
                     "Loading data with id: {}, data-len: {}",

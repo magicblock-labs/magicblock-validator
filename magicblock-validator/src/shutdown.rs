@@ -1,7 +1,7 @@
-use log::info;
 use tokio::signal;
 #[cfg(unix)]
 use tokio::signal::unix::SignalKind;
+use tracing::info;
 
 pub struct Shutdown;
 impl Shutdown {

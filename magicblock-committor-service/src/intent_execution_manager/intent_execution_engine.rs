@@ -5,7 +5,6 @@ use std::{
 };
 
 use futures_util::{stream::FuturesUnordered, StreamExt};
-use log::{error, info, trace, warn};
 use magicblock_metrics::metrics;
 use tokio::{
     sync::{
@@ -14,6 +13,7 @@ use tokio::{
     },
     task::JoinHandle,
 };
+use tracing::{error, info, trace, warn};
 
 use crate::{
     intent_execution_manager::{

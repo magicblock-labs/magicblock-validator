@@ -6,7 +6,7 @@ edition.workspace = true
 [dependencies]
 bincode = { workspace = true }
 futures = { workspace = true }
-log = { workspace = true }
+tracing = { workspace = true }
 magicblock-chainlink = { workspace = true }
 magicblock-config = { workspace = true }
 magicblock-delegation-program = { workspace = true }

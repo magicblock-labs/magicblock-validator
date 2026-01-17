@@ -4,7 +4,6 @@ use std::{
     sync::{Arc, RwLock},
 };
 
-use log::{info, warn};
 use magicblock_accounts_db::{AccountsDb, GlobalWriteLock};
 use magicblock_core::link::{
     accounts::AccountUpdateTx,
@@ -24,6 +23,7 @@ use solana_svm::transaction_processor::{
     TransactionProcessingConfig, TransactionProcessingEnvironment,
 };
 use tokio::{runtime::Builder, sync::mpsc::Sender};
+use tracing::{info, warn};
 
 use crate::{
     builtins::BUILTINS,

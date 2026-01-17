@@ -7,10 +7,10 @@ use std::{
     sync::atomic::{AtomicU32, AtomicU64, Ordering},
 };
 
-use log::error;
 use magicblock_config::config::{AccountsDbConfig, BlockSize};
 use memmap2::MmapMut;
 use solana_account::AccountSharedData;
+use tracing::error;
 
 use crate::{
     error::{AccountsDbError, LogErr},

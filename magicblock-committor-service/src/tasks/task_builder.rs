@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use log::error;
 use magicblock_program::magic_scheduled_base_intent::{
     CommitType, CommittedAccount, MagicBaseIntent, ScheduledBaseIntent,
     UndelegateType,
@@ -9,6 +8,7 @@ use magicblock_program::magic_scheduled_base_intent::{
 use solana_account::Account;
 use solana_pubkey::Pubkey;
 use solana_signature::Signature;
+use tracing::error;
 
 use super::{CommitDiffTask, CommitTask};
 use crate::{
@@ -147,7 +147,7 @@ impl TasksBuilder for TaskBuilderImpl {
         let base_accounts = match base_accounts {
             Ok(map) => map,
             Err(err) => {
-                log::warn!("Failed to fetch base accounts for CommitDiff (id={}): {}; falling back to CommitState", base_intent.id, err);
+                tracing::warn!("Failed to fetch base accounts for CommitDiff (id={}): {}; falling back to CommitState", base_intent.id, err);
                 Default::default()
             }
         };

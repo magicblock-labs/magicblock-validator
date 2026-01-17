@@ -8,7 +8,6 @@ use integration_test_tools::{
     },
     IntegrationTestContext,
 };
-use log::*;
 use magicblock_config::{
     config::{
         accounts::AccountsDbConfig, chain::ChainLinkConfig,
@@ -25,6 +24,7 @@ use solana_sdk::{
     signer::Signer, transaction::Transaction,
 };
 use tempfile::TempDir;
+use tracing::*;
 
 fn get_programs() -> Vec<LoadableProgram> {
     let flexicounter_id = program_flexi_counter::id();

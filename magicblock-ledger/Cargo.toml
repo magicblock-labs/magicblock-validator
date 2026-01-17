@@ -10,6 +10,7 @@ edition.workspace = true
 [dependencies]
 arc-swap = { workspace = true }
 bincode = { workspace = true }
+tracing = { workspace = true }
 log = { workspace = true }
 byteorder = { workspace = true }
 fs_extra = { workspace = true }

@@ -1,11 +1,11 @@
 use integration_test_tools::IntegrationTestContext;
-use log::*;
 use solana_sdk::{
     native_token::LAMPORTS_PER_SOL, signature::Keypair, signer::Signer,
     system_instruction,
 };
 use solana_transaction_status::UiTransactionEncoding;
 use test_kit::init_logger;
+use tracing::*;
 
 #[test]
 fn test_get_block_timestamp_stability() {

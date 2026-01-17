@@ -17,7 +17,6 @@ use helius_laserstream::{
     },
     ChannelOptions, LaserstreamConfig, LaserstreamError,
 };
-use log::*;
 use magicblock_metrics::metrics::{
     inc_account_subscription_account_updates_count,
     inc_program_subscription_account_updates_count,
@@ -28,6 +27,7 @@ use solana_pubkey::Pubkey;
 use solana_sdk_ids::sysvar::clock;
 use tokio::sync::{mpsc, oneshot};
 use tokio_stream::StreamMap;
+use tracing::*;
 
 use crate::remote_account_provider::{
     pubsub_common::{
@@ -450,7 +450,7 @@ impl ChainLaserActor {
             .map(|(cs, fs)| (Some(cs), Some(fs)))
             .unwrap_or((None, None));
 
-        if log::log_enabled!(log::Level::Trace) {
+        if tracing::enabled!(tracing::Level::TRACE) {
             trace!(
                 "[client_id={}] Activating {} account subs at slot {} \
              from_slot {} using {} stream(s)",
@@ -723,7 +723,7 @@ impl ChainLaserActor {
             return;
         };
 
-        let log_trace = if log::log_enabled!(log::Level::Trace) {
+        let log_trace = if tracing::enabled!(tracing::Level::TRACE) {
             if pubkey.eq(&clock::ID) {
                 static TRACE_CLOCK_COUNT: AtomicU64 = AtomicU64::new(0);
                 TRACE_CLOCK_COUNT

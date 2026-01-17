@@ -9,7 +9,6 @@ use std::{
 use dlp::pda::ephemeral_balance_pda_from_payer;
 use errors::ChainlinkResult;
 use fetch_cloner::FetchCloner;
-use log::*;
 use magicblock_config::config::ChainLinkConfig;
 use magicblock_core::traits::AccountsBank;
 use magicblock_metrics::metrics::AccountFetchOrigin;
@@ -19,6 +18,7 @@ use solana_feature_set;
 use solana_pubkey::Pubkey;
 use solana_transaction::sanitized::SanitizedTransaction;
 use tokio::{sync::mpsc, task};
+use tracing::*;
 
 use crate::{
     cloner::Cloner,
@@ -237,7 +237,7 @@ Kept: {} delegated, {} blacklisted",
                         let undelegating = account.undelegating();
                         let delegated = account.delegated();
                         let remove = !undelegating && !delegated;
-                        if log::log_enabled!(log::Level::Trace) {
+                        if tracing::enabled!(tracing::Level::TRACE) {
                             if remove {
                                 trace!(
                                     "Removing unsubscribed account '{pubkey}' from bank"
@@ -390,7 +390,7 @@ Kept: {} delegated, {} blacklisted",
         fetch_origin: AccountFetchOrigin,
         program_ids: Option<&[Pubkey]>,
     ) -> ChainlinkResult<Vec<Option<AccountSharedData>>> {
-        if log::log_enabled!(log::Level::Trace) {
+        if tracing::enabled!(tracing::Level::TRACE) {
             let pubkeys = pubkeys
                 .iter()
                 .map(|p| p.to_string())
@@ -430,7 +430,7 @@ Kept: {} delegated, {} blacklisted",
         fetch_origin: AccountFetchOrigin,
         program_ids: Option<&[Pubkey]>,
     ) -> ChainlinkResult<FetchAndCloneResult> {
-        if log::log_enabled!(log::Level::Trace) {
+        if tracing::enabled!(tracing::Level::TRACE) {
             let pubkeys_str = pubkeys
                 .iter()
                 .map(|p| p.to_string())

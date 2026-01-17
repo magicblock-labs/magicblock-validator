@@ -4,7 +4,6 @@ use cleanass::{assert, assert_eq};
 use integration_test_tools::{
     expect, tmpdir::resolve_tmp_dir, unwrap, validator::cleanup,
 };
-use log::*;
 use solana_sdk::{
     commitment_config::CommitmentConfig,
     pubkey::Pubkey,
@@ -17,6 +16,7 @@ use test_ledger_restore::{
     setup_validator_with_local_remote, transfer_lamports,
     wait_for_ledger_persist, TMP_DIR_LEDGER,
 };
+use tracing::*;
 
 #[test]
 fn test_restore_ledger_with_transferred_account() {

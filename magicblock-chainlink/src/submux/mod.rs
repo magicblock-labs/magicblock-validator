@@ -9,11 +9,11 @@ use std::{
 };
 
 use async_trait::async_trait;
-use log::*;
 use magicblock_metrics::metrics;
 use solana_pubkey::Pubkey;
 use solana_sdk_ids::sysvar::clock;
 use tokio::sync::mpsc;
+use tracing::*;
 
 use crate::remote_account_provider::{
     chain_pubsub_client::{ChainPubsubClient, ReconnectableClient},
@@ -659,7 +659,7 @@ where
             } else {
                 debounce_state.maybe_disable()
             };
-            if changed && log_enabled!(Level::Trace) {
+            if changed && tracing::enabled!(tracing::Level::TRACE) {
                 trace!(
                     "{} debounce for: {}. Millis between arrivals: {:?}",
                     debounce_state.label(),

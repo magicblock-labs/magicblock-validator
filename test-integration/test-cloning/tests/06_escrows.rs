@@ -1,10 +1,10 @@
 use integration_test_tools::{dlp_interface, IntegrationTestContext};
-use log::*;
 use solana_sdk::{
     account::Account, native_token::LAMPORTS_PER_SOL, pubkey::Pubkey,
     signature::Keypair, signer::Signer, system_instruction, system_program,
 };
 use test_kit::init_logger;
+use tracing::*;
 
 fn get_escrow_pda_ephem(
     ctx: &IntegrationTestContext,

@@ -1,7 +1,6 @@
 use std::time::Duration;
 
 use dlp::instruction_builder::validator_claim_fees;
-use log::{error, info};
 use magicblock_program::validator::validator_authority;
 use magicblock_rpc_client::MagicBlockRpcClientError;
 use solana_commitment_config::CommitmentConfig;
@@ -10,6 +9,7 @@ use solana_signer::Signer;
 use solana_transaction::Transaction;
 use tokio::{task::JoinHandle, time::Instant};
 use tokio_util::sync::CancellationToken;
+use tracing::{error, info};
 
 pub struct ClaimFeesTask {
     pub handle: Option<JoinHandle<()>>,

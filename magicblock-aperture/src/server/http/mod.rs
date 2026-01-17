@@ -6,13 +6,13 @@ use hyper_util::{
     rt::{TokioExecutor, TokioIo},
     server::conn,
 };
-use log::info;
 use magicblock_core::link::DispatchEndpoints;
 use tokio::{
     net::{TcpListener, TcpStream},
     sync::oneshot::Receiver,
 };
 use tokio_util::sync::CancellationToken;
+use tracing::info;
 
 use super::Shutdown;
 use crate::{state::SharedState, RpcResult};

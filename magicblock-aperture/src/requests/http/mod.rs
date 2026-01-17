@@ -7,7 +7,6 @@ use hyper::{
     body::{Bytes, Incoming},
     Request, Response,
 };
-use log::*;
 use magicblock_core::{
     link::transactions::SanitizeableTransaction, traits::AccountsBank,
 };
@@ -19,6 +18,7 @@ use solana_transaction::{
     sanitized::SanitizedTransaction, versioned::VersionedTransaction,
 };
 use solana_transaction_status::UiTransactionEncoding;
+use tracing::*;
 
 use super::RpcRequest;
 use crate::{

@@ -4,7 +4,6 @@ use std::{
 };
 
 use async_trait::async_trait;
-use log::*;
 use magicblock_accounts_db::AccountsDb;
 use magicblock_chainlink::{
     cloner::{
@@ -41,6 +40,7 @@ use solana_signer::{Signer, SignerError};
 use solana_sysvar::rent::Rent;
 use solana_transaction::Transaction;
 use tokio::sync::oneshot;
+use tracing::*;
 
 use crate::bpf_loader_v1::BpfUpgradableProgramModifications;
 

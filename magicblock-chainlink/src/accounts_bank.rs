@@ -2,10 +2,10 @@
 pub mod mock {
     use std::{collections::HashMap, fmt, sync::Mutex};
 
-    use log::*;
     use magicblock_core::traits::AccountsBank;
     use solana_account::{AccountSharedData, WritableAccount};
     use solana_pubkey::Pubkey;
+    use tracing::*;
 
     use crate::blacklisted_accounts;
 

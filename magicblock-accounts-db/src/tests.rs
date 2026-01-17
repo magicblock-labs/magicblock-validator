@@ -487,10 +487,7 @@ impl TestEnv {
     }
 
     fn init_raw_db() -> (Arc<AccountsDb>, TempDir) {
-        let _ = env_logger::builder()
-            .filter_level(log::LevelFilter::Info)
-            .is_test(true)
-            .try_init();
+        magicblock_core::logger::init_for_tests();
 
         let dir = tempfile::tempdir().expect("temp dir creation failed");
         let config = AccountsDbConfig::default();

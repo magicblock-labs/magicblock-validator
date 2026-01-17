@@ -1,6 +1,5 @@
 use std::str::FromStr;
 
-use log::{Level::Trace, *};
 use magicblock_core::link::transactions::{
     SanitizeableTransaction, TransactionSchedulerHandle,
 };
@@ -9,6 +8,7 @@ use solana_clock::{Slot, UnixTimestamp};
 use solana_hash::Hash;
 use solana_transaction::versioned::VersionedTransaction;
 use solana_transaction_status::VersionedConfirmedBlock;
+use tracing::{Level, *};
 
 use crate::{
     errors::{LedgerError, LedgerResult},
@@ -40,7 +40,7 @@ async fn replay_blocks(
     } = params;
     let mut slot: u64 = blockhashes_only_starting_slot;
 
-    let max_slot = if log::log_enabled!(Level::Info) {
+    let max_slot = if enabled!(Level::INFO) {
         ledger
             .get_max_blockhash()?
             .0
@@ -53,7 +53,7 @@ async fn replay_blocks(
         let Ok(Some(block)) = ledger.get_block(slot) else {
             break;
         };
-        if log::log_enabled!(Level::Info)
+        if enabled!(Level::INFO)
             && slot.is_multiple_of(PROGRESS_REPORT_INTERVAL)
         {
             info!(
@@ -127,7 +127,7 @@ async fn replay_blocks(
                 transaction_scheduler.replay(txn).await.map_err(|err| {
                     LedgerError::BlockStoreProcessor(err.to_string())
                 });
-            if !log_enabled!(Trace) {
+            if !enabled!(Level::TRACE) {
                 debug!("Result: {signature} - {result:?}");
             }
             if let Err(error) = result {

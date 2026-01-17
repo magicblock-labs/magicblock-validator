@@ -4,7 +4,6 @@ use std::{
 };
 
 use async_trait::async_trait;
-use log::{debug, error, info};
 use magicblock_account_cloner::ChainlinkCloner;
 use magicblock_accounts_db::AccountsDb;
 use magicblock_chainlink::{
@@ -36,6 +35,7 @@ use tokio::{
     task,
 };
 use tokio_util::sync::CancellationToken;
+use tracing::{debug, error, info};
 
 use crate::{
     errors::ScheduledCommitsProcessorResult, ScheduledCommitsProcessor,

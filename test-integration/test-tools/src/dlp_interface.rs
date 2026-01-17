@@ -1,6 +1,5 @@
 use anyhow::Context;
 use dlp::args::{DelegateArgs, DelegateEphemeralBalanceArgs};
-use log::*;
 use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_rpc_client_api::config::RpcSendTransactionConfig;
@@ -12,6 +11,7 @@ use solana_sdk::{
     system_instruction,
     transaction::Transaction,
 };
+use tracing::*;
 
 pub fn create_topup_ixs(
     payer: Pubkey,

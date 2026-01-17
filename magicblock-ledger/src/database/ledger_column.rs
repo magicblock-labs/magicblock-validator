@@ -7,10 +7,10 @@ use std::{
 };
 
 use bincode::{deserialize, serialize};
-use log::warn;
 use prost::Message;
 use rocksdb::{properties as RocksProperties, CStrLike, ColumnFamily};
 use serde::de::DeserializeOwned;
+use tracing::warn;
 
 use super::{
     columns::{

@@ -1,9 +1,9 @@
 use std::{sync::Arc, time::Duration};
 
 use futures_util::stream::{FuturesUnordered, StreamExt};
-use log::*;
 use solana_pubkey::Pubkey;
 use tokio::sync::oneshot;
+use tracing::*;
 
 const SUBSCRIBE_TIMEOUT: Duration = Duration::from_millis(2_000);
 const UNSUBSCRIBE_TIMEOUT: Duration = Duration::from_millis(1_000);

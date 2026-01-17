@@ -16,7 +16,6 @@ pub(crate) use errors::{
     RemoteAccountProviderError, RemoteAccountProviderResult,
 };
 use futures_util::future::try_join_all;
-use log::*;
 pub use lru_cache::AccountsLruCache;
 pub(crate) use remote_account::RemoteAccount;
 pub use remote_account::RemoteAccountUpdateSource;
@@ -37,6 +36,7 @@ use tokio::{
     task,
     time::{self, Duration},
 };
+use tracing::*;
 
 pub(crate) mod chain_laser_actor;
 pub mod chain_laser_client;
@@ -230,11 +230,12 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                     .subscription_count(Some(&never_evicted))
                     .await;
 
-                let all_pubsub_subs = if log::log_enabled!(log::Level::Debug) {
-                    pubsub_client.subscriptions().unwrap_or_default()
-                } else {
-                    vec![]
-                };
+                let all_pubsub_subs =
+                    if tracing::enabled!(tracing::Level::DEBUG) {
+                        pubsub_client.subscriptions().unwrap_or_default()
+                    } else {
+                        vec![]
+                    };
 
                 let (pubsub_total, pubsub_without_never_evict) =
                     match subscription_counts {
@@ -251,7 +252,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                         "User account subscription counts LRU cache={} pubsub client={} don't match",
                         lru_count, pubsub_without_never_evict
                     );
-                    if log::log_enabled!(log::Level::Debug) {
+                    if tracing::enabled!(tracing::Level::DEBUG) {
                         // Log all pubsub subscriptions for debugging
                         trace!(
                             "All pubsub subscriptions: {:?}",
@@ -611,7 +612,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             pubkeys.iter().any(|pk| !fetching.contains_key(pk))
         };
         if refetch {
-            if log::log_enabled!(log::Level::Trace) {
+            if tracing::enabled!(tracing::Level::TRACE) {
                 trace!(
                     "Triggering re-fetch for accounts [{}] at slot {}",
                     pubkeys_str(pubkeys),
@@ -632,7 +633,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         let start = std::time::Instant::now();
         let mut retries = 0;
         loop {
-            if log::log_enabled!(log::Level::Trace) {
+            if tracing::enabled!(tracing::Level::TRACE) {
                 let slots = account_slots(&remote_accounts);
                 let pubkey_slots = pubkeys
                     .iter()
@@ -715,7 +716,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             return Ok(vec![]);
         }
 
-        if log_enabled!(log::Level::Trace) {
+        if tracing::enabled!(tracing::Level::TRACE) {
             trace!("Fetching accounts: [{}]", pubkeys_str(pubkeys));
         }
 
@@ -811,7 +812,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         &self,
         subscribe_and_fetch: &[(Pubkey, oneshot::Receiver<FetchResult>)],
     ) -> RemoteAccountProviderResult<()> {
-        if log_enabled!(log::Level::Trace) {
+        if tracing::enabled!(tracing::Level::TRACE) {
             let pubkeys = subscribe_and_fetch
                 .iter()
                 .map(|(pk, _)| pk.to_string())
@@ -997,7 +998,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
 
             let mut remaining_retries: u64 = MAX_RETRIES;
 
-            if log_enabled!(log::Level::Trace) {
+            if tracing::enabled!(tracing::Level::TRACE) {
                 trace!("Fetch ({})", pubkeys_str(&pubkeys));
             }
 
@@ -1178,7 +1179,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                 }
             }
 
-            if log_enabled!(log::Level::Trace) {
+            if tracing::enabled!(tracing::Level::TRACE) {
                 let pubkeys = pubkeys
                     .iter()
                     .map(|pk| pk.to_string())
@@ -1201,7 +1202,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                         requests
                     } else {
                         // Account was resolved by subscription update, skip
-                        if log::log_enabled!(log::Level::Trace) {
+                        if tracing::enabled!(tracing::Level::TRACE) {
                             trace!(
                                 "Account {pubkey} was already resolved by subscription update"
                             );

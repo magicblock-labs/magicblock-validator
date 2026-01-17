@@ -1,10 +1,10 @@
-use log::*;
 use magicblock_metrics::metrics::{
     TRANSACTION_PROCESSING_TIME, TRANSACTION_SKIP_PREFLIGHT,
 };
 use solana_rpc_client_api::config::RpcSendTransactionConfig;
 use solana_transaction_error::TransactionError;
 use solana_transaction_status::UiTransactionEncoding;
+use tracing::*;
 
 use super::prelude::*;
 

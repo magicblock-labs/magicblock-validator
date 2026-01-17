@@ -1,4 +1,3 @@
-use log::error;
 use magicblock_metrics::metrics;
 use magicblock_rpc_client::{
     utils::TransactionErrorMapper, MagicBlockRpcClientError,
@@ -7,6 +6,7 @@ use solana_instruction::error::InstructionError;
 use solana_signature::Signature;
 use solana_signer::SignerError;
 use solana_transaction_error::TransactionError;
+use tracing::error;
 
 use crate::{
     tasks::{

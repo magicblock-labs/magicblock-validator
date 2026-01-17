@@ -1,8 +1,8 @@
 use std::ops::ControlFlow;
 
-use log::error;
 use solana_pubkey::Pubkey;
 use solana_signature::Signature;
+use tracing::error;
 
 use crate::{
     intent_executor::{

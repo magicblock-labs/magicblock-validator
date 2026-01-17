@@ -7,7 +7,6 @@ use std::{
     thread,
 };
 
-use log::*;
 use magicblock_account_cloner::{
     map_committor_request_result, ChainlinkCloner,
 };
@@ -77,6 +76,7 @@ use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_signer::Signer;
 use tokio::runtime::Builder;
 use tokio_util::sync::CancellationToken;
+use tracing::*;
 
 use crate::{
     domain_registry_manager::DomainRegistryManager,

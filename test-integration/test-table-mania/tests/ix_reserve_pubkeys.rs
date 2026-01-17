@@ -1,12 +1,12 @@
 use std::collections::HashSet;
 
-use log::*;
 use solana_pubkey::Pubkey;
 use solana_sdk::{
     address_lookup_table::state::LOOKUP_TABLE_MAX_ADDRESSES, signature::Keypair,
 };
 use test_kit::init_logger;
 use tokio::task::JoinSet;
+use tracing::*;
 mod utils;
 
 // -----------------

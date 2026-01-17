@@ -1,6 +1,5 @@
 use std::{error::Error, path::PathBuf};
 
-use log::debug;
 use magicblock_accounts_db::AccountsDb;
 use solana_account::{AccountSharedData, WritableAccount};
 use solana_program::{
@@ -8,6 +7,7 @@ use solana_program::{
     rent::Rent,
 };
 use solana_pubkey::Pubkey;
+use tracing::debug;
 
 const UPGRADEABLE_LOADER_ID: Pubkey = bpf_loader_upgradeable::ID;
 

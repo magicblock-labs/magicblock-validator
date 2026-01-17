@@ -43,7 +43,6 @@ futures = "0.3.31"
 integration-test-tools = { path = "test-tools" }
 isocountry = "0.3.2"
 lazy_static = "1.4.0"
-log = "0.4.20"
 magicblock-api = { path = "../magicblock-api" }
 magicblock-chainlink = { path = "../magicblock-chainlink", features = [
   "dev-context",
@@ -104,6 +103,7 @@ test-ledger-restore = { path = "./test-ledger-restore" }
 test-kit = { path = "../test-kit" }
 tokio = "1.0"
 toml = "0.8.13"
+tracing = "0.1"
 ureq = "2.9.6"
 url = "2.5.0"
 

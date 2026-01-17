@@ -61,7 +61,7 @@ base64 = { workspace = true }
 bincode = { workspace = true }
 bs58 = { workspace = true }
 json = { workspace = true }
-log = { workspace = true }
+tracing = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
 

@@ -8,7 +8,6 @@ use std::{
     },
 };
 
-use log::*;
 use magicblock_metrics::metrics;
 use magicblock_rpc_client::{
     MagicBlockRpcClientError, MagicBlockSendTransactionConfig,
@@ -26,6 +25,7 @@ use solana_signature::Signature;
 use solana_signer::Signer;
 use solana_slot_hashes::MAX_ENTRIES;
 use solana_transaction::Transaction;
+use tracing::*;
 
 use crate::{
     derive_keypair,

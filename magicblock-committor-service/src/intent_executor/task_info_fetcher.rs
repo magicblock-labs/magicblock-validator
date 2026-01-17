@@ -6,7 +6,6 @@ use async_trait::async_trait;
 use dlp::{
     delegation_metadata_seeds_from_delegated_account, state::DelegationMetadata,
 };
-use log::{error, info, warn};
 use lru::LruCache;
 use magicblock_metrics::metrics;
 use magicblock_rpc_client::{MagicBlockRpcClientError, MagicblockRpcClient};
@@ -19,6 +18,7 @@ use solana_rpc_client_api::{
     request::RpcError,
 };
 use solana_signature::Signature;
+use tracing::{error, info, warn};
 
 const NUM_FETCH_RETRIES: NonZeroUsize = NonZeroUsize::new(5).unwrap();
 const MUTEX_POISONED_MSG: &str = "CacheTaskInfoFetcher mutex poisoned!";

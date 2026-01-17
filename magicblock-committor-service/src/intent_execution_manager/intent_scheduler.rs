@@ -1,9 +1,9 @@
 use std::collections::{hash_map::Entry, HashMap, VecDeque};
 
-use log::error;
 use magicblock_program::magic_scheduled_base_intent::ScheduledBaseIntent;
 use solana_pubkey::Pubkey;
 use thiserror::Error;
+use tracing::error;
 
 use crate::types::ScheduledBaseIntentWrapper;
 

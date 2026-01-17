@@ -1,4 +1,3 @@
-use log::*;
 use solana_account_decoder::parse_token::UiTokenAmount;
 use solana_clock::{Slot, UnixTimestamp};
 use solana_hash::{Hash, HASH_BYTES};
@@ -18,6 +17,7 @@ use solana_transaction_status::{
     Reward, RewardType, TransactionStatusMeta, TransactionTokenBalance,
     TransactionWithStatusMeta, VersionedTransactionWithStatusMeta,
 };
+use tracing::*;
 
 pub fn from_generated_confirmed_transaction(
     slot: Slot,

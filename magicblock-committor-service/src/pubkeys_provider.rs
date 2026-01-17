@@ -1,9 +1,9 @@
 use std::collections::HashSet;
 
 use dlp::pda;
-use log::*;
 use solana_pubkey::Pubkey;
 use solana_system_program::id as system_program_id;
+use tracing::*;
 
 /// Returns all accounts needed to process/finalize a commit for the account
 /// with the provided `delegated_account`.

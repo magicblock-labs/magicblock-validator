@@ -1,6 +1,6 @@
 use std::io;
 
-use log::error;
+use tracing::error;
 
 #[derive(Debug, thiserror::Error)]
 pub enum AccountsDbError {

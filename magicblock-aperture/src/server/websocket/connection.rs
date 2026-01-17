@@ -12,12 +12,12 @@ use fastwebsockets::{
 use hyper::{body::Bytes, upgrade::Upgraded};
 use hyper_util::rt::TokioIo;
 use json::Value;
-use log::debug;
 use tokio::{
     sync::mpsc::{self, Receiver},
     time::{self, Instant},
 };
 use tokio_util::sync::CancellationToken;
+use tracing::debug;
 
 use super::{
     dispatch::{WsDispatchResult, WsDispatcher},

@@ -1,12 +1,12 @@
 use std::{collections::HashSet, sync::atomic::Ordering};
 
 use dlp::pda::delegation_record_pda_from_delegated_account;
-use log::*;
 use magicblock_core::{token_programs::is_ata, traits::AccountsBank};
 use magicblock_metrics::metrics::AccountFetchOrigin;
 use solana_account::{AccountSharedData, ReadableAccount};
 use solana_pubkey::Pubkey;
 use tokio::task::JoinSet;
+use tracing::*;
 
 use super::{
     subscription::{cancel_subs, CancelStrategy},
@@ -654,7 +654,7 @@ where
 {
     let mut join_set = JoinSet::new();
     for request in accounts_to_clone {
-        if log::log_enabled!(log::Level::Trace) {
+        if tracing::enabled!(tracing::Level::TRACE) {
             trace!(
                 "Cloning account: {} (remote slot {}, owner: {})",
                 request.pubkey,

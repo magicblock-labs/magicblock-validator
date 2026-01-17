@@ -17,7 +17,7 @@ bincode = { workspace = true }
 borsh = { workspace = true }
 dyn-clone = { workspace = true }
 futures-util = { workspace = true }
-log = { workspace = true }
+tracing = { workspace = true }
 lru = { workspace = true }
 magicblock-committor-program = { workspace = true, features = [
   "no-entrypoint",

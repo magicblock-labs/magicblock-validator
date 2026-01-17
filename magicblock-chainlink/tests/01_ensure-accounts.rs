@@ -1,6 +1,5 @@
 use assert_matches::assert_matches;
 use dlp::pda::delegation_record_pda_from_delegated_account;
-use log::*;
 use magicblock_chainlink::{
     assert_cloned_as_delegated, assert_cloned_as_undelegated,
     assert_not_cloned, assert_not_found, assert_not_subscribed,
@@ -11,6 +10,7 @@ use magicblock_chainlink::{
 use solana_account::{Account, AccountSharedData};
 use solana_program::clock::Slot;
 use solana_pubkey::Pubkey;
+use tracing::*;
 use utils::test_context::TestContext;
 
 mod utils;

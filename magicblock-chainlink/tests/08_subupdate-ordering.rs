@@ -1,8 +1,8 @@
-use log::*;
 use magicblock_chainlink::{testing::init_logger, AccountFetchOrigin};
 use solana_account::{Account, ReadableAccount};
 use solana_program::clock::Slot;
 use solana_pubkey::Pubkey;
+use tracing::*;
 use utils::{
     accounts::account_shared_with_owner_and_slot, test_context::TestContext,
 };

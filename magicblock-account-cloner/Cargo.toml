@@ -10,7 +10,7 @@ edition.workspace = true
 [dependencies]
 async-trait = { workspace = true }
 bincode = { workspace = true }
-log = { workspace = true }
+tracing = { workspace = true }
 magicblock-accounts-db = { workspace = true }
 magicblock-chainlink = { workspace = true }
 magicblock-committor-service = { workspace = true }

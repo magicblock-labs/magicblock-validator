@@ -2,9 +2,9 @@ use std::path::Path;
 
 use iterator::OffsetPubkeyIter;
 use lmdb::{Cursor, DatabaseFlags, Environment, RwTransaction, Transaction};
-use log::warn;
 use solana_pubkey::Pubkey;
 use table::Table;
+use tracing::warn;
 use utils::*;
 
 use crate::{

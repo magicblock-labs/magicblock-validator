@@ -1,12 +1,12 @@
 use std::sync::Arc;
 
-use log::{info, warn};
 use magicblock_config::config::ApertureConfig;
 use magicblock_core::link::{
     accounts::AccountUpdateRx, blocks::BlockUpdateRx,
     transactions::TransactionStatusRx, DispatchEndpoints,
 };
 use tokio_util::sync::CancellationToken;
+use tracing::{info, warn};
 
 use crate::{
     geyser::GeyserPluginManager,
