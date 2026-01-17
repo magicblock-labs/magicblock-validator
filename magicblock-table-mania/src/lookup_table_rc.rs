@@ -402,6 +402,7 @@ impl LookupTableRc {
     /// - **pubkeys**: to extend the lookup table respecting respecting
     ///   [solana_address_lookup_table_interface::LOOKUP_TABLE_MAX_ADDRESSES]
     ///   after it is initialized
+    #[instrument(skip(rpc_client, authority, compute_budget), fields(table_address = tracing::field::Empty))]
     pub async fn init(
         rpc_client: &MagicblockRpcClient,
         authority: &Keypair,
@@ -420,7 +421,9 @@ impl LookupTableRc {
             authority.pubkey(),
             latest_slot,
         );
-        trace!("Initializing lookup table {}", table_address);
+        tracing::Span::current()
+            .record("table_address", table_address.to_string());
+        trace!("Initializing lookup table");
 
         let end = pubkeys.len().min(LOOKUP_TABLE_MAX_ADDRESSES);
         let extend_ix = alt::instruction::extend_lookup_table(
@@ -454,10 +457,7 @@ impl LookupTableRc {
             .await?;
         let (signature, error) = outcome.into_signature_and_error();
         if let Some(error) = &error {
-            error!(
-                "Error initializing lookup table: {:?} ({})",
-                error, signature
-            );
+            error!(error = ?error, signature = %signature, "Failed to initialize lookup table");
             return Err(MagicBlockRpcClientError::SentTransactionError(
                 error.clone(),
                 signature,
@@ -486,6 +486,10 @@ impl LookupTableRc {
     /// - **rpc_client**: RPC client to use for sending the extend transaction
     /// - **authority**:  payer for the extend transaction
     /// - **pubkeys**:    to extend the lookup table with
+    #[instrument(
+        skip(self, rpc_client, authority, compute_budget),
+        fields(table_address = %self.table_address(), pubkey_count = extra_pubkeys.len())
+    )]
     pub async fn extend(
         &self,
         rpc_client: &MagicblockRpcClient,
@@ -535,7 +539,7 @@ impl LookupTableRc {
             .await?;
         let (signature, error) = outcome.into_signature_and_error();
         if let Some(error) = &error {
-            error!("Error extending lookup table: {:?} ({})", error, signature);
+            error!(error = ?error, signature = %signature, "Failed to extend table");
             return Err(MagicBlockRpcClientError::SentTransactionError(
                 error.clone(),
                 signature,
@@ -599,6 +603,10 @@ impl LookupTableRc {
     ///
     /// - **rpc_client**: RPC client to use for sending the deactivate transaction
     /// - **authority**:  pays for the deactivate transaction
+    #[instrument(
+        skip(self, rpc_client, authority, compute_budget),
+        fields(table_address = %self.table_address())
+    )]
     pub async fn deactivate(
         &mut self,
         rpc_client: &MagicblockRpcClient,
@@ -630,8 +638,9 @@ impl LookupTableRc {
         let (signature, error) = outcome.into_signature_and_error();
         if let Some(error) = &error {
             error!(
-                "Error deactivating lookup table: {:?} ({})",
-                error, signature
+                error = ?error,
+                signature = %signature,
+                "Failed to deactivate table"
             );
         }
 
@@ -658,6 +667,15 @@ impl LookupTableRc {
     ///
     /// 1. was [Self::deactivate] called
     /// 2. is the [LookupTable::Deactivated::deactivation_slot] far enough in the past
+    #[instrument(
+        skip(self, rpc_client),
+        fields(
+            table_address = %self.table_address(),
+            deactivation_slot = tracing::field::Empty,
+            current_slot = tracing::field::Empty,
+            slots_remaining = tracing::field::Empty,
+        )
+    )]
     pub async fn is_deactivated_on_chain(
         &self,
         rpc_client: &MagicblockRpcClient,
@@ -684,11 +702,11 @@ impl LookupTableRc {
         //       I tried to shorten the wait here but found that this is the minimum time needed
         //       for the table to be considered fully _deactivated_
         let deactivated_slot = deactivation_slot + MAX_ENTRIES as u64;
-        trace!(
-            "'{}' deactivates in {} slots",
-            self.table_address(),
-            deactivated_slot.saturating_sub(slot),
-        );
+        tracing::Span::current().record("current_slot", slot);
+        tracing::Span::current().record("deactivation_slot", deactivation_slot);
+        let slots_remaining = deactivated_slot.saturating_sub(slot);
+        tracing::Span::current().record("slots_remaining", slots_remaining);
+        trace!("Table deactivation in progress");
         deactivated_slot <= slot
     }
 
@@ -707,6 +725,10 @@ impl LookupTableRc {
     /// - **authority**:  pays for the close transaction and is refunded the
     ///   table account rent
     /// - **current_slot**: the current slot to use for checking deactivation
+    #[instrument(
+        skip(self, rpc_client, authority, compute_budget),
+        fields(table_address = %self.table_address(), deactivation_slot = tracing::field::Empty, current_slot = tracing::field::Empty)
+    )]
     pub async fn close(
         &self,
         rpc_client: &MagicblockRpcClient,
@@ -745,8 +767,9 @@ impl LookupTableRc {
         let (signature, error) = outcome.into_signature_and_error();
         if let Some(error) = &error {
             debug!(
-                "Error closing lookup table: {:?} ({}) - may need longer deactivation time",
-                error, signature
+                error = ?error,
+                signature = %signature,
+                "Error closing lookup table - may need longer deactivation time"
             );
         }
         let is_closed = self.is_closed(rpc_client).await?;

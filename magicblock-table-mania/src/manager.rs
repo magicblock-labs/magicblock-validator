@@ -203,24 +203,25 @@ impl TableMania {
     /// Tries to find a table that holds this pubkey already and reserves it.
     /// - *pubkey* to reserve
     /// - *returns* `true` if the pubkey could be reserved
+    #[instrument(skip(self), fields(pubkey = %pubkey))]
     async fn reserve_pubkey(&self, pubkey: &Pubkey) -> bool {
         for table in self.active_tables.read().await.iter() {
             if table.reserve_pubkey(pubkey) {
-                trace!(
-                    "Added reservation for pubkey {} to table {}",
-                    pubkey,
-                    table.table_address()
-                );
+                trace!("Added reservation to table");
                 return true;
             }
         }
-        trace!("No table found for which we can reserve pubkey {}", pubkey);
+        trace!("No table found for reservation");
         false
     }
 
     /// Reserves pubkeys that haven't been found in any of the active tables.
     /// Thus this is considered the first reservation for these pubkeys and thus includes
     /// initializing/extending actual lookup tables on chain.
+    #[instrument(
+        skip(self, authority, pubkeys),
+        fields(pubkey_count = pubkeys.len())
+    )]
     async fn reserve_new_pubkeys(
         &self,
         authority: &Keypair,
@@ -256,11 +257,11 @@ impl TableMania {
                             .await
                         {
                             error!(
-                                "Error extending table {}: {:?}",
-                                table.table_address(),
-                                err
+                                error = ?err,
+                                table_address = %table.table_address(),
+                                "Failed to extend table"
                             );
-                            if extend_errors >= MAX_ALLOWED_EXTEND_ERRORS {
+                            if extend_errors <= MAX_ALLOWED_EXTEND_ERRORS {
                                 extend_errors += 1;
                             } else {
                                 return Err(err);
@@ -311,6 +312,14 @@ impl TableMania {
     /// The stored pubkeys are removed from the `remaining` vector.
     /// If successful the table addres is added to the `tables_used` set.
     /// Returns `true` if the table is full after adding the pubkeys
+    #[instrument(
+        skip(self, table, authority, remaining, tables_used),
+        fields(
+            table_address = %table.table_address(),
+            remaining_count = remaining.len(),
+            stored_count = tracing::field::Empty
+        )
+    )]
     async fn extend_table(
         &self,
         table: &LookupTableRc,
@@ -321,12 +330,7 @@ impl TableMania {
         let remaining_len = remaining.len();
         let storing_len =
             remaining_len.min(MAX_ENTRIES_AS_PART_OF_EXTEND as usize);
-        trace!(
-            "Adding {}/{} pubkeys to existing table {}",
-            storing_len,
-            remaining_len,
-            table.table_address()
-        );
+        trace!("Extending existing table");
         if table.is_deactivated() {
             return Err(TableManiaError::CannotExtendDeactivatedTable(
                 *table.table_address(),
@@ -342,12 +346,15 @@ impl TableMania {
                 &self.compute_budgets.extend,
             )
             .await?;
-        trace!("Stored {}", stored.len());
+        let stored_len = stored.len();
+        tracing::Span::current().record("stored_count", stored_len);
+        trace!("Pubkeys stored");
         tables_used.insert(*table.table_address());
         remaining.retain(|pk| !stored.contains(pk));
 
-        let stored_count = remaining_len - remaining.len();
-        trace!("Stored {}, remaining: {}", stored_count, remaining.len());
+        let remaining_count = remaining.len();
+        tracing::Span::current().record("remaining_count", remaining_count);
+        trace!("Progress update in reservation");
 
         #[cfg(debug_assertions)]
         {
@@ -403,12 +410,7 @@ impl TableMania {
         .await?;
         pubkeys.retain_mut(|pk| !table.contains_key(pk));
 
-        trace!(
-            "Created new table and stored {}/{} pubkeys. {}",
-            len,
-            pubkeys_len,
-            table.table_address()
-        );
+        trace!("Created new table and stored pubkeys");
         Ok(table)
     }
 
@@ -435,18 +437,15 @@ impl TableMania {
         }
     }
 
+    #[instrument(skip(self), fields(pubkey = %pubkey))]
     async fn release_pubkey(&self, pubkey: &Pubkey) {
         for table in self.active_tables.read().await.iter() {
             if table.release_pubkey(pubkey) {
-                trace!(
-                    "Removed reservation for pubkey {} from table {}",
-                    pubkey,
-                    table.table_address()
-                );
+                trace!("Released reservation from table");
                 return;
             }
         }
-        trace!("No table found for which we can release pubkey {}", pubkey);
+        trace!("No table found for release");
     }
 
     // -----------------
@@ -462,6 +461,15 @@ impl TableMania {
     ///   means the [Self::reserve_pubkeys] was completed including any transactions that were sent
     /// - *wait_for_remote_table_match* how long to wait for remote tables to include the
     ///   matched pubkeys
+    #[instrument(
+        skip(self),
+        fields(
+            pubkey_count = pubkeys.len(),
+            table_count = tracing::field::Empty,
+            timeout_ms = tracing::field::Empty,
+            current_slot = tracing::field::Empty,
+        )
+    )]
     pub async fn try_get_active_address_lookup_table_accounts(
         &self,
         pubkeys: &HashSet<Pubkey>,
@@ -471,6 +479,10 @@ impl TableMania {
         // 1. Wait until all keys are present in a local table
         let matching_tables = {
             let start = Instant::now();
+            tracing::Span::current().record(
+                "timeout_ms",
+                wait_for_local_table_match.as_millis() as u64,
+            );
             loop {
                 {
                     let active_local_tables = self.active_tables.read().await;
@@ -488,19 +500,10 @@ impl TableMania {
                     if keys_to_match.is_empty() {
                         break matching_tables;
                     }
-                    trace!(
-                        "Matched {}/{} pubkeys",
-                        pubkeys.len() - keys_to_match.len(),
-                        pubkeys.len()
-                    );
+                    trace!("Waiting for local tables to match");
                 }
                 if start.elapsed() > wait_for_local_table_match {
-                    error!(
-                        "Timed out waiting for local tables to match requested keys: {:?} for {:?}",
-                        pubkeys,
-                        wait_for_local_table_match,
-
-                    );
+                    error!("Timed out waiting for local tables to match");
                     return Err(
                         TableManiaError::TimedOutWaitingForRemoteTablesToUpdate(
                             format!("{:?}", pubkeys),
@@ -511,6 +514,11 @@ impl TableMania {
                 sleep(Duration::from_millis(200)).await;
             }
         };
+        tracing::Span::current().record("table_count", matching_tables.len());
+        tracing::Span::current().record(
+            "timeout_ms",
+            wait_for_remote_table_match.as_millis() as u64,
+        );
 
         // 2. Ensure that all matching keys are also present remotely and have been finalized
         let remote_tables = {
@@ -553,10 +561,7 @@ impl TableMania {
                                     table.addresses.to_vec(),
                                 )),
                                 Err(err) => {
-                                    error!(
-                                        "Failed to deserialize table {}: {:?}",
-                                        matching_table_keys[idx], err
-                                    );
+                                    error!(error = ?err, "Failed to deserialize table");
                                     None
                                 }
                             },
@@ -584,9 +589,10 @@ impl TableMania {
 
                 if start.elapsed() > wait_for_remote_table_match {
                     error!(
-                        "Timed out waiting for remote tables to match local tables for {:?}. \
-                        Local: {:#?}\nRemote: {:#?}",
-                        wait_for_remote_table_match, matching_tables, remote_tables
+                        timeout_ms =
+                            wait_for_remote_table_match.as_millis() as u64,
+                        elapsed_ms = start.elapsed().as_millis() as u64,
+                        "Timed out waiting for remote tables to match"
                     );
                     return Err(
                         TableManiaError::TimedOutWaitingForRemoteTablesToUpdate(
@@ -597,10 +603,8 @@ impl TableMania {
 
                 if let Ok(slot) = self.rpc_client.wait_for_next_slot().await {
                     if slot - last_slot > 20 {
-                        debug!(
-                            "Waiting for remote tables {} to match local tables.",
-                            table_keys_str
-                        );
+                        tracing::Span::current().record("current_slot", slot);
+                        debug!("Still waiting for remote tables");
                     }
                     last_slot = slot;
                 }
@@ -689,18 +693,28 @@ impl TableMania {
     }
 
     /// Deactivates tables that were previously released
+    #[instrument(skip(rpc_client, authority, released_tables, compute_budget), fields(table_count = tracing::field::Empty, table_address = tracing::field::Empty))]
     async fn deactivate_tables(
         rpc_client: &MagicblockRpcClient,
         authority: &Keypair,
         released_tables: &Mutex<Vec<LookupTableRc>>,
         compute_budget: &TableManiaComputeBudget,
     ) {
+        let table_count = released_tables
+            .lock()
+            .await
+            .iter()
+            .filter(|x| !x.deactivate_triggered())
+            .count();
+        tracing::Span::current().record("table_count", table_count);
         for table in released_tables
             .lock()
             .await
             .iter_mut()
             .filter(|x| !x.deactivate_triggered())
         {
+            tracing::Span::current()
+                .record("table_address", table.table_address().to_string());
             // We don't bubble errors as there is no reasonable way to handle them.
             // Instead the next GC cycle will try again to deactivate the table.
             let _ = table
@@ -708,15 +722,21 @@ impl TableMania {
                 .await
                 .inspect_err(|err| {
                     error!(
-                        "Error deactivating table {}: {:?}",
-                        table.table_address(),
-                        err
+                        error = ?err,
+                        "Failed to deactivate table"
                     )
                 });
         }
     }
 
     /// Closes tables that were previously released and deactivated.
+    #[instrument(
+        skip(rpc_client, authority, released_tables, compute_budget),
+        fields(
+            deactivated_table_count = tracing::field::Empty,
+            current_slot = tracing::field::Empty,
+        )
+    )]
     async fn close_tables(
         rpc_client: &MagicblockRpcClient,
         authority: &Keypair,
@@ -734,13 +754,22 @@ impl TableMania {
             return;
         }
 
-        let Ok(latest_slot) = rpc_client
-            .get_slot()
+        let deactivated_count = released_tables
+            .lock()
             .await
-            .inspect_err(|err| error!("Error getting latest slot: {:?}", err))
-        else {
+            .iter()
+            .filter(|x| x.deactivate_triggered())
+            .count();
+        tracing::Span::current()
+            .record("deactivated_table_count", deactivated_count);
+
+        let Ok(latest_slot) = rpc_client.get_slot().await.inspect_err(
+            |err| error!(error = ?err, "Failed to get latest slot"),
+        ) else {
             return;
         };
+
+        tracing::Span::current().record("current_slot", latest_slot);
 
         let mut closed_tables = vec![];
         {
@@ -770,9 +799,9 @@ impl TableMania {
                         // Table not ready to be closed
                     }
                     Err(err) => error!(
-                        "Error closing table {}: {:?}",
-                        deactivated_table.table_address(),
-                        err
+                        error = ?err,
+                        table_address = %deactivated_table.table_address(),
+                        "Failed to close table"
                     ),
                 };
             }
