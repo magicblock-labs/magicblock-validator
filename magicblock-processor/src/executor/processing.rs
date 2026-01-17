@@ -170,7 +170,7 @@ impl super::TransactionExecutor {
     fn process_scheduled_tasks(&self) {
         while let Some(task) = ExecutionTlsStash::next_task() {
             if let Err(e) = self.tasks_tx.send(task) {
-                error!("Scheduled tasks service disconnected: {e}");
+                error!(error = ?e, "Scheduled tasks service disconnected");
             }
         }
     }
@@ -247,7 +247,7 @@ impl super::TransactionExecutor {
         ) {
             Ok(i) => i,
             Err(error) => {
-                error!("failed to commit transaction to the ledger: {error}");
+                error!(error = ?error, "Failed to commit transaction to ledger");
                 return;
             }
         };
