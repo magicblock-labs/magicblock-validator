@@ -553,8 +553,9 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                             subscription_forwarder.send(forward_update).await
                         {
                             error!(
-                                "Failed to forward subscription update for {}: {err:?}",
-                                update.pubkey
+                                pubkey = %update.pubkey,
+                                error = ?err,
+                                "Failed to forward subscription update"
                             );
                         }
                     }
@@ -768,8 +769,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                     }
                 },
                 Err(err) => {
-                    warn!(pubkey = %pubkey, stream_index = idx, error = ?err, total_pubkeys = pubkeys.len(), "Unexpected RecvError while awaiting account");
-                    error!(pubkey = %pubkey, error = ?err, "Failed to resolve account");
+                    error!(pubkey = %pubkey, stream_index = idx, error = ?err, total_pubkeys = pubkeys.len(), "Failed to resolve account (unexpected RecvError)");
                     errors.push((
                         idx,
                         RemoteAccountProviderError::RecvrError(err),

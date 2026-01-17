@@ -125,9 +125,14 @@ impl ChainPubsubActor {
         info!("Shutting down pubsub actor");
         let subs = subscriptions
             .lock()
-            .unwrap()
+            .expect("subscriptions lock poisoned")
             .drain()
-            .chain(program_subs.lock().unwrap().drain())
+            .chain(
+                program_subs
+                    .lock()
+                    .expect("program subs lock poisoned")
+                    .drain(),
+            )
             .collect::<Vec<_>>();
         for (_, sub) in subs {
             sub.cancellation_token.cancel();
@@ -679,7 +684,8 @@ impl ChainPubsubActor {
             subscriptions: Arc<Mutex<HashMap<Pubkey, AccountSubscription>>>,
         ) {
             let drained_subs = {
-                let mut subs_lock = subscriptions.lock().unwrap();
+                let mut subs_lock =
+                    subscriptions.lock().expect("subscriptions lock poisoned");
                 std::mem::take(&mut *subs_lock)
             };
             let drained_len = drained_subs.len();

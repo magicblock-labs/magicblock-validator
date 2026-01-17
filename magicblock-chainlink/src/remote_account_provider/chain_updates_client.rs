@@ -60,10 +60,7 @@ impl ChainUpdatesClient {
                 supports_backfill,
                 api_key,
             } => {
-                debug!(
-                    "Initializing Helius Laser client for gRPC endpoint: {}",
-                    url
-                );
+                debug!(url = %url, "Initializing Helius Laser client for gRPC endpoint");
                 let client_id = format!(
                     "grpc:{label}-{}",
                     CLIENT_ID.fetch_add(1, Ordering::SeqCst)
