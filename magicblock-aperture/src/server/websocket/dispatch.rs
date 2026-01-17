@@ -62,6 +62,11 @@ impl WsDispatcher {
         }
     }
 
+    /// Returns the unique ID for this connection.
+    pub(crate) fn connection_id(&self) -> ConnectionID {
+        self.chan.id
+    }
+
     /// Routes an incoming JSON-RPC request to the appropriate subscription handler.
     pub(crate) async fn dispatch(
         &mut self,

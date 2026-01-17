@@ -6,7 +6,7 @@ use magicblock_core::link::{
     transactions::TransactionStatusRx, DispatchEndpoints,
 };
 use tokio_util::sync::CancellationToken;
-use tracing::{info, warn};
+use tracing::{info, instrument, warn};
 
 use crate::{
     geyser::GeyserPluginManager,
@@ -104,8 +104,9 @@ impl EventProcessor {
     }
 
     /// The main event processing loop for a single worker instance.
+    #[instrument(skip(self, cancel), fields(processor_id = id))]
     async fn run(self, id: usize, cancel: CancellationToken) {
-        info!("event processor {id} is running");
+        info!("Event processor started");
         loop {
             tokio::select! {
                 biased;
@@ -116,11 +117,11 @@ impl EventProcessor {
                     self.subscriptions.send_slot(latest.meta.slot);
                     // Notify registered geyser plugins (if any) of the latest slot.
                     let _ = self.geyser.notify_slot(latest.meta.slot).inspect_err(|e| {
-                        warn!("Geyser slot update error: {e}");
+                        warn!(error = ?e, "Geyser slot update failed");
                     });
                     // Notify listening geyser plugins
                     let _ = self.geyser.notify_block(&latest).inspect_err(|e| {
-                        warn!("Geyser block update error: {e}");
+                        warn!(error = ?e, "Geyser block update failed");
                     });
                     // Update the global blocks cache with the latest block.
                     self.blocks.set_latest(latest);
@@ -134,7 +135,7 @@ impl EventProcessor {
                     self.subscriptions.send_program_update(&state).await;
                     // Notify registered geyser plugins (if any) of the account.
                     let _ = self.geyser.notify_account(&state).inspect_err(|e| {
-                        warn!("Geyser account update error: {e}");
+                        warn!(error = ?e, "Geyser account update failed");
                     });
                 }
 
@@ -148,7 +149,7 @@ impl EventProcessor {
 
                     // Notify listening geyser plugins
                     let _ = self.geyser.notify_transaction(&status).inspect_err(|e| {
-                        warn!("Geyser transaction update error: {e}");
+                        warn!(error = ?e, "Geyser transaction update failed");
                     });
 
                     // Update the global transaction cache.
@@ -164,6 +165,6 @@ impl EventProcessor {
                 }
             }
         }
-        info!("event processor {id} has terminated");
+        info!("Event processor terminated");
     }
 }

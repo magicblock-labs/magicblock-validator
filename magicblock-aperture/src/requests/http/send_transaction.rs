@@ -14,6 +14,7 @@ impl HttpDispatcher {
     /// Submits a new transaction to the validator's processing pipeline.
     /// The handler decodes and sanitizes the transaction, performs a robust
     /// replay-protection check, and then forwards it directly to the execution queue.
+    #[instrument(skip(self, request), fields(signature = tracing::field::Empty))]
     pub(crate) async fn send_transaction(
         &self,
         request: &mut JsonRequest,
@@ -28,10 +29,12 @@ impl HttpDispatcher {
 
         let transaction = self
             .prepare_transaction(&transaction_str, encoding, true, false)
-            .inspect_err(|err| {
-                debug!("Failed to prepare transaction: {err}")
-            })?;
+            .inspect_err(
+                |err| debug!(error = ?err, "Failed to prepare transaction"),
+            )?;
         let signature = *transaction.signature();
+        tracing::Span::current()
+            .record("signature", tracing::field::display(signature));
 
         // Perform a replay check and reserve the signature in the cache. This prevents
         // a transaction from being processed twice within the blockhash validity period.
@@ -47,9 +50,9 @@ impl HttpDispatcher {
         if config.skip_preflight {
             TRANSACTION_SKIP_PREFLIGHT.inc();
             self.transactions_scheduler.schedule(transaction).await?;
-            trace!("Scheduling transaction {signature}");
+            trace!("Transaction scheduled");
         } else {
-            trace!("Executing transaction {signature}");
+            trace!("Transaction executing");
             self.transactions_scheduler.execute(transaction).await?;
         }
 

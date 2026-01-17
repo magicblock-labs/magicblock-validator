@@ -41,7 +41,7 @@ impl HttpDispatcher {
                 config.replace_recent_blockhash,
             )
             .inspect_err(|err| {
-                debug!("Failed to prepare transaction to simulate: {err}")
+                debug!(error = ?err, "Failed to prepare transaction to simulate")
             })?;
         self.ensure_transaction_accounts(&transaction).await?;
 
