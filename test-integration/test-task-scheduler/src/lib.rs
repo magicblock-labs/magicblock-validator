@@ -1,3 +1,5 @@
+#![allow(deprecated)]
+
 use std::{process::Child, str::FromStr, time::Duration};
 
 use integration_test_tools::{

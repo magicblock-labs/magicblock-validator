@@ -19,7 +19,7 @@ fn lookup_table_interaction(config: bool) -> (usize, usize, usize) {
 
     let (_temp_dir, mut validator, ctx) = start_validator_with_clone_config(
         config,
-        &LoadedAccounts::with_delegation_program_test_authority(),
+        &LoadedAccounts::new_with_new_validator_authority(),
     );
     wait_for_startup(&ctx, &mut validator);
 

@@ -75,7 +75,7 @@ fn run_allowed_programs(allow_committor_program: bool) {
     let (_default_tmpdir, Some(mut validator), port) =
         start_magicblock_validator_with_config_struct(
             config,
-            &LoadedAccounts::with_delegation_program_test_authority(),
+            &LoadedAccounts::new_with_new_validator_authority(),
         )
     else {
         panic!("validator should set up correctly");

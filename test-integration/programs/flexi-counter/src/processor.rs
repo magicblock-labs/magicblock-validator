@@ -301,7 +301,7 @@ fn process_delegate(
         &seeds_no_bump,
         DelegateConfig {
             commit_frequency_ms: args.commit_frequency_ms,
-            validator: None,
+            validator: args.validator,
         },
     )?;
 
