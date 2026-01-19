@@ -69,9 +69,11 @@ declare_process_instruction!(
                 transaction_context,
                 id,
             ),
-            ScheduleBaseIntent(args) => {
-                process_schedule_base_intent(signers, invoke_context, args)
-            }
+            ScheduleBaseIntent(args) => process_schedule_intent_bundle(
+                signers,
+                invoke_context,
+                args.into(),
+            ),
             ScheduleIntentBundle(args) => {
                 process_schedule_intent_bundle(signers, invoke_context, args)
             }

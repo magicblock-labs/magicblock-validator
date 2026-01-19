@@ -26,7 +26,7 @@ use crate::{
 
 const PAYER_IDX: u16 = 0;
 const MAGIC_CONTEXT_IDX: u16 = PAYER_IDX + 1;
-const ACTION_ACCOUNTS_OFFSET: usize = MAGIC_CONTEXT_IDX as usize + 1;
+const ACCOUNTS_OFFSET: usize = MAGIC_CONTEXT_IDX as usize + 1;
 
 pub(crate) fn process_schedule_intent_bundle(
     signers: HashSet<Pubkey>,
@@ -51,7 +51,7 @@ pub(crate) fn process_schedule_intent_bundle(
 
     // Assert enough accounts
     let ix_accs_len = ix_ctx.get_number_of_instruction_accounts() as usize;
-    if ix_accs_len <= ACTION_ACCOUNTS_OFFSET {
+    if ix_accs_len <= ACCOUNTS_OFFSET {
         ic_msg!(
             invoke_context,
             "ScheduleCommit ERR: not enough accounts to schedule commit ({}), need payer, signing program an account for each pubkey to be committed",
@@ -123,7 +123,7 @@ pub(crate) fn process_schedule_intent_bundle(
     );
 
     let undelegated_accounts_ref =
-        if let MagicBaseIntentArgs::CommitAndUndelegate(ref value) = args {
+        if let Some(ref value) = args.commit_and_undelegate {
             Some(CommitType::extract_commit_accounts(
                 value.committed_accounts_indices(),
                 construction_context.transaction_context,
@@ -131,6 +131,7 @@ pub(crate) fn process_schedule_intent_bundle(
         } else {
             None
         };
+
     let scheduled_intent = ScheduledBaseIntent::try_new(
         args,
         intent_id,
@@ -202,7 +203,7 @@ fn get_parent_program_id(
 
     let first_committee_owner = *get_instruction_account_with_idx(
         transaction_context,
-        ACTION_ACCOUNTS_OFFSET as u16,
+        ACCOUNTS_OFFSET as u16,
     )?
     .borrow()
     .owner();

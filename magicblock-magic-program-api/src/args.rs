@@ -87,11 +87,28 @@ pub enum MagicBaseIntentArgs {
     CommitAndUndelegate(CommitAndUndelegateArgs),
 }
 
-#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
+#[derive(Clone, Default, Serialize, Deserialize, Debug, PartialEq, Eq)]
 pub struct MagicIntentBundleArgs {
     pub commit: Option<CommitTypeArgs>,
     pub commit_and_undelegate: Option<CommitAndUndelegateArgs>,
     pub standalone_actions: Vec<BaseActionArgs>,
+}
+
+impl From<MagicBaseIntentArgs> for MagicIntentBundleArgs {
+    fn from(value: MagicBaseIntentArgs) -> Self {
+        let mut this = Self::default();
+        match value {
+            MagicBaseIntentArgs::BaseActions(value) => {
+                this.standalone_actions.extend(value)
+            }
+            MagicBaseIntentArgs::Commit(value) => this.commit = Some(value),
+            MagicBaseIntentArgs::CommitAndUndelegate(value) => {
+                this.commit_and_undelegate = Some(value)
+            }
+        }
+
+        this
+    }
 }
 
 /// A compact account meta used for base-layer actions.

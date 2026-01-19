@@ -63,19 +63,20 @@ pub struct ScheduledBaseIntent {
     pub blockhash: Hash,
     pub action_sent_transaction: Transaction,
     pub payer: Pubkey,
-    // Scheduled action
-    pub base_intent: MagicBaseIntent,
+    /// Scheduled intent bundle
+    // TODO(edwin): rename
+    pub base_intent: MagicIntentBundle,
 }
 
 impl ScheduledBaseIntent {
     pub fn try_new(
-        args: MagicBaseIntentArgs,
+        args: MagicIntentBundleArgs,
         commit_id: u64,
         slot: Slot,
         payer_pubkey: &Pubkey,
         context: &ConstructionContext<'_, '_>,
     ) -> Result<ScheduledBaseIntent, InstructionError> {
-        let action = MagicBaseIntent::try_from_args(args, context)?;
+        let intent = MagicIntentBundle::try_from_args(args, context)?;
 
         let blockhash = context.invoke_context.environment_config.blockhash;
         let action_sent_transaction =
@@ -86,12 +87,21 @@ impl ScheduledBaseIntent {
             blockhash,
             payer: *payer_pubkey,
             action_sent_transaction,
-            base_intent: action,
+            base_intent: intent,
         })
     }
 
     pub fn get_committed_accounts(&self) -> Option<&Vec<CommittedAccount>> {
         self.base_intent.get_committed_accounts()
+    }
+
+    pub fn get_undelegated_accounts(&self) -> Option<&Vec<CommittedAccount>> {
+        Some(
+            self.base_intent
+                .commit_and_undelegate
+                .as_ref()?
+                .get_committed_accounts(),
+        )
     }
 
     pub fn get_committed_accounts_mut(
@@ -128,6 +138,23 @@ pub struct MagicIntentBundle {
     pub commit: Option<CommitType>,
     pub commit_and_undelegate: Option<CommitAndUndelegate>,
     pub standalone_actions: Vec<BaseAction>,
+}
+
+impl From<MagicBaseIntent> for MagicIntentBundle {
+    fn from(value: MagicBaseIntent) -> Self {
+        let mut this = Self::default();
+        match value {
+            MagicBaseIntent::BaseActions(value) => {
+                this.standalone_actions.extend(value)
+            }
+            MagicBaseIntent::Commit(value) => this.commit = Some(value),
+            MagicBaseIntent::CommitAndUndelegate(value) => {
+                this.commit_and_undelegate = Some(value)
+            }
+        }
+
+        this
+    }
 }
 
 impl MagicIntentBundle {

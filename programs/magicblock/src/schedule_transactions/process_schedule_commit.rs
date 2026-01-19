@@ -258,7 +258,9 @@ pub(crate) fn process_schedule_commit(
         })
     } else {
         MagicBaseIntent::Commit(CommitType::Standalone(committed_accounts))
-    };
+    }
+    .into();
+
     let scheduled_base_intent = ScheduledBaseIntent {
         id: intent_id,
         slot: clock.slot,
