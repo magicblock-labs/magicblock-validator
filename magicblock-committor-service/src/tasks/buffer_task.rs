@@ -1,11 +1,12 @@
 use dlp::{
-    args::CommitStateFromBufferArgs,
+    args::{CommitFinalizeArgs, CommitStateFromBufferArgs},
     compute_diff,
     instruction_builder::{commit_diff_size_budget, commit_size_budget},
     AccountSizeClass,
 };
 use magicblock_committor_program::Chunks;
 use magicblock_metrics::metrics::LabelValue;
+use solana_account::ReadableAccount;
 use solana_instruction::Instruction;
 use solana_pubkey::Pubkey;
 
@@ -17,8 +18,8 @@ use crate::{
     consts::MAX_WRITE_CHUNK_SIZE,
     tasks::{
         visitor::Visitor, BaseTask, BaseTaskError, BaseTaskResult,
-        CommitDiffTask, CommitTask, PreparationState, PreparationTask,
-        TaskType,
+        CommitDiffTask, CommitFinalizeTask, CommitTask, PreparationState,
+        PreparationTask, TaskType,
     },
 };
 

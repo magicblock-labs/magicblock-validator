@@ -18,7 +18,8 @@ use crate::{
     persist::IntentPersister,
     tasks::{
         args_task::{ArgsTask, ArgsTaskType},
-        BaseActionTask, BaseTask, FinalizeTask, UndelegateTask,
+        BaseActionTask, BaseTask, CommitFinalizeTask, FinalizeTask,
+        UndelegateTask,
     },
 };
 
@@ -80,6 +81,28 @@ impl TaskBuilderImpl {
         }
         .into()
     }
+
+    pub fn create_commit_finalize_task(
+        commit_id: u64,
+        allow_undelegation: bool,
+        account: CommittedAccount,
+        base_account: Option<Account>,
+    ) -> ArgsTask {
+        let base_account =
+            if account.account.data.len() > COMMIT_STATE_SIZE_THRESHOLD {
+                base_account
+            } else {
+                None
+            };
+
+        ArgsTaskType::CommitFinalize(CommitFinalizeTask {
+            commit_id,
+            allow_undelegation,
+            committed_account: account,
+            base_account,
+        })
+        .into()
+    }
 }
 
 #[async_trait]
@@ -90,31 +113,34 @@ impl TasksBuilder for TaskBuilderImpl {
         base_intent: &ScheduledBaseIntent,
         persister: &Option<P>,
     ) -> TaskBuilderResult<Vec<Box<dyn BaseTask>>> {
-        let (accounts, allow_undelegation) = match &base_intent.base_intent {
-            MagicBaseIntent::BaseActions(actions) => {
-                let tasks = actions
-                    .iter()
-                    .map(|el| {
-                        let task = BaseActionTask { action: el.clone() };
-                        let task =
-                            ArgsTask::new(ArgsTaskType::BaseAction(task));
-                        Box::new(task) as Box<dyn BaseTask>
-                    })
-                    .collect();
+        let (accounts, allow_undelegation, finalize) =
+            match &base_intent.base_intent {
+                MagicBaseIntent::BaseActions(actions) => {
+                    let tasks = actions
+                        .iter()
+                        .map(|el| {
+                            let task = BaseActionTask { action: el.clone() };
+                            let task =
+                                ArgsTask::new(ArgsTaskType::BaseAction(task));
+                            Box::new(task) as Box<dyn BaseTask>
+                        })
+                        .collect();
 
-                return Ok(tasks);
-            }
-            MagicBaseIntent::Commit(t) => (t.get_committed_accounts(), false),
-            MagicBaseIntent::CommitAndUndelegate(t) => {
-                (t.commit_action.get_committed_accounts(), true)
-            }
-            MagicBaseIntent::CommitFinalize(t) => {
-                (t.get_committed_accounts(), false)
-            }
-            MagicBaseIntent::CommitFinalizeAndUndelegate(t) => {
-                (t.commit_action.get_committed_accounts(), true)
-            }
-        };
+                    return Ok(tasks);
+                }
+                MagicBaseIntent::Commit(t) => {
+                    (t.get_committed_accounts(), false, false)
+                }
+                MagicBaseIntent::CommitAndUndelegate(t) => {
+                    (t.commit_action.get_committed_accounts(), true, false)
+                }
+                MagicBaseIntent::CommitFinalize(t) => {
+                    (t.get_committed_accounts(), false, true)
+                }
+                MagicBaseIntent::CommitFinalizeAndUndelegate(t) => {
+                    (t.commit_action.get_committed_accounts(), true, true)
+                }
+            };
 
         let (commit_ids, base_accounts) = {
             let mut min_context_slot = 0;
@@ -175,7 +201,9 @@ impl TasksBuilder for TaskBuilderImpl {
                 // instead:
                 //  let base_account = base_accounts.remove(&account.pubkey);
                 let base_account = base_accounts.get(&account.pubkey).cloned();
-                let task = Self::create_commit_task(commit_id, allow_undelegation, account.clone(), base_account);
+                let task = if finalize {
+                    Self::create_commit_finalize_task(commit_id, allow_undelegation, account.clone(), base_account)
+                } else { Self::create_commit_task(commit_id, allow_undelegation, account.clone(), base_account) };
                 Box::new(task) as Box<dyn BaseTask>
             }).collect();
 

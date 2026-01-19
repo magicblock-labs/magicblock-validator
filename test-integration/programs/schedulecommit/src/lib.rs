@@ -6,7 +6,10 @@ use ephemeral_rollups_sdk::{
     cpi::{
         delegate_account, undelegate_account, DelegateAccounts, DelegateConfig,
     },
-    ephem::{commit_accounts, commit_and_undelegate_accounts},
+    ephem::{
+        commit_accounts, commit_and_undelegate_accounts,
+        commit_finalize_accounts, commit_finalize_and_undelegate_accounts,
+    },
 };
 use magicblock_magic_program_api::instruction::MagicBlockInstruction;
 use solana_program::{
@@ -458,7 +461,7 @@ pub fn process_schedulecommit_for_orderbook(
 
     assert_is_signer(payer, "payer")?;
 
-    commit_and_undelegate_accounts(
+    commit_finalize_and_undelegate_accounts(
         payer,
         vec![order_book_account],
         magic_context,
@@ -574,14 +577,20 @@ pub fn process_schedulecommit_cpi(
     );
 
     if args.undelegate {
-        commit_and_undelegate_accounts(
+        // TODO (snawaz): temporary change. UNDO THIS
+        commit_finalize_and_undelegate_accounts(
             payer,
             committees,
             magic_context,
             magic_program,
         )?;
     } else {
-        commit_accounts(payer, committees, magic_context, magic_program)?;
+        commit_finalize_accounts(
+            payer,
+            committees,
+            magic_context,
+            magic_program,
+        )?;
     }
 
     Ok(())
