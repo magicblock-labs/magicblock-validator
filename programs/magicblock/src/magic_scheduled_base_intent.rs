@@ -91,10 +91,6 @@ impl ScheduledBaseIntent {
         })
     }
 
-    pub fn get_committed_accounts(&self) -> Option<&Vec<CommittedAccount>> {
-        self.base_intent.get_committed_accounts()
-    }
-
     pub fn get_undelegated_accounts(&self) -> Option<&Vec<CommittedAccount>> {
         Some(
             self.base_intent
@@ -102,12 +98,6 @@ impl ScheduledBaseIntent {
                 .as_ref()?
                 .get_committed_accounts(),
         )
-    }
-
-    pub fn get_committed_accounts_mut(
-        &mut self,
-    ) -> Option<&mut Vec<CommittedAccount>> {
-        self.base_intent.get_committed_accounts_mut()
     }
 
     pub fn get_committed_pubkeys(&self) -> Option<Vec<Pubkey>> {

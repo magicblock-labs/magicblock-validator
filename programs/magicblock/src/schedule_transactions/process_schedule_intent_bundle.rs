@@ -1,8 +1,6 @@
 use std::collections::HashSet;
 
-use magicblock_magic_program_api::args::{
-    MagicBaseIntentArgs, MagicIntentBundleArgs,
-};
+use magicblock_magic_program_api::args::MagicIntentBundleArgs;
 use solana_account::state_traits::StateMut;
 use solana_instruction::error::InstructionError;
 use solana_log_collector::ic_msg;
