@@ -203,20 +203,17 @@ impl TasksBuilder for TaskBuilderImpl {
             let photon_client = photon_client
                 .as_ref()
                 .ok_or(TaskBuilderError::PhotonClientNotFound)?;
-            let commit_ids = commit_ids.clone();
 
             accounts
                 .iter()
                 .map(|account| {
-                    let commit_ids = commit_ids.clone();
-                    async move {
-                        let commit_id = *commit_ids
-                            .get(&account.pubkey)
-                            .ok_or(TaskBuilderError::MissingCommitId(
-                                account.pubkey,
-                            ))?;
+                    let commit_id = *commit_ids.get(&account.pubkey).ok_or(
+                        TaskBuilderError::MissingCommitId(account.pubkey),
+                    )?;
+                    let account_clone = account.clone();
+                    Ok(async move {
                         let compressed_data = get_compressed_data(
-                            &account.pubkey,
+                            &account_clone.pubkey,
                             photon_client,
                             None,
                         )
@@ -225,16 +222,16 @@ impl TasksBuilder for TaskBuilderImpl {
                             CompressedCommitTask {
                                 commit_id,
                                 allow_undelegation,
-                                committed_account: account.clone(),
+                                committed_account: account_clone,
                                 compressed_data,
                             },
                         );
                         Ok::<_, TaskBuilderError>(
                             Box::new(ArgsTask::new(task)) as Box<dyn BaseTask>
                         )
-                    }
+                    })
                 })
-                .collect::<FuturesUnordered<_>>()
+                .collect::<Result<FuturesUnordered<_>, TaskBuilderError>>()?
                 .try_collect()
                 .await?
         } else {
