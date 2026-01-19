@@ -3173,6 +3173,7 @@ dependencies = [
  "solana-transaction-error",
  "solana-transaction-status",
  "tempfile",
+ "test-kit",
  "thiserror 1.0.69",
  "tokio",
  "tokio-util",
