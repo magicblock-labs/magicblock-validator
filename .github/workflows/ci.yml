@@ -99,77 +99,64 @@ jobs:
       - name: Run unit tests
         run: |
           make ci-test-unit
-#
-#  integration-tests:
-#    name: Integration Tests - ${{ matrix.batch_tests }}
-#    needs: [format, lint]
-#    runs-on: extra-large
-#    container:
-#      image: ghcr.io/magicblock-labs/magicblock-validator-ci:latest
-#    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
-#    strategy:
-#      fail-fast: false
-#      matrix:
-#        batch_tests:
-#          - "schedulecommit"
-#          - "chainlink"
-#          - "cloning"
-#          - "restore_ledger"
-#          - "magicblock_api"
-#          - "config"
-#          - "table_mania"
-#          - "committor"
-#          - "pubsub"
-#          - "schedule_intents"
-#          - "task-scheduler"
-#    steps:
-#      - name: Checkout magicblock-validator
-#        uses: actions/checkout@v5
-#        with:
-#          path: magicblock-validator
-#          fetch-depth: 1
-#
-#      - name: Rust cache (integration)
-#        uses: actions/cache@v4
-#        with:
-#          path: |
-#            ~/.cargo/registry
-#            ~/.cargo/git
-#            magicblock-validator/target
-#            magicblock-validator/test-integration/target
-#          # Cache specifica per integration + branch/PR
-#          key: >
-#            v1-rust-int-${{ runner.os }}-${{ hashFiles('magicblock-validator/Cargo.lock') }}-${{ github.head_ref || github.ref_name }}
-#          restore-keys: |
-#            v1-rust-int-${{ runner.os }}-${{ hashFiles('magicblock-validator/Cargo.lock') }}-
-#            v1-rust-${{ runner.os }}-${{ hashFiles('magicblock-validator/Cargo.lock') }}-
-#            v1-rust-${{ runner.os }}-
-#
-#      - name: Run integration tests - ${{ matrix.batch_tests }}
-#        run: |
-#          make ci-test-integration
-#        shell: bash
-#        working-directory: magicblock-validator
-#        env:
-#          RUN_TESTS: ${{ matrix.batch_tests }}
-#
-#  ci-status:
-#    name: CI Status
-#    runs-on: ubuntu-latest
-#    if: always()
-#    needs:
-#      - format
-#      - lint
-#      - unit-tests
-#      - integration-tests
-#    steps:
-#      - name: Check all jobs status
-#        run: |
-#          if [[ "${{ needs.format.result }}" != "success" ||
-#                "${{ needs.lint.result }}" != "success" ||
-#                "${{ needs.unit-tests.result }}" != "success" ||
-#                "${{ needs.integration-tests.result }}" != "success" ]]; then
-#            echo "One or more CI jobs failed or were skipped"
-#            exit 1
-#          fi
-#          echo "All CI jobs passed successfully"
+
+  integration-tests:
+    name: Integration Tests - ${{ matrix.batch_tests }}
+    runs-on: self-hosted
+    # Su push sempre; su PR solo se non è draft
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    needs: [format, lint, unit-tests]
+    strategy:
+      fail-fast: false
+      matrix:
+        batch_tests:
+          - "schedulecommit"
+          - "chainlink"
+          - "cloning"
+          - "restore_ledger"
+          - "magicblock_api"
+          - "config"
+          - "table_mania"
+          - "committor"
+          - "pubsub"
+          - "schedule_intents"
+          - "task-scheduler"
+    steps:
+      - name: Checkout magicblock-validator
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
+
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install 1.91.1 --profile default
+          rustup default 1.91.1
+          rustc --version
+          cargo --version
+
+      - name: Run integration tests - ${{ matrix.batch_tests }}
+        run: |
+          make ci-test-integration
+        env:
+          RUN_TESTS: ${{ matrix.batch_tests }}
+
+  ci-status:
+    name: CI Status
+    runs-on: ubuntu-latest
+    if: always()
+    needs:
+      - format
+      - lint
+      - unit-tests
+      - integration-tests
+    steps:
+      - name: Check all jobs status
+        run: |
+          if [[ "${{ needs.format.result }}" != "success" ||
+                "${{ needs.lint.result }}" != "success" ||
+                "${{ needs.unit-tests.result }}" != "success" ||
+                "${{ needs.integration-tests.result }}" != "success" ]]; then
+            echo "One or more CI jobs failed or were skipped"
+            exit 1
+          fi
+          echo "All CI jobs passed successfully"
