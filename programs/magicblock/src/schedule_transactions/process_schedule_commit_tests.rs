@@ -606,7 +606,7 @@ mod tests {
             vec![eata_pubkey]
         );
         // And the intent contains undelegation
-        assert!(scheduled[0].intent_bundle.is_undelegate());
+        assert!(scheduled[0].intent_bundle.has_undelegate_intent());
     }
 
     #[test]

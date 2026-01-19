@@ -779,7 +779,7 @@ where
         persister: Option<P>,
     ) -> IntentExecutionResult {
         let message_id = base_intent.id;
-        let is_undelegate = base_intent.is_undelegate();
+        let is_undelegate = base_intent.has_undelegate_intent();
         let pubkeys = base_intent.get_committed_pubkeys();
 
         let result = self.execute_inner(base_intent, &persister).await;

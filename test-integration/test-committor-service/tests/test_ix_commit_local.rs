@@ -668,7 +668,7 @@ async fn ix_commit_local(
             tx_logs_contain(&rpc_client, &finalize_signature, "Finalize").await
         );
 
-        let is_undelegate = base_intent.is_undelegate();
+        let is_undelegate = base_intent.has_undelegate_intent();
         if is_undelegate {
             // Undelegate is part of atomic Finalization Stage
             assert!(

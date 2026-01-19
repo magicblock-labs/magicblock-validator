@@ -125,11 +125,13 @@ impl CommittorProcessor {
         &self,
         intent_bundles: Vec<ScheduleIntentBundleWrapper>,
     ) -> CommittorServiceResult<()> {
-        let intent_bundles = intent_bundles
+        let base_intent_bundles = intent_bundles
             .iter()
             .map(|base_intent| base_intent.inner.clone())
             .collect::<Vec<_>>();
-        if let Err(err) = self.persister.start_base_intents(&intent_bundles) {
+        if let Err(err) =
+            self.persister.start_base_intents(&base_intent_bundles)
+        {
             // We will still try to perform the commits, but the fact that we cannot
             // persist the intent is very serious and we should probably restart the
             // valiator

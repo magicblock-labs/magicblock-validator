@@ -91,7 +91,7 @@ impl ScheduledCommitsProcessorImpl {
         &self,
         mut base_intent: ScheduledIntentBundle,
     ) -> (ScheduleIntentBundleWrapper, Vec<Pubkey>) {
-        let is_undelegate = base_intent.is_undelegate();
+        let is_undelegate = base_intent.has_undelegate_intent();
         let Some(committed_accounts) = base_intent.get_committed_accounts_mut()
         else {
             let intent = ScheduleIntentBundleWrapper {
@@ -400,7 +400,7 @@ impl ScheduledBaseIntentMeta {
             intent_sent_transaction: intent
                 .intent_bundle_sent_transaction
                 .clone(),
-            requested_undelegation: intent.is_undelegate(),
+            requested_undelegation: intent.has_undelegate_intent(),
         }
     }
 }

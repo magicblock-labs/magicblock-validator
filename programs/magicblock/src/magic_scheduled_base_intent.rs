@@ -91,7 +91,10 @@ impl ScheduledIntentBundle {
         })
     }
 
-    pub fn get_undelegated_accounts(&self) -> Option<&Vec<CommittedAccount>> {
+    /// Returns `[CommitAndUndelegate]` intent's accounts
+    pub fn get_undelegate_intent_accounts(
+        &self,
+    ) -> Option<&Vec<CommittedAccount>> {
         Some(
             self.intent_bundle
                 .commit_and_undelegate
@@ -100,12 +103,17 @@ impl ScheduledIntentBundle {
         )
     }
 
+    /// Returns `Commit` intent's accounts
+    pub fn get_commit_intent_accounts(&self) -> Option<&Vec<CommittedAccount>> {
+        Some(self.intent_bundle.commit.as_ref()?.get_committed_accounts())
+    }
+
     pub fn get_committed_pubkeys(&self) -> Option<Vec<Pubkey>> {
         self.intent_bundle.get_committed_pubkeys()
     }
 
-    pub fn is_undelegate(&self) -> bool {
-        self.intent_bundle.is_undelegate()
+    pub fn has_undelegate_intent(&self) -> bool {
+        self.intent_bundle.has_undelegate_intent()
     }
 
     pub fn is_empty(&self) -> bool {
@@ -205,7 +213,7 @@ impl MagicIntentBundle {
             .unwrap_or(Ok(()))
     }
 
-    pub fn is_undelegate(&self) -> bool {
+    pub fn has_undelegate_intent(&self) -> bool {
         self.commit_and_undelegate.is_some()
     }
 
