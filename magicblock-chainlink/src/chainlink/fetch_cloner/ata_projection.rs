@@ -1,4 +1,7 @@
+use std::sync::atomic::AtomicU16;
+
 use magicblock_core::{
+    logger::log_trace_warn,
     token_programs::{try_derive_eata_address_and_bump, MaybeIntoAta},
     traits::AccountsBank,
 };
@@ -46,13 +49,31 @@ where
     // Subscribe first so subsequent fetches are kept up-to-date
     for (ata_pubkey, _, ata_info, ata_account_slot) in &atas {
         if let Err(err) = this.subscribe_to_account(ata_pubkey).await {
-            warn!(pubkey = %ata_pubkey, error = %err, "Failed to subscribe to ATA");
+            static ATA_SUBSCRIPTION_FAILURE_COUNT: AtomicU16 =
+                AtomicU16::new(0);
+            log_trace_warn(
+                "Failed to subscribe to ATA",
+                "Failed to subscribe to ATAs",
+                &ata_pubkey,
+                &err,
+                1000,
+                &ATA_SUBSCRIPTION_FAILURE_COUNT,
+            );
         }
         if let Some((eata, _)) =
             try_derive_eata_address_and_bump(&ata_info.owner, &ata_info.mint)
         {
             if let Err(err) = this.subscribe_to_account(&eata).await {
-                warn!(pubkey = %eata, error = %err, "Failed to subscribe to derived eATA");
+                static EATA_SUBSCRIPTION_FAILURE_COUNT: AtomicU16 =
+                    AtomicU16::new(0);
+                log_trace_warn(
+                    "Failed to subscribe to derived eATA",
+                    "Failed to subscribe to derived eATAs",
+                    &eata,
+                    &err,
+                    1000,
+                    &EATA_SUBSCRIPTION_FAILURE_COUNT,
+                );
             }
 
             let effective_slot = if let Some(min_slot) = min_context_slot {
