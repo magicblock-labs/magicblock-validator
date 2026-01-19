@@ -24,7 +24,7 @@ pub fn log_trace_warn<T: Display, E: Debug>(
     trace_count: &AtomicU16,
 ) {
     if trace_count.fetch_add(1, Ordering::SeqCst) == max_trace {
-        warn!(error = ?err, count = u8::MAX, warn_msg);
+        warn!(error = ?err, count = max_trace, warn_msg);
         trace_count.store(0, Ordering::SeqCst);
     } else {
         trace!(error = ?err, data = %data, trace_msg);
