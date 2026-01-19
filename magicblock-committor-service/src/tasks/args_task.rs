@@ -93,28 +93,28 @@ impl BaseTask for ArgsTask {
                     args,
                 )
             }
-            ArgsTaskType::CommitFinalize(value) => {
+            ArgsTaskType::CommitFinalize(task) => {
                 let args = CommitFinalizeArgs {
-                    nonce: value.commit_id,
-                    lamports: value.committed_account.account.lamports,
+                    nonce: task.commit_id,
+                    lamports: task.committed_account.account.lamports,
 
-                    data: if let Some(base_account) = &value.base_account {
+                    data: if let Some(base_account) = &task.base_account {
                         compute_diff(
                             base_account.data(),
-                            value.committed_account.account.data(),
+                            task.committed_account.account.data(),
                         )
                         .to_vec()
                     } else {
-                        value.committed_account.account.data.clone()
+                        task.committed_account.account.data.clone()
                     },
 
-                    data_is_diff: value
+                    data_is_diff: task
                         .base_account
                         .as_ref()
                         .map(|_| 1)
                         .unwrap_or(0),
 
-                    allow_undelegation: if value.allow_undelegation {
+                    allow_undelegation: if task.allow_undelegation {
                         1
                     } else {
                         0
@@ -123,8 +123,8 @@ impl BaseTask for ArgsTask {
 
                 dlp::instruction_builder::commit_finalize(
                     *validator,
-                    value.committed_account.pubkey,
-                    value.committed_account.account.owner,
+                    task.committed_account.pubkey,
+                    task.committed_account.account.owner,
                     args,
                 )
             }
@@ -181,8 +181,12 @@ impl BaseTask for ArgsTask {
                     BufferTaskType::CommitDiff(value),
                 )))
             }
-            ArgsTaskType::CommitFinalize(_)
-            | ArgsTaskType::BaseAction(_)
+            ArgsTaskType::CommitFinalize(value) => {
+                Ok(Box::new(BufferTask::new_preparation_required(
+                    BufferTaskType::CommitFinalize(value),
+                )))
+            }
+            ArgsTaskType::BaseAction(_)
             | ArgsTaskType::Finalize(_)
             | ArgsTaskType::Undelegate(_) => Err(self),
         }
@@ -209,7 +213,7 @@ impl BaseTask for ArgsTask {
         match &self.task_type {
             ArgsTaskType::Commit(_) => 70_000,
             ArgsTaskType::CommitDiff(_) => 70_000,
-            ArgsTaskType::CommitFinalize(_) => 25000,
+            ArgsTaskType::CommitFinalize(_) => 40_000,
             ArgsTaskType::BaseAction(task) => task.action.compute_units,
             ArgsTaskType::Undelegate(_) => 70_000,
             ArgsTaskType::Finalize(_) => 70_000,
