@@ -128,6 +128,7 @@ impl MagicValidator {
     // -----------------
     // Initialization
     // -----------------
+    #[instrument(skip_all, fields(last_slot = tracing::field::Empty))]
     pub async fn try_from_config(config: ValidatorParams) -> ApiResult<Self> {
         // TODO(thlorenz): this will need to be recreated on each start
         let token = CancellationToken::new();
@@ -145,7 +146,8 @@ impl MagicValidator {
 
         let (ledger, last_slot) =
             Self::init_ledger(&config.ledger, &config.storage)?;
-        info!("Latest ledger slot: {}", last_slot);
+        tracing::Span::current().record("last_slot", last_slot);
+        info!("Ledger initialized");
         let ledger_path = ledger.ledger_path();
 
         Self::sync_validator_keypair_with_ledger(
@@ -259,7 +261,10 @@ impl MagicValidator {
             transaction_executors,
             txn_scheduler_state,
         );
-        info!("Running execution backend with {transaction_executors} threads");
+        info!(
+            executor_count = transaction_executors,
+            "Running execution backend"
+        );
         let transaction_execution = transaction_scheduler.spawn();
 
         let shared_state = SharedState::new(
@@ -286,17 +291,14 @@ impl MagicValidator {
             runtime.block_on(rpc.run());
 
             drop(runtime);
-            info!("rpc runtime shutdown!");
+            info!("RPC runtime shutdown");
         });
 
         let task_scheduler_db_path =
             SchedulerDatabase::path(ledger.ledger_path().parent().expect(
                 "ledger_path didn't have a parent, should never happen",
             ));
-        debug!(
-            "Task scheduler persists to: {}",
-            task_scheduler_db_path.display()
-        );
+        debug!(path = %task_scheduler_db_path.display(), "Initializing task scheduler");
         let task_scheduler = TaskSchedulerService::new(
             &task_scheduler_db_path,
             &config.task_scheduler,
@@ -332,15 +334,13 @@ impl MagicValidator {
         })
     }
 
+    #[instrument(skip(config))]
     async fn init_committor_service(
         config: &ValidatorParams,
     ) -> ApiResult<Option<Arc<CommittorService>>> {
         let committor_persist_path =
             config.storage.join("committor_service.sqlite");
-        debug!(
-            "Committor service persists to: {}",
-            committor_persist_path.display()
-        );
+        debug!(path = %committor_persist_path.display(), "Initializing committor service");
         // TODO(thlorenz): when we support lifecycle modes again, only start it when needed
         let committor_service = Some(Arc::new(CommittorService::try_start(
             config.validator.keypair.insecure_clone(),
@@ -356,7 +356,7 @@ impl MagicValidator {
 
         if let Some(committor_service) = &committor_service {
             if config.chainlink.prepare_lookup_tables {
-                debug!("Reserving common pubkeys for committor service");
+                debug!("Reserving common pubkeys");
                 map_committor_request_result(
                     committor_service.reserve_common_pubkeys(),
                     committor_service.clone(),
@@ -368,6 +368,13 @@ impl MagicValidator {
     }
 
     #[allow(clippy::too_many_arguments)]
+    #[instrument(skip(
+        config,
+        committor_service,
+        transaction_scheduler,
+        latest_block,
+        accountsdb
+    ))]
     async fn init_chainlink(
         config: &ValidatorParams,
         committor_service: Option<Arc<CommittorService>>,
@@ -451,7 +458,7 @@ impl MagicValidator {
             return Ok(());
         };
         if !verify_keypair {
-            warn!("Skipping ledger keypair verification due to configuration");
+            warn!("Skipping ledger keypair verification");
             return Ok(());
         }
         let existing_keypair = read_validator_keypair_from_ledger(ledger_path)?;
@@ -470,6 +477,7 @@ impl MagicValidator {
     // -----------------
     // Start/Stop
     // -----------------
+    #[instrument(skip(self), fields(ledger_slot = tracing::field::Empty))]
     async fn maybe_process_ledger(&self) -> ApiResult<()> {
         if self.config.ledger.reset {
             return Ok(());
@@ -504,11 +512,11 @@ impl MagicValidator {
         // validator.
         let scheduled_commits =
             ActionTransactionScheduler::default().scheduled_actions_len();
-        debug!(
-            "Found {} scheduled commits while processing ledger, clearing them",
-            scheduled_commits
-        );
         ActionTransactionScheduler::default().clear_scheduled_actions();
+        debug!(
+            committed_count = scheduled_commits,
+            "Cleared scheduled commits"
+        );
 
         // We want the next transaction either due to hydrating of cloned accounts or
         // user request to be processed in the next slot such that it doesn't become
@@ -522,14 +530,13 @@ impl MagicValidator {
             return Err(err.into());
         }
 
-        info!(
-            "Processed ledger, validator continues at slot {}",
-            slot_to_continue_at
-        );
+        tracing::Span::current().record("ledger_slot", slot_to_continue_at);
+        info!("Ledger processing complete");
 
         Ok(())
     }
 
+    #[instrument(skip(self, config), fields(identity = %self.identity))]
     async fn register_validator_on_chain(
         &self,
         config: &ChainOperationConfig,
@@ -567,7 +574,7 @@ impl MagicValidator {
         .map_err(|err| {
             ApiError::FailedToUnregisterValidatorOnChain(format!("{err:#}"))
         })
-        .inspect(|_| info!("Unregistered validator on chain!"))
+        .inspect(|_| info!("Unregistered validator on chain"))
     }
 
     async fn ensure_validator_funded_on_chain(&self) -> ApiResult<()> {
@@ -596,6 +603,7 @@ impl MagicValidator {
         }
     }
 
+    #[instrument(skip(self))]
     pub async fn start(&mut self) -> ApiResult<()> {
         if matches!(self.config.lifecycle, LifecycleMode::Ephemeral) {
             self.ensure_validator_funded_on_chain().await?;
@@ -651,21 +659,21 @@ impl MagicValidator {
             let join_handle = match task_scheduler.start().await {
                 Ok(join_handle) => join_handle,
                 Err(err) => {
-                    error!("Failed to start task scheduler: {:?}", err);
-                    error!("Exiting process...");
+                    error!(error = ?err, "Failed to start task scheduler");
+                    error!("Exiting process");
                     std::process::exit(1);
                 }
             };
             match join_handle.await {
                 Ok(Ok(())) => {}
                 Ok(Err(err)) => {
-                    error!("An error occurred while running the task scheduler: {:?}", err);
-                    error!("Exiting process...");
+                    error!(error = ?err, "Task scheduler failed");
+                    error!("Exiting process");
                     std::process::exit(1);
                 }
                 Err(err) => {
-                    error!("Failed to start task scheduler: {:?}", err);
-                    error!("Exiting process...");
+                    error!(error = ?err, "Task scheduler join failed");
+                    error!("Exiting process");
                     std::process::exit(1);
                 }
             }
@@ -675,6 +683,7 @@ impl MagicValidator {
         Ok(())
     }
 
+    #[instrument(skip(self))]
     pub async fn stop(mut self) {
         self.exit.store(true, Ordering::Relaxed);
 
@@ -696,7 +705,7 @@ impl MagicValidator {
             && matches!(self.config.lifecycle, LifecycleMode::Ephemeral)
         {
             if let Err(err) = self.unregister_validator_on_chain() {
-                error!("Failed to unregister: {}", err)
+                error!(error = ?err, "Failed to unregister");
             }
         }
         // we have two memory mapped databases,
@@ -704,18 +713,18 @@ impl MagicValidator {
         self.accountsdb.flush();
 
         if let Err(err) = self.ledger.shutdown(true) {
-            error!("Failed to shutdown ledger: {:?}", err);
+            error!(error = ?err, "Failed to shutdown ledger");
         }
         let _ = self.rpc_handle.join();
         if let Some(handle) = self.slot_ticker {
             let _ = handle.await;
         }
         if let Err(err) = self.ledger_truncator.join() {
-            error!("Ledger truncator did not gracefully exit: {:?}", err);
+            error!(error = ?err, "Ledger truncator did not gracefully exit");
         }
         let _ = self.transaction_execution.join();
 
-        info!("MagicValidator shutdown!");
+        info!("MagicValidator shutdown");
     }
 
     pub fn ledger(&self) -> &Ledger {
@@ -730,7 +739,7 @@ impl MagicValidator {
         // Calls & awaits until manual compaction is canceled
         self.ledger.cancel_manual_compactions();
         if let Err(err) = self.ledger.flush() {
-            error!("Failed to flush during shutdown preparation: {:?}", err);
+            error!(error = ?err, "Failed to flush during shutdown preparation");
         }
     }
 }
