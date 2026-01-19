@@ -305,14 +305,17 @@ where
             record_subs.push(delegation_record_pubkey);
 
             // If the account is delegated we set the owner and delegation state
-            let (commit_frequency_ms, delegated_to_other) =
-                if let Some(delegation_record_data) = delegation_record {
-                    // NOTE: failing here is fine when resolving all accounts for a transaction
-                    // since if something is off we better not run it anyways
-                    // However we may consider a different behavior when user is getting
-                    // multiple accounts.
-                    let delegation_record =
-                    match FetchCloner::<T, U, V, C, P>::parse_delegation_record(
+            let (commit_frequency_ms, delegated_to_other) = if let Some(
+                delegation_record_data,
+            ) =
+                delegation_record
+            {
+                // NOTE: failing here is fine when resolving all accounts for a transaction
+                // since if something is off we better not run it anyways
+                // However we may consider a different behavior when user is getting
+                // multiple accounts.
+                let delegation_record =
+                    match FetchCloner::<T, U, V, C>::parse_delegation_record(
                         delegation_record_data.data(),
                         delegation_record_pubkey,
                     ) {
@@ -335,21 +338,20 @@ where
                         }
                     };
 
-                    trace!(pubkey = %pubkey, "Delegation record found");
+                trace!(pubkey = %pubkey, "Delegation record found");
 
-                    let delegated_to_other =
-                        this.get_delegated_to_other(&delegation_record);
+                let delegated_to_other =
+                    this.get_delegated_to_other(&delegation_record);
 
-                    let commit_freq = this.apply_delegation_record_to_account(
-                        &mut account,
-                        &delegation_record,
-                    );
-                    (commit_freq, delegated_to_other)
-                } else {
-                    missing_delegation_record
-                        .push((pubkey, account.remote_slot()));
-                    (None, None)
-                };
+                let commit_freq = this.apply_delegation_record_to_account(
+                    &mut account,
+                    &delegation_record,
+                );
+                (commit_freq, delegated_to_other)
+            } else {
+                missing_delegation_record.push((pubkey, account.remote_slot()));
+                (None, None)
+            };
             accounts_to_clone.push(AccountCloneRequest {
                 pubkey,
                 account: account.into_account_shared_data(),
