@@ -512,7 +512,6 @@ impl ChainLaserActor {
             .as_ref()
             .map(|x| x.0.iter().cloned().collect::<HashSet<Pubkey>>())
             .unwrap_or_default();
-
         subscribed_programs.insert(program_id);
 
         let mut accounts = HashMap::new();
