@@ -21,7 +21,7 @@ use crate::{
     intent_executor::ExecutionOutput,
     persist::{CommitStatusRow, IntentPersisterImpl, MessageSignatures},
     service_ext::{BaseIntentCommitorExtResult, BaseIntentCommittorExt},
-    types::{ScheduledBaseIntentWrapper, TriggerType},
+    types::{ScheduleIntentBundleWrapper, TriggerType},
     BaseIntentCommittor,
 };
 
@@ -30,7 +30,7 @@ pub struct ChangesetCommittorStub {
     cancellation_token: CancellationToken,
     reserved_pubkeys_for_committee: Arc<Mutex<HashMap<Pubkey, Pubkey>>>,
     #[allow(clippy::type_complexity)]
-    committed_changesets: Arc<Mutex<HashMap<u64, ScheduledBaseIntentWrapper>>>,
+    committed_changesets: Arc<Mutex<HashMap<u64, ScheduleIntentBundleWrapper>>>,
     committed_accounts: Arc<Mutex<HashMap<Pubkey, Account>>>,
 }
 
@@ -66,7 +66,7 @@ impl BaseIntentCommittor for ChangesetCommittorStub {
 
     fn schedule_base_intent(
         &self,
-        base_intents: Vec<ScheduledBaseIntentWrapper>,
+        base_intents: Vec<ScheduleIntentBundleWrapper>,
     ) -> oneshot::Receiver<CommittorServiceResult<()>> {
         let (sender, receiver) = oneshot::channel();
         let _ = sender.send(Ok(()));
@@ -191,7 +191,7 @@ impl BaseIntentCommittor for ChangesetCommittorStub {
 impl BaseIntentCommittorExt for ChangesetCommittorStub {
     async fn schedule_base_intents_waiting(
         &self,
-        base_intents: Vec<ScheduledBaseIntentWrapper>,
+        base_intents: Vec<ScheduleIntentBundleWrapper>,
     ) -> BaseIntentCommitorExtResult<Vec<BroadcastedIntentExecutionResult>>
     {
         self.schedule_base_intent(base_intents.clone()).await??;

@@ -19,7 +19,7 @@ use crate::{
         CommitStatusRow, IntentPersister, IntentPersisterImpl,
         MessageSignatures,
     },
-    types::ScheduledBaseIntentWrapper,
+    types::ScheduleIntentBundleWrapper,
 };
 
 pub(crate) struct CommittorProcessor {
@@ -123,7 +123,7 @@ impl CommittorProcessor {
 
     pub async fn schedule_base_intents(
         &self,
-        base_intents: Vec<ScheduledBaseIntentWrapper>,
+        base_intents: Vec<ScheduleIntentBundleWrapper>,
     ) -> CommittorServiceResult<()> {
         let intents = base_intents
             .iter()

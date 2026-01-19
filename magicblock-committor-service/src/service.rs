@@ -22,7 +22,7 @@ use crate::{
     intent_execution_manager::BroadcastedIntentExecutionResult,
     persist::{CommitStatusRow, MessageSignatures},
     pubkeys_provider::{provide_committee_pubkeys, provide_common_pubkeys},
-    types::ScheduledBaseIntentWrapper,
+    types::ScheduleIntentBundleWrapper,
 };
 
 #[derive(Debug)]
@@ -55,7 +55,7 @@ pub enum CommittorMessage {
     },
     ScheduleBaseIntents {
         /// The [`ScheduledBaseIntent`]s to commit
-        base_intents: Vec<ScheduledBaseIntentWrapper>,
+        base_intents: Vec<ScheduleIntentBundleWrapper>,
         respond_to: oneshot::Sender<CommittorServiceResult<()>>,
     },
     GetCommitStatuses {
@@ -361,7 +361,7 @@ impl BaseIntentCommittor for CommittorService {
 
     fn schedule_base_intent(
         &self,
-        base_intents: Vec<ScheduledBaseIntentWrapper>,
+        base_intents: Vec<ScheduleIntentBundleWrapper>,
     ) -> oneshot::Receiver<CommittorServiceResult<()>> {
         let (tx, rx) = oneshot::channel();
         self.try_send(CommittorMessage::ScheduleBaseIntents {
@@ -442,7 +442,7 @@ pub trait BaseIntentCommittor: Send + Sync + 'static {
     /// Commits the changeset and returns
     fn schedule_base_intent(
         &self,
-        base_intents: Vec<ScheduledBaseIntentWrapper>,
+        base_intents: Vec<ScheduleIntentBundleWrapper>,
     ) -> oneshot::Receiver<CommittorServiceResult<()>>;
 
     /// Subscribes for results of BaseIntent execution

@@ -17,7 +17,7 @@ use magicblock_chainlink::{
 use magicblock_committor_service::{
     intent_execution_manager::BroadcastedIntentExecutionResult,
     intent_executor::ExecutionOutput,
-    types::{ScheduledBaseIntentWrapper, TriggerType},
+    types::{ScheduleIntentBundleWrapper, TriggerType},
     BaseIntentCommittor, CommittorService,
 };
 use magicblock_core::{
@@ -90,11 +90,11 @@ impl ScheduledCommitsProcessorImpl {
     fn preprocess_intent(
         &self,
         mut base_intent: ScheduledIntentBundle,
-    ) -> (ScheduledBaseIntentWrapper, Vec<Pubkey>) {
+    ) -> (ScheduleIntentBundleWrapper, Vec<Pubkey>) {
         let is_undelegate = base_intent.is_undelegate();
         let Some(committed_accounts) = base_intent.get_committed_accounts_mut()
         else {
-            let intent = ScheduledBaseIntentWrapper {
+            let intent = ScheduleIntentBundleWrapper {
                 inner: base_intent,
                 trigger_type: TriggerType::OnChain,
             };
@@ -127,7 +127,7 @@ impl ScheduledCommitsProcessorImpl {
             })
             .collect();
 
-        let intent = ScheduledBaseIntentWrapper {
+        let intent = ScheduleIntentBundleWrapper {
             inner: base_intent,
             trigger_type: TriggerType::OnChain,
         };

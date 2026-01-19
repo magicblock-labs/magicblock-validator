@@ -30,7 +30,7 @@ use crate::{
         ExecutionOutput, IntentExecutionResult, IntentExecutor,
     },
     persist::IntentPersister,
-    types::{ScheduledBaseIntentWrapper, TriggerType},
+    types::{ScheduleIntentBundleWrapper, TriggerType},
 };
 
 const SEMAPHORE_CLOSED_MSG: &str = "Executors semaphore closed!";
@@ -88,7 +88,7 @@ pub(crate) struct IntentExecutionEngine<D, P, F> {
     db: Arc<D>,
     executor_factory: F,
     intents_persister: Option<P>,
-    receiver: mpsc::Receiver<ScheduledBaseIntentWrapper>,
+    receiver: mpsc::Receiver<ScheduleIntentBundleWrapper>,
 
     inner: Arc<Mutex<IntentScheduler>>,
     running_executors: FuturesUnordered<JoinHandle<()>>,
@@ -106,7 +106,7 @@ where
         db: Arc<D>,
         executor_factory: F,
         intents_persister: Option<P>,
-        receiver: mpsc::Receiver<ScheduledBaseIntentWrapper>,
+        receiver: mpsc::Receiver<ScheduleIntentBundleWrapper>,
     ) -> Self {
         Self {
             db,
@@ -186,10 +186,10 @@ where
         }
     }
 
-    /// Returns [`ScheduledBaseIntentWrapper`] or None if all intents are blocked
+    /// Returns [`ScheduleIntentBundleWrapper`] or None if all intents are blocked
     async fn next_scheduled_intent(
         &mut self,
-    ) -> Result<Option<ScheduledBaseIntentWrapper>, IntentExecutionManagerError>
+    ) -> Result<Option<ScheduleIntentBundleWrapper>, IntentExecutionManagerError>
     {
         // Limit on number of intents that can be stored in scheduler
         const SCHEDULER_CAPACITY: usize = 1000;
@@ -238,11 +238,11 @@ where
         Ok(intent)
     }
 
-    /// Returns [`ScheduledBaseIntentWrapper`] from external channel
+    /// Returns [`ScheduleIntentBundleWrapper`] from external channel
     async fn get_new_intent(
-        receiver: &mut mpsc::Receiver<ScheduledBaseIntentWrapper>,
+        receiver: &mut mpsc::Receiver<ScheduleIntentBundleWrapper>,
         db: &Arc<D>,
-    ) -> Result<ScheduledBaseIntentWrapper, IntentExecutionManagerError> {
+    ) -> Result<ScheduleIntentBundleWrapper, IntentExecutionManagerError> {
         match receiver.try_recv() {
             Ok(val) => Ok(val),
             Err(TryRecvError::Empty) => {
@@ -267,7 +267,7 @@ where
     async fn execute(
         mut executor: E,
         persister: Option<P>,
-        intent: ScheduledBaseIntentWrapper,
+        intent: ScheduleIntentBundleWrapper,
         inner_scheduler: Arc<Mutex<IntentScheduler>>,
         execution_permit: OwnedSemaphorePermit,
         result_sender: broadcast::Sender<BroadcastedIntentExecutionResult>,
@@ -322,7 +322,7 @@ where
     /// Records metrics related to intent execution
     fn execution_metrics(
         execution_time: Duration,
-        intent: &ScheduledBaseIntentWrapper,
+        intent: &ScheduleIntentBundleWrapper,
         result: &IntentExecutorResult<ExecutionOutput>,
     ) {
         const EXECUTION_TIME_THRESHOLD: f64 = 5.0;
@@ -399,7 +399,7 @@ mod tests {
     fn setup_engine(
         should_fail: bool,
     ) -> (
-        mpsc::Sender<ScheduledBaseIntentWrapper>,
+        mpsc::Sender<ScheduleIntentBundleWrapper>,
         MockIntentExecutionEngine,
     ) {
         let (sender, receiver) = mpsc::channel(1000);

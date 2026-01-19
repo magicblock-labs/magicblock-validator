@@ -4,7 +4,7 @@ use std::{collections::VecDeque, sync::Mutex};
 use async_trait::async_trait;
 use magicblock_metrics::metrics;
 
-use crate::types::ScheduledBaseIntentWrapper;
+use crate::types::ScheduleIntentBundleWrapper;
 
 const POISONED_MUTEX_MSG: &str = "Dummy db mutex poisoned";
 
@@ -12,22 +12,22 @@ const POISONED_MUTEX_MSG: &str = "Dummy db mutex poisoned";
 pub trait DB: Send + Sync + 'static {
     async fn store_base_intent(
         &self,
-        base_intent: ScheduledBaseIntentWrapper,
+        base_intent: ScheduleIntentBundleWrapper,
     ) -> DBResult<()>;
     async fn store_base_intents(
         &self,
-        base_intents: Vec<ScheduledBaseIntentWrapper>,
+        base_intents: Vec<ScheduleIntentBundleWrapper>,
     ) -> DBResult<()>;
 
     /// Returns intent with smallest id
     async fn pop_base_intent(
         &self,
-    ) -> DBResult<Option<ScheduledBaseIntentWrapper>>;
+    ) -> DBResult<Option<ScheduleIntentBundleWrapper>>;
     fn is_empty(&self) -> bool;
 }
 
 pub(crate) struct DummyDB {
-    db: Mutex<VecDeque<ScheduledBaseIntentWrapper>>,
+    db: Mutex<VecDeque<ScheduleIntentBundleWrapper>>,
 }
 
 impl DummyDB {
@@ -42,7 +42,7 @@ impl DummyDB {
 impl DB for DummyDB {
     async fn store_base_intent(
         &self,
-        base_intent: ScheduledBaseIntentWrapper,
+        base_intent: ScheduleIntentBundleWrapper,
     ) -> DBResult<()> {
         let mut db = self.db.lock().expect(POISONED_MUTEX_MSG);
         db.push_back(base_intent);
@@ -53,7 +53,7 @@ impl DB for DummyDB {
 
     async fn store_base_intents(
         &self,
-        base_intents: Vec<ScheduledBaseIntentWrapper>,
+        base_intents: Vec<ScheduleIntentBundleWrapper>,
     ) -> DBResult<()> {
         let mut db = self.db.lock().expect(POISONED_MUTEX_MSG);
         db.extend(base_intents);
@@ -64,7 +64,7 @@ impl DB for DummyDB {
 
     async fn pop_base_intent(
         &self,
-    ) -> DBResult<Option<ScheduledBaseIntentWrapper>> {
+    ) -> DBResult<Option<ScheduleIntentBundleWrapper>> {
         let mut db = self.db.lock().expect(POISONED_MUTEX_MSG);
         let res = db.pop_front();
 

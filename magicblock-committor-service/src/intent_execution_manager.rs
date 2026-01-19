@@ -19,14 +19,14 @@ use crate::{
         task_info_fetcher::CacheTaskInfoFetcher,
     },
     persist::IntentPersister,
-    types::ScheduledBaseIntentWrapper,
+    types::ScheduleIntentBundleWrapper,
     ComputeBudgetConfig,
 };
 
 pub struct IntentExecutionManager<D: DB> {
     db: Arc<D>,
     result_subscriber: ResultSubscriber,
-    intent_sender: mpsc::Sender<ScheduledBaseIntentWrapper>,
+    intent_sender: mpsc::Sender<ScheduleIntentBundleWrapper>,
 }
 
 impl<D: DB> IntentExecutionManager<D> {
@@ -69,7 +69,7 @@ impl<D: DB> IntentExecutionManager<D> {
     /// Intents will be extracted and handled in the [`IntentExecutionEngine`]
     pub async fn schedule(
         &self,
-        base_intents: Vec<ScheduledBaseIntentWrapper>,
+        base_intents: Vec<ScheduleIntentBundleWrapper>,
     ) -> Result<(), IntentExecutionManagerError> {
         // If db not empty push el-t there
         // This means that at some point channel got full

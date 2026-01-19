@@ -13,13 +13,14 @@ pub enum TriggerType {
     OffChain,
 }
 
+// TODO(edwin): can be removed?
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ScheduledBaseIntentWrapper {
+pub struct ScheduleIntentBundleWrapper {
     pub inner: ScheduledIntentBundle,
     pub trigger_type: TriggerType,
 }
 
-impl metrics::LabelValue for ScheduledBaseIntentWrapper {
+impl metrics::LabelValue for ScheduleIntentBundleWrapper {
     fn value(&self) -> &str {
         match &self.inner.intent_bundle {
             MagicBaseIntent::BaseActions(_) => "actions",
@@ -29,7 +30,7 @@ impl metrics::LabelValue for ScheduledBaseIntentWrapper {
     }
 }
 
-impl Deref for ScheduledBaseIntentWrapper {
+impl Deref for ScheduleIntentBundleWrapper {
     type Target = ScheduledIntentBundle;
 
     fn deref(&self) -> &Self::Target {

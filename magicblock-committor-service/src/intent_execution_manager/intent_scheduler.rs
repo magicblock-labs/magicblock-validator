@@ -5,7 +5,7 @@ use solana_pubkey::Pubkey;
 use thiserror::Error;
 use tracing::error;
 
-use crate::types::ScheduledBaseIntentWrapper;
+use crate::types::ScheduleIntentBundleWrapper;
 
 pub(crate) const POISONED_INNER_MSG: &str =
     "Mutex on CommitSchedulerInner is poisoned.";
@@ -13,7 +13,7 @@ pub(crate) const POISONED_INNER_MSG: &str =
 type IntentID = u64;
 struct IntentMeta {
     num_keys: usize,
-    intent: ScheduledBaseIntentWrapper,
+    intent: ScheduleIntentBundleWrapper,
 }
 
 /// A scheduler that ensures mutually exclusive access to pubkeys across intents
@@ -80,8 +80,8 @@ impl IntentScheduler {
     /// otherwise consumes it and enqueues
     pub fn schedule(
         &mut self,
-        base_intent: ScheduledBaseIntentWrapper,
-    ) -> Option<ScheduledBaseIntentWrapper> {
+        base_intent: ScheduleIntentBundleWrapper,
+    ) -> Option<ScheduleIntentBundleWrapper> {
         let intent_id = base_intent.inner.id;
 
         // To check duplicate scheduling its enough to check:
@@ -229,7 +229,7 @@ impl IntentScheduler {
     // Returns [`ScheduledBaseIntent`] that can be executed
     pub fn pop_next_scheduled_intent(
         &mut self,
-    ) -> Option<ScheduledBaseIntentWrapper> {
+    ) -> Option<ScheduleIntentBundleWrapper> {
         // TODO(edwin): optimize. Create counter im IntentMeta & update
         let mut execute_candidates: HashMap<IntentID, usize> = HashMap::new();
         self.blocked_keys.iter().for_each(|(_, queue)| {
@@ -730,7 +730,7 @@ pub(crate) fn create_test_intent(
     id: u64,
     pubkeys: &[Pubkey],
     is_undelegate: bool,
-) -> ScheduledBaseIntentWrapper {
+) -> ScheduleIntentBundleWrapper {
     use magicblock_program::magic_scheduled_base_intent::{
         CommitAndUndelegate, CommitType, CommittedAccount, MagicBaseIntent,
         ScheduledIntentBundle, UndelegateType,
@@ -773,7 +773,7 @@ pub(crate) fn create_test_intent(
         }
     }
 
-    ScheduledBaseIntentWrapper {
+    ScheduleIntentBundleWrapper {
         inner: intent,
         trigger_type: TriggerType::OffChain,
     }

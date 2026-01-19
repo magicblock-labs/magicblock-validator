@@ -18,7 +18,7 @@ use crate::{
     error::{CommittorServiceError, CommittorServiceResult},
     intent_execution_manager::BroadcastedIntentExecutionResult,
     persist::{CommitStatusRow, MessageSignatures},
-    types::ScheduledBaseIntentWrapper,
+    types::ScheduleIntentBundleWrapper,
     BaseIntentCommittor,
 };
 
@@ -30,7 +30,7 @@ pub trait BaseIntentCommittorExt: BaseIntentCommittor {
     /// Schedules Base Intents and waits for their results
     async fn schedule_base_intents_waiting(
         &self,
-        base_intents: Vec<ScheduledBaseIntentWrapper>,
+        base_intents: Vec<ScheduleIntentBundleWrapper>,
     ) -> BaseIntentCommitorExtResult<Vec<BroadcastedIntentExecutionResult>>;
 }
 
@@ -116,7 +116,7 @@ impl<CC: BaseIntentCommittor> BaseIntentCommittorExt
 {
     async fn schedule_base_intents_waiting(
         &self,
-        base_intents: Vec<ScheduledBaseIntentWrapper>,
+        base_intents: Vec<ScheduleIntentBundleWrapper>,
     ) -> BaseIntentCommitorExtResult<Vec<BroadcastedIntentExecutionResult>>
     {
         // Critical section
@@ -164,7 +164,7 @@ impl<CC: BaseIntentCommittor> BaseIntentCommittor for CommittorServiceExt<CC> {
 
     fn schedule_base_intent(
         &self,
-        base_intents: Vec<ScheduledBaseIntentWrapper>,
+        base_intents: Vec<ScheduleIntentBundleWrapper>,
     ) -> oneshot::Receiver<CommittorServiceResult<()>> {
         self.inner.schedule_base_intent(base_intents)
     }

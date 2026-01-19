@@ -10,7 +10,7 @@ use magicblock_committor_service::{
     intent_executor::ExecutionOutput,
     persist::CommitStrategy,
     service_ext::{BaseIntentCommittorExt, CommittorServiceExt},
-    types::{ScheduledBaseIntentWrapper, TriggerType},
+    types::{ScheduleIntentBundleWrapper, TriggerType},
     BaseIntentCommittor, CommittorService, ComputeBudgetConfig,
 };
 use magicblock_program::magic_scheduled_base_intent::{
@@ -188,7 +188,7 @@ async fn commit_single_account(
         MagicBaseIntent::Commit(CommitType::Standalone(vec![account]))
     };
 
-    let intent = ScheduledBaseIntentWrapper {
+    let intent = ScheduleIntentBundleWrapper {
         trigger_type: TriggerType::OnChain,
         inner: ScheduledIntentBundle {
             id: 0,
@@ -255,7 +255,7 @@ async fn commit_book_order_account(
         MagicBaseIntent::Commit(CommitType::Standalone(vec![account]))
     };
 
-    let intent = ScheduledBaseIntentWrapper {
+    let intent = ScheduleIntentBundleWrapper {
         trigger_type: TriggerType::OnChain,
         inner: ScheduledIntentBundle {
             id: 0,
@@ -589,7 +589,7 @@ async fn commit_multiple_accounts(
             payer: Pubkey::new_unique(),
             intent_bundle: base_intent,
         })
-        .map(|intent| ScheduledBaseIntentWrapper {
+        .map(|intent| ScheduleIntentBundleWrapper {
             trigger_type: TriggerType::OnChain,
             inner: intent,
         })
@@ -627,7 +627,7 @@ async fn commit_multiple_accounts(
 // -----------------
 async fn ix_commit_local(
     service: CommittorServiceExt<CommittorService>,
-    base_intents: Vec<ScheduledBaseIntentWrapper>,
+    base_intents: Vec<ScheduleIntentBundleWrapper>,
     expected_strategies: ExpectedStrategies,
 ) {
     let execution_outputs = service
