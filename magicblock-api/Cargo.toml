@@ -12,7 +12,7 @@ anyhow = { workspace = true }
 borsh = "1.5.3"
 fd-lock = { workspace = true }
 light-client = { workspace = true, features = ["v2"] }
-log = { workspace = true }
+tracing = { workspace = true }
 
 magic-domain-program = { workspace = true }
 magicblock-account-cloner = { workspace = true }

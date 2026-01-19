@@ -2,9 +2,9 @@ use std::path::Path;
 
 use iterator::OffsetPubkeyIter;
 use lmdb::{Cursor, DatabaseFlags, Environment, RwTransaction, Transaction};
-use log::warn;
 use solana_pubkey::Pubkey;
 use table::Table;
+use tracing::warn;
 use utils::*;
 
 use crate::{
@@ -293,7 +293,7 @@ impl AccountsDbIndex {
                     Pubkey::try_from(val).map_err(|_| lmdb::Error::Invalid)?
                 }
                 None => {
-                    warn!("account {pubkey} missing from owners index during cleanup");
+                    warn!(pubkey = %pubkey, "Account missing from owners index");
                     return Ok(());
                 }
             },

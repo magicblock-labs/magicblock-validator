@@ -20,7 +20,7 @@ dyn-clone = { workspace = true }
 futures-util = { workspace = true }
 light-client = { workspace = true, features = ["v2"] }
 light-sdk = { workspace = true, features = ["v2"] }
-log = { workspace = true }
+tracing = { workspace = true }
 lru = { workspace = true }
 magicblock-core = { workspace = true }
 magicblock-config = { workspace = true }
@@ -64,6 +64,9 @@ solana-signature = { workspace = true, features = ["rand"] }
 lazy_static = { workspace = true }
 rand = { workspace = true }
 tempfile = { workspace = true }
+test-kit = { workspace = true }
+tracing-subscriber = { workspace = true }
+tracing-log = { workspace = true }
 
 [features]
 default = []

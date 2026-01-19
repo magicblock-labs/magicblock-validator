@@ -7,7 +7,6 @@ use hyper::{
     body::{Bytes, Incoming},
     Request, Response,
 };
-use log::*;
 use magicblock_core::{
     link::transactions::SanitizeableTransaction, traits::AccountsBank,
 };
@@ -19,6 +18,7 @@ use solana_transaction::{
     sanitized::SanitizedTransaction, versioned::VersionedTransaction,
 };
 use solana_transaction_status::UiTransactionEncoding;
+use tracing::*;
 
 use super::RpcRequest;
 use crate::{
@@ -106,6 +106,7 @@ pub(crate) async fn extract_bytes(
 impl HttpDispatcher {
     /// Fetches an account's data from the `AccountsDb` filling it in from chain
     /// as needed.
+    #[instrument(skip(self), fields(pubkey = %pubkey))]
     async fn read_account_with_ensure(
         &self,
         pubkey: &Pubkey,
@@ -125,18 +126,19 @@ impl HttpDispatcher {
             .inspect_err(|e| {
                 // There is nothing we can do if fetching the account fails
                 // Log the error and return whatever is in the accounts db
-                debug!("Failed to ensure account {pubkey}: {e}");
+                debug!(error = ?e, "Failed to ensure account");
             });
         self.accountsdb.get_account(pubkey)
     }
 
     /// Fetches multiple account's data from the `AccountsDb` filling them in from chain
     /// as needed.
+    #[instrument(skip(self, pubkeys), fields(pubkey_count = pubkeys.len()))]
     async fn read_accounts_with_ensure(
         &self,
         pubkeys: &[Pubkey],
     ) -> Vec<Option<AccountSharedData>> {
-        trace!("Ensuring accounts {pubkeys:?}");
+        trace!("Ensuring accounts");
         let _timer = ENSURE_ACCOUNTS_TIME
             .with_label_values(&["multi-account"])
             .start_timer();
@@ -152,7 +154,7 @@ impl HttpDispatcher {
             .inspect_err(|e| {
                 // There is nothing we can do if fetching the accounts fails
                 // Log the error and return whatever is in the accounts db
-                warn!("Failed to ensure accounts: {e}");
+                warn!(error = ?e, "Failed to ensure accounts");
             });
         pubkeys
             .iter()
@@ -208,6 +210,7 @@ impl HttpDispatcher {
     }
 
     /// Ensures all accounts required for a transaction are present in the `AccountsDb`.
+    #[instrument(skip(self, transaction), fields(signature = %transaction.signature()))]
     async fn ensure_transaction_accounts(
         &self,
         transaction: &SanitizedTransaction,
@@ -222,9 +225,7 @@ impl HttpDispatcher {
         {
             Ok(res) if res.is_ok() => Ok(()),
             Ok(res) => {
-                debug!(
-                    "Transaction {} account resolution encountered issues:\n{res}",
-                     transaction.signature());
+                debug!(result = %res, "Transaction account resolution encountered issues");
                 Ok(())
             }
             Err(err) => {
@@ -232,7 +233,7 @@ impl HttpDispatcher {
                 // all accounts, i.e. we may be disconnected, weren't able to
                 // setup a subscription, etc.
                 // In that case we don't even want to run the transaction.
-                warn!("Failed to ensure transaction accounts: {:?}", err);
+                warn!(error = ?err, "Failed to ensure transaction accounts");
                 Err(RpcError::transaction_verification(err))
             }
         }

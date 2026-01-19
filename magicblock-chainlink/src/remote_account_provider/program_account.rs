@@ -1,7 +1,6 @@
 #![allow(unused)]
 use std::{fmt, sync::Arc};
 
-use log::*;
 use solana_account::{AccountSharedData, ReadableAccount};
 use solana_instruction::{AccountMeta, Instruction};
 use solana_loader_v3_interface::{
@@ -15,6 +14,7 @@ use solana_loader_v4_interface::{
 use solana_pubkey::{pubkey, Pubkey};
 use solana_system_interface::instruction as system_instruction;
 use solana_sysvar::rent::Rent;
+use tracing::*;
 
 use crate::{
     cloner::errors::ClonerResult,
@@ -333,7 +333,7 @@ fn get_state_v1_v2(
     program_id: Pubkey,
     program_account: &[u8],
 ) -> RemoteAccountProviderResult<ProgramDataWithAuthority> {
-    debug!("Loading program account for loader v1/v2 {program_id}");
+    debug!(program_id = %program_id, "Loading program account for loader v1/v2");
     Ok(ProgramDataWithAuthority {
         authority: program_id,
         program_data: program_account.to_vec(),
@@ -345,7 +345,7 @@ fn get_state_v3(
     program_id: Pubkey,
     program_data_account: &[u8],
 ) -> RemoteAccountProviderResult<ProgramDataWithAuthority> {
-    debug!("Loading program account for loader v3 {program_id}");
+    debug!(program_id = %program_id, "Loading program account for loader v3");
     let meta_data = program_data_account
         .get(..LoaderV3State::size_of_programdata_metadata())
         .ok_or(RemoteAccountProviderError::LoaderV4StateInvalidLength(
@@ -397,7 +397,7 @@ fn get_state_v4(
     program_id: Pubkey,
     program_account: &[u8],
 ) -> RemoteAccountProviderResult<ProgramDataWithAuthority> {
-    debug!("Loading program account for loader v4 {program_id}");
+    debug!(program_id = %program_id, "Loading program account for loader v4");
     let data = program_account
         .get(0..LoaderV4State::program_data_offset())
         .ok_or(RemoteAccountProviderError::LoaderV4StateInvalidLength(

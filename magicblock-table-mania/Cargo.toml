@@ -12,7 +12,7 @@ doctest = false
 
 [dependencies]
 ed25519-dalek = { workspace = true }
-log = { workspace = true }
+tracing = { workspace = true }
 magicblock-rpc-client = { workspace = true }
 magicblock-metrics = { workspace = true }
 rand = { workspace = true }

@@ -437,6 +437,7 @@ mod tests {
             },
             BaseActionTask, CompressedCommitTask, TaskStrategy, UndelegateTask,
         },
+        test_utils,
     };
 
     struct MockInfoFetcher;
@@ -575,6 +576,7 @@ mod tests {
 
     #[test]
     fn test_build_strategy_with_single_small_task() {
+        test_utils::init_test_logger();
         let validator = Pubkey::new_unique();
         let task = create_test_commit_task(1, 100, 0);
         let tasks = vec![Box::new(task) as Box<dyn BaseTask>];

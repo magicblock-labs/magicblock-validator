@@ -1,5 +1,4 @@
 use error::{ApertureError, RpcError};
-use log::*;
 use magicblock_config::config::aperture::ApertureConfig;
 use magicblock_core::link::DispatchEndpoints;
 use processor::EventProcessor;
@@ -7,6 +6,7 @@ use server::{http::HttpServer, websocket::WebsocketServer};
 use state::SharedState;
 use tokio::net::TcpListener;
 use tokio_util::sync::CancellationToken;
+use tracing::{info, instrument};
 
 type RpcResult<T> = Result<T, RpcError>;
 type ApertureResult<T> = Result<T, ApertureError>;
@@ -54,13 +54,14 @@ impl JsonRpcServer {
     }
 
     /// Run JSON-RPC server indefinitely, until cancel token is used to signal shut down
+    #[instrument(skip(self))]
     pub async fn run(self) {
-        info!("Running JSON-RPC server");
+        info!("JSON-RPC server running");
         tokio::join! {
             self.http.run(),
             self.websocket.run()
         };
-        info!("JSON-RPC server has shutdown");
+        info!("JSON-RPC server shutdown");
     }
 }
 

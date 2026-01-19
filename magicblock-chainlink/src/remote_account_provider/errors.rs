@@ -65,8 +65,11 @@ pub enum RemoteAccountProviderError {
     #[error("Failed to fetch accounts ({0})")]
     FailedFetchingAccounts(String),
 
-    #[error("LRU capacity must be greater than 0, got {0}")]
-    InvalidLruCapacity(usize),
+    #[error("LRU capacity must be greater than 0")]
+    InvalidLruCapacity,
+
+    #[error("Resubscription delay must be greater than 0")]
+    InvalidResubscriptionDelay,
 
     #[error(
         "Only one listener supported on lru cache removed accounts events"

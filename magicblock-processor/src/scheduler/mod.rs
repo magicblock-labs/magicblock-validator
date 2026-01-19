@@ -11,7 +11,6 @@ use std::{
 
 use coordinator::{ExecutionCoordinator, TransactionWithId};
 use locks::{ExecutorId, MAX_SVM_EXECUTORS};
-use log::{error, info};
 use magicblock_core::link::transactions::{
     ProcessableTransaction, TransactionToProcessRx,
 };
@@ -23,6 +22,7 @@ use tokio::{
     sync::mpsc::{channel, Receiver, Sender},
 };
 use tokio_util::sync::CancellationToken;
+use tracing::{error, info, instrument};
 
 use crate::executor::{SimpleForkGraph, TransactionExecutor};
 
@@ -123,6 +123,7 @@ impl TransactionScheduler {
     /// The `biased` selection ensures that ready workers are processed before
     /// the incoming transactions, which helps to keep the pipeline full and
     /// maximize throughput.
+    #[instrument(skip(self))]
     async fn run(mut self) {
         let mut block_produced = self.latest_block.subscribe();
         loop {
@@ -150,7 +151,7 @@ impl TransactionScheduler {
         }
         drop(self.executors);
         self.ready_rx.recv().await;
-        info!("Transaction scheduler has terminated");
+        info!("Scheduler terminated");
     }
 
     /// Handles a notification that a worker has become ready.
@@ -221,7 +222,7 @@ impl TransactionScheduler {
         // NOTE: the channel will always have enough capacity, since the executor was
         // marked ready, which means that its transaction queue is currently empty.
         let _ = self.executors[executor as usize].try_send(txn).inspect_err(|e| {
-            error!("Executor {executor} has shutdown or crashed, should not be possible: {e}")
+            error!(executor = executor, error = ?e, "Executor channel send failed")
         });
         None
     }

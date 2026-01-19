@@ -1,6 +1,5 @@
 use std::str::FromStr;
 
-use log::{Level::Trace, *};
 use magicblock_core::link::transactions::{
     SanitizeableTransaction, TransactionSchedulerHandle,
 };
@@ -9,6 +8,7 @@ use solana_clock::{Slot, UnixTimestamp};
 use solana_hash::Hash;
 use solana_transaction::versioned::VersionedTransaction;
 use solana_transaction_status::VersionedConfirmedBlock;
+use tracing::{instrument, Level, *};
 
 use crate::{
     errors::{LedgerError, LedgerResult},
@@ -29,6 +29,13 @@ struct IterBlocksParams<'a> {
     blockhashes_only_starting_slot: Slot,
 }
 
+#[instrument(
+    skip(params, transaction_scheduler),
+    fields(
+        full_process_starting_slot = params.full_process_starting_slot,
+        blockhashes_only_starting_slot = params.blockhashes_only_starting_slot,
+    )
+)]
 async fn replay_blocks(
     params: IterBlocksParams<'_>,
     transaction_scheduler: TransactionSchedulerHandle,
@@ -40,26 +47,27 @@ async fn replay_blocks(
     } = params;
     let mut slot: u64 = blockhashes_only_starting_slot;
 
-    let max_slot = if log::log_enabled!(Level::Info) {
+    let max_slot = if enabled!(Level::INFO) {
         ledger
-            .get_max_blockhash()?
-            .0
-            .to_formatted_string(&Locale::en)
+            .get_max_blockhash()
+            .ok()
+            .map(|(s, _)| s.to_formatted_string(&Locale::en))
     } else {
-        "N/A".to_string()
-    };
+        None
+    }
+    .unwrap_or("N/A".to_string());
     const PROGRESS_REPORT_INTERVAL: u64 = 100;
     loop {
         let Ok(Some(block)) = ledger.get_block(slot) else {
             break;
         };
-        if log::log_enabled!(Level::Info)
+        if enabled!(Level::INFO)
             && slot.is_multiple_of(PROGRESS_REPORT_INTERVAL)
         {
             info!(
-                "Processing block: {}/{}",
-                slot.to_formatted_string(&Locale::en),
-                max_slot
+                slot = %slot.to_formatted_string(&Locale::en),
+                max_slot = %max_slot,
+                "Processing block"
             );
         }
 
@@ -127,8 +135,8 @@ async fn replay_blocks(
                 transaction_scheduler.replay(txn).await.map_err(|err| {
                     LedgerError::BlockStoreProcessor(err.to_string())
                 });
-            if !log_enabled!(Trace) {
-                debug!("Result: {signature} - {result:?}");
+            if !enabled!(Level::TRACE) {
+                debug!(signature = %signature, result = ?result, "Transaction replay result");
             }
             if let Err(error) = result {
                 return Err(LedgerError::BlockStoreProcessor(format!(
@@ -143,6 +151,10 @@ async fn replay_blocks(
 
 /// Processes the provided ledger updating the bank and returns the slot
 /// at which the validator should continue processing (last processed slot + 1).
+#[instrument(
+    skip(ledger, transaction_scheduler),
+    fields(full_process_starting_slot, max_age)
+)]
 pub async fn process_ledger(
     ledger: &Ledger,
     full_process_starting_slot: Slot,
@@ -153,10 +165,7 @@ pub async fn process_ledger(
     // ran initially we ensure that they are present during replay as well
     let blockhashes_only_starting_slot =
         full_process_starting_slot.saturating_sub(max_age);
-    debug!(
-        "Loaded accounts into bank from storage replaying blockhashes from {} and transactions from {}",
-        blockhashes_only_starting_slot, full_process_starting_slot
-    );
+    debug!("Ledger replay starting");
     let slot = replay_blocks(
         IterBlocksParams {
             ledger,

@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use log::*;
 use magicblock_chainlink::{
     assert_data_has_size, assert_loaded_program_with_size,
     assert_subscribed_without_loaderv3_program_data_account,
@@ -31,6 +30,7 @@ use test_chainlink::{
     },
     test_mini_program, test_mini_program_log_msg,
 };
+use tracing::*;
 
 const RPC_URL: &str = "http://localhost:7799";
 fn get_rpc_client(commitment: CommitmentConfig) -> RpcClient {

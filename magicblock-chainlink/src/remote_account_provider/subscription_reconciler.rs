@@ -1,8 +1,8 @@
 use std::collections::HashSet;
 
-use log::*;
 use solana_pubkey::Pubkey;
 use tokio::sync::mpsc;
+use tracing::*;
 
 use super::{AccountsLruCache, ChainPubsubClient};
 
@@ -12,6 +12,7 @@ use super::{AccountsLruCache, ChainPubsubClient};
 /// This is the core logic shared between:
 /// - Normal unsubscribe flow (after removing from LRU cache)
 /// - Reconciliation flow (account missing from LRU cache)
+#[instrument(skip(pubsub_client, removed_account_tx), fields(pubkey = %pubkey))]
 pub(crate) async fn unsubscribe_and_notify_removal<T: ChainPubsubClient>(
     pubkey: Pubkey,
     pubsub_client: &T,
@@ -20,12 +21,12 @@ pub(crate) async fn unsubscribe_and_notify_removal<T: ChainPubsubClient>(
     match pubsub_client.unsubscribe(pubkey).await {
         Ok(()) => {
             if let Err(err) = removed_account_tx.send(pubkey).await {
-                warn!("Failed to send removal update for {pubkey}: {err:?}");
+                warn!(error = ?err, "Failed to send removal update");
             }
             true
         }
         Err(err) => {
-            warn!("Failed to unsubscribe from pubsub for {pubkey}: {err:?}");
+            warn!(error = ?err, "Failed to unsubscribe");
             false
         }
     }
@@ -95,22 +96,20 @@ pub async fn reconcile_subscriptions<PubsubClient: ChainPubsubClient>(
 
     if !extra_in_lru.is_empty() {
         debug!(
-            "Resubscribing {} accounts in LRU but not in pubsub: {:?}",
-            extra_in_lru.len(),
-            extra_in_lru
+            count = extra_in_lru.len(),
+            "Resubscribing accounts in LRU but not in pubsub"
         );
         for pubkey in extra_in_lru {
             if let Err(e) = pubsub_client.subscribe(pubkey).await {
-                warn!("Failed to resubscribe account {}: {}", pubkey, e);
+                warn!(pubkey = %pubkey, error = ?e, "Failed to resubscribe account");
             }
         }
     }
 
     if !extra_in_pubsub.is_empty() {
         debug!(
-            "Unsubscribing {} accounts in pubsub but not in LRU: {:?}",
-            extra_in_pubsub.len(),
-            extra_in_pubsub
+            count = extra_in_pubsub.len(),
+            "Unsubscribing accounts in pubsub but not in LRU"
         );
         for pubkey in extra_in_pubsub {
             unsubscribe_and_notify_removal(

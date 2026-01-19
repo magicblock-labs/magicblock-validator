@@ -1,4 +1,3 @@
-use log::*;
 use magicblock_chainlink::{
     config::ChainlinkConfig,
     remote_account_provider::config::RemoteAccountProviderConfig,
@@ -7,6 +6,7 @@ use magicblock_chainlink::{
 };
 use magicblock_config::config::LifecycleMode;
 use test_chainlink::ixtest_context::IxtestContext;
+use tracing::*;
 
 async fn setup(
     subscribed_accounts_lru_capacity: usize,

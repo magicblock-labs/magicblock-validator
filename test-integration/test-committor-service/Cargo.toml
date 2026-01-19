@@ -11,7 +11,6 @@ light-client = { workspace = true, features = ["v2"] }
 light-compressed-account = { workspace = true }
 light-sdk = { workspace = true, features = ["v2"] }
 light-sdk-types = { workspace = true, features = ["v2"] }
-log = { workspace = true }
 futures = { workspace = true }
 magicblock-chainlink = { workspace = true }
 magicblock-committor-program = { workspace = true, features = [
@@ -39,6 +38,7 @@ solana-rpc-client-api = { workspace = true }
 solana-sdk = { workspace = true }
 test-kit = { workspace = true }
 tokio = { workspace = true }
+tracing = { workspace = true }
 
 [features]
 test_table_close = []

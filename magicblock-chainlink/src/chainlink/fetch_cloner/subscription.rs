@@ -1,8 +1,8 @@
 use std::{collections::HashSet, fmt, sync::Arc};
 
-use log::*;
 use solana_pubkey::Pubkey;
 use tokio::task::JoinSet;
+use tracing::*;
 
 use crate::remote_account_provider::{
     photon_client::PhotonClient, ChainPubsubClient, ChainRpcClient,
@@ -102,6 +102,7 @@ impl fmt::Display for CancelStrategy {
     }
 }
 
+#[instrument(skip(provider, strategy))]
 pub(crate) async fn cancel_subs<
     T: ChainRpcClient,
     U: ChainPubsubClient,
@@ -116,7 +117,7 @@ pub(crate) async fn cancel_subs<
     }
     let mut joinset = JoinSet::new();
 
-    trace!("Canceling subscriptions with strategy: {strategy}");
+    trace!("Canceling subscriptions");
     let subs_to_cancel = match strategy {
         CancelStrategy::All(pubkeys) => pubkeys,
         CancelStrategy::New {
@@ -133,15 +134,13 @@ pub(crate) async fn cancel_subs<
             .chain(all.into_iter())
             .collect(),
     };
-    if log::log_enabled!(log::Level::Trace) {
-        trace!(
-            "Canceling subscriptions for: {}",
-            subs_to_cancel
-                .iter()
-                .map(|p| p.to_string())
-                .collect::<Vec<_>>()
-                .join(", ")
-        );
+    if tracing::enabled!(tracing::Level::TRACE) {
+        let pubkeys_str = subs_to_cancel
+            .iter()
+            .map(|p| p.to_string())
+            .collect::<Vec<_>>()
+            .join(", ");
+        trace!(pubkeys = %pubkeys_str, "Canceling subscriptions for");
     }
 
     for pubkey in subs_to_cancel {
@@ -150,14 +149,12 @@ pub(crate) async fn cancel_subs<
             // Check if there are pending requests for this account before unsubscribing
             // This prevents race conditions where one operation unsubscribes while another still needs it
             if provider_clone.is_pending(&pubkey) {
-                debug!(
-                    "Skipping unsubscribe for {pubkey} - has pending requests"
-                );
+                debug!(pubkey = %pubkey, "Skipping unsubscribe - has pending requests");
                 return;
             }
 
             if let Err(err) = provider_clone.unsubscribe(&pubkey).await {
-                warn!("Failed to unsubscribe from {pubkey}: {err:?}");
+                warn!(pubkey = %pubkey, error = ?err, "Failed to unsubscribe");
             }
         });
     }

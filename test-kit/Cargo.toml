@@ -24,6 +24,7 @@ solana-signer = { workspace = true }
 solana-transaction = { workspace = true }
 solana-transaction-status-client-types = { workspace = true }
 
-env_logger = { workspace = true }
-log = { workspace = true }
 tempfile = { workspace = true }
+tracing = { workspace = true }
+tracing-log = { workspace = true }
+tracing-subscriber = { workspace = true }

@@ -1,4 +1,3 @@
-use log::*;
 use magicblock_chainlink::{
     assert_cloned_as_delegated, assert_cloned_as_undelegated,
     assert_not_cloned, assert_not_found, assert_not_subscribed,
@@ -8,6 +7,7 @@ use magicblock_chainlink::{
 };
 use solana_sdk::{signature::Keypair, signer::Signer};
 use test_chainlink::ixtest_context::IxtestContext;
+use tracing::*;
 
 #[tokio::test]
 async fn ixtest_write_non_existing_account() {

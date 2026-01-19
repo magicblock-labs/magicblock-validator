@@ -1,5 +1,4 @@
 use integration_test_tools::IntegrationTestContext;
-use log::*;
 use program_mini::sdk::MiniSdk;
 use solana_sdk::{
     instruction::Instruction, native_token::LAMPORTS_PER_SOL,
@@ -7,6 +6,7 @@ use solana_sdk::{
 };
 use test_chainlink::programs::{PARALLEL_MINIV3_1, PARALLEL_MINIV3_2};
 use test_kit::init_logger;
+use tracing::*;
 
 /// This test verifies that we can clone two LoaderV3 programs together by
 /// sending a transaction that invokes both programs. Both programs are

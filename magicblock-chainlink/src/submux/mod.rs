@@ -9,11 +9,11 @@ use std::{
 };
 
 use async_trait::async_trait;
-use log::*;
 use magicblock_metrics::metrics;
 use solana_pubkey::Pubkey;
 use solana_sdk_ids::sysvar::clock;
 use tokio::sync::mpsc;
+use tracing::*;
 
 use crate::remote_account_provider::{
     chain_pubsub_client::{ChainPubsubClient, ReconnectableClient},
@@ -223,6 +223,7 @@ where
                 .iter()
                 .filter(|(client, _)| client.subs_immediately())
                 .count();
+            metrics::set_connected_direct_pubsub_clients_count(n);
             Arc::new(AtomicU16::new(n.try_into().unwrap_or(u16::MAX)))
         };
         for (client, _) in &clients {
@@ -281,10 +282,7 @@ where
                     // Drain any duplicate abort signals to coalesce reconnect attempts
                     while abort_rx.try_recv().is_ok() {}
 
-                    debug!(
-                        "[client_id={}] Reconnecter received abort signal, reconnecting client",
-                        client.id()
-                    );
+                    debug!(client_id = %client.id(), "Reconnecter received abort signal");
 
                     // Update connection related metrics
                     connected_clients.fetch_sub(1, Ordering::SeqCst);
@@ -300,10 +298,10 @@ where
                             current as usize,
                         );
                         debug!(
-                            "[client_id={}] connected_clients_subscribing_immediately: {} -> {}",
-                            client.id(),
+                            client_id = %client.id(),
                             previous,
-                            current
+                            current,
+                            "Connected clients subscribing immediately"
                         );
                     }
                     metrics::set_pubsub_client_uptime(client.id(), false);
@@ -322,6 +320,16 @@ where
         clients_only
     }
 
+    #[instrument(
+        skip(
+            client,
+            accounts_tracker,
+            program_subs,
+            connected_clients,
+            connected_clients_subscribing_immediately
+        ),
+        fields(client_id = %client.id())
+    )]
     async fn reconnect_client_with_backoff<U: SubscribedAccountsTracker>(
         client: Arc<T>,
         accounts_tracker: Arc<U>,
@@ -351,30 +359,34 @@ where
             .await
             {
                 debug!(
-                    "[client_id={}] Successfully reconnected client after {} attempts",
-                    client.id(),
-                    attempt
+                    client_id = %client.id(),
+                    attempt,
+                    "Successfully reconnected client"
                 );
                 break;
             } else {
                 if attempt % WARN_EVERY_ATTEMPTS == 0 {
                     error!(
-                        "[client_id={}] Failed to reconnect ({}) times",
-                        client.id(),
-                        attempt
+                        client_id = %client.id(),
+                        attempt,
+                        "Failed to reconnect"
                     );
                 }
                 let wait_duration = Duration::from_secs(fib_with_max(attempt));
                 tokio::time::sleep(wait_duration).await;
                 debug!(
-                    "[client_id={}] Reconnect attempt {} failed, will retry",
-                    client.id(),
-                    attempt
+                    client_id = %client.id(),
+                    attempt,
+                    "Reconnect attempt failed, will retry"
                 );
             }
         }
     }
 
+    #[instrument(
+        skip(client, accounts_tracker, program_subs, connected_clients, connected_clients_subscribing_immediately),
+        fields(client_id = %client.id())
+    )]
     async fn reconnect_client<U: SubscribedAccountsTracker>(
         client: Arc<T>,
         accounts_tracker: &Arc<U>,
@@ -384,9 +396,9 @@ where
     ) -> bool {
         if let Err(err) = client.try_reconnect().await {
             debug!(
-                "[client_id={}] Failed to reconnect client: {:?}",
-                client.id(),
-                err
+                client_id = %client.id(),
+                error = ?err,
+                "Failed to reconnect client"
             );
             return false;
         }
@@ -397,10 +409,10 @@ where
         for program_id in programs {
             if let Err(err) = client.subscribe_program(program_id).await {
                 debug!(
-                    "[client_id={}] Failed to resubscribe program {} after reconnect: {:?}",
-                    client.id(),
-                    program_id,
-                    err
+                    client_id = %client.id(),
+                    program_id = %program_id,
+                    error = ?err,
+                    "Failed to resubscribe program after reconnect"
                 );
                 return false;
             }
@@ -412,7 +424,7 @@ where
         let account_subs = accounts_tracker.subscribed_accounts();
 
         if let Err(err) = client.resub_multiple(account_subs).await {
-            debug!("[client_id={}] Failed to resubscribe accounts after reconnect: {:?}", client.id(), err);
+            debug!(client_id = %client.id(), error = ?err, "Failed to resubscribe accounts after reconnect");
             return false;
         }
 
@@ -423,11 +435,11 @@ where
         );
         metrics::set_pubsub_client_uptime(client.id(), true);
         if client.subs_immediately() {
-            connected_clients_subscribing_immediately
+            let previous = connected_clients_subscribing_immediately
                 .fetch_add(1, Ordering::SeqCst);
+            let current = previous.saturating_add(1);
             metrics::set_connected_direct_pubsub_clients_count(
-                connected_clients_subscribing_immediately.load(Ordering::SeqCst)
-                    as usize,
+                current as usize,
             );
         }
 
@@ -658,12 +670,11 @@ where
             } else {
                 debounce_state.maybe_disable()
             };
-            if changed && log_enabled!(Level::Trace) {
+            if changed && tracing::enabled!(tracing::Level::TRACE) {
                 trace!(
-                    "{} debounce for: {}. Millis between arrivals: {:?}",
-                    debounce_state.label(),
-                    pubkey,
-                    debounce_state.arrival_deltas_ms()
+                    pubkey = %pubkey,
+                    state = %debounce_state.label(),
+                    "Debounce state"
                 );
             }
 
@@ -760,7 +771,7 @@ where
         {
             let mut subs = self.program_subs.lock().unwrap();
             if subs.contains(&program_id) {
-                warn!("Program subscription already exists for {}", program_id);
+                warn!(program_id = %program_id, "Program subscription already exists");
                 return Ok(());
             }
             // Add to program_subs before subscribing to clients

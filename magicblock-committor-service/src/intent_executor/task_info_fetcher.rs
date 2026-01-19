@@ -18,7 +18,6 @@ use light_client::{
     },
     rpc::RpcError as LightRpcError,
 };
-use log::{error, info, warn};
 use lru::LruCache;
 use magicblock_core::compression::derive_cda_from_pda;
 use magicblock_metrics::metrics;
@@ -32,6 +31,7 @@ use solana_rpc_client_api::{
     request::RpcError,
 };
 use solana_signature::Signature;
+use tracing::{error, info, warn};
 
 const NUM_FETCH_RETRIES: NonZeroUsize = NonZeroUsize::new(5).unwrap();
 const MUTEX_POISONED_MSG: &str = "CacheTaskInfoFetcher mutex poisoned!";
@@ -166,19 +166,20 @@ impl CacheTaskInfoFetcher {
                     break Err(err)
                 }
                 err @ TaskInfoFetcherError::InvalidAccountDataError(_) => {
-                    error!("Unexpected error: {:?}", err);
+                    error!(error = ?err, "Unexpected error");
                     break Err(err);
                 }
                 TaskInfoFetcherError::MinContextSlotNotReachedError(_, _) => {
                     // Get some extra sleep
                     info!(
-                        "Min context slot not reached {}, attempt: {}",
-                        min_context_slot, i
+                        min_context_slot,
+                        attempt = i,
+                        "Min context slot not reached"
                     );
                     tokio::time::sleep(Duration::from_millis(100)).await;
                 }
                 TaskInfoFetcherError::MagicBlockRpcClientError(ref err) => {
-                    warn!("Fetch account error: {}, attempt: {}", err, i);
+                    warn!(error = ?err, attempt = i, "Fetch account error");
                 }
                 TaskInfoFetcherError::IndexerError(ref err) => {
                     warn!("Fetch compressed delegation records error: {:?}, attempt: {}", err, i);

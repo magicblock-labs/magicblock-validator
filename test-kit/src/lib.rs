@@ -8,7 +8,6 @@ use std::{
 };
 
 pub use guinea;
-use log::error;
 use magicblock_accounts_db::AccountsDb;
 use magicblock_core::{
     link::{
@@ -40,6 +39,7 @@ pub use solana_signer::Signer;
 use solana_transaction::Transaction;
 use solana_transaction_status_client_types::TransactionStatusMeta;
 use tempfile::TempDir;
+use tracing::{error, instrument};
 
 /// A simulated validator backend for integration tests.
 ///
@@ -264,17 +264,18 @@ impl ExecutionTestEnv {
     }
 
     /// Submits a transaction for execution and waits for its result.
+    #[instrument(skip(self, txn))]
     pub async fn execute_transaction(
         &self,
         txn: impl SanitizeableTransaction,
     ) -> TransactionResult {
-        self.transaction_scheduler
-            .execute(txn)
-            .await
-            .inspect_err(|err| error!("failed to execute transaction: {err}"))
+        self.transaction_scheduler.execute(txn).await.inspect_err(
+            |err| error!(error = ?err, "Transaction execution failed"),
+        )
     }
 
     /// Submits a transaction for scheduling and returns
+    #[instrument(skip(self, txn))]
     pub async fn schedule_transaction(
         &self,
         txn: impl SanitizeableTransaction,
@@ -283,6 +284,7 @@ impl ExecutionTestEnv {
     }
 
     /// Submits a transaction for simulation and waits for the detailed result.
+    #[instrument(skip(self, txn))]
     pub async fn simulate_transaction(
         &self,
         txn: impl SanitizeableTransaction,
@@ -293,20 +295,20 @@ impl ExecutionTestEnv {
             .await
             .expect("transaction executor has shutdown during test");
         if let Err(ref err) = result.result {
-            error!("failed to simulate transaction: {err}")
+            error!(error = ?err, "Transaction simulation failed");
         }
         result
     }
 
     /// Submits a transaction for replay and waits for its result.
+    #[instrument(skip(self, txn))]
     pub async fn replay_transaction(
         &self,
         txn: impl SanitizeableTransaction,
     ) -> TransactionResult {
-        self.transaction_scheduler
-            .replay(txn)
-            .await
-            .inspect_err(|err| error!("failed to replay transaction: {err}"))
+        self.transaction_scheduler.replay(txn).await.inspect_err(
+            |err| error!(error = ?err, "Transaction replay failed"),
+        )
     }
 
     pub fn get_account(&self, pubkey: Pubkey) -> CommitableAccount<'_> {

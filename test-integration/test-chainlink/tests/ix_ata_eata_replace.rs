@@ -1,4 +1,3 @@
-use log::debug;
 use magicblock_chainlink::{
     testing::{
         deleg::add_delegation_record_for,
@@ -15,6 +14,7 @@ use solana_pubkey::{pubkey, Pubkey};
 use solana_sdk::signature::{Keypair, Signer};
 use spl_token::{solana_program::program_pack::Pack, state::AccountState};
 use test_chainlink::test_context::TestContext;
+use tracing::debug;
 
 #[tokio::test]
 async fn ixtest_ata_eata_replace_when_delegated_to_us() {

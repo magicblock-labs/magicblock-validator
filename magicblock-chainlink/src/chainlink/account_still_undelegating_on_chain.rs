@@ -1,6 +1,6 @@
 use dlp::state::DelegationRecord;
-use log::*;
 use solana_pubkey::Pubkey;
+use tracing::*;
 
 /// Decides if an account that is undelegating should be updated
 /// (overwritten) by the remote account state and the `undelegating` flag cleared.
@@ -59,30 +59,23 @@ pub(crate) fn account_still_undelegating_on_chain(
             // The last update of the account was after the last delegation
             // Therefore the account was not redelegated which indicates
             // that the undelegation is still not completed. Case (D))
-            debug!(
-                "Undelegation for {pubkey} is still pending. Keeping bank account.",
-            );
+            debug!(pubkey = %pubkey, "Undelegation is still pending, keeping bank account");
             true
         } else {
             // This is a re-delegation to us after undelegation completed.
             // Case (B))
-            debug!(
-                "Undelegation completed for account {pubkey} and it was re-delegated to us at slot: ({delegation_slot}).",
-            );
+            debug!(pubkey = %pubkey, delegation_slot = delegation_slot, "Undelegation completed, account re-delegated to us");
             magicblock_metrics::metrics::inc_undelegation_completed();
             false
         }
     } else if let Some(deleg_record) = deleg_record {
         // Account delegated to other (Case C)) -> clone as is
-        debug!(
-            "Account {pubkey} was undelegated and re-delegated to another validator. authority: {}, delegated_to: {}",
-            validator_auth, deleg_record.authority
-        );
+        debug!(pubkey = %pubkey, authority = %validator_auth, delegated_to = %deleg_record.authority, "Account re-delegated to another validator");
         magicblock_metrics::metrics::inc_undelegation_completed();
         false
     } else {
         // Account no longer delegated (Case A)) -> clone as is
-        debug!("Account {pubkey} was undelegated and remained so");
+        debug!(pubkey = %pubkey, "Account undelegated and remained so");
         magicblock_metrics::metrics::inc_undelegation_completed();
         false
     }

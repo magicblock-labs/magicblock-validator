@@ -1,4 +1,4 @@
-use log::error;
+use tracing::error;
 
 use crate::{
     persist::{CommitStrategy, IntentPersister},
@@ -61,9 +61,11 @@ where
                     commit_strategy,
                 ) {
                     error!(
-                        "Failed to persist commit strategy {}: {}",
-                        commit_strategy.as_str(),
-                        err
+                        %commit_id,
+                        %pubkey,
+                        strategy = commit_strategy.as_str(),
+                        error = ?err,
+                        "Failed to persist commit strategy"
                     );
                 }
             }
@@ -107,9 +109,11 @@ where
                     commit_strategy,
                 ) {
                     error!(
-                        "Failed to persist commit strategy {}: {}",
-                        commit_strategy.as_str(),
-                        err
+                        %commit_id,
+                        %pubkey,
+                        strategy = commit_strategy.as_str(),
+                        error = ?err,
+                        "Failed to persist commit strategy"
                     );
                 }
             }

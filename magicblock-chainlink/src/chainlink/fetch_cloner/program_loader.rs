@@ -1,8 +1,8 @@
-use log::*;
 use magicblock_core::traits::AccountsBank;
 use magicblock_metrics::metrics::AccountFetchOrigin;
 use solana_account::{AccountSharedData, ReadableAccount};
 use solana_pubkey::Pubkey;
+use tracing::*;
 
 use super::FetchCloner;
 use crate::{
@@ -26,7 +26,7 @@ pub(crate) async fn handle_executable_sub_update<T, U, V, C, P>(
     P: PhotonClient,
 {
     if !this.is_program_allowed(&pubkey) {
-        debug!("Skipping clone of program {pubkey}: not in allowed_programs");
+        debug!(pubkey = %pubkey, "Skipping clone of program, not in allowed_programs");
         return;
     }
 
@@ -34,9 +34,7 @@ pub(crate) async fn handle_executable_sub_update<T, U, V, C, P>(
         // This is a program deployed on chain with BPFLoader1111111111111111111111111111111111.
         // By definition it cannot be upgraded, hence we should never get a subscription
         // update for it.
-        error!(
-            "Unexpected subscription update for program to loaded on chain with LoaderV1: {pubkey}."
-        );
+        error!(pubkey = %pubkey, "Unexpected subscription update for program loaded with LoaderV1");
         return;
     }
 
@@ -60,15 +58,11 @@ pub(crate) async fn handle_executable_sub_update<T, U, V, C, P>(
                     .map(|x| x.into_account_shared_data()),
             ),
             Ok(Err(err)) => {
-                error!(
-                    "Failed to fetch program data account for program {pubkey}: {err}."
-                );
+                error!(pubkey = %pubkey, error = %err, "Failed to fetch program data account");
                 return;
             }
             Err(err) => {
-                error!(
-                    "Failed to fetch program data account for program {pubkey}: {err}."
-                );
+                error!(pubkey = %pubkey, error = %err, "Failed to fetch program data account");
                 return;
             }
         }
@@ -84,13 +78,11 @@ pub(crate) async fn handle_executable_sub_update<T, U, V, C, P>(
     ) {
         Ok(x) => x.into_loaded_program(),
         Err(err) => {
-            error!(
-                "Failed to resolve program account {pubkey} into bank: {err}"
-            );
+            error!(pubkey = %pubkey, error = %err, "Failed to resolve program account into bank");
             return;
         }
     };
     if let Err(err) = this.cloner.clone_program(loaded_program).await {
-        error!("Failed to clone account {pubkey} into bank: {err}");
+        error!(pubkey = %pubkey, error = %err, "Failed to clone program into bank");
     }
 }

@@ -1,9 +1,9 @@
 use std::{sync::Arc, time::Duration};
 
 use futures_util::stream::{FuturesUnordered, StreamExt};
-use log::*;
 use solana_pubkey::Pubkey;
 use tokio::sync::oneshot;
+use tracing::*;
 
 const SUBSCRIBE_TIMEOUT: Duration = Duration::from_millis(2_000);
 const UNSUBSCRIBE_TIMEOUT: Duration = Duration::from_millis(1_000);
@@ -13,7 +13,7 @@ use crate::remote_account_provider::{
     errors::{RemoteAccountProviderError, RemoteAccountProviderResult},
 };
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum AccountSubscriptionTask {
     Subscribe(Pubkey, usize),
     SubscribeProgram(Pubkey, usize),
@@ -34,6 +34,7 @@ impl AccountSubscriptionTask {
 }
 
 impl AccountSubscriptionTask {
+    #[instrument(skip(clients), fields(operation = %self.op_name()))]
     pub async fn process<T>(
         self,
         clients: Vec<Arc<T>>,
@@ -195,9 +196,11 @@ impl AccountSubscriptionTask {
                 // The failed clients will also trigger the reconnection logic
                 // which takes care of fixing the RPC connection.
                 warn!(
-                    "Some clients failed to {}: {}",
-                    op_name.to_lowercase(),
-                    errors.join(", ")
+                    operation = %op_name,
+                    total_clients,
+                    required_confirmations,
+                    error_count = errors.len(),
+                    "Some clients failed"
                 );
             }
         });

@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
 use integration_test_tools::IntegrationTestContext;
-use log::*;
 use program_mini::sdk::MiniSdk;
 use solana_loader_v4_interface::state::{LoaderV4State, LoaderV4Status};
 use solana_sdk::{native_token::LAMPORTS_PER_SOL, signature::Keypair};
@@ -11,6 +10,7 @@ use test_chainlink::programs::{
     MINIV2, MINIV3, MINIV3_AUTH,
 };
 use test_kit::{init_logger, Signer};
+use tracing::*;
 
 macro_rules! assert_tx_logs {
     ($ctx:expr, $sig:expr, $msg:expr) => {

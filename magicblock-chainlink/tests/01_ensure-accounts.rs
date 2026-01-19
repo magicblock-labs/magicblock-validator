@@ -1,6 +1,5 @@
 use assert_matches::assert_matches;
 use dlp::pda::delegation_record_pda_from_delegated_account;
-use log::*;
 use magicblock_chainlink::{
     assert_cloned_as_delegated, assert_cloned_as_undelegated,
     assert_not_cloned, assert_not_found, assert_not_subscribed,
@@ -11,6 +10,7 @@ use magicblock_chainlink::{
 use solana_account::{Account, AccountSharedData};
 use solana_program::clock::Slot;
 use solana_pubkey::Pubkey;
+use tracing::*;
 use utils::test_context::TestContext;
 
 mod utils;
@@ -47,7 +47,7 @@ async fn test_write_non_existing_account() {
         )
         .await
         .unwrap();
-    debug!("res: {res:?}");
+    debug!(result = ?res, "Ensure accounts completed");
 
     assert_not_found!(res, &pubkeys);
     assert_not_cloned!(cloner, &pubkeys);
@@ -79,7 +79,7 @@ async fn test_existing_account_undelegated() {
         )
         .await
         .unwrap();
-    debug!("res: {res:?}");
+    debug!(result = ?res, "Ensure accounts completed");
 
     assert_cloned_as_undelegated!(cloner, &pubkeys, CURRENT_SLOT);
     assert_subscribed_without_delegation_record!(chainlink, &[&pubkey]);
@@ -116,7 +116,7 @@ async fn test_existing_account_missing_delegation_record() {
         )
         .await
         .unwrap();
-    debug!("res: {res:?}");
+    debug!(result = ?res, "Ensure accounts completed");
 
     assert_cloned_as_undelegated!(cloner, &pubkeys, CURRENT_SLOT);
     assert_subscribed_without_delegation_record!(chainlink, &[&pubkey]);
@@ -158,7 +158,7 @@ async fn test_write_existing_account_valid_delegation_record() {
         )
         .await
         .unwrap();
-    debug!("res: {res:?}");
+    debug!(result = ?res, "Ensure accounts completed");
 
     // The account is cloned into the bank as delegated, the delegation record isn't
     assert_cloned_as_delegated!(cloner, &[pubkey], CURRENT_SLOT, owner);
@@ -204,7 +204,7 @@ async fn test_write_existing_account_other_authority() {
         )
         .await
         .unwrap();
-    debug!("res: {res:?}");
+    debug!(result = ?res, "Ensure accounts completed");
 
     // The account is cloned into the bank as undelegated, the delegation record isn't
     assert_cloned_as_undelegated!(cloner, &pubkeys, CURRENT_SLOT, owner);
@@ -260,7 +260,7 @@ async fn test_write_undelegating_account_undelegated_to_other_validator() {
         )
         .await
         .unwrap();
-    debug!("res: {res:?}");
+    debug!(result = ?res, "Ensure accounts completed");
     assert_not_undelegating!(cloner, &pubkeys, CURRENT_SLOT);
 }
 
@@ -309,7 +309,7 @@ async fn test_write_undelegating_account_still_being_undelegated() {
         )
         .await
         .unwrap();
-    debug!("res: {res:?}");
+    debug!(result = ?res, "Ensure accounts completed");
     assert_remain_undelegating!(cloner, &pubkeys, CURRENT_SLOT);
 }
 
@@ -352,7 +352,7 @@ async fn test_write_existing_account_invalid_delegation_record() {
             None,
         )
         .await;
-    debug!("res: {res:?}");
+    debug!(result = ?res, "Ensure accounts completed");
 
     assert_matches!(res, Err(_));
     assert!(cloner.get_account(&pubkey).is_none());

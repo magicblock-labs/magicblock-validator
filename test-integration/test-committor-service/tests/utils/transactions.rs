@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
 use light_client::indexer::{photon_indexer::PhotonIndexer, Indexer};
-use log::{debug, error};
 use magicblock_chainlink::testing::utils::{PHOTON_URL, RPC_URL};
 use solana_account::Account;
 use solana_pubkey::Pubkey;
@@ -16,6 +15,7 @@ use solana_sdk::{
     signature::{Keypair, Signature, Signer},
     transaction::Transaction,
 };
+use tracing::{debug, error};
 
 use crate::utils::instructions::{
     init_account_and_delegate_compressed_ixs, init_account_and_delegate_ixs,
@@ -152,7 +152,7 @@ pub async fn fetch_tx_logs(
         {
             Ok(tx) => break tx,
             Err(err) => {
-                log::error!("Failed to get transaction: {}", err);
+                tracing::error!("Failed to get transaction: {}", err);
                 retries -= 1;
                 if retries == 0 {
                     panic!(

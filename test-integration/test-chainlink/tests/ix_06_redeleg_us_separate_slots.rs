@@ -3,7 +3,6 @@
 // ## Redelegate an Account that was delegated to us to us - Separate Slots
 // @docs/flows/deleg-us-redeleg-us.md
 
-use log::*;
 use magicblock_chainlink::{
     assert_cloned_as_delegated_with_retries, assert_cloned_as_undelegated,
     assert_not_subscribed, assert_subscribed_without_delegation_record,
@@ -11,6 +10,7 @@ use magicblock_chainlink::{
 };
 use solana_sdk::{signature::Keypair, signer::Signer};
 use test_chainlink::{ixtest_context::IxtestContext, sleep_ms};
+use tracing::*;
 
 const RETRIES: usize = 30;
 

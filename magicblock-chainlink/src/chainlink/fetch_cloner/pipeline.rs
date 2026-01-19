@@ -5,12 +5,12 @@ use compressed_delegation_client::CompressedDelegationRecord;
 use dlp::{
     pda::delegation_record_pda_from_delegated_account, state::DelegationRecord,
 };
-use log::*;
 use magicblock_core::{token_programs::is_ata, traits::AccountsBank};
 use magicblock_metrics::metrics::AccountFetchOrigin;
 use solana_account::{AccountSharedData, ReadableAccount, WritableAccount};
 use solana_pubkey::Pubkey;
 use tokio::task::JoinSet;
+use tracing::*;
 
 use super::{
     subscription::{cancel_subs, CancelStrategy},
@@ -163,7 +163,7 @@ fn classify_single_account(
                     }
                 }
                 ResolvedAccount::Bank((pubkey, slot)) => {
-                    error!("We should not be fetching accounts that are already in bank: {pubkey}:{slot}");
+                    error!(pubkey = %pubkey, slot = slot, "BUG: Should not be fetching accounts already in bank");
                 }
             }
         }
@@ -215,6 +215,7 @@ pub(crate) fn partition_not_found(
 }
 
 /// Resolves delegated accounts by fetching their delegation records
+#[instrument(skip(this, owned_by_deleg, plain, pubkeys, existing_subs), fields(pubkey_count = pubkeys.len()))]
 pub(crate) async fn resolve_delegated_accounts<T, U, V, C, P>(
     this: &FetchCloner<T, U, V, C, P>,
     owned_by_deleg: Vec<(Pubkey, AccountSharedData, u64)>,
@@ -304,16 +305,13 @@ where
             record_subs.push(delegation_record_pubkey);
 
             // If the account is delegated we set the owner and delegation state
-            let (commit_frequency_ms, delegated_to_other) = if let Some(
-                delegation_record_data,
-            ) =
-                delegation_record
-            {
-                // NOTE: failing here is fine when resolving all accounts for a transaction
-                // since if something is off we better not run it anyways
-                // However we may consider a different behavior when user is getting
-                // multiple accounts.
-                let delegation_record =
+            let (commit_frequency_ms, delegated_to_other) =
+                if let Some(delegation_record_data) = delegation_record {
+                    // NOTE: failing here is fine when resolving all accounts for a transaction
+                    // since if something is off we better not run it anyways
+                    // However we may consider a different behavior when user is getting
+                    // multiple accounts.
+                    let delegation_record =
                     match FetchCloner::<T, U, V, C, P>::parse_delegation_record(
                         delegation_record_data.data(),
                         delegation_record_pubkey,
@@ -337,20 +335,21 @@ where
                         }
                     };
 
-                trace!("Delegation record found for {pubkey}: {delegation_record:?}");
+                    trace!(pubkey = %pubkey, "Delegation record found");
 
-                let delegated_to_other =
-                    this.get_delegated_to_other(&delegation_record);
+                    let delegated_to_other =
+                        this.get_delegated_to_other(&delegation_record);
 
-                let commit_freq = this.apply_delegation_record_to_account(
-                    &mut account,
-                    &delegation_record,
-                );
-                (commit_freq, delegated_to_other)
-            } else {
-                missing_delegation_record.push((pubkey, account.remote_slot()));
-                (None, None)
-            };
+                    let commit_freq = this.apply_delegation_record_to_account(
+                        &mut account,
+                        &delegation_record,
+                    );
+                    (commit_freq, delegated_to_other)
+                } else {
+                    missing_delegation_record
+                        .push((pubkey, account.remote_slot()));
+                    (None, None)
+                };
             accounts_to_clone.push(AccountCloneRequest {
                 pubkey,
                 account: account.into_account_shared_data(),
@@ -426,6 +425,7 @@ where
 }
 
 /// Resolves program accounts, fetching program data accounts for LoaderV3 programs
+#[instrument(skip(this, programs, pubkeys, existing_subs), fields(pubkey_count = pubkeys.len()))]
 pub(crate) async fn resolve_programs_with_program_data<T, U, V, C, P>(
     this: &FetchCloner<T, U, V, C, P>,
     programs: Vec<(Pubkey, AccountSharedData, u64)>,
@@ -678,6 +678,7 @@ pub(crate) fn compute_cancel_strategy(
 }
 
 /// Clones accounts and programs into the bank
+#[instrument(skip(this, accounts_to_clone, loaded_programs))]
 pub(crate) async fn clone_accounts_and_programs<T, U, V, C, P>(
     this: &FetchCloner<T, U, V, C, P>,
     accounts_to_clone: Vec<AccountCloneRequest>,
@@ -694,12 +695,12 @@ where
 {
     let mut join_set = JoinSet::new();
     for request in accounts_to_clone {
-        if log::log_enabled!(log::Level::Trace) {
+        if tracing::enabled!(tracing::Level::TRACE) {
             trace!(
-                "Cloning account: {} (remote slot {}, owner: {})",
-                request.pubkey,
-                request.account.remote_slot(),
-                request.account.owner()
+                pubkey = %request.pubkey,
+                slot = request.account.remote_slot(),
+                owner = %request.account.owner(),
+                "Cloning account"
             );
         };
 
@@ -709,10 +710,7 @@ where
 
     for acc in loaded_programs {
         if !this.is_program_allowed(&acc.program_id) {
-            debug!(
-                "Skipping clone of program {}: not in allowed_programs",
-                acc.program_id
-            );
+            debug!(program_id = %acc.program_id, "Skipping clone of program");
             continue;
         }
         let cloner = this.cloner.clone();

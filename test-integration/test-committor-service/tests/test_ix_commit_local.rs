@@ -9,7 +9,6 @@ use compressed_delegation_client::CompressedDelegationRecord;
 use light_client::indexer::{
     photon_indexer::PhotonIndexer, CompressedAccount, Indexer,
 };
-use log::*;
 use magicblock_chainlink::testing::utils::{PHOTON_URL, RPC_URL};
 use magicblock_committor_service::{
     config::ChainConfig,
@@ -35,6 +34,7 @@ use solana_sdk::{
 };
 use test_kit::init_logger;
 use tokio::task::JoinSet;
+use tracing::*;
 use utils::transactions::tx_logs_contain;
 
 use self::utils::transactions::init_and_delegate_order_book_on_chain;

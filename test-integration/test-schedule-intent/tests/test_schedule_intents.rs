@@ -1,6 +1,5 @@
 use dlp::pda::ephemeral_balance_pda_from_payer;
 use integration_test_tools::IntegrationTestContext;
-use log::*;
 use program_flexi_counter::{
     delegation_program_id,
     instruction::{
@@ -13,6 +12,7 @@ use solana_sdk::{
     signature::Keypair, signer::Signer, transaction::Transaction,
 };
 use test_kit::init_logger;
+use tracing::*;
 
 const LABEL: &str = "I am a label";
 

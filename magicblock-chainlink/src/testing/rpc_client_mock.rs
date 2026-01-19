@@ -10,8 +10,6 @@ use std::{
 #[cfg(any(test, feature = "dev-context"))]
 use async_trait::async_trait;
 #[cfg(any(test, feature = "dev-context"))]
-use log::*;
-#[cfg(any(test, feature = "dev-context"))]
 use solana_account::Account;
 #[cfg(any(test, feature = "dev-context"))]
 use solana_commitment_config::CommitmentConfig;
@@ -23,6 +21,8 @@ use solana_rpc_client_api::{
     response::{Response, RpcResponseContext, RpcResult},
 };
 use solana_sysvar::clock;
+#[cfg(any(test, feature = "dev-context"))]
+use tracing::*;
 
 #[cfg(any(test, feature = "dev-context"))]
 use crate::remote_account_provider::chain_rpc_client::ChainRpcClient;
@@ -87,7 +87,7 @@ impl ChainRpcClientMockBuilder {
         if let Some(account) = self.accounts.get_mut(pubkey) {
             account.slot = slot;
         } else {
-            warn!("Account {pubkey} not found in mock accounts");
+            warn!(pubkey = %pubkey, "Account not found in mock accounts");
         }
         self
     }
@@ -154,7 +154,7 @@ impl ChainRpcClientMock {
     /// In order to simulate RPC staleness issues, use [Self::account_override_slot] as well as
     /// [Self::set_clock_sysvar_for_slot].
     pub fn set_slot(&self, slot: u64) -> u64 {
-        trace!("Setting slot to {slot}");
+        trace!(slot = slot, "Setting slot");
         self.current_slot.store(slot, Ordering::Relaxed);
         for account in self.accounts.lock().unwrap().values_mut() {
             account.slot = slot;
@@ -167,7 +167,7 @@ impl ChainRpcClientMock {
     }
 
     pub fn set_clock_sysvar(&self, clock: clock::Clock) {
-        trace!("Setting clock sysvar: {clock:?}");
+        trace!(clock = ?clock, "Setting clock sysvar");
         let clock_data = bincode::serialize(&clock).unwrap();
         let account = Account {
             lamports: 1_000_000_000,
@@ -186,7 +186,10 @@ impl ChainRpcClientMock {
         leader_schedule_epoch: u64,
     ) {
         trace!(
-            "Adding clock sysvar with slot {slot}, epoch {epoch}, leader_schedule_epoch {leader_schedule_epoch}"
+            slot = slot,
+            epoch = epoch,
+            leader_schedule_epoch = leader_schedule_epoch,
+            "Adding clock sysvar"
         );
         let clock = clock::Clock {
             slot,
@@ -198,18 +201,18 @@ impl ChainRpcClientMock {
     }
 
     pub fn account_override_slot(&self, pubkey: &Pubkey, slot: u64) {
-        trace!("Overriding slot for account {pubkey} to {slot}");
+        trace!(pubkey = %pubkey, slot = slot, "Overriding slot for account");
         let mut lock = self.accounts.lock().unwrap();
         if let Some(account) = lock.get_mut(pubkey) {
             account.slot = slot;
         } else {
-            warn!("Account {pubkey} not found in mock accounts");
+            warn!(pubkey = %pubkey, "Account not found in mock accounts");
         }
     }
 
     pub fn add_account(&self, pubkey: Pubkey, account: Account) {
         let slot = self.current_slot.load(Ordering::Relaxed);
-        trace!("Adding account {pubkey} at slot {slot}");
+        trace!(pubkey = %pubkey, slot = slot, "Adding account");
         self.accounts
             .lock()
             .unwrap()
@@ -217,7 +220,7 @@ impl ChainRpcClientMock {
     }
 
     pub fn remove_account(&self, pubkey: &Pubkey) {
-        trace!("Removing account {pubkey}");
+        trace!(pubkey = %pubkey, "Removing account");
         self.accounts.lock().unwrap().remove(pubkey);
     }
 
@@ -225,7 +228,7 @@ impl ChainRpcClientMock {
         &self,
         pubkey: &Pubkey,
     ) -> Option<AccountAtSlot> {
-        trace!("Getting account for pubkey {pubkey}");
+        trace!(pubkey = %pubkey, "Getting account");
         let lock = self.accounts.lock().unwrap();
         let acc = lock.get(pubkey)?;
         if acc.slot >= self.current_slot.load(Ordering::Relaxed) {
@@ -236,7 +239,7 @@ impl ChainRpcClientMock {
     }
 
     pub fn set_current_slot(&self, slot: u64) {
-        trace!("Setting current slot to {slot}");
+        trace!(slot = slot, "Setting current slot");
         self.current_slot.store(slot, Ordering::Relaxed);
     }
 }
@@ -288,13 +291,13 @@ impl ChainRpcClient for ChainRpcClientMock {
         pubkeys: &[Pubkey],
         config: RpcAccountInfoConfig,
     ) -> RpcResult<Vec<Option<Account>>> {
-        if log::log_enabled!(log::Level::Trace) {
+        if tracing::enabled!(tracing::Level::TRACE) {
             let pubkeys = pubkeys
                 .iter()
                 .map(|p| p.to_string())
                 .collect::<Vec<_>>()
                 .join(", ");
-            trace!("get_multiple_accounts_with_config({pubkeys})");
+            trace!(pubkeys = pubkeys, "get_multiple_accounts_with_config");
         }
         let mut accounts = vec![];
         for pubkey in pubkeys {

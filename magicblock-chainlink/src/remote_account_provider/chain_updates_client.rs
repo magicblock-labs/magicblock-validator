@@ -7,10 +7,10 @@ use std::{
 };
 
 use async_trait::async_trait;
-use log::*;
 use solana_commitment_config::CommitmentConfig;
 use solana_pubkey::Pubkey;
 use tokio::sync::mpsc;
+use tracing::*;
 
 use crate::remote_account_provider::{
     chain_laser_actor::Slots, chain_laser_client::ChainLaserClientImpl,
@@ -38,7 +38,7 @@ impl ChainUpdatesClient {
 
         match endpoint {
             WebSocket { url, label } => {
-                debug!("Initializing WebSocket client for endpoint: {}", url);
+                debug!(url = %url, "Initializing WebSocket client");
                 let client_id = format!(
                     "ws:{label}-{}",
                     CLIENT_ID.fetch_add(1, Ordering::SeqCst)
@@ -60,10 +60,7 @@ impl ChainUpdatesClient {
                 supports_backfill,
                 api_key,
             } => {
-                debug!(
-                    "Initializing Helius Laser client for gRPC endpoint: {}",
-                    url
-                );
+                debug!(url = %url, "Initializing Helius Laser client for gRPC endpoint");
                 let client_id = format!(
                     "grpc:{label}-{}",
                     CLIENT_ID.fetch_add(1, Ordering::SeqCst)

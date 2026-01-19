@@ -5,7 +5,6 @@ use integration_test_tools::{
     expect, loaded_accounts::LoadedAccounts, tmpdir::resolve_tmp_dir,
     validator::cleanup,
 };
-use log::*;
 use program_flexi_counter::{
     instruction::{create_add_ix, create_mul_ix},
     state::FlexiCounter,
@@ -18,6 +17,7 @@ use test_ledger_restore::{
     setup_validator_with_local_remote_and_resume_strategy,
     wait_for_ledger_persist, TMP_DIR_LEDGER,
 };
+use tracing::*;
 
 const SLOT_MS: u64 = 150;
 

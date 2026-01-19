@@ -1,4 +1,3 @@
-use log::*;
 use solana_message::inner_instruction::InnerInstructions;
 use solana_rpc_client_api::{
     config::RpcSimulateTransactionConfig,
@@ -8,6 +7,7 @@ use solana_transaction_status::{
     InnerInstruction, InnerInstructions as StatusInnerInstructions,
     UiTransactionEncoding,
 };
+use tracing::*;
 
 use super::prelude::*;
 
@@ -41,7 +41,7 @@ impl HttpDispatcher {
                 config.replace_recent_blockhash,
             )
             .inspect_err(|err| {
-                debug!("Failed to prepare transaction to simulate: {err}")
+                debug!(error = ?err, "Failed to prepare transaction to simulate")
             })?;
         self.ensure_transaction_accounts(&transaction).await?;
 

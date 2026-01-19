@@ -9,11 +9,10 @@ async-trait = { workspace = true }
 bincode = { workspace = true }
 borsh = { workspace = true }
 compressed-delegation-client = { workspace = true }
-env_logger = { workspace = true }
 futures-util = { workspace = true }
 light-client = { workspace = true }
 helius-laserstream = { workspace = true }
-log = { workspace = true }
+tracing = { workspace = true }
 lru = { workspace = true }
 magicblock-config = { workspace = true }
 magicblock-core = { workspace = true }

@@ -8,7 +8,6 @@ use std::{
 use arc_swap::ArcSwap;
 use async_trait::async_trait;
 use futures_util::{future::BoxFuture, stream::BoxStream};
-use log::*;
 use solana_account_decoder::UiAccount;
 use solana_commitment_config::CommitmentConfig;
 use solana_pubkey::Pubkey;
@@ -23,6 +22,7 @@ use tokio::{
     sync::{mpsc, oneshot, Mutex as AsyncMutex},
     time,
 };
+use tracing::*;
 
 use super::{
     chain_pubsub_actor::ChainPubsubActor,
@@ -267,7 +267,7 @@ impl ChainPubsubClient for ChainPubsubClientImpl {
 
         rx.await
             .inspect_err(|err| {
-                warn!("ChainPubsubClientImpl::subscribe - RecvError occurred while awaiting subscription response for {}: {err:?}. This indicates the actor sender was dropped without responding.", pubkey);
+                warn!(pubkey = %pubkey, error = ?err, "ChainPubsubClientImpl::subscribe - RecvError awaiting subscription response, actor sender dropped");
             })?
     }
 
@@ -285,7 +285,7 @@ impl ChainPubsubClient for ChainPubsubClientImpl {
 
         rx.await
             .inspect_err(|err| {
-                warn!("ChainPubsubClientImpl::subscribe_program - RecvError occurred while awaiting subscription response for {}: {err:?}. This indicates the actor sender was dropped without responding.", program_id);
+                warn!(program_id = %program_id, error = ?err, "ChainPubsubClientImpl::subscribe_program - RecvError awaiting subscription response, actor sender dropped");
             })?
     }
 
@@ -303,7 +303,7 @@ impl ChainPubsubClient for ChainPubsubClientImpl {
 
         rx.await
             .inspect_err(|err| {
-                warn!("ChainPubsubClientImpl::unsubscribe - RecvError occurred while awaiting unsubscription response for {}: {err:?}. This indicates the actor sender was dropped without responding.", pubkey);
+                warn!(pubkey = %pubkey, error = ?err, "ChainPubsubClientImpl::unsubscribe - RecvError awaiting unsubscription response, actor sender dropped");
             })?
     }
 
@@ -342,7 +342,7 @@ impl ReconnectableClient for ChainPubsubClientImpl {
             .await?;
 
         rx.await.inspect_err(|err| {
-            warn!("RecvError occurred while awaiting reconnect response: {err:?}.");
+            warn!(error = ?err, "RecvError awaiting reconnect response");
         })?
     }
 
@@ -366,7 +366,6 @@ impl ReconnectableClient for ChainPubsubClientImpl {
 pub mod mock {
     use std::{collections::HashSet, time::Duration};
 
-    use log::*;
     use parking_lot::Mutex;
     use solana_account::Account;
     use solana_account_decoder::{encode_ui_account, UiAccountEncoding};
@@ -374,6 +373,7 @@ pub mod mock {
     use solana_rpc_client_api::response::{
         Response as RpcResponse, RpcResponseContext,
     };
+    use tracing::*;
 
     use super::*;
     use crate::remote_account_provider::{
@@ -427,7 +427,7 @@ pub mod mock {
             if subscribed_pubkeys.contains(&update.pubkey) {
                 let _ =
                     self.updates_sndr.send(update).await.inspect_err(|err| {
-                        error!("Failed to send subscription update: {err:?}")
+                        error!(error = ?err, "Failed to send subscription update")
                     });
             }
         }

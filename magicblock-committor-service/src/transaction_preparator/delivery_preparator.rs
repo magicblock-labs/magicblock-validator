@@ -2,7 +2,6 @@ use std::{collections::HashSet, ops::ControlFlow, sync::Arc, time::Duration};
 
 use futures_util::future::{join, join_all, try_join_all};
 use light_client::indexer::{photon_indexer::PhotonIndexer, IndexerRpcConfig};
-use log::{error, info};
 use magicblock_committor_program::{
     instruction_chunks::chunk_realloc_ixs, Chunks,
 };
@@ -27,6 +26,7 @@ use solana_signature::Signature;
 use solana_signer::{Signer, SignerError};
 use solana_transaction::versioned::VersionedTransaction;
 use solana_transaction_error::TransactionError;
+use tracing::{error, info};
 
 use crate::{
     intent_executor::CommitSlotFn,
@@ -229,10 +229,7 @@ impl DeliveryPreparator {
                     signature,
                 ),
             )) => {
-                info!(
-                    "Buffer was already initialized prior: {}. {:?}",
-                    err, signature
-                );
+                info!(error = ?err, signature = ?signature, "Buffer already initialized");
             }
             // Return in any other case
             res => return res,
@@ -556,7 +553,7 @@ impl DeliveryPreparator {
             .into_iter()
             .inspect(|res| {
                 if let Err(err) = res {
-                    error!("Failed to cleanup buffers: {}", err);
+                    error!(error = ?err, "Failed to cleanup buffers");
                 }
             })
             .collect::<Result<(), _>>()

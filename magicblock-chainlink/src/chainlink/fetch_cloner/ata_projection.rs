@@ -1,4 +1,3 @@
-use log::*;
 use magicblock_core::{
     token_programs::{try_derive_eata_address_and_bump, MaybeIntoAta},
     traits::AccountsBank,
@@ -7,6 +6,7 @@ use magicblock_metrics::metrics;
 use solana_account::AccountSharedData;
 use solana_pubkey::Pubkey;
 use tokio::task::JoinSet;
+use tracing::*;
 
 use super::{delegation, types::AccountWithCompanion, FetchCloner};
 use crate::{
@@ -20,6 +20,7 @@ use crate::{
 /// For each detected ATA, we derive the eATA PDA, subscribe to both,
 /// and, if the ATA is delegated to us and the eATA exists, we clone the eATA data
 /// into the ATA in the bank.
+#[instrument(skip(this, atas))]
 pub(crate) async fn resolve_ata_with_eata_projection<T, U, V, C, P>(
     this: &FetchCloner<T, U, V, C, P>,
     atas: Vec<(
@@ -48,13 +49,13 @@ where
     // Subscribe first so subsequent fetches are kept up-to-date
     for (ata_pubkey, _, ata_info, ata_account_slot) in &atas {
         if let Err(err) = this.subscribe_to_account(ata_pubkey).await {
-            warn!("Failed to subscribe to ATA {}: {}", ata_pubkey, err);
+            warn!(pubkey = %ata_pubkey, error = %err, "Failed to subscribe to ATA");
         }
         if let Some((eata, _)) =
             try_derive_eata_address_and_bump(&ata_info.owner, &ata_info.mint)
         {
             if let Err(err) = this.subscribe_to_account(&eata).await {
-                warn!("Failed to subscribe to derived eATA {}: {}", eata, err);
+                warn!(pubkey = %eata, error = %err, "Failed to subscribe to derived eATA");
             }
 
             let effective_slot = if let Some(min_slot) = min_context_slot {
@@ -83,11 +84,11 @@ where
         } = match result {
             Ok(Ok(v)) => v,
             Ok(Err(err)) => {
-                warn!("Failed to resolve ATA/eATA companion: {err}");
+                warn!(error = %err, "Failed to resolve ATA/eATA companion");
                 continue;
             }
             Err(join_err) => {
-                warn!("Failed to join ATA/eATA fetch task: {join_err}");
+                warn!(error = %join_err, "Failed to join ATA/eATA fetch task");
                 continue;
             }
         };

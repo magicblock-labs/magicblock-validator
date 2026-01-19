@@ -1,4 +1,3 @@
-use log::{debug, info};
 use magicblock_chainlink::{
     remote_account_provider::{
         chain_rpc_client::ChainRpcClientImpl,
@@ -21,6 +20,7 @@ use solana_rpc_client_api::{
 };
 use solana_sdk::commitment_config::CommitmentConfig;
 use tokio::sync::mpsc;
+use tracing::{debug, info};
 
 async fn init_remote_account_provider() -> RemoteAccountProvider<
     ChainRpcClientImpl,

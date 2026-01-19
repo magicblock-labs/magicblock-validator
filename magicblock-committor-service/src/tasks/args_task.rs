@@ -11,12 +11,12 @@ use dlp::{
     },
     total_size_budget, AccountSizeClass,
 };
-use log::warn;
 use magicblock_metrics::metrics::LabelValue;
 use solana_account::ReadableAccount;
 use solana_instruction::{AccountMeta, Instruction};
 use solana_pubkey::Pubkey;
 use solana_system_program::id as system_program_id;
+use tracing::*;
 
 #[cfg(test)]
 use crate::tasks::TaskStrategy;

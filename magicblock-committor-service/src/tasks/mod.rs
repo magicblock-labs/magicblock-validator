@@ -361,15 +361,23 @@ mod serialization_safety_test {
     };
     use solana_account::Account;
 
-    use crate::tasks::{
-        args_task::{ArgsTask, ArgsTaskType},
-        buffer_task::{BufferTask, BufferTaskType},
-        *,
+    use crate::{
+        tasks::{
+            args_task::{ArgsTask, ArgsTaskType},
+            buffer_task::{BufferTask, BufferTaskType},
+            *,
+        },
+        test_utils,
     };
+
+    fn setup() {
+        test_utils::init_test_logger();
+    }
 
     // Test all ArgsTask variants
     #[test]
     fn test_args_task_instruction_serialization() {
+        setup();
         let validator = Pubkey::new_unique();
 
         // Test Commit variant
@@ -508,10 +516,16 @@ fn test_close_buffer_limit() {
     use solana_keypair::Keypair;
     use solana_signer::Signer;
     use solana_transaction::Transaction;
+    use tracing::info;
 
-    use crate::transactions::{
-        serialize_and_encode_base64, MAX_ENCODED_TRANSACTION_SIZE,
+    use crate::{
+        test_utils,
+        transactions::{
+            serialize_and_encode_base64, MAX_ENCODED_TRANSACTION_SIZE,
+        },
     };
+
+    test_utils::init_test_logger();
 
     let authority = Keypair::new();
 
@@ -537,10 +551,9 @@ fn test_close_buffer_limit() {
         .collect();
 
     let tx = Transaction::new_with_payer(&ixs, Some(&authority.pubkey()));
-    println!("{}", serialize_and_encode_base64(&tx).len());
-    assert!(
-        serialize_and_encode_base64(&tx).len() <= MAX_ENCODED_TRANSACTION_SIZE
-    );
+    let tx_size = serialize_and_encode_base64(&tx).len();
+    info!(transaction_size = tx_size, "Cleanup task transaction size");
+    assert!(tx_size <= MAX_ENCODED_TRANSACTION_SIZE);
 
     // One more unique task should overflow
     let overflow_task = CleanupTask {

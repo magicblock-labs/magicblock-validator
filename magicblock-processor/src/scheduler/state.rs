@@ -100,7 +100,7 @@ impl TransactionSchedulerState {
             .as_ref()
             .map(|rc| rc.get_rent())
         {
-            self.ensure_sysvar(&sysvar::rent::ID, &rent);
+            self.ensure_sysvar(&sysvar::rent::ID, rent);
         }
     }
 

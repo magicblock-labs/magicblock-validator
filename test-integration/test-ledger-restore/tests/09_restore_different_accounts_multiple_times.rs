@@ -5,7 +5,6 @@ use integration_test_tools::{
     expect, loaded_accounts::LoadedAccounts, tmpdir::resolve_tmp_dir,
     validator::cleanup,
 };
-use log::*;
 use program_flexi_counter::{
     instruction::{create_add_counter_ix, create_add_ix, create_init_ix},
     state::FlexiCounter,
@@ -21,6 +20,7 @@ use test_ledger_restore::{
     wait_for_cloned_accounts_hydration, wait_for_ledger_persist,
     TMP_DIR_LEDGER,
 };
+use tracing::*;
 const COUNTER_MAIN: &str = "Main Counter";
 const COUNTER_READONLY: &str = "Readonly Counter";
 fn payer_keypair() -> Keypair {

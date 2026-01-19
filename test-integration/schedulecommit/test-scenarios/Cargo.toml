@@ -7,7 +7,7 @@ edition.workspace = true
 borsh = { workspace = true }
 ephemeral-rollups-sdk = { workspace = true }
 integration-test-tools = { workspace = true }
-log = { workspace = true }
+tracing = { workspace = true }
 program-schedulecommit = { workspace = true, features = ["no-entrypoint"] }
 schedulecommit-client = { workspace = true }
 magicblock-core = { workspace = true }

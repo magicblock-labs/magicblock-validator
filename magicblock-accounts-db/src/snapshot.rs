@@ -7,8 +7,8 @@ use std::{
     sync::Arc,
 };
 
-use log::{error, info, warn};
 use parking_lot::{Mutex, RwLockWriteGuard};
+use tracing::{error, info, warn};
 
 use crate::{
     error::{AccountsDbError, LogErr},
@@ -177,12 +177,19 @@ impl SnapshotManager {
         let chosen_slot = Self::parse_slot(&chosen_path)
             .ok_or(AccountsDbError::SnapshotMissing(target_slot))?;
 
-        info!("Restoring snapshot {} (req: {})", chosen_slot, target_slot);
+        info!(
+            chosen_slot = chosen_slot,
+            target_slot = target_slot,
+            "Restoring snapshot"
+        );
 
         // 2. Prune Invalidated Futures
         // Any snapshot strictly newer than the chosen one is now on a diverging timeline.
         for invalidated in registry.drain(index..) {
-            warn!("Pruning invalidated snapshot: {}", invalidated.display());
+            warn!(
+                invalidated_path = %invalidated.display(),
+                "Pruning invalidated snapshot"
+            );
             let _ = fs::remove_dir_all(&invalidated);
         }
 
@@ -198,8 +205,8 @@ impl SnapshotManager {
         // Promote snapshot to active
         if let Err(e) = fs::rename(&chosen_path, &self.db_path) {
             error!(
-                "Restore failed during promote: {}. Attempting rollback.",
-                e
+                error = ?e,
+                "Restore failed during promote"
             );
             // Attempt to restore the backup if promotion fails
             if backup.exists() {
@@ -240,7 +247,11 @@ impl SnapshotManager {
         while registry.len() >= self.max_snapshots {
             if let Some(path) = registry.pop_front() {
                 if let Err(e) = fs::remove_dir_all(&path) {
-                    warn!("Failed to prune {}: {}", path.display(), e);
+                    warn!(
+                        path = %path.display(),
+                        error = ?e,
+                        "Failed to prune snapshot"
+                    );
                 }
             }
         }

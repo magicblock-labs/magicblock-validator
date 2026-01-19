@@ -4,7 +4,6 @@ use std::{str::FromStr, thread::sleep, time::Duration};
 
 use anyhow::{Context, Result};
 use borsh::BorshDeserialize;
-use log::*;
 use solana_rpc_client::{
     nonblocking,
     rpc_client::{GetConfirmedSignaturesForAddress2Config, RpcClient},
@@ -31,6 +30,7 @@ use solana_transaction_status::{
     EncodedConfirmedBlock, EncodedConfirmedTransactionWithStatusMeta,
     UiTransactionEncoding,
 };
+use tracing::*;
 use url::Url;
 
 use crate::{

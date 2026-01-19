@@ -1,4 +1,3 @@
-use log::*;
 use magicblock_accounts_db::AccountsDbResult;
 use magicblock_core::{
     link::{
@@ -27,6 +26,7 @@ use solana_transaction_error::{TransactionError, TransactionResult};
 use solana_transaction_status::{
     map_inner_instructions, TransactionStatusMeta,
 };
+use tracing::*;
 
 impl super::TransactionExecutor {
     /// Executes a transaction and conditionally commits its results.
@@ -170,7 +170,7 @@ impl super::TransactionExecutor {
     fn process_scheduled_tasks(&self) {
         while let Some(task) = ExecutionTlsStash::next_task() {
             if let Err(e) = self.tasks_tx.send(task) {
-                error!("Scheduled tasks service disconnected: {e}");
+                error!(error = ?e, "Scheduled tasks service disconnected");
             }
         }
     }
@@ -247,7 +247,7 @@ impl super::TransactionExecutor {
         ) {
             Ok(i) => i,
             Err(error) => {
-                error!("failed to commit transaction to the ledger: {error}");
+                error!(error = ?error, "Failed to commit transaction to ledger");
                 return;
             }
         };

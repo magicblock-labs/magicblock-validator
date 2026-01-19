@@ -12,7 +12,6 @@ use light_client::indexer::{
     ValidityProofWithContext,
 };
 use light_sdk::instruction::{PackedAccounts, SystemAccountMetaConfig};
-use log::*;
 use magicblock_chainlink::{
     accounts_bank::mock::AccountsBankStub,
     cloner::{AccountCloneRequest, Cloner},
@@ -48,6 +47,7 @@ use solana_sdk::{
 };
 use solana_sdk_ids::{native_loader, system_program};
 use tokio::task;
+use tracing::*;
 
 use crate::sleep_ms;
 

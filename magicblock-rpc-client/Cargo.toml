@@ -11,7 +11,7 @@ edition.workspace = true
 doctest = false
 
 [dependencies]
-log = { workspace = true }
+tracing = { workspace = true }
 solana-rpc-client = { workspace = true }
 solana-rpc-client-api = { workspace = true }
 solana-transaction-status-client-types = { workspace = true }
@@ -24,7 +24,10 @@ solana-hash = { workspace = true }
 solana-instruction = { workspace = true }
 solana-pubkey = { workspace = true }
 solana-signature = { workspace = true }
-solana-address-lookup-table-interface = { workspace = true }
+solana-address-lookup-table-interface = { workspace = true, features = [
+  "bincode",
+  "bytemuck",
+] }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 

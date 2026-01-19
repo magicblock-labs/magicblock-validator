@@ -5,7 +5,6 @@ use index::{
     iterator::OffsetPubkeyIter, utils::AccountOffsetFinder, AccountsDbIndex,
 };
 use lmdb::{RwTransaction, Transaction};
-use log::{error, info, warn};
 use magicblock_config::config::AccountsDbConfig;
 use magicblock_core::traits::AccountsBank;
 use parking_lot::RwLock;
@@ -14,6 +13,7 @@ use solana_account::{
 };
 use solana_pubkey::Pubkey;
 use storage::AccountsStorage;
+use tracing::{error, info, warn};
 
 // Use the refactored manager
 use crate::snapshot::SnapshotManager;
@@ -61,7 +61,7 @@ impl AccountsDb {
         let db_dir = root_dir.join(ACCOUNTSDB_DIR).join("main");
 
         if config.reset && db_dir.exists() {
-            info!("Resetting AccountsDb at {}", db_dir.display());
+            info!(db_path = %db_dir.display(), "Resetting AccountsDb");
             std::fs::remove_dir_all(&db_dir).log_err(|| {
                 "Failed to reset accountsdb directory".to_string()
             })?;
@@ -136,7 +136,7 @@ impl AccountsDb {
         for (pubkey, account) in accounts.clone() {
             let result = self.perform_account_upsert(pubkey, account, &mut txn);
             if let Err(e) = result {
-                error!("Batch insert failed at {pubkey}: {e}");
+                error!(pubkey = %pubkey, error = ?e, "Batch insert failed");
                 // Rollback in-memory Cow changes for accounts processed so far
                 self.rollback_borrowed_accounts(accounts, processed_count);
                 // Abort LMDB transaction (implicit on drop, but explicit return here)
@@ -146,7 +146,11 @@ impl AccountsDb {
         }
 
         if let Err(e) = txn.commit() {
-            error!("Batch insert commit failed {e}");
+            error!(
+                processed_count = processed_count,
+                error = ?e,
+                "Batch insert commit failed"
+            );
             // Rollback in-memory CoW changes for all processed accounts
             self.rollback_borrowed_accounts(accounts, processed_count);
             return Err(e.into());
@@ -326,7 +330,7 @@ impl AccountsDb {
                 used_storage,
                 write_guard,
             ) {
-                warn!("Snapshot failed for slot {}: {}", slot, err);
+                warn!(slot = slot, error = ?err, "Snapshot failed");
             }
         });
     }
@@ -345,9 +349,9 @@ impl AccountsDb {
         }
 
         warn!(
-            "Current slot {} is ahead of target {}. Rolling back...",
-            self.slot(),
-            target_slot
+            current_slot = self.slot(),
+            target_slot = target_slot,
+            "Current slot ahead of target, rolling back"
         );
 
         // Block all writes during restoration
@@ -368,7 +372,7 @@ impl AccountsDb {
         self.storage.reload(path)?;
         self.index.reload(path)?;
 
-        info!("Successfully rolled back to slot {}", restored_slot);
+        info!(restored_slot = restored_slot, "Rolled back to snapshot");
         Ok(restored_slot)
     }
 

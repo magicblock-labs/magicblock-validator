@@ -50,7 +50,6 @@ light-compressed-account = { git = "https://github.com/magicblock-labs/light-pro
 light-hasher = { git = "https://github.com/magicblock-labs/light-protocol", rev = "849e6aa" }
 light-sdk = { git = "https://github.com/magicblock-labs/light-protocol", rev = "849e6aa" }
 light-sdk-types = { git = "https://github.com/magicblock-labs/light-protocol", rev = "849e6aa" }
-log = "0.4.20"
 magicblock-api = { path = "../magicblock-api" }
 magicblock-chainlink = { path = "../magicblock-chainlink", features = [
   "dev-context",
@@ -113,6 +112,7 @@ test-ledger-restore = { path = "./test-ledger-restore" }
 test-kit = { path = "../test-kit" }
 tokio = "1.0"
 toml = "0.8.13"
+tracing = "0.1"
 ureq = "2.9.6"
 url = "2.5.0"
 

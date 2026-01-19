@@ -9,7 +9,6 @@ use std::{
 };
 
 use bincode::{deserialize, serialize};
-use log::*;
 use magicblock_core::link::blocks::BlockHash;
 use magicblock_metrics::metrics::{
     start_ledger_disable_compactions_timer, start_ledger_shutdown_timer,
@@ -31,6 +30,7 @@ use solana_transaction_status::{
     ConfirmedTransactionWithStatusMeta, TransactionStatusMeta,
     VersionedConfirmedBlock, VersionedTransactionWithStatusMeta,
 };
+use tracing::*;
 
 use crate::{
     conversions::transaction,
@@ -131,7 +131,7 @@ impl Ledger {
 
         // Open the database
         let mut measure = Measure::start("ledger open");
-        info!("Opening ledger at {:?}", ledger_path);
+        info!(path = ?ledger_path, "Opening ledger");
         let db = Database::open(&ledger_path, options)?;
 
         let transaction_status_cf = db.column();
@@ -271,7 +271,10 @@ impl Ledger {
             _ => 0,
         };
 
-        info!("initializing lowest cleanup slot: {}", lowest_cleanup_slot);
+        info!(
+            slot = lowest_cleanup_slot,
+            "Initializing lowest cleanup slot"
+        );
         self.set_lowest_cleanup_slot(lowest_cleanup_slot);
 
         Ok(())
@@ -1366,6 +1369,7 @@ mod tests {
         VersionedTransactionWithStatusMeta,
     };
     use tempfile::{Builder, TempDir};
+    use test_kit::init_logger;
 
     use super::*;
 
@@ -1500,7 +1504,7 @@ mod tests {
             transaction
                 .try_into()
                 .map_err(|e| {
-                    error!("VersionedTransaction::try_into failed: {:?}", e)
+                    error!(error = ?e, "VersionedTransaction::try_into failed")
                 })
                 .unwrap(),
             Default::default(),
@@ -1508,7 +1512,7 @@ mod tests {
             SimpleAddressLoader::Enabled(meta.loaded_addresses.clone()),
             &Default::default(),
         )
-        .map_err(|e| error!("SanitizedTransaction::try_new failed: {:?}", e))
+        .map_err(|e| error!(error = ?e, "SanitizedTransaction::try_new failed"))
         .unwrap();
 
         (
@@ -1529,6 +1533,7 @@ mod tests {
 
     #[test]
     fn test_persist_transaction_status() {
+        init_logger!();
         let ledger_path = get_tmp_ledger_path_auto_delete!();
         let store = Ledger::open(ledger_path.path()).unwrap();
 
@@ -1590,6 +1595,7 @@ mod tests {
 
     #[test]
     fn test_get_transaction_status_by_signature() {
+        init_logger!();
         let ledger_path = get_tmp_ledger_path_auto_delete!();
         let store = Ledger::open(ledger_path.path()).unwrap();
 
@@ -1667,6 +1673,7 @@ mod tests {
 
     #[test]
     fn test_get_complete_transaction_by_signature() {
+        init_logger!();
         let ledger_path = get_tmp_ledger_path_auto_delete!();
         let store = Ledger::open(ledger_path.path()).unwrap();
 
@@ -1748,6 +1755,7 @@ mod tests {
 
     #[test]
     fn test_find_address_signatures_no_intra_slot_limits() {
+        init_logger!();
         let ledger_path = get_tmp_ledger_path_auto_delete!();
         let store = Ledger::open(ledger_path.path()).unwrap();
 
@@ -2108,6 +2116,7 @@ mod tests {
 
     #[test]
     fn test_find_address_signatures_intra_slot_limits() {
+        init_logger!();
         let ledger_path = get_tmp_ledger_path_auto_delete!();
         let store = Ledger::open(ledger_path.path()).unwrap();
 
@@ -2349,6 +2358,7 @@ mod tests {
 
     #[test]
     fn test_get_confirmed_signatures_with_memos() {
+        init_logger!();
         let ledger_path = get_tmp_ledger_path_auto_delete!();
         let store = Ledger::open(ledger_path.path()).unwrap();
 

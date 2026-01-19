@@ -1,6 +1,5 @@
 use std::{error::Error, path::PathBuf};
 
-use log::debug;
 use magicblock_accounts_db::AccountsDb;
 use solana_account::{AccountSharedData, WritableAccount};
 use solana_program::{
@@ -8,6 +7,7 @@ use solana_program::{
     rent::Rent,
 };
 use solana_pubkey::Pubkey;
+use tracing::debug;
 
 const UPGRADEABLE_LOADER_ID: Pubkey = bpf_loader_upgradeable::ID;
 
@@ -16,7 +16,7 @@ pub fn load_upgradeable_programs(
     accountsdb: &AccountsDb,
     progs: &[(Pubkey, PathBuf)],
 ) -> Result<(), Box<dyn Error>> {
-    debug!("Loading programs from files: {:#?}", progs);
+    debug!(programs = ?progs, "Loading programs");
     for (id, path) in progs {
         let elf = std::fs::read(path).map_err(|err| {
             format!("Failed to read program file for {id} at {path:?}: {err}")

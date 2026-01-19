@@ -5,11 +5,11 @@ use light_client::indexer::{
     photon_indexer::PhotonIndexer, CompressedAccount, Context, Indexer,
     IndexerError, IndexerRpcConfig, Response,
 };
-use log::*;
 use magicblock_core::compression::derive_cda_from_pda;
 use solana_account::Account;
 use solana_clock::Slot;
 use solana_pubkey::Pubkey;
+use tracing::*;
 
 use crate::remote_account_provider::{
     Endpoint, RemoteAccountProviderError, RemoteAccountProviderResult,
@@ -42,7 +42,7 @@ impl PhotonClientImpl {
                 ),
             );
         };
-        debug!("Creating PhotonClient with URL: {}", url);
+        debug!(url = %url, "Creating PhotonClient");
         Ok(Self::new(Arc::new(PhotonIndexer::new(
             url.to_string(),
             api_key.clone(),
@@ -111,15 +111,16 @@ impl PhotonClient for PhotonClientImpl {
             .map(|pk| derive_cda_from_pda(pk).to_bytes())
             .collect();
 
-        if log::log_enabled!(log::Level::Debug) {
-            let pks_cdas: Vec<_> = pubkeys
+        if tracing::enabled!(tracing::Level::DEBUG) {
+            let pks_cdas = pubkeys
                 .iter()
                 .zip(cdas.iter())
                 .map(|(pk, cda)| {
-                    (pk.to_string(), Pubkey::new_from_array(*cda).to_string())
+                    format!("({}: {})", pk, Pubkey::new_from_array(*cda))
                 })
-                .collect();
-            debug!("Fetching multiple accounts: {pks_cdas:?}");
+                .collect::<Vec<_>>()
+                .join(", ");
+            debug!(cdas = %pks_cdas, "Fetching multiple accounts");
         }
 
         let Response {

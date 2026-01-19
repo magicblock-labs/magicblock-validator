@@ -56,13 +56,7 @@ pub fn remote_account_lamports(acc: &RemoteAccount) -> u64 {
 }
 
 pub fn init_logger() {
-    let _ = env_logger::builder()
-        .format_timestamp(None)
-        .format_module_path(false)
-        .format_target(false)
-        .format_source_path(true)
-        .is_test(true)
-        .try_init();
+    magicblock_core::logger::init_for_tests();
 }
 
 pub fn get_remote_account_lamports<'a>(
@@ -81,7 +75,7 @@ pub fn get_remote_account_lamports<'a>(
 
 pub fn dump_remote_account_lamports(accs: &[(&Pubkey, u64)]) {
     for (pk, lamports) in accs.iter() {
-        log::info!("{pk}: {lamports}");
+        tracing::info!(pubkey = %pk, lamports = %lamports, "Account");
     }
 }
 
@@ -100,7 +94,7 @@ pub fn dump_remote_account_update_source(
     accs: &[(&Pubkey, Option<RemoteAccountUpdateSource>)],
 ) {
     for (pk, source) in accs.iter() {
-        log::info!("{pk}: {source:?}");
+        tracing::info!(pubkey = %pk, source = ?source, "Account update source");
     }
 }
 

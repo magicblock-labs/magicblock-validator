@@ -13,7 +13,6 @@ light-client = { workspace = true, features = ["v2"] }
 light-compressed-account = { workspace = true }
 light-hasher = { workspace = true }
 light-sdk = { workspace = true, features = ["v2"] }
-log = { workspace = true }
 magicblock-core = { workspace = true }
 magicblock-chainlink = { workspace = true }
 magicblock-config = { workspace = true }
@@ -34,3 +33,4 @@ solana-system-interface = { workspace = true }
 solana-transaction-status = { workspace = true }
 spl-token = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
+tracing = { workspace = true }

@@ -17,7 +17,6 @@ use helius_laserstream::{
     },
     ChannelOptions, LaserstreamConfig, LaserstreamError,
 };
-use log::*;
 use magicblock_metrics::metrics::{
     inc_account_subscription_account_updates_count,
     inc_program_subscription_account_updates_count,
@@ -28,6 +27,7 @@ use solana_pubkey::Pubkey;
 use solana_sdk_ids::sysvar::clock;
 use tokio::sync::{mpsc, oneshot};
 use tokio_stream::StreamMap;
+use tracing::*;
 
 use crate::remote_account_provider::{
     pubsub_common::{
@@ -198,16 +198,15 @@ impl ChainLaserActor {
     }
 
     #[allow(dead_code)]
+    #[instrument(skip(self), fields(client_id = %self.client_id))]
     fn shutdown(&mut self) {
-        info!(
-            "[client_id={}] Shutting down ChainLaserActor",
-            self.client_id
-        );
+        info!("Shutting down laser actor");
         self.subscriptions.clear();
         self.active_subscriptions.clear();
         self.active_subscription_pubkeys.clear();
     }
 
+    #[instrument(skip(self), fields(client_id = %self.client_id))]
     pub async fn run(mut self) {
         let mut activate_subs_interval =
             tokio::time::interval(std::time::Duration::from_millis(
@@ -237,11 +236,7 @@ impl ChainLaserActor {
                             self.handle_account_update(update).await;
                         }
                         None => {
-                            debug!(
-                                "[client_id={}] Account subscription stream ended; signaling \
-                                connection issue",
-                                self.client_id
-                            );
+                            debug!("Account subscription stream ended");
                             Self::signal_connection_issue(
                                 &mut self.subscriptions,
                                 &mut self.active_subscriptions,
@@ -266,11 +261,7 @@ impl ChainLaserActor {
                             self.handle_program_update(update).await;
                         }
                         None => {
-                            debug!(
-                                "[client_id={}] Program subscription stream ended; signaling \
-                                connection issue",
-                                self.client_id
-                            );
+                            debug!("Program subscription stream ended");
                             Self::signal_connection_issue(
                                 &mut self.subscriptions,
                                 &mut self.active_subscriptions,
@@ -308,11 +299,7 @@ impl ChainLaserActor {
                 let laser_client_config = self.laser_client_config.clone();
                 self.add_program_sub(pubkey, commitment, laser_client_config);
                 let _ = response.send(Ok(())).inspect_err(|_| {
-                    warn!(
-                        "[client_id={}] Failed to send program subscribe response for program {}",
-                        self.client_id,
-                        pubkey
-                    )
+                    warn!(program_id = %pubkey, "Failed to send program subscribe response");
                 });
                 false
             }
@@ -321,18 +308,12 @@ impl ChainLaserActor {
                 // subscriptions again and that method does not return any error information.
                 // Subscriptions were already cleared when the connection issue was signaled.
                 let _ = response.send(Ok(())).inspect_err(|_| {
-                    warn!(
-                        "[client_id={}] Failed to send reconnect response",
-                        self.client_id
-                    )
+                    warn!("Failed to send reconnect response");
                 });
                 false
             }
             Shutdown { response } => {
-                info!(
-                    "[client_id={}] Received Shutdown message",
-                    self.client_id
-                );
+                info!("Received Shutdown message");
                 Self::clear_subscriptions(
                     &mut self.subscriptions,
                     &mut self.active_subscriptions,
@@ -340,10 +321,7 @@ impl ChainLaserActor {
                     &mut self.program_subscriptions,
                 );
                 let _ = response.send(Ok(())).inspect_err(|_| {
-                    warn!(
-                        "[client_id={}] Failed to send shutdown response",
-                        self.client_id
-                    )
+                    warn!("Failed to send shutdown response");
                 });
                 true
             }
@@ -357,16 +335,9 @@ impl ChainLaserActor {
         sub_response: oneshot::Sender<RemoteAccountProviderResult<()>>,
     ) {
         if self.subscriptions.contains(&pubkey) {
-            warn!(
-                "[client_id={}] Already subscribed to account {}",
-                self.client_id, pubkey
-            );
+            warn!(pubkey = %pubkey, "Already subscribed to account");
             sub_response.send(Ok(())).unwrap_or_else(|_| {
-                warn!(
-                    "[client_id={}] Failed to send already subscribed response for account {}",
-                    self.client_id,
-                    pubkey
-                )
+                warn!(pubkey = %pubkey, "Failed to send already subscribed response");
             });
         } else {
             self.subscriptions.insert(pubkey);
@@ -375,11 +346,7 @@ impl ChainLaserActor {
                 self.update_active_subscriptions();
             }
             sub_response.send(Ok(())).unwrap_or_else(|_| {
-                warn!(
-                    "[client_id={}] Failed to send subscribe response for account {}",
-                    self.client_id,
-                    pubkey
-                )
+                warn!(pubkey = %pubkey, "Failed to send subscribe response");
             })
         }
     }
@@ -392,17 +359,9 @@ impl ChainLaserActor {
     ) {
         match self.subscriptions.remove(pubkey) {
             true => {
-                trace!(
-                    "[client_id={}] Unsubscribed from account {}",
-                    self.client_id,
-                    pubkey
-                );
+                trace!(pubkey = %pubkey, "Unsubscribed from account");
                 unsub_response.send(Ok(())).unwrap_or_else(|_| {
-                    warn!(
-                        "[client_id={}] Failed to send unsubscribe response for account {}",
-                        self.client_id,
-                        pubkey
-                    )
+                    warn!(pubkey = %pubkey, "Failed to send unsubscribe response");
                 });
             }
             false => {
@@ -413,11 +372,7 @@ impl ChainLaserActor {
                         ),
                     ))
                     .unwrap_or_else(|_| {
-                        warn!(
-                            "[client_id={}] Failed to send unsubscribe response for account {}",
-                            self.client_id,
-                            pubkey
-                        )
+                        warn!(pubkey = %pubkey, "Failed to send unsubscribe response");
                     });
             }
         }
@@ -428,9 +383,9 @@ impl ChainLaserActor {
         let new_pubkeys: HashSet<Pubkey> =
             self.subscriptions.iter().copied().collect();
         if new_pubkeys == self.active_subscription_pubkeys {
-            trace!("[client_id={}] Active subscriptions already up to date ({} account(s), skipping activation)",
-                self.client_id,
-                self.subscriptions.len(),
+            trace!(
+                count = self.subscriptions.len(),
+                "Active subscriptions already up to date"
             );
             return;
         }
@@ -450,19 +405,13 @@ impl ChainLaserActor {
             .map(|(cs, fs)| (Some(cs), Some(fs)))
             .unwrap_or((None, None));
 
-        if log::log_enabled!(log::Level::Trace) {
+        if tracing::enabled!(tracing::Level::TRACE) {
             trace!(
-                "[client_id={}] Activating {} account subs at slot {} \
-             from_slot {} using {} stream(s)",
-                self.client_id,
-                self.subscriptions.len(),
-                chain_slot
-                    .map(|s| s.to_string())
-                    .unwrap_or_else(|| "N/A".to_string()),
-                from_slot
-                    .map(|s| s.to_string())
-                    .unwrap_or_else(|| "N/A".to_string()),
-                chunks.len(),
+                account_count = self.subscriptions.len(),
+                chain_slot,
+                from_slot,
+                stream_count = chunks.len(),
+                "Activating account subscriptions"
             );
         }
 
@@ -554,10 +503,7 @@ impl ChainLaserActor {
             })
             .unwrap_or(false)
         {
-            trace!(
-                "[client_id={}] Program subscription for {program_id} already exists, ignoring add_program_sub request",
-                self.client_id
-            );
+            trace!(program_id = %program_id, "Program subscription already exists");
             return;
         }
 
@@ -590,6 +536,7 @@ impl ChainLaserActor {
     }
 
     /// Handles an update from one of the account data streams.
+    #[instrument(skip(self), fields(client_id = %self.client_id, stream_index = %idx))]
     async fn handle_account_update(
         &mut self,
         (idx, result): LaserStreamUpdate,
@@ -603,11 +550,7 @@ impl ChainLaserActor {
                 .await;
             }
             Err(err) => {
-                error!(
-                    "[client_id={}] Error in account update stream for accounts with idx \
-                     {}: {}; signaling connection issue",
-                    self.client_id, idx, err
-                );
+                error!(error = ?err, "Error in account update stream");
                 Self::signal_connection_issue(
                     &mut self.subscriptions,
                     &mut self.active_subscriptions,
@@ -622,6 +565,7 @@ impl ChainLaserActor {
     }
 
     /// Handles an update from the program subscriptions stream.
+    #[instrument(skip(self), fields(client_id = %self.client_id))]
     async fn handle_program_update(&mut self, result: LaserResult) {
         match result {
             Ok(subscribe_update) => {
@@ -632,11 +576,7 @@ impl ChainLaserActor {
                 .await;
             }
             Err(err) => {
-                error!(
-                    "[client_id={}] Error in program subscription stream: {}; signaling \
-                     connection issue",
-                    self.client_id, err
-                );
+                error!(error = ?err, "Error in program subscription stream");
                 Self::signal_connection_issue(
                     &mut self.subscriptions,
                     &mut self.active_subscriptions,
@@ -666,6 +606,7 @@ impl ChainLaserActor {
     /// sending a message on the abort channel.
     /// NOTE: the laser client should handle reconnects internally, but
     /// we add this as a backup in case it is unable to do so
+    #[instrument(skip(subscriptions, active_subscriptions, active_subscription_pubkeys, program_subscriptions, abort_sender), fields(client_id = %client_id))]
     async fn signal_connection_issue(
         subscriptions: &mut HashSet<Pubkey>,
         active_subscriptions: &mut StreamMap<usize, LaserStream>,
@@ -674,7 +615,7 @@ impl ChainLaserActor {
         abort_sender: &mpsc::Sender<()>,
         client_id: &str,
     ) {
-        debug!("[client_id={client_id}] Signaling connection issue");
+        debug!("Signaling connection issue");
 
         // Clear all subscriptions
         Self::clear_subscriptions(
@@ -688,7 +629,7 @@ impl ChainLaserActor {
         let _ = abort_sender.try_send(()).inspect_err(|err| {
             // Channel full is expected when reconnect is already in progress
             if !matches!(err, mpsc::error::TrySendError::Full(_)) {
-                error!("[client_id={client_id}] Failed to signal connection issue: {err:?}")
+                error!(error = ?err, "Failed to signal connection issue");
             }
         });
     }
@@ -698,6 +639,15 @@ impl ChainLaserActor {
     /// closed. In that case lamports == 0 and owner is the system program.
     /// Thus an update of `None` is not expected and can be ignored.
     /// See: https://gist.github.com/thlorenz/d3d1a380678a030b3e833f8f979319ae
+    #[instrument(
+        skip(self, update),
+        fields(
+            client_id = %self.client_id,
+            pubkey = tracing::field::Empty,
+            slot = tracing::field::Empty,
+            source = %source,
+        )
+    )]
     async fn process_subscription_update(
         &mut self,
         update: SubscribeUpdate,
@@ -715,14 +665,14 @@ impl ChainLaserActor {
         };
 
         let Ok(pubkey) = Pubkey::try_from(account.pubkey) else {
-            error!(
-                "[client_id={}] Failed to parse pubkey in subscription update",
-                self.client_id
-            );
+            error!("Failed to parse pubkey");
             return;
         };
 
-        let log_trace = if log::log_enabled!(log::Level::Trace) {
+        tracing::Span::current()
+            .record("pubkey", tracing::field::display(pubkey));
+
+        let log_trace = if tracing::enabled!(tracing::Level::TRACE) {
             if pubkey.eq(&clock::ID) {
                 static TRACE_CLOCK_COUNT: AtomicU64 = AtomicU64::new(0);
                 TRACE_CLOCK_COUNT
@@ -734,13 +684,11 @@ impl ChainLaserActor {
         } else {
             false
         };
+
+        tracing::Span::current().record("slot", slot);
+
         if log_trace {
-            trace!(
-                "[client_id={}] Received {source} subscription update for {}: slot {}",
-                self.client_id,
-                pubkey,
-                slot
-            );
+            trace!("Received subscription update");
         }
 
         if !self.subscriptions.contains(&pubkey) {
@@ -749,11 +697,7 @@ impl ChainLaserActor {
         }
 
         let Ok(owner) = Pubkey::try_from(account.owner) else {
-            error!(
-                "[client_id={}] Failed to parse owner pubkey in subscription update for account {}",
-                self.client_id,
-                pubkey
-            );
+            error!(pubkey = %pubkey, "Failed to parse owner pubkey");
             return;
         };
 
@@ -769,14 +713,6 @@ impl ChainLaserActor {
             slot,
             account: Some(account),
         };
-
-        if log_trace {
-            trace!(
-                "[client_id={}] Sending subscription update {:?} ",
-                self.client_id,
-                subscription_update
-            );
-        }
 
         if pubkey != clock::ID {
             match source {
@@ -797,11 +733,7 @@ impl ChainLaserActor {
             .send(subscription_update)
             .await
             .unwrap_or_else(|_| {
-                error!(
-                    "[client_id={}] Failed to send subscription update for account {}",
-                    self.client_id,
-                    pubkey
-                )
+                error!(pubkey = %pubkey, "Failed to send subscription update");
             });
     }
 }

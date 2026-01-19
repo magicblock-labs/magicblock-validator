@@ -25,4 +25,8 @@ solana-transaction-error = { workspace = true }
 solana-transaction-status-client-types = { workspace = true }
 spl-token = { workspace = true }
 spl-token-2022 = { workspace = true }
+
 tokio = { workspace = true, features = ["sync"] }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["time"] }
+tracing-log = { workspace = true }

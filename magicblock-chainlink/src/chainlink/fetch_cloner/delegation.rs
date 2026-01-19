@@ -1,11 +1,11 @@
 use dlp::{
     pda::delegation_record_pda_from_delegated_account, state::DelegationRecord,
 };
-use log::*;
 use magicblock_core::{token_programs::EATA_PROGRAM_ID, traits::AccountsBank};
 use magicblock_metrics::metrics;
 use solana_account::ReadableAccount;
 use solana_pubkey::Pubkey;
+use tracing::*;
 
 use super::FetchCloner;
 use crate::{
@@ -82,6 +82,7 @@ where
     (!is_delegated_to_us).then_some(delegation_record.authority)
 }
 
+#[instrument(skip(this))]
 pub(crate) async fn fetch_and_parse_delegation_record<T, U, V, C, P>(
     this: &FetchCloner<T, U, V, C, P>,
     account_pubkey: Pubkey,
@@ -147,9 +148,7 @@ where
             .unsubscribe(&delegation_record_pubkey)
             .await
         {
-            error!(
-                "Failed to unsubscribe from delegation record {delegation_record_pubkey}: {err}"
-            );
+            error!(pubkey = %delegation_record_pubkey, error = %err, "Failed to unsubscribe from delegation record");
         }
     }
 

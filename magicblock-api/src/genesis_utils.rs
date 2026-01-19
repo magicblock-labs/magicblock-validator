@@ -40,7 +40,7 @@ pub fn create_genesis_config_with_leader(
             target_signatures_per_slot: 0,
             ..FeeRateGovernor::default()
         },
-        Rent::free(),
+        Rent::default(),
         vec![],
     );
 

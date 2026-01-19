@@ -12,7 +12,6 @@ use light_sdk::{
         SystemAccountMetaConfig, ValidityProof,
     },
 };
-use log::*;
 use magicblock_core::compression::derive_cda_from_pda;
 use magicblock_program::magic_scheduled_base_intent::{
     CommitType, CommittedAccount, MagicBaseIntent, ScheduledBaseIntent,
@@ -22,6 +21,7 @@ use solana_account::Account;
 use solana_instruction::AccountMeta;
 use solana_pubkey::Pubkey;
 use solana_signature::Signature;
+use tracing::error;
 
 use super::{CommitDiffTask, CommitTask};
 use crate::{
@@ -184,7 +184,7 @@ impl TasksBuilder for TaskBuilderImpl {
         let base_accounts = match base_accounts {
             Ok(map) => map,
             Err(err) => {
-                log::warn!("Failed to fetch base accounts for CommitDiff (id={}): {}; falling back to CommitState", base_intent.id, err);
+                tracing::warn!(intent_id = base_intent.id, error = ?err, "Failed to fetch base accounts, falling back to CommitState");
                 Default::default()
             }
         };
@@ -194,7 +194,7 @@ impl TasksBuilder for TaskBuilderImpl {
             .iter()
             .for_each(|(pubkey, commit_id)| {
                 if let Err(err) = persister.set_commit_id(base_intent.id, pubkey, *commit_id) {
-                    error!("Failed to persist commit id: {}, for message id: {} with pubkey {}: {}", commit_id, base_intent.id, pubkey, err);
+                    error!(intent_id = base_intent.id, pubkey = %pubkey, error = ?err, "Failed to persist commit id");
                 }
             });
 

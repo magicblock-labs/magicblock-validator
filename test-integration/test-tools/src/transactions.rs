@@ -2,7 +2,6 @@
 
 use std::{thread::sleep, time::Duration};
 
-use log::*;
 use solana_rpc_client::rpc_client::RpcClient;
 use solana_rpc_client_api::{
     client_error,
@@ -15,6 +14,7 @@ use solana_sdk::{
     signer::Signer,
     transaction::Transaction,
 };
+use tracing::*;
 
 use crate::conversions::stringify_simulation_result;
 

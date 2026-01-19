@@ -4,6 +4,7 @@ use std::{sync::Arc, time::Duration};
 use magicblock_ledger::{ledger_truncator::LedgerTruncator, Ledger};
 use solana_hash::Hash;
 use solana_signature::Signature;
+use test_kit::init_logger;
 
 use crate::common::{setup, write_dummy_transaction};
 
@@ -41,6 +42,7 @@ fn verify_transactions_state(
 // Tests that ledger is not truncated while there is still enough space
 #[tokio::test]
 async fn test_truncator_not_purged_size() {
+    init_logger!();
     const NUM_TRANSACTIONS: u64 = 100;
 
     let ledger = Arc::new(setup());
@@ -77,6 +79,7 @@ async fn test_truncator_not_purged_size() {
 // Tests that ledger got truncated but not after finality slot
 #[tokio::test]
 async fn test_truncator_non_empty_ledger() {
+    init_logger!();
     const FINAL_SLOT: u64 = 80;
 
     let ledger = Arc::new(setup());
@@ -139,6 +142,7 @@ async fn transaction_spammer(
 // Tests if ledger truncated correctly during tx spamming
 #[tokio::test]
 async fn test_truncator_with_tx_spammer() {
+    init_logger!();
     let ledger = Arc::new(setup());
 
     let mut ledger_truncator =
@@ -169,6 +173,7 @@ async fn test_truncator_with_tx_spammer() {
 #[ignore = "Long running test"]
 #[tokio::test]
 async fn test_with_1gb_db() {
+    init_logger!();
     const DB_SIZE: u64 = 1 << 30;
     const CHECK_RATE: u64 = 100;
 
