@@ -91,7 +91,7 @@ jobs:
         run: |
           if ! command -v cargo-expand &> /dev/null; then
             echo "cargo-expand not found, installing..."
-            cargo install cargo-expand
+            cargo install cargo-expand --version 1.0.118
           else
             echo "cargo-expand already installed"
           fi
