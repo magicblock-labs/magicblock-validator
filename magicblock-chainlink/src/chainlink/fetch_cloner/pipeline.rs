@@ -343,29 +343,6 @@ where
             });
         }
 
-        // Subscribe to owner programs concurrently in background (best-effort)
-        if !owner_programs_to_subscribe.is_empty() {
-            let remote_account_provider = this.remote_account_provider.clone();
-            tokio::spawn(async move {
-                let subscribe_futures =
-                    owner_programs_to_subscribe.into_iter().map(|owner| {
-                        let provider = remote_account_provider.clone();
-                        async move {
-                            let result =
-                                provider.subscribe_program(owner).await;
-                            (owner, result)
-                        }
-                    });
-                let results =
-                    futures_util::future::join_all(subscribe_futures).await;
-                for (owner, result) in results {
-                    if let Err(err) = result {
-                        warn!(program_id = %owner, error = %err, "Failed to subscribe to owner program");
-                    }
-                }
-            });
-        }
-
         (accounts_to_clone, record_subs)
     };
 

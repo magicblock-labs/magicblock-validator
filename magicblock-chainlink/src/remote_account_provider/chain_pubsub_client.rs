@@ -468,10 +468,6 @@ pub mod mock {
                     == *self.subscription_count_at_disconnect.lock()
         }
 
-        pub fn subscribed_program_ids(&self) -> HashSet<Pubkey> {
-            self.subscribed_programs.lock().clone()
-        }
-
         /// Directly insert a subscription without going through subscribe().
         /// Useful for testing reconciliation scenarios.
         pub fn insert_subscription(&self, pubkey: Pubkey) {
