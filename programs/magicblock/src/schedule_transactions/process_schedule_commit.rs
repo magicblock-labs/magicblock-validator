@@ -10,7 +10,8 @@ use solana_pubkey::Pubkey;
 use crate::{
     magic_scheduled_base_intent::{
         validate_commit_schedule_permissions, CommitAndUndelegate, CommitType,
-        CommittedAccount, MagicBaseIntent, ScheduledBaseIntent, UndelegateType,
+        CommittedAccount, MagicBaseIntent, ScheduledIntentBundle,
+        UndelegateType,
     },
     schedule_transactions,
     utils::{
@@ -261,13 +262,13 @@ pub(crate) fn process_schedule_commit(
     }
     .into();
 
-    let scheduled_base_intent = ScheduledBaseIntent {
+    let scheduled_base_intent = ScheduledIntentBundle {
         id: intent_id,
         slot: clock.slot,
         blockhash,
-        action_sent_transaction,
+        intent_bundle_sent_transaction: action_sent_transaction,
         payer: *payer_pubkey,
-        base_intent,
+        intent_bundle: base_intent,
     };
 
     context.add_scheduled_action(scheduled_base_intent);

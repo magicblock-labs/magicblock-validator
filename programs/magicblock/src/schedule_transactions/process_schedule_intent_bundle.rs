@@ -10,7 +10,7 @@ use solana_transaction_context::TransactionContext;
 
 use crate::{
     magic_scheduled_base_intent::{
-        CommitType, ConstructionContext, ScheduledBaseIntent,
+        CommitType, ConstructionContext, ScheduledIntentBundle,
     },
     schedule_transactions::check_magic_context_id,
     utils::{
@@ -130,7 +130,7 @@ pub(crate) fn process_schedule_intent_bundle(
             None
         };
 
-    let scheduled_intent = ScheduledBaseIntent::try_new(
+    let scheduled_intent = ScheduledIntentBundle::try_new(
         args,
         intent_id,
         clock.slot,
@@ -156,7 +156,7 @@ pub(crate) fn process_schedule_intent_bundle(
     }
 
     let action_sent_signature =
-        scheduled_intent.action_sent_transaction.signatures[0];
+        scheduled_intent.intent_bundle_sent_transaction.signatures[0];
 
     context.add_scheduled_action(scheduled_intent);
     context_data.set_state(&context)?;

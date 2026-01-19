@@ -10,7 +10,7 @@ use async_trait::async_trait;
 use futures_util::future::{join, try_join_all};
 use magicblock_metrics::metrics;
 use magicblock_program::{
-    magic_scheduled_base_intent::ScheduledBaseIntent,
+    magic_scheduled_base_intent::ScheduledIntentBundle,
     validator::validator_authority,
 };
 use magicblock_rpc_client::{
@@ -96,7 +96,7 @@ pub trait IntentExecutor: Send + Sync + 'static {
     /// Returns `ExecutionOutput` or an `Error`
     async fn execute<P: IntentPersister>(
         &mut self,
-        base_intent: ScheduledBaseIntent,
+        base_intent: ScheduledIntentBundle,
         persister: Option<P>,
     ) -> IntentExecutionResult;
 
@@ -139,7 +139,7 @@ where
 
     async fn execute_inner<P: IntentPersister>(
         &mut self,
-        base_intent: ScheduledBaseIntent,
+        base_intent: ScheduledIntentBundle,
         persister: &Option<P>,
     ) -> IntentExecutorResult<ExecutionOutput> {
         if base_intent.is_empty() {
@@ -236,7 +236,7 @@ where
     /// Starting execution from single stage
     pub async fn single_stage_execution_flow<P: IntentPersister>(
         &mut self,
-        base_intent: ScheduledBaseIntent,
+        base_intent: ScheduledIntentBundle,
         transaction_strategy: TransactionStrategy,
         persister: &Option<P>,
     ) -> IntentExecutorResult<ExecutionOutput> {
@@ -775,7 +775,7 @@ where
     /// Returns `ExecutionOutput` or an `Error`
     async fn execute<P: IntentPersister>(
         &mut self,
-        base_intent: ScheduledBaseIntent,
+        base_intent: ScheduledIntentBundle,
         persister: Option<P>,
     ) -> IntentExecutionResult {
         let message_id = base_intent.id;

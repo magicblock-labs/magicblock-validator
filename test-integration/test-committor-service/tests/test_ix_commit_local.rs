@@ -15,7 +15,7 @@ use magicblock_committor_service::{
 };
 use magicblock_program::magic_scheduled_base_intent::{
     CommitAndUndelegate, CommitType, CommittedAccount, MagicBaseIntent,
-    ScheduledBaseIntent, UndelegateType,
+    ScheduledIntentBundle, UndelegateType,
 };
 use magicblock_rpc_client::MagicblockRpcClient;
 use program_flexi_counter::state::FlexiCounter;
@@ -190,13 +190,13 @@ async fn commit_single_account(
 
     let intent = ScheduledBaseIntentWrapper {
         trigger_type: TriggerType::OnChain,
-        inner: ScheduledBaseIntent {
+        inner: ScheduledIntentBundle {
             id: 0,
             slot: 10,
             blockhash: Hash::new_unique(),
-            action_sent_transaction: Transaction::default(),
+            intent_bundle_sent_transaction: Transaction::default(),
             payer: counter_auth.pubkey(),
-            base_intent,
+            intent_bundle: base_intent,
         },
     };
 
@@ -257,13 +257,13 @@ async fn commit_book_order_account(
 
     let intent = ScheduledBaseIntentWrapper {
         trigger_type: TriggerType::OnChain,
-        inner: ScheduledBaseIntent {
+        inner: ScheduledIntentBundle {
             id: 0,
             slot: 10,
             blockhash: Hash::new_unique(),
-            action_sent_transaction: Transaction::default(),
+            intent_bundle_sent_transaction: Transaction::default(),
             payer: payer.pubkey(),
-            base_intent,
+            intent_bundle: base_intent,
         },
     };
 
@@ -581,13 +581,13 @@ async fn commit_multiple_accounts(
             }
         })
         .enumerate()
-        .map(|(id, base_intent)| ScheduledBaseIntent {
+        .map(|(id, base_intent)| ScheduledIntentBundle {
             id: id as u64,
             slot: 0,
             blockhash: Hash::new_unique(),
-            action_sent_transaction: Transaction::default(),
+            intent_bundle_sent_transaction: Transaction::default(),
             payer: Pubkey::new_unique(),
-            base_intent,
+            intent_bundle: base_intent,
         })
         .map(|intent| ScheduledBaseIntentWrapper {
             trigger_type: TriggerType::OnChain,

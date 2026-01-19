@@ -24,7 +24,7 @@ use magicblock_core::{
     link::transactions::TransactionSchedulerHandle, traits::AccountsBank,
 };
 use magicblock_program::{
-    magic_scheduled_base_intent::ScheduledBaseIntent,
+    magic_scheduled_base_intent::ScheduledIntentBundle,
     register_scheduled_commit_sent, SentCommit, TransactionScheduler,
 };
 use solana_hash::Hash;
@@ -89,7 +89,7 @@ impl ScheduledCommitsProcessorImpl {
 
     fn preprocess_intent(
         &self,
-        mut base_intent: ScheduledBaseIntent,
+        mut base_intent: ScheduledIntentBundle,
     ) -> (ScheduledBaseIntentWrapper, Vec<Pubkey>) {
         let is_undelegate = base_intent.is_undelegate();
         let Some(committed_accounts) = base_intent.get_committed_accounts_mut()
@@ -389,7 +389,7 @@ struct ScheduledBaseIntentMeta {
 }
 
 impl ScheduledBaseIntentMeta {
-    fn new(intent: &ScheduledBaseIntent) -> Self {
+    fn new(intent: &ScheduledIntentBundle) -> Self {
         Self {
             slot: intent.slot,
             blockhash: intent.blockhash,
@@ -397,7 +397,9 @@ impl ScheduledBaseIntentMeta {
             included_pubkeys: intent
                 .get_committed_pubkeys()
                 .unwrap_or_default(),
-            intent_sent_transaction: intent.action_sent_transaction.clone(),
+            intent_sent_transaction: intent
+                .intent_bundle_sent_transaction
+                .clone(),
             requested_undelegation: intent.is_undelegate(),
         }
     }

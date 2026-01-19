@@ -370,7 +370,7 @@ mod tests {
     };
 
     use async_trait::async_trait;
-    use magicblock_program::magic_scheduled_base_intent::ScheduledBaseIntent;
+    use magicblock_program::magic_scheduled_base_intent::ScheduledIntentBundle;
     use solana_pubkey::{pubkey, Pubkey};
     use solana_signature::Signature;
     use solana_signer::SignerError;
@@ -778,7 +778,7 @@ mod tests {
     impl IntentExecutor for MockIntentExecutor {
         async fn execute<P: IntentPersister>(
             &mut self,
-            _base_intent: ScheduledBaseIntent,
+            _base_intent: ScheduledIntentBundle,
             _persister: Option<P>,
         ) -> IntentExecutionResult {
             self.on_task_started();

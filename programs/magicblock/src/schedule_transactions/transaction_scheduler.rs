@@ -13,12 +13,12 @@ use solana_pubkey::Pubkey;
 
 use crate::{
     magic_context::MagicContext,
-    magic_scheduled_base_intent::ScheduledBaseIntent,
+    magic_scheduled_base_intent::ScheduledIntentBundle,
 };
 
 #[derive(Clone)]
 pub struct TransactionScheduler {
-    scheduled_base_intents: Arc<RwLock<Vec<ScheduledBaseIntent>>>,
+    scheduled_base_intents: Arc<RwLock<Vec<ScheduledIntentBundle>>>,
 }
 
 impl Default for TransactionScheduler {
@@ -27,7 +27,7 @@ impl Default for TransactionScheduler {
             /// This vec tracks commits that went through the entire process of first
             /// being scheduled into the MagicContext, and then being moved
             /// over to this global.
-            static ref SCHEDULED_ACTION: Arc<RwLock<Vec<ScheduledBaseIntent >>> =
+            static ref SCHEDULED_ACTION: Arc<RwLock<Vec<ScheduledIntentBundle >>> =
                 Default::default();
         }
         Self {
@@ -40,7 +40,7 @@ impl TransactionScheduler {
     pub fn schedule_base_intent(
         invoke_context: &InvokeContext,
         context_account: &RefCell<AccountSharedData>,
-        action: ScheduledBaseIntent,
+        action: ScheduledIntentBundle,
     ) -> Result<(), InstructionError> {
         let context_data = &mut context_account.borrow_mut();
         let mut context =
@@ -59,7 +59,7 @@ impl TransactionScheduler {
 
     pub fn accept_scheduled_base_intent(
         &self,
-        base_intents: Vec<ScheduledBaseIntent>,
+        base_intents: Vec<ScheduledIntentBundle>,
     ) {
         self.scheduled_base_intents
             .write()
@@ -70,7 +70,7 @@ impl TransactionScheduler {
     pub fn get_scheduled_actions_by_payer(
         &self,
         payer: &Pubkey,
-    ) -> Vec<ScheduledBaseIntent> {
+    ) -> Vec<ScheduledIntentBundle> {
         let commits = self
             .scheduled_base_intents
             .read()
@@ -83,7 +83,7 @@ impl TransactionScheduler {
             .collect::<Vec<_>>()
     }
 
-    pub fn take_scheduled_actions(&self) -> Vec<ScheduledBaseIntent> {
+    pub fn take_scheduled_actions(&self) -> Vec<ScheduledIntentBundle> {
         let mut lock = self
             .scheduled_base_intents
             .write()

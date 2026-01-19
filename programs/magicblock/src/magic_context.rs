@@ -4,12 +4,12 @@ use magicblock_magic_program_api::MAGIC_CONTEXT_SIZE;
 use serde::{Deserialize, Serialize};
 use solana_account::{AccountSharedData, ReadableAccount};
 
-use crate::magic_scheduled_base_intent::ScheduledBaseIntent;
+use crate::magic_scheduled_base_intent::ScheduledIntentBundle;
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct MagicContext {
     pub intent_id: u64,
-    pub scheduled_base_intents: Vec<ScheduledBaseIntent>,
+    pub scheduled_base_intents: Vec<ScheduledIntentBundle>,
 }
 
 impl MagicContext {
@@ -34,14 +34,14 @@ impl MagicContext {
 
     pub(crate) fn add_scheduled_action(
         &mut self,
-        base_intent: ScheduledBaseIntent,
+        base_intent: ScheduledIntentBundle,
     ) {
         self.scheduled_base_intents.push(base_intent);
     }
 
     pub(crate) fn take_scheduled_commits(
         &mut self,
-    ) -> Vec<ScheduledBaseIntent> {
+    ) -> Vec<ScheduledIntentBundle> {
         mem::take(&mut self.scheduled_base_intents)
     }
 

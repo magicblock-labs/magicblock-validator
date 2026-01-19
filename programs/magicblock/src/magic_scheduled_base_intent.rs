@@ -57,43 +57,43 @@ impl<'a, 'ic> ConstructionContext<'a, 'ic> {
 
 /// Scheduled action to be executed on base layer
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ScheduledBaseIntent {
+pub struct ScheduledIntentBundle {
     pub id: u64,
     pub slot: Slot,
     pub blockhash: Hash,
-    pub action_sent_transaction: Transaction,
+    pub intent_bundle_sent_transaction: Transaction,
     pub payer: Pubkey,
     /// Scheduled intent bundle
     // TODO(edwin): rename
-    pub base_intent: MagicIntentBundle,
+    pub intent_bundle: MagicIntentBundle,
 }
 
-impl ScheduledBaseIntent {
+impl ScheduledIntentBundle {
     pub fn try_new(
         args: MagicIntentBundleArgs,
         commit_id: u64,
         slot: Slot,
         payer_pubkey: &Pubkey,
         context: &ConstructionContext<'_, '_>,
-    ) -> Result<ScheduledBaseIntent, InstructionError> {
-        let intent = MagicIntentBundle::try_from_args(args, context)?;
-
+    ) -> Result<ScheduledIntentBundle, InstructionError> {
+        let intent_bundle = MagicIntentBundle::try_from_args(args, context)?;
         let blockhash = context.invoke_context.environment_config.blockhash;
-        let action_sent_transaction =
+        let intent_bundle_sent_transaction =
             InstructionUtils::scheduled_commit_sent(commit_id, blockhash);
-        Ok(ScheduledBaseIntent {
+
+        Ok(ScheduledIntentBundle {
             id: commit_id,
             slot,
             blockhash,
             payer: *payer_pubkey,
-            action_sent_transaction,
-            base_intent: intent,
+            intent_bundle_sent_transaction,
+            intent_bundle,
         })
     }
 
     pub fn get_undelegated_accounts(&self) -> Option<&Vec<CommittedAccount>> {
         Some(
-            self.base_intent
+            self.intent_bundle
                 .commit_and_undelegate
                 .as_ref()?
                 .get_committed_accounts(),
@@ -101,15 +101,15 @@ impl ScheduledBaseIntent {
     }
 
     pub fn get_committed_pubkeys(&self) -> Option<Vec<Pubkey>> {
-        self.base_intent.get_committed_pubkeys()
+        self.intent_bundle.get_committed_pubkeys()
     }
 
     pub fn is_undelegate(&self) -> bool {
-        self.base_intent.is_undelegate()
+        self.intent_bundle.is_undelegate()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.base_intent.is_empty()
+        self.intent_bundle.is_empty()
     }
 }
 

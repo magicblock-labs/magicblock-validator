@@ -1,6 +1,6 @@
 use std::collections::{hash_map::Entry, HashMap, VecDeque};
 
-use magicblock_program::magic_scheduled_base_intent::ScheduledBaseIntent;
+use magicblock_program::magic_scheduled_base_intent::ScheduledIntentBundle;
 use solana_pubkey::Pubkey;
 use thiserror::Error;
 use tracing::error;
@@ -76,7 +76,7 @@ impl IntentScheduler {
         }
     }
 
-    /// Returns [`ScheduledBaseIntent`] if intent can be executed,
+    /// Returns [`ScheduledIntentBundle`] if intent can be executed,
     /// otherwise consumes it and enqueues
     pub fn schedule(
         &mut self,
@@ -143,7 +143,7 @@ impl IntentScheduler {
     /// NOTE: this shall be called on executing intents to finilize their execution.
     pub fn complete(
         &mut self,
-        base_intent: &ScheduledBaseIntent,
+        base_intent: &ScheduledIntentBundle,
     ) -> IntentSchedulerResult<()> {
         // Release data for completed intent
         let intent_id = base_intent.id;
@@ -592,7 +592,7 @@ mod edge_cases_test {
     fn test_intent_without_pubkeys() {
         let mut scheduler = IntentScheduler::new();
         let mut msg = create_test_intent(1, &[], false);
-        msg.inner.base_intent = MagicBaseIntent::BaseActions(vec![]);
+        msg.inner.intent_bundle = MagicBaseIntent::BaseActions(vec![]);
 
         // Should execute immediately since it has no pubkeys
         assert!(scheduler.schedule(msg.clone()).is_some());
@@ -661,7 +661,7 @@ mod complete_error_test {
         assert!(scheduler.schedule(msg1.clone()).is_some());
 
         msg1.inner
-            .base_intent
+            .intent_bundle
             .get_committed_accounts_mut()
             .unwrap()
             .push(CommittedAccount {
@@ -733,7 +733,7 @@ pub(crate) fn create_test_intent(
 ) -> ScheduledBaseIntentWrapper {
     use magicblock_program::magic_scheduled_base_intent::{
         CommitAndUndelegate, CommitType, CommittedAccount, MagicBaseIntent,
-        ScheduledBaseIntent, UndelegateType,
+        ScheduledIntentBundle, UndelegateType,
     };
     use solana_account::Account;
     use solana_hash::Hash;
@@ -741,13 +741,13 @@ pub(crate) fn create_test_intent(
 
     use crate::types::TriggerType;
 
-    let mut intent = ScheduledBaseIntent {
+    let mut intent = ScheduledIntentBundle {
         id,
         slot: 0,
         blockhash: Hash::default(),
-        action_sent_transaction: Transaction::default(),
+        intent_bundle_sent_transaction: Transaction::default(),
         payer: Pubkey::default(),
-        base_intent: MagicBaseIntent::BaseActions(vec![]),
+        intent_bundle: MagicBaseIntent::BaseActions(vec![]),
     };
 
     // Only set pubkeys if provided
@@ -763,13 +763,13 @@ pub(crate) fn create_test_intent(
 
         let commit_type = CommitType::Standalone(committed_accounts);
         if is_undelegate {
-            intent.base_intent =
+            intent.intent_bundle =
                 MagicBaseIntent::CommitAndUndelegate(CommitAndUndelegate {
                     commit_action: commit_type,
                     undelegate_action: UndelegateType::Standalone,
                 })
         } else {
-            intent.base_intent = MagicBaseIntent::Commit(commit_type);
+            intent.intent_bundle = MagicBaseIntent::Commit(commit_type);
         }
     }
 

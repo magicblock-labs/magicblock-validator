@@ -33,7 +33,7 @@ use magicblock_program::{
     args::ShortAccountMeta,
     magic_scheduled_base_intent::{
         BaseAction, CommitAndUndelegate, CommitType, CommittedAccount,
-        MagicBaseIntent, ProgramArgs, ScheduledBaseIntent, UndelegateType,
+        MagicBaseIntent, ProgramArgs, ScheduledIntentBundle, UndelegateType,
     },
     validator::validator_authority_id,
 };
@@ -1178,7 +1178,7 @@ async fn setup_counter(
 fn create_intent(
     committed_accounts: Vec<CommittedAccount>,
     is_undelegate: bool,
-) -> ScheduledBaseIntent {
+) -> ScheduledIntentBundle {
     let base_intent = if is_undelegate {
         MagicBaseIntent::CommitAndUndelegate(CommitAndUndelegate {
             commit_action: CommitType::Standalone(committed_accounts),
@@ -1193,23 +1193,23 @@ fn create_intent(
 
 fn create_scheduled_intent(
     base_intent: MagicBaseIntent,
-) -> ScheduledBaseIntent {
+) -> ScheduledIntentBundle {
     static INTENT_ID: AtomicU64 = AtomicU64::new(0);
 
-    ScheduledBaseIntent {
+    ScheduledIntentBundle {
         id: INTENT_ID.fetch_add(1, Ordering::Relaxed),
         slot: 10,
         blockhash: Hash::new_unique(),
-        action_sent_transaction: Transaction::default(),
+        intent_bundle_sent_transaction: Transaction::default(),
         payer: Pubkey::new_unique(),
-        base_intent,
+        intent_bundle: base_intent,
     }
 }
 
 async fn single_flow_transaction_strategy(
     authority: &Pubkey,
     task_info_fetcher: &Arc<CacheTaskInfoFetcher>,
-    intent: &ScheduledBaseIntent,
+    intent: &ScheduledIntentBundle,
 ) -> TransactionStrategy {
     let mut tasks = TaskBuilderImpl::commit_tasks(
         task_info_fetcher,

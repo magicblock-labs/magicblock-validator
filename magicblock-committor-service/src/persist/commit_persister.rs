@@ -3,7 +3,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use magicblock_program::magic_scheduled_base_intent::ScheduledBaseIntent;
+use magicblock_program::magic_scheduled_base_intent::ScheduledIntentBundle;
 use solana_pubkey::Pubkey;
 
 use super::{
@@ -21,12 +21,12 @@ pub trait IntentPersister: Send + Sync + Clone + 'static {
     /// Starts persisting BaseIntents
     fn start_base_intents(
         &self,
-        base_intent: &[ScheduledBaseIntent],
+        base_intent: &[ScheduledIntentBundle],
     ) -> CommitPersistResult<()>;
     /// Starts persisting BaseIntent
     fn start_base_intent(
         &self,
-        base_intent: &ScheduledBaseIntent,
+        base_intent: &ScheduledIntentBundle,
     ) -> CommitPersistResult<()>;
     fn set_commit_id(
         &self,
@@ -100,7 +100,7 @@ impl IntentPersisterImpl {
     }
 
     pub fn create_commit_rows(
-        base_intent: &ScheduledBaseIntent,
+        base_intent: &ScheduledIntentBundle,
     ) -> Vec<CommitStatusRow> {
         let Some(committed_accounts) = base_intent.get_committed_accounts()
         else {
@@ -152,7 +152,7 @@ impl IntentPersisterImpl {
 impl IntentPersister for IntentPersisterImpl {
     fn start_base_intents(
         &self,
-        base_intents: &[ScheduledBaseIntent],
+        base_intents: &[ScheduledIntentBundle],
     ) -> CommitPersistResult<()> {
         let commit_rows = base_intents
             .iter()
@@ -168,7 +168,7 @@ impl IntentPersister for IntentPersisterImpl {
 
     fn start_base_intent(
         &self,
-        base_intents: &ScheduledBaseIntent,
+        base_intents: &ScheduledIntentBundle,
     ) -> CommitPersistResult<()> {
         let commit_row = Self::create_commit_rows(base_intents);
         self.commits_db
@@ -297,7 +297,7 @@ impl IntentPersister for IntentPersisterImpl {
 impl<T: IntentPersister> IntentPersister for Option<T> {
     fn start_base_intents(
         &self,
-        base_intents: &[ScheduledBaseIntent],
+        base_intents: &[ScheduledIntentBundle],
     ) -> CommitPersistResult<()> {
         match self {
             Some(persister) => persister.start_base_intents(base_intents),
@@ -307,7 +307,7 @@ impl<T: IntentPersister> IntentPersister for Option<T> {
 
     fn start_base_intent(
         &self,
-        base_intents: &ScheduledBaseIntent,
+        base_intents: &ScheduledIntentBundle,
     ) -> CommitPersistResult<()> {
         match self {
             Some(persister) => persister.start_base_intent(base_intents),
@@ -454,7 +454,7 @@ mod tests {
         (persister, temp_file)
     }
 
-    fn create_test_message(id: u64) -> ScheduledBaseIntent {
+    fn create_test_message(id: u64) -> ScheduledIntentBundle {
         let account1 = Account {
             lamports: 1000,
             owner: Pubkey::new_unique(),
@@ -470,24 +470,26 @@ mod tests {
             rent_epoch: 0,
         };
 
-        ScheduledBaseIntent {
+        ScheduledIntentBundle {
             id,
             slot: 100,
             blockhash: Hash::new_unique(),
-            action_sent_transaction: Transaction::default(),
+            intent_bundle_sent_transaction: Transaction::default(),
             payer: Pubkey::new_unique(),
-            base_intent: MagicBaseIntent::Commit(CommitType::Standalone(vec![
-                CommittedAccount {
-                    pubkey: Pubkey::new_unique(),
-                    account: account1,
-                    remote_slot: 1,
-                },
-                CommittedAccount {
-                    pubkey: Pubkey::new_unique(),
-                    account: account2,
-                    remote_slot: 2,
-                },
-            ])),
+            intent_bundle: MagicBaseIntent::Commit(CommitType::Standalone(
+                vec![
+                    CommittedAccount {
+                        pubkey: Pubkey::new_unique(),
+                        account: account1,
+                        remote_slot: 1,
+                    },
+                    CommittedAccount {
+                        pubkey: Pubkey::new_unique(),
+                        account: account2,
+                        remote_slot: 2,
+                    },
+                ],
+            )),
         }
     }
 
@@ -654,8 +656,8 @@ mod tests {
     #[test]
     fn test_empty_accounts_not_persisted() {
         let (persister, _temp_file) = create_test_persister();
-        let message = ScheduledBaseIntent {
-            base_intent: MagicBaseIntent::BaseActions(vec![]), // No committed accounts
+        let message = ScheduledIntentBundle {
+            intent_bundle: MagicBaseIntent::BaseActions(vec![]), // No committed accounts
             ..create_test_message(1)
         };
 

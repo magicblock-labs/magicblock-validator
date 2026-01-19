@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use magicblock_program::magic_scheduled_base_intent::{
-    CommitType, CommittedAccount, MagicBaseIntent, ScheduledBaseIntent,
+    CommitType, CommittedAccount, MagicBaseIntent, ScheduledIntentBundle,
     UndelegateType,
 };
 use solana_account::Account;
@@ -27,14 +27,14 @@ pub trait TasksBuilder {
     // Creates tasks for commit stage
     async fn commit_tasks<C: TaskInfoFetcher, P: IntentPersister>(
         commit_id_fetcher: &Arc<C>,
-        base_intent: &ScheduledBaseIntent,
+        base_intent: &ScheduledIntentBundle,
         persister: &Option<P>,
     ) -> TaskBuilderResult<Vec<Box<dyn BaseTask>>>;
 
     // Create tasks for finalize stage
     async fn finalize_tasks<C: TaskInfoFetcher>(
         info_fetcher: &Arc<C>,
-        base_intent: &ScheduledBaseIntent,
+        base_intent: &ScheduledIntentBundle,
     ) -> TaskBuilderResult<Vec<Box<dyn BaseTask>>>;
 }
 
@@ -87,10 +87,10 @@ impl TasksBuilder for TaskBuilderImpl {
     /// Returns [`Task`]s for Commit stage
     async fn commit_tasks<C: TaskInfoFetcher, P: IntentPersister>(
         commit_id_fetcher: &Arc<C>,
-        base_intent: &ScheduledBaseIntent,
+        base_intent: &ScheduledIntentBundle,
         persister: &Option<P>,
     ) -> TaskBuilderResult<Vec<Box<dyn BaseTask>>> {
-        let (accounts, allow_undelegation) = match &base_intent.base_intent {
+        let (accounts, allow_undelegation) = match &base_intent.intent_bundle {
             MagicBaseIntent::BaseActions(actions) => {
                 let tasks = actions
                     .iter()
@@ -179,7 +179,7 @@ impl TasksBuilder for TaskBuilderImpl {
     /// Returns [`Task`]s for Finalize stage
     async fn finalize_tasks<C: TaskInfoFetcher>(
         info_fetcher: &Arc<C>,
-        base_intent: &ScheduledBaseIntent,
+        base_intent: &ScheduledIntentBundle,
     ) -> TaskBuilderResult<Vec<Box<dyn BaseTask>>> {
         // Helper to create a finalize task
         fn finalize_task(account: &CommittedAccount) -> Box<dyn BaseTask> {
@@ -229,7 +229,7 @@ impl TasksBuilder for TaskBuilderImpl {
             }
         }
 
-        match &base_intent.base_intent {
+        match &base_intent.intent_bundle {
             MagicBaseIntent::BaseActions(_) => Ok(vec![]),
             MagicBaseIntent::Commit(commit) => Ok(process_commit(commit)),
             MagicBaseIntent::CommitAndUndelegate(t) => {

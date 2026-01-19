@@ -2,7 +2,7 @@ use std::ops::Deref;
 
 use magicblock_metrics::metrics;
 use magicblock_program::magic_scheduled_base_intent::{
-    MagicBaseIntent, ScheduledBaseIntent,
+    MagicBaseIntent, ScheduledIntentBundle,
 };
 
 // TODO: should be removed once cranks are supported
@@ -15,13 +15,13 @@ pub enum TriggerType {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ScheduledBaseIntentWrapper {
-    pub inner: ScheduledBaseIntent,
+    pub inner: ScheduledIntentBundle,
     pub trigger_type: TriggerType,
 }
 
 impl metrics::LabelValue for ScheduledBaseIntentWrapper {
     fn value(&self) -> &str {
-        match &self.inner.base_intent {
+        match &self.inner.intent_bundle {
             MagicBaseIntent::BaseActions(_) => "actions",
             MagicBaseIntent::Commit(_) => "commit",
             MagicBaseIntent::CommitAndUndelegate(_) => "commit_and_undelegate",
@@ -30,7 +30,7 @@ impl metrics::LabelValue for ScheduledBaseIntentWrapper {
 }
 
 impl Deref for ScheduledBaseIntentWrapper {
-    type Target = ScheduledBaseIntent;
+    type Target = ScheduledIntentBundle;
 
     fn deref(&self) -> &Self::Target {
         &self.inner
