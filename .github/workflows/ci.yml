@@ -27,8 +27,8 @@ jobs:
 
       - name: Install Rust toolchain
         run: |
-          rustup toolchain install nightly --profile default
-          rustup default nightly
+          rustup toolchain install 1.84.1 --profile default
+          rustup default 1.84.1
           rustc --version
           cargo --version
 
@@ -53,8 +53,8 @@ jobs:
 
       - name: Install Rust toolchain
         run: |
-          rustup toolchain install nightly --profile default
-          rustup default nightly
+          rustup toolchain install 1.84.1 --profile default
+          rustup default 1.84.1
           rustc --version
           cargo --version
 
