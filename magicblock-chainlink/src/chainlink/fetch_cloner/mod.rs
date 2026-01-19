@@ -433,7 +433,11 @@ where
                     }
                 }
             } else if owned_by_compressed_delegation_program {
-                // If the account is compressed, the delegation record is in the account itself
+                // If the account is compressed, it can contain either:
+                // 1. The delegation record
+                // 2. No data in case the last update was the notif where the account was emptied
+                // If we fail to get the record, we need to fetch again so that we obtain the data
+                // from the compressed account.
                 let delegation_record =
                     match CompressedDelegationRecord::try_from_slice(
                         account.data(),
