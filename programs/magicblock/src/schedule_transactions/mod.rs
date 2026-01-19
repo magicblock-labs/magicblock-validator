@@ -3,6 +3,7 @@ mod process_schedule_base_intent;
 mod process_schedule_commit;
 #[cfg(test)]
 mod process_schedule_commit_tests;
+mod process_schedule_intent_bundle;
 mod process_scheduled_commit_sent;
 pub(crate) mod transaction_scheduler;
 
@@ -10,6 +11,7 @@ use magicblock_magic_program_api::MAGIC_CONTEXT_PUBKEY;
 pub(crate) use process_accept_scheduled_commits::*;
 pub(crate) use process_schedule_base_intent::*;
 pub(crate) use process_schedule_commit::*;
+pub(crate) use process_schedule_intent_bundle::process_schedule_intent_bundle;
 pub use process_scheduled_commit_sent::{
     process_scheduled_commit_sent, register_scheduled_commit_sent, SentCommit,
 };

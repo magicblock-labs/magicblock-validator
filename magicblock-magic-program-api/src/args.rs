@@ -87,6 +87,13 @@ pub enum MagicBaseIntentArgs {
     CommitAndUndelegate(CommitAndUndelegateArgs),
 }
 
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
+pub struct MagicIntentBundleArgs {
+    pub commit: Option<CommitTypeArgs>,
+    pub commit_and_undelegate: Option<CommitAndUndelegateArgs>,
+    pub standalone_actions: Vec<BaseActionArgs>,
+}
+
 /// A compact account meta used for base-layer actions.
 ///
 /// Unlike `solana_instruction::AccountMeta`, this type **does not** carry an

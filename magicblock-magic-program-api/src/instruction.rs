@@ -3,7 +3,9 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 use solana_program::pubkey::Pubkey;
 
-use crate::args::{MagicBaseIntentArgs, ScheduleTaskArgs};
+use crate::args::{
+    MagicBaseIntentArgs, MagicIntentBundleArgs, ScheduleTaskArgs,
+};
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
 pub enum MagicBlockInstruction {
@@ -71,7 +73,12 @@ pub enum MagicBlockInstruction {
     /// as part of the [MagicBlockInstruction::ScheduleCommit] instruction.
     /// Args: (intent_id, bump) - bump is needed in order to guarantee unique transactions
     ScheduledCommitSent((u64, u64)),
+
+    /// TODO(edwin):
     ScheduleBaseIntent(MagicBaseIntentArgs),
+
+    /// TODO(edwin):
+    ScheduleIntentBundle(MagicIntentBundleArgs),
 
     /// Schedule a new task for execution
     ///
@@ -86,9 +93,7 @@ pub enum MagicBlockInstruction {
     /// # Account references
     /// - **0.** `[WRITE, SIGNER]` Task authority
     /// - **1.** `[WRITE]`         Task context account
-    CancelTask {
-        task_id: i64,
-    },
+    CancelTask { task_id: i64 },
 
     /// Disables the executable check, needed to modify the data of a program
     /// in preparation to deploying it via LoaderV4 and to modify its authority.

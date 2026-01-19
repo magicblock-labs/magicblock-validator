@@ -8,7 +8,8 @@ use magicblock_core::{
 };
 use magicblock_magic_program_api::args::{
     ActionArgs, BaseActionArgs, CommitAndUndelegateArgs, CommitTypeArgs,
-    MagicBaseIntentArgs, ShortAccountMeta, UndelegateTypeArgs,
+    MagicBaseIntentArgs, MagicIntentBundleArgs, ShortAccountMeta,
+    UndelegateTypeArgs,
 };
 use serde::{Deserialize, Serialize};
 use solana_account::{Account, AccountSharedData, ReadableAccount};
@@ -119,6 +120,122 @@ pub enum MagicBaseIntent {
     BaseActions(Vec<BaseAction>),
     Commit(CommitType),
     CommitAndUndelegate(CommitAndUndelegate),
+}
+
+// Bundle of BaseIntents
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MagicIntentBundle {
+    pub commit: Option<CommitType>,
+    pub commit_and_undelegate: Option<CommitAndUndelegate>,
+    pub standalone_actions: Vec<BaseAction>,
+}
+
+impl MagicIntentBundle {
+    pub fn try_from_args(
+        args: MagicIntentBundleArgs,
+        context: &ConstructionContext<'_, '_>,
+    ) -> Result<Self, InstructionError> {
+        Self::validate(&args)?;
+
+        let commit = args
+            .commit
+            .map(|value| CommitType::try_from_args(value, context))
+            .transpose()?;
+        let commit_and_undelegate = args
+            .commit_and_undelegate
+            .map(|value| CommitAndUndelegate::try_from_args(value, context))
+            .transpose()?;
+        let actions = args
+            .standalone_actions
+            .into_iter()
+            .map(|args| BaseAction::try_from_args(args, context))
+            .collect::<Result<Vec<BaseAction>, InstructionError>>()?;
+
+        Ok(Self {
+            commit,
+            commit_and_undelegate,
+            standalone_actions: actions,
+        })
+    }
+
+    /// Cross intent validation:
+    /// 1. Set of committed accounts shall not overlap with
+    /// set of undelegated accounts
+    /// 2. None for now :)
+    fn validate(args: &MagicIntentBundleArgs) -> Result<(), InstructionError> {
+        let committed_set: Option<HashSet<_>> =
+            args.commit.as_ref().map(|el| {
+                el.committed_accounts_indices().iter().copied().collect()
+            });
+        let Some(committed_set) = committed_set else {
+            return Ok(());
+        };
+
+        args.commit_and_undelegate
+            .as_ref()
+            .and_then(|el| {
+                let has_cross_reference = el
+                    .committed_accounts_indices()
+                    .iter()
+                    .any(|ind| committed_set.contains(ind));
+                if has_cross_reference {
+                    Some(Ok(()))
+                } else {
+                    // TODO(edwin): add msg here?
+                    Some(Err(InstructionError::InvalidInstructionData))
+                }
+            })
+            .unwrap_or(Ok(()))
+    }
+
+    pub fn is_undelegate(&self) -> bool {
+        self.commit_and_undelegate.is_some()
+    }
+
+    /// Returns all the accounts that will be committed,
+    /// including the ones that will be undelegated as well
+    pub fn get_committed_accounts(&self) -> Option<Vec<CommittedAccount>> {
+        let committed = self
+            .commit
+            .as_ref()
+            .map(|el| el.get_committed_accounts().to_owned());
+
+        let undelegated = self
+            .commit_and_undelegate
+            .as_ref()
+            .map(|el| el.get_committed_accounts().to_owned());
+
+        match (committed, undelegated) {
+            (None, None) => None,
+            (Some(mut a), Some(b)) => {
+                a.extend(b);
+                Some(a)
+            }
+            (Some(a), None) | (None, Some(a)) => Some(a),
+        }
+    }
+
+    pub fn get_committed_pubkeys(&self) -> Option<Vec<Pubkey>> {
+        self.get_committed_accounts().map(|accounts| {
+            accounts.iter().map(|account| account.pubkey).collect()
+        })
+    }
+
+    pub fn is_empty(&self) -> bool {
+        let has_committed = self
+            .commit
+            .as_ref()
+            .map(|el| !el.is_empty())
+            .unwrap_or(false);
+        let has_committed_and_undelegated = self
+            .commit_and_undelegate
+            .as_ref()
+            .map(|el| !el.is_empty())
+            .unwrap_or(false);
+        let has_actions = !self.standalone_actions.is_empty();
+
+        has_committed || has_committed_and_undelegated || has_actions
+    }
 }
 
 impl MagicBaseIntent {
