@@ -1084,53 +1084,41 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
                 }
             };
 
-            let (
-                remote_accounts_results,
-                found_count,
-                not_found_count,
-                compressed_found_count,
-                compressed_not_found_count,
-            ) = vec![
+            let mut remote_accounts_results = Vec::with_capacity(2);
+            let mut found_cnt = 0;
+            let mut not_found_cnt = 0;
+            let mut compressed_found_count = 0;
+            let mut compressed_not_found_count = 0;
+
+            let results = vec![
                 Ok(Some((rpc_accounts, found_count, not_found_count))),
                 compressed_accounts().await,
-            ]
-            .into_iter()
-            .filter_map(|result| match result {
-                Ok(Some(result)) => Some(result),
-                Ok(None) => None,
-                Err(err) => {
-                    error!("Failed to fetch accounts: {err:?}");
-                    None
-                }
-            })
-            .fold(
-                (vec![], 0, 0, 0, 0),
-                |(
-                    remote_accounts_results,
-                    found_count,
-                    not_found_count,
-                    compressed_found_count,
-                    compressed_not_found_count,
-                ),
-                 (accs, found_cnt, not_found_cnt)| {
-                    match &accs {
-                        FetchedRemoteAccounts::Rpc(_) => (
-                            [remote_accounts_results, vec![accs]].concat(),
-                            found_count + found_cnt,
-                            not_found_count + not_found_cnt,
-                            compressed_found_count,
-                            compressed_not_found_count,
-                        ),
-                        FetchedRemoteAccounts::Compressed(_) => (
-                            [remote_accounts_results, vec![accs]].concat(),
-                            found_count,
-                            not_found_count,
-                            compressed_found_count + found_cnt,
-                            compressed_not_found_count + not_found_cnt,
-                        ),
+            ];
+
+            for result in results {
+                match result {
+                    Ok(Some((FetchedRemoteAccounts::Rpc(accs), fc, nfc))) => {
+                        remote_accounts_results
+                            .push(FetchedRemoteAccounts::Rpc(accs));
+                        found_cnt += fc;
+                        not_found_cnt += nfc;
                     }
-                },
-            );
+                    Ok(Some((
+                        FetchedRemoteAccounts::Compressed(accs),
+                        fc,
+                        nfc,
+                    ))) => {
+                        remote_accounts_results
+                            .push(FetchedRemoteAccounts::Compressed(accs));
+                        compressed_found_count += fc;
+                        compressed_not_found_count += nfc;
+                    }
+                    Ok(None) => {}
+                    Err(err) => {
+                        error!("Failed to fetch accounts: {err:?}");
+                    }
+                }
+            }
             let remote_accounts = Self::consolidate_fetched_remote_accounts(
                 &pubkeys,
                 remote_accounts_results,
@@ -1138,8 +1126,8 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
 
             // Update metrics for successful RPC fetch
             inc_account_fetches_success(pubkeys.len() as u64);
-            inc_account_fetches_found(fetch_origin, found_count);
-            inc_account_fetches_not_found(fetch_origin, not_found_count);
+            inc_account_fetches_found(fetch_origin, found_cnt);
+            inc_account_fetches_not_found(fetch_origin, not_found_cnt);
 
             if (*photon_client).is_some() {
                 // Update metrics for successful compressed fetch
@@ -1157,18 +1145,18 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
             // Record per-program metrics if programs were provided
             if let Some(program_ids) = &program_ids {
                 for program_id in program_ids {
-                    if found_count > 0 {
+                    if found_cnt > 0 {
                         inc_per_program_account_fetch_stats(
                             &program_id.to_string(),
                             ProgramFetchResult::Found,
-                            found_count,
+                            found_cnt,
                         );
                     }
-                    if not_found_count > 0 {
+                    if not_found_cnt > 0 {
                         inc_per_program_account_fetch_stats(
                             &program_id.to_string(),
                             ProgramFetchResult::NotFound,
-                            not_found_count,
+                            not_found_cnt,
                         );
                     }
                 }
