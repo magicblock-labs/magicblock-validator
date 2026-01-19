@@ -53,9 +53,9 @@ pub enum CommittorMessage {
         /// Called once the pubkeys have been released
         respond_to: oneshot::Sender<()>,
     },
-    ScheduleBaseIntents {
-        /// The [`ScheduledBaseIntent`]s to commit
-        base_intents: Vec<ScheduleIntentBundleWrapper>,
+    ScheduleIntentBundle {
+        /// The [`ScheduleIntentBundle`]s to commit
+        intent_bundle: Vec<ScheduleIntentBundleWrapper>,
         respond_to: oneshot::Sender<CommittorServiceResult<()>>,
     },
     GetCommitStatuses {
@@ -163,12 +163,12 @@ impl CommittorActor {
                     }
                 });
             }
-            ScheduleBaseIntents {
-                base_intents,
+            ScheduleIntentBundle {
+                intent_bundle,
                 respond_to,
             } => {
                 let result =
-                    self.processor.schedule_base_intents(base_intents).await;
+                    self.processor.schedule_intent_bundle(intent_bundle).await;
                 if let Err(e) = respond_to.send(result) {
                     error!("Failed to send response {:?}", e);
                 }
@@ -364,8 +364,8 @@ impl BaseIntentCommittor for CommittorService {
         base_intents: Vec<ScheduleIntentBundleWrapper>,
     ) -> oneshot::Receiver<CommittorServiceResult<()>> {
         let (tx, rx) = oneshot::channel();
-        self.try_send(CommittorMessage::ScheduleBaseIntents {
-            base_intents,
+        self.try_send(CommittorMessage::ScheduleIntentBundle {
+            intent_bundle: base_intents,
             respond_to: tx,
         });
         rx

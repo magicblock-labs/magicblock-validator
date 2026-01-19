@@ -69,18 +69,18 @@ impl<D: DB> IntentExecutionManager<D> {
     /// Intents will be extracted and handled in the [`IntentExecutionEngine`]
     pub async fn schedule(
         &self,
-        base_intents: Vec<ScheduleIntentBundleWrapper>,
+        intent_bundles: Vec<ScheduleIntentBundleWrapper>,
     ) -> Result<(), IntentExecutionManagerError> {
         // If db not empty push el-t there
         // This means that at some point channel got full
         // Worker first will clean-up channel, and then DB.
         // Pushing into channel would break order of commits
         if !self.db.is_empty() {
-            self.db.store_base_intents(base_intents).await?;
+            self.db.store_base_intents(intent_bundles).await?;
             return Ok(());
         }
 
-        for el in base_intents {
+        for el in intent_bundles {
             let err = if let Err(err) = self.intent_sender.try_send(el) {
                 err
             } else {

@@ -121,15 +121,15 @@ impl CommittorProcessor {
         Ok(signatures)
     }
 
-    pub async fn schedule_base_intents(
+    pub async fn schedule_intent_bundle(
         &self,
-        base_intents: Vec<ScheduleIntentBundleWrapper>,
+        intent_bundles: Vec<ScheduleIntentBundleWrapper>,
     ) -> CommittorServiceResult<()> {
-        let intents = base_intents
+        let intent_bundles = intent_bundles
             .iter()
             .map(|base_intent| base_intent.inner.clone())
             .collect::<Vec<_>>();
-        if let Err(err) = self.persister.start_base_intents(&intents) {
+        if let Err(err) = self.persister.start_base_intents(&intent_bundles) {
             // We will still try to perform the commits, but the fact that we cannot
             // persist the intent is very serious and we should probably restart the
             // valiator
@@ -140,7 +140,7 @@ impl CommittorProcessor {
         };
 
         self.commits_scheduler
-            .schedule(base_intents)
+            .schedule(intent_bundles)
             .await
             .inspect_err(|err| {
                 error!("Failed to schedule base intent: {}", err);
