@@ -277,9 +277,6 @@ where
         let mut record_subs = Vec::with_capacity(accounts_fully_resolved.len());
         let mut accounts_to_clone = plain;
 
-        // Collect unique owner programs to subscribe to concurrently
-        let mut owner_programs_to_subscribe: HashSet<Pubkey> = HashSet::new();
-
         // Now process the accounts (this can fail without affecting unsubscription)
         for AccountWithCompanion {
             pubkey,
@@ -333,12 +330,6 @@ where
                     &mut account,
                     &delegation_record,
                 );
-
-                // Collect unique owner programs to subscribe concurrently after the loop
-                if account.delegated() {
-                    owner_programs_to_subscribe.insert(delegation_record.owner);
-                }
-
                 (commit_freq, delegated_to_other)
             } else {
                 missing_delegation_record.push((pubkey, account.remote_slot()));
