@@ -27,8 +27,8 @@ jobs:
 
       - name: Install Rust toolchain
         run: |
-          rustup toolchain install 1.84.1 --profile default
-          rustup default 1.84.1
+          rustup toolchain install 1.91.1 --profile default
+          rustup default 1.91.1
           rustc --version
           cargo --version
 
@@ -53,9 +53,9 @@ jobs:
 
       - name: Install Rust toolchain
         run: |
-          rustup toolchain install 1.84.1 --profile default
-          rustup component add clippy --toolchain 1.84.1
-          rustup default 1.84.1
+          rustup toolchain install 1.91.1 --profile default
+          rustup component add clippy --toolchain 1.91.1
+          rustup default 1.91.1
           rustc --version
           cargo --version
 
@@ -82,8 +82,8 @@ jobs:
 
       - name: Install Rust toolchain
         run: |
-          rustup toolchain install 1.84.1 --profile default
-          rustup default 1.84.1
+          rustup toolchain install 1.91.1 --profile default
+          rustup default 1.91.1
           rustc --version
           cargo --version
 
@@ -91,7 +91,7 @@ jobs:
         run: |
           if ! command -v cargo-expand &> /dev/null; then
             echo "cargo-expand not found, installing..."
-            cargo install cargo-expand --version 1.0.118
+            cargo install cargo-expand
           else
             echo "cargo-expand already installed"
           fi
