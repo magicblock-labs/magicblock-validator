@@ -1482,6 +1482,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
         pubkeys: &[Pubkey],
         remote_accounts_results: Vec<FetchedRemoteAccounts>,
     ) -> Vec<RemoteAccount> {
+        const STALE_SLOT_THRESHOLD: u64 = 100;
         let (rpc_accounts, compressed_accounts) = {
             if remote_accounts_results.is_empty() {
                 return vec![];
@@ -1541,8 +1542,11 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
                         .into_iter()
                         .zip(compressed_accounts))
                         .map(|(pubkey, (rpc_acc, comp_acc))| match (rpc_acc, comp_acc) {
-                            (Found(_), Found(comp_state)) => {
-                                warn!("Both RPC and Compressed account found for pubkey {}. Using Compressed account.", pubkey);
+                            (Found(rpc_state), Found(comp_state)) => {
+                                info!("Both RPC and Compressed account found for pubkey {}. Using Compressed account.", pubkey);
+                                if rpc_state.account.slot() > comp_state.account.slot() + STALE_SLOT_THRESHOLD {
+                                    warn!("Compressed account is stale. rpc_slot={}, comp_slot={}", rpc_state.account.slot(), comp_state.account.slot());
+                                }
                                 Found(comp_state)
                             }
                             (Found(rpc_state), NotFound(_)) => Found(rpc_state),

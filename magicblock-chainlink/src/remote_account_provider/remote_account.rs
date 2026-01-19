@@ -42,6 +42,13 @@ impl ResolvedAccount {
                 .map(ResolvedAccountSharedData::Bank),
         }
     }
+
+    pub fn slot(&self) -> Slot {
+        match self {
+            ResolvedAccount::Fresh(account) => account.remote_slot(),
+            ResolvedAccount::Bank((_, slot)) => *slot,
+        }
+    }
 }
 
 /// Same as [ResolvedAccount], but with the account data fetched from the bank.
