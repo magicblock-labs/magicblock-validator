@@ -52,6 +52,7 @@ impl ChainLaserClientImpl {
         Ok(client)
     }
 
+    #[instrument(skip(self, msg), fields(client_id = %self.client_id))]
     async fn send_msg(
         &self,
         msg: ChainPubsubActorMessage,
@@ -157,7 +158,7 @@ impl ReconnectableClient for ChainLaserClientImpl {
             .await?;
 
         rx.await.inspect_err(|err| {
-            warn!("RecvError occurred while awaiting reconnect response: {err:?}.");
+            warn!(error = ?err, "RecvError while awaiting reconnect response");
         })?
     }
 

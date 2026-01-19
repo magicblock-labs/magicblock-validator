@@ -57,7 +57,7 @@ pub fn adjust_ulimit_nofile(
 
         nofile = get_nofile();
     }
-    info!("Maximum open file descriptors: {}", nofile.rlim_cur);
+    info!(limit = nofile.rlim_cur, "Maximum open file descriptors");
     Ok(())
 }
 

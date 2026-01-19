@@ -6,6 +6,7 @@
 use std::{env, path::Path};
 
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
+use tracing::instrument;
 use tracing_log::LogTracer;
 use tracing_subscriber::{fmt, EnvFilter};
 
@@ -88,6 +89,7 @@ macro_rules! init_logger {
     };
 }
 
+#[instrument]
 pub async fn is_devnet_up() -> bool {
     RpcClient::new("https://api.devnet.solana.com".to_string())
         .get_version()
