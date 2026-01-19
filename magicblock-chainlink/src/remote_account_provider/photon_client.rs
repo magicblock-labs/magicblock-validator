@@ -84,8 +84,8 @@ impl PhotonClient for PhotonClientImpl {
             Ok(res) => res,
             // NOTE: @@@ this is broken, we actually are getting a `None` value
             // when the account is not found
-            // We need to wait for the light-client to provide an `Option` for that
-            // value
+            // Light released a fix for this but we can't integrate it yet.
+            // https://github.com/magicblock-labs/magicblock-validator/issues/869
             Err(IndexerError::AccountNotFound) => {
                 return Ok(None);
             }
