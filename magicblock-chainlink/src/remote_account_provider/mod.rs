@@ -1168,7 +1168,15 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
                 pubkeys.iter().zip(remote_accounts.iter())
             {
                 let requests = {
-                    let mut fetching = fetching_accounts.lock().unwrap();
+                    let mut fetching = match fetching_accounts.lock() {  
+                        Ok(guard) => guard,  
+                        Err(poisoned) => {  
+                            error!(  
+                                "fetching_accounts lock poisoned; continuing with inner state: {poisoned:?}"  
+                            );  
+                            poisoned.into_inner()  
+                        }  
+                    }; 
                     // Remove from fetching and get pending requests
                     // Note: the account might have been resolved by subscription update already
                     if let Some((_, requests)) = fetching.remove(pubkey) {
