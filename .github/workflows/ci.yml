@@ -87,6 +87,15 @@ jobs:
           rustc --version
           cargo --version
 
+      - name: Install cargo-expand
+        run: |
+          if ! command -v cargo-expand &> /dev/null; then
+            echo "cargo-expand not found, installing..."
+            cargo install cargo-expand
+          else
+            echo "cargo-expand already installed"
+          fi
+
       - name: Run unit tests
         run: |
           make ci-test-unit
