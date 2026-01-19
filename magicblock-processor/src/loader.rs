@@ -16,7 +16,7 @@ pub fn load_upgradeable_programs(
     accountsdb: &AccountsDb,
     progs: &[(Pubkey, PathBuf)],
 ) -> Result<(), Box<dyn Error>> {
-    debug!("Loading programs from files: {:#?}", progs);
+    debug!(programs = ?progs, "Loading programs");
     for (id, path) in progs {
         let elf = std::fs::read(path).map_err(|err| {
             format!("Failed to read program file for {id} at {path:?}: {err}")
