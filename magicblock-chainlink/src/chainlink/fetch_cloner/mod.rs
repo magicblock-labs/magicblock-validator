@@ -481,6 +481,9 @@ where
                     account.set_owner(delegation_record.owner);
                     account.set_data(delegation_record.data);
                     account.set_lamports(delegation_record.lamports);
+                    account.set_confined(
+                        delegation_record.authority.eq(&Pubkey::default()),
+                    );
 
                     let is_delegated_to_us =
                         delegation_record.authority.eq(&self.validator_pubkey);
