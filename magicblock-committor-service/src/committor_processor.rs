@@ -1,5 +1,6 @@
 use std::{collections::HashSet, path::Path, sync::Arc};
 
+use magicblock_program::magic_scheduled_base_intent::ScheduledIntentBundle;
 use magicblock_rpc_client::MagicblockRpcClient;
 use magicblock_table_mania::{GarbageCollectorConfig, TableMania};
 use solana_keypair::Keypair;
@@ -19,7 +20,6 @@ use crate::{
         CommitStatusRow, IntentPersister, IntentPersisterImpl,
         MessageSignatures,
     },
-    types::ScheduleIntentBundleWrapper,
 };
 
 pub(crate) struct CommittorProcessor {
@@ -123,11 +123,11 @@ impl CommittorProcessor {
 
     pub async fn schedule_intent_bundle(
         &self,
-        intent_bundles: Vec<ScheduleIntentBundleWrapper>,
+        intent_bundles: Vec<ScheduledIntentBundle>,
     ) -> CommittorServiceResult<()> {
         let base_intent_bundles = intent_bundles
             .iter()
-            .map(|base_intent| base_intent.inner.clone())
+            .map(|base_intent| base_intent.clone())
             .collect::<Vec<_>>();
         if let Err(err) =
             self.persister.start_base_intents(&base_intent_bundles)

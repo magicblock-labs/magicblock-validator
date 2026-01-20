@@ -16,9 +16,7 @@ use magicblock_chainlink::{
 };
 use magicblock_committor_service::{
     intent_execution_manager::BroadcastedIntentExecutionResult,
-    intent_executor::ExecutionOutput,
-    types::{ScheduleIntentBundleWrapper, TriggerType},
-    BaseIntentCommittor, CommittorService,
+    intent_executor::ExecutionOutput, BaseIntentCommittor, CommittorService,
 };
 use magicblock_core::link::transactions::TransactionSchedulerHandle;
 use magicblock_program::{
@@ -155,14 +153,6 @@ impl ScheduledCommitsProcessorImpl {
             };
 
             let intent_id = execution_result.id;
-            let trigger_type = execution_result.trigger_type;
-            // Here we handle on OnChain triggered intent
-            // TODO: should be removed once crank supported
-            if matches!(trigger_type, TriggerType::OffChain) {
-                info!("OffChain triggered BaseIntent executed: {}", intent_id);
-                continue;
-            }
-
             // Remove intent from metas
             let intent_meta = if let Some(intent_meta) = intents_meta_map
                 .lock()
@@ -272,51 +262,36 @@ impl ScheduledCommitsProcessorImpl {
 #[async_trait]
 impl ScheduledCommitsProcessor for ScheduledCommitsProcessorImpl {
     async fn process(&self) -> ScheduledCommitsProcessorResult<()> {
-        let scheduled_base_intents =
-            self.transaction_scheduler.take_scheduled_actions();
+        let intent_bundles =
+            self.transaction_scheduler.take_scheduled_intent_bundles();
 
-        if scheduled_base_intents.is_empty() {
+        if intent_bundles.is_empty() {
             return Ok(());
         }
 
-        let intents = scheduled_base_intents.into_iter().map(|intent| {
-            ScheduleIntentBundleWrapper {
-                inner: intent,
-                trigger_type: TriggerType::OnChain,
-            }
-        });
-
         // Add metas for intent we schedule
-        let (intents, pubkeys_being_undelegated) = {
+        let pubkeys_being_undelegated = {
             let mut intent_metas =
                 self.intents_meta_map.lock().expect(POISONED_MUTEX_MSG);
             let mut pubkeys_being_undelegated = HashSet::<Pubkey>::new();
 
-            let intents = intents
-                .map(|intent| {
-                    intent_metas.insert(
-                        intent.id,
-                        ScheduledBaseIntentMeta::new(&intent),
-                    );
-                    if let Some(undelegate) =
-                        intent.get_undelegate_intent_pubkeys()
-                    {
-                        pubkeys_being_undelegated.extend(undelegate);
-                    }
+            intent_bundles.iter().for_each(|intent| {
+                intent_metas
+                    .insert(intent.id, ScheduledBaseIntentMeta::new(&intent));
+                if let Some(undelegate) = intent.get_undelegate_intent_pubkeys()
+                {
+                    pubkeys_being_undelegated.extend(undelegate);
+                }
+            });
 
-                    intent
-                })
-                .collect::<Vec<_>>();
-
-            (
-                intents,
-                pubkeys_being_undelegated.into_iter().collect::<Vec<_>>(),
-            )
+            pubkeys_being_undelegated.into_iter().collect::<Vec<_>>()
         };
 
         self.process_undelegation_requests(pubkeys_being_undelegated)
             .await;
-        self.committor.schedule_base_intent(intents).await??;
+        self.committor
+            .schedule_intent_bundles(intent_bundles)
+            .await??;
         Ok(())
     }
 

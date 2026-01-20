@@ -5,6 +5,7 @@ pub mod intent_scheduler;
 use std::sync::Arc;
 
 pub use intent_execution_engine::BroadcastedIntentExecutionResult;
+use magicblock_program::magic_scheduled_base_intent::ScheduledIntentBundle;
 use magicblock_rpc_client::MagicblockRpcClient;
 use magicblock_table_mania::TableMania;
 use tokio::sync::{broadcast, mpsc, mpsc::error::TrySendError};
@@ -19,14 +20,13 @@ use crate::{
         task_info_fetcher::CacheTaskInfoFetcher,
     },
     persist::IntentPersister,
-    types::ScheduleIntentBundleWrapper,
     ComputeBudgetConfig,
 };
 
 pub struct IntentExecutionManager<D: DB> {
     db: Arc<D>,
     result_subscriber: ResultSubscriber,
-    intent_sender: mpsc::Sender<ScheduleIntentBundleWrapper>,
+    intent_sender: mpsc::Sender<ScheduledIntentBundle>,
 }
 
 impl<D: DB> IntentExecutionManager<D> {
@@ -69,14 +69,14 @@ impl<D: DB> IntentExecutionManager<D> {
     /// Intents will be extracted and handled in the [`IntentExecutionEngine`]
     pub async fn schedule(
         &self,
-        intent_bundles: Vec<ScheduleIntentBundleWrapper>,
+        intent_bundles: Vec<ScheduledIntentBundle>,
     ) -> Result<(), IntentExecutionManagerError> {
         // If db not empty push el-t there
         // This means that at some point channel got full
         // Worker first will clean-up channel, and then DB.
         // Pushing into channel would break order of commits
         if !self.db.is_empty() {
-            self.db.store_base_intents(intent_bundles).await?;
+            self.db.store_intent_bundles(intent_bundles).await?;
             return Ok(());
         }
 
@@ -93,7 +93,7 @@ impl<D: DB> IntentExecutionManager<D> {
                 }
                 TrySendError::Full(el) => self
                     .db
-                    .store_base_intent(el)
+                    .store_intent_bundle(el)
                     .await
                     .map_err(IntentExecutionManagerError::from),
             }?;

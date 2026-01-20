@@ -18,7 +18,7 @@ use crate::{
 
 #[derive(Clone)]
 pub struct TransactionScheduler {
-    scheduled_base_intents: Arc<RwLock<Vec<ScheduledIntentBundle>>>,
+    scheduled_intent_bundles: Arc<RwLock<Vec<ScheduledIntentBundle>>>,
 }
 
 impl Default for TransactionScheduler {
@@ -31,7 +31,7 @@ impl Default for TransactionScheduler {
                 Default::default();
         }
         Self {
-            scheduled_base_intents: SCHEDULED_ACTION.clone(),
+            scheduled_intent_bundles: SCHEDULED_ACTION.clone(),
         }
     }
 }
@@ -61,7 +61,7 @@ impl TransactionScheduler {
         &self,
         base_intents: Vec<ScheduledIntentBundle>,
     ) {
-        self.scheduled_base_intents
+        self.scheduled_intent_bundles
             .write()
             .expect("scheduled_action lock poisoned")
             .extend(base_intents);
@@ -72,7 +72,7 @@ impl TransactionScheduler {
         payer: &Pubkey,
     ) -> Vec<ScheduledIntentBundle> {
         let commits = self
-            .scheduled_base_intents
+            .scheduled_intent_bundles
             .read()
             .expect("scheduled_action lock poisoned");
 
@@ -83,9 +83,9 @@ impl TransactionScheduler {
             .collect::<Vec<_>>()
     }
 
-    pub fn take_scheduled_actions(&self) -> Vec<ScheduledIntentBundle> {
+    pub fn take_scheduled_intent_bundles(&self) -> Vec<ScheduledIntentBundle> {
         let mut lock = self
-            .scheduled_base_intents
+            .scheduled_intent_bundles
             .write()
             .expect("scheduled_action lock poisoned");
         mem::take(&mut *lock)
@@ -93,7 +93,7 @@ impl TransactionScheduler {
 
     pub fn scheduled_actions_len(&self) -> usize {
         let lock = self
-            .scheduled_base_intents
+            .scheduled_intent_bundles
             .read()
             .expect("scheduled_action lock poisoned");
 
@@ -102,7 +102,7 @@ impl TransactionScheduler {
 
     pub fn clear_scheduled_actions(&self) {
         let mut lock = self
-            .scheduled_base_intents
+            .scheduled_intent_bundles
             .write()
             .expect("scheduled_action lock poisoned");
         lock.clear();

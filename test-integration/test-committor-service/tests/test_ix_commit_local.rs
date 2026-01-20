@@ -719,7 +719,7 @@ async fn ix_commit_local(
     expected_strategies: ExpectedStrategies,
 ) {
     let execution_outputs = service
-        .schedule_base_intents_waiting(intent_bundles.clone())
+        .schedule_intent_bundles_waiting(intent_bundles.clone())
         .await
         .unwrap()
         .into_iter()
