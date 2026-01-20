@@ -112,6 +112,7 @@ impl TestEnv {
     }
 }
 
+// TODO(edwin): add tests
 #[tokio::test]
 async fn test_commit_id_error_parsing() {
     const COUNTER_SIZE: u64 = 70;
@@ -138,7 +139,7 @@ async fn test_commit_id_error_parsing() {
     // Invalidate ids before execution
     task_info_fetcher
         .fetch_next_commit_ids(
-            &intent.get_committed_pubkeys().unwrap(),
+            &intent.get_undelegate_intent_pubkeys().unwrap(),
             remote_slot,
         )
         .await
@@ -1202,7 +1203,7 @@ fn create_scheduled_intent(
         blockhash: Hash::new_unique(),
         intent_bundle_sent_transaction: Transaction::default(),
         payer: Pubkey::new_unique(),
-        intent_bundle: base_intent,
+        intent_bundle: base_intent.into(),
     }
 }
 

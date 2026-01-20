@@ -196,7 +196,7 @@ async fn commit_single_account(
             blockhash: Hash::new_unique(),
             intent_bundle_sent_transaction: Transaction::default(),
             payer: counter_auth.pubkey(),
-            intent_bundle: base_intent,
+            intent_bundle: base_intent.into(),
         },
     };
 
@@ -263,7 +263,7 @@ async fn commit_book_order_account(
             blockhash: Hash::new_unique(),
             intent_bundle_sent_transaction: Transaction::default(),
             payer: payer.pubkey(),
-            intent_bundle: base_intent,
+            intent_bundle: base_intent.into(),
         },
     };
 
@@ -492,6 +492,7 @@ async fn commit_5_accounts_1kb(
     .await;
 }
 
+// TODO(edwin): add tests to cover intent bundles
 async fn commit_8_accounts_1kb(
     bundle_size: usize,
     expected_strategies: ExpectedStrategies,
@@ -587,7 +588,7 @@ async fn commit_multiple_accounts(
             blockhash: Hash::new_unique(),
             intent_bundle_sent_transaction: Transaction::default(),
             payer: Pubkey::new_unique(),
-            intent_bundle: base_intent,
+            intent_bundle: base_intent.into(),
         })
         .map(|intent| ScheduleIntentBundleWrapper {
             trigger_type: TriggerType::OnChain,
@@ -668,8 +669,8 @@ async fn ix_commit_local(
             tx_logs_contain(&rpc_client, &finalize_signature, "Finalize").await
         );
 
-        let is_undelegate = base_intent.has_undelegate_intent();
-        if is_undelegate {
+        let has_undelegate = base_intent.has_undelegate_intent();
+        if has_undelegate {
             // Undelegate is part of atomic Finalization Stage
             assert!(
                 tx_logs_contain(&rpc_client, &finalize_signature, "Undelegate")
@@ -677,12 +678,18 @@ async fn ix_commit_local(
             );
         }
 
-        let mut committed_accounts = base_intent
-            .get_committed_accounts()
-            .unwrap()
-            .iter()
-            .map(|el| (el.pubkey, el.clone()))
-            .collect::<HashMap<Pubkey, CommittedAccount>>();
+        let committed_accounts = base_intent.get_commit_intent_accounts();
+        let undelegated_accounts = base_intent.get_undelegate_intent_accounts();
+        let mut committed_accounts: HashMap<Pubkey, _> =
+            [(false, committed_accounts), (true, undelegated_accounts)]
+                .into_iter()
+                .flat_map(|(allow_undelegation, accounts)| {
+                    accounts.into_iter().flatten().map(move |account| {
+                        (account.pubkey, (allow_undelegation, account))
+                    })
+                })
+                .collect();
+
         let statuses = service
             .get_commit_statuses(base_intent.id)
             .await
@@ -697,18 +704,19 @@ async fn ix_commit_local(
                 .join("\n")
         );
 
-        // When we finalize it is possible to also undelegate the account
-        let expected_owner = if is_undelegate {
-            program_flexi_counter::id()
-        } else {
-            dlp::id()
-        };
-
         assert_eq!(statuses.len(), committed_accounts.len());
         for commit_status in statuses {
-            let account = committed_accounts
+            let (is_undelegate, account) = committed_accounts
                 .remove(&commit_status.pubkey)
                 .expect("Account should be persisted");
+
+            // When we finalize it is possible to also undelegate the account
+            let expected_owner = if is_undelegate {
+                program_flexi_counter::id()
+            } else {
+                dlp::id()
+            };
+
             let lamports = account.account.lamports;
             get_account!(
                 rpc_client,
@@ -722,7 +730,7 @@ async fn ix_commit_local(
                         lamports,
                         expected_owner,
                         account.pubkey,
-                        is_undelegate,
+                        has_undelegate,
                     )
                 }
             );
