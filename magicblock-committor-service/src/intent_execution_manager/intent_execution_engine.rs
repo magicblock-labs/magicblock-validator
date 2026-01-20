@@ -351,7 +351,7 @@ where
         if intent.has_undelegate_intent() && result.is_err() {
             warn!(
                 "Intent execution resulted in stuck accounts: {:?}",
-                intent.get_committed_pubkeys()
+                intent.get_undelegate_intent_pubkeys()
             );
         }
     }

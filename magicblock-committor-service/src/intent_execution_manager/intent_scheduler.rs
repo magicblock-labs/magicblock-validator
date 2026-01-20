@@ -80,9 +80,9 @@ impl IntentScheduler {
     /// otherwise consumes it and enqueues
     pub fn schedule(
         &mut self,
-        base_intent: ScheduleIntentBundleWrapper,
+        intent_bundle: ScheduleIntentBundleWrapper,
     ) -> Option<ScheduleIntentBundleWrapper> {
-        let intent_id = base_intent.inner.id;
+        let intent_id = intent_bundle.inner.id;
 
         // To check duplicate scheduling its enough to check:
         // 1. currently blocked
@@ -107,8 +107,9 @@ impl IntentScheduler {
             return None;
         }
 
-        let Some(pubkeys) = base_intent.inner.get_committed_pubkeys() else {
-            return Some(base_intent);
+        let pubkeys = intent_bundle.get_all_committed_pubkeys();
+        if pubkeys.is_empty() {
+            return Some(intent_bundle);
         };
 
         // Check if there are any conflicting keys
@@ -129,12 +130,12 @@ impl IntentScheduler {
                 intent_id,
                 IntentMeta {
                     num_keys: pubkeys.len(),
-                    intent: base_intent,
+                    intent: intent_bundle,
                 },
             );
             None
         } else {
-            Some(base_intent)
+            Some(intent_bundle)
         }
     }
 
@@ -143,11 +144,12 @@ impl IntentScheduler {
     /// NOTE: this shall be called on executing intents to finilize their execution.
     pub fn complete(
         &mut self,
-        base_intent: &ScheduledIntentBundle,
+        intent_bundle: &ScheduledIntentBundle,
     ) -> IntentSchedulerResult<()> {
         // Release data for completed intent
-        let intent_id = base_intent.id;
-        let Some(pubkeys) = base_intent.get_committed_pubkeys() else {
+        let intent_id = intent_bundle.id;
+        let pubkeys = intent_bundle.get_all_committed_pubkeys();
+        if pubkeys.is_empty() {
             // This means BaseAction, it doesn't have to be scheduled
             return Ok(());
         };

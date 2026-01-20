@@ -20,9 +20,7 @@ use magicblock_committor_service::{
     types::{ScheduleIntentBundleWrapper, TriggerType},
     BaseIntentCommittor, CommittorService,
 };
-use magicblock_core::{
-    link::transactions::TransactionSchedulerHandle, traits::AccountsBank,
-};
+use magicblock_core::link::transactions::TransactionSchedulerHandle;
 use magicblock_program::{
     magic_scheduled_base_intent::ScheduledIntentBundle,
     register_scheduled_commit_sent, SentCommit, TransactionScheduler,
@@ -303,8 +301,11 @@ impl ScheduledCommitsProcessor for ScheduledCommitsProcessorImpl {
                         intent.id,
                         ScheduledBaseIntentMeta::new(&intent),
                     );
-                    pubkeys_being_undelegated
-                        .extend(intent.get_undelegate_intent_pubkeys());
+                    if let Some(undelegate) =
+                        intent.get_undelegate_intent_pubkeys()
+                    {
+                        pubkeys_being_undelegated.extend(undelegate);
+                    }
 
                     intent
                 })
@@ -350,9 +351,7 @@ impl ScheduledBaseIntentMeta {
             slot: intent.slot,
             blockhash: intent.blockhash,
             payer: intent.payer,
-            included_pubkeys: intent
-                .get_committed_pubkeys()
-                .unwrap_or_default(),
+            included_pubkeys: intent.get_all_committed_pubkeys(),
             intent_sent_transaction: intent
                 .intent_bundle_sent_transaction
                 .clone(),

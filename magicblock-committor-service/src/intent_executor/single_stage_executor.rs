@@ -45,7 +45,7 @@ where
 
     pub async fn execute<P: IntentPersister>(
         &mut self,
-        committed_pubkeys: Option<&[Pubkey]>,
+        committed_pubkeys: &[Pubkey],
         persister: &Option<P>,
     ) -> IntentExecutorResult<ExecutionOutput> {
         const RECURSION_CEILING: u8 = 10;
@@ -119,12 +119,12 @@ where
         inner: &IntentExecutorImpl<T, F>,
         err: &TransactionStrategyExecutionError,
         transaction_strategy: &mut TransactionStrategy,
-        committed_pubkeys: Option<&[Pubkey]>,
+        committed_pubkeys: &[Pubkey],
     ) -> IntentExecutorResult<ControlFlow<(), TransactionStrategy>> {
-        let Some(committed_pubkeys) = committed_pubkeys else {
+        if committed_pubkeys.is_empty() {
             // No patching is applicable if intent doesn't commit accounts
             return Ok(ControlFlow::Break(()));
-        };
+        }
 
         match err {
             TransactionStrategyExecutionError::ActionsError(_, _) => {

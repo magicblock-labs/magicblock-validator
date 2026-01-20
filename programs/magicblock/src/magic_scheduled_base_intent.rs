@@ -104,6 +104,19 @@ impl ScheduledIntentBundle {
             .collect()
     }
 
+    /// Returns pubkeys of all accounts that will be committed on Base layer,
+    /// including the one scheduled for undelegation
+    pub fn get_all_committed_pubkeys(&self) -> Vec<Pubkey> {
+        [
+            self.get_commit_intent_pubkeys(),
+            self.get_undelegate_intent_pubkeys(),
+        ]
+        .into_iter()
+        .filter_map(|el| el)
+        .flatten()
+        .collect()
+    }
+
     /// Return `true` if there're account that will be committed on Base layer
     pub fn has_committed_accounts(&self) -> bool {
         let has_commit_intent_accounts = self
