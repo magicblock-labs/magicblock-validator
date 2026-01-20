@@ -14,10 +14,12 @@ use magicblock_core::link::{
 };
 use magicblock_ledger::{LatestBlock, LatestBlockInner, Ledger};
 use parking_lot::RwLockReadGuard;
+use serde::Serialize;
 use solana_program_runtime::loaded_programs::{
     BlockRelation, ForkGraph, ProgramCache, ProgramCacheEntry,
 };
-use solana_sdk_ids::sysvar::slot_hashes;
+use solana_pubkey::Pubkey;
+use solana_sdk_ids::sysvar::{clock, slot_hashes};
 use solana_svm::transaction_processor::{
     ExecutionRecordingConfig, TransactionBatchProcessor,
     TransactionProcessingConfig, TransactionProcessingEnvironment,
@@ -187,16 +189,20 @@ impl TransactionExecutor {
 
         hashes.add(block.slot, block.blockhash);
         cache.set_sysvar_for_tests(&hashes);
+        self.persist_sysvar(slot_hashes::ID, &hashes);
+        self.persist_sysvar(clock::ID, &block.clock);
+    }
 
-        // Persist slot hashes to AccountsDb
+    /// Serialize sysvar account to AccountsDB
+    fn persist_sysvar<D: Serialize>(&self, id: Pubkey, data: &D) {
         let Ok(reader) = self.accountsdb.reader() else {
             return;
         };
-        let Some(mut account) = reader.read(&slot_hashes::ID, identity) else {
+        let Some(mut account) = reader.read(&id, identity) else {
             return;
         };
-        if let Err(e) = account.serialize_data(&hashes) {
-            warn!(error = ?e, "Failed to serialize slot hashes");
+        if let Err(e) = account.serialize_data(data) {
+            warn!(%e, "Failed to serialize sysvar");
             return;
         }
         let _ = self.accountsdb.insert_account(&slot_hashes::ID, &account);
