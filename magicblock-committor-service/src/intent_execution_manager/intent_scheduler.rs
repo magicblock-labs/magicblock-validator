@@ -662,13 +662,15 @@ mod complete_error_test {
         let mut msg1 = create_test_intent(1, &[pubkey1, pubkey2], false);
         assert!(scheduler.schedule(msg1.clone()).is_some());
 
-        msg1.inner.intent_bundle.get_commit_intent_accounts_mut().unwrap().push(
-            CommittedAccount {
+        msg1.inner
+            .intent_bundle
+            .get_commit_intent_accounts_mut()
+            .unwrap()
+            .push(CommittedAccount {
                 pubkey: pubkey3,
                 account: Account::default(),
                 remote_slot: Default::default(),
-            },
-        );
+            });
 
         // Attempt to complete msg1 - should detect corrupted state
         let result = scheduler.complete(&msg1.inner);
@@ -724,6 +726,85 @@ mod complete_error_test {
     }
 }
 
+#[cfg(test)]
+mod intent_bundle_test {
+    use solana_pubkey::pubkey;
+
+    use super::*;
+
+    /// Bundle contains BOTH Commit and CommitAndUndelegate.
+    /// Scheduler must treat committed pubkeys as UNION across both.
+    #[test]
+    fn test_bundle_with_commit_and_cau_blocks_on_union() {
+        let mut scheduler = IntentScheduler::new();
+
+        let a = pubkey!("1111111111111111111111111111111111111111111");
+        let b = pubkey!("21111111111111111111111111111111111111111111");
+        let c = pubkey!("31111111111111111111111111111111111111111111");
+
+        // msg1 has commit[a] and cau[b]
+        let msg1 = create_test_intent_bundle(1, &[a], &[b]);
+
+        // msg2 conflicts with commit key (a)
+        let msg2 = create_test_intent(2, &[a], false);
+        // msg3 conflicts with cau key (b)
+        let msg3 = create_test_intent(3, &[b], false);
+        // msg4 is unrelated (c), should run immediately even while msg1 executes
+        let msg4 = create_test_intent(4, &[c], false);
+
+        // msg1 executes immediately
+        let executed1 = scheduler.schedule(msg1.clone()).unwrap();
+        assert_eq!(executed1, msg1);
+        assert_eq!(scheduler.intents_blocked(), 0);
+
+        // msg2 and msg3 should be blocked due to union keys [a, b]
+        assert!(scheduler.schedule(msg2.clone()).is_none());
+        assert!(scheduler.schedule(msg3.clone()).is_none());
+        assert_eq!(scheduler.intents_blocked(), 2);
+
+        // msg4 doesn't conflict, should execute immediately
+        assert!(scheduler.schedule(msg4.clone()).is_some());
+        assert_eq!(scheduler.intents_blocked(), 2);
+    }
+
+    /// After completing a bundle with both intents, the blocked intents should become eligible.
+    #[test]
+    fn test_bundle_with_commit_and_cau_unblocks_correctly() {
+        let mut scheduler = IntentScheduler::new();
+
+        let a = pubkey!("1111111111111111111111111111111111111111111");
+        let b = pubkey!("21111111111111111111111111111111111111111111");
+
+        // msg1 has commit[a] and cau[b]
+        let msg1 = create_test_intent_bundle(1, &[a], &[b]);
+        // both should be blocked behind msg1
+        let msg2 = create_test_intent(2, &[a], false);
+        let msg3 = create_test_intent(3, &[b], false);
+
+        // msg1 executes immediately
+        let executed1 = scheduler.schedule(msg1.clone()).unwrap();
+        // enqueue blockers
+        assert!(scheduler.schedule(msg2.clone()).is_none());
+        assert!(scheduler.schedule(msg3.clone()).is_none());
+        assert_eq!(scheduler.intents_blocked(), 2);
+
+        // Complete msg1
+        assert!(scheduler.complete(&executed1.inner).is_ok());
+
+        // Now both msg2 and msg3 are eligible (order doesn't matter)
+        let next1 = scheduler.pop_next_scheduled_intent().unwrap();
+        assert!(next1 == msg2 || next1 == msg3);
+        assert_eq!(scheduler.intents_blocked(), 1);
+
+        assert!(scheduler.complete(&next1.inner).is_ok());
+
+        let next2 = scheduler.pop_next_scheduled_intent().unwrap();
+        assert!(next2 == msg2 || next2 == msg3);
+        assert_ne!(next1, next2);
+        assert_eq!(scheduler.intents_blocked(), 0);
+    }
+}
+
 // Helper function to create test intents
 #[cfg(test)]
 pub(crate) fn create_test_intent(
@@ -771,6 +852,63 @@ pub(crate) fn create_test_intent(
         } else {
             intent.intent_bundle.commit = Some(commit_type);
         }
+    }
+
+    ScheduleIntentBundleWrapper {
+        inner: intent,
+        trigger_type: TriggerType::OffChain,
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn create_test_intent_bundle(
+    id: u64,
+    commit_pubkeys: &[Pubkey],
+    commit_and_undelegate_pubkeys: &[Pubkey],
+) -> ScheduleIntentBundleWrapper {
+    use magicblock_program::magic_scheduled_base_intent::{
+        CommitAndUndelegate, CommitType, CommittedAccount, MagicIntentBundle,
+        ScheduledIntentBundle, UndelegateType,
+    };
+    use solana_account::Account;
+    use solana_hash::Hash;
+    use solana_transaction::Transaction;
+
+    use crate::types::TriggerType;
+
+    let to_accounts = |keys: &[Pubkey]| -> Vec<CommittedAccount> {
+        keys.iter()
+            .copied()
+            .map(|pubkey| CommittedAccount {
+                pubkey,
+                account: Account::default(),
+                remote_slot: Default::default(),
+            })
+            .collect()
+    };
+
+    let mut intent = ScheduledIntentBundle {
+        id,
+        slot: 0,
+        blockhash: Hash::default(),
+        intent_bundle_sent_transaction: Transaction::default(),
+        payer: Pubkey::default(),
+        intent_bundle: MagicIntentBundle::default(),
+    };
+
+    if !commit_pubkeys.is_empty() {
+        intent.intent_bundle.commit =
+            Some(CommitType::Standalone(to_accounts(commit_pubkeys)));
+    }
+
+    if !commit_and_undelegate_pubkeys.is_empty() {
+        intent.intent_bundle.commit_and_undelegate =
+            Some(CommitAndUndelegate {
+                commit_action: CommitType::Standalone(to_accounts(
+                    commit_and_undelegate_pubkeys,
+                )),
+                undelegate_action: UndelegateType::Standalone,
+            });
     }
 
     ScheduleIntentBundleWrapper {

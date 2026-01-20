@@ -520,9 +520,7 @@ mod tests {
             assert_accepted_actions(&processed_accepted, &payer.pubkey(), 1);
         // Verify the committed pubkey remapped to eATA
         assert_eq!(
-            scheduled[0]
-                .intent_bundle
-                .get_all_committed_pubkeys(),
+            scheduled[0].intent_bundle.get_all_committed_pubkeys(),
             vec![eata_pubkey]
         );
     }
@@ -604,9 +602,7 @@ mod tests {
             assert_accepted_actions(&processed_accepted, &payer.pubkey(), 1);
         // Verify the committed pubkey remapped to eATA
         assert_eq!(
-            scheduled[0]
-                .intent_bundle
-                .get_all_committed_pubkeys(),
+            scheduled[0].intent_bundle.get_all_committed_pubkeys(),
             vec![eata_pubkey]
         );
         // And the intent contains undelegation
