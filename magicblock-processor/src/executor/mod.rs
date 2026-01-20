@@ -202,7 +202,7 @@ impl TransactionExecutor {
             return;
         };
         if let Err(e) = account.serialize_data(data) {
-            warn!(?e, "Failed to serialize sysvar: {}");
+            warn!(%e, "Failed to serialize sysvar");
             return;
         }
         let _ = self.accountsdb.insert_account(&slot_hashes::ID, &account);
