@@ -50,7 +50,6 @@ pub type ChainlinkImpl = Chainlink<
 >;
 
 pub struct ScheduledCommitsProcessorImpl {
-    accounts_bank: Arc<AccountsDb>,
     committor: Arc<CommittorService>,
     chainlink: Arc<ChainlinkImpl>,
     cancellation_token: CancellationToken,
@@ -60,7 +59,6 @@ pub struct ScheduledCommitsProcessorImpl {
 
 impl ScheduledCommitsProcessorImpl {
     pub fn new(
-        accounts_bank: Arc<AccountsDb>,
         committor: Arc<CommittorService>,
         chainlink: Arc<ChainlinkImpl>,
         internal_transaction_scheduler: TransactionSchedulerHandle,
@@ -76,7 +74,6 @@ impl ScheduledCommitsProcessorImpl {
         ));
 
         Self {
-            accounts_bank,
             committor,
             chainlink,
             cancellation_token,

@@ -207,7 +207,6 @@ impl MagicValidator {
         let scheduled_commits_processor =
             committor_service.as_ref().map(|committor_service| {
                 Arc::new(ScheduledCommitsProcessorImpl::new(
-                    accountsdb.clone(),
                     committor_service.clone(),
                     chainlink.clone(),
                     dispatch.transaction_scheduler.clone(),
