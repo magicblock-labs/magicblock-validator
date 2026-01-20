@@ -237,7 +237,9 @@ impl TasksBuilder for TaskBuilderImpl {
         }
 
         // Helper to process commit types
-        fn process_commit(commit: &CommitType) -> Vec<Box<dyn BaseTask>> {
+        fn create_finalize_tasks(
+            commit: &CommitType,
+        ) -> Vec<Box<dyn BaseTask>> {
             match commit {
                 CommitType::Standalone(accounts) => {
                     accounts.iter().map(finalize_task).collect()
@@ -310,9 +312,11 @@ impl TasksBuilder for TaskBuilderImpl {
 
         match &base_intent.base_intent {
             MagicBaseIntent::BaseActions(_) => Ok(vec![]),
-            MagicBaseIntent::Commit(commit) => Ok(process_commit(commit)),
+            MagicBaseIntent::Commit(commit) => {
+                Ok(create_finalize_tasks(commit))
+            }
             MagicBaseIntent::CommitAndUndelegate(t) => {
-                let mut tasks = process_commit(&t.commit_action);
+                let mut tasks = create_finalize_tasks(&t.commit_action);
                 tasks.extend(handler(t, info_fetcher).await?);
                 Ok(tasks)
             }

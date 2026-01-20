@@ -238,7 +238,7 @@ impl BaseTask for BufferTask {
         match self.task_type {
             BufferTaskType::Commit(_) => 70_000,
             BufferTaskType::CommitDiff(_) => 70_000,
-            BufferTaskType::CommitFinalize(_) => 40_000,
+            BufferTaskType::CommitFinalize(_) => 70_000,
         }
     }
 

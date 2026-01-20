@@ -160,7 +160,14 @@ pub enum ScheduleCommitInstruction {
     UpdateOrderBook(BookUpdate),
 
     /// ScheduleCommitDiffCpi
-    ScheduleCommitForOrderBook,
+    ScheduleCommitForOrderBook(ScheduleCommitType),
+}
+
+#[derive(BorshSerialize, BorshDeserialize, Debug, Clone, Copy)]
+pub enum ScheduleCommitType {
+    CommitAndUndelegate,
+    CommitFinalize,
+    CommitFinalizeAndUndelegate,
 }
 
 pub fn process_instruction<'a>(
@@ -217,8 +224,8 @@ pub fn process_instruction<'a>(
         }
         DelegateOrderBook(args) => process_delegate_order_book(accounts, args),
         UpdateOrderBook(args) => process_update_order_book(accounts, args),
-        ScheduleCommitForOrderBook => {
-            process_schedulecommit_for_orderbook(accounts)
+        ScheduleCommitForOrderBook(commit_type) => {
+            process_schedulecommit_for_orderbook(accounts, commit_type)
         }
     }
 }
@@ -451,6 +458,7 @@ fn process_update_order_book<'a>(
 // -----------------
 pub fn process_schedulecommit_for_orderbook(
     accounts: &[AccountInfo],
+    commit_type: ScheduleCommitType,
 ) -> Result<(), ProgramError> {
     msg!("Processing schedulecommit (for orderbook) instruction");
 
@@ -461,12 +469,32 @@ pub fn process_schedulecommit_for_orderbook(
 
     assert_is_signer(payer, "payer")?;
 
-    commit_finalize_and_undelegate_accounts(
-        payer,
-        vec![order_book_account],
-        magic_context,
-        magic_program,
-    )?;
+    match commit_type {
+        ScheduleCommitType::CommitAndUndelegate => {
+            commit_and_undelegate_accounts(
+                payer,
+                vec![order_book_account],
+                magic_context,
+                magic_program,
+            )?;
+        }
+        ScheduleCommitType::CommitFinalize => {
+            commit_finalize_accounts(
+                payer,
+                vec![order_book_account],
+                magic_context,
+                magic_program,
+            )?;
+        }
+        ScheduleCommitType::CommitFinalizeAndUndelegate => {
+            commit_finalize_and_undelegate_accounts(
+                payer,
+                vec![order_book_account],
+                magic_context,
+                magic_program,
+            )?;
+        }
+    };
 
     Ok(())
 }
@@ -577,20 +605,14 @@ pub fn process_schedulecommit_cpi(
     );
 
     if args.undelegate {
-        // TODO (snawaz): temporary change. UNDO THIS
-        commit_finalize_and_undelegate_accounts(
+        commit_and_undelegate_accounts(
             payer,
             committees,
             magic_context,
             magic_program,
         )?;
     } else {
-        commit_finalize_accounts(
-            payer,
-            committees,
-            magic_context,
-            magic_program,
-        )?;
+        commit_accounts(payer, committees, magic_context, magic_program)?;
     }
 
     Ok(())

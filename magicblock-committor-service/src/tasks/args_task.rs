@@ -213,7 +213,7 @@ impl BaseTask for ArgsTask {
         match &self.task_type {
             ArgsTaskType::Commit(_) => 70_000,
             ArgsTaskType::CommitDiff(_) => 70_000,
-            ArgsTaskType::CommitFinalize(_) => 40_000,
+            ArgsTaskType::CommitFinalize(_) => 70_000,
             ArgsTaskType::BaseAction(task) => task.action.compute_units,
             ArgsTaskType::Undelegate(_) => 70_000,
             ArgsTaskType::Finalize(_) => 70_000,

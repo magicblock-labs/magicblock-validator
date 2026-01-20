@@ -57,6 +57,13 @@ pub fn assert_one_committee_was_committed<T>(
     let commit = res.included.get(&pda);
     assert!(commit.is_some(), "should have committed pda");
 
+    println!(
+        "PDA:{}, included: {:#?}, sigs: {:#?}",
+        pda,
+        res.included.keys(),
+        res.sigs
+    );
+
     // SingleStage Commit & Finalize result in 1 tx
     // TwoStage results in 2 signatures on base layer
     let sig_len = if is_single_stage { 1 } else { 2 };
@@ -200,6 +207,15 @@ pub fn assert_one_committee_account_was_undelegated_on_chain(
 }
 
 #[allow(dead_code)] // used in 02_commit_and_undelegate.rs
+pub fn assert_one_committee_account_was_not_undelegated_on_chain(
+    ctx: &ScheduleCommitTestContext,
+) {
+    let pda = ctx.committees[0].1;
+    let id = program_schedulecommit::id();
+    assert_account_was_not_undelegated_on_chain(ctx, pda, id);
+}
+
+#[allow(dead_code)] // used in 02_commit_and_undelegate.rs
 pub fn assert_two_committee_accounts_were_undelegated_on_chain(
     ctx: &ScheduleCommitTestContext,
 ) {
@@ -223,6 +239,25 @@ pub fn assert_account_was_undelegated_on_chain(
         pda
     );
     assert_eq!(owner, new_owner, "{} has new owner", pda);
+}
+
+#[allow(dead_code)] // used in 02_commit_and_undelegate.rs
+pub fn assert_account_was_not_undelegated_on_chain(
+    ctx: &ScheduleCommitTestContext,
+    pda: Pubkey,
+    program_id: Pubkey,
+) {
+    let owner = ctx.fetch_chain_account_owner(pda).unwrap();
+    assert_eq!(
+        owner, DELEGATION_PROGRAM_ID,
+        "{} should be owned by delegation program",
+        pda
+    );
+    assert_ne!(
+        owner, program_id,
+        "{} should not be owned by {} as it is delegated",
+        pda, program_id
+    );
 }
 
 #[allow(dead_code)] // used in tests

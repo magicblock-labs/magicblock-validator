@@ -10,7 +10,7 @@ use solana_program::{
 
 use crate::{
     BookUpdate, DelegateCpiArgs, DelegateOrderBookArgs, ScheduleCommitCpiArgs,
-    ScheduleCommitInstruction,
+    ScheduleCommitInstruction, ScheduleCommitType,
 };
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
@@ -212,11 +212,12 @@ pub fn update_order_book_instruction(
     )
 }
 
-pub fn schedule_commit_diff_instruction_for_order_book(
+pub fn schedule_commit_instruction_for_order_book(
     payer: Pubkey,
     order_book: Pubkey,
     magic_program_id: Pubkey,
     magic_context_id: Pubkey,
+    commit_type: ScheduleCommitType,
 ) -> Instruction {
     let program_id = crate::id();
     let account_metas = vec![
@@ -228,7 +229,7 @@ pub fn schedule_commit_diff_instruction_for_order_book(
 
     Instruction::new_with_borsh(
         program_id,
-        &ScheduleCommitInstruction::ScheduleCommitForOrderBook,
+        &ScheduleCommitInstruction::ScheduleCommitForOrderBook(commit_type),
         account_metas,
     )
 }
