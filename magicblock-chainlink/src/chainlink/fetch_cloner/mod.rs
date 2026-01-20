@@ -499,7 +499,7 @@ where
         let deleg_record = delegation::fetch_and_parse_delegation_record(
             self,
             eata_pubkey,
-            self.remote_account_provider.chain_slot(),
+            ata_account.remote_slot().max(eata_account.remote_slot()),
             AccountFetchOrigin::GetAccount,
         )
         .await;
@@ -508,20 +508,34 @@ where
             return (ata_account, None);
         };
 
-        let delegated_to_us = deleg_record.authority == self.validator_pubkey;
-        if delegated_to_us {
-            if let Some(mut projected_ata) =
-                eata_account.maybe_into_ata(deleg_record.owner)
-            {
-                let projected_slot =
-                    ata_account.remote_slot().max(eata_account.remote_slot());
-                projected_ata.set_remote_slot(projected_slot);
-                projected_ata.set_delegated(true);
-                return (projected_ata, Some(deleg_record));
-            }
+        if let Some(projected_ata) = self.project_ata_from_eata(
+            &ata_account,
+            &eata_account,
+            &deleg_record,
+        ) {
+            return (projected_ata, Some(deleg_record));
         }
 
         (ata_account, Some(deleg_record))
+    }
+
+    fn project_ata_from_eata(
+        &self,
+        ata_account: &AccountSharedData,
+        eata_account: &AccountSharedData,
+        deleg_record: &DelegationRecord,
+    ) -> Option<AccountSharedData> {
+        if deleg_record.authority != self.validator_pubkey {
+            return None;
+        }
+
+        let mut projected_ata =
+            eata_account.maybe_into_ata(deleg_record.owner)?;
+        let projected_slot =
+            ata_account.remote_slot().max(eata_account.remote_slot());
+        projected_ata.set_remote_slot(projected_slot);
+        projected_ata.set_delegated(true);
+        Some(projected_ata)
     }
 
     /// Parses a delegation record from account data bytes.
@@ -926,7 +940,6 @@ where
                 }
             }
         }
-
         pubkeys.retain(|p| !in_bank.contains(p));
 
         // Check pending requests and bank synchronously
