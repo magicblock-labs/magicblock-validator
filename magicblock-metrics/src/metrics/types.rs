@@ -74,6 +74,7 @@ pub enum AccountFetchOrigin {
     GetMultipleAccounts,
     GetAccount,
     SendTransaction,
+    ProjectAta,
 }
 
 impl AccountFetchOrigin {
@@ -83,6 +84,7 @@ impl AccountFetchOrigin {
             GetMultipleAccounts => "get_multiple_accounts",
             GetAccount => "get_account",
             SendTransaction => "send_transaction",
+            ProjectAta => "project_ata",
         }
     }
 }

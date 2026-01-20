@@ -462,7 +462,7 @@ where
         if let Err(err) = self.subscribe_to_account(&eata_pubkey).await {
             warn!(
                 pubkey = %eata_pubkey,
-                error = %err,
+                error = ?err,
                 "Failed to subscribe to derived eATA"
             );
         }
@@ -475,7 +475,7 @@ where
                     min_context_slot: Some(ata_account.remote_slot()),
                     ..Default::default()
                 }),
-                AccountFetchOrigin::GetAccount,
+                AccountFetchOrigin::ProjectAta,
             )
             .await
         {
@@ -485,7 +485,7 @@ where
             Err(err) => {
                 debug!(
                     pubkey = %eata_pubkey,
-                    error = %err,
+                    error = ?err,
                     "Failed to fetch eATA for projection"
                 );
                 None
@@ -500,7 +500,7 @@ where
             self,
             eata_pubkey,
             ata_account.remote_slot().max(eata_account.remote_slot()),
-            AccountFetchOrigin::GetAccount,
+            AccountFetchOrigin::ProjectAta,
         )
         .await;
 
@@ -508,7 +508,7 @@ where
             return (ata_account, None);
         };
 
-        if let Some(projected_ata) = self.project_ata_from_eata(
+        if let Some(projected_ata) = self.maybe_project_delegated_ata_from_eata(
             &ata_account,
             &eata_account,
             &deleg_record,
@@ -519,7 +519,7 @@ where
         (ata_account, Some(deleg_record))
     }
 
-    fn project_ata_from_eata(
+    fn maybe_project_delegated_ata_from_eata(
         &self,
         ata_account: &AccountSharedData,
         eata_account: &AccountSharedData,

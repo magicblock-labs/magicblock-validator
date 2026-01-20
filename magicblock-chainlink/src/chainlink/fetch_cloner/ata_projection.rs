@@ -110,11 +110,13 @@ where
                     delegation::get_delegated_to_other(this, &deleg);
                 commit_frequency_ms = Some(deleg.commit_frequency_ms);
 
-                if let Some(projected_ata) = this.project_ata_from_eata(
-                    ata_account.account_shared_data(),
-                    &eata_shared,
-                    &deleg,
-                ) {
+                if let Some(projected_ata) = this
+                    .maybe_project_delegated_ata_from_eata(
+                        ata_account.account_shared_data(),
+                        &eata_shared,
+                        &deleg,
+                    )
+                {
                     account_to_clone = projected_ata;
                 }
             }
