@@ -1,6 +1,5 @@
 use magicblock_core::{
-    token_programs::{try_derive_eata_address_and_bump, MaybeIntoAta},
-    traits::AccountsBank,
+    token_programs::try_derive_eata_address_and_bump, traits::AccountsBank,
 };
 use magicblock_metrics::metrics;
 use solana_account::AccountSharedData;
@@ -111,15 +110,14 @@ where
                     delegation::get_delegated_to_other(this, &deleg);
                 commit_frequency_ms = Some(deleg.commit_frequency_ms);
 
-                let delegated_to_us = deleg.authority == this.validator_pubkey;
-
-                if delegated_to_us {
-                    if let Some(projected_ata) =
-                        eata_shared.maybe_into_ata(deleg.owner)
-                    {
-                        account_to_clone = projected_ata;
-                        account_to_clone.set_delegated(true);
-                    }
+                if let Some(projected_ata) = this
+                    .maybe_project_delegated_ata_from_eata(
+                        ata_account.account_shared_data(),
+                        &eata_shared,
+                        &deleg,
+                    )
+                {
+                    account_to_clone = projected_ata;
                 }
             }
         }
