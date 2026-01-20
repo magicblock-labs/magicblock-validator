@@ -130,13 +130,10 @@ jobs:
           rustc --version
           cargo --version
 
-      - name: Checkout magicblock-validator
-        run: |
-          echo $PATH
-          echo $GITHUB_PATH
-
       - name: Run integration tests - ${{ matrix.batch_tests }}
         run: |
+          # Rimuoviamo mold solo per questo step perché il linker SBF non lo supporta
+          export RUSTFLAGS=""
           make ci-test-integration
         env:
           RUN_TESTS: ${{ matrix.batch_tests }}
