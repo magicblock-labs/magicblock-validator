@@ -354,19 +354,19 @@ impl MagicIntentBundle {
     }
 
     pub fn is_empty(&self) -> bool {
-        let has_committed = self
+        let no_committed = self
             .commit
             .as_ref()
-            .map(|el| !el.is_empty())
+            .map(|el| el.is_empty())
             .unwrap_or(false);
-        let has_committed_and_undelegated = self
+        let no_committed_and_undelegated = self
             .commit_and_undelegate
             .as_ref()
-            .map(|el| !el.is_empty())
+            .map(|el| el.is_empty())
             .unwrap_or(false);
-        let has_actions = !self.standalone_actions.is_empty();
+        let no_actions = self.standalone_actions.is_empty();
 
-        has_committed || has_committed_and_undelegated || has_actions
+        no_committed && no_committed_and_undelegated && no_actions
     }
 }
 
