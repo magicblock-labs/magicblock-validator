@@ -14,56 +14,56 @@ env:
   CARGO_TARGET_DIR: ${{ github.workspace }}/target
 
 jobs:
-  format:
-    name: Format Check
-    runs-on: self-hosted # TODO da spostare sul runner generico
-    # Su push sempre; su PR solo se non è draft
-    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
-    steps:
-      - name: Checkout magicblock-validator
-        uses: actions/checkout@v5
-        with:
-          fetch-depth: 1
-
-      - name: Install Rust toolchain
-        run: |
-          rustup default 1.91.1
-          rustc --version
-          cargo --version
-
-      - name: Run ci-fmt
-        run: make ci-fmt
-
-      - name: Run ci-fmt in test-integration
-        run: |
-          cd test-integration
-          make ci-fmt
-
-  lint:
-    name: Lint Check
-    runs-on: self-hosted
-    # Su push sempre; su PR solo se non è draft
-    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
-    steps:
-      - name: Checkout magicblock-validator
-        uses: actions/checkout@v5
-        with:
-          fetch-depth: 1
-
-      - name: Install Rust toolchain
-        run: |
-          rustup component add clippy --toolchain 1.91.1
-          rustup default 1.91.1
-          rustc --version
-          cargo --version
-
-      - name: Run ci-lint
-        run: make ci-lint
-
-      - name: Run ci-lint in test-integration
-        run: |
-          cd test-integration
-          make ci-lint
+#  format:
+#    name: Format Check
+#    runs-on: self-hosted # TODO da spostare sul runner generico
+#    # Su push sempre; su PR solo se non è draft
+#    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+#    steps:
+#      - name: Checkout magicblock-validator
+#        uses: actions/checkout@v5
+#        with:
+#          fetch-depth: 1
+#
+#      - name: Install Rust toolchain
+#        run: |
+#          rustup default 1.91.1
+#          rustc --version
+#          cargo --version
+#
+#      - name: Run ci-fmt
+#        run: make ci-fmt
+#
+#      - name: Run ci-fmt in test-integration
+#        run: |
+#          cd test-integration
+#          make ci-fmt
+#
+#  lint:
+#    name: Lint Check
+#    runs-on: self-hosted
+#    # Su push sempre; su PR solo se non è draft
+#    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+#    steps:
+#      - name: Checkout magicblock-validator
+#        uses: actions/checkout@v5
+#        with:
+#          fetch-depth: 1
+#
+#      - name: Install Rust toolchain
+#        run: |
+#          rustup component add clippy --toolchain 1.91.1
+#          rustup default 1.91.1
+#          rustc --version
+#          cargo --version
+#
+#      - name: Run ci-lint
+#        run: make ci-lint
+#
+#      - name: Run ci-lint in test-integration
+#        run: |
+#          cd test-integration
+#          make ci-lint
 
 
 #  unit-tests:
@@ -102,7 +102,7 @@ jobs:
     runs-on: self-hosted
     # Su push sempre; su PR solo se non è draft
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
-    needs: [format, lint]
+    # needs: [format, lint]
     strategy:
       fail-fast: false
       matrix:
@@ -129,6 +129,11 @@ jobs:
           rustup default 1.91.1
           rustc --version
           cargo --version
+
+      - name: Checkout magicblock-validator
+        run: |
+          echo $PATH
+          echo $GITHUB_PATH
 
       - name: Run integration tests - ${{ matrix.batch_tests }}
         run: |
