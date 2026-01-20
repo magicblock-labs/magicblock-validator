@@ -11,7 +11,10 @@ use dlp::{
     pda::delegation_record_pda_from_delegated_account, state::DelegationRecord,
 };
 use magicblock_config::config::AllowedProgram;
-use magicblock_core::traits::AccountsBank;
+use magicblock_core::{
+    token_programs::{is_ata, try_derive_eata_address_and_bump, MaybeIntoAta},
+    traits::AccountsBank,
+};
 use magicblock_metrics::metrics::{self, AccountFetchOrigin};
 use scc::{hash_map::Entry, HashMap};
 use solana_account::{AccountSharedData, ReadableAccount};
@@ -173,13 +176,22 @@ where
                             .accounts_bank
                             .get_account(&pubkey)
                             .and_then(|in_bank| {
-                                if in_bank.remote_slot()
-                                    >= account.remote_slot()
-                                {
-                                    Some(in_bank.remote_slot())
-                                } else {
-                                    None
+                                let in_bank_slot = in_bank.remote_slot();
+                                let update_slot = account.remote_slot();
+                                if in_bank_slot > update_slot {
+                                    return Some(in_bank_slot);
                                 }
+                                if in_bank_slot == update_slot {
+                                    let differs = in_bank.owner()
+                                        != account.owner()
+                                        || in_bank.delegated()
+                                            != account.delegated()
+                                        || in_bank.data() != account.data();
+                                    if !differs {
+                                        return Some(in_bank_slot);
+                                    }
+                                }
+                                None
                             });
                         if let Some(in_bank_slot) = out_of_order_slot {
                             let update_slot = account.remote_slot();
@@ -428,9 +440,12 @@ where
                     }
                 }
             } else {
-                // Accounts not owned by the delegation program can be cloned as is
-                // No unsubscription needed for undelegated accounts
-                (Some(account), None)
+                let (account, deleg_record) = self
+                    .maybe_project_ata_from_subscription_update(
+                        pubkey, account,
+                    )
+                    .await;
+                (Some(account), deleg_record)
             }
         } else {
             // This should not happen since we call this method with sub updates which always hold
@@ -438,6 +453,87 @@ where
             error!(pubkey = %pubkey, account = ?account, "BUG: Received subscription update without fresh account");
             (None, None)
         }
+    }
+
+    async fn maybe_project_ata_from_subscription_update(
+        &self,
+        ata_pubkey: Pubkey,
+        ata_account: AccountSharedData,
+    ) -> (AccountSharedData, Option<DelegationRecord>) {
+        let Some(ata_info) = is_ata(&ata_pubkey, &ata_account) else {
+            return (ata_account, None);
+        };
+
+        let Some((eata_pubkey, _)) =
+            try_derive_eata_address_and_bump(&ata_info.owner, &ata_info.mint)
+        else {
+            return (ata_account, None);
+        };
+
+        if let Err(err) = self.subscribe_to_account(&eata_pubkey).await {
+            warn!(
+                pubkey = %eata_pubkey,
+                error = %err,
+                "Failed to subscribe to derived eATA"
+            );
+        }
+
+        let eata_account = match self
+            .remote_account_provider
+            .try_get_multi_until_slots_match(
+                &[eata_pubkey],
+                Some(MatchSlotsConfig {
+                    min_context_slot: Some(ata_account.remote_slot()),
+                    ..Default::default()
+                }),
+                AccountFetchOrigin::GetAccount,
+            )
+            .await
+        {
+            Ok(mut accounts) => accounts
+                .pop()
+                .and_then(|account| account.fresh_account()),
+            Err(err) => {
+                debug!(
+                    pubkey = %eata_pubkey,
+                    error = %err,
+                    "Failed to fetch eATA for projection"
+                );
+                None
+            }
+        };
+
+        let Some(eata_account) = eata_account else {
+            return (ata_account, None);
+        };
+
+        let deleg_record = delegation::fetch_and_parse_delegation_record(
+            self,
+            eata_pubkey,
+            self.remote_account_provider.chain_slot(),
+            AccountFetchOrigin::GetAccount,
+        )
+        .await;
+
+        let Some(deleg_record) = deleg_record else {
+            return (ata_account, None);
+        };
+
+        let delegated_to_us = deleg_record.authority == self.validator_pubkey;
+        if delegated_to_us {
+            if let Some(mut projected_ata) =
+                eata_account.maybe_into_ata(deleg_record.owner)
+            {
+                let projected_slot = ata_account
+                    .remote_slot()
+                    .max(eata_account.remote_slot());
+                projected_ata.set_remote_slot(projected_slot);
+                projected_ata.set_delegated(true);
+                return (projected_ata, Some(deleg_record));
+            }
+        }
+
+        (ata_account, Some(deleg_record))
     }
 
     /// Parses a delegation record from account data bytes.
@@ -842,6 +938,7 @@ where
                 }
             }
         }
+
         pubkeys.retain(|p| !in_bank.contains(p));
 
         // Check pending requests and bank synchronously
