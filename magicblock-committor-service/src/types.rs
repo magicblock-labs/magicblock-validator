@@ -20,16 +20,6 @@ pub struct ScheduleIntentBundleWrapper {
     pub trigger_type: TriggerType,
 }
 
-impl metrics::LabelValue for ScheduleIntentBundleWrapper {
-    fn value(&self) -> &str {
-        match &self.inner.intent_bundle {
-            MagicBaseIntent::BaseActions(_) => "actions",
-            MagicBaseIntent::Commit(_) => "commit",
-            MagicBaseIntent::CommitAndUndelegate(_) => "commit_and_undelegate",
-        }
-    }
-}
-
 impl Deref for ScheduleIntentBundleWrapper {
     type Target = ScheduledIntentBundle;
 

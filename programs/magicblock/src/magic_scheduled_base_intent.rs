@@ -91,6 +91,19 @@ impl ScheduledIntentBundle {
         })
     }
 
+    /// Returns all accounts that will be committed on chain,
+    /// including the one scheduled for undelegation
+    pub fn get_all_committed_accounts(&self) -> Vec<CommittedAccount> {
+        let committed = self.get_commit_intent_accounts();
+        let undelegated = self.get_undelegate_intent_accounts();
+        [committed, undelegated]
+            .into_iter()
+            .filter_map(|el| el)
+            .cloned()
+            .flatten()
+            .collect()
+    }
+
     /// Returns `[CommitAndUndelegate]` intent's accounts
     pub fn get_undelegate_intent_accounts(
         &self,
@@ -118,6 +131,10 @@ impl ScheduledIntentBundle {
 
     pub fn is_empty(&self) -> bool {
         self.intent_bundle.is_empty()
+    }
+
+    pub fn standalone_actions(&self) -> &Vec<BaseAction> {
+        &self.intent_bundle.standalone_actions
     }
 }
 
