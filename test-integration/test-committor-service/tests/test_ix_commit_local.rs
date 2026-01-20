@@ -37,7 +37,7 @@ use crate::utils::{
     ensure_validator_authority,
     transactions::{
         fund_validator_auth_and_ensure_validator_fees_vault,
-        init_and_delegate_account_on_chain, print_tx_logs,
+        init_and_delegate_account_on_chain,
     },
 };
 
@@ -155,7 +155,7 @@ async fn test_ix_commit_order_book_change_10k_bytes() {
     commit_book_order_account(
         10 * 1024,
         CommitStrategy::DiffBuffer,
-        ScheduleCommitType::Commit,
+        ScheduleCommitType::CommitAndUndelegate,
     )
     .await;
 }
@@ -225,6 +225,7 @@ async fn commit_single_account(
         service,
         vec![intent],
         expect_strategies(&[(expected_strategy, 1)]),
+        program_flexi_counter::ID,
     )
     .await;
 }
@@ -295,6 +296,7 @@ async fn commit_book_order_account(
         service,
         vec![intent],
         expect_strategies(&[(expected_strategy, 1)]),
+        program_schedulecommit::ID,
     )
     .await;
 }
@@ -619,7 +621,13 @@ async fn commit_multiple_accounts(
         })
         .collect::<Vec<_>>();
 
-    ix_commit_local(service, intents, expected_strategies).await;
+    ix_commit_local(
+        service,
+        intents,
+        expected_strategies,
+        program_flexi_counter::ID,
+    )
+    .await;
 }
 
 // TODO(thlorenz/snawaz): once delegation program supports larger commits add the following
@@ -653,6 +661,7 @@ async fn ix_commit_local(
     service: CommittorServiceExt<CommittorService>,
     base_intents: Vec<ScheduledBaseIntentWrapper>,
     expected_strategies: ExpectedStrategies,
+    program_id: Pubkey,
 ) {
     let execution_outputs = service
         .schedule_base_intents_waiting(base_intents.clone())
@@ -670,21 +679,7 @@ async fn ix_commit_local(
     for (execution_result, base_intent) in
         execution_outputs.into_iter().zip(base_intents.into_iter())
     {
-        let output = match execution_result.inner {
-            Ok(output) => output,
-            Err(err) => {
-                match err.signatures() {
-                    Some((sig, b)) => {
-                        println!("signatures: {:#?}", (sig, b));
-                        print_tx_logs(&rpc_client, &sig).await;
-                    }
-                    None => {
-                        println!("signatures: None");
-                    }
-                };
-                panic!("{:#?}", err);
-            }
-        };
+        let output = execution_result.inner.unwrap();
         let (commit_signature, finalize_signature) = match output {
             ExecutionOutput::SingleStage(signature) => (signature, signature),
             ExecutionOutput::TwoStage {
@@ -736,11 +731,7 @@ async fn ix_commit_local(
         );
 
         // When we finalize it is possible to also undelegate the account
-        let expected_owner = if is_undelegate {
-            program_flexi_counter::id()
-        } else {
-            dlp::id()
-        };
+        let expected_owner = if is_undelegate { program_id } else { dlp::id() };
 
         assert_eq!(statuses.len(), committed_accounts.len());
         for commit_status in statuses {
@@ -862,6 +853,13 @@ fn validate_account(
     let matches_data =
         acc.data() == expected_data && acc.lamports() == expected_lamports;
     let matches_undelegation = acc.owner().eq(&expected_owner);
+
+    println!(
+        "{matches_data} / {matches_undelegation} - {} == {}",
+        acc.owner(),
+        expected_owner
+    );
+
     let matches_all = matches_data && matches_undelegation;
 
     if !matches_all && remaining_tries.is_multiple_of(4) {

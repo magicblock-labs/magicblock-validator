@@ -41,7 +41,7 @@ solana-test-validator \
   LUzidNSiPNjYNkxZcUm5hYHwnWPwsUfh2US1cpWwaBm \
   /Users/snawaz/projects/mb/magicblock-validator/test-integration/configs/accounts/luzid-authority.json \
   --account \
-  EpJnX7ueXk7fKojBymqmVuCuwyhDQsYcLVL1XMsBbvDX \
+  DUH8h7rYjdTPYyBUEGAUwZv9ffz5wiM45GdYWYzogXjp \
   /Users/snawaz/projects/mb/magicblock-validator/test-integration/configs/accounts/validator-fees-vault.json \
   --account \
   7JrkjmZPprHwtuvtuGTXp9hwfGYFAQLnLeFM52kqAgXg \

@@ -728,8 +728,6 @@ where
             }
         }
 
-        println!("prepared_message: {:?}", prepared_message);
-
         const RETRY_FOR: Duration = Duration::from_secs(2 * 60);
         const MIN_ATTEMPTS: usize = 3;
 
