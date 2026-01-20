@@ -126,6 +126,7 @@ pub(crate) fn process_schedule_commit(
     // program owning the PDAs invoked us directly via CPI is sufficient
     // Thus we can be `invoke`d unsigned and no seeds need to be provided
     let mut committed_accounts: Vec<CommittedAccount> = Vec::new();
+    let mut seen_committed_pubkeys: HashSet<Pubkey> = HashSet::new();
     for idx in COMMITTEES_START..ix_accs_len {
         let acc_pubkey =
             get_instruction_pubkey_with_idx(transaction_context, idx as u16)?;
@@ -188,6 +189,12 @@ pub(crate) fn process_schedule_commit(
                     acc_pubkey,
                     committed.pubkey
                 );
+            }
+
+            // Backwards-compat: merge duplicate accounts (by final restored pubkey).
+            // Keep the first occurrence and ignore subsequent duplicates.
+            if !(seen_committed_pubkeys.insert(committed.pubkey)) {
+                continue;
             }
 
             committed_accounts.push(committed);

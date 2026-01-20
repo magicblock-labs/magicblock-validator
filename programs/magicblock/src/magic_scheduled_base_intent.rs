@@ -135,8 +135,12 @@ impl ScheduledIntentBundle {
         Some(self.intent_bundle.commit.as_ref()?.get_committed_accounts())
     }
 
-    pub fn get_committed_pubkeys(&self) -> Option<Vec<Pubkey>> {
-        self.intent_bundle.get_committed_pubkeys()
+    pub fn get_commit_intent_pubkeys(&self) -> Option<Vec<Pubkey>> {
+        self.intent_bundle.get_commit_intent_pubkeys()
+    }
+
+    pub fn get_undelegate_intent_pubkeys(&self) -> Option<Vec<Pubkey>> {
+        self.intent_bundle.get_undelegate_intent_pubkeys()
     }
 
     pub fn has_undelegate_intent(&self) -> bool {
@@ -314,6 +318,18 @@ impl MagicIntentBundle {
         })
     }
 
+    pub fn get_commit_intent_pubkeys(&self) -> Option<Vec<Pubkey>> {
+        self.commit
+            .as_ref()
+            .and_then(|value| Some(value.get_committed_pubkeys()))
+    }
+
+    pub fn get_undelegate_intent_pubkeys(&self) -> Option<Vec<Pubkey>> {
+        self.commit_and_undelegate
+            .as_ref()
+            .and_then(|value| Some(value.get_committed_pubkeys()))
+    }
+
     pub fn is_empty(&self) -> bool {
         let has_committed = self
             .commit
@@ -453,6 +469,10 @@ impl CommitAndUndelegate {
 
     pub fn get_committed_accounts_mut(&mut self) -> &mut Vec<CommittedAccount> {
         self.commit_action.get_committed_accounts_mut()
+    }
+
+    pub fn get_committed_pubkeys(&self) -> Vec<Pubkey> {
+        self.commit_action.get_committed_pubkeys()
     }
 
     pub fn is_empty(&self) -> bool {
@@ -715,6 +735,13 @@ impl CommitType {
                 committed_accounts, ..
             } => committed_accounts,
         }
+    }
+
+    pub fn get_committed_pubkeys(&self) -> Vec<Pubkey> {
+        self.get_committed_accounts()
+            .iter()
+            .map(|account| account.pubkey)
+            .collect()
     }
 
     pub fn is_empty(&self) -> bool {

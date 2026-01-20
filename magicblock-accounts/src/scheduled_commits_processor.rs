@@ -87,54 +87,6 @@ impl ScheduledCommitsProcessorImpl {
         }
     }
 
-    fn preprocess_intent(
-        &self,
-        mut base_intent: ScheduledIntentBundle,
-    ) -> (ScheduleIntentBundleWrapper, Vec<Pubkey>) {
-        let is_undelegate = base_intent.has_undelegate_intent();
-        let Some(committed_accounts) = base_intent.get_committed_accounts_mut()
-        else {
-            let intent = ScheduleIntentBundleWrapper {
-                inner: base_intent,
-                trigger_type: TriggerType::OnChain,
-            };
-            return (intent, vec![]);
-        };
-
-        // Filter duplicate accounts
-        let mut seen = HashSet::with_capacity(committed_accounts.len());
-        committed_accounts.retain(|account| seen.insert(account.pubkey));
-
-        // dump undelegated pubkeys
-        let pubkeys_being_undelegated: Vec<_> = committed_accounts
-            .iter()
-            .inspect(|account| {
-                let pubkey = account.pubkey;
-                if self.accounts_bank.get_account(&pubkey).is_none() {
-                    // This doesn't affect intent validity
-                    // We assume that intent is correct at the moment of scheduling
-                    // All the checks are performed by runtime & magic-program at the moment of scheduling
-                    // This log could be a sign of eviction or a bug in implementation
-                    info!("Account got evicted from AccountsDB after intent was scheduled!");
-                }
-            })
-            .filter_map(|account| {
-                if is_undelegate {
-                    Some(account.pubkey)
-                } else {
-                    None
-                }
-            })
-            .collect();
-
-        let intent = ScheduleIntentBundleWrapper {
-            inner: base_intent,
-            trigger_type: TriggerType::OnChain,
-        };
-
-        (intent, pubkeys_being_undelegated)
-    }
-
     async fn process_undelegation_requests(&self, pubkeys: Vec<Pubkey>) {
         let mut join_set = task::JoinSet::new();
         for pubkey in pubkeys.into_iter() {
@@ -332,23 +284,27 @@ impl ScheduledCommitsProcessor for ScheduledCommitsProcessorImpl {
             return Ok(());
         }
 
-        let intents = scheduled_base_intents
-            .into_iter()
-            .map(|intent| self.preprocess_intent(intent));
+        let intents = scheduled_base_intents.into_iter().map(|intent| {
+            ScheduleIntentBundleWrapper {
+                inner: intent,
+                trigger_type: TriggerType::OnChain,
+            }
+        });
 
         // Add metas for intent we schedule
         let (intents, pubkeys_being_undelegated) = {
             let mut intent_metas =
                 self.intents_meta_map.lock().expect(POISONED_MUTEX_MSG);
-            let mut pubkeys_being_undelegated = HashSet::new();
+            let mut pubkeys_being_undelegated = HashSet::<Pubkey>::new();
 
             let intents = intents
-                .map(|(intent, undelegated)| {
+                .map(|intent| {
                     intent_metas.insert(
                         intent.id,
                         ScheduledBaseIntentMeta::new(&intent),
                     );
-                    pubkeys_being_undelegated.extend(undelegated);
+                    pubkeys_being_undelegated
+                        .extend(intent.get_undelegate_intent_pubkeys());
 
                     intent
                 })
