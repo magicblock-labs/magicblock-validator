@@ -178,20 +178,8 @@ where
                             .and_then(|in_bank| {
                                 let in_bank_slot = in_bank.remote_slot();
                                 let update_slot = account.remote_slot();
-                                if in_bank_slot > update_slot {
-                                    return Some(in_bank_slot);
-                                }
-                                if in_bank_slot == update_slot {
-                                    let differs = in_bank.owner()
-                                        != account.owner()
-                                        || in_bank.delegated()
-                                            != account.delegated()
-                                        || in_bank.data() != account.data();
-                                    if !differs {
-                                        return Some(in_bank_slot);
-                                    }
-                                }
-                                None
+                                (in_bank_slot >= update_slot)
+                                    .then_some(in_bank_slot)
                             });
                         if let Some(in_bank_slot) = out_of_order_slot {
                             let update_slot = account.remote_slot();
@@ -441,9 +429,7 @@ where
                 }
             } else {
                 let (account, deleg_record) = self
-                    .maybe_project_ata_from_subscription_update(
-                        pubkey, account,
-                    )
+                    .maybe_project_ata_from_subscription_update(pubkey, account)
                     .await;
                 (Some(account), deleg_record)
             }
@@ -490,9 +476,9 @@ where
             )
             .await
         {
-            Ok(mut accounts) => accounts
-                .pop()
-                .and_then(|account| account.fresh_account()),
+            Ok(mut accounts) => {
+                accounts.pop().and_then(|account| account.fresh_account())
+            }
             Err(err) => {
                 debug!(
                     pubkey = %eata_pubkey,
@@ -524,9 +510,8 @@ where
             if let Some(mut projected_ata) =
                 eata_account.maybe_into_ata(deleg_record.owner)
             {
-                let projected_slot = ata_account
-                    .remote_slot()
-                    .max(eata_account.remote_slot());
+                let projected_slot =
+                    ata_account.remote_slot().max(eata_account.remote_slot());
                 projected_ata.set_remote_slot(projected_slot);
                 projected_ata.set_delegated(true);
                 return (projected_ata, Some(deleg_record));
