@@ -234,8 +234,15 @@ async fn commit_single_account(
     let validator_auth = ensure_validator_authority();
     fund_validator_auth_and_ensure_validator_fees_vault(&validator_auth).await;
 
-    let photon_client =
-        Some(Arc::new(PhotonIndexer::new(PHOTON_URL.to_string(), None)));
+    let photon_client = if matches!(
+        mode,
+        CommitAccountMode::CompressedCommit
+            | CommitAccountMode::CompressedCommitAndUndelegate
+    ) {
+        Some(Arc::new(PhotonIndexer::new(PHOTON_URL.to_string(), None)))
+    } else {
+        None
+    };
 
     // Run each test with and without finalizing
     let service = CommittorService::try_start(
