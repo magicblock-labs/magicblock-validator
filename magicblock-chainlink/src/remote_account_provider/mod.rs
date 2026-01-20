@@ -1122,7 +1122,9 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
             inc_account_fetches_found(fetch_origin, found_cnt);
             inc_account_fetches_not_found(fetch_origin, not_found_cnt);
 
-            if (*photon_client).is_some() {
+            let compressed_total =  
+                compressed_found_count + compressed_not_found_count;  
+            if (*photon_client).is_some() && compressed_total > 0 {
                 // Update metrics for successful compressed fetch
                 inc_compressed_account_fetches_success(pubkeys.len() as u64);
                 inc_compressed_account_fetches_found(
