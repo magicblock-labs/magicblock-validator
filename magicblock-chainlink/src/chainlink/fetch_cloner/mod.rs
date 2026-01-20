@@ -176,10 +176,13 @@ where
                             .accounts_bank
                             .get_account(&pubkey)
                             .and_then(|in_bank| {
-                                let in_bank_slot = in_bank.remote_slot();
-                                let update_slot = account.remote_slot();
-                                (in_bank_slot >= update_slot)
-                                    .then_some(in_bank_slot)
+                                if in_bank.remote_slot()
+                                    >= account.remote_slot()
+                                {
+                                    Some(in_bank.remote_slot())
+                                } else {
+                                    None
+                                }
                             });
                         if let Some(in_bank_slot) = out_of_order_slot {
                             let update_slot = account.remote_slot();
