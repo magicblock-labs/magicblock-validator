@@ -38,11 +38,8 @@ use magicblock_config::{
     },
     ValidatorParams,
 };
-use magicblock_core::{
-    link::{
-        blocks::BlockUpdateTx, link, transactions::TransactionSchedulerHandle,
-    },
-    Slot,
+use magicblock_core::link::{
+    blocks::BlockUpdateTx, link, transactions::TransactionSchedulerHandle,
 };
 use magicblock_ledger::{
     blockstore_processor::process_ledger,
@@ -87,7 +84,7 @@ use crate::{
     genesis_utils::{create_genesis_config_with_leader, GenesisConfigInfo},
     ledger::{
         self, read_validator_keypair_from_ledger, validator_keypair_path,
-        write_validator_keypair_to_ledger,
+        write_validator_keypair_to_ledger, LedgerInitState,
     },
     slot::advance_slot_and_update_ledger,
     tickers::{init_slot_ticker, init_system_metrics_ticker},
@@ -128,7 +125,7 @@ impl MagicValidator {
     // -----------------
     // Initialization
     // -----------------
-    #[instrument(skip_all, fields(last_slot = tracing::field::Empty))]
+    #[instrument(skip_all, fields(ledger_state = tracing::field::Empty))]
     pub async fn try_from_config(config: ValidatorParams) -> ApiResult<Self> {
         // TODO(thlorenz): this will need to be recreated on each start
         let token = CancellationToken::new();
@@ -144,9 +141,10 @@ impl MagicValidator {
             config.validator.basefee,
         );
 
-        let (ledger, last_slot) =
+        let (ledger, init_state) =
             Self::init_ledger(&config.ledger, &config.storage)?;
-        tracing::Span::current().record("last_slot", last_slot);
+        tracing::Span::current()
+            .record("ledger_state", init_state.to_string().as_str());
         info!("Ledger initialized");
         let ledger_path = ledger.ledger_path();
 
@@ -157,6 +155,7 @@ impl MagicValidator {
         )?;
 
         let latest_block = ledger.latest_block().load();
+        let last_slot = init_state.slot_for_accountsdb();
         let accountsdb =
             AccountsDb::new(&config.accountsdb, &config.storage, last_slot)?;
         for (pubkey, account) in genesis_config.accounts {
@@ -441,11 +440,11 @@ impl MagicValidator {
     fn init_ledger(
         ledger_config: &LedgerConfig,
         storage: &Path,
-    ) -> ApiResult<(Arc<Ledger>, Slot)> {
-        let (ledger, last_slot) = ledger::init(storage, ledger_config)?;
+    ) -> ApiResult<(Arc<Ledger>, LedgerInitState)> {
+        let (ledger, init_state) = ledger::init(storage, ledger_config)?;
         let ledger_shared = Arc::new(ledger);
         init_persister(ledger_shared.clone());
-        Ok((ledger_shared, last_slot))
+        Ok((ledger_shared, init_state))
     }
 
     fn sync_validator_keypair_with_ledger(
