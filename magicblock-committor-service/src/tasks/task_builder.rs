@@ -2,8 +2,8 @@ use std::{collections::HashMap, sync::Arc};
 
 use async_trait::async_trait;
 use magicblock_program::magic_scheduled_base_intent::{
-    BaseAction, CommitType, CommittedAccount, MagicBaseIntent,
-    ScheduledIntentBundle, UndelegateType,
+    BaseAction, CommitType, CommittedAccount, ScheduledIntentBundle,
+    UndelegateType,
 };
 use solana_account::Account;
 use solana_pubkey::Pubkey;
@@ -134,8 +134,12 @@ impl TasksBuilder for TaskBuilderImpl {
         intent_bundle: &ScheduledIntentBundle,
         persister: &Option<P>,
     ) -> TaskBuilderResult<Vec<Box<dyn BaseTask>>> {
-        let standalone_action_tasks = Self::create_action_tasks(
-            intent_bundle.standalone_actions().as_slice(),
+        let mut tasks = Vec::new();
+        tasks.extend(
+            Self::create_action_tasks(
+                intent_bundle.standalone_actions().as_slice(),
+            )
+            .into_iter(),
         );
 
         let committed_accounts =
@@ -174,7 +178,10 @@ impl TasksBuilder for TaskBuilderImpl {
         let commit_ids =
             commit_ids.map_err(TaskBuilderError::CommitTasksBuildError)?;
         let mut base_accounts = base_accounts.unwrap_or_else(|err| {
-            tracing::warn!("Failed to fetch base accounts for CommitDiff (id={}): {}; falling back to CommitState", base_intent.id, err);
+            tracing::warn!(
+                "Failed to fetch base accounts for CommitDiff (id={}): {}; falling back to CommitState",
+                intent_bundle.id, err
+            );
             Default::default()
         });
 
@@ -183,12 +190,15 @@ impl TasksBuilder for TaskBuilderImpl {
             .iter()
             .for_each(|(pubkey, commit_id) | {
                 if let Err(err) = persister.set_commit_id(intent_bundle.id, pubkey, *commit_id) {
-                    error!("Failed to persist commit id: {}, for message id: {} with pubkey {}: {}", commit_id, intent_bundle.id, pubkey, err);
+                    error!(
+                        "Failed to persist commit id: {}, for message id: {} with pubkey {}: {}",
+                        commit_id, intent_bundle.id, pubkey, err
+                    );
                 }
             });
 
         // Create commit tasks
-        let tasks: Vec<Box<dyn BaseTask>> = flagged_accounts
+        let commit_tasks_iter = flagged_accounts
             .into_iter()
             .map(|(allow_undelegation, account)| {
                 let commit_id = *commit_ids
@@ -202,8 +212,8 @@ impl TasksBuilder for TaskBuilderImpl {
                     account.clone(),
                     base_account,
                 )) as Box<dyn BaseTask>
-            })
-            .collect();
+            });
+        tasks.extend(commit_tasks_iter);
 
         Ok(tasks)
     }

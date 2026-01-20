@@ -91,7 +91,7 @@ impl ScheduledIntentBundle {
         })
     }
 
-    /// Returns all accounts that will be committed on chain,
+    /// Returns all accounts that will be committed on Base layer,
     /// including the one scheduled for undelegation
     pub fn get_all_committed_accounts(&self) -> Vec<CommittedAccount> {
         let committed = self.get_commit_intent_accounts();
@@ -102,6 +102,20 @@ impl ScheduledIntentBundle {
             .cloned()
             .flatten()
             .collect()
+    }
+
+    /// Return `true` if there're account that will be committed on Base layer
+    pub fn has_committed_accounts(&self) -> bool {
+        let has_commit_intent_accounts = self
+            .get_commit_intent_accounts()
+            .and_then(|el| Some(!el.is_empty()))
+            .unwrap_or(false);
+        let has_undelegate_intent_accounts = self
+            .get_undelegate_intent_accounts()
+            .and_then(|el| Some(!el.is_empty()))
+            .unwrap_or(false);
+
+        has_commit_intent_accounts || has_undelegate_intent_accounts
     }
 
     /// Returns `[CommitAndUndelegate]` intent's accounts
@@ -193,11 +207,14 @@ impl MagicIntentBundle {
             .map(|args| BaseAction::try_from_args(args, context))
             .collect::<Result<Vec<BaseAction>, InstructionError>>()?;
 
-        Ok(Self {
+        let this = Self {
             commit,
             commit_and_undelegate,
             standalone_actions: actions,
-        })
+        };
+        this.post_validation(context)?;
+
+        Ok(this)
     }
 
     /// Cross intent validation:
@@ -228,6 +245,40 @@ impl MagicIntentBundle {
                 }
             })
             .unwrap_or(Ok(()))
+    }
+
+    /// Post cross intent validation:
+    /// 1. Validates that all committed accounts across the entire intent bundle
+    /// are globally unique by pubkey.
+    fn post_validation(
+        &self,
+        context: &ConstructionContext<'_, '_>,
+    ) -> Result<(), InstructionError> {
+        let mut seen = HashSet::<Pubkey>::new();
+
+        let mut check =
+            |accounts: &Vec<CommittedAccount>| -> Result<(), InstructionError> {
+                for a in accounts {
+                    if !seen.insert(a.pubkey) {
+                        ic_msg!(
+                        context.invoke_context,
+                        "ScheduleCommit ERR: duplicate committed account pubkey across bundle: {}",
+                        a.pubkey
+                    );
+                        return Err(InstructionError::InvalidInstructionData);
+                    }
+                }
+                Ok(())
+            };
+
+        if let Some(commit) = &self.commit {
+            check(commit.get_committed_accounts())?;
+        }
+        if let Some(cau) = &self.commit_and_undelegate {
+            check(cau.get_committed_accounts())?;
+        }
+
+        Ok(())
     }
 
     pub fn has_undelegate_intent(&self) -> bool {

@@ -1,9 +1,7 @@
 use std::ops::Deref;
 
-use magicblock_metrics::metrics;
-use magicblock_program::magic_scheduled_base_intent::{
-    MagicBaseIntent, ScheduledIntentBundle,
-};
+use magicblock_metrics::metrics::LabelValue;
+use magicblock_program::magic_scheduled_base_intent::ScheduledIntentBundle;
 
 // TODO: should be removed once cranks are supported
 // Ideally even now OffChain/"Manual" commits should be triggered via Tx
@@ -25,5 +23,11 @@ impl Deref for ScheduleIntentBundleWrapper {
 
     fn deref(&self) -> &Self::Target {
         &self.inner
+    }
+}
+
+impl LabelValue for ScheduleIntentBundleWrapper {
+    fn value(&self) -> &str {
+        "intent_bundle"
     }
 }
