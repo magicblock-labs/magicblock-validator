@@ -25,12 +25,6 @@ jobs:
         with:
           fetch-depth: 1
 
-      - name: Install Rust toolchain
-        run: |
-          rustup default 1.91.1
-          rustc --version
-          cargo --version
-
       - name: Run ci-fmt
         run: make ci-fmt
 
@@ -50,13 +44,6 @@ jobs:
         with:
           fetch-depth: 1
 
-      - name: Install Rust toolchain
-        run: |
-          rustup component add clippy --toolchain 1.91.1
-          rustup default 1.91.1
-          rustc --version
-          cargo --version
-
       - name: Run ci-lint
         run: make ci-lint
 
@@ -66,36 +53,21 @@ jobs:
           make ci-lint
 
 
-#  unit-tests:
-#    name: Unit Tests
-#    runs-on: self-hosted
-#    # Su push sempre; su PR solo se non è draft
-#    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
-#    needs: [format, lint]
-#    steps:
-#      - name: Checkout magicblock-validator
-#        uses: actions/checkout@v5
-#        with:
-#          fetch-depth: 1
-#
-#      - name: Install Rust toolchain
-#        run: |
-#          rustup default 1.91.1
-#          rustc --version
-#          cargo --version
-#
-#      - name: Install cargo-expand
-#        run: |
-#          if ! command -v cargo-expand &> /dev/null; then
-#            echo "cargo-expand not found, installing..."
-#            cargo install cargo-expand
-#          else
-#            echo "cargo-expand already installed"
-#          fi
-#
-#      - name: Run unit tests
-#        run: |
-#          make ci-test-unit
+  unit-tests:
+    name: Unit Tests
+    runs-on: self-hosted
+    # Su push sempre; su PR solo se non è draft
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    needs: [format, lint]
+    steps:
+      - name: Checkout magicblock-validator
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
+
+      - name: Run unit tests
+        run: |
+          make ci-test-unit
 
 #  integration-tests:
 #    name: Integration Tests - ${{ matrix.batch_tests }}
