@@ -233,5 +233,6 @@ async fn test_deleg_after_subscribe_case2_compressed() {
 
         assert!(updated);
         assert_cloned_as_delegated!(cloner, &[pubkey], slot, program_pubkey);
+        assert_not_subscribed!(&chainlink, &[&pubkey]);
     }
 }
