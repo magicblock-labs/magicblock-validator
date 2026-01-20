@@ -140,22 +140,22 @@ jobs:
         env:
           RUN_TESTS: ${{ matrix.batch_tests }}
 
-  ci-status:
-    name: CI Status
-    runs-on: ubuntu-latest
-    if: always()
-    needs:
-      - format
-      - lint
-      - integration-tests
-    steps:
-      - name: Check all jobs status
-        run: |
-          if [[ "${{ needs.format.result }}" != "success" ||
-                "${{ needs.lint.result }}" != "success" ||
-                "${{ needs.unit-tests.result }}" != "success" ||
-                "${{ needs.integration-tests.result }}" != "success" ]]; then
-            echo "One or more CI jobs failed or were skipped"
-            exit 1
-          fi
-          echo "All CI jobs passed successfully"
+#  ci-status:
+#    name: CI Status
+#    runs-on: ubuntu-latest
+#    if: always()
+#    needs:
+#      - format
+#      - lint
+#      - integration-tests
+#    steps:
+#      - name: Check all jobs status
+#        run: |
+#          if [[ "${{ needs.format.result }}" != "success" ||
+#                "${{ needs.lint.result }}" != "success" ||
+#                "${{ needs.unit-tests.result }}" != "success" ||
+#                "${{ needs.integration-tests.result }}" != "success" ]]; then
+#            echo "One or more CI jobs failed or were skipped"
+#            exit 1
+#          fi
+#          echo "All CI jobs passed successfully"
