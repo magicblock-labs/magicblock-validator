@@ -211,7 +211,7 @@ impl TasksBuilder for TaskBuilderImpl {
     /// Returns [`Task`]s for Finalize stage
     async fn finalize_tasks<C: TaskInfoFetcher>(
         info_fetcher: &Arc<C>,
-        base_intent: &ScheduledIntentBundle,
+        intent_bundle: &ScheduledIntentBundle,
     ) -> TaskBuilderResult<Vec<Box<dyn BaseTask>>> {
         // Helper to create a finalize task
         fn finalize_task(account: &CommittedAccount) -> Box<dyn BaseTask> {
@@ -261,53 +261,52 @@ impl TasksBuilder for TaskBuilderImpl {
             }
         }
 
-        match &base_intent.intent_bundle {
-            MagicBaseIntent::BaseActions(_) => Ok(vec![]),
-            MagicBaseIntent::Commit(commit) => Ok(process_commit(commit)),
-            MagicBaseIntent::CommitAndUndelegate(t) => {
-                let mut tasks = process_commit(&t.commit_action);
-
-                // Get rent reimbursments for undelegated accounts
-                let accounts = t.get_committed_accounts();
-                let mut min_context_slot = 0;
-                let pubkeys = accounts
-                    .iter()
-                    .map(|account| {
-                        min_context_slot = std::cmp::max(
-                            min_context_slot,
-                            account.remote_slot,
-                        );
-                        account.pubkey
-                    })
-                    .collect::<Vec<_>>();
-                let rent_reimbursements = info_fetcher
-                    .fetch_rent_reimbursements(&pubkeys, min_context_slot)
-                    .await
-                    .map_err(TaskBuilderError::FinalizedTasksBuildError)?;
-
-                tasks.extend(accounts.iter().zip(rent_reimbursements).map(
-                    |(account, rent_reimbursement)| {
-                        undelegate_task(account, &rent_reimbursement)
-                    },
-                ));
-
-                match &t.undelegate_action {
-                    UndelegateType::Standalone => Ok(tasks),
-                    UndelegateType::WithBaseActions(actions) => {
-                        tasks.extend(actions.iter().map(|action| {
-                            let task = BaseActionTask {
-                                action: action.clone(),
-                            };
-                            let task =
-                                ArgsTask::new(ArgsTaskType::BaseAction(task));
-                            Box::new(task) as Box<dyn BaseTask>
-                        }));
-
-                        Ok(tasks)
-                    }
-                }
-            }
+        let mut tasks = Vec::new();
+        if let Some(ref value) = intent_bundle.intent_bundle.commit {
+            tasks.extend(process_commit(value).into_iter());
         }
+
+        if let Some(ref value) =
+            intent_bundle.intent_bundle.commit_and_undelegate
+        {
+            tasks.extend(process_commit(&value.commit_action).into_iter());
+
+            // Get rent reimbursments for undelegated accounts
+            let accounts = value.get_committed_accounts();
+            let mut min_context_slot = 0;
+            let pubkeys = accounts
+                .iter()
+                .map(|account| {
+                    min_context_slot =
+                        std::cmp::max(min_context_slot, account.remote_slot);
+                    account.pubkey
+                })
+                .collect::<Vec<_>>();
+            let rent_reimbursements = info_fetcher
+                .fetch_rent_reimbursements(&pubkeys, min_context_slot)
+                .await
+                .map_err(TaskBuilderError::FinalizedTasksBuildError)?;
+
+            tasks.extend(accounts.iter().zip(rent_reimbursements).map(
+                |(account, rent_reimbursement)| {
+                    undelegate_task(account, &rent_reimbursement)
+                },
+            ));
+
+            if let UndelegateType::WithBaseActions(actions) =
+                &value.undelegate_action
+            {
+                tasks.extend(actions.iter().map(|action| {
+                    let task = BaseActionTask {
+                        action: action.clone(),
+                    };
+                    let task = ArgsTask::new(ArgsTaskType::BaseAction(task));
+                    Box::new(task) as Box<dyn BaseTask>
+                }));
+            }
+        };
+
+        Ok(tasks)
     }
 }
 
