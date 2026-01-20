@@ -437,7 +437,7 @@ impl<T: IntentPersister> IntentPersister for Option<T> {
 #[cfg(test)]
 mod tests {
     use magicblock_program::magic_scheduled_base_intent::{
-        CommitAndUndelegate, CommitType, CommittedAccount, MagicBaseIntent,
+        CommitAndUndelegate, CommitType, CommittedAccount,
         MagicIntentBundle, UndelegateType,
     };
     use solana_account::Account;
