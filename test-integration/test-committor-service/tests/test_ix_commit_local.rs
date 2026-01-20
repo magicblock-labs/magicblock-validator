@@ -19,6 +19,7 @@ use magicblock_program::magic_scheduled_base_intent::{
 };
 use magicblock_rpc_client::MagicblockRpcClient;
 use program_flexi_counter::state::FlexiCounter;
+use program_schedulecommit::ScheduleCommitType;
 use solana_account::{Account, ReadableAccount};
 use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
@@ -36,7 +37,7 @@ use crate::utils::{
     ensure_validator_authority,
     transactions::{
         fund_validator_auth_and_ensure_validator_fees_vault,
-        init_and_delegate_account_on_chain,
+        init_and_delegate_account_on_chain, print_tx_logs,
     },
 };
 
@@ -117,12 +118,22 @@ async fn test_ix_commit_single_account_ten_kb() {
 
 #[tokio::test]
 async fn test_ix_commit_order_book_change_100_bytes() {
-    commit_book_order_account(100, CommitStrategy::DiffArgs, false).await;
+    commit_book_order_account(
+        100,
+        CommitStrategy::DiffArgs,
+        ScheduleCommitType::Commit,
+    )
+    .await;
 }
 
 #[tokio::test]
 async fn test_ix_commit_order_book_change_671_bytes() {
-    commit_book_order_account(671, CommitStrategy::DiffArgs, false).await;
+    commit_book_order_account(
+        671,
+        CommitStrategy::DiffArgs,
+        ScheduleCommitType::Commit,
+    )
+    .await;
 }
 
 #[tokio::test]
@@ -131,13 +142,22 @@ async fn test_ix_commit_order_book_change_673_bytes() {
     // of size 1644 (which is the max limit), but while the size of raw bytes for 671 is within
     // 1232 limit, the size for 672 exceeds by 1 (1233). That is why we used
     // 673 as changed_len where CommitStrategy goes from Args to FromBuffer.
-    commit_book_order_account(673, CommitStrategy::DiffBuffer, false).await;
+    commit_book_order_account(
+        673,
+        CommitStrategy::DiffBuffer,
+        ScheduleCommitType::Commit,
+    )
+    .await;
 }
 
 #[tokio::test]
 async fn test_ix_commit_order_book_change_10k_bytes() {
-    commit_book_order_account(10 * 1024, CommitStrategy::DiffBuffer, false)
-        .await;
+    commit_book_order_account(
+        10 * 1024,
+        CommitStrategy::DiffBuffer,
+        ScheduleCommitType::Commit,
+    )
+    .await;
 }
 
 async fn commit_single_account(
@@ -212,7 +232,7 @@ async fn commit_single_account(
 async fn commit_book_order_account(
     changed_len: usize,
     expected_strategy: CommitStrategy,
-    undelegate: bool,
+    commit_type: ScheduleCommitType,
 ) {
     init_logger!();
 
@@ -246,13 +266,17 @@ async fn commit_book_order_account(
         account: order_book_ac,
         remote_slot: Default::default(),
     };
-    let base_intent = if undelegate {
-        MagicBaseIntent::CommitAndUndelegate(CommitAndUndelegate {
-            commit_action: CommitType::Standalone(vec![account]),
-            undelegate_action: UndelegateType::Standalone,
-        })
-    } else {
-        MagicBaseIntent::Commit(CommitType::Standalone(vec![account]))
+    let base_intent = match commit_type {
+        ScheduleCommitType::CommitAndUndelegate => {
+            MagicBaseIntent::CommitAndUndelegate(CommitAndUndelegate {
+                commit_action: CommitType::Standalone(vec![account]),
+                undelegate_action: UndelegateType::Standalone,
+            })
+        }
+        ScheduleCommitType::Commit => {
+            MagicBaseIntent::Commit(CommitType::Standalone(vec![account]))
+        }
+        _ => todo!("not done yet"),
     };
 
     let intent = ScheduledBaseIntentWrapper {
@@ -646,7 +670,21 @@ async fn ix_commit_local(
     for (execution_result, base_intent) in
         execution_outputs.into_iter().zip(base_intents.into_iter())
     {
-        let output = execution_result.inner.unwrap();
+        let output = match execution_result.inner {
+            Ok(output) => output,
+            Err(err) => {
+                match err.signatures() {
+                    Some((sig, b)) => {
+                        println!("signatures: {:#?}", (sig, b));
+                        print_tx_logs(&rpc_client, &sig).await;
+                    }
+                    None => {
+                        println!("signatures: None");
+                    }
+                };
+                panic!("{:#?}", err);
+            }
+        };
         let (commit_signature, finalize_signature) = match output {
             ExecutionOutput::SingleStage(signature) => (signature, signature),
             ExecutionOutput::TwoStage {

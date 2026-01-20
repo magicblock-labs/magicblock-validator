@@ -108,7 +108,7 @@ impl IntentExecutorError {
                 err: _,
                 commit_signature,
                 finalize_signature,
-            } => commit_signature.map(|el| (el, *finalize_signature)),
+            } => finalize_signature.map(|el| (el, *commit_signature)),
             IntentExecutorError::EmptyIntentError
             | IntentExecutorError::FailedToFitError
             | IntentExecutorError::SignerError(_) => None,
