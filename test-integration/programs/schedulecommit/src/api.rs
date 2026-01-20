@@ -180,6 +180,7 @@ pub fn schedule_commit_cpi_instruction(
     magic_context_id: Pubkey,
     players: &[Pubkey],
     committees: &[Pubkey],
+    commit_type: ScheduleCommitType,
 ) -> Instruction {
     schedule_commit_cpi_instruction_impl(
         payer,
@@ -187,10 +188,8 @@ pub fn schedule_commit_cpi_instruction(
         magic_context_id,
         players,
         committees,
-        ScheduleCommitCpiInstructionImplArgs {
-            undelegate: false,
-            commit_payer: false,
-        },
+        false,
+        commit_type,
     )
 }
 
@@ -247,10 +246,8 @@ pub fn schedule_commit_with_payer_cpi_instruction(
         magic_context_id,
         players,
         committees,
-        ScheduleCommitCpiInstructionImplArgs {
-            undelegate: false,
-            commit_payer: true,
-        },
+        true,
+        ScheduleCommitType::Commit,
     )
 }
 
@@ -267,16 +264,9 @@ pub fn schedule_commit_and_undelegate_cpi_instruction(
         magic_context_id,
         players,
         committees,
-        ScheduleCommitCpiInstructionImplArgs {
-            undelegate: true,
-            commit_payer: false,
-        },
+        false,
+        ScheduleCommitType::CommitAndUndelegate,
     )
-}
-
-struct ScheduleCommitCpiInstructionImplArgs {
-    undelegate: bool,
-    commit_payer: bool,
 }
 
 fn schedule_commit_cpi_instruction_impl(
@@ -285,7 +275,8 @@ fn schedule_commit_cpi_instruction_impl(
     magic_context_id: Pubkey,
     players: &[Pubkey],
     committees: &[Pubkey],
-    args: ScheduleCommitCpiInstructionImplArgs,
+    commit_payer: bool,
+    commit_type: ScheduleCommitType,
 ) -> Instruction {
     let program_id = crate::id();
     let mut account_metas = vec![
@@ -300,10 +291,10 @@ fn schedule_commit_cpi_instruction_impl(
     let cpi_args = ScheduleCommitCpiArgs {
         players: players.to_vec(),
         modify_accounts: true,
-        undelegate: args.undelegate,
-        commit_payer: args.commit_payer,
+        commit_payer,
     };
-    let ix = ScheduleCommitInstruction::ScheduleCommitCpi(cpi_args);
+    let ix =
+        ScheduleCommitInstruction::ScheduleCommitCpi(cpi_args, commit_type);
     Instruction::new_with_borsh(program_id, &ix, account_metas)
 }
 

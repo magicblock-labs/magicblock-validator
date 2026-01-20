@@ -69,8 +69,6 @@ pub struct ScheduleCommitCpiArgs {
     pub players: Vec<Pubkey>,
     /// If true, the accounts will be modified after the commit
     pub modify_accounts: bool,
-    /// If true, the accounts will be undelegated after the commit
-    pub undelegate: bool,
     /// If true, also commit the payer account
     pub commit_payer: bool,
 }
@@ -99,7 +97,7 @@ pub enum ScheduleCommitInstruction {
     /// - **1**    `[]`              MagicContext (used to record scheduled commit)
     /// - **2**    `[]`              MagicBlock Program (used to schedule commit)
     /// - **3..n** `[]`              PDA accounts to be committed
-    ScheduleCommitCpi(ScheduleCommitCpiArgs),
+    ScheduleCommitCpi(ScheduleCommitCpiArgs, ScheduleCommitType),
 
     /// Same instruction input like [ScheduleCommitInstruction::ScheduleCommitCpi].
     /// Behavior differs that it will modify the accounts after it
@@ -165,9 +163,52 @@ pub enum ScheduleCommitInstruction {
 
 #[derive(BorshSerialize, BorshDeserialize, Debug, Clone, Copy)]
 pub enum ScheduleCommitType {
+    Commit,
     CommitAndUndelegate,
     CommitFinalize,
     CommitFinalizeAndUndelegate,
+}
+
+impl ScheduleCommitType {
+    fn invoke_commit<'a, 'info>(
+        self,
+        payer: &'a AccountInfo<'info>,
+        accounts: Vec<&'a AccountInfo<'info>>,
+        magic_context: &'a AccountInfo<'info>,
+        magic_program: &'a AccountInfo<'info>,
+    ) -> ProgramResult {
+        match self {
+            ScheduleCommitType::Commit => {
+                commit_accounts(payer, accounts, magic_context, magic_program)?;
+            }
+            ScheduleCommitType::CommitAndUndelegate => {
+                commit_and_undelegate_accounts(
+                    payer,
+                    accounts,
+                    magic_context,
+                    magic_program,
+                )?;
+            }
+            ScheduleCommitType::CommitFinalize => {
+                commit_finalize_accounts(
+                    payer,
+                    accounts,
+                    magic_context,
+                    magic_program,
+                )?;
+            }
+            ScheduleCommitType::CommitFinalizeAndUndelegate => {
+                commit_finalize_and_undelegate_accounts(
+                    payer,
+                    accounts,
+                    magic_context,
+                    magic_program,
+                )?;
+            }
+        };
+
+        Ok(())
+    }
 }
 
 pub fn process_instruction<'a>(
@@ -197,14 +238,14 @@ pub fn process_instruction<'a>(
     match ix {
         Init => process_init(program_id, accounts),
         DelegateCpi(args) => process_delegate_cpi(accounts, args),
-        ScheduleCommitCpi(args) => process_schedulecommit_cpi(
+        ScheduleCommitCpi(args, commit_type) => process_schedulecommit_cpi(
             accounts,
             &args.players,
             ProcessSchedulecommitCpiArgs {
                 modify_accounts: args.modify_accounts,
-                undelegate: args.undelegate,
                 commit_payer: args.commit_payer,
             },
+            commit_type,
         ),
         ScheduleCommitAndUndelegateCpiModAfter(players) => {
             process_schedulecommit_and_undelegation_cpi_with_mod_after(
@@ -469,32 +510,12 @@ pub fn process_schedulecommit_for_orderbook(
 
     assert_is_signer(payer, "payer")?;
 
-    match commit_type {
-        ScheduleCommitType::CommitAndUndelegate => {
-            commit_and_undelegate_accounts(
-                payer,
-                vec![order_book_account],
-                magic_context,
-                magic_program,
-            )?;
-        }
-        ScheduleCommitType::CommitFinalize => {
-            commit_finalize_accounts(
-                payer,
-                vec![order_book_account],
-                magic_context,
-                magic_program,
-            )?;
-        }
-        ScheduleCommitType::CommitFinalizeAndUndelegate => {
-            commit_finalize_and_undelegate_accounts(
-                payer,
-                vec![order_book_account],
-                magic_context,
-                magic_program,
-            )?;
-        }
-    };
+    commit_type.invoke_commit(
+        payer,
+        vec![order_book_account],
+        magic_context,
+        magic_program,
+    )?;
 
     Ok(())
 }
@@ -541,7 +562,6 @@ pub fn process_delegate_cpi(
 
 pub struct ProcessSchedulecommitCpiArgs {
     pub modify_accounts: bool,
-    pub undelegate: bool,
     pub commit_payer: bool,
 }
 
@@ -552,6 +572,7 @@ pub fn process_schedulecommit_cpi(
     accounts: &[AccountInfo],
     player_pubkeys: &[Pubkey],
     args: ProcessSchedulecommitCpiArgs,
+    commit_type: ScheduleCommitType,
 ) -> Result<(), ProgramError> {
     msg!("Processing schedulecommit_cpi instruction");
 
@@ -604,16 +625,12 @@ pub fn process_schedulecommit_cpi(
         committees.iter().map(|x| x.key).collect::<Vec<_>>()
     );
 
-    if args.undelegate {
-        commit_and_undelegate_accounts(
-            payer,
-            committees,
-            magic_context,
-            magic_program,
-        )?;
-    } else {
-        commit_accounts(payer, committees, magic_context, magic_program)?;
-    }
+    commit_type.invoke_commit(
+        payer,
+        committees,
+        magic_context,
+        magic_program,
+    )?;
 
     Ok(())
 }

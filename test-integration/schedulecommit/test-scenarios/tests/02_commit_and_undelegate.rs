@@ -388,6 +388,9 @@ fn run_test_for_commit_huge_order_book_account(
 
         assert_one_committee_was_committed(&ctx, &res, true);
         match commit_type {
+            ScheduleCommitType::Commit => {
+                assert!(false);
+            }
             ScheduleCommitType::CommitFinalize => {
                 assert_one_committee_account_was_not_undelegated_on_chain(&ctx);
             }
