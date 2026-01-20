@@ -381,19 +381,22 @@ where
     C: Cloner,
     P: PhotonClient,
 {
-    Ok(owned_by_deleg_compressed.into_iter().filter_map(
-        |(pubkey, mut account, _)| {
-            let Ok(delegation_record) =
-                CompressedDelegationRecord::try_from_slice(
-                    account.data(),
-                )
-                .map_err(|err| {
-                    error!("Failed to deserialize compressed delegation record for {pubkey}: {err}\nAccount: {:?}", account);
-                    err
-                })
-            else {
-                return None;
-            };
+    owned_by_deleg_compressed  
+       .into_iter()  
+       .map(|(pubkey, mut account, _)| {  
+           let delegation_record =  
+               CompressedDelegationRecord::try_from_slice(account.data())  
+                   .map_err(|err| {  
+                       error!(  
+                           "Failed to deserialize compressed delegation record for {pubkey}: {err}\nAccount: {:?}",  
+                           account  
+                       );  
+                       ChainlinkError::DelegatedAccountResolutionsFailed(  
+                           format!(  
+                               "Failed to deserialize compressed delegation record for {pubkey}: {err}"  
+                           ),  
+                       )  
+                    })?; 
 
             account.set_compressed(true);
             account.set_lamports(delegation_record.lamports);
@@ -414,16 +417,14 @@ where
                 lamports: delegation_record.lamports,
                 commit_frequency_ms: 0,
             });
-            Some(AccountCloneRequest {
+            Ok(AccountCloneRequest {
                 pubkey,
                 account,
                 commit_frequency_ms: None,
                 delegated_to_other,
             })
-        },
-    )
-    .collect::<Vec<_>>()
-)
+        })
+    .collect::<ChainlinkResult<Vec<_>>>()
 }
 
 /// Resolves program accounts, fetching program data accounts for LoaderV3 programs
