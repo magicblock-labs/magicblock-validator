@@ -121,8 +121,7 @@ impl BaseIntentCommittor for ChangesetCommittorStub {
             return rx;
         };
 
-        let status_rows =
-            IntentPersisterImpl::create_commit_rows(&base_intent.inner);
+        let status_rows = IntentPersisterImpl::create_commit_rows(&base_intent);
         tx.send(Ok(status_rows)).unwrap_or_else(|_| {
             tracing::error!("Failed to send commit status response");
         });

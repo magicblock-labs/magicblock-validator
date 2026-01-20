@@ -544,7 +544,7 @@ mod tests {
         let rows = IntentPersisterImpl::create_commit_rows(&message);
 
         assert_eq!(rows.len(), 2);
-        assert!(rows.iter().all(|r| r.undelegate == false));
+        assert!(rows.iter().all(|r| !r.undelegate));
 
         let empty_account = rows.iter().find(|r| r.data.is_none()).unwrap();
         assert_eq!(empty_account.commit_type, types::CommitType::EmptyAccount);
@@ -562,7 +562,7 @@ mod tests {
         let rows = IntentPersisterImpl::create_commit_rows(&message);
 
         assert_eq!(rows.len(), 2);
-        assert!(rows.iter().all(|r| r.undelegate == true));
+        assert!(rows.iter().all(|r| !r.undelegate));
     }
 
     #[test]

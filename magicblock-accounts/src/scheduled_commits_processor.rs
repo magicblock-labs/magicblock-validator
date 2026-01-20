@@ -277,7 +277,7 @@ impl ScheduledCommitsProcessor for ScheduledCommitsProcessorImpl {
 
             intent_bundles.iter().for_each(|intent| {
                 intent_metas
-                    .insert(intent.id, ScheduledBaseIntentMeta::new(&intent));
+                    .insert(intent.id, ScheduledBaseIntentMeta::new(intent));
                 if let Some(undelegate) = intent.get_undelegate_intent_pubkeys()
                 {
                     pubkeys_being_undelegated.extend(undelegate);

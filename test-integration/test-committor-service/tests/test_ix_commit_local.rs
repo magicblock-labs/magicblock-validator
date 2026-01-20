@@ -10,7 +10,6 @@ use magicblock_committor_service::{
     intent_executor::ExecutionOutput,
     persist::CommitStrategy,
     service_ext::{BaseIntentCommittorExt, CommittorServiceExt},
-    types::{ScheduleIntentBundleWrapper, TriggerType},
     BaseIntentCommittor, CommittorService, ComputeBudgetConfig,
 };
 use magicblock_program::magic_scheduled_base_intent::{
@@ -188,16 +187,13 @@ async fn commit_single_account(
         MagicBaseIntent::Commit(CommitType::Standalone(vec![account]))
     };
 
-    let intent = ScheduleIntentBundleWrapper {
-        trigger_type: TriggerType::OnChain,
-        inner: ScheduledIntentBundle {
-            id: 0,
-            slot: 10,
-            blockhash: Hash::new_unique(),
-            intent_bundle_sent_transaction: Transaction::default(),
-            payer: counter_auth.pubkey(),
-            intent_bundle: base_intent.into(),
-        },
+    let intent = ScheduledIntentBundle {
+        id: 0,
+        slot: 10,
+        blockhash: Hash::new_unique(),
+        intent_bundle_sent_transaction: Transaction::default(),
+        payer: counter_auth.pubkey(),
+        intent_bundle: base_intent.into(),
     };
 
     // We should always be able to Commit & Finalize 1 account either with Args or Buffers
@@ -255,16 +251,13 @@ async fn commit_book_order_account(
         MagicBaseIntent::Commit(CommitType::Standalone(vec![account]))
     };
 
-    let intent = ScheduleIntentBundleWrapper {
-        trigger_type: TriggerType::OnChain,
-        inner: ScheduledIntentBundle {
-            id: 0,
-            slot: 10,
-            blockhash: Hash::new_unique(),
-            intent_bundle_sent_transaction: Transaction::default(),
-            payer: payer.pubkey(),
-            intent_bundle: base_intent.into(),
-        },
+    let intent = ScheduledIntentBundle {
+        id: 0,
+        slot: 10,
+        blockhash: Hash::new_unique(),
+        intent_bundle_sent_transaction: Transaction::default(),
+        payer: payer.pubkey(),
+        intent_bundle: base_intent.into(),
     };
 
     ix_commit_local(
@@ -627,10 +620,6 @@ async fn commit_multiple_accounts(
             payer: Pubkey::new_unique(),
             intent_bundle: base_intent.into(),
         })
-        .map(|intent| ScheduleIntentBundleWrapper {
-            trigger_type: TriggerType::OnChain,
-            inner: intent,
-        })
         .collect::<Vec<_>>();
 
     ix_commit_local(service, intents, expected_strategies).await;
@@ -679,10 +668,6 @@ async fn execute_intent_bundle(
         payer: Pubkey::new_unique(),
         intent_bundle,
     };
-    let intent_bundle = ScheduleIntentBundleWrapper {
-        trigger_type: TriggerType::OnChain,
-        inner: intent_bundle,
-    };
     ix_commit_local(service, vec![intent_bundle], expected_strategies).await;
 }
 
@@ -715,7 +700,7 @@ async fn execute_intent_bundle(
 // -----------------
 async fn ix_commit_local(
     service: CommittorServiceExt<CommittorService>,
-    intent_bundles: Vec<ScheduleIntentBundleWrapper>,
+    intent_bundles: Vec<ScheduledIntentBundle>,
     expected_strategies: ExpectedStrategies,
 ) {
     let execution_outputs = service

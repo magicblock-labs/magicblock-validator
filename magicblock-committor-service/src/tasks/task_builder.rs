@@ -98,7 +98,7 @@ impl TaskBuilderImpl {
         min_context_slot: u64,
     ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>> {
         let committed_pubkeys = accounts
-            .into_iter()
+            .iter()
             .map(|(_, account)| account.pubkey)
             .collect::<Vec<_>>();
 
@@ -135,12 +135,9 @@ impl TasksBuilder for TaskBuilderImpl {
         persister: &Option<P>,
     ) -> TaskBuilderResult<Vec<Box<dyn BaseTask>>> {
         let mut tasks = Vec::new();
-        tasks.extend(
-            Self::create_action_tasks(
-                intent_bundle.standalone_actions().as_slice(),
-            )
-            .into_iter(),
-        );
+        tasks.extend(Self::create_action_tasks(
+            intent_bundle.standalone_actions().as_slice(),
+        ));
 
         let committed_accounts =
             intent_bundle.get_commit_intent_accounts().cloned();
@@ -273,13 +270,13 @@ impl TasksBuilder for TaskBuilderImpl {
 
         let mut tasks = Vec::new();
         if let Some(ref value) = intent_bundle.intent_bundle.commit {
-            tasks.extend(process_commit(value).into_iter());
+            tasks.extend(process_commit(value));
         }
 
         if let Some(ref value) =
             intent_bundle.intent_bundle.commit_and_undelegate
         {
-            tasks.extend(process_commit(&value.commit_action).into_iter());
+            tasks.extend(process_commit(&value.commit_action));
 
             // Get rent reimbursments for undelegated accounts
             let accounts = value.get_committed_accounts();

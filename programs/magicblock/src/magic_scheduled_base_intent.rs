@@ -215,7 +215,7 @@ impl MagicIntentBundle {
 
     /// Cross intent validation:
     /// 1. Set of committed accounts shall not overlap with
-    /// set of undelegated accounts
+    ///    set of undelegated accounts
     /// 2. None for now :)
     fn validate(args: &MagicIntentBundleArgs) -> Result<(), InstructionError> {
         let committed_set: Option<HashSet<_>> =
@@ -228,16 +228,16 @@ impl MagicIntentBundle {
 
         args.commit_and_undelegate
             .as_ref()
-            .and_then(|el| {
+            .map(|el| {
                 let has_cross_reference = el
                     .committed_accounts_indices()
                     .iter()
                     .any(|ind| committed_set.contains(ind));
                 if has_cross_reference {
-                    Some(Ok(()))
+                    Ok(())
                 } else {
                     // TODO(edwin): add msg here?
-                    Some(Err(InstructionError::InvalidInstructionData))
+                    Err(InstructionError::InvalidInstructionData)
                 }
             })
             .unwrap_or(Ok(()))
@@ -245,7 +245,7 @@ impl MagicIntentBundle {
 
     /// Post cross intent validation:
     /// 1. Validates that all committed accounts across the entire intent bundle
-    /// are globally unique by pubkey.
+    ///    are globally unique by pubkey.
     fn post_validation(
         &self,
         context: &ConstructionContext<'_, '_>,
@@ -284,11 +284,11 @@ impl MagicIntentBundle {
     pub fn has_committed_accounts(&self) -> bool {
         let has_commit_intent_accounts = self
             .get_commit_intent_accounts()
-            .and_then(|el| Some(!el.is_empty()))
+            .map(|el| !el.is_empty())
             .unwrap_or(false);
         let has_undelegate_intent_accounts = self
             .get_undelegate_intent_accounts()
-            .and_then(|el| Some(!el.is_empty()))
+            .map(|el| !el.is_empty())
             .unwrap_or(false);
 
         has_commit_intent_accounts || has_undelegate_intent_accounts
@@ -324,9 +324,9 @@ impl MagicIntentBundle {
         let undelegated = self.get_undelegate_intent_accounts();
         [committed, undelegated]
             .into_iter()
-            .filter_map(|el| el)
-            .cloned()
             .flatten()
+            .flatten()
+            .cloned()
             .collect()
     }
 
@@ -336,7 +336,7 @@ impl MagicIntentBundle {
             self.get_undelegate_intent_pubkeys(),
         ]
         .into_iter()
-        .filter_map(|el| el)
+        .flatten()
         .flatten()
         .collect()
     }
@@ -344,13 +344,13 @@ impl MagicIntentBundle {
     pub fn get_commit_intent_pubkeys(&self) -> Option<Vec<Pubkey>> {
         self.commit
             .as_ref()
-            .and_then(|value| Some(value.get_committed_pubkeys()))
+            .map(|value| value.get_committed_pubkeys())
     }
 
     pub fn get_undelegate_intent_pubkeys(&self) -> Option<Vec<Pubkey>> {
         self.commit_and_undelegate
             .as_ref()
-            .and_then(|value| Some(value.get_committed_pubkeys()))
+            .map(|value| value.get_committed_pubkeys())
     }
 
     pub fn is_empty(&self) -> bool {
