@@ -325,15 +325,18 @@ impl TasksBuilder for TaskBuilderImpl {
                     .ok_or(TaskBuilderError::PhotonClientNotFound)?;
                 committed_accounts
                     .iter()
-                    .map(|account| async {
-                        Ok(Some(
-                            get_compressed_data(
-                                &account.pubkey,
-                                photon_client,
-                                None,
-                            )
-                            .await?,
-                        ))
+                    .map(|account| {
+                        let pubkey = account.pubkey;
+                        async move {
+                            Ok(Some(
+                                get_compressed_data(
+                                    &pubkey,
+                                    photon_client,
+                                    None,
+                                )
+                                .await?,
+                            ))
+                        }
                     })
                     .collect::<FuturesUnordered<_>>()
                     .try_collect()
