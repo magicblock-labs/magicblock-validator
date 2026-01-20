@@ -381,7 +381,7 @@ mod tests {
     use crate::{
         intent_execution_manager::{
             db::{DummyDB, DB},
-            intent_scheduler::create_test_intent,
+            intent_scheduler::{create_test_intent, create_test_intent_bundle},
         },
         intent_executor::{
             error::{IntentExecutorError as ExecutorError, InternalError},
@@ -450,6 +450,32 @@ mod tests {
         let pubkey = pubkey!("1111111111111111111111111111111111111111111");
         let msg1 = create_test_intent(1, &[pubkey], false);
         let msg2 = create_test_intent(2, &[pubkey], false);
+
+        sender.send(msg1.clone()).await.unwrap();
+        sender.send(msg2.clone()).await.unwrap();
+
+        // First message should be processed immediately
+        let result1 = result_receiver.recv().await.unwrap();
+        assert!(result1.is_ok());
+        assert_eq!(result1.id, 1);
+
+        // Second message should be processed after first completes
+        let result2 = result_receiver.recv().await.unwrap();
+        assert!(result2.is_ok());
+        assert_eq!(result2.id, 2);
+    }
+
+    #[tokio::test]
+    async fn test_worker_handles_conflicting_bundles() {
+        let (sender, worker) = setup_engine(false);
+        let result_subscriber = worker.spawn();
+        let mut result_receiver = result_subscriber.subscribe();
+
+        // Send two conflicting messages
+        let a = pubkey!("1111111111111111111111111111111111111111111");
+        let b = pubkey!("21111111111111111111111111111111111111111111");
+        let msg1 = create_test_intent_bundle(1, &[a], &[b]);
+        let msg2 = create_test_intent(2, &[a], false);
 
         sender.send(msg1.clone()).await.unwrap();
         sender.send(msg2.clone()).await.unwrap();
