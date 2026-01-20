@@ -753,7 +753,7 @@ where
                 self,
                 owned_by_deleg_compressed,
             )
-            .await?;
+            .await;
         accounts_to_clone.extend(compressed_delegated_accounts);
 
         // Compute sub cancellations now since we may potentially fail during a cloning step
