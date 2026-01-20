@@ -795,9 +795,12 @@ where
             let Some(record) =
                 CompressedDelegationRecord::from_bytes(in_bank.data()).ok()
             else {
+                // The delegation record is not present in the account data because the actual account data
+                // has already been extracted from it. Refreshing would reset the account, losing local changes.
                 debug!(
                     pubkey = %pubkey,
-                    "Account is compressed, but the delegation has already been processed (account is delegated)"
+                    data = %format!("{:?}", in_bank.data()),
+                    "Skip refresh for already processed compressed account"
                 );
                 return RefreshDecision::No;
             };
@@ -812,19 +815,19 @@ where
                     owner: record.owner,
                     delegation_slot: record.delegation_slot,
                     lamports: record.lamports,
-                    commit_frequency_ms: 0,
+                    commit_frequency_ms: 0, // TODO(dode): use the actual commit frequency once implemented
                 }),
                 &self.validator_pubkey,
             ) {
                 debug!(
                     pubkey = %pubkey,
-                    "Account is compressed, but the compressed delegation record is not undelegating, refresh it"
+                    "Refresh compressed account since the compressed delegation record is not undelegating"
                 );
                 return RefreshDecision::Yes;
             };
             debug!(
                 pubkey = %pubkey,
-                "Account is compressed, the compressed delegation record is undelegating, do not refresh it"
+                "Skip refresh for compressed account since the compressed delegation record is undelegating"
             );
         } else if in_bank.undelegating() {
             debug!(
