@@ -437,8 +437,8 @@ impl<T: IntentPersister> IntentPersister for Option<T> {
 #[cfg(test)]
 mod tests {
     use magicblock_program::magic_scheduled_base_intent::{
-        CommitAndUndelegate, CommitType, CommittedAccount,
-        MagicIntentBundle, UndelegateType,
+        CommitAndUndelegate, CommitType, CommittedAccount, MagicIntentBundle,
+        UndelegateType,
     };
     use solana_account::Account;
     use solana_hash::Hash;
@@ -632,7 +632,7 @@ mod tests {
         let message = create_test_message(1, commit_only_budle());
         persister.start_base_intent(&message).unwrap();
 
-        let pubkey = message.get_committed_pubkeys().unwrap()[0];
+        let pubkey = message.get_all_committed_pubkeys()[0];
 
         // Update by message
         persister
@@ -671,7 +671,7 @@ mod tests {
         let message = create_test_message(1, commit_only_budle());
         persister.start_base_intent(&message).unwrap();
 
-        let pubkey = message.get_committed_pubkeys().unwrap()[0];
+        let pubkey = message.get_all_committed_pubkeys()[0];
         persister.set_commit_id(1, &pubkey, 100).unwrap();
 
         persister

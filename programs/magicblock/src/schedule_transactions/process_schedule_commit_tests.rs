@@ -238,14 +238,14 @@ fn assert_first_commit(
             assert!(id >= &0);
             assert_eq!(slot, &test_clock.slot);
             assert_eq!(actual_payer, payer);
-            assert_eq!(base_intent.get_committed_pubkeys().unwrap().as_slice(), committees);
+            assert_eq!(intent_bundle.get_all_committed_pubkeys().as_slice(), committees);
             let _instruction = MagicBlockInstruction::ScheduledCommitSent((*id, 0));
             // TODO(edwin) @@@ this fails in CI only with the similar to the below
             //   left: [4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0]
             //  right: [4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
             // See: https://github.com/magicblock-labs/magicblock-validator/actions/runs/18565403532/job/52924982063#step:6:1063
             // assert_eq!(action_sent_transaction.data(0), instruction.try_to_vec().unwrap());
-            assert_eq!(base_intent.is_undelegate(), expected_request_undelegation);
+            assert_eq!(intent_bundle.has_undelegate_intent(), expected_request_undelegation);
         }
     );
 }
@@ -520,7 +520,9 @@ mod tests {
             assert_accepted_actions(&processed_accepted, &payer.pubkey(), 1);
         // Verify the committed pubkey remapped to eATA
         assert_eq!(
-            scheduled[0].intent_bundle.get_committed_pubkeys().unwrap(),
+            scheduled[0]
+                .intent_bundle
+                .get_all_committed_pubkeys(),
             vec![eata_pubkey]
         );
     }
@@ -602,7 +604,9 @@ mod tests {
             assert_accepted_actions(&processed_accepted, &payer.pubkey(), 1);
         // Verify the committed pubkey remapped to eATA
         assert_eq!(
-            scheduled[0].intent_bundle.get_committed_pubkeys().unwrap(),
+            scheduled[0]
+                .intent_bundle
+                .get_all_committed_pubkeys(),
             vec![eata_pubkey]
         );
         // And the intent contains undelegation

@@ -75,15 +75,13 @@ impl BaseIntentCommittor for ChangesetCommittorStub {
             let mut committed_accounts =
                 self.committed_accounts.lock().unwrap();
             base_intents.iter().for_each(|intent| {
-                let intent_committed_accounts = intent.get_committed_accounts();
-                let Some(accounts) = intent_committed_accounts else {
-                    return;
-                };
-
-                accounts.iter().for_each(|account| {
-                    committed_accounts
-                        .insert(account.pubkey, account.account.clone());
-                })
+                intent
+                    .get_all_committed_accounts()
+                    .iter()
+                    .for_each(|account| {
+                        committed_accounts
+                            .insert(account.pubkey, account.account.clone());
+                    })
             })
         }
 

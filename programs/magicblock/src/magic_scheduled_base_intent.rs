@@ -94,58 +94,37 @@ impl ScheduledIntentBundle {
     /// Returns all accounts that will be committed on Base layer,
     /// including the one scheduled for undelegation
     pub fn get_all_committed_accounts(&self) -> Vec<CommittedAccount> {
-        let committed = self.get_commit_intent_accounts();
-        let undelegated = self.get_undelegate_intent_accounts();
-        [committed, undelegated]
-            .into_iter()
-            .filter_map(|el| el)
-            .cloned()
-            .flatten()
-            .collect()
+        self.intent_bundle.get_all_committed_accounts()
     }
 
     /// Returns pubkeys of all accounts that will be committed on Base layer,
     /// including the one scheduled for undelegation
     pub fn get_all_committed_pubkeys(&self) -> Vec<Pubkey> {
-        [
-            self.get_commit_intent_pubkeys(),
-            self.get_undelegate_intent_pubkeys(),
-        ]
-        .into_iter()
-        .filter_map(|el| el)
-        .flatten()
-        .collect()
+        self.intent_bundle.get_all_committed_pubkeys()
     }
 
     /// Return `true` if there're account that will be committed on Base layer
     pub fn has_committed_accounts(&self) -> bool {
-        let has_commit_intent_accounts = self
-            .get_commit_intent_accounts()
-            .and_then(|el| Some(!el.is_empty()))
-            .unwrap_or(false);
-        let has_undelegate_intent_accounts = self
-            .get_undelegate_intent_accounts()
-            .and_then(|el| Some(!el.is_empty()))
-            .unwrap_or(false);
-
-        has_commit_intent_accounts || has_undelegate_intent_accounts
+        self.intent_bundle.has_committed_accounts()
     }
 
     /// Returns `[CommitAndUndelegate]` intent's accounts
     pub fn get_undelegate_intent_accounts(
         &self,
     ) -> Option<&Vec<CommittedAccount>> {
-        Some(
-            self.intent_bundle
-                .commit_and_undelegate
-                .as_ref()?
-                .get_committed_accounts(),
-        )
+        self.intent_bundle.get_undelegate_intent_accounts()
     }
 
     /// Returns `Commit` intent's accounts
     pub fn get_commit_intent_accounts(&self) -> Option<&Vec<CommittedAccount>> {
-        Some(self.intent_bundle.commit.as_ref()?.get_committed_accounts())
+        self.intent_bundle.get_commit_intent_accounts()
+    }
+
+    /// Returns `Commit` intent's accounts
+    pub fn get_commit_intent_accounts_mut(
+        &mut self,
+    ) -> Option<&mut Vec<CommittedAccount>> {
+        self.intent_bundle.get_commit_intent_accounts_mut()
     }
 
     pub fn get_commit_intent_pubkeys(&self) -> Option<Vec<Pubkey>> {
@@ -302,33 +281,64 @@ impl MagicIntentBundle {
         self.commit_and_undelegate.is_some()
     }
 
-    /// Returns all the accounts that will be committed,
-    /// including the ones that will be undelegated as well
-    pub fn get_committed_accounts(&self) -> Option<Vec<CommittedAccount>> {
-        let committed = self
-            .commit
-            .as_ref()
-            .map(|el| el.get_committed_accounts().to_owned());
+    pub fn has_committed_accounts(&self) -> bool {
+        let has_commit_intent_accounts = self
+            .get_commit_intent_accounts()
+            .and_then(|el| Some(!el.is_empty()))
+            .unwrap_or(false);
+        let has_undelegate_intent_accounts = self
+            .get_undelegate_intent_accounts()
+            .and_then(|el| Some(!el.is_empty()))
+            .unwrap_or(false);
 
-        let undelegated = self
-            .commit_and_undelegate
-            .as_ref()
-            .map(|el| el.get_committed_accounts().to_owned());
-
-        match (committed, undelegated) {
-            (None, None) => None,
-            (Some(mut a), Some(b)) => {
-                a.extend(b);
-                Some(a)
-            }
-            (Some(a), None) | (None, Some(a)) => Some(a),
-        }
+        has_commit_intent_accounts || has_undelegate_intent_accounts
     }
 
-    pub fn get_committed_pubkeys(&self) -> Option<Vec<Pubkey>> {
-        self.get_committed_accounts().map(|accounts| {
-            accounts.iter().map(|account| account.pubkey).collect()
-        })
+    /// Returns `[CommitAndUndelegate]` intent's accounts
+    pub fn get_undelegate_intent_accounts(
+        &self,
+    ) -> Option<&Vec<CommittedAccount>> {
+        Some(
+            self.commit_and_undelegate
+                .as_ref()?
+                .get_committed_accounts(),
+        )
+    }
+
+    /// Returns `Commit` intent's accounts
+    pub fn get_commit_intent_accounts(&self) -> Option<&Vec<CommittedAccount>> {
+        Some(self.commit.as_ref()?.get_committed_accounts())
+    }
+
+    /// Returns `Commit` intent's accounts
+    pub fn get_commit_intent_accounts_mut(
+        &mut self,
+    ) -> Option<&mut Vec<CommittedAccount>> {
+        Some(self.commit.as_mut()?.get_committed_accounts_mut())
+    }
+
+    /// Returns all the accounts that will be committed,
+    /// including the ones that will be undelegated as well
+    pub fn get_all_committed_accounts(&self) -> Vec<CommittedAccount> {
+        let committed = self.get_commit_intent_accounts();
+        let undelegated = self.get_undelegate_intent_accounts();
+        [committed, undelegated]
+            .into_iter()
+            .filter_map(|el| el)
+            .cloned()
+            .flatten()
+            .collect()
+    }
+
+    pub fn get_all_committed_pubkeys(&self) -> Vec<Pubkey> {
+        [
+            self.get_commit_intent_pubkeys(),
+            self.get_undelegate_intent_pubkeys(),
+        ]
+        .into_iter()
+        .filter_map(|el| el)
+        .flatten()
+        .collect()
     }
 
     pub fn get_commit_intent_pubkeys(&self) -> Option<Vec<Pubkey>> {
