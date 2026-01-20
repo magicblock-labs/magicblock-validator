@@ -13,6 +13,7 @@ tracing = { workspace = true }
 lru = { workspace = true }
 magicblock-config = { workspace = true }
 magicblock-core = { workspace = true }
+magicblock-sync = { workspace = true }
 parking_lot = { workspace = true }
 magicblock-magic-program-api = { workspace = true }
 magicblock-metrics = { workspace = true }

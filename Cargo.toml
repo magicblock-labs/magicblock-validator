@@ -110,6 +110,7 @@ magicblock-metrics = { path = "./magicblock-metrics" }
 magicblock-processor = { path = "./magicblock-processor" }
 magicblock-program = { path = "./programs/magicblock" }
 magicblock-rpc-client = { path = "./magicblock-rpc-client" }
+magicblock-sync = { path = "../magicblock-sync" }
 magicblock-table-mania = { path = "./magicblock-table-mania" }
 magicblock-task-scheduler = { path = "./magicblock-task-scheduler" }
 magicblock-validator-admin = { path = "./magicblock-validator-admin" }

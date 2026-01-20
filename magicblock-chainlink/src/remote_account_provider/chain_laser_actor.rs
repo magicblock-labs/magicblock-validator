@@ -21,6 +21,7 @@ use magicblock_metrics::metrics::{
     inc_account_subscription_account_updates_count,
     inc_program_subscription_account_updates_count,
 };
+use magicblock_sync::transaction_syncer;
 use solana_account::Account;
 use solana_commitment_config::CommitmentLevel as SolanaCommitmentLevel;
 use solana_pubkey::Pubkey;
@@ -111,6 +112,8 @@ pub struct ChainLaserActor {
     active_subscriptions: StreamMap<usize, LaserStream>,
     /// Active streams for program subscriptions
     program_subscriptions: Option<(HashSet<Pubkey>, LaserStream)>,
+    /// Stream for transaction updates
+    transaction_stream: Option<LaserStream>,
     /// Receives subscribe/unsubscribe messages to this actor
     messages_receiver: mpsc::Receiver<ChainPubsubActorMessage>,
     /// Sends updates for any account subscription that is received via
@@ -187,6 +190,7 @@ impl ChainLaserActor {
             active_subscriptions: Default::default(),
             active_subscription_pubkeys: Default::default(),
             program_subscriptions: Default::default(),
+            transaction_stream: Default::default(),
             subscription_updates_sender,
             commitment,
             abort_sender,
@@ -196,6 +200,8 @@ impl ChainLaserActor {
 
         Ok((me, messages_sender, subscription_updates_receiver))
     }
+
+    fn track_undelegations() {}
 
     #[allow(dead_code)]
     #[instrument(skip(self), fields(client_id = %self.client_id))]
@@ -533,6 +539,26 @@ impl ChainLaserActor {
         let stream = client::subscribe(laser_client_config.clone(), request).0;
         self.program_subscriptions =
             Some((subscribed_programs, Box::pin(stream)));
+    }
+
+    fn setup_transaction_stream(
+        &mut self,
+        commitment: CommitmentLevel,
+        laser_client_config: LaserstreamConfig,
+    ) {
+        if self.transaction_stream.is_some() {
+            trace!("Transaction stream already exists");
+            return;
+        }
+
+        let transactions = transaction_syncer::create_filter();
+        let request = SubscribeRequest {
+            transactions,
+            commitment: Some(commitment.into()),
+            ..Default::default()
+        };
+        let stream = client::subscribe(laser_client_config.clone(), request).0;
+        self.transaction_stream = Some(Box::pin(stream));
     }
 
     /// Handles an update from one of the account data streams.
