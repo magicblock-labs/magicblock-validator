@@ -1122,8 +1122,8 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
             inc_account_fetches_found(fetch_origin, found_cnt);
             inc_account_fetches_not_found(fetch_origin, not_found_cnt);
 
-            let compressed_total =  
-                compressed_found_count + compressed_not_found_count;  
+            let compressed_total =
+                compressed_found_count + compressed_not_found_count;
             if (*photon_client).is_some() && compressed_total > 0 {
                 // Update metrics for successful compressed fetch
                 inc_compressed_account_fetches_success(pubkeys.len() as u64);
@@ -1170,15 +1170,15 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
                 pubkeys.iter().zip(remote_accounts.iter())
             {
                 let requests = {
-                    let mut fetching = match fetching_accounts.lock() {  
-                        Ok(guard) => guard,  
-                        Err(poisoned) => {  
-                            error!(  
+                    let mut fetching = match fetching_accounts.lock() {
+                        Ok(guard) => guard,
+                        Err(poisoned) => {
+                            error!(
                                 "fetching_accounts lock poisoned; continuing with inner state: {poisoned:?}"  
-                            );  
-                            poisoned.into_inner()  
-                        }  
-                    }; 
+                            );
+                            poisoned.into_inner()
+                        }
+                    };
                     // Remove from fetching and get pending requests
                     // Note: the account might have been resolved by subscription update already
                     if let Some((_, requests)) = fetching.remove(pubkey) {

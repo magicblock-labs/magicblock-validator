@@ -381,22 +381,22 @@ where
     C: Cloner,
     P: PhotonClient,
 {
-    owned_by_deleg_compressed  
-       .into_iter()  
-       .map(|(pubkey, mut account, _)| {  
-           let delegation_record =  
-               CompressedDelegationRecord::try_from_slice(account.data())  
-                   .map_err(|err| {  
-                       error!(  
+    owned_by_deleg_compressed
+       .into_iter()
+       .map(|(pubkey, mut account, _)| {
+           let delegation_record =
+               CompressedDelegationRecord::try_from_slice(account.data())
+                   .map_err(|err| {
+                       error!(
                            "Failed to deserialize compressed delegation record for {pubkey}: {err}\nAccount: {:?}",  
-                           account  
-                       );  
-                       ChainlinkError::DelegatedAccountResolutionsFailed(  
-                           format!(  
+                           account
+                       );
+                       ChainlinkError::DelegatedAccountResolutionsFailed(
+                           format!(
                                "Failed to deserialize compressed delegation record for {pubkey}: {err}"  
-                           ),  
-                       )  
-                    })?; 
+                           ),
+                       )
+                    })?;
 
             account.set_compressed(true);
             account.set_lamports(delegation_record.lamports);
