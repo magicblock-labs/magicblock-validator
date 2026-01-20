@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
 use async_trait::async_trait;
 use magicblock_program::magic_scheduled_base_intent::{
@@ -13,7 +13,7 @@ use tracing::error;
 use super::{CommitDiffTask, CommitTask};
 use crate::{
     intent_executor::task_info_fetcher::{
-        TaskInfoFetcher, TaskInfoFetcherError,
+        TaskInfoFetcher, TaskInfoFetcherError, TaskInfoFetcherResult,
     },
     persist::IntentPersister,
     tasks::{
@@ -91,13 +91,46 @@ impl TaskBuilderImpl {
             })
             .collect()
     }
+
+    async fn fetch_commit_nonces<C: TaskInfoFetcher>(
+        task_info_fetcher: &Arc<C>,
+        accounts: &[(bool, CommittedAccount)],
+        min_context_slot: u64,
+    ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>> {
+        let committed_pubkeys = accounts
+            .into_iter()
+            .map(|(_, account)| account.pubkey)
+            .collect::<Vec<_>>();
+
+        task_info_fetcher
+            .fetch_next_commit_ids(&committed_pubkeys, min_context_slot)
+            .await
+    }
+
+    async fn fetch_diffable_accounts<C: TaskInfoFetcher>(
+        task_info_fetcher: &Arc<C>,
+        accounts: &[(bool, CommittedAccount)],
+        min_context_slot: u64,
+    ) -> TaskInfoFetcherResult<HashMap<Pubkey, Account>> {
+        let diffable_pubkeys = accounts
+            .iter()
+            .filter(|(_, account)| {
+                account.account.data.len() > COMMIT_STATE_SIZE_THRESHOLD
+            })
+            .map(|(_, account)| account.pubkey)
+            .collect::<Vec<_>>();
+
+        task_info_fetcher
+            .get_base_accounts(&diffable_pubkeys, min_context_slot)
+            .await
+    }
 }
 
 #[async_trait]
 impl TasksBuilder for TaskBuilderImpl {
     /// Returns [`Task`]s for Commit stage
     async fn commit_tasks<C: TaskInfoFetcher, P: IntentPersister>(
-        commit_id_fetcher: &Arc<C>,
+        task_info_fetcher: &Arc<C>,
         intent_bundle: &ScheduledIntentBundle,
         persister: &Option<P>,
     ) -> TaskBuilderResult<Vec<Box<dyn BaseTask>>> {
@@ -109,47 +142,35 @@ impl TasksBuilder for TaskBuilderImpl {
             intent_bundle.get_commit_intent_accounts().cloned();
         let undelegated_accounts =
             intent_bundle.get_undelegate_intent_accounts().cloned();
+        let flagged_accounts: Vec<_> =
+            [(false, committed_accounts), (true, undelegated_accounts)]
+                .into_iter()
+                .flat_map(|(allow_undelegation, accounts)| {
+                    accounts
+                        .into_iter()
+                        .flatten()
+                        .map(move |account| (allow_undelegation, account))
+                })
+                .collect();
 
         // Get commit nonces and base accounts
-        // TODO(edwin): split into funcs
-        let (commit_ids, base_accounts) = {
-            let mut min_context_slot = 0;
-            let committed_pubkeys =
-                [&committed_accounts, &undelegated_accounts]
-                    .into_iter()
-                    .filter_map(|el| el.as_ref())
-                    .flatten()
-                    .map(|account| {
-                        min_context_slot = std::cmp::max(
-                            min_context_slot,
-                            account.remote_slot,
-                        );
-                        account.pubkey
-                    })
-                    .collect::<Vec<_>>();
-
-            let diffable_pubkeys = [&committed_accounts, &undelegated_accounts]
-                .into_iter()
-                .filter_map(|el| el.as_ref())
-                .flatten()
-                .filter(|account| {
-                    account.account.data.len() > COMMIT_STATE_SIZE_THRESHOLD
-                })
-                .map(|account| account.pubkey)
-                .collect::<Vec<_>>();
-
-            tokio::join!(
-                commit_id_fetcher.fetch_next_commit_ids(
-                    &committed_pubkeys,
-                    min_context_slot
-                ),
-                commit_id_fetcher.get_base_accounts(
-                    diffable_pubkeys.as_slice(),
-                    min_context_slot
-                )
+        let min_context_slot = flagged_accounts
+            .iter()
+            .map(|(_, account)| account.remote_slot)
+            .max()
+            .unwrap_or(0);
+        let (commit_ids, base_accounts) = tokio::join!(
+            Self::fetch_commit_nonces(
+                task_info_fetcher,
+                &flagged_accounts,
+                min_context_slot
+            ),
+            Self::fetch_diffable_accounts(
+                task_info_fetcher,
+                &flagged_accounts,
+                min_context_slot
             )
-        };
-
+        );
         let commit_ids =
             commit_ids.map_err(TaskBuilderError::CommitTasksBuildError)?;
         let mut base_accounts = base_accounts.unwrap_or_else(|err| {
@@ -166,17 +187,9 @@ impl TasksBuilder for TaskBuilderImpl {
                 }
             });
 
-        let tasks: Vec<Box<dyn BaseTask>> = [
-            (false, committed_accounts),
-            (true, undelegated_accounts),
-        ]
+        // Create commit tasks
+        let tasks: Vec<Box<dyn BaseTask>> = flagged_accounts
             .into_iter()
-            .flat_map(|(allow_undelegation, accounts)| {
-                accounts
-                    .into_iter() // Option<Vec<_>> -> 0/1 Vec<_>
-                    .flatten() // Vec<Vec<_>>? only if accounts is Option<impl IntoIterator>; otherwise ignore this variant
-                    .map(move |account| (allow_undelegation, account))
-            })
             .map(|(allow_undelegation, account)| {
                 let commit_id = *commit_ids
                     .get(&account.pubkey)
