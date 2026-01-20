@@ -1,12 +1,13 @@
 use std::{
     collections::HashMap,
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU16, Ordering},
         Arc, Mutex,
     },
 };
 
 use futures_util::stream::FuturesUnordered;
+use magicblock_core::logger::log_trace_warn;
 use magicblock_metrics::metrics::{
     inc_account_subscription_account_updates_count,
     inc_program_subscription_account_updates_count,
@@ -258,12 +259,22 @@ impl ChainPubsubActor {
         match msg {
             ChainPubsubActorMessage::AccountSubscribe { pubkey, response } => {
                 if !is_connected.load(Ordering::SeqCst) {
-                    warn!(pubkey = %pubkey, "Ignoring subscribe request because disconnected");
-                    let _ = response.send(Err(
+                    static SUBSCRIPTION_DURING_DISCONNECT_COUNT: AtomicU16 =
+                        AtomicU16::new(0);
+                    let err =
                         RemoteAccountProviderError::AccountSubscriptionsTaskFailed(
                             format!("Client {client_id} disconnected"),
-                        ),
-                    ));
+                        );
+                    log_trace_warn(
+                        "Ignoring subscribe request because disconnected",
+                        "Ignored subscribe requests because disconnected",
+                        &pubkey,
+                        &err,
+                        1000,
+                        &SUBSCRIPTION_DURING_DISCONNECT_COUNT,
+                    );
+
+                    let _ = response.send(Err(err));
                     return;
                 }
                 let commitment_config = pubsub_client_config.commitment_config;
@@ -286,7 +297,16 @@ impl ChainPubsubActor {
                 response,
             } => {
                 if !is_connected.load(Ordering::SeqCst) {
-                    trace!(pubkey = %pubkey, "Ignoring unsubscribe request because disconnected");
+                    static UNSUBSCRIPTION_DURING_DISCONNECT_COUNT: AtomicU16 =
+                        AtomicU16::new(0);
+                    log_trace_warn(
+                        "Ignoring unsubscribe request because disconnected",
+                        "Ignored unsubscribe requests because disconnected",
+                        &pubkey,
+                        &"Client disconnected",
+                        1000,
+                        &UNSUBSCRIPTION_DURING_DISCONNECT_COUNT,
+                    );
                     send_ok(response, client_id);
                     return;
                 }
@@ -307,12 +327,21 @@ impl ChainPubsubActor {
             }
             ChainPubsubActorMessage::ProgramSubscribe { pubkey, response } => {
                 if !is_connected.load(Ordering::SeqCst) {
-                    warn!(program_id = %pubkey, "Ignoring program subscribe request because disconnected");
-                    let _ = response.send(Err(
+                    static SUBSCRIPTION_DURING_DISCONNECT_COUNT: AtomicU16 =
+                        AtomicU16::new(0);
+                    let err =
                         RemoteAccountProviderError::AccountSubscriptionsTaskFailed(
                             format!("Client {client_id} disconnected"),
-                        ),
-                    ));
+                        );
+                    log_trace_warn(
+                        "Ignoring program subscribe request because disconnected",
+                        "Ignored program subscribe requests because disconnected",
+                        &pubkey,
+                        &"Client disconnected",
+                        1000,
+                        &SUBSCRIPTION_DURING_DISCONNECT_COUNT,
+                    );
+                    let _ = response.send(Err(err));
                     return;
                 }
                 let commitment_config = pubsub_client_config.commitment_config;
@@ -410,7 +439,6 @@ impl ChainPubsubActor {
         {
             Ok(res) => res,
             Err(err) => {
-                error!(error = ?err, "Failed to subscribe to account");
                 Self::abort_and_signal_connection_issue(
                     client_id,
                     subs.clone(),
@@ -537,7 +565,16 @@ impl ChainPubsubActor {
         {
             Ok(res) => res,
             Err(err) => {
-                error!(error = ?err, "Failed to subscribe to program");
+                static SUBSCRIPTION_FAILURE_COUNT: AtomicU16 =
+                    AtomicU16::new(0);
+                log_trace_warn(
+                    "Failed to subscribe to program",
+                    "Failed to subscribe to programs",
+                    &program_pubkey,
+                    &err,
+                    100,
+                    &SUBSCRIPTION_FAILURE_COUNT,
+                );
                 Self::abort_and_signal_connection_issue(
                     client_id,
                     subs.clone(),
