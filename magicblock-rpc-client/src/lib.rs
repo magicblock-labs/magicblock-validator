@@ -491,6 +491,14 @@ impl MagicblockRpcClient {
     }
 
     /// Waits for a transaction to reach processed status
+    #[instrument(
+        skip(self),
+        fields(
+            signature = %signature,
+            blockhash = %recent_blockhash,
+            timeout_ms = timeout.as_millis() as u64,
+        )
+    )]
     pub async fn wait_for_processed_status(
         &self,
         signature: &Signature,
@@ -537,8 +545,8 @@ impl MagicblockRpcClient {
 
             if !blockhash_found && &start.elapsed() < blockhash_valid_timeout {
                 trace!(
-                    "Waiting for blockhash {} to become valid",
-                    recent_blockhash
+                    elapsed_ms = start.elapsed().as_millis() as u64,
+                    "Waiting for blockhash validity"
                 );
                 tokio::time::sleep(Duration::from_millis(400)).await;
                 continue;

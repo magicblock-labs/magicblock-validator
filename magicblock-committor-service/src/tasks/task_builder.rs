@@ -147,7 +147,7 @@ impl TasksBuilder for TaskBuilderImpl {
         let base_accounts = match base_accounts {
             Ok(map) => map,
             Err(err) => {
-                tracing::warn!("Failed to fetch base accounts for CommitDiff (id={}): {}; falling back to CommitState", base_intent.id, err);
+                tracing::warn!(intent_id = base_intent.id, error = ?err, "Failed to fetch base accounts, falling back to CommitState");
                 Default::default()
             }
         };
@@ -157,7 +157,7 @@ impl TasksBuilder for TaskBuilderImpl {
             .iter()
             .for_each(|(pubkey, commit_id) | {
                 if let Err(err) = persister.set_commit_id(base_intent.id, pubkey, *commit_id) {
-                    error!("Failed to persist commit id: {}, for message id: {} with pubkey {}: {}", commit_id, base_intent.id, pubkey, err);
+                    error!(intent_id = base_intent.id, pubkey = %pubkey, error = ?err, "Failed to persist commit id");
                 }
             });
 

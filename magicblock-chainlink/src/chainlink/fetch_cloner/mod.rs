@@ -155,9 +155,9 @@ where
     ) {
         tokio::spawn(async move {
             while let Some(update) = subscription_updates.recv().await {
-                trace!("FetchCloner received subscription update for {} at slot {}",
-                    update.pubkey, update.account.slot());
                 let pubkey = update.pubkey;
+                let slot = update.account.slot();
+                trace!(pubkey = %pubkey, slot, "FetchCloner received subscription update");
 
                 // Process each subscription update concurrently to avoid blocking on delegation
                 // record fetches. This allows multiple updates to be processed in parallel.
@@ -182,9 +182,12 @@ where
                                 }
                             });
                         if let Some(in_bank_slot) = out_of_order_slot {
+                            let update_slot = account.remote_slot();
                             trace!(
-                                "Ignoring out-of-order subscription update for {pubkey}: bank slot {in_bank_slot}, update slot {}",
-                                account.remote_slot()
+                                pubkey = %pubkey,
+                                bank_slot = in_bank_slot,
+                                update_slot,
+                                "Ignoring out-of-order subscription update"
                             );
                             return;
                         }
@@ -195,20 +198,16 @@ where
                             if in_bank.undelegating() {
                                 // We expect the account to still be delegated, but with the delegation
                                 // program owner
-                                debug!("Received update for undelegating account {pubkey} \
-                                in_bank.delegated={}, \
-                                in_bank.owner={}, \
-                                in_bank.remote_slot={}, \
-                                chain.delegated={}, \
-                                chain.owner={}, \
-                                chain.remote_slot={}",
-                                in_bank.delegated(),
-                                in_bank.owner(),
-                                in_bank.remote_slot(),
-                                account.delegated(),
-                                account.owner(),
-                                account.remote_slot()
-                            );
+                                debug!(
+                                    pubkey = %pubkey,
+                                    in_bank_delegated = in_bank.delegated(),
+                                    in_bank_owner = %in_bank.owner(),
+                                    in_bank_slot = in_bank.remote_slot(),
+                                    chain_delegated = account.delegated(),
+                                    chain_owner = %account.owner(),
+                                    chain_slot = account.remote_slot(),
+                                    "Received update for undelegating account"
+                                );
 
                                 // This will only be true in the following case:
                                 // 1. a commit was triggered for the account
@@ -228,13 +227,15 @@ where
                                 }
                             } else if in_bank.owner().eq(&dlp::id()) {
                                 debug!(
-                                "Received update for {pubkey} owned by deleg program not marked as undelegating"
-                            );
+                                    pubkey = %pubkey,
+                                    "Received update for account owned by delegation program but not marked as undelegating"
+                                );
                             }
                         } else {
                             warn!(
-                            "Received update for {pubkey} which is not in bank"
-                        );
+                                pubkey = %pubkey,
+                                "Received update for account not in bank"
+                            );
                         }
 
                         // Determine if delegated to another validator
@@ -253,8 +254,10 @@ where
                                 .await
                             {
                                 error!(
-                                "Failed to unsubscribe from delegated account {pubkey}: {err}"
-                            );
+                                    pubkey = %pubkey,
+                                    error = %err,
+                                    "Failed to unsubscribe from delegated account"
+                                );
                             }
                         }
 
@@ -272,8 +275,10 @@ where
                             .await
                         {
                             error!(
-                            "Failed to clone account {pubkey} into bank: {err}"
-                        );
+                                pubkey = %pubkey,
+                                error = %err,
+                                "Failed to clone account into bank"
+                            );
                         }
                     }
                 });
@@ -345,7 +350,11 @@ where
                                 ) {
                                     Ok(x) => Some(x),
                                     Err(err) => {
-                                        error!("Failed to parse delegation record for {pubkey}: {err}. Not cloning account.");
+                                        error!(
+                                            pubkey = %pubkey,
+                                            error = %err,
+                                            "Failed to parse delegation record"
+                                        );
                                         None
                                     }
                                 };
@@ -354,11 +363,14 @@ where
                             // status on the account
                             if let Some(delegation_record) = delegation_record {
                                 if tracing::enabled!(tracing::Level::TRACE) {
-                                    trace!("Delegation record found for {pubkey}: {delegation_record:?}");
+                                    let delegation_record_display =
+                                        format!("{:?}", delegation_record);
                                     trace!(
-                                        "Resolving delegated account: {pubkey} (remote slot {}, owner: {})",
-                                        account.remote_slot(),
-                                        delegation_record.owner
+                                        pubkey = %pubkey,
+                                        slot = account.remote_slot(),
+                                        owner = %delegation_record.owner,
+                                        deleg_record = %delegation_record_display,
+                                        "Resolving delegated account"
                                     );
                                 }
 
@@ -368,26 +380,8 @@ where
                                 );
 
                                 // For accounts delegated to us, always unsubscribe from the delegated account
-                                // and subscribe to the original owner program for undelegation update resilience
                                 if account.delegated() {
                                     subs_to_remove.insert(pubkey);
-
-                                    // Subscribe to the original owner program for undelegation update resilience
-                                    // Fire-and-forget to avoid blocking subscription updates
-                                    let provider =
-                                        self.remote_account_provider.clone();
-                                    let owner = delegation_record.owner;
-                                    tokio::spawn(async move {
-                                        if let Err(err) = provider
-                                            .subscribe_program(owner)
-                                            .await
-                                        {
-                                            warn!(
-                                                "Failed to subscribe to owner program {} for account {}: {}",
-                                                owner, pubkey, err
-                                            );
-                                        }
-                                    });
                                 }
 
                                 (
@@ -417,11 +411,19 @@ where
                     }
                     // In case of errors fetching the delegation record we cannot clone the account
                     Ok(Err(err)) => {
-                        error!("failed to fetch delegation record for {pubkey}: {err}. not cloning account.");
+                        error!(
+                            pubkey = %pubkey,
+                            error = %err,
+                            "Failed to fetch delegation record"
+                        );
                         (None, None)
                     }
                     Err(err) => {
-                        error!("failed to fetch delegation record for {pubkey}: {err}. not cloning account.");
+                        error!(
+                            pubkey = %pubkey,
+                            error = %err,
+                            "Failed to fetch delegation record"
+                        );
                         (None, None)
                     }
                 }
@@ -433,7 +435,7 @@ where
         } else {
             // This should not happen since we call this method with sub updates which always hold
             // a fresh remote account
-            error!("BUG: Received subscription update for {pubkey} without fresh account: {account:?}");
+            error!(pubkey = %pubkey, account = ?account, "BUG: Received subscription update without fresh account");
             (None, None)
         }
     }
@@ -500,6 +502,7 @@ where
     /// - **slot**: optional slot to use as minimum context slot for the accounts being cloned
     ///
     /// NOTE: accounts fetched here have not been found in the bank
+    #[instrument(skip(self, pubkeys, mark_empty_if_not_found, program_ids))]
     async fn fetch_and_clone_accounts(
         &self,
         pubkeys: &[Pubkey],
@@ -509,13 +512,8 @@ where
         program_ids: Option<&[Pubkey]>,
     ) -> ChainlinkResult<FetchAndCloneResult> {
         if tracing::enabled!(tracing::Level::TRACE) {
-            let pubkeys = pubkeys
-                .iter()
-                .map(|p| p.to_string())
-                .collect::<Vec<_>>()
-                .join(", ");
-
-            trace!("Fetching and cloning accounts: {pubkeys}");
+            let pubkeys_count = pubkeys.len();
+            trace!(count = pubkeys_count, "Fetching and cloning accounts");
         }
 
         // We keep all existing subscriptions including delegation records and program data
@@ -543,7 +541,10 @@ where
         // Fetching accounts creates subscriptions for all requested pubkeys
         new_subs.extend(pubkeys.iter().copied());
 
-        trace!("Fetched {accs:?}");
+        if tracing::enabled!(tracing::Level::TRACE) {
+            let accs_count = accs.len();
+            trace!(count = accs_count, "Fetched accounts");
+        }
 
         let ClassifiedAccounts {
             not_found,
@@ -704,7 +705,12 @@ where
         fetch_origin: AccountFetchOrigin,
     ) -> RefreshDecision {
         if in_bank.undelegating() {
-            debug!("Fetching undelegating account {pubkey}. delegated={}, undelegating={}", in_bank.delegated(), in_bank.undelegating());
+            debug!(
+                pubkey = %pubkey,
+                delegated = in_bank.delegated(),
+                undelegating = in_bank.undelegating(),
+                "Fetching undelegating account"
+            );
             let deleg_record = self
                 .fetch_and_parse_delegation_record(
                     *pubkey,
@@ -754,6 +760,7 @@ where
     ///
     /// Note: since we fetch each account only once in parallel, we also avoid fetching
     /// the same delegation record in parallel.
+    #[instrument(skip(self, pubkeys, mark_empty_if_not_found, program_ids))]
     pub async fn fetch_and_clone_accounts_with_dedup(
         &self,
         pubkeys: &[Pubkey],
@@ -770,12 +777,8 @@ where
             .filter(|p| !self.blacklisted_accounts.contains(p))
             .collect::<Vec<_>>();
         if tracing::enabled!(tracing::Level::TRACE) {
-            let pubkeys_str = pubkeys
-                .iter()
-                .map(|p| p.to_string())
-                .collect::<Vec<_>>()
-                .join(", ");
-            trace!("Fetching and cloning accounts with dedup: {pubkeys_str}");
+            let count = pubkeys.len();
+            trace!(count, "Fetching and cloning accounts with dedup");
         }
 
         let mut await_pending = vec![];
@@ -798,7 +801,10 @@ where
                 {
                     Ok(decision) => decision,
                     Err(_timeout) => {
-                        warn!("Timeout checking if account {pubkey} is still undelegating after 5 seconds. Treating as not needing refresh.");
+                        warn!(
+                            pubkey = %pubkey,
+                            "Timeout checking if account is still undelegating after 5 seconds"
+                        );
                         RefreshDecision::No
                     }
                 };
@@ -806,7 +812,10 @@ where
                 match decision {
                     RefreshDecision::Yes
                     | RefreshDecision::YesAndMarkEmptyIfNotFound => {
-                        debug!("Account {pubkey} completed undelegation which we missed and is fetched again");
+                        debug!(
+                            pubkey = %pubkey,
+                            "Account completed undelegation which was missed and is fetched again"
+                        );
                         metrics::inc_unstuck_undelegation_count();
                         if let RefreshDecision::YesAndMarkEmptyIfNotFound =
                             decision
@@ -819,11 +828,13 @@ where
                         if tracing::enabled!(tracing::Level::TRACE) {
                             let undelegating = account_in_bank.undelegating();
                             let delegated = account_in_bank.delegated();
-                            let owner = account_in_bank.owner().to_string();
-                            trace!("Account {pubkey} found in bank in valid state, no fetch needed \
-                                    undelegating = {undelegating}, \
-                                    delegated = {delegated}, \
-                                    owner={owner}"
+                            let owner = account_in_bank.owner();
+                            trace!(
+                                pubkey = %pubkey,
+                                undelegating,
+                                delegated,
+                                owner = %owner,
+                                "Account found in bank in valid state, no fetch needed"
                             );
                         }
                         in_bank.push(*pubkey);
@@ -900,7 +911,7 @@ where
                 if let Err(err) = receiver
                     .await
                     .inspect_err(|err| {
-                        warn!("FetchCloner::clone_accounts - RecvError occurred while awaiting account {}: {err:?}. This indicates the account fetch sender was dropped without sending a value.", pubkey);
+                        warn!(pubkey = %pubkey, error = ?err, "FetchCloner::clone_accounts - RecvError awaiting account, sender dropped without sending value");
                     })
                 {
                     // The sender was dropped, likely due to an error in the other request
@@ -958,7 +969,12 @@ where
         let bank = self.accounts_bank.clone();
         let fetch_count = self.fetch_count.clone();
         task::spawn(async move {
-            trace!("Fetching account {pubkey} with companion {companion_pubkey} at slot {slot}");
+            trace!(
+                pubkey = %pubkey,
+                companion = %companion_pubkey,
+                slot,
+                "Fetching account with companion"
+            );
 
             // Increment fetch counter for testing deduplication (2 accounts: pubkey + delegation_record_pubkey)
             fetch_count.fetch_add(2, Ordering::Relaxed);
@@ -1072,11 +1088,12 @@ where
     /// Subscribe to updates for a specific account
     /// This is typically used when an account is about to be undelegated
     /// and we need to start watching for changes
+    #[instrument(skip(self))]
     pub async fn subscribe_to_account(
         &self,
         pubkey: &Pubkey,
     ) -> ChainlinkResult<()> {
-        trace!("Subscribing to account: {pubkey}");
+        trace!(pubkey = %pubkey, "Subscribing to account");
 
         self.remote_account_provider
             .subscribe(pubkey)
@@ -1106,6 +1123,7 @@ where
 
     /// Best-effort airdrop helper: if the account doesn't exist in the bank or has 0 lamports,
     /// create/overwrite it as a plain system account with the provided lamports using the cloner path.
+    #[instrument(skip(self))]
     pub async fn airdrop_account_if_empty(
         &self,
         pubkey: Pubkey,
@@ -1123,8 +1141,9 @@ where
         let account =
             AccountSharedData::new(lamports, 0, &system_program::id());
         debug!(
-            "Auto-airdropping {} lamports to new/empty account {}",
-            lamports, pubkey
+            pubkey = %pubkey,
+            lamports,
+            "Auto-airdropping account"
         );
         let _sig = self
             .cloner

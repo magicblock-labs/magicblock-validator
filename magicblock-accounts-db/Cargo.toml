@@ -26,6 +26,7 @@ magicblock-core = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+test-kit = { workspace = true }
 
 [features]
 default = []

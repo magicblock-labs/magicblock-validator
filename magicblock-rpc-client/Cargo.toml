@@ -24,7 +24,10 @@ solana-hash = { workspace = true }
 solana-instruction = { workspace = true }
 solana-pubkey = { workspace = true }
 solana-signature = { workspace = true }
-solana-address-lookup-table-interface = { workspace = true }
+solana-address-lookup-table-interface = { workspace = true, features = [
+  "bincode",
+  "bytemuck",
+] }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 

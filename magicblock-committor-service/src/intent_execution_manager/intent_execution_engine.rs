@@ -13,7 +13,7 @@ use tokio::{
     },
     task::JoinHandle,
 };
-use tracing::{error, info, trace, warn};
+use tracing::{error, info, instrument, trace, warn};
 
 use crate::{
     intent_execution_manager::{
@@ -133,6 +133,7 @@ where
     /// 1. Handles & schedules incoming intents
     /// 2. Finds available executor
     /// 3. Spawns execution of scheduled intent
+    #[instrument(skip(self, result_sender))]
     async fn main_loop(
         mut self,
         result_sender: broadcast::Sender<BroadcastedIntentExecutionResult>,
@@ -141,11 +142,11 @@ where
             let intent = match self.next_scheduled_intent().await {
                 Ok(value) => value,
                 Err(IntentExecutionManagerError::ChannelClosed) => {
-                    info!("Channel closed, exiting IntentExecutionEngine::main_loop");
+                    info!("Channel closed, exiting");
                     break;
                 }
                 Err(IntentExecutionManagerError::DBError(err)) => {
-                    error!("Failed to fetch intent from db: {:?}", err);
+                    error!(error = ?err, "Failed to fetch intent");
                     break;
                 }
             };
@@ -153,7 +154,7 @@ where
                 // We couldn't pick up intent for execution due to:
                 // 1. All executors are currently busy
                 // 2. All intents are blocked and none could be executed at the moment
-                trace!("Could not schedule any intents");
+                trace!("No intents available");
                 continue;
             };
 
@@ -187,6 +188,7 @@ where
     }
 
     /// Returns [`ScheduledBaseIntentWrapper`] or None if all intents are blocked
+    #[instrument(skip(self))]
     async fn next_scheduled_intent(
         &mut self,
     ) -> Result<Option<ScheduledBaseIntentWrapper>, IntentExecutionManagerError>
@@ -203,7 +205,7 @@ where
             if num_blocked_intents < SCHEDULER_CAPACITY {
                 true
             } else {
-                warn!("Scheduler capacity exceeded: {}", num_blocked_intents);
+                warn!(blocked_count = num_blocked_intents, "Capacity exceeded");
                 false
             }
         };
@@ -216,9 +218,9 @@ where
             biased;
             Some(result) = running_executors.next() => {
                 if let Err(err) = result {
-                    error!("Executor failed to complete: {}", err);
+                    error!(error = ?err, "Executor failed");
                 };
-                trace!("Worker executed BaseIntent, fetching new available one");
+                trace!("Worker executed intent, fetching new available one");
                 self.inner.lock().expect(POISONED_INNER_MSG).pop_next_scheduled_intent()
             },
             result = Self::get_new_intent(receiver, db), if can_receive() => {
@@ -264,6 +266,7 @@ where
     }
 
     /// Wrapper on [`IntentExecutor`] that handles its results and drops execution permit
+    #[instrument(skip(executor, persister, inner_scheduler, execution_permit, result_sender), fields(intent_id = intent.id, trigger_type = ?intent.trigger_type))]
     async fn execute(
         mut executor: E,
         persister: Option<P>,
@@ -277,7 +280,7 @@ where
         // Execute an Intent
         let result = executor.execute(intent.inner.clone(), persister).await;
         let _ = result.inner.as_ref().inspect_err(|err| {
-            error!("Failed to execute BaseIntent. id: {}. {}", intent.id, err)
+            error!(intent_id = intent.id, error = ?err, "Execution failed");
         });
 
         // Record metrics after execution
@@ -290,7 +293,7 @@ where
             result,
         );
         if let Err(err) = result_sender.send(broadcasted_result) {
-            warn!("No result listeners of intent execution: {}", err);
+            warn!(error = ?err, "No result listeners");
         }
 
         // Remove executed task from Scheduler to unblock other intents
@@ -311,7 +314,7 @@ where
             // We assume that this case is highly unlikely since it would mean:
             // user redelegates amd reaches current commit id faster than we execute transactions below
             if let Err(err) = executor.cleanup().await {
-                error!("Failed to cleanup after intent: {}", err);
+                error!(error = ?err, "Cleanup failed");
             }
         });
 
@@ -339,20 +342,14 @@ where
 
         // Loki alerts
         if intent_execution_secs >= EXECUTION_TIME_THRESHOLD {
-            info!(
-                "Intent took too long to execute: {}s. {:?}",
-                intent_execution_secs, result
-            );
+            info!(duration_secs = intent_execution_secs, result = ?result, "Execution slow");
         } else {
-            trace!("Seconds took to execute intent: {}", intent_execution_secs);
+            trace!(duration_secs = intent_execution_secs, result = ?result, "Execution time");
         }
 
         // Alert
         if intent.is_undelegate() && result.is_err() {
-            warn!(
-                "Intent execution resulted in stuck accounts: {:?}",
-                intent.get_committed_pubkeys()
-            );
+            warn!(stuck_accounts = ?intent.get_committed_pubkeys(), "Undelegate execution failed, accounts may be stuck");
         }
     }
 }
@@ -388,6 +385,7 @@ mod tests {
             IntentExecutionResult,
         },
         persist::IntentPersisterImpl,
+        test_utils,
         transaction_preparator::delivery_preparator::BufferExecutionError,
     };
 
@@ -402,6 +400,8 @@ mod tests {
         mpsc::Sender<ScheduledBaseIntentWrapper>,
         MockIntentExecutionEngine,
     ) {
+        test_utils::init_test_logger();
+
         let (sender, receiver) = mpsc::channel(1000);
 
         let db = Arc::new(DummyDB::new());
@@ -633,7 +633,7 @@ mod tests {
             max_observed,
             MAX_EXECUTORS
         );
-        println!("max_observed: {}", max_observed);
+        tracing::info!(max_observed, "Concurrency observed");
         // Likely even max_observed == 50
         assert!(
             max_observed > 1,

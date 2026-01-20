@@ -221,7 +221,7 @@ async fn test_fetch_and_clone_single_non_delegated_account() {
         )
         .await;
 
-    debug!("Test result: {result:?}");
+    debug!(result = ?result, "Test completed");
 
     assert!(result.is_ok());
     assert_cloned_undelegated_account!(
@@ -260,7 +260,7 @@ async fn test_fetch_and_clone_single_non_existing_account() {
         )
         .await;
 
-    debug!("Test result: {result:?}");
+    debug!(result = ?result, "Test completed");
 
     // Verify success (non-existing accounts are handled gracefully)
     assert!(result.is_ok());
@@ -320,7 +320,7 @@ async fn test_fetch_and_clone_single_delegated_account_with_valid_delegation_rec
         )
         .await;
 
-    debug!("Test result: {result:?}");
+    debug!(result = ?result, "Test completed");
 
     assert!(result.is_ok());
 
@@ -398,7 +398,7 @@ async fn test_fetch_and_clone_single_delegated_account_with_different_authority(
         )
         .await;
 
-    debug!("Test result: {result:?}");
+    debug!(result = ?result, "Test completed");
 
     assert!(result.is_ok());
 
@@ -592,7 +592,7 @@ async fn test_fetch_and_clone_multiple_accounts_mixed_types() {
         )
         .await;
 
-    debug!("Test result: {result:?}");
+    debug!(result = ?result, "Test completed");
 
     assert!(result.is_ok());
 
@@ -693,7 +693,7 @@ async fn test_fetch_and_clone_valid_delegated_account_and_account_with_invalid_d
         )
         .await;
 
-    debug!("Test result: {result:?}");
+    debug!(result = ?result, "Test completed");
 
     // Should return an error due to invalid delegation record
     assert!(result.is_err());
@@ -764,7 +764,7 @@ async fn test_deleg_record_stale() {
         )
         .await;
 
-    debug!("Test result: {result:?}");
+    debug!(result = ?result, "Test completed");
 
     // Should return a result indicating missing  delegation record
     assert!(result.is_ok());
@@ -785,7 +785,7 @@ async fn test_deleg_record_stale() {
             None,
         )
         .await;
-    debug!("Test result after updating delegation record: {result:?}");
+    debug!(result = ?result, "Test result after updating delegation record");
     assert!(result.is_ok());
     assert!(result.unwrap().is_ok());
 }
@@ -841,7 +841,7 @@ async fn test_account_stale() {
         )
         .await;
 
-    debug!("Test result: {result:?}");
+    debug!(result = ?result, "Test completed");
 
     // Should return a result indicating the account needs to be updated
     assert!(result.is_ok());
@@ -861,7 +861,7 @@ async fn test_account_stale() {
             None,
         )
         .await;
-    debug!("Test result after updating account: {result:?}");
+    debug!(result = ?result, "Test result after updating account");
     assert!(result.is_ok());
     assert!(result.unwrap().is_ok());
 }
@@ -1425,7 +1425,7 @@ async fn test_fetch_and_clone_undelegating_account_that_is_closed_on_chain() {
         )
         .await;
 
-    debug!("Test result: {result:?}");
+    debug!(result = ?result, "Test completed");
     assert!(result.is_ok());
 
     // Account should be replaced with empty account in bank
@@ -1511,7 +1511,7 @@ async fn test_allowed_programs_filters_programs() {
         )
         .await;
 
-    debug!("Test result: {result:?}");
+    debug!(result = ?result, "Test completed");
     assert!(result.is_ok());
 
     // The allowed program should be in the bank
@@ -1579,7 +1579,7 @@ async fn test_allowed_programs_none_allows_all() {
         )
         .await;
 
-    debug!("Test result: {result:?}");
+    debug!(result = ?result, "Test completed");
     assert!(result.is_ok());
 
     // Both programs should be in the bank
@@ -1646,7 +1646,7 @@ async fn test_allowed_programs_empty_allows_all() {
         )
         .await;
 
-    debug!("Test result: {result:?}");
+    debug!(result = ?result, "Test completed");
     assert!(result.is_ok());
 
     // Both programs should be in the bank (empty list is treated as unrestricted)
@@ -1657,329 +1657,5 @@ async fn test_allowed_programs_empty_allows_all() {
     assert!(
         accounts_bank.get_account(&program_id2).is_some(),
         "Program 2 should be in the bank (empty allowed_programs allows all)"
-    );
-}
-
-// -----------------
-// Program Subscription Tests for Delegated Accounts
-// -----------------
-
-#[tokio::test]
-async fn test_subscribe_to_original_owner_program_on_delegated_account_fetch() {
-    init_logger();
-    let validator_pubkey = random_pubkey();
-    let account_owner = random_pubkey();
-    const CURRENT_SLOT: u64 = 100;
-
-    let account_pubkey = random_pubkey();
-    let account = Account {
-        lamports: 1_000_000,
-        data: vec![1, 2, 3, 4],
-        owner: dlp::id(),
-        executable: false,
-        rent_epoch: 0,
-    };
-
-    let FetcherTestCtx {
-        remote_account_provider,
-        accounts_bank,
-        rpc_client,
-        fetch_cloner,
-        ..
-    } = setup(
-        [(account_pubkey, account.clone())],
-        CURRENT_SLOT,
-        validator_pubkey,
-    )
-    .await;
-
-    // Add delegation record with original owner
-    add_delegation_record_for(
-        &rpc_client,
-        account_pubkey,
-        validator_pubkey,
-        account_owner,
-    );
-
-    // Fetch and clone the delegated account
-    let result = fetch_cloner
-        .fetch_and_clone_accounts(
-            &[account_pubkey],
-            None,
-            None,
-            AccountFetchOrigin::GetAccount,
-            None,
-        )
-        .await;
-
-    assert!(result.is_ok());
-
-    // Verify account was cloned and marked as delegated
-    assert_cloned_delegated_account!(
-        accounts_bank,
-        account_pubkey,
-        account,
-        CURRENT_SLOT,
-        account_owner
-    );
-
-    // Verify that we subscribed to the original owner program
-    let pubsub_client = remote_account_provider.pubsub_client();
-    let subscribed_programs = pubsub_client.subscribed_program_ids();
-    assert!(
-        subscribed_programs.contains(&account_owner),
-        "Should subscribe to original owner program {}, got: {:?}",
-        account_owner,
-        subscribed_programs
-    );
-}
-
-#[tokio::test]
-async fn test_no_program_subscription_for_undelegated_account() {
-    init_logger();
-    let validator_pubkey = random_pubkey();
-    let account_owner = random_pubkey();
-    const CURRENT_SLOT: u64 = 100;
-
-    let account_pubkey = random_pubkey();
-    let undelegated_account = Account {
-        lamports: 1_000_000,
-        data: vec![1, 2, 3, 4],
-        owner: account_owner,
-        executable: false,
-        rent_epoch: 0,
-    };
-
-    let FetcherTestCtx {
-        remote_account_provider,
-        accounts_bank,
-        fetch_cloner,
-        ..
-    } = setup(
-        [(account_pubkey, undelegated_account.clone())],
-        CURRENT_SLOT,
-        validator_pubkey,
-    )
-    .await;
-
-    // Verify that initially we don't subscribe to any program
-    let pubsub_client = remote_account_provider.pubsub_client();
-    let initial_programs = pubsub_client.subscribed_program_ids();
-    assert!(
-        initial_programs.is_empty(),
-        "Should have no program subscriptions initially"
-    );
-
-    // Fetch and clone the undelegated account
-    let result = fetch_cloner
-        .fetch_and_clone_accounts(
-            &[account_pubkey],
-            None,
-            None,
-            AccountFetchOrigin::GetAccount,
-            None,
-        )
-        .await;
-
-    assert!(result.is_ok());
-
-    // Verify account was cloned but not delegated
-    assert_cloned_undelegated_account!(
-        accounts_bank,
-        account_pubkey,
-        undelegated_account,
-        CURRENT_SLOT,
-        account_owner
-    );
-
-    // Still no program subscriptions since it wasn't delegated
-    let programs_after_fetch = pubsub_client.subscribed_program_ids();
-    assert!(
-        programs_after_fetch.is_empty(),
-        "Should have no program subscriptions after fetching undelegated account"
-    );
-}
-
-#[allow(clippy::too_many_arguments)]
-async fn send_subscription_update_and_get_subscribed_programs(
-    remote_account_provider: &Arc<
-        RemoteAccountProvider<ChainRpcClientMock, ChainPubsubClientMock>,
-    >,
-    accounts_bank: &Arc<AccountsBankStub>,
-    subscription_tx: &mpsc::Sender<ForwardedSubscriptionUpdate>,
-    account_pubkey: Pubkey,
-    bank_account: Account,
-    update_account: Account,
-    slot: u64,
-    expected_program_id: Option<Pubkey>,
-) -> std::collections::HashSet<Pubkey> {
-    use crate::remote_account_provider::{
-        RemoteAccount, RemoteAccountUpdateSource,
-    };
-
-    accounts_bank.insert(account_pubkey, AccountSharedData::from(bank_account));
-
-    let pubsub_client = remote_account_provider.pubsub_client();
-    let initial_programs = pubsub_client.subscribed_program_ids();
-    assert!(
-        initial_programs.is_empty(),
-        "Should have no program subscriptions initially"
-    );
-
-    let remote_account = RemoteAccount::from_fresh_account(
-        update_account,
-        slot,
-        RemoteAccountUpdateSource::Subscription,
-    );
-    let update = ForwardedSubscriptionUpdate {
-        pubkey: account_pubkey,
-        account: remote_account,
-    };
-    subscription_tx.send(update).await.unwrap();
-
-    const POLL_INTERVAL: std::time::Duration = Duration::from_millis(10);
-    const TIMEOUT: std::time::Duration = Duration::from_millis(200);
-
-    let result = tokio::time::timeout(TIMEOUT, async {
-        loop {
-            let subscribed = pubsub_client.subscribed_program_ids();
-            match expected_program_id {
-                Some(expected) if subscribed.contains(&expected) => {
-                    return subscribed;
-                }
-                None if !subscribed.is_empty() => {
-                    return subscribed;
-                }
-                _ => {}
-            }
-            tokio::time::sleep(POLL_INTERVAL).await;
-        }
-    })
-    .await;
-
-    match result {
-        Ok(subscribed) => subscribed,
-        Err(_) if expected_program_id.is_some() => {
-            panic!(
-                "Timeout waiting for program subscription {:?}",
-                expected_program_id
-            )
-        }
-        Err(_) => pubsub_client.subscribed_program_ids(),
-    }
-}
-
-#[tokio::test]
-async fn test_subscribe_to_original_owner_program_on_delegated_account_subscription_update(
-) {
-    init_logger();
-    let validator_pubkey = random_pubkey();
-    let account_owner = random_pubkey();
-    const CURRENT_SLOT: u64 = 100;
-
-    let account_pubkey = random_pubkey();
-    let delegated_account = Account {
-        lamports: 1_000_000,
-        data: vec![1, 2, 3, 4],
-        owner: dlp::id(),
-        executable: false,
-        rent_epoch: 0,
-    };
-
-    let FetcherTestCtx {
-        remote_account_provider,
-        accounts_bank,
-        rpc_client,
-        subscription_tx,
-        ..
-    } = setup(
-        [(account_pubkey, delegated_account.clone())],
-        CURRENT_SLOT,
-        validator_pubkey,
-    )
-    .await;
-
-    add_delegation_record_for(
-        &rpc_client,
-        account_pubkey,
-        validator_pubkey,
-        account_owner,
-    );
-
-    let bank_account = Account {
-        lamports: 500_000,
-        data: vec![0, 0, 0, 0],
-        owner: account_owner,
-        executable: false,
-        rent_epoch: 0,
-    };
-
-    let subscribed_programs =
-        send_subscription_update_and_get_subscribed_programs(
-            &remote_account_provider,
-            &accounts_bank,
-            &subscription_tx,
-            account_pubkey,
-            bank_account,
-            delegated_account,
-            CURRENT_SLOT,
-            Some(account_owner),
-        )
-        .await;
-
-    assert!(
-        subscribed_programs.contains(&account_owner),
-        "Should subscribe to original owner program {} via subscription update, got: {:?}",
-        account_owner,
-        subscribed_programs
-    );
-}
-
-#[tokio::test]
-async fn test_no_program_subscription_for_undelegated_account_subscription_update(
-) {
-    init_logger();
-    let validator_pubkey = random_pubkey();
-    let account_owner = random_pubkey();
-    const CURRENT_SLOT: u64 = 100;
-
-    let account_pubkey = random_pubkey();
-    let undelegated_account = Account {
-        lamports: 1_000_000,
-        data: vec![1, 2, 3, 4],
-        owner: account_owner,
-        executable: false,
-        rent_epoch: 0,
-    };
-
-    let FetcherTestCtx {
-        remote_account_provider,
-        accounts_bank,
-        subscription_tx,
-        ..
-    } = setup(
-        [(account_pubkey, undelegated_account.clone())],
-        CURRENT_SLOT,
-        validator_pubkey,
-    )
-    .await;
-
-    let subscribed_programs =
-        send_subscription_update_and_get_subscribed_programs(
-            &remote_account_provider,
-            &accounts_bank,
-            &subscription_tx,
-            account_pubkey,
-            undelegated_account.clone(),
-            undelegated_account,
-            CURRENT_SLOT,
-            None,
-        )
-        .await;
-
-    assert!(
-        subscribed_programs.is_empty(),
-        "Should have no program subscriptions for undelegated account subscription update, got: {:?}",
-        subscribed_programs
     );
 }

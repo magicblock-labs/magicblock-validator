@@ -25,7 +25,7 @@ use solana_svm::transaction_processor::{
     TransactionProcessingConfig, TransactionProcessingEnvironment,
 };
 use tokio::{runtime::Builder, sync::mpsc::Sender};
-use tracing::{info, warn};
+use tracing::{info, instrument, warn};
 
 use crate::{
     builtins::BUILTINS,
@@ -134,6 +134,7 @@ impl TransactionExecutor {
     }
 
     #[allow(clippy::await_holding_lock)]
+    #[instrument(skip(self), fields(executor_id = self.id))]
     async fn run(mut self) {
         let mut guard = self.sync.read();
         let mut block_updated = self.block.subscribe();
@@ -165,7 +166,7 @@ impl TransactionExecutor {
                 else => break,
             }
         }
-        info!("Transaction executor {} terminated", self.id);
+        info!("Executor terminated");
     }
 
     fn transition_to_new_slot(&mut self) {
@@ -201,7 +202,7 @@ impl TransactionExecutor {
             return;
         };
         if let Err(e) = account.serialize_data(data) {
-            warn!("Failed to serialize sysvar: {e}");
+            warn!(?e, "Failed to serialize sysvar: {}");
             return;
         }
         let _ = self.accountsdb.insert_account(&slot_hashes::ID, &account);
