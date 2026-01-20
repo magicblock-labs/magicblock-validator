@@ -326,12 +326,6 @@ where
         committed_pubkeys: &[Pubkey],
         strategy: &mut TransactionStrategy,
     ) -> Result<TransactionStrategy, TaskBuilderError> {
-        // TODO(dode): Handle cases where some tasks are compressed and some are not
-        let compressed = strategy
-            .optimized_tasks
-            .iter()
-            .any(|task| task.is_compressed());
-
         let tasks_and_metas: Vec<_> = strategy
             .optimized_tasks
             .iter_mut()
@@ -362,7 +356,7 @@ where
             .fetch_next_commit_ids(
                 committed_pubkeys,
                 min_context_slot,
-                compressed,
+                strategy.compressed,
             )
             .await
             .map_err(TaskBuilderError::CommitTasksBuildError)?;
