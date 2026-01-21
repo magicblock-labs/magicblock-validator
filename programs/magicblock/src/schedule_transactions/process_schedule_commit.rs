@@ -142,6 +142,16 @@ pub(crate) fn process_schedule_commit(
             return Err(InstructionError::InvalidAccountData);
         }
 
+        // Prevent ephemeral accounts from being committed to base chain
+        if acc.borrow().ephemeral() {
+            ic_msg!(
+                invoke_context,
+                "ScheduleCommit ERR: account {} is ephemeral and cannot be committed to base chain",
+                acc_pubkey
+            );
+            return Err(InstructionError::InvalidAccountData);
+        }
+
         {
             let is_delegated = acc.borrow().delegated();
 
