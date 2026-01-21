@@ -11,7 +11,7 @@ on:
     types: [opened, reopened, synchronize, ready_for_review]
 
 jobs:
-  # 1. Calcolo della directory Target Globale
+  # 1. Compute shared global target directory (per branch)
   prepare-env:
     runs-on: self-hosted
     outputs:
@@ -19,26 +19,26 @@ jobs:
     steps:
       - id: calc
         run: |
-          # Sostituisce gli slash nel nome branch con trattini
+          # Replace slashes in branch name to make it filesystem-safe
           SAFE_BRANCH=$(echo "${{ github.ref_name }}" | tr '/' '-')
-          # Definisce il path assoluto condiviso
+          # Define the global shared target directory for this repo + branch
           TARGET_DIR="/var/lib/gh-runners/global-targets/${{ github.event.repository.name }}-${SAFE_BRANCH}"
           mkdir -p "$TARGET_DIR"
           echo "dir=$TARGET_DIR" >> $GITHUB_OUTPUT
 
-  # 2. FASE DI BUILD MONOLITICA (Con Internet)
+  # 2. MONOLITHIC BUILD PHASE (with Internet)
   build-everything:
     needs: prepare-env
     runs-on: self-hosted
     env:
-      # SOVRASCRITTURE RISPETTO AL RUNNER .ENV
+      # Override runner defaults
       CARGO_TARGET_DIR: ${{ needs.prepare-env.outputs.target_dir }}
-      # Disabilitiamo sccache per favorire l'incrementale locale (più veloce su disco)
+      # Disable sccache to favor local incremental builds on disk
       RUSTC_WRAPPER: ""
       RUSTFLAGS: ""
-      # Attiviamo l'incrementale per build rapide su modifiche piccole
+      # Enable incremental builds for faster small changes
       CARGO_INCREMENTAL: 1
-      # Usiamo 30 core (invece dei 4 di default) perché giriamo da soli
+      # Use many cores because this job runs alone on the runner
       CARGO_BUILD_JOBS: 30
     steps:
       - uses: actions/checkout@v5
@@ -47,24 +47,46 @@ jobs:
 
       - name: Build Everything & Pre-fetch dependencies
         run: |
-          # 1. Build SBF (Programmi Solana)
+          # 1. Build SBF (Solana programs) for integration tests
           make -C test-integration programs
           
-          # 2. Build Binaries & Test Runner
+          # 2. Build binaries & test runner
           cargo build --bins --tests
           
-          # 3. Fast Checks (Format, Lint, Unit)
-          # Eseguiamo qui i check veloci sfruttando i binari appena compilati
+          # 3. Fast checks (format, lint, unit tests)
           make ci-fmt
           make ci-lint
           RUST_TEST_THREADS=1 make ci-test-unit
           
-          # 4. PRE-FETCH per i test di integrazione
-          # Scarica e compila tutte le dipendenze dei test, ma NON li esegue (--no-run).
-          # Fondamentale per far funzionare lo step successivo offline.
+          # 4. PRE-FETCH for integration tests
+          #    Download and compile test dependencies, but do NOT run tests.
           cargo test --test '*' --no-run
 
-  # 3. FASE DI ESECUZIONE PARALLELA (ISOLATA - NO INTERNET)
+          # 5. SAVE SBF ARTIFACTS INTO THE GLOBAL TARGET
+          #    This allows matrix jobs to reuse the same .so files without rebuilding.
+          SBF_CACHE_DIR="$CARGO_TARGET_DIR/sbf-artifacts"
+          echo "Saving SBF artifacts into $SBF_CACHE_DIR ..."
+          mkdir -p "$SBF_CACHE_DIR/test-integration" "$SBF_CACHE_DIR/root"
+
+          # SBF programs built under test-integration (DEPLOY_DIR)
+          if ls test-integration/target/deploy/*.so >/dev/null 2>&1; then
+            cp test-integration/target/deploy/*.so "$SBF_CACHE_DIR/test-integration/"
+            echo "Copied test-integration SBFs to cache:"
+            ls -1 "$SBF_CACHE_DIR/test-integration/"
+          else
+            echo "WARNING: no SBFs found in test-integration/target/deploy"
+          fi
+
+          # Committor program built under root target/deploy (ROOT_DEPLOY_DIR = ../target/deploy)
+          if ls target/deploy/*.so >/dev/null 2>&1; then
+            cp target/deploy/*.so "$SBF_CACHE_DIR/root/"
+            echo "Copied root SBFs to cache:"
+            ls -1 "$SBF_CACHE_DIR/root/"
+          else
+            echo "WARNING: no SBFs found in target/deploy"
+          fi
+
+  # 3. PARALLEL INTEGRATION TEST PHASE (isolated network - no Internet)
   integration-matrix:
     needs: [prepare-env, build-everything]
     runs-on: self-hosted
@@ -73,13 +95,13 @@ jobs:
       matrix:
         batch_tests: ["schedulecommit", "chainlink", "cloning", "restore_ledger", "table_mania", "committor", "pubsub", "task-scheduler"]
     env:
-      # Punta alla stessa target directory già compilata dallo step precedente
+      # Point Cargo to the same global target directory from the build phase
       CARGO_TARGET_DIR: ${{ needs.prepare-env.outputs.target_dir }}
-      # Forza Cargo a non cercare internet (siamo dentro un namespace isolato)
+      # Force Cargo not to hit the network (we are inside a network namespace)
       CARGO_NET_OFFLINE: "true"
-      # Disabilita wrapper inutili in esecuzione
+      # Disable any wrappers that might interfere during test execution
       RUSTC_WRAPPER: ""
-      # Pulisce flag che potrebbero dar fastidio all'esecuzione
+      # Clear potentially problematic flags
       RUSTFLAGS: ""
     steps:
       - uses: actions/checkout@v5
@@ -89,23 +111,52 @@ jobs:
       - name: Restore timestamps to satisfy Cargo cache
         run: |
           echo "Syncing file timestamps to commit time..."
-          # Ottieni la data dell'ultimo commit
+          # Get the commit timestamp of HEAD
           COMMIT_TIME=$(git show -s --format=%ci HEAD)
-          # Applica quella data a tutti i file (escludendo la cartella .git per velocità)
-          # Questo è velocissimo sui tuoi 40 core
+          # Apply that timestamp to all files (excluding .git for speed)
           find . -type f -not -path "./.git/*" -exec touch -d "$COMMIT_TIME" {} +
           echo "Timestamps synced to $COMMIT_TIME"
 
+      - name: Restore prebuilt SBF programs from Global Target
+        run: |
+          SBF_CACHE_DIR="$CARGO_TARGET_DIR/sbf-artifacts"
+          echo "Restoring SBF artifacts from $SBF_CACHE_DIR ..."
+
+          # 1) Restore SBFs for test-integration (DEPLOY_DIR)
+          LOCAL_DEPLOY_TEST="test-integration/target/deploy"
+          mkdir -p "$LOCAL_DEPLOY_TEST"
+          if ls "$SBF_CACHE_DIR/test-integration"/*.so >/dev/null 2>&1; then
+            cp "$SBF_CACHE_DIR/test-integration"/*.so "$LOCAL_DEPLOY_TEST/"
+            # Touch to ensure the .so files are newer than sources (so Make will not rebuild them)
+            touch "$LOCAL_DEPLOY_TEST"/*.so
+            echo "Restored test-integration SBFs:"
+            ls -1 "$LOCAL_DEPLOY_TEST/"
+          else
+            echo "WARNING: no cached SBFs found for test-integration"
+          fi
+
+          # 2) Restore SBFs for root target (committor program, ROOT_DEPLOY_DIR)
+          LOCAL_DEPLOY_ROOT="target/deploy"
+          mkdir -p "$LOCAL_DEPLOY_ROOT"
+          if ls "$SBF_CACHE_DIR/root"/*.so >/dev/null 2>&1; then
+            cp "$SBF_CACHE_DIR/root"/*.so "$LOCAL_DEPLOY_ROOT/"
+            touch "$LOCAL_DEPLOY_ROOT"/*.so
+            echo "Restored root SBFs:"
+            ls -1 "$LOCAL_DEPLOY_ROOT/"
+          else
+            echo "WARNING: no cached SBFs found for root"
+          fi
+
       - name: Run ${{ matrix.batch_tests }} (Network Namespace)
         run: |
-          # 'unshare -r -n' crea una bolla di rete vuota.
-          # Dentro questa bolla, la porta 8899 è libera per tutti i 10 job contemporaneamente.
-          # 'ip link set lo up' accende localhost dentro la bolla.
-          
+          # 'unshare -r -n' creates an isolated network namespace.
+          # Inside this bubble, port 8899 is free for all 10 jobs at the same time.
+          # 'ip link set lo up' brings up the loopback interface inside the namespace.
           unshare -r -n sh -c "ip link set lo up && make ci-test-integration"
         env:
           RUN_TESTS: ${{ matrix.batch_tests }}
 
+  # 4. Aggregate status for CI (single green/red check)
   ci-status:
     if: always()
     needs: [build-everything, integration-matrix]
