@@ -464,7 +464,7 @@ fn test_intent_bundle_commit_only() {
     // Verify still delegated
     for payer in &commit_only_payers {
         let counter_pda = FlexiCounter::pda(&payer.pubkey()).0;
-        let owner = ctx.fetch_ephem_account_owner(counter_pda).unwrap();
+        let owner = ctx.fetch_chain_account_owner(counter_pda).unwrap();
         assert_eq!(owner, delegation_program_id());
     }
 }

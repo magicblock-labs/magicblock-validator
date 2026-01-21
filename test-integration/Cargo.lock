@@ -1690,7 +1690,7 @@ dependencies = [
 [[package]]
 name = "ephemeral-rollups-sdk"
 version = "0.6.5"
-source = "git+https://github.com/magicblock-labs/ephemeral-rollups-sdk.git?rev=9deb6fb5a3#9deb6fb5a3bbaf29a38f35b6a03d0fb9f69fa66f"
+source = "git+https://github.com/magicblock-labs/ephemeral-rollups-sdk.git?rev=8e84ebdba#8e84ebdba2322fbe5ac01cf853d01e2a431ba6f1"
 dependencies = [
  "base64ct",
  "borsh 1.6.0",
@@ -1715,7 +1715,7 @@ dependencies = [
 [[package]]
 name = "ephemeral-rollups-sdk-attribute-action"
 version = "0.6.5"
-source = "git+https://github.com/magicblock-labs/ephemeral-rollups-sdk.git?rev=9deb6fb5a3#9deb6fb5a3bbaf29a38f35b6a03d0fb9f69fa66f"
+source = "git+https://github.com/magicblock-labs/ephemeral-rollups-sdk.git?rev=8e84ebdba#8e84ebdba2322fbe5ac01cf853d01e2a431ba6f1"
 dependencies = [
  "quote",
  "syn 1.0.109",
@@ -1724,7 +1724,7 @@ dependencies = [
 [[package]]
 name = "ephemeral-rollups-sdk-attribute-commit"
 version = "0.6.5"
-source = "git+https://github.com/magicblock-labs/ephemeral-rollups-sdk.git?rev=9deb6fb5a3#9deb6fb5a3bbaf29a38f35b6a03d0fb9f69fa66f"
+source = "git+https://github.com/magicblock-labs/ephemeral-rollups-sdk.git?rev=8e84ebdba#8e84ebdba2322fbe5ac01cf853d01e2a431ba6f1"
 dependencies = [
  "quote",
  "syn 1.0.109",
@@ -1733,7 +1733,7 @@ dependencies = [
 [[package]]
 name = "ephemeral-rollups-sdk-attribute-delegate"
 version = "0.6.5"
-source = "git+https://github.com/magicblock-labs/ephemeral-rollups-sdk.git?rev=9deb6fb5a3#9deb6fb5a3bbaf29a38f35b6a03d0fb9f69fa66f"
+source = "git+https://github.com/magicblock-labs/ephemeral-rollups-sdk.git?rev=8e84ebdba#8e84ebdba2322fbe5ac01cf853d01e2a431ba6f1"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1743,7 +1743,7 @@ dependencies = [
 [[package]]
 name = "ephemeral-rollups-sdk-attribute-ephemeral"
 version = "0.6.5"
-source = "git+https://github.com/magicblock-labs/ephemeral-rollups-sdk.git?rev=9deb6fb5a3#9deb6fb5a3bbaf29a38f35b6a03d0fb9f69fa66f"
+source = "git+https://github.com/magicblock-labs/ephemeral-rollups-sdk.git?rev=8e84ebdba#8e84ebdba2322fbe5ac01cf853d01e2a431ba6f1"
 dependencies = [
  "proc-macro2",
  "quote",
