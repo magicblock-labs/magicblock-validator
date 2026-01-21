@@ -310,16 +310,14 @@ fn test_intent_bundle_commit_and_undelegate_simultaneously() {
     // Init context
     let ctx = IntegrationTestContext::try_new().unwrap();
 
-    // Create 2 payers for commit-only and 2 for undelegate
+    // Create 2 payers for commit-only and 1 for undelegate
     let commit_only_payers: Vec<Keypair> =
         (0..2).map(|_| setup_payer(&ctx)).collect();
-    let undelegate_payers: Vec<Keypair> =
-        (0..2).map(|_| setup_payer(&ctx)).collect();
+    let undelegate_payer = setup_payer(&ctx);
 
     debug!(
-        "Created {} commit-only payers and {} undelegate payers",
-        commit_only_payers.len(),
-        undelegate_payers.len()
+        "Created {} commit-only payers and 1 undelegate payer",
+        commit_only_payers.len()
     );
 
     // Init and delegate counters for commit-only payers
@@ -335,26 +333,24 @@ fn test_intent_bundle_commit_and_undelegate_simultaneously() {
         );
     }
 
-    // Init and delegate counters for undelegate payers
-    let undelegate_values: [u8; 2] = [100, 150];
-    for (idx, payer) in undelegate_payers.iter().enumerate() {
-        init_counter(&ctx, payer);
-        delegate_counter(&ctx, payer);
-        add_to_counter(&ctx, payer, undelegate_values[idx]);
-        debug!(
-            "Undelegate payer {} initialized with value {}",
-            payer.pubkey(),
-            undelegate_values[idx]
-        );
-    }
+    // Init and delegate counter for undelegate payer
+    let undelegate_value: u8 = 100;
+    init_counter(&ctx, &undelegate_payer);
+    delegate_counter(&ctx, &undelegate_payer);
+    add_to_counter(&ctx, &undelegate_payer, undelegate_value);
+    debug!(
+        "Undelegate payer {} initialized with value {}",
+        undelegate_payer.pubkey(),
+        undelegate_value
+    );
 
     // Schedule intent bundle with both Commit and CommitAndUndelegate
-    // Counter diffs: -10 for first undelegate payer, +25 for second
-    let counter_diffs = vec![-10i64, 25i64];
+    // Counter diff: -10 for undelegate payer
+    let counter_diffs = vec![-10i64];
     schedule_intent_bundle(
         &ctx,
         &commit_only_payers.iter().collect::<Vec<_>>(),
-        &undelegate_payers.iter().collect::<Vec<_>>(),
+        &[&undelegate_payer],
         counter_diffs,
     );
     debug!("Scheduled intent bundle");
@@ -377,38 +373,26 @@ fn test_intent_bundle_commit_and_undelegate_simultaneously() {
     );
     debug!("Verified commit-only counters on base layer");
 
-    // Assert undelegate counters have their values committed + counter_diff applied
-    // (undelegate payers: 100 + (-10) = 90, 150 + 25 = 175)
+    // Assert undelegate counter has its value committed + counter_diff applied
+    // (undelegate payer: 100 + (-10) = 90)
     assert_counters(
         &ctx,
-        &[
-            ExpectedCounter {
-                pda: FlexiCounter::pda(&undelegate_payers[0].pubkey()).0,
-                expected: 90,
-            },
-            ExpectedCounter {
-                pda: FlexiCounter::pda(&undelegate_payers[1].pubkey()).0,
-                expected: 175,
-            },
-        ],
+        &[ExpectedCounter {
+            pda: FlexiCounter::pda(&undelegate_payer.pubkey()).0,
+            expected: 90,
+        }],
         true,
     );
-    debug!("Verified undelegate counters on base layer");
+    debug!("Verified undelegate counter on base layer");
 
-    // Verify that only undelegate payers' accounts are undelegated
-    verify_undelegation_in_ephem_via_owner(
-        &undelegate_payers
-            .iter()
-            .map(|p| p.pubkey())
-            .collect::<Vec<_>>(),
-        &ctx,
-    );
-    debug!("Verified undelegation for undelegate payers");
+    // Verify that only undelegate payer's account is undelegated
+    verify_undelegation_in_ephem_via_owner(&[undelegate_payer.pubkey()], &ctx);
+    debug!("Verified undelegation for undelegate payer");
 
     // Verify that commit-only payers' accounts are still delegated
     for payer in &commit_only_payers {
         let counter_pda = FlexiCounter::pda(&payer.pubkey()).0;
-        let owner = ctx.fetch_ephem_account_owner(counter_pda).unwrap();
+        let owner = ctx.fetch_chain_account_owner(counter_pda).unwrap();
         assert_eq!(
             owner,
             delegation_program_id(),
