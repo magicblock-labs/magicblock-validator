@@ -10,10 +10,14 @@ pub async fn fetch_metrics(endpoint: &str) -> Result<MetricsSnapshot> {
     let response = reqwest::get(endpoint).await?;
     let text = response.text().await?;
 
-    let pubkey_updates_count =
-        parse_metric(&text, "transaction_subscription_pubkey_updates_count")?;
-    let account_updates_count =
-        parse_metric(&text, "transaction_subscription_account_updates_count")?;
+    let pubkey_updates_count = parse_metric(
+        &text,
+        "mbv_transaction_subscription_pubkey_updates_count",
+    )?;
+    let account_updates_count = parse_metric(
+        &text,
+        "mbv_transaction_subscription_account_updates_count",
+    )?;
 
     Ok(MetricsSnapshot {
         pubkey_updates_count,
@@ -46,19 +50,19 @@ mod tests {
     use super::*;
 
     const SAMPLE_METRICS: &str = r#"
-# HELP transaction_subscription_pubkey_updates_count Total pubkey updates
-# TYPE transaction_subscription_pubkey_updates_count counter
-transaction_subscription_pubkey_updates_count 42
-# HELP transaction_subscription_account_updates_count Total account updates
-# TYPE transaction_subscription_account_updates_count counter
-transaction_subscription_account_updates_count 100
+# HELP mbv_transaction_subscription_pubkey_updates_count Total pubkey updates
+# TYPE mbv_transaction_subscription_pubkey_updates_count counter
+mbv_transaction_subscription_pubkey_updates_count 42
+# HELP mbv_transaction_subscription_account_updates_count Total account updates
+# TYPE mbv_transaction_subscription_account_updates_count counter
+mbv_transaction_subscription_account_updates_count 100
 "#;
 
     #[test]
     fn test_parse_metric_pubkey_updates() {
         let result = parse_metric(
             SAMPLE_METRICS,
-            "transaction_subscription_pubkey_updates_count",
+            "mbv_transaction_subscription_pubkey_updates_count",
         );
         assert_eq!(result.unwrap(), 42);
     }
@@ -67,7 +71,7 @@ transaction_subscription_account_updates_count 100
     fn test_parse_metric_account_updates() {
         let result = parse_metric(
             SAMPLE_METRICS,
-            "transaction_subscription_account_updates_count",
+            "mbv_transaction_subscription_account_updates_count",
         );
         assert_eq!(result.unwrap(), 100);
     }

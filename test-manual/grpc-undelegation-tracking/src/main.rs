@@ -10,8 +10,8 @@ use solana_sdk::signer::Signer;
 use tracing::info;
 
 use counter_sdk::{
-    build_add_and_schedule_commit_ix, build_delegate_ix, build_init_ix,
-    derive_counter_pda, read_counter_value, FLEXI_COUNTER_PROGRAM_ID,
+    build_delegate_ix, build_increment_and_undelegate_ix, build_init_ix,
+    derive_counter_pda, read_counter_value, COUNTER_PROGRAM_ID,
 };
 use delegation_sdk::{
     build_direct_undelegate_flow, delegation_metadata_pda,
@@ -21,6 +21,7 @@ use metrics::fetch_metrics;
 use test_utils::{create_rpc_clients, load_keypairs, send_and_confirm};
 
 const METRICS_ENDPOINT: &str = "http://127.0.0.1:9000/metrics";
+const COUNTER_ID: u64 = 0;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -38,7 +39,7 @@ async fn main() -> Result<()> {
     info!("Payer: {}", payer_pubkey);
     info!("Validator: {}", validator_pubkey);
 
-    let (counter_pda, _) = derive_counter_pda(&payer_pubkey);
+    let (counter_pda, _) = derive_counter_pda(COUNTER_ID);
     info!("Counter PDA: {}", counter_pda);
 
     // ===== PHASE 1: Initialize Counter (if needed) =====
@@ -47,18 +48,15 @@ async fn main() -> Result<()> {
     let counter_exists = devnet_rpc.get_account(&counter_pda).is_ok();
     if !counter_exists {
         info!("Counter does not exist, initializing...");
-        let init_ix = build_init_ix(&payer_pubkey, "test-undelegation");
+        let init_ix = build_init_ix(&payer_pubkey, COUNTER_ID);
         send_and_confirm(&devnet_rpc, &[init_ix], &payer, &[])?;
         info!("Counter initialized on devnet");
     } else {
         info!("Counter already exists on devnet");
     }
 
-    let initial_counter = read_counter_value(&devnet_rpc, &payer_pubkey)?;
-    info!(
-        "Initial counter - count: {}, updates: {}",
-        initial_counter.count, initial_counter.updates
-    );
+    let initial_counter = read_counter_value(&devnet_rpc, COUNTER_ID)?;
+    info!("Initial counter - count: {}", initial_counter.count);
 
     // ===== PHASE 2: Fetch Initial Metrics =====
     info!("Phase 2: Recording initial metrics");
@@ -73,7 +71,8 @@ async fn main() -> Result<()> {
     // ===== PHASE 3: Delegate Counter to Validator =====
     info!("Phase 3: Delegating counter to validator");
 
-    let delegate_ix = build_delegate_ix(&payer_pubkey, Some(&validator_pubkey));
+    let delegate_ix =
+        build_delegate_ix(&payer_pubkey, COUNTER_ID, Some(&validator_pubkey));
     send_and_confirm(&devnet_rpc, &[delegate_ix], &payer, &[])?;
     info!("Counter delegated to validator");
 
@@ -87,19 +86,19 @@ async fn main() -> Result<()> {
 
     tokio::time::sleep(Duration::from_secs(3)).await;
 
-    let cloned_counter = read_counter_value(&ephemeral_rpc, &payer_pubkey)?;
+    let cloned_counter = read_counter_value(&ephemeral_rpc, COUNTER_ID)?;
     info!(
-        "Counter on ephemeral after clone - count: {}, updates: {}",
-        cloned_counter.count, cloned_counter.updates
+        "Counter on ephemeral after clone - count: {}",
+        cloned_counter.count
     );
 
     // ===== PHASE 5: Undelegate via Ephemeral (Normal Flow) =====
-    info!("Phase 5: Undelegating counter via ephemeral (add + commit + undelegate)");
+    info!("Phase 5: Undelegating counter via ephemeral (increment + undelegate)");
 
     let undelegate_ix =
-        build_add_and_schedule_commit_ix(&payer_pubkey, 1, true);
+        build_increment_and_undelegate_ix(&payer_pubkey, COUNTER_ID);
     send_and_confirm(&ephemeral_rpc, &[undelegate_ix], &payer, &[])?;
-    info!("Add+commit+undelegate scheduled on ephemeral");
+    info!("Increment+undelegate scheduled on ephemeral");
 
     info!("Waiting for undelegation to finalize on devnet...");
     tokio::time::sleep(Duration::from_secs(15)).await;
@@ -107,11 +106,8 @@ async fn main() -> Result<()> {
     // ===== PHASE 6: Verify Counter Updated on Devnet =====
     info!("Phase 6: Verifying counter updated on devnet");
 
-    let final_counter = read_counter_value(&devnet_rpc, &payer_pubkey)?;
-    info!(
-        "Final counter on devnet - count: {}, updates: {}",
-        final_counter.count, final_counter.updates
-    );
+    let final_counter = read_counter_value(&devnet_rpc, COUNTER_ID)?;
+    info!("Final counter on devnet - count: {}", final_counter.count);
 
     assert!(
         final_counter.count > initial_counter.count,
@@ -123,7 +119,7 @@ async fn main() -> Result<()> {
     info!("Phase 7: Delegating counter again for cheating flow test");
 
     let delegate_ix2 =
-        build_delegate_ix(&payer_pubkey, Some(&validator_pubkey));
+        build_delegate_ix(&payer_pubkey, COUNTER_ID, Some(&validator_pubkey));
     send_and_confirm(&devnet_rpc, &[delegate_ix2], &payer, &[])?;
     info!("Counter delegated again");
 
@@ -158,7 +154,7 @@ async fn main() -> Result<()> {
     let cheating_ixs = build_direct_undelegate_flow(
         validator_pubkey,
         counter_pda,
-        FLEXI_COUNTER_PROGRAM_ID,
+        COUNTER_PROGRAM_ID,
         delegation_metadata.rent_payer,
         delegated_account_data.data.clone(),
         delegated_account_data.lamports,
@@ -207,10 +203,10 @@ async fn main() -> Result<()> {
     // ===== PHASE 10: Verify Final State =====
     info!("Phase 10: Verifying final counter state");
 
-    let final_counter_state = read_counter_value(&devnet_rpc, &payer_pubkey)?;
+    let final_counter_state = read_counter_value(&devnet_rpc, COUNTER_ID)?;
     info!(
-        "Final counter state - count: {}, updates: {}",
-        final_counter_state.count, final_counter_state.updates
+        "Final counter state - count: {}",
+        final_counter_state.count
     );
 
     let delegation_metadata_pda = delegation_metadata_pda(&counter_pda);
