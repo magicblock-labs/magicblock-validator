@@ -20,6 +20,8 @@ use helius_laserstream::{
 use magicblock_metrics::metrics::{
     inc_account_subscription_account_updates_count,
     inc_program_subscription_account_updates_count,
+    inc_transaction_subscription_pubkey_updates_count_by,
+    inc_transaction_subscription_account_updates_count,
 };
 use magicblock_sync::transaction_syncer;
 use solana_account::Account;
@@ -671,6 +673,10 @@ impl<T: ChainRpcClient> ChainLaserActor<T> {
                         .filter(|pk| self.subscriptions.contains(pk))
                         .collect::<Vec<Pubkey>>();
 
+                    inc_transaction_subscription_pubkey_updates_count_by(
+                        pubkeys.len() as u64,
+                    );
+
                     let slot = tx.slot;
                     let accounts_res = match rpc::fetch_accounts_with_timeout(
                         &rpc_client,
@@ -704,6 +710,7 @@ impl<T: ChainRpcClient> ChainLaserActor<T> {
                         pubkeys.iter().zip(accounts_res.value.into_iter())
                     {
                         if let Some(account) = account {
+                            inc_transaction_subscription_account_updates_count();
                             let subscription_update = SubscriptionUpdate {
                                 pubkey: *pubkey,
                                 slot: context_slot,

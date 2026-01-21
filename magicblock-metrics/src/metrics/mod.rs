@@ -182,6 +182,20 @@ lazy_static::lazy_static! {
         )
         .unwrap();
 
+    static ref TRANSACTION_SUBSCRIPTION_PUBKEY_UPDATES_COUNT: IntCounter =
+        IntCounter::new(
+            "transaction_subscription_pubkey_updates_count",
+            "Number of pubkeys that undelegated and triggered a transaction syncer update",
+        )
+        .unwrap();
+
+    static ref TRANSACTION_SUBSCRIPTION_ACCOUNT_UPDATES_COUNT: IntCounter =
+        IntCounter::new(
+            "transaction_subscription_account_updates_count",
+            "Number of undelegated pubkeys that triggered a transaction syncer update and were subscribed, resulting in an account update",
+        )
+        .unwrap();
+
     // -----------------
     // RPC/Aperture
     // -----------------
@@ -742,4 +756,12 @@ pub fn set_pubsub_client_uptime(client_id: &str, connected: bool) {
     PUBSUB_CLIENT_UPTIME_GAUGE
         .with_label_values(&[client_id])
         .set(if connected { 1 } else { 0 });
+}
+
+pub fn inc_transaction_subscription_pubkey_updates_count_by(by: u64) {
+    TRANSACTION_SUBSCRIPTION_PUBKEY_UPDATES_COUNT.inc_by(by);
+}
+
+pub fn inc_transaction_subscription_account_updates_count() {
+    TRANSACTION_SUBSCRIPTION_ACCOUNT_UPDATES_COUNT.inc();
 }
