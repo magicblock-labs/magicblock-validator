@@ -82,3 +82,21 @@ pub(crate) fn fund_magic_context(accountsdb: &AccountsDb) {
     let _ = accountsdb
         .insert_account(&magic_program::MAGIC_CONTEXT_PUBKEY, &magic_context);
 }
+
+pub(crate) fn fund_ephemeral_vault(accountsdb: &AccountsDb) {
+    // Only create vault if it doesn't exist (don't overwrite on restart)
+    if accountsdb
+        .get_account(&magic_program::EPHEMERAL_VAULT_PUBKEY)
+        .is_none()
+    {
+        // Create with 0 balance, will accumulate rent over time
+        fund_account(accountsdb, &magic_program::EPHEMERAL_VAULT_PUBKEY, 0);
+        let mut vault = accountsdb
+            .get_account(&magic_program::EPHEMERAL_VAULT_PUBKEY)
+            .unwrap();
+        vault.set_delegated(true);
+        vault.set_ephemeral(true);
+        let _ = accountsdb
+            .insert_account(&magic_program::EPHEMERAL_VAULT_PUBKEY, &vault);
+    }
+}

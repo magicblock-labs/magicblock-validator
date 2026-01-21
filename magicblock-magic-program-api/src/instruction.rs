@@ -124,6 +124,35 @@ pub enum MagicBlockInstruction {
     /// - **0.** `[SIGNER]`         Validator authority
     EnableExecutableCheck,
 
+    /// Creates a new ephemeral account with rent paid by a sponsor.
+    /// The account is automatically owned by the calling program (CPI caller).
+    ///
+    /// # Account references
+    /// - **0.** `[WRITE]` Sponsor account (pays rent, can be PDA or oncurve)
+    /// - **1.** `[WRITE]` Ephemeral account to create (must have 0 lamports)
+    /// - **2.** `[WRITE]` Vault account (receives rent payment)
+    CreateEphemeralAccount {
+        /// Initial data length in bytes
+        data_len: usize,
+    },
+
+    /// Resizes an existing ephemeral account, adjusting rent accordingly.
+    ///
+    /// # Account references
+    /// - **0.** `[WRITE]` Sponsor account (pays/receives rent difference)
+    /// - **1.** `[WRITE]` Ephemeral account to resize
+    ResizeEphemeralAccount {
+        /// New data length in bytes
+        new_data_len: usize,
+    },
+
+    /// Closes an ephemeral account, refunding rent to the sponsor.
+    ///
+    /// # Account references
+    /// - **0.** `[WRITE]` Sponsor account (receives rent refund)
+    /// - **1.** `[WRITE]` Ephemeral account to close
+    CloseEphemeralAccount,
+
     /// Noop instruction
     Noop(u64),
 
