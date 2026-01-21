@@ -3,7 +3,8 @@ use integration_test_tools::IntegrationTestContext;
 use program_flexi_counter::{
     delegation_program_id,
     instruction::{
-        create_add_ix, create_delegate_ix, create_init_ix, create_intent_ix,
+        create_add_ix, create_delegate_ix, create_init_ix,
+        create_intent_bundle_ix, create_intent_ix,
     },
     state::FlexiCounter,
 };
@@ -291,6 +292,237 @@ fn test_redelegation_intent() {
     // redelegate_intent(&ctx, &payer);
 }
 
+/// Tests the new MagicIntentBundleBuilder feature where a single IntentBundle
+/// can contain both Commit and CommitAndUndelegate intents simultaneously.
+///
+/// Setup:
+/// - 2 payers for commit-only (their counters will just be committed)
+/// - 2 payers for commit-and-undelegate (their counters will be committed and undelegated)
+///
+/// Expected behavior:
+/// - All 4 counters should be committed to base layer
+/// - Only the undelegate payers' counters should be undelegated
+/// - Commit-only payers' counters remain delegated
+#[test]
+fn test_intent_bundle_commit_and_undelegate_simultaneously() {
+    init_logger!();
+
+    // Init context
+    let ctx = IntegrationTestContext::try_new().unwrap();
+
+    // Create 2 payers for commit-only and 2 for undelegate
+    let commit_only_payers: Vec<Keypair> =
+        (0..2).map(|_| setup_payer(&ctx)).collect();
+    let undelegate_payers: Vec<Keypair> =
+        (0..2).map(|_| setup_payer(&ctx)).collect();
+
+    debug!(
+        "Created {} commit-only payers and {} undelegate payers",
+        commit_only_payers.len(),
+        undelegate_payers.len()
+    );
+
+    // Init and delegate counters for commit-only payers
+    let commit_values: [u8; 2] = [50, 75];
+    for (idx, payer) in commit_only_payers.iter().enumerate() {
+        init_counter(&ctx, payer);
+        delegate_counter(&ctx, payer);
+        add_to_counter(&ctx, payer, commit_values[idx]);
+        debug!(
+            "Commit-only payer {} initialized with value {}",
+            payer.pubkey(),
+            commit_values[idx]
+        );
+    }
+
+    // Init and delegate counters for undelegate payers
+    let undelegate_values: [u8; 2] = [100, 150];
+    for (idx, payer) in undelegate_payers.iter().enumerate() {
+        init_counter(&ctx, payer);
+        delegate_counter(&ctx, payer);
+        add_to_counter(&ctx, payer, undelegate_values[idx]);
+        debug!(
+            "Undelegate payer {} initialized with value {}",
+            payer.pubkey(),
+            undelegate_values[idx]
+        );
+    }
+
+    // Schedule intent bundle with both Commit and CommitAndUndelegate
+    // Counter diffs: -10 for first undelegate payer, +25 for second
+    let counter_diffs = vec![-10i64, 25i64];
+    schedule_intent_bundle(
+        &ctx,
+        &commit_only_payers.iter().collect::<Vec<_>>(),
+        &undelegate_payers.iter().collect::<Vec<_>>(),
+        counter_diffs,
+    );
+    debug!("Scheduled intent bundle");
+
+    // Assert commit-only counters have their values committed
+    // (commit-only payers: 50, 75)
+    assert_counters(
+        &ctx,
+        &[
+            ExpectedCounter {
+                pda: FlexiCounter::pda(&commit_only_payers[0].pubkey()).0,
+                expected: 50,
+            },
+            ExpectedCounter {
+                pda: FlexiCounter::pda(&commit_only_payers[1].pubkey()).0,
+                expected: 75,
+            },
+        ],
+        true,
+    );
+    debug!("Verified commit-only counters on base layer");
+
+    // Assert undelegate counters have their values committed + counter_diff applied
+    // (undelegate payers: 100 + (-10) = 90, 150 + 25 = 175)
+    assert_counters(
+        &ctx,
+        &[
+            ExpectedCounter {
+                pda: FlexiCounter::pda(&undelegate_payers[0].pubkey()).0,
+                expected: 90,
+            },
+            ExpectedCounter {
+                pda: FlexiCounter::pda(&undelegate_payers[1].pubkey()).0,
+                expected: 175,
+            },
+        ],
+        true,
+    );
+    debug!("Verified undelegate counters on base layer");
+
+    // Verify that only undelegate payers' accounts are undelegated
+    verify_undelegation_in_ephem_via_owner(
+        &undelegate_payers
+            .iter()
+            .map(|p| p.pubkey())
+            .collect::<Vec<_>>(),
+        &ctx,
+    );
+    debug!("Verified undelegation for undelegate payers");
+
+    // Verify that commit-only payers' accounts are still delegated
+    for payer in &commit_only_payers {
+        let counter_pda = FlexiCounter::pda(&payer.pubkey()).0;
+        let owner = ctx.fetch_ephem_account_owner(counter_pda).unwrap();
+        assert_eq!(
+            owner,
+            delegation_program_id(),
+            "Commit-only counter should still be delegated"
+        );
+    }
+    debug!("Verified commit-only counters are still delegated");
+}
+
+/// Tests IntentBundle with only Commit intent (no undelegate).
+/// This ensures the new API works for commit-only scenarios.
+#[test]
+fn test_intent_bundle_commit_only() {
+    init_logger!();
+
+    let ctx = IntegrationTestContext::try_new().unwrap();
+
+    let commit_only_payers: Vec<Keypair> =
+        (0..2).map(|_| setup_payer(&ctx)).collect();
+
+    // Init and delegate counters
+    let values: [u8; 2] = [42, 88];
+    for (idx, payer) in commit_only_payers.iter().enumerate() {
+        init_counter(&ctx, payer);
+        delegate_counter(&ctx, payer);
+        add_to_counter(&ctx, payer, values[idx]);
+    }
+
+    // Schedule bundle with only commit intent (no undelegate payers)
+    schedule_intent_bundle(
+        &ctx,
+        &commit_only_payers.iter().collect::<Vec<_>>(),
+        &[], // No undelegate payers
+        vec![],
+    );
+
+    // Verify commits
+    assert_counters(
+        &ctx,
+        &[
+            ExpectedCounter {
+                pda: FlexiCounter::pda(&commit_only_payers[0].pubkey()).0,
+                expected: 42,
+            },
+            ExpectedCounter {
+                pda: FlexiCounter::pda(&commit_only_payers[1].pubkey()).0,
+                expected: 88,
+            },
+        ],
+        true,
+    );
+
+    // Verify still delegated
+    for payer in &commit_only_payers {
+        let counter_pda = FlexiCounter::pda(&payer.pubkey()).0;
+        let owner = ctx.fetch_ephem_account_owner(counter_pda).unwrap();
+        assert_eq!(owner, delegation_program_id());
+    }
+}
+
+/// Tests IntentBundle with only CommitAndUndelegate intent (no commit-only).
+/// This ensures the new API works for undelegate-only scenarios.
+#[test]
+fn test_intent_bundle_undelegate_only() {
+    init_logger!();
+
+    let ctx = IntegrationTestContext::try_new().unwrap();
+
+    let undelegate_payers: Vec<Keypair> =
+        (0..2).map(|_| setup_payer(&ctx)).collect();
+
+    // Init and delegate counters
+    let values: [u8; 2] = [200, 250];
+    for (idx, payer) in undelegate_payers.iter().enumerate() {
+        init_counter(&ctx, payer);
+        delegate_counter(&ctx, payer);
+        add_to_counter(&ctx, payer, values[idx]);
+    }
+
+    // Schedule bundle with only undelegate intent (no commit-only payers)
+    let counter_diffs = vec![50i64, -100i64];
+    schedule_intent_bundle(
+        &ctx,
+        &[], // No commit-only payers
+        &undelegate_payers.iter().collect::<Vec<_>>(),
+        counter_diffs,
+    );
+
+    // Verify values (200 + 50 = 250, 250 - 100 = 150)
+    assert_counters(
+        &ctx,
+        &[
+            ExpectedCounter {
+                pda: FlexiCounter::pda(&undelegate_payers[0].pubkey()).0,
+                expected: 250,
+            },
+            ExpectedCounter {
+                pda: FlexiCounter::pda(&undelegate_payers[1].pubkey()).0,
+                expected: 150,
+            },
+        ],
+        true,
+    );
+
+    // Verify undelegation
+    verify_undelegation_in_ephem_via_owner(
+        &undelegate_payers
+            .iter()
+            .map(|p| p.pubkey())
+            .collect::<Vec<_>>(),
+        &ctx,
+    );
+}
+
 fn setup_payer(ctx: &IntegrationTestContext) -> Keypair {
     // Airdrop to payer on chain
     let payer = Keypair::new();
@@ -455,6 +687,69 @@ fn schedule_intent(
         transfer_destination_balance,
         mutiplier * payers.len() as u64 * 1_000_000
     );
+}
+
+/// Schedule an intent bundle using the new MagicIntentBundleBuilder API.
+/// This creates an IntentBundle that can contain both Commit and CommitAndUndelegate intents.
+fn schedule_intent_bundle(
+    ctx: &IntegrationTestContext,
+    commit_only_payers: &[&Keypair],
+    undelegate_payers: &[&Keypair],
+    counter_diffs: Vec<i64>,
+) {
+    ctx.wait_for_next_slot_ephem().unwrap();
+
+    let transfer_destination = Keypair::new();
+    let commit_only_pubkeys: Vec<Pubkey> =
+        commit_only_payers.iter().map(|p| p.pubkey()).collect();
+    let undelegate_pubkeys: Vec<Pubkey> =
+        undelegate_payers.iter().map(|p| p.pubkey()).collect();
+
+    let ix = create_intent_bundle_ix(
+        commit_only_pubkeys,
+        undelegate_pubkeys,
+        transfer_destination.pubkey(),
+        counter_diffs,
+        100_000,
+    );
+
+    // Collect all signers - need at least one
+    let all_payers: Vec<&Keypair> = commit_only_payers
+        .iter()
+        .chain(undelegate_payers.iter())
+        .copied()
+        .collect();
+
+    assert!(
+        !all_payers.is_empty(),
+        "At least one payer required for intent bundle"
+    );
+
+    let mut tx =
+        Transaction::new_with_payer(&[ix], Some(&all_payers[0].pubkey()));
+    let (sig, confirmed) = ctx
+        .send_and_confirm_transaction_ephem(&mut tx, &all_payers)
+        .unwrap();
+    assert!(confirmed);
+
+    // Confirm was sent on Base Layer
+    let commit_result = ctx
+        .fetch_schedule_commit_result::<FlexiCounter>(sig)
+        .unwrap();
+    commit_result
+        .confirm_commit_transactions_on_chain(ctx)
+        .unwrap();
+
+    // Verify Prize = 1_000_000 is transferred for each action
+    // - commit-only payers: 1 action each (commit)
+    // - undelegate payers: 2 actions each (commit + undelegate)
+    let transfer_destination_balance = ctx
+        .fetch_chain_account_balance(&transfer_destination.pubkey())
+        .unwrap();
+
+    let expected_balance = (commit_only_payers.len() as u64 * 1_000_000)
+        + (undelegate_payers.len() as u64 * 2 * 1_000_000);
+    assert_eq!(transfer_destination_balance, expected_balance);
 }
 
 fn verify_undelegation_in_ephem_via_owner(

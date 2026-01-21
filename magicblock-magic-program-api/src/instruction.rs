@@ -74,10 +74,46 @@ pub enum MagicBlockInstruction {
     /// Args: (intent_id, bump) - bump is needed in order to guarantee unique transactions
     ScheduledCommitSent((u64, u64)),
 
-    /// TODO(edwin):
+    /// Schedules execution of a single *base intent*.
+    ///
+    /// A "base intent" is an atomic unit of work executed by the validator on the Base layer,
+    /// such as:
+    /// - executing standalone base actions (`BaseActions`)
+    /// - committing a set of accounts (`Commit`)
+    /// - committing and undelegating accounts, optionally with post-actions (`CommitAndUndelegate`)
+    ///
+    /// This instruction is the legacy/single-intent variant of scheduling. For batching multiple
+    /// independent intents into a single instruction, see [`MagicBlockInstruction::ScheduleIntentBundle`].
+    ///
+    /// # Account references
+    /// - **0.**   `[WRITE, SIGNER]` Payer requesting the intent to be scheduled
+    /// - **1.**   `[WRITE]`         Magic Context account
+    /// - **2..n** `[]`              Accounts referenced by the intent (including action accounts)
+    ///
+    /// # Data
+    /// The embedded [`MagicBaseIntentArgs`] encodes account references by indices into the
+    /// accounts array (compact representation).
     ScheduleBaseIntent(MagicBaseIntentArgs),
 
-    /// TODO(edwin):
+    /// Schedules execution of a *bundle* of intents in a single instruction.
+    ///
+    /// A "intent bundle" is an atomic unit of work executed by the validator on the Base layer,
+    /// such as:
+    /// - standalone base actions
+    /// - an optional `Commit`
+    /// - an optional `CommitAndUndelegate`
+    ///
+    /// This is the recommended scheduling path when the caller wants to submit multiple
+    /// independent intents while paying account overhead only once.
+    ///
+    /// # Account references
+    /// - **0.**   `[WRITE, SIGNER]` Payer requesting the bundle to be scheduled
+    /// - **1.**   `[WRITE]`         Magic Context account
+    /// - **2..n** `[]`              All accounts referenced by any intent in the bundle
+    ///
+    /// # Data
+    /// The embedded [`MagicIntentBundleArgs`] encodes account references by indices into the
+    /// accounts array.
     ScheduleIntentBundle(MagicIntentBundleArgs),
 
     /// Schedule a new task for execution
