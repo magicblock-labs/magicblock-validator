@@ -36,6 +36,7 @@ jobs:
       CARGO_TARGET_DIR: ${{ needs.prepare-env.outputs.target_dir }}
       # Disabilitiamo sccache per favorire l'incrementale locale (più veloce su disco)
       RUSTC_WRAPPER: ""
+      RUSTFLAGS: ""
       # Attiviamo l'incrementale per build rapide su modifiche piccole
       CARGO_INCREMENTAL: 1
       # Usiamo 30 core (invece dei 4 di default) perché giriamo da soli
