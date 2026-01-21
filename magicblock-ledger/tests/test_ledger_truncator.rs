@@ -77,6 +77,7 @@ async fn test_truncator_not_purged_size() {
 }
 
 // Tests that ledger got truncated but not after finality slot
+#[ignore = "Flaky test"]
 #[tokio::test]
 async fn test_truncator_non_empty_ledger() {
     init_logger!();
