@@ -67,7 +67,6 @@ jobs:
 
       - name: Run unit tests
         run: |
-#          make ci-test-unit
           cargo test --test test_ledger_truncator
 
 #  integration-tests:
