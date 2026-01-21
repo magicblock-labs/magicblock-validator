@@ -56,7 +56,7 @@ jobs:
           # 3. Fast checks (format, lint, unit tests)
           make ci-fmt
           make ci-lint
-          RUST_TEST_THREADS=1 make ci-test-unit
+          make ci-test-unit
           
           # 4. PRE-FETCH for integration tests
           #    Download and compile test dependencies, but do NOT run tests.
