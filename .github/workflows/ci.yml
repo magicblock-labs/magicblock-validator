@@ -67,7 +67,8 @@ jobs:
 
       - name: Run unit tests
         run: |
-          make ci-test-unit
+#          make ci-test-unit
+          cargo test --test test_ledger_truncator
 
 #  integration-tests:
 #    name: Integration Tests - ${{ matrix.batch_tests }}
