@@ -35,8 +35,8 @@ use crate::remote_account_provider::{
         ChainPubsubActorMessage, MESSAGE_CHANNEL_SIZE,
         SUBSCRIPTION_UPDATE_CHANNEL_SIZE,
     },
-    RemoteAccountProviderError, RemoteAccountProviderResult,
-    SubscriptionUpdate,
+    rpc, ChainRpcClient, RemoteAccountProviderError,
+    RemoteAccountProviderResult, SubscriptionUpdate,
 };
 
 type LaserResult = Result<SubscribeUpdate, LaserstreamError>;
@@ -101,7 +101,7 @@ impl fmt::Display for AccountUpdateSource {
 /// - If a stream ends unexpectedly, `signal_connection_issue()` is called.
 /// - The actor sends an abort signal to the submux, which triggers reconnection.
 /// - The actor itself doesn't attempt to reconnect; it relies on external recovery.
-pub struct ChainLaserActor {
+pub struct ChainLaserActor<T: ChainRpcClient> {
     /// Configuration used to create the laser client
     laser_client_config: LaserstreamConfig,
     /// Requested subscriptions, some may not be active yet
@@ -129,9 +129,12 @@ pub struct ChainLaserActor {
     /// Unique client ID including the gRPC provider name for this actor instance used in logs
     /// and metrics
     client_id: String,
+    /// RPC client for fetching account data to resolve pubkeys from Delegation program
+    /// transaction updates
+    rpc_client: T,
 }
 
-impl ChainLaserActor {
+impl<T: ChainRpcClient> ChainLaserActor<T> {
     pub fn new_from_url(
         pubsub_url: &str,
         client_id: &str,
@@ -139,6 +142,7 @@ impl ChainLaserActor {
         commitment: SolanaCommitmentLevel,
         abort_sender: mpsc::Sender<()>,
         slots: Option<Slots>,
+        rpc_client: T,
     ) -> RemoteAccountProviderResult<(
         Self,
         mpsc::Sender<ChainPubsubActorMessage>,
@@ -163,6 +167,7 @@ impl ChainLaserActor {
             commitment,
             abort_sender,
             slots,
+            rpc_client,
         )
     }
 
@@ -172,6 +177,7 @@ impl ChainLaserActor {
         commitment: SolanaCommitmentLevel,
         abort_sender: mpsc::Sender<()>,
         slots: Option<Slots>,
+        rpc_client: T,
     ) -> RemoteAccountProviderResult<(
         Self,
         mpsc::Sender<ChainPubsubActorMessage>,
@@ -196,6 +202,7 @@ impl ChainLaserActor {
             abort_sender,
             slots,
             client_id: client_id.to_string(),
+            rpc_client,
         };
 
         Ok((me, messages_sender, subscription_updates_receiver))
@@ -289,7 +296,7 @@ impl ChainLaserActor {
                 }, if self.transaction_stream.is_some() => {
                     match update {
                         Some(update) => {
-                            self.handle_transaction_update(update).await;
+                            self.handle_transaction_update(update, self.rpc_client.clone()).await;
                         }
                         None => {
                             debug!("Transaction stream ended");
@@ -646,20 +653,85 @@ impl ChainLaserActor {
         }
     }
 
-    /// Handles an update from the transaction stream.
-    #[instrument(skip(self), fields(client_id = %self.client_id))]
-    async fn handle_transaction_update(&mut self, result: LaserResult) {
+    /// Handles an update from the Delegation program transaction stream.
+    /// It then tries to detect undelegated accounts and fetches their latest
+    /// account data via RPC before sending subscription updates.
+    #[instrument(skip(self, rpc_client), fields(client_id = %self.client_id))]
+    async fn handle_transaction_update(
+        &mut self,
+        result: LaserResult,
+        rpc_client: T,
+    ) {
         match result {
-            Ok(subscribe_update) => {
-                match subscribe_update.update_oneof {
-                    Some(UpdateOneof::Transaction(tx)) => {
-                        let _ = transaction_syncer::process_update(&tx);
+            Ok(subscribe_update) => match subscribe_update.update_oneof {
+                Some(UpdateOneof::Transaction(tx)) => {
+                    let pubkeys = transaction_syncer::process_update(&tx)
+                        .into_iter()
+                        .map(Pubkey::from)
+                        .filter(|pk| self.subscriptions.contains(pk))
+                        .collect::<Vec<Pubkey>>();
+
+                    let slot = tx.slot;
+                    let accounts_res = match rpc::fetch_accounts_with_timeout(
+                        &rpc_client,
+                        &pubkeys,
+                        rpc_client.commitment(),
+                        slot,
+                        None,
+                    )
+                    .await
+                    {
+                        Ok(Ok(accounts_res)) => accounts_res,
+                        Ok(Err(err)) => {
+                            warn!(error = ?err, "RPC error fetching accounts for transaction update");
+                            return;
+                        }
+                        Err(err) => {
+                            warn!(error = ?err, "Timed out fetching accounts for transaction update");
+                            return;
+                        }
+                    };
+
+                    let context_slot = accounts_res.context.slot;
+                    if context_slot < slot {
+                        warn!(
+                            slot = slot,
+                            context_slot = context_slot,
+                            "Fetched accounts context slot is less than transaction slot"
+                        );
                     }
-                    _ => {
-                        warn!("Received non-transaction update on transaction stream");
+                    for (pubkey, account) in
+                        pubkeys.iter().zip(accounts_res.value.into_iter())
+                    {
+                        if let Some(account) = account {
+                            let subscription_update = SubscriptionUpdate {
+                                pubkey: *pubkey,
+                                slot: context_slot,
+                                account: Some(account),
+                            };
+                            self.subscription_updates_sender
+                                .send(subscription_update)
+                                .await
+                                .unwrap_or_else(|_| {
+                                    error!(
+                                        pubkey = %pubkey,
+                                        "Failed to send subscription update"
+                                    );
+                                });
+                        } else {
+                            warn!(
+                                pubkey = %pubkey,
+                                "Account not found when fetching its data after transaction update"
+                            );
+                        }
                     }
                 }
-            }
+                _ => {
+                    warn!(
+                        "Received non-transaction update on transaction stream"
+                    );
+                }
+            },
             Err(err) => {
                 error!(error = ?err, "Error in transaction stream");
                 Self::signal_connection_issue(

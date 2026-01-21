@@ -12,8 +12,8 @@ use tracing::*;
 use crate::remote_account_provider::{
     chain_laser_actor::{ChainLaserActor, Slots},
     pubsub_common::{ChainPubsubActorMessage, SubscriptionUpdate},
-    ChainPubsubClient, ReconnectableClient, RemoteAccountProviderError,
-    RemoteAccountProviderResult,
+    ChainPubsubClient, ChainRpcClient, ReconnectableClient,
+    RemoteAccountProviderError, RemoteAccountProviderResult,
 };
 
 #[derive(Clone)]
@@ -27,13 +27,14 @@ pub struct ChainLaserClientImpl {
 }
 
 impl ChainLaserClientImpl {
-    pub async fn new_from_url(
+    pub async fn new_from_url<T: ChainRpcClient>(
         pubsub_url: &str,
         client_id: String,
         api_key: &str,
         commitment: CommitmentLevel,
         abort_sender: mpsc::Sender<()>,
         slots: Option<Slots>,
+        rpc_client: T,
     ) -> RemoteAccountProviderResult<Self> {
         let (actor, messages, updates) = ChainLaserActor::new_from_url(
             pubsub_url,
@@ -42,6 +43,7 @@ impl ChainLaserClientImpl {
             commitment,
             abort_sender,
             slots,
+            rpc_client,
         )?;
         let client = Self {
             updates: Arc::new(Mutex::new(Some(updates))),

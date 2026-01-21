@@ -20,13 +20,12 @@ pub use lru_cache::AccountsLruCache;
 pub(crate) use remote_account::RemoteAccount;
 pub use remote_account::RemoteAccountUpdateSource;
 use solana_account::Account;
-use solana_account_decoder_client_types::UiAccountEncoding;
 use solana_commitment_config::CommitmentConfig;
 use solana_pubkey::Pubkey;
 #[cfg(any(test, feature = "dev-context"))]
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_rpc_client_api::{
-    client_error::ErrorKind, config::RpcAccountInfoConfig,
+    client_error::ErrorKind,
     custom_error::JSON_RPC_SERVER_ERROR_MIN_CONTEXT_SLOT_NOT_REACHED,
     request::RpcError,
 };
@@ -405,6 +404,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                 abort_tx,
                 chain_slot.clone(),
                 resubscription_delay,
+                rpc_client.clone(),
             )
             .await?;
             Ok::<_, RemoteAccountProviderError>((Arc::new(client), abort_rx))

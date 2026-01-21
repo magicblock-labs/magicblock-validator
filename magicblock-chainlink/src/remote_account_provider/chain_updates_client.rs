@@ -14,7 +14,7 @@ use tracing::*;
 
 use crate::remote_account_provider::{
     chain_laser_actor::Slots, chain_laser_client::ChainLaserClientImpl,
-    pubsub_common::SubscriptionUpdate, ChainPubsubClient,
+    pubsub_common::SubscriptionUpdate, ChainPubsubClient, ChainRpcClient,
     ChainPubsubClientImpl, Endpoint, ReconnectableClient,
     RemoteAccountProviderError, RemoteAccountProviderResult,
 };
@@ -26,12 +26,13 @@ pub enum ChainUpdatesClient {
 }
 
 impl ChainUpdatesClient {
-    pub async fn try_new_from_endpoint(
+    pub async fn try_new_from_endpoint<T: ChainRpcClient>(
         endpoint: &Endpoint,
         commitment: CommitmentConfig,
         abort_sender: mpsc::Sender<()>,
         chain_slot: Arc<AtomicU64>,
         resubscription_delay: std::time::Duration,
+        rpc_client: T,
     ) -> RemoteAccountProviderResult<Self> {
         use Endpoint::*;
         static CLIENT_ID: AtomicU16 = AtomicU16::new(0);
@@ -78,6 +79,7 @@ impl ChainUpdatesClient {
                         commitment.commitment,
                         abort_sender,
                         slots,
+                        rpc_client,
                     )
                     .await?,
                 ))
