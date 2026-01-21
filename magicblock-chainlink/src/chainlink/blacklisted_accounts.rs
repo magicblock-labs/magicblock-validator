@@ -29,6 +29,7 @@ pub fn blacklisted_accounts(
 
     blacklisted_accounts.insert(magic_program::ID);
     blacklisted_accounts.insert(magic_program::MAGIC_CONTEXT_PUBKEY);
+    blacklisted_accounts.insert(magic_program::EPHEMERAL_VAULT_PUBKEY);
     blacklisted_accounts.insert(*validator_id);
     blacklisted_accounts.insert(*faucet_id);
     blacklisted_accounts

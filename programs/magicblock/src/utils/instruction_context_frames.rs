@@ -1,4 +1,3 @@
-#![cfg(not(test))]
 use solana_instruction::error::InstructionError;
 use solana_pubkey::Pubkey;
 use solana_transaction_context::{InstructionContext, TransactionContext};
