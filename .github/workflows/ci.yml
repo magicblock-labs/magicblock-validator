@@ -48,7 +48,7 @@ jobs:
       - name: Build Everything & Pre-fetch dependencies
         run: |
           # 1. Build SBF (Programmi Solana)
-          make build-sbf
+          make -C test-integration programs
           
           # 2. Build Binaries & Test Runner
           cargo build --bins --tests
