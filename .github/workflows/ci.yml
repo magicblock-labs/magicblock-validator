@@ -12,101 +12,82 @@ on:
 
 env:
   CARGO_TARGET_DIR: ${{ github.workspace }}/target
+  CARGO_BUILD_JOBS: 4
 
 jobs:
+  setup-affinity:
+    name: Setup Affinity
+    runs-on: self-hosted
+    outputs:
+      runner_idx: ${{ steps.select.outputs.idx }}
+    steps:
+      - id: select
+        run: |
+          IDX=$(echo -n "${{ github.ref_name }}" | cksum | awk '{print ($1 % 10) + 1}')
+          echo "idx=$IDX" >> $GITHUB_OUTPUT
+
   format:
     name: Format Check
-    runs-on: self-hosted
-    # Su push sempre; su PR solo se non è draft
+    needs: setup-affinity
+    runs-on: [self-hosted, "self-hosted-${{ needs.setup-affinity.outputs.runner_idx }}"]
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     steps:
       - name: Checkout magicblock-validator
         uses: actions/checkout@v5
         with:
           fetch-depth: 1
-
-      - name: Run ci-fmt
-        run: make ci-fmt
-
-      - name: Run ci-fmt in test-integration
+      - name: Run fmt
         run: |
-          cd test-integration
           make ci-fmt
+          cd test-integration && make ci-fmt
 
   lint:
     name: Lint Check
-    runs-on: self-hosted
-    # Su push sempre; su PR solo se non è draft
+    needs: setup-affinity
+    runs-on: [self-hosted, "self-hosted-${{ needs.setup-affinity.outputs.runner_idx }}"]
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     steps:
       - name: Checkout magicblock-validator
         uses: actions/checkout@v5
         with:
           fetch-depth: 1
-
       - name: Run ci-lint
-        run: make ci-lint
-
-      - name: Run ci-lint in test-integration
         run: |
-          cd test-integration
+          export RUSTC_WRAPPER=""
+          export CARGO_INCREMENTAL=1
+          export CARGO_BUILD_JOBS=20 
           make ci-lint
-
+          cd test-integration && make ci-lint
 
   unit-tests:
     name: Unit Tests
-    runs-on: self-hosted
-    # Su push sempre; su PR solo se non è draft
+    needs: setup-affinity
+    runs-on: [self-hosted, "self-hosted-${{ needs.setup-affinity.outputs.runner_idx }}"]
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     steps:
       - name: Checkout magicblock-validator
         uses: actions/checkout@v5
         with:
           fetch-depth: 1
-
       - name: Run unit tests
-        run: |
-          RUST_TEST_THREADS=1 make ci-test-unit
+        run: RUST_TEST_THREADS=1 make ci-test-unit
 
   integration-tests:
     name: Integration Tests - ${{ matrix.batch_tests }}
+    needs: [setup-affinity, format, lint, unit-tests]
     runs-on: self-hosted
-    # Su push sempre; su PR solo se non è draft
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
-    needs:
-      - format
-      - lint
-      - unit-tests
     strategy:
       fail-fast: false
       matrix:
-        batch_tests:
-          - "schedulecommit"
-          - "chainlink"
-          - "cloning"
-          - "restore_ledger"
-          - "magicblock_api"
-          - "config"
-          - "table_mania"
-          - "committor"
-          - "pubsub"
-          - "schedule_intents"
-          - "task-scheduler"
+        batch_tests: ["schedulecommit", "chainlink", "cloning", "restore_ledger", "magicblock_api", "config", "table_mania", "committor", "pubsub", "schedule_intents", "task-scheduler"]
     steps:
       - name: Checkout magicblock-validator
         uses: actions/checkout@v5
         with:
           fetch-depth: 1
-
-      - name: Install Rust toolchain
+      - name: Run integration tests
         run: |
-          rustup default 1.91.1
-          rustc --version
-          cargo --version
-
-      - name: Run integration tests - ${{ matrix.batch_tests }}
-        run: |
-          # Rimuoviamo mold solo per questo step perché il linker SBF non lo supporta
           export RUSTFLAGS=""
           make ci-test-integration
         env:
@@ -116,11 +97,7 @@ jobs:
     name: CI Status
     runs-on: ubuntu-latest
     if: always()
-    needs:
-      - format
-      - lint
-      - unit-tests
-      - integration-tests
+    needs: [format, lint, unit-tests, integration-tests]
     steps:
       - name: Check all jobs status
         run: |
@@ -128,7 +105,5 @@ jobs:
                 "${{ needs.lint.result }}" != "success" ||
                 "${{ needs.unit-tests.result }}" != "success" ||
                 "${{ needs.integration-tests.result }}" != "success" ]]; then
-            echo "One or more CI jobs failed or were skipped"
             exit 1
           fi
-          echo "All CI jobs passed successfully"
