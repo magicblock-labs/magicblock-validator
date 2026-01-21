@@ -1,5 +1,5 @@
 [workspace]
-members = ["helius-laser"]
+members = ["grpc-account-tracking"]
 resolver = "2"
 
 [workspace.package]
@@ -19,5 +19,5 @@ tokio = { version = "1", features = ["full"] }
 yellowstone-grpc-proto = "7.0.0"
 
 [[workspace.bin]]
-name = "helius-laser"
-path = "helius-laser/src/main.rs"
+name = "grpc-account-tracking"
+path = "grpc-account-tracking/src/main.rs"

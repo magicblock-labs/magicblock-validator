@@ -4,15 +4,15 @@ This workspace contains manual integration tests for the Magicblock validator th
 
 ## Tests
 
-### [helius-laser](helius-laser/)
+### [grpc-account-tracking](grpc-account-tracking/)
 
-Tests the validator's laser gRPC client integration with Helius devnet. This test validates that the validator can properly clone accounts from remote clusters and maintain synchronized state.
+Tests the validator's gRPC account tracking integration with Helius devnet. This test validates that the validator can properly clone accounts from remote clusters and maintain synchronized state.
 
 **Requirements**: Helius API key, Solana devnet keypair with SOL
 
-**Run with**: `make manual-test-laser`
+**Run with**: `make test-grpc-account-tracking`
 
-See the [helius-laser README](helius-laser/README.md) for detailed setup and usage instructions.
+See the [grpc-account-tracking README](grpc-account-tracking/README.md) for detailed setup and usage instructions.
 
 ## Why Manual Tests?
 

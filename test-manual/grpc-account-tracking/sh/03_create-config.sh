@@ -11,7 +11,7 @@ fi
 # Get the directory where this script is located
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 CONFIG_DIR="$SCRIPT_DIR/../configs"
-OUTPUT_FILE="/tmp/mb-test-laser.toml"
+OUTPUT_FILE="/tmp/mb-test-grpc-account-tracking.toml"
 
 # Determine which template to use and which API key(s) to use
 if [[ -n "${TRITON_API_KEY:-}" ]]; then

@@ -1,5 +1,5 @@
 [package]
-name = "helius-laser"
+name = "grpc-account-tracking"
 version.workspace = true
 edition.workspace = true
 

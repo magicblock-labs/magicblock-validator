@@ -1485,6 +1485,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "grpc-account-tracking"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "magicblock-core",
+ "solana-client",
+ "solana-rpc-client",
+ "solana-sdk",
+ "tokio",
+]
+
+[[package]]
 name = "h2"
 version = "0.3.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1543,18 +1555,6 @@ name = "hashbrown"
 version = "0.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5419bdc4f6a9207fbeba6d11b604d481addf78ecd10c11ad51e76c2f6482748d"
-
-[[package]]
-name = "helius-laser"
-version = "0.0.0"
-dependencies = [
- "anyhow",
- "magicblock-core",
- "solana-client",
- "solana-rpc-client",
- "solana-sdk",
- "tokio",
-]
 
 [[package]]
 name = "hermit-abi"

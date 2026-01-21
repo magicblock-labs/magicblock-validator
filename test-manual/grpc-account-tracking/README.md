@@ -1,10 +1,10 @@
-# Helius Laser Test
+# gRPC Account Tracking Test
 
 ## What does it do
 
-This test validates the validator's laser gRPC client integration with Helius or Triton devnet.
+This test validates the validator's gRPC account tracking integration with Helius or Triton devnet.
 It performs a series of account operations and verifies that the local validator correctly
-clones and tracks account states from the remote Helius cluster.
+clones and tracks account states from the remote devnet cluster.
 
 The test:
 
@@ -36,9 +36,9 @@ These external dependencies and manual setup steps prevent full automation.
    ```
 
 2. Run the test from the `test-manual` directory:
-   ```bash
-   make test-laser
-   ```
+    ```bash
+    make test-grpc-account-tracking
+    ```
 That last step will ensure the following:
 
 1. airdrop some SOL to your globally configured keypair
@@ -60,5 +60,5 @@ If successful, you'll see account cloning and subscription messages in the valid
 
 ## Run Steps in Isolation
 
-Inside `test-manual/helius-laser/sh/` you can find bash scripts which you can run in order to
+Inside `test-manual/grpc-account-tracking/sh/` you can find bash scripts which you can run in order to
 perform the above step by step.
