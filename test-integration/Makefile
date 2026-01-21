@@ -30,7 +30,13 @@ list-programs:
 programs: $(PROGRAMS_SO)
 
 test: $(PROGRAMS_SO)
-	$(MAKE) chainlink-prep-programs -C ./test-chainlink && \
+	@# Only prepare chainlink programs when running chainlink tests
+	@if [ -z "$(RUN_TESTS)" ] || [ "$(RUN_TESTS)" = "chainlink" ]; then \
+		echo "Preparing chainlink programs (RUN_TESTS=$(RUN_TESTS))"; \
+		$(MAKE) chainlink-prep-programs -C ./test-chainlink; \
+	else \
+		echo "Skipping chainlink-prep-programs for RUN_TESTS=$(RUN_TESTS)"; \
+	fi
 	RUST_BACKTRACE=1 \
 	RUST_LOG=$(RUST_LOG) \
 	cargo run --package test-runner --bin run-tests
