@@ -3,6 +3,9 @@ DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 GRPC_ACCOUNT_TRACKING_DIR := $(DIR)grpc-account-tracking
 GRPC_ACCOUNT_TRACKING_SH_DIR := $(GRPC_ACCOUNT_TRACKING_DIR)/sh
 
+GRPC_UNDELEGATION_TRACKING_DIR := $(DIR)grpc-undelegation-tracking
+GRPC_UNDELEGATION_TRACKING_SH_DIR := $(GRPC_UNDELEGATION_TRACKING_DIR)/sh
+
 fmt:
 	cargo +nightly fmt -- --config-path $(DIR)rustfmt-nightly.toml
 
@@ -44,4 +47,39 @@ test-grpc-account-tracking:
 		rm /tmp/validator.pid /tmp/validator.log /tmp/mb-test-grpc-account-tracking.toml ; \
 	fi
 
-.PHONY: fmt list test-grpc-account-tracking
+test-grpc-undelegation-tracking:
+	@if [ -z "$$HELIUS_API_KEY" ]; then \
+		echo "Error: HELIUS_API_KEY environment variable and optionally TRITON_API_KEY need to be set."; \
+		exit 1; \
+	fi
+	$(eval KEYPAIR_PATH := $(shell $(GRPC_UNDELEGATION_TRACKING_SH_DIR)/01_extract_keypair_path.sh))
+	$(GRPC_UNDELEGATION_TRACKING_SH_DIR)/02_airdrop.sh $(KEYPAIR_PATH) || true
+	$(GRPC_UNDELEGATION_TRACKING_SH_DIR)/03_create-config.sh
+	@echo
+	@echo "## Starting validator in background..."
+	RUST_LOG=warn,magicblock=info,magicblock_chainlink=debug,magicblock_accounts=debug,magicblock_committor_service=debug \
+			cargo run --bin magicblock-validator --manifest-path=$(DIR)../Cargo.toml \
+			-- /tmp/mb-test-grpc-undelegation-tracking.toml \
+			> /tmp/validator.log 2>&1 &
+	@echo $$! > /tmp/validator.pid
+	@echo
+	@echo "### Waiting until validator listens on port 9988..."
+	@until solana cluster-version --url http://127.0.0.1:9988 >/dev/null 2>&1; do \
+		sleep 1; \
+	done
+	@echo "## Running undelegation tracking test..."
+	@KEYPAIR_PATH=$(KEYPAIR_PATH) RUST_LOG=info \
+		cargo run --bin grpc-undelegation-tracking || { \
+			echo "## Undelegation tracking test failed, showing validator logs"; \
+			cat /tmp/validator.log || true; \
+			echo "⛔ TEST FAILED"; \
+		}
+	@echo "✅ TEST COMPLETED"
+	@echo
+	@if [ -f /tmp/validator.pid ]; then \
+		echo "## Shutting down validator"; \
+		kill $$(cat /tmp/validator.pid) 2>/dev/null || true; \
+		rm /tmp/validator.pid /tmp/validator.log /tmp/mb-test-grpc-undelegation-tracking.toml ; \
+	fi
+
+.PHONY: fmt list test-grpc-account-tracking test-grpc-undelegation-tracking
