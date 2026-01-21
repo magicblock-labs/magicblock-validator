@@ -1,5 +1,6 @@
 # Makefile for building and testing Solana programs and test suitesk
 DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
+TEST_RUNNER_BIN := $(DIR)../target/debug/run-tests
 DEPLOY_DIR := $(DIR)target/deploy
 ROOT_DEPLOY_DIR := $(DIR)../target/deploy
 
@@ -37,9 +38,15 @@ test: $(PROGRAMS_SO)
 	else \
 		echo "Skipping chainlink-prep-programs for RUN_TESTS=$(RUN_TESTS)"; \
 	fi
-	RUST_BACKTRACE=1 \
-	RUST_LOG=$(RUST_LOG) \
-	cargo run --package test-runner --bin run-tests
+	@# Prefer running the prebuilt test-runner binary to avoid concurrent Cargo locking
+	@if [ -x "$(TEST_RUNNER_BIN)" ]; then \
+		echo "Using prebuilt test-runner binary: $(TEST_RUNNER_BIN)"; \
+		RUST_BACKTRACE=1 RUST_LOG=$(RUST_LOG) $(TEST_RUNNER_BIN); \
+	else \
+		echo "test-runner binary not found, falling back to 'cargo run'"; \
+		RUST_BACKTRACE=1 RUST_LOG=$(RUST_LOG) cargo run --package test-runner --bin run-tests; \
+	fi
+
 
 test-force-mb: $(PROGRAMS_SO)
 	RUST_LOG=$(RUST_LOG) \
