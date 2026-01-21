@@ -1,5 +1,7 @@
+use std::sync::atomic::AtomicU16;
+
 use magicblock_core::{
-    token_programs::{try_derive_eata_address_and_bump, MaybeIntoAta},
+    logger::log_trace_warn, token_programs::try_derive_eata_address_and_bump,
     traits::AccountsBank,
 };
 use magicblock_metrics::metrics;
@@ -18,6 +20,7 @@ use crate::{
 /// For each detected ATA, we derive the eATA PDA, subscribe to both,
 /// and, if the ATA is delegated to us and the eATA exists, we clone the eATA data
 /// into the ATA in the bank.
+#[instrument(skip(this, atas))]
 pub(crate) async fn resolve_ata_with_eata_projection<T, U, V, C>(
     this: &FetchCloner<T, U, V, C>,
     atas: Vec<(
@@ -45,13 +48,31 @@ where
     // Subscribe first so subsequent fetches are kept up-to-date
     for (ata_pubkey, _, ata_info, ata_account_slot) in &atas {
         if let Err(err) = this.subscribe_to_account(ata_pubkey).await {
-            warn!("Failed to subscribe to ATA {}: {}", ata_pubkey, err);
+            static ATA_SUBSCRIPTION_FAILURE_COUNT: AtomicU16 =
+                AtomicU16::new(0);
+            log_trace_warn(
+                "Failed to subscribe to ATA",
+                "Failed to subscribe to ATAs",
+                &ata_pubkey,
+                &err,
+                1000,
+                &ATA_SUBSCRIPTION_FAILURE_COUNT,
+            );
         }
         if let Some((eata, _)) =
             try_derive_eata_address_and_bump(&ata_info.owner, &ata_info.mint)
         {
             if let Err(err) = this.subscribe_to_account(&eata).await {
-                warn!("Failed to subscribe to derived eATA {}: {}", eata, err);
+                static EATA_SUBSCRIPTION_FAILURE_COUNT: AtomicU16 =
+                    AtomicU16::new(0);
+                log_trace_warn(
+                    "Failed to subscribe to derived eATA",
+                    "Failed to subscribe to derived eATAs",
+                    &eata,
+                    &err,
+                    1000,
+                    &EATA_SUBSCRIPTION_FAILURE_COUNT,
+                );
             }
 
             let effective_slot = if let Some(min_slot) = min_context_slot {
@@ -80,11 +101,11 @@ where
         } = match result {
             Ok(Ok(v)) => v,
             Ok(Err(err)) => {
-                warn!("Failed to resolve ATA/eATA companion: {err}");
+                warn!(error = %err, "Failed to resolve ATA/eATA companion");
                 continue;
             }
             Err(join_err) => {
-                warn!("Failed to join ATA/eATA fetch task: {join_err}");
+                warn!(error = %join_err, "Failed to join ATA/eATA fetch task");
                 continue;
             }
         };
@@ -110,15 +131,14 @@ where
                     delegation::get_delegated_to_other(this, &deleg);
                 commit_frequency_ms = Some(deleg.commit_frequency_ms);
 
-                let delegated_to_us = deleg.authority == this.validator_pubkey;
-
-                if delegated_to_us {
-                    if let Some(projected_ata) =
-                        eata_shared.maybe_into_ata(deleg.owner)
-                    {
-                        account_to_clone = projected_ata;
-                        account_to_clone.set_delegated(true);
-                    }
+                if let Some(projected_ata) = this
+                    .maybe_project_delegated_ata_from_eata(
+                        ata_account.account_shared_data(),
+                        &eata_shared,
+                        &deleg,
+                    )
+                {
+                    account_to_clone = projected_ata;
                 }
             }
         }

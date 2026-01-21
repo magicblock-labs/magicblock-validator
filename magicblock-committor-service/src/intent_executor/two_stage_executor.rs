@@ -2,7 +2,7 @@ use std::ops::ControlFlow;
 
 use solana_pubkey::Pubkey;
 use solana_signature::Signature;
-use tracing::{error, warn};
+use tracing::{error, instrument, warn};
 
 use crate::{
     intent_executor::{
@@ -71,6 +71,10 @@ where
         }
     }
 
+    #[instrument(
+        skip(self, committed_pubkeys, persister),
+        fields(stage = "commit")
+    )]
     pub async fn commit<P: IntentPersister>(
         mut self,
         committed_pubkeys: &[Pubkey],
@@ -110,9 +114,7 @@ where
             self.inner.junk.push(cleanup);
 
             if i >= Self::RECURSION_CEILING {
-                error!(
-                    "CRITICAL! Recursion ceiling reached in intent execution."
-                );
+                error!("CRITICAL! Recursion ceiling reached");
                 break Err(execution_err);
             } else {
                 self.inner.patched_errors.push(execution_err);
@@ -162,8 +164,8 @@ where
             ) => {
                 let optimized_tasks =
                     commit_strategy.optimized_tasks.as_slice();
-                if let Some(task) = err
-                    .task_index()
+                let task_index = err.task_index();
+                if let Some(task) = task_index
                     .and_then(|index| optimized_tasks.get(index as usize))
                 {
                     Self::handle_unfinalized_account_error(
@@ -174,8 +176,10 @@ where
                     .await
                 } else {
                     error!(
-                        "RPC returned unexpected task index: {}. optimized_tasks_len: {}",
-                        err, optimized_tasks.len()
+                        task_index = ?task_index,
+                        optimized_tasks_len = optimized_tasks.len(),
+                        error = ?err,
+                        "RPC returned unexpected task index"
                     );
                     Ok(ControlFlow::Break(()))
                 }
@@ -183,18 +187,18 @@ where
             TransactionStrategyExecutionError::ActionsError(_, _) => {
                 // Unexpected in Two Stage commit
                 // That would mean that Two Stage executes Standalone commit
-                error!("Unexpected error in two stage commit flow: {}", err);
+                error!(error = ?err, "Unexpected error in two stage commit flow");
                 Ok(ControlFlow::Break(()))
             }
             TransactionStrategyExecutionError::UndelegationError(_, _) => {
                 // Unexpected in Two Stage commit
                 // That would mean that Two Stage executes undelegation in commit phase
-                error!("Unexpected error in two stage commit flow: {}", err);
+                error!(error = ?err, "Unexpected error in two stage commit flow");
                 Ok(ControlFlow::Break(()))
             }
             TransactionStrategyExecutionError::CpiLimitError(_, _) => {
                 // Can't be handled
-                error!("Commit tasks exceeded CpiLimitError: {}", err);
+                error!(error = ?err, "Commit tasks exceeded CpiLimitError");
                 Ok(ControlFlow::Break(()))
             }
             TransactionStrategyExecutionError::InternalError(_) => {
@@ -246,6 +250,7 @@ where
 {
     const RECURSION_CEILING: u8 = 10;
 
+    #[instrument(skip(self, persister), fields(stage = "finalize"))]
     pub async fn finalize<P: IntentPersister>(
         mut self,
         persister: &Option<P>,
@@ -284,9 +289,7 @@ where
             self.inner.junk.push(cleanup);
 
             if i >= Self::RECURSION_CEILING {
-                error!(
-                    "CRITICAL! Recursion ceiling reached in intent execution."
-                );
+                error!("CRITICAL! Recursion ceiling reached");
                 break Err(execution_err);
             } else {
                 self.inner.patched_errors.push(execution_err);
@@ -331,7 +334,7 @@ where
                 _,
             ) => {
                 // Unexpected error in Two Stage commit
-                error!("Unexpected error in two stage finalize flow: {}", err);
+                error!(error = ?err, "Unexpected error in two stage finalize flow");
                 Ok(ControlFlow::Break(()))
             }
             TransactionStrategyExecutionError::ActionsError(_, _) => {
@@ -349,7 +352,7 @@ where
             }
             TransactionStrategyExecutionError::CpiLimitError(_, _) => {
                 // Can't be handled
-                warn!("Finalization tasks exceeded CpiLimitError: {}", err);
+                warn!(error = ?err, "Finalization tasks exceeded CpiLimitError");
                 Ok(ControlFlow::Break(()))
             }
             TransactionStrategyExecutionError::InternalError(_) => {

@@ -12,7 +12,7 @@ use tokio::{
     sync::oneshot::Receiver,
 };
 use tokio_util::sync::CancellationToken;
-use tracing::info;
+use tracing::{info, instrument};
 
 use super::Shutdown;
 use crate::{state::SharedState, RpcResult};
@@ -65,6 +65,7 @@ impl HttpServer {
     /// 2.  The server then waits for all active connections (which hold a clone of the
     ///     `shutdown` handle) to complete their work and drop their handles. Only then
     ///     does the `run` method return.
+    #[instrument(skip(self))]
     pub(crate) async fn run(self) {
         let dispatcher = self.dispatcher.clone();
         let cancel = self.cancel.clone();
@@ -76,7 +77,7 @@ impl HttpServer {
                 Ok((stream, _)) = self.socket.accept() => self.handle(stream),
                 // Or, break the loop if the cancellation token is triggered.
                 _ = self.cancel.cancelled() => {
-                    info!("HTTP server shutdown signal has been received");
+                    info!("HTTP server shutdown signal received");
                     break
                 }
             }
@@ -88,7 +89,7 @@ impl HttpServer {
         drop(self.shutdown);
         // Wait for the shutdown signal, which fires when all connections are closed.
         let _ = self.shutdown_rx.await;
-        info!("HTTP server has shutdown");
+        info!("HTTP server shutdown");
     }
 
     /// Spawns a new task to handle a single incoming TCP connection.

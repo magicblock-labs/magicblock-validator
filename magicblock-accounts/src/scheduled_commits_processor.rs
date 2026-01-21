@@ -31,7 +31,7 @@ use tokio::{
     task,
 };
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, instrument};
 
 use crate::{
     errors::ScheduledCommitsProcessorResult, ScheduledCommitsProcessor,
@@ -109,12 +109,18 @@ impl ScheduledCommitsProcessorImpl {
             // in the validator and are not synced from chain.
             // We could implement a retry mechanism inside of chainlink in the future.
             error!(
-                "Failed to subscribe to accounts being undelegated: {:?}",
-                sub_errors
+                error_count = sub_errors.len(),
+                "Failed to subscribe to accounts being undelegated"
             );
         }
     }
 
+    #[instrument(skip(
+        result_subscriber,
+        cancellation_token,
+        intents_meta_map,
+        internal_transaction_scheduler
+    ))]
     async fn result_processor(
         result_subscriber: oneshot::Receiver<
             broadcast::Receiver<BroadcastedIntentExecutionResult>,
@@ -132,20 +138,20 @@ impl ScheduledCommitsProcessorImpl {
             let execution_result = tokio::select! {
                 biased;
                 _ = cancellation_token.cancelled() => {
-                    info!("ScheduledCommitsProcessorImpl stopped.");
+                    info!("Shutting down");
                     return;
                 }
                 execution_result = result_receiver.recv() => {
                     match execution_result {
                         Ok(result) => result,
                         Err(broadcast::error::RecvError::Closed) => {
-                            info!("Intent execution got shutdown, shutting down result processor!");
+                            info!("Intent execution service shut down");
                             break;
                         }
                         Err(broadcast::error::RecvError::Lagged(skipped)) => {
                             // SAFETY: This shouldn't happen as our tx execution is faster than Intent execution on Base layer
                             // If this ever happens it requires investigation
-                            error!("ScheduledCommitsProcessorImpl lags behind Intent execution! skipped: {}", skipped);
+                            error!(skipped_count = skipped, "Lagging behind intent execution");
                             continue;
                         }
                     }
@@ -164,10 +170,7 @@ impl ScheduledCommitsProcessorImpl {
                 // Possible if we have duplicate Intents
                 // First one will remove id from map and second could fail.
                 // This should not happen and needs investigation!
-                error!(
-                    "CRITICAL! Failed to find IntentMeta for id: {}!",
-                    intent_id
-                );
+                error!(intent_id, "Failed to find intent metadata");
                 continue;
             };
 
@@ -181,6 +184,10 @@ impl ScheduledCommitsProcessorImpl {
         }
     }
 
+    #[instrument(
+        skip(internal_transaction_scheduler, result, intent_meta),
+        fields(intent_id)
+    )]
     async fn process_intent_result(
         intent_id: u64,
         internal_transaction_scheduler: &TransactionSchedulerHandle,
@@ -196,12 +203,11 @@ impl ScheduledCommitsProcessorImpl {
             .execute(intent_sent_transaction)
             .await
         {
-            Ok(signature) => debug!(
-                "Signaled sent commit with internal signature: {:?}",
-                signature
-            ),
+            Ok(()) => {
+                debug!("Sent commit signaled")
+            }
             Err(err) => {
-                error!("Failed to signal sent commit via transaction: {}", err);
+                error!(error = ?err, "Failed to signal sent commit");
             }
         }
     }
@@ -261,6 +267,7 @@ impl ScheduledCommitsProcessorImpl {
 
 #[async_trait]
 impl ScheduledCommitsProcessor for ScheduledCommitsProcessorImpl {
+    #[instrument(skip(self))]
     async fn process(&self) -> ScheduledCommitsProcessorResult<()> {
         let intent_bundles =
             self.transaction_scheduler.take_scheduled_intent_bundles();

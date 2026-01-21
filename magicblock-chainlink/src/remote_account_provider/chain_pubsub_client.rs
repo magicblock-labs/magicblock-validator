@@ -267,7 +267,7 @@ impl ChainPubsubClient for ChainPubsubClientImpl {
 
         rx.await
             .inspect_err(|err| {
-                warn!("ChainPubsubClientImpl::subscribe - RecvError occurred while awaiting subscription response for {}: {err:?}. This indicates the actor sender was dropped without responding.", pubkey);
+                warn!(pubkey = %pubkey, error = ?err, "ChainPubsubClientImpl::subscribe - RecvError awaiting subscription response, actor sender dropped");
             })?
     }
 
@@ -285,7 +285,7 @@ impl ChainPubsubClient for ChainPubsubClientImpl {
 
         rx.await
             .inspect_err(|err| {
-                warn!("ChainPubsubClientImpl::subscribe_program - RecvError occurred while awaiting subscription response for {}: {err:?}. This indicates the actor sender was dropped without responding.", program_id);
+                warn!(program_id = %program_id, error = ?err, "ChainPubsubClientImpl::subscribe_program - RecvError awaiting subscription response, actor sender dropped");
             })?
     }
 
@@ -303,7 +303,7 @@ impl ChainPubsubClient for ChainPubsubClientImpl {
 
         rx.await
             .inspect_err(|err| {
-                warn!("ChainPubsubClientImpl::unsubscribe - RecvError occurred while awaiting unsubscription response for {}: {err:?}. This indicates the actor sender was dropped without responding.", pubkey);
+                warn!(pubkey = %pubkey, error = ?err, "ChainPubsubClientImpl::unsubscribe - RecvError awaiting unsubscription response, actor sender dropped");
             })?
     }
 
@@ -342,7 +342,7 @@ impl ReconnectableClient for ChainPubsubClientImpl {
             .await?;
 
         rx.await.inspect_err(|err| {
-            warn!("RecvError occurred while awaiting reconnect response: {err:?}.");
+            warn!(error = ?err, "RecvError awaiting reconnect response");
         })?
     }
 
@@ -385,7 +385,6 @@ pub mod mock {
         updates_sndr: mpsc::Sender<SubscriptionUpdate>,
         updates_rcvr: Arc<Mutex<Option<mpsc::Receiver<SubscriptionUpdate>>>>,
         subscribed_pubkeys: Arc<Mutex<HashSet<Pubkey>>>,
-        subscribed_programs: Arc<Mutex<HashSet<Pubkey>>>,
         subscription_count_at_disconnect: Arc<Mutex<usize>>,
         connected: Arc<Mutex<bool>>,
         pending_resubscribe_failures: Arc<Mutex<usize>>,
@@ -401,7 +400,6 @@ pub mod mock {
                 updates_sndr,
                 updates_rcvr: Arc::new(Mutex::new(Some(updates_rcvr))),
                 subscribed_pubkeys: Arc::new(Mutex::new(HashSet::new())),
-                subscribed_programs: Arc::new(Mutex::new(HashSet::new())),
                 subscription_count_at_disconnect: Arc::new(Mutex::new(0)),
                 connected: Arc::new(Mutex::new(true)),
                 pending_resubscribe_failures: Arc::new(Mutex::new(0)),
@@ -427,7 +425,7 @@ pub mod mock {
             if subscribed_pubkeys.contains(&update.pubkey) {
                 let _ =
                     self.updates_sndr.send(update).await.inspect_err(|err| {
-                        error!("Failed to send subscription update: {err:?}")
+                        error!(error = ?err, "Failed to send subscription update")
                     });
             }
         }
@@ -470,10 +468,6 @@ pub mod mock {
                     == *self.subscription_count_at_disconnect.lock()
         }
 
-        pub fn subscribed_program_ids(&self) -> HashSet<Pubkey> {
-            self.subscribed_programs.lock().clone()
-        }
-
         /// Directly insert a subscription without going through subscribe().
         /// Useful for testing reconciliation scenarios.
         pub fn insert_subscription(&self, pubkey: Pubkey) {
@@ -510,7 +504,7 @@ pub mod mock {
 
         async fn subscribe_program(
             &self,
-            program_id: Pubkey,
+            _program_id: Pubkey,
         ) -> RemoteAccountProviderResult<()> {
             if !*self.connected.lock() {
                 return Err(
@@ -520,8 +514,7 @@ pub mod mock {
                     ),
                 );
             }
-            let mut subscribed_programs = self.subscribed_programs.lock();
-            subscribed_programs.insert(program_id);
+            // Program subscriptions don't track individual accounts in the mock
             Ok(())
         }
 

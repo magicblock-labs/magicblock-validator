@@ -175,10 +175,7 @@ impl TasksBuilder for TaskBuilderImpl {
         let commit_ids =
             commit_ids.map_err(TaskBuilderError::CommitTasksBuildError)?;
         let mut base_accounts = base_accounts.unwrap_or_else(|err| {
-            tracing::warn!(
-                "Failed to fetch base accounts for CommitDiff (id={}): {}; falling back to CommitState",
-                intent_bundle.id, err
-            );
+            tracing::warn!(intent_id = intent_bundle.id, error = ?err, "Failed to fetch base accounts, falling back to CommitState");
             Default::default()
         });
 
@@ -187,10 +184,7 @@ impl TasksBuilder for TaskBuilderImpl {
             .iter()
             .for_each(|(pubkey, commit_id) | {
                 if let Err(err) = persister.set_commit_id(intent_bundle.id, pubkey, *commit_id) {
-                    error!(
-                        "Failed to persist commit id: {}, for message id: {} with pubkey {}: {}",
-                        commit_id, intent_bundle.id, pubkey, err
-                    );
+                    error!(intent_id = intent_bundle.id, pubkey = %pubkey, error = ?err, "Failed to persist commit id");
                 }
             });
 

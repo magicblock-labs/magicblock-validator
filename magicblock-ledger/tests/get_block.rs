@@ -1,6 +1,7 @@
 mod common;
 
 use solana_hash::Hash;
+use test_kit::init_logger;
 
 use crate::common::{
     get_block, get_block_transaction_hash, setup, write_dummy_transaction,
@@ -8,6 +9,7 @@ use crate::common::{
 
 #[test]
 fn test_get_block_meta() {
+    init_logger!();
     let ledger = setup();
 
     let slot_0_time = 5;
@@ -37,6 +39,7 @@ fn test_get_block_meta() {
 
 #[test]
 fn test_get_block_transactions() {
+    init_logger!();
     let ledger = setup();
 
     let (slot_41_tx1, _) = write_dummy_transaction(&ledger, 41);
