@@ -516,7 +516,6 @@ async fn commit_5_accounts_1kb(
     .await;
 }
 
-// TODO(edwin): add tests to cover intent bundles
 async fn commit_8_accounts_1kb(
     bundle_size: usize,
     expected_strategies: ExpectedStrategies,

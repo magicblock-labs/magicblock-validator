@@ -112,7 +112,6 @@ impl TestEnv {
     }
 }
 
-// TODO(edwin): add tests
 #[tokio::test]
 async fn test_commit_id_error_parsing() {
     const COUNTER_SIZE: u64 = 70;

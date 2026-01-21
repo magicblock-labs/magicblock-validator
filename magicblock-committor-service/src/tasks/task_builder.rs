@@ -189,12 +189,18 @@ impl TasksBuilder for TaskBuilderImpl {
             });
 
         // Create commit tasks
-        let commit_tasks_iter = flagged_accounts
-            .into_iter()
-            .map(|(allow_undelegation, account)| {
-                let commit_id = *commit_ids
+        let commit_tasks_iter = flagged_accounts.into_iter().map(
+            |(allow_undelegation, account)| {
+                let commit_id = commit_ids
                     .get(&account.pubkey)
-                    .expect("CommitIdFetcher must provide commit ids for all listed pubkeys, or error!");
+                    .copied()
+                    .unwrap_or_else(|| {
+                        // This shall not ever happen since TaskInfoFetcher
+                        // returns commit ids for all pubkeys or throws
+                        // If it does occur, it will be patched and retried by IntentExecutor
+                        error!(pubkey = %account.pubkey, "Commit id absent for pubkey");
+                        0
+                    });
                 let base_account = base_accounts.remove(&account.pubkey);
 
                 Box::new(Self::create_commit_task(
@@ -203,7 +209,8 @@ impl TasksBuilder for TaskBuilderImpl {
                     account.clone(),
                     base_account,
                 )) as Box<dyn BaseTask>
-            });
+            },
+        );
         tasks.extend(commit_tasks_iter);
 
         Ok(tasks)

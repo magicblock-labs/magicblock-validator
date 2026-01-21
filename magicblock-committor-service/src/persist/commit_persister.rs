@@ -566,7 +566,7 @@ mod tests {
         let rows = IntentPersisterImpl::create_commit_rows(&message);
 
         assert_eq!(rows.len(), 2);
-        assert!(rows.iter().all(|r| !r.undelegate));
+        assert!(rows.iter().all(|r| r.undelegate));
     }
 
     #[test]

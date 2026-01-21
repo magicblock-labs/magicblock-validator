@@ -64,7 +64,6 @@ pub struct ScheduledIntentBundle {
     pub intent_bundle_sent_transaction: Transaction,
     pub payer: Pubkey,
     /// Scheduled intent bundle
-    // TODO(edwin): rename
     pub intent_bundle: MagicIntentBundle,
 }
 
@@ -187,7 +186,7 @@ impl MagicIntentBundle {
         args: MagicIntentBundleArgs,
         context: &ConstructionContext<'_, '_>,
     ) -> Result<Self, InstructionError> {
-        Self::validate(&args)?;
+        Self::validate(&args, context)?;
 
         let commit = args
             .commit
@@ -217,7 +216,10 @@ impl MagicIntentBundle {
     /// 1. Set of committed accounts shall not overlap with
     ///    set of undelegated accounts
     /// 2. None for now :)
-    fn validate(args: &MagicIntentBundleArgs) -> Result<(), InstructionError> {
+    fn validate(
+        args: &MagicIntentBundleArgs,
+        context: &ConstructionContext<'_, '_>,
+    ) -> Result<(), InstructionError> {
         let committed_set: Option<HashSet<_>> =
             args.commit.as_ref().map(|el| {
                 el.committed_accounts_indices().iter().copied().collect()
@@ -234,10 +236,13 @@ impl MagicIntentBundle {
                     .iter()
                     .any(|ind| committed_set.contains(ind));
                 if has_cross_reference {
-                    Ok(())
-                } else {
-                    // TODO(edwin): add msg here?
+                    ic_msg!(
+                        context.invoke_context,
+                        "ScheduleCommit ERR: duplicate committed account across bundle",
+                    );
                     Err(InstructionError::InvalidInstructionData)
+                } else {
+                    Ok(())
                 }
             })
             .unwrap_or(Ok(()))
@@ -251,16 +256,15 @@ impl MagicIntentBundle {
         context: &ConstructionContext<'_, '_>,
     ) -> Result<(), InstructionError> {
         let mut seen = HashSet::<Pubkey>::new();
-
         let mut check =
             |accounts: &Vec<CommittedAccount>| -> Result<(), InstructionError> {
-                for a in accounts {
-                    if !seen.insert(a.pubkey) {
+                for el in accounts {
+                    if !seen.insert(el.pubkey) {
                         ic_msg!(
-                        context.invoke_context,
-                        "ScheduleCommit ERR: duplicate committed account pubkey across bundle: {}",
-                        a.pubkey
-                    );
+                            context.invoke_context,
+                            "ScheduleCommit ERR: duplicate committed account pubkey across bundle: {}",
+                            el.pubkey
+                        );
                         return Err(InstructionError::InvalidInstructionData);
                     }
                 }

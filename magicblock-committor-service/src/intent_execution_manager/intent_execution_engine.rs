@@ -181,7 +181,7 @@ where
         }
     }
 
-    /// Returns [`ScheduleIntentBundleWrapper`] or None if all intents are blocked
+    /// Returns [`ScheduledIntentBundle`] or None if all intents are blocked
     #[instrument(skip(self))]
     async fn next_scheduled_intent(
         &mut self,
