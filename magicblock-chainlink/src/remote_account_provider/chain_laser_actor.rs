@@ -201,8 +201,6 @@ impl ChainLaserActor {
         Ok((me, messages_sender, subscription_updates_receiver))
     }
 
-    fn track_undelegations() {}
-
     #[allow(dead_code)]
     #[instrument(skip(self), fields(client_id = %self.client_id))]
     fn shutdown(&mut self) {
@@ -248,6 +246,7 @@ impl ChainLaserActor {
                                 &mut self.active_subscriptions,
                                 &mut self.active_subscription_pubkeys,
                                 &mut self.program_subscriptions,
+                                &mut self.transaction_stream,
                                 &self.abort_sender,
                                 &self.client_id,
                             )
@@ -273,6 +272,33 @@ impl ChainLaserActor {
                                 &mut self.active_subscriptions,
                                 &mut self.active_subscription_pubkeys,
                                 &mut self.program_subscriptions,
+                                &mut self.transaction_stream,
+                                &self.abort_sender,
+                                &self.client_id,
+                            )
+                            .await;
+                        }
+                    }
+                },
+                // Transaction stream updates
+                update = async {
+                    match &mut self.transaction_stream {
+                        Some(stream) => stream.next().await,
+                        None => std::future::pending().await,
+                    }
+                }, if self.transaction_stream.is_some() => {
+                    match update {
+                        Some(update) => {
+                            self.handle_transaction_update(update).await;
+                        }
+                        None => {
+                            debug!("Transaction stream ended");
+                            Self::signal_connection_issue(
+                                &mut self.subscriptions,
+                                &mut self.active_subscriptions,
+                                &mut self.active_subscription_pubkeys,
+                                &mut self.program_subscriptions,
+                                &mut self.transaction_stream,
                                 &self.abort_sender,
                                 &self.client_id,
                             )
@@ -325,6 +351,7 @@ impl ChainLaserActor {
                     &mut self.active_subscriptions,
                     &mut self.active_subscription_pubkeys,
                     &mut self.program_subscriptions,
+                    &mut self.transaction_stream,
                 );
                 let _ = response.send(Ok(())).inspect_err(|_| {
                     warn!("Failed to send shutdown response");
@@ -541,6 +568,7 @@ impl ChainLaserActor {
             Some((subscribed_programs, Box::pin(stream)));
     }
 
+    #[allow(dead_code)]
     fn setup_transaction_stream(
         &mut self,
         commitment: CommitmentLevel,
@@ -582,6 +610,7 @@ impl ChainLaserActor {
                     &mut self.active_subscriptions,
                     &mut self.active_subscription_pubkeys,
                     &mut self.program_subscriptions,
+                    &mut self.transaction_stream,
                     &self.abort_sender,
                     &self.client_id,
                 )
@@ -608,6 +637,37 @@ impl ChainLaserActor {
                     &mut self.active_subscriptions,
                     &mut self.active_subscription_pubkeys,
                     &mut self.program_subscriptions,
+                    &mut self.transaction_stream,
+                    &self.abort_sender,
+                    &self.client_id,
+                )
+                .await;
+            }
+        }
+    }
+
+    /// Handles an update from the transaction stream.
+    #[instrument(skip(self), fields(client_id = %self.client_id))]
+    async fn handle_transaction_update(&mut self, result: LaserResult) {
+        match result {
+            Ok(subscribe_update) => {
+                match subscribe_update.update_oneof {
+                    Some(UpdateOneof::Transaction(tx)) => {
+                        let _ = transaction_syncer::process_update(&tx);
+                    }
+                    _ => {
+                        warn!("Received non-transaction update on transaction stream");
+                    }
+                }
+            }
+            Err(err) => {
+                error!(error = ?err, "Error in transaction stream");
+                Self::signal_connection_issue(
+                    &mut self.subscriptions,
+                    &mut self.active_subscriptions,
+                    &mut self.active_subscription_pubkeys,
+                    &mut self.program_subscriptions,
+                    &mut self.transaction_stream,
                     &self.abort_sender,
                     &self.client_id,
                 )
@@ -621,23 +681,26 @@ impl ChainLaserActor {
         active_subscriptions: &mut StreamMap<usize, LaserStream>,
         active_subscription_pubkeys: &mut HashSet<Pubkey>,
         program_subscriptions: &mut Option<(HashSet<Pubkey>, LaserStream)>,
+        transaction_stream: &mut Option<LaserStream>,
     ) {
         subscriptions.clear();
         active_subscriptions.clear();
         active_subscription_pubkeys.clear();
         *program_subscriptions = None;
+        *transaction_stream = None;
     }
 
     /// Signals a connection issue by clearing all subscriptions and
     /// sending a message on the abort channel.
     /// NOTE: the laser client should handle reconnects internally, but
     /// we add this as a backup in case it is unable to do so
-    #[instrument(skip(subscriptions, active_subscriptions, active_subscription_pubkeys, program_subscriptions, abort_sender), fields(client_id = %client_id))]
+    #[instrument(skip(subscriptions, active_subscriptions, active_subscription_pubkeys, program_subscriptions, transaction_stream, abort_sender), fields(client_id = %client_id))]
     async fn signal_connection_issue(
         subscriptions: &mut HashSet<Pubkey>,
         active_subscriptions: &mut StreamMap<usize, LaserStream>,
         active_subscription_pubkeys: &mut HashSet<Pubkey>,
         program_subscriptions: &mut Option<(HashSet<Pubkey>, LaserStream)>,
+        transaction_stream: &mut Option<LaserStream>,
         abort_sender: &mpsc::Sender<()>,
         client_id: &str,
     ) {
@@ -649,6 +712,7 @@ impl ChainLaserActor {
             active_subscriptions,
             active_subscription_pubkeys,
             program_subscriptions,
+            transaction_stream,
         );
 
         // Use try_send to avoid blocking and naturally coalesce signals

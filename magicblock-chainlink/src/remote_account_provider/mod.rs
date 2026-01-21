@@ -51,6 +51,7 @@ mod lru_cache;
 pub mod program_account;
 pub mod pubsub_common;
 mod remote_account;
+pub mod rpc;
 mod subscription_reconciler;
 
 pub use endpoint::{Endpoint, Endpoints};
@@ -1012,17 +1013,12 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                 // its account cache. Otherwise we could just keep fetching the accounts
                 // until the context slot is high enough.
                 metrics::inc_remote_account_provider_a_count();
-                match tokio::time::timeout(
-                    RPC_CALL_TIMEOUT,
-                    rpc_client.get_multiple_accounts_with_config(
-                        &pubkeys,
-                        RpcAccountInfoConfig {
-                            commitment: Some(commitment),
-                            min_context_slot: Some(min_context_slot),
-                            encoding: Some(UiAccountEncoding::Base64Zstd),
-                            data_slice: None,
-                        },
-                    ),
+                match rpc::fetch_accounts_with_timeout(
+                    &rpc_client,
+                    &pubkeys,
+                    commitment,
+                    min_context_slot,
+                    Some(RPC_CALL_TIMEOUT),
                 )
                 .await
                 {
