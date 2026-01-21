@@ -58,9 +58,6 @@ jobs:
     runs-on: self-hosted
     # Su push sempre; su PR solo se non è draft
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
-    needs:
-      - format
-      - lint
     steps:
       - name: Checkout magicblock-validator
         uses: actions/checkout@v5
