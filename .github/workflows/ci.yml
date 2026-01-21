@@ -58,7 +58,6 @@ jobs:
     runs-on: self-hosted
     # Su push sempre; su PR solo se non è draft
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
-    needs: [format, lint]
     steps:
       - name: Checkout magicblock-validator
         uses: actions/checkout@v5
@@ -67,7 +66,7 @@ jobs:
 
       - name: Run unit tests
         run: |
-          cargo test --test test_ledger_truncator
+          make ci-test-unit
 
 #  integration-tests:
 #    name: Integration Tests - ${{ matrix.batch_tests }}
