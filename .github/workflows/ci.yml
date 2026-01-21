@@ -58,6 +58,9 @@ jobs:
     runs-on: self-hosted
     # Su push sempre; su PR solo se non è draft
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    needs:
+      - format
+      - lint
     steps:
       - name: Checkout magicblock-validator
         uses: actions/checkout@v5
@@ -66,65 +69,69 @@ jobs:
 
       - name: Run unit tests
         run: |
-          make ci-test-unit
+          RUST_TEST_THREADS=1 make ci-test-unit
 
-#  integration-tests:
-#    name: Integration Tests - ${{ matrix.batch_tests }}
-#    runs-on: self-hosted
-#    # Su push sempre; su PR solo se non è draft
-#    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
-#    # needs: [format, lint]
-#    strategy:
-#      fail-fast: false
-#      matrix:
-#        batch_tests:
-#          - "schedulecommit"
-#          - "chainlink"
-#          - "cloning"
-#          - "restore_ledger"
-#          - "magicblock_api"
-#          - "config"
-#          - "table_mania"
-#          - "committor"
-#          - "pubsub"
-#          - "schedule_intents"
-#          - "task-scheduler"
-#    steps:
-#      - name: Checkout magicblock-validator
-#        uses: actions/checkout@v5
-#        with:
-#          fetch-depth: 1
-#
-#      - name: Install Rust toolchain
-#        run: |
-#          rustup default 1.91.1
-#          rustc --version
-#          cargo --version
-#
-#      - name: Run integration tests - ${{ matrix.batch_tests }}
-#        run: |
-#          # Rimuoviamo mold solo per questo step perché il linker SBF non lo supporta
-#          export RUSTFLAGS=""
-#          make ci-test-integration
-#        env:
-#          RUN_TESTS: ${{ matrix.batch_tests }}
+  integration-tests:
+    name: Integration Tests - ${{ matrix.batch_tests }}
+    runs-on: self-hosted
+    # Su push sempre; su PR solo se non è draft
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    needs:
+      - format
+      - lint
+      - unit-tests
+    strategy:
+      fail-fast: false
+      matrix:
+        batch_tests:
+          - "schedulecommit"
+          - "chainlink"
+          - "cloning"
+          - "restore_ledger"
+          - "magicblock_api"
+          - "config"
+          - "table_mania"
+          - "committor"
+          - "pubsub"
+          - "schedule_intents"
+          - "task-scheduler"
+    steps:
+      - name: Checkout magicblock-validator
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
 
-#  ci-status:
-#    name: CI Status
-#    runs-on: ubuntu-latest
-#    if: always()
-#    needs:
-#      - format
-#      - lint
-#      - integration-tests
-#    steps:
-#      - name: Check all jobs status
-#        run: |
-#          if [[ "${{ needs.format.result }}" != "success" ||
-#                "${{ needs.lint.result }}" != "success" ||
-#                "${{ needs.unit-tests.result }}" != "success" ||
-#                "${{ needs.integration-tests.result }}" != "success" ]]; then
-#            echo "One or more CI jobs failed or were skipped"
-#            exit 1
-#          fi
-#          echo "All CI jobs passed successfully"
+      - name: Install Rust toolchain
+        run: |
+          rustup default 1.91.1
+          rustc --version
+          cargo --version
+
+      - name: Run integration tests - ${{ matrix.batch_tests }}
+        run: |
+          # Rimuoviamo mold solo per questo step perché il linker SBF non lo supporta
+          export RUSTFLAGS=""
+          make ci-test-integration
+        env:
+          RUN_TESTS: ${{ matrix.batch_tests }}
+
+  ci-status:
+    name: CI Status
+    runs-on: ubuntu-latest
+    if: always()
+    needs:
+      - format
+      - lint
+      - unit-tests
+      - integration-tests
+    steps:
+      - name: Check all jobs status
+        run: |
+          if [[ "${{ needs.format.result }}" != "success" ||
+                "${{ needs.lint.result }}" != "success" ||
+                "${{ needs.unit-tests.result }}" != "success" ||
+                "${{ needs.integration-tests.result }}" != "success" ]]; then
+            echo "One or more CI jobs failed or were skipped"
+            exit 1
+          fi
+          echo "All CI jobs passed successfully"
