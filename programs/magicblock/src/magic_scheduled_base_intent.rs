@@ -362,12 +362,12 @@ impl MagicIntentBundle {
             .commit
             .as_ref()
             .map(|el| el.is_empty())
-            .unwrap_or(false);
+            .unwrap_or(true);
         let no_committed_and_undelegated = self
             .commit_and_undelegate
             .as_ref()
             .map(|el| el.is_empty())
-            .unwrap_or(false);
+            .unwrap_or(true);
         let no_actions = self.standalone_actions.is_empty();
 
         no_committed && no_committed_and_undelegated && no_actions
