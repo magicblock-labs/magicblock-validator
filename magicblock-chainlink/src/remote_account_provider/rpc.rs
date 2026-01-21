@@ -1,8 +1,9 @@
+use std::time::Duration;
+
 use solana_account_decoder_client_types::UiAccountEncoding;
 use solana_commitment_config::CommitmentConfig;
 use solana_pubkey::Pubkey;
 use solana_rpc_client_api::config::RpcAccountInfoConfig;
-use std::time::Duration;
 
 use crate::remote_account_provider::ChainRpcClient;
 const DEFAULT_RPC_CALL_TIMEOUT: Duration = Duration::from_secs(2);

@@ -5,9 +5,14 @@ edition.workspace = true
 
 [dependencies]
 anyhow = { workspace = true }
+borsh = { workspace = true }
 magicblock-core = { workspace = true }
-magicblock-delegation-program = { workspace = true }
+magicblock-delegation-program = { workspace = true, features = [
+  "no-entrypoint",
+] }
+reqwest = { workspace = true }
 solana-client = { workspace = true }
 solana-rpc-client = { workspace = true }
 solana-sdk = { workspace = true }
 tokio = { workspace = true }
+tracing = { workspace = true }

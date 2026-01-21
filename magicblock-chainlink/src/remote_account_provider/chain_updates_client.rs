@@ -14,8 +14,8 @@ use tracing::*;
 
 use crate::remote_account_provider::{
     chain_laser_actor::Slots, chain_laser_client::ChainLaserClientImpl,
-    pubsub_common::SubscriptionUpdate, ChainPubsubClient, ChainRpcClient,
-    ChainPubsubClientImpl, Endpoint, ReconnectableClient,
+    pubsub_common::SubscriptionUpdate, ChainPubsubClient,
+    ChainPubsubClientImpl, ChainRpcClient, Endpoint, ReconnectableClient,
     RemoteAccountProviderError, RemoteAccountProviderResult,
 };
 

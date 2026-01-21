@@ -8,6 +8,7 @@ edition = "2021"
 
 [workspace.dependencies]
 anyhow = "1.0"
+borsh = "1.5"
 env_logger = "0.11"
 futures = "0.3"
 helius-laserstream = { git = "https://github.com/magicblock-labs/laserstream-sdk", branch = "v0.2.2-magicblock" }
@@ -15,10 +16,12 @@ magicblock-core = { path = "../magicblock-core" }
 magicblock-delegation-program = { git = "https://github.com/magicblock-labs/delegation-program.git", rev = "1874b4f5f5f55cb9ab54b64de2cc0d41107d1435", features = [
   "no-entrypoint",
 ] }
-solana-client = "2.1.8"
-solana-rpc-client = "2.1.8"
-solana-sdk = "2.1.8"
+reqwest = "0.11"
+solana-client = "2.2"
+solana-rpc-client = "2.2"
+solana-sdk = "2.2"
 tokio = { version = "1", features = ["full"] }
+tracing = "0.1"
 yellowstone-grpc-proto = "7.0.0"
 
 [[workspace.bin]]
@@ -28,3 +31,6 @@ path = "grpc-account-tracking/src/main.rs"
 [[workspace.bin]]
 name = "grpc-undelegation-tracking"
 path = "grpc-undelegation-tracking/src/main.rs"
+
+[patch.crates-io]
+solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "2246929" }
