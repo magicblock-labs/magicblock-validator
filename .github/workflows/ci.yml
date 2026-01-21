@@ -32,7 +32,6 @@ jobs:
     runs-on: self-hosted
     env:
       # SOVRASCRITTURE RISPETTO AL RUNNER .ENV
-      # Usiamo la target persistente calcolata sopra
       CARGO_TARGET_DIR: ${{ needs.prepare-env.outputs.target_dir }}
       # Disabilitiamo sccache per favorire l'incrementale locale (più veloce su disco)
       RUSTC_WRAPPER: ""
