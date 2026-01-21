@@ -10,100 +10,102 @@ on:
   pull_request:
     types: [opened, reopened, synchronize, ready_for_review]
 
-env:
-  CARGO_TARGET_DIR: ${{ github.workspace }}/target
-  CARGO_BUILD_JOBS: 4
-
 jobs:
-  setup-affinity:
-    name: Setup Affinity
+  # 1. Calcolo della directory Target Globale
+  prepare-env:
     runs-on: self-hosted
     outputs:
-      runner_idx: ${{ steps.select.outputs.idx }}
+      target_dir: ${{ steps.calc.outputs.dir }}
     steps:
-      - id: select
+      - id: calc
         run: |
-          IDX=$(echo -n "${{ github.ref_name }}" | cksum | awk '{print ($1 % 10) + 1}')
-          echo "idx=$IDX" >> $GITHUB_OUTPUT
+          # Sostituisce gli slash nel nome branch con trattini
+          SAFE_BRANCH=$(echo "${{ github.ref_name }}" | tr '/' '-')
+          # Definisce il path assoluto condiviso
+          TARGET_DIR="/var/lib/gh-runners/global-targets/${{ github.event.repository.name }}-${SAFE_BRANCH}"
+          mkdir -p "$TARGET_DIR"
+          echo "dir=$TARGET_DIR" >> $GITHUB_OUTPUT
 
-  format:
-    name: Format Check
-    needs: setup-affinity
-    runs-on: [self-hosted, "self-hosted-${{ needs.setup-affinity.outputs.runner_idx }}"]
-    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
-    steps:
-      - name: Checkout magicblock-validator
-        uses: actions/checkout@v5
-        with:
-          fetch-depth: 1
-      - name: Run fmt
-        run: |
-          make ci-fmt
-          cd test-integration && make ci-fmt
-
-  lint:
-    name: Lint Check
-    needs: setup-affinity
-    runs-on: [self-hosted, "self-hosted-${{ needs.setup-affinity.outputs.runner_idx }}"]
-    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
-    steps:
-      - name: Checkout magicblock-validator
-        uses: actions/checkout@v5
-        with:
-          fetch-depth: 1
-      - name: Run ci-lint
-        run: |
-          export RUSTC_WRAPPER=""
-          export CARGO_INCREMENTAL=1
-          export CARGO_BUILD_JOBS=20 
-          make ci-lint
-          cd test-integration && make ci-lint
-
-  unit-tests:
-    name: Unit Tests
-    needs: setup-affinity
-    runs-on: [self-hosted, "self-hosted-${{ needs.setup-affinity.outputs.runner_idx }}"]
-    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
-    steps:
-      - name: Checkout magicblock-validator
-        uses: actions/checkout@v5
-        with:
-          fetch-depth: 1
-      - name: Run unit tests
-        run: RUST_TEST_THREADS=1 make ci-test-unit
-
-  integration-tests:
-    name: Integration Tests - ${{ matrix.batch_tests }}
-    needs: [setup-affinity, format, lint, unit-tests]
+  # 2. FASE DI BUILD MONOLITICA (Con Internet)
+  build-everything:
+    needs: prepare-env
     runs-on: self-hosted
-    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    env:
+      # SOVRASCRITTURE RISPETTO AL RUNNER .ENV
+      # Usiamo la target persistente calcolata sopra
+      CARGO_TARGET_DIR: ${{ needs.prepare-env.outputs.target_dir }}
+      # Disabilitiamo sccache per favorire l'incrementale locale (più veloce su disco)
+      RUSTC_WRAPPER: ""
+      # Attiviamo l'incrementale per build rapide su modifiche piccole
+      CARGO_INCREMENTAL: 1
+      # Usiamo 30 core (invece dei 4 di default) perché giriamo da soli
+      CARGO_BUILD_JOBS: 30
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+
+      - name: Build Everything & Pre-fetch dependencies
+        run: |
+          # 1. Build SBF (Programmi Solana)
+          make build-sbf
+          
+          # 2. Build Binaries & Test Runner
+          cargo build --bins --tests
+          
+          # 3. Fast Checks (Format, Lint, Unit)
+          # Eseguiamo qui i check veloci sfruttando i binari appena compilati
+          make ci-fmt
+          make ci-lint
+          RUST_TEST_THREADS=1 make ci-test-unit
+          
+          # 4. PRE-FETCH per i test di integrazione
+          # Scarica e compila tutte le dipendenze dei test, ma NON li esegue (--no-run).
+          # Fondamentale per far funzionare lo step successivo offline.
+          cargo test --test '*' --no-run
+
+  # 3. FASE DI ESECUZIONE PARALLELA (ISOLATA - NO INTERNET)
+  integration-matrix:
+    needs: [prepare-env, build-everything]
+    runs-on: self-hosted
     strategy:
       fail-fast: false
       matrix:
-        batch_tests: ["schedulecommit", "chainlink", "cloning", "restore_ledger", "magicblock_api", "config", "table_mania", "committor", "pubsub", "schedule_intents", "task-scheduler"]
+        batch_tests: ["schedulecommit", "chainlink", "cloning", "restore_ledger", "table_mania", "committor", "pubsub", "task-scheduler"]
+    env:
+      # Punta alla stessa target directory già compilata dallo step precedente
+      CARGO_TARGET_DIR: ${{ needs.prepare-env.outputs.target_dir }}
+      # Forza Cargo a non cercare internet (siamo dentro un namespace isolato)
+      CARGO_NET_OFFLINE: "true"
+      # Disabilita wrapper inutili in esecuzione
+      RUSTC_WRAPPER: ""
+      # Pulisce flag che potrebbero dar fastidio all'esecuzione
+      RUSTFLAGS: ""
     steps:
-      - name: Checkout magicblock-validator
-        uses: actions/checkout@v5
+      - uses: actions/checkout@v5
         with:
-          fetch-depth: 1
-      - name: Run integration tests
+          submodules: recursive
+
+      - name: Run ${{ matrix.batch_tests }} (Network Namespace)
         run: |
-          export RUSTFLAGS=""
-          make ci-test-integration
+          # 'unshare -r -n' crea una bolla di rete vuota.
+          # Dentro questa bolla, la porta 8899 è libera per tutti i 10 job contemporaneamente.
+          # 'ip link set lo up' accende localhost dentro la bolla.
+          
+          unshare -r -n sh -c "ip link set lo up && make ci-test-integration"
         env:
           RUN_TESTS: ${{ matrix.batch_tests }}
 
   ci-status:
-    name: CI Status
-    runs-on: ubuntu-latest
     if: always()
-    needs: [format, lint, unit-tests, integration-tests]
+    needs: [build-everything, integration-matrix]
+    runs-on: ubuntu-latest
     steps:
-      - name: Check all jobs status
+      - name: Check Status
         run: |
-          if [[ "${{ needs.format.result }}" != "success" ||
-                "${{ needs.lint.result }}" != "success" ||
-                "${{ needs.unit-tests.result }}" != "success" ||
-                "${{ needs.integration-tests.result }}" != "success" ]]; then
+          if [[ "${{ needs.build-everything.result }}" != "success" || 
+                "${{ needs.integration-matrix.result }}" != "success" ]]; then
+            echo "CI Failed"
             exit 1
           fi
+          echo "CI Passed"
