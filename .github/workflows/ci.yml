@@ -86,6 +86,16 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Restore timestamps to satisfy Cargo cache
+        run: |
+          echo "Syncing file timestamps to commit time..."
+          # Ottieni la data dell'ultimo commit
+          COMMIT_TIME=$(git show -s --format=%ci HEAD)
+          # Applica quella data a tutti i file (escludendo la cartella .git per velocità)
+          # Questo è velocissimo sui tuoi 40 core
+          find . -type f -not -path "./.git/*" -exec touch -d "$COMMIT_TIME" {} +
+          echo "Timestamps synced to $COMMIT_TIME"
+
       - name: Run ${{ matrix.batch_tests }} (Network Namespace)
         run: |
           # 'unshare -r -n' crea una bolla di rete vuota.
