@@ -3782,6 +3782,8 @@ dependencies = [
 name = "magicblock-sync"
 version = "0.1.0"
 dependencies = [
+ "bs58",
+ "either",
  "futures",
  "helius-laserstream",
  "tokio",
