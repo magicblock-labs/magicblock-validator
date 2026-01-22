@@ -14,8 +14,7 @@ use solana_pubkey::Pubkey;
 use storage::AccountsStorage;
 use tracing::{error, info, warn};
 
-use crate::snapshot::SnapshotManager;
-use crate::traits::AccountsBank;
+use crate::{snapshot::SnapshotManager, traits::AccountsBank};
 
 pub type AccountsDbResult<T> = Result<T, AccountsDbError>;
 
