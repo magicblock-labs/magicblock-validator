@@ -120,16 +120,21 @@ jobs:
           find . -type f -not -path "./.git/*" -exec touch -d "$COMMIT_TIME" {} +
           echo "Timestamps synced to $COMMIT_TIME"
 
-      - name: Copy Pre-built Artifacts to Local Target
+      - name: Copy Pre-built Artifacts to Local Target (Hardlinks)
         run: |
           GLOBAL_TARGET="${{ needs.prepare-env.outputs.target_dir }}"
-          echo "Copying artifacts from $GLOBAL_TARGET to ./target ..."
+          echo "Linking artifacts from $GLOBAL_TARGET to ./target ..."
           mkdir -p target
-          # Use recursive copy. -u only copies if source is newer/different (though here it's fresh)
-          cp -r "$GLOBAL_TARGET"/* target/
-          # Ensure timestamps are preserved/updated so cargo doesn't rebuild
-          find target -name "*.d" -exec touch {} +
-          find target -name "*.rlib" -exec touch {} +
+          
+          # 1. Use hardlinks (-l) to avoid duplicating data (instant + 0 disk usage)
+          # 2. Only link 'debug' directory (contains test binaries)
+          # Note: This assumes runners are on the same filesystem as GLOBAL_TARGET
+          cp -rl "$GLOBAL_TARGET/debug" target/
+          
+          # 3. Remove 'incremental' compilation data (huge & useless for running tests)
+          rm -rf target/debug/incremental
+          
+          echo "Artifacts linked successfully."
 
       - name: Restore prebuilt SBF programs from Global Target
         run: |
