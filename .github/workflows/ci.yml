@@ -176,6 +176,13 @@ jobs:
             echo "WARNING: no cached SBFs found for root"
           fi
 
+      - name: Debug - List Critical Directories
+        run: |
+          echo "Listing test-integration/target/deploy:"
+          ls -R test-integration/target/deploy || echo "Directory not found"
+          echo "Listing test-integration/schedulecommit/elfs:"
+          ls -R test-integration/schedulecommit/elfs || echo "Directory not found"
+
       - name: Run ${{ matrix.batch_tests }} (Network Namespace)
         run: |
           # 'unshare -r -n' creates an isolated network namespace.
