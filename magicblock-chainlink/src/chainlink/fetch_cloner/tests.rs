@@ -20,6 +20,7 @@ use crate::{
         cloner_stub::ClonerStub,
         deleg::{add_delegation_record_for, add_invalid_delegation_record_for},
         init_logger,
+        photon_client_mock::PhotonClientMock,
         rpc_client_mock::{ChainRpcClientMock, ChainRpcClientMockBuilder},
         utils::{create_test_lru_cache, random_pubkey},
     },
@@ -32,6 +33,7 @@ type TestFetchClonerResult = (
             ChainPubsubClientMock,
             AccountsBankStub,
             ClonerStub,
+            PhotonClientMock,
         >,
     >,
     mpsc::Sender<ForwardedSubscriptionUpdate>,
@@ -85,8 +87,13 @@ macro_rules! assert_cloned_undelegated_account {
 }
 
 struct FetcherTestCtx {
-    remote_account_provider:
-        Arc<RemoteAccountProvider<ChainRpcClientMock, ChainPubsubClientMock>>,
+    remote_account_provider: Arc<
+        RemoteAccountProvider<
+            ChainRpcClientMock,
+            ChainPubsubClientMock,
+            PhotonClientMock,
+        >,
+    >,
     accounts_bank: Arc<AccountsBankStub>,
     rpc_client: crate::testing::rpc_client_mock::ChainRpcClientMock,
     #[allow(unused)]
@@ -97,6 +104,7 @@ struct FetcherTestCtx {
             ChainPubsubClientMock,
             AccountsBankStub,
             ClonerStub,
+            PhotonClientMock,
         >,
     >,
     #[allow(unused)]
@@ -138,6 +146,7 @@ where
         RemoteAccountProvider::new(
             rpc_client,
             pubsub_client,
+            None::<PhotonClientMock>,
             forward_tx,
             &config,
             subscribed_accounts,
@@ -167,7 +176,11 @@ where
 /// Returns (FetchCloner, subscription_sender) for simulating subscription updates in tests
 fn init_fetch_cloner(
     remote_account_provider: Arc<
-        RemoteAccountProvider<ChainRpcClientMock, ChainPubsubClientMock>,
+        RemoteAccountProvider<
+            ChainRpcClientMock,
+            ChainPubsubClientMock,
+            PhotonClientMock,
+        >,
     >,
     bank: &Arc<AccountsBankStub>,
     validator_pubkey: Pubkey,
@@ -911,7 +924,7 @@ async fn test_delegation_record_unsub_race_condition_prevention() {
 
     // Use a shared FetchCloner to test deduplication
     // Helper function to spawn a fetch_and_clone task with shared FetchCloner
-    let spawn_fetch_task = |fetch_cloner: &Arc<FetchCloner<_, _, _, _>>| {
+    let spawn_fetch_task = |fetch_cloner: &Arc<FetchCloner<_, _, _, _, _>>| {
         let fetch_cloner = fetch_cloner.clone();
         tokio::spawn(async move {
             fetch_cloner

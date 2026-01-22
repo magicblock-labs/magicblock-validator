@@ -1,5 +1,6 @@
 use std::{collections::HashSet, path::Path, sync::Arc};
 
+use light_client::indexer::photon_indexer::PhotonIndexer;
 use magicblock_rpc_client::MagicblockRpcClient;
 use magicblock_table_mania::{GarbageCollectorConfig, TableMania};
 use solana_keypair::Keypair;
@@ -35,6 +36,7 @@ impl CommittorProcessor {
         authority: Keypair,
         persist_file: P,
         chain_config: ChainConfig,
+        photon_client: Option<Arc<PhotonIndexer>>,
     ) -> CommittorServiceResult<Self>
     where
         P: AsRef<Path>,
@@ -60,6 +62,7 @@ impl CommittorProcessor {
         // Create commit scheduler
         let commits_scheduler = IntentExecutionManager::new(
             magic_block_rpc_client.clone(),
+            photon_client.clone(),
             DummyDB::new(),
             Some(persister.clone()),
             table_mania.clone(),

@@ -12,8 +12,8 @@ use crate::{
     chainlink::errors::{ChainlinkError, ChainlinkResult},
     cloner::Cloner,
     remote_account_provider::{
-        ChainPubsubClient, ChainRpcClient, MatchSlotsConfig,
-        ResolvedAccountSharedData,
+        photon_client::PhotonClient, ChainPubsubClient, ChainRpcClient,
+        MatchSlotsConfig, ResolvedAccountSharedData,
     },
 };
 
@@ -31,8 +31,8 @@ pub(crate) fn parse_delegation_record(
         })
 }
 
-pub(crate) fn apply_delegation_record_to_account<T, U, V, C>(
-    this: &FetchCloner<T, U, V, C>,
+pub(crate) fn apply_delegation_record_to_account<T, U, V, C, P>(
+    this: &FetchCloner<T, U, V, C, P>,
     account: &mut ResolvedAccountSharedData,
     delegation_record: &DelegationRecord,
 ) -> Option<u64>
@@ -41,6 +41,7 @@ where
     U: ChainPubsubClient,
     V: AccountsBank,
     C: Cloner,
+    P: PhotonClient,
 {
     let is_confined = delegation_record.authority.eq(&Pubkey::default());
     let is_delegated_to_us =
@@ -63,8 +64,8 @@ where
     }
 }
 
-pub(crate) fn get_delegated_to_other<T, U, V, C>(
-    this: &FetchCloner<T, U, V, C>,
+pub(crate) fn get_delegated_to_other<T, U, V, C, P>(
+    this: &FetchCloner<T, U, V, C, P>,
     delegation_record: &DelegationRecord,
 ) -> Option<Pubkey>
 where
@@ -72,6 +73,7 @@ where
     U: ChainPubsubClient,
     V: AccountsBank,
     C: Cloner,
+    P: PhotonClient,
 {
     let is_delegated_to_us =
         delegation_record.authority.eq(&this.validator_pubkey)
@@ -81,8 +83,8 @@ where
 }
 
 #[instrument(skip(this))]
-pub(crate) async fn fetch_and_parse_delegation_record<T, U, V, C>(
-    this: &FetchCloner<T, U, V, C>,
+pub(crate) async fn fetch_and_parse_delegation_record<T, U, V, C, P>(
+    this: &FetchCloner<T, U, V, C, P>,
     account_pubkey: Pubkey,
     min_context_slot: u64,
     fetch_origin: metrics::AccountFetchOrigin,
@@ -92,6 +94,7 @@ where
     U: ChainPubsubClient,
     V: AccountsBank,
     C: Cloner,
+    P: PhotonClient,
 {
     let delegation_record_pubkey =
         delegation_record_pda_from_delegated_account(&account_pubkey);
@@ -115,7 +118,7 @@ where
             if let Some(delegation_record_remote) = delegation_records.pop() {
                 match delegation_record_remote.fresh_account() {
                     Some(delegation_record_account) => {
-                        FetchCloner::<T, U, V, C>::parse_delegation_record(
+                        FetchCloner::<T, U, V, C, P>::parse_delegation_record(
                             delegation_record_account.data(),
                             delegation_record_pubkey,
                         )

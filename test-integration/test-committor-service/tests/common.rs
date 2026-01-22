@@ -7,6 +7,10 @@ use std::{
 };
 
 use async_trait::async_trait;
+use light_client::indexer::photon_indexer::PhotonIndexer;
+use light_compressed_account::instruction_data::compressed_proof::ValidityProof;
+use light_sdk_types::instruction::account_meta::CompressedAccountMeta;
+use magicblock_chainlink::testing::utils::PHOTON_URL;
 use magicblock_committor_service::{
     intent_executor::{
         task_info_fetcher::{
@@ -15,7 +19,7 @@ use magicblock_committor_service::{
         },
         IntentExecutorImpl,
     },
-    tasks::CommitTask,
+    tasks::{task_builder::CompressedData, CommitTask, CompressedCommitTask},
     transaction_preparator::{
         delivery_preparator::DeliveryPreparator, TransactionPreparatorImpl,
     },
@@ -40,9 +44,16 @@ pub async fn create_test_client() -> MagicblockRpcClient {
     MagicblockRpcClient::new(Arc::new(rpc_client))
 }
 
+// Helper function to create a test PhotonIndexer
+pub fn create_test_photon_indexer() -> Option<Arc<PhotonIndexer>> {
+    let url = PHOTON_URL.to_string();
+    Some(Arc::new(PhotonIndexer::new(url, None)))
+}
+
 // Test fixture structure
 pub struct TestFixture {
     pub rpc_client: MagicblockRpcClient,
+    pub photon_client: Option<Arc<PhotonIndexer>>,
     pub table_mania: TableMania,
     pub authority: Keypair,
     pub compute_budget_config: ComputeBudgetConfig,
@@ -57,6 +68,9 @@ impl TestFixture {
 
     pub async fn new_with_keypair(authority: Keypair) -> Self {
         let rpc_client = create_test_client().await;
+
+        // PhotonIndexer
+        let photon_client = create_test_photon_indexer();
 
         // TableMania
         let gc_config = GarbageCollectorConfig::default();
@@ -75,6 +89,7 @@ impl TestFixture {
         let compute_budget_config = ComputeBudgetConfig::new(1_000_000);
         Self {
             rpc_client,
+            photon_client,
             table_mania,
             authority,
             compute_budget_config,
@@ -108,6 +123,7 @@ impl TestFixture {
 
         IntentExecutorImpl::new(
             self.rpc_client.clone(),
+            self.photon_client.clone(),
             transaction_preparator,
             self.create_task_info_fetcher(),
         )
@@ -127,6 +143,7 @@ impl TaskInfoFetcher for MockTaskInfoFetcher {
         &self,
         pubkeys: &[Pubkey],
         _: u64,
+        _compressed: bool,
     ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>> {
         Ok(pubkeys.iter().map(|pubkey| (*pubkey, 0)).collect())
     }
@@ -182,6 +199,40 @@ pub fn create_commit_task(data: &[u8]) -> CommitTask {
         allow_undelegation: false,
         committed_account: CommittedAccount {
             pubkey: Pubkey::new_unique(),
+            account: Account {
+                lamports: 1000,
+                data: data.to_vec(),
+                owner: dlp::id(),
+                executable: false,
+                rent_epoch: 0,
+            },
+            remote_slot: Default::default(),
+        },
+    }
+}
+
+#[allow(dead_code)]
+/// Test-only helper. Uses dummy compressed_data (empty delegation record,
+/// default proof/meta) and must not be used for on-chain compressed-delegation
+/// transactions.
+pub fn create_dummy_compressed_commit_task(
+    pubkey: Pubkey,
+    hash: [u8; 32],
+    data: &[u8],
+) -> CompressedCommitTask {
+    static COMMIT_ID: AtomicU64 = AtomicU64::new(0);
+    CompressedCommitTask {
+        commit_id: COMMIT_ID.fetch_add(1, Ordering::Relaxed),
+        compressed_data: CompressedData {
+            hash,
+            compressed_delegation_record_bytes: vec![],
+            remaining_accounts: vec![],
+            account_meta: CompressedAccountMeta::default(),
+            proof: ValidityProof::default(),
+        },
+        allow_undelegation: false,
+        committed_account: CommittedAccount {
+            pubkey,
             account: Account {
                 lamports: 1000,
                 data: data.to_vec(),

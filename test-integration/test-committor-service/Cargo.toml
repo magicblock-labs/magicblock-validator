@@ -6,14 +6,20 @@ edition.workspace = true
 [dev-dependencies]
 async-trait = { workspace = true }
 borsh = { workspace = true }
-tracing = { workspace = true }
+compressed-delegation-client = { workspace = true }
+light-client = { workspace = true, features = ["v2"] }
+light-compressed-account = { workspace = true }
+light-sdk = { workspace = true, features = ["v2"] }
+light-sdk-types = { workspace = true, features = ["v2"] }
 futures = { workspace = true }
+magicblock-chainlink = { workspace = true }
 magicblock-committor-program = { workspace = true, features = [
   "no-entrypoint",
 ] }
 magicblock-committor-service = { workspace = true, features = [
   "dev-context-only-utils",
 ] }
+magicblock-core = { workspace = true }
 magicblock-delegation-program = { workspace = true, features = [
   "no-entrypoint",
 ] }
@@ -32,6 +38,7 @@ solana-rpc-client-api = { workspace = true }
 solana-sdk = { workspace = true }
 test-kit = { workspace = true }
 tokio = { workspace = true }
+tracing = { workspace = true }
 
 [features]
 test_table_close = []

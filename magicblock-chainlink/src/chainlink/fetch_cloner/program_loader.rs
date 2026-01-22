@@ -8,13 +8,14 @@ use super::FetchCloner;
 use crate::{
     cloner::Cloner,
     remote_account_provider::{
+        photon_client::PhotonClient,
         program_account::{ProgramAccountResolver, LOADER_V1, LOADER_V3},
         ChainPubsubClient, ChainRpcClient,
     },
 };
 
-pub(crate) async fn handle_executable_sub_update<T, U, V, C>(
-    this: &FetchCloner<T, U, V, C>,
+pub(crate) async fn handle_executable_sub_update<T, U, V, C, P>(
+    this: &FetchCloner<T, U, V, C, P>,
     pubkey: Pubkey,
     account: AccountSharedData,
 ) where
@@ -22,6 +23,7 @@ pub(crate) async fn handle_executable_sub_update<T, U, V, C>(
     U: ChainPubsubClient,
     V: AccountsBank,
     C: Cloner,
+    P: PhotonClient,
 {
     if !this.is_program_allowed(&pubkey) {
         debug!(pubkey = %pubkey, "Skipping clone of program, not in allowed_programs");

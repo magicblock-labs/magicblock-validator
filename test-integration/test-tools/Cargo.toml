@@ -11,6 +11,7 @@ tracing = { workspace = true }
 random-port = { workspace = true }
 rayon = { workspace = true }
 serde = { workspace = true }
+shlex = { workspace = true }
 ureq = { workspace = true }
 url = { workspace = true }
 magicblock-core = { workspace = true }

@@ -17,8 +17,8 @@ use crate::{
     consts::MAX_WRITE_CHUNK_SIZE,
     tasks::{
         visitor::Visitor, BaseTask, BaseTaskError, BaseTaskResult,
-        CommitDiffTask, CommitTask, PreparationState, PreparationTask,
-        TaskType,
+        BufferPreparationTask, CommitDiffTask, CommitTask, PreparationState,
+        PreparationTask, TaskType,
     },
 };
 
@@ -61,12 +61,14 @@ impl BufferTask {
                 let chunks =
                     Chunks::from_data_length(data.len(), MAX_WRITE_CHUNK_SIZE);
 
-                PreparationState::Required(PreparationTask {
-                    commit_id: task.commit_id,
-                    pubkey: task.committed_account.pubkey,
-                    committed_data: data,
-                    chunks,
-                })
+                PreparationState::Required(PreparationTask::Buffer(
+                    BufferPreparationTask {
+                        commit_id: task.commit_id,
+                        pubkey: task.committed_account.pubkey,
+                        committed_data: data,
+                        chunks,
+                    },
+                ))
             }
 
             BufferTaskType::CommitDiff(task) => {
@@ -78,12 +80,14 @@ impl BufferTask {
                 let chunks =
                     Chunks::from_data_length(diff.len(), MAX_WRITE_CHUNK_SIZE);
 
-                PreparationState::Required(PreparationTask {
-                    commit_id: task.commit_id,
-                    pubkey: task.committed_account.pubkey,
-                    committed_data: diff,
-                    chunks,
-                })
+                PreparationState::Required(PreparationTask::Buffer(
+                    BufferPreparationTask {
+                        commit_id: task.commit_id,
+                        pubkey: task.committed_account.pubkey,
+                        committed_data: diff,
+                        chunks,
+                    },
+                ))
             }
         }
     }
@@ -219,6 +223,34 @@ impl BaseTask for BufferTask {
         };
 
         self.preparation_state = Self::preparation_required(&self.task_type)
+    }
+
+    fn is_compressed(&self) -> bool {
+        false
+    }
+
+    fn set_compressed_data(
+        &mut self,
+        _compressed_data: super::task_builder::CompressedData,
+    ) {
+        // No-op
+    }
+
+    fn get_compressed_data(
+        &self,
+    ) -> Option<&super::task_builder::CompressedData> {
+        None
+    }
+
+    fn delegated_account(&self) -> Option<Pubkey> {
+        match &self.task_type {
+            BufferTaskType::Commit(value) => {
+                Some(value.committed_account.pubkey)
+            }
+            BufferTaskType::CommitDiff(value) => {
+                Some(value.committed_account.pubkey)
+            }
+        }
     }
 }
 

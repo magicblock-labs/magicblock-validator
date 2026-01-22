@@ -20,9 +20,31 @@ use crate::{
 pub struct TransactionStrategy {
     pub optimized_tasks: Vec<Box<dyn BaseTask>>,
     pub lookup_tables_keys: Vec<Pubkey>,
+    pub compressed: bool,
 }
 
 impl TransactionStrategy {
+    pub fn try_new(
+        optimized_tasks: Vec<Box<dyn BaseTask>>,
+        lookup_tables_keys: Vec<Pubkey>,
+    ) -> Result<Self, TaskStrategistError> {
+        let compressed = optimized_tasks
+            .iter()
+            .fold(None, |state, task| match state {
+                None => Some(Ok(task.is_compressed())),
+                Some(Ok(state)) if state != task.is_compressed() => {
+                    Some(Err(TaskStrategistError::InconsistentTaskCompression))
+                }
+                Some(Ok(state)) => Some(Ok(state)),
+                Some(Err(err)) => Some(Err(err)),
+            })
+            .unwrap_or(Ok(false))?;
+        Ok(Self {
+            optimized_tasks,
+            lookup_tables_keys,
+            compressed,
+        })
+    }
     /// In case old strategy used ALTs recalculate old value
     /// NOTE: this can be used when full revaluation is unnecessary, like:
     /// some tasks were reset, number of tasks didn't increase
@@ -80,6 +102,18 @@ impl TaskStrategist {
     ) -> TaskStrategistResult<StrategyExecutionMode> {
         const MAX_UNITED_TASKS_LEN: usize = 22;
 
+        // Compressed commits and finalize must be executed in two stages
+        if commit_tasks.iter().any(|t| t.is_compressed())
+            || finalize_tasks.iter().any(|t| t.is_compressed())
+        {
+            return Self::build_two_stage(
+                commit_tasks,
+                finalize_tasks,
+                authority,
+                persister,
+            );
+        }
+
         // We can unite in 1 tx a lot of commits
         // but then there's a possibility of hitting CPI limit, aka
         // MaxInstructionTraceLengthExceeded error.
@@ -116,6 +150,9 @@ impl TaskStrategist {
             }
             Err(TaskStrategistError::SignerError(err)) => {
                 return Err(err.into())
+            }
+            Err(TaskStrategistError::InconsistentTaskCompression) => {
+                return Err(TaskStrategistError::InconsistentTaskCompression);
             }
         };
 
@@ -187,10 +224,7 @@ impl TaskStrategist {
                     .for_each(|task| task.visit(&mut persistor_visitor));
             }
 
-            Ok(TransactionStrategy {
-                optimized_tasks: tasks,
-                lookup_tables_keys: vec![],
-            })
+            TransactionStrategy::try_new(tasks, vec![])
         }
         // In case task optimization didn't work
         // attempt using lookup tables for all keys involved in tasks
@@ -209,10 +243,7 @@ impl TaskStrategist {
             // Get lookup table keys
             let lookup_tables_keys =
                 Self::collect_lookup_table_keys(validator, &tasks);
-            Ok(TransactionStrategy {
-                optimized_tasks: tasks,
-                lookup_tables_keys,
-            })
+            TransactionStrategy::try_new(tasks, lookup_tables_keys)
         } else {
             Err(TaskStrategistError::FailedToFitError)
         }
@@ -283,7 +314,7 @@ impl TaskStrategist {
     /// the limit MAX_ENCODED_TRANSACTION_SIZE. The caller needs to check and make decision accordingly.
     fn try_optimize_tx_size_if_needed(
         tasks: &mut [Box<dyn BaseTask>],
-    ) -> Result<usize, SignerError> {
+    ) -> Result<usize, TaskStrategistError> {
         // Get initial transaction size
         let calculate_tx_length = |tasks: &[Box<dyn BaseTask>]| {
             match TransactionUtils::assemble_tasks_tx(
@@ -294,7 +325,7 @@ impl TaskStrategist {
             ) {
                 Ok(tx) => Ok(serialize_and_encode_base64(&tx).len()),
                 Err(TaskStrategistError::FailedToFitError) => Ok(usize::MAX),
-                Err(TaskStrategistError::SignerError(err)) => Err(err),
+                Err(err) => Err(err),
             }
         };
 
@@ -367,12 +398,14 @@ impl TaskStrategist {
     }
 }
 
-#[derive(thiserror::Error, Debug)]
+#[derive(thiserror::Error, Debug, PartialEq)]
 pub enum TaskStrategistError {
     #[error("Failed to fit in single TX")]
     FailedToFitError,
     #[error("SignerError: {0}")]
     SignerError(#[from] SignerError),
+    #[error("Inconsistent task compression")]
+    InconsistentTaskCompression,
 }
 
 pub type TaskStrategistResult<T, E = TaskStrategistError> = Result<T, E>;
@@ -381,6 +414,7 @@ pub type TaskStrategistResult<T, E = TaskStrategistError> = Result<T, E>;
 mod tests {
     use std::{collections::HashMap, sync::Arc};
 
+    use light_client::indexer::photon_indexer::PhotonIndexer;
     use magicblock_program::magic_scheduled_base_intent::{
         BaseAction, CommittedAccount, ProgramArgs,
     };
@@ -398,9 +432,10 @@ mod tests {
         persist::IntentPersisterImpl,
         tasks::{
             task_builder::{
-                TaskBuilderImpl, TasksBuilder, COMMIT_STATE_SIZE_THRESHOLD,
+                CompressedData, TaskBuilderImpl, TasksBuilder,
+                COMMIT_STATE_SIZE_THRESHOLD,
             },
-            BaseActionTask, TaskStrategy, UndelegateTask,
+            BaseActionTask, CompressedCommitTask, TaskStrategy, UndelegateTask,
         },
         test_utils,
     };
@@ -413,6 +448,7 @@ mod tests {
             &self,
             pubkeys: &[Pubkey],
             _: u64,
+            _compressed: bool,
         ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>> {
             Ok(pubkeys.iter().map(|pubkey| (*pubkey, 0)).collect())
         }
@@ -481,6 +517,29 @@ mod tests {
                 Some(base_account),
             )
         }
+    }
+
+    // Helper to create a simple compressed commit task
+    fn create_test_compressed_commit_task(
+        commit_id: u64,
+        data_size: usize,
+    ) -> ArgsTask {
+        ArgsTask::new(ArgsTaskType::CompressedCommit(CompressedCommitTask {
+            commit_id,
+            allow_undelegation: false,
+            committed_account: CommittedAccount {
+                pubkey: Pubkey::new_unique(),
+                account: Account {
+                    lamports: 1000,
+                    data: vec![1; data_size],
+                    owner: system_program_id(),
+                    executable: false,
+                    rent_epoch: 0,
+                },
+                remote_slot: Default::default(),
+            },
+            compressed_data: CompressedData::default(),
+        }))
     }
 
     // Helper to create a Base action task
@@ -767,6 +826,26 @@ mod tests {
         assert!(!strategy.lookup_tables_keys.is_empty());
     }
 
+    #[test]
+    fn test_mixed_task_types_compressed() {
+        let validator = Pubkey::new_unique();
+        let tasks = vec![
+            Box::new(create_test_commit_task(1, 100, 0)) as Box<dyn BaseTask>,
+            Box::new(create_test_compressed_commit_task(2, 100))
+                as Box<dyn BaseTask>,
+        ];
+
+        let Err(err) = TaskStrategist::build_strategy(
+            tasks,
+            &validator,
+            &None::<IntentPersisterImpl>,
+        ) else {
+            panic!("Should not build invalid strategy");
+        };
+
+        assert_eq!(err, TaskStrategistError::InconsistentTaskCompression);
+    }
+
     #[tokio::test]
     async fn test_build_single_stage_mode() {
         let pubkey = [Pubkey::new_unique()];
@@ -777,13 +856,17 @@ mod tests {
             &info_fetcher,
             &intent,
             &None::<IntentPersisterImpl>,
+            &None::<Arc<PhotonIndexer>>,
         )
         .await
         .unwrap();
-        let finalize_task =
-            TaskBuilderImpl::finalize_tasks(&info_fetcher, &intent)
-                .await
-                .unwrap();
+        let finalize_task = TaskBuilderImpl::finalize_tasks(
+            &info_fetcher,
+            &intent,
+            &None::<Arc<PhotonIndexer>>,
+        )
+        .await
+        .unwrap();
 
         let execution_mode = TaskStrategist::build_execution_strategy(
             commit_task,
@@ -809,13 +892,17 @@ mod tests {
             &info_fetcher,
             &intent,
             &None::<IntentPersisterImpl>,
+            &None::<Arc<PhotonIndexer>>,
         )
         .await
         .unwrap();
-        let finalize_task =
-            TaskBuilderImpl::finalize_tasks(&info_fetcher, &intent)
-                .await
-                .unwrap();
+        let finalize_task = TaskBuilderImpl::finalize_tasks(
+            &info_fetcher,
+            &intent,
+            &None::<Arc<PhotonIndexer>>,
+        )
+        .await
+        .unwrap();
 
         let execution_mode = TaskStrategist::build_execution_strategy(
             commit_task,
@@ -846,13 +933,17 @@ mod tests {
             &info_fetcher,
             &intent,
             &None::<IntentPersisterImpl>,
+            &None::<Arc<PhotonIndexer>>,
         )
         .await
         .unwrap();
-        let finalize_task =
-            TaskBuilderImpl::finalize_tasks(&info_fetcher, &intent)
-                .await
-                .unwrap();
+        let finalize_task = TaskBuilderImpl::finalize_tasks(
+            &info_fetcher,
+            &intent,
+            &None::<Arc<PhotonIndexer>>,
+        )
+        .await
+        .unwrap();
 
         let execution_mode = TaskStrategist::build_execution_strategy(
             commit_task,

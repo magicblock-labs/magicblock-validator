@@ -1,6 +1,17 @@
 use std::sync::Arc;
 
+use borsh::{BorshDeserialize, BorshSerialize};
+use compressed_delegation_client::{
+    CommitArgs, CommitBuilder, CompressedAccountMeta,
+    CompressedDelegationRecord, FinalizeArgs, FinalizeBuilder,
+    PackedAddressTreeInfo, UndelegateArgs, UndelegateBuilder,
+};
 use integration_test_tools::dlp_interface;
+use light_client::indexer::{
+    photon_indexer::PhotonIndexer, AddressWithTree, CompressedAccount, Indexer,
+    ValidityProofWithContext,
+};
+use light_sdk::instruction::{PackedAccounts, SystemAccountMetaConfig};
 use magicblock_chainlink::{
     accounts_bank::mock::AccountsBankStub,
     cloner::{AccountCloneRequest, Cloner},
@@ -9,16 +20,24 @@ use magicblock_chainlink::{
     native_program_accounts,
     remote_account_provider::{
         chain_rpc_client::ChainRpcClientImpl,
-        chain_updates_client::ChainUpdatesClient, Endpoint, Endpoints,
+        chain_updates_client::ChainUpdatesClient,
+        photon_client::PhotonClientImpl, Endpoint, Endpoints,
         RemoteAccountProvider,
     },
     submux::SubMuxClient,
-    testing::cloner_stub::ClonerStub,
+    testing::{
+        cloner_stub::ClonerStub,
+        utils::{PHOTON_URL, RPC_URL},
+    },
     Chainlink,
 };
 use magicblock_config::config::{ChainLinkConfig, LifecycleMode};
+use magicblock_core::compression::{
+    derive_cda_from_pda, ADDRESS_TREE, OUTPUT_QUEUE,
+};
 use program_flexi_counter::state::FlexiCounter;
 use solana_account::AccountSharedData;
+use solana_compute_budget_interface::ComputeBudgetInstruction;
 use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_rpc_client_api::config::RpcSendTransactionConfig;
@@ -26,7 +45,7 @@ use solana_sdk::{
     commitment_config::CommitmentConfig, native_token::LAMPORTS_PER_SOL,
     signature::Keypair, signer::Signer, transaction::Transaction,
 };
-use solana_sdk_ids::native_loader;
+use solana_sdk_ids::{native_loader, system_program};
 use tokio::task;
 use tracing::*;
 
@@ -37,11 +56,13 @@ pub type IxtestChainlink = Chainlink<
     SubMuxClient<ChainUpdatesClient>,
     AccountsBankStub,
     ClonerStub,
+    PhotonClientImpl,
 >;
 
 #[derive(Clone)]
 pub struct IxtestContext {
     pub rpc_client: Arc<RpcClient>,
+    pub photon_indexer: Arc<PhotonIndexer>,
     pub chainlink: Arc<IxtestChainlink>,
     pub bank: Arc<AccountsBankStub>,
     pub remote_account_provider: Option<
@@ -49,6 +70,7 @@ pub struct IxtestContext {
             RemoteAccountProvider<
                 ChainRpcClientImpl,
                 SubMuxClient<ChainUpdatesClient>,
+                PhotonClientImpl,
             >,
         >,
     >,
@@ -56,13 +78,13 @@ pub struct IxtestContext {
     pub validator_kp: Arc<Keypair>,
 }
 
-const RPC_URL: &str = "http://localhost:7799";
 pub const TEST_AUTHORITY: [u8; 64] = [
     251, 62, 129, 184, 107, 49, 62, 184, 1, 147, 178, 128, 185, 157, 247, 92,
     56, 158, 145, 53, 51, 226, 202, 96, 178, 248, 195, 133, 133, 237, 237, 146,
     13, 32, 77, 204, 244, 56, 166, 172, 66, 113, 150, 218, 112, 42, 110, 181,
     98, 158, 222, 194, 130, 93, 175, 100, 190, 106, 9, 69, 156, 80, 96, 72,
 ];
+
 impl IxtestContext {
     pub async fn init() -> Self {
         Self::init_with_config(ChainlinkConfig::default_with_lifecycle_mode(
@@ -79,7 +101,7 @@ impl IxtestContext {
         let bank = Arc::<AccountsBankStub>::default();
         let cloner = Arc::new(ClonerStub::new(bank.clone()));
         let (tx, rx) = tokio::sync::mpsc::channel(100);
-        let (fetch_cloner, remote_account_provider) = {
+        let (fetch_cloner, remote_account_provider, photon_indexer) = {
             let endpoints_vec = vec![
                 Endpoint::Rpc {
                     url: RPC_URL.to_string(),
@@ -88,6 +110,10 @@ impl IxtestContext {
                 Endpoint::WebSocket {
                     url: "ws://localhost:7800".to_string(),
                     label: "test-ws".to_string(),
+                },
+                Endpoint::Compression {
+                    url: PHOTON_URL.to_string(),
+                    api_key: None,
                 },
             ];
             let endpoints = Endpoints::from(endpoints_vec.as_slice());
@@ -115,6 +141,9 @@ impl IxtestContext {
                 )
                 .await;
 
+            let photon_indexer =
+                Arc::new(PhotonIndexer::new(PHOTON_URL.to_string(), None));
+
             match remote_account_provider {
                 Ok(Some(remote_account_provider)) => {
                     debug!("Initializing FetchCloner");
@@ -130,12 +159,13 @@ impl IxtestContext {
                             None,
                         )),
                         Some(provider),
+                        photon_indexer,
                     )
                 }
                 Err(err) => {
                     panic!("Failed to create remote account provider: {err:?}");
                 }
-                _ => (None, None),
+                _ => (None, None, photon_indexer),
             }
         };
         let chainlink = Chainlink::try_new(
@@ -150,6 +180,7 @@ impl IxtestContext {
         let rpc_client = IxtestContext::get_rpc_client(commitment);
         Self {
             rpc_client: Arc::new(rpc_client),
+            photon_indexer,
             chainlink: Arc::new(chainlink),
             bank,
             remote_account_provider,
@@ -353,6 +384,336 @@ impl IxtestContext {
         self
     }
 
+    pub async fn delegate_compressed_counter(
+        &self,
+        counter_auth: &Keypair,
+        redelegate: bool,
+    ) -> &Self {
+        debug!(
+            "Delegating compressed counter account {}",
+            counter_auth.pubkey()
+        );
+        use program_flexi_counter::instruction::*;
+
+        let auth = counter_auth.pubkey();
+        let (pda, _bump) = FlexiCounter::pda(&auth);
+        let record_address = derive_cda_from_pda(&pda);
+
+        let mut remaining_accounts = self.get_packed_accounts();
+
+        let (
+            remaining_accounts_metas,
+            validity_proof,
+            address_tree_info,
+            account_meta,
+            output_state_tree_index,
+        ) = if redelegate {
+            let (compressed_delegated_record, proof) =
+                self.get_compressed_account_and_proof(&record_address).await;
+
+            let packed_state_tree = proof
+                .pack_tree_infos(&mut remaining_accounts)
+                .state_trees
+                .unwrap();
+            let account_meta = CompressedAccountMeta {
+                tree_info: packed_state_tree.packed_tree_infos[0],
+                address: compressed_delegated_record.address.unwrap(),
+                output_state_tree_index: packed_state_tree.output_tree_index,
+            };
+
+            let (remaining_accounts_metas, _, _) =
+                remaining_accounts.to_account_metas();
+            (
+                remaining_accounts_metas,
+                proof.proof,
+                None,
+                Some(account_meta),
+                packed_state_tree.output_tree_index,
+            )
+        } else {
+            let rpc_result: ValidityProofWithContext = self
+                .photon_indexer
+                .get_validity_proof(
+                    vec![],
+                    vec![AddressWithTree {
+                        address: record_address.to_bytes(),
+                        tree: ADDRESS_TREE,
+                    }],
+                    None,
+                )
+                .await
+                .unwrap()
+                .value;
+
+            // Insert trees in accounts
+            let address_merkle_tree_pubkey_index =
+                remaining_accounts.insert_or_get(ADDRESS_TREE);
+            let state_queue_pubkey_index =
+                remaining_accounts.insert_or_get(OUTPUT_QUEUE);
+
+            let packed_address_tree_info = PackedAddressTreeInfo {
+                root_index: rpc_result.addresses[0].root_index,
+                address_merkle_tree_pubkey_index,
+                address_queue_pubkey_index: address_merkle_tree_pubkey_index,
+            };
+
+            let (remaining_accounts_metas, _, _) =
+                remaining_accounts.to_account_metas();
+
+            (
+                remaining_accounts_metas,
+                rpc_result.proof,
+                Some(packed_address_tree_info),
+                None,
+                state_queue_pubkey_index,
+            )
+        };
+
+        let delegate_ix = create_delegate_compressed_ix(
+            counter_auth.pubkey(),
+            &remaining_accounts_metas,
+            DelegateCompressedArgs {
+                validator: Some(self.validator_kp.pubkey()),
+                validity_proof,
+                account_meta,
+                address_tree_info,
+                output_state_tree_index,
+            },
+        );
+
+        let latest_block_hash =
+            self.rpc_client.get_latest_blockhash().await.unwrap();
+        let tx = Transaction::new_signed_with_payer(
+            &[
+                ComputeBudgetInstruction::set_compute_unit_limit(300_000),
+                delegate_ix,
+            ],
+            Some(&counter_auth.pubkey()),
+            &[&counter_auth],
+            latest_block_hash,
+        );
+        debug!("Delegate transaction: {:?}", tx.signatures[0]);
+        self.rpc_client
+            .send_and_confirm_transaction_with_spinner_and_config(
+                &tx,
+                CommitmentConfig::confirmed(),
+                RpcSendTransactionConfig {
+                    skip_preflight: true,
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect("Failed to delegate account");
+
+        // Wait for the indexer to index the account
+        sleep_ms(1500).await;
+
+        self
+    }
+
+    pub async fn undelegate_compressed_counter(
+        &self,
+        counter_auth: &Keypair,
+        redelegate: bool,
+    ) -> &Self {
+        debug!(
+            "Undelegating compressed counter account {}",
+            counter_auth.pubkey()
+        );
+        let counter_pda = self.counter_pda(&counter_auth.pubkey());
+        // The committor service will call this in order to have
+        // chainlink subscribe to account updates of the counter account
+        self.chainlink
+            .undelegation_requested(counter_pda)
+            .await
+            .unwrap();
+
+        // In order to make the account undelegatable we first need to
+        // commmit and finalize
+        let (pda, _bump) = FlexiCounter::pda(&counter_auth.pubkey());
+        let record_address = derive_cda_from_pda(&pda);
+        let (compressed_account, proof) =
+            self.get_compressed_account_and_proof(&record_address).await;
+        let mut remaining_accounts = self.get_packed_accounts();
+
+        let packed_tree_accounts = proof
+            .pack_tree_infos(&mut remaining_accounts)
+            .state_trees
+            .unwrap();
+
+        let account_meta = CompressedAccountMeta {
+            tree_info: packed_tree_accounts.packed_tree_infos[0],
+            address: compressed_account.address.unwrap(),
+            output_state_tree_index: packed_tree_accounts.output_tree_index,
+        };
+
+        let (remaining_accounts_metas, _, _) =
+            remaining_accounts.to_account_metas();
+
+        let commit_ix =
+            CommitBuilder::new()
+                .validator(self.validator_kp.pubkey())
+                .delegated_account(pda)
+                .args(CommitArgs {
+                    current_compressed_delegated_account_data:
+                        compressed_account.data.unwrap().data.to_vec(),
+                    new_data: FlexiCounter::new("COUNTER".to_string())
+                        .try_to_vec()
+                        .unwrap(),
+                    account_meta,
+                    validity_proof: proof.proof,
+                    update_nonce: 1,
+                    allow_undelegation: true,
+                })
+                .add_remaining_accounts(remaining_accounts_metas.as_slice())
+                .instruction();
+
+        let latest_block_hash =
+            self.rpc_client.get_latest_blockhash().await.unwrap();
+        self.rpc_client
+            .send_and_confirm_transaction_with_spinner_and_config(
+                &Transaction::new_signed_with_payer(
+                    &[commit_ix],
+                    Some(&self.validator_kp.pubkey()),
+                    &[&self.validator_kp],
+                    latest_block_hash,
+                ),
+                CommitmentConfig::confirmed(),
+                RpcSendTransactionConfig {
+                    skip_preflight: true,
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect("Failed to commit account");
+
+        // Wait for the indexer to index the account
+        sleep_ms(500).await;
+
+        // Finalize
+        let (compressed_account, proof) =
+            self.get_compressed_account_and_proof(&record_address).await;
+
+        let mut remaining_accounts = self.get_packed_accounts();
+
+        let packed_tree_accounts = proof
+            .pack_tree_infos(&mut remaining_accounts)
+            .state_trees
+            .unwrap();
+
+        let account_meta = CompressedAccountMeta {
+            tree_info: packed_tree_accounts.packed_tree_infos[0],
+            address: compressed_account.address.unwrap(),
+            output_state_tree_index: packed_tree_accounts.output_tree_index,
+        };
+
+        let (remaining_accounts_metas, _, _) =
+            remaining_accounts.to_account_metas();
+
+        let finalize_ix =
+            FinalizeBuilder::new()
+                .validator(self.validator_kp.pubkey())
+                .delegated_account(pda)
+                .args(FinalizeArgs {
+                    current_compressed_delegated_account_data:
+                        compressed_account.data.unwrap().data,
+                    account_meta,
+                    validity_proof: proof.proof,
+                })
+                .add_remaining_accounts(remaining_accounts_metas.as_slice())
+                .instruction();
+
+        let latest_block_hash =
+            self.rpc_client.get_latest_blockhash().await.unwrap();
+        self.rpc_client
+            .send_and_confirm_transaction_with_spinner_and_config(
+                &Transaction::new_signed_with_payer(
+                    &[finalize_ix],
+                    Some(&self.validator_kp.pubkey()),
+                    &[&self.validator_kp],
+                    latest_block_hash,
+                ),
+                CommitmentConfig::confirmed(),
+                RpcSendTransactionConfig {
+                    skip_preflight: true,
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect("Failed to finalize account");
+
+        // Wait for the indexer to index the account
+        sleep_ms(1500).await;
+
+        let (compressed_account, proof) =
+            self.get_compressed_account_and_proof(&record_address).await;
+
+        let mut remaining_accounts = self.get_packed_accounts();
+
+        let packed_state_tree = proof
+            .pack_tree_infos(&mut remaining_accounts)
+            .state_trees
+            .unwrap();
+        let account_meta = CompressedAccountMeta {
+            tree_info: packed_state_tree.packed_tree_infos[0],
+            address: compressed_account.address.unwrap(),
+            output_state_tree_index: packed_state_tree.output_tree_index,
+        };
+
+        let (remaining_accounts_metas, _, _) =
+            remaining_accounts.to_account_metas();
+
+        let undelegate_ix = UndelegateBuilder::new()
+            .payer(counter_auth.pubkey())
+            .delegated_account(counter_pda)
+            .owner_program(program_flexi_counter::ID)
+            .system_program(system_program::ID)
+            .args(UndelegateArgs {
+                validity_proof: proof.proof,
+                delegation_record_account_meta: account_meta,
+                compressed_delegated_record:
+                    CompressedDelegationRecord::try_from_slice(
+                        &compressed_account.data.clone().unwrap().data,
+                    )
+                    .unwrap(),
+            })
+            .add_remaining_accounts(remaining_accounts_metas.as_slice())
+            .instruction();
+        let latest_block_hash =
+            self.rpc_client.get_latest_blockhash().await.unwrap();
+        let tx = Transaction::new_signed_with_payer(
+            &[
+                ComputeBudgetInstruction::set_compute_unit_limit(250_000),
+                undelegate_ix,
+            ],
+            Some(&counter_auth.pubkey()),
+            &[&counter_auth],
+            latest_block_hash,
+        );
+        debug!("Undelegate transaction: {:?}", tx.signatures[0]);
+        self.rpc_client
+            .send_and_confirm_transaction_with_spinner_and_config(
+                &tx,
+                CommitmentConfig::confirmed(),
+                RpcSendTransactionConfig {
+                    skip_preflight: true,
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect("Failed to undelegate account");
+
+        // Build instructions and required signers
+        if redelegate {
+            // Wait for the indexer to index the account
+            sleep_ms(1500).await;
+
+            self.delegate_compressed_counter(counter_auth, true).await
+        } else {
+            self
+        }
+    }
+
     pub async fn top_up_ephemeral_fee_balance(
         &self,
         payer: &Keypair,
@@ -390,11 +751,40 @@ impl IxtestContext {
     pub async fn get_remote_account(
         &self,
         pubkey: &Pubkey,
-    ) -> Option<solana_sdk::account::Account> {
+    ) -> Option<solana_account::Account> {
         self.rpc_client.get_account(pubkey).await.ok()
     }
 
     pub fn get_rpc_client(commitment: CommitmentConfig) -> RpcClient {
         RpcClient::new_with_commitment(RPC_URL.to_string(), commitment)
+    }
+
+    fn get_packed_accounts(&self) -> PackedAccounts {
+        let system_account_meta_config =
+            SystemAccountMetaConfig::new(compressed_delegation_client::ID);
+        let mut remaining_accounts = PackedAccounts::default();
+        remaining_accounts
+            .add_system_accounts_v2(system_account_meta_config)
+            .unwrap();
+        remaining_accounts
+    }
+
+    async fn get_compressed_account_and_proof(
+        &self,
+        pubkey: &Pubkey,
+    ) -> (CompressedAccount, ValidityProofWithContext) {
+        let compressed_account = self
+            .photon_indexer
+            .get_compressed_account(pubkey.to_bytes(), None)
+            .await
+            .unwrap()
+            .value;
+        let validity_proof = self
+            .photon_indexer
+            .get_validity_proof(vec![compressed_account.hash], vec![], None)
+            .await
+            .unwrap()
+            .value;
+        (compressed_account, validity_proof)
     }
 }

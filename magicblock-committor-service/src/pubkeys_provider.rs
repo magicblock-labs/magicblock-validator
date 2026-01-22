@@ -42,6 +42,7 @@ pub fn provide_common_pubkeys(validator: &Pubkey) -> HashSet<Pubkey> {
     let mut set = HashSet::new();
 
     let deleg_program = dlp::id();
+    let compressed_delegation_program = compressed_delegation_client::id();
     let protocol_fees_vault = pda::fees_vault_pda();
     let validator_fees_vault =
         pda::validator_fees_vault_pda_from_validator(validator);
@@ -50,6 +51,7 @@ pub fn provide_common_pubkeys(validator: &Pubkey) -> HashSet<Pubkey> {
     trace!(
         validator = %validator,
         deleg_program = %deleg_program,
+        compressed_delegation_program = %compressed_delegation_program,
         protocol_fees_vault = %protocol_fees_vault,
         validator_fees_vault = %validator_fees_vault,
         committor_program = %committor_program,
@@ -59,6 +61,7 @@ pub fn provide_common_pubkeys(validator: &Pubkey) -> HashSet<Pubkey> {
     set.insert(*validator);
     set.insert(system_program_id());
     set.insert(deleg_program);
+    set.insert(compressed_delegation_program);
     set.insert(protocol_fees_vault);
     set.insert(validator_fees_vault);
     set.insert(committor_program);

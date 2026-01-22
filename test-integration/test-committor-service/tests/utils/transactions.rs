@@ -1,3 +1,7 @@
+use std::sync::Arc;
+
+use light_client::indexer::{photon_indexer::PhotonIndexer, Indexer};
+use magicblock_chainlink::testing::utils::{PHOTON_URL, RPC_URL};
 use solana_account::Account;
 use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
@@ -6,6 +10,7 @@ use solana_rpc_client_api::config::{
 };
 use solana_sdk::{
     commitment_config::CommitmentConfig,
+    compute_budget::ComputeBudgetInstruction,
     native_token::LAMPORTS_PER_SOL,
     signature::{Keypair, Signature, Signer},
     transaction::Transaction,
@@ -13,8 +18,9 @@ use solana_sdk::{
 use tracing::{debug, error};
 
 use crate::utils::instructions::{
-    init_account_and_delegate_ixs, init_order_book_account_and_delegate_ixs,
-    init_validator_fees_vault_ix, InitAccountAndDelegateIxs,
+    init_account_and_delegate_compressed_ixs, init_account_and_delegate_ixs,
+    init_order_book_account_and_delegate_ixs, init_validator_fees_vault_ix,
+    InitAccountAndDelegateCompressedIxs, InitAccountAndDelegateIxs,
     InitOrderBookAndDelegateIxs,
 };
 
@@ -65,6 +71,53 @@ macro_rules! get_account {
     }};
     ($rpc_client:ident, $pubkey:expr, $label:literal) => {{
         get_account!($rpc_client, $pubkey, $label, |_: &Account, _: u8| true)
+    }};
+}
+
+#[macro_export]
+macro_rules! get_compressed_account {
+    ($photon_client:ident, $address:expr, $label:literal, $predicate:expr) => {{
+        const GET_ACCOUNT_RETRIES: u8 = 12;
+
+        let mut remaining_tries = GET_ACCOUNT_RETRIES;
+        loop {
+            let acc = $photon_client
+                .get_compressed_account($address, None)
+                .await
+                .ok()
+                .map(|acc| acc.value.clone());
+            if let Some(acc) = acc {
+                if $predicate(&acc, remaining_tries) {
+                    break acc;
+                }
+                remaining_tries -= 1;
+                if remaining_tries == 0 {
+                    panic!(
+                        "{} account ({:?}) does not match condition after {} retries",
+                        $label, $address, GET_ACCOUNT_RETRIES
+                    );
+                }
+                $crate::utils::sleep_millis(800).await;
+            } else {
+                remaining_tries -= 1;
+                if remaining_tries == 0 {
+                    panic!(
+                        "Unable to get {} account ({:?}) matching condition after {} retries",
+                        $label, $address, GET_ACCOUNT_RETRIES
+                    );
+                }
+                if remaining_tries % 10 == 0 {
+                    debug!(
+                        "Waiting for {} account ({:?}) to become available",
+                        $label, $address
+                    );
+                }
+                $crate::utils::sleep_millis(800).await;
+            }
+        }
+    }};
+    ($photon_client:ident, $pubkey:expr, $label:literal) => {{
+        get_compressed_account!($photon_client, $pubkey, $label, |_: &light_client::indexer::CompressedAccount, _: u8| true)
     }};
 }
 
@@ -155,7 +208,7 @@ pub async fn init_and_delegate_account_on_chain(
     bytes: u64,
     label: Option<String>,
 ) -> (Pubkey, Account) {
-    let rpc_client = RpcClient::new("http://localhost:7799".to_string());
+    let rpc_client = RpcClient::new(RPC_URL.to_string());
 
     rpc_client
         .request_airdrop(&counter_auth.pubkey(), 777 * LAMPORTS_PER_SOL)
@@ -168,7 +221,7 @@ pub async fn init_and_delegate_account_on_chain(
         reallocs: realloc_ixs,
         delegate: delegate_ix,
         pda,
-        rent_excempt,
+        rent_exempt,
     } = init_account_and_delegate_ixs(counter_auth.pubkey(), bytes, label);
 
     let latest_block_hash = rpc_client.get_latest_blockhash().await.unwrap();
@@ -192,15 +245,12 @@ pub async fn init_and_delegate_account_on_chain(
     debug!("Init account: {:?}", pda);
 
     // 2. Airdrop to account for extra rent needed for reallocs
-    rpc_client
-        .request_airdrop(&pda, rent_excempt)
-        .await
-        .unwrap();
+    rpc_client.request_airdrop(&pda, rent_exempt).await.unwrap();
 
     debug!(
         "Airdropped to account: {:4} {}SOL to pay rent for {} bytes",
         pda,
-        rent_excempt as f64 / LAMPORTS_PER_SOL as f64,
+        rent_exempt as f64 / LAMPORTS_PER_SOL as f64,
         bytes
     );
 
@@ -249,12 +299,95 @@ pub async fn init_and_delegate_account_on_chain(
     (pda, pda_acc)
 }
 
+/// This needs to be run for each test that required a new counter to be compressed delegated
+#[allow(dead_code)]
+pub async fn init_and_delegate_compressed_account_on_chain(
+    counter_auth: &Keypair,
+) -> (Pubkey, [u8; 32], Account) {
+    let rpc_client = RpcClient::new(RPC_URL.to_string());
+    let photon_indexer =
+        Arc::new(PhotonIndexer::new(PHOTON_URL.to_string(), None));
+
+    rpc_client
+        .request_airdrop(&counter_auth.pubkey(), 777 * LAMPORTS_PER_SOL)
+        .await
+        .unwrap();
+    debug!("Airdropped to counter auth: {} SOL", 777 * LAMPORTS_PER_SOL);
+
+    let InitAccountAndDelegateCompressedIxs {
+        init: init_counter_ix,
+        delegate: delegate_ix,
+        pda,
+        address,
+    } = init_account_and_delegate_compressed_ixs(
+        counter_auth.pubkey(),
+        photon_indexer.clone(),
+    )
+    .await;
+
+    let latest_block_hash = rpc_client.get_latest_blockhash().await.unwrap();
+    // 1. Init account
+    rpc_client
+        .send_and_confirm_transaction_with_spinner_and_config(
+            &Transaction::new_signed_with_payer(
+                &[init_counter_ix],
+                Some(&counter_auth.pubkey()),
+                &[&counter_auth],
+                latest_block_hash,
+            ),
+            CommitmentConfig::confirmed(),
+            RpcSendTransactionConfig {
+                skip_preflight: true,
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("Failed to init account");
+    debug!("Init account: {:?}", pda);
+
+    let pda_acc = get_account!(rpc_client, pda, "pda");
+
+    // 2. Delegate account
+    let tx = Transaction::new_signed_with_payer(
+        &[
+            ComputeBudgetInstruction::set_compute_unit_limit(250_000),
+            delegate_ix,
+        ],
+        Some(&counter_auth.pubkey()),
+        &[&counter_auth],
+        latest_block_hash,
+    );
+    rpc_client
+        .send_and_confirm_transaction_with_spinner_and_config(
+            &tx,
+            CommitmentConfig::confirmed(),
+            RpcSendTransactionConfig {
+                skip_preflight: true,
+                ..Default::default()
+            },
+        )
+        .await
+        .inspect_err(|err| {
+            error!(
+                "Failed to delegate: {err:?}, signature: {:?}",
+                tx.signatures[0]
+            )
+        })
+        .expect("Failed to delegate");
+
+    let compressed_account =
+        get_compressed_account!(photon_indexer, address, "pda");
+    debug!("Compressed account: {:?}", compressed_account);
+
+    (pda, compressed_account.hash, pda_acc)
+}
+
 /// This needs to be run for each test that required a new order_book to be delegated
 #[allow(dead_code)]
 pub async fn init_and_delegate_order_book_on_chain(
     payer: &Keypair,
 ) -> (Pubkey, Account) {
-    let rpc_client = RpcClient::new("http://localhost:7799".to_string());
+    let rpc_client = RpcClient::new(RPC_URL.to_string());
 
     rpc_client
         .request_airdrop(&payer.pubkey(), 777 * LAMPORTS_PER_SOL)
@@ -312,10 +445,11 @@ pub async fn init_and_delegate_order_book_on_chain(
 }
 
 /// This needs to be run once for all tests
+#[allow(dead_code)]
 pub async fn fund_validator_auth_and_ensure_validator_fees_vault(
     validator_auth: &Keypair,
 ) {
-    let rpc_client = RpcClient::new("http://localhost:7799".to_string());
+    let rpc_client = RpcClient::new(RPC_URL.to_string());
     rpc_client
         .request_airdrop(&validator_auth.pubkey(), 777 * LAMPORTS_PER_SOL)
         .await

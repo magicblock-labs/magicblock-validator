@@ -26,8 +26,10 @@ use crate::{
     fetch_cloner::FetchAndCloneResult,
     filters::is_noop_system_transfer,
     remote_account_provider::{
-        chain_updates_client::ChainUpdatesClient, ChainPubsubClient,
-        ChainRpcClient, ChainRpcClientImpl, Endpoints, RemoteAccountProvider,
+        chain_updates_client::ChainUpdatesClient,
+        photon_client::{PhotonClient, PhotonClientImpl},
+        ChainPubsubClient, ChainRpcClient, ChainRpcClientImpl, Endpoints,
+        RemoteAccountProvider,
     },
     submux::SubMuxClient,
 };
@@ -40,6 +42,8 @@ pub mod fetch_cloner;
 
 pub use blacklisted_accounts::*;
 
+type ArcFetchCloner<T, U, V, C, P> = Arc<FetchCloner<T, U, V, C, P>>;
+
 // -----------------
 // Chainlink
 // -----------------
@@ -48,9 +52,10 @@ pub struct Chainlink<
     U: ChainPubsubClient,
     V: AccountsBank,
     C: Cloner,
+    P: PhotonClient,
 > {
     accounts_bank: Arc<V>,
-    fetch_cloner: Option<Arc<FetchCloner<T, U, V, C>>>,
+    fetch_cloner: Option<ArcFetchCloner<T, U, V, C, P>>,
     /// The subscription to events for each account that is removed from
     /// the accounts tracked by the provider.
     /// In that case we also remove it from the bank since it is no longer
@@ -68,12 +73,17 @@ pub struct Chainlink<
     remove_confined_accounts: bool,
 }
 
-impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
-    Chainlink<T, U, V, C>
+impl<
+        T: ChainRpcClient,
+        U: ChainPubsubClient,
+        V: AccountsBank,
+        C: Cloner,
+        P: PhotonClient,
+    > Chainlink<T, U, V, C, P>
 {
     pub fn try_new(
         accounts_bank: &Arc<V>,
-        fetch_cloner: Option<Arc<FetchCloner<T, U, V, C>>>,
+        fetch_cloner: Option<ArcFetchCloner<T, U, V, C, P>>,
         validator_pubkey: Pubkey,
         faucet_pubkey: Pubkey,
         config: &ChainLinkConfig,
@@ -117,7 +127,13 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
         config: ChainlinkConfig,
         chainlink_config: &ChainLinkConfig,
     ) -> ChainlinkResult<
-        Chainlink<ChainRpcClientImpl, SubMuxClient<ChainUpdatesClient>, V, C>,
+        Chainlink<
+            ChainRpcClientImpl,
+            SubMuxClient<ChainUpdatesClient>,
+            V,
+            C,
+            PhotonClientImpl,
+        >,
     > {
         // Extract accounts provider and create fetch cloner while connecting
         // the subscription channel
@@ -281,7 +297,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
     /// does nothing as only existing accounts are affected.
     /// See [lru::LruCache::promote]
     fn promote_accounts(
-        fetch_cloner: &FetchCloner<T, U, V, C>,
+        fetch_cloner: &FetchCloner<T, U, V, C, P>,
         pubkeys: &[&Pubkey],
     ) {
         fetch_cloner.promote_accounts(pubkeys);
@@ -448,7 +464,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
     ))]
     async fn fetch_accounts_common(
         &self,
-        fetch_cloner: &FetchCloner<T, U, V, C>,
+        fetch_cloner: &FetchCloner<T, U, V, C, P>,
         pubkeys: &[Pubkey],
         mark_empty_if_not_found: Option<&[Pubkey]>,
         fetch_origin: AccountFetchOrigin,
@@ -504,7 +520,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
         Ok(())
     }
 
-    pub fn fetch_cloner(&self) -> Option<&Arc<FetchCloner<T, U, V, C>>> {
+    pub fn fetch_cloner(&self) -> Option<&ArcFetchCloner<T, U, V, C, P>> {
         self.fetch_cloner.as_ref()
     }
 

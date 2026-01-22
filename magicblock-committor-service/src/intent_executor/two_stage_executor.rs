@@ -1,6 +1,8 @@
-use std::ops::ControlFlow;
+use std::{ops::ControlFlow, sync::Arc};
 
+use solana_commitment_config::CommitmentConfig;
 use solana_pubkey::Pubkey;
+use solana_rpc_client_api::config::RpcTransactionConfig;
 use solana_signature::Signature;
 use tracing::{error, instrument, warn};
 
@@ -12,7 +14,7 @@ use crate::{
         },
         task_info_fetcher::TaskInfoFetcher,
         two_stage_executor::sealed::Sealed,
-        IntentExecutorImpl,
+        CommitSlotFn, IntentExecutorImpl,
     },
     persist::{IntentPersister, IntentPersisterImpl},
     tasks::{
@@ -90,6 +92,7 @@ where
                 .prepare_and_execute_strategy(
                     &mut self.state.commit_strategy,
                     persister,
+                    None::<CommitSlotFn>,
                 )
                 .await
                 .map_err(IntentExecutorError::FailedCommitPreparationError)?;
@@ -226,8 +229,10 @@ where
                 &mut TransactionStrategy {
                     optimized_tasks: vec![finalize_task],
                     lookup_tables_keys: vec![],
+                    compressed: task.is_compressed(),
                 },
                 &None::<IntentPersisterImpl>,
+                None,
             )
             .await
             .map_err(IntentExecutorError::FailedCommitPreparationError)?
@@ -239,6 +244,7 @@ where
         Ok(ControlFlow::Continue(TransactionStrategy {
             optimized_tasks: vec![],
             lookup_tables_keys: vec![],
+            compressed: task.is_compressed(),
         }))
     }
 }
@@ -255,6 +261,32 @@ where
         mut self,
         persister: &Option<P>,
     ) -> IntentExecutorResult<TwoStageExecutor<'a, T, F, Finalized>> {
+        // Fetching the slot at which the transaction was executed
+        // Task preparations requiring fresh data can use that info
+        // Using a future to avoid fetching when unnecessary
+        let rpc_client = self.inner.rpc_client.clone();
+        let sig = self.state.commit_signature;
+        let commit_slot_fn: CommitSlotFn = Arc::new(move || {
+            let rpc_client = rpc_client.clone();
+            Box::pin(async move {
+                rpc_client
+                    .get_transaction(
+                        &sig,
+                        Some(RpcTransactionConfig {
+                            commitment: Some(CommitmentConfig::confirmed()),
+                            max_supported_transaction_version: Some(0),
+                            ..Default::default()
+                        }),
+                    )
+                    .await
+                    .inspect_err(|err| {
+                        error!("Failed to get commit slot: {}", err)
+                    })
+                    .map(|tx| tx.slot)
+                    .ok()
+            })
+        });
+
         let mut i = 0;
         let finalize_result = loop {
             i += 1;
@@ -265,6 +297,7 @@ where
                 .prepare_and_execute_strategy(
                     &mut self.state.finalize_strategy,
                     persister,
+                    Some(commit_slot_fn.clone()),
                 )
                 .await
                 .map_err(IntentExecutorError::FailedFinalizePreparationError)?;

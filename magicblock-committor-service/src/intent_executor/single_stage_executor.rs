@@ -11,7 +11,7 @@ use crate::{
             TransactionStrategyExecutionError,
         },
         task_info_fetcher::TaskInfoFetcher,
-        ExecutionOutput, IntentExecutorImpl,
+        CommitSlotFn, ExecutionOutput, IntentExecutorImpl,
     },
     persist::{IntentPersister, IntentPersisterImpl},
     tasks::{
@@ -64,6 +64,7 @@ where
                 .prepare_and_execute_strategy(
                     &mut self.transaction_strategy,
                     persister,
+                    None,
                 )
                 .await
                 .map_err(IntentExecutorError::FailedFinalizePreparationError)?;
@@ -216,8 +217,10 @@ where
                 &mut TransactionStrategy {
                     optimized_tasks: vec![finalize_task],
                     lookup_tables_keys: vec![],
+                    compressed: task.is_compressed(),
                 },
                 &None::<IntentPersisterImpl>,
+                None::<CommitSlotFn>,
             )
             .await
             .map_err(IntentExecutorError::FailedFinalizePreparationError)?
@@ -230,6 +233,7 @@ where
         Ok(ControlFlow::Continue(TransactionStrategy {
             optimized_tasks: vec![],
             lookup_tables_keys: vec![],
+            compressed: task.is_compressed(),
         }))
     }
 }
