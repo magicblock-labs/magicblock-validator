@@ -1,13 +1,11 @@
 use std::{collections::HashSet, ops::Deref, sync::Arc};
 
 use magicblock_config::config::AccountsDbConfig;
-use magicblock_core::traits::AccountsBank;
 use solana_account::{AccountSharedData, ReadableAccount, WritableAccount};
 use solana_pubkey::Pubkey;
 use tempfile::TempDir;
-use test_kit::init_logger;
 
-use crate::{storage::ACCOUNTS_DB_FILENAME, AccountsDb};
+use crate::{storage::ACCOUNTS_DB_FILENAME, traits::AccountsBank, AccountsDb};
 
 const LAMPORTS: u64 = 4425;
 const SPACE: usize = 73;
@@ -483,13 +481,14 @@ struct TestEnv {
 
 impl TestEnv {
     fn new() -> Self {
+        let _ = tracing_subscriber::fmt()
+            .with_max_level(tracing::Level::INFO)
+            .try_init();
         let (adb, _directory) = Self::init_raw_db();
         Self { adb, _directory }
     }
 
     fn init_raw_db() -> (Arc<AccountsDb>, TempDir) {
-        init_logger!();
-
         let dir = tempfile::tempdir().expect("temp dir creation failed");
         let config = AccountsDbConfig::default();
 

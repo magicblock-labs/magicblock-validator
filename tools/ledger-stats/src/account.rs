@@ -1,5 +1,4 @@
-use magicblock_accounts_db::AccountsDb;
-use magicblock_core::traits::AccountsBank;
+use magicblock_accounts_db::{traits::AccountsBank, AccountsDb};
 use num_format::{Locale, ToFormattedString};
 use pretty_hex::*;
 use solana_account::ReadableAccount;

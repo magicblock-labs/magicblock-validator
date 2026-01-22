@@ -1,4 +1,4 @@
-use std::{path::Path, sync::Arc, thread};
+use std::{fs, path::Path, sync::Arc, thread};
 
 use error::{AccountsDbError, LogErr};
 use index::{
@@ -6,7 +6,6 @@ use index::{
 };
 use lmdb::{RwTransaction, Transaction};
 use magicblock_config::config::AccountsDbConfig;
-use magicblock_core::traits::AccountsBank;
 use parking_lot::RwLock;
 use solana_account::{
     cow::AccountBorrowed, AccountSharedData, ReadableAccount,
@@ -17,6 +16,7 @@ use tracing::{error, info, warn};
 
 // Use the refactored manager
 use crate::snapshot::SnapshotManager;
+use crate::traits::AccountsBank;
 
 pub type AccountsDbResult<T> = Result<T, AccountsDbError>;
 
@@ -62,24 +62,21 @@ impl AccountsDb {
 
         if config.reset && db_dir.exists() {
             info!(db_path = %db_dir.display(), "Resetting AccountsDb");
-            std::fs::remove_dir_all(&db_dir).log_err(|| {
-                "Failed to reset accountsdb directory".to_string()
-            })?;
+            fs::remove_dir_all(&db_dir)
+                .log_err(|| "Failed to reset accountsdb directory")?;
         }
-        std::fs::create_dir_all(&db_dir)
-            .log_err(|| "Failed to create accountsdb directory".to_string())?;
+        fs::create_dir_all(&db_dir)
+            .log_err(|| "Failed to create accountsdb directory")?;
 
         let storage = AccountsStorage::new(config, &db_dir)
-            .log_err(|| "Failed to initialize storage".to_string())?;
+            .log_err(|| "Failed to initialize storage")?;
 
         let index = AccountsDbIndex::new(config.index_size, &db_dir)
-            .log_err(|| "Failed to initialize index".to_string())?;
+            .log_err(|| "Failed to initialize index")?;
 
         let snapshot_manager =
             SnapshotManager::new(db_dir.clone(), config.max_snapshots as usize)
-                .log_err(|| {
-                    "Failed to initialize snapshot manager".to_string()
-                })?;
+                .log_err(|| "Failed to initialize snapshot manager")?;
 
         if config.snapshot_frequency == 0 {
             return Err(AccountsDbError::Internal(
@@ -116,126 +113,109 @@ impl AccountsDb {
         pubkey: &Pubkey,
         account: &AccountSharedData,
     ) -> AccountsDbResult<()> {
-        let mut txn = self.index.rwtxn()?;
-        self.perform_account_upsert(pubkey, account, &mut txn)?;
-        txn.commit()?;
+        let mut txn = None;
+        self.upsert(pubkey, account, &mut txn)?;
+        if let Some(t) = txn {
+            t.commit()?;
+        }
         Ok(())
     }
 
     /// Inserts multiple accounts atomically.
-    ///
-    /// If any insertion fails, the entire batch is rolled back (index changes are aborted).
     pub fn insert_batch<'a>(
         &self,
         accounts: impl Iterator<Item = &'a (Pubkey, AccountSharedData)> + Clone,
     ) -> AccountsDbResult<()> {
-        let mut txn = self.index.rwtxn()?;
-        let mut processed_count = 0;
+        let (mut txn, mut count) = (None, 0usize);
 
-        // Optimistic execution
         for (pubkey, account) in accounts.clone() {
-            let result = self.perform_account_upsert(pubkey, account, &mut txn);
-            if let Err(e) = result {
-                error!(pubkey = %pubkey, error = ?e, "Batch insert failed");
-                // Rollback in-memory Cow changes for accounts processed so far
-                self.rollback_borrowed_accounts(accounts, processed_count);
-                // Abort LMDB transaction (implicit on drop, but explicit return here)
-                return Err(e);
+            match self.upsert(pubkey, account, &mut txn) {
+                Ok(()) => count += 1,
+                Err(e) => {
+                    self.rollback(accounts, count);
+                    return Err(e);
+                }
             }
-            processed_count += 1;
         }
 
-        if let Err(e) = txn.commit() {
-            error!(
-                processed_count = processed_count,
-                error = ?e,
-                "Batch insert commit failed"
-            );
-            // Rollback in-memory CoW changes for all processed accounts
-            self.rollback_borrowed_accounts(accounts, processed_count);
-            return Err(e.into());
+        if let Some(Err(error)) = txn.map(|t| t.commit()) {
+            error!(%error, "Batch insert commit failed");
+            self.rollback(accounts, count);
+            Err(error)?;
         }
         Ok(())
     }
 
-    fn rollback_borrowed_accounts<'a>(
+    fn rollback<'a>(
         &self,
         accounts: impl Iterator<Item = &'a (Pubkey, AccountSharedData)>,
         count: usize,
     ) {
-        for (_, account) in accounts.take(count) {
-            // SAFETY:
-            // We invoke rollback on the specific `AccountSharedData` instances
-            // that were modified in-memory during this failed transaction.
-            // This method is called only for accounts previously modified by
-            // perform_account_upsert.
-            unsafe { account.rollback() };
+        for acc in accounts.take(count) {
+            unsafe { acc.1.rollback() };
         }
     }
 
-    /// Core upsert logic: Storage Allocation -> Index Update -> Data Write.
-    fn perform_account_upsert(
-        &self,
+    fn upsert<'a>(
+        &'a self,
         pubkey: &Pubkey,
         account: &AccountSharedData,
-        txn: &mut RwTransaction,
+        txn: &mut Option<RwTransaction<'a>>,
     ) -> AccountsDbResult<()> {
+        /// Get or create LMDB transaction for index writes.
+        macro_rules! txn {
+            () => {
+                match txn.as_mut() {
+                    Some(t) => t,
+                    None => txn.get_or_insert(self.index.rwtxn()?),
+                }
+            };
+        }
         match account {
             AccountSharedData::Borrowed(acc) => {
-                // Borrowed accounts are updated in-place in RAM.
-                // We only touch the index if ownership changes to ensure consistency.
                 if acc.owner_changed() {
                     self.index
-                        .ensure_correct_owner(pubkey, account.owner(), txn)
-                        .log_err(|| {
-                            "Failed to update owner index".to_string()
-                        })?;
+                        .ensure_correct_owner(pubkey, account.owner(), txn!())
+                        .log_err(|| "Failed to update owner index")?;
                 }
                 acc.commit();
             }
             AccountSharedData::Owned(acc) => {
-                // 1. Calculate size requirements
                 let data_len = account.data().len() as u32;
                 let block_size = self.storage.block_size() as u32;
                 let size_bytes = AccountSharedData::serialized_size_aligned(
                     data_len, block_size,
                 ) as usize;
-
                 let blocks_needed = self.storage.blocks_required(size_bytes);
 
-                // 2. Allocate (Recycle or New)
-                let allocation =
-                    match self.index.try_recycle_allocation(blocks_needed, txn)
-                    {
-                        Ok(recycled) => {
-                            self.storage.dec_recycled_count(recycled.blocks);
-                            self.storage.recycle(recycled)
-                        }
-                        Err(AccountsDbError::NotFound) => {
-                            self.storage.allocate(size_bytes)?
-                        }
-                        Err(e) => return Err(e),
-                    };
+                let result =
+                    self.index.try_recycle_allocation(blocks_needed, txn!());
+                let allocation = match result {
+                    Ok(recycled) => {
+                        self.storage.dec_recycled_count(recycled.blocks);
+                        self.storage.recycle(recycled)
+                    }
+                    Err(AccountsDbError::NotFound) => {
+                        self.storage.allocate(size_bytes)?
+                    }
+                    Err(e) => return Err(e),
+                };
 
-                // 3. Update Index
                 let old_allocation = self
                     .index
-                    .upsert_account(pubkey, account.owner(), allocation, txn)
-                    .log_err(|| "Index update failed".to_string())?;
+                    .upsert_account(pubkey, account.owner(), allocation, txn!())
+                    .log_err(|| "Index update failed")?;
 
                 if let Some(old) = old_allocation {
                     self.storage.inc_recycled_count(old.blocks);
                 }
 
-                // 4. Write Data
-                // SAFETY: `allocation` provides a valid, exclusive pointer range managed by `AccountsStorage`.
-                unsafe {
-                    AccountSharedData::serialize_to_mmap(
-                        acc,
-                        allocation.ptr.as_ptr(),
-                        block_size * allocation.blocks,
-                    )
-                };
+                let ptr = allocation.ptr.as_ptr();
+                let size = block_size * allocation.blocks;
+                // SAFETY:
+                // `allocation` provides a valid, exclusive pointer
+                // range managed by `AccountsStorage`.
+                unsafe { AccountSharedData::serialize_to_mmap(acc, ptr, size) };
             }
         }
         Ok(())
@@ -262,10 +242,10 @@ impl AccountsDb {
     where
         F: Fn(&AccountSharedData) -> bool + 'static,
     {
-        let iterator =
-            self.index.get_program_accounts_iter(program).log_err(|| {
-                "Failed to create program accounts iterator".to_string()
-            })?;
+        let iterator = self
+            .index
+            .get_program_accounts_iter(program)
+            .log_err(|| "Failed to create program accounts iterator")?;
 
         Ok(AccountsScanner {
             iterator,
@@ -325,13 +305,11 @@ impl AccountsDb {
             // Capture the active memory map region for the snapshot
             let used_storage = this.storage.active_segment();
 
-            if let Err(err) = this.snapshot_manager.create_snapshot(
+            let _ = this.snapshot_manager.create_snapshot(
                 slot,
                 used_storage,
                 write_guard,
-            ) {
-                warn!(slot = slot, error = ?err, "Snapshot failed");
-            }
+            );
         });
     }
 
@@ -361,10 +339,7 @@ impl AccountsDb {
             .snapshot_manager
             .restore_from_snapshot(target_slot)
             .log_err(|| {
-                format!(
-                    "Snapshot restoration failed for target {}",
-                    target_slot
-                )
+                format!("Snapshot restoration failed for target {target_slot}",)
             })?;
 
         // Reload components to reflect new FS state
@@ -372,7 +347,7 @@ impl AccountsDb {
         self.storage.reload(path)?;
         self.index.reload(path)?;
 
-        info!(restored_slot = restored_slot, "Rolled back to snapshot");
+        info!(restored_slot, "Successfully rolled back");
         Ok(restored_slot)
     }
 
@@ -383,12 +358,9 @@ impl AccountsDb {
     pub fn iter_all(
         &self,
     ) -> impl Iterator<Item = (Pubkey, AccountSharedData)> + '_ {
-        self.index
-            .get_all_accounts()
-            .ok()
-            .into_iter()
-            .flatten()
-            .map(|(offset, pk)| (pk, self.storage.read_account(offset)))
+        let result = self.index.get_all_accounts().ok();
+        let accounts = result.into_iter().flatten();
+        accounts.map(|(offset, pk)| (pk, self.storage.read_account(offset)))
     }
 
     pub fn flush(&self) {
@@ -409,38 +381,23 @@ impl AccountsBank for AccountsDb {
     }
 
     fn remove_account(&self, pubkey: &Pubkey) {
-        let _ = self
-            .index
-            .remove(pubkey)
-            .log_err(|| format!("Failed to remove account {pubkey}"));
+        let result = self.index.remove(pubkey);
+        let _ = result.log_err(|| format!("Failed to remove account {pubkey}"));
     }
 
-    /// Efficiently removes accounts matching a predicate.
+    /// Removes accounts matching a predicate.
     fn remove_where(
         &self,
         predicate: impl Fn(&Pubkey, &AccountSharedData) -> bool,
     ) -> usize {
-        let mut count = 0;
-        let batch_size = 1024;
-        let mut keys_to_remove = Vec::with_capacity(batch_size);
+        let to_remove = self
+            .iter_all()
+            .filter_map(|(pk, acc)| predicate(&pk, &acc).then_some(pk))
+            .collect::<Vec<_>>();
 
-        // First pass: Identify keys (using iter_all which is read-only)
-        for (pk, acc) in self.iter_all() {
-            if predicate(&pk, &acc) {
-                keys_to_remove.push(pk);
-                if keys_to_remove.len() >= batch_size {
-                    for k in keys_to_remove.drain(..) {
-                        self.remove_account(&k);
-                        count += 1;
-                    }
-                }
-            }
-        }
-
-        // Final flush
-        for k in keys_to_remove {
+        let count = to_remove.len();
+        for k in to_remove {
             self.remove_account(&k);
-            count += 1;
         }
 
         count
@@ -509,3 +466,4 @@ mod snapshot;
 mod storage;
 #[cfg(test)]
 mod tests;
+pub mod traits;

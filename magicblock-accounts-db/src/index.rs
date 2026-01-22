@@ -380,10 +380,7 @@ impl AccountsDbIndex {
     }
 
     pub(crate) fn flush(&self) {
-        let _ = self
-            .env
-            .sync(true)
-            .log_err(|| "main index flushing".to_string());
+        let _ = self.env.sync(true).log_err(|| "main index flushing");
     }
 
     pub(crate) fn reload(&mut self, dbpath: &Path) -> AccountsDbResult<()> {

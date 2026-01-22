@@ -1,5 +1,5 @@
-use magicblock_accounts_db::AccountsDb;
-use magicblock_core::{link::blocks::BlockHash, traits::AccountsBank};
+use magicblock_accounts_db::{traits::AccountsBank, AccountsDb};
+use magicblock_core::link::blocks::BlockHash;
 use solana_account::AccountSharedData;
 use solana_feature_set::{
     curve25519_restrict_msm_length, curve25519_syscall_enabled,

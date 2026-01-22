@@ -9,8 +9,8 @@ use std::{
 use dlp::pda::ephemeral_balance_pda_from_payer;
 use errors::ChainlinkResult;
 use fetch_cloner::FetchCloner;
+use magicblock_accounts_db::traits::AccountsBank;
 use magicblock_config::config::ChainLinkConfig;
-use magicblock_core::traits::AccountsBank;
 use magicblock_metrics::metrics::AccountFetchOrigin;
 use solana_account::{AccountSharedData, ReadableAccount};
 use solana_commitment_config::CommitmentConfig;

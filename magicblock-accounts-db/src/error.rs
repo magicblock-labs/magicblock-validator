@@ -44,8 +44,8 @@ where
         F: FnOnce() -> S,
         S: std::fmt::Display,
     {
-        if let Err(e) = &self {
-            error!("{}: {}", msg(), e);
+        if let Err(error) = &self {
+            error!(%error, msg=%msg());
         }
         self
     }

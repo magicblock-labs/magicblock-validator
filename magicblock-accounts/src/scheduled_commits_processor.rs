@@ -5,7 +5,7 @@ use std::{
 
 use async_trait::async_trait;
 use magicblock_account_cloner::ChainlinkCloner;
-use magicblock_accounts_db::AccountsDb;
+use magicblock_accounts_db::{traits::AccountsBank, AccountsDb};
 use magicblock_chainlink::{
     remote_account_provider::{
         chain_rpc_client::ChainRpcClientImpl,
@@ -20,9 +20,7 @@ use magicblock_committor_service::{
     types::{ScheduledBaseIntentWrapper, TriggerType},
     BaseIntentCommittor, CommittorService,
 };
-use magicblock_core::{
-    link::transactions::TransactionSchedulerHandle, traits::AccountsBank,
-};
+use magicblock_core::link::transactions::TransactionSchedulerHandle;
 use magicblock_program::{
     magic_scheduled_base_intent::ScheduledBaseIntent,
     register_scheduled_commit_sent, SentCommit, TransactionScheduler,

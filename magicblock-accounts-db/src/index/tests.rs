@@ -8,7 +8,6 @@ use lmdb::Transaction;
 use magicblock_config::config::AccountsDbConfig;
 use solana_pubkey::Pubkey;
 use tempfile::TempDir;
-use test_kit::init_logger;
 
 use super::{AccountsDbIndex, Allocation};
 use crate::error::AccountsDbError;
@@ -17,7 +16,6 @@ use crate::error::AccountsDbError;
 /// and updates to existing accounts, returning the old allocation when applicable.
 #[test]
 fn test_upsert_account() {
-    init_logger!();
     let env = IndexTestEnv::new();
     let account = env.new_account();
 
@@ -58,7 +56,6 @@ fn test_upsert_account() {
 /// using both the convenience method and raw transaction lookup.
 #[test]
 fn test_get_offset() {
-    init_logger!();
     let env = IndexTestEnv::new();
     let account = env.new_account();
 
@@ -78,7 +75,6 @@ fn test_get_offset() {
 /// and marks the old space as deallocated.
 #[test]
 fn test_reallocate_account() {
-    init_logger!();
     let env = IndexTestEnv::new();
     let account = env.new_account();
     env.persist_account(&account);
@@ -110,7 +106,6 @@ fn test_reallocate_account() {
 
 #[test]
 fn test_remove_account() {
-    init_logger!();
     let env = IndexTestEnv::new();
     let account = env.new_account();
     env.persist_account(&account);
@@ -132,7 +127,6 @@ fn test_remove_account() {
 /// to reflect the move from the old owner to the new owner.
 #[test]
 fn test_ensure_correct_owner() {
-    init_logger!();
     let env = IndexTestEnv::new();
     let account = env.new_account();
     env.persist_account(&account);
@@ -169,7 +163,6 @@ fn test_ensure_correct_owner() {
 
 #[test]
 fn test_program_index_cleanup() {
-    init_logger!();
     let env = IndexTestEnv::new();
     let account = env.new_account();
     env.persist_account(&account);
@@ -196,7 +189,6 @@ fn test_program_index_cleanup() {
 /// Insert -> Reallocate (creates hole) -> Insert New (fills hole).
 #[test]
 fn test_recycle_allocation_flow() {
-    init_logger!();
     let env = IndexTestEnv::new();
     let account = env.new_account();
 
@@ -239,7 +231,6 @@ fn test_recycle_allocation_flow() {
 /// correctly splits the hole and returns the remainder to the free list.
 #[test]
 fn test_recycle_allocation_split() {
-    init_logger!();
     let env = IndexTestEnv::new();
     let account = env.new_account();
     env.persist_account(&account);
@@ -275,7 +266,6 @@ fn test_recycle_allocation_split() {
 
 #[test]
 fn test_byte_pack_unpack_macro() {
-    init_logger!();
     macro_rules! check_pack {
         ($v1: expr, $t1: ty, $v2: expr, $t2: ty) => {{
             let packed = bytes!(#pack, $v1, $t1, $v2, $t2);
@@ -311,6 +301,9 @@ struct IndexAccount {
 
 impl IndexTestEnv {
     fn new() -> Self {
+        let _ = tracing_subscriber::fmt()
+            .with_max_level(tracing::Level::INFO)
+            .try_init();
         let _temp_dir = tempfile::tempdir().expect("failed to create temp dir");
         let index = AccountsDbIndex::new(
             AccountsDbConfig::default().index_size,
