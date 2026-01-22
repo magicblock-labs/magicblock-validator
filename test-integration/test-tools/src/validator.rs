@@ -32,26 +32,35 @@ pub fn start_magic_block_validator_with_config(
     } = test_runner_paths;
 
     let port = rpc_port_from_config(config_path);
-
-    // First build so that the validator can start fast
-    let mut command = process::Command::new("cargo");
     let keypair_base58 = loaded_chain_accounts.validator_authority_base58();
-    command.arg("build");
-    let build_res = command.current_dir(root_dir.clone()).output();
 
-    if build_res.is_ok_and(|output| !output.status.success()) {
-        eprintln!("Failed to build validator");
-        return None;
-    }
+    // Check if we should use a prebuilt binary (faster in CI)
+    let workspace_dir = resolve_workspace_dir();
+    let target_dir = std::env::var("CARGO_TARGET_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| workspace_dir.join("../target"));
+    
+    let validator_bin = target_dir.join("debug/magicblock-validator");
 
-    // Start validator via `cargo run -- <path to config>`
-    let mut command = process::Command::new("cargo");
-    command.arg("run");
+    let mut command = if validator_bin.exists() {
+        eprintln!("Using prebuilt validator binary: {:?}", validator_bin);
+        let mut cmd = process::Command::new(validator_bin);
+        cmd.arg(config_path);
+        cmd
+    } else {
+        eprintln!("Prebuilt validator not found at {:?}, falling back to cargo run", validator_bin);
+        // Fallback for local development
+        let mut cmd = process::Command::new("cargo");
+        cmd.arg("run")
+           .arg("--")
+           .arg(config_path);
+        cmd
+    };
+
     let rust_log_style =
         std::env::var("RUST_LOG_STYLE").unwrap_or(log_suffix.to_string());
+    
     command
-        .arg("--")
-        .arg(config_path)
         .env("RUST_LOG_STYLE", rust_log_style)
         .env("MBV_VALIDATOR__KEYPAIR", keypair_base58.clone())
         .current_dir(root_dir);

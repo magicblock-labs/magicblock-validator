@@ -68,6 +68,10 @@ jobs:
           # 2. Build binaries & test runner
           cargo build --bins --tests
           
+          # 2.5 Pre-build everything in test-integration workspace
+          echo "Pre-building test-integration workspace..."
+          cargo build --manifest-path test-integration/Cargo.toml --bins --tests
+          
           # 3. Fast checks (format, lint, unit tests)
           make ci-fmt
           make ci-lint
