@@ -2836,16 +2836,15 @@ version = "0.6.1"
 dependencies = [
  "lmdb-rkv",
  "magicblock-config",
- "magicblock-core",
  "memmap2 0.9.9",
  "parking_lot",
  "reflink-copy",
  "solana-account",
  "solana-pubkey",
  "tempfile",
- "test-kit",
  "thiserror 1.0.69",
  "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -2967,6 +2966,7 @@ dependencies = [
  "futures-util",
  "helius-laserstream",
  "lru",
+ "magicblock-accounts-db",
  "magicblock-chainlink",
  "magicblock-config",
  "magicblock-core",

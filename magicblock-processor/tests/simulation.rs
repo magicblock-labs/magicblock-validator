@@ -1,9 +1,8 @@
 use std::time::Duration;
 
 use guinea::GuineaInstruction;
-use magicblock_core::{
-    link::transactions::TransactionSimulationResult, traits::AccountsBank,
-};
+use magicblock_accounts_db::traits::AccountsBank;
+use magicblock_core::link::transactions::TransactionSimulationResult;
 use solana_account::ReadableAccount;
 use solana_program::{
     instruction::{AccountMeta, Instruction},

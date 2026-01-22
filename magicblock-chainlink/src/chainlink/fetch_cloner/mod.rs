@@ -10,10 +10,10 @@ use std::{
 use dlp::{
     pda::delegation_record_pda_from_delegated_account, state::DelegationRecord,
 };
+use magicblock_accounts_db::traits::AccountsBank;
 use magicblock_config::config::AllowedProgram;
-use magicblock_core::{
-    token_programs::{is_ata, try_derive_eata_address_and_bump, MaybeIntoAta},
-    traits::AccountsBank,
+use magicblock_core::token_programs::{
+    is_ata, try_derive_eata_address_and_bump, MaybeIntoAta,
 };
 use magicblock_metrics::metrics::{self, AccountFetchOrigin};
 use scc::{hash_map::Entry, HashMap};

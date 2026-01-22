@@ -1,7 +1,8 @@
 use std::{collections::HashSet, sync::atomic::Ordering};
 
 use dlp::pda::delegation_record_pda_from_delegated_account;
-use magicblock_core::{token_programs::is_ata, traits::AccountsBank};
+use magicblock_accounts_db::traits::AccountsBank;
+use magicblock_core::token_programs::is_ata;
 use magicblock_metrics::metrics::AccountFetchOrigin;
 use solana_account::{AccountSharedData, ReadableAccount};
 use solana_pubkey::Pubkey;

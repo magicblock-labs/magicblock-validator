@@ -9,8 +9,8 @@ use std::{
 use dlp::pda::ephemeral_balance_pda_from_payer;
 use errors::ChainlinkResult;
 use fetch_cloner::FetchCloner;
+use magicblock_accounts_db::{traits::AccountsBank, AccountsDbResult};
 use magicblock_config::config::ChainLinkConfig;
-use magicblock_core::traits::AccountsBank;
 use magicblock_metrics::metrics::AccountFetchOrigin;
 use solana_account::{AccountSharedData, ReadableAccount};
 use solana_commitment_config::CommitmentConfig;
@@ -158,7 +158,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
     /// This should only be called _before_ the validator starts up, i.e.
     /// when resuming an existing ledger to guarantee that we don't hold
     /// accounts that might be stale.
-    pub fn reset_accounts_bank(&self) {
+    pub fn reset_accounts_bank(&self) -> AccountsDbResult<()> {
         let blacklisted_accounts =
             blacklisted_accounts(&self.validator_id, &self.faucet_id);
 
@@ -196,13 +196,11 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
                 );
             }
             remaining.fetch_add(1, Ordering::Relaxed);
-            if account.lamports() == 0
-                && account.owner() != &solana_feature_set::ID.to_bytes().into()
-            {
+            if account.owner().as_ref() != solana_feature_set::ID.as_ref() {
                 remaining_empty.fetch_add(1, Ordering::Relaxed);
             }
             true
-        });
+        })?;
 
         let non_empty = remaining
             .load(Ordering::Relaxed)
@@ -225,6 +223,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
             kept_blacklisted,
             "Removed accounts from bank"
         );
+        Ok(())
     }
 
     fn subscribe_account_removals(

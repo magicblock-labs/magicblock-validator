@@ -1,6 +1,7 @@
 use std::time::Duration;
 
-use magicblock_core::{link::blocks::BlockHash, traits::AccountsBank};
+use magicblock_accounts_db::traits::AccountsBank;
+use magicblock_core::link::blocks::BlockHash;
 use setup::RpcTestEnv;
 use solana_account::ReadableAccount;
 use solana_pubkey::Pubkey;
