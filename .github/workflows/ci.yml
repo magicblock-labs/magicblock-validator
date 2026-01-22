@@ -95,14 +95,17 @@ jobs:
       matrix:
         batch_tests: ["schedulecommit", "chainlink", "cloning", "restore_ledger", "table_mania", "committor", "pubsub", "task-scheduler"]
     env:
-      # Point Cargo to the same global target directory from the build phase
-      CARGO_TARGET_DIR: ${{ needs.prepare-env.outputs.target_dir }}
+      # Use local target dir to avoid locking issues between parallel runners
+      # CARGO_TARGET_DIR: ${{ needs.prepare-env.outputs.target_dir }}
       # Force Cargo not to hit the network (we are inside a network namespace)
       CARGO_NET_OFFLINE: "true"
       # Disable any wrappers that might interfere during test execution
       RUSTC_WRAPPER: ""
       # Clear potentially problematic flags
       RUSTFLAGS: ""
+      # Limit concurrency per runner to avoid oversubscribing the shared host
+      CARGO_BUILD_JOBS: 4
+      NEXTEST_RETRIES: 0
     steps:
       - uses: actions/checkout@v5
         with:
@@ -116,6 +119,17 @@ jobs:
           # Apply that timestamp to all files (excluding .git for speed)
           find . -type f -not -path "./.git/*" -exec touch -d "$COMMIT_TIME" {} +
           echo "Timestamps synced to $COMMIT_TIME"
+
+      - name: Copy Pre-built Artifacts to Local Target
+        run: |
+          GLOBAL_TARGET="${{ needs.prepare-env.outputs.target_dir }}"
+          echo "Copying artifacts from $GLOBAL_TARGET to ./target ..."
+          mkdir -p target
+          # Use recursive copy. -u only copies if source is newer/different (though here it's fresh)
+          cp -r "$GLOBAL_TARGET"/* target/
+          # Ensure timestamps are preserved/updated so cargo doesn't rebuild
+          find target -name "*.d" -exec touch {} +
+          find target -name "*.rlib" -exec touch {} +
 
       - name: Restore prebuilt SBF programs from Global Target
         run: |

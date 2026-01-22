@@ -47,10 +47,10 @@ test: $(PROGRAMS_SO)
 	@# Prefer running the prebuilt test-runner binary to avoid concurrent Cargo locking
 	@if [ -x "$(TEST_RUNNER_BIN)" ]; then \
 		echo "Using prebuilt test-runner binary: $(TEST_RUNNER_BIN)"; \
-		RUST_BACKTRACE=1 RUST_LOG=$(RUST_LOG) $(TEST_RUNNER_BIN); \
+		CARGO_TEST_THREADS=$${CARGO_TEST_THREADS:-1} CARGO_MANIFEST_DIR=$(DIR)test-runner RUST_BACKTRACE=1 RUST_LOG=$(RUST_LOG) $(TEST_RUNNER_BIN); \
 	else \
 		echo "test-runner binary not found, falling back to 'cargo run'"; \
-		RUST_BACKTRACE=1 RUST_LOG=$(RUST_LOG) cargo run --package test-runner --bin run-tests; \
+		CARGO_TEST_THREADS=$${CARGO_TEST_THREADS:-1} RUST_BACKTRACE=1 RUST_LOG=$(RUST_LOG) cargo run --package test-runner --bin run-tests; \
 	fi
 
 test-force-mb: $(PROGRAMS_SO)
