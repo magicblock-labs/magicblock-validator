@@ -59,6 +59,12 @@ jobs:
           echo "Verifying SBF build output:"
           ls -R test-integration/target/deploy || echo "Deploy dir missing!"
           
+          # Force rebuild of test-runner to include our debug prints
+          echo "Forcing rebuild of test-runner..."
+          touch test-integration/test-runner/bin/run_tests.rs
+          # Also touch the library it depends on just in case
+          touch test-integration/test-tools/src/lib.rs
+          
           # 2. Build binaries & test runner
           cargo build --bins --tests
           
