@@ -80,8 +80,13 @@ pub fn config_to_args(
 
         args.push(program.id);
 
+        let full_path_to_resolve = config_dir.join(&program.path);
+        eprintln!("Resolving program path: {:?}", full_path_to_resolve);
         let resolved_full_config_path =
-            config_dir.join(&program.path).canonicalize().unwrap();
+            full_path_to_resolve.canonicalize().expect(&format!(
+                "Failed to canonicalize program path: {:?}",
+                full_path_to_resolve
+            ));
         args.push(resolved_full_config_path.to_str().unwrap().to_string());
 
         if program_loader == ProgramLoader::UpgradeableProgram {
