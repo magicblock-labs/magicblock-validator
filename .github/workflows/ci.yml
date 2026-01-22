@@ -48,10 +48,16 @@ jobs:
       - name: Build Everything & Pre-fetch dependencies
         run: |
           # 1. Build SBF (Solana programs) for integration tests
-          make -C test-integration programs
+          # Unset CARGO_TARGET_DIR for SBF builds to ensure they write to local target/deploy
+          (
+            unset CARGO_TARGET_DIR
+            echo "Building SBF programs with local target dir..."
+            make -C test-integration programs
+            make chainlink-prep-programs -C test-integration/test-chainlink
+          )
           
-          # 1.5 Build Chainlink auxiliary programs
-          make chainlink-prep-programs -C test-integration/test-chainlink
+          echo "Verifying SBF build output:"
+          ls -R test-integration/target/deploy || echo "Deploy dir missing!"
           
           # 2. Build binaries & test runner
           cargo build --bins --tests
