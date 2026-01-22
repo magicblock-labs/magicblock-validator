@@ -42,6 +42,7 @@ use magicblock_core::{
     link::{
         blocks::BlockUpdateTx, link, transactions::TransactionSchedulerHandle,
     },
+    traits::AccountsBank,
     Slot,
 };
 use magicblock_ledger::{
@@ -68,6 +69,7 @@ use mdp::state::{
     status::ErStatus,
     version::v0::RecordV0,
 };
+use solana_account::ReadableAccount;
 use solana_commitment_config::{CommitmentConfig, CommitmentLevel};
 use solana_keypair::Keypair;
 use solana_native_token::LAMPORTS_PER_SOL;
@@ -161,6 +163,14 @@ impl MagicValidator {
             AccountsDb::new(&config.accountsdb, &config.storage, last_slot)?;
         for (pubkey, account) in genesis_config.accounts {
             let _ = accountsdb.insert_account(&pubkey, &account.into());
+        }
+        let removed_executables =
+            accountsdb.remove_where(|_, account| account.executable());
+        if removed_executables > 0 {
+            info!(
+                removed_executables,
+                "Removed executable program accounts on startup"
+            );
         }
 
         let exit = Arc::<AtomicBool>::default();
