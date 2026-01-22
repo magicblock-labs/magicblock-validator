@@ -48,22 +48,14 @@ jobs:
       - name: Build Everything & Pre-fetch dependencies
         run: |
           # 1. Build SBF (Solana programs) for integration tests
-          # Unset CARGO_TARGET_DIR for SBF builds to ensure they write to local target/deploy
+          # Unset CARGO_TARGET_DIR for SBF builds to ensure they write to local test-integration/target/deploy
+          # This prevents conflicts with the global shared target directory
           (
             unset CARGO_TARGET_DIR
             echo "Building SBF programs with local target dir..."
             make -C test-integration programs
             make chainlink-prep-programs -C test-integration/test-chainlink
           )
-          
-          echo "Verifying SBF build output:"
-          ls -R test-integration/target/deploy || echo "Deploy dir missing!"
-          
-          # Force rebuild of test-runner to include our debug prints
-          echo "Forcing rebuild of test-runner..."
-          touch test-integration/test-runner/bin/run_tests.rs
-          # Also touch the library it depends on just in case
-          touch test-integration/test-tools/src/lib.rs
           
           # 2. Build binaries & test runner
           cargo build --bins --tests
@@ -87,8 +79,7 @@ jobs:
           # Use recursive copy to capture subdirectories (e.g., miniv2/)
           if [ -d "test-integration/target/deploy" ]; then
             cp -r test-integration/target/deploy/* "$SBF_CACHE_DIR/test-integration/"
-            echo "Copied test-integration SBFs to cache:"
-            ls -R "$SBF_CACHE_DIR/test-integration/"
+            echo "Copied test-integration SBFs to cache"
           else
             echo "WARNING: test-integration/target/deploy not found"
           fi
@@ -96,8 +87,7 @@ jobs:
           # Committor program built under root target/deploy (ROOT_DEPLOY_DIR = ../target/deploy)
           if ls target/deploy/*.so >/dev/null 2>&1; then
             cp target/deploy/*.so "$SBF_CACHE_DIR/root/"
-            echo "Copied root SBFs to cache:"
-            ls -1 "$SBF_CACHE_DIR/root/"
+            echo "Copied root SBFs to cache"
           else
             echo "WARNING: no SBFs found in target/deploy"
           fi
@@ -109,12 +99,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Batch tests to reduce concurrent load (3 runners instead of 8)
-        # Each string contains space-separated tests to run sequentially
-        batch_tests: 
-          - "schedulecommit chainlink cloning"
-          - "restore_ledger table_mania committor"
-          - "pubsub task-scheduler"
+        # Optimized grouping for ~35-40 mins per runner on a 40-core machine.
+        # Total sequential time: ~173 mins. Parallel target: ~37 mins.
+        batch_tests:
+          - "committor config"                  # 22 + 15 = 37 min
+          - "restore_ledger schedulecommit"     # 18 + 17 = 35 min
+          - "table_mania cloning"               # 18 + 17 = 35 min
+          - "magicblock_api schedule_intents"   # 16 + 16 = 32 min
+          - "task-scheduler chainlink pubsub"   # 15 + 11 + 8 = 34 min
     env:
       # Use RAM disk for temporary files (Ledger, RocksDB) to save Disk I/O
       TMPDIR: "/dev/shm"
@@ -124,8 +116,9 @@ jobs:
       RUSTC_WRAPPER: ""
       # Clear potentially problematic flags
       RUSTFLAGS: ""
-      # Limit concurrency per runner to avoid oversubscribing the shared host
-      CARGO_BUILD_JOBS: 4
+      # Limit concurrency per runner (40 cores / 5 runners = ~8 cores available per runner)
+      # Leaving some headroom for OS and other jobs.
+      CARGO_BUILD_JOBS: 6
       NEXTEST_RETRIES: 0
     steps:
       - uses: actions/checkout@v5
@@ -183,18 +176,10 @@ jobs:
           if ls "$SBF_CACHE_DIR/root"/*.so >/dev/null 2>&1; then
             cp "$SBF_CACHE_DIR/root"/*.so "$LOCAL_DEPLOY_ROOT/"
             touch "$LOCAL_DEPLOY_ROOT"/*.so
-            echo "Restored root SBFs:"
-            ls -1 "$LOCAL_DEPLOY_ROOT/"
+            echo "Restored root SBFs"
           else
             echo "WARNING: no cached SBFs found for root"
           fi
-
-      - name: Debug - List Critical Directories
-        run: |
-          echo "Listing test-integration/target/deploy:"
-          ls -R test-integration/target/deploy || echo "Directory not found"
-          echo "Listing test-integration/schedulecommit/elfs:"
-          ls -R test-integration/schedulecommit/elfs || echo "Directory not found"
 
       - name: Run ${{ matrix.batch_tests }} (Network Namespace)
         run: |
