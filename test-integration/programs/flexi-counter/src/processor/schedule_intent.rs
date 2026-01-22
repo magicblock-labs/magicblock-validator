@@ -245,7 +245,7 @@ pub fn process_create_intent_bundle(
             .add_post_commit_actions(call_handlers)
             .build();
 
-        builder = builder.add_commit_intent(commit_intent);
+        builder = builder.add_commit(commit_intent);
     }
 
     // Build CommitAndUndelegate intent
@@ -319,7 +319,7 @@ pub fn process_create_intent_bundle(
                 .add_post_undelegate_actions(undelegate_handlers)
                 .build();
 
-        builder = builder.add_commit_and_undelegate_intent(cau_intent);
+        builder = builder.add_commit_and_undelegate(cau_intent);
     }
 
     // Build and invoke the intent bundle
