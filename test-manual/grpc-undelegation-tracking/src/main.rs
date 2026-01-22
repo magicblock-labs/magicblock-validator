@@ -15,7 +15,7 @@ use counter_sdk::{
 };
 use delegation_sdk::{
     build_direct_undelegate_flow, delegation_metadata_pda,
-    fetch_delegation_metadata, fetch_delegation_record,
+    fetch_delegation_metadata, fetch_delegation_record, is_delegated,
 };
 use metrics::fetch_metrics;
 use test_utils::{create_rpc_clients, load_keypairs, send_and_confirm};
@@ -71,10 +71,14 @@ async fn main() -> Result<()> {
     // ===== PHASE 3: Delegate Counter to Validator =====
     info!("Phase 3: Delegating counter to validator");
 
-    let delegate_ix =
-        build_delegate_ix(&payer_pubkey, COUNTER_ID, Some(&validator_pubkey));
-    send_and_confirm(&devnet_rpc, &[delegate_ix], &payer, &[])?;
-    info!("Counter delegated to validator");
+    if is_delegated(&devnet_rpc, &counter_pda) {
+        info!("Counter is already delegated, skipping delegation");
+    } else {
+        let delegate_ix =
+            build_delegate_ix(&payer_pubkey, COUNTER_ID, Some(&validator_pubkey));
+        send_and_confirm(&devnet_rpc, &[delegate_ix], &payer, &[])?;
+        info!("Counter delegated to validator");
+    }
 
     tokio::time::sleep(Duration::from_secs(2)).await;
 

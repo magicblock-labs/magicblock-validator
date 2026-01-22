@@ -139,11 +139,16 @@ pub fn build_increment_and_undelegate_ix(
     counter_id: u64,
 ) -> Instruction {
     let (pda, _) = derive_counter_pda(counter_id);
+    // Account order from #[commit] macro expansion:
+    // 1. payer (signer, mut)
+    // 2. counter (mut)
+    // 3. magic_program (readonly) - added by macro first
+    // 4. magic_context (mut) - added by macro second
     let accounts = vec![
         AccountMeta::new(*payer, true),
         AccountMeta::new(pda, false),
-        AccountMeta::new(MAGIC_CONTEXT_PUBKEY, false),
         AccountMeta::new_readonly(MAGIC_PROGRAM_ID, false),
+        AccountMeta::new(MAGIC_CONTEXT_PUBKEY, false),
     ];
 
     let discriminator = anchor_discriminator("increment_and_undelegate");

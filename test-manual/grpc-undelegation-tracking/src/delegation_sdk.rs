@@ -98,6 +98,14 @@ pub fn program_config_pda(owner_program: &Pubkey) -> Pubkey {
     .0
 }
 
+pub fn is_delegated(
+    rpc: &solana_rpc_client::rpc_client::RpcClient,
+    delegated_account: &Pubkey,
+) -> bool {
+    let pda = delegation_record_pda(delegated_account);
+    rpc.get_account(&pda).is_ok()
+}
+
 pub fn fetch_delegation_record(
     rpc: &solana_rpc_client::rpc_client::RpcClient,
     delegated_account: &Pubkey,
@@ -157,19 +165,28 @@ pub fn build_commit_state_instruction(
     let mut data = COMMIT_STATE_DISCRIMINATOR.to_le_bytes().to_vec();
     data.extend(borsh::to_vec(&args).unwrap());
 
+    // Account order from delegation-program/src/instruction_builder/commit_state.rs:
+    // 1. validator (readonly, signer)
+    // 2. delegated_account (readonly)
+    // 3. commit_state_pda (writable)
+    // 4. commit_record_pda (writable)
+    // 5. delegation_record_pda (readonly)
+    // 6. delegation_metadata_pda (writable)
+    // 7. validator_fees_vault_pda (readonly)
+    // 8. program_config_pda (readonly)
+    // 9. system_program (readonly)
     let accounts = vec![
-        AccountMeta::new(validator, true),
-        AccountMeta::new(delegated_account, false),
+        AccountMeta::new_readonly(validator, true),
+        AccountMeta::new_readonly(delegated_account, false),
+        AccountMeta::new(commit_state_pda(&delegated_account), false),
+        AccountMeta::new(commit_record_pda(&delegated_account), false),
         AccountMeta::new_readonly(
             delegation_record_pda(&delegated_account),
             false,
         ),
         AccountMeta::new(delegation_metadata_pda(&delegated_account), false),
-        AccountMeta::new(commit_state_pda(&delegated_account), false),
-        AccountMeta::new(commit_record_pda(&delegated_account), false),
+        AccountMeta::new_readonly(validator_fees_vault_pda(&validator), false),
         AccountMeta::new_readonly(program_config_pda(&owner_program), false),
-        AccountMeta::new(fees_vault_pda(), false),
-        AccountMeta::new(validator_fees_vault_pda(&validator), false),
         AccountMeta::new_readonly(system_program::id(), false),
     ];
 
@@ -186,16 +203,23 @@ pub fn build_finalize_instruction(
 ) -> Instruction {
     let data = FINALIZE_DISCRIMINATOR.to_le_bytes().to_vec();
 
+    // Account order from delegation-program/src/instruction_builder/finalize.rs:
+    // 1. validator (readonly, signer)
+    // 2. delegated_account (writable)
+    // 3. commit_state_pda (writable)
+    // 4. commit_record_pda (writable)
+    // 5. delegation_record_pda (writable)
+    // 6. delegation_metadata_pda (writable)
+    // 7. validator_fees_vault_pda (writable)
+    // 8. system_program (readonly)
     let accounts = vec![
-        AccountMeta::new(validator, true),
+        AccountMeta::new_readonly(validator, true),
         AccountMeta::new(delegated_account, false),
-        AccountMeta::new_readonly(
-            delegation_record_pda(&delegated_account),
-            false,
-        ),
-        AccountMeta::new(delegation_metadata_pda(&delegated_account), false),
         AccountMeta::new(commit_state_pda(&delegated_account), false),
         AccountMeta::new(commit_record_pda(&delegated_account), false),
+        AccountMeta::new(delegation_record_pda(&delegated_account), false),
+        AccountMeta::new(delegation_metadata_pda(&delegated_account), false),
+        AccountMeta::new(validator_fees_vault_pda(&validator), false),
         AccountMeta::new_readonly(system_program::id(), false),
     ];
 
@@ -214,19 +238,31 @@ pub fn build_undelegate_instruction(
 ) -> Instruction {
     let data = UNDELEGATE_DISCRIMINATOR.to_le_bytes().to_vec();
 
+    // Account order from delegation-program/src/instruction_builder/undelegate.rs:
+    // 1. validator (writable, signer)
+    // 2. delegated_account (writable)
+    // 3. owner_program (readonly)
+    // 4. undelegate_buffer_pda (writable)
+    // 5. commit_state_pda (readonly)
+    // 6. commit_record_pda (readonly)
+    // 7. delegation_record_pda (writable)
+    // 8. delegation_metadata_pda (writable)
+    // 9. rent_reimbursement (writable)
+    // 10. fees_vault_pda (writable)
+    // 11. validator_fees_vault_pda (writable)
+    // 12. system_program (readonly)
     let accounts = vec![
         AccountMeta::new(validator, true),
         AccountMeta::new(delegated_account, false),
-        AccountMeta::new_readonly(
-            delegation_record_pda(&delegated_account),
-            false,
-        ),
-        AccountMeta::new(delegation_metadata_pda(&delegated_account), false),
-        AccountMeta::new(commit_state_pda(&delegated_account), false),
-        AccountMeta::new(commit_record_pda(&delegated_account), false),
-        AccountMeta::new(undelegate_buffer_pda(&delegated_account), false),
         AccountMeta::new_readonly(owner_program, false),
+        AccountMeta::new(undelegate_buffer_pda(&delegated_account), false),
+        AccountMeta::new_readonly(commit_state_pda(&delegated_account), false),
+        AccountMeta::new_readonly(commit_record_pda(&delegated_account), false),
+        AccountMeta::new(delegation_record_pda(&delegated_account), false),
+        AccountMeta::new(delegation_metadata_pda(&delegated_account), false),
         AccountMeta::new(rent_reimbursement, false),
+        AccountMeta::new(fees_vault_pda(), false),
+        AccountMeta::new(validator_fees_vault_pda(&validator), false),
         AccountMeta::new_readonly(system_program::id(), false),
     ];
 
