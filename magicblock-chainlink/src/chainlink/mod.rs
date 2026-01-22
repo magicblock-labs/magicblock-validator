@@ -196,9 +196,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
                 );
             }
             remaining.fetch_add(1, Ordering::Relaxed);
-            if account.lamports() == 0
-                && account.owner() != &solana_feature_set::ID.to_bytes().into()
-            {
+            if account.owner().as_ref() != solana_feature_set::ID.as_ref() {
                 remaining_empty.fetch_add(1, Ordering::Relaxed);
             }
             true
