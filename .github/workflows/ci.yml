@@ -159,7 +159,8 @@ jobs:
 
       - name: Restore prebuilt SBF programs from Global Target
         run: |
-          SBF_CACHE_DIR="$CARGO_TARGET_DIR/sbf-artifacts"
+          GLOBAL_TARGET_DIR="${{ needs.prepare-env.outputs.target_dir }}"
+          SBF_CACHE_DIR="$GLOBAL_TARGET_DIR/sbf-artifacts"
           echo "Restoring SBF artifacts from $SBF_CACHE_DIR ..."
 
           # 1) Restore SBFs for test-integration (DEPLOY_DIR)
