@@ -97,10 +97,15 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        batch_tests: ["schedulecommit", "chainlink", "cloning", "restore_ledger", "table_mania", "committor", "pubsub", "task-scheduler"]
+        # Batch tests to reduce concurrent load (3 runners instead of 8)
+        # Each string contains space-separated tests to run sequentially
+        batch_tests: 
+          - "schedulecommit chainlink cloning"
+          - "restore_ledger table_mania committor"
+          - "pubsub task-scheduler"
     env:
-      # Use local target dir to avoid locking issues between parallel runners
-      # CARGO_TARGET_DIR: ${{ needs.prepare-env.outputs.target_dir }}
+      # Use RAM disk for temporary files (Ledger, RocksDB) to save Disk I/O
+      TMPDIR: "/dev/shm"
       # Force Cargo not to hit the network (we are inside a network namespace)
       CARGO_NET_OFFLINE: "true"
       # Disable any wrappers that might interfere during test execution
@@ -174,13 +179,22 @@ jobs:
       - name: Run ${{ matrix.batch_tests }} (Network Namespace)
         run: |
           # 'unshare -r -n' creates an isolated network namespace.
-          # Inside this bubble, port 8899 is free for all 10 jobs at the same time.
-          # 'ip link set lo up' brings up the loopback interface inside the namespace.
+          # Inside this bubble, port 8899 is free for all parallel jobs.
+          # We loop through the batch list and run tests sequentially in this runner.
           # We pass PROGRAMS_SO="" to empty the dependency list for 'make test'
           # We pass SKIP_CHAINLINK_PREP=1 to skip the chainlink prep step
-          unshare -r -n sh -c "ip link set lo up && make ci-test-integration PROGRAMS_SO= SKIP_CHAINLINK_PREP=1"
+          unshare -r -n sh -c "
+            ip link set lo up
+            for test in ${{ matrix.batch_tests }}; do
+              echo \"--------------------------------------------------\"
+              echo \"Running test suite: \$test\"
+              echo \"--------------------------------------------------\"
+              RUN_TESTS=\$test make ci-test-integration PROGRAMS_SO= SKIP_CHAINLINK_PREP=1
+            done
+          "
         env:
-          RUN_TESTS: ${{ matrix.batch_tests }}
+          # Not used directly in the loop, but kept for context if needed
+          BATCH_LIST: ${{ matrix.batch_tests }}
 
   # 4. Aggregate status for CI (single green/red check)
   ci-status:
