@@ -221,6 +221,12 @@ impl<T: ChainRpcClient> ChainLaserActor<T> {
 
     #[instrument(skip(self), fields(client_id = %self.client_id))]
     pub async fn run(mut self) {
+        // Set up transaction stream for delegation program updates
+        self.setup_transaction_stream(
+            self.commitment,
+            self.laser_client_config.clone(),
+        );
+
         let mut activate_subs_interval =
             tokio::time::interval(std::time::Duration::from_millis(
                 SUBSCRIPTION_ACTIVATION_INTERVAL_MILLIS,
@@ -577,7 +583,6 @@ impl<T: ChainRpcClient> ChainLaserActor<T> {
             Some((subscribed_programs, Box::pin(stream)));
     }
 
-    #[allow(dead_code)]
     fn setup_transaction_stream(
         &mut self,
         commitment: CommitmentLevel,
@@ -658,12 +663,13 @@ impl<T: ChainRpcClient> ChainLaserActor<T> {
     /// Handles an update from the Delegation program transaction stream.
     /// It then tries to detect undelegated accounts and fetches their latest
     /// account data via RPC before sending subscription updates.
-    #[instrument(skip(self, rpc_client), fields(client_id = %self.client_id))]
+    #[instrument(skip(self, result, rpc_client), fields(client_id = %self.client_id))]
     async fn handle_transaction_update(
         &mut self,
         result: LaserResult,
         rpc_client: T,
     ) {
+        debug!("Handling transaction update");
         match result {
             Ok(subscribe_update) => match subscribe_update.update_oneof {
                 Some(UpdateOneof::Transaction(tx)) => {
@@ -671,6 +677,10 @@ impl<T: ChainRpcClient> ChainLaserActor<T> {
                         .map(Pubkey::from)
                         .filter(|pk| self.subscriptions.contains(pk))
                         .collect::<Vec<Pubkey>>();
+                    debug!(
+                        pubkeys_count = pubkeys.len(),
+                        "Undelegating pubkeys detected in transaction update"
+                    );
 
                     inc_transaction_subscription_pubkey_updates_count_by(
                         pubkeys.len() as u64,
