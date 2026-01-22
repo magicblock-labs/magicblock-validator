@@ -1,5 +1,5 @@
 use dlp::{
-    args::{CommitFinalizeFromBufferArgs, CommitStateFromBufferArgs},
+    args::{CommitFinalizeArgs, CommitStateFromBufferArgs},
     compute_diff,
     instruction_builder::{
         commit_diff_size_budget, commit_finalize_from_buffer_size_budget,
@@ -183,21 +183,13 @@ impl BaseTask for BufferTask {
                         &task.commit_id.to_le_bytes(),
                     );
 
-                let args = CommitFinalizeFromBufferArgs {
-                    nonce: task.commit_id,
+                let mut args = CommitFinalizeArgs {
+                    commit_id: task.commit_id,
                     lamports: task.committed_account.account.lamports,
-
-                    data_is_diff: task
-                        .base_account
-                        .as_ref()
-                        .map(|_| 1)
-                        .unwrap_or(0),
-
-                    allow_undelegation: if task.allow_undelegation {
-                        1
-                    } else {
-                        0
-                    },
+                    data_is_diff: task.base_account.is_some().into(),
+                    allow_undelegation: task.allow_undelegation.into(),
+                    bumps: Default::default(),
+                    reserved_padding: Default::default(),
                 };
 
                 dlp::instruction_builder::commit_finalize_from_buffer(
@@ -205,8 +197,9 @@ impl BaseTask for BufferTask {
                     task.committed_account.pubkey,
                     task.committed_account.account.owner,
                     data_buffer_pubkey,
-                    args,
+                    &mut args,
                 )
+                .0
             }
         }
     }

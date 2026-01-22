@@ -94,39 +94,37 @@ impl BaseTask for ArgsTask {
                 )
             }
             ArgsTaskType::CommitFinalize(task) => {
-                let args = CommitFinalizeArgs {
-                    nonce: task.commit_id,
-                    lamports: task.committed_account.account.lamports,
-
-                    data: if let Some(base_account) = &task.base_account {
-                        compute_diff(
-                            base_account.data(),
-                            task.committed_account.account.data(),
+                let (data, data_is_diff) =
+                    if let Some(base_account) = &task.base_account {
+                        (
+                            compute_diff(
+                                base_account.data(),
+                                task.committed_account.account.data(),
+                            )
+                            .to_vec(),
+                            true,
                         )
-                        .to_vec()
                     } else {
-                        task.committed_account.account.data.clone()
-                    },
+                        (task.committed_account.account.data.clone(), false)
+                    };
 
-                    data_is_diff: task
-                        .base_account
-                        .as_ref()
-                        .map(|_| 1)
-                        .unwrap_or(0),
-
-                    allow_undelegation: if task.allow_undelegation {
-                        1
-                    } else {
-                        0
-                    },
+                let mut args = CommitFinalizeArgs {
+                    commit_id: task.commit_id,
+                    lamports: task.committed_account.account.lamports,
+                    data_is_diff: data_is_diff.into(),
+                    allow_undelegation: task.allow_undelegation.into(),
+                    bumps: Default::default(),
+                    reserved_padding: Default::default(),
                 };
 
                 dlp::instruction_builder::commit_finalize(
                     *validator,
                     task.committed_account.pubkey,
                     task.committed_account.account.owner,
-                    args,
+                    &mut args,
+                    &data,
                 )
+                .0
             }
             ArgsTaskType::Finalize(value) => {
                 dlp::instruction_builder::finalize(
