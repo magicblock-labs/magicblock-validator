@@ -1,13 +1,15 @@
 use solana_account::AccountSharedData;
 use solana_pubkey::Pubkey;
 
+use crate::AccountsDbResult;
+
 pub trait AccountsBank: Send + Sync + 'static {
     fn get_account(&self, pubkey: &Pubkey) -> Option<AccountSharedData>;
     fn remove_account(&self, pubkey: &Pubkey);
     fn remove_where(
         &self,
         predicate: impl Fn(&Pubkey, &AccountSharedData) -> bool,
-    ) -> usize;
+    ) -> AccountsDbResult<usize>;
 
     fn remove_account_conditionally(
         &self,

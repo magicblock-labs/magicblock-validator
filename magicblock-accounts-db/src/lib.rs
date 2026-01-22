@@ -14,7 +14,6 @@ use solana_pubkey::Pubkey;
 use storage::AccountsStorage;
 use tracing::{error, info, warn};
 
-// Use the refactored manager
 use crate::snapshot::SnapshotManager;
 use crate::traits::AccountsBank;
 
@@ -381,26 +380,35 @@ impl AccountsBank for AccountsDb {
     }
 
     fn remove_account(&self, pubkey: &Pubkey) {
-        let result = self.index.remove(pubkey);
-        let _ = result.log_err(|| format!("Failed to remove account {pubkey}"));
+        let Ok(mut txn) = self.index.rwtxn() else {
+            error!("accountsdb: couldn't create rw index transaction");
+            return;
+        };
+        let _ = self
+            .index
+            .remove(pubkey, &mut txn)
+            .and_then(|_| txn.commit().map_err(Into::into))
+            .log_err(|| format!("Failed to remove account {pubkey}"));
     }
 
     /// Removes accounts matching a predicate.
     fn remove_where(
         &self,
         predicate: impl Fn(&Pubkey, &AccountSharedData) -> bool,
-    ) -> usize {
+    ) -> AccountsDbResult<usize> {
         let to_remove = self
             .iter_all()
             .filter_map(|(pk, acc)| predicate(&pk, &acc).then_some(pk))
             .collect::<Vec<_>>();
 
         let count = to_remove.len();
-        for k in to_remove {
-            self.remove_account(&k);
+        let mut txn = self.index.rwtxn()?;
+        for pubkey in to_remove {
+            self.index.remove(&pubkey, &mut txn)?;
         }
+        txn.commit()?;
 
-        count
+        Ok(count)
     }
 }
 

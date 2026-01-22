@@ -2,7 +2,7 @@
 pub mod mock {
     use std::{collections::HashMap, fmt, sync::Mutex};
 
-    use magicblock_accounts_db::traits::AccountsBank;
+    use magicblock_accounts_db::{traits::AccountsBank, AccountsDbResult};
     use solana_account::{AccountSharedData, WritableAccount};
     use solana_pubkey::Pubkey;
     use tracing::*;
@@ -112,11 +112,11 @@ pub mod mock {
         fn remove_where(
             &self,
             predicate: impl Fn(&Pubkey, &AccountSharedData) -> bool,
-        ) -> usize {
+        ) -> AccountsDbResult<usize> {
             let mut accounts = self.accounts.lock().unwrap();
             let initial_len = accounts.len();
             accounts.retain(|k, v| !predicate(k, v));
-            initial_len - accounts.len()
+            Ok(initial_len - accounts.len())
         }
     }
 

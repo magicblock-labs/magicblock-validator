@@ -111,7 +111,9 @@ fn test_remove_account() {
     env.persist_account(&account);
 
     // Perform removal
-    let result = env.remove(&account.pubkey);
+    let mut txn = env.rw_txn();
+    let result = env.remove(&account.pubkey, &mut txn);
+    txn.commit().unwrap();
     assert!(result.is_ok());
 
     // Verify Index Entry is gone
@@ -234,7 +236,10 @@ fn test_recycle_allocation_split() {
     let env = IndexTestEnv::new();
     let account = env.new_account();
     env.persist_account(&account);
-    env.remove(&account.pubkey).unwrap();
+
+    let mut txn = env.rw_txn();
+    env.remove(&account.pubkey, &mut txn).unwrap();
+    txn.commit().unwrap();
 
     assert_eq!(env.count_deallocations(), 1);
 

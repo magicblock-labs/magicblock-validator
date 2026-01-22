@@ -618,7 +618,7 @@ impl MagicValidator {
         // Ledger replay has completed, we can now clean non-delegated accounts
         // including programs from the bank
         if !self.config.accountsdb.reset {
-            self.chainlink.reset_accounts_bank();
+            self.chainlink.reset_accounts_bank()?;
         }
 
         // Now we are ready to start all services and are ready to accept transactions
