@@ -234,7 +234,7 @@ where
         Ok(intent)
     }
 
-    /// Returns [`ScheduleIntentBundleWrapper`] from external channel
+    /// Returns [`ScheduledIntentBundle`] from external channel
     async fn get_new_intent(
         receiver: &mut mpsc::Receiver<ScheduledIntentBundle>,
         db: &Arc<D>,

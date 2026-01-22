@@ -358,11 +358,8 @@ impl MagicIntentBundle {
     }
 
     pub fn is_empty(&self) -> bool {
-        let no_committed = self
-            .commit
-            .as_ref()
-            .map(|el| el.is_empty())
-            .unwrap_or(true);
+        let no_committed =
+            self.commit.as_ref().map(|el| el.is_empty()).unwrap_or(true);
         let no_committed_and_undelegated = self
             .commit_and_undelegate
             .as_ref()
