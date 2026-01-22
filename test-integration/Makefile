@@ -38,11 +38,11 @@ programs: $(PROGRAMS_SO)
 
 test: $(PROGRAMS_SO)
 	@# Only prepare chainlink programs when running chainlink tests
-	@if [ -z "$(RUN_TESTS)" ] || [ "$(RUN_TESTS)" = "chainlink" ]; then \
+	@if [ -z "$(SKIP_CHAINLINK_PREP)" ] && ([ -z "$(RUN_TESTS)" ] || [ "$(RUN_TESTS)" = "chainlink" ]); then \
 		echo "Preparing chainlink programs (RUN_TESTS=$(RUN_TESTS))"; \
 		$(MAKE) chainlink-prep-programs -C ./test-chainlink; \
 	else \
-		echo "Skipping chainlink-prep-programs for RUN_TESTS=$(RUN_TESTS)"; \
+		echo "Skipping chainlink-prep-programs (SKIP_CHAINLINK_PREP=$(SKIP_CHAINLINK_PREP), RUN_TESTS=$(RUN_TESTS))"; \
 	fi
 	@# Prefer running the prebuilt test-runner binary to avoid concurrent Cargo locking
 	@if [ -x "$(TEST_RUNNER_BIN)" ]; then \

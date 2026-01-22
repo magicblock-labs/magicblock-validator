@@ -50,6 +50,9 @@ jobs:
           # 1. Build SBF (Solana programs) for integration tests
           make -C test-integration programs
           
+          # 1.5 Build Chainlink auxiliary programs
+          make chainlink-prep-programs -C test-integration/test-chainlink
+          
           # 2. Build binaries & test runner
           cargo build --bins --tests
           
@@ -69,12 +72,13 @@ jobs:
           mkdir -p "$SBF_CACHE_DIR/test-integration" "$SBF_CACHE_DIR/root"
 
           # SBF programs built under test-integration (DEPLOY_DIR)
-          if ls test-integration/target/deploy/*.so >/dev/null 2>&1; then
-            cp test-integration/target/deploy/*.so "$SBF_CACHE_DIR/test-integration/"
+          # Use recursive copy to capture subdirectories (e.g., miniv2/)
+          if [ -d "test-integration/target/deploy" ]; then
+            cp -r test-integration/target/deploy/* "$SBF_CACHE_DIR/test-integration/"
             echo "Copied test-integration SBFs to cache:"
-            ls -1 "$SBF_CACHE_DIR/test-integration/"
+            ls -R "$SBF_CACHE_DIR/test-integration/"
           else
-            echo "WARNING: no SBFs found in test-integration/target/deploy"
+            echo "WARNING: test-integration/target/deploy not found"
           fi
 
           # Committor program built under root target/deploy (ROOT_DEPLOY_DIR = ../target/deploy)
@@ -144,12 +148,13 @@ jobs:
           # 1) Restore SBFs for test-integration (DEPLOY_DIR)
           LOCAL_DEPLOY_TEST="test-integration/target/deploy"
           mkdir -p "$LOCAL_DEPLOY_TEST"
-          if ls "$SBF_CACHE_DIR/test-integration"/*.so >/dev/null 2>&1; then
-            cp "$SBF_CACHE_DIR/test-integration"/*.so "$LOCAL_DEPLOY_TEST/"
+          if [ -d "$SBF_CACHE_DIR/test-integration" ]; then
+            cp -r "$SBF_CACHE_DIR/test-integration"/* "$LOCAL_DEPLOY_TEST/"
             # Touch to ensure the .so files are newer than sources (so Make will not rebuild them)
-            touch "$LOCAL_DEPLOY_TEST"/*.so
+            # Find all files (including those in subdirs) and touch them
+            find "$LOCAL_DEPLOY_TEST" -type f -exec touch {} +
             echo "Restored test-integration SBFs:"
-            ls -1 "$LOCAL_DEPLOY_TEST/"
+            ls -R "$LOCAL_DEPLOY_TEST/"
           else
             echo "WARNING: no cached SBFs found for test-integration"
           fi
@@ -171,7 +176,9 @@ jobs:
           # 'unshare -r -n' creates an isolated network namespace.
           # Inside this bubble, port 8899 is free for all 10 jobs at the same time.
           # 'ip link set lo up' brings up the loopback interface inside the namespace.
-          unshare -r -n sh -c "ip link set lo up && make ci-test-integration"
+          # We pass PROGRAMS_SO="" to empty the dependency list for 'make test'
+          # We pass SKIP_CHAINLINK_PREP=1 to skip the chainlink prep step
+          unshare -r -n sh -c "ip link set lo up && make ci-test-integration PROGRAMS_SO= SKIP_CHAINLINK_PREP=1"
         env:
           RUN_TESTS: ${{ matrix.batch_tests }}
 
