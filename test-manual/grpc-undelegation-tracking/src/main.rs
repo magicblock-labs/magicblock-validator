@@ -74,8 +74,11 @@ async fn main() -> Result<()> {
     if is_delegated(&devnet_rpc, &counter_pda) {
         info!("Counter is already delegated, skipping delegation");
     } else {
-        let delegate_ix =
-            build_delegate_ix(&payer_pubkey, COUNTER_ID, Some(&validator_pubkey));
+        let delegate_ix = build_delegate_ix(
+            &payer_pubkey,
+            COUNTER_ID,
+            Some(&validator_pubkey),
+        );
         send_and_confirm(&devnet_rpc, &[delegate_ix], &payer, &[])?;
         info!("Counter delegated to validator");
     }
@@ -97,7 +100,9 @@ async fn main() -> Result<()> {
     );
 
     // ===== PHASE 5: Undelegate via Ephemeral (Normal Flow) =====
-    info!("Phase 5: Undelegating counter via ephemeral (increment + undelegate)");
+    info!(
+        "Phase 5: Undelegating counter via ephemeral (increment + undelegate)"
+    );
 
     let undelegate_ix =
         build_increment_and_undelegate_ix(&payer_pubkey, COUNTER_ID);
@@ -208,10 +213,7 @@ async fn main() -> Result<()> {
     info!("Phase 10: Verifying final counter state");
 
     let final_counter_state = read_counter_value(&devnet_rpc, COUNTER_ID)?;
-    info!(
-        "Final counter state - count: {}",
-        final_counter_state.count
-    );
+    info!("Final counter state - count: {}", final_counter_state.count);
 
     let delegation_metadata_pda = delegation_metadata_pda(&counter_pda);
     let metadata_exists =
