@@ -43,7 +43,12 @@ The test cannot be fully automated because it requires:
 - A running ephemeral validator configured to track devnet delegations
 - The hardcoded validator keypair (`mAGicPQYBMvcYveUZA5F5UNNwyHvfYh5xkLS2Fr1mev`) must be authorized
 
-## How to run it
+## Run Steps in Isolation
+
+Inside `test-manual/grpc-undelegation-tracking/sh/` you can find bash scripts which you can run in order to
+perform the below step by step.
+
+## How to run all steps together
 
 1. Set your Helius API key:
    ```bash
