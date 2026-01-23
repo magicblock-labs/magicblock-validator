@@ -6,6 +6,7 @@ use std::{
 use async_trait::async_trait;
 use solana_commitment_config::CommitmentLevel;
 use solana_pubkey::Pubkey;
+use solana_sdk_ids::sysvar::clock;
 use tokio::sync::{mpsc, oneshot};
 use tracing::*;
 
@@ -72,6 +73,13 @@ impl ChainPubsubClient for ChainLaserClientImpl {
         &self,
         pubkey: Pubkey,
     ) -> RemoteAccountProviderResult<()> {
+        // Skip clock::ID subscriptions for GRPC clients since they get slot
+        // updates directly via the SubscribeRequestFilterSlots in the GRPC
+        // subscription request. This avoids redundant subscriptions.
+        if pubkey == clock::ID {
+            return Ok(());
+        }
+
         let (tx, rx) = oneshot::channel();
         self.send_msg(ChainPubsubActorMessage::AccountSubscribe {
             pubkey,
