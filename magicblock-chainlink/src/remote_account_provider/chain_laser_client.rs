@@ -5,7 +5,7 @@ use std::{
 
 use async_trait::async_trait;
 use solana_commitment_config::CommitmentLevel;
-use solana_pubkey::Pubkey;
+use solana_pubkey::{pubkey, Pubkey};
 use solana_sdk_ids::sysvar::clock;
 use tokio::sync::{mpsc, oneshot};
 use tracing::*;
@@ -16,6 +16,30 @@ use crate::remote_account_provider::{
     ChainPubsubClient, ReconnectableClient, RemoteAccountProviderError,
     RemoteAccountProviderResult,
 };
+
+/// Reserved pubkey used to track implicit slot subscriptions for GRPC clients.
+///
+/// ## Design Rationale
+///
+/// GRPC clients receive slot updates directly via the SubscribeRequestFilterSlots
+/// filter in their subscription request, but don't subscribe to the clock::ID account.
+/// Instead of skipping subscription tracking or implementing special-case logic, we
+/// subscribe to this dummy pubkey to represent the implicit slot subscription.
+///
+/// ## Benefits
+///
+/// **Accuracy**: Subscription count equals the actual number of active subscriptions
+/// across all client types (WebSocket and GRPC). No hidden logic, no off-by-one errors.
+///
+/// **No Hidden Assumptions**: The dummy subscription is tracked like any other
+/// subscription in our data structures. Metrics, logging, and subscription management
+/// code can treat all subscriptions uniformly without special cases or exceptions.
+/// This prevents subtle bugs where GRPC and WebSocket clients are handled differently.
+///
+/// The value used is a reserved, non-functional pubkey that never carries real account
+/// data. It exists purely for accounting purposes.
+static SLOT_SUBSCRIPTION_DUMMY: Pubkey =
+    pubkey!("FAKESUB111111111111111111111111111111111111");
 
 #[derive(Clone)]
 pub struct ChainLaserClientImpl {
@@ -75,14 +99,21 @@ impl ChainPubsubClient for ChainLaserClientImpl {
     ) -> RemoteAccountProviderResult<()> {
         // Skip clock::ID subscriptions for GRPC clients since they get slot
         // updates directly via the SubscribeRequestFilterSlots in the GRPC
-        // subscription request. This avoids redundant subscriptions.
-        if pubkey == clock::ID {
-            return Ok(());
-        }
+        // subscription request. Instead, subscribe to a dummy pubkey to track
+        // this implicit subscription and keep subscription counts accurate.
+        // Subscription counts equal for different client types by treating the GRPC slot sub the
+        // same as the websocket clock sub.
+        // Otherwise we'd have to handle the inconsistency of account subscription counts of websocket vs
+        // GRPC clients in multiple places.
+        let effective_pubkey = if pubkey == clock::ID {
+            SLOT_SUBSCRIPTION_DUMMY
+        } else {
+            pubkey
+        };
 
         let (tx, rx) = oneshot::channel();
         self.send_msg(ChainPubsubActorMessage::AccountSubscribe {
-            pubkey,
+            pubkey: effective_pubkey,
             response: tx,
         })
         .await?;
