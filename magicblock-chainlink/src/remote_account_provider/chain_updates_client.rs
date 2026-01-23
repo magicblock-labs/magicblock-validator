@@ -78,7 +78,7 @@ impl ChainUpdatesClient {
                         api_key,
                         commitment.commitment,
                         abort_sender,
-                        Some(slots),
+                        slots,
                     )
                     .await?,
                 ))

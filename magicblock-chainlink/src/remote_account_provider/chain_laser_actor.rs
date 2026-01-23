@@ -124,9 +124,8 @@ pub struct ChainLaserActor {
     commitment: CommitmentLevel,
     /// Channel used to signal connection issues to the submux
     abort_sender: mpsc::Sender<()>,
-    /// Slot tracking for activation lookback
-    /// This is only set when the gRPC provider supports backfilling subscription updates
-    slots: Option<Slots>,
+    /// Slot tracking for chain slot synchronization and activation lookback
+    slots: Slots,
     /// Unique client ID including the gRPC provider name for this actor instance used in logs
     /// and metrics
     client_id: String,
@@ -139,7 +138,7 @@ impl ChainLaserActor {
         api_key: &str,
         commitment: SolanaCommitmentLevel,
         abort_sender: mpsc::Sender<()>,
-        slots: Option<Slots>,
+        slots: Slots,
     ) -> RemoteAccountProviderResult<(
         Self,
         mpsc::Sender<ChainPubsubActorMessage>,
@@ -172,7 +171,7 @@ impl ChainLaserActor {
         laser_client_config: LaserstreamConfig,
         commitment: SolanaCommitmentLevel,
         abort_sender: mpsc::Sender<()>,
-        slots: Option<Slots>,
+        slots: Slots,
     ) -> RemoteAccountProviderResult<(
         Self,
         mpsc::Sender<ChainPubsubActorMessage>,
@@ -440,21 +439,19 @@ impl ChainLaserActor {
     /// Returns `Some((chain_slot, from_slot))` if backfilling is supported and we have a valid chain slot,
     /// otherwise returns `None`.
     fn determine_from_slot(&self) -> Option<(u64, u64)> {
-        let Some(slots) = &self.slots else {
-            return None;
-        };
-        if !slots.supports_backfill {
+        if !self.slots.supports_backfill {
             return None;
         }
 
-        let chain_slot = slots.chain_slot.load(Ordering::Relaxed);
+        let chain_slot = self.slots.chain_slot.load(Ordering::Relaxed);
         if chain_slot == 0 {
             // If we didn't get a chain slot update yet we cannot backfill
             return None;
         }
 
         // Get last activation slot and update to current chain slot
-        let last_activation_slot = slots
+        let last_activation_slot = self
+            .slots
             .last_activation_slot
             .swap(chain_slot, Ordering::Relaxed);
 
@@ -682,11 +679,9 @@ impl ChainLaserActor {
 
         // Handle slot updates - update chain_slot to max of current and received
         if let UpdateOneof::Slot(slot_update) = &update_oneof {
-            if let Some(slots) = &self.slots {
-                slots
-                    .chain_slot
-                    .fetch_max(slot_update.slot, Ordering::Relaxed);
-            }
+            self.slots
+                .chain_slot
+                .fetch_max(slot_update.slot, Ordering::Relaxed);
             return;
         }
 
