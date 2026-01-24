@@ -359,6 +359,11 @@ where
             )
             .await
             {
+                // Reset backoff duration metric on successful reconnect
+                metrics::set_pubsub_client_reconnect_backoff_duration_seconds(
+                    client.id(),
+                    0,
+                );
                 debug!(
                     client_id = %client.id(),
                     attempt,
@@ -368,6 +373,11 @@ where
             } else {
                 let wait_duration =
                     Duration::from_secs(fib_with_max_secs(attempt));
+                // Update backoff duration metric
+                metrics::set_pubsub_client_reconnect_backoff_duration_seconds(
+                    client.id(),
+                    wait_duration.as_secs(),
+                );
                 // Log at max once a minute or every WARN_EVERY_ATTEMPTS attempts
                 if attempt % WARN_EVERY_ATTEMPTS == 0
                     || wait_duration.as_secs() >= 60

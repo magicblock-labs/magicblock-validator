@@ -418,6 +418,14 @@ lazy_static::lazy_static! {
         ),
         &["client_id"],
     ).unwrap();
+
+    static ref PUBSUB_CLIENT_RECONNECT_BACKOFF_DURATION_SECONDS: IntGaugeVec = IntGaugeVec::new(
+        Opts::new(
+            "pubsub_client_reconnect_backoff_duration_seconds",
+            "Current backoff wait duration in seconds during reconnect attempts (0 when connected)"
+        ),
+        &["client_id"],
+    ).unwrap();
 }
 
 pub(crate) fn register() {
@@ -487,6 +495,7 @@ pub(crate) fn register() {
         register!(CONNECTED_PUBSUB_CLIENTS_GAUGE);
         register!(CONNECTED_DIRECT_PUBSUB_CLIENTS_GAUGE);
         register!(PUBSUB_CLIENT_UPTIME_GAUGE);
+        register!(PUBSUB_CLIENT_RECONNECT_BACKOFF_DURATION_SECONDS);
     });
 }
 
@@ -742,4 +751,13 @@ pub fn set_pubsub_client_uptime(client_id: &str, connected: bool) {
     PUBSUB_CLIENT_UPTIME_GAUGE
         .with_label_values(&[client_id])
         .set(if connected { 1 } else { 0 });
+}
+
+pub fn set_pubsub_client_reconnect_backoff_duration_seconds(
+    client_id: &str,
+    duration_secs: u64,
+) {
+    PUBSUB_CLIENT_RECONNECT_BACKOFF_DURATION_SECONDS
+        .with_label_values(&[client_id])
+        .set(duration_secs as i64);
 }
