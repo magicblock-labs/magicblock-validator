@@ -66,10 +66,11 @@ impl ChainUpdatesClient {
                     CLIENT_ID.fetch_add(1, Ordering::SeqCst)
                 );
 
-                let slots = supports_backfill.then_some(Slots {
+                let slots = Slots {
                     chain_slot,
                     last_activation_slot: AtomicU64::new(0),
-                });
+                    supports_backfill: *supports_backfill,
+                };
                 Ok(ChainUpdatesClient::Laser(
                     ChainLaserClientImpl::new_from_url(
                         url,
