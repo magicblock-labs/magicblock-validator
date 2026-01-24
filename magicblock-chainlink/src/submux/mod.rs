@@ -349,6 +349,10 @@ where
         const WARN_EVERY_ATTEMPTS: u64 = 10;
         let mut attempt = 0;
         loop {
+            metrics::set_pubsub_client_failed_reconnect_attempts(
+                client.id(),
+                attempt,
+            );
             attempt += 1;
             if Self::reconnect_client(
                 client.clone(),
@@ -359,8 +363,12 @@ where
             )
             .await
             {
-                // Reset backoff duration metric on successful reconnect
+                // Reset metrics on successful reconnect
                 metrics::set_pubsub_client_reconnect_backoff_duration_seconds(
+                    client.id(),
+                    0,
+                );
+                metrics::set_pubsub_client_failed_reconnect_attempts(
                     client.id(),
                     0,
                 );
