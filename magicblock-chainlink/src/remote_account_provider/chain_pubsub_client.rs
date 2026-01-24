@@ -1,7 +1,10 @@
 use std::{
     collections::HashSet,
     mem,
-    sync::{Arc, Mutex},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc, Mutex,
+    },
     time::Duration,
 };
 
@@ -42,6 +45,7 @@ type ProgramSubscribeResult = PubsubClientResult<(
 
 const MAX_RECONNECT_ATTEMPTS: usize = 5;
 const RECONNECT_ATTEMPT_DELAY: Duration = Duration::from_millis(500);
+const MAX_RESUB_DELAY_MS: u64 = 5_000;
 
 pub struct PubSubConnection {
     client: ArcSwap<PubsubClient>,
@@ -188,6 +192,11 @@ pub trait ReconnectableClient {
         &self,
         pubkeys: HashSet<Pubkey>,
     ) -> RemoteAccountProviderResult<()>;
+    /// Returns the current resubscription delay in milliseconds.
+    /// Returns None if this client doesn't track resubscription delay.
+    fn current_resub_delay_ms(&self) -> Option<u64> {
+        None
+    }
 }
 
 // -----------------
@@ -198,7 +207,7 @@ pub struct ChainPubsubClientImpl {
     actor: Arc<ChainPubsubActor>,
     updates_rcvr: Arc<Mutex<Option<mpsc::Receiver<SubscriptionUpdate>>>>,
     client_id: String,
-    resubscription_delay: Duration,
+    current_resub_delay_ms: Arc<AtomicU64>,
 }
 
 impl ChainPubsubClientImpl {
@@ -216,11 +225,13 @@ impl ChainPubsubClientImpl {
             commitment,
         )
         .await?;
+        let current_resub_delay_ms =
+            Arc::new(AtomicU64::new(resubscription_delay.as_millis() as u64));
         Ok(Self {
             actor: Arc::new(actor),
             updates_rcvr: Arc::new(Mutex::new(Some(updates))),
             client_id,
-            resubscription_delay,
+            current_resub_delay_ms,
         })
     }
 }
@@ -350,12 +361,30 @@ impl ReconnectableClient for ChainPubsubClientImpl {
         &self,
         pubkeys: HashSet<Pubkey>,
     ) -> RemoteAccountProviderResult<()> {
-        for pubkey in pubkeys {
-            self.subscribe(pubkey).await?;
-            // Configurable delay to prevent overwhelming the RPC provider during reconnection
-            tokio::time::sleep(self.resubscription_delay).await;
+        let delay_ms = self.current_resub_delay_ms.load(Ordering::SeqCst);
+        let delay = Duration::from_millis(delay_ms);
+        let pubkeys_vec: Vec<Pubkey> = pubkeys.into_iter().collect();
+        for (idx, pubkey) in pubkeys_vec.iter().enumerate() {
+            if let Err(err) = self.subscribe(*pubkey).await {
+                // Exponentially back off on resubscription attempts, so the next time we
+                // reconnect and try to resubscribe, we wait longer in between each subscription
+                // in order to avoid overwhelming the RPC with requests
+                let new_delay =
+                    delay_ms.saturating_mul(2).min(MAX_RESUB_DELAY_MS);
+                self.current_resub_delay_ms
+                    .store(new_delay, Ordering::SeqCst);
+                return Err(err);
+            }
+            // Only sleep between subscriptions, not after the final one
+            if idx < pubkeys_vec.len() - 1 {
+                tokio::time::sleep(delay).await;
+            }
         }
         Ok(())
+    }
+
+    fn current_resub_delay_ms(&self) -> Option<u64> {
+        Some(self.current_resub_delay_ms.load(Ordering::SeqCst))
     }
 }
 

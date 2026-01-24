@@ -203,4 +203,12 @@ impl ReconnectableClient for ChainUpdatesClient {
             Laser(client) => client.resub_multiple(pubkeys).await,
         }
     }
+
+    fn current_resub_delay_ms(&self) -> Option<u64> {
+        use ChainUpdatesClient::*;
+        match self {
+            WebSocket(client) => client.current_resub_delay_ms(),
+            Laser(client) => client.current_resub_delay_ms(),
+        }
+    }
 }
