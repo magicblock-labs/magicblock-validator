@@ -383,6 +383,8 @@ impl ChainPubsubActor {
     }
 
     #[allow(clippy::too_many_arguments)]
+    // NOTE: Pubkey stringification overhead is acceptable here since this is a cold path
+    // (network I/O dwarfs the stringification cost)
     #[instrument(skip(sub_response, subs, program_subs, pubsub_connection, subscription_updates_sender, abort_sender, is_connected), fields(client_id = %client_id, pubkey = %pubkey, commitment = ?commitment_config))]
     async fn add_sub(
         pubkey: Pubkey,
@@ -511,6 +513,8 @@ impl ChainPubsubActor {
         });
     }
     #[allow(clippy::too_many_arguments)]
+    // NOTE: Pubkey stringification overhead is acceptable here since this is a cold path
+    // (network I/O dwarfs the stringification cost)
     #[instrument(skip(sub_response, subs, program_subs, pubsub_connection, subscription_updates_sender, abort_sender, is_connected), fields(client_id = %client_id, program_id = %program_pubkey, commitment = ?commitment_config))]
     async fn add_program_sub(
         program_pubkey: Pubkey,
