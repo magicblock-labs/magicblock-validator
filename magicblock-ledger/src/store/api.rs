@@ -539,13 +539,17 @@ impl Ledger {
         // 3. Find all matching (slot, signature) pairs sorted newest to oldest
         let matching = {
             let mut matching = Vec::new();
-            let (_lock, _) = self.ensure_lowest_cleanup_slot();
+            let (_lock, lowest_available_slot) =
+                self.ensure_lowest_cleanup_slot();
 
             // The newest signatures are inside the slot that contains the upper
             // limit signature if it was provided.
             // We include the ones with lower tx_index than that signature
             // (if any for that account).
-            if found_upper && include_upper {
+            if found_upper
+                && include_upper
+                && upper_slot >= lowest_available_slot
+            {
                 // SAFETY: found_upper cannot be true if this is None
                 let upper_signature = upper_limit_signature.unwrap();
 
@@ -626,6 +630,9 @@ impl Ledger {
                 for ((address, tx_slot, _tx_idx, signature), _) in
                     index_iterator
                 {
+                    if tx_slot < lowest_available_slot {
+                        break;
+                    }
                     // Bail out if we reached the max number of signatures to collect
                     if matching.len() >= limit {
                         break;
@@ -668,7 +675,10 @@ impl Ledger {
 
             // The oldest signatures are inside the slot that contains the lower
             // limit signature if it was provided
-            if found_lower && include_lower {
+            if found_lower
+                && include_lower
+                && lower_slot >= lowest_available_slot
+            {
                 // SAFETY: found_lower cannot be true if this is None
                 let lower_signature = lower_limit_signature.unwrap();
 
@@ -705,6 +715,9 @@ impl Ledger {
                     for ((address, tx_slot, tx_idx, signature), _) in
                         index_iterator
                     {
+                        if tx_slot < lowest_available_slot {
+                            break;
+                        }
                         // Bail out if we reached the max number of signatures to collect
                         if matching.len() >= limit {
                             break;

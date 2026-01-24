@@ -13,7 +13,8 @@ use helius_laserstream::{
     client,
     grpc::{
         subscribe_update::UpdateOneof, CommitmentLevel, SubscribeRequest,
-        SubscribeRequestFilterAccounts, SubscribeUpdate,
+        SubscribeRequestFilterAccounts, SubscribeRequestFilterSlots,
+        SubscribeUpdate,
     },
     ChannelOptions, LaserstreamConfig, LaserstreamError,
 };
@@ -50,12 +51,15 @@ const SLOTS_BETWEEN_ACTIVATIONS: u64 =
 // -----------------
 // Slots
 // -----------------
-/// Shared slot tracking for activation lookback
+/// Shared slot tracking for activation lookback and chain slot synchronization.
 pub struct Slots {
-    /// The current slot on chain, shared with RemoteAccountProvider
+    /// The current slot on chain, shared with RemoteAccountProvider.
+    /// Updated via `fetch_max()` when slot updates are received from GRPC.
     pub chain_slot: Arc<AtomicU64>,
-    /// The last slot at which activation happened
+    /// The last slot at which activation happened (used for backfilling).
     pub last_activation_slot: AtomicU64,
+    /// Whether this GRPC endpoint supports backfilling subscription updates.
+    pub supports_backfill: bool,
 }
 
 // -----------------
@@ -120,9 +124,8 @@ pub struct ChainLaserActor {
     commitment: CommitmentLevel,
     /// Channel used to signal connection issues to the submux
     abort_sender: mpsc::Sender<()>,
-    /// Slot tracking for activation lookback
-    /// This is only set when the gRPC provider supports backfilling subscription updates
-    slots: Option<Slots>,
+    /// Slot tracking for chain slot synchronization and activation lookback
+    slots: Slots,
     /// Unique client ID including the gRPC provider name for this actor instance used in logs
     /// and metrics
     client_id: String,
@@ -135,7 +138,7 @@ impl ChainLaserActor {
         api_key: &str,
         commitment: SolanaCommitmentLevel,
         abort_sender: mpsc::Sender<()>,
-        slots: Option<Slots>,
+        slots: Slots,
     ) -> RemoteAccountProviderResult<(
         Self,
         mpsc::Sender<ChainPubsubActorMessage>,
@@ -168,7 +171,7 @@ impl ChainLaserActor {
         laser_client_config: LaserstreamConfig,
         commitment: SolanaCommitmentLevel,
         abort_sender: mpsc::Sender<()>,
-        slots: Option<Slots>,
+        slots: Slots,
     ) -> RemoteAccountProviderResult<(
         Self,
         mpsc::Sender<ChainPubsubActorMessage>,
@@ -416,7 +419,7 @@ impl ChainLaserActor {
         }
 
         for (idx, chunk) in chunks.into_iter().enumerate() {
-            let stream = Self::create_accounts_stream(
+            let stream = Self::create_accounts_and_slot_stream(
                 &chunk,
                 &self.commitment,
                 &self.laser_client_config,
@@ -436,19 +439,19 @@ impl ChainLaserActor {
     /// Returns `Some((chain_slot, from_slot))` if backfilling is supported and we have a valid chain slot,
     /// otherwise returns `None`.
     fn determine_from_slot(&self) -> Option<(u64, u64)> {
-        // slots is only set when backfilling is supported
-        let Some(slots) = &self.slots else {
+        if !self.slots.supports_backfill {
             return None;
-        };
+        }
 
-        let chain_slot = slots.chain_slot.load(Ordering::Relaxed);
+        let chain_slot = self.slots.chain_slot.load(Ordering::Relaxed);
         if chain_slot == 0 {
             // If we didn't get a chain slot update yet we cannot backfill
             return None;
         }
 
         // Get last activation slot and update to current chain slot
-        let last_activation_slot = slots
+        let last_activation_slot = self
+            .slots
             .last_activation_slot
             .swap(chain_slot, Ordering::Relaxed);
 
@@ -463,7 +466,12 @@ impl ChainLaserActor {
     }
 
     /// Helper to create a dedicated stream for a number of accounts.
-    fn create_accounts_stream(
+    /// It includes a slot subscription for chain slot synchronization.
+    /// This is not 100% cleanly separated but avoids creating another connection
+    /// just for slot updates.
+    /// NOTE: no slot update subscription will be created until the first
+    /// accounts subscription is created.
+    fn create_accounts_and_slot_stream(
         pubkeys: &[&Pubkey],
         commitment: &CommitmentLevel,
         laser_client_config: &LaserstreamConfig,
@@ -478,8 +486,20 @@ impl ChainLaserActor {
                 ..Default::default()
             },
         );
+
+        // Subscribe to slot updates for chain_slot synchronization
+        let mut slots = HashMap::new();
+        slots.insert(
+            "slot_updates".to_string(),
+            SubscribeRequestFilterSlots {
+                filter_by_commitment: Some(true),
+                ..Default::default()
+            },
+        );
+
         let request = SubscribeRequest {
             accounts,
+            slots,
             commitment: Some((*commitment).into()),
             // NOTE: triton does not support backfilling and we could not verify this with
             // helius due to being rate limited.
@@ -656,6 +676,15 @@ impl ChainLaserActor {
         let Some(update_oneof) = update.update_oneof else {
             return;
         };
+
+        // Handle slot updates - update chain_slot to max of current and received
+        if let UpdateOneof::Slot(slot_update) = &update_oneof {
+            self.slots
+                .chain_slot
+                .fetch_max(slot_update.slot, Ordering::Relaxed);
+            return;
+        }
+
         let UpdateOneof::Account(acc) = update_oneof else {
             return;
         };
