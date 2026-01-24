@@ -418,6 +418,30 @@ lazy_static::lazy_static! {
         ),
         &["client_id"],
     ).unwrap();
+
+    static ref PUBSUB_CLIENT_RECONNECT_BACKOFF_DURATION_SECONDS_GAUGE: IntGaugeVec = IntGaugeVec::new(
+        Opts::new(
+            "pubsub_client_reconnect_backoff_duration_seconds_gauge",
+            "Current backoff wait duration in seconds during reconnect attempts (0 when connected)"
+        ),
+        &["client_id"],
+    ).unwrap();
+
+    static ref PUBSUB_CLIENT_FAILED_RECONNECT_ATTEMPTS_GAUGE: IntGaugeVec = IntGaugeVec::new(
+        Opts::new(
+            "pubsub_client_failed_reconnect_attempts_gauge",
+            "Current number of failed reconnect attempts for each pubsub client (0 when connected)"
+        ),
+        &["client_id"],
+    ).unwrap();
+
+    static ref PUBSUB_CLIENT_RESUBSCRIBE_DELAY_MILLISECONDS_GAUGE: IntGaugeVec = IntGaugeVec::new(
+        Opts::new(
+            "pubsub_client_resubscribe_delay_milliseconds_gauge",
+            "Current resubscription delay in milliseconds for each pubsub client"
+        ),
+        &["client_id"],
+    ).unwrap();
 }
 
 pub(crate) fn register() {
@@ -487,6 +511,9 @@ pub(crate) fn register() {
         register!(CONNECTED_PUBSUB_CLIENTS_GAUGE);
         register!(CONNECTED_DIRECT_PUBSUB_CLIENTS_GAUGE);
         register!(PUBSUB_CLIENT_UPTIME_GAUGE);
+        register!(PUBSUB_CLIENT_RECONNECT_BACKOFF_DURATION_SECONDS_GAUGE);
+        register!(PUBSUB_CLIENT_FAILED_RECONNECT_ATTEMPTS_GAUGE);
+        register!(PUBSUB_CLIENT_RESUBSCRIBE_DELAY_MILLISECONDS_GAUGE);
     });
 }
 
@@ -742,4 +769,28 @@ pub fn set_pubsub_client_uptime(client_id: &str, connected: bool) {
     PUBSUB_CLIENT_UPTIME_GAUGE
         .with_label_values(&[client_id])
         .set(if connected { 1 } else { 0 });
+}
+
+pub fn set_pubsub_client_reconnect_backoff_duration_seconds(
+    client_id: &str,
+    duration_secs: u64,
+) {
+    PUBSUB_CLIENT_RECONNECT_BACKOFF_DURATION_SECONDS_GAUGE
+        .with_label_values(&[client_id])
+        .set(duration_secs as i64);
+}
+
+pub fn set_pubsub_client_failed_reconnect_attempts(
+    client_id: &str,
+    attempts: u64,
+) {
+    PUBSUB_CLIENT_FAILED_RECONNECT_ATTEMPTS_GAUGE
+        .with_label_values(&[client_id])
+        .set(attempts as i64);
+}
+
+pub fn set_pubsub_client_resubscribe_delay(client_id: &str, delay_ms: u64) {
+    PUBSUB_CLIENT_RESUBSCRIBE_DELAY_MILLISECONDS_GAUGE
+        .with_label_values(&[client_id])
+        .set(delay_ms as i64);
 }
