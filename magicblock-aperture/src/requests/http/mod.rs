@@ -209,7 +209,7 @@ impl HttpDispatcher {
     }
 
     /// Ensures all accounts required for a transaction are present in the `AccountsDb`.
-    #[instrument(skip(self, transaction), fields(signature = %transaction.signature()))]
+    #[instrument(skip_all)]
     async fn ensure_transaction_accounts(
         &self,
         transaction: &SanitizedTransaction,
