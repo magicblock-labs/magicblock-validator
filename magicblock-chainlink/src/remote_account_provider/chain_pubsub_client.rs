@@ -192,6 +192,11 @@ pub trait ReconnectableClient {
         &self,
         pubkeys: HashSet<Pubkey>,
     ) -> RemoteAccountProviderResult<()>;
+    /// Returns the current resubscription delay in milliseconds.
+    /// Returns None if this client doesn't track resubscription delay.
+    fn current_resub_delay_ms(&self) -> Option<u64> {
+        None
+    }
 }
 
 // -----------------
@@ -371,6 +376,10 @@ impl ReconnectableClient for ChainPubsubClientImpl {
             tokio::time::sleep(delay).await;
         }
         Ok(())
+    }
+
+    fn current_resub_delay_ms(&self) -> Option<u64> {
+        Some(self.current_resub_delay_ms.load(Ordering::SeqCst))
     }
 }
 
