@@ -414,6 +414,7 @@ pub mod mock {
         updates_sndr: mpsc::Sender<SubscriptionUpdate>,
         updates_rcvr: Arc<Mutex<Option<mpsc::Receiver<SubscriptionUpdate>>>>,
         subscribed_pubkeys: Arc<Mutex<HashSet<Pubkey>>>,
+        subscribed_programs: Arc<Mutex<HashSet<Pubkey>>>,
         subscription_count_at_disconnect: Arc<Mutex<usize>>,
         connected: Arc<Mutex<bool>>,
         pending_resubscribe_failures: Arc<Mutex<usize>>,
@@ -429,6 +430,7 @@ pub mod mock {
                 updates_sndr,
                 updates_rcvr: Arc::new(Mutex::new(Some(updates_rcvr))),
                 subscribed_pubkeys: Arc::new(Mutex::new(HashSet::new())),
+                subscribed_programs: Arc::new(Mutex::new(HashSet::new())),
                 subscription_count_at_disconnect: Arc::new(Mutex::new(0)),
                 connected: Arc::new(Mutex::new(true)),
                 pending_resubscribe_failures: Arc::new(Mutex::new(0)),
@@ -497,6 +499,10 @@ pub mod mock {
                     == *self.subscription_count_at_disconnect.lock()
         }
 
+        pub fn subscribed_program_ids(&self) -> HashSet<Pubkey> {
+            self.subscribed_programs.lock().clone()
+        }
+
         /// Directly insert a subscription without going through subscribe().
         /// Useful for testing reconciliation scenarios.
         pub fn insert_subscription(&self, pubkey: Pubkey) {
@@ -533,7 +539,7 @@ pub mod mock {
 
         async fn subscribe_program(
             &self,
-            _program_id: Pubkey,
+            program_id: Pubkey,
         ) -> RemoteAccountProviderResult<()> {
             if !*self.connected.lock() {
                 return Err(
@@ -543,7 +549,8 @@ pub mod mock {
                     ),
                 );
             }
-            // Program subscriptions don't track individual accounts in the mock
+            let mut subscribed_programs = self.subscribed_programs.lock();
+            subscribed_programs.insert(program_id);
             Ok(())
         }
 
