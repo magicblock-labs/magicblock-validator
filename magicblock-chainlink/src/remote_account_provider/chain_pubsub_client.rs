@@ -363,17 +363,22 @@ impl ReconnectableClient for ChainPubsubClientImpl {
     ) -> RemoteAccountProviderResult<()> {
         let delay_ms = self.current_resub_delay_ms.load(Ordering::SeqCst);
         let delay = Duration::from_millis(delay_ms);
-        for pubkey in pubkeys {
-            if let Err(err) = self.subscribe(pubkey).await {
+        let pubkeys_vec: Vec<Pubkey> = pubkeys.into_iter().collect();
+        for (idx, pubkey) in pubkeys_vec.iter().enumerate() {
+            if let Err(err) = self.subscribe(*pubkey).await {
                 // Exponentially back off on resubscription attempts, so the next time we
                 // reconnect and try to resubscribe, we wait longer in between each subscription
                 // in order to avoid overwhelming the RPC with requests
-                let new_delay = (delay_ms * 2).min(MAX_RESUB_DELAY_MS);
+                let new_delay =
+                    delay_ms.saturating_mul(2).min(MAX_RESUB_DELAY_MS);
                 self.current_resub_delay_ms
                     .store(new_delay, Ordering::SeqCst);
                 return Err(err);
             }
-            tokio::time::sleep(delay).await;
+            // Only sleep between subscriptions, not after the final one
+            if idx < pubkeys_vec.len() - 1 {
+                tokio::time::sleep(delay).await;
+            }
         }
         Ok(())
     }
