@@ -434,6 +434,14 @@ lazy_static::lazy_static! {
         ),
         &["client_id"],
     ).unwrap();
+
+    static ref PUBSUB_CLIENT_RESUBSCRIBE_DELAY_GAUGE: IntGaugeVec = IntGaugeVec::new(
+        Opts::new(
+            "pubsub_client_resubscribe_delay_milliseconds",
+            "Current resubscription delay in milliseconds for each pubsub client"
+        ),
+        &["client_id"],
+    ).unwrap();
 }
 
 pub(crate) fn register() {
@@ -505,6 +513,7 @@ pub(crate) fn register() {
         register!(PUBSUB_CLIENT_UPTIME_GAUGE);
         register!(PUBSUB_CLIENT_RECONNECT_BACKOFF_DURATION_SECONDS);
         register!(PUBSUB_CLIENT_FAILED_RECONNECT_ATTEMPTS);
+        register!(PUBSUB_CLIENT_RESUBSCRIBE_DELAY_GAUGE);
     });
 }
 
@@ -775,4 +784,10 @@ pub fn set_pubsub_client_failed_reconnect_attempts(client_id: &str, attempts: u6
     PUBSUB_CLIENT_FAILED_RECONNECT_ATTEMPTS
         .with_label_values(&[client_id])
         .set(attempts as i64);
+}
+
+pub fn set_pubsub_client_resubscribe_delay(client_id: &str, delay_ms: u64) {
+    PUBSUB_CLIENT_RESUBSCRIBE_DELAY_GAUGE
+        .with_label_values(&[client_id])
+        .set(delay_ms as i64);
 }
