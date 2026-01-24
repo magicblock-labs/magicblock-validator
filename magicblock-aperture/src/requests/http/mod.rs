@@ -105,7 +105,7 @@ pub(crate) async fn extract_bytes(
 impl HttpDispatcher {
     /// Fetches an account's data from the `AccountsDb` filling it in from chain
     /// as needed.
-    #[instrument(skip(self), fields(pubkey = %pubkey))]
+    #[instrument(skip_all)]
     async fn read_account_with_ensure(
         &self,
         pubkey: &Pubkey,
