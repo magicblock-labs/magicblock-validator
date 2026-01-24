@@ -355,10 +355,6 @@ where
         const WARN_EVERY_ATTEMPTS: u64 = 10;
         let mut attempt = 0;
         loop {
-            metrics::set_pubsub_client_failed_reconnect_attempts(
-                client.id(),
-                attempt,
-            );
             attempt += 1;
             // Track the current resubscription delay for this client
             if let Some(delay_ms) = client.current_resub_delay_ms() {
@@ -399,7 +395,12 @@ where
                     client.id(),
                     wait_duration.as_secs(),
                 );
-                // Log at max once a minute or every WARN_EVERY_ATTEMPTS attempts
+                // Record current failed attempt count after the failed attempt
+                metrics::set_pubsub_client_failed_reconnect_attempts(
+                    client.id(),
+                    attempt,
+                );
+                // Log at max once per minute or every WARN_EVERY_ATTEMPTS attempts
                 if attempt % WARN_EVERY_ATTEMPTS == 0
                     || wait_duration.as_secs() >= 60
                 {
