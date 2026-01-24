@@ -349,7 +349,7 @@ where
                 (a, b) = (b, a.saturating_add(b));
             }
             // 1h max wait
-            a.min(6_000)
+            a.min(3_600)
         }
 
         const WARN_EVERY_ATTEMPTS: u64 = 10;
