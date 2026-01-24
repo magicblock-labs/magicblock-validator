@@ -337,12 +337,13 @@ where
         connected_clients: Arc<AtomicU16>,
         connected_clients_subscribing_immediately: Arc<AtomicU16>,
     ) {
-        fn fib_with_max(n: u64) -> u64 {
+        fn fib_with_max_secs(n: u64) -> u64 {
             let (mut a, mut b) = (0u64, 1u64);
             for _ in 0..n {
                 (a, b) = (b, a.saturating_add(b));
             }
-            a.min(600)
+            // 1h max wait
+            a.min(6_000)
         }
 
         const WARN_EVERY_ATTEMPTS: u64 = 10;
@@ -365,18 +366,24 @@ where
                 );
                 break;
             } else {
-                if attempt % WARN_EVERY_ATTEMPTS == 0 {
-                    error!(
+                let wait_duration =
+                    Duration::from_secs(fib_with_max_secs(attempt));
+                // Log at max once a minute or every WARN_EVERY_ATTEMPTS attempts
+                if attempt % WARN_EVERY_ATTEMPTS == 0
+                    || wait_duration.as_secs() >= 60
+                {
+                    warn!(
                         client_id = %client.id(),
                         attempt,
-                        "Failed to reconnect"
+                        wait_duration = ?wait_duration,
+                        "Failed to reconnect client, will retry after backoff"
                     );
                 }
-                let wait_duration = Duration::from_secs(fib_with_max(attempt));
                 tokio::time::sleep(wait_duration).await;
                 debug!(
                     client_id = %client.id(),
                     attempt,
+                    wait_duration = ?wait_duration,
                     "Reconnect attempt failed, will retry"
                 );
             }
