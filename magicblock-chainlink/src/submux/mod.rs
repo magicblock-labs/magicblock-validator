@@ -229,7 +229,10 @@ where
         for (client, _) in &clients {
             metrics::set_pubsub_client_uptime(client.id(), true);
             if let Some(delay_ms) = client.current_resub_delay_ms() {
-                metrics::set_pubsub_client_resubscribe_delay(client.id(), delay_ms);
+                metrics::set_pubsub_client_resubscribe_delay(
+                    client.id(),
+                    delay_ms,
+                );
             }
         }
 
@@ -359,7 +362,10 @@ where
             attempt += 1;
             // Track the current resubscription delay for this client
             if let Some(delay_ms) = client.current_resub_delay_ms() {
-                metrics::set_pubsub_client_resubscribe_delay(client.id(), delay_ms);
+                metrics::set_pubsub_client_resubscribe_delay(
+                    client.id(),
+                    delay_ms,
+                );
             }
             if Self::reconnect_client(
                 client.clone(),
