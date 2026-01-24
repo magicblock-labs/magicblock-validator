@@ -431,7 +431,12 @@ where
         let account_subs = accounts_tracker.subscribed_accounts();
 
         if let Err(err) = client.resub_multiple(account_subs).await {
-            debug!(client_id = %client.id(), error = ?err, "Failed to resubscribe accounts after reconnect");
+            debug!(
+                client_id = %client.id(),
+                resub_delay_ms = ?client.current_resub_delay_ms(),
+                error = ?err,
+                "Failed to resubscribe accounts after reconnect"
+            );
             return false;
         }
 
