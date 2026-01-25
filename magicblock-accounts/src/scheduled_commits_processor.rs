@@ -5,7 +5,7 @@ use std::{
 
 use async_trait::async_trait;
 use magicblock_account_cloner::ChainlinkCloner;
-use magicblock_accounts_db::{traits::AccountsBank, AccountsDb};
+use magicblock_accounts_db::AccountsDb;
 use magicblock_chainlink::{
     remote_account_provider::{
         chain_rpc_client::ChainRpcClientImpl,
