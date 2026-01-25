@@ -4,6 +4,9 @@ use std::{
 };
 
 use guinea::GuineaInstruction;
+use magicblock_core::link::transactions::{
+    recv_status_timeout, resubscribe_status_rx,
+};
 use solana_account::ReadableAccount;
 use solana_program::{
     instruction::{AccountMeta, Instruction},
@@ -13,7 +16,6 @@ use solana_pubkey::Pubkey;
 use solana_signature::Signature;
 use solana_transaction::Transaction;
 use test_kit::{ExecutionTestEnv, Signer};
-use tokio::time::timeout;
 
 const TIMEOUT: Duration = Duration::from_secs(5);
 const STRESS_TIMEOUT: Duration = Duration::from_secs(10);
@@ -102,7 +104,7 @@ async fn collect_statuses(
 ) -> Vec<Signature> {
     let start = Instant::now();
     let mut results = Vec::with_capacity(count);
-    let mut status_rx = env.dispatch.transaction_status.resubscribe();
+    let mut status_rx = resubscribe_status_rx(&env.dispatch.transaction_status);
 
     while results.len() < count {
         if start.elapsed() > limit {
@@ -112,8 +114,9 @@ async fn collect_statuses(
             );
         }
         // Short poll interval
-        if let Ok(Ok(status)) =
-            timeout(Duration::from_millis(100), status_rx.recv()).await
+        if let Ok(status) =
+            recv_status_timeout(&mut status_rx, Duration::from_millis(100))
+                .await
         {
             assert!(
                 status.meta.status.is_ok(),

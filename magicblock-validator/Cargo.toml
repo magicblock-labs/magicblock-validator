@@ -23,4 +23,4 @@ tracing = { workspace = true }
 [features]
 default = []
 tokio-console = ["console-subscriber", "tokio/tracing"]
-tui = ["magicblock-tui"]
+tui = ["magicblock-tui", "magicblock-api/tui"]

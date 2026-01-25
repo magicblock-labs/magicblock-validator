@@ -10,7 +10,7 @@ edition.workspace = true
 [dependencies]
 chrono = { workspace = true }
 crossterm = { workspace = true }
-magicblock-core = { workspace = true }
+magicblock-core = { workspace = true, features = ["tui"] }
 ratatui = { workspace = true }
 reqwest = { workspace = true, features = ["json"] }
 serde = { workspace = true, features = ["derive"] }

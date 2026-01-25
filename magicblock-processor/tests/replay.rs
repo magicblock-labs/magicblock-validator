@@ -3,7 +3,8 @@ use std::time::Duration;
 use guinea::GuineaInstruction;
 use magicblock_accounts_db::traits::AccountsBank;
 use magicblock_core::link::transactions::{
-    SanitizeableTransaction, TransactionStatusRx,
+    recv_status_timeout, resubscribe_status_rx, try_recv_status,
+    SanitizeableTransaction,
 };
 use solana_account::ReadableAccount;
 use solana_program::{
@@ -14,7 +15,6 @@ use solana_pubkey::Pubkey;
 use solana_signer::Signer;
 use solana_transaction::sanitized::SanitizedTransaction;
 use test_kit::ExecutionTestEnv;
-use tokio::time::timeout;
 
 const ACCOUNTS_COUNT: usize = 8;
 const TIMEOUT: Duration = Duration::from_millis(100);
@@ -23,7 +23,7 @@ const TIMEOUT: Duration = Duration::from_millis(100);
 async fn setup_replay_scenario(
     env: &ExecutionTestEnv,
     ix: GuineaInstruction,
-) -> (SanitizedTransaction, Vec<Pubkey>, TransactionStatusRx) {
+) -> (SanitizedTransaction, Vec<Pubkey>) {
     // 1. Create Accounts & Build Instruction
     let accounts: Vec<_> = (0..ACCOUNTS_COUNT)
         .map(|_| {
@@ -72,17 +72,17 @@ async fn setup_replay_scenario(
         .unwrap();
 
     // 6. Drain channels (Cleanup notifications from the setup execution)
-    let mut status_rx = env.dispatch.transaction_status.resubscribe();
-    while status_rx.try_recv().is_ok() {}
+    let mut status_rx = resubscribe_status_rx(&env.dispatch.transaction_status);
+    while try_recv_status(&mut status_rx).is_ok() {}
     while env.dispatch.account_update.try_recv().is_ok() {}
 
-    (transaction, pubkeys, status_rx)
+    (transaction, pubkeys)
 }
 
 #[tokio::test]
 pub async fn test_replay_state_transition() {
     let env = ExecutionTestEnv::new();
-    let (txn, pubkeys, mut status_rx) =
+    let (txn, pubkeys) =
         setup_replay_scenario(&env, GuineaInstruction::WriteByteToData(42))
             .await;
 
@@ -97,10 +97,12 @@ pub async fn test_replay_state_transition() {
 
     // 3. Verify No Side Effects (Notifications)
     assert!(
-        matches!(
-            timeout(TIMEOUT, status_rx.recv()).await,
-            Err(_) | Ok(Err(_))
-        ),
+        recv_status_timeout(
+            &mut resubscribe_status_rx(&env.dispatch.transaction_status),
+            TIMEOUT,
+        )
+        .await
+        .is_err(),
         "Replay should NOT broadcast status updates"
     );
     assert!(

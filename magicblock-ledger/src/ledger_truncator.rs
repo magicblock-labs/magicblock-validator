@@ -12,7 +12,7 @@ use magicblock_metrics::metrics::{
 use solana_measure::measure::Measure;
 use tokio::{runtime::Builder, time::interval};
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, error, info, instrument, warn};
+use tracing::{error, info, instrument, warn};
 
 use crate::{
     database::{
@@ -75,7 +75,7 @@ impl LedgerTrunctationWorker {
 
                     // Check if we should truncate
                     if current_size < (self.ledger_size / 100) * FILLED_PERCENTAGE_LIMIT as u64 {
-                        debug!(current_size, "Skipping truncation");
+                        info!(current_size, "Skipping truncation");
                         continue;
                     }
 

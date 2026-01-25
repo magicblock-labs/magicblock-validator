@@ -9,7 +9,7 @@ edition.workspace = true
 
 [dependencies]
 
-tokio = { workspace = true, features = ["sync"] }
+tokio = { workspace = true, features = ["sync", "time"] }
 flume = { workspace = true }
 
 solana-account = { workspace = true }
@@ -29,3 +29,7 @@ spl-token-2022 = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["time"] }
 tracing-log = { workspace = true }
+
+[features]
+default = []
+tui = []

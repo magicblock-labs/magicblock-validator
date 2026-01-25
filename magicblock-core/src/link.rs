@@ -1,6 +1,8 @@
 use accounts::{AccountUpdateRx, AccountUpdateTx};
 use blocks::{BlockUpdateRx, BlockUpdateTx};
-use tokio::sync::{broadcast, mpsc};
+#[cfg(feature = "tui")]
+use tokio::sync::broadcast;
+use tokio::sync::mpsc;
 use transactions::{
     ScheduledTasksRx, ScheduledTasksTx, TransactionSchedulerHandle,
     TransactionStatusRx, TransactionStatusTx, TransactionToProcessRx,
@@ -58,12 +60,17 @@ pub struct ValidatorChannelEndpoints {
 /// 1.  `DispatchEndpoints` for the "client" side (e.g., RPC servers).
 /// 2.  `ValidatorChannelEndpoints` for the "server" side (e.g., the transaction executor).
 pub fn link() -> (DispatchEndpoints, ValidatorChannelEndpoints) {
-    // Broadcast channel for transaction status - all consumers receive all messages
+    // Unbounded channels for high-throughput multicast where backpressure is not desired.
+    #[cfg(feature = "tui")]
     let (transaction_status_tx, transaction_status_rx) =
         broadcast::channel(LINK_CAPACITY);
-    // Unbounded channel for account updates where backpressure is not desired.
+    #[cfg(not(feature = "tui"))]
+    let (transaction_status_tx, transaction_status_rx) = flume::unbounded();
     let (account_update_tx, account_update_rx) = flume::unbounded();
+    #[cfg(feature = "tui")]
     let (block_update_tx, block_update_rx) = broadcast::channel(LINK_CAPACITY);
+    #[cfg(not(feature = "tui"))]
+    let (block_update_tx, block_update_rx) = flume::unbounded();
     let (tasks_tx, tasks_rx) = mpsc::unbounded_channel();
 
     // Bounded channels for command queues where applying backpressure is important.

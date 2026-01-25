@@ -1,11 +1,9 @@
-use std::sync::Arc;
-
 use magicblock_accounts_db::AccountsDbResult;
 use magicblock_core::{
     link::{
         accounts::{AccountWithSlot, LockedAccount},
         transactions::{
-            TransactionSimulationResult, TransactionStatus,
+            to_status_message, TransactionSimulationResult, TransactionStatus,
             TxnExecutionResultTx, TxnSimulationResultTx,
         },
     },
@@ -254,15 +252,15 @@ impl super::TransactionExecutor {
             }
         };
 
-        let status = Arc::new(TransactionStatus {
+        let status = TransactionStatus {
             slot: self.processor.slot,
             index,
             txn,
             meta,
-        });
+        };
 
-        // Notify listeners (broadcast to all consumers)
-        let _ = self.transaction_tx.send(status);
+        // Notify listeners
+        let _ = self.transaction_tx.send(to_status_message(status));
     }
 
     /// Persists account changes to AccountsDb and notifies listeners.

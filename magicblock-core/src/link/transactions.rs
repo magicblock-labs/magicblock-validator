@@ -1,5 +1,9 @@
+#[cfg(feature = "tui")]
 use std::sync::Arc;
+use std::time::Duration;
 
+#[cfg(not(feature = "tui"))]
+use flume::{Receiver as MpmcReceiver, Sender as MpmcSender};
 use magicblock_magic_program_api::args::TaskRequest;
 use solana_program::message::{
     inner_instruction::InnerInstructionsList, SimpleAddressLoader,
@@ -11,8 +15,9 @@ use solana_transaction::{
 use solana_transaction_context::TransactionReturnData;
 use solana_transaction_error::TransactionError;
 use solana_transaction_status_client_types::TransactionStatusMeta;
+#[cfg(feature = "tui")]
+use tokio::sync::broadcast;
 use tokio::sync::{
-    broadcast,
     mpsc::{Receiver, Sender, UnboundedReceiver, UnboundedSender},
     oneshot,
 };
@@ -20,11 +25,124 @@ use tokio::sync::{
 use super::blocks::BlockHash;
 use crate::Slot;
 
-/// The receiver end of the broadcast channel for communicating final transaction statuses.
-/// All receivers see every message (unlike MPMC which distributes messages).
+/// The receiver end of the channel for communicating final transaction statuses.
+#[cfg(feature = "tui")]
 pub type TransactionStatusRx = broadcast::Receiver<Arc<TransactionStatus>>;
-/// The sender end of the broadcast channel for communicating final transaction statuses.
+#[cfg(not(feature = "tui"))]
+pub type TransactionStatusRx = MpmcReceiver<TransactionStatus>;
+/// The sender end of the channel for communicating final transaction statuses.
+#[cfg(feature = "tui")]
 pub type TransactionStatusTx = broadcast::Sender<Arc<TransactionStatus>>;
+#[cfg(not(feature = "tui"))]
+pub type TransactionStatusTx = MpmcSender<TransactionStatus>;
+/// The message type carried over the transaction status channel.
+#[cfg(feature = "tui")]
+pub type TransactionStatusMessage = Arc<TransactionStatus>;
+#[cfg(not(feature = "tui"))]
+pub type TransactionStatusMessage = TransactionStatus;
+
+/// Wraps a transaction status for delivery over the configured channel type.
+#[inline]
+pub fn to_status_message(
+    status: TransactionStatus,
+) -> TransactionStatusMessage {
+    #[cfg(feature = "tui")]
+    {
+        Arc::new(status)
+    }
+    #[cfg(not(feature = "tui"))]
+    {
+        status
+    }
+}
+
+/// Indicates why a non-blocking receive did not yield a message.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TryRecvErrorKind {
+    Empty,
+    Lagged,
+    Closed,
+}
+
+/// Creates a new receiver for transaction status updates.
+#[inline]
+pub fn resubscribe_status_rx(rx: &TransactionStatusRx) -> TransactionStatusRx {
+    #[cfg(feature = "tui")]
+    {
+        rx.resubscribe()
+    }
+    #[cfg(not(feature = "tui"))]
+    {
+        rx.clone()
+    }
+}
+
+/// Attempts to receive a transaction status without waiting.
+#[inline]
+pub fn try_recv_status(
+    rx: &mut TransactionStatusRx,
+) -> Result<TransactionStatusMessage, TryRecvErrorKind> {
+    #[cfg(feature = "tui")]
+    {
+        rx.try_recv().map_err(|err| match err {
+            tokio::sync::broadcast::error::TryRecvError::Empty => {
+                TryRecvErrorKind::Empty
+            }
+            tokio::sync::broadcast::error::TryRecvError::Lagged(_) => {
+                TryRecvErrorKind::Lagged
+            }
+            tokio::sync::broadcast::error::TryRecvError::Closed => {
+                TryRecvErrorKind::Closed
+            }
+        })
+    }
+    #[cfg(not(feature = "tui"))]
+    {
+        rx.try_recv().map_err(|err| match err {
+            flume::TryRecvError::Empty => TryRecvErrorKind::Empty,
+            flume::TryRecvError::Disconnected => TryRecvErrorKind::Closed,
+        })
+    }
+}
+
+/// Receives the next transaction status, awaiting if needed.
+pub async fn recv_status(
+    rx: &mut TransactionStatusRx,
+) -> Result<TransactionStatusMessage, TryRecvErrorKind> {
+    #[cfg(feature = "tui")]
+    {
+        rx.recv().await.map_err(|err| match err {
+            tokio::sync::broadcast::error::RecvError::Lagged(_) => {
+                TryRecvErrorKind::Lagged
+            }
+            tokio::sync::broadcast::error::RecvError::Closed => {
+                TryRecvErrorKind::Closed
+            }
+        })
+    }
+    #[cfg(not(feature = "tui"))]
+    {
+        rx.recv_async().await.map_err(|_| TryRecvErrorKind::Closed)
+    }
+}
+
+/// Receives the next transaction status, or returns an error if it times out.
+pub async fn recv_status_timeout(
+    rx: &mut TransactionStatusRx,
+    timeout: Duration,
+) -> Result<TransactionStatusMessage, TryRecvErrorKind> {
+    #[cfg(feature = "tui")]
+    {
+        tokio::time::timeout(timeout, recv_status(rx))
+            .await
+            .map_err(|_| TryRecvErrorKind::Empty)?
+    }
+    #[cfg(not(feature = "tui"))]
+    {
+        rx.recv_timeout(timeout)
+            .map_err(|_| TryRecvErrorKind::Empty)
+    }
+}
 
 /// The receiver end of the channel used to send new transactions to the scheduler for processing.
 pub type TransactionToProcessRx = Receiver<ProcessableTransaction>;

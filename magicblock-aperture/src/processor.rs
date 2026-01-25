@@ -2,10 +2,17 @@ use std::sync::Arc;
 
 use magicblock_config::config::ApertureConfig;
 use magicblock_core::link::{
-    accounts::AccountUpdateRx, blocks::BlockUpdateRx,
-    transactions::TransactionStatusRx, DispatchEndpoints,
+    accounts::AccountUpdateRx,
+    blocks::{
+        recv_block_update, resubscribe_block_rx, BlockUpdateRx,
+        TryRecvErrorKind as BlockRecvErrorKind,
+    },
+    transactions::{
+        recv_status, resubscribe_status_rx, TransactionStatusRx,
+        TryRecvErrorKind as StatusRecvErrorKind,
+    },
+    DispatchEndpoints,
 };
-use tokio::sync::broadcast;
 use tokio_util::sync::CancellationToken;
 use tracing::{info, instrument, warn};
 
@@ -62,13 +69,16 @@ impl EventProcessor {
         state: &SharedState,
         geyser: Arc<GeyserPluginManager>,
     ) -> ApertureResult<Self> {
+        let transaction_status_rx =
+            resubscribe_status_rx(&channels.transaction_status);
+        let block_update_rx = resubscribe_block_rx(&channels.block_update);
         Ok(Self {
             subscriptions: state.subscriptions.clone(),
             transactions: state.transactions.clone(),
             blocks: state.blocks.clone(),
             account_update_rx: channels.account_update.clone(),
-            transaction_status_rx: channels.transaction_status.resubscribe(),
-            block_update_rx: channels.block_update.resubscribe(),
+            transaction_status_rx,
+            block_update_rx,
             geyser,
         })
     }
@@ -122,14 +132,17 @@ impl EventProcessor {
                 biased;
 
                 // Process a new block.
-                result = block_update_rx.recv() => {
+                result = recv_block_update(&mut block_update_rx) => {
                     let latest = match result {
                         Ok(latest) => latest,
-                        Err(broadcast::error::RecvError::Lagged(_)) => {
+                        Err(BlockRecvErrorKind::Lagged) => {
                             continue;
                         }
-                        Err(broadcast::error::RecvError::Closed) => {
+                        Err(BlockRecvErrorKind::Closed) => {
                             break;
+                        }
+                        Err(BlockRecvErrorKind::Empty) => {
+                            continue;
                         }
                     };
                     // Notify subscribers waiting on slot updates.
@@ -159,14 +172,17 @@ impl EventProcessor {
                 }
 
                 // Process a new transaction status update.
-                result = transaction_status_rx.recv() => {
+                result = recv_status(&mut transaction_status_rx) => {
                     let status = match result {
                         Ok(status) => status,
-                        Err(broadcast::error::RecvError::Lagged(_)) => {
+                        Err(StatusRecvErrorKind::Lagged) => {
                             continue;
                         }
-                        Err(broadcast::error::RecvError::Closed) => {
+                        Err(StatusRecvErrorKind::Closed) => {
                             break;
+                        }
+                        Err(StatusRecvErrorKind::Empty) => {
+                            continue;
                         }
                     };
                     // Notify subscribers waiting on this specific transaction signature.
