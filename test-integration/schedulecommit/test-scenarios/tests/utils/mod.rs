@@ -248,15 +248,15 @@ pub fn assert_account_was_not_undelegated_on_chain(
     program_id: Pubkey,
 ) {
     let owner = ctx.fetch_chain_account_owner(pda).unwrap();
-    assert_eq!(
-        owner, DELEGATION_PROGRAM_ID,
-        "{} should be owned by delegation program",
-        pda
-    );
     assert_ne!(
         owner, program_id,
         "{} should not be owned by {} as it is delegated",
         pda, program_id
+    );
+    assert_eq!(
+        owner, DELEGATION_PROGRAM_ID,
+        "{} should be owned by delegation program",
+        pda
     );
 }
 

@@ -179,7 +179,7 @@ impl ScheduleCommitType {
     ) -> ProgramResult {
         match self {
             ScheduleCommitType::Commit => {
-                commit_accounts(payer, accounts, magic_context, magic_program)?;
+                commit_accounts(payer, accounts, magic_context, magic_program)
             }
             ScheduleCommitType::CommitAndUndelegate => {
                 commit_and_undelegate_accounts(
@@ -187,27 +187,23 @@ impl ScheduleCommitType {
                     accounts,
                     magic_context,
                     magic_program,
-                )?;
+                )
             }
-            ScheduleCommitType::CommitFinalize => {
-                commit_finalize_accounts(
-                    payer,
-                    accounts,
-                    magic_context,
-                    magic_program,
-                )?;
-            }
+            ScheduleCommitType::CommitFinalize => commit_finalize_accounts(
+                payer,
+                accounts,
+                magic_context,
+                magic_program,
+            ),
             ScheduleCommitType::CommitFinalizeAndUndelegate => {
                 commit_finalize_and_undelegate_accounts(
                     payer,
                     accounts,
                     magic_context,
                     magic_program,
-                )?;
+                )
             }
-        };
-
-        Ok(())
+        }
     }
 }
 

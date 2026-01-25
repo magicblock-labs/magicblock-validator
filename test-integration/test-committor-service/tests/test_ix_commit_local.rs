@@ -68,52 +68,102 @@ fn expect_strategies(
 
 #[tokio::test]
 async fn test_ix_commit_single_account_100_bytes() {
-    commit_single_account(100, CommitStrategy::StateArgs, false).await;
+    commit_single_account(
+        100,
+        CommitStrategy::StateArgs,
+        ScheduleCommitType::Commit,
+    )
+    .await;
 }
 
 #[tokio::test]
 async fn test_ix_commit_single_account_100_bytes_and_undelegate() {
-    commit_single_account(100, CommitStrategy::StateArgs, true).await;
+    commit_single_account(
+        100,
+        CommitStrategy::StateArgs,
+        ScheduleCommitType::CommitAndUndelegate,
+    )
+    .await;
 }
 
 #[tokio::test]
 async fn test_ix_commit_single_account_256_bytes() {
-    commit_single_account(256, CommitStrategy::StateArgs, false).await;
+    commit_single_account(
+        256,
+        CommitStrategy::StateArgs,
+        ScheduleCommitType::Commit,
+    )
+    .await;
 }
 
 #[tokio::test]
 async fn test_ix_commit_single_account_257_bytes() {
-    commit_single_account(257, CommitStrategy::DiffArgs, false).await;
+    commit_single_account(
+        257,
+        CommitStrategy::DiffArgs,
+        ScheduleCommitType::Commit,
+    )
+    .await;
 }
 
 #[tokio::test]
 async fn test_ix_commit_single_account_256_bytes_and_undelegate() {
-    commit_single_account(256, CommitStrategy::StateArgs, true).await;
+    commit_single_account(
+        256,
+        CommitStrategy::StateArgs,
+        ScheduleCommitType::CommitAndUndelegate,
+    )
+    .await;
 }
 
 #[tokio::test]
 async fn test_ix_commit_single_account_257_bytes_and_undelegate() {
-    commit_single_account(257, CommitStrategy::DiffArgs, true).await;
+    commit_single_account(
+        257,
+        CommitStrategy::DiffArgs,
+        ScheduleCommitType::CommitAndUndelegate,
+    )
+    .await;
 }
 
 #[tokio::test]
 async fn test_ix_commit_single_account_800_bytes() {
-    commit_single_account(800, CommitStrategy::DiffArgs, false).await;
+    commit_single_account(
+        800,
+        CommitStrategy::DiffArgs,
+        ScheduleCommitType::Commit,
+    )
+    .await;
 }
 
 #[tokio::test]
 async fn test_ix_commit_single_account_800_bytes_and_undelegate() {
-    commit_single_account(800, CommitStrategy::DiffArgs, true).await;
+    commit_single_account(
+        800,
+        CommitStrategy::DiffArgs,
+        ScheduleCommitType::CommitAndUndelegate,
+    )
+    .await;
 }
 
 #[tokio::test]
 async fn test_ix_commit_single_account_one_kb() {
-    commit_single_account(1024, CommitStrategy::DiffArgs, false).await;
+    commit_single_account(
+        1024,
+        CommitStrategy::DiffArgs,
+        ScheduleCommitType::Commit,
+    )
+    .await;
 }
 
 #[tokio::test]
 async fn test_ix_commit_single_account_ten_kb() {
-    commit_single_account(10 * 1024, CommitStrategy::DiffArgs, false).await;
+    commit_single_account(
+        10 * 1024,
+        CommitStrategy::DiffArgs,
+        ScheduleCommitType::Commit,
+    )
+    .await;
 }
 
 #[tokio::test]
@@ -160,10 +210,20 @@ async fn test_ix_commit_order_book_change_10k_bytes() {
     .await;
 }
 
+#[tokio::test]
+async fn test_ix_commit_finalize_order_book_change_10k_bytes() {
+    commit_book_order_account(
+        10 * 1024,
+        CommitStrategy::DiffBuffer,
+        ScheduleCommitType::CommitFinalize,
+    )
+    .await;
+}
+
 async fn commit_single_account(
     bytes: usize,
     expected_strategy: CommitStrategy,
-    undelegate: bool,
+    commit_type: ScheduleCommitType,
 ) {
     init_logger!();
 
@@ -199,13 +259,27 @@ async fn commit_single_account(
         account,
         remote_slot: Default::default(),
     };
-    let base_intent = if undelegate {
-        MagicBaseIntent::CommitAndUndelegate(CommitAndUndelegate {
-            commit_action: CommitType::Standalone(vec![account]),
-            undelegate_action: UndelegateType::Standalone,
-        })
-    } else {
-        MagicBaseIntent::Commit(CommitType::Standalone(vec![account]))
+    let base_intent = match commit_type {
+        ScheduleCommitType::Commit => {
+            MagicBaseIntent::Commit(CommitType::Standalone(vec![account]))
+        }
+        ScheduleCommitType::CommitAndUndelegate => {
+            MagicBaseIntent::CommitAndUndelegate(CommitAndUndelegate {
+                commit_action: CommitType::Standalone(vec![account]),
+                undelegate_action: UndelegateType::Standalone,
+            })
+        }
+        ScheduleCommitType::CommitFinalize => {
+            MagicBaseIntent::CommitFinalize(CommitType::Standalone(vec![
+                account,
+            ]))
+        }
+        ScheduleCommitType::CommitFinalizeAndUndelegate => {
+            MagicBaseIntent::CommitFinalizeAndUndelegate(CommitAndUndelegate {
+                commit_action: CommitType::Standalone(vec![account]),
+                undelegate_action: UndelegateType::Standalone,
+            })
+        }
     };
 
     let intent = ScheduledBaseIntentWrapper {
@@ -268,16 +342,26 @@ async fn commit_book_order_account(
         remote_slot: Default::default(),
     };
     let base_intent = match commit_type {
+        ScheduleCommitType::Commit => {
+            MagicBaseIntent::Commit(CommitType::Standalone(vec![account]))
+        }
         ScheduleCommitType::CommitAndUndelegate => {
             MagicBaseIntent::CommitAndUndelegate(CommitAndUndelegate {
                 commit_action: CommitType::Standalone(vec![account]),
                 undelegate_action: UndelegateType::Standalone,
             })
         }
-        ScheduleCommitType::Commit => {
-            MagicBaseIntent::Commit(CommitType::Standalone(vec![account]))
+        ScheduleCommitType::CommitFinalize => {
+            MagicBaseIntent::CommitFinalize(CommitType::Standalone(vec![
+                account,
+            ]))
         }
-        _ => todo!("not done yet"),
+        ScheduleCommitType::CommitFinalizeAndUndelegate => {
+            MagicBaseIntent::CommitFinalizeAndUndelegate(CommitAndUndelegate {
+                commit_action: CommitType::Standalone(vec![account]),
+                undelegate_action: UndelegateType::Standalone,
+            })
+        }
     };
 
     let intent = ScheduledBaseIntentWrapper {
@@ -853,13 +937,6 @@ fn validate_account(
     let matches_data =
         acc.data() == expected_data && acc.lamports() == expected_lamports;
     let matches_undelegation = acc.owner().eq(&expected_owner);
-
-    println!(
-        "{matches_data} / {matches_undelegation} - {} == {}",
-        acc.owner(),
-        expected_owner
-    );
-
     let matches_all = matches_data && matches_undelegation;
 
     if !matches_all && remaining_tries.is_multiple_of(4) {

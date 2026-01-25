@@ -160,10 +160,8 @@ where
         let committed_pubkeys = match base_intent.get_committed_pubkeys() {
             Some(value) => value,
             None => {
-                // TODO (snawaz): it's actually MagicBaseIntent::BaseActionse scenario.
-                // do something here so that we do not have to call "commit_tasks".
-                // or simply rename this to something generic and return Either<commit_tasks,
-                // base_actions>;
+                // TODO (snawaz): it's actually MagicBaseIntent::BaseActionse scenario, not Commit
+                // scenario. The related code needs little bit of refactoring.
                 let commit_tasks = TaskBuilderImpl::commit_tasks(
                     &self.task_info_fetcher,
                     &base_intent,
