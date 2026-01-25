@@ -1,9 +1,6 @@
 use std::{collections::HashSet, time::Duration};
 
 use guinea::GuineaInstruction;
-use magicblock_core::link::transactions::{
-    recv_status_timeout, resubscribe_status_rx,
-};
 use solana_account::{ReadableAccount, WritableAccount};
 use solana_keypair::Keypair;
 use solana_program::{
@@ -160,7 +157,6 @@ async fn test_escrowed_payer_success() {
 #[tokio::test]
 async fn test_fee_charged_for_failed_transaction() {
     let env = ExecutionTestEnv::new();
-    let mut status_rx = resubscribe_status_rx(&env.dispatch.transaction_status);
     let initial_bal = env.get_payer().lamports();
 
     // Create invalid instruction (writing to empty data)
@@ -175,7 +171,11 @@ async fn test_fee_charged_for_failed_transaction() {
     let txn = env.build_transaction(&[ix]);
     env.transaction_scheduler.schedule(txn).await.unwrap();
 
-    let status = recv_status_timeout(&mut status_rx, TIMEOUT).await.unwrap();
+    let status = env
+        .dispatch
+        .transaction_status
+        .recv_timeout(TIMEOUT)
+        .unwrap();
     assert!(status.meta.status.is_err(), "Transaction should fail");
     assert_eq!(
         env.get_payer().lamports(),
@@ -187,7 +187,6 @@ async fn test_fee_charged_for_failed_transaction() {
 #[tokio::test]
 async fn test_escrow_charged_for_failed_transaction() {
     let env = ExecutionTestEnv::new();
-    let mut status_rx = resubscribe_status_rx(&env.dispatch.transaction_status);
     let mut payer = env.get_payer();
     payer.set_lamports(0);
     payer.set_delegated(false);
@@ -208,7 +207,11 @@ async fn test_escrow_charged_for_failed_transaction() {
     let txn = env.build_transaction(&[ix]);
     env.transaction_scheduler.schedule(txn).await.unwrap();
 
-    let status = recv_status_timeout(&mut status_rx, TIMEOUT).await.unwrap();
+    let status = env
+        .dispatch
+        .transaction_status
+        .recv_timeout(TIMEOUT)
+        .unwrap();
     assert!(status.meta.status.is_err(), "Transaction should fail");
     assert_eq!(
         env.get_account(escrow).lamports(),
@@ -220,7 +223,6 @@ async fn test_escrow_charged_for_failed_transaction() {
 #[tokio::test]
 async fn test_transaction_gasless_mode() {
     let env = ExecutionTestEnv::new_with_config(0, 1, false);
-    let mut status_rx = resubscribe_status_rx(&env.dispatch.transaction_status);
     let mut payer = env.get_payer();
     payer.set_lamports(1);
     payer.set_delegated(false);
@@ -239,7 +241,11 @@ async fn test_transaction_gasless_mode() {
         .await
         .expect("Gasless tx failed");
 
-    let status = recv_status_timeout(&mut status_rx, TIMEOUT).await.unwrap();
+    let status = env
+        .dispatch
+        .transaction_status
+        .recv_timeout(TIMEOUT)
+        .unwrap();
     assert_eq!(status.txn.signatures()[0], sig);
     assert!(status.meta.status.is_ok());
     assert_eq!(
@@ -252,7 +258,6 @@ async fn test_transaction_gasless_mode() {
 #[tokio::test]
 async fn test_transaction_gasless_mode_with_non_existent_account() {
     let env = ExecutionTestEnv::new_with_config(0, 1, false);
-    let mut status_rx = resubscribe_status_rx(&env.dispatch.transaction_status);
     let mut payer = env.get_payer();
     payer.set_lamports(1);
     payer.set_delegated(false);
@@ -271,7 +276,11 @@ async fn test_transaction_gasless_mode_with_non_existent_account() {
         .await
         .expect("Gasless tx with missing acc failed");
 
-    let status = recv_status_timeout(&mut status_rx, TIMEOUT).await.unwrap();
+    let status = env
+        .dispatch
+        .transaction_status
+        .recv_timeout(TIMEOUT)
+        .unwrap();
     assert!(status.meta.status.is_ok());
     assert_eq!(
         env.get_payer().lamports(),

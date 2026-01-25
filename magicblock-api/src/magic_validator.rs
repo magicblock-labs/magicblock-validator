@@ -38,6 +38,11 @@ use magicblock_config::{
     },
     ValidatorParams,
 };
+#[cfg(feature = "tui")]
+use magicblock_core::tui::{
+    tui_block_channel, tui_transaction_status_channel, TuiBlockUpdateRx,
+    TuiBlockUpdateTx, TuiTransactionStatusRx, TuiTransactionStatusTx,
+};
 use magicblock_core::{
     link::{
         blocks::BlockUpdateTx, link, transactions::TransactionSchedulerHandle,
@@ -78,6 +83,8 @@ use tokio::runtime::Builder;
 use tokio_util::sync::CancellationToken;
 use tracing::*;
 
+#[cfg(feature = "tui")]
+use crate::tickers::init_slot_ticker_with_tui;
 use crate::{
     domain_registry_manager::DomainRegistryManager,
     errors::{ApiError, ApiResult},
@@ -118,13 +125,14 @@ pub struct MagicValidator {
     identity: Pubkey,
     transaction_scheduler: TransactionSchedulerHandle,
     block_udpate_tx: BlockUpdateTx,
-    /// Receiver for block updates (for TUI consumption)
     #[cfg(feature = "tui")]
-    block_update_rx: magicblock_core::link::blocks::BlockUpdateRx,
-    /// Receiver for transaction status (for TUI consumption)
+    tui_block_tx: TuiBlockUpdateTx,
     #[cfg(feature = "tui")]
-    transaction_status_rx:
-        magicblock_core::link::transactions::TransactionStatusRx,
+    tui_block_rx: TuiBlockUpdateRx,
+    #[cfg(feature = "tui")]
+    tui_transaction_status_tx: TuiTransactionStatusTx,
+    #[cfg(feature = "tui")]
+    tui_transaction_status_rx: TuiTransactionStatusRx,
     _metrics: (MetricsService, tokio::task::JoinHandle<()>),
     claim_fees_task: ClaimFeesTask,
     task_scheduler: Option<TaskSchedulerService>,
@@ -246,6 +254,8 @@ impl MagicValidator {
                 .auto_airdrop_lamports
                 > 0,
             shutdown: token.clone(),
+            #[cfg(feature = "tui")]
+            tui_transaction_status_tx: Some(tui_transaction_status_tx.clone()),
         };
         TRANSACTION_COUNT.inc_by(ledger.count_transactions()? as u64);
         // Faucet keypair is only used for airdrops, which are not allowed in
@@ -282,9 +292,10 @@ impl MagicValidator {
         );
 
         #[cfg(feature = "tui")]
-        let block_update_rx = dispatch.block_update.resubscribe();
+        let (tui_block_tx, tui_block_rx) = tui_block_channel();
         #[cfg(feature = "tui")]
-        let transaction_status_rx = dispatch.transaction_status.resubscribe();
+        let (tui_transaction_status_tx, tui_transaction_status_rx) =
+            tui_transaction_status_channel();
 
         let rpc = initialize_aperture(
             &config.aperture,
@@ -343,9 +354,13 @@ impl MagicValidator {
             transaction_scheduler: dispatch.transaction_scheduler,
             block_udpate_tx: validator_channels.block_update,
             #[cfg(feature = "tui")]
-            block_update_rx,
+            tui_block_tx,
             #[cfg(feature = "tui")]
-            transaction_status_rx,
+            tui_block_rx,
+            #[cfg(feature = "tui")]
+            tui_transaction_status_tx,
+            #[cfg(feature = "tui")]
+            tui_transaction_status_rx,
             task_scheduler: Some(task_scheduler),
             transaction_execution,
         })
@@ -650,15 +665,31 @@ impl MagicValidator {
                 .start(frequency, self.config.rpc_url().to_owned());
         }
 
-        self.slot_ticker = Some(init_slot_ticker(
-            self.accountsdb.clone(),
-            &self.scheduled_commits_processor,
-            self.ledger.clone(),
-            self.config.ledger.block_time,
-            self.transaction_scheduler.clone(),
-            self.block_udpate_tx.clone(),
-            self.exit.clone(),
-        ));
+        #[cfg(feature = "tui")]
+        {
+            self.slot_ticker = Some(init_slot_ticker_with_tui(
+                self.accountsdb.clone(),
+                &self.scheduled_commits_processor,
+                self.ledger.clone(),
+                self.config.ledger.block_time,
+                self.transaction_scheduler.clone(),
+                self.block_udpate_tx.clone(),
+                self.tui_block_tx.clone(),
+                self.exit.clone(),
+            ));
+        }
+        #[cfg(not(feature = "tui"))]
+        {
+            self.slot_ticker = Some(init_slot_ticker(
+                self.accountsdb.clone(),
+                &self.scheduled_commits_processor,
+                self.ledger.clone(),
+                self.config.ledger.block_time,
+                self.transaction_scheduler.clone(),
+                self.block_udpate_tx.clone(),
+                self.exit.clone(),
+            ));
+        }
 
         self.ledger_truncator.start();
 
@@ -757,19 +788,15 @@ impl MagicValidator {
     /// Returns the block update receiver for TUI consumption.
     /// Note: This resubscribes to the broadcast channel so each consumer sees all updates.
     #[cfg(feature = "tui")]
-    pub fn block_update_rx(
-        &self,
-    ) -> magicblock_core::link::blocks::BlockUpdateRx {
-        self.block_update_rx.resubscribe()
+    pub fn block_update_rx(&self) -> TuiBlockUpdateRx {
+        self.tui_block_rx.resubscribe()
     }
 
     /// Returns the transaction status receiver for TUI consumption.
     /// Note: This resubscribes to the broadcast channel (all subscribers see all messages).
     #[cfg(feature = "tui")]
-    pub fn transaction_status_rx(
-        &self,
-    ) -> magicblock_core::link::transactions::TransactionStatusRx {
-        self.transaction_status_rx.resubscribe()
+    pub fn transaction_status_rx(&self) -> TuiTransactionStatusRx {
+        self.tui_transaction_status_rx.resubscribe()
     }
 
     /// Prepares RocksDB for shutdown by cancelling all Manual compactions

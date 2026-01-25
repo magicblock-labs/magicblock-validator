@@ -8,6 +8,7 @@ mod events;
 mod logger;
 mod state;
 mod ui;
+mod utils;
 
 pub use app::run_tui;
 pub use logger::TuiTracingLayer;

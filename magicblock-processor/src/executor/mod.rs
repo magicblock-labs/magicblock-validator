@@ -12,6 +12,8 @@ use magicblock_core::link::{
         TransactionToProcessRx,
     },
 };
+#[cfg(feature = "tui")]
+use magicblock_core::tui::TuiTransactionStatusTx;
 use magicblock_ledger::{LatestBlock, LatestBlockInner, Ledger};
 use parking_lot::RwLockReadGuard;
 use serde::Serialize;
@@ -53,6 +55,8 @@ pub(super) struct TransactionExecutor {
     accounts_tx: AccountUpdateTx,
     tasks_tx: ScheduledTasksTx,
     ready_tx: Sender<ExecutorId>,
+    #[cfg(feature = "tui")]
+    tui_transaction_tx: Option<TuiTransactionStatusTx>,
 
     // Config
     is_auto_airdrop_lamports_enabled: bool,
@@ -100,6 +104,8 @@ impl TransactionExecutor {
             tasks_tx: state.tasks_tx.clone(),
             is_auto_airdrop_lamports_enabled: state
                 .is_auto_airdrop_lamports_enabled,
+            #[cfg(feature = "tui")]
+            tui_transaction_tx: state.tui_transaction_status_tx.clone(),
         };
 
         this.processor.fill_missing_sysvar_cache_entries(&this);

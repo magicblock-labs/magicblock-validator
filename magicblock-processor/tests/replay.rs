@@ -2,10 +2,7 @@ use std::time::Duration;
 
 use guinea::GuineaInstruction;
 use magicblock_accounts_db::traits::AccountsBank;
-use magicblock_core::link::transactions::{
-    recv_status_timeout, resubscribe_status_rx, try_recv_status,
-    SanitizeableTransaction,
-};
+use magicblock_core::link::transactions::SanitizeableTransaction;
 use solana_account::ReadableAccount;
 use solana_program::{
     instruction::{AccountMeta, Instruction},
@@ -72,8 +69,7 @@ async fn setup_replay_scenario(
         .unwrap();
 
     // 6. Drain channels (Cleanup notifications from the setup execution)
-    let mut status_rx = resubscribe_status_rx(&env.dispatch.transaction_status);
-    while try_recv_status(&mut status_rx).is_ok() {}
+    while env.dispatch.transaction_status.try_recv().is_ok() {}
     while env.dispatch.account_update.try_recv().is_ok() {}
 
     (transaction, pubkeys)
@@ -97,12 +93,10 @@ pub async fn test_replay_state_transition() {
 
     // 3. Verify No Side Effects (Notifications)
     assert!(
-        recv_status_timeout(
-            &mut resubscribe_status_rx(&env.dispatch.transaction_status),
-            TIMEOUT,
-        )
-        .await
-        .is_err(),
+        env.dispatch
+            .transaction_status
+            .recv_timeout(TIMEOUT)
+            .is_err(),
         "Replay should NOT broadcast status updates"
     );
     assert!(

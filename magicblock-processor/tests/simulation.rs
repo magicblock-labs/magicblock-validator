@@ -2,9 +2,7 @@ use std::time::Duration;
 
 use guinea::GuineaInstruction;
 use magicblock_accounts_db::traits::AccountsBank;
-use magicblock_core::link::transactions::{
-    recv_status_timeout, resubscribe_status_rx, TransactionSimulationResult,
-};
+use magicblock_core::link::transactions::TransactionSimulationResult;
 use solana_account::ReadableAccount;
 use solana_program::{
     instruction::{AccountMeta, Instruction},
@@ -54,7 +52,6 @@ async fn simulate_guinea(
 #[tokio::test]
 async fn test_absent_simulation_side_effects() {
     let env = ExecutionTestEnv::new();
-    let mut status_rx = resubscribe_status_rx(&env.dispatch.transaction_status);
     let (_, sig, pubkeys) = simulate_guinea(
         &env,
         GuineaInstruction::WriteByteToData(42),
@@ -64,7 +61,10 @@ async fn test_absent_simulation_side_effects() {
 
     // 1. Verify No Notifications
     assert!(
-        recv_status_timeout(&mut status_rx, TIMEOUT).await.is_err(),
+        env.dispatch
+            .transaction_status
+            .recv_timeout(TIMEOUT)
+            .is_err(),
         "Simulation triggered status update"
     );
     assert!(

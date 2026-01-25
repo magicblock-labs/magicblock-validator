@@ -5,6 +5,8 @@ use std::collections::VecDeque;
 use chrono::{DateTime, Utc};
 use tracing::Level;
 
+use crate::utils::url_encode;
+
 /// Configuration for the TUI
 #[derive(Clone)]
 pub struct TuiConfig {
@@ -194,24 +196,6 @@ pub struct TuiState {
     pub explorer_url: String,
     /// Help URL for footer
     pub help_url: String,
-}
-
-/// Simple URL encoding for the RPC URL
-pub fn url_encode(s: &str) -> String {
-    let mut encoded = String::with_capacity(s.len() * 3);
-    for c in s.chars() {
-        match c {
-            'A'..='Z' | 'a'..='z' | '0'..='9' | '-' | '_' | '.' | '~' => {
-                encoded.push(c);
-            }
-            _ => {
-                for byte in c.to_string().as_bytes() {
-                    encoded.push_str(&format!("%{:02X}", byte));
-                }
-            }
-        }
-    }
-    encoded
 }
 
 impl TuiState {

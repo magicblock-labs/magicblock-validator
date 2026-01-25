@@ -2,16 +2,8 @@ use std::sync::Arc;
 
 use magicblock_config::config::ApertureConfig;
 use magicblock_core::link::{
-    accounts::AccountUpdateRx,
-    blocks::{
-        recv_block_update, resubscribe_block_rx, BlockUpdateRx,
-        TryRecvErrorKind as BlockRecvErrorKind,
-    },
-    transactions::{
-        recv_status, resubscribe_status_rx, TransactionStatusRx,
-        TryRecvErrorKind as StatusRecvErrorKind,
-    },
-    DispatchEndpoints,
+    accounts::AccountUpdateRx, blocks::BlockUpdateRx,
+    transactions::TransactionStatusRx, DispatchEndpoints,
 };
 use tokio_util::sync::CancellationToken;
 use tracing::{info, instrument, warn};
@@ -69,16 +61,13 @@ impl EventProcessor {
         state: &SharedState,
         geyser: Arc<GeyserPluginManager>,
     ) -> ApertureResult<Self> {
-        let transaction_status_rx =
-            resubscribe_status_rx(&channels.transaction_status);
-        let block_update_rx = resubscribe_block_rx(&channels.block_update);
         Ok(Self {
             subscriptions: state.subscriptions.clone(),
             transactions: state.transactions.clone(),
             blocks: state.blocks.clone(),
             account_update_rx: channels.account_update.clone(),
-            transaction_status_rx,
-            block_update_rx,
+            transaction_status_rx: channels.transaction_status.clone(),
+            block_update_rx: channels.block_update.clone(),
             geyser,
         })
     }
@@ -118,90 +107,57 @@ impl EventProcessor {
     #[instrument(skip(self, cancel), fields(processor_id = id))]
     async fn run(self, id: usize, cancel: CancellationToken) {
         info!("Event processor started");
-        let EventProcessor {
-            subscriptions,
-            transactions,
-            blocks,
-            account_update_rx,
-            mut transaction_status_rx,
-            mut block_update_rx,
-            geyser,
-        } = self;
         loop {
             tokio::select! {
                 biased;
 
                 // Process a new block.
-                result = recv_block_update(&mut block_update_rx) => {
-                    let latest = match result {
-                        Ok(latest) => latest,
-                        Err(BlockRecvErrorKind::Lagged) => {
-                            continue;
-                        }
-                        Err(BlockRecvErrorKind::Closed) => {
-                            break;
-                        }
-                        Err(BlockRecvErrorKind::Empty) => {
-                            continue;
-                        }
-                    };
+                Ok(latest) = self.block_update_rx.recv_async() => {
                     // Notify subscribers waiting on slot updates.
-                    subscriptions.send_slot(latest.meta.slot);
+                    self.subscriptions.send_slot(latest.meta.slot);
                     // Notify registered geyser plugins (if any) of the latest slot.
-                    let _ = geyser.notify_slot(latest.meta.slot).inspect_err(|e| {
+                    let _ = self.geyser.notify_slot(latest.meta.slot).inspect_err(|e| {
                         warn!(error = ?e, "Geyser slot update failed");
                     });
                     // Notify listening geyser plugins
-                    let _ = geyser.notify_block(&latest).inspect_err(|e| {
+                    let _ = self.geyser.notify_block(&latest).inspect_err(|e| {
                         warn!(error = ?e, "Geyser block update failed");
                     });
                     // Update the global blocks cache with the latest block.
-                    blocks.set_latest(latest);
+                    self.blocks.set_latest(latest);
                 }
 
                 // Process a new account state update.
-                Ok(state) = account_update_rx.recv_async() => {
+                Ok(state) = self.account_update_rx.recv_async() => {
                     // Notify subscribers for this specific account.
-                    subscriptions.send_account_update(&state).await;
+                    self.subscriptions.send_account_update(&state).await;
                     // Notify subscribers for the program that owns the account.
-                    subscriptions.send_program_update(&state).await;
+                    self.subscriptions.send_program_update(&state).await;
                     // Notify registered geyser plugins (if any) of the account.
-                    let _ = geyser.notify_account(&state).inspect_err(|e| {
+                    let _ = self.geyser.notify_account(&state).inspect_err(|e| {
                         warn!(error = ?e, "Geyser account update failed");
                     });
                 }
 
                 // Process a new transaction status update.
-                result = recv_status(&mut transaction_status_rx) => {
-                    let status = match result {
-                        Ok(status) => status,
-                        Err(StatusRecvErrorKind::Lagged) => {
-                            continue;
-                        }
-                        Err(StatusRecvErrorKind::Closed) => {
-                            break;
-                        }
-                        Err(StatusRecvErrorKind::Empty) => {
-                            continue;
-                        }
-                    };
+                Ok(status) = self.transaction_status_rx.recv_async() => {
                     // Notify subscribers waiting on this specific transaction signature.
-                    subscriptions.send_signature_update(&status).await;
+                    self.subscriptions.send_signature_update(&status).await;
 
                     // Notify subscribers interested in transaction logs.
-                    subscriptions.send_logs_update(&status, status.slot);
+                    self.subscriptions.send_logs_update(&status, status.slot);
 
                     // Notify listening geyser plugins
-                    let _ = geyser.notify_transaction(&status).inspect_err(|e| {
+                    let _ = self.geyser.notify_transaction(&status).inspect_err(|e| {
                         warn!(error = ?e, "Geyser transaction update failed");
                     });
 
                     // Update the global transaction cache.
                     let result = SignatureResult {
                         slot: status.slot,
-                        result: status.meta.status.clone()
+                        result: status.meta.status
                     };
-                    transactions.push(*status.txn.signature(), Some(result));
+                    self.transactions.push(*status.txn.signature(), Some(result));
                 }
                 // Listen for the cancellation signal to gracefully shut down.
                 _ = cancel.cancelled() => {

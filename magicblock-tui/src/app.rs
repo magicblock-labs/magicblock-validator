@@ -13,9 +13,7 @@ use crossterm::{
     terminal::{self, EnterAlternateScreen, LeaveAlternateScreen},
     ExecutableCommand,
 };
-use magicblock_core::link::{
-    blocks::BlockUpdateRx, transactions::TransactionStatusRx,
-};
+use magicblock_core::tui::{TuiBlockUpdateRx, TuiTransactionStatusRx};
 use ratatui::{backend::CrosstermBackend, Terminal};
 use serde::Deserialize;
 use tokio::sync::{broadcast::error::TryRecvError, mpsc::UnboundedReceiver};
@@ -33,6 +31,7 @@ use crate::{
         LogEntry, TransactionDetail, TransactionEntry, TuiConfig, TuiState,
     },
     ui,
+    utils::url_encode,
 };
 
 /// Terminal type alias
@@ -44,8 +43,8 @@ type Term = Terminal<CrosstermBackend<Stdout>>;
 /// the user quits or the cancellation token is triggered.
 pub async fn run_tui(
     config: TuiConfig,
-    block_rx: BlockUpdateRx,
-    tx_status_rx: TransactionStatusRx,
+    block_rx: TuiBlockUpdateRx,
+    tx_status_rx: TuiTransactionStatusRx,
     cancel: CancellationToken,
 ) -> io::Result<()> {
     // Set up log capture channel
@@ -122,8 +121,8 @@ fn restore_terminal(terminal: &mut Term) -> io::Result<()> {
 async fn run_event_loop(
     terminal: &mut Term,
     state: &mut TuiState,
-    mut block_rx: BlockUpdateRx,
-    mut tx_status_rx: TransactionStatusRx,
+    mut block_rx: TuiBlockUpdateRx,
+    mut tx_status_rx: TuiTransactionStatusRx,
     mut log_rx: UnboundedReceiver<LogEntry>,
     cancel: CancellationToken,
 ) -> io::Result<()> {
@@ -206,7 +205,7 @@ async fn run_event_loop(
         loop {
             match block_rx.try_recv() {
                 Ok(block) => {
-                    state.update_slot(block.meta.slot);
+                    state.update_slot(block.slot);
                 }
                 Err(TryRecvError::Empty) => break,
                 Err(TryRecvError::Lagged(_)) => continue,
@@ -219,9 +218,9 @@ async fn run_event_loop(
             match tx_status_rx.try_recv() {
                 Ok(tx_status) => {
                     let entry = TransactionEntry {
-                        signature: tx_status.txn.signature().to_string(),
+                        signature: tx_status.signature.to_string(),
                         slot: tx_status.slot,
-                        success: tx_status.meta.status.is_ok(),
+                        success: tx_status.success,
                         timestamp: Utc::now(),
                     };
                     state.push_transaction(entry);
@@ -254,7 +253,6 @@ async fn run_event_loop(
 #[derive(Debug, Deserialize)]
 struct RpcResponse<T> {
     result: Option<T>,
-    #[allow(dead_code)]
     error: Option<RpcError>,
 }
 
@@ -360,24 +358,6 @@ fn build_explorer_url(rpc_url: &str, signature: &str) -> String {
     )
 }
 
-/// Simple URL encoding
-fn url_encode(s: &str) -> String {
-    let mut encoded = String::with_capacity(s.len() * 3);
-    for c in s.chars() {
-        match c {
-            'A'..='Z' | 'a'..='z' | '0'..='9' | '-' | '_' | '.' | '~' => {
-                encoded.push(c);
-            }
-            _ => {
-                for byte in c.to_string().as_bytes() {
-                    encoded.push_str(&format!("%{:02X}", byte));
-                }
-            }
-        }
-    }
-    encoded
-}
-
 /// Open a URL in the default browser
 fn open_url_in_browser(url: &str) -> std::io::Result<()> {
     #[cfg(target_os = "macos")]
@@ -393,6 +373,17 @@ fn open_url_in_browser(url: &str) -> std::io::Result<()> {
         std::process::Command::new("cmd")
             .args(["/C", "start", url])
             .spawn()?;
+    }
+    #[cfg(not(any(
+        target_os = "macos",
+        target_os = "linux",
+        target_os = "windows"
+    )))]
+    {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "Opening URLs is not supported on this platform",
+        ));
     }
     Ok(())
 }

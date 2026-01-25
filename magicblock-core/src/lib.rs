@@ -17,5 +17,7 @@ pub mod link;
 pub mod tls;
 pub mod token_programs;
 pub mod traits;
+#[cfg(feature = "tui")]
+pub mod tui;
 
 pub mod logger;

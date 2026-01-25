@@ -1,7 +1,5 @@
 use accounts::{AccountUpdateRx, AccountUpdateTx};
 use blocks::{BlockUpdateRx, BlockUpdateTx};
-#[cfg(feature = "tui")]
-use tokio::sync::broadcast;
 use tokio::sync::mpsc;
 use transactions::{
     ScheduledTasksRx, ScheduledTasksTx, TransactionSchedulerHandle,
@@ -61,15 +59,8 @@ pub struct ValidatorChannelEndpoints {
 /// 2.  `ValidatorChannelEndpoints` for the "server" side (e.g., the transaction executor).
 pub fn link() -> (DispatchEndpoints, ValidatorChannelEndpoints) {
     // Unbounded channels for high-throughput multicast where backpressure is not desired.
-    #[cfg(feature = "tui")]
-    let (transaction_status_tx, transaction_status_rx) =
-        broadcast::channel(LINK_CAPACITY);
-    #[cfg(not(feature = "tui"))]
     let (transaction_status_tx, transaction_status_rx) = flume::unbounded();
     let (account_update_tx, account_update_rx) = flume::unbounded();
-    #[cfg(feature = "tui")]
-    let (block_update_tx, block_update_rx) = broadcast::channel(LINK_CAPACITY);
-    #[cfg(not(feature = "tui"))]
     let (block_update_tx, block_update_rx) = flume::unbounded();
     let (tasks_tx, tasks_rx) = mpsc::unbounded_channel();
 

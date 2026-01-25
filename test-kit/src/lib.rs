@@ -145,6 +145,8 @@ impl ExecutionTestEnv {
             environment,
             is_auto_airdrop_lamports_enabled: false,
             shutdown: Default::default(),
+            #[cfg(feature = "tui")]
+            tui_transaction_status_tx: None,
         };
 
         // Start/Defer the transaction processing backend.

@@ -9,7 +9,7 @@ edition.workspace = true
 
 [dependencies]
 
-tokio = { workspace = true, features = ["sync", "time"] }
+tokio = { workspace = true, features = ["sync"] }
 flume = { workspace = true }
 
 solana-account = { workspace = true }

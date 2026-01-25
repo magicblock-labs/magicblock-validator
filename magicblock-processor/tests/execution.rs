@@ -1,9 +1,6 @@
 use std::{collections::HashSet, time::Duration};
 
 use guinea::GuineaInstruction;
-use magicblock_core::link::transactions::{
-    recv_status_timeout, resubscribe_status_rx,
-};
 use solana_account::ReadableAccount;
 use solana_program::{
     instruction::{AccountMeta, Instruction},
@@ -70,12 +67,13 @@ async fn test_transaction_with_return_data() {
 #[tokio::test]
 async fn test_transaction_status_update() {
     let env = ExecutionTestEnv::new();
-    let mut status_rx = resubscribe_status_rx(&env.dispatch.transaction_status);
     let (sig, _) =
         execute_guinea(&env, GuineaInstruction::PrintSizes, false).await;
 
-    let status = recv_status_timeout(&mut status_rx, TIMEOUT)
-        .await
+    let status = env
+        .dispatch
+        .transaction_status
+        .recv_timeout(TIMEOUT)
         .expect("Status update missing");
 
     assert_eq!(status.txn.signatures()[0], sig);
@@ -86,14 +84,15 @@ async fn test_transaction_status_update() {
 #[tokio::test]
 async fn test_transaction_modifies_accounts() {
     let env = ExecutionTestEnv::new();
-    let mut status_rx = resubscribe_status_rx(&env.dispatch.transaction_status);
     let (_, accounts) =
         execute_guinea(&env, GuineaInstruction::WriteByteToData(42), true)
             .await;
 
     // 1. Verify DB state modifications
-    let status = recv_status_timeout(&mut status_rx, TIMEOUT)
-        .await
+    let status = env
+        .dispatch
+        .transaction_status
+        .recv_timeout(TIMEOUT)
         .expect("Status update missing");
 
     // Skip fee payer, check the guinea accounts

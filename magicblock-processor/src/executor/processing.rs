@@ -3,7 +3,7 @@ use magicblock_core::{
     link::{
         accounts::{AccountWithSlot, LockedAccount},
         transactions::{
-            to_status_message, TransactionSimulationResult, TransactionStatus,
+            TransactionSimulationResult, TransactionStatus,
             TxnExecutionResultTx, TxnSimulationResultTx,
         },
     },
@@ -258,9 +258,19 @@ impl super::TransactionExecutor {
             txn,
             meta,
         };
+        #[cfg(feature = "tui")]
+        let tui_status = magicblock_core::tui::TuiTransactionStatus {
+            signature: *status.txn.signature(),
+            slot: status.slot,
+            success: status.meta.status.is_ok(),
+        };
 
         // Notify listeners
-        let _ = self.transaction_tx.send(to_status_message(status));
+        let _ = self.transaction_tx.send(status);
+        #[cfg(feature = "tui")]
+        if let Some(tui_tx) = self.tui_transaction_tx.as_ref() {
+            let _ = tui_tx.send(tui_status);
+        }
     }
 
     /// Persists account changes to AccountsDb and notifies listeners.

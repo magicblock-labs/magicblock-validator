@@ -5,6 +5,8 @@ use std::{
 
 use magicblock_accounts_db::AccountsDb;
 use magicblock_core::link::blocks::{BlockMeta, BlockUpdate, BlockUpdateTx};
+#[cfg(feature = "tui")]
+use magicblock_core::tui::{TuiBlockUpdate, TuiBlockUpdateTx};
 use magicblock_ledger::{errors::LedgerResult, Ledger};
 use solana_program::clock::Slot;
 use solana_sha256_hasher::Hasher;
@@ -62,6 +64,51 @@ pub fn advance_slot_and_update_ledger(
     };
 
     let _ = block_update_tx.send(update);
+
+    (ledger_result, next_slot)
+}
+
+#[cfg(feature = "tui")]
+pub fn advance_slot_and_update_ledger_with_tui(
+    accountsdb: &Arc<AccountsDb>,
+    ledger: &Ledger,
+    block_update_tx: &BlockUpdateTx,
+    tui_block_update_tx: &TuiBlockUpdateTx,
+) -> (LedgerResult<()>, Slot) {
+    // This is the latest "confirmed" block, written to the ledger
+    let latest_block = ledger.latest_block().load();
+    // And this is not yet "confirmed" slot, which doesn't have an associated "block"
+    // same as latest_block.slot + 1, accountsdb is always 1 slot ahead of the ledger;
+    let current_slot = accountsdb.slot();
+    // Determine next blockhash
+    let blockhash = {
+        let mut hasher = Hasher::default();
+        hasher.hash(latest_block.blockhash.as_ref());
+        hasher.hash(&current_slot.to_le_bytes());
+        hasher.result()
+    };
+
+    let next_slot = current_slot + 1;
+
+    accountsdb.set_slot(next_slot);
+
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64;
+    let ledger_result = ledger.write_block(current_slot, timestamp, blockhash);
+    let meta = BlockMeta {
+        slot: current_slot,
+        time: timestamp,
+    };
+    let update = BlockUpdate {
+        hash: blockhash,
+        meta,
+    };
+    let tui_update: TuiBlockUpdate = meta;
+
+    let _ = block_update_tx.send(update);
+    let _ = tui_block_update_tx.send(tui_update);
 
     (ledger_result, next_slot)
 }

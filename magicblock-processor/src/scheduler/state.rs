@@ -7,6 +7,8 @@ use magicblock_core::link::{
         ScheduledTasksTx, TransactionStatusTx, TransactionToProcessRx,
     },
 };
+#[cfg(feature = "tui")]
+use magicblock_core::tui::TuiTransactionStatusTx;
 use magicblock_ledger::Ledger;
 use serde::Serialize;
 use solana_account::AccountSharedData;
@@ -38,6 +40,8 @@ pub struct TransactionSchedulerState {
     pub txn_to_process_rx: TransactionToProcessRx,
     pub account_update_tx: AccountUpdateTx,
     pub transaction_status_tx: TransactionStatusTx,
+    #[cfg(feature = "tui")]
+    pub tui_transaction_status_tx: Option<TuiTransactionStatusTx>,
     pub tasks_tx: ScheduledTasksTx,
 
     // Configuration

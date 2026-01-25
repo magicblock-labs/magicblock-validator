@@ -11,6 +11,8 @@ use magicblock_accounts_db::{traits::AccountsBank, AccountsDb};
 use magicblock_core::link::{
     blocks::BlockUpdateTx, transactions::TransactionSchedulerHandle,
 };
+#[cfg(feature = "tui")]
+use magicblock_core::tui::TuiBlockUpdateTx;
 use magicblock_ledger::{LatestBlock, Ledger};
 use magicblock_magic_program_api as magic_program;
 use magicblock_metrics::metrics;
@@ -20,6 +22,8 @@ use tokio_util::sync::CancellationToken;
 use tracing::*;
 
 use crate::slot::advance_slot_and_update_ledger;
+#[cfg(feature = "tui")]
+use crate::slot::advance_slot_and_update_ledger_with_tui;
 
 pub fn init_slot_ticker<C: ScheduledCommitsProcessor>(
     accountsdb: Arc<AccountsDb>,
@@ -60,6 +64,63 @@ pub fn init_slot_ticker<C: ScheduledCommitsProcessor>(
 
             // If accounts were scheduled to be committed, we accept them here
             // and processs the commits
+            let magic_context_acc = accountsdb.get_account(&magic_program::MAGIC_CONTEXT_PUBKEY)
+                .expect("Validator found to be running without MagicContext account!");
+            if MagicContext::has_scheduled_commits(magic_context_acc.data()) {
+                handle_scheduled_commits(
+                    committor_processor,
+                    &transaction_scheduler,
+                    &latest_block,
+                )
+                .await;
+            }
+            if log {
+                debug!(slot = next_slot, "Advanced to slot");
+            }
+        }
+        metrics::inc_slot();
+    })
+}
+
+#[cfg(feature = "tui")]
+pub fn init_slot_ticker_with_tui<C: ScheduledCommitsProcessor>(
+    accountsdb: Arc<AccountsDb>,
+    committor_processor: &Option<Arc<C>>,
+    ledger: Arc<Ledger>,
+    tick_duration: Duration,
+    transaction_scheduler: TransactionSchedulerHandle,
+    block_updates_tx: BlockUpdateTx,
+    tui_block_updates_tx: TuiBlockUpdateTx,
+    exit: Arc<AtomicBool>,
+) -> tokio::task::JoinHandle<()> {
+    let committor_processor = committor_processor.clone();
+
+    let latest_block = ledger.latest_block().clone();
+    tokio::task::spawn(async move {
+        let log = tick_duration >= Duration::from_secs(5);
+        while !exit.load(Ordering::Relaxed) {
+            tokio::time::sleep(tick_duration).await;
+
+            let (update_ledger_result, next_slot) =
+                advance_slot_and_update_ledger_with_tui(
+                    &accountsdb,
+                    &ledger,
+                    &block_updates_tx,
+                    &tui_block_updates_tx,
+                );
+            if let Err(err) = update_ledger_result {
+                error!(error = ?err, "Failed to write block");
+            }
+
+            if log {
+                debug!(slot = next_slot, "Advanced to slot");
+            }
+            metrics::inc_slot();
+
+            let Some(committor_processor) = &committor_processor else {
+                continue;
+            };
+
             let magic_context_acc = accountsdb.get_account(&magic_program::MAGIC_CONTEXT_PUBKEY)
                 .expect("Validator found to be running without MagicContext account!");
             if MagicContext::has_scheduled_commits(magic_context_acc.data()) {

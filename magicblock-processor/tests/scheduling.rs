@@ -4,9 +4,6 @@ use std::{
 };
 
 use guinea::GuineaInstruction;
-use magicblock_core::link::transactions::{
-    recv_status_timeout, resubscribe_status_rx,
-};
 use solana_account::ReadableAccount;
 use solana_program::{
     instruction::{AccountMeta, Instruction},
@@ -104,7 +101,6 @@ async fn collect_statuses(
 ) -> Vec<Signature> {
     let start = Instant::now();
     let mut results = Vec::with_capacity(count);
-    let mut status_rx = resubscribe_status_rx(&env.dispatch.transaction_status);
 
     while results.len() < count {
         if start.elapsed() > limit {
@@ -114,9 +110,11 @@ async fn collect_statuses(
             );
         }
         // Short poll interval
-        if let Ok(status) =
-            recv_status_timeout(&mut status_rx, Duration::from_millis(100))
-                .await
+        if let Ok(Ok(status)) = tokio::time::timeout(
+            Duration::from_millis(100),
+            env.dispatch.transaction_status.recv_async(),
+        )
+        .await
         {
             assert!(
                 status.meta.status.is_ok(),
