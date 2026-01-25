@@ -1,6 +1,6 @@
 //! Custom tracing layer for capturing logs to TUI
 
-use tokio::sync::mpsc::UnboundedSender;
+use tokio::sync::mpsc::Sender;
 use tracing::{
     field::{Field, Visit},
     Event, Level, Subscriber,
@@ -11,13 +11,13 @@ use crate::state::LogEntry;
 
 /// A tracing layer that captures log events and sends them to the TUI
 pub struct TuiTracingLayer {
-    tx: UnboundedSender<LogEntry>,
+    tx: Sender<LogEntry>,
     min_level: Level,
 }
 
 impl TuiTracingLayer {
     /// Create a new TUI tracing layer
-    pub fn new(tx: UnboundedSender<LogEntry>, min_level: Level) -> Self {
+    pub fn new(tx: Sender<LogEntry>, min_level: Level) -> Self {
         Self { tx, min_level }
     }
 }
@@ -44,8 +44,8 @@ where
             visitor.message,
         );
 
-        // Non-blocking send - if the channel is full or closed, we just drop the log
-        let _ = self.tx.send(entry);
+        // Non-blocking send - drop if the buffer is full or the channel is closed
+        let _ = self.tx.try_send(entry);
     }
 }
 

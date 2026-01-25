@@ -1,5 +1,7 @@
 //! Shared utility functions
 
+use std::fmt::Write;
+
 /// URL-encode a string for use in query parameters
 ///
 /// Encodes all characters except unreserved characters as defined in RFC 3986:
@@ -12,8 +14,9 @@ pub fn url_encode(s: &str) -> String {
                 encoded.push(c);
             }
             _ => {
-                for byte in c.to_string().as_bytes() {
-                    encoded.push_str(&format!("%{:02X}", byte));
+                let mut buf = [0u8; 4];
+                for byte in c.encode_utf8(&mut buf).as_bytes() {
+                    let _ = write!(&mut encoded, "%{:02X}", byte);
                 }
             }
         }

@@ -121,8 +121,14 @@ pub fn init_slot_ticker_with_tui<C: ScheduledCommitsProcessor>(
                 continue;
             };
 
-            let magic_context_acc = accountsdb.get_account(&magic_program::MAGIC_CONTEXT_PUBKEY)
-                .expect("Validator found to be running without MagicContext account!");
+            let Some(magic_context_acc) =
+                accountsdb.get_account(&magic_program::MAGIC_CONTEXT_PUBKEY)
+            else {
+                error!(
+                    "Missing MagicContext account; skipping scheduled commits"
+                );
+                continue;
+            };
             if MagicContext::has_scheduled_commits(magic_context_acc.data()) {
                 handle_scheduled_commits(
                     committor_processor,

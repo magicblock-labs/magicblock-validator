@@ -94,8 +94,8 @@ pub fn advance_slot_and_update_ledger_with_tui(
 
     let timestamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_secs() as i64;
+        .map(|duration| duration.as_secs() as i64)
+        .unwrap_or(0);
     let ledger_result = ledger.write_block(current_slot, timestamp, blockhash);
     let meta = BlockMeta {
         slot: current_slot,

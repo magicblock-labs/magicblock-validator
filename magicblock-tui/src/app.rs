@@ -16,7 +16,7 @@ use crossterm::{
 use magicblock_core::tui::{TuiBlockUpdateRx, TuiTransactionStatusRx};
 use ratatui::{backend::CrosstermBackend, Terminal};
 use serde::Deserialize;
-use tokio::sync::{broadcast::error::TryRecvError, mpsc::UnboundedReceiver};
+use tokio::sync::{broadcast::error::TryRecvError, mpsc::Receiver};
 use tokio_util::sync::CancellationToken;
 use tracing::Level;
 use tracing_log::LogTracer;
@@ -47,8 +47,8 @@ pub async fn run_tui(
     tx_status_rx: TuiTransactionStatusRx,
     cancel: CancellationToken,
 ) -> io::Result<()> {
-    // Set up log capture channel
-    let (log_tx, log_rx) = tokio::sync::mpsc::unbounded_channel();
+    // Set up log capture channel with bounded capacity to prevent unbounded memory growth
+    let (log_tx, log_rx) = tokio::sync::mpsc::channel(1000);
 
     // Initialize the tracing subscriber with our custom layer
     let _ = LogTracer::init();
@@ -123,7 +123,7 @@ async fn run_event_loop(
     state: &mut TuiState,
     mut block_rx: TuiBlockUpdateRx,
     mut tx_status_rx: TuiTransactionStatusRx,
-    mut log_rx: UnboundedReceiver<LogEntry>,
+    mut log_rx: Receiver<LogEntry>,
     cancel: CancellationToken,
 ) -> io::Result<()> {
     // Use zero timeout for non-blocking poll - we'll use tokio for timing
@@ -311,6 +311,7 @@ async fn fetch_transaction_detail(
 
     let response = client
         .post(rpc_url)
+        .timeout(Duration::from_secs(10))
         .json(&request_body)
         .send()
         .await

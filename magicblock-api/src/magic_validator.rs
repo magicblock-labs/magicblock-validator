@@ -208,6 +208,10 @@ impl MagicValidator {
 
         let (mut dispatch, validator_channels) = link();
 
+        #[cfg(feature = "tui")]
+        let (tui_transaction_status_tx, tui_transaction_status_rx) =
+            tui_transaction_status_channel();
+
         let committor_service = Self::init_committor_service(&config).await?;
         let chainlink = Arc::new(
             Self::init_chainlink(
@@ -293,9 +297,6 @@ impl MagicValidator {
 
         #[cfg(feature = "tui")]
         let (tui_block_tx, tui_block_rx) = tui_block_channel();
-        #[cfg(feature = "tui")]
-        let (tui_transaction_status_tx, tui_transaction_status_rx) =
-            tui_transaction_status_channel();
 
         let rpc = initialize_aperture(
             &config.aperture,

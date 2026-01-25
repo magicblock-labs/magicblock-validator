@@ -475,15 +475,19 @@ fn render_tx_detail_popup(frame: &mut Frame, state: &TuiState) {
         )));
         let max_logs = (popup_height as usize).saturating_sub(lines.len() + 4);
         for log in detail.logs.iter().take(max_logs) {
-            // Truncate long log lines (safe for UTF-8)
-            let max_chars = popup_width as usize - 4;
+            // Truncate long log lines (safe for UTF-8 and narrow terminals)
+            let max_chars = (popup_width as usize).saturating_sub(4);
             let truncated = if log.chars().count() > max_chars {
-                let truncate_at = log
-                    .char_indices()
-                    .nth(max_chars - 3)
-                    .map(|(i, _)| i)
-                    .unwrap_or(log.len());
-                format!("{}...", &log[..truncate_at])
+                if max_chars > 3 {
+                    let truncate_at = log
+                        .char_indices()
+                        .nth(max_chars - 3)
+                        .map(|(i, _)| i)
+                        .unwrap_or(log.len());
+                    format!("{}...", &log[..truncate_at])
+                } else {
+                    "...".to_string()
+                }
             } else {
                 log.clone()
             };
