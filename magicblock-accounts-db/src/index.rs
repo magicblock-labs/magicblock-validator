@@ -189,35 +189,31 @@ impl AccountsDbIndex {
     }
 
     /// Removes an account from all indices and marks its space as recyclable.
-    pub(crate) fn remove(&self, pubkey: &Pubkey) -> AccountsDbResult<()> {
-        let mut txn = self.env.begin_rw_txn()?;
-
+    pub(crate) fn remove(
+        &self,
+        pubkey: &Pubkey,
+        txn: &mut RwTransaction<'_>,
+    ) -> AccountsDbResult<()> {
         // Get allocation to know what to free
-        let allocation = match self.get_allocation(&txn, pubkey) {
+        let allocation = match self.get_allocation(txn, pubkey) {
             Ok(a) => a,
             Err(AccountsDbError::NotFound) => return Ok(()), // Idempotent
             Err(e) => return Err(e),
         };
 
         // Remove from Main Index
-        self.accounts.remove(&mut txn, pubkey, None)?;
+        self.accounts.remove(txn, pubkey, None)?;
 
         // Add to Deallocations Index
         let key = allocation.blocks.to_le_bytes();
         let val =
             bytes!(#pack, allocation.offset, Offset, allocation.blocks, Blocks);
-        self.deallocations.upsert(&mut txn, key, val)?;
+        self.deallocations.upsert(txn, key, val)?;
 
         // Remove from Secondary Indices
-        self.owners.remove(&mut txn, pubkey, None)?;
-        self.remove_program_index_entry(
-            pubkey,
-            None,
-            &mut txn,
-            allocation.offset,
-        )?;
+        self.remove_program_index_entry(pubkey, None, txn, allocation.offset)?;
+        self.owners.remove(txn, pubkey, None)?;
 
-        txn.commit()?;
         Ok(())
     }
 
@@ -228,19 +224,9 @@ impl AccountsDbIndex {
         new_owner: &Pubkey,
         txn: &mut RwTransaction,
     ) -> AccountsDbResult<()> {
-        let stored_owner_bytes = self.owners.get(txn, pubkey)?;
+        let owner_bytes = self.owners.get(txn, pubkey)?;
 
-        let needs_update = match stored_owner_bytes {
-            Some(bytes) => bytes != new_owner.as_ref(),
-            None => true,
-        };
-
-        if !needs_update {
-            return Ok(());
-        }
-
-        let old_owner =
-            stored_owner_bytes.map(|b| Pubkey::try_from(b).unwrap_or_default()); // Safe unwrap, if index isn't corrupt
+        let old_owner = owner_bytes.and_then(|b| Pubkey::try_from(b).ok());
 
         let allocation = self.get_allocation(txn, pubkey)?;
 
@@ -380,10 +366,7 @@ impl AccountsDbIndex {
     }
 
     pub(crate) fn flush(&self) {
-        let _ = self
-            .env
-            .sync(true)
-            .log_err(|| "main index flushing".to_string());
+        let _ = self.env.sync(true).log_err(|| "main index flushing");
     }
 
     pub(crate) fn reload(&mut self, dbpath: &Path) -> AccountsDbResult<()> {

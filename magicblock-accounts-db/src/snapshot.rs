@@ -30,9 +30,7 @@ enum SnapshotStrategy {
 impl SnapshotStrategy {
     /// Probes the filesystem at `dir` to determine if CoW operations are supported.
     fn detect(dir: &Path) -> AccountsDbResult<Self> {
-        if fs_backend::supports_reflink(dir)
-            .log_err(|| "CoW check failed".to_string())?
-        {
+        if fs_backend::supports_reflink(dir).log_err(|| "CoW check failed")? {
             info!("Snapshot Strategy: Reflink (Fast/CoW)");
             Ok(Self::Reflink)
         } else {
@@ -95,7 +93,7 @@ impl SnapshotManager {
             .ok_or_else(|| {
                 io::Error::new(io::ErrorKind::InvalidInput, "Invalid db_path")
             })
-            .log_err(|| "Failed to resolve snapshots directory".to_string())?
+            .log_err(|| "Failed to resolve snapshots directory")?
             .to_path_buf();
 
         // 1. Determine capabilities (CoW or Deep Copy)
@@ -103,7 +101,7 @@ impl SnapshotManager {
 
         // 2. Load and sort existing snapshots from the filesystem
         let registry = Self::recover_registry(&snapshots_dir, max_snapshots)
-            .log_err(|| "Failed to load snapshot registry".to_string())?;
+            .log_err(|| "Failed to load snapshot registry")?;
 
         Ok(Arc::new(Self {
             db_path,
@@ -143,7 +141,7 @@ impl SnapshotManager {
         // 3. Execute Snapshot
         self.strategy
             .execute(&self.db_path, &snap_path, memory_capture, lock)
-            .log_err(|| "Snapshot failed".to_string())?;
+            .log_err(|| "Snapshot failed")?;
 
         // 4. Register success
         self.registry.lock().push_back(snap_path);
@@ -199,7 +197,7 @@ impl SnapshotManager {
         // Stage current DB as backup
         if self.db_path.exists() {
             fs::rename(&self.db_path, &backup)
-                .log_err(|| "Failed to stage backup".to_string())?;
+                .log_err(|| "Failed to stage backup")?;
         }
 
         // Promote snapshot to active

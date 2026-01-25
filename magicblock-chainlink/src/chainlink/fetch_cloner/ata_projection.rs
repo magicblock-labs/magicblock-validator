@@ -1,8 +1,8 @@
 use std::sync::atomic::AtomicU16;
 
+use magicblock_accounts_db::traits::AccountsBank;
 use magicblock_core::{
     logger::log_trace_warn, token_programs::try_derive_eata_address_and_bump,
-    traits::AccountsBank,
 };
 use magicblock_metrics::metrics;
 use solana_account::AccountSharedData;

@@ -144,8 +144,7 @@ impl AccountsStorage {
 
         if mmap.len() < METADATA_STORAGE_SIZE {
             return Err(AccountsDbError::Internal(
-                "memory map length is less than metadata requirement"
-                    .to_string(),
+                "memory map length is less than metadata requirement".into(),
             ));
         }
 
@@ -201,7 +200,7 @@ impl AccountsStorage {
                 "AccountsDB corruption detected"
             );
             return Err(AccountsDbError::Internal(
-                "AccountsDB file corrupted".to_string(),
+                "AccountsDB file corrupted".into(),
             ));
         }
         Ok(())
@@ -352,7 +351,7 @@ impl AccountsStorage {
         let _ = self
             .mmap
             .flush()
-            .log_err(|| "failed to sync flush the mmap".to_string());
+            .log_err(|| "failed to sync flush the mmap");
     }
 
     /// Reloads the database from a different path (used for snapshots).

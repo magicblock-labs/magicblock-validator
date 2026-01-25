@@ -12,7 +12,7 @@ use std::{
     time::Instant,
 };
 
-use magicblock_accounts_db::AccountsDb;
+use magicblock_accounts_db::{traits::AccountsBank, AccountsDb};
 use magicblock_aperture::{
     initialize_aperture,
     state::{ChainlinkImpl, NodeContext, SharedState},
@@ -22,9 +22,7 @@ use magicblock_config::{
     config::{ApertureConfig, ChainLinkConfig},
     types::BindAddress,
 };
-use magicblock_core::{
-    link::accounts::LockedAccount, traits::AccountsBank, Slot,
-};
+use magicblock_core::{link::accounts::LockedAccount, Slot};
 use magicblock_ledger::LatestBlock;
 use solana_account::{ReadableAccount, WritableAccount};
 use solana_keypair::Keypair;

@@ -1,7 +1,8 @@
 use std::{collections::HashSet, sync::atomic::Ordering};
 
 use dlp::pda::delegation_record_pda_from_delegated_account;
-use magicblock_core::{token_programs::is_ata, traits::AccountsBank};
+use magicblock_accounts_db::traits::AccountsBank;
+use magicblock_core::token_programs::is_ata;
 use magicblock_metrics::metrics::AccountFetchOrigin;
 use solana_account::{AccountSharedData, ReadableAccount};
 use solana_pubkey::Pubkey;
@@ -277,6 +278,9 @@ where
         let mut record_subs = Vec::with_capacity(accounts_fully_resolved.len());
         let mut accounts_to_clone = plain;
 
+        // Collect unique owner programs to subscribe to concurrently
+        let mut owner_programs_to_subscribe: HashSet<Pubkey> = HashSet::new();
+
         // Now process the accounts (this can fail without affecting unsubscription)
         for AccountWithCompanion {
             pubkey,
@@ -330,6 +334,12 @@ where
                     &mut account,
                     &delegation_record,
                 );
+
+                // Collect unique owner programs to subscribe concurrently after the loop
+                if account.delegated() {
+                    owner_programs_to_subscribe.insert(delegation_record.owner);
+                }
+
                 (commit_freq, delegated_to_other)
             } else {
                 missing_delegation_record.push((pubkey, account.remote_slot()));
@@ -340,6 +350,29 @@ where
                 account: account.into_account_shared_data(),
                 commit_frequency_ms,
                 delegated_to_other,
+            });
+        }
+
+        // Subscribe to owner programs concurrently in background (best-effort)
+        if !owner_programs_to_subscribe.is_empty() {
+            let remote_account_provider = this.remote_account_provider.clone();
+            tokio::spawn(async move {
+                let subscribe_futures =
+                    owner_programs_to_subscribe.into_iter().map(|owner| {
+                        let provider = remote_account_provider.clone();
+                        async move {
+                            let result =
+                                provider.subscribe_program(owner).await;
+                            (owner, result)
+                        }
+                    });
+                let results =
+                    futures_util::future::join_all(subscribe_futures).await;
+                for (owner, result) in results {
+                    if let Err(err) = result {
+                        warn!(program_id = %owner, error = %err, "Failed to subscribe to owner program");
+                    }
+                }
             });
         }
 

@@ -1,7 +1,6 @@
 use std::path::Path;
 
-use magicblock_accounts_db::AccountsDb;
-use magicblock_core::traits::AccountsBank;
+use magicblock_accounts_db::{traits::AccountsBank, AccountsDb};
 use magicblock_magic_program_api as magic_program;
 use magicblock_program::MagicContext;
 use solana_account::{AccountSharedData, WritableAccount};

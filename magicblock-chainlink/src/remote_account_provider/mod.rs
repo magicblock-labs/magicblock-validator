@@ -101,8 +101,19 @@ pub struct RemoteAccountProvider<T: ChainRpcClient, U: ChainPubsubClient> {
     /// Minimal tracking of accounts currently being fetched to handle race conditions
     /// between fetch and subscription updates. Only used during active fetch operations.
     fetching_accounts: Arc<FetchingAccounts>,
-    /// The current slot on chain, derived from the latest update of the clock
-    /// account that we received
+    /// The current slot on chain.
+    ///
+    /// This value is updated from two sources and always stores the maximum
+    /// slot seen from either:
+    ///
+    /// 1. **WebSocket**: Updated in [RemoteAccountProvider::listen_for_account_updates] when clock
+    ///    account (`clock::ID`) subscription updates are received.
+    ///
+    /// 2. **GRPC**: Updated directly in [chain_laser_actor::ChainLaserActor::process_subscription_update]
+    ///    when slot updates [UpdateOneof::Slot] are received from the GRPC stream.
+    ///
+    /// Both sources use `fetch_max()` to ensure this value is monotonically
+    /// increasing and reflects the highest known slot from any source.
     chain_slot: Arc<AtomicU64>,
 
     /// The slot of the last account update we received
@@ -490,8 +501,10 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
 
                 if update.pubkey == clock::ID {
                     // We show as part of test_chain_pubsub_client_clock that the response
-                    // context slot always matches the slot encoded in the slot data
-                    chain_slot.store(slot, Ordering::Relaxed);
+                    // context slot always matches the slot encoded in the slot data.
+                    // Use fetch_max to ensure we always keep the highest slot value,
+                    // since GRPC may have already updated chain_slot to a higher value.
+                    chain_slot.fetch_max(slot, Ordering::Relaxed);
                     // NOTE: we do not forward clock updates
                 } else {
                     trace!(

@@ -7,9 +7,8 @@ use hyper::{
     body::{Bytes, Incoming},
     Request, Response,
 };
-use magicblock_core::{
-    link::transactions::SanitizeableTransaction, traits::AccountsBank,
-};
+use magicblock_accounts_db::traits::AccountsBank;
+use magicblock_core::link::transactions::SanitizeableTransaction;
 use magicblock_metrics::metrics::{AccountFetchOrigin, ENSURE_ACCOUNTS_TIME};
 use prelude::JsonBody;
 use solana_account::AccountSharedData;

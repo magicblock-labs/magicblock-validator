@@ -8,7 +8,7 @@ use std::{
 };
 
 pub use guinea;
-use magicblock_accounts_db::AccountsDb;
+use magicblock_accounts_db::{traits::AccountsBank, AccountsDb};
 use magicblock_core::{
     link::{
         blocks::{BlockMeta, BlockUpdate, BlockUpdateTx},
@@ -19,7 +19,6 @@ use magicblock_core::{
         },
         DispatchEndpoints,
     },
-    traits::AccountsBank,
     Slot,
 };
 use magicblock_ledger::Ledger;

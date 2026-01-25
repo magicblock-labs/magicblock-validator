@@ -10,10 +10,10 @@ use std::{
 use dlp::{
     pda::delegation_record_pda_from_delegated_account, state::DelegationRecord,
 };
+use magicblock_accounts_db::traits::AccountsBank;
 use magicblock_config::config::AllowedProgram;
-use magicblock_core::{
-    token_programs::{is_ata, try_derive_eata_address_and_bump, MaybeIntoAta},
-    traits::AccountsBank,
+use magicblock_core::token_programs::{
+    is_ata, try_derive_eata_address_and_bump, MaybeIntoAta,
 };
 use magicblock_metrics::metrics::{self, AccountFetchOrigin};
 use scc::{hash_map::Entry, HashMap};
@@ -383,8 +383,26 @@ where
                                 );
 
                                 // For accounts delegated to us, always unsubscribe from the delegated account
+                                // and subscribe to the original owner program for undelegation update resilience
                                 if account.delegated() {
                                     subs_to_remove.insert(pubkey);
+
+                                    // Subscribe to the original owner program for undelegation update resilience
+                                    // Fire-and-forget to avoid blocking subscription updates
+                                    let provider =
+                                        self.remote_account_provider.clone();
+                                    let owner = delegation_record.owner;
+                                    tokio::spawn(async move {
+                                        if let Err(err) = provider
+                                            .subscribe_program(owner)
+                                            .await
+                                        {
+                                            warn!(
+                                                "Failed to subscribe to owner program {} for account {}: {}",
+                                                owner, pubkey, err
+                                            );
+                                        }
+                                    });
                                 }
 
                                 (

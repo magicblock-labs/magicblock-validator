@@ -228,6 +228,12 @@ where
         };
         for (client, _) in &clients {
             metrics::set_pubsub_client_uptime(client.id(), true);
+            if let Some(delay_ms) = client.current_resub_delay_ms() {
+                metrics::set_pubsub_client_resubscribe_delay(
+                    client.id(),
+                    delay_ms,
+                );
+            }
         }
 
         let clients = Self::spawn_reconnectors(
@@ -337,18 +343,26 @@ where
         connected_clients: Arc<AtomicU16>,
         connected_clients_subscribing_immediately: Arc<AtomicU16>,
     ) {
-        fn fib_with_max(n: u64) -> u64 {
+        fn fib_with_max_secs(n: u64) -> u64 {
             let (mut a, mut b) = (0u64, 1u64);
             for _ in 0..n {
                 (a, b) = (b, a.saturating_add(b));
             }
-            a.min(600)
+            // 1h max wait
+            a.min(3_600)
         }
 
         const WARN_EVERY_ATTEMPTS: u64 = 10;
         let mut attempt = 0;
         loop {
             attempt += 1;
+            // Track the current resubscription delay for this client
+            if let Some(delay_ms) = client.current_resub_delay_ms() {
+                metrics::set_pubsub_client_resubscribe_delay(
+                    client.id(),
+                    delay_ms,
+                );
+            }
             if Self::reconnect_client(
                 client.clone(),
                 &accounts_tracker,
@@ -358,6 +372,15 @@ where
             )
             .await
             {
+                // Reset metrics on successful reconnect
+                metrics::set_pubsub_client_reconnect_backoff_duration_seconds(
+                    client.id(),
+                    0,
+                );
+                metrics::set_pubsub_client_failed_reconnect_attempts(
+                    client.id(),
+                    0,
+                );
                 debug!(
                     client_id = %client.id(),
                     attempt,
@@ -365,18 +388,34 @@ where
                 );
                 break;
             } else {
-                if attempt % WARN_EVERY_ATTEMPTS == 0 {
-                    error!(
+                let wait_duration =
+                    Duration::from_secs(fib_with_max_secs(attempt));
+                // Update backoff duration metric
+                metrics::set_pubsub_client_reconnect_backoff_duration_seconds(
+                    client.id(),
+                    wait_duration.as_secs(),
+                );
+                // Record current failed attempt count after the failed attempt
+                metrics::set_pubsub_client_failed_reconnect_attempts(
+                    client.id(),
+                    attempt,
+                );
+                // Log at max once per minute or every WARN_EVERY_ATTEMPTS attempts
+                if attempt % WARN_EVERY_ATTEMPTS == 0
+                    || wait_duration.as_secs() >= 60
+                {
+                    warn!(
                         client_id = %client.id(),
                         attempt,
-                        "Failed to reconnect"
+                        wait_duration = ?wait_duration,
+                        "Failed to reconnect client, will retry after backoff"
                     );
                 }
-                let wait_duration = Duration::from_secs(fib_with_max(attempt));
                 tokio::time::sleep(wait_duration).await;
                 debug!(
                     client_id = %client.id(),
                     attempt,
+                    wait_duration = ?wait_duration,
                     "Reconnect attempt failed, will retry"
                 );
             }
@@ -424,7 +463,12 @@ where
         let account_subs = accounts_tracker.subscribed_accounts();
 
         if let Err(err) = client.resub_multiple(account_subs).await {
-            debug!(client_id = %client.id(), error = ?err, "Failed to resubscribe accounts after reconnect");
+            debug!(
+                client_id = %client.id(),
+                resub_delay_ms = ?client.current_resub_delay_ms(),
+                error = ?err,
+                "Failed to resubscribe accounts after reconnect"
+            );
             return false;
         }
 
