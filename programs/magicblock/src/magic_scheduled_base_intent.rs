@@ -61,7 +61,7 @@ pub struct ScheduledIntentBundle {
     pub id: u64,
     pub slot: Slot,
     pub blockhash: Hash,
-    pub intent_bundle_sent_transaction: Transaction,
+    pub sent_transaction: Transaction,
     pub payer: Pubkey,
     /// Scheduled intent bundle
     pub intent_bundle: MagicIntentBundle,
@@ -85,7 +85,7 @@ impl ScheduledIntentBundle {
             slot,
             blockhash,
             payer: *payer_pubkey,
-            intent_bundle_sent_transaction,
+            sent_transaction: intent_bundle_sent_transaction,
             intent_bundle,
         })
     }
@@ -255,6 +255,14 @@ impl MagicIntentBundle {
         &self,
         context: &ConstructionContext<'_, '_>,
     ) -> Result<(), InstructionError> {
+        if self.is_empty() {
+            ic_msg!(
+                context.invoke_context,
+                "ScheduleCommit ERR: intent bundle must not be empty.",
+            );
+            return Err(InstructionError::InvalidInstructionData);
+        }
+
         let mut seen = HashSet::<Pubkey>::new();
         let mut check =
             |accounts: &Vec<CommittedAccount>| -> Result<(), InstructionError> {

@@ -155,8 +155,7 @@ pub(crate) fn process_schedule_intent_bundle(
         );
     }
 
-    let action_sent_signature =
-        scheduled_intent.intent_bundle_sent_transaction.signatures[0];
+    let action_sent_signature = scheduled_intent.sent_transaction.signatures[0];
 
     context.add_scheduled_action(scheduled_intent);
     context_data.set_state(&context)?;

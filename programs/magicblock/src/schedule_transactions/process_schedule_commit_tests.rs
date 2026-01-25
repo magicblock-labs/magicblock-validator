@@ -232,7 +232,7 @@ fn assert_first_commit(
             slot,
             payer: actual_payer,
             blockhash: _,
-            intent_bundle_sent_transaction: _,
+            sent_transaction: _,
             intent_bundle,
         } => {
             assert!(id >= &0);

@@ -1200,7 +1200,7 @@ fn create_scheduled_intent(
         id: INTENT_ID.fetch_add(1, Ordering::Relaxed),
         slot: 10,
         blockhash: Hash::new_unique(),
-        intent_bundle_sent_transaction: Transaction::default(),
+        sent_transaction: Transaction::default(),
         payer: Pubkey::new_unique(),
         intent_bundle: base_intent.into(),
     }

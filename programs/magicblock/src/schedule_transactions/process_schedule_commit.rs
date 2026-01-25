@@ -273,7 +273,7 @@ pub(crate) fn process_schedule_commit(
         id: intent_id,
         slot: clock.slot,
         blockhash,
-        intent_bundle_sent_transaction: action_sent_transaction,
+        sent_transaction: action_sent_transaction,
         payer: *payer_pubkey,
         intent_bundle: base_intent,
     };

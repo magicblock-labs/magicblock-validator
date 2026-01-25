@@ -331,9 +331,7 @@ impl ScheduledBaseIntentMeta {
             blockhash: intent.blockhash,
             payer: intent.payer,
             included_pubkeys: intent.get_all_committed_pubkeys(),
-            intent_sent_transaction: intent
-                .intent_bundle_sent_transaction
-                .clone(),
+            intent_sent_transaction: intent.sent_transaction.clone(),
             requested_undelegation: intent.has_undelegate_intent(),
         }
     }

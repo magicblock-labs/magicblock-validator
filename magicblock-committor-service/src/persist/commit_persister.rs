@@ -490,7 +490,7 @@ mod tests {
         ]
     }
 
-    fn commit_only_budle() -> MagicIntentBundle {
+    fn commit_only_bundle() -> MagicIntentBundle {
         MagicIntentBundle {
             commit: Some(CommitType::Standalone(test_accounts())),
             commit_and_undelegate: None,
@@ -536,7 +536,7 @@ mod tests {
             id,
             slot: 100,
             blockhash: Hash::new_unique(),
-            intent_bundle_sent_transaction: Transaction::default(),
+            sent_transaction: Transaction::default(),
             payer: Pubkey::new_unique(),
             intent_bundle,
         }
@@ -544,7 +544,7 @@ mod tests {
 
     #[test]
     fn test_create_commit_rows_commit_only() {
-        let message = create_test_message(1, commit_only_budle());
+        let message = create_test_message(1, commit_only_bundle());
         let rows = IntentPersisterImpl::create_commit_rows(&message);
 
         assert_eq!(rows.len(), 2);
@@ -587,7 +587,7 @@ mod tests {
     #[test]
     fn test_start_base_message_commit_only() {
         let (persister, _temp_file) = create_test_persister();
-        let message = create_test_message(1, commit_only_budle());
+        let message = create_test_message(1, commit_only_bundle());
 
         persister.start_base_intent(&message).unwrap();
 
@@ -603,7 +603,7 @@ mod tests {
     #[test]
     fn test_start_base_messages_mixed() {
         let (persister, _temp_file) = create_test_persister();
-        let message1 = create_test_message(1, commit_only_budle()); // 2 rows
+        let message1 = create_test_message(1, commit_only_bundle()); // 2 rows
         let message2 = create_test_message(2, undelegate_only_bundle()); // 2 rows
         let message3 = create_test_message(3, bundle_both()); // 4 rows
         let message4 = create_test_message(4, bundle_none()); // 0 rows
@@ -633,7 +633,7 @@ mod tests {
     #[test]
     fn test_update_status() {
         let (persister, _temp_file) = create_test_persister();
-        let message = create_test_message(1, commit_only_budle());
+        let message = create_test_message(1, commit_only_bundle());
         persister.start_base_intent(&message).unwrap();
 
         let pubkey = message.get_all_committed_pubkeys()[0];
@@ -672,7 +672,7 @@ mod tests {
     #[test]
     fn test_set_commit_strategy() {
         let (persister, _temp_file) = create_test_persister();
-        let message = create_test_message(1, commit_only_budle());
+        let message = create_test_message(1, commit_only_bundle());
         persister.start_base_intent(&message).unwrap();
 
         let pubkey = message.get_all_committed_pubkeys()[0];
@@ -692,7 +692,7 @@ mod tests {
     #[test]
     fn test_get_signatures() {
         let (persister, _temp_file) = create_test_persister();
-        let message = create_test_message(1, commit_only_budle());
+        let message = create_test_message(1, commit_only_bundle());
         persister.start_base_intent(&message).unwrap();
 
         let statuses = persister.get_commit_statuses_by_message(1).unwrap();

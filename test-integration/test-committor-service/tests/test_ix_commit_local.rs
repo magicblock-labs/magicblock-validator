@@ -191,7 +191,7 @@ async fn commit_single_account(
         id: 0,
         slot: 10,
         blockhash: Hash::new_unique(),
-        intent_bundle_sent_transaction: Transaction::default(),
+        sent_transaction: Transaction::default(),
         payer: counter_auth.pubkey(),
         intent_bundle: base_intent.into(),
     };
@@ -255,7 +255,7 @@ async fn commit_book_order_account(
         id: 0,
         slot: 10,
         blockhash: Hash::new_unique(),
-        intent_bundle_sent_transaction: Transaction::default(),
+        sent_transaction: Transaction::default(),
         payer: payer.pubkey(),
         intent_bundle: base_intent.into(),
     };
@@ -615,7 +615,7 @@ async fn commit_multiple_accounts(
             id: id as u64,
             slot: 0,
             blockhash: Hash::new_unique(),
-            intent_bundle_sent_transaction: Transaction::default(),
+            sent_transaction: Transaction::default(),
             payer: Pubkey::new_unique(),
             intent_bundle: base_intent.into(),
         })
@@ -663,7 +663,7 @@ async fn execute_intent_bundle(
         id: 0,
         slot: 0,
         blockhash: Hash::new_unique(),
-        intent_bundle_sent_transaction: Transaction::default(),
+        sent_transaction: Transaction::default(),
         payer: Pubkey::new_unique(),
         intent_bundle,
     };
