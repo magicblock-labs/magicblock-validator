@@ -40,7 +40,9 @@ use magicblock_config::{
 };
 use magicblock_core::{
     link::{
-        blocks::BlockUpdateTx, link, transactions::TransactionSchedulerHandle,
+        blocks::{BlockUpdateRx, BlockUpdateTx},
+        link,
+        transactions::{TransactionSchedulerHandle, TransactionStatusRx},
     },
     Slot,
 };
@@ -118,6 +120,10 @@ pub struct MagicValidator {
     identity: Pubkey,
     transaction_scheduler: TransactionSchedulerHandle,
     block_udpate_tx: BlockUpdateTx,
+    /// Receiver for block updates (for TUI consumption)
+    block_update_rx: BlockUpdateRx,
+    /// Receiver for transaction status (for TUI consumption)
+    transaction_status_rx: TransactionStatusRx,
     _metrics: (MetricsService, tokio::task::JoinHandle<()>),
     claim_fees_task: ClaimFeesTask,
     task_scheduler: Option<TaskSchedulerService>,
@@ -273,6 +279,12 @@ impl MagicValidator {
             ledger.clone(),
             chainlink.clone(),
         );
+
+        // Clone receivers for TUI before passing dispatch to aperture
+        // (block updates are broadcast so all consumers see each message)
+        let block_update_rx = dispatch.block_update.resubscribe();
+        let transaction_status_rx = dispatch.transaction_status.clone();
+
         let rpc = initialize_aperture(
             &config.aperture,
             shared_state,
@@ -329,6 +341,8 @@ impl MagicValidator {
             identity: validator_pubkey,
             transaction_scheduler: dispatch.transaction_scheduler,
             block_udpate_tx: validator_channels.block_update,
+            block_update_rx,
+            transaction_status_rx,
             task_scheduler: Some(task_scheduler),
             transaction_execution,
         })
@@ -729,6 +743,33 @@ impl MagicValidator {
 
     pub fn ledger(&self) -> &Ledger {
         &self.ledger
+    }
+
+    /// Returns the cancellation token for coordinated shutdown
+    pub fn cancellation_token(&self) -> &CancellationToken {
+        &self.token
+    }
+
+    /// Returns the block update receiver for TUI consumption.
+    /// Note: This resubscribes to the broadcast channel so each consumer sees all updates.
+    pub fn block_update_rx(&self) -> BlockUpdateRx {
+        self.block_update_rx.resubscribe()
+    }
+
+    /// Returns the transaction status receiver for TUI consumption.
+    /// Note: This clones the flume receiver (cheap, MPMC channel).
+    pub fn transaction_status_rx(&self) -> TransactionStatusRx {
+        self.transaction_status_rx.clone()
+    }
+
+    /// Returns the validator configuration
+    pub fn config(&self) -> &ValidatorParams {
+        &self.config
+    }
+
+    /// Returns the validator identity pubkey
+    pub fn identity(&self) -> &Pubkey {
+        &self.identity
     }
 
     /// Prepares RocksDB for shutdown by cancelling all Manual compactions

@@ -12,13 +12,15 @@ default-run = "magicblock-validator"
 console-subscriber = { workspace = true, optional = true }
 magicblock-api = { workspace = true }
 magicblock-core = { workspace = true }
-tracing = { workspace = true }
 magicblock-config = { workspace = true }
+magicblock-tui = { workspace = true, optional = true }
 magicblock-version = { workspace = true }
 num_cpus = { workspace = true }
 solana-signer = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread"] }
+tracing = { workspace = true }
 
 [features]
 default = []
 tokio-console = ["console-subscriber", "tokio/tracing"]
+tui = ["magicblock-tui"]

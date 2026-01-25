@@ -1,6 +1,6 @@
 use accounts::{AccountUpdateRx, AccountUpdateTx};
 use blocks::{BlockUpdateRx, BlockUpdateTx};
-use tokio::sync::mpsc;
+use tokio::sync::{broadcast, mpsc};
 use transactions::{
     ScheduledTasksRx, ScheduledTasksTx, TransactionSchedulerHandle,
     TransactionStatusRx, TransactionStatusTx, TransactionToProcessRx,
@@ -61,7 +61,7 @@ pub fn link() -> (DispatchEndpoints, ValidatorChannelEndpoints) {
     // Unbounded channels for high-throughput multicast where backpressure is not desired.
     let (transaction_status_tx, transaction_status_rx) = flume::unbounded();
     let (account_update_tx, account_update_rx) = flume::unbounded();
-    let (block_update_tx, block_update_rx) = flume::unbounded();
+    let (block_update_tx, block_update_rx) = broadcast::channel(LINK_CAPACITY);
     let (tasks_tx, tasks_rx) = mpsc::unbounded_channel();
 
     // Bounded channels for command queues where applying backpressure is important.

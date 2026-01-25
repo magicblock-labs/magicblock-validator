@@ -1,0 +1,20 @@
+[package]
+name = "magicblock-tui"
+version.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+license.workspace = true
+edition.workspace = true
+
+[dependencies]
+chrono = { workspace = true }
+crossterm = { workspace = true }
+flume = { workspace = true }
+magicblock-core = { workspace = true }
+ratatui = { workspace = true }
+tokio = { workspace = true, features = ["sync", "time"] }
+tokio-util = { workspace = true }
+tracing = { workspace = true }
+tracing-log = { workspace = true }
+tracing-subscriber = { workspace = true }

@@ -22,6 +22,7 @@ members = [
   "magicblock-rpc-client",
   "magicblock-table-mania",
   "magicblock-task-scheduler",
+  "magicblock-tui",
   "magicblock-validator",
   "magicblock-validator-admin",
   "magicblock-version",
@@ -59,6 +60,7 @@ byteorder = "1.5.0"
 chrono = "0.4"
 clap = "4.5.40"
 console-subscriber = "0.5.0"
+crossterm = "0.28"
 derive_more = "2.0"
 dyn-clone = "1.0.20"
 ed25519-dalek = "1.0.1"
@@ -112,6 +114,7 @@ magicblock-program = { path = "./programs/magicblock" }
 magicblock-rpc-client = { path = "./magicblock-rpc-client" }
 magicblock-table-mania = { path = "./magicblock-table-mania" }
 magicblock-task-scheduler = { path = "./magicblock-task-scheduler" }
+magicblock-tui = { path = "./magicblock-tui" }
 magicblock-validator-admin = { path = "./magicblock-validator-admin" }
 magicblock-version = { path = "./magicblock-version" }
 
@@ -122,6 +125,7 @@ num_cpus = "1.16.0"
 parking_lot = "0.12"
 paste = "1.0"
 prometheus = "0.13.4"
+ratatui = "0.29"
 # Needs to match https://crates.io/crates/solana-storage-bigtable/2.1.13/dependencies
 prost = "0.11.9"
 protobuf-src = "1.1"
@@ -194,6 +198,7 @@ solana-timings = "2.2"
 solana-transaction = { version = "2.2" }
 solana-transaction-context = { version = "2.2", features = ["serde"] }
 solana-transaction-error = { version = "2.2" }
+
 solana-transaction-status = { version = "2.2" }
 solana-transaction-status-client-types = "2.2"
 static_assertions = "1.1.0"
@@ -228,6 +233,7 @@ version = "0.22.0"
 # some solana dependencies have solana-storage-proto as dependency
 # we need to patch them with our version, because they use protobuf-src v1.1.0
 # and we use protobuf-src v2.1.1. Otherwise compilation fails
+reqwest = { path = "vendor/reqwest" }
 solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "2246929" }
 solana-storage-proto = { path = "./storage-proto" }
 solana-svm = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "3e9456ec4" }
