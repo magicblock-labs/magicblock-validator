@@ -443,7 +443,7 @@ fn calculate_file_size(config: &AccountsDbConfig) -> usize {
 
 /// Represents a successful allocation within the storage.
 #[derive(Clone, Copy)]
-pub(crate) struct Allocation {
+pub struct Allocation {
     /// Raw pointer to the start of the allocated memory.
     pub(crate) ptr: NonNull<u8>,
     /// The block index (offset) of this allocation.
@@ -455,7 +455,7 @@ pub(crate) struct Allocation {
 /// A struct representing a previously known allocation.
 /// Used for recycling or testing equality.
 #[cfg_attr(test, derive(Debug, Eq, PartialEq))]
-pub(crate) struct ExistingAllocation {
+pub struct ExistingAllocation {
     /// The block index (offset) of this allocation.
     pub(crate) offset: Offset,
     /// The number of blocks reserved.

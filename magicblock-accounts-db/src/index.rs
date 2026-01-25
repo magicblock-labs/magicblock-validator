@@ -26,24 +26,25 @@ const OWNERS_INDEX: &str = "owners-idx";
 /// Handles secondary indices for mapping Pubkeys to storage offsets,
 /// tracking program ownership, and managing deallocated space.
 #[cfg_attr(test, derive(Debug))]
-pub(crate) struct AccountsDbIndex {
+pub struct AccountsDbIndex {
     /// Maps Account Pubkey -> (Storage Offset, Block Count).
-    accounts: Table,
+    pub accounts: Table,
     /// Maps Owner Pubkey -> (Storage Offset, Account Pubkey).
     /// Used for `get_program_accounts`.
-    programs: Table,
+    pub programs: Table,
     /// Maps Allocation Size (Blocks) -> (Storage Offset, Block Count).
     /// Used for finding recyclable "holes" in storage.
-    deallocations: Table,
+    pub deallocations: Table,
     /// Maps Account Pubkey -> Owner Pubkey.
     /// Used for cleaning up the `programs` index when an account changes owner.
-    owners: Table,
+    pub owners: Table,
     /// The LMDB Environment.
     env: Environment,
 }
 
 /// Helper macro to pack/unpack types into/from byte buffers.
 /// Uses unaligned writes/reads for performance and compactness.
+#[macro_export]
 macro_rules! bytes {
     (#pack, $val1: expr, $type1: ty, $val2: expr, $type2: ty) => {{
         const S1: usize = std::mem::size_of::<$type1>();
@@ -70,7 +71,7 @@ macro_rules! bytes {
 }
 
 impl AccountsDbIndex {
-    pub(crate) fn new(size: usize, directory: &Path) -> AccountsDbResult<Self> {
+    pub fn new(size: usize, directory: &Path) -> AccountsDbResult<Self> {
         let env = utils::create_lmdb_env(directory, size).log_err(|| {
             format!("main index env creation at {}", directory.display())
         })?;
@@ -108,10 +109,7 @@ impl AccountsDbIndex {
 
     /// Retrieves the storage offset for a given account.
     #[inline(always)]
-    pub(crate) fn get_offset(
-        &self,
-        pubkey: &Pubkey,
-    ) -> AccountsDbResult<Offset> {
+    pub fn get_offset(&self, pubkey: &Pubkey) -> AccountsDbResult<Offset> {
         let txn = self.env.begin_ro_txn()?;
         let Some(value_bytes) = self.accounts.get(&txn, pubkey)? else {
             return Err(AccountsDbError::NotFound);
@@ -131,7 +129,7 @@ impl AccountsDbIndex {
     /// 1. Marks the old space as deallocated (recyclable).
     /// 2. Updates the main index.
     /// 3. Updates secondary indices (programs, owners).
-    pub(crate) fn upsert_account(
+    pub fn upsert_account(
         &self,
         pubkey: &Pubkey,
         owner: &Pubkey,
@@ -344,9 +342,7 @@ impl AccountsDbIndex {
         OffsetPubkeyIter::new(&self.programs, txn, Some(program))
     }
 
-    pub(crate) fn get_all_accounts(
-        &self,
-    ) -> AccountsDbResult<OffsetPubkeyIter<'_>> {
+    pub fn get_all_accounts(&self) -> AccountsDbResult<OffsetPubkeyIter<'_>> {
         let txn = self.env.begin_ro_txn()?;
         OffsetPubkeyIter::new(&self.programs, txn, None)
     }
@@ -358,7 +354,7 @@ impl AccountsDbIndex {
         AccountOffsetFinder::new(&self.accounts, txn)
     }
 
-    pub(crate) fn get_accounts_count(&self) -> usize {
+    pub fn get_accounts_count(&self) -> usize {
         let Ok(txn) = self.env.begin_ro_txn() else {
             return 0;
         };
@@ -375,7 +371,7 @@ impl AccountsDbIndex {
         Ok(())
     }
 
-    pub(crate) fn rwtxn(&self) -> lmdb::Result<RwTransaction<'_>> {
+    pub fn rwtxn(&self) -> lmdb::Result<RwTransaction<'_>> {
         self.env.begin_rw_txn()
     }
 }

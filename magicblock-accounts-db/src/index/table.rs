@@ -5,8 +5,8 @@ use lmdb::{
 
 /// Wrapper around LMDB Database providing a safe, typed interface.
 #[cfg_attr(test, derive(Debug))]
-pub(super) struct Table {
-    db: Database,
+pub struct Table {
+    pub db: Database,
 }
 
 impl Table {
@@ -22,7 +22,7 @@ impl Table {
 
     /// Retrieves a value by key. Returns `None` if the key does not exist.
     #[inline]
-    pub(super) fn get<'txn, T: Transaction, K: AsRef<[u8]>>(
+    pub fn get<'txn, T: Transaction, K: AsRef<[u8]>>(
         &self,
         txn: &'txn T,
         key: K,
@@ -48,7 +48,7 @@ impl Table {
     /// Inserts a key-value pair **only if the key does not already exist**.
     /// Returns `true` if inserted, `false` if the key already existed.
     #[inline]
-    pub(super) fn insert<K: AsRef<[u8]>, V: AsRef<[u8]>>(
+    pub fn insert<K: AsRef<[u8]>, V: AsRef<[u8]>>(
         &self,
         txn: &mut RwTransaction,
         key: K,
@@ -65,7 +65,7 @@ impl Table {
     ///
     /// If `value` is provided, the deletion only occurs if the data in the DB matches.
     #[inline]
-    pub(super) fn remove<K: AsRef<[u8]>>(
+    pub fn remove<K: AsRef<[u8]>>(
         &self,
         txn: &mut RwTransaction,
         key: K,
@@ -79,7 +79,7 @@ impl Table {
 
     /// Opens a read-only cursor.
     #[inline]
-    pub(super) fn cursor_ro<'txn, T: Transaction>(
+    pub fn cursor_ro<'txn, T: Transaction>(
         &self,
         txn: &'txn T,
     ) -> lmdb::Result<RoCursor<'txn>> {
@@ -88,7 +88,7 @@ impl Table {
 
     /// Opens a read-write cursor.
     #[inline]
-    pub(super) fn cursor_rw<'txn>(
+    pub fn cursor_rw<'txn>(
         &self,
         txn: &'txn mut RwTransaction,
     ) -> lmdb::Result<RwCursor<'txn>> {
@@ -96,7 +96,7 @@ impl Table {
     }
 
     /// Returns the number of entries in the database.
-    pub(super) fn entries<T: Transaction>(&self, txn: &T) -> usize {
+    pub fn entries<T: Transaction>(&self, txn: &T) -> usize {
         txn.stat(self.db).map(|s| s.entries()).unwrap_or_default()
     }
 }

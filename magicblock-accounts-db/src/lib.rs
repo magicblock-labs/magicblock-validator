@@ -468,7 +468,7 @@ impl AccountsDb {
 }
 
 pub mod error;
-mod index;
+pub mod index;
 mod snapshot;
 mod storage;
 #[cfg(test)]
