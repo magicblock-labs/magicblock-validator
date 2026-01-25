@@ -67,7 +67,7 @@ impl EventProcessor {
             transactions: state.transactions.clone(),
             blocks: state.blocks.clone(),
             account_update_rx: channels.account_update.clone(),
-            transaction_status_rx: channels.transaction_status.clone(),
+            transaction_status_rx: channels.transaction_status.resubscribe(),
             block_update_rx: channels.block_update.resubscribe(),
             geyser,
         })
@@ -113,7 +113,7 @@ impl EventProcessor {
             transactions,
             blocks,
             account_update_rx,
-            transaction_status_rx,
+            mut transaction_status_rx,
             mut block_update_rx,
             geyser,
         } = self;
@@ -159,7 +159,16 @@ impl EventProcessor {
                 }
 
                 // Process a new transaction status update.
-                Ok(status) = transaction_status_rx.recv_async() => {
+                result = transaction_status_rx.recv() => {
+                    let status = match result {
+                        Ok(status) => status,
+                        Err(broadcast::error::RecvError::Lagged(_)) => {
+                            continue;
+                        }
+                        Err(broadcast::error::RecvError::Closed) => {
+                            break;
+                        }
+                    };
                     // Notify subscribers waiting on this specific transaction signature.
                     subscriptions.send_signature_update(&status).await;
 
@@ -174,7 +183,7 @@ impl EventProcessor {
                     // Update the global transaction cache.
                     let result = SignatureResult {
                         slot: status.slot,
-                        result: status.meta.status
+                        result: status.meta.status.clone()
                     };
                     transactions.push(*status.txn.signature(), Some(result));
                 }

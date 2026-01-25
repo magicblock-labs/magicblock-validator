@@ -58,8 +58,10 @@ pub struct ValidatorChannelEndpoints {
 /// 1.  `DispatchEndpoints` for the "client" side (e.g., RPC servers).
 /// 2.  `ValidatorChannelEndpoints` for the "server" side (e.g., the transaction executor).
 pub fn link() -> (DispatchEndpoints, ValidatorChannelEndpoints) {
-    // Unbounded channels for high-throughput multicast where backpressure is not desired.
-    let (transaction_status_tx, transaction_status_rx) = flume::unbounded();
+    // Broadcast channel for transaction status - all consumers receive all messages
+    let (transaction_status_tx, transaction_status_rx) =
+        broadcast::channel(LINK_CAPACITY);
+    // Unbounded channel for account updates where backpressure is not desired.
     let (account_update_tx, account_update_rx) = flume::unbounded();
     let (block_update_tx, block_update_rx) = broadcast::channel(LINK_CAPACITY);
     let (tasks_tx, tasks_rx) = mpsc::unbounded_channel();

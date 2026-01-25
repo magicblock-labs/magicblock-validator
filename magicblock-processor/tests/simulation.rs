@@ -11,6 +11,7 @@ use solana_program::{
 use solana_pubkey::Pubkey;
 use solana_signature::Signature;
 use test_kit::{ExecutionTestEnv, Signer};
+use tokio::time::timeout;
 
 const ACCOUNTS_COUNT: usize = 8;
 const TIMEOUT: Duration = Duration::from_millis(100);
@@ -52,6 +53,7 @@ async fn simulate_guinea(
 #[tokio::test]
 async fn test_absent_simulation_side_effects() {
     let env = ExecutionTestEnv::new();
+    let mut status_rx = env.dispatch.transaction_status.resubscribe();
     let (_, sig, pubkeys) = simulate_guinea(
         &env,
         GuineaInstruction::WriteByteToData(42),
@@ -61,10 +63,10 @@ async fn test_absent_simulation_side_effects() {
 
     // 1. Verify No Notifications
     assert!(
-        env.dispatch
-            .transaction_status
-            .recv_timeout(TIMEOUT)
-            .is_err(),
+        matches!(
+            timeout(TIMEOUT, status_rx.recv()).await,
+            Err(_) | Ok(Err(_))
+        ),
         "Simulation triggered status update"
     );
     assert!(

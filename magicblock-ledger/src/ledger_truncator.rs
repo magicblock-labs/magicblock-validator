@@ -12,7 +12,7 @@ use magicblock_metrics::metrics::{
 use solana_measure::measure::Measure;
 use tokio::{runtime::Builder, time::interval};
 use tokio_util::sync::CancellationToken;
-use tracing::{error, info, instrument, warn, debug};
+use tracing::{debug, error, info, instrument, warn};
 
 use crate::{
     database::{

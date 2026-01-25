@@ -1,10 +1,13 @@
+#[cfg(not(feature = "tui"))]
 mod shutdown;
 
 use magicblock_api::{ledger, magic_validator::MagicValidator};
 use magicblock_config::ValidatorParams;
 use solana_signer::Signer;
 use tokio::runtime::Builder;
-use tracing::{debug, error, info, instrument};
+#[cfg(not(feature = "tui"))]
+use tracing::info;
+use tracing::{debug, error, instrument};
 
 #[cfg(not(feature = "tui"))]
 use crate::shutdown::Shutdown;
@@ -123,7 +126,9 @@ async fn run() {
         let tx_status_rx = api.transaction_status_rx();
         let cancel = api.cancellation_token().clone();
 
-        if let Err(err) = run_tui(tui_config, block_rx, tx_status_rx, cancel).await {
+        if let Err(err) =
+            run_tui(tui_config, block_rx, tx_status_rx, cancel).await
+        {
             error!(error = ?err, "TUI error");
         }
     }

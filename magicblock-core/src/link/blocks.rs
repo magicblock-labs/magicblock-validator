@@ -1,5 +1,7 @@
-use tokio::sync::broadcast::{Receiver as BroadcastReceiver, Sender as BroadcastSender};
 use solana_hash::Hash;
+use tokio::sync::broadcast::{
+    Receiver as BroadcastReceiver, Sender as BroadcastSender,
+};
 
 use crate::Slot;
 

@@ -9,6 +9,7 @@ use solana_program::{
 use solana_pubkey::Pubkey;
 use solana_signature::Signature;
 use test_kit::{ExecutionTestEnv, Signer};
+use tokio::time::timeout;
 
 const ACCOUNTS_COUNT: usize = 8;
 const TIMEOUT: Duration = Duration::from_millis(200);
@@ -67,14 +68,14 @@ async fn test_transaction_with_return_data() {
 #[tokio::test]
 async fn test_transaction_status_update() {
     let env = ExecutionTestEnv::new();
+    let mut status_rx = env.dispatch.transaction_status.resubscribe();
     let (sig, _) =
         execute_guinea(&env, GuineaInstruction::PrintSizes, false).await;
 
-    let status = env
-        .dispatch
-        .transaction_status
-        .recv_timeout(TIMEOUT)
+    let status = timeout(TIMEOUT, status_rx.recv())
+        .await
         .expect("Status update missing");
+    let status = status.expect("Status update channel closed");
 
     assert_eq!(status.txn.signatures()[0], sig);
     let logs = status.meta.log_messages.as_ref().expect("Logs missing");
@@ -84,16 +85,16 @@ async fn test_transaction_status_update() {
 #[tokio::test]
 async fn test_transaction_modifies_accounts() {
     let env = ExecutionTestEnv::new();
+    let mut status_rx = env.dispatch.transaction_status.resubscribe();
     let (_, accounts) =
         execute_guinea(&env, GuineaInstruction::WriteByteToData(42), true)
             .await;
 
     // 1. Verify DB state modifications
-    let status = env
-        .dispatch
-        .transaction_status
-        .recv_timeout(TIMEOUT)
+    let status = timeout(TIMEOUT, status_rx.recv())
+        .await
         .expect("Status update missing");
+    let status = status.expect("Status update channel closed");
 
     // Skip fee payer, check the guinea accounts
     let account_keys: Vec<_> = status

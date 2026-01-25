@@ -102,6 +102,7 @@ async fn collect_statuses(
 ) -> Vec<Signature> {
     let start = Instant::now();
     let mut results = Vec::with_capacity(count);
+    let mut status_rx = env.dispatch.transaction_status.resubscribe();
 
     while results.len() < count {
         if start.elapsed() > limit {
@@ -111,11 +112,8 @@ async fn collect_statuses(
             );
         }
         // Short poll interval
-        if let Ok(Ok(status)) = timeout(
-            Duration::from_millis(100),
-            env.dispatch.transaction_status.recv_async(),
-        )
-        .await
+        if let Ok(Ok(status)) =
+            timeout(Duration::from_millis(100), status_rx.recv()).await
         {
             assert!(
                 status.meta.status.is_ok(),

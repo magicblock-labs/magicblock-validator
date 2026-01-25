@@ -1,4 +1,5 @@
-use flume::{Receiver as MpmcReceiver, Sender as MpmcSender};
+use std::sync::Arc;
+
 use magicblock_magic_program_api::args::TaskRequest;
 use solana_program::message::{
     inner_instruction::InnerInstructionsList, SimpleAddressLoader,
@@ -11,6 +12,7 @@ use solana_transaction_context::TransactionReturnData;
 use solana_transaction_error::TransactionError;
 use solana_transaction_status_client_types::TransactionStatusMeta;
 use tokio::sync::{
+    broadcast,
     mpsc::{Receiver, Sender, UnboundedReceiver, UnboundedSender},
     oneshot,
 };
@@ -18,12 +20,11 @@ use tokio::sync::{
 use super::blocks::BlockHash;
 use crate::Slot;
 
-/// The receiver end of the multi-producer, multi-consumer
-/// channel for communicating final transaction statuses.
-pub type TransactionStatusRx = MpmcReceiver<TransactionStatus>;
-/// The sender end of the multi-producer, multi-consumer
-/// channel for communicating final transaction statuses.
-pub type TransactionStatusTx = MpmcSender<TransactionStatus>;
+/// The receiver end of the broadcast channel for communicating final transaction statuses.
+/// All receivers see every message (unlike MPMC which distributes messages).
+pub type TransactionStatusRx = broadcast::Receiver<Arc<TransactionStatus>>;
+/// The sender end of the broadcast channel for communicating final transaction statuses.
+pub type TransactionStatusTx = broadcast::Sender<Arc<TransactionStatus>>;
 
 /// The receiver end of the channel used to send new transactions to the scheduler for processing.
 pub type TransactionToProcessRx = Receiver<ProcessableTransaction>;

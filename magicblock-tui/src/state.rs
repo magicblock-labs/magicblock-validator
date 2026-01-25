@@ -55,10 +55,16 @@ pub struct ValidatorConfig {
 
 impl From<&TuiConfig> for ValidatorConfig {
     fn from(config: &TuiConfig) -> Self {
+        // Replace 0.0.0.0 with localhost for display
+        let rpc_endpoint = config.rpc_url.replace("0.0.0.0", "localhost");
+        let ws_endpoint = config.ws_url.replace("0.0.0.0", "localhost");
         Self {
-            version: format!("{} (Git: {})", config.version, config.git_version),
-            rpc_endpoint: config.rpc_url.clone(),
-            ws_endpoint: config.ws_url.clone(),
+            version: format!(
+                "{} (Git: {})",
+                config.version, config.git_version
+            ),
+            rpc_endpoint,
+            ws_endpoint,
             remote_rpc: config.remote_rpc_url.clone(),
             validator_identity: config.validator_identity.clone(),
             ledger_path: config.ledger_path.clone(),
@@ -73,25 +79,25 @@ impl From<&TuiConfig> for ValidatorConfig {
 #[derive(Clone, Copy, PartialEq, Eq, Default)]
 pub enum Tab {
     #[default]
-    Logs,
     Transactions,
+    Logs,
     Config,
 }
 
 impl Tab {
     pub fn next(self) -> Self {
         match self {
-            Tab::Logs => Tab::Transactions,
-            Tab::Transactions => Tab::Config,
-            Tab::Config => Tab::Logs,
+            Tab::Transactions => Tab::Logs,
+            Tab::Logs => Tab::Config,
+            Tab::Config => Tab::Transactions,
         }
     }
 
     pub fn prev(self) -> Self {
         match self {
-            Tab::Logs => Tab::Config,
-            Tab::Transactions => Tab::Logs,
-            Tab::Config => Tab::Transactions,
+            Tab::Transactions => Tab::Config,
+            Tab::Logs => Tab::Transactions,
+            Tab::Config => Tab::Logs,
         }
     }
 }
@@ -125,6 +131,29 @@ pub struct TransactionEntry {
     pub timestamp: DateTime<Utc>,
 }
 
+/// Detailed transaction information fetched from RPC
+#[derive(Clone)]
+pub struct TransactionDetail {
+    pub signature: String,
+    pub slot: u64,
+    pub success: bool,
+    pub fee: u64,
+    pub compute_units: Option<u64>,
+    pub logs: Vec<String>,
+    pub accounts: Vec<String>,
+    pub error: Option<String>,
+    pub explorer_url: String,
+    pub explorer_selected: bool,
+}
+
+/// View mode for the TUI
+#[derive(Clone, Copy, PartialEq, Eq, Default)]
+pub enum ViewMode {
+    #[default]
+    List,
+    Detail,
+}
+
 /// The main TUI state
 pub struct TuiState {
     /// Current slot number
@@ -149,11 +178,17 @@ pub struct TuiState {
     pub log_scroll: usize,
     /// Scroll offset for transactions view
     pub tx_scroll: usize,
+    /// Selected transaction index (for navigation)
+    pub selected_tx: usize,
+    /// Current view mode
+    pub view_mode: ViewMode,
+    /// Transaction detail being viewed
+    pub tx_detail: Option<TransactionDetail>,
     /// Whether the TUI should quit
     pub should_quit: bool,
     /// Validator configuration for Config tab
     pub config: ValidatorConfig,
-    /// Short RPC URL for header display
+    /// RPC URL for fetching transaction details
     pub rpc_url: String,
     /// Full Solana Explorer URL for Config tab
     pub explorer_url: String,
@@ -162,7 +197,7 @@ pub struct TuiState {
 }
 
 /// Simple URL encoding for the RPC URL
-fn url_encode(s: &str) -> String {
+pub fn url_encode(s: &str) -> String {
     let mut encoded = String::with_capacity(s.len() * 3);
     for c in s.chars() {
         match c {
@@ -197,9 +232,12 @@ impl TuiState {
             max_logs: 1000,
             transactions: VecDeque::with_capacity(500),
             max_transactions: 500,
-            active_tab: Tab::Logs,
+            active_tab: Tab::Transactions,
             log_scroll: 0,
             tx_scroll: 0,
+            selected_tx: 0,
+            view_mode: ViewMode::List,
+            tx_detail: None,
             should_quit: false,
             rpc_url: rpc_for_explorer.clone(),
             explorer_url,
@@ -213,15 +251,6 @@ impl TuiState {
         self.slot = slot;
         self.epoch = slot / self.slots_per_epoch;
         self.epoch_start_slot = self.epoch * self.slots_per_epoch;
-    }
-
-    /// Get epoch progress as a ratio (0.0 to 1.0)
-    pub fn epoch_progress(&self) -> f64 {
-        if self.slots_per_epoch == 0 {
-            return 0.0;
-        }
-        let slots_in_epoch = self.slot.saturating_sub(self.epoch_start_slot);
-        (slots_in_epoch as f64 / self.slots_per_epoch as f64).min(1.0)
     }
 
     /// Add a log entry
@@ -247,7 +276,12 @@ impl TuiState {
                 self.log_scroll = self.log_scroll.saturating_sub(1);
             }
             Tab::Transactions => {
-                self.tx_scroll = self.tx_scroll.saturating_sub(1);
+                // Move selection up
+                self.selected_tx = self.selected_tx.saturating_sub(1);
+                // Auto-scroll to keep selection visible
+                if self.selected_tx < self.tx_scroll {
+                    self.tx_scroll = self.selected_tx;
+                }
             }
             Tab::Config => {}
         }
@@ -261,10 +295,34 @@ impl TuiState {
                 self.log_scroll = (self.log_scroll + 1).min(max);
             }
             Tab::Transactions => {
-                let max = self.transactions.len().saturating_sub(visible_height);
-                self.tx_scroll = (self.tx_scroll + 1).min(max);
+                // Move selection down
+                if !self.transactions.is_empty() {
+                    self.selected_tx =
+                        (self.selected_tx + 1).min(self.transactions.len() - 1);
+                    // Auto-scroll to keep selection visible
+                    if self.selected_tx >= self.tx_scroll + visible_height {
+                        self.tx_scroll = self.selected_tx - visible_height + 1;
+                    }
+                }
             }
             Tab::Config => {}
         }
+    }
+
+    /// Get the currently selected transaction signature
+    pub fn selected_transaction(&self) -> Option<&TransactionEntry> {
+        self.transactions.get(self.selected_tx)
+    }
+
+    /// Set transaction detail view
+    pub fn show_tx_detail(&mut self, detail: TransactionDetail) {
+        self.tx_detail = Some(detail);
+        self.view_mode = ViewMode::Detail;
+    }
+
+    /// Close transaction detail view
+    pub fn close_tx_detail(&mut self) {
+        self.tx_detail = None;
+        self.view_mode = ViewMode::List;
     }
 }

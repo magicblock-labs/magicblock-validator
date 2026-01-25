@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use magicblock_accounts_db::AccountsDbResult;
 use magicblock_core::{
     link::{
@@ -252,14 +254,14 @@ impl super::TransactionExecutor {
             }
         };
 
-        let status = TransactionStatus {
+        let status = Arc::new(TransactionStatus {
             slot: self.processor.slot,
             index,
             txn,
             meta,
-        };
+        });
 
-        // Notify listeners
+        // Notify listeners (broadcast to all consumers)
         let _ = self.transaction_tx.send(status);
     }
 

@@ -13,20 +13,25 @@ use crossterm::{
     terminal::{self, EnterAlternateScreen, LeaveAlternateScreen},
     ExecutableCommand,
 };
-use flume::Receiver as MpmcReceiver;
-use magicblock_core::link::{blocks::BlockUpdateRx, transactions::TransactionStatus};
+use magicblock_core::link::{
+    blocks::BlockUpdateRx, transactions::TransactionStatusRx,
+};
 use ratatui::{backend::CrosstermBackend, Terminal};
-use tokio::sync::mpsc::UnboundedReceiver;
-use tokio::sync::broadcast::error::TryRecvError;
+use serde::Deserialize;
+use tokio::sync::{broadcast::error::TryRecvError, mpsc::UnboundedReceiver};
 use tokio_util::sync::CancellationToken;
 use tracing::Level;
 use tracing_log::LogTracer;
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
+use tracing_subscriber::{
+    layer::SubscriberExt, util::SubscriberInitExt, EnvFilter,
+};
 
 use crate::{
-    events::{handle_event, poll_event},
+    events::{handle_event, poll_event, EventAction},
     logger::TuiTracingLayer,
-    state::{LogEntry, TransactionEntry, TuiConfig, TuiState},
+    state::{
+        LogEntry, TransactionDetail, TransactionEntry, TuiConfig, TuiState,
+    },
     ui,
 };
 
@@ -40,7 +45,7 @@ type Term = Terminal<CrosstermBackend<Stdout>>;
 pub async fn run_tui(
     config: TuiConfig,
     block_rx: BlockUpdateRx,
-    tx_status_rx: MpmcReceiver<TransactionStatus>,
+    tx_status_rx: TransactionStatusRx,
     cancel: CancellationToken,
 ) -> io::Result<()> {
     // Set up log capture channel
@@ -49,7 +54,8 @@ pub async fn run_tui(
     // Initialize the tracing subscriber with our custom layer
     let _ = LogTracer::init();
     let tui_layer = TuiTracingLayer::new(log_tx, Level::INFO);
-    let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+    let env_filter = EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| EnvFilter::new("info"));
 
     tracing_subscriber::registry()
         .with(env_filter)
@@ -117,7 +123,7 @@ async fn run_event_loop(
     terminal: &mut Term,
     state: &mut TuiState,
     mut block_rx: BlockUpdateRx,
-    tx_status_rx: MpmcReceiver<TransactionStatus>,
+    mut tx_status_rx: TransactionStatusRx,
     mut log_rx: UnboundedReceiver<LogEntry>,
     cancel: CancellationToken,
 ) -> io::Result<()> {
@@ -152,7 +158,42 @@ async fn run_event_loop(
             // Check for resize before handling (event will be moved)
             let is_resize = matches!(event, Event::Resize(_, _));
 
-            handle_event(state, event, visible_height);
+            let action = handle_event(state, event, visible_height);
+
+            // Handle any resulting action
+            match action {
+                EventAction::FetchTransaction(sig) => {
+                    // Fetch transaction details from RPC
+                    let rpc_url = state.rpc_url.clone();
+                    match fetch_transaction_detail(&rpc_url, &sig).await {
+                        Ok(detail) => {
+                            state.show_tx_detail(detail);
+                        }
+                        Err(e) => {
+                            // Show error in detail view
+                            let explorer_url =
+                                build_explorer_url(&state.rpc_url, &sig);
+                            state.show_tx_detail(TransactionDetail {
+                                signature: sig,
+                                slot: 0,
+                                success: false,
+                                fee: 0,
+                                compute_units: None,
+                                logs: vec![],
+                                accounts: vec![],
+                                error: Some(format!("Failed to fetch: {}", e)),
+                                explorer_url,
+                                explorer_selected: false,
+                            });
+                        }
+                    }
+                }
+                EventAction::OpenUrl(url) => {
+                    // Open URL in default browser
+                    let _ = open_url_in_browser(&url);
+                }
+                EventAction::None => {}
+            }
 
             // If resize, redraw immediately
             if is_resize {
@@ -174,14 +215,21 @@ async fn run_event_loop(
         }
 
         // Process incoming transaction status (non-blocking)
-        while let Ok(tx_status) = tx_status_rx.try_recv() {
-            let entry = TransactionEntry {
-                signature: tx_status.txn.signature().to_string(),
-                slot: tx_status.slot,
-                success: tx_status.meta.status.is_ok(),
-                timestamp: Utc::now(),
-            };
-            state.push_transaction(entry);
+        loop {
+            match tx_status_rx.try_recv() {
+                Ok(tx_status) => {
+                    let entry = TransactionEntry {
+                        signature: tx_status.txn.signature().to_string(),
+                        slot: tx_status.slot,
+                        success: tx_status.meta.status.is_ok(),
+                        timestamp: Utc::now(),
+                    };
+                    state.push_transaction(entry);
+                }
+                Err(TryRecvError::Empty) => break,
+                Err(TryRecvError::Lagged(_)) => continue,
+                Err(TryRecvError::Closed) => break,
+            }
         }
 
         // Process incoming log entries (non-blocking)
@@ -199,5 +247,152 @@ async fn run_event_loop(
         tokio::time::sleep(Duration::from_millis(1)).await;
     }
 
+    Ok(())
+}
+
+/// RPC response structures for parsing getTransaction response
+#[derive(Debug, Deserialize)]
+struct RpcResponse<T> {
+    result: Option<T>,
+    #[allow(dead_code)]
+    error: Option<RpcError>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RpcError {
+    message: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct TransactionResponse {
+    slot: u64,
+    meta: Option<TransactionMeta>,
+    transaction: TransactionData,
+}
+
+#[derive(Debug, Deserialize)]
+struct TransactionMeta {
+    fee: u64,
+    err: Option<serde_json::Value>,
+    #[serde(rename = "logMessages")]
+    log_messages: Option<Vec<String>>,
+    #[serde(rename = "computeUnitsConsumed")]
+    compute_units_consumed: Option<u64>,
+}
+
+#[derive(Debug, Deserialize)]
+struct TransactionData {
+    message: TransactionMessage,
+}
+
+#[derive(Debug, Deserialize)]
+struct TransactionMessage {
+    #[serde(rename = "accountKeys")]
+    account_keys: Vec<String>,
+}
+
+/// Fetch transaction details from RPC
+async fn fetch_transaction_detail(
+    rpc_url: &str,
+    signature: &str,
+) -> Result<TransactionDetail, String> {
+    let client = reqwest::Client::new();
+
+    let request_body = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "getTransaction",
+        "params": [
+            signature,
+            {
+                "encoding": "json",
+                "maxSupportedTransactionVersion": 0
+            }
+        ]
+    });
+
+    let response = client
+        .post(rpc_url)
+        .json(&request_body)
+        .send()
+        .await
+        .map_err(|e| format!("HTTP error: {}", e))?;
+
+    let rpc_response: RpcResponse<TransactionResponse> = response
+        .json()
+        .await
+        .map_err(|e| format!("Parse error: {}", e))?;
+
+    if let Some(err) = rpc_response.error {
+        return Err(err.message);
+    }
+
+    let tx = rpc_response
+        .result
+        .ok_or_else(|| "Transaction not found".to_string())?;
+
+    let meta = tx.meta.as_ref();
+    let success = meta.map(|m| m.err.is_none()).unwrap_or(true);
+    let error = meta.and_then(|m| m.err.as_ref()).map(|e| format!("{}", e));
+
+    Ok(TransactionDetail {
+        signature: signature.to_string(),
+        slot: tx.slot,
+        success,
+        fee: meta.map(|m| m.fee).unwrap_or(0),
+        compute_units: meta.and_then(|m| m.compute_units_consumed),
+        logs: meta
+            .and_then(|m| m.log_messages.clone())
+            .unwrap_or_default(),
+        accounts: tx.transaction.message.account_keys,
+        error,
+        explorer_url: build_explorer_url(rpc_url, signature),
+        explorer_selected: false,
+    })
+}
+
+/// Build the Solana Explorer URL for a transaction
+fn build_explorer_url(rpc_url: &str, signature: &str) -> String {
+    let encoded_rpc = url_encode(rpc_url);
+    format!(
+        "https://explorer.solana.com/tx/{}?cluster=custom&customUrl={}",
+        signature, encoded_rpc
+    )
+}
+
+/// Simple URL encoding
+fn url_encode(s: &str) -> String {
+    let mut encoded = String::with_capacity(s.len() * 3);
+    for c in s.chars() {
+        match c {
+            'A'..='Z' | 'a'..='z' | '0'..='9' | '-' | '_' | '.' | '~' => {
+                encoded.push(c);
+            }
+            _ => {
+                for byte in c.to_string().as_bytes() {
+                    encoded.push_str(&format!("%{:02X}", byte));
+                }
+            }
+        }
+    }
+    encoded
+}
+
+/// Open a URL in the default browser
+fn open_url_in_browser(url: &str) -> std::io::Result<()> {
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open").arg(url).spawn()?;
+    }
+    #[cfg(target_os = "linux")]
+    {
+        std::process::Command::new("xdg-open").arg(url).spawn()?;
+    }
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("cmd")
+            .args(["/C", "start", url])
+            .spawn()?;
+    }
     Ok(())
 }

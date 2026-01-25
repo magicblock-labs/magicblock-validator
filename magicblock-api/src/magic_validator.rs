@@ -280,10 +280,10 @@ impl MagicValidator {
             chainlink.clone(),
         );
 
-        // Clone receivers for TUI before passing dispatch to aperture
-        // (block updates are broadcast so all consumers see each message)
+        // Subscribe to broadcast channels for TUI before passing dispatch to aperture
+        // (broadcast channels deliver each message to all subscribers)
         let block_update_rx = dispatch.block_update.resubscribe();
-        let transaction_status_rx = dispatch.transaction_status.clone();
+        let transaction_status_rx = dispatch.transaction_status.resubscribe();
 
         let rpc = initialize_aperture(
             &config.aperture,
@@ -757,9 +757,9 @@ impl MagicValidator {
     }
 
     /// Returns the transaction status receiver for TUI consumption.
-    /// Note: This clones the flume receiver (cheap, MPMC channel).
+    /// Note: This resubscribes to the broadcast channel (all subscribers see all messages).
     pub fn transaction_status_rx(&self) -> TransactionStatusRx {
-        self.transaction_status_rx.clone()
+        self.transaction_status_rx.resubscribe()
     }
 
     /// Returns the validator configuration
