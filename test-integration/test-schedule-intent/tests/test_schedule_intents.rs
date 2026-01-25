@@ -300,7 +300,7 @@ fn test_redelegation_intent() {
 /// - 1 payer for commit-and-undelegate (their counters will be committed and undelegated)
 ///
 /// Expected behavior:
-/// - All 4 counters should be committed to base layer
+/// - All 3 counters should be committed to base layer
 /// - Only the undelegate payers' counters should be undelegated
 /// - Commit-only payers' counters remain delegated
 #[test]
