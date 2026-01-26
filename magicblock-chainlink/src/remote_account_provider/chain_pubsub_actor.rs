@@ -123,7 +123,7 @@ impl ChainPubsubActor {
         program_subs: Arc<Mutex<HashMap<Pubkey, AccountSubscription>>>,
         shutdown_token: CancellationToken,
     ) {
-        info!("Shutting down pubsub actor");
+        info!(client_id = client_id, "Shutting down pubsub actor");
         let subs = subscriptions
             .lock()
             .expect("subscriptions lock poisoned")
@@ -481,7 +481,7 @@ impl ChainPubsubActor {
                                 error!(error = ?err, "Failed to send subscription update");
                             });
                         } else {
-                            debug!("Subscription ended; signaling connection issue");
+                            debug!(client_id = client_id, "Subscription ended; signaling connection issue");
                             Self::abort_and_signal_connection_issue(
                                 &client_id,
                                 subs.clone(),
@@ -628,7 +628,7 @@ impl ChainPubsubActor {
                                 }
                             }
                         } else {
-                            debug!("Program subscription ended; signaling connection issue");
+                            debug!(client_id = client_id, "Program subscription ended; signaling connection issue");
                             Self::abort_and_signal_connection_issue(
                                 &client_id,
                                 subs.clone(),
@@ -714,7 +714,7 @@ impl ChainPubsubActor {
             return;
         }
 
-        debug!("Aborting connection");
+        debug!(client_id = client_id, "Aborting connection");
 
         fn drain_subscriptions(
             _client_id: &str,

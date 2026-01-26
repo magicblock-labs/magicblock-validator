@@ -301,7 +301,7 @@ impl ChainLaserActor {
                 let laser_client_config = self.laser_client_config.clone();
                 self.add_program_sub(pubkey, commitment, laser_client_config);
                 let _ = response.send(Ok(())).inspect_err(|_| {
-                    warn!(program_id = %pubkey, "Failed to send program subscribe response");
+                    warn!(client_id = self.client_id, program_id = %pubkey, "Failed to send program subscribe response");
                 });
                 false
             }
@@ -310,12 +310,15 @@ impl ChainLaserActor {
                 // subscriptions again and that method does not return any error information.
                 // Subscriptions were already cleared when the connection issue was signaled.
                 let _ = response.send(Ok(())).inspect_err(|_| {
-                    warn!("Failed to send reconnect response");
+                    warn!(
+                        client_id = self.client_id,
+                        "Failed to send reconnect response"
+                    );
                 });
                 false
             }
             Shutdown { response } => {
-                info!("Received Shutdown message");
+                info!(client_id = self.client_id, "Received Shutdown message");
                 Self::clear_subscriptions(
                     &mut self.subscriptions,
                     &mut self.active_subscriptions,
@@ -323,7 +326,10 @@ impl ChainLaserActor {
                     &mut self.program_subscriptions,
                 );
                 let _ = response.send(Ok(())).inspect_err(|_| {
-                    warn!("Failed to send shutdown response");
+                    warn!(
+                        client_id = self.client_id,
+                        "Failed to send shutdown response"
+                    );
                 });
                 true
             }
