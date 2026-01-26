@@ -338,7 +338,7 @@ impl ChainLaserActor {
         sub_response: oneshot::Sender<RemoteAccountProviderResult<()>>,
     ) {
         if self.subscriptions.contains(&pubkey) {
-            warn!(pubkey = %pubkey, "Already subscribed to account");
+            debug!(pubkey = %pubkey, "Already subscribed to account");
             sub_response.send(Ok(())).unwrap_or_else(|_| {
                 warn!(pubkey = %pubkey, "Failed to send already subscribed response");
             });
