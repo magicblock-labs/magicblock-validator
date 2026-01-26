@@ -14,6 +14,7 @@ use solana_sdk_ids::{
     ed25519_program, native_loader, secp256k1_program, secp256r1_program,
 };
 use solana_svm::transaction_processor::TransactionProcessingEnvironment;
+use tracing::error;
 
 /// Initialize an SVM environment for transaction processing.
 pub fn build_svm_env(
@@ -90,7 +91,7 @@ fn ensure_precompile_account(accountsdb: &AccountsDb, id: &Pubkey) {
     let mut account = AccountSharedData::new(1, 0, &native_loader::ID);
     account.set_executable(true);
     if let Err(e) = accountsdb.insert_account(id, &account) {
-        log::error!("Failed to insert precompile account {}: {:?}", id, e);
+        error!("Failed to insert precompile account {}: {:?}", id, e);
     }
 }
 
