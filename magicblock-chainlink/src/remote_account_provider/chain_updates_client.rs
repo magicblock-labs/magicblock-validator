@@ -14,8 +14,8 @@ use tracing::*;
 
 use crate::remote_account_provider::{
     chain_laser_actor::Slots, chain_laser_client::ChainLaserClientImpl,
-    pubsub_common::SubscriptionUpdate, ChainPubsubClient,
-    ChainPubsubClientImpl, Endpoint, ReconnectableClient,
+    chain_slot::ChainSlot, pubsub_common::SubscriptionUpdate,
+    ChainPubsubClient, ChainPubsubClientImpl, Endpoint, ReconnectableClient,
     RemoteAccountProviderError, RemoteAccountProviderResult,
 };
 
@@ -67,7 +67,7 @@ impl ChainUpdatesClient {
                 );
 
                 let slots = Slots {
-                    chain_slot,
+                    chain_slot: ChainSlot::new(chain_slot),
                     last_activation_slot: AtomicU64::new(0),
                     supports_backfill: *supports_backfill,
                 };

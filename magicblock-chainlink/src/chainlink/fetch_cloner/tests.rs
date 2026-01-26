@@ -10,7 +10,8 @@ use crate::{
     assert_not_cloned, assert_not_subscribed, assert_subscribed,
     assert_subscribed_without_delegation_record,
     remote_account_provider::{
-        chain_pubsub_client::mock::ChainPubsubClientMock, RemoteAccountProvider,
+        chain_pubsub_client::mock::ChainPubsubClientMock,
+        chain_slot::ChainSlot, RemoteAccountProvider,
     },
     testing::{
         accounts::{
@@ -141,7 +142,7 @@ where
             forward_tx,
             &config,
             subscribed_accounts,
-            chain_slot,
+            ChainSlot::new(chain_slot),
         )
         .await
         .unwrap(),
