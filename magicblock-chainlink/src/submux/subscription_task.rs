@@ -87,7 +87,7 @@ impl AccountSubscriptionTask {
         let (tx, rx) = oneshot::channel();
         tokio::spawn(async move {
             let mut futures = FuturesUnordered::new();
-            for (i, client) in clients.iter().enumerate() {
+            for client in clients.iter() {
                 let client = client.clone();
                 let task = self.clone();
                 futures.push(async move {
@@ -148,16 +148,18 @@ impl AccountSubscriptionTask {
                         }
                         Shutdown => (client.shutdown().await, true),
                     };
-                    (i, result, count_as_success)
+                    (result, count_as_success, client.id().to_string())
                 });
             }
 
             let mut errors = Vec::new();
+            let mut failed_client_ids = Vec::new();
             let mut tx = Some(tx);
             let mut successes = 0;
             let op_name = self.op_name();
 
-            while let Some((i, result, count_as_success)) = futures.next().await
+            while let Some((result, count_as_success, client_id)) =
+                futures.next().await
             {
                 match result {
                     Ok(_) => {
@@ -172,7 +174,8 @@ impl AccountSubscriptionTask {
                         }
                     }
                     Err(e) => {
-                        errors.push(format!("Client {}: {:?}", i, e));
+                        errors.push(format!("Client {}: {:?}", client_id, e));
+                        failed_client_ids.push(client_id);
                     }
                 }
             }
@@ -200,6 +203,7 @@ impl AccountSubscriptionTask {
                     total_clients,
                     required_confirmations,
                     error_count = errors.len(),
+                    failed_clients = %failed_client_ids.join(", "),
                     "Some clients failed"
                 );
             }
