@@ -50,6 +50,7 @@ const SLOTS_BETWEEN_ACTIVATIONS: u64 =
 // Slots
 // -----------------
 /// Shared slot tracking for activation lookback and chain slot synchronization.
+#[derive(Debug)]
 pub struct Slots {
     /// The current slot on chain, shared with RemoteAccountProvider.
     /// Updated via `update()` when slot updates are received from GRPC.
@@ -570,7 +571,7 @@ impl ChainLaserActor {
                 .await;
             }
             Err(err) => {
-                error!(error = ?err, "Error in account update stream");
+                error!(error = ?err, slots = ?self.slots, "Error in account update stream");
                 Self::signal_connection_issue(
                     &mut self.subscriptions,
                     &mut self.active_subscriptions,
@@ -596,7 +597,7 @@ impl ChainLaserActor {
                 .await;
             }
             Err(err) => {
-                error!(error = ?err, "Error in program subscription stream");
+                error!(error = ?err, slots = ?self.slots, "Error in program subscription stream");
                 Self::signal_connection_issue(
                     &mut self.subscriptions,
                     &mut self.active_subscriptions,
