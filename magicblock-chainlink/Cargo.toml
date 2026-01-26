@@ -50,6 +50,7 @@ thiserror = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 tokio-stream = { workspace = true }
 tokio-util = { workspace = true }
+tonic = { workspace = true }
 url = { workspace = true }
 
 [dev-dependencies]
