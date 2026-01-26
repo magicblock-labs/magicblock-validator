@@ -203,6 +203,7 @@ impl AccountSubscriptionTask {
                     total_clients,
                     required_confirmations,
                     error_count = errors.len(),
+                    errors = %errors.join(", "),
                     failed_clients = %failed_client_ids.join(", "),
                     "Some clients failed"
                 );
