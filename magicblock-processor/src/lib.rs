@@ -89,9 +89,7 @@ fn ensure_precompile_account(accountsdb: &AccountsDb, id: &Pubkey) {
 
     let mut account = AccountSharedData::new(1, 0, &native_loader::ID);
     account.set_executable(true);
-    if let Err(e) = accountsdb.insert_account(id, &account) {
-        log::error!("Failed to insert precompile account {}: {:?}", id, e);
-    }
+    let _ = accountsdb.insert_account(id, &account);
 }
 
 mod builtins;
