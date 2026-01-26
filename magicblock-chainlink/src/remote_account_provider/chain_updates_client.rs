@@ -14,8 +14,9 @@ use tracing::*;
 
 use crate::remote_account_provider::{
     chain_laser_actor::Slots, chain_laser_client::ChainLaserClientImpl,
-    chain_slot::ChainSlot, pubsub_common::SubscriptionUpdate,
-    ChainPubsubClient, ChainPubsubClientImpl, Endpoint, ReconnectableClient,
+    chain_rpc_client::ChainRpcClientImpl, chain_slot::ChainSlot,
+    pubsub_common::SubscriptionUpdate, ChainPubsubClient,
+    ChainPubsubClientImpl, Endpoint, ReconnectableClient,
     RemoteAccountProviderError, RemoteAccountProviderResult,
 };
 
@@ -32,6 +33,7 @@ impl ChainUpdatesClient {
         abort_sender: mpsc::Sender<()>,
         chain_slot: Arc<AtomicU64>,
         resubscription_delay: std::time::Duration,
+        rpc_client: ChainRpcClientImpl,
     ) -> RemoteAccountProviderResult<Self> {
         use Endpoint::*;
         static CLIENT_ID: AtomicU16 = AtomicU16::new(0);
@@ -79,6 +81,7 @@ impl ChainUpdatesClient {
                         commitment.commitment,
                         abort_sender,
                         slots,
+                        rpc_client,
                     )
                     .await?,
                 ))
