@@ -50,6 +50,7 @@ const PER_STREAM_SUBSCRIPTION_LIMIT: usize = 1_000;
 const SUBSCRIPTION_ACTIVATION_INTERVAL_MILLIS: u64 = 10_000;
 const SLOTS_BETWEEN_ACTIVATIONS: u64 =
     SUBSCRIPTION_ACTIVATION_INTERVAL_MILLIS / 400;
+const MAX_SLOTS_BACKFILL: u64 = 100;
 
 // -----------------
 // Slots
@@ -471,7 +472,14 @@ impl ChainLaserActor {
         let from_slot = if last_activation_slot == 0 {
             chain_slot.saturating_sub(SLOTS_BETWEEN_ACTIVATIONS + 1)
         } else {
-            last_activation_slot.saturating_sub(1)
+            // Limit how far back we go in order to avoid data loss errors
+            let target_slot = last_activation_slot.saturating_sub(1);
+            let delta = chain_slot.saturating_sub(target_slot);
+            if delta < MAX_SLOTS_BACKFILL {
+                target_slot
+            } else {
+                chain_slot.saturating_sub(MAX_SLOTS_BACKFILL)
+            }
         };
         Some((chain_slot, from_slot))
     }
