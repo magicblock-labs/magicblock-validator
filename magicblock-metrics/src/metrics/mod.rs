@@ -442,6 +442,14 @@ lazy_static::lazy_static! {
         ),
         &["client_id"],
     ).unwrap();
+
+    static ref PUBSUB_CLIENT_RESUBSCRIBED_GAUGE: IntGaugeVec = IntGaugeVec::new(
+        Opts::new(
+            "pubsub_client_resubscribed_gauge",
+            "Number of subscriptions successfully resubscribed for each pubsub client before complete or failed"
+        ),
+        &["client_id"],
+    ).unwrap();
 }
 
 pub(crate) fn register() {
@@ -514,6 +522,7 @@ pub(crate) fn register() {
         register!(PUBSUB_CLIENT_RECONNECT_BACKOFF_DURATION_SECONDS_GAUGE);
         register!(PUBSUB_CLIENT_FAILED_RECONNECT_ATTEMPTS_GAUGE);
         register!(PUBSUB_CLIENT_RESUBSCRIBE_DELAY_MILLISECONDS_GAUGE);
+        register!(PUBSUB_CLIENT_RESUBSCRIBED_GAUGE);
     });
 }
 
@@ -793,4 +802,10 @@ pub fn set_pubsub_client_resubscribe_delay(client_id: &str, delay_ms: u64) {
     PUBSUB_CLIENT_RESUBSCRIBE_DELAY_MILLISECONDS_GAUGE
         .with_label_values(&[client_id])
         .set(delay_ms as i64);
+}
+
+pub fn set_pubsub_client_resubscribed_count(client_id: &str, count: usize) {
+    PUBSUB_CLIENT_RESUBSCRIBED_GAUGE
+        .with_label_values(&[client_id])
+        .set(count as i64);
 }

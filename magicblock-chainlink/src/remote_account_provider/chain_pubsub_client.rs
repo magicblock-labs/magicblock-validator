@@ -27,6 +27,8 @@ use tokio::{
 };
 use tracing::*;
 
+use magicblock_metrics::metrics;
+
 use super::{
     chain_pubsub_actor::ChainPubsubActor,
     errors::RemoteAccountProviderResult,
@@ -366,6 +368,8 @@ impl ReconnectableClient for ChainPubsubClientImpl {
         let pubkeys_vec: Vec<Pubkey> = pubkeys.into_iter().collect();
         for (idx, pubkey) in pubkeys_vec.iter().enumerate() {
             if let Err(err) = self.subscribe(*pubkey).await {
+                // Report the number of subscriptions we managed before failing
+                metrics::set_pubsub_client_resubscribed_count(&self.client_id, idx);
                 // Exponentially back off on resubscription attempts, so the next time we
                 // reconnect and try to resubscribe, we wait longer in between each subscription
                 // in order to avoid overwhelming the RPC with requests
@@ -380,6 +384,11 @@ impl ReconnectableClient for ChainPubsubClientImpl {
                 tokio::time::sleep(delay).await;
             }
         }
+        // Report successful resubscription of all pubkeys
+        metrics::set_pubsub_client_resubscribed_count(
+            &self.client_id,
+            pubkeys_vec.len(),
+        );
         Ok(())
     }
 
@@ -621,6 +630,11 @@ pub mod mock {
                 let mut to_fail = self.pending_resubscribe_failures.lock();
                 if *to_fail > 0 {
                     *to_fail -= 1;
+                    // Report the number of subscriptions we managed before failing
+                    metrics::set_pubsub_client_resubscribed_count(
+                        &self.id(),
+                        0,
+                    );
                     return Err(
                         RemoteAccountProviderError::AccountSubscriptionsTaskFailed(
                             "mock: forced resubscribe failure".to_string(),
