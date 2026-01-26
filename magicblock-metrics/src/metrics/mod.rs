@@ -39,6 +39,11 @@ lazy_static::lazy_static! {
         "slot_count", "Slot Count",
     ).unwrap();
 
+    // Needs to be a gauge so we can set it directly
+    // (instead of having to calcuate by which to inc it)
+    static ref CHAIN_SLOT_GAUGE: IntGauge = IntGauge::new(
+        "chain_slot_gauge", "Chain Slot Gauge",
+    ).unwrap();
 
     static ref CACHED_CLONE_OUTPUTS_COUNT: IntGauge = IntGauge::new(
         "magicblock_account_cloner_cached_outputs_count",
@@ -137,6 +142,9 @@ lazy_static::lazy_static! {
             vec![0.1, 1.0, 2.0, 3.0, 10.0, 60.0]
         ),
         ).unwrap();
+}
+
+lazy_static::lazy_static! {
 
     // -----------------
     // Accounts
@@ -463,6 +471,7 @@ pub(crate) fn register() {
             };
         }
         register!(SLOT_COUNT);
+        register!(CHAIN_SLOT_GAUGE);
         register!(CACHED_CLONE_OUTPUTS_COUNT);
         register!(LEDGER_SIZE_GAUGE);
         register!(LEDGER_BLOCK_TIMES_GAUGE);
@@ -528,6 +537,10 @@ pub(crate) fn register() {
 
 pub fn inc_slot() {
     SLOT_COUNT.inc();
+}
+
+pub fn set_chain_slot(value: u64) {
+    CHAIN_SLOT_GAUGE.set(value as i64);
 }
 
 pub fn set_cached_clone_outputs_count(count: usize) {

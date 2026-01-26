@@ -2,10 +2,7 @@ use std::{
     collections::{HashMap, HashSet},
     fmt,
     pin::Pin,
-    sync::{
-        atomic::{AtomicU64, Ordering},
-        Arc,
-    },
+    sync::atomic::{AtomicU64, Ordering},
 };
 
 use futures_util::{Stream, StreamExt};
@@ -30,6 +27,7 @@ use tokio::sync::{mpsc, oneshot};
 use tokio_stream::StreamMap;
 use tracing::*;
 
+use super::chain_slot::ChainSlot;
 use crate::remote_account_provider::{
     pubsub_common::{
         ChainPubsubActorMessage, MESSAGE_CHANNEL_SIZE,
@@ -54,8 +52,9 @@ const SLOTS_BETWEEN_ACTIVATIONS: u64 =
 /// Shared slot tracking for activation lookback and chain slot synchronization.
 pub struct Slots {
     /// The current slot on chain, shared with RemoteAccountProvider.
-    /// Updated via `fetch_max()` when slot updates are received from GRPC.
-    pub chain_slot: Arc<AtomicU64>,
+    /// Updated via `update()` when slot updates are received from GRPC.
+    /// Metrics are automatically captured on updates.
+    pub chain_slot: ChainSlot,
     /// The last slot at which activation happened (used for backfilling).
     pub last_activation_slot: AtomicU64,
     /// Whether this GRPC endpoint supports backfilling subscription updates.
@@ -443,7 +442,7 @@ impl ChainLaserActor {
             return None;
         }
 
-        let chain_slot = self.slots.chain_slot.load(Ordering::Relaxed);
+        let chain_slot = self.slots.chain_slot.load();
         if chain_slot == 0 {
             // If we didn't get a chain slot update yet we cannot backfill
             return None;
@@ -680,9 +679,7 @@ impl ChainLaserActor {
 
         // Handle slot updates - update chain_slot to max of current and received
         if let UpdateOneof::Slot(slot_update) = &update_oneof {
-            self.slots
-                .chain_slot
-                .fetch_max(slot_update.slot, Ordering::Relaxed);
+            self.slots.chain_slot.update(slot_update.slot);
             return;
         }
 

@@ -11,6 +11,7 @@ use std::{
 use arc_swap::ArcSwap;
 use async_trait::async_trait;
 use futures_util::{future::BoxFuture, stream::BoxStream};
+use magicblock_metrics::metrics;
 use solana_account_decoder::UiAccount;
 use solana_commitment_config::CommitmentConfig;
 use solana_pubkey::Pubkey;
@@ -26,8 +27,6 @@ use tokio::{
     time,
 };
 use tracing::*;
-
-use magicblock_metrics::metrics;
 
 use super::{
     chain_pubsub_actor::ChainPubsubActor,
@@ -369,7 +368,10 @@ impl ReconnectableClient for ChainPubsubClientImpl {
         for (idx, pubkey) in pubkeys_vec.iter().enumerate() {
             if let Err(err) = self.subscribe(*pubkey).await {
                 // Report the number of subscriptions we managed before failing
-                metrics::set_pubsub_client_resubscribed_count(&self.client_id, idx);
+                metrics::set_pubsub_client_resubscribed_count(
+                    &self.client_id,
+                    idx,
+                );
                 // Exponentially back off on resubscription attempts, so the next time we
                 // reconnect and try to resubscribe, we wait longer in between each subscription
                 // in order to avoid overwhelming the RPC with requests
@@ -630,11 +632,6 @@ pub mod mock {
                 let mut to_fail = self.pending_resubscribe_failures.lock();
                 if *to_fail > 0 {
                     *to_fail -= 1;
-                    // Report the number of subscriptions we managed before failing
-                    metrics::set_pubsub_client_resubscribed_count(
-                        &self.id(),
-                        0,
-                    );
                     return Err(
                         RemoteAccountProviderError::AccountSubscriptionsTaskFailed(
                             "mock: forced resubscribe failure".to_string(),
