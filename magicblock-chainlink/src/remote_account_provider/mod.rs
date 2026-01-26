@@ -38,6 +38,8 @@ use tokio::{
 };
 use tracing::*;
 
+pub mod chain_slot;
+use chain_slot::ChainSlot;
 pub(crate) mod chain_laser_actor;
 pub mod chain_laser_client;
 pub(crate) mod chain_pubsub_actor;
@@ -114,7 +116,8 @@ pub struct RemoteAccountProvider<T: ChainRpcClient, U: ChainPubsubClient> {
     ///
     /// Both sources use `fetch_max()` to ensure this value is monotonically
     /// increasing and reflects the highest known slot from any source.
-    chain_slot: Arc<AtomicU64>,
+    /// Metrics are automatically captured on updates inside [ChainSlot::update]
+    chain_slot: ChainSlot,
 
     /// The slot of the last account update we received
     last_update_slot: Arc<AtomicU64>,
@@ -203,6 +206,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         lrucache_subscribed_accounts: Arc<AccountsLruCache>,
         chain_slot: Arc<AtomicU64>,
     ) -> ChainlinkResult<Option<RemoteAccountProvider<T, U>>> {
+        let chain_slot = ChainSlot::new(chain_slot);
         if config.lifecycle_mode().needs_remote_account_provider() {
             Ok(Some(
                 Self::new(
@@ -324,7 +328,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         subscription_forwarder: mpsc::Sender<ForwardedSubscriptionUpdate>,
         config: &RemoteAccountProviderConfig,
         lrucache_subscribed_accounts: Arc<AccountsLruCache>,
-        chain_slot: Arc<AtomicU64>,
+        chain_slot: ChainSlot,
     ) -> RemoteAccountProviderResult<Self> {
         let (removed_account_tx, removed_account_rx) =
             tokio::sync::mpsc::channel(100);
@@ -366,8 +370,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                 ))
             }
             RemoteAccount::Found(_) => {
-                me.chain_slot
-                    .store(clock_remote_account.slot(), Ordering::Relaxed);
+                me.chain_slot.update(clock_remote_account.slot());
                 Ok(me)
             }
         }
@@ -450,7 +453,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             subscription_forwarder,
             config,
             subscribed_accounts,
-            chain_slot,
+            ChainSlot::new(chain_slot),
         )
         .await
     }
@@ -472,7 +475,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
     }
 
     pub fn chain_slot(&self) -> u64 {
-        self.chain_slot.load(Ordering::Relaxed)
+        self.chain_slot.load()
     }
 
     pub fn last_update_slot(&self) -> u64 {
@@ -504,7 +507,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                     // context slot always matches the slot encoded in the slot data.
                     // Use fetch_max to ensure we always keep the highest slot value,
                     // since GRPC may have already updated chain_slot to a higher value.
-                    chain_slot.fetch_max(slot, Ordering::Relaxed);
+                    chain_slot.update(slot);
                     // NOTE: we do not forward clock updates
                 } else {
                     trace!(
@@ -733,7 +736,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
 
         // Create channels for potential subscription updates to override fetch results
         let mut subscription_overrides = vec![];
-        let fetch_start_slot = self.chain_slot.load(Ordering::Relaxed);
+        let fetch_start_slot = self.chain_slot.load();
 
         {
             let mut fetching = self.fetching_accounts.lock().unwrap();
@@ -1340,7 +1343,7 @@ mod test {
                 fwd_tx,
                 &config,
                 subscribed_accounts,
-                chain_slot,
+                ChainSlot::new(chain_slot),
             )
             .await
             .unwrap()
@@ -1392,7 +1395,7 @@ mod test {
                         fwd_tx,
                         &config,
                         subscribed_accounts,
-                        chain_slot,
+                        ChainSlot::new(chain_slot),
                     )
                     .await
                     .unwrap()
@@ -1472,7 +1475,7 @@ mod test {
                 forward_tx,
                 &config,
                 subscribed_accounts,
-                chain_slot,
+                ChainSlot::new(chain_slot),
             )
             .await
             .unwrap(),
@@ -1677,7 +1680,7 @@ mod test {
             forward_tx,
             &config,
             subscribed_accounts,
-            chain_slot,
+            ChainSlot::new(chain_slot),
         )
         .await
         .unwrap();

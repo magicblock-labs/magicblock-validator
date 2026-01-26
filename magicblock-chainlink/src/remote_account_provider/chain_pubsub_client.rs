@@ -11,6 +11,7 @@ use std::{
 use arc_swap::ArcSwap;
 use async_trait::async_trait;
 use futures_util::{future::BoxFuture, stream::BoxStream};
+use magicblock_metrics::metrics;
 use solana_account_decoder::UiAccount;
 use solana_commitment_config::CommitmentConfig;
 use solana_pubkey::Pubkey;
@@ -366,6 +367,11 @@ impl ReconnectableClient for ChainPubsubClientImpl {
         let pubkeys_vec: Vec<Pubkey> = pubkeys.into_iter().collect();
         for (idx, pubkey) in pubkeys_vec.iter().enumerate() {
             if let Err(err) = self.subscribe(*pubkey).await {
+                // Report the number of subscriptions we managed before failing
+                metrics::set_pubsub_client_resubscribed_count(
+                    &self.client_id,
+                    idx,
+                );
                 // Exponentially back off on resubscription attempts, so the next time we
                 // reconnect and try to resubscribe, we wait longer in between each subscription
                 // in order to avoid overwhelming the RPC with requests
@@ -380,6 +386,11 @@ impl ReconnectableClient for ChainPubsubClientImpl {
                 tokio::time::sleep(delay).await;
             }
         }
+        // Report successful resubscription of all pubkeys
+        metrics::set_pubsub_client_resubscribed_count(
+            &self.client_id,
+            pubkeys_vec.len(),
+        );
         Ok(())
     }
 
