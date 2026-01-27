@@ -2,7 +2,7 @@ use tracing_log::LogTracer;
 use tracing_subscriber::{fmt, EnvFilter};
 
 mod consolidate;
-pub use consolidate::log_trace_warn;
+pub use consolidate::{log_trace_debug, log_trace_warn};
 
 /// Initialize the tracing subscriber for the main validator.
 ///

@@ -370,7 +370,7 @@ impl ReconnectableClient for ChainPubsubClientImpl {
                 // Report the number of subscriptions we managed before failing
                 metrics::set_pubsub_client_resubscribed_count(
                     &self.client_id,
-                    idx,
+                    idx + 1,
                 );
                 // Exponentially back off on resubscription attempts, so the next time we
                 // reconnect and try to resubscribe, we wait longer in between each subscription
@@ -379,6 +379,13 @@ impl ReconnectableClient for ChainPubsubClientImpl {
                     delay_ms.saturating_mul(2).min(MAX_RESUB_DELAY_MS);
                 self.current_resub_delay_ms
                     .store(new_delay, Ordering::SeqCst);
+                debug!(
+                    error = ?err,
+                    total_subs = pubkeys_vec.len(),
+                    processed_subs = idx + 1,
+                    pubkey = %pubkey,
+                    "Re-subscription for multiple pubkeys failed to complete",
+                );
                 return Err(err);
             }
             // Only sleep between subscriptions, not after the final one
