@@ -30,3 +30,19 @@ pub fn log_trace_warn<T: Display, E: Debug>(
         trace!(error = ?err, data = %data, trace_msg);
     }
 }
+
+pub fn log_trace_debug<T: Display, E: Debug>(
+    trace_msg: &str,
+    debug_msg: &str,
+    data: &T,
+    err: &E,
+    max_trace: u16,
+    trace_count: &AtomicU16,
+) {
+    if trace_count.fetch_add(1, Ordering::SeqCst) == max_trace {
+        debug!(error = ?err, count = max_trace, debug_msg);
+        trace_count.store(0, Ordering::SeqCst);
+    } else {
+        trace!(error = ?err, data = %data, trace_msg);
+    }
+}

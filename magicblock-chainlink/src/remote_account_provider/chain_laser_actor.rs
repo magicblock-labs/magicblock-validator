@@ -2,7 +2,7 @@ use std::{
     collections::{HashMap, HashSet},
     fmt,
     pin::Pin,
-    sync::atomic::{AtomicU64, Ordering},
+    sync::atomic::{AtomicU16, AtomicU64, Ordering},
     time::Duration,
 };
 
@@ -16,6 +16,7 @@ use helius_laserstream::{
     },
     ChannelOptions, LaserstreamConfig, LaserstreamError,
 };
+use magicblock_core::logger::log_trace_debug;
 use magicblock_metrics::metrics::{
     inc_account_subscription_account_updates_count,
     inc_program_subscription_account_updates_count,
@@ -727,7 +728,15 @@ impl ChainLaserActor {
         abort_sender: &mpsc::Sender<()>,
         client_id: &str,
     ) {
-        debug!("Signaling connection issue");
+        static SIGNAL_CONNECTION_COUNT: AtomicU16 = AtomicU16::new(0);
+        log_trace_debug(
+            "Signaling connection issue",
+            "Signaled connection issue",
+            &client_id,
+            &RemoteAccountProviderError::ConnectionDisrupted,
+            100,
+            &SIGNAL_CONNECTION_COUNT,
+        );
 
         // Clear all subscriptions
         Self::clear_subscriptions(
