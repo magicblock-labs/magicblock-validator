@@ -7,7 +7,7 @@ use magicblock_metrics::metrics;
 
 /// Wrapper around Arc<AtomicU64> that automatically captures metrics
 /// when the chain slot is updated.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct ChainSlot {
     slot: Arc<AtomicU64>,
 }
