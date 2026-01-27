@@ -379,7 +379,7 @@ impl ReconnectableClient for ChainPubsubClientImpl {
                     delay_ms.saturating_mul(2).min(MAX_RESUB_DELAY_MS);
                 self.current_resub_delay_ms
                     .store(new_delay, Ordering::SeqCst);
-                warn!(
+                debug!(
                     error = ?err,
                     total_subs = pubkeys_vec.len(),
                     processed_subs = idx + 1,
