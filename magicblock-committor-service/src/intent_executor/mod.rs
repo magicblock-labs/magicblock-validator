@@ -160,7 +160,8 @@ where
         let committed_pubkeys = match base_intent.get_committed_pubkeys() {
             Some(value) => value,
             None => {
-                // Build tasks for commit stage
+                // TODO (snawaz): it's actually MagicBaseIntent::BaseActionse scenario, not Commit
+                // scenario. The related code needs little bit of refactoring.
                 let commit_tasks = TaskBuilderImpl::commit_tasks(
                     &self.task_info_fetcher,
                     &base_intent,
@@ -184,6 +185,46 @@ where
             }
         };
 
+        // if base_intent.is_commit_finalize() {
+        //     // Build tasks for commit & finalize stages
+        //     let commit_tasks = TaskBuilderImpl::commit_tasks(
+        //         &self.task_info_fetcher,
+        //         &base_intent,
+        //         persister,
+        //     )
+        //     .await?;
+
+        //     // Build execution strategy
+        //     match TaskStrategist::build_execution_strategy(
+        //         commit_tasks,
+        //         Vec::new(),
+        //         &self.authority.pubkey(),
+        //         persister,
+        //     )? {
+        //         StrategyExecutionMode::SingleStage(strategy) => {
+        //             trace!("Executing intent in single stage");
+        //             self.single_stage_execution_flow(
+        //                 base_intent,
+        //                 strategy,
+        //                 persister,
+        //             )
+        //             .await
+        //         }
+        //         StrategyExecutionMode::TwoStage {
+        //             commit_stage,
+        //             finalize_stage,
+        //         } => {
+        //             trace!("Executing intent in two stages");
+        //             self.two_stage_execution_flow(
+        //                 &committed_pubkeys,
+        //                 commit_stage,
+        //                 finalize_stage,
+        //                 persister,
+        //             )
+        //             .await
+        //         }
+        //     }
+        // } else {
         // Build tasks for commit & finalize stages
         let (commit_tasks, finalize_tasks) = {
             let commit_tasks_fut = TaskBuilderImpl::commit_tasks(
@@ -231,6 +272,7 @@ where
                 .await
             }
         }
+        //}
     }
 
     /// Starting execution from single stage

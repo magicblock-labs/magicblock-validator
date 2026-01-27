@@ -1,9 +1,12 @@
 use dlp::{
-    args::{CallHandlerArgs, CommitDiffArgs, CommitStateArgs},
+    args::{
+        CallHandlerArgs, CommitDiffArgs, CommitFinalizeArgs, CommitStateArgs,
+    },
     compute_diff,
     instruction_builder::{
-        call_handler_size_budget, commit_diff_size_budget, commit_size_budget,
-        finalize_size_budget, undelegate_size_budget,
+        call_handler_size_budget, commit_diff_size_budget,
+        commit_finalize_size_budget, commit_size_budget, finalize_size_budget,
+        undelegate_size_budget,
     },
     AccountSizeClass,
 };
@@ -18,7 +21,8 @@ use crate::tasks::{
     buffer_task::{BufferTask, BufferTaskType},
     visitor::Visitor,
     BaseActionTask, BaseTask, BaseTaskError, BaseTaskResult, CommitDiffTask,
-    CommitTask, FinalizeTask, PreparationState, TaskType, UndelegateTask,
+    CommitFinalizeTask, CommitTask, FinalizeTask, PreparationState, TaskType,
+    UndelegateTask,
 };
 
 /// Task that will be executed on Base layer via arguments
@@ -26,6 +30,7 @@ use crate::tasks::{
 pub enum ArgsTaskType {
     Commit(CommitTask),
     CommitDiff(CommitDiffTask),
+    CommitFinalize(CommitFinalizeTask),
     Finalize(FinalizeTask),
     Undelegate(UndelegateTask), // Special action really
     BaseAction(BaseActionTask),
@@ -88,6 +93,39 @@ impl BaseTask for ArgsTask {
                     args,
                 )
             }
+            ArgsTaskType::CommitFinalize(task) => {
+                let (data, data_is_diff) =
+                    if let Some(base_account) = &task.base_account {
+                        (
+                            compute_diff(
+                                base_account.data(),
+                                task.committed_account.account.data(),
+                            )
+                            .to_vec(),
+                            true,
+                        )
+                    } else {
+                        (task.committed_account.account.data.clone(), false)
+                    };
+
+                let mut args = CommitFinalizeArgs {
+                    commit_id: task.commit_id,
+                    lamports: task.committed_account.account.lamports,
+                    data_is_diff: data_is_diff.into(),
+                    allow_undelegation: task.allow_undelegation.into(),
+                    bumps: Default::default(),
+                    reserved_padding: Default::default(),
+                };
+
+                dlp::instruction_builder::commit_finalize(
+                    *validator,
+                    task.committed_account.pubkey,
+                    task.committed_account.account.owner,
+                    &mut args,
+                    &data,
+                )
+                .0
+            }
             ArgsTaskType::Finalize(value) => {
                 dlp::instruction_builder::finalize(
                     *validator,
@@ -141,6 +179,11 @@ impl BaseTask for ArgsTask {
                     BufferTaskType::CommitDiff(value),
                 )))
             }
+            ArgsTaskType::CommitFinalize(value) => {
+                Ok(Box::new(BufferTask::new_preparation_required(
+                    BufferTaskType::CommitFinalize(value),
+                )))
+            }
             ArgsTaskType::BaseAction(_)
             | ArgsTaskType::Finalize(_)
             | ArgsTaskType::Undelegate(_) => Err(self),
@@ -168,6 +211,7 @@ impl BaseTask for ArgsTask {
         match &self.task_type {
             ArgsTaskType::Commit(_) => 70_000,
             ArgsTaskType::CommitDiff(_) => 70_000,
+            ArgsTaskType::CommitFinalize(_) => 70_000,
             ArgsTaskType::BaseAction(task) => task.action.compute_units,
             ArgsTaskType::Undelegate(_) => 70_000,
             ArgsTaskType::Finalize(_) => 70_000,
@@ -183,6 +227,11 @@ impl BaseTask for ArgsTask {
             }
             ArgsTaskType::CommitDiff(task) => {
                 commit_diff_size_budget(AccountSizeClass::Dynamic(
+                    task.committed_account.account.data.len() as u32,
+                ))
+            }
+            ArgsTaskType::CommitFinalize(task) => {
+                commit_finalize_size_budget(AccountSizeClass::Dynamic(
                     task.committed_account.account.data.len() as u32,
                 ))
             }
@@ -215,6 +264,7 @@ impl BaseTask for ArgsTask {
         match &self.task_type {
             ArgsTaskType::Commit(_) => TaskType::Commit,
             ArgsTaskType::CommitDiff(_) => TaskType::Commit,
+            ArgsTaskType::CommitFinalize(_) => TaskType::CommitFinalize,
             ArgsTaskType::BaseAction(_) => TaskType::Action,
             ArgsTaskType::Undelegate(_) => TaskType::Undelegate,
             ArgsTaskType::Finalize(_) => TaskType::Finalize,
@@ -234,6 +284,9 @@ impl BaseTask for ArgsTask {
             ArgsTaskType::CommitDiff(task) => {
                 task.commit_id = commit_id;
             }
+            ArgsTaskType::CommitFinalize(task) => {
+                task.commit_id = commit_id;
+            }
             ArgsTaskType::BaseAction(_)
             | ArgsTaskType::Finalize(_)
             | ArgsTaskType::Undelegate(_) => {}
@@ -246,6 +299,7 @@ impl LabelValue for ArgsTask {
         match self.task_type {
             ArgsTaskType::Commit(_) => "args_commit",
             ArgsTaskType::CommitDiff(_) => "args_commit_diff",
+            ArgsTaskType::CommitFinalize(_) => "args_commit_finalize",
             ArgsTaskType::BaseAction(_) => "args_action",
             ArgsTaskType::Finalize(_) => "args_finalize",
             ArgsTaskType::Undelegate(_) => "args_undelegate",
