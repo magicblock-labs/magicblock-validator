@@ -189,6 +189,7 @@ setup-task-scheduler-devnet:
 
 # --ignore-rust-version: bincode 2.0.1 declares MSRV 1.85 but compiles fine with
 # Solana's build-sbf toolchain (rustc 1.84). No .cargo/config.toml equivalent exists.
+# TODO: remove once solana 2.2 is raised
 $(FLEXI_COUNTER_SO): $(FLEXI_COUNTER_SRC)
 	cargo build-sbf --manifest-path $(FLEXI_COUNTER_DIR)/Cargo.toml \
 		--sbf-out-dir $(DEPLOY_DIR) \
