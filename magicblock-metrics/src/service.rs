@@ -78,9 +78,12 @@ async fn start_metrics_server(
                     Ok((stream, _)) => {
                         let io = TokioIo::new(stream);
                         tokio::task::spawn(async move {
-                            let _ = http1::Builder::new()
-                                .serve_connection(io, service_fn(metrics_service_router))
-                                .await;
+                            if let Err(err) = http1::Builder::new()
+                            .serve_connection(io, service_fn(metrics_service_router))
+                            .await
+                        {
+                            debug!(error = ?err, "Metrics connection closed");
+                        }
                         });
                     }
                     Err(err) => error!(
