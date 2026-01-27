@@ -34,6 +34,7 @@ pub async fn subscribe(actor: &ChainPubsubActor, pubkey: Pubkey) {
     actor
         .send_msg(ChainPubsubActorMessage::AccountSubscribe {
             pubkey,
+            retries: None,
             response: tx,
         })
         .await

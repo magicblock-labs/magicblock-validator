@@ -5,17 +5,21 @@ use solana_pubkey::Pubkey;
 use tokio::sync::oneshot;
 use tracing::*;
 
+/// Timeout for each subscription attempt
+/// NOTE: if retries are defined the timeout is applied per retry
 const SUBSCRIBE_TIMEOUT: Duration = Duration::from_millis(2_000);
+/// Timeout for each unsubscription attempt
 const UNSUBSCRIBE_TIMEOUT: Duration = Duration::from_millis(1_000);
 
 use crate::remote_account_provider::{
     chain_pubsub_client::{ChainPubsubClient, ReconnectableClient},
     errors::{RemoteAccountProviderError, RemoteAccountProviderResult},
+    DEFAULT_SUBSCRIPTION_RETRIES,
 };
 
 #[derive(Clone, Debug)]
 pub enum AccountSubscriptionTask {
-    Subscribe(Pubkey, usize),
+    Subscribe(Pubkey, Option<usize>, usize),
     SubscribeProgram(Pubkey, usize),
     Unsubscribe(Pubkey),
     Shutdown,
@@ -25,7 +29,7 @@ impl AccountSubscriptionTask {
     fn op_name(&self) -> &'static str {
         use AccountSubscriptionTask::*;
         match self {
-            Subscribe(_, _) => "Subscribe",
+            Subscribe(_, _, _) => "Subscribe",
             SubscribeProgram(_, _) => "SubscribeProgram",
             Unsubscribe(_) => "Unsubscribe",
             Shutdown => "Shutdown",
@@ -46,7 +50,7 @@ impl AccountSubscriptionTask {
 
         let total_clients = clients.len();
         let required_confirmations = match &self {
-            Subscribe(_, n) | SubscribeProgram(_, n) => *n,
+            Subscribe(_, _, n) | SubscribeProgram(_, n) => *n,
             _ => 1,
         };
 
@@ -73,7 +77,7 @@ impl AccountSubscriptionTask {
             );
         }
 
-        if matches!(self, Subscribe(_, _) | SubscribeProgram(_, _))
+        if matches!(self, Subscribe(_, _, _) | SubscribeProgram(_, _))
             && required_confirmations == 0
         {
             return Err(
@@ -92,10 +96,10 @@ impl AccountSubscriptionTask {
                 let task = self.clone();
                 futures.push(async move {
                     let (result, count_as_success) = match task {
-                        Subscribe(pubkey, _) => {
+                        Subscribe(pubkey, retries, _) => {
                             let result = match tokio::time::timeout(
-                                SUBSCRIBE_TIMEOUT,
-                                client.subscribe(pubkey),
+                                SUBSCRIBE_TIMEOUT * (retries.unwrap_or(DEFAULT_SUBSCRIPTION_RETRIES) as u32 + 1),
+                                client.subscribe(pubkey, retries),
                             )
                             .await
                             {
@@ -240,7 +244,7 @@ mod tests {
     async fn test_subscribe_single_confirmation() {
         let (mock_client, _abort_sndr, _abort_rcvr) = create_mock_client();
         let pubkey = Pubkey::new_unique();
-        let task = AccountSubscriptionTask::Subscribe(pubkey, 1);
+        let task = AccountSubscriptionTask::Subscribe(pubkey, None, 1);
 
         let result = task.process(vec![Arc::new(mock_client)]).await;
 
@@ -253,7 +257,7 @@ mod tests {
         let (mock_client2, _abort_sndr2, _abort_rcvr2) = create_mock_client();
         let (mock_client3, _abort_sndr3, _abort_rcvr3) = create_mock_client();
         let pubkey = Pubkey::new_unique();
-        let task = AccountSubscriptionTask::Subscribe(pubkey, 2);
+        let task = AccountSubscriptionTask::Subscribe(pubkey, None, 2);
 
         let result = task
             .process(vec![
@@ -276,7 +280,7 @@ mod tests {
         mock_client2.simulate_disconnect();
 
         let pubkey = Pubkey::new_unique();
-        let task = AccountSubscriptionTask::Subscribe(pubkey, 2);
+        let task = AccountSubscriptionTask::Subscribe(pubkey, None, 2);
 
         let result = task
             .process(vec![
@@ -302,7 +306,7 @@ mod tests {
         mock_client3.simulate_disconnect();
 
         let pubkey = Pubkey::new_unique();
-        let task = AccountSubscriptionTask::Subscribe(pubkey, 2);
+        let task = AccountSubscriptionTask::Subscribe(pubkey, None, 2);
 
         let result = task
             .process(vec![
@@ -323,7 +327,7 @@ mod tests {
     #[tokio::test]
     async fn test_subscribe_no_clients() {
         let pubkey = Pubkey::new_unique();
-        let task = AccountSubscriptionTask::Subscribe(pubkey, 1);
+        let task = AccountSubscriptionTask::Subscribe(pubkey, None, 1);
 
         let result: RemoteAccountProviderResult<()> =
             task.process::<ChainPubsubClientMock>(vec![]).await;
@@ -341,7 +345,7 @@ mod tests {
         let (mock_client2, _abort_sndr2, _abort_rcvr2) = create_mock_client();
 
         let pubkey = Pubkey::new_unique();
-        let task = AccountSubscriptionTask::Subscribe(pubkey, 0);
+        let task = AccountSubscriptionTask::Subscribe(pubkey, None, 0);
 
         let result = task
             .process(vec![Arc::new(mock_client1), Arc::new(mock_client2)])
@@ -396,7 +400,7 @@ mod tests {
         mock_client3.simulate_disconnect();
 
         let pubkey = Pubkey::new_unique();
-        let task = AccountSubscriptionTask::Subscribe(pubkey, 2);
+        let task = AccountSubscriptionTask::Subscribe(pubkey, None, 2);
 
         let result = task
             .process(vec![

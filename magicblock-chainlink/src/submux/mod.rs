@@ -798,9 +798,11 @@ where
     async fn subscribe(
         &self,
         pubkey: Pubkey,
+        retries: Option<usize>,
     ) -> RemoteAccountProviderResult<()> {
         AccountSubscriptionTask::Subscribe(
             pubkey,
+            retries,
             self.required_account_subscription_confirmations(),
         )
         .process(self.clients.clone())
@@ -1013,7 +1015,7 @@ mod tests {
 
         let pk = Pubkey::new_unique();
 
-        mux.subscribe(pk).await.unwrap();
+        mux.subscribe(pk, None).await.unwrap();
 
         // send one update from each client
         client1
@@ -1067,7 +1069,7 @@ mod tests {
 
         let pk = Pubkey::new_unique();
 
-        mux.subscribe(pk).await.unwrap();
+        mux.subscribe(pk, None).await.unwrap();
 
         client1
             .send_account_update(pk, 1, &account_with_lamports(1))
@@ -1113,7 +1115,7 @@ mod tests {
         let mut mux_rx = mux.take_updates();
 
         let pk = Pubkey::new_unique();
-        mux.subscribe(pk).await.unwrap();
+        mux.subscribe(pk, None).await.unwrap();
 
         // Two updates with same pubkey and slot (slot=7) from different clients
         client1
@@ -1174,7 +1176,7 @@ mod tests {
         let mut mux_rx = mux.take_updates();
 
         let pk = Pubkey::new_unique();
-        mux.subscribe(pk).await.unwrap();
+        mux.subscribe(pk, None).await.unwrap();
 
         // Send updates within 100ms window: u1, u2, u1(again), u3, u2(again)
         client1
@@ -1237,7 +1239,7 @@ mod tests {
         let mut mux_rx = mux.take_updates();
 
         let pk = Pubkey::new_unique();
-        mux.subscribe(pk).await.unwrap();
+        mux.subscribe(pk, None).await.unwrap();
 
         // Within 100ms window
         client1
@@ -1370,7 +1372,7 @@ mod tests {
             );
         let mut mux_rx = mux.take_updates();
         let pk = Pubkey::new_unique();
-        mux.subscribe(pk).await.unwrap();
+        mux.subscribe(pk, None).await.unwrap();
 
         // A schedule adjusted to receive only indexes: 0,1,2,3,4,7,9
         // Explanation:
@@ -1428,7 +1430,7 @@ mod tests {
             );
         let mut mux_rx = mux.take_updates();
         let pk = Pubkey::new_unique();
-        mux.subscribe(pk).await.unwrap();
+        mux.subscribe(pk, None).await.unwrap();
 
         // B (scaled): 00:0 | 01:+400 | 02:+400 | 03:+400 (never enters debounce)
         // Never debounced
@@ -1466,7 +1468,7 @@ mod tests {
             );
         let mut mux_rx = mux.take_updates();
         let pk = Pubkey::new_unique();
-        mux.subscribe(pk).await.unwrap();
+        mux.subscribe(pk, None).await.unwrap();
 
         // Phases:
         // 1) First 5 updates at ~180ms: enables debounce on the 5th.
@@ -1527,7 +1529,7 @@ mod tests {
         // 1. Ensure that for another account's updates are debounced
         {
             let other = Pubkey::new_unique();
-            mux.subscribe(other).await.unwrap();
+            mux.subscribe(other, None).await.unwrap();
             let schedule: Vec<(u64, u64)> = (0..10).map(|i| (i, 50)).collect();
             send_schedule(client.clone(), other, 5000, &schedule).await;
             let received = drain_slots(&mut mux_rx, 800).await;
@@ -1538,7 +1540,7 @@ mod tests {
         //    None should be debounced
         {
             let clock = solana_program::sysvar::clock::ID;
-            mux.subscribe(clock).await.unwrap();
+            mux.subscribe(clock, None).await.unwrap();
 
             let schedule: Vec<(u64, u64)> = (0..10).map(|i| (i, 50)).collect();
             send_schedule(client.clone(), clock, 5000, &schedule).await;
@@ -1592,7 +1594,7 @@ mod tests {
 
         let mut mux_rx = mux.take_updates();
 
-        mux.subscribe(pk).await.unwrap();
+        mux.subscribe(pk, None).await.unwrap();
 
         // Baseline: client1 update arrives
         client1
@@ -1677,7 +1679,7 @@ mod tests {
         );
         let mut mux_rx = mux.take_updates();
 
-        mux.subscribe(pk).await.unwrap();
+        mux.subscribe(pk, None).await.unwrap();
 
         // Prepare: first resubscribe attempt will fail
         client1.fail_next_resubscriptions(1);

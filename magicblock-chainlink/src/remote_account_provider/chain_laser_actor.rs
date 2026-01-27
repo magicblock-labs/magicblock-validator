@@ -302,7 +302,9 @@ impl ChainLaserActor {
     fn handle_msg(&mut self, msg: ChainPubsubActorMessage) -> bool {
         use ChainPubsubActorMessage::*;
         match msg {
-            AccountSubscribe { pubkey, response } => {
+            AccountSubscribe {
+                pubkey, response, ..
+            } => {
                 self.add_sub(pubkey, response);
                 false
             }
