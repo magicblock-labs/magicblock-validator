@@ -7,7 +7,7 @@ use std::{
 };
 
 use futures_util::stream::FuturesUnordered;
-use magicblock_core::logger::log_trace_warn;
+use magicblock_core::logger::{log_trace_debug, log_trace_warn};
 use magicblock_metrics::metrics::{
     inc_account_subscription_account_updates_count,
     inc_program_subscription_account_updates_count,
@@ -481,7 +481,17 @@ impl ChainPubsubActor {
                                 error!(error = ?err, "Failed to send subscription update");
                             });
                         } else {
-                            debug!(client_id = client_id, "Subscription ended; signaling connection issue");
+                            static SIGNAL_CONNECTION_COUNT: AtomicU16 =
+                                AtomicU16::new(0);
+                            log_trace_debug(
+                                "Subscription ended; signaling connection issue",
+                                "Subscriptions ended; signaled connection issue",
+                                &client_id,
+                                &RemoteAccountProviderError::ConnectionDisrupted,
+                                100,
+                                &SIGNAL_CONNECTION_COUNT,
+                            );
+
                             Self::abort_and_signal_connection_issue(
                                 &client_id,
                                 subs.clone(),
@@ -628,7 +638,17 @@ impl ChainPubsubActor {
                                 }
                             }
                         } else {
-                            debug!(client_id = client_id, "Program subscription ended; signaling connection issue");
+                            static SIGNAL_PROGRAM_CONNECTION_COUNT: AtomicU16 =
+                                AtomicU16::new(0);
+                            log_trace_debug(
+                                "Program subscription ended; signaling connection issue",
+                                "Program subscriptions ended; signaled connection issue",
+                                &client_id,
+                                &RemoteAccountProviderError::ConnectionDisrupted,
+                                100,
+                                &SIGNAL_PROGRAM_CONNECTION_COUNT,
+                            );
+
                             Self::abort_and_signal_connection_issue(
                                 &client_id,
                                 subs.clone(),
