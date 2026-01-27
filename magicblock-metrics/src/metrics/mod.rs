@@ -519,6 +519,7 @@ pub(crate) fn register() {
         register!(UNDELEGATION_REQUESTED_COUNT);
         register!(UNDELEGATION_COMPLETED_COUNT);
         register!(UNSTUCK_UNDELEGATION_COUNT);
+        register!(TRANSACTION_COUNT);
         register!(FAILED_TRANSACTIONS_COUNT);
         register!(MAX_LOCK_CONTENTION_QUEUE_SIZE);
         register!(REMOTE_ACCOUNT_PROVIDER_A_COUNT);
