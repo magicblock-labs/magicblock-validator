@@ -24,8 +24,8 @@ pub fn log_trace_warn<T: Display, E: Debug>(
     trace_count: &AtomicU16,
 ) {
     let prev_value = trace_count.fetch_add(1, Ordering::SeqCst);
-    // Log the warning message when the max_trace limit is reached
-    if prev_value >= max_trace {
+    // Log the first message and when the max_trace limit is reached
+    if prev_value >= max_trace || prev_value == 0 {
         warn!(error = ?err, count = max_trace, warn_msg);
         // NOTE: 0 is reserved for the very first time this is invoked
         trace_count.store(1, Ordering::SeqCst);
