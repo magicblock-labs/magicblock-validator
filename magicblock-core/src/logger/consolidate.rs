@@ -5,16 +5,17 @@ use std::{
 
 use tracing::*;
 
-/// Logs a trace message with data and error until the max_trace count is reached,
-/// at which point it logs a warning message with the error and count.
-/// Subsequent calls reset the trace count.
+/// Logs a warn message on the first invocation (prev_value == 0), then logs
+/// trace-level messages for up to max_trace-1 calls. When the counter reaches
+/// max_trace, emits a warn message. After each warn log, the trace_count is
+/// reset to 1 for the next cycle.
 /// # Arguments
-/// * `trace_msg` - The message to log at trace level.
-/// * `warn_msg` - The message to log at warn level.
-/// * `data` - The data to include in the trace log.
+/// * `trace_msg` - The message to log at trace level (used for intermediate calls).
+/// * `warn_msg` - The message to log at warn level (used on first call and after max_trace).
+/// * `data` - The data to include in trace logs.
 /// * `err` - The error to include in both trace and warn logs.
-/// * `max_trace` - The maximum number of trace logs before logging a warning.
-/// * `trace_count` - An atomic counter tracking the number of trace logs.
+/// * `max_trace` - The maximum number of times to log trace messages before logging warn.
+/// * `trace_count` - An atomic counter tracking calls; reset to 1 after warn log.
 pub fn log_trace_warn<T: Display, E: Debug>(
     trace_msg: &str,
     warn_msg: &str,
@@ -34,16 +35,17 @@ pub fn log_trace_warn<T: Display, E: Debug>(
     }
 }
 
-/// Logs a trace message with data and error until the max_trace count is reached,
-/// at which point it logs a debug message with the error and count.
-/// Subsequent calls reset the trace count.
+/// Logs a debug message on the first invocation (prev_value == 0), then logs
+/// trace-level messages for up to max_trace-1 calls. When the counter reaches
+/// max_trace, emits a debug message. After each debug log, the trace_count is
+/// reset to 1 for the next cycle.
 /// # Arguments
-/// * `trace_msg` - The message to log at trace level.
-/// * `debug_msg` - The message to log at debug level.
-/// * `data` - The data to include in the trace log.
+/// * `trace_msg` - The message to log at trace level (used for intermediate calls).
+/// * `debug_msg` - The message to log at debug level (used on first call and after max_trace).
+/// * `data` - The data to include in trace logs.
 /// * `err` - The error to include in both trace and debug logs.
-/// * `max_trace` - The maximum number of trace logs before logging a debug message.
-/// * `trace_count` - An atomic counter tracking the number of trace logs.
+/// * `max_trace` - The maximum number of times to log trace messages before logging debug.
+/// * `trace_count` - An atomic counter tracking calls; reset to 1 after debug log.
 pub fn log_trace_debug<T: Display, E: Debug>(
     trace_msg: &str,
     debug_msg: &str,
