@@ -46,7 +46,7 @@ type ProgramSubscribeResult = PubsubClientResult<(
 
 const MAX_RECONNECT_ATTEMPTS: usize = 5;
 const RECONNECT_ATTEMPT_DELAY: Duration = Duration::from_millis(500);
-const MAX_RESUB_DELAY_MS: u64 = 5_000;
+const MAX_RESUB_DELAY_MS: u64 = 800;
 
 pub struct PubSubConnection {
     client: ArcSwap<PubsubClient>,
