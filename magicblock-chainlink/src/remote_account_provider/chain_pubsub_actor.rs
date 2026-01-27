@@ -454,6 +454,11 @@ impl ChainPubsubActor {
                 Err(err) => {
                     if retries > 0 {
                         retries -= 1;
+                        // Exponential backoff: sleep longer as retries decrease
+                        let backoff_ms =
+                            50u64 * (initial_tries - retries) as u64;
+                        tokio::time::sleep(Duration::from_millis(backoff_ms))
+                            .await;
                         continue;
                     }
                     if initial_tries > 0 {
