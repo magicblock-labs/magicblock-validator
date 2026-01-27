@@ -215,9 +215,9 @@ remove-confined-accounts = false
 # This throttles the rate at which we resubscribe to prevent overwhelming the RPC provider.
 # Supports humantime format (e.g. "50ms", "200ms", "1s").
 # For example, with 200ms delay, resubscribing to 1000 accounts would take ~3.3 minutes.
-# Default: "200ms"
+# Default: "50ms"
 # Env: MBV_CHAINLINK__RESUBSCRIPTION_DELAY
-# resubscription-delay = "200ms"
+# resubscription-delay = "50ms"
 
 # ==============================================================================
 # On-Chain Registration (Optional)
