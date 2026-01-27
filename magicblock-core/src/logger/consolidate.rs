@@ -23,9 +23,12 @@ pub fn log_trace_warn<T: Display, E: Debug>(
     max_trace: u16,
     trace_count: &AtomicU16,
 ) {
-    if trace_count.fetch_add(1, Ordering::SeqCst) == max_trace {
+    let prev_value = trace_count.load(Ordering::SeqCst);
+    // Log the warning message when the max_trace limit is reached
+    if prev_value >= max_trace {
         warn!(error = ?err, count = max_trace, warn_msg);
-        trace_count.store(0, Ordering::SeqCst);
+        // NOTE: 0 is reserved for the very first time this is invoked
+        trace_count.store(1, Ordering::SeqCst);
     } else {
         trace!(error = ?err, data = %data, trace_msg);
     }
@@ -39,9 +42,12 @@ pub fn log_trace_debug<T: Display, E: Debug>(
     max_trace: u16,
     trace_count: &AtomicU16,
 ) {
-    if trace_count.fetch_add(1, Ordering::SeqCst) == max_trace {
+    let prev_value = trace_count.fetch_add(1, Ordering::SeqCst);
+    // Log the first message and when the max_trace limit is reached
+    if prev_value >= max_trace || prev_value == 0 {
         debug!(error = ?err, count = max_trace, debug_msg);
-        trace_count.store(0, Ordering::SeqCst);
+        // NOTE: 0 is reserved for the very first time this is invoked
+        trace_count.store(1, Ordering::SeqCst);
     } else {
         trace!(error = ?err, data = %data, trace_msg);
     }
