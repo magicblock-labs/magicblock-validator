@@ -77,7 +77,7 @@ const _: () = assert!(size_of::<StorageHeader>().is_multiple_of(8));
 /// This struct provides safe wrappers around the raw memory map, handling
 /// atomic allocation, bounds checking, and pointer arithmetic.
 #[cfg_attr(test, derive(Debug))]
-pub(crate) struct AccountsStorage {
+pub struct AccountsStorage {
     /// The underlying memory-mapped file.
     /// Kept alive here to ensure the memory region remains valid.
     mmap: MmapMut,
@@ -292,7 +292,7 @@ impl AccountsStorage {
 
     /// Translates an abstract `Offset` (block index) to a raw memory pointer.
     #[inline]
-    pub(crate) fn resolve_ptr(&self, offset: Offset) -> NonNull<u8> {
+    pub fn resolve_ptr(&self, offset: Offset) -> NonNull<u8> {
         let offset_bytes = offset as usize * self.block_size;
         // SAFETY:
         // The caller is responsible for ensuring `offset` is within valid bounds.

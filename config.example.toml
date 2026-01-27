@@ -60,8 +60,8 @@ lifecycle = "ephemeral"
 # See Helius gRPC docs for available network endpoints.
 remotes = [
   "https://api.devnet.solana.com",
-  "wss://api.devnet.solana.com",
-  "grpcs://laserstream-devnet-ewr.helius-rpc.com?api-key=YOUR_API_KEY",
+  # "wss://api.devnet.solana.com",
+  # "grpcs://laserstream-devnet-ewr.helius-rpc.com?api-key=YOUR_API_KEY",
 ]
 
 # Root directory for application storage (ledger, accountsdb, snapshots).
@@ -116,7 +116,7 @@ event-processors = 1
 
 # List of paths to geyser json configuration files
 # Default: empty list (no plugins)
-geyser-plugins = ["config.json"]
+# geyser-plugins = ["config.json"]
 
 # ==============================================================================
 # Chain Commitment Strategy (ER -> BASE)
@@ -180,7 +180,7 @@ size = 536_870_912
 # Whether to verify that the ledger on disk belongs to the configured keypair.
 # Default: true
 # Env: MBV_LEDGER__VERIFY_KEYPAIR
-verify-keypair = true
+verify-keypair = false
 
 # If true, deletes the existing ledger directory on startup.
 # Default: false
@@ -225,18 +225,18 @@ remove-confined-accounts = false
 # Used only if the validator registers itself on-chain.
 # This section is optional. To disable, just remove/comment the section
 
-[chain-operation]
-# ISO 3166-1 alpha-2 country code (e.g. "US", "DE").
-# Env: MBV_CHAIN_OPERATION__COUNTRY_CODE
-country-code = "US"
+# [chain-operation]
+# # ISO 3166-1 alpha-2 country code (e.g. "US", "DE").
+# # Env: MBV_CHAIN_OPERATION__COUNTRY_CODE
+# country-code = "US"
 
-# Fully Qualified Domain Name where this validator is reachable.
-# Env: MBV_CHAIN_OPERATION__FQDN
-fqdn = "https://validator.example.com"
+# # Fully Qualified Domain Name where this validator is reachable.
+# # Env: MBV_CHAIN_OPERATION__FQDN
+# fqdn = "https://validator.example.com"
 
-# How often to claim accrued fees from the chain (e.g. "24h").
-# Env: MBV_CHAIN_OPERATION__CLAIM_FEES_FREQUENCY
-claim-fees-frequency = "24h"
+# # How often to claim accrued fees from the chain (e.g. "24h").
+# # Env: MBV_CHAIN_OPERATION__CLAIM_FEES_FREQUENCY
+# claim-fees-frequency = "24h"
 
 # ==============================================================================
 # Internal Task Scheduler
@@ -259,10 +259,10 @@ min-interval = "10ms"
 # You can specify multiple programs to load at startup.
 # Default: Empty list
 
-[[programs]]
-id = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
-path = "./libs/spl_token.so"
+# [[programs]]
+# id = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+# path = "./libs/spl_token.so"
 
-[[programs]]
-id = "Memo1UhkJRfHyvLMcVucJwxXeuD728EqVDDwQDxFMNo"
-path = "./libs/spl_memo.so"
+# [[programs]]
+# id = "Memo1UhkJRfHyvLMcVucJwxXeuD728EqVDDwQDxFMNo"
+# path = "./libs/spl_memo.so"

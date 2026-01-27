@@ -33,7 +33,7 @@ pub const ACCOUNTSDB_DIR: &str = "accountsdb";
 #[cfg_attr(test, derive(Debug))]
 pub struct AccountsDb {
     /// Underlying append-only storage for account data.
-    storage: AccountsStorage,
+    pub storage: AccountsStorage,
     /// Fast index for account lookups (Pubkey -> Offset).
     index: AccountsDbIndex,
     /// Manages snapshots and state restoration.
