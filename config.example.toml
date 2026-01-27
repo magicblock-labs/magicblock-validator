@@ -214,7 +214,7 @@ remove-confined-accounts = false
 # Delay between resubscribing to accounts after a pubsub reconnection.
 # This throttles the rate at which we resubscribe to prevent overwhelming the RPC provider.
 # Supports humantime format (e.g. "50ms", "200ms", "1s").
-# For example, with 200ms delay, resubscribing to 1000 accounts would take ~3.3 minutes.
+# For example, with 50ms delay, resubscribing to 1000 accounts would take ~50 seconds.
 # Default: "50ms"
 # Env: MBV_CHAINLINK__RESUBSCRIPTION_DELAY
 # resubscription-delay = "50ms"
