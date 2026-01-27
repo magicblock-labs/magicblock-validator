@@ -154,8 +154,12 @@ fn assert_non_accepted_actions<'a>(
 ) -> &'a AccountSharedData {
     let magic_context_acc = find_magic_context_account(processed_scheduled)
         .expect("magic context account not found");
-    let magic_context =
-        bincode::deserialize::<MagicContext>(magic_context_acc.data()).unwrap();
+    let magic_context: MagicContext = bincode::serde::decode_from_slice(
+        magic_context_acc.data(),
+        bincode::config::legacy(),
+    )
+    .unwrap()
+    .0;
 
     let accepted_scheduled_actions =
         TransactionScheduler::default().get_scheduled_actions_by_payer(payer);
@@ -175,8 +179,12 @@ fn assert_accepted_actions(
 ) -> Vec<ScheduledIntentBundle> {
     let magic_context_acc = find_magic_context_account(processed_accepted)
         .expect("magic context account not found");
-    let magic_context =
-        bincode::deserialize::<MagicContext>(magic_context_acc.data()).unwrap();
+    let magic_context: MagicContext = bincode::serde::decode_from_slice(
+        magic_context_acc.data(),
+        bincode::config::legacy(),
+    )
+    .unwrap()
+    .0;
 
     let scheduled_actions =
         TransactionScheduler::default().get_scheduled_actions_by_payer(payer);
