@@ -1,6 +1,10 @@
-use std::{sync::Arc, time::Duration};
+use std::{
+    sync::{atomic::AtomicU16, Arc},
+    time::Duration,
+};
 
 use futures_util::stream::{FuturesUnordered, StreamExt};
+use magicblock_core::logger::log_trace_warn;
 use solana_pubkey::Pubkey;
 use tokio::sync::oneshot;
 use tracing::*;
@@ -202,14 +206,26 @@ impl AccountSubscriptionTask {
                 // ones that failed.
                 // The failed clients will also trigger the reconnection logic
                 // which takes care of fixing the RPC connection.
-                warn!(
-                    operation = %op_name,
+
+                static CLIENTS_FAILED_OPERATION_COUNT: AtomicU16 =
+                    AtomicU16::new(0);
+                let data = format!("operation={}, total_clients={}, required_confirmations={}, failed_clients={}",
+                    op_name,
                     total_clients,
                     required_confirmations,
-                    error_count = errors.len(),
-                    errors = %errors.join(", "),
-                    failed_clients = %failed_client_ids.join(", "),
-                    "Some clients failed"
+                    failed_client_ids.join(", "),
+                );
+                let err =
+                    RemoteAccountProviderError::AccountSubscriptionsTaskFailed(
+                        errors.join(", "),
+                    );
+                log_trace_warn(
+                    "Some clients failed",
+                    "Some clients failed multiple times",
+                    &data,
+                    &err,
+                    100,
+                    &CLIENTS_FAILED_OPERATION_COUNT,
                 );
             }
         });
