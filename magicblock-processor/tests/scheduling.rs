@@ -13,7 +13,6 @@ use solana_pubkey::Pubkey;
 use solana_signature::Signature;
 use solana_transaction::Transaction;
 use test_kit::{ExecutionTestEnv, Signer};
-use tokio::time::timeout;
 
 const TIMEOUT: Duration = Duration::from_secs(5);
 const STRESS_TIMEOUT: Duration = Duration::from_secs(10);
@@ -111,7 +110,7 @@ async fn collect_statuses(
             );
         }
         // Short poll interval
-        if let Ok(Ok(status)) = timeout(
+        if let Ok(Ok(status)) = tokio::time::timeout(
             Duration::from_millis(100),
             env.dispatch.transaction_status.recv_async(),
         )

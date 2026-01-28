@@ -65,6 +65,10 @@ tracing = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
 
+[features]
+default = []
+tui = ["magicblock-core/tui"]
+
 [dev-dependencies]
 rand = { workspace = true }
 test-kit = { workspace = true }

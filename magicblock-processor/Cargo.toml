@@ -42,6 +42,10 @@ solana-transaction-status = { workspace = true }
 
 rustc-hash = { workspace = true }
 
+[features]
+default = []
+tui = ["magicblock-core/tui"]
+
 [dev-dependencies]
 guinea = { workspace = true }
 solana-keypair = { workspace = true }

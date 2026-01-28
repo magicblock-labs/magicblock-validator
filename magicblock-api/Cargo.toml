@@ -59,3 +59,11 @@ solana-native-token = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
+
+[features]
+default = []
+tui = [
+  "magicblock-core/tui",
+  "magicblock-aperture/tui",
+  "magicblock-processor/tui",
+]
