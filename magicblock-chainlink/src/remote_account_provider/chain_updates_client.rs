@@ -100,11 +100,12 @@ impl ChainPubsubClient for ChainUpdatesClient {
     async fn subscribe(
         &self,
         pubkey: Pubkey,
+        retries: Option<usize>,
     ) -> RemoteAccountProviderResult<()> {
         use ChainUpdatesClient::*;
         match self {
-            WebSocket(client) => client.subscribe(pubkey).await,
-            Laser(client) => client.subscribe(pubkey).await,
+            WebSocket(client) => client.subscribe(pubkey, retries).await,
+            Laser(client) => client.subscribe(pubkey, retries).await,
         }
     }
 

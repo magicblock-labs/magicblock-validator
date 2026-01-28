@@ -99,6 +99,7 @@ impl ChainPubsubClient for ChainLaserClientImpl {
     async fn subscribe(
         &self,
         pubkey: Pubkey,
+        retries: Option<usize>,
     ) -> RemoteAccountProviderResult<()> {
         // Skip clock::ID subscriptions for GRPC clients since they get slot
         // updates directly via the SubscribeRequestFilterSlots in the GRPC
@@ -117,6 +118,7 @@ impl ChainPubsubClient for ChainLaserClientImpl {
         let (tx, rx) = oneshot::channel();
         self.send_msg(ChainPubsubActorMessage::AccountSubscribe {
             pubkey: effective_pubkey,
+            retries,
             response: tx,
         })
         .await?;
@@ -211,7 +213,7 @@ impl ReconnectableClient for ChainLaserClientImpl {
         // NOTE: The laser implementation subscribes periodically to requested accounts
         // thus we don't need to throttle the speed at which we resubscribe here.
         for pubkey in pubkeys {
-            self.subscribe(pubkey).await?;
+            self.subscribe(pubkey, None).await?;
         }
         Ok(())
     }

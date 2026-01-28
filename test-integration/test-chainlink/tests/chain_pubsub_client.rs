@@ -86,7 +86,7 @@ async fn ixtest_chain_pubsub_client_clock() {
 
     let (client, mut updates) = setup().await;
 
-    client.subscribe(clock::ID).await.unwrap();
+    client.subscribe(clock::ID, None).await.unwrap();
     let mut received_updates = vec![];
     while let Some(update) = updates.recv().await {
         received_updates.push(update);
@@ -145,7 +145,7 @@ async fn ixtest_chain_pubsub_client_airdropping() {
     {
         let len = updates_total_len(&received_updates);
 
-        client.subscribe(pubkey1).await.unwrap();
+        client.subscribe(pubkey1, None).await.unwrap();
         airdrop(&rpc_client, &pubkey1, 1_000_000).await;
         airdrop(&rpc_client, &pubkey2, 1_000_000).await;
 
@@ -163,7 +163,7 @@ async fn ixtest_chain_pubsub_client_airdropping() {
     {
         let len = updates_total_len(&received_updates);
 
-        client.subscribe(pubkey2).await.unwrap();
+        client.subscribe(pubkey2, None).await.unwrap();
         airdrop(&rpc_client, &pubkey1, 2_000_000).await;
         airdrop(&rpc_client, &pubkey2, 2_000_000).await;
 

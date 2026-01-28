@@ -46,7 +46,7 @@ type ProgramSubscribeResult = PubsubClientResult<(
 
 const MAX_RECONNECT_ATTEMPTS: usize = 5;
 const RECONNECT_ATTEMPT_DELAY: Duration = Duration::from_millis(500);
-const MAX_RESUB_DELAY_MS: u64 = 5_000;
+const MAX_RESUB_DELAY_MS: u64 = 800;
 
 pub struct PubSubConnection {
     client: ArcSwap<PubsubClient>,
@@ -154,6 +154,7 @@ pub trait ChainPubsubClient: Send + Sync + Clone + 'static {
     async fn subscribe(
         &self,
         pubkey: Pubkey,
+        retries: Option<usize>,
     ) -> RemoteAccountProviderResult<()>;
     async fn subscribe_program(
         &self,
@@ -268,11 +269,13 @@ impl ChainPubsubClient for ChainPubsubClientImpl {
     async fn subscribe(
         &self,
         pubkey: Pubkey,
+        retries: Option<usize>,
     ) -> RemoteAccountProviderResult<()> {
         let (tx, rx) = oneshot::channel();
         self.actor
             .send_msg(ChainPubsubActorMessage::AccountSubscribe {
                 pubkey,
+                retries,
                 response: tx,
             })
             .await?;
@@ -362,11 +365,15 @@ impl ReconnectableClient for ChainPubsubClientImpl {
         &self,
         pubkeys: HashSet<Pubkey>,
     ) -> RemoteAccountProviderResult<()> {
+        const RESUB_MULTIPLE_RETRY_PER_PUBKEY: usize = 5;
         let delay_ms = self.current_resub_delay_ms.load(Ordering::SeqCst);
         let delay = Duration::from_millis(delay_ms);
         let pubkeys_vec: Vec<Pubkey> = pubkeys.into_iter().collect();
         for (idx, pubkey) in pubkeys_vec.iter().enumerate() {
-            if let Err(err) = self.subscribe(*pubkey).await {
+            if let Err(err) = self
+                .subscribe(*pubkey, Some(RESUB_MULTIPLE_RETRY_PER_PUBKEY))
+                .await
+            {
                 // Report the number of subscriptions we managed before failing
                 metrics::set_pubsub_client_resubscribed_count(
                     &self.client_id,
@@ -542,6 +549,7 @@ pub mod mock {
         async fn subscribe(
             &self,
             pubkey: Pubkey,
+            _retries: Option<usize>,
         ) -> RemoteAccountProviderResult<()> {
             if !*self.connected.lock() {
                 return Err(
@@ -647,7 +655,7 @@ pub mod mock {
                 }
             }
             for pubkey in pubkeys {
-                self.subscribe(pubkey).await?;
+                self.subscribe(pubkey, None).await?;
                 // keep it small; tests shouldn't take long
                 tokio::time::sleep(Duration::from_millis(10)).await;
             }

@@ -32,9 +32,13 @@ use super::{
     chain_pubsub_client::PubSubConnection,
     errors::{RemoteAccountProviderError, RemoteAccountProviderResult},
 };
-use crate::remote_account_provider::pubsub_common::{
-    AccountSubscription, ChainPubsubActorMessage, PubsubClientConfig,
-    SubscriptionUpdate, MESSAGE_CHANNEL_SIZE, SUBSCRIPTION_UPDATE_CHANNEL_SIZE,
+use crate::remote_account_provider::{
+    pubsub_common::{
+        AccountSubscription, ChainPubsubActorMessage, PubsubClientConfig,
+        SubscriptionUpdate, MESSAGE_CHANNEL_SIZE,
+        SUBSCRIPTION_UPDATE_CHANNEL_SIZE,
+    },
+    DEFAULT_SUBSCRIPTION_RETRIES,
 };
 
 // Log every 10 secs (given chain slot time is 400ms)
@@ -257,7 +261,11 @@ impl ChainPubsubActor {
         }
 
         match msg {
-            ChainPubsubActorMessage::AccountSubscribe { pubkey, response } => {
+            ChainPubsubActorMessage::AccountSubscribe {
+                pubkey,
+                retries,
+                response,
+            } => {
                 if !is_connected.load(Ordering::SeqCst) {
                     static SUBSCRIPTION_DURING_DISCONNECT_COUNT: AtomicU16 =
                         AtomicU16::new(0);
@@ -288,6 +296,7 @@ impl ChainPubsubActor {
                     abort_sender,
                     is_connected,
                     commitment_config,
+                    retries,
                     client_id,
                 )
                 .await;
@@ -394,6 +403,7 @@ impl ChainPubsubActor {
         abort_sender: mpsc::Sender<()>,
         is_connected: Arc<AtomicBool>,
         commitment_config: CommitmentConfig,
+        retries: Option<usize>,
         client_id: &str,
     ) {
         if subs
@@ -432,24 +442,46 @@ impl ChainPubsubActor {
             ..Default::default()
         };
 
-        // Perform the subscription
-        let (mut update_stream, unsubscribe) = match pubsub_connection
-            .account_subscribe(&pubkey, config.clone())
-            .await
-        {
-            Ok(res) => res,
-            Err(err) => {
-                Self::abort_and_signal_connection_issue(
-                    client_id,
-                    subs.clone(),
-                    program_subs.clone(),
-                    abort_sender,
-                    is_connected.clone(),
-                );
-                // RPC failed - inform the requester
-                let _ = sub_response.send(Err(err.into()));
-                return;
-            }
+        let mut retries = retries.unwrap_or(DEFAULT_SUBSCRIPTION_RETRIES);
+        let initial_tries = retries;
+        let (mut update_stream, unsubscribe) = loop {
+            // Perform the subscription
+            match pubsub_connection
+                .account_subscribe(&pubkey, config.clone())
+                .await
+            {
+                Ok(res) => break res,
+                Err(err) => {
+                    if retries > 0 {
+                        retries -= 1;
+                        // Linear backoff: sleep longer as retries decrease
+                        let backoff_ms =
+                            50u64 * (initial_tries - retries) as u64;
+                        tokio::time::sleep(Duration::from_millis(backoff_ms))
+                            .await;
+                        continue;
+                    }
+                    if initial_tries > 0 {
+                        warn!(
+                            error = ?err,
+                            pubkey = %pubkey,
+                            retries_count = initial_tries,
+                            "Failed to subscribe to account after retrying multiple times",
+                        );
+                    }
+                    Self::abort_and_signal_connection_issue(
+                        client_id,
+                        subs.clone(),
+                        program_subs.clone(),
+                        abort_sender,
+                        is_connected.clone(),
+                        &format!("Failed to subscribe to account {pubkey} after {initial_tries} retries")
+                    );
+                    // RPC failed - inform the requester
+                    let _ = sub_response.send(Err(err.into()));
+                    return;
+                }
+            };
         };
 
         // RPC succeeded - confirm to the requester that the subscription was made
@@ -498,6 +530,7 @@ impl ChainPubsubActor {
                                 program_subs.clone(),
                                 abort_sender.clone(),
                                 is_connected.clone(),
+                                &format!("Subscription ended for {pubkey}")
                             );
                             // Return early - abort_and_signal_connection_issue cancels all
                             // subscriptions, triggering cleanup via the cancellation path
@@ -591,6 +624,7 @@ impl ChainPubsubActor {
                     program_subs.clone(),
                     abort_sender,
                     is_connected.clone(),
+                    &format!("Failed to subscribe to program {program_pubkey}"),
                 );
                 // RPC failed - inform the requester
                 let _ = sub_response.send(Err(err.into()));
@@ -655,6 +689,7 @@ impl ChainPubsubActor {
                                 program_subs.clone(),
                                 abort_sender.clone(),
                                 is_connected.clone(),
+                                &format!("Program subscription ended for {program_pubkey}")
                             );
                             // Return early - abort_and_signal_connection_issue cancels all
                             // subscriptions, triggering cleanup via the cancellation path
@@ -727,6 +762,7 @@ impl ChainPubsubActor {
         program_subs: Arc<Mutex<HashMap<Pubkey, AccountSubscription>>>,
         abort_sender: mpsc::Sender<()>,
         is_connected: Arc<AtomicBool>,
+        reason: &str,
     ) {
         // Only abort if we were connected; prevents duplicate aborts
         if !is_connected.swap(false, Ordering::SeqCst) {
@@ -734,7 +770,11 @@ impl ChainPubsubActor {
             return;
         }
 
-        debug!(client_id = client_id, "Aborting connection");
+        debug!(
+            client_id = client_id,
+            reason = reason,
+            "Aborting connection"
+        );
 
         fn drain_subscriptions(
             _client_id: &str,

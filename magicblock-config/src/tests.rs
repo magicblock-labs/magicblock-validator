@@ -262,7 +262,7 @@ fn test_chainlink_config() {
         [chainlink]
         prepare-lookup-tables = true
         max-monitored-accounts = 5000
-        resubscription-delay = "200ms"
+        resubscription-delay = "50ms"
         "#,
     );
 
@@ -272,7 +272,7 @@ fn test_chainlink_config() {
     assert_eq!(config.chainlink.max_monitored_accounts, 5000);
     assert_eq!(
         config.chainlink.resubscription_delay,
-        std::time::Duration::from_millis(200)
+        std::time::Duration::from_millis(50)
     );
 }
 

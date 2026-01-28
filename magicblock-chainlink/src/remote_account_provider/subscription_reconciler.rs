@@ -100,7 +100,7 @@ pub async fn reconcile_subscriptions<PubsubClient: ChainPubsubClient>(
             "Resubscribing accounts in LRU but not in pubsub"
         );
         for pubkey in extra_in_lru {
-            if let Err(e) = pubsub_client.subscribe(pubkey).await {
+            if let Err(e) = pubsub_client.subscribe(pubkey, None).await {
                 warn!(pubkey = %pubkey, error = ?e, "Failed to resubscribe account");
             }
         }
