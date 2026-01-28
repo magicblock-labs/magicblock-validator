@@ -5,11 +5,12 @@ use solana_account::{ReadableAccount, WritableAccount};
 use solana_instruction::error::InstructionError;
 use solana_log_collector::ic_msg;
 use solana_program_runtime::invoke_context::InvokeContext;
+use solana_sdk_ids::system_program;
 use solana_transaction_context::TransactionContext;
 
 use super::processor::rent_for;
 use super::validation::{validate_cpi_only, validate_sponsor};
-use crate::utils::accounts;
+use crate::utils::{accounts, instruction_context_frames::InstructionContextFrames};
 
 /// Closes an ephemeral account, refunding rent to the sponsor.
 pub(crate) fn process_close_ephemeral_account(
@@ -23,15 +24,28 @@ pub(crate) fn process_close_ephemeral_account(
     validate_sponsor(transaction_context)?;
 
     // Validate vault is owned by magic program
-    let vault = accounts::get_instruction_account_with_idx(transaction_context, 2)?;
+    let vault =
+        accounts::get_instruction_account_with_idx(transaction_context, 2)?;
     if *vault.borrow().owner() != id() {
         return Err(InstructionError::InvalidAccountOwner);
     }
 
-    let ephemeral = accounts::get_instruction_account_with_idx(transaction_context, 1)?;
+    let ephemeral =
+        accounts::get_instruction_account_with_idx(transaction_context, 1)?;
 
     if !ephemeral.borrow().ephemeral() {
         return Err(InstructionError::InvalidAccountData);
+    }
+
+    // Prevent double-close: verify account is still owned by calling program
+    // After closing, account is owned by system_program, so this prevents double-spend
+    let frames = InstructionContextFrames::try_from(transaction_context)?;
+    let caller_program_id = frames
+        .find_program_id_of_parent_of_current_instruction()
+        .ok_or(InstructionError::IncorrectProgramId)?;
+
+    if *ephemeral.borrow().owner() != *caller_program_id {
+        return Err(InstructionError::InvalidAccountOwner);
     }
 
     let data_len = ephemeral.borrow().data().len();
@@ -42,14 +56,16 @@ pub(crate) fn process_close_ephemeral_account(
         0,
         refund,
     )?;
-    accounts::debit_instruction_account_at_index(transaction_context, 2, refund)?;
+    accounts::debit_instruction_account_at_index(
+        transaction_context,
+        2,
+        refund,
+    )?;
 
     let mut acc = ephemeral.borrow_mut();
     acc.set_lamports(0);
-    acc.set_owner(solana_sdk_ids::system_program::id());
+    acc.set_owner(system_program::id());
     acc.resize(0, 0);
-    acc.set_ephemeral(false);
-    acc.set_delegated(false);
 
     ic_msg!(invoke_context, "Closed ephemeral, refunded: {}", refund);
     Ok(())
