@@ -9,8 +9,9 @@ use solana_transaction_context::TransactionContext;
 pub(crate) fn validate_sponsor(
     transaction_context: &TransactionContext,
 ) -> Result<(), InstructionError> {
-    use crate::utils::accounts;
-    use crate::utils::instruction_context_frames::InstructionContextFrames;
+    use crate::utils::{
+        accounts, instruction_context_frames::InstructionContextFrames,
+    };
 
     let ix_ctx = transaction_context.get_current_instruction_context()?;
 
@@ -22,7 +23,10 @@ pub(crate) fn validate_sponsor(
             .find_program_id_of_parent_of_current_instruction()
             .ok_or(InstructionError::InvalidAccountData)?;
 
-        let sponsor_owner = accounts::get_instruction_account_owner_with_idx(transaction_context, 0)?;
+        let sponsor_owner = accounts::get_instruction_account_owner_with_idx(
+            transaction_context,
+            0,
+        )?;
         if sponsor_owner != *caller_program_id {
             return Err(InstructionError::InvalidAccountOwner);
         }
@@ -39,7 +43,8 @@ pub(crate) fn validate_cpi_only(
     use crate::utils::instruction_context_frames::InstructionContextFrames;
 
     let frames = InstructionContextFrames::try_from(transaction_context)?;
-    let caller_program_id = frames.find_program_id_of_parent_of_current_instruction();
+    let caller_program_id =
+        frames.find_program_id_of_parent_of_current_instruction();
 
     // If caller_program_id is None, we're at the top level (direct call, not CPI)
     if caller_program_id.is_none() {
