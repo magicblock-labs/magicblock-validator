@@ -1,35 +1,66 @@
-//! Manages transaction scheduling across multiple executors.
+//! Transaction scheduling across multiple executors.
 //!
-//! Simple locking strategy: try to acquire all locks, if any fails,
-//! release partial locks and queue behind the blocking executor.
-//! No fairness guarantees - livelocks are acceptable.
+//! Simple locking: try all locks, requeue on failure. No fairness blocking.
+//! Transactions ordered by ID (FIFO) within each executor's blocked queue.
 
-use std::collections::VecDeque;
+use std::{cmp::Ordering, collections::BinaryHeap};
 
 use magicblock_core::link::transactions::ProcessableTransaction;
 use magicblock_metrics::metrics::MAX_LOCK_CONTENTION_QUEUE_SIZE;
+use solana_pubkey::Pubkey;
 
-use super::locks::{ExecutorId, LocksCache, RcLock};
+use super::locks::{
+    next_transaction_id, ExecutorId, LocksCache, TransactionId,
+};
 
-type TransactionQueue = VecDeque<ProcessableTransaction>;
+/// Transaction tagged with ID for queue ordering.
+pub(super) struct TransactionWithId {
+    pub(super) id: TransactionId,
+    pub(super) txn: ProcessableTransaction,
+}
 
-/// The central state machine for the scheduler.
+impl TransactionWithId {
+    pub(super) fn new(txn: ProcessableTransaction) -> Self {
+        Self {
+            id: next_transaction_id(),
+            txn,
+        }
+    }
+}
+
+// Min-heap: smaller ID = higher priority
+impl Ord for TransactionWithId {
+    fn cmp(&self, other: &Self) -> Ordering {
+        other.id.cmp(&self.id)
+    }
+}
+impl PartialOrd for TransactionWithId {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+impl PartialEq for TransactionWithId {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
+    }
+}
+impl Eq for TransactionWithId {}
+
 pub(super) struct ExecutionCoordinator {
-    /// Transactions waiting for a specific executor to finish.
-    blocked_transactions: Vec<TransactionQueue>,
-    /// Pool of idle executors ready for work.
+    blocked_transactions: Vec<BinaryHeap<TransactionWithId>>,
     ready_executors: Vec<ExecutorId>,
-    /// Locks currently held by each executor.
-    acquired_locks: Vec<Vec<RcLock>>,
-    /// The global registry of all account locks.
+    /// Account keys locked by each executor (for unlocking)
+    held_accounts: Vec<Vec<Pubkey>>,
     locks: LocksCache,
 }
 
 impl ExecutionCoordinator {
     pub(super) fn new(count: usize) -> Self {
         Self {
-            blocked_transactions: (0..count).map(|_| VecDeque::new()).collect(),
-            acquired_locks: (0..count).map(|_| Vec::new()).collect(),
+            blocked_transactions: (0..count)
+                .map(|_| BinaryHeap::new())
+                .collect(),
+            held_accounts: (0..count).map(|_| Vec::new()).collect(),
             ready_executors: (0..count as u32).collect(),
             locks: LocksCache::default(),
         }
@@ -50,15 +81,13 @@ impl ExecutionCoordinator {
         self.ready_executors.push(executor)
     }
 
-    /// Attempts to schedule a transaction on the given executor.
-    /// Returns Ok(txn) if locks acquired, Err(blocking_executor) if blocked.
     pub(super) fn try_schedule(
         &mut self,
         executor: ExecutorId,
-        txn: ProcessableTransaction,
+        txn: TransactionWithId,
     ) -> Result<ProcessableTransaction, ExecutorId> {
-        match self.try_acquire_locks(executor, &txn) {
-            Ok(()) => Ok(txn),
+        match self.try_acquire_locks(executor, &txn.txn) {
+            Ok(()) => Ok(txn.txn),
             Err(blocker) => {
                 self.release_executor(executor);
                 self.queue_transaction(blocker, txn);
@@ -67,7 +96,6 @@ impl ExecutionCoordinator {
         }
     }
 
-    /// Try to acquire all locks for the transaction.
     pub(crate) fn try_acquire_locks(
         &mut self,
         executor: ExecutorId,
@@ -77,54 +105,45 @@ impl ExecutionCoordinator {
         let accounts = message.account_keys();
 
         for (i, &acc) in accounts.iter().enumerate() {
-            let lock = self.locks.entry(acc).or_default().clone();
-            let mut guard = lock.borrow_mut();
-
+            let lock = self.locks.entry(acc).or_default();
             let result = if message.is_writable(i) {
-                guard.write(executor)
+                lock.write(executor)
             } else {
-                guard.read(executor)
+                lock.read(executor)
             };
 
-            match result {
-                Ok(()) => {
-                    self.acquired_locks[executor as usize].push(lock.clone())
-                }
-                Err(blocker) => {
-                    self.unlock_accounts(executor);
-                    return Err(blocker);
-                }
+            if let Err(blocker) = result {
+                self.unlock_accounts(executor);
+                return Err(blocker);
             }
+            self.held_accounts[executor as usize].push(acc);
         }
         Ok(())
     }
 
-    /// Releases all locks held by a specific executor.
     pub(crate) fn unlock_accounts(&mut self, executor: ExecutorId) {
-        let locks = &mut self.acquired_locks[executor as usize];
-        while let Some(lock) = locks.pop() {
-            lock.borrow_mut().unlock(executor);
+        for acc in self.held_accounts[executor as usize].drain(..) {
+            if let Some(lock) = self.locks.get_mut(&acc) {
+                lock.unlock(executor);
+            }
         }
     }
 
-    /// Queues a transaction behind the blocking executor.
     fn queue_transaction(
         &mut self,
         blocker: ExecutorId,
-        txn: ProcessableTransaction,
+        txn: TransactionWithId,
     ) {
-        let queue = &mut self.blocked_transactions[blocker as usize];
-        queue.push_back(txn);
-
-        let current_max = MAX_LOCK_CONTENTION_QUEUE_SIZE.get();
-        MAX_LOCK_CONTENTION_QUEUE_SIZE.set(current_max.max(queue.len() as i64));
+        let heap = &mut self.blocked_transactions[blocker as usize];
+        heap.push(txn);
+        MAX_LOCK_CONTENTION_QUEUE_SIZE
+            .set(MAX_LOCK_CONTENTION_QUEUE_SIZE.get().max(heap.len() as i64));
     }
 
-    /// Retrieves the next transaction waiting for this executor.
     pub(super) fn next_blocked_transaction(
         &mut self,
         executor: ExecutorId,
-    ) -> Option<ProcessableTransaction> {
-        self.blocked_transactions[executor as usize].pop_front()
+    ) -> Option<TransactionWithId> {
+        self.blocked_transactions[executor as usize].pop()
     }
 }

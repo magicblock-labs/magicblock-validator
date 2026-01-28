@@ -9,7 +9,7 @@ use std::{
     thread::JoinHandle,
 };
 
-use coordinator::ExecutionCoordinator;
+use coordinator::{ExecutionCoordinator, TransactionWithId};
 use locks::{ExecutorId, MAX_SVM_EXECUTORS};
 use magicblock_accounts_db::{traits::AccountsBank, AccountsDb};
 use magicblock_core::link::transactions::{
@@ -54,7 +54,8 @@ impl TransactionScheduler {
         state.prepare_sysvars();
 
         for id in 0..count {
-            let (transactions_tx, transactions_rx) = channel(EXECUTOR_QUEUE_CAPACITY);
+            let (transactions_tx, transactions_rx) =
+                channel(EXECUTOR_QUEUE_CAPACITY);
             let executor = TransactionExecutor::new(
                 id as u32,
                 &state,
@@ -115,17 +116,17 @@ impl TransactionScheduler {
     }
 
     fn handle_new_transaction(&mut self, txn: ProcessableTransaction) {
-        let executor = self
-            .coordinator
-            .get_ready_executor()
-            .expect("unreachable: is_ready() guard ensures an executor is available");
-        self.schedule_transaction(executor, txn);
+        let executor = self.coordinator.get_ready_executor().expect(
+            "unreachable: is_ready() guard ensures an executor is available",
+        );
+        self.schedule_transaction(executor, TransactionWithId::new(txn));
     }
 
     fn reschedule_blocked_transactions(&mut self, blocker: ExecutorId) {
         let mut executor = Some(blocker);
         while let Some(exec) = executor.take() {
-            let Some(txn) = self.coordinator.next_blocked_transaction(blocker) else {
+            let Some(txn) = self.coordinator.next_blocked_transaction(blocker)
+            else {
                 self.coordinator.release_executor(exec);
                 break;
             };
@@ -143,16 +144,16 @@ impl TransactionScheduler {
     fn schedule_transaction(
         &mut self,
         executor: ExecutorId,
-        txn: ProcessableTransaction,
+        txn: TransactionWithId,
     ) -> Option<ExecutorId> {
         let txn = match self.coordinator.try_schedule(executor, txn) {
             Ok(txn) => txn,
             Err(blocker) => return Some(blocker),
         };
 
-        let _ = self.executors[executor as usize]
-            .try_send(txn)
-            .inspect_err(|e| error!(executor, error = ?e, "Executor channel send failed"));
+        let _ = self.executors[executor as usize].try_send(txn).inspect_err(
+            |e| error!(executor, error = ?e, "Executor channel send failed"),
+        );
         None
     }
 
