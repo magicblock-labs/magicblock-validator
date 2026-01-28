@@ -14,13 +14,43 @@ use tracing::*;
 
 use crate::errors::{ApiError, ApiResult};
 
+/// Represents the initialization state of the ledger
+#[derive(Debug, Clone, Copy)]
+pub enum LedgerInitState {
+    /// Ledger was reset/fresh start - no existing blocks
+    Fresh,
+    /// Resuming from an existing slot
+    Resuming { last_slot: Slot },
+}
+
+impl LedgerInitState {
+    /// Returns the slot to use for AccountsDB initialization
+    pub fn slot_for_accountsdb(&self) -> Slot {
+        match self {
+            LedgerInitState::Fresh => Slot::MAX,
+            LedgerInitState::Resuming { last_slot } => *last_slot,
+        }
+    }
+}
+
+impl std::fmt::Display for LedgerInitState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            LedgerInitState::Fresh => write!(f, "fresh start (no existing blocks)"),
+            LedgerInitState::Resuming { last_slot } => {
+                write!(f, "resuming from slot {}", last_slot)
+            }
+        }
+    }
+}
+
 // -----------------
 // Init
 // -----------------
 pub(crate) fn init(
     path: &Path,
     config: &LedgerConfig,
-) -> ApiResult<(Ledger, Slot)> {
+) -> ApiResult<(Ledger, LedgerInitState)> {
     if config.reset {
         remove_ledger_directory_if_exists(path).map_err(|err| {
             error!(error = ?err, path = %path.display(), "Unable to remove ledger");
@@ -28,14 +58,13 @@ pub(crate) fn init(
         })?;
     };
     let ledger = Ledger::open(path)?;
-    let slot = if config.reset {
-        // If the ledger was reset, then we use whatever
-        // current slot is available in the AccountsDB
-        Slot::MAX
+    let init_state = if config.reset {
+        LedgerInitState::Fresh
     } else {
-        ledger.get_max_blockhash().map(|(slot, _)| slot)?
+        let slot = ledger.get_max_blockhash().map(|(slot, _)| slot)?;
+        LedgerInitState::Resuming { last_slot: slot }
     };
-    Ok((ledger, slot))
+    Ok((ledger, init_state))
 }
 
 // -----------------
@@ -178,4 +207,23 @@ fn remove_ledger_directory_if_exists(storage_path: &Path) -> ApiResult<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_ledger_init_state_fresh_display() {
+        let state = LedgerInitState::Fresh;
+        assert_eq!(state.to_string(), "fresh start (no existing blocks)");
+        assert_eq!(state.slot_for_accountsdb(), Slot::MAX);
+    }
+
+    #[test]
+    fn test_ledger_init_state_resuming_display() {
+        let state = LedgerInitState::Resuming { last_slot: 42 };
+        assert_eq!(state.to_string(), "resuming from slot 42");
+        assert_eq!(state.slot_for_accountsdb(), 42);
+    }
 }
