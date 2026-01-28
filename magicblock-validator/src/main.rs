@@ -1,5 +1,7 @@
 mod shutdown;
 
+use std::time::Instant;
+
 use magicblock_api::{ledger, magic_validator::MagicValidator};
 use magicblock_config::ValidatorParams;
 use solana_signer::Signer;
@@ -35,6 +37,7 @@ fn main() {
 
 #[instrument(skip_all)]
 async fn run() {
+    let overall_start = Instant::now();
     init_logger();
     #[cfg(feature = "tokio-console")]
     console_subscriber::init();
@@ -68,7 +71,12 @@ async fn run() {
     let mut ledger_lock = ledger::ledger_lockfile(api.ledger().ledger_path());
     let _ledger_write_guard =
         ledger::lock_ledger(api.ledger().ledger_path(), &mut ledger_lock);
+    let start_step = Instant::now();
     api.start().await.expect("Failed to start validator");
+    debug!(
+        duration_ms = start_step.elapsed().as_millis() as u64,
+        "Validator start completed"
+    );
     let version = magicblock_version::Version::default();
     print_info("");
     print_info("🧙 Magicblock Validator is running! 🪄✦");
@@ -94,12 +102,26 @@ async fn run() {
     print_info("-----------------------------------");
     print_info("Ready for connections!");
     print_info("");
+    debug!(
+        duration_ms = overall_start.elapsed().as_millis() as u64,
+        "Validator ready"
+    );
+    let shutdown_wait = Instant::now();
     if let Err(err) = Shutdown::wait().await {
         error!(error = ?err, "Failed to gracefully shutdown");
     }
+    debug!(
+        duration_ms = shutdown_wait.elapsed().as_millis() as u64,
+        "Shutdown signal received"
+    );
 
     api.prepare_ledger_for_shutdown();
+    let stop_step = Instant::now();
     api.stop().await;
+    debug!(
+        duration_ms = stop_step.elapsed().as_millis() as u64,
+        "Validator stop completed"
+    );
 }
 
 /// Print informational startup messages.
