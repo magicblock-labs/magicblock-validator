@@ -2,10 +2,8 @@ use std::{
     collections::{HashMap, HashSet},
     fmt,
     pin::Pin,
-    sync::{
-        atomic::{AtomicU64, Ordering},
-        Arc,
-    },
+    sync::atomic::{AtomicU16, AtomicU64, Ordering},
+    time::Duration,
 };
 
 use futures_util::{Stream, StreamExt};
@@ -18,6 +16,7 @@ use helius_laserstream::{
     },
     ChannelOptions, LaserstreamConfig, LaserstreamError,
 };
+use magicblock_core::logger::log_trace_debug;
 use magicblock_metrics::metrics::{
     inc_account_subscription_account_updates_count,
     inc_program_subscription_account_updates_count,
@@ -28,8 +27,13 @@ use solana_pubkey::Pubkey;
 use solana_sdk_ids::sysvar::clock;
 use tokio::sync::{mpsc, oneshot};
 use tokio_stream::StreamMap;
+use tonic::Code;
 use tracing::*;
 
+use super::{
+    chain_rpc_client::{ChainRpcClient, ChainRpcClientImpl},
+    chain_slot::ChainSlot,
+};
 use crate::remote_account_provider::{
     pubsub_common::{
         ChainPubsubActorMessage, MESSAGE_CHANNEL_SIZE,
@@ -47,15 +51,18 @@ const PER_STREAM_SUBSCRIPTION_LIMIT: usize = 1_000;
 const SUBSCRIPTION_ACTIVATION_INTERVAL_MILLIS: u64 = 10_000;
 const SLOTS_BETWEEN_ACTIVATIONS: u64 =
     SUBSCRIPTION_ACTIVATION_INTERVAL_MILLIS / 400;
+const MAX_SLOTS_BACKFILL: u64 = 400;
 
 // -----------------
 // Slots
 // -----------------
 /// Shared slot tracking for activation lookback and chain slot synchronization.
+#[derive(Debug)]
 pub struct Slots {
     /// The current slot on chain, shared with RemoteAccountProvider.
-    /// Updated via `fetch_max()` when slot updates are received from GRPC.
-    pub chain_slot: Arc<AtomicU64>,
+    /// Updated via `update()` when slot updates are received from GRPC.
+    /// Metrics are automatically captured on updates.
+    pub chain_slot: ChainSlot,
     /// The last slot at which activation happened (used for backfilling).
     pub last_activation_slot: AtomicU64,
     /// Whether this GRPC endpoint supports backfilling subscription updates.
@@ -129,6 +136,8 @@ pub struct ChainLaserActor {
     /// Unique client ID including the gRPC provider name for this actor instance used in logs
     /// and metrics
     client_id: String,
+    /// RPC client for diagnostics (e.g., fetching slot when falling behind)
+    rpc_client: ChainRpcClientImpl,
 }
 
 impl ChainLaserActor {
@@ -139,6 +148,7 @@ impl ChainLaserActor {
         commitment: SolanaCommitmentLevel,
         abort_sender: mpsc::Sender<()>,
         slots: Slots,
+        rpc_client: ChainRpcClientImpl,
     ) -> RemoteAccountProviderResult<(
         Self,
         mpsc::Sender<ChainPubsubActorMessage>,
@@ -163,6 +173,7 @@ impl ChainLaserActor {
             commitment,
             abort_sender,
             slots,
+            rpc_client,
         )
     }
 
@@ -172,6 +183,7 @@ impl ChainLaserActor {
         commitment: SolanaCommitmentLevel,
         abort_sender: mpsc::Sender<()>,
         slots: Slots,
+        rpc_client: ChainRpcClientImpl,
     ) -> RemoteAccountProviderResult<(
         Self,
         mpsc::Sender<ChainPubsubActorMessage>,
@@ -195,6 +207,7 @@ impl ChainLaserActor {
             abort_sender,
             slots,
             client_id: client_id.to_string(),
+            rpc_client,
         };
 
         Ok((me, messages_sender, subscription_updates_receiver))
@@ -302,7 +315,7 @@ impl ChainLaserActor {
                 let laser_client_config = self.laser_client_config.clone();
                 self.add_program_sub(pubkey, commitment, laser_client_config);
                 let _ = response.send(Ok(())).inspect_err(|_| {
-                    warn!(program_id = %pubkey, "Failed to send program subscribe response");
+                    warn!(client_id = self.client_id, program_id = %pubkey, "Failed to send program subscribe response");
                 });
                 false
             }
@@ -311,12 +324,15 @@ impl ChainLaserActor {
                 // subscriptions again and that method does not return any error information.
                 // Subscriptions were already cleared when the connection issue was signaled.
                 let _ = response.send(Ok(())).inspect_err(|_| {
-                    warn!("Failed to send reconnect response");
+                    warn!(
+                        client_id = self.client_id,
+                        "Failed to send reconnect response"
+                    );
                 });
                 false
             }
             Shutdown { response } => {
-                info!("Received Shutdown message");
+                info!(client_id = self.client_id, "Received Shutdown message");
                 Self::clear_subscriptions(
                     &mut self.subscriptions,
                     &mut self.active_subscriptions,
@@ -324,7 +340,10 @@ impl ChainLaserActor {
                     &mut self.program_subscriptions,
                 );
                 let _ = response.send(Ok(())).inspect_err(|_| {
-                    warn!("Failed to send shutdown response");
+                    warn!(
+                        client_id = self.client_id,
+                        "Failed to send shutdown response"
+                    );
                 });
                 true
             }
@@ -338,7 +357,7 @@ impl ChainLaserActor {
         sub_response: oneshot::Sender<RemoteAccountProviderResult<()>>,
     ) {
         if self.subscriptions.contains(&pubkey) {
-            warn!(pubkey = %pubkey, "Already subscribed to account");
+            debug!(pubkey = %pubkey, "Already subscribed to account");
             sub_response.send(Ok(())).unwrap_or_else(|_| {
                 warn!(pubkey = %pubkey, "Failed to send already subscribed response");
             });
@@ -443,7 +462,7 @@ impl ChainLaserActor {
             return None;
         }
 
-        let chain_slot = self.slots.chain_slot.load(Ordering::Relaxed);
+        let chain_slot = self.slots.chain_slot.load();
         if chain_slot == 0 {
             // If we didn't get a chain slot update yet we cannot backfill
             return None;
@@ -460,7 +479,14 @@ impl ChainLaserActor {
         let from_slot = if last_activation_slot == 0 {
             chain_slot.saturating_sub(SLOTS_BETWEEN_ACTIVATIONS + 1)
         } else {
-            last_activation_slot.saturating_sub(1)
+            // Limit how far back we go in order to avoid data loss errors
+            let target_slot = last_activation_slot.saturating_sub(1);
+            let delta = chain_slot.saturating_sub(target_slot);
+            if delta < MAX_SLOTS_BACKFILL {
+                target_slot
+            } else {
+                chain_slot.saturating_sub(MAX_SLOTS_BACKFILL)
+            }
         };
         Some((chain_slot, from_slot))
     }
@@ -571,16 +597,7 @@ impl ChainLaserActor {
                 .await;
             }
             Err(err) => {
-                error!(error = ?err, "Error in account update stream");
-                Self::signal_connection_issue(
-                    &mut self.subscriptions,
-                    &mut self.active_subscriptions,
-                    &mut self.active_subscription_pubkeys,
-                    &mut self.program_subscriptions,
-                    &self.abort_sender,
-                    &self.client_id,
-                )
-                .await;
+                self.handle_stream_error(&err, "account update").await;
             }
         }
     }
@@ -597,18 +614,93 @@ impl ChainLaserActor {
                 .await;
             }
             Err(err) => {
-                error!(error = ?err, "Error in program subscription stream");
-                Self::signal_connection_issue(
-                    &mut self.subscriptions,
-                    &mut self.active_subscriptions,
-                    &mut self.active_subscription_pubkeys,
-                    &mut self.program_subscriptions,
-                    &self.abort_sender,
-                    &self.client_id,
-                )
-                .await;
+                self.handle_stream_error(&err, "program subscription").await;
             }
         }
+    }
+
+    /// Common error handling for stream errors. Detects "fallen behind" errors
+    /// and spawns diagnostics to compare our last known slot with the actual
+    /// chain slot via RPC.
+    async fn handle_stream_error(
+        &mut self,
+        err: &LaserstreamError,
+        source: &str,
+    ) {
+        if is_fallen_behind_error(err) {
+            self.spawn_fallen_behind_diagnostics(source);
+        }
+
+        error!(error = ?err, slots = ?self.slots, "Error in {} stream", source);
+        Self::signal_connection_issue(
+            &mut self.subscriptions,
+            &mut self.active_subscriptions,
+            &mut self.active_subscription_pubkeys,
+            &mut self.program_subscriptions,
+            &self.abort_sender,
+            &self.client_id,
+        )
+        .await;
+    }
+
+    /// Spawns an async task to fetch the current chain slot via RPC and log
+    /// how far behind we were when the "fallen behind" error occurred.
+    /// It also updates the current chain slot in our `chain_slot` tracker to
+    /// the fetched slot if it is higher than our last known slot.
+    fn spawn_fallen_behind_diagnostics(&self, source: &str) {
+        let chain_slot = self.slots.chain_slot.clone();
+        let last_chain_slot = chain_slot.load();
+        let rpc_client = self.rpc_client.clone();
+        let client_id = self.client_id.clone();
+        let source = source.to_string();
+
+        const TIMEOUT_SECS: u64 = 5;
+        // At 2.5 slots per sec when we factor by 5 we allow
+        // double the lag that would be caused by the max timeout alone
+        const MAX_ALLOWED_LAG_SLOTS: u64 = TIMEOUT_SECS * 5;
+
+        tokio::spawn(async move {
+            let rpc_result = tokio::time::timeout(
+                Duration::from_secs(TIMEOUT_SECS),
+                rpc_client.get_slot(),
+            )
+            .await;
+
+            match rpc_result {
+                Ok(Ok(rpc_chain_slot)) => {
+                    let slot_lag =
+                        rpc_chain_slot.saturating_sub(last_chain_slot);
+                    chain_slot.update(rpc_chain_slot);
+                    if slot_lag > MAX_ALLOWED_LAG_SLOTS {
+                        warn!(
+                            %client_id,
+                            last_chain_slot,
+                            rpc_chain_slot,
+                            slot_lag,
+                            source,
+                            "gRPC reportedly fell behind (DataLoss) due to chain_slot lagging"
+                        );
+                    }
+                }
+                Ok(Err(rpc_err)) => {
+                    debug!(
+                        %client_id,
+                        last_chain_slot,
+                        error = ?rpc_err,
+                        source,
+                        "Failed to fetch RPC slot for DataLoss diagnostics"
+                    );
+                }
+                Err(_timeout) => {
+                    debug!(
+                        %client_id,
+                        last_chain_slot,
+                        source,
+                        "Timeout fetching RPC slot for DataLoss diagnostics"
+                    );
+                }
+            }
+        });
     }
 
     fn clear_subscriptions(
@@ -636,7 +728,15 @@ impl ChainLaserActor {
         abort_sender: &mpsc::Sender<()>,
         client_id: &str,
     ) {
-        debug!("Signaling connection issue");
+        static SIGNAL_CONNECTION_COUNT: AtomicU16 = AtomicU16::new(0);
+        log_trace_debug(
+            "Signaling connection issue",
+            "Signaled connection issue",
+            &client_id,
+            &RemoteAccountProviderError::ConnectionDisrupted,
+            100,
+            &SIGNAL_CONNECTION_COUNT,
+        );
 
         // Clear all subscriptions
         Self::clear_subscriptions(
@@ -680,9 +780,7 @@ impl ChainLaserActor {
 
         // Handle slot updates - update chain_slot to max of current and received
         if let UpdateOneof::Slot(slot_update) = &update_oneof {
-            self.slots
-                .chain_slot
-                .fetch_max(slot_update.slot, Ordering::Relaxed);
+            self.slots.chain_slot.update(slot_update.slot);
             return;
         }
 
@@ -779,5 +877,21 @@ fn grpc_commitment_from_solana(
         Finalized => CommitmentLevel::Finalized,
         Confirmed => CommitmentLevel::Confirmed,
         Processed => CommitmentLevel::Processed,
+    }
+}
+
+/// Detects if a LaserstreamError indicates the client has fallen behind the
+/// stream and cannot catch up. This occurs when the client cannot consume
+/// messages fast enough and falls more than 500 slots behind.
+fn is_fallen_behind_error(err: &LaserstreamError) -> bool {
+    match err {
+        LaserstreamError::Status(status) => {
+            status.code() == Code::DataLoss
+                && status
+                    .message()
+                    .to_ascii_lowercase()
+                    .contains("fallen behind")
+        }
+        _ => false,
     }
 }

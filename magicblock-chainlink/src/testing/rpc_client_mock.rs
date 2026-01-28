@@ -16,6 +16,8 @@ use solana_commitment_config::CommitmentConfig;
 #[cfg(any(test, feature = "dev-context"))]
 use solana_pubkey::Pubkey;
 #[cfg(any(test, feature = "dev-context"))]
+use solana_rpc_client_api::client_error;
+#[cfg(any(test, feature = "dev-context"))]
 use solana_rpc_client_api::{
     config::RpcAccountInfoConfig,
     response::{Response, RpcResponseContext, RpcResult},
@@ -256,6 +258,10 @@ impl Default for ChainRpcClientMock {
 impl ChainRpcClient for ChainRpcClientMock {
     fn commitment(&self) -> CommitmentConfig {
         self.commitment
+    }
+
+    async fn get_slot(&self) -> client_error::Result<u64> {
+        Ok(self.get_slot())
     }
 
     async fn get_account_with_config(

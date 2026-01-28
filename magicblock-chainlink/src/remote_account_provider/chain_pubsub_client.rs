@@ -11,6 +11,7 @@ use std::{
 use arc_swap::ArcSwap;
 use async_trait::async_trait;
 use futures_util::{future::BoxFuture, stream::BoxStream};
+use magicblock_metrics::metrics;
 use solana_account_decoder::UiAccount;
 use solana_commitment_config::CommitmentConfig;
 use solana_pubkey::Pubkey;
@@ -366,6 +367,11 @@ impl ReconnectableClient for ChainPubsubClientImpl {
         let pubkeys_vec: Vec<Pubkey> = pubkeys.into_iter().collect();
         for (idx, pubkey) in pubkeys_vec.iter().enumerate() {
             if let Err(err) = self.subscribe(*pubkey).await {
+                // Report the number of subscriptions we managed before failing
+                metrics::set_pubsub_client_resubscribed_count(
+                    &self.client_id,
+                    idx + 1,
+                );
                 // Exponentially back off on resubscription attempts, so the next time we
                 // reconnect and try to resubscribe, we wait longer in between each subscription
                 // in order to avoid overwhelming the RPC with requests
@@ -373,6 +379,13 @@ impl ReconnectableClient for ChainPubsubClientImpl {
                     delay_ms.saturating_mul(2).min(MAX_RESUB_DELAY_MS);
                 self.current_resub_delay_ms
                     .store(new_delay, Ordering::SeqCst);
+                debug!(
+                    error = ?err,
+                    total_subs = pubkeys_vec.len(),
+                    processed_subs = idx + 1,
+                    pubkey = %pubkey,
+                    "Re-subscription for multiple pubkeys failed to complete",
+                );
                 return Err(err);
             }
             // Only sleep between subscriptions, not after the final one
@@ -380,6 +393,11 @@ impl ReconnectableClient for ChainPubsubClientImpl {
                 tokio::time::sleep(delay).await;
             }
         }
+        // Report successful resubscription of all pubkeys
+        metrics::set_pubsub_client_resubscribed_count(
+            &self.client_id,
+            pubkeys_vec.len(),
+        );
         Ok(())
     }
 
