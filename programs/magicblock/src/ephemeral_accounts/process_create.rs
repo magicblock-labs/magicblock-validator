@@ -63,7 +63,6 @@ pub(crate) fn process_create_ephemeral_account(
     acc.set_owner(*caller_program_id);
     acc.resize(data_len, 0);
     acc.set_ephemeral(true);
-    acc.set_delegated(true);
 
     ic_msg!(
         invoke_context,

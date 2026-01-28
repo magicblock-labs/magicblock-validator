@@ -20,6 +20,7 @@ members = [
   "test-config",
   "test-schedule-intent",
   "test-task-scheduler",
+  "test-ephemeral-accounts",
 ]
 resolver = "2"
 
@@ -78,7 +79,7 @@ rkyv = "0.7.45"
 schedulecommit-client = { path = "schedulecommit/client" }
 serde = "1.0.217"
 serial_test = "3.2.0"
-solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "2246929" }
+solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "6eae52b" }
 solana-loader-v2-interface = "2.2"
 solana-loader-v3-interface = "4.0"
 solana-loader-v4-interface = "2.1"
@@ -104,6 +105,7 @@ test-kit = { path = "../test-kit" }
 tokio = "1.0"
 toml = "0.8.13"
 tracing = "0.1"
+test-ephemeral-accounts = { path = "test-ephemeral-accounts" }
 ureq = "2.9.6"
 url = "2.5.0"
 
@@ -114,4 +116,4 @@ url = "2.5.0"
 solana-storage-proto = { path = "../storage-proto" }
 # same reason as above
 rocksdb = { git = "https://github.com/magicblock-labs/rust-rocksdb.git", rev = "6d975197" }
-solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "2246929" }
+solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "6eae52b" }
