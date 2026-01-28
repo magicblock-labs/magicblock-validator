@@ -642,6 +642,8 @@ impl MagicValidator {
         if matches!(self.config.lifecycle, LifecycleMode::Ephemeral) {
             let rpc_url = self.config.rpc_url().to_owned();
             let identity = self.identity;
+            // Ephemeral mode does a non-blocking startup balance check.
+            // Intentionally fire-and-forget: the task itself exits the process on failure,
             tokio::spawn(async move {
                 let step_start = Instant::now();
                 let result = MagicValidator::ensure_validator_funded_on_chain(
