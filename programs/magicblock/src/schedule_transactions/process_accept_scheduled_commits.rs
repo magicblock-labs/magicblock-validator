@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use solana_account::ReadableAccount;
+use solana_account::{ReadableAccount, WritableAccount};
 use solana_instruction::error::InstructionError;
 use solana_log_collector::ic_msg;
 use solana_program_runtime::invoke_context::InvokeContext;
@@ -35,16 +35,19 @@ pub fn process_accept_scheduled_commits(
         transaction_context,
         MAGIC_CONTEXT_IDX,
     )?;
-    let mut magic_context =
-        bincode::deserialize::<MagicContext>(magic_context_acc.borrow().data())
-            .map_err(|err| {
-                ic_msg!(
-                    invoke_context,
-                    "Failed to deserialize MagicContext: {}",
-                    err
-                );
-                InstructionError::InvalidAccountData
-            })?;
+    let mut magic_context: MagicContext = bincode::serde::decode_from_slice(
+        magic_context_acc.borrow().data(),
+        bincode::config::legacy(),
+    )
+    .map_err(|err| {
+        ic_msg!(
+            invoke_context,
+            "Failed to deserialize MagicContext: {}",
+            err
+        );
+        InstructionError::InvalidAccountData
+    })?
+    .0;
     if magic_context.scheduled_base_intents.is_empty() {
         ic_msg!(
             invoke_context,
@@ -96,17 +99,16 @@ pub fn process_accept_scheduled_commits(
         .borrow_mut()
         .set_data_from_slice(&MagicContext::ZERO);
 
-    magic_context_acc
-        .borrow_mut()
-        .serialize_data(&magic_context)
-        .map_err(|err| {
-            ic_msg!(
-                invoke_context,
-                "Failed to serialize MagicContext: {}",
-                err
-            );
-            InstructionError::GenericError
-        })?;
+    let encoded = bincode::serde::encode_to_vec(
+        &magic_context,
+        bincode::config::legacy(),
+    )
+    .map_err(|err| {
+        ic_msg!(invoke_context, "Failed to serialize MagicContext: {}", err);
+        InstructionError::GenericError
+    })?;
+    magic_context_acc.borrow_mut().data_as_mut_slice()[..encoded.len()]
+        .copy_from_slice(&encoded);
 
     Ok(())
 }

@@ -150,8 +150,8 @@ pub enum MagicBlockInstruction {
 }
 
 impl MagicBlockInstruction {
-    pub fn try_to_vec(&self) -> Result<Vec<u8>, bincode::Error> {
-        bincode::serialize(self)
+    pub fn try_to_vec(&self) -> Result<Vec<u8>, bincode::error::EncodeError> {
+        bincode::serde::encode_to_vec(self, bincode::config::legacy())
     }
 }
 
@@ -176,4 +176,329 @@ pub struct AccountModificationForInstruction {
     pub delegated: Option<bool>,
     pub confined: Option<bool>,
     pub remote_slot: Option<u64>,
+}
+
+#[cfg(test)]
+mod tests {
+    use solana_program::instruction::{AccountMeta, Instruction};
+
+    use super::*;
+    use crate::args::{
+        ActionArgs, BaseActionArgs, CommitAndUndelegateArgs, CommitTypeArgs,
+        MagicBaseIntentArgs, MagicIntentBundleArgs, ScheduleTaskArgs,
+        ShortAccountMeta, UndelegateTypeArgs,
+    };
+
+    /// Helper to verify bincode 2 (legacy config) produces identical bytes to bincode 1.3
+    fn assert_bincode_compatible<T: Serialize>(value: &T, name: &str) {
+        let bincode2_bytes =
+            bincode::serde::encode_to_vec(value, bincode::config::legacy())
+                .unwrap();
+        let bincode1_bytes = bincode1::serialize(value).unwrap();
+        assert_eq!(
+            bincode2_bytes, bincode1_bytes,
+            "{} serialization mismatch:\nbincode2: {:?}\nbincode1: {:?}",
+            name, bincode2_bytes, bincode1_bytes
+        );
+    }
+
+    /// Helper to verify bincode 2 can deserialize bincode 1 serialized data
+    fn assert_bincode_deserialize_compatible<T>(value: &T, name: &str)
+    where
+        T: Serialize + for<'de> Deserialize<'de> + PartialEq + std::fmt::Debug,
+    {
+        let bincode1_bytes = bincode1::serialize(value).unwrap();
+        let bincode2_result: T = bincode::serde::decode_from_slice(
+            &bincode1_bytes,
+            bincode::config::legacy(),
+        )
+        .unwrap()
+        .0;
+        assert_eq!(&bincode2_result, value, "{} round-trip mismatch", name);
+    }
+
+    fn test_pubkey() -> Pubkey {
+        Pubkey::new_from_array([1u8; 32])
+    }
+
+    fn test_pubkey2() -> Pubkey {
+        Pubkey::new_from_array([2u8; 32])
+    }
+
+    #[test]
+    fn test_noop_compatibility() {
+        let instruction = MagicBlockInstruction::Noop(42);
+        assert_bincode_compatible(&instruction, "Noop");
+        assert_bincode_deserialize_compatible(&instruction, "Noop");
+    }
+
+    #[test]
+    fn test_schedule_commit_compatibility() {
+        let instruction = MagicBlockInstruction::ScheduleCommit;
+        assert_bincode_compatible(&instruction, "ScheduleCommit");
+        assert_bincode_deserialize_compatible(&instruction, "ScheduleCommit");
+    }
+
+    #[test]
+    fn test_schedule_commit_and_undelegate_compatibility() {
+        let instruction = MagicBlockInstruction::ScheduleCommitAndUndelegate;
+        assert_bincode_compatible(&instruction, "ScheduleCommitAndUndelegate");
+        assert_bincode_deserialize_compatible(
+            &instruction,
+            "ScheduleCommitAndUndelegate",
+        );
+    }
+
+    #[test]
+    fn test_accept_schedule_commits_compatibility() {
+        let instruction = MagicBlockInstruction::AcceptScheduleCommits;
+        assert_bincode_compatible(&instruction, "AcceptScheduleCommits");
+        assert_bincode_deserialize_compatible(
+            &instruction,
+            "AcceptScheduleCommits",
+        );
+    }
+
+    #[test]
+    fn test_scheduled_commit_sent_compatibility() {
+        let instruction =
+            MagicBlockInstruction::ScheduledCommitSent((123, 456));
+        assert_bincode_compatible(&instruction, "ScheduledCommitSent");
+        assert_bincode_deserialize_compatible(
+            &instruction,
+            "ScheduledCommitSent",
+        );
+    }
+
+    #[test]
+    fn test_cancel_task_compatibility() {
+        let instruction = MagicBlockInstruction::CancelTask { task_id: 999 };
+        assert_bincode_compatible(&instruction, "CancelTask");
+        assert_bincode_deserialize_compatible(&instruction, "CancelTask");
+    }
+
+    #[test]
+    fn test_modify_accounts_compatibility() {
+        let mut accounts = HashMap::new();
+        accounts.insert(
+            test_pubkey(),
+            AccountModificationForInstruction {
+                lamports: Some(1000),
+                owner: Some(test_pubkey2()),
+                executable: Some(false),
+                data_key: Some(42),
+                delegated: Some(true),
+                confined: Some(false),
+                remote_slot: Some(100),
+            },
+        );
+        let instruction = MagicBlockInstruction::ModifyAccounts {
+            accounts,
+            message: Some("test message".to_string()),
+        };
+        assert_bincode_compatible(&instruction, "ModifyAccounts");
+        assert_bincode_deserialize_compatible(&instruction, "ModifyAccounts");
+    }
+
+    #[test]
+    fn test_schedule_base_intent_base_actions_compatibility() {
+        let base_action = BaseActionArgs {
+            args: ActionArgs::new(vec![1, 2, 3]),
+            compute_units: 1000,
+            escrow_authority: 0,
+            destination_program: test_pubkey(),
+            accounts: vec![ShortAccountMeta {
+                pubkey: test_pubkey2(),
+                is_writable: true,
+            }],
+        };
+        let instruction = MagicBlockInstruction::ScheduleBaseIntent(
+            MagicBaseIntentArgs::BaseActions(vec![base_action]),
+        );
+        assert_bincode_compatible(
+            &instruction,
+            "ScheduleBaseIntent::BaseActions",
+        );
+        assert_bincode_deserialize_compatible(
+            &instruction,
+            "ScheduleBaseIntent::BaseActions",
+        );
+    }
+
+    #[test]
+    fn test_schedule_base_intent_commit_standalone_compatibility() {
+        let instruction = MagicBlockInstruction::ScheduleBaseIntent(
+            MagicBaseIntentArgs::Commit(CommitTypeArgs::Standalone(vec![
+                0, 1, 2,
+            ])),
+        );
+        assert_bincode_compatible(
+            &instruction,
+            "ScheduleBaseIntent::Commit::Standalone",
+        );
+        assert_bincode_deserialize_compatible(
+            &instruction,
+            "ScheduleBaseIntent::Commit::Standalone",
+        );
+    }
+
+    #[test]
+    fn test_schedule_base_intent_commit_with_actions_compatibility() {
+        let base_action = BaseActionArgs {
+            args: ActionArgs::new(vec![4, 5, 6]).with_escrow_index(1),
+            compute_units: 2000,
+            escrow_authority: 2,
+            destination_program: test_pubkey(),
+            accounts: vec![],
+        };
+        let instruction = MagicBlockInstruction::ScheduleBaseIntent(
+            MagicBaseIntentArgs::Commit(CommitTypeArgs::WithBaseActions {
+                committed_accounts: vec![0, 1],
+                base_actions: vec![base_action],
+            }),
+        );
+        assert_bincode_compatible(
+            &instruction,
+            "ScheduleBaseIntent::Commit::WithBaseActions",
+        );
+        assert_bincode_deserialize_compatible(
+            &instruction,
+            "ScheduleBaseIntent::Commit::WithBaseActions",
+        );
+    }
+
+    #[test]
+    fn test_schedule_base_intent_commit_and_undelegate_compatibility() {
+        let instruction = MagicBlockInstruction::ScheduleBaseIntent(
+            MagicBaseIntentArgs::CommitAndUndelegate(CommitAndUndelegateArgs {
+                commit_type: CommitTypeArgs::Standalone(vec![0]),
+                undelegate_type: UndelegateTypeArgs::Standalone,
+            }),
+        );
+        assert_bincode_compatible(
+            &instruction,
+            "ScheduleBaseIntent::CommitAndUndelegate",
+        );
+        assert_bincode_deserialize_compatible(
+            &instruction,
+            "ScheduleBaseIntent::CommitAndUndelegate",
+        );
+    }
+
+    #[test]
+    fn test_schedule_intent_bundle_compatibility() {
+        let base_action = BaseActionArgs {
+            args: ActionArgs::new(vec![7, 8, 9]),
+            compute_units: 3000,
+            escrow_authority: 1,
+            destination_program: test_pubkey2(),
+            accounts: vec![ShortAccountMeta {
+                pubkey: test_pubkey(),
+                is_writable: false,
+            }],
+        };
+        let instruction = MagicBlockInstruction::ScheduleIntentBundle(
+            MagicIntentBundleArgs {
+                commit: Some(CommitTypeArgs::Standalone(vec![0, 1])),
+                commit_and_undelegate: Some(CommitAndUndelegateArgs {
+                    commit_type: CommitTypeArgs::Standalone(vec![2]),
+                    undelegate_type: UndelegateTypeArgs::WithBaseActions {
+                        base_actions: vec![base_action.clone()],
+                    },
+                }),
+                standalone_actions: vec![base_action],
+            },
+        );
+        assert_bincode_compatible(&instruction, "ScheduleIntentBundle");
+        assert_bincode_deserialize_compatible(
+            &instruction,
+            "ScheduleIntentBundle",
+        );
+    }
+
+    #[test]
+    fn test_schedule_task_compatibility() {
+        let instruction =
+            MagicBlockInstruction::ScheduleTask(ScheduleTaskArgs {
+                task_id: 12345,
+                execution_interval_millis: 1000,
+                iterations: 10,
+                instructions: vec![Instruction {
+                    program_id: test_pubkey(),
+                    accounts: vec![AccountMeta::new(test_pubkey2(), true)],
+                    data: vec![1, 2, 3, 4],
+                }],
+            });
+        assert_bincode_compatible(&instruction, "ScheduleTask");
+        assert_bincode_deserialize_compatible(&instruction, "ScheduleTask");
+    }
+
+    #[test]
+    fn test_account_modification_compatibility() {
+        let modification = AccountModification {
+            pubkey: test_pubkey(),
+            lamports: Some(5000),
+            owner: Some(test_pubkey2()),
+            executable: Some(true),
+            data: Some(vec![0xde, 0xad, 0xbe, 0xef]),
+            delegated: Some(true),
+            confined: Some(false),
+            remote_slot: Some(999),
+        };
+        assert_bincode_compatible(&modification, "AccountModification");
+        assert_bincode_deserialize_compatible(
+            &modification,
+            "AccountModification",
+        );
+    }
+
+    #[test]
+    fn test_short_account_meta_compatibility() {
+        let meta = ShortAccountMeta {
+            pubkey: test_pubkey(),
+            is_writable: true,
+        };
+        assert_bincode_compatible(&meta, "ShortAccountMeta");
+        assert_bincode_deserialize_compatible(&meta, "ShortAccountMeta");
+    }
+
+    #[test]
+    fn test_action_args_compatibility() {
+        let args = ActionArgs::new(vec![10, 20, 30]).with_escrow_index(5);
+        assert_bincode_compatible(&args, "ActionArgs");
+        assert_bincode_deserialize_compatible(&args, "ActionArgs");
+    }
+
+    #[test]
+    fn test_base_action_args_compatibility() {
+        let args = BaseActionArgs {
+            args: ActionArgs::new(vec![100, 200]),
+            compute_units: 50000,
+            escrow_authority: 3,
+            destination_program: test_pubkey(),
+            accounts: vec![
+                ShortAccountMeta {
+                    pubkey: test_pubkey(),
+                    is_writable: true,
+                },
+                ShortAccountMeta {
+                    pubkey: test_pubkey2(),
+                    is_writable: false,
+                },
+            ],
+        };
+        assert_bincode_compatible(&args, "BaseActionArgs");
+        assert_bincode_deserialize_compatible(&args, "BaseActionArgs");
+    }
+
+    #[test]
+    fn test_magic_intent_bundle_args_compatibility() {
+        let args = MagicIntentBundleArgs {
+            commit: Some(CommitTypeArgs::Standalone(vec![0])),
+            commit_and_undelegate: None,
+            standalone_actions: vec![],
+        };
+        assert_bincode_compatible(&args, "MagicIntentBundleArgs");
+        assert_bincode_deserialize_compatible(&args, "MagicIntentBundleArgs");
+    }
 }

@@ -19,15 +19,17 @@ declare_process_instruction!(
     DEFAULT_COMPUTE_UNITS,
     |invoke_context| {
         use MagicBlockInstruction::*;
-        let instruction: MagicBlockInstruction = bincode::deserialize(
+        let instruction: MagicBlockInstruction = bincode::serde::decode_from_slice(
             invoke_context
                 .transaction_context
                 .get_current_instruction_context()?
                 .get_instruction_data(),
+            bincode::config::legacy(),
         )
         .map_err(|_| {
             solana_instruction::error::InstructionError::InvalidInstructionData
-        })?;
+        })?
+        .0;
 
         let transaction_context = &invoke_context.transaction_context;
         let instruction_context =
