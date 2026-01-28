@@ -83,7 +83,8 @@ use crate::{
     domain_registry_manager::DomainRegistryManager,
     errors::{ApiError, ApiResult},
     fund_account::{
-        fund_magic_context, funded_faucet, init_validator_identity,
+        fund_ephemeral_vault, fund_magic_context, funded_faucet,
+        init_validator_identity,
     },
     genesis_utils::{create_genesis_config_with_leader, GenesisConfigInfo},
     ledger::{
@@ -179,6 +180,7 @@ impl MagicValidator {
 
         init_validator_identity(&accountsdb, &validator_pubkey);
         fund_magic_context(&accountsdb);
+        fund_ephemeral_vault(&accountsdb);
 
         let faucet_keypair =
             funded_faucet(&accountsdb, ledger.ledger_path().as_path())?;
