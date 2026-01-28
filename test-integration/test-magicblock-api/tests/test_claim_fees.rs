@@ -1,3 +1,5 @@
+#![allow(deprecated)]
+
 use std::{thread::sleep, time::Duration};
 
 use dlp::instruction_builder::validator_claim_fees;

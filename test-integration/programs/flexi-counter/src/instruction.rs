@@ -15,6 +15,7 @@ use crate::state::FlexiCounter;
 pub struct DelegateArgs {
     pub valid_until: i64,
     pub commit_frequency_ms: u32,
+    pub validator: Option<Pubkey>,
 }
 
 #[derive(BorshSerialize, BorshDeserialize, Debug, Clone)]
@@ -298,6 +299,41 @@ pub fn create_delegate_ix_with_commit_frequency_ms(
     let args = DelegateArgs {
         valid_until: i64::MAX,
         commit_frequency_ms,
+        validator: None,
+    };
+
+    Instruction::new_with_borsh(
+        *program_id,
+        &FlexiCounterInstruction::Delegate(args),
+        account_metas,
+    )
+}
+
+pub fn create_delegate_ix_with_validator(
+    payer: Pubkey,
+    validator: Option<Pubkey>,
+) -> Instruction {
+    let program_id = &crate::id();
+    let (pda, _) = FlexiCounter::pda(&payer);
+    let commit_frequency_ms = 0;
+
+    let delegate_accounts = DelegateAccounts::new(pda, *program_id);
+    let delegate_metas = DelegateAccountMetas::from(delegate_accounts);
+    let account_metas = vec![
+        AccountMeta::new(payer, true),
+        delegate_metas.delegated_account,
+        delegate_metas.owner_program,
+        delegate_metas.delegate_buffer,
+        delegate_metas.delegation_record,
+        delegate_metas.delegation_metadata,
+        delegate_metas.delegation_program,
+        delegate_metas.system_program,
+    ];
+
+    let args = DelegateArgs {
+        valid_until: i64::MAX,
+        commit_frequency_ms,
+        validator,
     };
 
     Instruction::new_with_borsh(

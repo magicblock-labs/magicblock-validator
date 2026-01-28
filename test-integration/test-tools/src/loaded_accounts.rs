@@ -49,12 +49,15 @@ impl LoadedAccounts {
         }
     }
 
-    /// This use the test authority used in the delegation program as the validator
-    /// authority.
-    /// https://github.com/magicblock-labs/delegation-program/blob/7fc0ae9a59e48bea5b046b173ea0e34fd433c3c7/tests/fixtures/accounts.rs#L46
-    /// It is compiled in as the authority for the validator vault when we build
-    /// the delegation program via:
-    /// `cargo build-sbf --features=unit_test_config`
+    /// DEPRECATED: This function was used when dlp was built with unit_test_config.
+    /// With production dlp (without unit_test_config), this hardcoded authority
+    /// is no longer baked into the delegation program.
+    /// Use `new_with_new_validator_authority()` instead for new tests.
+    /// Keep this only for backward compatibility with existing test infrastructure.
+    #[deprecated(
+        since = "0.0.0",
+        note = "DLP now uses production build without unit_test_config. Use new_with_new_validator_authority() instead."
+    )]
     pub fn with_delegation_program_test_authority() -> Self {
         Self {
             validator_authority_kp: Keypair::from_bytes(

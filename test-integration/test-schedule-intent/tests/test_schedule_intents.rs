@@ -3,7 +3,8 @@ use integration_test_tools::IntegrationTestContext;
 use program_flexi_counter::{
     delegation_program_id,
     instruction::{
-        create_add_ix, create_delegate_ix, create_init_ix, create_intent_ix,
+        create_add_ix, create_delegate_ix_with_validator, create_init_ix,
+        create_intent_ix,
     },
     state::FlexiCounter,
 };
@@ -297,15 +298,30 @@ fn setup_payer(ctx: &IntegrationTestContext) -> Keypair {
     ctx.airdrop_chain(&payer.pubkey(), LAMPORTS_PER_SOL)
         .unwrap();
 
-    // Create actor escrow
-    let ix = dlp::instruction_builder::top_up_ephemeral_balance(
+    // Create actor escrow with delegation
+    let top_up_ix = dlp::instruction_builder::top_up_ephemeral_balance(
         payer.pubkey(),
         payer.pubkey(),
         Some(LAMPORTS_PER_SOL / 2),
         Some(1),
     );
-    ctx.send_and_confirm_instructions_with_payer_chain(&[ix], &payer)
-        .unwrap();
+    let delegate_ix = dlp::instruction_builder::delegate_ephemeral_balance(
+        payer.pubkey(),
+        payer.pubkey(),
+        dlp::args::DelegateEphemeralBalanceArgs {
+            index: 1,
+            delegate_args: dlp::args::DelegateArgs {
+                commit_frequency_ms: 0,
+                seeds: vec![],
+                validator: ctx.ephem_validator_identity,
+            },
+        },
+    );
+    ctx.send_and_confirm_instructions_with_payer_chain(
+        &[top_up_ix, delegate_ix],
+        &payer,
+    )
+    .unwrap();
 
     // Confirm actor escrow
     let escrow_pda = ephemeral_balance_pda_from_payer(&payer.pubkey(), 1);
@@ -344,7 +360,10 @@ fn delegate_counter(ctx: &IntegrationTestContext, payer: &Keypair) {
     ctx.wait_for_next_slot_ephem().unwrap();
 
     let counter_pda = FlexiCounter::pda(&payer.pubkey()).0;
-    let ix = create_delegate_ix(payer.pubkey());
+    let ix = create_delegate_ix_with_validator(
+        payer.pubkey(),
+        ctx.ephem_validator_identity,
+    );
     ctx.send_and_confirm_instructions_with_payer_chain(&[ix], payer)
         .unwrap();
 
