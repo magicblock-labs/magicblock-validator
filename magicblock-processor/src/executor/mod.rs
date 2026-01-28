@@ -1,6 +1,5 @@
 use std::{
     cmp::Ordering,
-    convert::identity,
     sync::{Arc, RwLock},
 };
 
@@ -14,18 +13,16 @@ use magicblock_core::link::{
 };
 use magicblock_ledger::{LatestBlock, LatestBlockInner, Ledger};
 use parking_lot::RwLockReadGuard;
-use serde::Serialize;
+use solana_program::slot_hashes::SlotHashes;
 use solana_program_runtime::loaded_programs::{
     BlockRelation, ForkGraph, ProgramCache, ProgramCacheEntry,
 };
-use solana_pubkey::Pubkey;
-use solana_sdk_ids::sysvar::{clock, slot_hashes};
 use solana_svm::transaction_processor::{
     ExecutionRecordingConfig, TransactionBatchProcessor,
     TransactionProcessingConfig, TransactionProcessingEnvironment,
 };
 use tokio::{runtime::Builder, sync::mpsc::Sender};
-use tracing::{info, instrument, warn};
+use tracing::{info, instrument};
 
 use crate::{
     builtins::BUILTINS,
@@ -181,31 +178,11 @@ impl TransactionExecutor {
         let mut cache = self.processor.writable_sysvar_cache().write().unwrap();
         cache.set_sysvar_for_tests(&block.clock);
 
-        let mut hashes = cache
-            .get_slot_hashes()
-            .ok()
-            .and_then(Arc::into_inner)
-            .unwrap_or_default();
-
-        hashes.add(block.slot, block.blockhash);
-        cache.set_sysvar_for_tests(&hashes);
-        self.persist_sysvar(slot_hashes::ID, &hashes);
-        self.persist_sysvar(clock::ID, &block.clock);
-    }
-
-    /// Serialize sysvar account to AccountsDB
-    fn persist_sysvar<D: Serialize>(&self, id: Pubkey, data: &D) {
-        let Ok(reader) = self.accountsdb.reader() else {
-            return;
-        };
-        let Some(mut account) = reader.read(&id, identity) else {
-            return;
-        };
-        if let Err(e) = account.serialize_data(data) {
-            warn!(%e, "Failed to serialize sysvar");
-            return;
+        if let Ok(hashes) = cache.get_slot_hashes() {
+            let mut hashes = SlotHashes::new(hashes.slot_hashes());
+            hashes.add(block.slot, block.blockhash);
+            cache.set_sysvar_for_tests(&hashes);
         }
-        let _ = self.accountsdb.insert_account(&slot_hashes::ID, &account);
     }
 }
 

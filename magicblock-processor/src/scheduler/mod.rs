@@ -11,18 +11,22 @@ use std::{
 
 use coordinator::{ExecutionCoordinator, TransactionWithId};
 use locks::{ExecutorId, MAX_SVM_EXECUTORS};
+use magicblock_accounts_db::{traits::AccountsBank, AccountsDb};
 use magicblock_core::link::transactions::{
     ProcessableTransaction, TransactionToProcessRx,
 };
 use magicblock_ledger::LatestBlock;
+use solana_account::{from_account, to_account};
+use solana_program::slot_hashes::SlotHashes;
 use solana_program_runtime::loaded_programs::ProgramCache;
+use solana_sdk_ids::sysvar::{clock, slot_hashes};
 use state::TransactionSchedulerState;
 use tokio::{
     runtime::Builder,
     sync::mpsc::{channel, Receiver, Sender},
 };
 use tokio_util::sync::CancellationToken;
-use tracing::{error, info, instrument};
+use tracing::{error, info, instrument, warn};
 
 use crate::executor::{SimpleForkGraph, TransactionExecutor};
 
@@ -48,6 +52,8 @@ pub struct TransactionScheduler {
     executors: Vec<Sender<ProcessableTransaction>>,
     /// A handle to the globally shared cache for loaded BPF programs.
     program_cache: Arc<RwLock<ProgramCache<SimpleForkGraph>>>,
+    /// AccountsDB handle
+    accountsdb: Arc<AccountsDb>,
     /// A handle to the globally shared state of the latest block.
     latest_block: LatestBlock,
     /// A global cancellation token used to signal system shutdown
@@ -93,6 +99,7 @@ impl TransactionScheduler {
             executors,
             latest_block: state.ledger.latest_block().clone(),
             program_cache,
+            accountsdb: state.accountsdb,
             shutdown: state.shutdown,
         }
     }
@@ -229,14 +236,32 @@ impl TransactionScheduler {
 
     /// Updates the scheduler's state when a new slot begins.
     fn transition_to_new_slot(&self) {
-        let root = self.latest_block.load().slot;
+        let block = self.latest_block.load();
         let mut cache = self.program_cache.write().unwrap();
         // Remove duplicate entries from programs cache
         // NOTE: this is an important cleanup, as otherwise it might
         // lead cache corruption issues over time as it fills up
-        cache.prune(root, 0);
+        cache.prune(block.slot, 0);
         // Re-root the shared program cache to the new slot.
-        cache.latest_root_slot = root;
+        cache.latest_root_slot = block.slot;
+
+        // Update the sysvars in the AccountsDB
+        if let Some(mut account) = self.accountsdb.get_account(&clock::ID) {
+            let _ = account.serialize_data(&block.clock);
+            let _ = self.accountsdb.insert_account(&clock::ID, &account);
+        }
+        if let Some(mut acc) = self.accountsdb.get_account(&slot_hashes::ID) {
+            let Some(mut hashes) = from_account::<SlotHashes, _>(&acc) else {
+                warn!("failed to read slot hashes from account");
+                return;
+            };
+            hashes.add(block.slot, block.blockhash);
+            if to_account(&hashes, &mut acc).is_none() {
+                warn!("failed to write slot hashes to account");
+            }
+            let _ = self.accountsdb.insert_account(&slot_hashes::ID, &acc);
+        }
+        drop(cache);
     }
 }
 
