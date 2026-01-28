@@ -1,6 +1,6 @@
 use std::sync::{Arc, OnceLock, RwLock};
 
-use magicblock_accounts_db::AccountsDb;
+use magicblock_accounts_db::{traits::AccountsBank, AccountsDb};
 use magicblock_core::link::{
     accounts::AccountUpdateTx,
     transactions::{
@@ -15,8 +15,10 @@ use solana_bpf_loader_program::syscalls::{
     create_program_runtime_environment_v2,
 };
 use solana_program::{
-    clock::DEFAULT_SLOTS_PER_EPOCH, epoch_schedule::EpochSchedule,
-    slot_hashes::SlotHashes, sysvar,
+    clock::DEFAULT_SLOTS_PER_EPOCH,
+    epoch_schedule::EpochSchedule,
+    slot_hashes::{SlotHashes, MAX_ENTRIES},
+    sysvar,
 };
 use solana_program_runtime::{
     loaded_programs::ProgramCache, solana_sbpf::program::BuiltinProgram,
@@ -87,19 +89,21 @@ impl TransactionSchedulerState {
         // 1. Mutable Sysvars (updated per block)
         self.ensure_sysvar(&sysvar::clock::ID, &block.clock);
 
-        let slot_hashes = SlotHashes::new(&[(block.slot, block.blockhash)]);
+        let slot_hashes =
+            SlotHashes::new(&[(block.slot, block.blockhash); MAX_ENTRIES]);
+        self.accountsdb.remove_account(&sysvar::slot_hashes::ID);
         self.ensure_sysvar(&sysvar::slot_hashes::ID, &slot_hashes);
 
         // 2. Immutable/Static Sysvars
         let epoch_schedule = EpochSchedule::new(DEFAULT_SLOTS_PER_EPOCH);
         self.ensure_sysvar(&sysvar::epoch_schedule::ID, &epoch_schedule);
 
-        if let Some(rent) = self
+        let rent = self
             .environment
             .rent_collector
             .as_ref()
-            .map(|rc| rc.get_rent())
-        {
+            .map(|rc| rc.get_rent());
+        if let Some(rent) = rent {
             self.ensure_sysvar(&sysvar::rent::ID, rent);
         }
     }
