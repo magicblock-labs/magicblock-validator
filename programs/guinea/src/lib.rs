@@ -44,7 +44,8 @@ fn invoke_with_sponsor(
         instruction.accounts[0].is_signer = true;
 
         let bump_bytes = &[bump];
-        let seeds_for_signer: Vec<&[u8]> = vec![GLOBAL_SPONSOR_SEED, bump_bytes];
+        let seeds_for_signer: Vec<&[u8]> =
+            vec![GLOBAL_SPONSOR_SEED, bump_bytes];
         let signer_seeds: &[&[&[u8]]] = &[&seeds_for_signer[..]];
 
         invoke_signed(&instruction, account_infos, signer_seeds)

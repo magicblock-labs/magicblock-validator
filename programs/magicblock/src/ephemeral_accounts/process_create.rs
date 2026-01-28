@@ -7,8 +7,10 @@ use solana_log_collector::ic_msg;
 use solana_program_runtime::invoke_context::InvokeContext;
 use solana_transaction_context::TransactionContext;
 
-use super::processor::rent_for;
-use super::validation::{validate_cpi_only, validate_sponsor};
+use super::{
+    processor::rent_for,
+    validation::{validate_cpi_only, validate_sponsor},
+};
 use crate::utils::accounts;
 
 /// Creates a new ephemeral account with rent paid by the sponsor.

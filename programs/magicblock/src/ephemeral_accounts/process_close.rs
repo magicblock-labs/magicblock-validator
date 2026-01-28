@@ -8,9 +8,13 @@ use solana_program_runtime::invoke_context::InvokeContext;
 use solana_sdk_ids::system_program;
 use solana_transaction_context::TransactionContext;
 
-use super::processor::rent_for;
-use super::validation::{validate_cpi_only, validate_sponsor};
-use crate::utils::{accounts, instruction_context_frames::InstructionContextFrames};
+use super::{
+    processor::rent_for,
+    validation::{validate_cpi_only, validate_sponsor},
+};
+use crate::utils::{
+    accounts, instruction_context_frames::InstructionContextFrames,
+};
 
 /// Closes an ephemeral account, refunding rent to the sponsor.
 pub(crate) fn process_close_ephemeral_account(

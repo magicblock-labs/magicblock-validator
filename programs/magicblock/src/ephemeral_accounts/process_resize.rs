@@ -7,8 +7,10 @@ use solana_log_collector::ic_msg;
 use solana_program_runtime::invoke_context::InvokeContext;
 use solana_transaction_context::TransactionContext;
 
-use super::processor::rent_for;
-use super::validation::{validate_cpi_only, validate_sponsor};
+use super::{
+    processor::rent_for,
+    validation::{validate_cpi_only, validate_sponsor},
+};
 use crate::utils::accounts;
 
 /// Resizes an existing ephemeral account, adjusting rent accordingly.
@@ -24,12 +26,14 @@ pub(crate) fn process_resize_ephemeral_account(
     validate_sponsor(transaction_context)?;
 
     // Validate vault is owned by magic program
-    let vault = accounts::get_instruction_account_with_idx(transaction_context, 2)?;
+    let vault =
+        accounts::get_instruction_account_with_idx(transaction_context, 2)?;
     if *vault.borrow().owner() != id() {
         return Err(InstructionError::InvalidAccountOwner);
     }
 
-    let ephemeral = accounts::get_instruction_account_with_idx(transaction_context, 1)?;
+    let ephemeral =
+        accounts::get_instruction_account_with_idx(transaction_context, 1)?;
 
     if !ephemeral.borrow().ephemeral() {
         return Err(InstructionError::InvalidAccountData);

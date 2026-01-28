@@ -20,7 +20,6 @@ members = [
   "test-config",
   "test-schedule-intent",
   "test-task-scheduler",
-  "test-ephemeral-accounts",
 ]
 resolver = "2"
 

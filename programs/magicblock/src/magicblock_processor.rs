@@ -93,14 +93,23 @@ declare_process_instruction!(
                 process_toggle_executable_check(signers, invoke_context, true)
             }
             CreateEphemeralAccount { data_len } => {
-                process_create_ephemeral_account(invoke_context, transaction_context, data_len)
+                process_create_ephemeral_account(
+                    invoke_context,
+                    transaction_context,
+                    data_len,
+                )
             }
             ResizeEphemeralAccount { new_data_len } => {
-                process_resize_ephemeral_account(invoke_context, transaction_context, new_data_len)
+                process_resize_ephemeral_account(
+                    invoke_context,
+                    transaction_context,
+                    new_data_len,
+                )
             }
-            CloseEphemeralAccount => {
-                process_close_ephemeral_account(invoke_context, transaction_context)
-            }
+            CloseEphemeralAccount => process_close_ephemeral_account(
+                invoke_context,
+                transaction_context,
+            ),
             Noop(_) => Ok(()),
         }
     }
