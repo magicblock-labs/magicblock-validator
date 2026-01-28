@@ -475,6 +475,7 @@ impl ChainPubsubActor {
                         program_subs.clone(),
                         abort_sender,
                         is_connected.clone(),
+                        &format!("Failed to subscribe to account {pubkey} after {initial_tries} retries")
                     );
                     // RPC failed - inform the requester
                     let _ = sub_response.send(Err(err.into()));
@@ -529,6 +530,7 @@ impl ChainPubsubActor {
                                 program_subs.clone(),
                                 abort_sender.clone(),
                                 is_connected.clone(),
+                                &format!("Subscription ended for {pubkey}")
                             );
                             // Return early - abort_and_signal_connection_issue cancels all
                             // subscriptions, triggering cleanup via the cancellation path
@@ -622,6 +624,7 @@ impl ChainPubsubActor {
                     program_subs.clone(),
                     abort_sender,
                     is_connected.clone(),
+                    &format!("Failed to subscribe to program {program_pubkey}"),
                 );
                 // RPC failed - inform the requester
                 let _ = sub_response.send(Err(err.into()));
@@ -686,6 +689,7 @@ impl ChainPubsubActor {
                                 program_subs.clone(),
                                 abort_sender.clone(),
                                 is_connected.clone(),
+                                &format!("Program subscription ended for {program_pubkey}")
                             );
                             // Return early - abort_and_signal_connection_issue cancels all
                             // subscriptions, triggering cleanup via the cancellation path
@@ -758,6 +762,7 @@ impl ChainPubsubActor {
         program_subs: Arc<Mutex<HashMap<Pubkey, AccountSubscription>>>,
         abort_sender: mpsc::Sender<()>,
         is_connected: Arc<AtomicBool>,
+        reason: &str,
     ) {
         // Only abort if we were connected; prevents duplicate aborts
         if !is_connected.swap(false, Ordering::SeqCst) {
@@ -765,7 +770,11 @@ impl ChainPubsubActor {
             return;
         }
 
-        debug!(client_id = client_id, "Aborting connection");
+        debug!(
+            client_id = client_id,
+            reason = reason,
+            "Aborting connection"
+        );
 
         fn drain_subscriptions(
             _client_id: &str,
