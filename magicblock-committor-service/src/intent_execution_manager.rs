@@ -5,6 +5,7 @@ pub mod intent_scheduler;
 use std::sync::Arc;
 
 pub use intent_execution_engine::BroadcastedIntentExecutionResult;
+use magicblock_program::magic_scheduled_base_intent::ScheduledIntentBundle;
 use magicblock_rpc_client::MagicblockRpcClient;
 use magicblock_table_mania::TableMania;
 use tokio::sync::{broadcast, mpsc, mpsc::error::TrySendError};
@@ -19,14 +20,13 @@ use crate::{
         task_info_fetcher::CacheTaskInfoFetcher,
     },
     persist::IntentPersister,
-    types::ScheduledBaseIntentWrapper,
     ComputeBudgetConfig,
 };
 
 pub struct IntentExecutionManager<D: DB> {
     db: Arc<D>,
     result_subscriber: ResultSubscriber,
-    intent_sender: mpsc::Sender<ScheduledBaseIntentWrapper>,
+    intent_sender: mpsc::Sender<ScheduledIntentBundle>,
 }
 
 impl<D: DB> IntentExecutionManager<D> {
@@ -69,18 +69,18 @@ impl<D: DB> IntentExecutionManager<D> {
     /// Intents will be extracted and handled in the [`IntentExecutionEngine`]
     pub async fn schedule(
         &self,
-        base_intents: Vec<ScheduledBaseIntentWrapper>,
+        intent_bundles: Vec<ScheduledIntentBundle>,
     ) -> Result<(), IntentExecutionManagerError> {
         // If db not empty push el-t there
         // This means that at some point channel got full
         // Worker first will clean-up channel, and then DB.
         // Pushing into channel would break order of commits
         if !self.db.is_empty() {
-            self.db.store_base_intents(base_intents).await?;
+            self.db.store_intent_bundles(intent_bundles).await?;
             return Ok(());
         }
 
-        for el in base_intents {
+        for el in intent_bundles {
             let err = if let Err(err) = self.intent_sender.try_send(el) {
                 err
             } else {
@@ -93,7 +93,7 @@ impl<D: DB> IntentExecutionManager<D> {
                 }
                 TrySendError::Full(el) => self
                     .db
-                    .store_base_intent(el)
+                    .store_intent_bundle(el)
                     .await
                     .map_err(IntentExecutionManagerError::from),
             }?;

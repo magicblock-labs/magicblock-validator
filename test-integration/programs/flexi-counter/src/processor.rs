@@ -35,7 +35,9 @@ use crate::{
         call_handler::{
             process_commit_action_handler, process_undelegate_action_handler,
         },
-        schedule_intent::process_create_intent,
+        schedule_intent::{
+            process_create_intent, process_create_intent_bundle,
+        },
     },
     state::{FlexiCounter, FAIL_UNDELEGATION_CODE, FAIL_UNDELEGATION_LABEL},
     utils::assert_keys_equal,
@@ -94,6 +96,18 @@ pub fn process(
         } => process_undelegate_action_handler(accounts, amount, counter_diff),
         Schedule(args) => process_schedule_task(accounts, args),
         Cancel(args) => process_cancel_task(accounts, args),
+        CreateIntentBundle {
+            num_commit_only,
+            num_undelegate,
+            counter_diffs,
+            compute_units,
+        } => process_create_intent_bundle(
+            accounts,
+            num_commit_only,
+            num_undelegate,
+            counter_diffs,
+            compute_units,
+        ),
     }?;
     Ok(())
 }

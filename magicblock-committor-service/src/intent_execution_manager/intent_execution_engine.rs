@@ -6,6 +6,7 @@ use std::{
 
 use futures_util::{stream::FuturesUnordered, StreamExt};
 use magicblock_metrics::metrics;
+use magicblock_program::magic_scheduled_base_intent::ScheduledIntentBundle;
 use tokio::{
     sync::{
         broadcast, mpsc, mpsc::error::TryRecvError, OwnedSemaphorePermit,
@@ -30,7 +31,6 @@ use crate::{
         ExecutionOutput, IntentExecutionResult, IntentExecutor,
     },
     persist::IntentPersister,
-    types::{ScheduledBaseIntentWrapper, TriggerType},
 };
 
 const SEMAPHORE_CLOSED_MSG: &str = "Executors semaphore closed!";
@@ -43,21 +43,15 @@ pub type PatchedErrors = Vec<TransactionStrategyExecutionError>;
 pub struct BroadcastedIntentExecutionResult {
     pub inner: Result<ExecutionOutput, Arc<IntentExecutorError>>,
     pub id: u64,
-    pub trigger_type: TriggerType,
     pub patched_errors: Arc<PatchedErrors>,
 }
 
 impl BroadcastedIntentExecutionResult {
-    fn new(
-        id: u64,
-        trigger_type: TriggerType,
-        execution_result: IntentExecutionResult,
-    ) -> Self {
+    fn new(id: u64, execution_result: IntentExecutionResult) -> Self {
         let inner = execution_result.inner.map_err(Arc::new);
         let patched_errors = execution_result.patched_errors.into();
         Self {
             id,
-            trigger_type,
             patched_errors,
             inner,
         }
@@ -88,7 +82,7 @@ pub(crate) struct IntentExecutionEngine<D, P, F> {
     db: Arc<D>,
     executor_factory: F,
     intents_persister: Option<P>,
-    receiver: mpsc::Receiver<ScheduledBaseIntentWrapper>,
+    receiver: mpsc::Receiver<ScheduledIntentBundle>,
 
     inner: Arc<Mutex<IntentScheduler>>,
     running_executors: FuturesUnordered<JoinHandle<()>>,
@@ -106,7 +100,7 @@ where
         db: Arc<D>,
         executor_factory: F,
         intents_persister: Option<P>,
-        receiver: mpsc::Receiver<ScheduledBaseIntentWrapper>,
+        receiver: mpsc::Receiver<ScheduledIntentBundle>,
     ) -> Self {
         Self {
             db,
@@ -154,7 +148,7 @@ where
                 // We couldn't pick up intent for execution due to:
                 // 1. All executors are currently busy
                 // 2. All intents are blocked and none could be executed at the moment
-                trace!("No intents available");
+                trace!("Could not schedule any intents");
                 continue;
             };
 
@@ -187,11 +181,11 @@ where
         }
     }
 
-    /// Returns [`ScheduledBaseIntentWrapper`] or None if all intents are blocked
+    /// Returns [`ScheduledIntentBundle`] or None if all intents are blocked
     #[instrument(skip(self))]
     async fn next_scheduled_intent(
         &mut self,
-    ) -> Result<Option<ScheduledBaseIntentWrapper>, IntentExecutionManagerError>
+    ) -> Result<Option<ScheduledIntentBundle>, IntentExecutionManagerError>
     {
         // Limit on number of intents that can be stored in scheduler
         const SCHEDULER_CAPACITY: usize = 1000;
@@ -220,7 +214,7 @@ where
                 if let Err(err) = result {
                     error!(error = ?err, "Executor failed");
                 };
-                trace!("Worker executed intent, fetching new available one");
+                trace!("Worker executed intent bundle, fetching new available one");
                 self.inner.lock().expect(POISONED_INNER_MSG).pop_next_scheduled_intent()
             },
             result = Self::get_new_intent(receiver, db), if can_receive() => {
@@ -240,18 +234,18 @@ where
         Ok(intent)
     }
 
-    /// Returns [`ScheduledBaseIntentWrapper`] from external channel
+    /// Returns [`ScheduledIntentBundle`] from external channel
     async fn get_new_intent(
-        receiver: &mut mpsc::Receiver<ScheduledBaseIntentWrapper>,
+        receiver: &mut mpsc::Receiver<ScheduledIntentBundle>,
         db: &Arc<D>,
-    ) -> Result<ScheduledBaseIntentWrapper, IntentExecutionManagerError> {
+    ) -> Result<ScheduledIntentBundle, IntentExecutionManagerError> {
         match receiver.try_recv() {
             Ok(val) => Ok(val),
             Err(TryRecvError::Empty) => {
                 // Worker either cleaned-up congested channel and now need to clean-up DB
                 // or we're just waiting on empty channel
-                if let Some(base_intent) = db.pop_base_intent().await? {
-                    Ok(base_intent)
+                if let Some(intent_bundle) = db.pop_intent_bundle().await? {
+                    Ok(intent_bundle)
                 } else {
                     receiver
                         .recv()
@@ -266,11 +260,11 @@ where
     }
 
     /// Wrapper on [`IntentExecutor`] that handles its results and drops execution permit
-    #[instrument(skip(executor, persister, inner_scheduler, execution_permit, result_sender), fields(intent_id = intent.id, trigger_type = ?intent.trigger_type))]
+    #[instrument(skip(executor, persister, inner_scheduler, execution_permit, result_sender), fields(intent_id = intent.id))]
     async fn execute(
         mut executor: E,
         persister: Option<P>,
-        intent: ScheduledBaseIntentWrapper,
+        intent: ScheduledIntentBundle,
         inner_scheduler: Arc<Mutex<IntentScheduler>>,
         execution_permit: OwnedSemaphorePermit,
         result_sender: broadcast::Sender<BroadcastedIntentExecutionResult>,
@@ -278,20 +272,17 @@ where
         let instant = Instant::now();
 
         // Execute an Intent
-        let result = executor.execute(intent.inner.clone(), persister).await;
+        let result = executor.execute(intent.clone(), persister).await;
         let _ = result.inner.as_ref().inspect_err(|err| {
-            error!(intent_id = intent.id, error = ?err, "Execution failed");
+            error!(intent_id = intent.id, error = ?err, "Failed to execute intent bundle");
         });
 
         // Record metrics after execution
         Self::execution_metrics(instant.elapsed(), &intent, &result.inner);
 
         // Broadcast result to subscribers
-        let broadcasted_result = BroadcastedIntentExecutionResult::new(
-            intent.id,
-            intent.trigger_type,
-            result,
-        );
+        let broadcasted_result =
+            BroadcastedIntentExecutionResult::new(intent.id, result);
         if let Err(err) = result_sender.send(broadcasted_result) {
             warn!(error = ?err, "No result listeners");
         }
@@ -303,7 +294,7 @@ where
         inner_scheduler
             .lock()
             .expect(POISONED_INNER_MSG)
-            .complete(&intent.inner)
+            .complete(&intent)
             .expect("Valid completion of previously scheduled message");
 
         tokio::spawn(async move {
@@ -314,7 +305,7 @@ where
             // We assume that this case is highly unlikely since it would mean:
             // user redelegates amd reaches current commit id faster than we execute transactions below
             if let Err(err) = executor.cleanup().await {
-                error!(error = ?err, "Cleanup failed");
+                error!(error = ?err, "Failed to cleanup after intent");
             }
         });
 
@@ -325,31 +316,35 @@ where
     /// Records metrics related to intent execution
     fn execution_metrics(
         execution_time: Duration,
-        intent: &ScheduledBaseIntentWrapper,
+        intent: &ScheduledIntentBundle,
         result: &IntentExecutorResult<ExecutionOutput>,
     ) {
         const EXECUTION_TIME_THRESHOLD: f64 = 5.0;
+        const INTENT_BUNDLE_LABEL: &str = "intent_bundle";
 
         let intent_execution_secs = execution_time.as_secs_f64();
         metrics::observe_committor_intent_execution_time_histogram(
             intent_execution_secs,
-            intent,
+            &INTENT_BUNDLE_LABEL,
             result,
         );
         if let Err(ref err) = result {
-            metrics::inc_committor_failed_intents_count(intent, err);
+            metrics::inc_committor_failed_intents_count(
+                &INTENT_BUNDLE_LABEL,
+                err,
+            );
         }
 
         // Loki alerts
         if intent_execution_secs >= EXECUTION_TIME_THRESHOLD {
-            info!(duration_secs = intent_execution_secs, result = ?result, "Execution slow");
+            info!(duration_secs = intent_execution_secs, result = ?result, "Intent bundle took too long to execute");
         } else {
-            trace!(duration_secs = intent_execution_secs, result = ?result, "Execution time");
+            trace!(duration_secs = intent_execution_secs, result = ?result, "Intent bundle execution time");
         }
 
         // Alert
-        if intent.is_undelegate() && result.is_err() {
-            warn!(stuck_accounts = ?intent.get_committed_pubkeys(), "Undelegate execution failed, accounts may be stuck");
+        if intent.has_undelegate_intent() && result.is_err() {
+            warn!(stuck_accounts = ?intent.get_undelegate_intent_pubkeys(), "Intent execution resulted in stuck accounts");
         }
     }
 }
@@ -367,7 +362,7 @@ mod tests {
     };
 
     use async_trait::async_trait;
-    use magicblock_program::magic_scheduled_base_intent::ScheduledBaseIntent;
+    use magicblock_program::magic_scheduled_base_intent::ScheduledIntentBundle;
     use solana_pubkey::{pubkey, Pubkey};
     use solana_signature::Signature;
     use solana_signer::SignerError;
@@ -378,7 +373,7 @@ mod tests {
     use crate::{
         intent_execution_manager::{
             db::{DummyDB, DB},
-            intent_scheduler::create_test_intent,
+            intent_scheduler::{create_test_intent, create_test_intent_bundle},
         },
         intent_executor::{
             error::{IntentExecutorError as ExecutorError, InternalError},
@@ -397,7 +392,7 @@ mod tests {
     fn setup_engine(
         should_fail: bool,
     ) -> (
-        mpsc::Sender<ScheduledBaseIntentWrapper>,
+        mpsc::Sender<ScheduledIntentBundle>,
         MockIntentExecutionEngine,
     ) {
         test_utils::init_test_logger();
@@ -466,6 +461,32 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_worker_handles_conflicting_bundles() {
+        let (sender, worker) = setup_engine(false);
+        let result_subscriber = worker.spawn();
+        let mut result_receiver = result_subscriber.subscribe();
+
+        // Send two conflicting messages
+        let a = pubkey!("1111111111111111111111111111111111111111111");
+        let b = pubkey!("21111111111111111111111111111111111111111111");
+        let msg1 = create_test_intent_bundle(1, &[a], &[b]);
+        let msg2 = create_test_intent(2, &[a], false);
+
+        sender.send(msg1.clone()).await.unwrap();
+        sender.send(msg2.clone()).await.unwrap();
+
+        // First message should be processed immediately
+        let result1 = result_receiver.recv().await.unwrap();
+        assert!(result1.is_ok());
+        assert_eq!(result1.id, 1);
+
+        // Second message should be processed after first completes
+        let result2 = result_receiver.recv().await.unwrap();
+        assert!(result2.is_ok());
+        assert_eq!(result2.id, 2);
+    }
+
+    #[tokio::test]
     async fn test_worker_handles_executor_failure() {
         let (sender, worker) = setup_engine(true);
         let result_subscriber = worker.spawn();
@@ -483,7 +504,6 @@ mod tests {
         let result = result_receiver.recv().await.unwrap();
         assert!(result.inner.is_err());
         assert_eq!(result.id, 1);
-        assert_eq!(result.trigger_type, TriggerType::OffChain);
         assert_eq!(
             result.patched_errors[0].to_string(),
             "User supplied actions are ill-formed: Attempt to debit an account but found no record of a prior credit.. None"
@@ -504,7 +524,7 @@ mod tests {
             &[pubkey!("1111111111111111111111111111111111111111111")],
             false,
         );
-        worker.db.store_base_intent(msg.clone()).await.unwrap();
+        worker.db.store_intent_bundle(msg.clone()).await.unwrap();
 
         // Start worker
         let result_subscriber = worker.spawn();
@@ -778,7 +798,7 @@ mod tests {
     impl IntentExecutor for MockIntentExecutor {
         async fn execute<P: IntentPersister>(
             &mut self,
-            _base_intent: ScheduledBaseIntent,
+            _base_intent: ScheduledIntentBundle,
             _persister: Option<P>,
         ) -> IntentExecutionResult {
             self.on_task_started();
