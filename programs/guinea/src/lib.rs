@@ -65,8 +65,8 @@ pub enum GuineaInstruction {
     Resize(usize),
     ScheduleTask(ScheduleTaskArgs),
     CancelTask(i64),
-    CreateEphemeralAccount { data_len: usize },
-    ResizeEphemeralAccount { new_data_len: usize },
+    CreateEphemeralAccount { data_len: u32 },
+    ResizeEphemeralAccount { new_data_len: u32 },
     CloseEphemeralAccount,
 }
 
@@ -202,22 +202,29 @@ fn cancel_task(
     Ok(())
 }
 
+fn validate_ephemeral_accounts(
+    magic_program_info: &AccountInfo,
+    vault_info: &AccountInfo,
+) -> ProgramResult {
+    if magic_program_info.key != &magicblock_magic_program_api::ID {
+        return Err(ProgramError::InvalidAccountData);
+    }
+    if *vault_info.key != EPHEMERAL_VAULT_PUBKEY {
+        return Err(ProgramError::InvalidAccountData);
+    }
+    Ok(())
+}
+
 fn create_ephemeral_account(
     mut accounts: slice::Iter<AccountInfo>,
-    data_len: usize,
+    data_len: u32,
 ) -> ProgramResult {
     let magic_program_info = next_account_info(&mut accounts)?;
     let sponsor_info = next_account_info(&mut accounts)?;
     let ephemeral_info = next_account_info(&mut accounts)?;
     let vault_info = next_account_info(&mut accounts)?;
 
-    if magic_program_info.key != &magicblock_magic_program_api::ID {
-        return Err(ProgramError::InvalidAccountData);
-    }
-
-    if *vault_info.key != EPHEMERAL_VAULT_PUBKEY {
-        return Err(ProgramError::InvalidAccountData);
-    }
+    validate_ephemeral_accounts(magic_program_info, vault_info)?;
 
     let account_infos = &[
         sponsor_info.clone(),
@@ -243,20 +250,14 @@ fn create_ephemeral_account(
 
 fn resize_ephemeral_account(
     mut accounts: slice::Iter<AccountInfo>,
-    new_data_len: usize,
+    new_data_len: u32,
 ) -> ProgramResult {
     let magic_program_info = next_account_info(&mut accounts)?;
     let sponsor_info = next_account_info(&mut accounts)?;
     let ephemeral_info = next_account_info(&mut accounts)?;
     let vault_info = next_account_info(&mut accounts)?;
 
-    if magic_program_info.key != &magicblock_magic_program_api::ID {
-        return Err(ProgramError::InvalidAccountData);
-    }
-
-    if *vault_info.key != EPHEMERAL_VAULT_PUBKEY {
-        return Err(ProgramError::InvalidAccountData);
-    }
+    validate_ephemeral_accounts(magic_program_info, vault_info)?;
 
     let account_infos = &[
         sponsor_info.clone(),
@@ -288,13 +289,7 @@ fn close_ephemeral_account(
     let ephemeral_info = next_account_info(&mut accounts)?;
     let vault_info = next_account_info(&mut accounts)?;
 
-    if magic_program_info.key != &magicblock_magic_program_api::ID {
-        return Err(ProgramError::InvalidAccountData);
-    }
-
-    if *vault_info.key != EPHEMERAL_VAULT_PUBKEY {
-        return Err(ProgramError::InvalidAccountData);
-    }
+    validate_ephemeral_accounts(magic_program_info, vault_info)?;
 
     let account_infos = &[
         sponsor_info.clone(),

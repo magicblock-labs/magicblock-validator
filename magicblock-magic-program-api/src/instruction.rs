@@ -133,7 +133,7 @@ pub enum MagicBlockInstruction {
     /// - **2.** `[WRITE]` Vault account (receives rent payment)
     CreateEphemeralAccount {
         /// Initial data length in bytes
-        data_len: usize,
+        data_len: u32,
     },
 
     /// Resizes an existing ephemeral account, adjusting rent accordingly.
@@ -141,9 +141,10 @@ pub enum MagicBlockInstruction {
     /// # Account references
     /// - **0.** `[WRITE]` Sponsor account (pays/receives rent difference)
     /// - **1.** `[WRITE]` Ephemeral account to resize
+    /// - **2.** `[WRITE]` Vault account (holds/receives lamports for rent transfer)
     ResizeEphemeralAccount {
         /// New data length in bytes
-        new_data_len: usize,
+        new_data_len: u32,
     },
 
     /// Closes an ephemeral account, refunding rent to the sponsor.
@@ -151,6 +152,7 @@ pub enum MagicBlockInstruction {
     /// # Account references
     /// - **0.** `[WRITE]` Sponsor account (receives rent refund)
     /// - **1.** `[WRITE]` Ephemeral account to close
+    /// - **2.** `[WRITE]` Vault account (source of rent refund)
     CloseEphemeralAccount,
 
     /// Noop instruction

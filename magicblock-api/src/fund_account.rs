@@ -6,6 +6,7 @@ use magicblock_program::MagicContext;
 use solana_account::{AccountSharedData, WritableAccount};
 use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
+use solana_rent::Rent;
 use solana_signer::Signer;
 
 use crate::{
@@ -84,19 +85,13 @@ pub(crate) fn fund_magic_context(accountsdb: &AccountsDb) {
 }
 
 pub(crate) fn fund_ephemeral_vault(accountsdb: &AccountsDb) {
-    // Only create vault if it doesn't exist (don't overwrite on restart)
-    if accountsdb
+    let lamports = Rent::default().minimum_balance(0);
+    fund_account(accountsdb, &magic_program::EPHEMERAL_VAULT_PUBKEY, lamports);
+    let mut vault = accountsdb
         .get_account(&magic_program::EPHEMERAL_VAULT_PUBKEY)
-        .is_none()
-    {
-        // Create with 0 balance, will accumulate rent over time
-        fund_account(accountsdb, &magic_program::EPHEMERAL_VAULT_PUBKEY, 0);
-        let mut vault = accountsdb
-            .get_account(&magic_program::EPHEMERAL_VAULT_PUBKEY)
-            .unwrap();
-        vault.set_delegated(true);
-        vault.set_ephemeral(true);
-        let _ = accountsdb
-            .insert_account(&magic_program::EPHEMERAL_VAULT_PUBKEY, &vault);
-    }
+        .expect("vault should have been created");
+    vault.set_ephemeral(true);
+    vault.set_owner(magic_program::ID);
+    let _ = accountsdb
+        .insert_account(&magic_program::EPHEMERAL_VAULT_PUBKEY, &vault);
 }

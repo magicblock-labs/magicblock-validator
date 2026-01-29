@@ -1,15 +1,18 @@
 //! Create ephemeral account instruction processor
 
-use magicblock_magic_program_api::id;
 use solana_account::{ReadableAccount, WritableAccount};
 use solana_instruction::error::InstructionError;
 use solana_log_collector::ic_msg;
 use solana_program_runtime::invoke_context::InvokeContext;
+use solana_sdk_ids::system_program;
 use solana_transaction_context::TransactionContext;
 
 use super::{
-    processor::rent_for,
-    validation::{validate_cpi_only, validate_sponsor},
+    processor::{rent_for, MAX_DATA_LEN},
+    validation::{
+        get_caller_program_id, validate_cpi_only, validate_sponsor,
+        validate_vault,
+    },
 };
 use crate::utils::accounts;
 
@@ -18,40 +21,29 @@ use crate::utils::accounts;
 pub(crate) fn process_create_ephemeral_account(
     invoke_context: &InvokeContext,
     transaction_context: &TransactionContext,
-    data_len: usize,
+    data_len: u32,
 ) -> Result<(), InstructionError> {
-    use crate::utils::instruction_context_frames::InstructionContextFrames;
-
-    // Must be called via CPI (user programs mediate all access)
-    validate_cpi_only(transaction_context)?;
-
-    // Get caller program ID (will be the owner of the ephemeral account)
-    let frames = InstructionContextFrames::try_from(transaction_context)?;
-    let caller_program_id = frames
-        .find_program_id_of_parent_of_current_instruction()
-        .ok_or(InstructionError::IncorrectProgramId)?;
-
-    // Validate sponsor (signer or PDA owned by caller)
-    validate_sponsor(transaction_context)?;
-
-    // Validate vault is owned by magic program
-    let vault =
-        accounts::get_instruction_account_with_idx(transaction_context, 2)?;
-    if *vault.borrow().owner() != id() {
-        return Err(InstructionError::InvalidAccountOwner);
+    if data_len > MAX_DATA_LEN {
+        return Err(InstructionError::InvalidArgument);
     }
 
-    // Validate: must have 0 lamports and not already ephemeral
+    validate_cpi_only(transaction_context)?;
+    validate_sponsor(transaction_context)?;
+    validate_vault(transaction_context)?;
+
+    let caller_program_id = get_caller_program_id(transaction_context)?;
+
+    // Target account must be empty (0 lamports, not owned by system program)
     let ephemeral =
         accounts::get_instruction_account_with_idx(transaction_context, 1)?;
     let acc = ephemeral.borrow();
-    if acc.lamports() != 0 || acc.ephemeral() {
+    if acc.lamports() != 0 || *acc.owner() != system_program::ID {
         return Err(InstructionError::InvalidAccountData);
     }
     drop(acc);
 
-    // Debit rent from sponsor, credit to vault
-    let rent = rent_for(data_len);
+    // Transfer rent from sponsor to vault
+    let rent = rent_for(data_len)?;
     accounts::debit_instruction_account_at_index(transaction_context, 0, rent)?;
     accounts::credit_instruction_account_at_index(
         transaction_context,
@@ -59,11 +51,11 @@ pub(crate) fn process_create_ephemeral_account(
         rent,
     )?;
 
-    // Set up ephemeral account (owned by the calling program)
+    // Initialize ephemeral account
     let mut acc = ephemeral.borrow_mut();
     acc.set_lamports(0);
-    acc.set_owner(*caller_program_id);
-    acc.resize(data_len, 0);
+    acc.set_owner(caller_program_id);
+    acc.resize(data_len as usize, 0);
     acc.set_ephemeral(true);
 
     ic_msg!(
