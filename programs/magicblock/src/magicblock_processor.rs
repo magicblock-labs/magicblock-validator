@@ -6,8 +6,8 @@ use crate::{
     process_scheduled_commit_sent,
     schedule_task::{process_cancel_task, process_schedule_task},
     schedule_transactions::{
-        process_accept_scheduled_commits, process_schedule_base_intent,
-        process_schedule_commit, ProcessScheduleCommitOptions,
+        process_accept_scheduled_commits, process_schedule_commit,
+        process_schedule_intent_bundle, ProcessScheduleCommitOptions,
     },
     toggle_executable_check::process_toggle_executable_check,
 };
@@ -68,8 +68,13 @@ declare_process_instruction!(
                 transaction_context,
                 id,
             ),
-            ScheduleBaseIntent(args) => {
-                process_schedule_base_intent(signers, invoke_context, args)
+            ScheduleBaseIntent(args) => process_schedule_intent_bundle(
+                signers,
+                invoke_context,
+                args.into(),
+            ),
+            ScheduleIntentBundle(args) => {
+                process_schedule_intent_bundle(signers, invoke_context, args)
             }
             ScheduleTask(args) => {
                 process_schedule_task(signers, invoke_context, args)

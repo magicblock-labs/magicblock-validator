@@ -184,6 +184,40 @@ pub enum FlexiCounterInstruction {
     /// 1. `[signer]` The payer that created and is cancelling the task.
     /// 2. `[write]`  Task context account.
     Cancel(CancelArgs),
+
+    /// Creates an intent bundle that can contain both Commit and CommitAndUndelegate
+    /// intents simultaneously using MagicIntentBundleBuilder.
+    ///
+    /// This instruction tests the new IntentBundle feature where:
+    /// - commit_only_payers: accounts that will only be committed (Commit intent)
+    /// - undelegate_payers: accounts that will be committed and undelegated (CommitAndUndelegate intent)
+    ///
+    /// Accounts:
+    /// 0.      `[]`       Destination program
+    /// 1.      `[]`       MagicContext (used to record scheduled commit)
+    /// 2.      `[]`       MagicBlock Program (used to schedule commit)
+    /// 3.      `[write]`  Transfer destination during action
+    /// 4.      `[]`       System program
+    /// -- Commit only accounts --
+    /// 5.      `[signer]` Escrow authority for commit only
+    /// ...
+    /// 5+n-1   `[signer]` Escrow authority for commit only
+    /// 5+n     `[write]`  Counter pda for commit only
+    /// ...
+    /// 5+2n-1  `[write]`  Counter pda for commit only
+    /// -- CommitAndUndelegate accounts --
+    /// 5+2n    `[signer]` Escrow authority for undelegate
+    /// ...
+    /// 5+2n+m-1 `[signer]` Escrow authority for undelegate
+    /// 5+2n+m   `[write]`  Counter pda for undelegate
+    /// ...
+    /// 5+2n+2m-1 `[write]` Counter pda for undelegate
+    CreateIntentBundle {
+        num_commit_only: u8,
+        num_undelegate: u8,
+        counter_diffs: Vec<i64>,
+        compute_units: u32,
+    },
 }
 
 pub fn create_init_ix(payer: Pubkey, label: String) -> Instruction {
@@ -458,6 +492,71 @@ pub fn create_cancel_task_ix(payer: Pubkey, task_id: i64) -> Instruction {
     Instruction::new_with_borsh(
         *program_id,
         &FlexiCounterInstruction::Cancel(CancelArgs { task_id }),
+        accounts,
+    )
+}
+
+/// Creates an instruction for CreateIntentBundle that tests both Commit and
+/// CommitAndUndelegate intents simultaneously.
+///
+/// # Arguments
+/// * `commit_only_payers` - Payers whose counters will only be committed
+/// * `undelegate_payers` - Payers whose counters will be committed and undelegated
+/// * `transfer_destination` - Destination for prize transfers during actions
+/// * `counter_diffs` - Diffs to apply to undelegate counters after undelegation
+/// * `compute_units` - Compute units for action handlers
+pub fn create_intent_bundle_ix(
+    commit_only_payers: Vec<Pubkey>,
+    undelegate_payers: Vec<Pubkey>,
+    transfer_destination: Pubkey,
+    counter_diffs: Vec<i64>,
+    compute_units: u32,
+) -> Instruction {
+    let program_id = &crate::id();
+
+    // Build account metas
+    let mut accounts = vec![
+        AccountMeta::new_readonly(crate::id(), false),
+        AccountMeta::new(MAGIC_CONTEXT_ID, false),
+        AccountMeta::new_readonly(MAGIC_PROGRAM_ID, false),
+        AccountMeta::new_readonly(transfer_destination, false),
+        AccountMeta::new_readonly(system_program::id(), false),
+    ];
+
+    // Add commit-only payers (escrow authorities)
+    accounts.extend(
+        commit_only_payers
+            .iter()
+            .map(|payer| AccountMeta::new_readonly(*payer, true)),
+    );
+    // Add commit-only counters
+    accounts.extend(
+        commit_only_payers
+            .iter()
+            .map(|payer| AccountMeta::new(FlexiCounter::pda(payer).0, false)),
+    );
+
+    // Add undelegate payers (escrow authorities)
+    accounts.extend(
+        undelegate_payers
+            .iter()
+            .map(|payer| AccountMeta::new_readonly(*payer, true)),
+    );
+    // Add undelegate counters
+    accounts.extend(
+        undelegate_payers
+            .iter()
+            .map(|payer| AccountMeta::new(FlexiCounter::pda(payer).0, false)),
+    );
+
+    Instruction::new_with_borsh(
+        *program_id,
+        &FlexiCounterInstruction::CreateIntentBundle {
+            num_commit_only: commit_only_payers.len() as u8,
+            num_undelegate: undelegate_payers.len() as u8,
+            counter_diffs,
+            compute_units,
+        },
         accounts,
     )
 }

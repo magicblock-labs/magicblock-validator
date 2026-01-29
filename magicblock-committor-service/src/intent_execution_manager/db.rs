@@ -3,31 +3,30 @@ use std::{collections::VecDeque, sync::Mutex};
 /// DB for storing intents that overflow committor channel
 use async_trait::async_trait;
 use magicblock_metrics::metrics;
-
-use crate::types::ScheduledBaseIntentWrapper;
+use magicblock_program::magic_scheduled_base_intent::ScheduledIntentBundle;
 
 const POISONED_MUTEX_MSG: &str = "Dummy db mutex poisoned";
 
 #[async_trait]
 pub trait DB: Send + Sync + 'static {
-    async fn store_base_intent(
+    async fn store_intent_bundle(
         &self,
-        base_intent: ScheduledBaseIntentWrapper,
+        intent_bundle: ScheduledIntentBundle,
     ) -> DBResult<()>;
-    async fn store_base_intents(
+    async fn store_intent_bundles(
         &self,
-        base_intents: Vec<ScheduledBaseIntentWrapper>,
+        intent_bundles: Vec<ScheduledIntentBundle>,
     ) -> DBResult<()>;
 
     /// Returns intent with smallest id
-    async fn pop_base_intent(
+    async fn pop_intent_bundle(
         &self,
-    ) -> DBResult<Option<ScheduledBaseIntentWrapper>>;
+    ) -> DBResult<Option<ScheduledIntentBundle>>;
     fn is_empty(&self) -> bool;
 }
 
 pub(crate) struct DummyDB {
-    db: Mutex<VecDeque<ScheduledBaseIntentWrapper>>,
+    db: Mutex<VecDeque<ScheduledIntentBundle>>,
 }
 
 impl DummyDB {
@@ -40,31 +39,31 @@ impl DummyDB {
 
 #[async_trait]
 impl DB for DummyDB {
-    async fn store_base_intent(
+    async fn store_intent_bundle(
         &self,
-        base_intent: ScheduledBaseIntentWrapper,
+        intent_bundle: ScheduledIntentBundle,
     ) -> DBResult<()> {
         let mut db = self.db.lock().expect(POISONED_MUTEX_MSG);
-        db.push_back(base_intent);
+        db.push_back(intent_bundle);
 
         metrics::set_committor_intents_backlog_count(db.len() as i64);
         Ok(())
     }
 
-    async fn store_base_intents(
+    async fn store_intent_bundles(
         &self,
-        base_intents: Vec<ScheduledBaseIntentWrapper>,
+        intent_bundles: Vec<ScheduledIntentBundle>,
     ) -> DBResult<()> {
         let mut db = self.db.lock().expect(POISONED_MUTEX_MSG);
-        db.extend(base_intents);
+        db.extend(intent_bundles);
 
         metrics::set_committor_intents_backlog_count(db.len() as i64);
         Ok(())
     }
 
-    async fn pop_base_intent(
+    async fn pop_intent_bundle(
         &self,
-    ) -> DBResult<Option<ScheduledBaseIntentWrapper>> {
+    ) -> DBResult<Option<ScheduledIntentBundle>> {
         let mut db = self.db.lock().expect(POISONED_MUTEX_MSG);
         let res = db.pop_front();
 
