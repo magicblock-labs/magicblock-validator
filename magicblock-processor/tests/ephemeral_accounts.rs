@@ -10,8 +10,8 @@ use solana_pubkey::Pubkey;
 use test_kit::{ExecutionTestEnv, Signer};
 
 /// Calculates rent for an ephemeral account (same logic as magic program)
-fn rent_for(data_len: usize) -> u64 {
-    (data_len as u64 + AccountSharedData::ACCOUNT_STATIC_SIZE as u64)
+fn rent_for(data_len: u32) -> u64 {
+    (u64::from(data_len) + AccountSharedData::ACCOUNT_STATIC_SIZE as u64)
         * EPHEMERAL_RENT_PER_BYTE
 }
 
@@ -78,7 +78,7 @@ fn create_ephemeral_account_ix(
     sponsor: Pubkey,
     ephemeral: Pubkey,
     vault: Pubkey,
-    data_len: usize,
+    data_len: u32,
 ) -> Instruction {
     Instruction::new_with_bincode(
         guinea::ID,
@@ -98,7 +98,7 @@ fn resize_ephemeral_account_ix(
     sponsor: Pubkey,
     ephemeral: Pubkey,
     vault: Pubkey,
-    new_data_len: usize,
+    new_data_len: u32,
 ) -> Instruction {
     Instruction::new_with_bincode(
         guinea::ID,
@@ -204,7 +204,7 @@ async fn test_create_ephemeral_account_via_cpi() {
     );
     assert_eq!(
         ephemeral_after.data().len(),
-        data_len,
+        data_len as usize,
         "Data length should match"
     );
     assert_eq!(
@@ -306,7 +306,7 @@ async fn test_resize_ephemeral_account_via_cpi() {
     // Verify the account was resized
     assert_eq!(
         ephemeral_after_resize.data().len(),
-        new_data_len,
+        new_data_len as usize,
         "Data length should be updated"
     );
     assert!(
@@ -510,7 +510,7 @@ async fn test_resize_smaller_via_cpi() {
     // Verify the account was resized
     assert_eq!(
         ephemeral_after_resize.data().len(),
-        new_data_len,
+        new_data_len as usize,
         "Data length should be updated"
     );
 
@@ -546,7 +546,7 @@ fn direct_create_instruction(
     sponsor: Pubkey,
     ephemeral: Pubkey,
     vault: Pubkey,
-    data_len: usize,
+    data_len: u32,
 ) -> Instruction {
     Instruction::new_with_bincode(
         magicblock_magic_program_api::ID,
@@ -609,8 +609,9 @@ async fn test_create_with_non_zero_lamports_fails() {
 async fn test_create_already_ephemeral_fails() {
     let ctx = setup_test();
 
-    // Mark as already ephemeral
+    // Simulate an existing ephemeral account (owned by a program, not system)
     let mut acc = ctx.env.get_account(ctx.ephemeral);
+    acc.set_owner(guinea::ID);
     acc.set_ephemeral(true);
     acc.commit();
 
@@ -899,14 +900,8 @@ async fn test_insufficient_balance_fails() {
     assert!(result.is_err(), "Should fail - insufficient balance");
 }
 
-// NOTE: This test is IGNORED because testing `invoke_signed` with PDAs requires nested CPI,
-// which cannot be tested directly from a client transaction. In production, user programs
-// would call magic-program via CPI, and those programs would use `invoke_signed` for their PDAs.
-//
-// The guinea program DOES support the global PDA sponsor (via invoke_signed with proper seeds),
-// but testing it requires a wrapper program for the CPI call.
-//
-// See: https://solana.stackexchange.com/questions/17627 for invoke_signed seed/bump format
+// Tests creating an ephemeral account with a PDA sponsor.
+// The guinea program uses `invoke_signed` with proper seeds to sign for the PDA.
 #[tokio::test]
 async fn test_create_with_pda_sponsor() {
     let env = ExecutionTestEnv::new_with_config(0, 1, false);
