@@ -232,13 +232,17 @@ fn create_ephemeral_account(
         vault_info.clone(),
     ];
 
-    // Create instruction (signer flag will be patched by helper if needed)
+    // Ephemeral must be a signer (prevents pubkey squatting)
+    if !ephemeral_info.is_signer {
+        return Err(ProgramError::MissingRequiredSignature);
+    }
+
     let ix = Instruction::new_with_bincode(
         magicblock_magic_program_api::ID,
         &MagicBlockInstruction::CreateEphemeralAccount { data_len },
         vec![
-            AccountMeta::new(*sponsor_info.key, true),
-            AccountMeta::new(*ephemeral_info.key, false),
+            AccountMeta::new(*sponsor_info.key, sponsor_info.is_signer),
+            AccountMeta::new(*ephemeral_info.key, true),
             AccountMeta::new(EPHEMERAL_VAULT_PUBKEY, false),
         ],
     );

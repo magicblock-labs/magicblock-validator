@@ -5,6 +5,7 @@ use magicblock_magic_program_api::{
     EPHEMERAL_VAULT_PUBKEY, ID as MAGIC_PROGRAM_ID,
 };
 use solana_account::{AccountSharedData, ReadableAccount, WritableAccount};
+use solana_keypair::Keypair;
 use solana_program::instruction::{AccountMeta, Instruction};
 use solana_pubkey::Pubkey;
 use test_kit::{ExecutionTestEnv, Signer};
@@ -19,7 +20,7 @@ fn rent_for(data_len: u32) -> u64 {
 struct TestContext {
     env: ExecutionTestEnv,
     sponsor: Pubkey,
-    ephemeral: Pubkey,
+    ephemeral: Keypair,
 }
 
 /// Sets up a test with vault, sponsor, and ephemeral account
@@ -29,7 +30,7 @@ fn setup_test() -> TestContext {
 
     let sponsor = env.get_payer().pubkey;
     init_sponsor(&env, sponsor);
-    let ephemeral = env.create_account(0).pubkey();
+    let ephemeral = env.create_account(0);
 
     TestContext {
         env,
@@ -44,6 +45,16 @@ async fn execute_instruction(
     ix: Instruction,
 ) -> Result<(), solana_transaction_error::TransactionError> {
     let txn = env.build_transaction(&[ix]);
+    env.execute_transaction(txn).await
+}
+
+/// Executes an instruction with additional signers
+async fn execute_instruction_with_signers(
+    env: &ExecutionTestEnv,
+    ix: Instruction,
+    signers: &[&Keypair],
+) -> Result<(), solana_transaction_error::TransactionError> {
+    let txn = env.build_transaction_with_signers(&[ix], signers);
     env.execute_transaction(txn).await
 }
 
@@ -86,7 +97,7 @@ fn create_ephemeral_account_ix(
         vec![
             AccountMeta::new_readonly(magic_program, false),
             AccountMeta::new(sponsor, true),
-            AccountMeta::new(ephemeral, false),
+            AccountMeta::new(ephemeral, true), // Must be signer to prevent squatting
             AccountMeta::new(vault, false),
         ],
     )
@@ -166,7 +177,7 @@ async fn test_create_ephemeral_account_via_cpi() {
         EPHEMERAL_VAULT_PUBKEY,
         data_len,
     );
-    let txn = env.build_transaction(&[ix]);
+    let txn = env.build_transaction_with_signers(&[ix], &[&ephemeral]);
 
     let result = env.execute_transaction(txn).await;
     if let Err(e) = &result {
@@ -254,7 +265,7 @@ async fn test_resize_ephemeral_account_via_cpi() {
         EPHEMERAL_VAULT_PUBKEY,
         initial_data_len,
     );
-    let txn = env.build_transaction(&[ix]);
+    let txn = env.build_transaction_with_signers(&[ix], &[&ephemeral]);
     assert!(env.execute_transaction(txn).await.is_ok());
 
     // Check balances BEFORE resize
@@ -355,7 +366,7 @@ async fn test_close_ephemeral_account_via_cpi() {
         EPHEMERAL_VAULT_PUBKEY,
         data_len,
     );
-    let txn = env.build_transaction(&[ix]);
+    let txn = env.build_transaction_with_signers(&[ix], &[&ephemeral]);
     assert!(env.execute_transaction(txn).await.is_ok());
 
     let expected_rent = rent_for(data_len);
@@ -458,7 +469,7 @@ async fn test_resize_smaller_via_cpi() {
         EPHEMERAL_VAULT_PUBKEY,
         initial_data_len,
     );
-    let txn = env.build_transaction(&[ix]);
+    let txn = env.build_transaction_with_signers(&[ix], &[&ephemeral]);
     assert!(env.execute_transaction(txn).await.is_ok());
 
     // Check balances BEFORE resize (shrink)
@@ -588,17 +599,18 @@ async fn test_create_with_non_zero_lamports_fails() {
 
     let sponsor = env.get_payer().pubkey;
     init_sponsor(&env, sponsor);
-    let ephemeral = env.create_account(100).pubkey(); // Non-zero lamports!
+    let ephemeral = env.create_account(100); // Non-zero lamports!
 
-    let result = execute_instruction(
+    let result = execute_instruction_with_signers(
         &env,
         create_ephemeral_account_ix(
             magicblock_magic_program_api::ID,
             sponsor,
-            ephemeral,
+            ephemeral.pubkey(),
             EPHEMERAL_VAULT_PUBKEY,
             1000,
         ),
+        &[&ephemeral],
     )
     .await;
 
@@ -610,20 +622,21 @@ async fn test_create_already_ephemeral_fails() {
     let ctx = setup_test();
 
     // Simulate an existing ephemeral account (owned by a program, not system)
-    let mut acc = ctx.env.get_account(ctx.ephemeral);
+    let mut acc = ctx.env.get_account(ctx.ephemeral.pubkey());
     acc.set_owner(guinea::ID);
     acc.set_ephemeral(true);
     acc.commit();
 
-    let result = execute_instruction(
+    let result = execute_instruction_with_signers(
         &ctx.env,
         create_ephemeral_account_ix(
             magicblock_magic_program_api::ID,
             ctx.sponsor,
-            ctx.ephemeral,
+            ctx.ephemeral.pubkey(),
             EPHEMERAL_VAULT_PUBKEY,
             1000,
         ),
+        &[&ctx.ephemeral],
     )
     .await;
 
@@ -715,7 +728,7 @@ async fn test_resize_to_zero_size() {
         EPHEMERAL_VAULT_PUBKEY,
         1000,
     );
-    let txn = env.build_transaction(&[ix]);
+    let txn = env.build_transaction_with_signers(&[ix], &[&ephemeral]);
     assert!(env.execute_transaction(txn).await.is_ok());
 
     // Resize to zero
@@ -752,7 +765,7 @@ async fn test_close_already_closed() {
         EPHEMERAL_VAULT_PUBKEY,
         1000,
     );
-    let txn = env.build_transaction(&[create_ix]);
+    let txn = env.build_transaction_with_signers(&[create_ix], &[&ephemeral]);
     assert!(env.execute_transaction(txn).await.is_ok());
 
     let close_ix = close_ephemeral_account_ix(
@@ -797,7 +810,7 @@ async fn test_close_already_closed_double_spend() {
         EPHEMERAL_VAULT_PUBKEY,
         1000,
     );
-    let txn = env.build_transaction(&[ix]);
+    let txn = env.build_transaction_with_signers(&[ix], &[&ephemeral]);
     assert!(env.execute_transaction(txn).await.is_ok());
 
     // Track balances before first close
@@ -894,7 +907,7 @@ async fn test_insufficient_balance_fails() {
         EPHEMERAL_VAULT_PUBKEY,
         data_len,
     );
-    let txn = env.build_transaction(&[ix]);
+    let txn = env.build_transaction_with_signers(&[ix], &[&ephemeral]);
 
     let result = env.execute_transaction(txn).await;
     assert!(result.is_err(), "Should fail - insufficient balance");
@@ -926,11 +939,11 @@ async fn test_create_with_pda_sponsor() {
         vec![
             AccountMeta::new_readonly(magicblock_magic_program_api::ID, false),
             AccountMeta::new(global_sponsor_pda, false), // PDA (not a signer in transaction)
-            AccountMeta::new(ephemeral.pubkey(), false),
+            AccountMeta::new(ephemeral.pubkey(), true),  // Ephemeral must sign
             AccountMeta::new(EPHEMERAL_VAULT_PUBKEY, false),
         ],
     );
-    let txn = env.build_transaction(&[ix]);
+    let txn = env.build_transaction_with_signers(&[ix], &[&ephemeral]);
 
     let result = env.execute_transaction(txn).await;
 
@@ -1027,7 +1040,7 @@ async fn test_full_lifecycle() {
         EPHEMERAL_VAULT_PUBKEY,
         1000,
     );
-    let txn = env.build_transaction(&[create_ix]);
+    let txn = env.build_transaction_with_signers(&[create_ix], &[&ephemeral]);
     assert!(env.execute_transaction(txn).await.is_ok());
 
     let grow_ix = resize_ephemeral_account_ix(
@@ -1087,25 +1100,15 @@ async fn test_multiple_accounts_same_sponsor() {
         env.accountsdb.get_account(&sponsor).unwrap().lamports();
 
     // Create 3 accounts with different sizes
-    for (eph, len) in [
-        (eph1.pubkey(), 1000),
-        (eph2.pubkey(), 2000),
-        (eph3.pubkey(), 500),
-    ] {
+    for (eph, len) in [(&eph1, 1000), (&eph2, 2000), (&eph3, 500)] {
         let ix = create_ephemeral_account_ix(
             magicblock_magic_program_api::ID,
             sponsor,
-            eph,
+            eph.pubkey(),
             EPHEMERAL_VAULT_PUBKEY,
             len,
         );
-        // Manually build transaction with same signer
-        let txn = solana_transaction::Transaction::new_signed_with_payer(
-            &[ix],
-            Some(&sponsor),
-            &[&env.payers[0]],
-            env.ledger.latest_blockhash(),
-        );
+        let txn = env.build_transaction_with_signers(&[ix], &[eph]);
         assert!(env.execute_transaction(txn).await.is_ok());
     }
 
