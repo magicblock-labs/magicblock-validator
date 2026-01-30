@@ -31,9 +31,15 @@ pub(crate) fn process_create_ephemeral_account(
     validate_sponsor(transaction_context)?;
     validate_vault(transaction_context)?;
 
+    // Ephemeral account must be a signer (prevents pubkey squatting)
+    let ix_ctx = transaction_context.get_current_instruction_context()?;
+    if !ix_ctx.is_instruction_account_signer(1)? {
+        return Err(InstructionError::MissingRequiredSignature);
+    }
+
     let caller_program_id = get_caller_program_id(transaction_context)?;
 
-    // Target account must be empty (0 lamports, not owned by system program)
+    // Target account must be empty (0 lamports, owned by system program)
     let ephemeral =
         accounts::get_instruction_account_with_idx(transaction_context, 1)?;
     let acc = ephemeral.borrow();

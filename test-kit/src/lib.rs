@@ -262,6 +262,26 @@ impl ExecutionTestEnv {
         )
     }
 
+    /// Builds a transaction with additional signers beyond the payer.
+    pub fn build_transaction_with_signers(
+        &self,
+        ixs: &[Instruction],
+        additional_signers: &[&Keypair],
+    ) -> Transaction {
+        let payer = {
+            let index = self.payer_index.fetch_add(1, Ordering::Relaxed);
+            &self.payers[index % self.payers.len()]
+        };
+        let mut signers: Vec<&Keypair> = vec![payer];
+        signers.extend(additional_signers);
+        Transaction::new_signed_with_payer(
+            ixs,
+            Some(&payer.pubkey()),
+            &signers,
+            self.ledger.latest_blockhash(),
+        )
+    }
+
     /// Submits a transaction for execution and waits for its result.
     #[instrument(skip(self, txn))]
     pub async fn execute_transaction(
