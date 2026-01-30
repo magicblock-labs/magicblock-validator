@@ -15,7 +15,7 @@ use config::RemoteAccountProviderConfig;
 pub(crate) use errors::{
     RemoteAccountProviderError, RemoteAccountProviderResult,
 };
-use futures_util::future::try_join_all;
+use futures_util::future::{join_all, try_join_all};
 pub use lru_cache::AccountsLruCache;
 pub(crate) use remote_account::RemoteAccount;
 pub use remote_account::RemoteAccountUpdateSource;
@@ -414,6 +414,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         let pubsub_futs = pubsubs.iter().map(|ep| {
             let rpc_client = rpc_client.clone();
             let chain_slot = chain_slot.clone();
+            let ep_label = ep.label().to_string();
             async move {
                 let (abort_tx, abort_rx) = mpsc::channel(1);
                 let client = ChainUpdatesClient::try_new_from_endpoint(
@@ -424,14 +425,29 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                     resubscription_delay,
                     rpc_client,
                 )
-                .await?;
-                Ok::<_, RemoteAccountProviderError>((
-                    Arc::new(client),
-                    abort_rx,
-                ))
+                .await;
+                (ep_label, client.map(|c| (Arc::new(c), abort_rx)))
             }
         });
-        let pubsubs = try_join_all(pubsub_futs).await?;
+        let results = join_all(pubsub_futs).await;
+        let pubsubs: Vec<_> = results
+            .into_iter()
+            .filter_map(|(label, result)| match result {
+                Ok(client) => Some(client),
+                Err(err) => {
+                    warn!(
+                        endpoint = %label,
+                        error = %err,
+                        "Skipping pubsub client that failed to connect"
+                    );
+                    None
+                }
+            })
+            .collect();
+
+        if pubsubs.is_empty() {
+            return Err(RemoteAccountProviderError::AllPubsubClientsFailed);
+        }
         let subscribed_accounts = Arc::new(AccountsLruCache::new({
             // SAFETY: NonZeroUsize::new only returns None if the value is 0.
             // RemoteAccountProviderConfig can only be constructed with
