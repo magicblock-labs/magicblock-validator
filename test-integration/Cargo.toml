@@ -104,7 +104,6 @@ test-kit = { path = "../test-kit" }
 tokio = "1.0"
 toml = "0.8.13"
 tracing = "0.1"
-test-ephemeral-accounts = { path = "test-ephemeral-accounts" }
 ureq = "2.9.6"
 url = "2.5.0"
 
