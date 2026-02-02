@@ -124,6 +124,30 @@ pub enum MagicBlockInstruction {
     /// - **0.** `[SIGNER]`         Validator authority
     EnableExecutableCheck,
 
+    /// Noop instruction
+    Noop(u64),
+
+    /// Schedules execution of a *bundle* of intents in a single instruction.
+    ///
+    /// A "intent bundle" is an atomic unit of work executed by the validator on the Base layer,
+    /// such as:
+    /// - standalone base actions
+    /// - an optional `Commit`
+    /// - an optional `CommitAndUndelegate`
+    ///
+    /// This is the recommended scheduling path when the caller wants to submit multiple
+    /// independent intents while paying account overhead only once.
+    ///
+    /// # Account references
+    /// - **0.**   `[WRITE, SIGNER]` Payer requesting the bundle to be scheduled
+    /// - **1.**   `[WRITE]`         Magic Context account
+    /// - **2..n** `[]`              All accounts referenced by any intent in the bundle
+    ///
+    /// # Data
+    /// The embedded [`MagicIntentBundleArgs`] encodes account references by indices into the
+    /// accounts array.
+    ScheduleIntentBundle(MagicIntentBundleArgs),
+
     /// Creates a new ephemeral account with rent paid by a sponsor.
     /// The account is automatically owned by the calling program (CPI caller).
     ///
@@ -154,30 +178,6 @@ pub enum MagicBlockInstruction {
     /// - **1.** `[WRITE]` Ephemeral account to close
     /// - **2.** `[WRITE]` Vault account (source of rent refund)
     CloseEphemeralAccount,
-
-    /// Noop instruction
-    Noop(u64),
-
-    /// Schedules execution of a *bundle* of intents in a single instruction.
-    ///
-    /// A "intent bundle" is an atomic unit of work executed by the validator on the Base layer,
-    /// such as:
-    /// - standalone base actions
-    /// - an optional `Commit`
-    /// - an optional `CommitAndUndelegate`
-    ///
-    /// This is the recommended scheduling path when the caller wants to submit multiple
-    /// independent intents while paying account overhead only once.
-    ///
-    /// # Account references
-    /// - **0.**   `[WRITE, SIGNER]` Payer requesting the bundle to be scheduled
-    /// - **1.**   `[WRITE]`         Magic Context account
-    /// - **2..n** `[]`              All accounts referenced by any intent in the bundle
-    ///
-    /// # Data
-    /// The embedded [`MagicIntentBundleArgs`] encodes account references by indices into the
-    /// accounts array.
-    ScheduleIntentBundle(MagicIntentBundleArgs),
 }
 
 impl MagicBlockInstruction {
