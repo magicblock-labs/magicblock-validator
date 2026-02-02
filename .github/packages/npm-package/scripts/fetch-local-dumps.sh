@@ -20,6 +20,10 @@ accounts=(
   Cuj97ggrhhidhbu39TijNVqE74xvKJ69gDervRUXAxGh
   5hBR571xnXppuCPveTrctfTU7tJLSN94nq7kv7FRK5Tc
   F72HqCR8nwYsVyeVd38pgKkjXmXFzVAM8rjZZsXWbdE
+  paywJiVATrVDLYLmowJqzG6MsaCt77L8WyTnBb2754t   # vrf oracle identity
+  CXMc1eCiEp9YXjanBNB6HUvbWCmxeVmhcR3bPXw8exJA  # vrf oracle data
+  GKE6d7iv8kCBrsxr78W3xVdjGLLLJnxsGiuzrsZCGEvb  # queue for paywJiVATrVDLYLmowJqzG6MsaCt77L8WyTnBb2754t
+  FRqXJqfCi3o6gF3Yqnkx1gKA3YnbRDJbBs6hKpme3NHJ  # deleted queue for paywJiVATrVDLYLmowJqzG6MsaCt77L8WyTnBb2754t
 )
 
 for acc in "${accounts[@]}"; do
@@ -36,6 +40,9 @@ programs=(
   noopb9bkMVfRPU8AsbpTUg8AQkHtKwMYZiFUjNRtMmV
   Vrf1RNUjXmQGjmQrQLvJHs9SNkvDJEsRVFPkfSQUwGz
   DmnRGfyyftzacFb1XadYhWF6vWqXwtQk5tbr6XgR3BA1
+  ACLseoPoyC3cBqoUtkbjZ4aDrkurZW86v19pXz2XQnp1
+  EnhkomtzKms55jXi3ijn9XsMKYpMT4BJjmbuDQmPo3YS
+  SPLxh1LVZzEkX99H6rqYizhytLWPZVV296zyYDPagv2
 )
 
 for prog in "${programs[@]}"; do

@@ -11,7 +11,7 @@ edition.workspace = true
 anyhow = { workspace = true }
 borsh = "1.5.3"
 fd-lock = { workspace = true }
-log = { workspace = true }
+tracing = { workspace = true }
 
 magic-domain-program = { workspace = true }
 magicblock-account-cloner = { workspace = true }

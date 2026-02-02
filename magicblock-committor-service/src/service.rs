@@ -1,6 +1,6 @@
 use std::{path::Path, sync::Arc, time::Instant};
 
-use log::*;
+use magicblock_program::magic_scheduled_base_intent::ScheduledIntentBundle;
 use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
 use solana_signature::Signature;
@@ -14,6 +14,7 @@ use tokio::{
     },
 };
 use tokio_util::sync::{CancellationToken, WaitForCancellationFutureOwned};
+use tracing::*;
 
 use crate::{
     committor_processor::CommittorProcessor,
@@ -22,7 +23,6 @@ use crate::{
     intent_execution_manager::BroadcastedIntentExecutionResult,
     persist::{CommitStatusRow, MessageSignatures},
     pubkeys_provider::{provide_committee_pubkeys, provide_common_pubkeys},
-    types::ScheduledBaseIntentWrapper,
 };
 
 #[derive(Debug)]
@@ -53,9 +53,9 @@ pub enum CommittorMessage {
         /// Called once the pubkeys have been released
         respond_to: oneshot::Sender<()>,
     },
-    ScheduleBaseIntents {
-        /// The [`ScheduledBaseIntent`]s to commit
-        base_intents: Vec<ScheduledBaseIntentWrapper>,
+    ScheduleIntentBundle {
+        /// The [`ScheduleIntentBundle`]s to commit
+        intent_bundles: Vec<ScheduledIntentBundle>,
         respond_to: oneshot::Sender<CommittorServiceResult<()>>,
     },
     GetCommitStatuses {
@@ -115,6 +115,7 @@ impl CommittorActor {
         })
     }
 
+    #[instrument(skip(self))]
     async fn handle_msg(&self, msg: CommittorMessage) {
         use CommittorMessage::*;
         match msg {
@@ -137,7 +138,7 @@ impl CommittorActor {
                         .await
                         .map(|_| initiated);
                     if let Err(e) = respond_to.send(result) {
-                        error!("Failed to send response {:?}", e);
+                        error!(message_type = "ReservePubkeysForCommittee", error = ?e, "Failed to send response");
                     }
                 });
             }
@@ -148,7 +149,7 @@ impl CommittorActor {
                         provide_common_pubkeys(&processor.auth_pubkey());
                     let reqid = processor.reserve_pubkeys(pubkeys).await;
                     if let Err(e) = respond_to.send(reqid) {
-                        error!("Failed to send response {:?}", e);
+                        error!(message_type = "ReserveCommonPubkeys", error = ?e, "Failed to send response");
                     }
                 });
             }
@@ -159,18 +160,18 @@ impl CommittorActor {
                         provide_common_pubkeys(&processor.auth_pubkey());
                     processor.release_pubkeys(pubkeys).await;
                     if let Err(e) = respond_to.send(()) {
-                        error!("Failed to send response {:?}", e);
+                        error!(message_type = "ReleaseCommonPubkeys", error = ?e, "Failed to send response");
                     }
                 });
             }
-            ScheduleBaseIntents {
-                base_intents,
+            ScheduleIntentBundle {
+                intent_bundles,
                 respond_to,
             } => {
                 let result =
-                    self.processor.schedule_base_intents(base_intents).await;
+                    self.processor.schedule_intent_bundle(intent_bundles).await;
                 if let Err(e) = respond_to.send(result) {
-                    error!("Failed to send response {:?}", e);
+                    error!(message_type = "ScheduleBaseIntents", error = ?e, "Failed to send response");
                 }
             }
             GetCommitStatuses {
@@ -180,7 +181,7 @@ impl CommittorActor {
                 let commit_statuses =
                     self.processor.get_commit_statuses(message_id);
                 if let Err(e) = respond_to.send(commit_statuses) {
-                    error!("Failed to send response {:?}", e);
+                    error!(message_type = "GetCommitStatuses", error = ?e, "Failed to send response");
                 }
             }
             GetCommitSignatures {
@@ -191,7 +192,7 @@ impl CommittorActor {
                 let sig =
                     self.processor.get_commit_signature(commit_id, pubkey);
                 if let Err(e) = respond_to.send(sig) {
-                    error!("Failed to send response {:?}", e);
+                    error!(message_type = "GetCommitSignatures", error = ?e, "Failed to send response");
                 }
             }
             GetTransaction {
@@ -206,7 +207,7 @@ impl CommittorActor {
                         .await
                         .map_err(Into::into);
                     if let Err(err) = respond_to.send(res) {
-                        error!( "Failed to send response for GetTransactionLogs: {:?}", err);
+                        error!(message_type = "GetTransaction", error = ?err, "Failed to send response");
                     }
                 });
             }
@@ -218,18 +219,19 @@ impl CommittorActor {
                     active: active_tables,
                     released: released_tables,
                 }) {
-                    error!("Failed to send response {:?}", e);
+                    error!(message_type = "GetLookupTables", error = ?e, "Failed to send response");
                 }
             }
             SubscribeForResults { respond_to } => {
                 let subscription = self.processor.subscribe_for_results();
                 if let Err(err) = respond_to.send(subscription) {
-                    error!("Failed to send response {:?}", err);
+                    error!(message_type = "SubscribeForResults", error = ?err, "Failed to send response");
                 }
             }
         }
     }
 
+    #[instrument(skip(self, cancel_token))]
     pub async fn run(&mut self, cancel_token: CancellationToken) {
         loop {
             select! {
@@ -246,7 +248,7 @@ impl CommittorActor {
             }
         }
 
-        info!("CommittorActor shutdown!");
+        info!("Actor shutdown");
     }
 }
 
@@ -267,7 +269,7 @@ impl CommittorService {
     where
         P: AsRef<Path>,
     {
-        debug!("Starting committor service with config: {:?}", chain_config);
+        debug!("Starting committor service");
         let (sender, receiver) = mpsc::channel(1_000);
         let cancel_token = CancellationToken::new();
         {
@@ -359,13 +361,13 @@ impl BaseIntentCommittor for CommittorService {
         rx
     }
 
-    fn schedule_base_intent(
+    fn schedule_intent_bundles(
         &self,
-        base_intents: Vec<ScheduledBaseIntentWrapper>,
+        intent_bundles: Vec<ScheduledIntentBundle>,
     ) -> oneshot::Receiver<CommittorServiceResult<()>> {
         let (tx, rx) = oneshot::channel();
-        self.try_send(CommittorMessage::ScheduleBaseIntents {
-            base_intents,
+        self.try_send(CommittorMessage::ScheduleIntentBundle {
+            intent_bundles,
             respond_to: tx,
         });
         rx
@@ -440,9 +442,9 @@ pub trait BaseIntentCommittor: Send + Sync + 'static {
     ) -> oneshot::Receiver<CommittorServiceResult<Instant>>;
 
     /// Commits the changeset and returns
-    fn schedule_base_intent(
+    fn schedule_intent_bundles(
         &self,
-        base_intents: Vec<ScheduledBaseIntentWrapper>,
+        intent_bundles: Vec<ScheduledIntentBundle>,
     ) -> oneshot::Receiver<CommittorServiceResult<()>>;
 
     /// Subscribes for results of BaseIntent execution

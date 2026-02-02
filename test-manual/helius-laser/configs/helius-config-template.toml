@@ -1,5 +1,4 @@
 lifecycle = "ephemeral"
-listen = "127.0.0.1:9988"
 
 remotes = [
   "https://devnet.helius-rpc.com?api-key=<helius-api-key>",
@@ -8,6 +7,9 @@ remotes = [
 ]
 
 storage = "magicblock-test-storage"
+
+[aperture]
+listen = "127.0.0.1:9988"
 
 [chainlink]
 max-monitored-accounts = 100
@@ -28,6 +30,8 @@ index-size = 2048576
 max-snapshots = 7
 # how frequently (slot-wise) we should take snapshots
 snapshot-frequency = 1024
+# Wipes the accounts database on every startup.
+reset = true
 
 [ledger]
 reset = true

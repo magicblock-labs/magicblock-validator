@@ -1,4 +1,4 @@
-use magicblock_core::traits::AccountsBank;
+use magicblock_accounts_db::traits::AccountsBank;
 use solana_account::{
     Account, AccountSharedData, ReadableAccount, WritableAccount,
 };

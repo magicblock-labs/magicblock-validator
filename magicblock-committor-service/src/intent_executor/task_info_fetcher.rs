@@ -6,13 +6,19 @@ use async_trait::async_trait;
 use dlp::{
     delegation_metadata_seeds_from_delegated_account, state::DelegationMetadata,
 };
-use log::warn;
 use lru::LruCache;
 use magicblock_metrics::metrics;
 use magicblock_rpc_client::{MagicBlockRpcClientError, MagicblockRpcClient};
 use solana_account::Account;
+use solana_account_decoder::UiAccountEncoding;
 use solana_pubkey::Pubkey;
+use solana_rpc_client_api::{
+    client_error::ErrorKind, config::RpcAccountInfoConfig,
+    custom_error::JSON_RPC_SERVER_ERROR_MIN_CONTEXT_SLOT_NOT_REACHED,
+    request::RpcError,
+};
 use solana_signature::Signature;
+use tracing::{error, info, warn};
 
 const NUM_FETCH_RETRIES: NonZeroUsize = NonZeroUsize::new(5).unwrap();
 const MUTEX_POISONED_MSG: &str = "CacheTaskInfoFetcher mutex poisoned!";
@@ -24,12 +30,14 @@ pub trait TaskInfoFetcher: Send + Sync + 'static {
     async fn fetch_next_commit_ids(
         &self,
         pubkeys: &[Pubkey],
+        min_context_slot: u64,
     ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>>;
 
     /// Fetches rent reimbursement address for pubkeys
     async fn fetch_rent_reimbursements(
         &self,
         pubkeys: &[Pubkey],
+        min_context_slot: u64,
     ) -> TaskInfoFetcherResult<Vec<Pubkey>>;
 
     /// Peeks current commit ids for pubkeys
@@ -41,6 +49,7 @@ pub trait TaskInfoFetcher: Send + Sync + 'static {
     async fn get_base_accounts(
         &self,
         pubkeys: &[Pubkey],
+        min_context_slot: u64,
     ) -> TaskInfoFetcherResult<HashMap<Pubkey, Account>>;
 }
 
@@ -68,48 +77,14 @@ impl CacheTaskInfoFetcher {
     pub async fn fetch_metadata_with_retries(
         rpc_client: &MagicblockRpcClient,
         pubkeys: &[Pubkey],
-        num_retries: NonZeroUsize,
+        min_context_slot: u64,
+        max_retries: NonZeroUsize,
     ) -> TaskInfoFetcherResult<Vec<DelegationMetadata>> {
         if pubkeys.is_empty() {
             return Ok(Vec::new());
         }
 
-        let mut last_err =
-            TaskInfoFetcherError::MetadataNotFoundError(pubkeys[0]);
-        for i in 0..num_retries.get() {
-            match Self::fetch_metadata(rpc_client, pubkeys).await {
-                Ok(value) => return Ok(value),
-                err @ Err(TaskInfoFetcherError::InvalidAccountDataError(_)) => {
-                    return err
-                }
-                err @ Err(TaskInfoFetcherError::MetadataNotFoundError(_)) => {
-                    return err
-                }
-                Err(TaskInfoFetcherError::MagicBlockRpcClientError(err)) => {
-                    // TODO(edwin): RPC error handlings should be more robust
-                    last_err =
-                        TaskInfoFetcherError::MagicBlockRpcClientError(err)
-                }
-            };
-
-            warn!("Fetch commit last error: {}, attempt: {}", last_err, i);
-            tokio::time::sleep(Duration::from_millis(50)).await;
-        }
-
-        Err(last_err)
-    }
-
-    /// Fetches commit_ids using RPC
-    pub async fn fetch_metadata(
-        rpc_client: &MagicblockRpcClient,
-        pubkeys: &[Pubkey],
-    ) -> TaskInfoFetcherResult<Vec<DelegationMetadata>> {
-        // Early return if no pubkeys to process
-        if pubkeys.is_empty() {
-            return Ok(Vec::new());
-        }
-
-        let pda_accounts = pubkeys
+        let pda_accounts: Vec<Pubkey> = pubkeys
             .iter()
             .map(|delegated_account| {
                 Pubkey::find_program_address(
@@ -120,41 +95,132 @@ impl CacheTaskInfoFetcher {
                 )
                 .0
             })
-            .collect::<Vec<_>>();
+            .collect();
+
+        let accounts = Self::fetch_accounts_with_retries(
+            rpc_client,
+            &pda_accounts,
+            min_context_slot,
+            max_retries,
+        )
+        .await?;
+
+        accounts
+            .into_iter()
+            .zip(pda_accounts)
+            .map(|(account, pda)| {
+                DelegationMetadata::try_from_bytes_with_discriminator(
+                    &account.data,
+                )
+                .map_err(|_| TaskInfoFetcherError::InvalidAccountDataError(pda))
+            })
+            .collect()
+    }
+
+    /// Fetches [`Account`]s with some num of retries
+    pub async fn fetch_accounts_with_retries(
+        rpc_client: &MagicblockRpcClient,
+        pubkeys: &[Pubkey],
+        min_context_slot: u64,
+        max_retries: NonZeroUsize,
+    ) -> TaskInfoFetcherResult<Vec<Account>> {
+        if pubkeys.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let mut i = 0;
+        loop {
+            i += 1;
+            let err = match Self::fetch_accounts(
+                rpc_client,
+                pubkeys,
+                min_context_slot,
+            )
+            .await
+            {
+                Ok(value) => break Ok(value),
+                Err(err) => err,
+            };
+
+            match err {
+                TaskInfoFetcherError::AccountNotFoundError(_) => {
+                    break Err(err)
+                }
+                err @ TaskInfoFetcherError::InvalidAccountDataError(_) => {
+                    error!(error = ?err, "Unexpected error");
+                    break Err(err);
+                }
+                TaskInfoFetcherError::MinContextSlotNotReachedError(_, _) => {
+                    // Get some extra sleep
+                    info!(
+                        min_context_slot,
+                        attempt = i,
+                        "Min context slot not reached"
+                    );
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                }
+                TaskInfoFetcherError::MagicBlockRpcClientError(ref err) => {
+                    warn!(error = ?err, attempt = i, "Fetch account error");
+                }
+            }
+
+            if i >= max_retries.get() {
+                break Err(err);
+            }
+
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    }
+
+    /// Fetches specified list of accounts
+    pub async fn fetch_accounts(
+        rpc_client: &MagicblockRpcClient,
+        pubkeys: &[Pubkey],
+        min_context_slot: u64,
+    ) -> TaskInfoFetcherResult<Vec<Account>> {
+        // Early return if no pubkeys to process
+        if pubkeys.is_empty() {
+            return Ok(Vec::new());
+        }
 
         metrics::inc_task_info_fetcher_a_count();
-        let accounts_data = rpc_client
-            .get_multiple_accounts(&pda_accounts, None)
-            .await?;
+        let commitment = rpc_client.commitment();
+        let mut accounts = rpc_client
+            .get_multiple_accounts_with_config(
+                pubkeys,
+                RpcAccountInfoConfig {
+                    encoding: Some(UiAccountEncoding::Base64Zstd),
+                    commitment: Some(commitment),
+                    data_slice: None,
+                    min_context_slot: Some(min_context_slot),
+                },
+                None,
+            )
+            .await
+            .map_err(|err| {
+                TaskInfoFetcherError::map_client_error(min_context_slot, err)
+            })?;
 
-        let metadatas = pda_accounts
-            .into_iter()
+        let accounts = pubkeys
+            .iter()
             .enumerate()
-            .map(|(i, pda)| {
-                let account = if let Some(account) = accounts_data.get(i) {
+            .map(|(i, pubkey)| {
+                let account = if let Some(account) = accounts.get_mut(i) {
                     account
                 } else {
-                    return Err(TaskInfoFetcherError::MetadataNotFoundError(
-                        pda,
+                    return Err(TaskInfoFetcherError::AccountNotFoundError(
+                        *pubkey,
                     ));
                 };
-
-                let account = account
-                    .as_ref()
-                    .ok_or(TaskInfoFetcherError::MetadataNotFoundError(pda))?;
-                let metadata =
-                    DelegationMetadata::try_from_bytes_with_discriminator(
-                        &account.data,
-                    )
-                    .map_err(|_| {
-                        TaskInfoFetcherError::InvalidAccountDataError(pda)
-                    })?;
-
-                Ok(metadata)
+                if let Some(account) = account.take() {
+                    Ok(account)
+                } else {
+                    Err(TaskInfoFetcherError::AccountNotFoundError(*pubkey))
+                }
             })
             .collect::<Result<Vec<_>, _>>()?;
 
-        Ok(metadatas)
+        Ok(accounts)
     }
 }
 
@@ -166,6 +232,7 @@ impl TaskInfoFetcher for CacheTaskInfoFetcher {
     async fn fetch_next_commit_ids(
         &self,
         pubkeys: &[Pubkey],
+        min_context_slot: u64,
     ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>> {
         if pubkeys.is_empty() {
             return Ok(HashMap::new());
@@ -207,6 +274,7 @@ impl TaskInfoFetcher for CacheTaskInfoFetcher {
         let remaining_ids = Self::fetch_metadata_with_retries(
             &self.rpc_client,
             &to_request,
+            min_context_slot,
             NUM_FETCH_RETRIES,
         )
         .await?
@@ -235,10 +303,12 @@ impl TaskInfoFetcher for CacheTaskInfoFetcher {
     async fn fetch_rent_reimbursements(
         &self,
         pubkeys: &[Pubkey],
+        min_context_slot: u64,
     ) -> TaskInfoFetcherResult<Vec<Pubkey>> {
         let rent_reimbursements = Self::fetch_metadata_with_retries(
             &self.rpc_client,
             pubkeys,
+            min_context_slot,
             NUM_FETCH_RETRIES,
         )
         .await?
@@ -273,31 +343,65 @@ impl TaskInfoFetcher for CacheTaskInfoFetcher {
     async fn get_base_accounts(
         &self,
         pubkeys: &[Pubkey],
+        min_context_slot: u64,
     ) -> TaskInfoFetcherResult<HashMap<Pubkey, Account>> {
-        self.rpc_client
-            .get_multiple_accounts(pubkeys, None)
-            .await
-            .map_err(|err| {
-                TaskInfoFetcherError::MagicBlockRpcClientError(Box::new(err))
-            })
-            .map(|accounts| {
-                pubkeys
-                    .iter()
-                    .zip(accounts.into_iter())
-                    .filter_map(|(key, value)| value.map(|value| (*key, value)))
-                    .collect()
-            })
+        let accounts = Self::fetch_accounts_with_retries(
+            &self.rpc_client,
+            pubkeys,
+            min_context_slot,
+            NUM_FETCH_RETRIES,
+        )
+        .await?;
+
+        Ok(pubkeys.iter().copied().zip(accounts).collect())
     }
 }
 
 #[derive(thiserror::Error, Debug)]
 pub enum TaskInfoFetcherError {
     #[error("Metadata not found for: {0}")]
-    MetadataNotFoundError(Pubkey),
+    AccountNotFoundError(Pubkey),
     #[error("InvalidAccountDataError for: {0}")]
     InvalidAccountDataError(Pubkey),
+    #[error("Minimum context slot {0} not reached: {1}")]
+    MinContextSlotNotReachedError(u64, Box<MagicBlockRpcClientError>),
     #[error("MagicBlockRpcClientError: {0}")]
     MagicBlockRpcClientError(Box<MagicBlockRpcClientError>),
+}
+
+impl TaskInfoFetcherError {
+    pub fn map_client_error(
+        min_context_slot: u64,
+        e: MagicBlockRpcClientError,
+    ) -> Self {
+        const MIN_CONTEXT_SLOT_MSG1: &str =
+            "Minimum context slot has not been reached";
+
+        let orig = e;
+        let err = match &orig {
+            MagicBlockRpcClientError::RpcClientError(err)
+            | MagicBlockRpcClientError::SendTransaction(err) => Some(err),
+            _ => None,
+        };
+        let Some(err) = err else {
+            return Self::MagicBlockRpcClientError(Box::new(orig));
+        };
+
+        match &err.kind {
+            ErrorKind::RpcError(rpc_err) => match rpc_err {
+                RpcError::ForUser(msg)
+                if msg.contains(MIN_CONTEXT_SLOT_MSG1) => {
+                    Self::MinContextSlotNotReachedError(min_context_slot, Box::new(orig))
+                },
+                RpcError::RpcResponseError { code, .. }
+                if *code == JSON_RPC_SERVER_ERROR_MIN_CONTEXT_SLOT_NOT_REACHED => {
+                    Self::MinContextSlotNotReachedError(min_context_slot, Box::new(orig))
+                }
+                _ => Self::MagicBlockRpcClientError(Box::new(orig)),
+            },
+            _ => Self::MagicBlockRpcClientError(Box::new(orig)),
+        }
+    }
 }
 
 impl From<MagicBlockRpcClientError> for TaskInfoFetcherError {
@@ -309,8 +413,9 @@ impl From<MagicBlockRpcClientError> for TaskInfoFetcherError {
 impl TaskInfoFetcherError {
     pub fn signature(&self) -> Option<Signature> {
         match self {
-            Self::MetadataNotFoundError(_) => None,
+            Self::AccountNotFoundError(_) => None,
             Self::InvalidAccountDataError(_) => None,
+            Self::MinContextSlotNotReachedError(_, err) => err.signature(),
             Self::MagicBlockRpcClientError(err) => err.signature(),
         }
     }

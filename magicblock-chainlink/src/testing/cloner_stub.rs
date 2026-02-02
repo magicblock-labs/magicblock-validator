@@ -42,7 +42,7 @@ impl ClonerStub {
 
     #[allow(dead_code)]
     pub fn get_account(&self, pubkey: &Pubkey) -> Option<AccountSharedData> {
-        use magicblock_core::traits::AccountsBank;
+        use magicblock_accounts_db::traits::AccountsBank;
 
         self.accounts_bank.get_account(pubkey)
     }

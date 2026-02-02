@@ -7,18 +7,18 @@ use std::{
 
 use async_trait::async_trait;
 use futures_util::future::join_all;
-use log::{error, info};
+use magicblock_program::magic_scheduled_base_intent::ScheduledIntentBundle;
 use solana_pubkey::Pubkey;
 use solana_signature::Signature;
 use solana_transaction_status_client_types::EncodedConfirmedTransactionWithStatusMeta;
 use tokio::sync::{broadcast, oneshot, oneshot::error::RecvError};
 use tokio_util::sync::WaitForCancellationFutureOwned;
+use tracing::{error, info, instrument};
 
 use crate::{
     error::{CommittorServiceError, CommittorServiceResult},
     intent_execution_manager::BroadcastedIntentExecutionResult,
     persist::{CommitStatusRow, MessageSignatures},
-    types::ScheduledBaseIntentWrapper,
     BaseIntentCommittor,
 };
 
@@ -28,9 +28,9 @@ const POISONED_MUTEX_MSG: &str =
 #[async_trait]
 pub trait BaseIntentCommittorExt: BaseIntentCommittor {
     /// Schedules Base Intents and waits for their results
-    async fn schedule_base_intents_waiting(
+    async fn schedule_intent_bundles_waiting(
         &self,
-        base_intents: Vec<ScheduledBaseIntentWrapper>,
+        intent_bundles: Vec<ScheduledIntentBundle>,
     ) -> BaseIntentCommitorExtResult<Vec<BroadcastedIntentExecutionResult>>;
 }
 
@@ -57,6 +57,11 @@ impl<CC: BaseIntentCommittor> CommittorServiceExt<CC> {
         }
     }
 
+    #[instrument(skip(
+        committor_stopped,
+        pending_message,
+        results_subscription
+    ))]
     async fn dispatcher(
         committor_stopped: WaitForCancellationFutureOwned,
         results_subscription: oneshot::Receiver<
@@ -71,20 +76,20 @@ impl<CC: BaseIntentCommittor> CommittorServiceExt<CC> {
             let execution_result = tokio::select! {
                 biased;
                 _ = &mut committor_stopped => {
-                    info!("Committor service stopped, stopping Committor extension");
+                    info!("Shutting down extension");
                     return;
                 }
                 execution_result = results_subscription.recv() => {
                     match execution_result {
                         Ok(result) => result,
                         Err(broadcast::error::RecvError::Closed) => {
-                            info!("Intent execution got shutdown, shutting down result Committor extension!");
+                            info!("Intent execution shutdown");
                             break;
                         }
                         Err(broadcast::error::RecvError::Lagged(skipped)) => {
                             // SAFETY: not really feasible to happen as this function is way faster than Intent execution
                             // requires investigation if ever happens!
-                            error!("CommittorServiceExt lags behind Intent execution! skipped: {}", skipped);
+                            error!(skipped, "Dispatcher lag detected");
                             continue;
                         }
                     }
@@ -101,9 +106,10 @@ impl<CC: BaseIntentCommittor> CommittorServiceExt<CC> {
                 continue;
             };
 
-            if sender.send(execution_result).is_err() {
+            if let Err(execution_result) = sender.send(execution_result) {
                 error!(
-                    "Failed to send BaseIntent execution result to listener"
+                    intent_id = execution_result.id,
+                    "Failed to send execution result"
                 );
             }
         }
@@ -114,9 +120,9 @@ impl<CC: BaseIntentCommittor> CommittorServiceExt<CC> {
 impl<CC: BaseIntentCommittor> BaseIntentCommittorExt
     for CommittorServiceExt<CC>
 {
-    async fn schedule_base_intents_waiting(
+    async fn schedule_intent_bundles_waiting(
         &self,
-        base_intents: Vec<ScheduledBaseIntentWrapper>,
+        base_intents: Vec<ScheduledIntentBundle>,
     ) -> BaseIntentCommitorExtResult<Vec<BroadcastedIntentExecutionResult>>
     {
         // Critical section
@@ -128,14 +134,14 @@ impl<CC: BaseIntentCommittor> BaseIntentCommittorExt
                 .iter()
                 .map(|intent| {
                     let (sender, receiver) = oneshot::channel();
-                    match pending_messages.entry(intent.inner.id) {
+                    match pending_messages.entry(intent.id) {
                         Entry::Vacant(vacant) => {
                             vacant.insert(sender);
                             Ok(receiver)
                         }
                         Entry::Occupied(_) => Err(
                             CommittorServiceExtError::RepeatingMessageError(
-                                intent.inner.id,
+                                intent.id,
                             ),
                         ),
                     }
@@ -143,7 +149,7 @@ impl<CC: BaseIntentCommittor> BaseIntentCommittorExt
                 .collect::<Result<Vec<_>, _>>()?
         };
 
-        self.schedule_base_intent(base_intents).await??;
+        self.schedule_intent_bundles(base_intents).await??;
         let results = join_all(receivers.into_iter())
             .await
             .into_iter()
@@ -162,11 +168,11 @@ impl<CC: BaseIntentCommittor> BaseIntentCommittor for CommittorServiceExt<CC> {
         self.inner.reserve_pubkeys_for_committee(committee, owner)
     }
 
-    fn schedule_base_intent(
+    fn schedule_intent_bundles(
         &self,
-        base_intents: Vec<ScheduledBaseIntentWrapper>,
+        intent_bundles: Vec<ScheduledIntentBundle>,
     ) -> oneshot::Receiver<CommittorServiceResult<()>> {
-        self.inner.schedule_base_intent(base_intents)
+        self.inner.schedule_intent_bundles(intent_bundles)
     }
 
     fn subscribe_for_results(

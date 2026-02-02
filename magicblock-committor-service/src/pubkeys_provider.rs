@@ -1,9 +1,9 @@
 use std::collections::HashSet;
 
 use dlp::pda;
-use log::*;
 use solana_pubkey::Pubkey;
 use solana_system_program::id as system_program_id;
+use tracing::*;
 
 /// Returns all accounts needed to process/finalize a commit for the account
 /// with the provided `delegated_account`.
@@ -31,10 +31,7 @@ pub fn provide_committee_pubkeys(
     if let Some(owner_program) = owner_program {
         set.insert(pda::program_config_from_program_id(owner_program));
     } else {
-        warn!(
-            "No owner program provided for committee pubkey {}",
-            committee
-        );
+        warn!(committee = %committee, "No owner program provided for committee");
     }
     set
 }
@@ -51,17 +48,12 @@ pub fn provide_common_pubkeys(validator: &Pubkey) -> HashSet<Pubkey> {
     let committor_program = magicblock_committor_program::id();
 
     trace!(
-        "Common pubkeys:
-    validator:                {}
-    delegation program:       {}
-    protocol fees vault:      {}
-    validator fees vault:     {}
-    committor program:        {}",
-        validator,
-        deleg_program,
-        protocol_fees_vault,
-        validator_fees_vault,
-        committor_program
+        validator = %validator,
+        deleg_program = %deleg_program,
+        protocol_fees_vault = %protocol_fees_vault,
+        validator_fees_vault = %validator_fees_vault,
+        committor_program = %committor_program,
+        "Common pubkeys loaded"
     );
 
     set.insert(*validator);

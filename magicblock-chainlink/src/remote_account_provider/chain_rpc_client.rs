@@ -6,8 +6,7 @@ use solana_commitment_config::CommitmentConfig;
 use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_rpc_client_api::{
-    client_error::Result as ClientResult, config::RpcAccountInfoConfig,
-    response::RpcResult,
+    client_error, config::RpcAccountInfoConfig, response::RpcResult,
 };
 
 // -----------------
@@ -16,6 +15,9 @@ use solana_rpc_client_api::{
 #[async_trait]
 pub trait ChainRpcClient: Send + Sync + Clone + 'static {
     fn commitment(&self) -> CommitmentConfig;
+
+    async fn get_slot(&self) -> client_error::Result<u64>;
+
     async fn get_account_with_config(
         &self,
         pubkey: &Pubkey,
@@ -27,11 +29,6 @@ pub trait ChainRpcClient: Send + Sync + Clone + 'static {
         pubkeys: &[Pubkey],
         config: RpcAccountInfoConfig,
     ) -> RpcResult<Vec<Option<Account>>>;
-
-    async fn get_slot_with_commitment(
-        &self,
-        commitment: CommitmentConfig,
-    ) -> ClientResult<u64>;
 }
 
 // -----------------
@@ -62,6 +59,10 @@ impl ChainRpcClient for ChainRpcClientImpl {
         self.rpc_client.commitment()
     }
 
+    async fn get_slot(&self) -> client_error::Result<u64> {
+        self.rpc_client.get_slot().await
+    }
+
     async fn get_account_with_config(
         &self,
         pubkey: &Pubkey,
@@ -79,11 +80,5 @@ impl ChainRpcClient for ChainRpcClientImpl {
         self.rpc_client
             .get_multiple_accounts_with_config(pubkeys, config)
             .await
-    }
-    async fn get_slot_with_commitment(
-        &self,
-        commitment: CommitmentConfig,
-    ) -> ClientResult<u64> {
-        self.rpc_client.get_slot_with_commitment(commitment).await
     }
 }

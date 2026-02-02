@@ -46,7 +46,6 @@ pub enum PreparationState {
     Cleanup(CleanupTask),
 }
 
-#[cfg(test)]
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum TaskStrategy {
     Args,
@@ -67,8 +66,9 @@ pub trait BaseTask: Send + Sync + DynClone + LabelValue {
     /// Gets instruction for task execution
     fn instruction(&self, validator: &Pubkey) -> Instruction;
 
-    /// Optimizes Task strategy if possible, otherwise returns itself
-    fn optimize(
+    /// Optimize for transaction size so that more instructions can be buddled together in a single
+    /// transaction. Return Ok(new_tx_optimized_task), else Err(self) if task cannot be optimized.
+    fn try_optimize_tx_size(
         self: Box<Self>,
     ) -> Result<Box<dyn BaseTask>, Box<dyn BaseTask>>;
 
@@ -84,6 +84,9 @@ pub trait BaseTask: Send + Sync + DynClone + LabelValue {
 
     /// Returns [`Task`] budget
     fn compute_units(&self) -> u32;
+
+    /// Returns the max accounts-data-size that can be used with SetLoadedAccountsDataSizeLimit
+    fn accounts_size_budget(&self) -> u32;
 
     /// Returns current [`TaskStrategy`]
     #[cfg(test)]
@@ -309,15 +312,23 @@ mod serialization_safety_test {
     };
     use solana_account::Account;
 
-    use crate::tasks::{
-        args_task::{ArgsTask, ArgsTaskType},
-        buffer_task::{BufferTask, BufferTaskType},
-        *,
+    use crate::{
+        tasks::{
+            args_task::{ArgsTask, ArgsTaskType},
+            buffer_task::{BufferTask, BufferTaskType},
+            *,
+        },
+        test_utils,
     };
+
+    fn setup() {
+        test_utils::init_test_logger();
+    }
 
     // Test all ArgsTask variants
     #[test]
     fn test_args_task_instruction_serialization() {
+        setup();
         let validator = Pubkey::new_unique();
 
         // Test Commit variant
@@ -333,6 +344,7 @@ mod serialization_safety_test {
                     executable: false,
                     rent_epoch: 0,
                 },
+                remote_slot: Default::default(),
             },
         })
         .into();
@@ -393,6 +405,7 @@ mod serialization_safety_test {
                         executable: false,
                         rent_epoch: 0,
                     },
+                    remote_slot: Default::default(),
                 },
             }),
         );
@@ -418,6 +431,7 @@ mod serialization_safety_test {
                         executable: false,
                         rent_epoch: 0,
                     },
+                    remote_slot: Default::default(),
                 },
             }),
         );
@@ -450,10 +464,16 @@ fn test_close_buffer_limit() {
     use solana_keypair::Keypair;
     use solana_signer::Signer;
     use solana_transaction::Transaction;
+    use tracing::info;
 
-    use crate::transactions::{
-        serialize_and_encode_base64, MAX_ENCODED_TRANSACTION_SIZE,
+    use crate::{
+        test_utils,
+        transactions::{
+            serialize_and_encode_base64, MAX_ENCODED_TRANSACTION_SIZE,
+        },
     };
+
+    test_utils::init_test_logger();
 
     let authority = Keypair::new();
 
@@ -479,10 +499,9 @@ fn test_close_buffer_limit() {
         .collect();
 
     let tx = Transaction::new_with_payer(&ixs, Some(&authority.pubkey()));
-    println!("{}", serialize_and_encode_base64(&tx).len());
-    assert!(
-        serialize_and_encode_base64(&tx).len() <= MAX_ENCODED_TRANSACTION_SIZE
-    );
+    let tx_size = serialize_and_encode_base64(&tx).len();
+    info!(transaction_size = tx_size, "Cleanup task transaction size");
+    assert!(tx_size <= MAX_ENCODED_TRANSACTION_SIZE);
 
     // One more unique task should overflow
     let overflow_task = CleanupTask {

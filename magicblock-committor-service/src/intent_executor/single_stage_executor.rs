@@ -1,7 +1,8 @@
 use std::ops::ControlFlow;
 
-use log::error;
 use solana_pubkey::Pubkey;
+use solana_signature::Signature;
+use tracing::{error, instrument};
 
 use crate::{
     intent_executor::{
@@ -12,8 +13,13 @@ use crate::{
         task_info_fetcher::TaskInfoFetcher,
         ExecutionOutput, IntentExecutorImpl,
     },
-    persist::IntentPersister,
-    tasks::task_strategist::TransactionStrategy,
+    persist::{IntentPersister, IntentPersisterImpl},
+    tasks::{
+        args_task::{ArgsTask, ArgsTaskType},
+        task_strategist::TransactionStrategy,
+        task_visitors::utility_visitor::TaskVisitorUtils,
+        BaseTask,
+    },
     transaction_preparator::TransactionPreparator,
 };
 
@@ -37,9 +43,13 @@ where
         }
     }
 
+    #[instrument(
+        skip(self, committed_pubkeys, persister),
+        fields(stage = "single_stage")
+    )]
     pub async fn execute<P: IntentPersister>(
         &mut self,
-        committed_pubkeys: Option<&[Pubkey]>,
+        committed_pubkeys: &[Pubkey],
         persister: &Option<P>,
     ) -> IntentExecutorResult<ExecutionOutput> {
         const RECURSION_CEILING: u8 = 10;
@@ -85,7 +95,10 @@ where
 
             if i >= RECURSION_CEILING {
                 error!(
-                    "CRITICAL! Recursion ceiling reached in intent execution."
+                    attempt = i,
+                    ceiling = RECURSION_CEILING,
+                    error = ?execution_err,
+                    "Recursion ceiling exceeded"
                 );
                 break Err(execution_err);
             } else {
@@ -113,12 +126,12 @@ where
         inner: &IntentExecutorImpl<T, F>,
         err: &TransactionStrategyExecutionError,
         transaction_strategy: &mut TransactionStrategy,
-        committed_pubkeys: Option<&[Pubkey]>,
+        committed_pubkeys: &[Pubkey],
     ) -> IntentExecutorResult<ControlFlow<(), TransactionStrategy>> {
-        let Some(committed_pubkeys) = committed_pubkeys else {
+        if committed_pubkeys.is_empty() {
             // No patching is applicable if intent doesn't commit accounts
             return Ok(ControlFlow::Break(()));
-        };
+        }
 
         match err {
             TransactionStrategyExecutionError::ActionsError(_, _) => {
@@ -139,6 +152,33 @@ where
                     .await?;
                 Ok(ControlFlow::Continue(to_cleanup))
             }
+            err
+            @ TransactionStrategyExecutionError::UnfinalizedAccountError(
+                _,
+                signature,
+            ) => {
+                let optimized_tasks =
+                    transaction_strategy.optimized_tasks.as_slice();
+                if let Some(task) = err
+                    .task_index()
+                    .and_then(|index| optimized_tasks.get(index as usize))
+                {
+                    Self::handle_unfinalized_account_error(
+                        inner,
+                        signature,
+                        task.as_ref(),
+                    )
+                    .await
+                } else {
+                    error!(
+                        task_index = err.task_index(),
+                        optimized_tasks_len = optimized_tasks.len(),
+                        error = ?err,
+                        "RPC returned unexpected task index"
+                    );
+                    Ok(ControlFlow::Break(()))
+                }
+            }
             TransactionStrategyExecutionError::UndelegationError(_, _) => {
                 // Here we patch strategy for it to be retried in next iteration
                 // & we also record data that has to be cleaned up after patch
@@ -156,5 +196,40 @@ where
                 Ok(ControlFlow::Break(()))
             }
         }
+    }
+
+    /// Handles unfinalized account error
+    /// Sends a separate tx to finalize account and then continues execution
+    async fn handle_unfinalized_account_error(
+        inner: &IntentExecutorImpl<T, F>,
+        failed_signature: &Option<Signature>,
+        task: &dyn BaseTask,
+    ) -> IntentExecutorResult<ControlFlow<(), TransactionStrategy>> {
+        let Some(commit_meta) = TaskVisitorUtils::commit_meta(task) else {
+            // Can't recover - break execution
+            return Ok(ControlFlow::Break(()));
+        };
+        let finalize_task: Box<dyn BaseTask> =
+            Box::new(ArgsTask::new(ArgsTaskType::Finalize(commit_meta.into())));
+        inner
+            .prepare_and_execute_strategy(
+                &mut TransactionStrategy {
+                    optimized_tasks: vec![finalize_task],
+                    lookup_tables_keys: vec![],
+                },
+                &None::<IntentPersisterImpl>,
+            )
+            .await
+            .map_err(IntentExecutorError::FailedFinalizePreparationError)?
+            .map_err(|err| IntentExecutorError::FailedToFinalizeError {
+                err,
+                commit_signature: None,
+                finalize_signature: *failed_signature,
+            })?;
+
+        Ok(ControlFlow::Continue(TransactionStrategy {
+            optimized_tasks: vec![],
+            lookup_tables_keys: vec![],
+        }))
     }
 }

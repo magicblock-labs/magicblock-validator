@@ -2,7 +2,6 @@ use std::io;
 
 use anyhow::Context;
 use borsh::BorshDeserialize;
-use log::info;
 use mdp::{
     consts::ER_RECORD_SEED,
     instructions::{sync::SyncInstruction, version::v0::SyncRecordV0},
@@ -18,6 +17,7 @@ use solana_pubkey::Pubkey;
 use solana_rpc_client::rpc_client::RpcClient;
 use solana_signer::Signer;
 use solana_transaction::Transaction;
+use tracing::info;
 pub struct DomainRegistryManager {
     client: RpcClient,
 }
@@ -132,15 +132,15 @@ impl DomainRegistryManager {
         match self.fetch_validator_info(&validator_info.pda().0)? {
             Some(current_validator_info) => {
                 if current_validator_info == validator_info {
-                    info!("Domain registry record for the validator is up to date, skipping sync");
+                    info!("Domain registry record up to date");
                     Ok(())
                 } else {
-                    info!("Domain registry record for the validator requires update, syncing data");
+                    info!("Domain registry record requires update");
                     self.sync(payer, &validator_info)
                 }
             }
             None => {
-                info!("Domain registry record for the validator absent, registering");
+                info!("Domain registry record absent, registering");
                 self.register(payer, validator_info)
             }
         }
@@ -190,7 +190,7 @@ impl DomainRegistryManager {
         url: impl ToString,
         payer: &Keypair,
     ) -> Result<(), Error> {
-        info!("Unregistering validator's record from domain registry");
+        info!("Unregistering validator from domain registry");
         let manager = DomainRegistryManager::new(url);
         manager.unregister(payer)
     }

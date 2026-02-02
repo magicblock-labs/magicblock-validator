@@ -36,12 +36,13 @@ chrono = "0.4"
 cleanass = "0.0.1"
 color-backtrace = { version = "0.7" }
 ctrlc = "3.4.7"
+ephemeral-rollups-sdk = { git = "https://github.com/magicblock-labs/ephemeral-rollups-sdk.git", rev = "03d5566c5", default-features = false, features = [
+  "modular-sdk",
+] }
 futures = "0.3.31"
-ephemeral-rollups-sdk = { git = "https://github.com/magicblock-labs/ephemeral-rollups-sdk.git", rev = "2d0f16b" }
 integration-test-tools = { path = "test-tools" }
 isocountry = "0.3.2"
 lazy_static = "1.4.0"
-log = "0.4.20"
 magicblock-api = { path = "../magicblock-api" }
 magicblock-chainlink = { path = "../magicblock-chainlink", features = [
   "dev-context",
@@ -55,9 +56,11 @@ magicblock-committor-program = { path = "../magicblock-committor-program", featu
 magicblock-committor-service = { path = "../magicblock-committor-service" }
 magicblock-config = { path = "../magicblock-config" }
 magicblock-core = { path = "../magicblock-core" }
-magic-domain-program = { git = "https://github.com/magicblock-labs/magic-domain-program.git", rev = "ea04d46", default-features = false }
+magic-domain-program = { git = "https://github.com/magicblock-labs/magic-domain-program.git", rev = "cffcfeb", default-features = false, features = [
+  "modular-sdk",
+] }
 magicblock_magic_program_api = { package = "magicblock-magic-program-api", path = "../magicblock-magic-program-api" }
-magicblock-delegation-program = { git = "https://github.com/magicblock-labs/delegation-program.git", rev = "3edb41022" , features = [
+magicblock-delegation-program = { git = "https://github.com/magicblock-labs/delegation-program.git", rev = "1874b4f5f5f55cb9ab54b64de2cc0d41107d1435", features = [
   "no-entrypoint",
 ] }
 magicblock-program = { path = "../programs/magicblock" }
@@ -75,7 +78,7 @@ rkyv = "0.7.45"
 schedulecommit-client = { path = "schedulecommit/client" }
 serde = "1.0.217"
 serial_test = "3.2.0"
-solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "57158728" }
+solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "2246929" }
 solana-loader-v2-interface = "2.2"
 solana-loader-v3-interface = "4.0"
 solana-loader-v4-interface = "2.1"
@@ -90,6 +93,7 @@ solana-sdk-ids = { version = "2.2" }
 solana-system-interface = "1.0"
 solana-transaction-status = "2.2"
 spl-memo-interface = "1.0"
+spl-token = "=7.0"
 static_assertions = "1.1.0"
 teepee = "0.0.1"
 tempfile = "3.10.1"
@@ -99,6 +103,7 @@ test-ledger-restore = { path = "./test-ledger-restore" }
 test-kit = { path = "../test-kit" }
 tokio = "1.0"
 toml = "0.8.13"
+tracing = "0.1"
 ureq = "2.9.6"
 url = "2.5.0"
 
@@ -109,4 +114,4 @@ url = "2.5.0"
 solana-storage-proto = { path = "../storage-proto" }
 # same reason as above
 rocksdb = { git = "https://github.com/magicblock-labs/rust-rocksdb.git", rev = "6d975197" }
-solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "57158728" }
+solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "2246929" }

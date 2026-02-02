@@ -1,25 +1,27 @@
 {
   "name": "@magicblock-labs/ephemeral-validator",
-  "version": "0.3.1",
+  "version": "0.6.2",
   "description": "MagicBlock Ephemeral Validator",
-  "homepage": "https://github.com/magicblock-labs/ephemeral-validator#readme",
+  "homepage": "https://github.com/magicblock-labs/magicblock-validator#readme",
   "bugs": {
-    "url": "https://github.com/magicblock-labs/ephemeral-validator/issues"
+    "url": "https://github.com/magicblock-labs/magicblock-validator/issues"
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/magicblock-labs/ephemeral-validator.git"
+    "url": "https://github.com/magicblock-labs/magicblock-validator.git"
   },
   "license": "Business Source License 1.1",
   "bin": {
     "ephemeral-validator": "ephemeralValidator.js",
-    "mb-test-validator": "mbTestValidator.js"
+    "mb-test-validator": "mbTestValidator.js",
+    "rpc-router": "rpcRouter.js",
+    "vrf-oracle": "vrfOracle.js"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
     "lint": "prettier */*.js \"*/**/*{.js,.ts}\" --check ",
     "lint:fix": "node_modules/.bin/prettier */*.js \"*/**/*{.js,.ts}\" -w",
-    "build": "tsc && bash scripts/fetch-local-dumps.sh",
+    "build": "tsc && cp package.json lib/ && bash scripts/fetch-local-dumps.sh",
     "dev": "yarn build && node lib/index.js"
   },
   "devDependencies": {
@@ -28,11 +30,18 @@
     "typescript": "^4.9.4"
   },
   "optionalDependencies": {
-    "@magicblock-labs/ephemeral-validator-darwin-arm64": "0.3.1",
-    "@magicblock-labs/ephemeral-validator-darwin-x64": "0.3.1",
-    "@magicblock-labs/ephemeral-validator-linux-arm64": "0.3.1",
-    "@magicblock-labs/ephemeral-validator-linux-x64": "0.3.1",
-    "@magicblock-labs/ephemeral-validator-windows-x64": "0.3.1"
+    "@magicblock-labs/ephemeral-validator-darwin-arm64": "0.6.2",
+    "@magicblock-labs/ephemeral-validator-darwin-x64": "0.6.2",
+    "@magicblock-labs/ephemeral-validator-linux-arm64": "0.6.2",
+    "@magicblock-labs/ephemeral-validator-linux-x64": "0.6.2",
+    "@magicblock-labs/vrf-oracle-linux-x64": "0.2.3",
+    "@magicblock-labs/vrf-oracle-linux-arm64": "0.2.3",
+    "@magicblock-labs/vrf-oracle-darwin-x64": "0.2.3",
+    "@magicblock-labs/vrf-oracle-darwin-arm64": "0.2.3",
+    "@magicblock-labs/rpc-router-linux-x64": "0.0.1",
+    "@magicblock-labs/rpc-router-linux-arm64": "0.0.1",
+    "@magicblock-labs/rpc-router-darwin-x64": "0.0.1",
+    "@magicblock-labs/rpc-router-darwin-arm64": "0.0.1"
   },
   "publishConfig": {
     "access": "public"

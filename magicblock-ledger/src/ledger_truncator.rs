@@ -5,7 +5,6 @@ use std::{
     time::Duration,
 };
 
-use log::{error, info, warn};
 use magicblock_metrics::metrics::{
     observe_ledger_truncator_delete, start_ledger_truncator_compaction_timer,
     HistogramTimer,
@@ -13,6 +12,7 @@ use magicblock_metrics::metrics::{
 use solana_measure::measure::Measure;
 use tokio::{runtime::Builder, time::interval};
 use tokio_util::sync::CancellationToken;
+use tracing::{debug, error, info, instrument, warn};
 
 use crate::{
     database::{
@@ -54,6 +54,7 @@ impl LedgerTrunctationWorker {
         }
     }
 
+    #[instrument(skip(self))]
     pub async fn run(self) {
         let mut interval = interval(self.truncation_time_interval);
         loop {
@@ -67,20 +68,20 @@ impl LedgerTrunctationWorker {
                     let current_size = match self.ledger.storage_size() {
                         Ok(value) => value,
                         Err(err) => {
-                            error!("Failed to check truncation condition: {err}");
+                            error!(error = ?err, "Truncation check failed");
                             continue;
                         }
                     };
 
                     // Check if we should truncate
                     if current_size < (self.ledger_size / 100) * FILLED_PERCENTAGE_LIMIT as u64 {
-                        info!("Skipping truncation, ledger size: {}", current_size);
+                        debug!(current_size, "Skipping truncation");
                         continue;
                     }
 
-                    info!("Ledger size: {current_size}");
+                    info!(current_size, "Checking ledger size");
                     if let Err(err) = self.truncate(current_size) {
-                        error!("Failed to truncate ledger!: {:?}", err);
+                        error!(error = ?err, "Truncation failed");
                     }
                 }
             }
@@ -111,7 +112,7 @@ impl LedgerTrunctationWorker {
         &self,
         current_ledger_size: u64,
     ) -> LedgerResult<()> {
-        info!("Fat truncation");
+        info!("Starting fat truncation");
 
         // Calculate excessive size
         let desired_size =
@@ -120,12 +121,9 @@ impl LedgerTrunctationWorker {
 
         let (highest_slot, _) = self.ledger.get_max_blockhash()?;
         let lowest_slot = self.ledger.get_lowest_slot()?.unwrap_or(0);
-        info!(
-            "Fat truncation. lowest slot: {}, hightest slot: {}",
-            lowest_slot, highest_slot
-        );
+        info!(lowest_slot, highest_slot, "Fat truncation bounds");
         if lowest_slot == highest_slot {
-            warn!("Nani3?");
+            warn!("Invalid slot range");
             return Ok(());
         }
 
@@ -137,17 +135,14 @@ impl LedgerTrunctationWorker {
         // Calculating up to which slot we're truncating
         let truncate_to_slot = lowest_slot + num_slots_to_truncate - 1;
 
-        info!(
-            "Fat truncation: truncating up to(inclusive): {}",
-            truncate_to_slot
-        );
+        info!(truncate_to_slot, "Fat truncation complete");
 
         self.ledger.set_lowest_cleanup_slot(truncate_to_slot);
         Self::delete_slots(&self.ledger, 0, truncate_to_slot)?;
 
         if let Err(err) = self.ledger.flush() {
             // We will still compact
-            error!("Failed to flush: {}", err);
+            error!(error = ?err, "Flush failed");
         }
         Self::compact_slot_range(
             &self.ledger,
@@ -279,20 +274,18 @@ impl LedgerTrunctationWorker {
         cancellation_token: CancellationToken,
     ) -> LedgerResult<()> {
         if to_slot < from_slot {
-            warn!("LedgerTruncator: Nani?");
+            warn!("Invalid slot range");
             return Ok(());
         }
 
-        info!(
-            "LedgerTruncator: truncating slot range [{from_slot}; {to_slot}]"
-        );
+        info!(from_slot, to_slot, "Truncating slot range");
 
         ledger.set_lowest_cleanup_slot(to_slot);
         Self::delete_slots(ledger, from_slot, to_slot)?;
 
         // Flush memtables with tombstones prior to compaction
         if let Err(err) = ledger.flush() {
-            error!("Failed to flush ledger: {err}");
+            error!(error = ?err, "Flush failed");
         }
         Self::compact_slot_range(
             ledger,
@@ -314,7 +307,7 @@ impl LedgerTrunctationWorker {
         use crate::compact_cf_or_return;
 
         if to_slot < from_slot {
-            warn!("LedgerTruncator: Nani2?");
+            warn!("Invalid slot range");
             return;
         }
         if cancellation_token.is_cancelled() {
@@ -322,9 +315,7 @@ impl LedgerTrunctationWorker {
             return;
         }
 
-        info!(
-            "LedgerTruncator: compacting slot range [{from_slot}; {to_slot}]"
-        );
+        info!(from_slot, to_slot, "Compacting slot range");
 
         struct CompactionMeasure {
             measure: Measure,
@@ -493,8 +484,8 @@ macro_rules! compact_cf_or_return {
         $ledger.compact_slot_range_cf::<$cf>(Some($from), Some($to));
         if $token.is_cancelled() {
             info!(
-                "Validator shutting down - stopping compaction after {}",
-                <$cf as $crate::database::columns::ColumnName>::NAME
+                column_name = %<$cf as $crate::database::columns::ColumnName>::NAME,
+                "Shutdown during compaction"
             );
             return;
         }
@@ -503,8 +494,8 @@ macro_rules! compact_cf_or_return {
         $ledger.compact_slot_range_cf::<$cf>($from, $to);
         if $token.is_cancelled() {
             info!(
-                "Validator shutting down - stopping compaction after {}",
-                <$cf as $crate::database::columns::ColumnName>::NAME
+                column_name = %<$cf as $crate::database::columns::ColumnName>::NAME,
+                "Shutdown during compaction"
             );
             return;
         }

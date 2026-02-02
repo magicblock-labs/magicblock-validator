@@ -126,6 +126,7 @@ impl TaskInfoFetcher for MockTaskInfoFetcher {
     async fn fetch_next_commit_ids(
         &self,
         pubkeys: &[Pubkey],
+        _: u64,
     ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>> {
         Ok(pubkeys.iter().map(|pubkey| (*pubkey, 0)).collect())
     }
@@ -133,6 +134,7 @@ impl TaskInfoFetcher for MockTaskInfoFetcher {
     async fn fetch_rent_reimbursements(
         &self,
         pubkeys: &[Pubkey],
+        _: u64,
     ) -> TaskInfoFetcherResult<Vec<Pubkey>> {
         Ok(pubkeys.to_vec())
     }
@@ -146,6 +148,7 @@ impl TaskInfoFetcher for MockTaskInfoFetcher {
     async fn get_base_accounts(
         &self,
         pubkeys: &[Pubkey],
+        _: u64,
     ) -> TaskInfoFetcherResult<HashMap<Pubkey, Account>> {
         self.0
             .get_multiple_accounts(pubkeys, None)
@@ -156,7 +159,7 @@ impl TaskInfoFetcher for MockTaskInfoFetcher {
             .map(|accounts| {
                 pubkeys
                     .iter()
-                    .zip(accounts.into_iter())
+                    .zip(accounts)
                     .filter_map(|(key, value)| value.map(|value| (*key, value)))
                     .collect()
             })
@@ -186,6 +189,7 @@ pub fn create_commit_task(data: &[u8]) -> CommitTask {
                 executable: false,
                 rent_epoch: 0,
             },
+            remote_slot: Default::default(),
         },
     }
 }
@@ -201,5 +205,6 @@ pub fn create_committed_account(data: &[u8]) -> CommittedAccount {
             executable: false,
             rent_epoch: 0,
         },
+        remote_slot: Default::default(),
     }
 }

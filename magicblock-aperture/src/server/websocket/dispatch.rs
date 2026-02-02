@@ -62,6 +62,11 @@ impl WsDispatcher {
         }
     }
 
+    /// Returns the unique ID for this connection.
+    pub(crate) fn connection_id(&self) -> ConnectionID {
+        self.chan.id
+    }
+
     /// Routes an incoming JSON-RPC request to the appropriate subscription handler.
     pub(crate) async fn dispatch(
         &mut self,
@@ -81,6 +86,7 @@ impl WsDispatcher {
             | SlotUnsubscribe | SignatureUnsubscribe => {
                 self.unsubscribe(request)
             }
+            Ping => Ok(SubResult::Pong("pong")),
         }?;
 
         Ok(WsDispatchResult {
@@ -152,6 +158,8 @@ pub(crate) enum SubResult {
     SubId(SubscriptionID),
     /// The result of an unsubscription request (`true` for success).
     Unsub(bool),
+    /// The heartbeat response message
+    Pong(&'static str),
 }
 
 /// A container for a successfully processed RPC request, pairing the result with

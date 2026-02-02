@@ -25,4 +25,9 @@ impl ChainlinkConfig {
             remove_confined_accounts: false,
         }
     }
+
+    pub fn with_remove_confined_accounts(mut self, remove: bool) -> Self {
+        self.remove_confined_accounts = remove;
+        self
+    }
 }

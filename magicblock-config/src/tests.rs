@@ -8,7 +8,7 @@ use tempfile::TempDir;
 use crate::{
     config::{BlockSize, LifecycleMode},
     consts::{self, DEFAULT_VALIDATOR_KEYPAIR},
-    types::network::Remote,
+    types::network::{BindAddress, Remote},
     ValidatorParams,
 };
 
@@ -65,7 +65,7 @@ fn test_defaults_are_sane() {
     assert_eq!(config.validator.basefee, consts::DEFAULT_BASE_FEE);
     // Remotes default to [devnet HTTP] + [devnet WS] (added by ensure_websocket)
     assert_eq!(config.remotes.len(), 2);
-    assert_eq!(config.listen.0.port(), 8899);
+    assert_eq!(config.aperture.listen.0.port(), 8899);
     assert_eq!(config.lifecycle, LifecycleMode::Ephemeral);
 
     // Verify internal config defaults (not exposed to CLI)
@@ -171,14 +171,23 @@ fn test_cli_overlay_is_non_destructive() {
         custom_keypair
     ));
 
-    // Change ONLY basefee via CLI
-    let config =
-        run_cli(vec![config_path.to_str().unwrap(), "--basefee", "500"]);
+    // Change ONLY basefee and listen address via CLI
+    let config = run_cli(vec![
+        config_path.to_str().unwrap(),
+        "--basefee",
+        "500",
+        "--listen",
+        "127.0.0.1:7000",
+    ]);
 
-    // Basefee updated
+    // Basefee is updated
     assert_eq!(config.validator.basefee, 500);
-    // Keypair PRESERVED from TOML
+    // Listen address is updated as well
+    assert_eq!(config.aperture.listen.0, "127.0.0.1:7000".parse().unwrap());
+    // Keypair is PRESERVED from TOML
     assert_eq!(config.validator.keypair, custom_keypair.parse().unwrap());
+    // Event processors count is PRESERVED from TOML
+    assert_eq!(config.aperture.event_processors, 1);
 }
 
 #[test]
@@ -253,6 +262,7 @@ fn test_chainlink_config() {
         [chainlink]
         prepare-lookup-tables = true
         max-monitored-accounts = 5000
+        resubscription-delay = "50ms"
         "#,
     );
 
@@ -260,6 +270,10 @@ fn test_chainlink_config() {
 
     assert!(config.chainlink.prepare_lookup_tables);
     assert_eq!(config.chainlink.max_monitored_accounts, 5000);
+    assert_eq!(
+        config.chainlink.resubscription_delay,
+        std::time::Duration::from_millis(50)
+    );
 }
 
 // ============================================================================
@@ -362,7 +376,7 @@ fn test_example_config_full_coverage() {
     // Example config has 3 remotes: devnet HTTP, devnet WebSocket, and Helius gRPC
     assert_eq!(config.remotes.len(), 3);
     assert_eq!(config.remotes[0].url_str(), consts::DEVNET_URL);
-    assert_eq!(config.listen.0.port(), 8899);
+    assert_eq!(config.aperture.listen.0.port(), 8899);
     // Check that storage path is set (contains the expected folder name)
     assert!(config
         .storage
@@ -417,7 +431,13 @@ fn test_example_config_full_coverage() {
     assert_eq!(config.chainlink.max_monitored_accounts, 1000);
 
     // ========================================================================
-    // 10. Optional Sections
+    // 10. Aperture
+    // ========================================================================
+    assert_eq!(config.aperture.listen.0.port(), 8899);
+    assert_eq!(config.aperture.event_processors, 1);
+
+    // ========================================================================
+    // 11. Optional Sections
     // ========================================================================
     // Task scheduler reset should be false
     assert!(!config.task_scheduler.reset);
@@ -444,14 +464,15 @@ fn test_example_config_full_coverage() {
 #[serial]
 fn test_env_vars_full_coverage() {
     // We must keep these guards alive until the config is parsed.
-    // The `EnvVarGuard` helper (defined in your tests.rs) cleans them up on Drop.
     let _guards = vec![
         // --- Core ---
         EnvVarGuard::new("MBV_LIFECYCLE", "replica"),
         // Note: MBV_REMOTE is no longer supported for the new Vec<RemoteConfig> format
         // Use TOML [[remote]] array syntax instead
         EnvVarGuard::new("MBV_STORAGE", "/tmp/env-test-storage"),
-        EnvVarGuard::new("MBV_LISTEN", "127.0.0.1:9999"),
+        // --- Aperture ---
+        EnvVarGuard::new("MBV_APERTURE__LISTEN", "127.0.0.1:9999"),
+        EnvVarGuard::new("MBV_APERTURE__EVENT_PROCESSORS", "9"),
         // --- Metrics ---
         EnvVarGuard::new("MBV_METRICS__ADDRESS", "127.0.0.1:9091"),
         EnvVarGuard::new("MBV_METRICS__COLLECT_FREQUENCY", "15s"),
@@ -477,6 +498,7 @@ fn test_env_vars_full_coverage() {
         EnvVarGuard::new("MBV_CHAINLINK__PREPARE_LOOKUP_TABLES", "true"),
         EnvVarGuard::new("MBV_CHAINLINK__AUTO_AIRDROP_LAMPORTS", "555"),
         EnvVarGuard::new("MBV_CHAINLINK__MAX_MONITORED_ACCOUNTS", "123"),
+        EnvVarGuard::new("MBV_CHAINLINK__RESUBSCRIPTION_DELAY", "150ms"),
         // --- Task Scheduler ---
         EnvVarGuard::new("MBV_TASK_SCHEDULER__RESET", "true"),
         EnvVarGuard::new("MBV_TASK_SCHEDULER__MIN_INTERVAL", "99ms"),
@@ -500,7 +522,10 @@ fn test_env_vars_full_coverage() {
     // Remotes default to devnet (HTTP) + devnet WebSocket (added by ensure_websocket)
     assert_eq!(config.remotes.len(), 2);
     assert_eq!(config.storage.to_string_lossy(), "/tmp/env-test-storage");
-    assert_eq!(config.listen.0.port(), 9999);
+
+    // Aperture
+    assert_eq!(config.aperture.listen.0.port(), 9999);
+    assert_eq!(config.aperture.event_processors, 9);
 
     // Metrics
     assert_eq!(config.metrics.address.0.port(), 9091);
@@ -531,6 +556,10 @@ fn test_env_vars_full_coverage() {
     assert!(config.chainlink.prepare_lookup_tables);
     assert_eq!(config.chainlink.auto_airdrop_lamports, 555);
     assert_eq!(config.chainlink.max_monitored_accounts, 123);
+    assert_eq!(
+        config.chainlink.resubscription_delay,
+        Duration::from_millis(150)
+    );
 
     // Task Scheduler
     assert!(config.task_scheduler.reset);
@@ -592,4 +621,70 @@ fn test_to_websocket_from_http() {
     let ws_remote = remote.to_websocket().unwrap();
     assert!(matches!(ws_remote, Remote::Websocket(_)));
     assert_eq!(ws_remote.url_str(), "ws://localhost:8900/");
+}
+
+// ============================================================================
+// 10. BindAddress Type Parsing
+// ============================================================================
+
+#[test]
+#[parallel]
+fn test_bind_address_from_str_accepts_port_only() {
+    let addr: BindAddress = "7799".parse().expect("should parse port-only");
+    assert_eq!(addr.0.to_string(), "127.0.0.1:7799");
+}
+
+#[test]
+#[parallel]
+fn test_bind_address_from_str_accepts_socket_addr() {
+    let addr: BindAddress =
+        "0.0.0.0:8899".parse().expect("should parse socket addr");
+    assert_eq!(addr.0.to_string(), "0.0.0.0:8899");
+}
+
+#[test]
+#[parallel]
+fn test_bind_address_toml_deserialize_from_integer() {
+    #[derive(serde::Deserialize)]
+    struct Cfg {
+        listen: BindAddress,
+    }
+
+    let cfg: Cfg =
+        toml::from_str("listen = 7799\n").expect("toml int to parse");
+    assert_eq!(cfg.listen.0.to_string(), "127.0.0.1:7799");
+}
+
+#[test]
+#[parallel]
+fn test_bind_address_toml_deserialize_from_string() {
+    #[derive(serde::Deserialize)]
+    struct Cfg {
+        listen: BindAddress,
+    }
+
+    let cfg: Cfg = toml::from_str("listen = \"0.0.0.0:8899\"\n")
+        .expect("toml str to parse");
+    assert_eq!(cfg.listen.0.to_string(), "0.0.0.0:8899");
+}
+
+#[test]
+#[parallel]
+fn test_bind_address_toml_deserialize_port_out_of_range_errors() {
+    #[derive(serde::Deserialize)]
+    struct Cfg {
+        #[allow(dead_code)]
+        listen: BindAddress,
+    }
+
+    let msg = toml::from_str::<Cfg>("listen = 70000\n")
+        .err()
+        .unwrap()
+        .to_string();
+    // Error message can vary, but it should mention invalid value or out of range
+    assert!(
+        msg.contains("out of range") || msg.contains("invalid"),
+        "unexpected error: {}",
+        msg
+    );
 }

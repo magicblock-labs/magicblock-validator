@@ -7,13 +7,14 @@ use std::{
 };
 
 use async_trait::async_trait;
-use log::*;
 use solana_commitment_config::CommitmentConfig;
 use solana_pubkey::Pubkey;
 use tokio::sync::mpsc;
+use tracing::*;
 
 use crate::remote_account_provider::{
-    chain_laser_client::ChainLaserClientImpl,
+    chain_laser_actor::Slots, chain_laser_client::ChainLaserClientImpl,
+    chain_rpc_client::ChainRpcClientImpl, chain_slot::ChainSlot,
     pubsub_common::SubscriptionUpdate, ChainPubsubClient,
     ChainPubsubClientImpl, Endpoint, ReconnectableClient,
     RemoteAccountProviderError, RemoteAccountProviderResult,
@@ -31,13 +32,15 @@ impl ChainUpdatesClient {
         commitment: CommitmentConfig,
         abort_sender: mpsc::Sender<()>,
         chain_slot: Arc<AtomicU64>,
+        resubscription_delay: std::time::Duration,
+        rpc_client: ChainRpcClientImpl,
     ) -> RemoteAccountProviderResult<Self> {
         use Endpoint::*;
         static CLIENT_ID: AtomicU16 = AtomicU16::new(0);
 
         match endpoint {
             WebSocket { url, label } => {
-                debug!("Initializing WebSocket client for endpoint: {}", url);
+                debug!(url = %url, "Initializing WebSocket client");
                 let client_id = format!(
                     "ws:{label}-{}",
                     CLIENT_ID.fetch_add(1, Ordering::SeqCst)
@@ -48,6 +51,7 @@ impl ChainUpdatesClient {
                         client_id,
                         abort_sender,
                         commitment,
+                        resubscription_delay,
                     )
                     .await?,
                 ))
@@ -58,26 +62,27 @@ impl ChainUpdatesClient {
                 supports_backfill,
                 api_key,
             } => {
-                debug!(
-                    "Initializing Helius Laser client for gRPC endpoint: {}",
-                    url
-                );
+                debug!(url = %url, "Initializing Helius Laser client for gRPC endpoint");
                 let client_id = format!(
                     "grpc:{label}-{}",
                     CLIENT_ID.fetch_add(1, Ordering::SeqCst)
                 );
 
-                let chain_slot = supports_backfill.then_some(chain_slot);
+                let slots = Slots {
+                    chain_slot: ChainSlot::new(chain_slot),
+                    last_activation_slot: AtomicU64::new(0),
+                    supports_backfill: *supports_backfill,
+                };
                 Ok(ChainUpdatesClient::Laser(
                     ChainLaserClientImpl::new_from_url(
                         url,
-                        client_id,
+                        client_id.to_string(),
                         api_key,
                         commitment.commitment,
                         abort_sender,
-                        chain_slot,
-                    )
-                    .await?,
+                        slots,
+                        rpc_client,
+                    ),
                 ))
             }
             Rpc { .. } => {
@@ -94,11 +99,12 @@ impl ChainPubsubClient for ChainUpdatesClient {
     async fn subscribe(
         &self,
         pubkey: Pubkey,
+        retries: Option<usize>,
     ) -> RemoteAccountProviderResult<()> {
         use ChainUpdatesClient::*;
         match self {
-            WebSocket(client) => client.subscribe(pubkey).await,
-            Laser(client) => client.subscribe(pubkey).await,
+            WebSocket(client) => client.subscribe(pubkey, retries).await,
+            Laser(client) => client.subscribe(pubkey, retries).await,
         }
     }
 
@@ -198,6 +204,14 @@ impl ReconnectableClient for ChainUpdatesClient {
         match self {
             WebSocket(client) => client.resub_multiple(pubkeys).await,
             Laser(client) => client.resub_multiple(pubkeys).await,
+        }
+    }
+
+    fn current_resub_delay_ms(&self) -> Option<u64> {
+        use ChainUpdatesClient::*;
+        match self {
+            WebSocket(client) => client.current_resub_delay_ms(),
+            Laser(client) => client.current_resub_delay_ms(),
         }
     }
 }

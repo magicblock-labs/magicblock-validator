@@ -9,6 +9,7 @@ use std::{
 use hyper::body::Bytes;
 use magicblock_accounts_db::AccountsDb;
 use magicblock_config::config::ChainLinkConfig;
+use solana_account_decoder::UiAccountEncoding;
 use solana_pubkey::Pubkey;
 use test_kit::{
     guinea::{self, GuineaInstruction},
@@ -52,7 +53,9 @@ fn chainlink(accounts_db: &Arc<AccountsDb>) -> ChainlinkImpl {
 }
 
 mod event_processor {
-    use magicblock_config::consts::DEFAULT_LEDGER_BLOCK_TIME_MS;
+    use magicblock_config::{
+        config::ApertureConfig, consts::DEFAULT_LEDGER_BLOCK_TIME_MS,
+    };
 
     use super::*;
     use crate::state::NodeContext;
@@ -75,7 +78,9 @@ mod event_processor {
             Arc::new(chainlink(&env.accountsdb)),
         );
         let cancel = CancellationToken::new();
-        EventProcessor::start(&state, &env.dispatch, 1, cancel);
+        let config = ApertureConfig::default();
+        EventProcessor::start(&config, &state, &env.dispatch, cancel)
+            .expect("failed to start an event processor");
         env.advance_slot();
         (state, env)
     }
@@ -114,14 +119,24 @@ mod event_processor {
         // Subscribe to both the specific account and the program that owns it.
         let _acc_sub = state
             .subscriptions
-            .subscribe_to_account(acc, AccountEncoder::Base58, tx.clone())
+            .subscribe_to_account(
+                acc,
+                AccountEncoder {
+                    encoding: UiAccountEncoding::Base58,
+                    data_slice: None,
+                },
+                tx.clone(),
+            )
             .await;
         let _prog_sub = state
             .subscriptions
             .subscribe_to_program(
                 guinea::ID,
                 ProgramAccountEncoder {
-                    encoder: AccountEncoder::Base58,
+                    encoder: AccountEncoder {
+                        encoding: UiAccountEncoding::Base58,
+                        data_slice: None,
+                    },
                     filters: ProgramFilters::default(),
                 },
                 tx,
@@ -219,11 +234,25 @@ mod event_processor {
 
         let _acc_sub1 = state
             .subscriptions
-            .subscribe_to_account(acc1, AccountEncoder::Base58, acc_tx1)
+            .subscribe_to_account(
+                acc1,
+                AccountEncoder {
+                    encoding: UiAccountEncoding::Base58,
+                    data_slice: None,
+                },
+                acc_tx1,
+            )
             .await;
         let _acc_sub2 = state
             .subscriptions
-            .subscribe_to_account(acc1, AccountEncoder::Base58, acc_tx2)
+            .subscribe_to_account(
+                acc1,
+                AccountEncoder {
+                    encoding: UiAccountEncoding::Base58,
+                    data_slice: None,
+                },
+                acc_tx2,
+            )
             .await;
 
         let ix1 = Instruction::new_with_bincode(
@@ -245,7 +274,10 @@ mod event_processor {
         let (prog_tx1, mut prog_rx1) = ws_channel();
         let (prog_tx2, mut prog_rx2) = ws_channel();
         let prog_encoder = ProgramAccountEncoder {
-            encoder: AccountEncoder::Base58,
+            encoder: AccountEncoder {
+                encoding: UiAccountEncoding::Base58,
+                data_slice: None,
+            },
             filters: ProgramFilters::default(),
         };
 
@@ -361,7 +393,10 @@ mod subscriptions_db {
         let account_handle = db
             .subscribe_to_account(
                 Pubkey::new_unique(),
-                AccountEncoder::Base58,
+                AccountEncoder {
+                    encoding: UiAccountEncoding::Base58,
+                    data_slice: None,
+                },
                 tx.clone(),
             )
             .await;
@@ -383,7 +418,10 @@ mod subscriptions_db {
             .subscribe_to_program(
                 guinea::ID,
                 ProgramAccountEncoder {
-                    encoder: AccountEncoder::Base58,
+                    encoder: AccountEncoder {
+                        encoding: UiAccountEncoding::Base58,
+                        data_slice: None,
+                    },
                     filters: ProgramFilters::default(),
                 },
                 tx.clone(),

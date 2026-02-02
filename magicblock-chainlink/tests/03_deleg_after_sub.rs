@@ -1,4 +1,3 @@
-use log::*;
 use magicblock_chainlink::{
     assert_cloned_as_delegated, assert_cloned_as_undelegated,
     assert_not_cloned, assert_not_subscribed,
@@ -9,6 +8,7 @@ use magicblock_chainlink::{
 use solana_account::Account;
 use solana_program::clock::Slot;
 use solana_pubkey::Pubkey;
+use tracing::*;
 use utils::{
     accounts::account_shared_with_owner_and_slot, test_context::TestContext,
 };

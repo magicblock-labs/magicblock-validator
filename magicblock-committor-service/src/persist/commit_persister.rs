@@ -3,7 +3,9 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use magicblock_program::magic_scheduled_base_intent::ScheduledBaseIntent;
+use magicblock_program::magic_scheduled_base_intent::{
+    CommittedAccount, ScheduledIntentBundle,
+};
 use solana_pubkey::Pubkey;
 
 use super::{
@@ -21,12 +23,12 @@ pub trait IntentPersister: Send + Sync + Clone + 'static {
     /// Starts persisting BaseIntents
     fn start_base_intents(
         &self,
-        base_intent: &[ScheduledBaseIntent],
+        base_intent: &[ScheduledIntentBundle],
     ) -> CommitPersistResult<()>;
     /// Starts persisting BaseIntent
     fn start_base_intent(
         &self,
-        base_intent: &ScheduledBaseIntent,
+        base_intent: &ScheduledIntentBundle,
     ) -> CommitPersistResult<()>;
     fn set_commit_id(
         &self,
@@ -100,59 +102,58 @@ impl IntentPersisterImpl {
     }
 
     pub fn create_commit_rows(
-        base_intent: &ScheduledBaseIntent,
+        intent_bundle: &ScheduledIntentBundle,
     ) -> Vec<CommitStatusRow> {
-        let Some(committed_accounts) = base_intent.get_committed_accounts()
-        else {
-            // We don't persist standalone actions
-            return vec![];
+        let created_at = now();
+
+        let create_row = |undelegate: bool, account: &CommittedAccount| {
+            let data = &account.account.data;
+            let (commit_type, data) = if data.is_empty() {
+                (CommitType::EmptyAccount, None)
+            } else {
+                (CommitType::DataAccount, Some(data.clone()))
+            };
+
+            CommitStatusRow {
+                message_id: intent_bundle.id,
+                commit_id: 0, // Not known at creation, set later
+                pubkey: account.pubkey,
+                delegated_account_owner: account.account.owner,
+                slot: intent_bundle.slot,
+                ephemeral_blockhash: intent_bundle.blockhash,
+                undelegate,
+                lamports: account.account.lamports,
+                data,
+                commit_type,
+                created_at,
+                commit_strategy: CommitStrategy::default(),
+                commit_status: CommitStatus::Pending,
+                last_retried_at: created_at,
+                retries_count: 0,
+            }
         };
 
-        let undelegate = base_intent.is_undelegate();
-        let created_at = now();
-        committed_accounts
-            .iter()
-            .map(|account| {
-                let data = &account.account.data;
-                let commit_type = if data.is_empty() {
-                    CommitType::EmptyAccount
-                } else {
-                    CommitType::DataAccount
-                };
-
-                let data = if commit_type == CommitType::DataAccount {
-                    Some(data.clone())
-                } else {
-                    None
-                };
-
-                // Create a commit status row for this account
-                CommitStatusRow {
-                    message_id: base_intent.id,
-                    commit_id: 0, // Not known at creation, set later
-                    pubkey: account.pubkey,
-                    delegated_account_owner: account.account.owner,
-                    slot: base_intent.slot,
-                    ephemeral_blockhash: base_intent.blockhash,
-                    undelegate,
-                    lamports: account.account.lamports,
-                    data,
-                    commit_type,
-                    created_at,
-                    commit_strategy: CommitStrategy::default(),
-                    commit_status: CommitStatus::Pending,
-                    last_retried_at: created_at,
-                    retries_count: 0,
-                }
-            })
-            .collect()
+        [
+            (false, intent_bundle.get_commit_intent_accounts()),
+            (true, intent_bundle.get_undelegate_intent_accounts()),
+        ]
+        .into_iter()
+        .filter_map(|(undelegate, accounts)| {
+            accounts.map(|accounts| (undelegate, accounts))
+        })
+        .flat_map(|(undelegate, accounts)| {
+            accounts
+                .iter()
+                .map(move |account| create_row(undelegate, account))
+        })
+        .collect()
     }
 }
 
 impl IntentPersister for IntentPersisterImpl {
     fn start_base_intents(
         &self,
-        base_intents: &[ScheduledBaseIntent],
+        base_intents: &[ScheduledIntentBundle],
     ) -> CommitPersistResult<()> {
         let commit_rows = base_intents
             .iter()
@@ -168,7 +169,7 @@ impl IntentPersister for IntentPersisterImpl {
 
     fn start_base_intent(
         &self,
-        base_intents: &ScheduledBaseIntent,
+        base_intents: &ScheduledIntentBundle,
     ) -> CommitPersistResult<()> {
         let commit_row = Self::create_commit_rows(base_intents);
         self.commits_db
@@ -297,7 +298,7 @@ impl IntentPersister for IntentPersisterImpl {
 impl<T: IntentPersister> IntentPersister for Option<T> {
     fn start_base_intents(
         &self,
-        base_intents: &[ScheduledBaseIntent],
+        base_intents: &[ScheduledIntentBundle],
     ) -> CommitPersistResult<()> {
         match self {
             Some(persister) => persister.start_base_intents(base_intents),
@@ -307,7 +308,7 @@ impl<T: IntentPersister> IntentPersister for Option<T> {
 
     fn start_base_intent(
         &self,
-        base_intents: &ScheduledBaseIntent,
+        base_intents: &ScheduledIntentBundle,
     ) -> CommitPersistResult<()> {
         match self {
             Some(persister) => persister.start_base_intent(base_intents),
@@ -436,7 +437,8 @@ impl<T: IntentPersister> IntentPersister for Option<T> {
 #[cfg(test)]
 mod tests {
     use magicblock_program::magic_scheduled_base_intent::{
-        CommitType, CommittedAccount, MagicBaseIntent,
+        CommitAndUndelegate, CommitType, CommittedAccount, MagicIntentBundle,
+        UndelegateType,
     };
     use solana_account::Account;
     use solana_hash::Hash;
@@ -446,15 +448,19 @@ mod tests {
     use tempfile::NamedTempFile;
 
     use super::*;
-    use crate::persist::{types, CommitStatusSignatures};
+    use crate::{
+        persist::{types, CommitStatusSignatures},
+        test_utils,
+    };
 
     fn create_test_persister() -> (IntentPersisterImpl, NamedTempFile) {
+        test_utils::init_test_logger();
         let temp_file = NamedTempFile::new().unwrap();
         let persister = IntentPersisterImpl::try_new(temp_file.path()).unwrap();
         (persister, temp_file)
     }
 
-    fn create_test_message(id: u64) -> ScheduledBaseIntent {
+    fn test_accounts() -> Vec<CommittedAccount> {
         let account1 = Account {
             lamports: 1000,
             owner: Pubkey::new_unique(),
@@ -470,31 +476,79 @@ mod tests {
             rent_epoch: 0,
         };
 
-        ScheduledBaseIntent {
+        vec![
+            CommittedAccount {
+                pubkey: Pubkey::new_unique(),
+                account: account1,
+                remote_slot: 1,
+            },
+            CommittedAccount {
+                pubkey: Pubkey::new_unique(),
+                account: account2,
+                remote_slot: 2,
+            },
+        ]
+    }
+
+    fn commit_only_bundle() -> MagicIntentBundle {
+        MagicIntentBundle {
+            commit: Some(CommitType::Standalone(test_accounts())),
+            commit_and_undelegate: None,
+            standalone_actions: vec![],
+        }
+    }
+
+    fn undelegate_only_bundle() -> MagicIntentBundle {
+        MagicIntentBundle {
+            commit: None,
+            commit_and_undelegate: Some(CommitAndUndelegate {
+                commit_action: CommitType::Standalone(test_accounts()),
+                undelegate_action: UndelegateType::Standalone,
+            }),
+            standalone_actions: vec![],
+        }
+    }
+
+    fn bundle_both() -> MagicIntentBundle {
+        MagicIntentBundle {
+            commit: Some(CommitType::Standalone(test_accounts())),
+            commit_and_undelegate: Some(CommitAndUndelegate {
+                commit_action: CommitType::Standalone(test_accounts()),
+                undelegate_action: UndelegateType::Standalone,
+            }),
+            standalone_actions: vec![],
+        }
+    }
+
+    fn bundle_none() -> MagicIntentBundle {
+        MagicIntentBundle {
+            commit: None,
+            commit_and_undelegate: None,
+            standalone_actions: vec![],
+        }
+    }
+
+    fn create_test_message(
+        id: u64,
+        intent_bundle: MagicIntentBundle,
+    ) -> ScheduledIntentBundle {
+        ScheduledIntentBundle {
             id,
             slot: 100,
             blockhash: Hash::new_unique(),
-            action_sent_transaction: Transaction::default(),
+            sent_transaction: Transaction::default(),
             payer: Pubkey::new_unique(),
-            base_intent: MagicBaseIntent::Commit(CommitType::Standalone(vec![
-                CommittedAccount {
-                    pubkey: Pubkey::new_unique(),
-                    account: account1,
-                },
-                CommittedAccount {
-                    pubkey: Pubkey::new_unique(),
-                    account: account2,
-                },
-            ])),
+            intent_bundle,
         }
     }
 
     #[test]
-    fn test_create_commit_rows() {
-        let message = create_test_message(1);
+    fn test_create_commit_rows_commit_only() {
+        let message = create_test_message(1, commit_only_bundle());
         let rows = IntentPersisterImpl::create_commit_rows(&message);
 
         assert_eq!(rows.len(), 2);
+        assert!(rows.iter().all(|r| !r.undelegate));
 
         let empty_account = rows.iter().find(|r| r.data.is_none()).unwrap();
         assert_eq!(empty_account.commit_type, types::CommitType::EmptyAccount);
@@ -507,9 +561,33 @@ mod tests {
     }
 
     #[test]
-    fn test_start_base_message() {
+    fn test_create_commit_rows_undelegate_only() {
+        let message = create_test_message(1, undelegate_only_bundle());
+        let rows = IntentPersisterImpl::create_commit_rows(&message);
+
+        assert_eq!(rows.len(), 2);
+        assert!(rows.iter().all(|r| r.undelegate));
+    }
+
+    #[test]
+    fn test_create_commit_rows_both_intents() {
+        let message = create_test_message(1, bundle_both());
+        let rows = IntentPersisterImpl::create_commit_rows(&message);
+
+        // 2 from commit + 2 from commit_and_undelegate
+        assert_eq!(rows.len(), 4);
+
+        let commit_rows = rows.iter().filter(|r| !r.undelegate).count();
+        let undelegate_rows = rows.iter().filter(|r| r.undelegate).count();
+
+        assert_eq!(commit_rows, 2);
+        assert_eq!(undelegate_rows, 2);
+    }
+
+    #[test]
+    fn test_start_base_message_commit_only() {
         let (persister, _temp_file) = create_test_persister();
-        let message = create_test_message(1);
+        let message = create_test_message(1, commit_only_bundle());
 
         persister.start_base_intent(&message).unwrap();
 
@@ -517,32 +595,48 @@ mod tests {
             IntentPersisterImpl::create_commit_rows(&message);
         let statuses = persister.get_commit_statuses_by_message(1).unwrap();
 
-        assert_eq!(statuses.len(), 2);
+        assert_eq!(statuses.len(), expected_statuses.len());
         assert_eq!(expected_statuses[0], statuses[0]);
         assert_eq!(expected_statuses[1], statuses[1]);
     }
 
     #[test]
-    fn test_start_base_messages() {
+    fn test_start_base_messages_mixed() {
         let (persister, _temp_file) = create_test_persister();
-        let message1 = create_test_message(1);
-        let message2 = create_test_message(2);
+        let message1 = create_test_message(1, commit_only_bundle()); // 2 rows
+        let message2 = create_test_message(2, undelegate_only_bundle()); // 2 rows
+        let message3 = create_test_message(3, bundle_both()); // 4 rows
+        let message4 = create_test_message(4, bundle_none()); // 0 rows
 
-        persister.start_base_intents(&[message1, message2]).unwrap();
+        persister
+            .start_base_intents(&[message1, message2, message3, message4])
+            .unwrap();
 
-        let statuses1 = persister.get_commit_statuses_by_message(1).unwrap();
-        let statuses2 = persister.get_commit_statuses_by_message(2).unwrap();
-        assert_eq!(statuses1.len(), 2);
-        assert_eq!(statuses2.len(), 2);
+        assert_eq!(
+            persister.get_commit_statuses_by_message(1).unwrap().len(),
+            2
+        );
+        assert_eq!(
+            persister.get_commit_statuses_by_message(2).unwrap().len(),
+            2
+        );
+        assert_eq!(
+            persister.get_commit_statuses_by_message(3).unwrap().len(),
+            4
+        );
+        assert_eq!(
+            persister.get_commit_statuses_by_message(4).unwrap().len(),
+            0
+        );
     }
 
     #[test]
     fn test_update_status() {
         let (persister, _temp_file) = create_test_persister();
-        let message = create_test_message(1);
+        let message = create_test_message(1, commit_only_bundle());
         persister.start_base_intent(&message).unwrap();
 
-        let pubkey = message.get_committed_pubkeys().unwrap()[0];
+        let pubkey = message.get_all_committed_pubkeys()[0];
 
         // Update by message
         persister
@@ -578,27 +672,27 @@ mod tests {
     #[test]
     fn test_set_commit_strategy() {
         let (persister, _temp_file) = create_test_persister();
-        let message = create_test_message(1);
+        let message = create_test_message(1, commit_only_bundle());
         persister.start_base_intent(&message).unwrap();
 
-        let pubkey = message.get_committed_pubkeys().unwrap()[0];
+        let pubkey = message.get_all_committed_pubkeys()[0];
         persister.set_commit_id(1, &pubkey, 100).unwrap();
 
         persister
-            .set_commit_strategy(100, &pubkey, CommitStrategy::Args)
+            .set_commit_strategy(100, &pubkey, CommitStrategy::StateArgs)
             .unwrap();
 
         let updated = persister
             .get_commit_status_by_message(1, &pubkey)
             .unwrap()
             .unwrap();
-        assert_eq!(updated.commit_strategy, CommitStrategy::Args);
+        assert_eq!(updated.commit_strategy, CommitStrategy::StateArgs);
     }
 
     #[test]
     fn test_get_signatures() {
         let (persister, _temp_file) = create_test_persister();
-        let message = create_test_message(1);
+        let message = create_test_message(1, commit_only_bundle());
         persister.start_base_intent(&message).unwrap();
 
         let statuses = persister.get_commit_statuses_by_message(1).unwrap();
@@ -652,14 +746,11 @@ mod tests {
     #[test]
     fn test_empty_accounts_not_persisted() {
         let (persister, _temp_file) = create_test_persister();
-        let message = ScheduledBaseIntent {
-            base_intent: MagicBaseIntent::BaseActions(vec![]), // No committed accounts
-            ..create_test_message(1)
-        };
+        let message = create_test_message(1, bundle_none());
 
         persister.start_base_intent(&message).unwrap();
 
         let statuses = persister.get_commit_statuses_by_message(1).unwrap();
-        assert_eq!(statuses.len(), 0); // No rows should be persisted
+        assert_eq!(statuses.len(), 0);
     }
 }

@@ -10,7 +10,7 @@ magicblock-delegation-program = { workspace = true, features = [
   "no-entrypoint",
 ] }
 integration-test-tools = { workspace = true }
-log = { workspace = true }
+tracing = { workspace = true }
 program-schedulecommit = { workspace = true, features = ["no-entrypoint"] }
 magicblock-core = { workspace = true }
 solana-program = { workspace = true }

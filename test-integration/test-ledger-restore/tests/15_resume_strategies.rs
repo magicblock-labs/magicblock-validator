@@ -4,7 +4,6 @@ use cleanass::{assert, assert_eq};
 use integration_test_tools::{
     expect, tmpdir::resolve_tmp_dir, validator::cleanup,
 };
-use log::*;
 use solana_sdk::{
     signature::{Keypair, Signature},
     signer::Signer,
@@ -16,6 +15,7 @@ use test_ledger_restore::{
     wait_for_ledger_persist, wait_for_next_slot_after_account_snapshot,
     SNAPSHOT_FREQUENCY, TMP_DIR_LEDGER,
 };
+use tracing::*;
 
 #[test]
 fn test_restore_ledger_resume_strategy_reset_all() {

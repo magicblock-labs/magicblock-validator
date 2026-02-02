@@ -69,6 +69,7 @@ pub struct AccountSubscription {
 pub enum ChainPubsubActorMessage {
     AccountSubscribe {
         pubkey: Pubkey,
+        retries: Option<usize>,
         response: oneshot::Sender<RemoteAccountProviderResult<()>>,
     },
     AccountUnsubscribe {

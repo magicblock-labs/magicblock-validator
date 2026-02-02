@@ -32,6 +32,9 @@ pub enum RemoteAccountProviderError {
     #[error("Failed to manage subscriptions ({0})")]
     AccountSubscriptionsTaskFailed(String),
 
+    #[error("Connection disrupted")]
+    ConnectionDisrupted,
+
     #[error("Failed to send message to laser actor: {0} ({1})")]
     ChainLaserActorSendError(String, String),
 
@@ -43,6 +46,9 @@ pub enum RemoteAccountProviderError {
 
     #[error("Invalid pubsub endpoint: {0}")]
     InvalidPubsubEndpoint(String),
+
+    #[error("All pubsub clients failed to connect")]
+    AllPubsubClientsFailed,
 
     #[error("Failed to setup an account subscription ({0})")]
     AccountSubscriptionsFailed(String),
@@ -59,8 +65,11 @@ pub enum RemoteAccountProviderError {
     #[error("Accounts matched same slot ({0}), but it's less than min required context slot {2} ")]
     MatchingSlotsNotSatisfyingMinContextSlot(String, Vec<u64>, u64),
 
-    #[error("LRU capacity must be greater than 0, got {0}")]
-    InvalidLruCapacity(usize),
+    #[error("LRU capacity must be greater than 0")]
+    InvalidLruCapacity,
+
+    #[error("Resubscription delay must be greater than 0")]
+    InvalidResubscriptionDelay,
 
     #[error(
         "Only one listener supported on lru cache removed accounts events"

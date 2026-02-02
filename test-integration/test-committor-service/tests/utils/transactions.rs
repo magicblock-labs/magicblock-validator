@@ -1,4 +1,3 @@
-use log::{debug, error};
 use solana_account::Account;
 use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
@@ -11,6 +10,7 @@ use solana_sdk::{
     signature::{Keypair, Signature, Signer},
     transaction::Transaction,
 };
+use tracing::{debug, error};
 
 use crate::utils::instructions::{
     init_account_and_delegate_ixs, init_order_book_account_and_delegate_ixs,
@@ -69,11 +69,10 @@ macro_rules! get_account {
 }
 
 #[allow(dead_code)]
-pub async fn tx_logs_contain(
+pub async fn fetch_tx_logs(
     rpc_client: &RpcClient,
     signature: &Signature,
-    needle: &str,
-) -> bool {
+) -> Vec<String> {
     // NOTE: we encountered the following error a few times which makes tests fail for the
     //       wrong reason:
     //       Error {
@@ -100,7 +99,7 @@ pub async fn tx_logs_contain(
         {
             Ok(tx) => break tx,
             Err(err) => {
-                log::error!("Failed to get transaction: {}", err);
+                tracing::error!("Failed to get transaction: {}", err);
                 retries -= 1;
                 if retries == 0 {
                     panic!(
@@ -113,25 +112,40 @@ pub async fn tx_logs_contain(
             }
         };
     };
-    let logs = tx
-        .transaction
+    tx.transaction
         .meta
         .as_ref()
         .unwrap()
         .log_messages
         .clone()
-        .unwrap_or_else(Vec::new);
-    logs.iter().any(|log| {
-        // Lots of existing tests pass "CommitState" as needle argument to this function, but since now CommitTask
-        // could invoke CommitState or CommitDiff depending on the size of the account, we also look for "CommitDiff"
-        // in the logs when needle == CommitState. It's easier to make this little adjustment here than computing
-        // the decision and passing either CommitState or CommitDiff from the tests themselves.
-        if needle == "CommitState" {
-            log.contains(needle) || log.contains("CommitDiff")
-        } else {
-            log.contains(needle)
-        }
-    })
+        .unwrap_or_else(Vec::new)
+}
+
+#[allow(dead_code)]
+pub async fn print_tx_logs(rpc_client: &RpcClient, signature: &Signature) {
+    println!("logs: {:#?}", fetch_tx_logs(rpc_client, signature).await);
+}
+
+#[allow(dead_code)]
+pub async fn tx_logs_contain(
+    rpc_client: &RpcClient,
+    signature: &Signature,
+    needle: &str,
+) -> bool {
+    fetch_tx_logs(rpc_client, signature)
+        .await
+        .iter()
+        .any(|log| {
+            // Lots of existing tests pass "CommitState" as needle argument to this function, but since now CommitTask
+            // could invoke CommitState or CommitDiff depending on the size of the account, we also look for "CommitDiff"
+            // in the logs when needle == CommitState. It's easier to make this little adjustment here than computing
+            // the decision and passing either CommitState or CommitDiff from the tests themselves.
+            if needle == "CommitState" {
+                log.contains(needle) || log.contains("CommitDiff")
+            } else {
+                log.contains(needle)
+            }
+        })
 }
 
 /// This needs to be run for each test that required a new counter to be delegated

@@ -3,9 +3,9 @@ import fs from "fs";
 import { spawn, spawnSync } from "child_process";
 import path from "path";
 import { arch, platform } from "os";
-import { version } from "./package.json";
+import { VERSIONS } from "./getVersions";
 
-const PACKAGE_VERSION = `ephemeral-validator ${version}`;
+const PACKAGE_VERSION = `ephemeral-validator ${VERSIONS.EPHEMERAL_VALIDATOR}`;
 
 function getBinaryVersion(location: string): [string | null, string | null] {
   const result = spawnSync(location, ["--version"]);

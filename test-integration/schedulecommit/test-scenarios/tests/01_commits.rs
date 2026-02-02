@@ -1,7 +1,6 @@
 #![allow(clippy::result_large_err)]
 
 use integration_test_tools::{run_test, IntegrationTestContext};
-use log::*;
 use program_schedulecommit::{
     api::{
         delegate_account_cpi_instruction, init_account_instruction,
@@ -21,6 +20,7 @@ use solana_sdk::{
     transaction::{Transaction, TransactionError},
 };
 use test_kit::{init_logger, AccountMeta, Instruction};
+use tracing::*;
 use utils::{
     assert_one_committee_synchronized_count,
     assert_one_committee_was_committed,

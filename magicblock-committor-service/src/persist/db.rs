@@ -5,6 +5,7 @@ use solana_hash::Hash;
 use solana_program::clock::Slot;
 use solana_pubkey::Pubkey;
 use solana_signature::Signature;
+use tracing::error;
 
 use super::{
     error::CommitPersistResult,
@@ -374,7 +375,7 @@ impl CommittsDb {
         ) {
             Ok(_) => Ok(()),
             Err(err) => {
-                eprintln!("Error creating commit_status table: {}", err);
+                error!(error = ?err, "Failed to create commit_status table");
                 Err(err)
             }
         }
@@ -398,7 +399,7 @@ impl CommittsDb {
         ) {
             Ok(_) => Ok(()),
             Err(err) => {
-                eprintln!("Error creating bundle_signature table: {}", err);
+                error!(error = ?err, "Failed to create bundle_signature table");
                 Err(err)
             }
         }
@@ -746,9 +747,11 @@ mod tests {
     use tempfile::NamedTempFile;
 
     use super::*;
+    use crate::test_utils;
 
     // Helper to create a test database
     fn setup_test_db() -> (CommittsDb, NamedTempFile) {
+        test_utils::init_test_logger();
         let temp_file = NamedTempFile::new().unwrap();
         let db = CommittsDb::new(temp_file.path()).unwrap();
         db.create_commit_status_table().unwrap();
@@ -772,7 +775,7 @@ mod tests {
             commit_type: CommitType::DataAccount,
             created_at: 1000,
             commit_status: CommitStatus::Pending,
-            commit_strategy: CommitStrategy::Args,
+            commit_strategy: CommitStrategy::StateArgs,
             last_retried_at: 1000,
             retries_count: 0,
         }
@@ -907,7 +910,7 @@ mod tests {
         db.insert_commit_status_rows(std::slice::from_ref(&row))
             .unwrap();
 
-        let new_strategy = CommitStrategy::FromBuffer;
+        let new_strategy = CommitStrategy::StateBuffer;
         db.set_commit_strategy(100, &row.pubkey, new_strategy)
             .unwrap();
 

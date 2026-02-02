@@ -17,7 +17,7 @@ bincode = { workspace = true }
 borsh = { workspace = true }
 dyn-clone = { workspace = true }
 futures-util = { workspace = true }
-log = { workspace = true }
+tracing = { workspace = true }
 lru = { workspace = true }
 magicblock-committor-program = { workspace = true, features = [
   "no-entrypoint",
@@ -31,6 +31,7 @@ magicblock-rpc-client = { workspace = true }
 magicblock-table-mania = { workspace = true }
 rusqlite = { workspace = true }
 solana-account = { workspace = true }
+solana-account-decoder = { workspace = true }
 solana-address-lookup-table-interface = { workspace = true }
 solana-commitment-config = { workspace = true }
 solana-compute-budget-interface = { workspace = true }
@@ -58,6 +59,9 @@ solana-signature = { workspace = true, features = ["rand"] }
 lazy_static = { workspace = true }
 rand = { workspace = true }
 tempfile = { workspace = true }
+test-kit = { workspace = true }
+tracing-subscriber = { workspace = true }
+tracing-log = { workspace = true }
 
 [features]
 default = []

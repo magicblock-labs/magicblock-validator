@@ -1,5 +1,5 @@
-use log::error;
 use solana_pubkey::Pubkey;
+use tracing::error;
 
 use crate::persist::{CommitStatus, IntentPersister};
 
@@ -17,7 +17,7 @@ pub(crate) fn persist_status_update<P: IntentPersister>(
         pubkey,
         update_status.clone(),
     ) {
-        error!("Failed to persist new status {}: {}", update_status, err);
+        error!(pubkey = %pubkey, error = ?err, "Failed to persist status");
     }
 }
 
@@ -34,7 +34,7 @@ pub(crate) fn persist_status_update_by_message_set<P: IntentPersister>(
             pubkey,
             update_status.clone(),
         ) {
-            error!("Failed to persist new status {}: {}", update_status, err);
+            error!(pubkey = %pubkey, error = ?err, "Failed to persist status");
         }
     });
 }

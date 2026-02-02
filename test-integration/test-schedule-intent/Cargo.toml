@@ -6,7 +6,7 @@ edition.workspace = true
 [dependencies]
 
 [dev-dependencies]
-log = { workspace = true }
+tracing = { workspace = true }
 integration-test-tools = { workspace = true }
 magicblock-delegation-program = { workspace = true, features = [
   "no-entrypoint",

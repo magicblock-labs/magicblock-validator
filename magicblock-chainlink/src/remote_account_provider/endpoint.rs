@@ -23,6 +23,16 @@ pub enum Endpoint {
     },
 }
 
+impl Endpoint {
+    pub fn label(&self) -> &str {
+        match self {
+            Endpoint::Rpc { label, .. }
+            | Endpoint::WebSocket { label, .. }
+            | Endpoint::Grpc { label, .. } => label,
+        }
+    }
+}
+
 impl Endpoints {
     /// Returns the URL of the first RPC endpoint found in the provided
     /// slice. If no RPC endpoint is found, returns None.

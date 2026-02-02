@@ -1,6 +1,11 @@
 use dlp::{
     args::{CallHandlerArgs, CommitDiffArgs, CommitStateArgs},
     compute_diff,
+    instruction_builder::{
+        call_handler_size_budget, commit_diff_size_budget, commit_size_budget,
+        finalize_size_budget, undelegate_size_budget,
+    },
+    AccountSizeClass,
 };
 use magicblock_metrics::metrics::LabelValue;
 use solana_account::ReadableAccount;
@@ -122,7 +127,7 @@ impl BaseTask for ArgsTask {
         }
     }
 
-    fn optimize(
+    fn try_optimize_tx_size(
         self: Box<Self>,
     ) -> Result<Box<dyn BaseTask>, Box<dyn BaseTask>> {
         match self.task_type {
@@ -132,16 +137,8 @@ impl BaseTask for ArgsTask {
                 )))
             }
             ArgsTaskType::CommitDiff(value) => {
-                // TODO (snawaz): Currently, we do not support executing CommitDiff
-                // as BufferTask, which is why we're forcing CommitDiffTask to become CommitTask
-                // before converting this task into BufferTask. Once CommitDiff is supported
-                // by BufferTask, we do not have to do this, as it's essentially a downgrade.
                 Ok(Box::new(BufferTask::new_preparation_required(
-                    BufferTaskType::Commit(CommitTask {
-                        commit_id: value.commit_id,
-                        allow_undelegation: value.allow_undelegation,
-                        committed_account: value.committed_account,
-                    }),
+                    BufferTaskType::CommitDiff(value),
                 )))
             }
             ArgsTaskType::BaseAction(_)
@@ -174,6 +171,38 @@ impl BaseTask for ArgsTask {
             ArgsTaskType::BaseAction(task) => task.action.compute_units,
             ArgsTaskType::Undelegate(_) => 70_000,
             ArgsTaskType::Finalize(_) => 70_000,
+        }
+    }
+
+    fn accounts_size_budget(&self) -> u32 {
+        match &self.task_type {
+            ArgsTaskType::Commit(task) => {
+                commit_size_budget(AccountSizeClass::Dynamic(
+                    task.committed_account.account.data.len() as u32,
+                ))
+            }
+            ArgsTaskType::CommitDiff(task) => {
+                commit_diff_size_budget(AccountSizeClass::Dynamic(
+                    task.committed_account.account.data.len() as u32,
+                ))
+            }
+            ArgsTaskType::BaseAction(task) => {
+                // assume all other accounts are Small accounts.
+                let other_accounts_budget =
+                    task.action.account_metas_per_program.len() as u32
+                        * AccountSizeClass::Small.size_budget();
+
+                call_handler_size_budget(
+                    AccountSizeClass::Medium,
+                    other_accounts_budget,
+                )
+            }
+            ArgsTaskType::Undelegate(_) => {
+                undelegate_size_budget(AccountSizeClass::Huge)
+            }
+            ArgsTaskType::Finalize(_) => {
+                finalize_size_budget(AccountSizeClass::Huge)
+            }
         }
     }
 

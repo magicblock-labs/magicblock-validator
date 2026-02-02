@@ -1,6 +1,6 @@
 use std::{collections::HashSet, path::Path, sync::Arc};
 
-use log::*;
+use magicblock_program::magic_scheduled_base_intent::ScheduledIntentBundle;
 use magicblock_rpc_client::MagicblockRpcClient;
 use magicblock_table_mania::{GarbageCollectorConfig, TableMania};
 use solana_keypair::Keypair;
@@ -8,6 +8,7 @@ use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_signer::Signer;
 use tokio::sync::broadcast;
+use tracing::{error, instrument};
 
 use crate::{
     config::ChainConfig,
@@ -19,7 +20,6 @@ use crate::{
         CommitStatusRow, IntentPersister, IntentPersisterImpl,
         MessageSignatures,
     },
-    types::ScheduledBaseIntentWrapper,
 };
 
 pub(crate) struct CommittorProcessor {
@@ -121,29 +121,23 @@ impl CommittorProcessor {
         Ok(signatures)
     }
 
-    pub async fn schedule_base_intents(
+    #[instrument(skip(self, intent_bundles))]
+    pub async fn schedule_intent_bundle(
         &self,
-        base_intents: Vec<ScheduledBaseIntentWrapper>,
+        intent_bundles: Vec<ScheduledIntentBundle>,
     ) -> CommittorServiceResult<()> {
-        let intents = base_intents
-            .iter()
-            .map(|base_intent| base_intent.inner.clone())
-            .collect::<Vec<_>>();
-        if let Err(err) = self.persister.start_base_intents(&intents) {
+        if let Err(err) = self.persister.start_base_intents(&intent_bundles) {
             // We will still try to perform the commits, but the fact that we cannot
             // persist the intent is very serious and we should probably restart the
             // valiator
-            error!(
-                "DB EXCEPTION: Failed to persist changeset to be committed: {:?}",
-                err
-            );
+            error!(error = ?err, "DB EXCEPTION: Failed to persist changeset");
         };
 
         self.commits_scheduler
-            .schedule(base_intents)
+            .schedule(intent_bundles)
             .await
             .inspect_err(|err| {
-                error!("Failed to schedule base intent: {}", err);
+                error!(error = ?err, "Failed to schedule intent");
             })?;
 
         Ok(())

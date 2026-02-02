@@ -9,7 +9,6 @@ use std::{
 };
 
 use bincode::{deserialize, serialize};
-use log::*;
 use magicblock_core::link::blocks::BlockHash;
 use magicblock_metrics::metrics::{
     start_ledger_disable_compactions_timer, start_ledger_shutdown_timer,
@@ -31,6 +30,7 @@ use solana_transaction_status::{
     ConfirmedTransactionWithStatusMeta, TransactionStatusMeta,
     VersionedConfirmedBlock, VersionedTransactionWithStatusMeta,
 };
+use tracing::*;
 
 use crate::{
     conversions::transaction,
@@ -131,7 +131,7 @@ impl Ledger {
 
         // Open the database
         let mut measure = Measure::start("ledger open");
-        info!("Opening ledger at {:?}", ledger_path);
+        info!(path = ?ledger_path, "Opening ledger");
         let db = Database::open(&ledger_path, options)?;
 
         let transaction_status_cf = db.column();
@@ -271,7 +271,10 @@ impl Ledger {
             _ => 0,
         };
 
-        info!("initializing lowest cleanup slot: {}", lowest_cleanup_slot);
+        info!(
+            slot = lowest_cleanup_slot,
+            "Initializing lowest cleanup slot"
+        );
         self.set_lowest_cleanup_slot(lowest_cleanup_slot);
 
         Ok(())
@@ -536,13 +539,17 @@ impl Ledger {
         // 3. Find all matching (slot, signature) pairs sorted newest to oldest
         let matching = {
             let mut matching = Vec::new();
-            let (_lock, _) = self.ensure_lowest_cleanup_slot();
+            let (_lock, lowest_available_slot) =
+                self.ensure_lowest_cleanup_slot();
 
             // The newest signatures are inside the slot that contains the upper
             // limit signature if it was provided.
             // We include the ones with lower tx_index than that signature
             // (if any for that account).
-            if found_upper && include_upper {
+            if found_upper
+                && include_upper
+                && upper_slot >= lowest_available_slot
+            {
                 // SAFETY: found_upper cannot be true if this is None
                 let upper_signature = upper_limit_signature.unwrap();
 
@@ -623,6 +630,9 @@ impl Ledger {
                 for ((address, tx_slot, _tx_idx, signature), _) in
                     index_iterator
                 {
+                    if tx_slot < lowest_available_slot {
+                        break;
+                    }
                     // Bail out if we reached the max number of signatures to collect
                     if matching.len() >= limit {
                         break;
@@ -665,7 +675,10 @@ impl Ledger {
 
             // The oldest signatures are inside the slot that contains the lower
             // limit signature if it was provided
-            if found_lower && include_lower {
+            if found_lower
+                && include_lower
+                && lower_slot >= lowest_available_slot
+            {
                 // SAFETY: found_lower cannot be true if this is None
                 let lower_signature = lower_limit_signature.unwrap();
 
@@ -702,6 +715,9 @@ impl Ledger {
                     for ((address, tx_slot, tx_idx, signature), _) in
                         index_iterator
                     {
+                        if tx_slot < lowest_available_slot {
+                            break;
+                        }
                         // Bail out if we reached the max number of signatures to collect
                         if matching.len() >= limit {
                             break;
@@ -862,13 +878,13 @@ impl Ledger {
         &self,
         signature: Signature,
         slot: Slot,
-        transaction: SanitizedTransaction,
+        transaction: &SanitizedTransaction,
         status: TransactionStatusMeta,
-    ) -> LedgerResult<()> {
+    ) -> LedgerResult<u32> {
         let tx_account_locks = transaction.get_account_locks_unchecked();
 
         // 1. Write Transaction Status
-        self.write_transaction_status(
+        let index = self.write_transaction_status(
             slot,
             signature,
             tx_account_locks.writable,
@@ -884,7 +900,7 @@ impl Ledger {
             .put_protobuf((signature, slot), &transaction)?;
         self.transaction_cf.try_increase_entry_counter(1);
 
-        Ok(())
+        Ok(index)
     }
 
     pub fn read_transaction(
@@ -995,7 +1011,7 @@ impl Ledger {
         writable_keys: Vec<&Pubkey>,
         readonly_keys: Vec<&Pubkey>,
         status: TransactionStatusMeta,
-    ) -> LedgerResult<()> {
+    ) -> LedgerResult<u32> {
         let transaction_slot_index = self
             .block_txn_indexes
             .entry(slot)
@@ -1039,7 +1055,7 @@ impl Ledger {
             );
         }
 
-        Ok(())
+        Ok(transaction_slot_index)
     }
 
     /// Returns an iterator over all transaction statuses.
@@ -1366,6 +1382,7 @@ mod tests {
         VersionedTransactionWithStatusMeta,
     };
     use tempfile::{Builder, TempDir};
+    use test_kit::init_logger;
 
     use super::*;
 
@@ -1500,7 +1517,7 @@ mod tests {
             transaction
                 .try_into()
                 .map_err(|e| {
-                    error!("VersionedTransaction::try_into failed: {:?}", e)
+                    error!(error = ?e, "VersionedTransaction::try_into failed")
                 })
                 .unwrap(),
             Default::default(),
@@ -1508,7 +1525,7 @@ mod tests {
             SimpleAddressLoader::Enabled(meta.loaded_addresses.clone()),
             &Default::default(),
         )
-        .map_err(|e| error!("SanitizedTransaction::try_new failed: {:?}", e))
+        .map_err(|e| error!(error = ?e, "SanitizedTransaction::try_new failed"))
         .unwrap();
 
         (
@@ -1529,6 +1546,7 @@ mod tests {
 
     #[test]
     fn test_persist_transaction_status() {
+        init_logger!();
         let ledger_path = get_tmp_ledger_path_auto_delete!();
         let store = Ledger::open(ledger_path.path()).unwrap();
 
@@ -1590,6 +1608,7 @@ mod tests {
 
     #[test]
     fn test_get_transaction_status_by_signature() {
+        init_logger!();
         let ledger_path = get_tmp_ledger_path_auto_delete!();
         let store = Ledger::open(ledger_path.path()).unwrap();
 
@@ -1667,6 +1686,7 @@ mod tests {
 
     #[test]
     fn test_get_complete_transaction_by_signature() {
+        init_logger!();
         let ledger_path = get_tmp_ledger_path_auto_delete!();
         let store = Ledger::open(ledger_path.path()).unwrap();
 
@@ -1704,7 +1724,7 @@ mod tests {
             .write_transaction(
                 sig_uno,
                 slot_uno,
-                sanitized_uno.clone(),
+                &sanitized_uno,
                 tx_uno.tx_with_meta.get_status_meta().unwrap(),
             )
             .is_ok());
@@ -1730,7 +1750,7 @@ mod tests {
             .write_transaction(
                 sig_dos,
                 slot_dos,
-                sanitized_dos.clone(),
+                &sanitized_dos,
                 tx_dos.tx_with_meta.get_status_meta().unwrap(),
             )
             .is_ok());
@@ -1748,6 +1768,7 @@ mod tests {
 
     #[test]
     fn test_find_address_signatures_no_intra_slot_limits() {
+        init_logger!();
         let ledger_path = get_tmp_ledger_path_auto_delete!();
         let store = Ledger::open(ledger_path.path()).unwrap();
 
@@ -2108,6 +2129,7 @@ mod tests {
 
     #[test]
     fn test_find_address_signatures_intra_slot_limits() {
+        init_logger!();
         let ledger_path = get_tmp_ledger_path_auto_delete!();
         let store = Ledger::open(ledger_path.path()).unwrap();
 
@@ -2349,6 +2371,7 @@ mod tests {
 
     #[test]
     fn test_get_confirmed_signatures_with_memos() {
+        init_logger!();
         let ledger_path = get_tmp_ledger_path_auto_delete!();
         let store = Ledger::open(ledger_path.path()).unwrap();
 
@@ -2366,7 +2389,7 @@ mod tests {
                 .write_transaction(
                     sig_uno,
                     slot_uno,
-                    sanitized_uno.clone(),
+                    &sanitized_uno,
                     tx_uno.tx_with_meta.get_status_meta().unwrap(),
                 )
                 .is_ok());
@@ -2389,7 +2412,7 @@ mod tests {
                 .write_transaction(
                     sig_dos,
                     slot_dos,
-                    sanitized_dos.clone(),
+                    &sanitized_dos,
                     tx_dos.tx_with_meta.get_status_meta().unwrap(),
                 )
                 .is_ok());

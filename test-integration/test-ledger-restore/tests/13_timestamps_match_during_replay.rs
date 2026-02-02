@@ -5,7 +5,6 @@ use integration_test_tools::{
     expect, loaded_accounts::LoadedAccounts, tmpdir::resolve_tmp_dir,
     validator::cleanup,
 };
-use log::*;
 use solana_sdk::{
     signature::{Keypair, Signature},
     signer::Signer,
@@ -17,6 +16,7 @@ use test_ledger_restore::{
     setup_validator_with_local_remote, transfer_lamports,
     wait_for_ledger_persist, SNAPSHOT_FREQUENCY, TMP_DIR_LEDGER,
 };
+use tracing::*;
 
 // In this test we ensure that the timestamps of the blocks in the restored
 // ledger match the timestamps of the blocks in the original ledger.

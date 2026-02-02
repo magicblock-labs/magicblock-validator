@@ -1,10 +1,10 @@
 use std::{future::Future, ops::ControlFlow, time::Duration};
 
-use log::error;
 use solana_rpc_client_api::client_error::ErrorKind;
 use solana_signature::Signature;
 use solana_transaction_error::TransactionError;
 use tokio::time::{sleep, Instant};
+use tracing::error;
 
 use crate::{MagicBlockRpcClientError, MagicBlockSendTransactionOutcome};
 
@@ -124,11 +124,11 @@ where
             }
         }
         err @
-        (MagicBlockRpcClientError::GetSlot(_)
-        | MagicBlockRpcClientError::LookupTableDeserialize(_)) => {
-            error!("Unexpected error during send transaction: {:?}", err);
-            err.into()
-        }
+         (MagicBlockRpcClientError::GetSlot(_)
+         | MagicBlockRpcClientError::LookupTableDeserialize(_)) => {
+             error!(error = ?err, "Unexpected error during send transaction");
+             err.into()
+         }
         err
         @ (MagicBlockRpcClientError::GetLatestBlockhash(_)
         | MagicBlockRpcClientError::CannotGetTransactionSignatureStatus(

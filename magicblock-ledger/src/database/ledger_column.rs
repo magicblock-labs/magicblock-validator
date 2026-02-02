@@ -7,10 +7,10 @@ use std::{
 };
 
 use bincode::{deserialize, serialize};
-use log::warn;
 use prost::Message;
 use rocksdb::{properties as RocksProperties, CStrLike, ColumnFamily};
 use serde::de::DeserializeOwned;
+use tracing::warn;
 
 use super::{
     columns::{
@@ -651,7 +651,7 @@ pub fn try_decrease_entry_counter(entry_counter: &AtomicI64, by: u64) {
                 return;
             }
         } else {
-            warn!("Negative entry counter!");
+            warn!(counter = prev, "Negative entry counter");
             // In case value fixed to valid one in between
             if entry_counter
                 .compare_exchange(

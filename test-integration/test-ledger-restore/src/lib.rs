@@ -12,7 +12,6 @@ use integration_test_tools::{
     },
     IntegrationTestContext,
 };
-use log::*;
 use magicblock_config::{
     config::{
         accounts::AccountsDbConfig, ledger::LedgerConfig,
@@ -38,6 +37,7 @@ use solana_sdk::{
     transaction::Transaction,
 };
 use tempfile::TempDir;
+use tracing::*;
 
 pub const TMP_DIR_LEDGER: &str = "TMP_DIR_LEDGER";
 pub const SNAPSHOT_FREQUENCY: u64 = 2;

@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 
-use solana_account::{state_traits::StateMut, Account, ReadableAccount};
+// no direct token remap helpers needed here; handled in CommittedAccount builder
+use solana_account::{state_traits::StateMut, ReadableAccount};
 use solana_instruction::error::InstructionError;
 use solana_log_collector::ic_msg;
 use solana_program_runtime::invoke_context::InvokeContext;
@@ -9,7 +10,8 @@ use solana_pubkey::Pubkey;
 use crate::{
     magic_scheduled_base_intent::{
         validate_commit_schedule_permissions, CommitAndUndelegate, CommitType,
-        CommittedAccount, MagicBaseIntent, ScheduledBaseIntent, UndelegateType,
+        CommittedAccount, MagicBaseIntent, ScheduledIntentBundle,
+        UndelegateType,
     },
     schedule_transactions,
     utils::{
@@ -121,9 +123,10 @@ pub(crate) fn process_schedule_commit(
     // Assert all accounts are delegated, owned by invoking program OR are signers
     // Also works if the validator authority is a signer
     // NOTE: we don't require PDAs to be signers as in our case verifying that the
-    // program owning the PDAs invoked us via CPI is sufficient
+    // program owning the PDAs invoked us directly via CPI is sufficient
     // Thus we can be `invoke`d unsigned and no seeds need to be provided
     let mut committed_accounts: Vec<CommittedAccount> = Vec::new();
+    let mut seen_committed_pubkeys: HashSet<Pubkey> = HashSet::new();
     for idx in COMMITTEES_START..ix_accs_len {
         let acc_pubkey =
             get_instruction_pubkey_with_idx(transaction_context, idx as u16)?;
@@ -140,13 +143,13 @@ pub(crate) fn process_schedule_commit(
         }
 
         {
+            let is_delegated = acc.borrow().delegated();
+
             if opts.request_undelegation {
-                // Check if account is writable and also undelegated
-                // SVM doesn't check delegated, so we need to do extra checks here
-                // Otherwise account could be undelegated twice
-                let acc_writable =
+                // Must be writable and delegated to avoid double-undelegation
+                let is_writable =
                     get_writable_with_idx(transaction_context, idx as u16)?;
-                if !acc_writable || !acc.borrow().delegated() {
+                if !is_writable || !is_delegated {
                     ic_msg!(
                         invoke_context,
                         "ScheduleCommit ERR: account {} is required to be writable and delegated in order to be undelegated",
@@ -154,14 +157,14 @@ pub(crate) fn process_schedule_commit(
                     );
                     return Err(InstructionError::ReadonlyDataModified);
                 }
-            } else if !acc.borrow().delegated() {
+            } else if !is_delegated {
                 ic_msg!(
                     invoke_context,
                     "ScheduleCommit ERR: account {} is required to be delegated to the current validator, in order to be committed",
                     acc_pubkey
                 );
                 return Err(InstructionError::IllegalOwner);
-            };
+            }
 
             // Validate committed account was scheduled by valid authority
             let acc_owner = *acc.borrow().owner();
@@ -173,14 +176,28 @@ pub(crate) fn process_schedule_commit(
                 &signers,
             )?;
 
-            let mut account: Account = acc.borrow().to_owned().into();
-            account.owner = parent_program_id.cloned().unwrap_or(account.owner);
+            let committed = CommittedAccount::from_account_shared(
+                *acc_pubkey,
+                &acc.borrow(),
+                parent_program_id.cloned(),
+            );
 
-            #[allow(clippy::unnecessary_literal_unwrap)]
-            committed_accounts.push(CommittedAccount {
-                pubkey: *acc_pubkey,
-                account,
-            });
+            if &committed.pubkey != acc_pubkey {
+                ic_msg!(
+                    invoke_context,
+                    "ScheduleCommit: remapping ATA {} -> eATA {}",
+                    acc_pubkey,
+                    committed.pubkey
+                );
+            }
+
+            // Backwards-compat: merge duplicate accounts (by final restored pubkey).
+            // Keep the first occurrence and ignore subsequent duplicates.
+            if !(seen_committed_pubkeys.insert(committed.pubkey)) {
+                continue;
+            }
+
+            committed_accounts.push(committed);
         }
 
         if opts.request_undelegation {
@@ -249,14 +266,16 @@ pub(crate) fn process_schedule_commit(
         })
     } else {
         MagicBaseIntent::Commit(CommitType::Standalone(committed_accounts))
-    };
-    let scheduled_base_intent = ScheduledBaseIntent {
+    }
+    .into();
+
+    let scheduled_base_intent = ScheduledIntentBundle {
         id: intent_id,
         slot: clock.slot,
         blockhash,
-        action_sent_transaction,
+        sent_transaction: action_sent_transaction,
         payer: *payer_pubkey,
-        base_intent,
+        intent_bundle: base_intent,
     };
 
     context.add_scheduled_action(scheduled_base_intent);

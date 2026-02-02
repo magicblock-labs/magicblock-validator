@@ -2,13 +2,13 @@ use integration_test_tools::{
     expect, loaded_accounts::LoadedAccounts, validator::cleanup,
     IntegrationTestContext,
 };
-use log::*;
 use serial_test::file_serial;
 use test_config::{
     count_lookup_table_transactions_on_chain, delegate_and_clone,
     start_validator_with_clone_config, wait_for_startup,
 };
 use test_kit::init_logger;
+use tracing::*;
 
 fn lookup_table_interaction(config: bool) -> (usize, usize, usize) {
     let lookup_table_tx_count_before =

@@ -6,12 +6,10 @@ use std::{
     time::Duration,
 };
 
-use log::*;
 use magicblock_accounts::ScheduledCommitsProcessor;
-use magicblock_accounts_db::AccountsDb;
-use magicblock_core::{
-    link::{blocks::BlockUpdateTx, transactions::TransactionSchedulerHandle},
-    traits::AccountsBank,
+use magicblock_accounts_db::{traits::AccountsBank, AccountsDb};
+use magicblock_core::link::{
+    blocks::BlockUpdateTx, transactions::TransactionSchedulerHandle,
 };
 use magicblock_ledger::{LatestBlock, Ledger};
 use magicblock_magic_program_api as magic_program;
@@ -19,6 +17,7 @@ use magicblock_metrics::metrics;
 use magicblock_program::{instruction_utils::InstructionUtils, MagicContext};
 use solana_account::ReadableAccount;
 use tokio_util::sync::CancellationToken;
+use tracing::*;
 
 use crate::slot::advance_slot_and_update_ledger;
 
@@ -46,11 +45,11 @@ pub fn init_slot_ticker<C: ScheduledCommitsProcessor>(
                     &block_updates_tx,
                 );
             if let Err(err) = update_ledger_result {
-                error!("Failed to write block: {:?}", err);
+                error!(error = ?err, "Failed to write block");
             }
 
             if log {
-                debug!("Advanced to slot {}", next_slot);
+                debug!(slot = next_slot, "Advanced to slot");
             }
             metrics::inc_slot();
 
@@ -72,13 +71,14 @@ pub fn init_slot_ticker<C: ScheduledCommitsProcessor>(
                 .await;
             }
             if log {
-                debug!("Advanced to slot {}", next_slot);
+                debug!(slot = next_slot, "Advanced to slot");
             }
         }
         metrics::inc_slot();
     })
 }
 
+#[instrument(skip(committor_processor, transaction_scheduler, latest_block))]
 async fn handle_scheduled_commits<C: ScheduledCommitsProcessor>(
     committor_processor: &Arc<C>,
     transaction_scheduler: &TransactionSchedulerHandle,
@@ -90,7 +90,7 @@ async fn handle_scheduled_commits<C: ScheduledCommitsProcessor>(
         latest_block.load().blockhash,
     );
     if let Err(err) = transaction_scheduler.execute(tx).await {
-        error!("Failed to accept scheduled commits: {:?}", err);
+        error!(error = ?err, "Failed to accept scheduled commits");
         return;
     }
 
@@ -98,7 +98,7 @@ async fn handle_scheduled_commits<C: ScheduledCommitsProcessor>(
     // TODO: fix the possible delay here
     // https://github.com/magicblock-labs/magicblock-validator/issues/104
     if let Err(err) = committor_processor.process().await {
-        error!("Failed to process scheduled commits: {:?}", err);
+        error!(error = ?err, "Failed to process scheduled commits");
     }
 }
 #[allow(unused_variables)]
@@ -111,7 +111,9 @@ pub fn init_system_metrics_ticker(
     fn try_set_ledger_storage_size(ledger: &Ledger) {
         match ledger.storage_size() {
             Ok(byte_size) => metrics::set_ledger_size(byte_size),
-            Err(err) => warn!("Failed to get ledger storage size: {:?}", err),
+            Err(err) => {
+                warn!(error = ?err, "Failed to get ledger storage size")
+            }
         }
     }
     fn set_accounts_storage_size(accounts_db: &AccountsDb) {
@@ -120,10 +122,7 @@ pub fn init_system_metrics_ticker(
     }
     fn set_accounts_count(accounts_db: &AccountsDb) {
         metrics::set_accounts_count(
-            accounts_db
-                .get_accounts_count()
-                .try_into()
-                .unwrap_or(i64::MAX),
+            accounts_db.account_count().try_into().unwrap_or(i64::MAX),
         );
     }
 
@@ -143,6 +142,6 @@ pub fn init_system_metrics_ticker(
             }
         }
 
-        info!("System metrics ticker shutdown!");
+        info!("System metrics ticker shutdown");
     })
 }

@@ -1,18 +1,29 @@
-use std::sync::Arc;
+use std::{
+    sync::{atomic::AtomicU16, Arc},
+    time::Duration,
+};
 
 use futures_util::stream::{FuturesUnordered, StreamExt};
-use log::*;
+use magicblock_core::logger::log_trace_warn;
 use solana_pubkey::Pubkey;
 use tokio::sync::oneshot;
+use tracing::*;
+
+/// Timeout for each subscription attempt
+/// NOTE: if retries are defined the timeout is applied per retry
+const SUBSCRIBE_TIMEOUT: Duration = Duration::from_millis(2_000);
+/// Timeout for each unsubscription attempt
+const UNSUBSCRIBE_TIMEOUT: Duration = Duration::from_millis(1_000);
 
 use crate::remote_account_provider::{
     chain_pubsub_client::{ChainPubsubClient, ReconnectableClient},
     errors::{RemoteAccountProviderError, RemoteAccountProviderResult},
+    DEFAULT_SUBSCRIPTION_RETRIES,
 };
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum AccountSubscriptionTask {
-    Subscribe(Pubkey, usize),
+    Subscribe(Pubkey, Option<usize>, usize),
     SubscribeProgram(Pubkey, usize),
     Unsubscribe(Pubkey),
     Shutdown,
@@ -22,7 +33,7 @@ impl AccountSubscriptionTask {
     fn op_name(&self) -> &'static str {
         use AccountSubscriptionTask::*;
         match self {
-            Subscribe(_, _) => "Subscribe",
+            Subscribe(_, _, _) => "Subscribe",
             SubscribeProgram(_, _) => "SubscribeProgram",
             Unsubscribe(_) => "Unsubscribe",
             Shutdown => "Shutdown",
@@ -31,6 +42,7 @@ impl AccountSubscriptionTask {
 }
 
 impl AccountSubscriptionTask {
+    #[instrument(skip(clients), fields(operation = %self.op_name()))]
     pub async fn process<T>(
         self,
         clients: Vec<Arc<T>>,
@@ -42,7 +54,7 @@ impl AccountSubscriptionTask {
 
         let total_clients = clients.len();
         let required_confirmations = match &self {
-            Subscribe(_, n) | SubscribeProgram(_, n) => *n,
+            Subscribe(_, _, n) | SubscribeProgram(_, n) => *n,
             _ => 1,
         };
 
@@ -69,7 +81,7 @@ impl AccountSubscriptionTask {
             );
         }
 
-        if matches!(self, Subscribe(_, _) | SubscribeProgram(_, _))
+        if matches!(self, Subscribe(_, _, _) | SubscribeProgram(_, _))
             && required_confirmations == 0
         {
             return Err(
@@ -83,34 +95,79 @@ impl AccountSubscriptionTask {
         let (tx, rx) = oneshot::channel();
         tokio::spawn(async move {
             let mut futures = FuturesUnordered::new();
-            for (i, client) in clients.iter().enumerate() {
+            for client in clients.iter() {
                 let client = client.clone();
                 let task = self.clone();
                 futures.push(async move {
                     let (result, count_as_success) = match task {
-                        Subscribe(pubkey, _) => (
-                            client.subscribe(pubkey).await,
-                            client.subs_immediately(),
-                        ),
-                        SubscribeProgram(program_id, _) => (
-                            client.subscribe_program(program_id).await,
-                            client.subs_immediately(),
-                        ),
+                        Subscribe(pubkey, retries, _) => {
+                            let result = match tokio::time::timeout(
+                                SUBSCRIBE_TIMEOUT * (retries.unwrap_or(DEFAULT_SUBSCRIPTION_RETRIES) as u32 + 1),
+                                client.subscribe(pubkey, retries),
+                            )
+                            .await
+                            {
+                                Ok(res) => res,
+                                Err(_) => Err(RemoteAccountProviderError::AccountSubscriptionsTaskFailed(
+                                    format!(
+                                        "Subscribe timed out after {:?} for client {}",
+                                        SUBSCRIBE_TIMEOUT,
+                                        client.id()
+                                    ),
+                                )),
+                            };
+                            (result, client.subs_immediately())
+                        }
+                        SubscribeProgram(program_id, _) => {
+                            let result = match tokio::time::timeout(
+                                SUBSCRIBE_TIMEOUT,
+                                client.subscribe_program(program_id),
+                            )
+                            .await
+                            {
+                                Ok(res) => res,
+                                Err(_) => Err(RemoteAccountProviderError::AccountSubscriptionsTaskFailed(
+                                    format!(
+                                        "SubscribeProgram timed out after {:?} for client {}",
+                                        SUBSCRIBE_TIMEOUT,
+                                        client.id()
+                                    ),
+                                )),
+                            };
+                            (result, client.subs_immediately())
+                        }
                         Unsubscribe(pubkey) => {
-                            (client.unsubscribe(pubkey).await, true)
+                            let result = match tokio::time::timeout(
+                                UNSUBSCRIBE_TIMEOUT,
+                                client.unsubscribe(pubkey),
+                            )
+                            .await
+                            {
+                                Ok(res) => res,
+                                Err(_) => Err(RemoteAccountProviderError::AccountSubscriptionsTaskFailed(
+                                    format!(
+                                        "Unsubscribe timed out after {:?} for client {}",
+                                        UNSUBSCRIBE_TIMEOUT,
+                                        client.id()
+                                    ),
+                                )),
+                            };
+                            (result, true)
                         }
                         Shutdown => (client.shutdown().await, true),
                     };
-                    (i, result, count_as_success)
+                    (result, count_as_success, client.id().to_string())
                 });
             }
 
             let mut errors = Vec::new();
+            let mut failed_client_ids = Vec::new();
             let mut tx = Some(tx);
             let mut successes = 0;
             let op_name = self.op_name();
 
-            while let Some((i, result, count_as_success)) = futures.next().await
+            while let Some((result, count_as_success, client_id)) =
+                futures.next().await
             {
                 match result {
                     Ok(_) => {
@@ -125,7 +182,8 @@ impl AccountSubscriptionTask {
                         }
                     }
                     Err(e) => {
-                        errors.push(format!("Client {}: {:?}", i, e));
+                        errors.push(format!("Client {}: {:?}", client_id, e));
+                        failed_client_ids.push(client_id);
                     }
                 }
             }
@@ -148,10 +206,26 @@ impl AccountSubscriptionTask {
                 // ones that failed.
                 // The failed clients will also trigger the reconnection logic
                 // which takes care of fixing the RPC connection.
-                warn!(
-                    "Some clients failed to {}: {}",
-                    op_name.to_lowercase(),
-                    errors.join(", ")
+
+                static CLIENTS_FAILED_OPERATION_COUNT: AtomicU16 =
+                    AtomicU16::new(0);
+                let data = format!("operation={}, total_clients={}, required_confirmations={}, failed_clients={}",
+                    op_name,
+                    total_clients,
+                    required_confirmations,
+                    failed_client_ids.join(", "),
+                );
+                let err =
+                    RemoteAccountProviderError::AccountSubscriptionsTaskFailed(
+                        errors.join(", "),
+                    );
+                log_trace_warn(
+                    "Some clients failed",
+                    "Some clients failed multiple times",
+                    &data,
+                    &err,
+                    100,
+                    &CLIENTS_FAILED_OPERATION_COUNT,
                 );
             }
         });
@@ -186,7 +260,7 @@ mod tests {
     async fn test_subscribe_single_confirmation() {
         let (mock_client, _abort_sndr, _abort_rcvr) = create_mock_client();
         let pubkey = Pubkey::new_unique();
-        let task = AccountSubscriptionTask::Subscribe(pubkey, 1);
+        let task = AccountSubscriptionTask::Subscribe(pubkey, None, 1);
 
         let result = task.process(vec![Arc::new(mock_client)]).await;
 
@@ -199,7 +273,7 @@ mod tests {
         let (mock_client2, _abort_sndr2, _abort_rcvr2) = create_mock_client();
         let (mock_client3, _abort_sndr3, _abort_rcvr3) = create_mock_client();
         let pubkey = Pubkey::new_unique();
-        let task = AccountSubscriptionTask::Subscribe(pubkey, 2);
+        let task = AccountSubscriptionTask::Subscribe(pubkey, None, 2);
 
         let result = task
             .process(vec![
@@ -222,7 +296,7 @@ mod tests {
         mock_client2.simulate_disconnect();
 
         let pubkey = Pubkey::new_unique();
-        let task = AccountSubscriptionTask::Subscribe(pubkey, 2);
+        let task = AccountSubscriptionTask::Subscribe(pubkey, None, 2);
 
         let result = task
             .process(vec![
@@ -248,7 +322,7 @@ mod tests {
         mock_client3.simulate_disconnect();
 
         let pubkey = Pubkey::new_unique();
-        let task = AccountSubscriptionTask::Subscribe(pubkey, 2);
+        let task = AccountSubscriptionTask::Subscribe(pubkey, None, 2);
 
         let result = task
             .process(vec![
@@ -269,7 +343,7 @@ mod tests {
     #[tokio::test]
     async fn test_subscribe_no_clients() {
         let pubkey = Pubkey::new_unique();
-        let task = AccountSubscriptionTask::Subscribe(pubkey, 1);
+        let task = AccountSubscriptionTask::Subscribe(pubkey, None, 1);
 
         let result: RemoteAccountProviderResult<()> =
             task.process::<ChainPubsubClientMock>(vec![]).await;
@@ -287,7 +361,7 @@ mod tests {
         let (mock_client2, _abort_sndr2, _abort_rcvr2) = create_mock_client();
 
         let pubkey = Pubkey::new_unique();
-        let task = AccountSubscriptionTask::Subscribe(pubkey, 0);
+        let task = AccountSubscriptionTask::Subscribe(pubkey, None, 0);
 
         let result = task
             .process(vec![Arc::new(mock_client1), Arc::new(mock_client2)])
@@ -342,7 +416,7 @@ mod tests {
         mock_client3.simulate_disconnect();
 
         let pubkey = Pubkey::new_unique();
-        let task = AccountSubscriptionTask::Subscribe(pubkey, 2);
+        let task = AccountSubscriptionTask::Subscribe(pubkey, None, 2);
 
         let result = task
             .process(vec![

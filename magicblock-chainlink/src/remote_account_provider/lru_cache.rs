@@ -1,10 +1,11 @@
-use std::{collections::HashSet, num::NonZeroUsize, sync::Mutex};
+use std::{collections::HashSet, num::NonZeroUsize};
 
-use log::*;
 use lru::LruCache;
 use magicblock_metrics::metrics::inc_evicted_accounts_count;
+use parking_lot::Mutex;
 use solana_pubkey::Pubkey;
 use solana_sdk_ids::sysvar;
+use tracing::*;
 
 use crate::submux::SubscribedAccountsTracker;
 
@@ -37,19 +38,16 @@ impl AccountsLruCache {
     }
 
     pub fn promote_multi(&self, pubkeys: &[&Pubkey]) {
-        if log::log_enabled!(log::Level::Trace) {
+        if tracing::enabled!(tracing::Level::TRACE) {
             let pubkeys = pubkeys
                 .iter()
                 .map(|pk| pk.to_string())
                 .collect::<Vec<_>>()
                 .join(", ");
-            trace!("Promoting: {pubkeys}");
+            trace!(pubkeys = pubkeys, "Promoting accounts");
         }
 
-        let mut subs = self
-            .subscribed_accounts
-            .lock()
-            .expect("subscribed_accounts lock poisoned");
+        let mut subs = self.subscribed_accounts.lock();
         for key in pubkeys {
             subs.promote(key);
         }
@@ -60,20 +58,17 @@ impl AccountsLruCache {
         // never be evicted.
         // Thus we ignore them here in order to never cause a removal/unsubscribe.
         if self.accounts_to_never_evict.contains(&pubkey) {
-            trace!("Account {pubkey} is in the never-evict set, skipping");
+            trace!(pubkey = %pubkey, "Account is in the never-evict set, skipping");
             return None;
         }
 
-        let mut subs = self
-            .subscribed_accounts
-            .lock()
-            .expect("subscribed_accounts lock poisoned");
+        let mut subs = self.subscribed_accounts.lock();
         // If the pubkey is already in the cache, we just promote it
         if subs.promote(&pubkey) {
-            trace!("Account promoted: {pubkey}");
+            trace!(pubkey = %pubkey, "Account promoted");
             return None;
         }
-        trace!("Adding new account: {pubkey}");
+        trace!(pubkey = %pubkey, "Adding new account");
 
         // Otherwise we add it new and possibly deal with an eviction
         // on the caller side
@@ -87,17 +82,14 @@ impl AccountsLruCache {
                 evicted_pubkey, pubkey,
                 "Should not evict the same pubkey that we added"
             );
-            trace!("Evict candidate: {evicted_pubkey}");
+            trace!(evicted_pubkey = %evicted_pubkey, "Evict candidate");
         }
 
         evicted
     }
 
     pub fn contains(&self, pubkey: &Pubkey) -> bool {
-        let subs = self
-            .subscribed_accounts
-            .lock()
-            .expect("subscribed_accounts lock poisoned");
+        let subs = self.subscribed_accounts.lock();
         subs.contains(pubkey)
     }
 
@@ -106,12 +98,9 @@ impl AccountsLruCache {
             !self.accounts_to_never_evict.contains(pubkey),
             "Cannot remove an account that is not supposed to be evicted: {pubkey}"
         );
-        let mut subs = self
-            .subscribed_accounts
-            .lock()
-            .expect("subscribed_accounts lock poisoned");
+        let mut subs = self.subscribed_accounts.lock();
         if subs.pop(pubkey).is_some() {
-            trace!("Removed account: {pubkey}");
+            trace!(pubkey = %pubkey, "Removed account");
             true
         } else {
             false
@@ -119,10 +108,7 @@ impl AccountsLruCache {
     }
 
     pub fn len(&self) -> usize {
-        let subs = self
-            .subscribed_accounts
-            .lock()
-            .expect("subscribed_accounts lock poisoned");
+        let subs = self.subscribed_accounts.lock();
         subs.len()
     }
 
@@ -139,20 +125,14 @@ impl AccountsLruCache {
     }
 
     pub fn pubkeys(&self) -> Vec<Pubkey> {
-        let subs = self
-            .subscribed_accounts
-            .lock()
-            .expect("subscribed_accounts lock poisoned");
+        let subs = self.subscribed_accounts.lock();
         subs.iter().map(|(k, _)| *k).collect()
     }
 }
 
 impl SubscribedAccountsTracker for AccountsLruCache {
     fn subscribed_accounts(&self) -> HashSet<Pubkey> {
-        let subs = self
-            .subscribed_accounts
-            .lock()
-            .expect("subscribed_accounts lock poisoned");
+        let subs = self.subscribed_accounts.lock();
         subs.iter().map(|(k, _)| *k).collect()
     }
 }

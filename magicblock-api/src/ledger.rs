@@ -5,12 +5,12 @@ use std::{
 };
 
 use fd_lock::{RwLock, RwLockWriteGuard};
-use log::*;
 use magicblock_config::config::LedgerConfig;
 use magicblock_ledger::{Ledger, BLOCKSTORE_DIRECTORY_ROCKS_LEVEL};
 use solana_keypair::Keypair;
 use solana_program::clock::Slot;
 use solana_signer::EncodableKey;
+use tracing::*;
 
 use crate::errors::{ApiError, ApiResult};
 
@@ -23,7 +23,7 @@ pub(crate) fn init(
 ) -> ApiResult<(Ledger, Slot)> {
     if config.reset {
         remove_ledger_directory_if_exists(path).map_err(|err| {
-            error!("Unable to remove the ledger {}: {}", path.display(), err);
+            error!(error = ?err, path = %path.display(), "Unable to remove ledger");
             ApiError::UnableToCleanLedgerDirectory(path.display().to_string())
         })?;
     };

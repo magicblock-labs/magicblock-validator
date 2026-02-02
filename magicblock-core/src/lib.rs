@@ -8,11 +8,14 @@ macro_rules! debug_panic {
         if cfg!(debug_assertions) {
             panic!($($arg)*);
         } else {
-            ::log::error!($($arg)*);
+            ::tracing::error!($($arg)*);
         }
     )
 }
 
 pub mod link;
 pub mod tls;
+pub mod token_programs;
 pub mod traits;
+
+pub mod logger;

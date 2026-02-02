@@ -171,7 +171,8 @@ impl TaskStrategist {
         persistor: &Option<P>,
     ) -> TaskStrategistResult<TransactionStrategy> {
         // Attempt optimizing tasks themselves(using buffers)
-        if Self::optimize_strategy(&mut tasks)? <= MAX_ENCODED_TRANSACTION_SIZE
+        if Self::try_optimize_tx_size_if_needed(&mut tasks)?
+            <= MAX_ENCODED_TRANSACTION_SIZE
         {
             // Persist tasks strategy
             if let Some(persistor) = persistor {
@@ -224,8 +225,12 @@ impl TaskStrategist {
         let placeholder = Keypair::new();
         // Gather all involved keys in tx
         let budgets = TransactionUtils::tasks_compute_units(tasks);
-        let budget_instructions =
-            TransactionUtils::budget_instructions(budgets, u64::default());
+        let size_budgets = TransactionUtils::tasks_accounts_size_budget(tasks);
+        let budget_instructions = TransactionUtils::budget_instructions(
+            budgets,
+            u64::default(),
+            size_budgets,
+        );
         let unique_involved_pubkeys = TransactionUtils::unique_involved_pubkeys(
             tasks,
             &placeholder.pubkey(),
@@ -258,8 +263,12 @@ impl TaskStrategist {
         tasks: &[Box<dyn BaseTask>],
     ) -> Vec<Pubkey> {
         let budgets = TransactionUtils::tasks_compute_units(tasks);
-        let budget_instructions =
-            TransactionUtils::budget_instructions(budgets, u64::default());
+        let size_budgets = TransactionUtils::tasks_accounts_size_budget(tasks);
+        let budget_instructions = TransactionUtils::budget_instructions(
+            budgets,
+            u64::default(),
+            size_budgets,
+        );
 
         TransactionUtils::unique_involved_pubkeys(
             tasks,
@@ -268,9 +277,11 @@ impl TaskStrategist {
         )
     }
 
-    /// Optimizes set of [`TaskDeliveryStrategy`] to fit [`MAX_ENCODED_TRANSACTION_SIZE`]
-    /// Returns size of tx after optimizations
-    fn optimize_strategy(
+    /// Optimizes tasks so as to bring the transaction size within the limit [`MAX_ENCODED_TRANSACTION_SIZE`]
+    /// Returns Ok(size of tx after optimizations) else Err(SignerError).
+    /// Note that the returned size, though possibly optimized one, may still not be under
+    /// the limit MAX_ENCODED_TRANSACTION_SIZE. The caller needs to check and make decision accordingly.
+    fn try_optimize_tx_size_if_needed(
         tasks: &mut [Box<dyn BaseTask>],
     ) -> Result<usize, SignerError> {
         // Get initial transaction size
@@ -325,7 +336,7 @@ impl TaskStrategist {
                 let tmp_task = Box::new(tmp_task) as Box<dyn BaseTask>;
                 std::mem::replace(&mut tasks[index], tmp_task)
             };
-            match task.optimize() {
+            match task.try_optimize_tx_size() {
                 // If we can decrease:
                 // 1. Calculate new tx size & ix size
                 // 2. Insert item's data back in the heap
@@ -391,6 +402,7 @@ mod tests {
             },
             BaseActionTask, TaskStrategy, UndelegateTask,
         },
+        test_utils,
     };
 
     struct MockInfoFetcher;
@@ -400,6 +412,7 @@ mod tests {
         async fn fetch_next_commit_ids(
             &self,
             pubkeys: &[Pubkey],
+            _: u64,
         ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>> {
             Ok(pubkeys.iter().map(|pubkey| (*pubkey, 0)).collect())
         }
@@ -407,6 +420,7 @@ mod tests {
         async fn fetch_rent_reimbursements(
             &self,
             pubkeys: &[Pubkey],
+            _: u64,
         ) -> TaskInfoFetcherResult<Vec<Pubkey>> {
             Ok(pubkeys.iter().map(|_| Pubkey::new_unique()).collect())
         }
@@ -420,6 +434,7 @@ mod tests {
         async fn get_base_accounts(
             &self,
             _pubkeys: &[Pubkey],
+            _: u64,
         ) -> TaskInfoFetcherResult<HashMap<Pubkey, Account>> {
             Ok(Default::default())
         }
@@ -440,6 +455,7 @@ mod tests {
                 executable: false,
                 rent_epoch: 0,
             },
+            remote_slot: Default::default(),
         };
 
         if diff_len == 0 {
@@ -501,6 +517,7 @@ mod tests {
 
     #[test]
     fn test_build_strategy_with_single_small_task() {
+        test_utils::init_test_logger();
         let validator = Pubkey::new_unique();
         let task = create_test_commit_task(1, 100, 0);
         let tasks = vec![Box::new(task) as Box<dyn BaseTask>];
@@ -704,7 +721,7 @@ mod tests {
             Box::new(create_test_commit_task(3, 1000, 0)) as Box<dyn BaseTask>, // Larger task
         ];
 
-        let _ = TaskStrategist::optimize_strategy(&mut tasks);
+        let _ = TaskStrategist::try_optimize_tx_size_if_needed(&mut tasks);
         // The larger task should have been optimized first
         assert!(matches!(tasks[0].strategy(), TaskStrategy::Args));
         assert!(matches!(tasks[1].strategy(), TaskStrategy::Buffer));

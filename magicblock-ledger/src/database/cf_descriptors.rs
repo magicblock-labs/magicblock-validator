@@ -4,8 +4,8 @@ use std::{
     sync::{atomic::AtomicU64, Arc},
 };
 
-use log::*;
 use rocksdb::{ColumnFamilyDescriptor, DBCompressionType, Options, DB};
+use tracing::*;
 
 use super::{
     columns::{should_enable_compression, Column, ColumnName},
@@ -60,7 +60,7 @@ pub fn cf_descriptors(
     let detected_cfs = match DB::list_cf(&Options::default(), path) {
         Ok(detected_cfs) => detected_cfs,
         Err(err) => {
-            debug!("Unable to detect Rocks columns: {err:?}. This is expected for a new ledger.");
+            debug!(error = ?err, "Unable to detect Rocks columns; this is expected for a new ledger");
             vec![]
         }
     };
@@ -75,7 +75,7 @@ pub fn cf_descriptors(
         .collect();
     detected_cfs.iter().for_each(|cf_name| {
             if !known_cfs.contains(cf_name.as_str()) {
-                info!("Detected unknown column {cf_name}, opening column with basic options");
+                info!(column_name = %cf_name, "Detected unknown column; opening with basic options");
                 // This version of the software was unaware of the column, so
                 // it is fair to assume that we will not attempt to read or
                 // write the column. So, set some bare bones settings to avoid

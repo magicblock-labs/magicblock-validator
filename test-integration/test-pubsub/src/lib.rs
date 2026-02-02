@@ -3,7 +3,6 @@ use std::time::Duration;
 use integration_test_tools::{
     conversions::stringify_simulation_result, IntegrationTestContext,
 };
-use log::*;
 use solana_pubsub_client::nonblocking::pubsub_client::PubsubClient;
 use solana_rpc_client_api::config::RpcSimulateTransactionConfig;
 use solana_sdk::{
@@ -13,6 +12,7 @@ use solana_sdk::{
     system_instruction,
     transaction::Transaction,
 };
+use tracing::*;
 
 const VALIDATOR_WS: &str = "ws://127.0.0.1:8900";
 

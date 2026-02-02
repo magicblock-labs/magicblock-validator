@@ -4,7 +4,6 @@ use std::{str::FromStr, thread::sleep, time::Duration};
 
 use anyhow::{Context, Result};
 use borsh::BorshDeserialize;
-use log::*;
 use solana_rpc_client::{
     nonblocking,
     rpc_client::{GetConfirmedSignaturesForAddress2Config, RpcClient},
@@ -31,6 +30,7 @@ use solana_transaction_status::{
     EncodedConfirmedBlock, EncodedConfirmedTransactionWithStatusMeta,
     UiTransactionEncoding,
 };
+use tracing::*;
 use url::Url;
 
 use crate::{
@@ -660,28 +660,72 @@ impl IntegrationTestContext {
         commitment_config: CommitmentConfig,
         on_error: Option<&dyn Fn(Signature)>,
     ) -> anyhow::Result<Signature> {
-        let sig = rpc_client.request_airdrop(pubkey, lamports).with_context(
-            || format!("Failed to airdrop chain account '{:?}'", pubkey),
-        )?;
+        // The chain RPC might not be immediately ready (especially in CI).
+        // Retry requesting the airdrop a few times before giving up.
+        const MAX_ATTEMPTS: u32 = 60; // Up to ~60s with adaptive backoff
+        const MILLIS_UNTIL_RETRY_NORMAL: u64 = 250;
+        const MILLIS_UNTIL_RETRY_RATE_LIMITED: u64 = 1500;
 
-        let succeeded =
-            confirm_transaction(&sig, rpc_client, commitment_config, None)
-                .with_context(|| {
-                    format!(
-                        "Failed to confirm airdrop chain account '{:?}'",
-                        pubkey
+        let mut last_err: Option<anyhow::Error> = None;
+        for attempt in 1..=MAX_ATTEMPTS {
+            match rpc_client.request_airdrop(pubkey, lamports) {
+                Ok(sig) => {
+                    let succeeded = confirm_transaction(
+                        &sig,
+                        rpc_client,
+                        commitment_config,
+                        None,
                     )
-                })?;
-        if !succeeded {
-            if let Some(on_error) = on_error {
-                on_error(sig);
+                    .with_context(|| {
+                        format!(
+                            "Failed to confirm airdrop chain account '{:?}'",
+                            pubkey
+                        )
+                    })?;
+                    if !succeeded {
+                        if let Some(on_error) = on_error {
+                            on_error(sig);
+                        }
+                        return Err(anyhow::anyhow!(
+                            "Failed to airdrop chain account '{:?}'",
+                            pubkey
+                        ));
+                    }
+                    return Ok(sig);
+                }
+                Err(err) => {
+                    let err_msg = err.to_string();
+                    last_err = Some(err.into());
+                    let (reason, delay_ms) = if err_msg
+                        .to_ascii_lowercase()
+                        .contains("rate limit")
+                    {
+                        ("rate-limited", MILLIS_UNTIL_RETRY_RATE_LIMITED)
+                    } else {
+                        ("rpc-error", MILLIS_UNTIL_RETRY_NORMAL)
+                    };
+                    debug!(
+                        "Airdrop request failed for {} ({}; attempt {}/{}), retrying in {}ms...",
+                        pubkey,
+                        reason,
+                        attempt,
+                        MAX_ATTEMPTS,
+                        delay_ms
+                    );
+                    // Only sleep if we will retry again
+                    if attempt < MAX_ATTEMPTS {
+                        sleep(Duration::from_millis(delay_ms));
+                    }
+                }
             }
-            return Err(anyhow::anyhow!(
-                "Failed to airdrop chain account '{:?}'",
-                pubkey
-            ));
         }
-        Ok(sig)
+
+        Err(last_err.unwrap_or_else(|| {
+            anyhow::anyhow!(
+                "Failed to airdrop chain account '{:?}' (unknown error)",
+                pubkey
+            )
+        }))
     }
 
     // -----------------

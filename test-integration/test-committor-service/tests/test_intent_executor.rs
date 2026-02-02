@@ -10,19 +10,21 @@ use std::{
 };
 
 use borsh::to_vec;
-use dlp::pda::ephemeral_balance_pda_from_payer;
+use dlp::{args::CommitStateArgs, pda::ephemeral_balance_pda_from_payer};
 use futures::future::join_all;
 use magicblock_committor_program::pdas;
 use magicblock_committor_service::{
     intent_executor::{
-        error::TransactionStrategyExecutionError,
-        task_info_fetcher::{CacheTaskInfoFetcher, TaskInfoFetcher},
+        error::{IntentExecutorError, TransactionStrategyExecutionError},
+        task_info_fetcher::{
+            CacheTaskInfoFetcher, TaskInfoFetcher, TaskInfoFetcherError,
+        },
         ExecutionOutput, IntentExecutionResult, IntentExecutor,
         IntentExecutorImpl,
     },
     persist::IntentPersisterImpl,
     tasks::{
-        task_builder::{TaskBuilderImpl, TasksBuilder},
+        task_builder::{TaskBuilderError, TaskBuilderImpl, TasksBuilder},
         task_strategist::{TaskStrategist, TransactionStrategy},
     },
     transaction_preparator::TransactionPreparatorImpl,
@@ -31,10 +33,11 @@ use magicblock_program::{
     args::ShortAccountMeta,
     magic_scheduled_base_intent::{
         BaseAction, CommitAndUndelegate, CommitType, CommittedAccount,
-        MagicBaseIntent, ProgramArgs, ScheduledBaseIntent, UndelegateType,
+        MagicBaseIntent, ProgramArgs, ScheduledIntentBundle, UndelegateType,
     },
     validator::validator_authority_id,
 };
+use magicblock_rpc_client::MagicBlockSendTransactionConfig;
 use magicblock_table_mania::TableMania;
 use program_flexi_counter::{
     instruction::FlexiCounterInstruction,
@@ -112,7 +115,7 @@ impl TestEnv {
 #[tokio::test]
 async fn test_commit_id_error_parsing() {
     const COUNTER_SIZE: u64 = 70;
-    const EXPECTED_ERR_MSG: &str = "Accounts committed with an invalid Commit id: Error processing Instruction 2: custom program error: 0xc";
+    const EXPECTED_ERR_MSG: &str = "Accounts committed with an invalid Commit id: Error processing Instruction 3: custom program error: 0xc";
 
     let TestEnv {
         fixture,
@@ -121,17 +124,23 @@ async fn test_commit_id_error_parsing() {
         pre_test_tablemania_state: _,
     } = TestEnv::setup().await;
     let (counter_auth, account) = setup_counter(COUNTER_SIZE, None).await;
+    let remote_slot = Default::default();
+
     let intent = create_intent(
         vec![CommittedAccount {
             pubkey: FlexiCounter::pda(&counter_auth.pubkey()).0,
             account,
+            remote_slot,
         }],
         true,
     );
 
     // Invalidate ids before execution
     task_info_fetcher
-        .fetch_next_commit_ids(&intent.get_committed_pubkeys().unwrap())
+        .fetch_next_commit_ids(
+            &intent.get_undelegate_intent_pubkeys().unwrap(),
+            remote_slot,
+        )
         .await
         .unwrap();
 
@@ -153,17 +162,18 @@ async fn test_commit_id_error_parsing() {
     let execution_result = execution_result.unwrap();
     assert!(execution_result.is_err());
     let err = execution_result.unwrap_err();
-    assert!(matches!(
-        err,
-        TransactionStrategyExecutionError::CommitIDError(_, _)
-    ));
+    assert!(
+        matches!(err, TransactionStrategyExecutionError::CommitIDError(_, _)),
+        "err: {:?}",
+        err
+    );
     assert!(err.to_string().contains(EXPECTED_ERR_MSG));
 }
 
 #[tokio::test]
 async fn test_undelegation_error_parsing() {
     const COUNTER_SIZE: u64 = 70;
-    const EXPECTED_ERR_MSG: &str = "Invalid undelegation: Error processing Instruction 4: custom program error: 0x7a.";
+    const EXPECTED_ERR_MSG: &str = "Invalid undelegation: Error processing Instruction 5: custom program error: 0x7a.";
 
     let TestEnv {
         fixture,
@@ -180,6 +190,7 @@ async fn test_undelegation_error_parsing() {
         vec![CommittedAccount {
             pubkey: FlexiCounter::pda(&counter_auth.pubkey()).0,
             account,
+            remote_slot: Default::default(),
         }],
         true,
     );
@@ -212,7 +223,7 @@ async fn test_undelegation_error_parsing() {
 #[tokio::test]
 async fn test_action_error_parsing() {
     const COUNTER_SIZE: u64 = 70;
-    const EXPECTED_ERR_MSG: &str = "User supplied actions are ill-formed: Error processing Instruction 5: Program arithmetic overflowed";
+    const EXPECTED_ERR_MSG: &str = "User supplied actions are ill-formed: Error processing Instruction 6: Program arithmetic overflowed";
 
     let TestEnv {
         fixture,
@@ -228,6 +239,7 @@ async fn test_action_error_parsing() {
     let committed_account = CommittedAccount {
         pubkey: FlexiCounter::pda(&counter_auth.pubkey()).0,
         account,
+        remote_slot: Default::default(),
     };
 
     // Create Intent with invalid action
@@ -272,7 +284,7 @@ async fn test_action_error_parsing() {
 async fn test_cpi_limits_error_parsing() {
     const COUNTER_SIZE: u64 = 102;
     const COUNTER_NUM: u64 = 10;
-    const EXPECTED_ERR_MSG: &str = "Max instruction trace length exceeded: Error processing Instruction 26: Max instruction trace length exceeded";
+    const EXPECTED_ERR_MSG: &str = "Max instruction trace length exceeded: Error processing Instruction 27: Max instruction trace length exceeded";
 
     let TestEnv {
         fixture,
@@ -295,6 +307,7 @@ async fn test_cpi_limits_error_parsing() {
         .map(|(counter, account)| CommittedAccount {
             pubkey: FlexiCounter::pda(&counter.pubkey()).0,
             account: account.clone(),
+            remote_slot: Default::default(),
         })
         .collect();
 
@@ -327,6 +340,54 @@ async fn test_cpi_limits_error_parsing() {
 }
 
 #[tokio::test]
+async fn test_min_context_slot_not_reached_error_parsing() {
+    const COUNTER_SIZE: u64 = 70;
+    const EXPECTED_ERR_MSG: &str = "Minimum context slot";
+    const REMOTE_SLOT: u64 = 1_000_000_000;
+
+    let TestEnv {
+        fixture: _,
+        mut intent_executor,
+        task_info_fetcher: _,
+        pre_test_tablemania_state: _,
+    } = TestEnv::setup().await;
+    let (counter_auth, account) = setup_counter(COUNTER_SIZE, None).await;
+
+    let intent = create_intent(
+        vec![CommittedAccount {
+            pubkey: FlexiCounter::pda(&counter_auth.pubkey()).0,
+            account,
+            remote_slot: REMOTE_SLOT,
+        }],
+        true,
+    );
+
+    let execution_result = intent_executor
+        .execute(intent, None::<IntentPersisterImpl>)
+        .await;
+
+    // Verify that we got MinContextSlotNotReachedError
+    assert!(execution_result.inner.is_err());
+    let err = execution_result.inner.unwrap_err();
+    assert!(
+        matches!(
+            err,
+            IntentExecutorError::TaskBuilderError(
+                TaskBuilderError::CommitTasksBuildError(
+                    TaskInfoFetcherError::MinContextSlotNotReachedError(
+                        REMOTE_SLOT,
+                        _
+                    )
+                )
+            )
+        ),
+        "err: {:?}",
+        err
+    );
+    assert!(err.to_string().contains(EXPECTED_ERR_MSG));
+}
+
+#[tokio::test]
 async fn test_commit_id_error_recovery() {
     const COUNTER_SIZE: u64 = 100;
 
@@ -343,12 +404,17 @@ async fn test_commit_id_error_recovery() {
             .await;
 
     account.owner = program_flexi_counter::id();
-    let committed_account = CommittedAccount { pubkey, account };
+    let remote_slot = Default::default();
+    let committed_account = CommittedAccount {
+        pubkey,
+        account,
+        remote_slot,
+    };
     let intent = create_intent(vec![committed_account.clone()], false);
 
     // Invalidate commit nonce cache
     let res = task_info_fetcher
-        .fetch_next_commit_ids(&[committed_account.pubkey])
+        .fetch_next_commit_ids(&[committed_account.pubkey], remote_slot)
         .await;
     assert!(res.is_ok());
     assert!(res.unwrap().contains_key(&committed_account.pubkey));
@@ -361,7 +427,13 @@ async fn test_commit_id_error_recovery() {
         inner: res,
         patched_errors,
     } = res;
-    assert!(res.is_ok());
+
+    assert!(
+        res.is_ok(),
+        "res: {:?}, patched_errors: {:#?}",
+        res,
+        patched_errors
+    );
     assert!(matches!(res.unwrap(), ExecutionOutput::SingleStage(_)));
 
     assert_eq!(patched_errors.len(), 1, "Only 1 patch expected");
@@ -413,7 +485,11 @@ async fn test_undelegation_error_recovery() {
     .await;
 
     account.owner = program_flexi_counter::id();
-    let committed_account = CommittedAccount { pubkey, account };
+    let committed_account = CommittedAccount {
+        pubkey,
+        account,
+        remote_slot: Default::default(),
+    };
     let intent = create_intent(vec![committed_account.clone()], true);
 
     // Execute intent
@@ -467,6 +543,7 @@ async fn test_action_error_recovery() {
     let committed_account = CommittedAccount {
         pubkey: counter_pubkey,
         account,
+        remote_slot: Default::default(),
     };
 
     // Create Intent with invalid action
@@ -529,14 +606,16 @@ async fn test_commit_id_and_action_errors_recovery() {
         init_and_delegate_account_on_chain(&payer, COUNTER_SIZE, None).await;
 
     account.owner = program_flexi_counter::id();
+    let remote_slot = Default::default();
     let committed_account = CommittedAccount {
         pubkey: counter_pubkey,
         account,
+        remote_slot,
     };
 
     // Invalidate commit nonce cache
     let res = task_info_fetcher
-        .fetch_next_commit_ids(&[committed_account.pubkey])
+        .fetch_next_commit_ids(&[committed_account.pubkey], remote_slot)
         .await;
     assert!(res.is_ok());
     assert!(res.unwrap().contains_key(&committed_account.pubkey));
@@ -631,6 +710,7 @@ async fn test_cpi_limits_error_recovery() {
             CommittedAccount {
                 pubkey: FlexiCounter::pda(&counter.pubkey()).0,
                 account,
+                remote_slot: Default::default(),
             }
         })
         .collect();
@@ -720,6 +800,7 @@ async fn test_commit_id_actions_cpi_limit_errors_recovery() {
             CommittedAccount {
                 pubkey: FlexiCounter::pda(&counter.pubkey()).0,
                 account,
+                remote_slot: Default::default(),
             }
         })
         .collect();
@@ -740,7 +821,7 @@ async fn test_commit_id_actions_cpi_limit_errors_recovery() {
     // Force CommitIDError by invalidating the commit-nonce cache before running
     let pubkeys: Vec<_> = committed_accounts.iter().map(|c| c.pubkey).collect();
     let mut invalidated_keys = task_info_fetcher
-        .fetch_next_commit_ids(&pubkeys)
+        .fetch_next_commit_ids(&pubkeys, Default::default())
         .await
         .unwrap();
 
@@ -822,6 +903,173 @@ async fn test_commit_id_actions_cpi_limit_errors_recovery() {
         &invalidated_keys,
     )
     .await;
+}
+
+#[tokio::test]
+async fn test_commit_unfinalized_account_recovery() {
+    let TestEnv {
+        fixture,
+        mut intent_executor,
+        task_info_fetcher: _,
+        pre_test_tablemania_state: _,
+    } = TestEnv::setup().await;
+
+    // Prepare multiple counters; each needs an escrow (payer) to be able to execute base actions.
+    // We also craft unique on-chain data so we can verify post-commit state exactly.
+    let (counter_auth, account) = setup_counter(40, None).await;
+    setup_payer_with_keypair(&counter_auth, fixture.rpc_client.get_inner())
+        .await;
+    let pda = FlexiCounter::pda(&counter_auth.pubkey()).0;
+
+    // Commit account without finalization
+    // This simulates finalization stage failure
+    {
+        let commit_allow_undelegation_ix =
+            dlp::instruction_builder::commit_state(
+                fixture.authority.pubkey(),
+                pda,
+                account.owner,
+                CommitStateArgs {
+                    nonce: 1,
+                    lamports: account.lamports,
+                    allow_undelegation: false,
+                    data: account.data.clone(),
+                },
+            );
+
+        let blockhash =
+            fixture.rpc_client.get_latest_blockhash().await.unwrap();
+        let tx = Transaction::new_signed_with_payer(
+            &[commit_allow_undelegation_ix],
+            Some(&fixture.authority.pubkey()),
+            &[&fixture.authority],
+            blockhash,
+        );
+
+        let result = fixture
+            .rpc_client
+            .send_transaction(
+                &tx,
+                &MagicBlockSendTransactionConfig::ensure_committed(),
+            )
+            .await;
+        assert!(result.is_ok());
+    }
+
+    // Now simulate user sending new intent
+    let committed_account = CommittedAccount {
+        pubkey: pda,
+        account,
+        remote_slot: Default::default(),
+    };
+    let intent = create_intent(vec![committed_account], false);
+    let result = intent_executor
+        .execute(intent, None::<IntentPersisterImpl>)
+        .await;
+    assert!(result.inner.is_ok());
+    assert!(matches!(
+        result.inner.unwrap(),
+        ExecutionOutput::SingleStage(_)
+    ));
+
+    assert_eq!(result.patched_errors.len(), 2);
+    assert!(matches!(
+        result.patched_errors[0],
+        TransactionStrategyExecutionError::UnfinalizedAccountError(_, _)
+    ));
+    assert!(matches!(
+        result.patched_errors[1],
+        TransactionStrategyExecutionError::CommitIDError(_, _)
+    ))
+}
+
+#[tokio::test]
+async fn test_commit_unfinalized_account_recovery_two_stage() {
+    let TestEnv {
+        fixture,
+        mut intent_executor,
+        task_info_fetcher: _,
+        pre_test_tablemania_state: _,
+    } = TestEnv::setup().await;
+
+    // Prepare multiple counters; each needs an escrow (payer) to be able to execute base actions.
+    // We also craft unique on-chain data so we can verify post-commit state exactly.
+    let counters = (0..8).map(async |_| {
+        let (counter_auth, account) = setup_counter(40, None).await;
+        setup_payer_with_keypair(&counter_auth, fixture.rpc_client.get_inner())
+            .await;
+        let pda = FlexiCounter::pda(&counter_auth.pubkey()).0;
+        (counter_auth, pda, account)
+    });
+    let counters: Vec<(_, _, _)> = join_all(counters).await;
+
+    // Commit account without finalization
+    // This simulates finalization stage failure
+    {
+        let commit_allow_undelegation_ix =
+            dlp::instruction_builder::commit_state(
+                fixture.authority.pubkey(),
+                counters[0].1,
+                counters[0].2.owner,
+                CommitStateArgs {
+                    nonce: 1,
+                    lamports: counters[0].2.lamports,
+                    allow_undelegation: false,
+                    data: counters[0].2.data.clone(),
+                },
+            );
+
+        let blockhash =
+            fixture.rpc_client.get_latest_blockhash().await.unwrap();
+        let tx = Transaction::new_signed_with_payer(
+            &[commit_allow_undelegation_ix],
+            Some(&fixture.authority.pubkey()),
+            &[&fixture.authority],
+            blockhash,
+        );
+
+        let result = fixture
+            .rpc_client
+            .send_transaction(
+                &tx,
+                &MagicBlockSendTransactionConfig::ensure_committed(),
+            )
+            .await;
+        assert!(result.is_ok());
+    }
+
+    // Now simulate user sending new intent
+    let committed_accounts = counters
+        .into_iter()
+        .map(|el| CommittedAccount {
+            pubkey: el.1,
+            account: el.2,
+            remote_slot: Default::default(),
+        })
+        .collect();
+    let intent = create_intent(committed_accounts, true);
+
+    let result = intent_executor
+        .execute(intent, None::<IntentPersisterImpl>)
+        .await;
+    assert!(result.inner.is_ok());
+    assert!(matches!(
+        result.inner.unwrap(),
+        ExecutionOutput::TwoStage {
+            commit_signature: _,
+            finalize_signature: _
+        }
+    ));
+
+    assert_eq!(result.patched_errors.len(), 2);
+    assert!(matches!(
+        result.patched_errors[0],
+        TransactionStrategyExecutionError::UnfinalizedAccountError(_, _)
+    ));
+    assert!(matches!(
+        result.patched_errors[1],
+        TransactionStrategyExecutionError::CommitIDError(_, _)
+    ))
 }
 
 fn failing_undelegate_action(
@@ -930,7 +1178,7 @@ async fn setup_counter(
 fn create_intent(
     committed_accounts: Vec<CommittedAccount>,
     is_undelegate: bool,
-) -> ScheduledBaseIntent {
+) -> ScheduledIntentBundle {
     let base_intent = if is_undelegate {
         MagicBaseIntent::CommitAndUndelegate(CommitAndUndelegate {
             commit_action: CommitType::Standalone(committed_accounts),
@@ -945,23 +1193,23 @@ fn create_intent(
 
 fn create_scheduled_intent(
     base_intent: MagicBaseIntent,
-) -> ScheduledBaseIntent {
+) -> ScheduledIntentBundle {
     static INTENT_ID: AtomicU64 = AtomicU64::new(0);
 
-    ScheduledBaseIntent {
+    ScheduledIntentBundle {
         id: INTENT_ID.fetch_add(1, Ordering::Relaxed),
         slot: 10,
         blockhash: Hash::new_unique(),
-        action_sent_transaction: Transaction::default(),
+        sent_transaction: Transaction::default(),
         payer: Pubkey::new_unique(),
-        base_intent,
+        intent_bundle: base_intent.into(),
     }
 }
 
 async fn single_flow_transaction_strategy(
     authority: &Pubkey,
     task_info_fetcher: &Arc<CacheTaskInfoFetcher>,
-    intent: &ScheduledBaseIntent,
+    intent: &ScheduledIntentBundle,
 ) -> TransactionStrategy {
     let mut tasks = TaskBuilderImpl::commit_tasks(
         task_info_fetcher,

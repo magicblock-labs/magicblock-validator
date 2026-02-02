@@ -1,7 +1,6 @@
 use std::path::Path;
 
-use magicblock_accounts_db::AccountsDb;
-use magicblock_core::traits::AccountsBank;
+use magicblock_accounts_db::{traits::AccountsBank, AccountsDb};
 use magicblock_magic_program_api as magic_program;
 use magicblock_program::MagicContext;
 use solana_account::{AccountSharedData, WritableAccount};
@@ -35,7 +34,7 @@ pub(crate) fn fund_account_with_data(
     } else {
         AccountSharedData::new(lamports, size, &Default::default())
     };
-    accountsdb.insert_account(pubkey, &account);
+    let _ = accountsdb.insert_account(pubkey, &account);
 }
 
 pub(crate) fn init_validator_identity(
@@ -45,7 +44,7 @@ pub(crate) fn init_validator_identity(
     fund_account(accountsdb, validator_id, u64::MAX / 2);
     let mut authority = accountsdb.get_account(validator_id).unwrap();
     authority.as_borrowed_mut().unwrap().set_privileged(true);
-    accountsdb.insert_account(validator_id, &authority);
+    let _ = accountsdb.insert_account(validator_id, &authority);
 }
 
 /// Funds the faucet account.
@@ -80,6 +79,6 @@ pub(crate) fn fund_magic_context(accountsdb: &AccountsDb) {
         .get_account(&magic_program::MAGIC_CONTEXT_PUBKEY)
         .unwrap();
     magic_context.set_delegated(true);
-    accountsdb
+    let _ = accountsdb
         .insert_account(&magic_program::MAGIC_CONTEXT_PUBKEY, &magic_context);
 }

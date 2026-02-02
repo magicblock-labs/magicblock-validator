@@ -8,8 +8,7 @@ use std::{
 };
 
 pub use guinea;
-use log::error;
-use magicblock_accounts_db::AccountsDb;
+use magicblock_accounts_db::{traits::AccountsBank, AccountsDb};
 use magicblock_core::{
     link::{
         blocks::{BlockMeta, BlockUpdate, BlockUpdateTx},
@@ -20,12 +19,12 @@ use magicblock_core::{
         },
         DispatchEndpoints,
     },
-    traits::AccountsBank,
     Slot,
 };
 use magicblock_ledger::Ledger;
 use magicblock_processor::{
     build_svm_env,
+    loader::load_upgradeable_programs,
     scheduler::{state::TransactionSchedulerState, TransactionScheduler},
 };
 use solana_account::AccountSharedData;
@@ -39,6 +38,7 @@ pub use solana_signer::Signer;
 use solana_transaction::Transaction;
 use solana_transaction_status_client_types::TransactionStatusMeta;
 use tempfile::TempDir;
+use tracing::{error, instrument};
 
 /// A simulated validator backend for integration tests.
 ///
@@ -128,6 +128,13 @@ impl ExecutionTestEnv {
         };
         this.advance_slot(); // Move to slot 1 to ensure a non-genesis state.
 
+        // Load test program
+        load_upgradeable_programs(
+            &accountsdb,
+            &[(guinea::ID, "../programs/elfs/guinea.so".into())],
+        )
+        .expect("failed to load test programs into test env");
+
         let scheduler_state = TransactionSchedulerState {
             accountsdb,
             ledger,
@@ -139,14 +146,6 @@ impl ExecutionTestEnv {
             is_auto_airdrop_lamports_enabled: false,
             shutdown: Default::default(),
         };
-
-        // Load test program
-        scheduler_state
-            .load_upgradeable_programs(&[(
-                guinea::ID,
-                "../programs/elfs/guinea.so".into(),
-            )])
-            .expect("failed to load test programs into test env");
 
         // Start/Defer the transaction processing backend.
         // NOTE: we run in default (Ephemeral) mode which enforces access permissions.
@@ -181,7 +180,7 @@ impl ExecutionTestEnv {
         let keypair = Keypair::new();
         let mut account = AccountSharedData::new(lamports, space, &owner);
         account.set_delegated(true);
-        self.accountsdb.insert_account(&keypair.pubkey(), &account);
+        let _ = self.accountsdb.insert_account(&keypair.pubkey(), &account);
         keypair
     }
 
@@ -206,7 +205,7 @@ impl ExecutionTestEnv {
     ) {
         let mut account = AccountSharedData::new(lamports, 0, &owner);
         account.set_delegated(true);
-        self.accountsdb.insert_account(&pubkey, &account);
+        let _ = self.accountsdb.insert_account(&pubkey, &account);
     }
 
     /// Retrieves a transaction's metadata from the ledger by its signature.
@@ -266,17 +265,18 @@ impl ExecutionTestEnv {
     }
 
     /// Submits a transaction for execution and waits for its result.
+    #[instrument(skip(self, txn))]
     pub async fn execute_transaction(
         &self,
         txn: impl SanitizeableTransaction,
     ) -> TransactionResult {
-        self.transaction_scheduler
-            .execute(txn)
-            .await
-            .inspect_err(|err| error!("failed to execute transaction: {err}"))
+        self.transaction_scheduler.execute(txn).await.inspect_err(
+            |err| error!(error = ?err, "Transaction execution failed"),
+        )
     }
 
     /// Submits a transaction for scheduling and returns
+    #[instrument(skip(self, txn))]
     pub async fn schedule_transaction(
         &self,
         txn: impl SanitizeableTransaction,
@@ -285,6 +285,7 @@ impl ExecutionTestEnv {
     }
 
     /// Submits a transaction for simulation and waits for the detailed result.
+    #[instrument(skip(self, txn))]
     pub async fn simulate_transaction(
         &self,
         txn: impl SanitizeableTransaction,
@@ -295,20 +296,20 @@ impl ExecutionTestEnv {
             .await
             .expect("transaction executor has shutdown during test");
         if let Err(ref err) = result.result {
-            error!("failed to simulate transaction: {err}")
+            error!(error = ?err, "Transaction simulation failed");
         }
         result
     }
 
     /// Submits a transaction for replay and waits for its result.
+    #[instrument(skip(self, txn))]
     pub async fn replay_transaction(
         &self,
         txn: impl SanitizeableTransaction,
     ) -> TransactionResult {
-        self.transaction_scheduler
-            .replay(txn)
-            .await
-            .inspect_err(|err| error!("failed to replay transaction: {err}"))
+        self.transaction_scheduler.replay(txn).await.inspect_err(
+            |err| error!(error = ?err, "Transaction replay failed"),
+        )
     }
 
     pub fn get_account(&self, pubkey: Pubkey) -> CommitableAccount<'_> {
@@ -340,7 +341,7 @@ pub struct CommitableAccount<'db> {
 
 impl CommitableAccount<'_> {
     pub fn commit(self) {
-        self.db.insert_account(&self.pubkey, &self.account);
+        let _ = self.db.insert_account(&self.pubkey, &self.account);
     }
 }
 

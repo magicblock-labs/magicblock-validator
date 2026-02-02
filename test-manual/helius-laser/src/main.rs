@@ -1,7 +1,7 @@
 use std::{env, time::Duration};
 
 use anyhow::{Context, Result};
-use log::*;
+use tracing::{info, warn};
 use solana_client::rpc_config::{
     RpcSendTransactionConfig, RpcTransactionConfig,
 };
@@ -15,7 +15,7 @@ use solana_sdk::{
     signer::Signer,
     system_instruction::transfer,
     transaction::Transaction,
-};
+}; 
 
 const TRANSFER_AMOUNT: u64 = LAMPORTS_PER_SOL / 1_000;
 const SECOND_TRANSFER_AMOUNT: u64 = LAMPORTS_PER_SOL / 2_000;
@@ -97,7 +97,7 @@ local  from: {} lamports, to: {} lamports",
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    env_logger::init();
+    magicblock_core::logger::init();
 
     let helius_api_key = env::var("HELIUS_API_KEY")
         .context("HELIUS_API_KEY environment variable not set")?;

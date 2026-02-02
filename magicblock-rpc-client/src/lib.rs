@@ -5,8 +5,8 @@ use std::{
     time::{Duration, Instant},
 };
 
-use log::*;
 use solana_account::Account;
+use solana_account_decoder_client_types::UiAccountEncoding;
 use solana_address_lookup_table_interface::state::{
     AddressLookupTable, LookupTableMeta,
 };
@@ -20,7 +20,9 @@ use solana_rpc_client::{
 };
 use solana_rpc_client_api::{
     client_error::ErrorKind as RpcClientErrorKind,
-    config::{RpcSendTransactionConfig, RpcTransactionConfig},
+    config::{
+        RpcAccountInfoConfig, RpcSendTransactionConfig, RpcTransactionConfig,
+    },
     request::RpcError,
 };
 use solana_signature::Signature;
@@ -29,6 +31,7 @@ use solana_transaction_status_client_types::{
     EncodedConfirmedTransactionWithStatusMeta, UiTransactionEncoding,
 };
 use tokio::task::JoinSet;
+use tracing::*;
 
 /// The encoding to use when sending transactions
 pub const SEND_TRANSACTION_ENCODING: UiTransactionEncoding =
@@ -298,15 +301,35 @@ impl MagicblockRpcClient {
         commitment: CommitmentConfig,
         max_per_fetch: Option<usize>,
     ) -> MagicBlockRpcClientResult<Vec<Option<Account>>> {
+        self.get_multiple_accounts_with_config(
+            pubkeys,
+            RpcAccountInfoConfig {
+                encoding: Some(UiAccountEncoding::Base64Zstd),
+                commitment: Some(commitment),
+                data_slice: None,
+                min_context_slot: None,
+            },
+            max_per_fetch,
+        )
+        .await
+    }
+
+    pub async fn get_multiple_accounts_with_config(
+        &self,
+        pubkeys: &[Pubkey],
+        config: RpcAccountInfoConfig,
+        max_per_fetch: Option<usize>,
+    ) -> MagicBlockRpcClientResult<Vec<Option<Account>>> {
         let max_per_fetch = max_per_fetch.unwrap_or(MAX_MULTIPLE_ACCOUNTS);
 
         let mut join_set = JoinSet::new();
         for pubkey_chunk in pubkeys.chunks(max_per_fetch) {
             let client = self.client.clone();
             let pubkeys = pubkey_chunk.to_vec();
+            let config = config.clone();
             join_set.spawn(async move {
                 client
-                    .get_multiple_accounts_with_commitment(&pubkeys, commitment)
+                    .get_multiple_accounts_with_config(&pubkeys, config)
                     .await
             });
         }
@@ -468,6 +491,14 @@ impl MagicblockRpcClient {
     }
 
     /// Waits for a transaction to reach processed status
+    #[instrument(
+        skip(self),
+        fields(
+            signature = %signature,
+            blockhash = %recent_blockhash,
+            timeout_ms = timeout.as_millis() as u64,
+        )
+    )]
     pub async fn wait_for_processed_status(
         &self,
         signature: &Signature,
@@ -514,8 +545,8 @@ impl MagicblockRpcClient {
 
             if !blockhash_found && &start.elapsed() < blockhash_valid_timeout {
                 trace!(
-                    "Waiting for blockhash {} to become valid",
-                    recent_blockhash
+                    elapsed_ms = start.elapsed().as_millis() as u64,
+                    "Waiting for blockhash validity"
                 );
                 tokio::time::sleep(Duration::from_millis(400)).await;
                 continue;

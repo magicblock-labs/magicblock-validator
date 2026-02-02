@@ -1,19 +1,19 @@
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
 use async_trait::async_trait;
-use log::error;
 use magicblock_program::magic_scheduled_base_intent::{
-    CommitType, CommittedAccount, MagicBaseIntent, ScheduledBaseIntent,
+    BaseAction, CommitType, CommittedAccount, ScheduledIntentBundle,
     UndelegateType,
 };
 use solana_account::Account;
 use solana_pubkey::Pubkey;
 use solana_signature::Signature;
+use tracing::error;
 
 use super::{CommitDiffTask, CommitTask};
 use crate::{
     intent_executor::task_info_fetcher::{
-        TaskInfoFetcher, TaskInfoFetcherError,
+        TaskInfoFetcher, TaskInfoFetcherError, TaskInfoFetcherResult,
     },
     persist::IntentPersister,
     tasks::{
@@ -27,14 +27,14 @@ pub trait TasksBuilder {
     // Creates tasks for commit stage
     async fn commit_tasks<C: TaskInfoFetcher, P: IntentPersister>(
         commit_id_fetcher: &Arc<C>,
-        base_intent: &ScheduledBaseIntent,
+        base_intent: &ScheduledIntentBundle,
         persister: &Option<P>,
     ) -> TaskBuilderResult<Vec<Box<dyn BaseTask>>>;
 
     // Create tasks for finalize stage
     async fn finalize_tasks<C: TaskInfoFetcher>(
         info_fetcher: &Arc<C>,
-        base_intent: &ScheduledBaseIntent,
+        base_intent: &ScheduledIntentBundle,
     ) -> TaskBuilderResult<Vec<Box<dyn BaseTask>>>;
 }
 
@@ -80,88 +80,138 @@ impl TaskBuilderImpl {
         }
         .into()
     }
+
+    fn create_action_tasks(actions: &[BaseAction]) -> Vec<Box<dyn BaseTask>> {
+        actions
+            .iter()
+            .map(|el| {
+                let task = BaseActionTask { action: el.clone() };
+                let task = ArgsTask::new(ArgsTaskType::BaseAction(task));
+                Box::new(task) as Box<dyn BaseTask>
+            })
+            .collect()
+    }
+
+    async fn fetch_commit_nonces<C: TaskInfoFetcher>(
+        task_info_fetcher: &Arc<C>,
+        accounts: &[(bool, CommittedAccount)],
+        min_context_slot: u64,
+    ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>> {
+        let committed_pubkeys = accounts
+            .iter()
+            .map(|(_, account)| account.pubkey)
+            .collect::<Vec<_>>();
+
+        task_info_fetcher
+            .fetch_next_commit_ids(&committed_pubkeys, min_context_slot)
+            .await
+    }
+
+    async fn fetch_diffable_accounts<C: TaskInfoFetcher>(
+        task_info_fetcher: &Arc<C>,
+        accounts: &[(bool, CommittedAccount)],
+        min_context_slot: u64,
+    ) -> TaskInfoFetcherResult<HashMap<Pubkey, Account>> {
+        let diffable_pubkeys = accounts
+            .iter()
+            .filter(|(_, account)| {
+                account.account.data.len() > COMMIT_STATE_SIZE_THRESHOLD
+            })
+            .map(|(_, account)| account.pubkey)
+            .collect::<Vec<_>>();
+
+        task_info_fetcher
+            .get_base_accounts(&diffable_pubkeys, min_context_slot)
+            .await
+    }
 }
 
 #[async_trait]
 impl TasksBuilder for TaskBuilderImpl {
     /// Returns [`Task`]s for Commit stage
     async fn commit_tasks<C: TaskInfoFetcher, P: IntentPersister>(
-        commit_id_fetcher: &Arc<C>,
-        base_intent: &ScheduledBaseIntent,
+        task_info_fetcher: &Arc<C>,
+        intent_bundle: &ScheduledIntentBundle,
         persister: &Option<P>,
     ) -> TaskBuilderResult<Vec<Box<dyn BaseTask>>> {
-        let (accounts, allow_undelegation) = match &base_intent.base_intent {
-            MagicBaseIntent::BaseActions(actions) => {
-                let tasks = actions
-                    .iter()
-                    .map(|el| {
-                        let task = BaseActionTask { action: el.clone() };
-                        let task =
-                            ArgsTask::new(ArgsTaskType::BaseAction(task));
-                        Box::new(task) as Box<dyn BaseTask>
-                    })
-                    .collect();
+        let mut tasks = Vec::new();
+        tasks.extend(Self::create_action_tasks(
+            intent_bundle.standalone_actions().as_slice(),
+        ));
 
-                return Ok(tasks);
-            }
-            MagicBaseIntent::Commit(t) => (t.get_committed_accounts(), false),
-            MagicBaseIntent::CommitAndUndelegate(t) => {
-                (t.commit_action.get_committed_accounts(), true)
-            }
-        };
-
-        let (commit_ids, base_accounts) = {
-            let committed_pubkeys = accounts
-                .iter()
-                .map(|account| account.pubkey)
-                .collect::<Vec<_>>();
-
-            let diffable_pubkeys = accounts
-                .iter()
-                .filter(|account| {
-                    account.account.data.len() > COMMIT_STATE_SIZE_THRESHOLD
+        let committed_accounts =
+            intent_bundle.get_commit_intent_accounts().cloned();
+        let undelegated_accounts =
+            intent_bundle.get_undelegate_intent_accounts().cloned();
+        let flagged_accounts: Vec<_> =
+            [(false, committed_accounts), (true, undelegated_accounts)]
+                .into_iter()
+                .flat_map(|(allow_undelegation, accounts)| {
+                    accounts
+                        .into_iter()
+                        .flatten()
+                        .map(move |account| (allow_undelegation, account))
                 })
-                .map(|account| account.pubkey)
-                .collect::<Vec<_>>();
+                .collect();
 
-            tokio::join!(
-                commit_id_fetcher.fetch_next_commit_ids(&committed_pubkeys),
-                commit_id_fetcher
-                    .get_base_accounts(diffable_pubkeys.as_slice())
+        // Get commit nonces and base accounts
+        let min_context_slot = flagged_accounts
+            .iter()
+            .map(|(_, account)| account.remote_slot)
+            .max()
+            .unwrap_or(0);
+        let (commit_ids, base_accounts) = tokio::join!(
+            Self::fetch_commit_nonces(
+                task_info_fetcher,
+                &flagged_accounts,
+                min_context_slot
+            ),
+            Self::fetch_diffable_accounts(
+                task_info_fetcher,
+                &flagged_accounts,
+                min_context_slot
             )
-        };
-
+        );
         let commit_ids =
             commit_ids.map_err(TaskBuilderError::CommitTasksBuildError)?;
-
-        let base_accounts = match base_accounts {
-            Ok(map) => map,
-            Err(err) => {
-                log::warn!("Failed to fetch base accounts for CommitDiff (id={}): {}; falling back to CommitState", base_intent.id, err);
-                Default::default()
-            }
-        };
+        let mut base_accounts = base_accounts.unwrap_or_else(|err| {
+            tracing::warn!(intent_id = intent_bundle.id, error = ?err, "Failed to fetch base accounts, falling back to CommitState");
+            Default::default()
+        });
 
         // Persist commit ids for commitees
         commit_ids
             .iter()
             .for_each(|(pubkey, commit_id) | {
-                if let Err(err) = persister.set_commit_id(base_intent.id, pubkey, *commit_id) {
-                    error!("Failed to persist commit id: {}, for message id: {} with pubkey {}: {}", commit_id, base_intent.id, pubkey, err);
+                if let Err(err) = persister.set_commit_id(intent_bundle.id, pubkey, *commit_id) {
+                    error!(intent_id = intent_bundle.id, pubkey = %pubkey, error = ?err, "Failed to persist commit id");
                 }
             });
 
-        let tasks = accounts
-            .iter()
-            .map(|account| {
-                let commit_id = *commit_ids.get(&account.pubkey).expect("CommitIdFetcher provide commit ids for all listed pubkeys, or errors!");
-                // TODO (snawaz): if accounts do not have duplicate, then we can use remove
-                // instead:
-                //  let base_account = base_accounts.remove(&account.pubkey);
-                let base_account = base_accounts.get(&account.pubkey).cloned();
-                let task = Self::create_commit_task(commit_id, allow_undelegation, account.clone(), base_account);
-                Box::new(task) as Box<dyn BaseTask>
-            }).collect();
+        // Create commit tasks
+        let commit_tasks_iter = flagged_accounts.into_iter().map(
+            |(allow_undelegation, account)| {
+                let commit_id = commit_ids
+                    .get(&account.pubkey)
+                    .copied()
+                    .unwrap_or_else(|| {
+                        // This shall not ever happen since TaskInfoFetcher
+                        // returns commit ids for all pubkeys or throws
+                        // If it does occur, it will be patched and retried by IntentExecutor
+                        error!(pubkey = %account.pubkey, "Commit id absent for pubkey");
+                        0
+                    });
+                let base_account = base_accounts.remove(&account.pubkey);
+
+                Box::new(Self::create_commit_task(
+                    commit_id,
+                    allow_undelegation,
+                    account.clone(),
+                    base_account,
+                )) as Box<dyn BaseTask>
+            },
+        );
+        tasks.extend(commit_tasks_iter);
 
         Ok(tasks)
     }
@@ -169,7 +219,7 @@ impl TasksBuilder for TaskBuilderImpl {
     /// Returns [`Task`]s for Finalize stage
     async fn finalize_tasks<C: TaskInfoFetcher>(
         info_fetcher: &Arc<C>,
-        base_intent: &ScheduledBaseIntent,
+        intent_bundle: &ScheduledIntentBundle,
     ) -> TaskBuilderResult<Vec<Box<dyn BaseTask>>> {
         // Helper to create a finalize task
         fn finalize_task(account: &CommittedAccount) -> Box<dyn BaseTask> {
@@ -219,46 +269,52 @@ impl TasksBuilder for TaskBuilderImpl {
             }
         }
 
-        match &base_intent.base_intent {
-            MagicBaseIntent::BaseActions(_) => Ok(vec![]),
-            MagicBaseIntent::Commit(commit) => Ok(process_commit(commit)),
-            MagicBaseIntent::CommitAndUndelegate(t) => {
-                let mut tasks = process_commit(&t.commit_action);
-
-                // Get rent reimbursments for undelegated accounts
-                let accounts = t.get_committed_accounts();
-                let pubkeys = accounts
-                    .iter()
-                    .map(|account| account.pubkey)
-                    .collect::<Vec<_>>();
-                let rent_reimbursements = info_fetcher
-                    .fetch_rent_reimbursements(&pubkeys)
-                    .await
-                    .map_err(TaskBuilderError::FinalizedTasksBuildError)?;
-
-                tasks.extend(accounts.iter().zip(rent_reimbursements).map(
-                    |(account, rent_reimbursement)| {
-                        undelegate_task(account, &rent_reimbursement)
-                    },
-                ));
-
-                match &t.undelegate_action {
-                    UndelegateType::Standalone => Ok(tasks),
-                    UndelegateType::WithBaseActions(actions) => {
-                        tasks.extend(actions.iter().map(|action| {
-                            let task = BaseActionTask {
-                                action: action.clone(),
-                            };
-                            let task =
-                                ArgsTask::new(ArgsTaskType::BaseAction(task));
-                            Box::new(task) as Box<dyn BaseTask>
-                        }));
-
-                        Ok(tasks)
-                    }
-                }
-            }
+        let mut tasks = Vec::new();
+        if let Some(ref value) = intent_bundle.intent_bundle.commit {
+            tasks.extend(process_commit(value));
         }
+
+        if let Some(ref value) =
+            intent_bundle.intent_bundle.commit_and_undelegate
+        {
+            tasks.extend(process_commit(&value.commit_action));
+
+            // Get rent reimbursments for undelegated accounts
+            let accounts = value.get_committed_accounts();
+            let mut min_context_slot = 0;
+            let pubkeys = accounts
+                .iter()
+                .map(|account| {
+                    min_context_slot =
+                        std::cmp::max(min_context_slot, account.remote_slot);
+                    account.pubkey
+                })
+                .collect::<Vec<_>>();
+            let rent_reimbursements = info_fetcher
+                .fetch_rent_reimbursements(&pubkeys, min_context_slot)
+                .await
+                .map_err(TaskBuilderError::FinalizedTasksBuildError)?;
+
+            tasks.extend(accounts.iter().zip(rent_reimbursements).map(
+                |(account, rent_reimbursement)| {
+                    undelegate_task(account, &rent_reimbursement)
+                },
+            ));
+
+            if let UndelegateType::WithBaseActions(actions) =
+                &value.undelegate_action
+            {
+                tasks.extend(actions.iter().map(|action| {
+                    let task = BaseActionTask {
+                        action: action.clone(),
+                    };
+                    let task = ArgsTask::new(ArgsTaskType::BaseAction(task));
+                    Box::new(task) as Box<dyn BaseTask>
+                }));
+            }
+        };
+
+        Ok(tasks)
     }
 }
 

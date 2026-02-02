@@ -1,17 +1,14 @@
 use std::path::Path;
 
 use iterator::OffsetPubkeyIter;
-use lmdb::{
-    Cursor, DatabaseFlags, Environment, RwTransaction, Transaction, WriteFlags,
-};
-use log::warn;
+use lmdb::{Cursor, DatabaseFlags, Environment, RwTransaction, Transaction};
 use solana_pubkey::Pubkey;
 use table::Table;
+use tracing::warn;
 use utils::*;
 
 use crate::{
-    error::AccountsDbError,
-    log_err,
+    error::{AccountsDbError, LogErr},
     storage::{Allocation, ExistingAllocation},
     AccountsDbResult,
 };
@@ -19,93 +16,76 @@ use crate::{
 pub type Offset = u32;
 pub type Blocks = u32;
 
-const WEMPTY: WriteFlags = WriteFlags::empty();
-
 const ACCOUNTS_INDEX: &str = "accounts-idx";
 const PROGRAMS_INDEX: &str = "programs-idx";
 const DEALLOCATIONS_INDEX: &str = "deallocations-idx";
 const OWNERS_INDEX: &str = "owners-idx";
 
-/// LMDB Index manager
+/// LMDB Index manager.
+///
+/// Handles secondary indices for mapping Pubkeys to storage offsets,
+/// tracking program ownership, and managing deallocated space.
 #[cfg_attr(test, derive(Debug))]
 pub(crate) struct AccountsDbIndex {
-    /// Accounts Index, used for searching accounts by offset in the main storage
-    ///
-    /// the key is the account's pubkey (32 bytes)
-    /// the value is a concatenation of:
-    /// 1. offset in the storage (4 bytes)
-    /// 2. number of allocated blocks (4 bytes)
+    /// Maps Account Pubkey -> (Storage Offset, Block Count).
     accounts: Table,
-    /// Programs Index, used to keep track of owner->accounts
-    /// mapping, significantly speeds up program accounts retrieval
-    ///
-    /// the key is the owner's pubkey (32 bytes)
-    /// the value is a concatenation of:
-    /// 1. offset in the storage (4 bytes)
-    /// 2. account pubkey (32 bytes)
+    /// Maps Owner Pubkey -> (Storage Offset, Account Pubkey).
+    /// Used for `get_program_accounts`.
     programs: Table,
-    /// Deallocation Index, used to keep track of allocation size of deallocated
-    /// accounts, this is further utilized when defragmentation is required, by
-    /// matching new accounts' size and already present "holes" in the database
-    ///
-    /// the key is the allocation size in blocks (4 bytes)
-    /// the value is a concatenation of:
-    /// 1. offset in the storage (4 bytes)
-    /// 2. number of allocated blocks (4 bytes)
+    /// Maps Allocation Size (Blocks) -> (Storage Offset, Block Count).
+    /// Used for finding recyclable "holes" in storage.
     deallocations: Table,
-    /// Index map from accounts' pubkeys to their current owners, the index is
-    /// used primarily for cleanup purposes when owner change occures and we need
-    /// to cleanup programs index, so that old owner -> account mapping doesn't dangle
-    ///
-    /// the key is the account's pubkey (32 bytes)
-    /// the value is owner's pubkey (32 bytes)
+    /// Maps Account Pubkey -> Owner Pubkey.
+    /// Used for cleaning up the `programs` index when an account changes owner.
     owners: Table,
-    /// Common envorinment for all of the tables
+    /// The LMDB Environment.
     env: Environment,
 }
 
-/// Helper macro to pack(merge) two types into single buffer of similar
-/// combined length or to unpack(unmerge) them back into original types
+/// Helper macro to pack/unpack types into/from byte buffers.
+/// Uses unaligned writes/reads for performance and compactness.
 macro_rules! bytes {
-    (#pack, $hi: expr, $t1: ty, $low: expr, $t2: ty) => {{
-        const S1: usize = size_of::<$t1>();
-        const S2: usize = size_of::<$t2>();
+    (#pack, $val1: expr, $type1: ty, $val2: expr, $type2: ty) => {{
+        const S1: usize = std::mem::size_of::<$type1>();
+        const S2: usize = std::mem::size_of::<$type2>();
         let mut buffer = [0_u8; S1 + S2];
         let ptr = buffer.as_mut_ptr();
-        // SAFETY:
-        // we made sure that buffer contains exact space required by both writes
-        unsafe { (ptr as *mut $t1).write_unaligned($hi) };
-        unsafe { (ptr.add(S1) as *mut $t2).write_unaligned($low) };
+        // SAFETY: Buffer is exactly S1 + S2 bytes.
+        unsafe {
+            (ptr as *mut $type1).write_unaligned($val1);
+            (ptr.add(S1) as *mut $type2).write_unaligned($val2);
+        }
         buffer
     }};
-    (#unpack, $packed: expr,  $t1: ty, $t2: ty) => {{
+    (#unpack, $packed: expr, $type1: ty, $type2: ty) => {{
         let ptr = $packed.as_ptr();
-        const S1: usize = size_of::<$t1>();
-        // SAFETY:
-        // this macro branch is called on values previously packed by first branch
-        // so we essentially undo the packing on buffer of valid length
-        let t1 = unsafe { (ptr as *const $t1).read_unaligned() };
-        let t2 = unsafe { (ptr.add(S1) as *const $t2).read_unaligned() };
-        (t1, t2)
+        const S1: usize = std::mem::size_of::<$type1>();
+        // SAFETY: Macro caller ensures $packed is valid length.
+        unsafe {
+            let v1 = (ptr as *const $type1).read_unaligned();
+            let v2 = (ptr.add(S1) as *const $type2).read_unaligned();
+            (v1, v2)
+        }
     }};
 }
 
 impl AccountsDbIndex {
-    /// Creates new index manager for AccountsDB, by
-    /// opening/creating necessary lmdb environments
     pub(crate) fn new(size: usize, directory: &Path) -> AccountsDbResult<Self> {
-        // create an environment for all the tables
-        let env = lmdb_env(directory, size).inspect_err(log_err!(
-            "main index env creation at {}",
-            directory.display()
-        ))?;
+        let env = utils::create_lmdb_env(directory, size).log_err(|| {
+            format!("main index env creation at {}", directory.display())
+        })?;
+
         let accounts =
             Table::new(&env, ACCOUNTS_INDEX, DatabaseFlags::empty())?;
+
         let programs = Table::new(
             &env,
             PROGRAMS_INDEX,
             DatabaseFlags::DUP_SORT | DatabaseFlags::DUP_FIXED,
         )?;
+
+        // DEALLOCATIONS: Allow duplicates (multiple holes of same size),
+        // integer keys (block size) for range searches.
         let deallocations = Table::new(
             &env,
             DEALLOCATIONS_INDEX,
@@ -116,6 +96,7 @@ impl AccountsDbIndex {
         )?;
 
         let owners = Table::new(&env, OWNERS_INDEX, DatabaseFlags::empty())?;
+
         Ok(Self {
             accounts,
             programs,
@@ -125,30 +106,150 @@ impl AccountsDbIndex {
         })
     }
 
-    /// Retrieve the offset at which account can be read from main storage
+    /// Retrieves the storage offset for a given account.
     #[inline(always)]
-    pub(crate) fn get_account_offset(
+    pub(crate) fn get_offset(
         &self,
         pubkey: &Pubkey,
     ) -> AccountsDbResult<Offset> {
         let txn = self.env.begin_ro_txn()?;
-        let Some(offset) = self.accounts.get(&txn, pubkey)? else {
+        let Some(value_bytes) = self.accounts.get(&txn, pubkey)? else {
             return Err(AccountsDbError::NotFound);
         };
+
+        // We only need the first 4 bytes (Offset), ignoring the Blocks count.
+        // SAFETY: Accounts index values are always created by `bytes!(#pack, ...)`
+        // which guarantees [Offset(4), Blocks(4)].
         let offset =
-            // SAFETY:
-            // The accounts index stores two u32 values (offset and blocks)
-            // serialized into 8 byte long slice. Here we are interested only in the first 4 bytes
-            // (offset). The memory used by lmdb to store the serialization might not be u32
-            // aligned, so we make use `read_unaligned`.
-            //
-            // We read the data stored by corresponding put in `insert_account`,
-            // thus it should be of valid length and contain valid value
-            unsafe { (offset.as_ptr() as *const Offset).read_unaligned() };
+            unsafe { (value_bytes.as_ptr() as *const Offset).read_unaligned() };
         Ok(offset)
     }
 
-    /// Retrieve the offset and the size (number of blocks) given account occupies
+    /// Inserts or updates an account's allocation in the indices.
+    ///
+    /// If the account already exists, it handles the "move":
+    /// 1. Marks the old space as deallocated (recyclable).
+    /// 2. Updates the main index.
+    /// 3. Updates secondary indices (programs, owners).
+    pub(crate) fn upsert_account(
+        &self,
+        pubkey: &Pubkey,
+        owner: &Pubkey,
+        allocation: Allocation,
+        txn: &mut RwTransaction,
+    ) -> AccountsDbResult<Option<ExistingAllocation>> {
+        let Allocation { offset, blocks, .. } = allocation;
+        let mut old_allocation = None;
+
+        let index_value = bytes!(#pack, offset, Offset, blocks, Blocks);
+        let offset_and_pubkey = bytes!(#pack, offset, Offset, *pubkey, Pubkey);
+
+        // 1. Optimistic insert (returns true if inserted, false if existed)
+        let inserted = self.accounts.insert(txn, pubkey, index_value)?;
+
+        // 2. Handle update if it already existed
+        if !inserted {
+            let previous =
+                self.reallocate_account(pubkey, txn, &index_value)?;
+            old_allocation = Some(previous);
+        }
+
+        // 3. Update secondary indices
+        self.programs.upsert(txn, owner, offset_and_pubkey)?;
+        self.owners.upsert(txn, pubkey, owner)?;
+
+        Ok(old_allocation)
+    }
+
+    /// Handles the logistics of moving an existing account to a new location.
+    /// Returns the old allocation so it can be added to the free list.
+    fn reallocate_account(
+        &self,
+        pubkey: &Pubkey,
+        txn: &mut RwTransaction,
+        new_index_value: &[u8],
+    ) -> AccountsDbResult<ExistingAllocation> {
+        // Retrieve old location
+        let old_alloc = self.get_allocation(txn, pubkey)?;
+
+        // Mark old space as free (Deallocations Index)
+        // Key: Block Count (for size-based lookup), Value: {Offset, Block Count}
+        let key = old_alloc.blocks.to_le_bytes();
+        let value =
+            bytes!(#pack, old_alloc.offset, Offset, old_alloc.blocks, Blocks);
+        self.deallocations.upsert(txn, key, value)?;
+
+        // Update Main Index with new location
+        self.accounts.upsert(txn, pubkey, new_index_value)?;
+
+        // Clean up Programs Index (dangling pointer to old offset)
+        self.remove_program_index_entry(pubkey, None, txn, old_alloc.offset)?;
+
+        Ok(old_alloc)
+    }
+
+    /// Removes an account from all indices and marks its space as recyclable.
+    pub(crate) fn remove(
+        &self,
+        pubkey: &Pubkey,
+        txn: &mut RwTransaction<'_>,
+    ) -> AccountsDbResult<()> {
+        // Get allocation to know what to free
+        let allocation = match self.get_allocation(txn, pubkey) {
+            Ok(a) => a,
+            Err(AccountsDbError::NotFound) => return Ok(()), // Idempotent
+            Err(e) => return Err(e),
+        };
+
+        // Remove from Main Index
+        self.accounts.remove(txn, pubkey, None)?;
+
+        // Add to Deallocations Index
+        let key = allocation.blocks.to_le_bytes();
+        let val =
+            bytes!(#pack, allocation.offset, Offset, allocation.blocks, Blocks);
+        self.deallocations.upsert(txn, key, val)?;
+
+        // Remove from Secondary Indices
+        self.remove_program_index_entry(pubkey, None, txn, allocation.offset)?;
+        self.owners.remove(txn, pubkey, None)?;
+
+        Ok(())
+    }
+
+    /// Reconciles the `owners` and `programs` indices if the account's owner changed.
+    pub(crate) fn ensure_correct_owner(
+        &self,
+        pubkey: &Pubkey,
+        new_owner: &Pubkey,
+        txn: &mut RwTransaction,
+    ) -> AccountsDbResult<()> {
+        let owner_bytes = self.owners.get(txn, pubkey)?;
+
+        let old_owner = owner_bytes.and_then(|b| Pubkey::try_from(b).ok());
+
+        let allocation = self.get_allocation(txn, pubkey)?;
+
+        // 1. Clean up old program index entry
+        self.remove_program_index_entry(
+            pubkey,
+            old_owner,
+            txn,
+            allocation.offset,
+        )?;
+
+        // 2. Insert new program index entry
+        let offset_and_pubkey =
+            bytes!(#pack, allocation.offset, Offset, *pubkey, Pubkey);
+        self.programs.upsert(txn, new_owner, offset_and_pubkey)?;
+
+        // 3. Update owners index
+        self.owners.upsert(txn, pubkey, new_owner)?;
+
+        Ok(())
+    }
+
+    /// Internal helper to retrieve full allocation info (Offset + Size).
     fn get_allocation<T: Transaction>(
         &self,
         txn: &T,
@@ -157,188 +258,84 @@ impl AccountsDbIndex {
         let Some(slice) = self.accounts.get(txn, pubkey)? else {
             return Err(AccountsDbError::NotFound);
         };
-        let (offset, blocks) = bytes!(#unpack, slice, u32, u32);
+        let (offset, blocks) = bytes!(#unpack, slice, Offset, Blocks);
         Ok(ExistingAllocation { offset, blocks })
     }
 
-    /// Insert account's allocation information into various indices, if
-    /// account is already present, necessary bookkeeping will take place
-    pub(crate) fn insert_account(
-        &self,
-        pubkey: &Pubkey,
-        owner: &Pubkey,
-        allocation: Allocation,
-    ) -> AccountsDbResult<Option<ExistingAllocation>> {
-        let Allocation { offset, blocks, .. } = allocation;
-
-        let mut txn = self.env.begin_rw_txn()?;
-        let mut dealloc = None;
-
-        // merge offset and block count into one single u64 and cast it to [u8; 8]
-        let index_value = bytes!(#pack, offset, Offset, blocks, Blocks);
-        // concatenate offset where account is stored with pubkey of that account
-        let offset_and_pubkey = bytes!(#pack, offset, Offset, *pubkey, Pubkey);
-
-        // optimisitically try to insert account to index, assuming that it doesn't exist
-        let inserted =
-            self.accounts
-                .put_if_not_exists(&mut txn, pubkey, index_value)?;
-        // if the account does exist, then it already occupies space in main storage
-        if !inserted {
-            // in which case we just move the account to a new allocation
-            // adjusting all of the offsets and cleaning up the older ones
-            let previous =
-                self.reallocate_account(pubkey, &mut txn, &index_value)?;
-            dealloc.replace(previous);
-        };
-
-        // track the account via programs' index as well
-        self.programs.put(&mut txn, owner, offset_and_pubkey)?;
-        // track the reverse relation between account and its owner
-        self.owners.put(&mut txn, pubkey, owner)?;
-
-        txn.commit()?;
-        Ok(dealloc)
-    }
-
-    /// Helper method to change the allocation for a given account
-    fn reallocate_account(
-        &self,
-        pubkey: &Pubkey,
-        txn: &mut RwTransaction,
-        index_value: &[u8],
-    ) -> AccountsDbResult<ExistingAllocation> {
-        // retrieve the size and offset for allocation
-        let allocation = self.get_allocation(txn, pubkey)?;
-        // and put it into deallocation index, so the space can be recycled later
-        let key = allocation.blocks.to_le_bytes();
-        let value =
-            bytes!(#pack, allocation.offset, Offset, allocation.blocks, Blocks);
-        self.deallocations.put(txn, key, value)?;
-
-        // now we can overwrite the index record
-        self.accounts.put(txn, pubkey, index_value)?;
-
-        // we also need to delete old entry from `programs` index
-        self.remove_programs_index_entry(pubkey, None, txn, allocation.offset)?;
-        Ok(allocation)
-    }
-
-    /// Removes account from the database and marks its backing storage for recycling
-    /// this method also performs various cleanup operations on the secondary indexes
-    pub(crate) fn remove_account(
-        &self,
-        pubkey: &Pubkey,
-    ) -> AccountsDbResult<()> {
-        let mut txn = self.env.begin_rw_txn()?;
-        let mut cursor = self.accounts.cursor_rw(&mut txn)?;
-
-        // locate the account entry
-        let result = cursor
-            .get(Some(pubkey.as_ref()), None, MDB_SET_OP)
-            .map(|(_, v)| bytes!(#unpack, v, Offset, Blocks));
-        let (offset, blocks) = match result {
-            Ok(r) => r,
-            Err(lmdb::Error::NotFound) => return Ok(()),
-            Err(err) => Err(err)?,
-        };
-
-        // and delete it
-        cursor.del(WriteFlags::empty())?;
-        drop(cursor);
-
-        // mark the allocation for future recycling
-        self.deallocations.put(
-            &mut txn,
-            blocks.to_le_bytes(),
-            bytes!(#pack, offset, Offset, blocks, Blocks),
-        )?;
-
-        // we also need to cleanup `programs` index
-        self.remove_programs_index_entry(pubkey, None, &mut txn, offset)?;
-        txn.commit()?;
-        Ok(())
-    }
-
-    /// Ensures that current owner of account matches the one recorded in index,
-    /// if not, the index cleanup will be performed and new entry inserted to
-    /// match the current state
-    pub(crate) fn ensure_correct_owner(
-        &self,
-        pubkey: &Pubkey,
-        owner: &Pubkey,
-    ) -> AccountsDbResult<()> {
-        let txn = self.env.begin_ro_txn()?;
-        let old_owner = match self.owners.get(&txn, pubkey)? {
-            // if current owner matches with that stored in index, then we are all set
-            Some(val) if owner.as_ref() == val => {
-                return Ok(());
-            }
-            None => return Ok(()),
-            // if they don't match, then we have to remove old entries and create new ones
-            Some(val) => Pubkey::try_from(val).ok(),
-        };
-        let allocation = self.get_allocation(&txn, pubkey)?;
-        let mut txn = self.env.begin_rw_txn()?;
-        // cleanup `programs` and `owners` index
-        self.remove_programs_index_entry(
-            pubkey,
-            old_owner,
-            &mut txn,
-            allocation.offset,
-        )?;
-        // track new owner of the account via programs' index
-        let offset_and_pubkey =
-            bytes!(#pack, allocation.offset, Offset, *pubkey, Pubkey);
-        self.programs.put(&mut txn, owner, offset_and_pubkey)?;
-        // track the reverse relation between account and its owner
-        self.owners.put(&mut txn, pubkey, owner)?;
-
-        txn.commit().map_err(Into::into)
-    }
-
-    fn remove_programs_index_entry(
+    /// Finds and removes a `programs` index entry.
+    /// If `old_owner` is not provided, it is looked up in the `owners` index.
+    fn remove_program_index_entry(
         &self,
         pubkey: &Pubkey,
         old_owner: Option<Pubkey>,
         txn: &mut RwTransaction,
         offset: Offset,
     ) -> lmdb::Result<()> {
-        let val = bytes!(#pack, offset, Offset, *pubkey, Pubkey);
-        if let Some(owner) = old_owner {
-            return self.programs.del(txn, owner, Some(&val));
-        }
-        // in order to delete the old entry from `programs` index, we consult
-        // the `owners` index to fetch the previous owner of the account
-        let mut owners = self.owners.cursor_rw(txn)?;
-        let owner = match owners.get(Some(pubkey.as_ref()), None, MDB_SET_OP) {
-            Ok((_, val)) => {
-                let pk = Pubkey::try_from(val).inspect_err(log_err!(
-                    "owners index contained invalid value for pubkey of len {}",
-                    val.len()
-                ));
-                let Ok(owner) = pk else {
+        // We need the owner to find the key in the programs index (Key=Owner).
+        let owner = match old_owner {
+            Some(pk) => pk,
+            None => match self.owners.get(txn, pubkey)? {
+                Some(val) => {
+                    Pubkey::try_from(val).map_err(|_| lmdb::Error::Invalid)?
+                }
+                None => {
+                    warn!(pubkey = %pubkey, "Account missing from owners index");
                     return Ok(());
-                };
-                owner
-            }
-            Err(lmdb::Error::NotFound) => {
-                warn!("account {pubkey} didn't have owners index entry");
-                return Ok(());
-            }
-            Err(e) => {
-                return Err(e);
-            }
+                }
+            },
         };
-        owners.del(WEMPTY)?;
-        drop(owners);
 
-        self.programs.del(txn, owner, Some(&val))?;
-        Ok(())
+        // Value in programs index is {Offset, Pubkey}.
+        // We need exact match to delete from DUPSORT db.
+        let val = bytes!(#pack, offset, Offset, *pubkey, Pubkey);
+        self.programs.remove(txn, owner, Some(&val))
     }
 
-    /// Returns an iterator over offsets and pubkeys of accounts for given
-    /// program offsets can be used to retrieve the account from storage
+    /// Tries to find a free block of `needed` size in the deallocations table.
+    /// If found, splits it if too large, and returns the recycled allocation.
+    pub(crate) fn try_recycle_allocation(
+        &self,
+        needed: Blocks,
+        txn: &mut RwTransaction,
+    ) -> AccountsDbResult<ExistingAllocation> {
+        let mut cursor = self.deallocations.cursor_rw(txn)?;
+
+        // MDB_SET_RANGE: Position cursor at first key >= `needed`.
+        // This effectively implements a "Best Fit" (or "First Sufficient Fit") strategy.
+        let (_key_bytes, val_bytes) = cursor.get(
+            Some(&needed.to_le_bytes()),
+            None,
+            utils::MDB_SET_RANGE_OP,
+        )?;
+
+        let (offset, available_blocks) =
+            bytes!(#unpack, val_bytes, Offset, Blocks);
+
+        // Remove this allocation from free list
+        cursor.del(lmdb::WriteFlags::empty())?;
+
+        // If we found a block larger than needed, split it and put the remainder back.
+        let remainder = available_blocks.saturating_sub(needed);
+        if remainder > 0 {
+            let new_hole_offset = offset.saturating_add(needed);
+
+            let new_key = remainder.to_le_bytes();
+            let new_val =
+                bytes!(#pack, new_hole_offset, Offset, remainder, Blocks);
+
+            drop(cursor);
+            // Insert the remainder back into deallocations
+            self.deallocations.upsert(txn, new_key, new_val)?;
+        }
+
+        Ok(ExistingAllocation {
+            offset,
+            blocks: needed,
+        })
+    }
+
+    // --- Iterators & Accessors ---
+
     pub(crate) fn get_program_accounts_iter(
         &self,
         program: &Pubkey,
@@ -347,8 +344,6 @@ impl AccountsDbIndex {
         OffsetPubkeyIter::new(&self.programs, txn, Some(program))
     }
 
-    /// Returns an iterator over offsets and pubkeys of all accounts in database
-    /// offsets can be used further to retrieve the account from storage
     pub(crate) fn get_all_accounts(
         &self,
     ) -> AccountsDbResult<OffsetPubkeyIter<'_>> {
@@ -356,7 +351,6 @@ impl AccountsDbIndex {
         OffsetPubkeyIter::new(&self.programs, txn, None)
     }
 
-    /// Obtain a wrapped cursor to query account offsets repeatedly
     pub(crate) fn offset_finder(
         &self,
     ) -> AccountsDbResult<AccountOffsetFinder<'_>> {
@@ -364,85 +358,30 @@ impl AccountsDbIndex {
         AccountOffsetFinder::new(&self.accounts, txn)
     }
 
-    /// Returns the number of accounts in the database
     pub(crate) fn get_accounts_count(&self) -> usize {
         let Ok(txn) = self.env.begin_ro_txn() else {
-            warn!("failed to start transaction for stats retrieval");
             return 0;
         };
         self.owners.entries(&txn)
     }
 
-    /// Check whether allocation of given size (in blocks) exists.
-    /// These are the allocations which are leftovers from
-    /// accounts' reallocations due to their resizing/removal
-    pub(crate) fn try_recycle_allocation(
-        &self,
-        space: Blocks,
-    ) -> AccountsDbResult<ExistingAllocation> {
-        let mut txn = self.env.begin_rw_txn()?;
-        let mut cursor = self.deallocations.cursor_rw(&mut txn)?;
-        // this is a neat lmdb trick where we can search for entry with matching
-        // or greater key since we are interested in any allocation of at least
-        // `blocks` size or greater, this works perfectly well for this case
-
-        let (_, val) =
-            cursor.get(Some(&space.to_le_bytes()), None, MDB_SET_RANGE_OP)?;
-
-        let (offset, mut blocks) = bytes!(#unpack, val, Offset, Blocks);
-        // delete the allocation record from recycleable list
-        cursor.del(WEMPTY)?;
-        // check whether the found allocation contains more space than necessary
-        let remainder = blocks.saturating_sub(space);
-        if remainder > 0 {
-            // split the allocation, to maximize the efficiency of block reuse
-            blocks = space;
-            let new_offset = offset.saturating_add(blocks);
-            let index_value = bytes!(#pack, new_offset, u32, remainder, u32);
-            cursor.put(&remainder.to_le_bytes(), &index_value, WEMPTY)?;
-        }
-
-        drop(cursor);
-        txn.commit()?;
-
-        Ok(ExistingAllocation { offset, blocks })
-    }
-
     pub(crate) fn flush(&self) {
-        // it's ok to ignore potential error here, as it will only happen if something
-        // utterly terrible happened at OS level, in which case we most likely won't even
-        // reach this code in any case there's no meaningful way to handle these errors
-        let _ = self
-            .env
-            .sync(true)
-            .inspect_err(log_err!("main index flushing"));
+        let _ = self.env.sync(true).log_err(|| "main index flushing");
     }
 
-    /// Reopen the index databases from a different directory at provided path
-    ///
-    /// NOTE: this is a very cheap operation, as fast as opening a few files
     pub(crate) fn reload(&mut self, dbpath: &Path) -> AccountsDbResult<()> {
-        // set it to default lmdb map size, it will be
-        // ignored if smaller than currently occupied
         const DEFAULT_SIZE: usize = 1024 * 1024;
         *self = Self::new(DEFAULT_SIZE, dbpath)?;
         Ok(())
     }
 
-    /// Returns the number of deallocations in the database
-    #[cfg(test)]
-    pub(crate) fn get_delloactions_count(&self) -> usize {
-        let Ok(txn) = self.env.begin_ro_txn() else {
-            warn!("failed to start transaction for stats retrieval");
-            return 0;
-        };
-        self.deallocations.entries(&txn)
+    pub(crate) fn rwtxn(&self) -> lmdb::Result<RwTransaction<'_>> {
+        self.env.begin_rw_txn()
     }
 }
 
 pub(crate) mod iterator;
-pub(super) mod utils;
-//mod standalone;
 mod table;
 #[cfg(test)]
 mod tests;
+pub(super) mod utils;
