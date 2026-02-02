@@ -7,7 +7,7 @@ use integration_test_tools::{
     validator::{cleanup, start_magicblock_validator_with_config_struct},
     IntegrationTestContext,
 };
-use log::*;
+use tracing::*;
 use magicblock_config::{
     config::{
         accounts::AccountsDbConfig, chain::ChainLinkConfig,
