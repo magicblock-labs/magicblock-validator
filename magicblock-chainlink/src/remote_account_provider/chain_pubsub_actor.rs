@@ -93,7 +93,17 @@ impl ChainPubsubActor {
     ) -> RemoteAccountProviderResult<(Self, mpsc::Receiver<SubscriptionUpdate>)>
     {
         let url = pubsub_client_config.pubsub_url.clone();
-        let pubsub_connection = Arc::new(PubSubConnection::new(url).await?);
+        let pubsub_connection = {
+            let pubsub_connection =
+                PubSubConnection::new(url).await.inspect_err(|err| {
+                    error!(
+                        client_id = client_id,
+                        err = ?err,
+                        "Failed to connect to provider"
+                    )
+                })?;
+            Arc::new(pubsub_connection)
+        };
 
         let (subscription_updates_sender, subscription_updates_receiver) =
             mpsc::channel(SUBSCRIPTION_UPDATE_CHANNEL_SIZE);

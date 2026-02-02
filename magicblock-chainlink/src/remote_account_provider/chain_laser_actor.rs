@@ -149,11 +149,11 @@ impl ChainLaserActor {
         abort_sender: mpsc::Sender<()>,
         slots: Slots,
         rpc_client: ChainRpcClientImpl,
-    ) -> RemoteAccountProviderResult<(
+    ) -> (
         Self,
         mpsc::Sender<ChainPubsubActorMessage>,
         mpsc::Receiver<SubscriptionUpdate>,
-    )> {
+    ) {
         let channel_options = ChannelOptions {
             connect_timeout_secs: Some(5),
             http2_keep_alive_interval_secs: Some(15),
@@ -184,11 +184,11 @@ impl ChainLaserActor {
         abort_sender: mpsc::Sender<()>,
         slots: Slots,
         rpc_client: ChainRpcClientImpl,
-    ) -> RemoteAccountProviderResult<(
+    ) -> (
         Self,
         mpsc::Sender<ChainPubsubActorMessage>,
         mpsc::Receiver<SubscriptionUpdate>,
-    )> {
+    ) {
         let (subscription_updates_sender, subscription_updates_receiver) =
             mpsc::channel(SUBSCRIPTION_UPDATE_CHANNEL_SIZE);
         let (messages_sender, messages_receiver) =
@@ -210,7 +210,7 @@ impl ChainLaserActor {
             rpc_client,
         };
 
-        Ok((me, messages_sender, subscription_updates_receiver))
+        (me, messages_sender, subscription_updates_receiver)
     }
 
     #[allow(dead_code)]
