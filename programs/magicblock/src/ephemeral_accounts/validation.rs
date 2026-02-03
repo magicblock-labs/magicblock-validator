@@ -46,15 +46,7 @@ pub(crate) fn validate_sponsor(
     let ix_ctx = transaction_context.get_current_instruction_context()?;
 
     if !ix_ctx.is_instruction_account_signer(0)? {
-        // Not a signer - must be a PDA owned by the calling program
-        let caller_program_id = get_caller_program_id(transaction_context)?;
-        let sponsor_owner = accounts::get_instruction_account_owner_with_idx(
-            transaction_context,
-            0,
-        )?;
-        if sponsor_owner != caller_program_id {
-            return Err(InstructionError::InvalidAccountOwner);
-        }
+        return Err(InstructionError::MissingRequiredSignature);
     }
     Ok(())
 }

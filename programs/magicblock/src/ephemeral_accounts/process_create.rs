@@ -7,14 +7,13 @@ use solana_program_runtime::invoke_context::InvokeContext;
 use solana_sdk_ids::system_program;
 use solana_transaction_context::TransactionContext;
 
-use super::{
-    processor::{rent_for, MAX_DATA_LEN},
-    validation::{
-        get_caller_program_id, validate_cpi_only, validate_sponsor,
-        validate_vault,
-    },
+use super::validation::{
+    get_caller_program_id, validate_cpi_only, validate_sponsor, validate_vault,
 };
-use crate::utils::accounts;
+use crate::{
+    ephemeral_accounts::{rent_for, MAX_DATA_LEN},
+    utils::accounts,
+};
 
 /// Creates a new ephemeral account with rent paid by the sponsor.
 /// The account is owned by the calling program (inferred from CPI context).
