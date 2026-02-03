@@ -795,12 +795,8 @@ where
 
         cancel_subs(&self.remote_account_provider, cancel_strategy).await;
 
-        pipeline::clone_accounts_and_programs(
-            self,
-            accounts_to_clone,
-            loaded_programs,
-        )
-        .await?;
+        self.clone_accounts_and_programs(accounts_to_clone, loaded_programs)
+            .await?;
 
         Ok(FetchAndCloneResult {
             not_found_on_chain: not_found,

@@ -638,50 +638,58 @@ pub(crate) fn compute_cancel_strategy(
     }
 }
 
-/// Clones accounts and programs into the bank
-#[instrument(skip(this, accounts_to_clone, loaded_programs))]
-pub(crate) async fn clone_accounts_and_programs<T, U, V, C>(
-    this: &FetchCloner<T, U, V, C>,
-    accounts_to_clone: Vec<AccountCloneRequest>,
-    loaded_programs: Vec<
-        crate::remote_account_provider::program_account::LoadedProgram,
-    >,
-) -> ClonerResult<()>
+impl<T, U, V, C> FetchCloner<T, U, V, C>
 where
     T: ChainRpcClient,
     U: ChainPubsubClient,
     V: AccountsBank,
     C: Cloner,
 {
-    let mut join_set = JoinSet::new();
-    for request in accounts_to_clone {
-        if tracing::enabled!(tracing::Level::TRACE) {
-            trace!(
-                pubkey = %request.pubkey,
-                slot = request.account.remote_slot(),
-                owner = %request.account.owner(),
-                "Cloning account"
-            );
-        };
+    /// Clones accounts and programs into the bank
+    #[instrument(skip(self, accounts_to_clone, loaded_programs))]
+    pub(crate) async fn clone_accounts_and_programs(
+        &self,
+        accounts_to_clone: Vec<AccountCloneRequest>,
+        loaded_programs: Vec<
+            crate::remote_account_provider::program_account::LoadedProgram,
+        >,
+    ) -> ClonerResult<()>
+    where
+        T: ChainRpcClient,
+        U: ChainPubsubClient,
+        V: AccountsBank,
+        C: Cloner,
+    {
+        let mut join_set = JoinSet::new();
+        for request in accounts_to_clone {
+            if tracing::enabled!(tracing::Level::TRACE) {
+                trace!(
+                    pubkey = %request.pubkey,
+                    slot = request.account.remote_slot(),
+                    owner = %request.account.owner(),
+                    "Cloning account"
+                );
+            };
 
-        let cloner = this.cloner.clone();
-        join_set.spawn(async move { cloner.clone_account(request).await });
-    }
-
-    for acc in loaded_programs {
-        if !this.is_program_allowed(&acc.program_id) {
-            debug!(program_id = %acc.program_id, "Skipping clone of program");
-            continue;
+            let cloner = self.cloner.clone();
+            join_set.spawn(async move { cloner.clone_account(request).await });
         }
-        let cloner = this.cloner.clone();
-        join_set.spawn(async move { cloner.clone_program(acc).await });
+
+        for acc in loaded_programs {
+            if !self.is_program_allowed(&acc.program_id) {
+                debug!(program_id = %acc.program_id, "Skipping clone of program");
+                continue;
+            }
+            let cloner = self.cloner.clone();
+            join_set.spawn(async move { cloner.clone_program(acc).await });
+        }
+
+        join_set
+            .join_all()
+            .await
+            .into_iter()
+            .collect::<ClonerResult<Vec<_>>>()?;
+
+        Ok(())
     }
-
-    join_set
-        .join_all()
-        .await
-        .into_iter()
-        .collect::<ClonerResult<Vec<_>>>()?;
-
-    Ok(())
 }
