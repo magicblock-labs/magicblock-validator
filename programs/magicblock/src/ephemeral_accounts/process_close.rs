@@ -8,7 +8,7 @@ use solana_sdk_ids::system_program;
 use solana_transaction_context::TransactionContext;
 
 use super::{
-    processor::rent_for,
+    rent_for,
     validation::{
         get_caller_program_id, validate_cpi_only, validate_existing_ephemeral,
         validate_sponsor, validate_vault,

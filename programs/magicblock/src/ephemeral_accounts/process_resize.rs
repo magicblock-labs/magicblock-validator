@@ -6,14 +6,14 @@ use solana_log_collector::ic_msg;
 use solana_program_runtime::invoke_context::InvokeContext;
 use solana_transaction_context::TransactionContext;
 
-use super::{
-    processor::{rent_for, MAX_DATA_LEN},
-    validation::{
-        get_caller_program_id, validate_cpi_only, validate_existing_ephemeral,
-        validate_sponsor, validate_vault,
-    },
+use super::validation::{
+    get_caller_program_id, validate_cpi_only, validate_existing_ephemeral,
+    validate_sponsor, validate_vault,
 };
-use crate::utils::accounts;
+use crate::{
+    ephemeral_accounts::{rent_for, MAX_DATA_LEN},
+    utils::accounts,
+};
 
 /// Resizes an existing ephemeral account, adjusting rent accordingly.
 pub(crate) fn process_resize_ephemeral_account(
