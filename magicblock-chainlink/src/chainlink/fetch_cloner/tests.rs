@@ -1,5 +1,6 @@
 use std::{collections::HashMap, sync::Arc};
 
+use magicblock_config::config::LifecycleMode;
 use solana_account::{Account, AccountSharedData, WritableAccount};
 use solana_sdk_ids::system_program;
 use tokio::sync::mpsc;
@@ -184,6 +185,7 @@ fn init_fetch_cloner(
         faucet_pubkey,
         subscription_rx,
         None,
+        LifecycleMode::Ephemeral,
     );
     (fetch_cloner, subscription_tx)
 }
@@ -1499,6 +1501,7 @@ async fn test_allowed_programs_filters_programs() {
         random_pubkey(),
         subscription_rx,
         allowed_programs,
+        LifecycleMode::Ephemeral,
     );
 
     // Fetch and clone both programs
@@ -1567,6 +1570,7 @@ async fn test_allowed_programs_none_allows_all() {
         random_pubkey(),
         subscription_rx,
         None, // No restriction
+        LifecycleMode::Ephemeral,
     );
 
     // Fetch and clone both programs
@@ -1634,6 +1638,7 @@ async fn test_allowed_programs_empty_allows_all() {
         random_pubkey(),
         subscription_rx,
         allowed_programs,
+        LifecycleMode::Ephemeral,
     );
 
     // Fetch and clone both programs

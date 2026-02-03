@@ -29,6 +29,12 @@ impl LifecycleMode {
         !matches!(self, LifecycleMode::Offline)
     }
 
+    /// Check whether the validator lifecycle dictates to
+    /// clone program accounts only
+    pub fn clones_programs_only(&self) -> bool {
+        matches!(self, LifecycleMode::ProgramsReplica)
+    }
+
     /// Check whether the validator lifecycle enforces access permissions
     /// which is only the case currently in [LifecycleMode::Ephemeral] mode
     pub fn enforce_access_permissions(&self) -> bool {

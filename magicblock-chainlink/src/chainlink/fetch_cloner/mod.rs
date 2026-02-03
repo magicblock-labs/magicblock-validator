@@ -11,7 +11,7 @@ use dlp::{
     pda::delegation_record_pda_from_delegated_account, state::DelegationRecord,
 };
 use magicblock_accounts_db::traits::AccountsBank;
-use magicblock_config::config::AllowedProgram;
+use magicblock_config::config::{AllowedProgram, LifecycleMode};
 use magicblock_core::token_programs::{
     is_ata, try_derive_eata_address_and_bump, MaybeIntoAta,
 };
@@ -87,6 +87,9 @@ where
     /// If specified, only these programs will be cloned. If None or empty,
     /// all programs are allowed.
     allowed_programs: Option<HashSet<Pubkey>>,
+
+    /// The lifecycle mode of the validator, used to determine cloning behavior
+    lifecycle_mode: LifecycleMode,
 }
 
 impl<T, U, V, C> FetchCloner<T, U, V, C>
@@ -97,6 +100,7 @@ where
     C: Cloner,
 {
     /// Create FetchCloner with subscription updates properly connected
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         remote_account_provider: &Arc<RemoteAccountProvider<T, U>>,
         accounts_bank: &Arc<V>,
@@ -105,6 +109,7 @@ where
         faucet_pubkey: Pubkey,
         subscription_updates_rx: mpsc::Receiver<ForwardedSubscriptionUpdate>,
         allowed_programs: Option<Vec<AllowedProgram>>,
+        lifecycle_mode: LifecycleMode,
     ) -> Arc<Self> {
         let blacklisted_accounts =
             blacklisted_accounts(&validator_pubkey, &faucet_pubkey);
@@ -120,6 +125,7 @@ where
             fetch_count: Arc::new(AtomicU64::new(0)),
             blacklisted_accounts,
             allowed_programs,
+            lifecycle_mode,
         });
 
         me.clone()

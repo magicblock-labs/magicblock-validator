@@ -131,6 +131,8 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
         .await?;
         let fetch_cloner = if let Some(provider) = account_provider {
             let provider = Arc::new(provider);
+            let lifecycle_mode =
+                config.remote_account_provider.lifecycle_mode().clone();
             let fetch_cloner = FetchCloner::new(
                 &provider,
                 accounts_bank,
@@ -139,6 +141,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
                 faucet_pubkey,
                 rx,
                 chainlink_config.allowed_programs.clone(),
+                lifecycle_mode,
             );
             Some(fetch_cloner)
         } else {

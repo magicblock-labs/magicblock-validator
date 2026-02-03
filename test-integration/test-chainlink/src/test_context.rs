@@ -102,6 +102,7 @@ impl TestContext {
                             faucet_pubkey,
                             rx,
                             None,
+                            lifecycle_mode,
                         )),
                         Some(provider),
                     )
