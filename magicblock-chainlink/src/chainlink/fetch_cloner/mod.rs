@@ -788,6 +788,11 @@ where
         .await;
         accounts_to_clone.extend(ata_accounts);
 
+        // If lifecycle mode requires programs-only cloning, filter out non-program accounts
+        if self.lifecycle_mode.clones_programs_only() {
+            accounts_to_clone.retain(|request| request.account.executable());
+        }
+
         // Compute sub cancellations now since we may potentially fail during a cloning step
         let cancel_strategy = pipeline::compute_cancel_strategy(
             pubkeys,
