@@ -97,7 +97,7 @@ fn create_ephemeral_account_ix(
         vec![
             AccountMeta::new_readonly(magic_program, false),
             AccountMeta::new(sponsor, true),
-            AccountMeta::new(ephemeral, true), // Must be signer to prevent squatting
+            AccountMeta::new(ephemeral, true),
             AccountMeta::new(vault, false),
         ],
     )

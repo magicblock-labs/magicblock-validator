@@ -37,9 +37,7 @@ pub(crate) fn validate_cpi_only(
     Ok(())
 }
 
-/// Validates the sponsor account (index 0):
-/// - Oncurve accounts must be a signer
-/// - PDA accounts must be owned by the calling program
+/// Validates the sponsor account (index 0) is a signer
 pub(crate) fn validate_sponsor(
     transaction_context: &TransactionContext,
 ) -> Result<(), InstructionError> {
