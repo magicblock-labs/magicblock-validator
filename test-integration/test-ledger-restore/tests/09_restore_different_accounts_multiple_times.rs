@@ -2,7 +2,14 @@ use std::{path::Path, process::Child};
 
 use cleanass::assert_eq;
 use integration_test_tools::{
-    expect, loaded_accounts::LoadedAccounts, tmpdir::resolve_tmp_dir,
+    expect,
+    loaded_accounts::LoadedAccounts,
+    scenario_setup::{
+        confirm_tx_with_payer_chain, confirm_tx_with_payer_ephem,
+        fetch_counter_chain, fetch_counter_ephem,
+        init_and_delegate_counter_and_payer,
+    },
+    tmpdir::resolve_tmp_dir,
     validator::cleanup,
 };
 use program_flexi_counter::{
@@ -14,11 +21,8 @@ use solana_sdk::{
 };
 use test_kit::init_logger;
 use test_ledger_restore::{
-    confirm_tx_with_payer_chain, confirm_tx_with_payer_ephem,
-    fetch_counter_chain, fetch_counter_ephem,
-    init_and_delegate_counter_and_payer, setup_validator_with_local_remote,
-    wait_for_cloned_accounts_hydration, wait_for_ledger_persist,
-    TMP_DIR_LEDGER,
+    setup_validator_with_local_remote, wait_for_cloned_accounts_hydration,
+    wait_for_ledger_persist, TMP_DIR_LEDGER,
 };
 use tracing::*;
 const COUNTER_MAIN: &str = "Main Counter";

@@ -7,6 +7,7 @@ edition.workspace = true
 anyhow = { workspace = true }
 borsh = { workspace = true }
 color-backtrace = { workspace = true }
+cleanass = { workspace = true }
 tracing = { workspace = true }
 random-port = { workspace = true }
 rayon = { workspace = true }
@@ -18,6 +19,7 @@ magicblock-config = { workspace = true }
 magicblock-delegation-program = { workspace = true, features = [
   "no-entrypoint",
 ] }
+program-flexi-counter = { workspace = true, features = ["no-entrypoint"] }
 solana-pubkey = { workspace = true }
 solana-rpc-client = { workspace = true }
 solana-rpc-client-api = { workspace = true }

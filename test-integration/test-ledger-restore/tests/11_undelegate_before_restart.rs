@@ -2,8 +2,15 @@ use std::{path::Path, process::Child};
 
 use cleanass::assert;
 use integration_test_tools::{
-    conversions::get_rpc_transwise_error_msg, expect, expect_err,
-    loaded_accounts::LoadedAccounts, tmpdir::resolve_tmp_dir, unwrap,
+    conversions::get_rpc_transwise_error_msg,
+    expect, expect_err,
+    loaded_accounts::LoadedAccounts,
+    scenario_setup::{
+        airdrop_accounts_on_chain, confirm_tx_with_payer_chain,
+        confirm_tx_with_payer_ephem, delegate_accounts,
+    },
+    tmpdir::resolve_tmp_dir,
+    unwrap,
     validator::cleanup,
 };
 use program_flexi_counter::{
@@ -19,9 +26,7 @@ use solana_sdk::{
 };
 use test_kit::init_logger;
 use test_ledger_restore::{
-    airdrop_accounts_on_chain, assert_counter_state,
-    confirm_tx_with_payer_chain, confirm_tx_with_payer_ephem,
-    delegate_accounts, get_programs_with_flexi_counter,
+    assert_counter_state, get_programs_with_flexi_counter,
     setup_validator_with_local_remote, wait_for_ledger_persist, Counter, State,
     TMP_DIR_LEDGER,
 };

@@ -2,7 +2,10 @@ use std::{path::Path, process::Child};
 
 use cleanass::{assert, assert_eq};
 use integration_test_tools::{
-    expect, tmpdir::resolve_tmp_dir, validator::cleanup,
+    expect,
+    scenario_setup::{airdrop_and_delegate_accounts, transfer_lamports},
+    tmpdir::resolve_tmp_dir,
+    validator::cleanup,
 };
 use solana_sdk::{
     signature::{Keypair, Signature},
@@ -10,8 +13,8 @@ use solana_sdk::{
 };
 use test_kit::init_logger;
 use test_ledger_restore::{
-    airdrop_and_delegate_accounts, setup_validator_with_local_remote,
-    setup_validator_with_local_remote_and_resume_strategy, transfer_lamports,
+    setup_validator_with_local_remote,
+    setup_validator_with_local_remote_and_resume_strategy,
     wait_for_ledger_persist, wait_for_next_slot_after_account_snapshot,
     SNAPSHOT_FREQUENCY, TMP_DIR_LEDGER,
 };
