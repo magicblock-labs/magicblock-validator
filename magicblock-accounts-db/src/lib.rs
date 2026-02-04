@@ -169,6 +169,11 @@ impl AccountsDb {
                 }
             };
         }
+        // The ephemeral account has been closed, remove it from DB
+        if account.ephemeral() && account.data().is_empty() {
+            self.index.remove(pubkey, txn!())?;
+            return Ok(());
+        }
         match account {
             AccountSharedData::Borrowed(acc) => {
                 if acc.owner_changed() {
