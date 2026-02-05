@@ -19,6 +19,7 @@ use helius_laserstream::{
 use magicblock_core::logger::log_trace_debug;
 use magicblock_metrics::metrics::{
     inc_account_subscription_account_updates_count,
+    inc_account_subscription_activations_count,
     inc_per_program_account_updates_count,
     inc_program_subscription_account_updates_count,
 };
@@ -414,6 +415,8 @@ impl ChainLaserActor {
             );
             return;
         }
+
+        inc_account_subscription_activations_count(&self.client_id);
 
         let mut new_subs: StreamMap<usize, LaserStream> = StreamMap::new();
 
