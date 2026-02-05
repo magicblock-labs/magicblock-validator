@@ -174,7 +174,7 @@ lazy_static::lazy_static! {
         IntCounterVec::new(
             Opts::new(
                 "program_subscription_account_updates_count",
-                "Number of account updates received via program subscription",
+                "Number of account updates received via program subscription matching an existing subscription",
             ),
             &["client_id"],
         )
@@ -287,6 +287,16 @@ lazy_static::lazy_static! {
         &["program", "result"],
     )
     .unwrap();
+
+    pub static ref PER_PROGRAM_ACCOUNT_UPDATES_COUNT: IntCounterVec =
+        IntCounterVec::new(
+            Opts::new(
+                "per_program_account_updates_count",
+                "Number of account updates received grouped by program id, no matter if they match an account subscription",
+            ),
+            &["client_id", "program"],
+        )
+        .unwrap();
 
     pub static ref UNDELEGATION_REQUESTED_COUNT: IntCounter =
         IntCounter::new(
@@ -516,6 +526,7 @@ pub(crate) fn register() {
         register!(ACCOUNT_FETCHES_FOUND_COUNT);
         register!(ACCOUNT_FETCHES_NOT_FOUND_COUNT);
         register!(PER_PROGRAM_ACCOUNT_FETCH_STATS);
+        register!(PER_PROGRAM_ACCOUNT_UPDATES_COUNT);
         register!(UNDELEGATION_REQUESTED_COUNT);
         register!(UNDELEGATION_COMPLETED_COUNT);
         register!(UNSTUCK_UNDELEGATION_COUNT);
@@ -750,6 +761,15 @@ pub fn inc_per_program_account_fetch_stats(
     PER_PROGRAM_ACCOUNT_FETCH_STATS
         .with_label_values(&[program_id, result.value()])
         .inc_by(count);
+}
+
+pub fn inc_per_program_account_updates_count(
+    client_id: &str,
+    program_id: &str,
+) {
+    PER_PROGRAM_ACCOUNT_UPDATES_COUNT
+        .with_label_values(&[client_id, program_id])
+        .inc()
 }
 
 pub fn inc_undelegation_requested() {
