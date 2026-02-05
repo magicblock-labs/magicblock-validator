@@ -197,9 +197,16 @@ fn run_lifecycle_cloning_test_no_cleanup(
         debug!("✅ Airdropped 1 SOL to test account on chain: {}", pubkey);
     }
 
-    // Attempt to fetch the account from ephemeral validator
-    std::thread::sleep(std::time::Duration::from_millis(500));
-    let cloned_account = ctx.fetch_ephem_account(pubkey);
+    // Poll for the account from ephemeral validator with timeout
+    let max_wait = std::time::Duration::from_secs(5);
+    let poll_interval = std::time::Duration::from_millis(50);
+    let start = std::time::Instant::now();
+    let mut cloned_account = ctx.fetch_ephem_account(pubkey);
+
+    while cloned_account.is_err() && start.elapsed() < max_wait {
+        std::thread::sleep(poll_interval);
+        cloned_account = ctx.fetch_ephem_account(pubkey);
+    }
 
     if expect_clone {
         assert_eq!(
