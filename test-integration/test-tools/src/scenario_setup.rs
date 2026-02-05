@@ -1,4 +1,5 @@
-use crate::{expect, validator::cleanup, IntegrationTestContext};
+use std::process::Child;
+
 use cleanass::{assert, assert_eq};
 use dlp;
 use program_flexi_counter::{
@@ -13,8 +14,9 @@ use solana_sdk::{
     signature::{Keypair, Signature, Signer},
     transaction::Transaction,
 };
-use std::process::Child;
 use tracing::debug;
+
+use crate::{expect, validator::cleanup, IntegrationTestContext};
 
 // -----------------
 // Transactions and Account Updates

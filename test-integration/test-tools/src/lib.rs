@@ -3,12 +3,12 @@ pub mod dlp_interface;
 mod integration_test_context;
 pub mod loaded_accounts;
 mod run_test;
-pub mod toml_to_args;
-pub mod validator;
 pub mod scenario_setup;
 pub mod scheduled_commits;
 pub mod tmpdir;
+pub mod toml_to_args;
 pub mod transactions;
+pub mod validator;
 pub mod workspace_paths;
 
 pub use color_backtrace;

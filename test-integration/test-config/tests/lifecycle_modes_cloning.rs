@@ -18,9 +18,9 @@ use magicblock_config::{
 };
 use program_flexi_counter::instruction::create_init_ix;
 use serial_test::file_serial;
-use solana_sdk::pubkey::Pubkey;
 use solana_sdk::{
-    native_token::LAMPORTS_PER_SOL, signature::Keypair, signer::Signer,
+    native_token::LAMPORTS_PER_SOL, pubkey::Pubkey, signature::Keypair,
+    signer::Signer,
 };
 use test_kit::init_logger;
 use tracing::*;

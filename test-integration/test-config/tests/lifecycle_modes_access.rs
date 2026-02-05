@@ -7,7 +7,6 @@ use integration_test_tools::{
     validator::{cleanup, start_magicblock_validator_with_config_struct},
     IntegrationTestContext,
 };
-use tracing::*;
 use magicblock_config::{
     config::{
         accounts::AccountsDbConfig, chain::ChainLinkConfig,
@@ -22,6 +21,7 @@ use solana_sdk::{
     system_instruction,
 };
 use test_kit::init_logger;
+use tracing::*;
 
 #[test]
 #[file_serial]
