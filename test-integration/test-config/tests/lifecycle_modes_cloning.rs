@@ -1,9 +1,10 @@
-use std::str::FromStr;
+use std::{process::Child, str::FromStr};
 
 use cleanass::assert_eq;
 use integration_test_tools::{
     expect,
     loaded_accounts::LoadedAccounts,
+    scenario_setup::confirm_tx_with_payer_ephem,
     validator::{cleanup, start_magicblock_validator_with_config_struct},
     IntegrationTestContext,
 };
@@ -15,6 +16,7 @@ use magicblock_config::{
     types::network::Remote,
     ValidatorParams,
 };
+use program_flexi_counter::instruction::create_init_ix;
 use serial_test::file_serial;
 use solana_sdk::pubkey::Pubkey;
 use solana_sdk::{
@@ -111,12 +113,24 @@ fn test_lifecycle_programs_replica_does_not_clone_non_program_account() {
 #[test]
 #[file_serial]
 fn test_lifecycle_programs_replica_clones_program_account() {
-    run_lifecycle_cloning_test(
+    let (ctx, mut validator) = run_lifecycle_cloning_test_no_cleanup(
         LifecycleMode::ProgramsReplica,
         program_flexi_counter::id(),
         true,
         true,
     );
+
+    // Verify that the program got cloned correctly and can run instructions
+    let payer = Keypair::new();
+    expect!(
+        ctx.airdrop_ephem(&payer.pubkey(), LAMPORTS_PER_SOL),
+        validator
+    );
+    let ix = create_init_ix(payer.pubkey(), "Counter".to_string());
+    let sig = confirm_tx_with_payer_ephem(ix, &payer, &ctx, &mut validator);
+    debug!("✅ Initialized flexi counter in ephemeral validator: {sig}");
+
+    cleanup(&mut validator);
 }
 
 fn run_lifecycle_cloning_test(
@@ -125,6 +139,21 @@ fn run_lifecycle_cloning_test(
     airdrop: bool,
     expect_clone: bool,
 ) {
+    let (_ctx, mut validator) = run_lifecycle_cloning_test_no_cleanup(
+        lifecycle_mode,
+        pubkey,
+        airdrop,
+        expect_clone,
+    );
+    cleanup(&mut validator);
+}
+
+fn run_lifecycle_cloning_test_no_cleanup(
+    lifecycle_mode: LifecycleMode,
+    pubkey: Pubkey,
+    airdrop: bool,
+    expect_clone: bool,
+) -> (IntegrationTestContext, Child) {
     init_logger!();
 
     let config = ValidatorParams {
@@ -189,6 +218,5 @@ fn run_lifecycle_cloning_test(
             lifecycle_mode,
         );
     }
-
-    cleanup(&mut validator);
+    (ctx, validator)
 }
