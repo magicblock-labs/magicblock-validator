@@ -517,7 +517,7 @@ impl IntegrationTestContext {
                 pubkey,
                 lamports,
                 self.commitment,
-                Some(&(|sig| self.dump_chain_logs(sig))),
+                Some(&(|sig| self.dump_ephemeral_logs(sig))),
             )
         })
     }
