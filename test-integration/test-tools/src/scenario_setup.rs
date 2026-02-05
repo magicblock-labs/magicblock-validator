@@ -185,6 +185,9 @@ pub fn confirm_tx_with_payer_ephem(
         ctx.send_and_confirm_transaction_ephem(&mut tx, signers),
         validator
     );
+    if !confirmed {
+        ctx.dump_ephemeral_logs(sig)
+    }
     assert!(confirmed, cleanup(validator), "Should confirm transaction",);
     sig
 }
@@ -203,6 +206,9 @@ pub fn confirm_tx_with_payer_chain(
         ctx.send_and_confirm_transaction_chain(&mut tx, signers),
         validator
     );
+    if !confirmed {
+        ctx.dump_chain_logs(sig)
+    }
     assert!(confirmed, cleanup(validator), "Should confirm transaction");
     sig
 }
