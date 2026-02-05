@@ -341,6 +341,9 @@ impl super::TransactionExecutor {
     }
 
     fn verify_account_states(&self, processed: &mut ProcessedTransaction) {
+        if !self.is_enforcing_access_permissions {
+            return;
+        }
         let ProcessedTransaction::Executed(executed) = processed else {
             return;
         };

@@ -164,6 +164,8 @@ impl Default for MatchSlotsConfig {
 impl
     RemoteAccountProvider<ChainRpcClientImpl, SubMuxClient<ChainUpdatesClient>>
 {
+    /// Creates a RemoteAccountProvider from the given endpoints and config if needed.
+    /// NOTE: for offline [RemoteAccountProviderConfig::lifecycle_mode] we return None
     pub async fn try_from_urls_and_config(
         endpoints: &Endpoints,
         commitment: CommitmentConfig,

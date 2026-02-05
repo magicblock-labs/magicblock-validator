@@ -2,7 +2,10 @@ use std::{path::Path, process::Child};
 
 use cleanass::assert_eq;
 use integration_test_tools::{
-    expect, tmpdir::resolve_tmp_dir, validator::cleanup,
+    expect,
+    scenario_setup::{airdrop_and_delegate_accounts, transfer_lamports},
+    tmpdir::resolve_tmp_dir,
+    validator::cleanup,
 };
 use solana_sdk::{
     native_token::LAMPORTS_PER_SOL,
@@ -10,8 +13,7 @@ use solana_sdk::{
     signature::{Keypair, Signer},
 };
 use test_ledger_restore::{
-    airdrop_and_delegate_accounts, setup_offline_validator,
-    setup_validator_with_local_remote, transfer_lamports,
+    setup_offline_validator, setup_validator_with_local_remote,
     wait_for_ledger_persist, TMP_DIR_LEDGER,
 };
 

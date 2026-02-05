@@ -148,7 +148,9 @@ impl ExecutionTestEnv {
         };
 
         // Start/Defer the transaction processing backend.
-        let scheduler = TransactionScheduler::new(executors, scheduler_state);
+        // NOTE: we run in default (Ephemeral) mode which enforces access permissions.
+        let scheduler =
+            TransactionScheduler::new(executors, scheduler_state, true);
         if defer_startup {
             this.scheduler.replace(scheduler);
         } else {

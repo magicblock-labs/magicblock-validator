@@ -7,7 +7,10 @@ use std::{
 
 use cleanass::assert_eq;
 use integration_test_tools::{
-    expect, tmpdir::resolve_tmp_dir, validator::cleanup,
+    expect,
+    scenario_setup::{confirm_tx_with_payer_ephem, fetch_counter_ephem},
+    tmpdir::resolve_tmp_dir,
+    validator::cleanup,
     workspace_paths::TestProgramPaths,
 };
 use program_flexi_counter::{
@@ -21,8 +24,8 @@ use solana_sdk::{
     signer::{EncodableKey, Signer},
 };
 use test_ledger_restore::{
-    confirm_tx_with_payer_ephem, fetch_counter_ephem, setup_offline_validator,
-    wait_for_ledger_persist, FLEXI_COUNTER_ID, TMP_DIR_LEDGER,
+    setup_offline_validator, wait_for_ledger_persist, FLEXI_COUNTER_ID,
+    TMP_DIR_LEDGER,
 };
 
 fn read_authority_pubkey(paths: &TestProgramPaths) -> Pubkey {

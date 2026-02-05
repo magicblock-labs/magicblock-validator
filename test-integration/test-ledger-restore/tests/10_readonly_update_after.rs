@@ -2,7 +2,13 @@ use std::{path::Path, process::Child};
 
 use cleanass::assert_eq;
 use integration_test_tools::{
-    expect, loaded_accounts::LoadedAccounts, tmpdir::resolve_tmp_dir,
+    expect,
+    loaded_accounts::LoadedAccounts,
+    scenario_setup::{
+        confirm_tx_with_payer_chain, confirm_tx_with_payer_ephem,
+        delegate_accounts,
+    },
+    tmpdir::resolve_tmp_dir,
     validator::cleanup,
 };
 use program_flexi_counter::{
@@ -17,9 +23,7 @@ use solana_sdk::{
 };
 use test_kit::init_logger;
 use test_ledger_restore::{
-    assert_counter_state, confirm_tx_with_payer_chain,
-    confirm_tx_with_payer_ephem, delegate_accounts, fetch_counter_chain,
-    fetch_counter_ephem, get_programs_with_flexi_counter,
+    assert_counter_state, get_programs_with_flexi_counter,
     setup_validator_with_local_remote, wait_for_cloned_accounts_hydration,
     wait_for_ledger_persist, Counter, State, TMP_DIR_LEDGER,
 };
@@ -84,10 +88,17 @@ struct ExpectedCounterStates<'a> {
 macro_rules! add_to_readonly {
     ($validator:expr, $payer_readonly:expr, $count:expr, $expected:expr) => {
         let ix = create_add_ix($payer_readonly.pubkey(), $count);
-        confirm_tx_with_payer_chain(ix, $payer_readonly, $validator);
+        ::integration_test_tools::scenario_setup::confirm_tx_with_payer_chain(
+            ix,
+            $payer_readonly,
+            $validator,
+        );
 
         let counter_readonly_chain =
-            fetch_counter_chain(&$payer_readonly.pubkey(), $validator);
+            ::integration_test_tools::scenario_setup::fetch_counter_chain(
+                &$payer_readonly.pubkey(),
+                $validator,
+            );
         assert_eq!(counter_readonly_chain, $expected, cleanup($validator));
     };
 }
@@ -98,10 +109,19 @@ macro_rules! add_readonly_to_main {
             $payer_main.pubkey(),
             $payer_readonly.pubkey(),
         );
-        confirm_tx_with_payer_ephem(ix, $payer_main, $ctx, $validator);
+        ::integration_test_tools::scenario_setup::confirm_tx_with_payer_ephem(
+            ix,
+            $payer_main,
+            $ctx,
+            $validator,
+        );
 
         let counter_main_ephem =
-            fetch_counter_ephem($ctx, &$payer_main.pubkey(), $validator);
+            ::integration_test_tools::scenario_setup::fetch_counter_ephem(
+                $ctx,
+                &$payer_main.pubkey(),
+                $validator,
+            );
         assert_eq!(counter_main_ephem, $expected, cleanup($validator));
     };
 }

@@ -71,7 +71,7 @@ impl TestContext {
             let (tx, rx) = tokio::sync::mpsc::channel(100);
             let config = RemoteAccountProviderConfig::try_new_with_metrics(
                 1000, // subscribed_accounts_lru_capacity
-                lifecycle_mode,
+                lifecycle_mode.clone(),
                 false, // disable subscription metrics
             )
             .unwrap();
@@ -102,6 +102,7 @@ impl TestContext {
                             faucet_pubkey,
                             rx,
                             None,
+                            lifecycle_mode,
                         )),
                         Some(provider),
                     )

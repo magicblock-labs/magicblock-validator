@@ -70,7 +70,7 @@ impl TestContext {
             let (tx, rx) = tokio::sync::mpsc::channel(100);
             let config =
                 RemoteAccountProviderConfig::default_with_lifecycle_mode(
-                    lifecycle_mode,
+                    lifecycle_mode.clone(),
                 );
             let subscribed_accounts =
                 create_test_lru_cache_with_config(&config);
@@ -99,6 +99,7 @@ impl TestContext {
                             faucet_pubkey,
                             rx,
                             None,
+                            lifecycle_mode.clone(),
                         )),
                         Some(provider),
                     )

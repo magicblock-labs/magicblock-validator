@@ -128,6 +128,10 @@ impl IxtestContext {
                             faucet_kp.pubkey(),
                             rx,
                             None,
+                            config
+                                .remote_account_provider
+                                .lifecycle_mode()
+                                .clone(),
                         )),
                         Some(provider),
                     )

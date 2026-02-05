@@ -2,15 +2,17 @@ use std::{path::Path, process::Child};
 
 use cleanass::assert_eq;
 use integration_test_tools::{
-    expect, loaded_accounts::LoadedAccounts, tmpdir::resolve_tmp_dir,
+    expect,
+    loaded_accounts::LoadedAccounts,
+    scenario_setup::{airdrop_and_delegate_accounts, transfer_lamports},
+    tmpdir::resolve_tmp_dir,
     validator::cleanup,
 };
 use solana_sdk::{pubkey::Pubkey, signature::Keypair, signer::Signer};
 use test_kit::init_logger;
 use test_ledger_restore::{
-    airdrop_and_delegate_accounts, setup_validator_with_local_remote,
-    transfer_lamports, wait_for_ledger_persist, SNAPSHOT_FREQUENCY,
-    TMP_DIR_LEDGER,
+    setup_validator_with_local_remote, wait_for_ledger_persist,
+    SNAPSHOT_FREQUENCY, TMP_DIR_LEDGER,
 };
 use tracing::*;
 

@@ -53,6 +53,8 @@ pub(super) struct TransactionExecutor {
 
     // Config
     is_auto_airdrop_lamports_enabled: bool,
+    /// Whether to enforce access permissions during transaction execution.
+    is_enforcing_access_permissions: bool,
 }
 
 impl TransactionExecutor {
@@ -62,11 +64,13 @@ impl TransactionExecutor {
         rx: TransactionToProcessRx,
         ready_tx: Sender<ExecutorId>,
         programs_cache: Arc<RwLock<ProgramCache<SimpleForkGraph>>>,
+        enforce_access_permissions: bool,
     ) -> Self {
         let slot = state.accountsdb.slot();
         let mut processor = TransactionBatchProcessor::new_uninitialized(
             slot,
             Default::default(),
+            enforce_access_permissions,
         );
 
         // Use global program cache to share compilation results across executors
@@ -97,6 +101,7 @@ impl TransactionExecutor {
             tasks_tx: state.tasks_tx.clone(),
             is_auto_airdrop_lamports_enabled: state
                 .is_auto_airdrop_lamports_enabled,
+            is_enforcing_access_permissions: enforce_access_permissions,
         };
 
         this.processor.fill_missing_sysvar_cache_entries(&this);
