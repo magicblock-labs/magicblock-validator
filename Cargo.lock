@@ -7094,6 +7094,7 @@ dependencies = [
 [[package]]
 name = "solana-svm"
 version = "2.2.1"
+source = "git+https://github.com/magicblock-labs/magicblock-svm.git?rev=569cb82#569cb82aa0081cd8433147bd54d942f08be57715"
 dependencies = [
  "ahash 0.8.12",
  "log",
@@ -9599,8 +9600,3 @@ dependencies = [
  "cc",
  "pkg-config",
 ]
-
-[[patch.unused]]
-name = "solana-svm"
-version = "2.2.1"
-source = "git+https://github.com/magicblock-labs/magicblock-svm.git?rev=569cb82#569cb82aa0081cd8433147bd54d942f08be57715"
