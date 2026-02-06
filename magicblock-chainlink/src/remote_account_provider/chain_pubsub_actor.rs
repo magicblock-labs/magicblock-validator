@@ -29,8 +29,8 @@ use tokio_util::sync::CancellationToken;
 use tracing::*;
 
 use super::{
-    chain_pubsub_client::PubSubConnection,
     errors::{RemoteAccountProviderError, RemoteAccountProviderResult},
+    pubsub_connection_pool::PubSubConnectionPool,
 };
 use crate::remote_account_provider::{
     pubsub_common::{
@@ -50,8 +50,8 @@ const CLOCK_LOG_SLOT_FREQ: u64 = 25;
 pub struct ChainPubsubActor {
     /// Configuration used to create the pubsub client
     pubsub_client_config: PubsubClientConfig,
-    /// Underlying pubsub connection to connect to the chain
-    pubsub_connection: Arc<PubSubConnection>,
+    /// Underlying pubsub connection pool to connect to the chain
+    pubsub_connection: Arc<PubSubConnectionPool>,
     /// Sends subscribe/unsubscribe messages to this actor
     messages_sender: mpsc::Sender<ChainPubsubActorMessage>,
     /// Map of subscriptions we are holding
@@ -93,16 +93,19 @@ impl ChainPubsubActor {
     ) -> RemoteAccountProviderResult<(Self, mpsc::Receiver<SubscriptionUpdate>)>
     {
         let url = pubsub_client_config.pubsub_url.clone();
+        let limit = pubsub_client_config.per_stream_subscription_limit
+            .unwrap_or(usize::MAX);
         let pubsub_connection = {
-            let pubsub_connection =
-                PubSubConnection::new(url).await.inspect_err(|err| {
+            let pubsub_pool = PubSubConnectionPool::new(url, limit)
+                .await
+                .inspect_err(|err| {
                     error!(
                         client_id = client_id,
                         err = ?err,
                         "Failed to connect to provider"
                     )
                 })?;
-            Arc::new(pubsub_connection)
+            Arc::new(pubsub_pool)
         };
 
         let (subscription_updates_sender, subscription_updates_receiver) =
@@ -252,7 +255,7 @@ impl ChainPubsubActor {
     async fn handle_msg(
         subscriptions: Arc<Mutex<HashMap<Pubkey, AccountSubscription>>>,
         program_subs: Arc<Mutex<HashMap<Pubkey, AccountSubscription>>>,
-        pubsub_connection: Arc<PubSubConnection>,
+        pubsub_connection: Arc<PubSubConnectionPool>,
         subscription_updates_sender: mpsc::Sender<SubscriptionUpdate>,
         pubsub_client_config: PubsubClientConfig,
         abort_sender: mpsc::Sender<()>,
@@ -408,7 +411,7 @@ impl ChainPubsubActor {
         sub_response: oneshot::Sender<RemoteAccountProviderResult<()>>,
         subs: Arc<Mutex<HashMap<Pubkey, AccountSubscription>>>,
         program_subs: Arc<Mutex<HashMap<Pubkey, AccountSubscription>>>,
-        pubsub_connection: Arc<PubSubConnection>,
+        pubsub_connection: Arc<PubSubConnectionPool>,
         subscription_updates_sender: mpsc::Sender<SubscriptionUpdate>,
         abort_sender: mpsc::Sender<()>,
         is_connected: Arc<AtomicBool>,
@@ -570,7 +573,7 @@ impl ChainPubsubActor {
         sub_response: oneshot::Sender<RemoteAccountProviderResult<()>>,
         subs: Arc<Mutex<HashMap<Pubkey, AccountSubscription>>>,
         program_subs: Arc<Mutex<HashMap<Pubkey, AccountSubscription>>>,
-        pubsub_connection: Arc<PubSubConnection>,
+        pubsub_connection: Arc<PubSubConnectionPool>,
         subscription_updates_sender: mpsc::Sender<SubscriptionUpdate>,
         abort_sender: mpsc::Sender<()>,
         is_connected: Arc<AtomicBool>,
@@ -726,16 +729,13 @@ impl ChainPubsubActor {
 
     #[instrument(skip(pubsub_connection, pubsub_client_config, is_connected), fields(client_id = %client_id))]
     async fn try_reconnect(
-        pubsub_connection: Arc<PubSubConnection>,
+        pubsub_connection: Arc<PubSubConnectionPool>,
         pubsub_client_config: PubsubClientConfig,
         client_id: &str,
         is_connected: Arc<AtomicBool>,
     ) -> RemoteAccountProviderResult<()> {
         // 1. Try to reconnect the pubsub connection
-        if let Err(err) = pubsub_connection.reconnect().await {
-            debug!(error = ?err, "Failed to reconnect");
-            return Err(err.into());
-        }
+        pubsub_connection.clear_connections();
         // Make a sub to any account and unsub immediately to verify connection
         let pubkey = Pubkey::new_unique();
         let config = RpcAccountInfoConfig {

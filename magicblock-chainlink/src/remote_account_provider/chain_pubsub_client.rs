@@ -34,12 +34,12 @@ use super::{
     pubsub_common::{ChainPubsubActorMessage, SubscriptionUpdate},
 };
 
-type UnsubscribeFn = Box<dyn FnOnce() -> BoxFuture<'static, ()> + Send>;
-type SubscribeResult = PubsubClientResult<(
+pub type UnsubscribeFn = Box<dyn FnOnce() -> BoxFuture<'static, ()> + Send>;
+pub type SubscribeResult = PubsubClientResult<(
     BoxStream<'static, Response<UiAccount>>,
     UnsubscribeFn,
 )>;
-type ProgramSubscribeResult = PubsubClientResult<(
+pub type ProgramSubscribeResult = PubsubClientResult<(
     BoxStream<'static, Response<RpcKeyedAccount>>,
     UnsubscribeFn,
 )>;
@@ -48,13 +48,29 @@ const MAX_RECONNECT_ATTEMPTS: usize = 5;
 const RECONNECT_ATTEMPT_DELAY: Duration = Duration::from_millis(500);
 const MAX_RESUB_DELAY_MS: u64 = 800;
 
-pub struct PubSubConnection {
+#[async_trait]
+pub trait PubsubConnection {
+    fn url(&self) -> &str;
+    async fn account_subscribe(
+        &self,
+        pubkey: &Pubkey,
+        config: RpcAccountInfoConfig,
+    ) -> SubscribeResult;
+    async fn program_subscribe(
+        &self,
+        program_id: &Pubkey,
+        config: RpcProgramAccountsConfig,
+    ) -> ProgramSubscribeResult;
+    async fn reconnect(&self) -> PubsubClientResult<()>;
+}
+
+pub struct PubsubConnectionImpl {
     client: ArcSwap<PubsubClient>,
     url: String,
     reconnect_guard: AsyncMutex<()>,
 }
 
-impl PubSubConnection {
+impl PubsubConnectionImpl {
     pub async fn new(url: String) -> RemoteAccountProviderResult<Self> {
         let client = Arc::new(PubsubClient::new(&url).await?).into();
         let reconnect_guard = AsyncMutex::new(());
@@ -64,12 +80,15 @@ impl PubSubConnection {
             reconnect_guard,
         })
     }
+}
 
-    pub fn url(&self) -> &str {
+#[async_trait]
+impl PubsubConnection for PubsubConnectionImpl {
+    fn url(&self) -> &str {
         &self.url
     }
 
-    pub async fn account_subscribe(
+    async fn account_subscribe(
         &self,
         pubkey: &Pubkey,
         config: RpcAccountInfoConfig,
@@ -90,7 +109,7 @@ impl PubSubConnection {
         Ok((stream, unsub))
     }
 
-    pub async fn program_subscribe(
+    async fn program_subscribe(
         &self,
         program_id: &Pubkey,
         config: RpcProgramAccountsConfig,
@@ -113,7 +132,7 @@ impl PubSubConnection {
         Ok((stream, unsub))
     }
 
-    pub async fn reconnect(&self) -> PubsubClientResult<()> {
+    async fn reconnect(&self) -> PubsubClientResult<()> {
         // Prevents multiple reconnect attempts running concurrently
         let _guard = match self.reconnect_guard.try_lock() {
             Ok(g) => g,
