@@ -10,6 +10,7 @@ use futures_util::stream::FuturesUnordered;
 use magicblock_core::logger::{log_trace_debug, log_trace_warn};
 use magicblock_metrics::metrics::{
     inc_account_subscription_account_updates_count,
+    inc_per_program_account_updates_count,
     inc_program_subscription_account_updates_count,
 };
 use solana_account_decoder_client_types::UiAccountEncoding;
@@ -662,6 +663,11 @@ impl ChainPubsubActor {
                                     warn!(error = ?err, pubkey_string = %rpc_response.value.pubkey, "Received invalid pubkey in program subscription update");
                                 });
                             if let Ok(acc_pubkey) = acc_pubkey {
+                                inc_per_program_account_updates_count(
+                                    &client_id,
+                                    &program_pubkey.to_string(),
+                                );
+
                                 if subs.lock().expect("subscriptions lock poisoned").contains_key(&acc_pubkey) {
                                     let ui_account = rpc_response.value.account;
                                     let rpc_response = RpcResponse {
