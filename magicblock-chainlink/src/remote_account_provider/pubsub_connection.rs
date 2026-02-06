@@ -1,7 +1,4 @@
-use std::{
-    mem,
-    sync::Arc,
-};
+use std::{mem, sync::Arc};
 
 use arc_swap::ArcSwap;
 use async_trait::async_trait;
@@ -15,10 +12,7 @@ use solana_rpc_client_api::{
     config::{RpcAccountInfoConfig, RpcProgramAccountsConfig},
     response::{Response, RpcKeyedAccount},
 };
-use tokio::{
-    sync::Mutex as AsyncMutex,
-    time,
-};
+use tokio::{sync::Mutex as AsyncMutex, time};
 use tracing::warn;
 
 use super::errors::RemoteAccountProviderResult;
@@ -39,7 +33,10 @@ const RECONNECT_ATTEMPT_DELAY: std::time::Duration =
     std::time::Duration::from_millis(500);
 
 #[async_trait]
-pub trait PubsubConnection {
+pub trait PubsubConnection: Send + Sync + 'static {
+    async fn new(url: String) -> RemoteAccountProviderResult<Self>
+    where
+        Self: Sized;
     fn url(&self) -> &str;
     async fn account_subscribe(
         &self,
@@ -60,8 +57,9 @@ pub struct PubsubConnectionImpl {
     reconnect_guard: AsyncMutex<()>,
 }
 
-impl PubsubConnectionImpl {
-    pub async fn new(url: String) -> RemoteAccountProviderResult<Self> {
+#[async_trait]
+impl PubsubConnection for PubsubConnectionImpl {
+    async fn new(url: String) -> RemoteAccountProviderResult<Self> {
         let client = Arc::new(PubsubClient::new(&url).await?).into();
         let reconnect_guard = AsyncMutex::new(());
         Ok(Self {
@@ -70,10 +68,6 @@ impl PubsubConnectionImpl {
             reconnect_guard,
         })
     }
-}
-
-#[async_trait]
-impl PubsubConnection for PubsubConnectionImpl {
     fn url(&self) -> &str {
         &self.url
     }
@@ -154,5 +148,89 @@ impl PubsubConnection for PubsubConnectionImpl {
         };
         self.client.store(client);
         Ok(())
+    }
+}
+
+#[cfg(test)]
+pub mod mock {
+    use super::*;
+    use std::sync::Arc;
+    use tokio::sync::Mutex;
+
+    #[derive(Clone)]
+    pub struct MockPubsubConnection {
+        account_subscriptions: Arc<Mutex<Vec<Pubkey>>>,
+        program_subscriptions: Arc<Mutex<Vec<Pubkey>>>,
+    }
+
+    impl MockPubsubConnection {
+        pub fn new() -> Self {
+            Self {
+                account_subscriptions: Arc::new(Mutex::new(Vec::new())),
+                program_subscriptions: Arc::new(Mutex::new(Vec::new())),
+            }
+        }
+
+        pub async fn account_subs(&self) -> Vec<Pubkey> {
+            self.account_subscriptions.lock().await.clone()
+        }
+
+        pub async fn program_subs(&self) -> Vec<Pubkey> {
+            self.program_subscriptions.lock().await.clone()
+        }
+
+        pub async fn clear(&self) {
+            self.account_subscriptions.lock().await.clear();
+            self.program_subscriptions.lock().await.clear();
+        }
+    }
+
+    impl Default for MockPubsubConnection {
+        fn default() -> Self {
+            Self::new()
+        }
+    }
+
+    #[async_trait]
+    impl PubsubConnection for MockPubsubConnection {
+        async fn new(_url: String) -> RemoteAccountProviderResult<Self>
+        where
+            Self: Sized,
+        {
+            Ok(Self::new())
+        }
+        fn url(&self) -> &str {
+            "mock://"
+        }
+
+        async fn account_subscribe(
+            &self,
+            pubkey: &Pubkey,
+            _config: RpcAccountInfoConfig,
+        ) -> SubscribeResult {
+            self.account_subscriptions.lock().await.push(*pubkey);
+
+            // Return empty stream with no-op unsubscribe
+            let stream = Box::pin(futures_util::stream::empty());
+            let unsubscribe: UnsubscribeFn = Box::new(|| Box::pin(async {}));
+            Ok((stream, unsubscribe))
+        }
+
+        async fn program_subscribe(
+            &self,
+            program_id: &Pubkey,
+            _config: RpcProgramAccountsConfig,
+        ) -> ProgramSubscribeResult {
+            self.program_subscriptions.lock().await.push(*program_id);
+
+            // Return empty stream with no-op unsubscribe
+            let stream = Box::pin(futures_util::stream::empty());
+            let unsubscribe: UnsubscribeFn = Box::new(|| Box::pin(async {}));
+            Ok((stream, unsubscribe))
+        }
+
+        async fn reconnect(&self) -> PubsubClientResult<()> {
+            Ok(())
+        }
     }
 }

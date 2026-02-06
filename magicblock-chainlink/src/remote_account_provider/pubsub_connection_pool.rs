@@ -10,37 +10,35 @@ use solana_rpc_client_api::config::{
 };
 use tracing::*;
 
-use super::pubsub_connection::{
-    ProgramSubscribeResult, PubsubConnection, PubsubConnectionImpl,
-    SubscribeResult, UnsubscribeFn,
-};
 use super::errors::RemoteAccountProviderResult;
+use super::pubsub_connection::{
+    ProgramSubscribeResult, PubsubConnection, SubscribeResult, UnsubscribeFn,
+};
 
 /// A slot in the connection pool, wrapping a PubSubConnection and
 /// tracking its subscription count.
-struct PooledConnection {
-    connection: Arc<PubsubConnectionImpl>,
+struct PooledConnection<T: PubsubConnection> {
+    connection: Arc<T>,
     sub_count: Arc<AtomicUsize>,
 }
 
 /// A pool of PubSubConnections that distributes subscriptions across
 /// multiple websocket connections to stay within per-stream subscription
 /// limits.
-pub struct PubSubConnectionPool {
-    connections: Arc<Queue<PooledConnection>>,
+pub struct PubSubConnectionPool<T: PubsubConnection> {
+    connections: Arc<Queue<PooledConnection<T>>>,
     url: String,
     per_connection_sub_limit: usize,
 }
 
-impl PubSubConnectionPool {
+impl<T: PubsubConnection> PubSubConnectionPool<T> {
     /// Creates a new pool with a single initial connection.
     pub async fn new(
         url: String,
         limit: usize,
-    ) -> RemoteAccountProviderResult<Self> {
+    ) -> RemoteAccountProviderResult<PubSubConnectionPool<T>> {
         // Creating initial connection also to verify that provider is valid
-        let connection =
-            Arc::new(PubsubConnectionImpl::new(url.clone()).await?);
+        let connection = Arc::new(T::new(url.clone()).await?);
         let conn = PooledConnection {
             connection,
             sub_count: Arc::new(AtomicUsize::new(0)),
@@ -123,10 +121,7 @@ impl PubSubConnectionPool {
     /// as needed. Returns (sub_count, connection).
     async fn find_or_create_connection(
         &self,
-    ) -> RemoteAccountProviderResult<(
-        Arc<AtomicUsize>,
-        Arc<PubsubConnectionImpl>,
-    )> {
+    ) -> RemoteAccountProviderResult<(Arc<AtomicUsize>, Arc<T>)> {
         // Phase 1: Try to find a slot with capacity under lock
 
         {
@@ -139,8 +134,7 @@ impl PubSubConnectionPool {
         }
 
         // Phase 2: No slot has capacity; create new connection (async)
-        let new_connection =
-            Arc::new(PubsubConnectionImpl::new(self.url.clone()).await?);
+        let new_connection = Arc::new(T::new(self.url.clone()).await?);
 
         // Phase 3: Add new slot to pool under lock
         let sub_count = Arc::new(AtomicUsize::new(1));
@@ -158,7 +152,7 @@ impl PubSubConnectionPool {
     fn pick_connection<'a>(
         &self,
         guard: &'a Guard,
-    ) -> Option<&'a PooledConnection> {
+    ) -> Option<&'a PooledConnection<T>> {
         self.connections.iter(guard).find(|conn| {
             conn.sub_count.load(Ordering::SeqCst)
                 < self.per_connection_sub_limit

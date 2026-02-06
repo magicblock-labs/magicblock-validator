@@ -38,6 +38,7 @@ use crate::remote_account_provider::{
         SubscriptionUpdate, MESSAGE_CHANNEL_SIZE,
         SUBSCRIPTION_UPDATE_CHANNEL_SIZE,
     },
+    pubsub_connection::PubsubConnectionImpl,
     DEFAULT_SUBSCRIPTION_RETRIES,
 };
 
@@ -51,7 +52,7 @@ pub struct ChainPubsubActor {
     /// Configuration used to create the pubsub client
     pubsub_client_config: PubsubClientConfig,
     /// Underlying pubsub connection pool to connect to the chain
-    pubsub_connection: Arc<PubSubConnectionPool>,
+    pubsub_connection: Arc<PubSubConnectionPool<PubsubConnectionImpl>>,
     /// Sends subscribe/unsubscribe messages to this actor
     messages_sender: mpsc::Sender<ChainPubsubActorMessage>,
     /// Map of subscriptions we are holding
@@ -93,7 +94,8 @@ impl ChainPubsubActor {
     ) -> RemoteAccountProviderResult<(Self, mpsc::Receiver<SubscriptionUpdate>)>
     {
         let url = pubsub_client_config.pubsub_url.clone();
-        let limit = pubsub_client_config.per_stream_subscription_limit
+        let limit = pubsub_client_config
+            .per_stream_subscription_limit
             .unwrap_or(usize::MAX);
         let pubsub_connection = {
             let pubsub_pool = PubSubConnectionPool::new(url, limit)
@@ -255,7 +257,7 @@ impl ChainPubsubActor {
     async fn handle_msg(
         subscriptions: Arc<Mutex<HashMap<Pubkey, AccountSubscription>>>,
         program_subs: Arc<Mutex<HashMap<Pubkey, AccountSubscription>>>,
-        pubsub_connection: Arc<PubSubConnectionPool>,
+        pubsub_connection: Arc<PubSubConnectionPool<PubsubConnectionImpl>>,
         subscription_updates_sender: mpsc::Sender<SubscriptionUpdate>,
         pubsub_client_config: PubsubClientConfig,
         abort_sender: mpsc::Sender<()>,
@@ -411,7 +413,7 @@ impl ChainPubsubActor {
         sub_response: oneshot::Sender<RemoteAccountProviderResult<()>>,
         subs: Arc<Mutex<HashMap<Pubkey, AccountSubscription>>>,
         program_subs: Arc<Mutex<HashMap<Pubkey, AccountSubscription>>>,
-        pubsub_connection: Arc<PubSubConnectionPool>,
+        pubsub_connection: Arc<PubSubConnectionPool<PubsubConnectionImpl>>,
         subscription_updates_sender: mpsc::Sender<SubscriptionUpdate>,
         abort_sender: mpsc::Sender<()>,
         is_connected: Arc<AtomicBool>,
@@ -573,7 +575,7 @@ impl ChainPubsubActor {
         sub_response: oneshot::Sender<RemoteAccountProviderResult<()>>,
         subs: Arc<Mutex<HashMap<Pubkey, AccountSubscription>>>,
         program_subs: Arc<Mutex<HashMap<Pubkey, AccountSubscription>>>,
-        pubsub_connection: Arc<PubSubConnectionPool>,
+        pubsub_connection: Arc<PubSubConnectionPool<PubsubConnectionImpl>>,
         subscription_updates_sender: mpsc::Sender<SubscriptionUpdate>,
         abort_sender: mpsc::Sender<()>,
         is_connected: Arc<AtomicBool>,
@@ -729,7 +731,7 @@ impl ChainPubsubActor {
 
     #[instrument(skip(pubsub_connection, pubsub_client_config, is_connected), fields(client_id = %client_id))]
     async fn try_reconnect(
-        pubsub_connection: Arc<PubSubConnectionPool>,
+        pubsub_connection: Arc<PubSubConnectionPool<PubsubConnectionImpl>>,
         pubsub_client_config: PubsubClientConfig,
         client_id: &str,
         is_connected: Arc<AtomicBool>,
