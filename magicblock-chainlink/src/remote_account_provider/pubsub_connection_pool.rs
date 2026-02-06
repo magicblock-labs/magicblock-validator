@@ -10,11 +10,9 @@ use solana_rpc_client_api::config::{
 };
 use tracing::*;
 
-use crate::remote_account_provider::chain_pubsub_client::PubsubConnection;
-
-use super::chain_pubsub_client::{
-    ProgramSubscribeResult, PubsubConnectionImpl, SubscribeResult,
-    UnsubscribeFn,
+use super::pubsub_connection::{
+    ProgramSubscribeResult, PubsubConnection, PubsubConnectionImpl,
+    SubscribeResult, UnsubscribeFn,
 };
 use super::errors::RemoteAccountProviderResult;
 
