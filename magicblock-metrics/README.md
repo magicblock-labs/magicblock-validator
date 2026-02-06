@@ -49,7 +49,7 @@ A dashboard with ID `1860` can be imported to Grafana to visualize these metrics
 
 ### Optionally Install Telegraf
 
-- [get it here](ihttps://www.influxdata.com/time-series-platform/telegraf/)
+- [get it here](https://www.influxdata.com/time-series-platform/telegraf/)
 
 ```sh
 brew install telegraf
