@@ -38,7 +38,7 @@ pub(crate) fn process_mutate_accounts(
             ic_msg!(
                 invoke_context,
                 "Validator identity '{}' not in signers",
-                &validator_authority_id.to_string()
+                validator_authority_id
             );
             return Err(InstructionError::MissingRequiredSignature);
         }
@@ -110,6 +110,13 @@ pub(crate) fn process_mutate_accounts(
         // we do not allow for account modification if the
         // account is ephemeral (i.e. exists locally on ER)
         if account.borrow().ephemeral() {
+            let key = transaction_context
+                .get_key_of_account_at_index(account_transaction_index)?;
+            ic_msg!(
+                invoke_context,
+                "MutateAccounts: skipping ephemeral account {}",
+                key
+            );
             continue;
         }
         let account_key = transaction_context

@@ -342,6 +342,16 @@ impl ExecutionTestEnv {
         }
     }
 
+    pub fn try_get_account(&self, pubkey: Pubkey) -> Option<CommitableAccount<'_>> {
+        self.accountsdb.get_account(&pubkey).map(|account| {
+            CommitableAccount {
+                pubkey,
+                account,
+                db: &self.accountsdb,
+            }
+        })
+    }
+
     pub fn get_payer(&self) -> CommitableAccount<'_> {
         let payer = {
             let index = self.payer_index.load(Ordering::Relaxed);

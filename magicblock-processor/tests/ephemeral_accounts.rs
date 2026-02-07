@@ -404,31 +404,23 @@ async fn test_close_ephemeral_account_via_cpi() {
     // Check balances AFTER close
     let sponsor_after_close = env.get_account(sponsor);
     let vault_after_close = env.get_account(EPHEMERAL_VAULT_PUBKEY);
-    let ephemeral_after_close = env.get_account(ephemeral.pubkey());
-    let total_after_close = sponsor_after_close.lamports()
-        + vault_after_close.lamports()
-        + ephemeral_after_close.lamports();
+
+    // Closed ephemeral accounts are removed from the DB
+    assert!(
+        env.try_get_account(ephemeral.pubkey()).is_none(),
+        "Closed ephemeral account should be removed from DB"
+    );
+
+    let total_after_close =
+        sponsor_after_close.lamports() + vault_after_close.lamports();
 
     println!("=== AFTER CLOSE ===");
     println!("Sponsor: {}", sponsor_after_close.lamports());
     println!("Vault: {}", vault_after_close.lamports());
-    println!("Ephemeral: {}", ephemeral_after_close.lamports());
     println!("Total: {}", total_after_close);
 
-    // Verify the account was closed (owned by system, data cleared)
-    // Note: ephemeral and delegated flags are NOT reset on close
-    assert_eq!(
-        *ephemeral_after_close.owner(),
-        solana_sdk_ids::system_program::id(),
-        "Owner should be system program"
-    );
-    assert_eq!(
-        ephemeral_after_close.data().len(),
-        0,
-        "Data should be empty"
-    );
-
     // CONSERVATION CHECK: Total lamports should not change
+    // (ephemeral had 0 lamports, so sponsor + vault should equal prior total)
     assert_eq!(
         total_after_close, total_before_close,
         "Total lamports should be conserved"
@@ -1072,12 +1064,11 @@ async fn test_full_lifecycle() {
     let txn = env.build_transaction(&[close_ix]);
     assert!(env.execute_transaction(txn).await.is_ok());
 
-    let ephemeral_after = env.get_account(ephemeral.pubkey());
-    assert_eq!(
-        *ephemeral_after.owner(),
-        solana_sdk_ids::system_program::id()
+    // Closed ephemeral accounts are removed from the DB
+    assert!(
+        env.try_get_account(ephemeral.pubkey()).is_none(),
+        "Closed ephemeral account should be removed from DB"
     );
-    assert_eq!(ephemeral_after.data().len(), 0);
 }
 
 #[tokio::test]
