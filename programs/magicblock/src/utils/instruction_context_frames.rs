@@ -1,4 +1,3 @@
-#![cfg(not(test))]
 use solana_instruction::error::InstructionError;
 use solana_pubkey::Pubkey;
 use solana_transaction_context::{InstructionContext, TransactionContext};
@@ -144,7 +143,8 @@ impl<'a> TryFrom<&'a TransactionContext> for InstructionContextFrames<'a> {
             frames.push(frame);
         }
 
-        let current_frame_idx = current_frame_idx.expect("current frame not found in frames which is invalid validator behavior");
+        let current_frame_idx =
+            current_frame_idx.ok_or(InstructionError::InvalidAccountData)?;
         Ok(InstructionContextFrames::new(frames, current_frame_idx))
     }
 }

@@ -383,20 +383,21 @@ impl super::TransactionExecutor {
         // 2. Confined Account Integrity Check
         // Confined accounts must not have their lamport balance changed.
         for (pubkey, acc) in &txn.accounts {
-            if acc.confined() {
-                let lamports_changed = acc
-                    .as_borrowed()
-                    .map(|a| a.lamports_changed())
-                    .unwrap_or(true);
+            if !acc.confined() {
+                continue;
+            }
+            let lamports_changed = acc
+                .as_borrowed()
+                .map(|a| a.lamports_changed())
+                .unwrap_or(true);
 
-                if lamports_changed {
-                    executed.execution_details.status =
-                        Err(TransactionError::UnbalancedTransaction);
-                    logs.push(format!(
-                        "Confined account {pubkey} has been illegally modified"
-                    ));
-                    break;
-                }
+            if lamports_changed {
+                executed.execution_details.status =
+                    Err(TransactionError::UnbalancedTransaction);
+                logs.push(format!(
+                    "Confined account {pubkey} has been illegally modified"
+                ));
+                break;
             }
         }
     }
