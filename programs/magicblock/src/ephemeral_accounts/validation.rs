@@ -30,9 +30,7 @@ fn get_caller_program_id(
 
 /// Validates that the sponsor account is a signer.
 /// PDAs may satisfy this via `invoke_signed`.
-fn validate_sponsor(
-    tc: &TransactionContext,
-) -> Result<(), InstructionError> {
+fn validate_sponsor(tc: &TransactionContext) -> Result<(), InstructionError> {
     let ix_ctx = tc.get_current_instruction_context()?;
     if !ix_ctx.is_instruction_account_signer(SPONSOR_IDX)? {
         return Err(InstructionError::MissingRequiredSignature);
@@ -41,9 +39,7 @@ fn validate_sponsor(
 }
 
 /// Validates the vault account matches the expected pubkey.
-fn validate_vault(
-    tc: &TransactionContext,
-) -> Result<(), InstructionError> {
+fn validate_vault(tc: &TransactionContext) -> Result<(), InstructionError> {
     let vault_pubkey =
         accounts::get_instruction_pubkey_with_idx(tc, VAULT_IDX)?;
     if *vault_pubkey != EPHEMERAL_VAULT_PUBKEY {

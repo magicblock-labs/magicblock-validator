@@ -6,10 +6,13 @@ use solana_log_collector::ic_msg;
 use solana_program_runtime::invoke_context::InvokeContext;
 use solana_transaction_context::TransactionContext;
 
-use super::validation::{
-    validate_common, validate_ephemeral_signer, validate_new_ephemeral,
+use super::{
+    rent_for, transfer_rent,
+    validation::{
+        validate_common, validate_ephemeral_signer, validate_new_ephemeral,
+    },
+    MAX_DATA_LEN,
 };
-use super::{rent_for, transfer_rent, MAX_DATA_LEN};
 
 /// Creates a new ephemeral account with rent paid by the sponsor.
 /// The account is owned by the calling program (inferred from CPI context).

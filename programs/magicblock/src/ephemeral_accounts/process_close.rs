@@ -7,8 +7,10 @@ use solana_program_runtime::invoke_context::InvokeContext;
 use solana_sdk_ids::system_program;
 use solana_transaction_context::TransactionContext;
 
-use super::validation::{validate_common, validate_existing_ephemeral};
-use super::{get_ephemeral_data_len, rent_for, transfer_rent};
+use super::{
+    get_ephemeral_data_len, rent_for, transfer_rent,
+    validation::{validate_common, validate_existing_ephemeral},
+};
 
 /// Closes an ephemeral account, refunding rent to the sponsor.
 pub(crate) fn process_close_ephemeral_account(

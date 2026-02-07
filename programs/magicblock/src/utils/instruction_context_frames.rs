@@ -143,8 +143,8 @@ impl<'a> TryFrom<&'a TransactionContext> for InstructionContextFrames<'a> {
             frames.push(frame);
         }
 
-        let current_frame_idx = current_frame_idx
-            .ok_or(InstructionError::InvalidAccountData)?;
+        let current_frame_idx =
+            current_frame_idx.ok_or(InstructionError::InvalidAccountData)?;
         Ok(InstructionContextFrames::new(frames, current_frame_idx))
     }
 }
