@@ -153,8 +153,9 @@ impl PubsubConnection for PubsubConnectionImpl {
 
 #[cfg(test)]
 pub mod mock {
-    use super::*;
     use std::sync::{Arc, Mutex};
+
+    use super::*;
 
     #[derive(Clone)]
     pub struct MockPubsubConnection {
