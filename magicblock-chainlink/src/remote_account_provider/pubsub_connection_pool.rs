@@ -85,30 +85,11 @@ impl<T: PubsubConnection> PubSubConnectionPool<T> {
         pubkey: &Pubkey,
         config: RpcAccountInfoConfig,
     ) -> SubscribeResult {
-        let (sub_count, connection) =
-            match self.find_or_create_connection().await {
-                Ok(result) => result,
-                Err(err) => {
-                    return Err(PubsubClientError::SubscribeFailed {
-                        reason: "Unable to find or create connection"
-                            .to_string(),
-                        message: format!("{err:?}"),
-                    });
-                }
-            };
-
-        // Subscribe using the selected connection
-        match connection.account_subscribe(pubkey, config).await {
-            Ok((stream, raw_unsub)) => {
-                let wrapped_unsub = self.wrap_unsub(raw_unsub, sub_count);
-                Ok((stream, wrapped_unsub))
-            }
-            Err(err) => {
-                // Rollback: decrement count
-                sub_count.fetch_sub(1, Ordering::SeqCst);
-                Err(err)
-            }
-        }
+        let pubkey = *pubkey;
+        self.subscribe_with_pool(|connection| async move {
+            connection.account_subscribe(&pubkey, config).await
+        })
+        .await
     }
 
     /// Subscribes to program account updates, distributing across pool slots.
@@ -117,6 +98,27 @@ impl<T: PubsubConnection> PubSubConnectionPool<T> {
         program_id: &Pubkey,
         config: RpcProgramAccountsConfig,
     ) -> ProgramSubscribeResult {
+        let program_id = *program_id;
+        self.subscribe_with_pool(|connection| async move {
+            connection.program_subscribe(&program_id, config).await
+        })
+        .await
+    }
+
+    /// Helper to perform a subscription with a provided closure,
+    /// handling find-or-create, error mapping, rollback, and unsubscribe wrapping.
+    async fn subscribe_with_pool<F, Fut, S>(
+        &self,
+        subscribe_fn: F,
+    ) -> PubsubClientResult<(S, UnsubscribeFn)>
+    where
+        F: FnOnce(Arc<T>) -> Fut,
+        Fut: std::future::Future<
+            Output = PubsubClientResult<(S, UnsubscribeFn)>,
+        >,
+        S: 'static,
+    {
+        // Find or create a connection
         let (sub_count, connection) =
             match self.find_or_create_connection().await {
                 Ok(result) => result,
@@ -130,7 +132,7 @@ impl<T: PubsubConnection> PubSubConnectionPool<T> {
             };
 
         // Subscribe using the selected connection
-        match connection.program_subscribe(program_id, config).await {
+        match subscribe_fn(connection).await {
             Ok((stream, raw_unsub)) => {
                 let wrapped_unsub = self.wrap_unsub(raw_unsub, sub_count);
                 Ok((stream, wrapped_unsub))
