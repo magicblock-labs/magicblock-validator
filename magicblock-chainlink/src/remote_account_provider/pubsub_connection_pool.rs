@@ -3,14 +3,16 @@ use std::sync::{
     Arc,
 };
 
-use tokio::sync::Mutex as AsyncMutex;
-
 use scc::{ebr::Guard, Queue};
 use solana_pubkey::Pubkey;
-use solana_pubsub_client::pubsub_client::PubsubClientError;
+use solana_pubsub_client::{
+    nonblocking::pubsub_client::PubsubClientResult,
+    pubsub_client::PubsubClientError,
+};
 use solana_rpc_client_api::config::{
     RpcAccountInfoConfig, RpcProgramAccountsConfig,
 };
+use tokio::sync::Mutex as AsyncMutex;
 use tracing::*;
 
 use super::{
@@ -141,9 +143,32 @@ impl<T: PubsubConnection> PubSubConnectionPool<T> {
         }
     }
 
-    /// Reconnects the pool: clears state and reconnects the first slot.
-    pub fn clear_connections(&self) {
+    /// Reconnects the pool: clears state and tries to reconnect the
+    /// first connection to ensure that the provider is working
+    /// NOTE: assumes that all existing subscriptions have been dropped.
+    pub async fn reconnect(&self) -> PubsubClientResult<()> {
         while self.connections.pop().is_some() {}
+        // We cannot reconnect an existing connection due to the lockless queue
+        // not allowing us to call the async reconnect method of the first connection.
+        // Instead we clear all of them and then create a new one, just to verify that
+        // the provider is working again
+        let pooled_conn = match T::new(self.url.clone()).await {
+            Ok(conn) => {
+                conn.reconnect().await?;
+                PooledConnection {
+                    connection: Arc::new(conn),
+                    sub_count: Arc::new(AtomicUsize::new(0)),
+                }
+            }
+            Err(err) => {
+                return Err(PubsubClientError::ConnectionClosed(format!(
+                    "{err:?}"
+                )));
+            }
+        };
+        // Since we already created it we keep it as well
+        self.connections.push(pooled_conn);
+        Ok(())
     }
 
     /// Finds a connection for a new subscription, creating new connections
@@ -191,9 +216,9 @@ impl<T: PubsubConnection> PubSubConnectionPool<T> {
     /// Tries to atomically reserve a subscription slot on an existing
     /// connection via CAS, ensuring we never exceed
     /// `per_connection_sub_limit`.
-    fn try_reserve_slot<'a>(
+    fn try_reserve_slot(
         &self,
-        guard: &'a Guard,
+        guard: &Guard,
     ) -> Option<(Arc<AtomicUsize>, Arc<T>)> {
         for conn in self.connections.iter(guard) {
             let sub_count = &conn.sub_count;

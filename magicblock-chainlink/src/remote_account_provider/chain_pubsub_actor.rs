@@ -737,7 +737,7 @@ impl ChainPubsubActor {
         is_connected: Arc<AtomicBool>,
     ) -> RemoteAccountProviderResult<()> {
         // 1. Try to reconnect the pubsub connection
-        pubsub_connection.clear_connections();
+        pubsub_connection.reconnect().await?;
         // Make a sub to any account and unsub immediately to verify connection
         let pubkey = Pubkey::new_unique();
         let config = RpcAccountInfoConfig {
