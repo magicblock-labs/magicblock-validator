@@ -22,6 +22,15 @@ struct PooledConnection<T: PubsubConnection> {
     sub_count: Arc<AtomicUsize>,
 }
 
+impl<T: PubsubConnection> Clone for PooledConnection<T> {
+    fn clone(&self) -> Self {
+        Self {
+            connection: Arc::clone(&self.connection),
+            sub_count: Arc::clone(&self.sub_count),
+        }
+    }
+}
+
 /// A pool of PubSubConnections that distributes subscriptions across
 /// multiple websocket connections to stay within per-stream subscription
 /// limits.
@@ -172,5 +181,184 @@ impl<T: PubsubConnection> PubSubConnectionPool<T> {
                 sub_count.fetch_sub(1, Ordering::SeqCst);
             })
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::remote_account_provider::pubsub_connection::mock::MockPubsubConnection;
+    use solana_pubkey::Pubkey;
+
+    fn get_connection_at_index<T: PubsubConnection>(
+        pool: &PubSubConnectionPool<T>,
+        index: usize,
+    ) -> Option<PooledConnection<T>> {
+        let guard = Guard::new();
+        let mut iter = pool.connections.iter(&guard);
+        iter.nth(index).cloned()
+    }
+
+    fn assert_account_subs(
+        pool: &PubSubConnectionPool<MockPubsubConnection>,
+        conn_subs: &[Vec<Pubkey>],
+    ) {
+        for (idx, expected_subs) in conn_subs.iter().enumerate() {
+            let conn = get_connection_at_index(pool, idx).unwrap();
+            assert_eq!(
+                conn.sub_count.load(Ordering::SeqCst),
+                expected_subs.len()
+            );
+            for pubkey in expected_subs {
+                assert!(conn.connection.account_subs().contains(pubkey));
+            }
+        }
+    }
+
+    async fn create_pool(
+        limit: usize,
+    ) -> PubSubConnectionPool<MockPubsubConnection> {
+        PubSubConnectionPool::<MockPubsubConnection>::new(
+            "mock://".to_string(),
+            limit,
+        )
+        .await
+        .unwrap()
+    }
+
+    async fn account_subscribe(
+        pool: &PubSubConnectionPool<MockPubsubConnection>,
+        pubkey: &Pubkey,
+    ) -> UnsubscribeFn {
+        let (_stream, unsub) = pool
+            .account_subscribe(pubkey, RpcAccountInfoConfig::default())
+            .await
+            .unwrap();
+        unsub
+    }
+
+    #[tokio::test]
+    async fn test_single_sub() {
+        let pool = create_pool(2).await;
+        let pk1 = Pubkey::new_unique();
+
+        let _unsub1 = account_subscribe(&pool, &pk1).await;
+
+        assert_account_subs(&pool, &[vec![pk1]]);
+    }
+
+    #[tokio::test]
+    async fn test_two_subs_one_connection() {
+        let pool = create_pool(2).await;
+        let pk1 = Pubkey::new_unique();
+        let pk2 = Pubkey::new_unique();
+
+        let _unsub1 = account_subscribe(&pool, &pk1).await;
+        let _unsub2 = account_subscribe(&pool, &pk2).await;
+
+        assert_account_subs(&pool, &[vec![pk1, pk2]]);
+    }
+
+    #[tokio::test]
+    async fn test_three_subs_two_connections() {
+        let pool = create_pool(2).await;
+        let pk1 = Pubkey::new_unique();
+        let pk2 = Pubkey::new_unique();
+        let pk3 = Pubkey::new_unique();
+
+        let _unsub1 = account_subscribe(&pool, &pk1).await;
+        let _unsub2 = account_subscribe(&pool, &pk2).await;
+        let _unsub3 = account_subscribe(&pool, &pk3).await;
+
+        assert_account_subs(&pool, &[vec![pk1, pk2], vec![pk3]]);
+    }
+
+    #[tokio::test]
+    async fn test_unsub_frees_slot_and_new_sub_fills_it() {
+        let pool = create_pool(2).await;
+        let pk1 = Pubkey::new_unique();
+        let pk2 = Pubkey::new_unique();
+        let pk3 = Pubkey::new_unique();
+        let pk4 = Pubkey::new_unique();
+        let pk5 = Pubkey::new_unique();
+
+        // Fill 2 connections: [pk1, pk2] and [pk3, pk4]
+        let _unsub1 = account_subscribe(&pool, &pk1).await;
+        let unsub2 = account_subscribe(&pool, &pk2).await;
+        let _unsub3 = account_subscribe(&pool, &pk3).await;
+        let _unsub4 = account_subscribe(&pool, &pk4).await;
+
+        assert_account_subs(&pool, &[vec![pk1, pk2], vec![pk3, pk4]]);
+
+        // Unsubscribe pk2 from connection 0, freeing a slot
+        unsub2().await;
+
+        // New sub should go to connection 0 (first with capacity)
+        let _unsub5 = account_subscribe(&pool, &pk5).await;
+
+        // conn0 now has pk1+pk5 (sub_count=2), conn1 unchanged
+        assert_account_subs(
+            &pool,
+            &[vec![pk1, pk5], vec![pk3, pk4]],
+        );
+    }
+
+    #[tokio::test]
+    async fn test_elaborate_sub_unsub_lifecycle() {
+        let pool = create_pool(2).await;
+        let pks: Vec<Pubkey> = (0..8).map(|_| Pubkey::new_unique()).collect();
+
+        // Sub pk0, pk1 -> conn0 full
+        let unsub0 = account_subscribe(&pool, &pks[0]).await;
+        let unsub1 = account_subscribe(&pool, &pks[1]).await;
+        assert_account_subs(&pool, &[vec![pks[0], pks[1]]]);
+
+        // Sub pk2 -> conn1 created
+        let _unsub2 = account_subscribe(&pool, &pks[2]).await;
+        assert_account_subs(&pool, &[vec![pks[0], pks[1]], vec![pks[2]]]);
+
+        // Sub pk3 -> conn1 full
+        let unsub3 = account_subscribe(&pool, &pks[3]).await;
+        assert_account_subs(
+            &pool,
+            &[vec![pks[0], pks[1]], vec![pks[2], pks[3]]],
+        );
+
+        // Sub pk4 -> conn2 created
+        let _unsub4 = account_subscribe(&pool, &pks[4]).await;
+        assert_account_subs(
+            &pool,
+            &[vec![pks[0], pks[1]], vec![pks[2], pks[3]], vec![pks[4]]],
+        );
+
+        // Unsub pk0 from conn0 -> conn0 has capacity
+        unsub0().await;
+
+        // Sub pk5 -> goes to conn0 (first with capacity)
+        let _unsub5 = account_subscribe(&pool, &pks[5]).await;
+        assert_account_subs(
+            &pool,
+            &[
+                vec![pks[1], pks[5]],
+                vec![pks[2], pks[3]],
+                vec![pks[4]],
+            ],
+        );
+
+        // Unsub pk1, pk3 -> conn0 and conn1 each drop to 1
+        unsub1().await;
+        unsub3().await;
+
+        // Sub pk6 -> fills conn0, pk7 -> fills conn1
+        let _unsub6 = account_subscribe(&pool, &pks[6]).await;
+        let _unsub7 = account_subscribe(&pool, &pks[7]).await;
+        assert_account_subs(
+            &pool,
+            &[
+                vec![pks[5], pks[6]],
+                vec![pks[2], pks[7]],
+                vec![pks[4]],
+            ],
+        );
     }
 }

@@ -154,8 +154,7 @@ impl PubsubConnection for PubsubConnectionImpl {
 #[cfg(test)]
 pub mod mock {
     use super::*;
-    use std::sync::Arc;
-    use tokio::sync::Mutex;
+    use std::sync::{Arc, Mutex};
 
     #[derive(Clone)]
     pub struct MockPubsubConnection {
@@ -171,17 +170,17 @@ pub mod mock {
             }
         }
 
-        pub async fn account_subs(&self) -> Vec<Pubkey> {
-            self.account_subscriptions.lock().await.clone()
+        pub fn account_subs(&self) -> Vec<Pubkey> {
+            self.account_subscriptions.lock().unwrap().clone()
         }
 
-        pub async fn program_subs(&self) -> Vec<Pubkey> {
-            self.program_subscriptions.lock().await.clone()
+        pub fn program_subs(&self) -> Vec<Pubkey> {
+            self.program_subscriptions.lock().unwrap().clone()
         }
 
-        pub async fn clear(&self) {
-            self.account_subscriptions.lock().await.clear();
-            self.program_subscriptions.lock().await.clear();
+        pub fn clear(&self) {
+            self.account_subscriptions.lock().unwrap().clear();
+            self.program_subscriptions.lock().unwrap().clear();
         }
     }
 
@@ -208,7 +207,7 @@ pub mod mock {
             pubkey: &Pubkey,
             _config: RpcAccountInfoConfig,
         ) -> SubscribeResult {
-            self.account_subscriptions.lock().await.push(*pubkey);
+            self.account_subscriptions.lock().unwrap().push(*pubkey);
 
             // Return empty stream with no-op unsubscribe
             let stream = Box::pin(futures_util::stream::empty());
@@ -221,7 +220,7 @@ pub mod mock {
             program_id: &Pubkey,
             _config: RpcProgramAccountsConfig,
         ) -> ProgramSubscribeResult {
-            self.program_subscriptions.lock().await.push(*program_id);
+            self.program_subscriptions.lock().unwrap().push(*program_id);
 
             // Return empty stream with no-op unsubscribe
             let stream = Box::pin(futures_util::stream::empty());
