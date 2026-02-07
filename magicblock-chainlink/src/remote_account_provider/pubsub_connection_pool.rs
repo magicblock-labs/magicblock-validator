@@ -3,6 +3,8 @@ use std::sync::{
     Arc,
 };
 
+use tokio::sync::Mutex as AsyncMutex;
+
 use scc::{ebr::Guard, Queue};
 use solana_pubkey::Pubkey;
 use solana_pubsub_client::pubsub_client::PubsubClientError;
@@ -42,6 +44,7 @@ pub struct PubSubConnectionPool<T: PubsubConnection> {
     connections: Arc<Queue<PooledConnection<T>>>,
     url: String,
     per_connection_sub_limit: usize,
+    new_connection_guard: AsyncMutex<()>,
 }
 
 impl<T: PubsubConnection> PubSubConnectionPool<T> {
@@ -65,6 +68,7 @@ impl<T: PubsubConnection> PubSubConnectionPool<T> {
             connections: Arc::new(queue),
             url,
             per_connection_sub_limit: limit,
+            new_connection_guard: AsyncMutex::new(()),
         })
     }
 
@@ -147,41 +151,74 @@ impl<T: PubsubConnection> PubSubConnectionPool<T> {
     async fn find_or_create_connection(
         &self,
     ) -> RemoteAccountProviderResult<(Arc<AtomicUsize>, Arc<T>)> {
-        // Phase 1: Try to find a slot with capacity under lock
-
-        {
+        fn try_reserve_connection<T: PubsubConnection>(
+            pool: &PubSubConnectionPool<T>,
+        ) -> Option<(Arc<AtomicUsize>, Arc<T>)> {
             let guard = Guard::new();
-            if let Some(pooled_conn) = self.pick_connection(&guard) {
-                let sub_count = Arc::clone(&pooled_conn.sub_count);
-                sub_count.fetch_add(1, Ordering::SeqCst);
-                return Ok((sub_count, Arc::clone(&pooled_conn.connection)));
-            }
+            pool.try_reserve_slot(&guard)
         }
 
-        // Phase 2: No slot has capacity; create new connection (async)
-        let new_connection = Arc::new(T::new(self.url.clone()).await?);
+        // Phase 1: fast path — try to reserve a slot without locking
+        if let Some(result) = try_reserve_connection(self) {
+            return Ok(result);
+        }
 
-        // Phase 3: Add new slot to pool under lock
+        // Serialize connection creation
+        let _new_conn_guard = self.new_connection_guard.lock().await;
+
+        // Phase 2: re-check under lock — another task may have
+        // created a connection while we waited
+        if let Some(result) = try_reserve_connection(self) {
+            return Ok(result);
+        }
+
+        // Phase 3: still no capacity — create and push new connection
+        let new_connection = Arc::new(T::new(self.url.clone()).await?);
         let sub_count = Arc::new(AtomicUsize::new(1));
         let conn = PooledConnection {
             connection: Arc::clone(&new_connection),
             sub_count: Arc::clone(&sub_count),
         };
         self.connections.push(conn);
-        trace!("Created new pooled connection");
+        trace!(
+            url = self.url,
+            connection_count = self.connections.len(),
+            "Created new pooled connection"
+        );
         Ok((sub_count, new_connection))
     }
 
-    /// Picks a slot with available capacity using first-fit.
-    /// Returns None if no slot has capacity (need to create new connection).
-    fn pick_connection<'a>(
+    /// Tries to atomically reserve a subscription slot on an existing
+    /// connection via CAS, ensuring we never exceed
+    /// `per_connection_sub_limit`.
+    fn try_reserve_slot<'a>(
         &self,
         guard: &'a Guard,
-    ) -> Option<&'a PooledConnection<T>> {
-        self.connections.iter(guard).find(|conn| {
-            conn.sub_count.load(Ordering::SeqCst)
-                < self.per_connection_sub_limit
-        })
+    ) -> Option<(Arc<AtomicUsize>, Arc<T>)> {
+        for conn in self.connections.iter(guard) {
+            let sub_count = &conn.sub_count;
+            loop {
+                let current = sub_count.load(Ordering::SeqCst);
+                if current >= self.per_connection_sub_limit {
+                    break;
+                }
+                if sub_count
+                    .compare_exchange(
+                        current,
+                        current + 1,
+                        Ordering::SeqCst,
+                        Ordering::SeqCst,
+                    )
+                    .is_ok()
+                {
+                    return Some((
+                        Arc::clone(&conn.sub_count),
+                        Arc::clone(&conn.connection),
+                    ));
+                }
+            }
+        }
+        None
     }
 
     /// Wraps a raw unsubscribe function to also decrement the sub counter for the
