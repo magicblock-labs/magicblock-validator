@@ -5,6 +5,7 @@ use std::sync::{
 
 use scc::{ebr::Guard, Queue};
 use solana_pubkey::Pubkey;
+use solana_pubsub_client::pubsub_client::PubsubClientError;
 use solana_rpc_client_api::config::{
     RpcAccountInfoConfig, RpcProgramAccountsConfig,
 };
@@ -81,7 +82,13 @@ impl<T: PubsubConnection> PubSubConnectionPool<T> {
         let (sub_count, connection) =
             match self.find_or_create_connection().await {
                 Ok(result) => result,
-                Err(err) => return Err(err.into()),
+                Err(err) => {
+                    return Err(PubsubClientError::SubscribeFailed {
+                        reason: "Unable to find or create connection"
+                            .to_string(),
+                        message: format!("{err:?}"),
+                    });
+                }
             };
 
         // Subscribe using the selected connection
@@ -107,7 +114,13 @@ impl<T: PubsubConnection> PubSubConnectionPool<T> {
         let (sub_count, connection) =
             match self.find_or_create_connection().await {
                 Ok(result) => result,
-                Err(err) => return Err(err.into()),
+                Err(err) => {
+                    return Err(PubsubClientError::SubscribeFailed {
+                        reason: "Unable to find or create connection"
+                            .to_string(),
+                        message: format!("{err:?}"),
+                    });
+                }
             };
 
         // Subscribe using the selected connection

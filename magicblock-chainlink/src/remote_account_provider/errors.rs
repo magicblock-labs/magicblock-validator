@@ -112,24 +112,10 @@ pub enum RemoteAccountProviderError {
     )]
     LoaderV4StateDeserializationFailed(Pubkey, String),
 }
-
 impl From<solana_pubsub_client::pubsub_client::PubsubClientError>
     for RemoteAccountProviderError
 {
     fn from(e: solana_pubsub_client::pubsub_client::PubsubClientError) -> Self {
         Self::PubsubClientError(Box::new(e))
-    }
-}
-
-impl From<RemoteAccountProviderError>
-    for solana_pubsub_client::pubsub_client::PubsubClientError
-{
-    fn from(e: RemoteAccountProviderError) -> Self {
-        match e {
-            RemoteAccountProviderError::PubsubClientError(err) => *err,
-            _ => solana_pubsub_client::pubsub_client::PubsubClientError::UrlParseError(
-                url::ParseError::Overflow,
-            ),
-        }
     }
 }
