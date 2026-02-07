@@ -43,7 +43,7 @@ fn validate_vault(tc: &TransactionContext) -> Result<(), InstructionError> {
     let vault_pubkey =
         accounts::get_instruction_pubkey_with_idx(tc, VAULT_IDX)?;
     if *vault_pubkey != EPHEMERAL_VAULT_PUBKEY {
-        return Err(InstructionError::InvalidAccountOwner);
+        return Err(InstructionError::InvalidAccountData);
     }
     Ok(())
 }

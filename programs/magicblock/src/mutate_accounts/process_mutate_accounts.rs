@@ -112,6 +112,7 @@ pub(crate) fn process_mutate_accounts(
         if account.borrow().ephemeral() {
             let key = transaction_context
                 .get_key_of_account_at_index(account_transaction_index)?;
+            account_mods.remove(key);
             ic_msg!(
                 invoke_context,
                 "MutateAccounts: skipping ephemeral account {}",
