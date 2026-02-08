@@ -1,10 +1,10 @@
 
 # Summary
 
-Implements a `AccountsManager`, which is reponsible for:
+Implements a `AccountsManager`, which is responsible for:
 
 - fetching chain accounts content
-- commiting content back to chain
+- committing content back to chain
 
 # Details
 
@@ -15,7 +15,7 @@ Implements a `AccountsManager`, which is reponsible for:
   - depends on an `InternalAccountProvider` (implemented by `BankAccountProvider`)
   - depends on an `AccountCloner` (implemented by `RemoteAccountCloner`)
   - depends on a `Transwise`
-  - denepds on a `CommittorServiceExt` that is used for Manual commits
+  - depends on a `CommittorServiceExt` that is used for Manual commits
   - Implements `ensure_accounts` function
   - Maintains a local cache of accounts already validated and cloned
 
