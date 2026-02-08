@@ -29,7 +29,7 @@ make test-task-scheduler
 ### Running Test Suites with Validators in separate Terminals
 
 In order to isolate issues you can run one set of the below (each command in its own terminal):
-You an then also run individual tests of the respective suite while keeping the setup
+You can then also run individual tests of the respective suite while keeping the setup
 validators running in the other terminals.
 
 ```sh
