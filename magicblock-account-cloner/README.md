@@ -35,7 +35,7 @@ The important states stored for each account are:
 
 ### Transaction event: new transaction received
 
-When a transaction is received by the validator, each account of the transaction is cloned separately in parrallel.
+When a transaction is received by the validator, each account of the transaction is cloned separately in parallel.
 
 Each account's clone request is pushed into a queue and executed on a worker thread dedicated to the cloner.
 
@@ -70,7 +70,7 @@ When an on-chain account's subscription notices a change:
 
 ## Update logic
 
-During the cloner's step `A.1`, an account is added to the set of monitored acounts.
+During the cloner's step `A.1`, an account is added to the set of monitored accounts.
 Once an account has been cloned, we keep monitoring for on-chain changes forever.
 
 Each account's monitoring request is pushed into a queue and executed on a worker thread dedicated to the updates.
@@ -83,7 +83,7 @@ On startup, we subscribe to the RPC's `Clock` changes, in order to know which sl
 For each account monitoring request, an "accountSubscribe" websocket subscription is created through an RPC call.
 For each account monitoring request, we set the `first_subscribed_slot` to the last `Clock`'s slot at the time of subscription.
 
-For each update received in the websocket subscription, we save the slot at which the update occured: This is what we call the `last_known_update_slot`.
+For each update received in the websocket subscription, we save the slot at which the update occurred: This is what we call the `last_known_update_slot`.
 
 Note: multiple RPC connections are maintained at all times, and all subscriptions are refreshed every 5 minutes:
 - one RPC websocket connection is destroyed (and all subscriptions dropped)
@@ -98,4 +98,4 @@ For each fetched account, we simply use the `getMultipleAccount` solana's RPC ca
 Note that we use the `minContextSlot` parameter is passed to try to enforce that the state being fetched is more recent than the latest subscription's slot.
 The `minContextSlot` passed as parameter is the most recent confirmed slot which was received from the "Update" subscriptions (it's the `first_subscribed_slot`).
 
-The fetcher structure in the validator's repository is mostly used for queuing and scheduling purposeds, most of the actual RPC request logic and parsing is done in the cunjuntoi repository implementation of the "AccountChainSnapshotProvider"
+The fetcher structure in the validator's repository is mostly used for queuing and scheduling purposes, most of the actual RPC request logic and parsing is done in the cunjuntoi repository implementation of the "AccountChainSnapshotProvider"
