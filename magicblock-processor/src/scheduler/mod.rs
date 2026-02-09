@@ -143,6 +143,9 @@ impl TransactionScheduler {
     }
 
     fn handle_new_transaction(&mut self, txn: ProcessableTransaction) {
+        // SAFETY:
+        // the caller ensured that executor was ready before invoking this
+        // method so the get_ready_executor should always return Some here
         let executor = self.coordinator.get_ready_executor().expect(
             "unreachable: is_ready() guard ensures an executor is available",
         );
