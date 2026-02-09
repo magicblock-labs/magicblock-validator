@@ -1,3 +1,11 @@
+//! Unit tests for the scheduler's locking and queueing logic.
+//!
+//! Tests cover:
+//! - Lock semantics (write/write, write/read, read/write contention)
+//! - FIFO ordering within blocked queues
+//! - Executor pool management
+//! - Edge cases (empty transactions, duplicate accounts)
+
 use magicblock_core::link::transactions::{
     ProcessableTransaction, SanitizeableTransaction, TransactionProcessingMode,
 };
@@ -12,6 +20,11 @@ use solana_transaction::Transaction;
 
 use super::coordinator::{ExecutionCoordinator, TransactionWithId};
 
+/// Creates a mock transaction with the specified accounts.
+///
+/// # Arguments
+///
+/// * `accounts` - Slice of `(Pubkey, is_writable)` tuples
 fn mock_txn(accounts: &[(Pubkey, bool)]) -> TransactionWithId {
     let payer = Keypair::new();
     let instructions: Vec<Instruction> = accounts

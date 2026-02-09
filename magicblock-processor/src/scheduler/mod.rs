@@ -1,8 +1,11 @@
-//! The central transaction scheduler and its event loop.
+//! Central transaction scheduler and event loop.
 //!
-//! This module is the entry point for all transactions into the processing pipeline.
-//! It is responsible for creating and managing a pool of `TransactionExecutor`
-//! workers and dispatching transactions to them for execution.
+//! # Architecture
+//!
+//! - Receives transactions from a global queue
+//! - Spawns N `TransactionExecutor` workers (one per OS thread)
+//! - Dispatches transactions using account locking to prevent conflicts
+//! - Multiplexes between: new transactions, executor readiness, and slot transitions
 
 use std::{
     sync::{Arc, RwLock},
@@ -30,25 +33,41 @@ use tracing::{error, info, instrument, warn};
 
 use crate::executor::{SimpleForkGraph, TransactionExecutor};
 
+// Capacity of 1 ensures executor processes one transaction at a time
 const EXECUTOR_QUEUE_CAPACITY: usize = 1;
 
-/// The central transaction scheduler responsible for distributing work to executors.
+/// Central transaction scheduler managing executor workers and transaction dispatch.
+///
+/// Runs in a dedicated thread with a single-threaded Tokio runtime.
 pub struct TransactionScheduler {
+    /// Manages executor pool and account locking
     coordinator: ExecutionCoordinator,
+    /// Incoming transaction queue from global processor
     transactions_rx: TransactionToProcessRx,
+    /// Executor readiness notifications (workers signal when idle)
     ready_rx: Receiver<ExecutorId>,
+    /// Sender channels to each executor worker
     executors: Vec<Sender<ProcessableTransaction>>,
+    /// Shared BPF program cache
     program_cache: Arc<RwLock<ProgramCache<SimpleForkGraph>>>,
+    /// Accounts database (for sysvar updates on slot transition)
     accountsdb: Arc<AccountsDb>,
+    /// Latest block metadata (slot, clock, blockhash)
     latest_block: LatestBlock,
+    /// Global shutdown signal
     shutdown: CancellationToken,
 }
 
 impl TransactionScheduler {
+    /// Creates a new scheduler and spawns its executor worker pool.
+    ///
+    /// Prepares shared program cache and sysvars, then spawns N executors
+    /// (one per OS thread, up to MAX_SVM_EXECUTORS).
     pub fn new(executors: u32, state: TransactionSchedulerState) -> Self {
         let count = executors.clamp(1, MAX_SVM_EXECUTORS) as usize;
         let mut executors = Vec::with_capacity(count);
 
+        // Channel for workers to signal when ready for new transactions
         let (ready_tx, ready_rx) = channel(count);
         let program_cache = state.prepare_programs_cache();
         state.prepare_sysvars();
@@ -80,8 +99,10 @@ impl TransactionScheduler {
         }
     }
 
+    /// Spawns the scheduler's event loop in a dedicated OS thread.
     pub fn spawn(self) -> JoinHandle<()> {
         std::thread::spawn(move || {
+            // Single-threaded runtime avoids scheduler contention with other async tasks
             let runtime = Builder::new_current_thread()
                 .thread_name("transaction-scheduler")
                 .build()
@@ -90,6 +111,10 @@ impl TransactionScheduler {
         })
     }
 
+    /// Main event loop: processes executor readiness, new transactions, and slot transitions.
+    ///
+    /// Uses `biased` select to prioritize ready workers over incoming transactions,
+    /// ensuring the pipeline stays full.
     #[instrument(skip(self))]
     async fn run(mut self) {
         let mut block_produced = self.latest_block.subscribe();
@@ -105,8 +130,10 @@ impl TransactionScheduler {
                 else => break,
             }
         }
+        // Shutdown: drop executor channels to signal workers to stop,
+        // then drain remaining ready notifications
         drop(self.executors);
-        self.ready_rx.recv().await;
+        while self.ready_rx.recv().await.is_some() {}
         info!("Scheduler terminated");
     }
 
@@ -125,8 +152,10 @@ impl TransactionScheduler {
     fn reschedule_blocked_transactions(&mut self, blocker: ExecutorId) {
         let mut executor = Some(blocker);
         while let Some(exec) = executor.take() {
+            // Try to get next transaction blocked by this executor
             let Some(txn) = self.coordinator.next_blocked_transaction(blocker)
             else {
+                // Queue empty: release executor back to pool
                 self.coordinator.release_executor(exec);
                 break;
             };
@@ -137,6 +166,7 @@ impl TransactionScheduler {
             if blocked.is_some_and(|b| b == blocker) {
                 break;
             }
+            // Try to get another executor for the next blocked transaction
             executor = self.coordinator.get_ready_executor();
         }
     }
@@ -160,14 +190,18 @@ impl TransactionScheduler {
     fn transition_to_new_slot(&self) {
         let block = self.latest_block.load();
         let mut cache = self.program_cache.write().unwrap();
+
+        // Prune stale programs and re-root to new slot
         cache.prune(block.slot, 0);
         cache.latest_root_slot = block.slot;
 
+        // Update Clock sysvar
         if let Some(mut account) = self.accountsdb.get_account(&clock::ID) {
             let _ = account.serialize_data(&block.clock);
             let _ = self.accountsdb.insert_account(&clock::ID, &account);
         }
 
+        // Update SlotHashes sysvar
         if let Some(mut acc) = self.accountsdb.get_account(&slot_hashes::ID) {
             let Some(mut hashes) = from_account::<SlotHashes, _>(&acc) else {
                 warn!("failed to read slot hashes from account");
@@ -179,15 +213,18 @@ impl TransactionScheduler {
             }
             let _ = self.accountsdb.insert_account(&slot_hashes::ID, &acc);
         }
+        // Release lock before syscall lookup (prevents deadlock if sysvar is accessed)
         drop(cache);
     }
 }
+
+// SAFETY:
+// Rc<RefCell> used in the the scheduler is only used in a single
+// thread, the scheduler is meant to stay single threaded
+unsafe impl Send for TransactionScheduler {}
 
 pub mod coordinator;
 pub mod locks;
 pub mod state;
 #[cfg(test)]
 mod tests;
-
-// SAFETY: Rc<RefCell> used within the scheduler never escapes to other threads
-unsafe impl Send for TransactionScheduler {}

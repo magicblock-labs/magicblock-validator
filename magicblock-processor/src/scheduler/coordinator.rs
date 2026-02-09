@@ -1,56 +1,46 @@
-//! Transaction scheduling across multiple executors.
+//! Transaction scheduling coordination across multiple executors.
 //!
-//! Simple locking: try all locks, requeue on failure. No fairness blocking.
-//! Transactions ordered by ID (FIFO) within each executor's blocked queue.
+//! # Architecture
+//!
+//! - **Lock acquisition**: All-or-nothing attempt on all transaction accounts
+//! - **Lock contention**: Failed transactions queued behind blocking executor
+//! - **FIFO ordering**: Transactions processed in ID order within each blocked queue
+//!
+//! # Key Types
+//!
+//! - `ExecutorId`: Unique identifier for each executor worker (0..N)
+//! - `TransactionId`: Monotonic ID for FIFO queue ordering
+//! - `BinaryHeap<TransactionWithId>`: Min-heap ordered by transaction ID
 
 use std::{cmp::Ordering, collections::BinaryHeap};
 
 use magicblock_core::link::transactions::ProcessableTransaction;
 use magicblock_metrics::metrics::MAX_LOCK_CONTENTION_QUEUE_SIZE;
-use solana_pubkey::Pubkey;
 
 use super::locks::{
     next_transaction_id, ExecutorId, LocksCache, TransactionId,
 };
+use crate::scheduler::locks::RcLock;
 
-/// Transaction tagged with ID for queue ordering.
-pub(super) struct TransactionWithId {
-    pub(super) id: TransactionId,
-    pub(super) txn: ProcessableTransaction,
-}
-
-impl TransactionWithId {
-    pub(super) fn new(txn: ProcessableTransaction) -> Self {
-        Self {
-            id: next_transaction_id(),
-            txn,
-        }
-    }
-}
-
-// Min-heap: smaller ID = higher priority
-impl Ord for TransactionWithId {
-    fn cmp(&self, other: &Self) -> Ordering {
-        other.id.cmp(&self.id)
-    }
-}
-impl PartialOrd for TransactionWithId {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-impl PartialEq for TransactionWithId {
-    fn eq(&self, other: &Self) -> bool {
-        self.id == other.id
-    }
-}
-impl Eq for TransactionWithId {}
-
+/// Coordinates transaction scheduling across multiple executor workers.
+///
+/// # Scheduling Flow
+///
+/// 1. Acquire idle executor from pool
+/// 2. Try to lock all transaction accounts (all-or-nothing)
+/// 3. On success: send to executor; on failure: queue and return executor to pool
+///
+/// # Unlock Flow
+///
+/// When executor finishes, unlock accounts and retry blocked transactions in FIFO order.
 pub(super) struct ExecutionCoordinator {
+    /// Blocked transactions per executor, ordered by transaction ID (FIFO)
     blocked_transactions: Vec<BinaryHeap<TransactionWithId>>,
+    /// Pool of idle executors available for work
     ready_executors: Vec<ExecutorId>,
-    /// Account keys locked by each executor (for unlocking)
-    held_accounts: Vec<Vec<Pubkey>>,
+    /// Account locks currently held by each running executor (for unlocking)
+    acquired_locks: Vec<Vec<RcLock>>,
+    /// Global account lock registry
     locks: LocksCache,
 }
 
@@ -60,7 +50,7 @@ impl ExecutionCoordinator {
             blocked_transactions: (0..count)
                 .map(|_| BinaryHeap::new())
                 .collect(),
-            held_accounts: (0..count).map(|_| Vec::new()).collect(),
+            acquired_locks: (0..count).map(|_| Vec::new()).collect(),
             ready_executors: (0..count as u32).collect(),
             locks: LocksCache::default(),
         }
@@ -96,7 +86,7 @@ impl ExecutionCoordinator {
         }
     }
 
-    pub(crate) fn try_acquire_locks(
+    pub(super) fn try_acquire_locks(
         &mut self,
         executor: ExecutorId,
         txn: &ProcessableTransaction,
@@ -105,27 +95,26 @@ impl ExecutionCoordinator {
         let accounts = message.account_keys();
 
         for (i, &acc) in accounts.iter().enumerate() {
-            let lock = self.locks.entry(acc).or_default();
+            let lock = self.locks.entry(acc).or_default().clone();
             let result = if message.is_writable(i) {
-                lock.write(executor)
+                lock.borrow_mut().write(executor)
             } else {
-                lock.read(executor)
+                lock.borrow_mut().read(executor)
             };
 
             if let Err(blocker) = result {
+                // All-or-nothing: release any locks we acquired and fail
                 self.unlock_accounts(executor);
                 return Err(blocker);
             }
-            self.held_accounts[executor as usize].push(acc);
+            self.acquired_locks[executor as usize].push(lock);
         }
         Ok(())
     }
 
-    pub(crate) fn unlock_accounts(&mut self, executor: ExecutorId) {
-        for acc in self.held_accounts[executor as usize].drain(..) {
-            if let Some(lock) = self.locks.get_mut(&acc) {
-                lock.unlock(executor);
-            }
+    pub(super) fn unlock_accounts(&mut self, executor: ExecutorId) {
+        for lock in self.acquired_locks[executor as usize].drain(..) {
+            lock.borrow_mut().unlock(executor);
         }
     }
 
@@ -147,3 +136,39 @@ impl ExecutionCoordinator {
         self.blocked_transactions[executor as usize].pop()
     }
 }
+
+/// Transaction wrapped with a monotonic ID for FIFO queue ordering.
+///
+/// The ID ensures blocked transactions are processed in arrival order:
+/// lower IDs (earlier transactions) are dequeued before higher IDs.
+pub(super) struct TransactionWithId {
+    pub(super) id: TransactionId,
+    pub(super) txn: ProcessableTransaction,
+}
+
+impl TransactionWithId {
+    pub(super) fn new(txn: ProcessableTransaction) -> Self {
+        Self {
+            id: next_transaction_id(),
+            txn,
+        }
+    }
+}
+
+// BinaryHeap is max-heap by default, so we reverse comparison for min-heap behavior
+impl Ord for TransactionWithId {
+    fn cmp(&self, other: &Self) -> Ordering {
+        other.id.cmp(&self.id) // smaller ID = higher priority
+    }
+}
+impl PartialOrd for TransactionWithId {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+impl PartialEq for TransactionWithId {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
+    }
+}
+impl Eq for TransactionWithId {}
