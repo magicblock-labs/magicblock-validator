@@ -19,6 +19,8 @@ use helius_laserstream::{
 use magicblock_core::logger::log_trace_debug;
 use magicblock_metrics::metrics::{
     inc_account_subscription_account_updates_count,
+    inc_account_subscription_activations_count,
+    inc_per_program_account_updates_count,
     inc_program_subscription_account_updates_count,
 };
 use solana_account::Account;
@@ -413,6 +415,8 @@ impl ChainLaserActor {
             );
             return;
         }
+
+        inc_account_subscription_activations_count(&self.client_id);
 
         let mut new_subs: StreamMap<usize, LaserStream> = StreamMap::new();
 
@@ -821,15 +825,22 @@ impl ChainLaserActor {
             trace!("Received subscription update");
         }
 
-        if !self.subscriptions.contains(&pubkey) {
-            // Ignore updates for accounts we are not subscribed to
-            return;
-        }
-
         let Ok(owner) = Pubkey::try_from(account.owner) else {
             error!(pubkey = %pubkey, "Failed to parse owner pubkey");
             return;
         };
+
+        if matches!(source, AccountUpdateSource::Program) {
+            inc_per_program_account_updates_count(
+                &self.client_id,
+                &owner.to_string(),
+            );
+        }
+
+        if !self.subscriptions.contains(&pubkey) {
+            // Ignore updates for accounts we are not subscribed to
+            return;
+        }
 
         let account = Account {
             lamports: account.lamports,
