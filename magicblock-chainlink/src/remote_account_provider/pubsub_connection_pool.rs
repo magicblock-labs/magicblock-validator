@@ -3,6 +3,7 @@ use std::sync::{
     Arc,
 };
 
+use magicblock_metrics::metrics;
 use scc::{ebr::Guard, Queue};
 use solana_pubkey::Pubkey;
 use solana_pubsub_client::{
@@ -47,6 +48,7 @@ pub struct PubSubConnectionPool<T: PubsubConnection> {
     url: String,
     per_connection_sub_limit: usize,
     new_connection_guard: AsyncMutex<()>,
+    client_id: String,
 }
 
 impl<T: PubsubConnection> PubSubConnectionPool<T> {
@@ -54,6 +56,7 @@ impl<T: PubsubConnection> PubSubConnectionPool<T> {
     pub async fn new(
         url: String,
         limit: usize,
+        client_id: String,
     ) -> RemoteAccountProviderResult<PubSubConnectionPool<T>> {
         // Creating initial connection also to verify that provider is valid
         let connection = Arc::new(T::new(url.clone()).await?);
@@ -66,11 +69,13 @@ impl<T: PubsubConnection> PubSubConnectionPool<T> {
             queue.push(conn);
             queue
         };
+        metrics::set_pubsub_client_connections_count(&client_id, 1);
         Ok(Self {
             connections: Arc::new(queue),
             url,
             per_connection_sub_limit: limit,
             new_connection_guard: AsyncMutex::new(()),
+            client_id,
         })
     }
 
@@ -170,6 +175,7 @@ impl<T: PubsubConnection> PubSubConnectionPool<T> {
         };
         // Since we already created it we keep it as well
         self.connections.push(pooled_conn);
+        metrics::set_pubsub_client_connections_count(&self.client_id, 1);
         Ok(())
     }
 
@@ -207,9 +213,14 @@ impl<T: PubsubConnection> PubSubConnectionPool<T> {
             sub_count: Arc::clone(&sub_count),
         };
         self.connections.push(conn);
+        let connection_count = self.connections.len();
+        metrics::set_pubsub_client_connections_count(
+            &self.client_id,
+            connection_count,
+        );
         trace!(
             url = self.url,
-            connection_count = self.connections.len(),
+            connection_count,
             "Created new pooled connection"
         );
         Ok((sub_count, new_connection))
@@ -302,6 +313,7 @@ mod tests {
         PubSubConnectionPool::<MockPubsubConnection>::new(
             "mock://".to_string(),
             limit,
+            "test_client".to_string(),
         )
         .await
         .unwrap()

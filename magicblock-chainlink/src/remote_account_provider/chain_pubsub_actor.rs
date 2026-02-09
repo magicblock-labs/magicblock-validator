@@ -98,15 +98,19 @@ impl ChainPubsubActor {
             .per_stream_subscription_limit
             .unwrap_or(usize::MAX);
         let pubsub_connection = {
-            let pubsub_pool = PubSubConnectionPool::new(url, limit)
-                .await
-                .inspect_err(|err| {
-                    error!(
-                        client_id = client_id,
-                        err = ?err,
-                        "Failed to connect to provider"
-                    )
-                })?;
+            let pubsub_pool = PubSubConnectionPool::new(
+                url,
+                limit,
+                client_id.to_string(),
+            )
+            .await
+            .inspect_err(|err| {
+                error!(
+                    client_id = client_id,
+                    err = ?err,
+                    "Failed to connect to provider"
+                )
+            })?;
             Arc::new(pubsub_pool)
         };
 
