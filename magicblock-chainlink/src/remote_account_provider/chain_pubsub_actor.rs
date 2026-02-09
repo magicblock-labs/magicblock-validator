@@ -143,6 +143,14 @@ impl ChainPubsubActor {
         shutdown_token: CancellationToken,
     ) {
         info!(client_id = client_id, "Shutting down pubsub actor");
+        Self::unsubscribe_all(subscriptions, program_subs);
+        shutdown_token.cancel();
+    }
+
+    fn unsubscribe_all(
+        subscriptions: Arc<Mutex<HashMap<Pubkey, AccountSubscription>>>,
+        program_subs: Arc<Mutex<HashMap<Pubkey, AccountSubscription>>>,
+    ) {
         let subs = subscriptions
             .lock()
             .expect("subscriptions lock poisoned")
@@ -157,7 +165,6 @@ impl ChainPubsubActor {
         for (_, sub) in subs {
             sub.cancellation_token.cancel();
         }
-        shutdown_token.cancel();
     }
 
     pub fn subscription_count(&self, filter: &[Pubkey]) -> usize {
@@ -387,6 +394,8 @@ impl ChainPubsubActor {
                 let result = Self::try_reconnect(
                     pubsub_connection,
                     pubsub_client_config,
+                    subscriptions,
+                    program_subs,
                     client_id,
                     is_connected,
                 )
@@ -729,14 +738,19 @@ impl ChainPubsubActor {
         });
     }
 
-    #[instrument(skip(pubsub_connection, pubsub_client_config, is_connected), fields(client_id = %client_id))]
+    #[instrument(skip(pubsub_connection, pubsub_client_config, subs, program_subs, is_connected), fields(client_id = %client_id))]
     async fn try_reconnect(
         pubsub_connection: Arc<PubSubConnectionPool<PubsubConnectionImpl>>,
         pubsub_client_config: PubsubClientConfig,
+        subs: Arc<Mutex<HashMap<Pubkey, AccountSubscription>>>,
+        program_subs: Arc<Mutex<HashMap<Pubkey, AccountSubscription>>>,
         client_id: &str,
         is_connected: Arc<AtomicBool>,
     ) -> RemoteAccountProviderResult<()> {
-        // 1. Try to reconnect the pubsub connection
+        // 1. Ensure we cleaned all existing subscriptions
+        Self::unsubscribe_all(subs, program_subs);
+
+        // 2. Try to reconnect the pubsub connection
         pubsub_connection.reconnect().await?;
         // Make a sub to any account and unsub immediately to verify connection
         let pubkey = Pubkey::new_unique();
@@ -746,7 +760,7 @@ impl ChainPubsubActor {
             ..Default::default()
         };
 
-        // 2. Try to subscribe to an account to verify connection
+        // 3. Try to subscribe to an account to verify connection
         let (_, unsubscribe) =
             match pubsub_connection.account_subscribe(&pubkey, config).await {
                 Ok(res) => res,
@@ -759,10 +773,10 @@ impl ChainPubsubActor {
                 }
             };
 
-        // 3. Unsubscribe immediately
+        // 4. Unsubscribe immediately
         unsubscribe().await;
 
-        // 4. We are now connected again
+        // 5. We are now connected again
         is_connected.store(true, Ordering::SeqCst);
         Ok(())
     }
