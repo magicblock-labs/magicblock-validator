@@ -833,10 +833,7 @@ pub fn set_pubsub_client_resubscribed_count(client_id: &str, count: usize) {
         .set(count as i64);
 }
 
-pub fn set_pubsub_client_connections_count(
-    client_id: &str,
-    count: usize,
-) {
+pub fn set_pubsub_client_connections_count(client_id: &str, count: usize) {
     PUBSUB_CLIENT_CONNECTIONS_GAUGE
         .with_label_values(&[client_id])
         .set(count as i64);
