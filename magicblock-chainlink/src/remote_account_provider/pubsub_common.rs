@@ -97,7 +97,7 @@ pub enum ChainPubsubActorMessage {
     },
 }
 
-pub const HELIUS_PER_STREAM_SUBSCRIPTION_LIMIT: usize = 100;
+pub const HELIUS_PER_STREAM_SUBSCRIPTION_LIMIT: usize = 80;
 
 pub const SUBSCRIPTION_UPDATE_CHANNEL_SIZE: usize = 5_000;
 pub const MESSAGE_CHANNEL_SIZE: usize = 1_000;
