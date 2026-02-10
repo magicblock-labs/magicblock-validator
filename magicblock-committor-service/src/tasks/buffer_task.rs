@@ -58,15 +58,16 @@ impl BufferTask {
         match task_type {
             BufferTaskType::Commit(task) => {
                 let data = task.committed_account.account.data.clone();
+                let buffer_account_size = data.len() as u64;
                 let chunks =
                     Chunks::from_data_length(data.len(), MAX_WRITE_CHUNK_SIZE);
 
                 PreparationState::Required(PreparationTask {
                     commit_id: task.commit_id,
                     pubkey: task.committed_account.pubkey,
-                    committed_data: data.clone(),
+                    committed_data: data,
                     chunks,
-                    buffer_account_size: data.len() as u64,
+                    buffer_account_size,
                 })
             }
 
