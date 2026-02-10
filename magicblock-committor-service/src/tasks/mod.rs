@@ -144,6 +144,11 @@ pub struct PreparationTask {
 
     // TODO(edwin): replace with reference once done
     pub committed_data: Vec<u8>,
+    /// Actual buffer account size for realloc instructions
+    /// For CommitDiff: committed_account.data.len()
+    /// For Commit: data.len()
+    /// This may differ from committed_data.len() (which holds the diff for CommitDiff)
+    pub buffer_account_size: u64,
 }
 
 impl PreparationTask {
@@ -156,7 +161,7 @@ impl PreparationTask {
         // // https://github.com/near/borsh-rs/blob/f1b75a6b50740bfb6231b7d0b1bd93ea58ca5452/borsh/src/ser/helpers.rs#L59
         let chunks_account_size =
             borsh::object_length(&self.chunks).unwrap() as u64;
-        let buffer_account_size = self.committed_data.len() as u64;
+        let buffer_account_size = self.buffer_account_size;
 
         let (instruction, _, _) = create_init_ix(CreateInitIxArgs {
             authority: *authority,
@@ -179,12 +184,11 @@ impl PreparationTask {
     /// Returns realloc instruction required for Buffer preparation
     #[allow(clippy::let_and_return)]
     pub fn realloc_instructions(&self, authority: &Pubkey) -> Vec<Instruction> {
-        let buffer_account_size = self.committed_data.len() as u64;
         let realloc_instructions =
             create_realloc_buffer_ixs(CreateReallocBufferIxArgs {
                 authority: *authority,
                 pubkey: self.pubkey,
-                buffer_account_size,
+                buffer_account_size: self.buffer_account_size,
                 commit_id: self.commit_id,
             });
 
