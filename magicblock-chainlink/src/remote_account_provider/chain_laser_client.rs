@@ -181,7 +181,7 @@ impl ChainPubsubClient for ChainLaserClientImpl {
         None
     }
 
-    fn subscriptions(&self) -> Option<Vec<Pubkey>> {
+    fn subscriptions(&self) -> Option<HashSet<Pubkey>> {
         None
     }
 

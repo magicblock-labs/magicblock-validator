@@ -161,7 +161,7 @@ impl ChainPubsubClient for ChainUpdatesClient {
         }
     }
 
-    fn subscriptions(&self) -> Option<Vec<Pubkey>> {
+    fn subscriptions(&self) -> Option<HashSet<Pubkey>> {
         use ChainUpdatesClient::*;
         match self {
             WebSocket(client) => client.subscriptions(),

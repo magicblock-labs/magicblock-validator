@@ -250,7 +250,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                     if tracing::enabled!(tracing::Level::DEBUG) {
                         pubsub_client.subscriptions().unwrap_or_default()
                     } else {
-                        vec![]
+                        HashSet::new()
                     };
 
                 let (pubsub_total, pubsub_without_never_evict) =

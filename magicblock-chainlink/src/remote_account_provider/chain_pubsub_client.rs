@@ -53,7 +53,7 @@ pub trait ChainPubsubClient: Send + Sync + Clone + 'static {
         exclude: Option<&[Pubkey]>,
     ) -> Option<(usize, usize)>;
 
-    fn subscriptions(&self) -> Option<Vec<Pubkey>>;
+    fn subscriptions(&self) -> Option<HashSet<Pubkey>>;
 
     fn subs_immediately(&self) -> bool;
 
@@ -211,7 +211,7 @@ impl ChainPubsubClient for ChainPubsubClientImpl {
         Some((total, filtered))
     }
 
-    fn subscriptions(&self) -> Option<Vec<Pubkey>> {
+    fn subscriptions(&self) -> Option<HashSet<Pubkey>> {
         Some(self.actor.subscriptions())
     }
 
@@ -486,7 +486,7 @@ pub mod mock {
             Some((total, filtered))
         }
 
-        fn subscriptions(&self) -> Option<Vec<Pubkey>> {
+        fn subscriptions(&self) -> Option<HashSet<Pubkey>> {
             let subs = self.subscribed_pubkeys.lock();
             Some(subs.iter().copied().collect())
         }

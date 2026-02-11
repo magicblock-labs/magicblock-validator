@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     sync::{
         atomic::{AtomicBool, AtomicU16, Ordering},
         Arc, Mutex,
@@ -186,9 +186,9 @@ impl ChainPubsubActor {
         }
     }
 
-    pub fn subscriptions(&self) -> Vec<Pubkey> {
+    pub fn subscriptions(&self) -> HashSet<Pubkey> {
         if !self.is_connected.load(Ordering::SeqCst) {
-            return vec![];
+            return HashSet::new();
         }
         let subs = self
             .subscriptions

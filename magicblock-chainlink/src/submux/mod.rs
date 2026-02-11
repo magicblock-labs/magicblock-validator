@@ -744,7 +744,7 @@ where
         maybe_forward_now
     }
 
-    fn get_subscriptions(clients: &[Arc<T>]) -> Option<Vec<Pubkey>> {
+    fn get_subscriptions(clients: &[Arc<T>]) -> Option<HashSet<Pubkey>> {
         let mut all_subs = HashSet::new();
         for client in clients {
             if let Some(subs) = client.subscriptions() {
@@ -753,7 +753,7 @@ where
                 return None;
             }
         }
-        Some(all_subs.into_iter().collect())
+        Some(all_subs)
     }
 
     /// Number of clients that must confirm an account subscription for it to be considered active.
@@ -890,7 +890,7 @@ where
     /// Gets the union of all subscriptions across all inner clients.
     /// Unless one is reconnecting, this should be identical to
     /// getting it from a single inner client.
-    fn subscriptions(&self) -> Option<Vec<Pubkey>> {
+    fn subscriptions(&self) -> Option<HashSet<Pubkey>> {
         Self::get_subscriptions(&self.clients)
     }
 
