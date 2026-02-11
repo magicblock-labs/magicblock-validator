@@ -10,6 +10,7 @@ use futures_util::stream::FuturesUnordered;
 use magicblock_core::logger::{log_trace_debug, log_trace_warn};
 use magicblock_metrics::metrics::{
     inc_account_subscription_account_updates_count,
+    inc_per_program_account_updates_count,
     inc_program_subscription_account_updates_count,
 };
 use solana_account_decoder_client_types::UiAccountEncoding;
@@ -93,7 +94,17 @@ impl ChainPubsubActor {
     ) -> RemoteAccountProviderResult<(Self, mpsc::Receiver<SubscriptionUpdate>)>
     {
         let url = pubsub_client_config.pubsub_url.clone();
-        let pubsub_connection = Arc::new(PubSubConnection::new(url).await?);
+        let pubsub_connection = {
+            let pubsub_connection =
+                PubSubConnection::new(url).await.inspect_err(|err| {
+                    error!(
+                        client_id = client_id,
+                        err = ?err,
+                        "Failed to connect to provider"
+                    )
+                })?;
+            Arc::new(pubsub_connection)
+        };
 
         let (subscription_updates_sender, subscription_updates_receiver) =
             mpsc::channel(SUBSCRIPTION_UPDATE_CHANNEL_SIZE);
@@ -652,6 +663,11 @@ impl ChainPubsubActor {
                                     warn!(error = ?err, pubkey_string = %rpc_response.value.pubkey, "Received invalid pubkey in program subscription update");
                                 });
                             if let Ok(acc_pubkey) = acc_pubkey {
+                                inc_per_program_account_updates_count(
+                                    &client_id,
+                                    &program_pubkey.to_string(),
+                                );
+
                                 if subs.lock().expect("subscriptions lock poisoned").contains_key(&acc_pubkey) {
                                     let ui_account = rpc_response.value.account;
                                     let rpc_response = RpcResponse {

@@ -53,7 +53,7 @@ pub struct ChainLaserClientImpl {
 }
 
 impl ChainLaserClientImpl {
-    pub async fn new_from_url(
+    pub fn new_from_url(
         pubsub_url: &str,
         client_id: String,
         api_key: &str,
@@ -61,7 +61,7 @@ impl ChainLaserClientImpl {
         abort_sender: mpsc::Sender<()>,
         slots: Slots,
         rpc_client: ChainRpcClientImpl,
-    ) -> RemoteAccountProviderResult<Self> {
+    ) -> Self {
         let (actor, messages, updates) = ChainLaserActor::new_from_url(
             pubsub_url,
             &client_id,
@@ -70,14 +70,14 @@ impl ChainLaserClientImpl {
             abort_sender,
             slots,
             rpc_client,
-        )?;
+        );
         let client = Self {
             updates: Arc::new(Mutex::new(Some(updates))),
             messages,
             client_id,
         };
         tokio::spawn(actor.run());
-        Ok(client)
+        client
     }
 
     #[instrument(skip(self, msg), fields(client_id = %self.client_id))]

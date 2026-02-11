@@ -76,14 +76,13 @@ impl ChainUpdatesClient {
                 Ok(ChainUpdatesClient::Laser(
                     ChainLaserClientImpl::new_from_url(
                         url,
-                        client_id,
+                        client_id.to_string(),
                         api_key,
                         commitment.commitment,
                         abort_sender,
                         slots,
                         rpc_client,
-                    )
-                    .await?,
+                    ),
                 ))
             }
             Rpc { .. } => {

@@ -47,6 +47,9 @@ pub enum RemoteAccountProviderError {
     #[error("Invalid pubsub endpoint: {0}")]
     InvalidPubsubEndpoint(String),
 
+    #[error("All pubsub clients failed to connect")]
+    AllPubsubClientsFailed,
+
     #[error("Failed to setup an account subscription ({0})")]
     AccountSubscriptionsFailed(String),
 
