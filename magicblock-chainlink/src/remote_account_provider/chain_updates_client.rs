@@ -161,11 +161,11 @@ impl ChainPubsubClient for ChainUpdatesClient {
         }
     }
 
-    fn subscriptions(&self) -> Option<HashSet<Pubkey>> {
+    fn subscriptions_union(&self) -> Option<HashSet<Pubkey>> {
         use ChainUpdatesClient::*;
         match self {
-            WebSocket(client) => client.subscriptions(),
-            Laser(client) => client.subscriptions(),
+            WebSocket(client) => client.subscriptions_union(),
+            Laser(client) => client.subscriptions_union(),
         }
     }
 

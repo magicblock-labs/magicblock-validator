@@ -72,7 +72,7 @@ pub async fn reconcile_subscriptions<PubsubClient: ChainPubsubClient>(
     never_evicted: &[Pubkey],
     removed_account_tx: &mpsc::Sender<Pubkey>,
 ) {
-    let all_pubsub_subs = pubsub_client.subscriptions().unwrap_or_default();
+    let all_pubsub_subs = pubsub_client.subscriptions_union().unwrap_or_default();
     let lru_pubkeys = subscribed_accounts.pubkeys();
 
     let pubsub_subs_without_never_evict: HashSet<_> = all_pubsub_subs

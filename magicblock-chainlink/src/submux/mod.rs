@@ -747,7 +747,7 @@ where
     fn get_subscriptions(clients: &[Arc<T>]) -> Option<HashSet<Pubkey>> {
         let mut all_subs = HashSet::new();
         for client in clients {
-            if let Some(subs) = client.subscriptions() {
+            if let Some(subs) = client.subscriptions_union() {
                 all_subs.extend(subs);
             } else {
                 return None;
@@ -890,7 +890,7 @@ where
     /// Gets the union of all subscriptions across all inner clients.
     /// Unless one is reconnecting, this should be identical to
     /// getting it from a single inner client.
-    fn subscriptions(&self) -> Option<HashSet<Pubkey>> {
+    fn subscriptions_union(&self) -> Option<HashSet<Pubkey>> {
         Self::get_subscriptions(&self.clients)
     }
 

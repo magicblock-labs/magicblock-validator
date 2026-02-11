@@ -181,7 +181,7 @@ impl ChainPubsubClient for ChainLaserClientImpl {
         None
     }
 
-    fn subscriptions(&self) -> Option<HashSet<Pubkey>> {
+    fn subscriptions_union(&self) -> Option<HashSet<Pubkey>> {
         None
     }
 

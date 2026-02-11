@@ -248,7 +248,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
 
                 let all_pubsub_subs =
                     if tracing::enabled!(tracing::Level::DEBUG) {
-                        pubsub_client.subscriptions().unwrap_or_default()
+                        pubsub_client.subscriptions_union().unwrap_or_default()
                     } else {
                         HashSet::new()
                     };
@@ -1887,7 +1887,7 @@ mod test {
         .await;
 
         // Verify all accounts are now subscribed
-        let subs = pubsub_client.subscriptions().unwrap();
+        let subs = pubsub_client.subscriptions_union().unwrap();
         assert!(subs.contains(&pubkey1));
         assert!(subs.contains(&pubkey2));
         assert!(subs.contains(&pubkey3));
@@ -1929,7 +1929,7 @@ mod test {
         .await;
 
         // Verify only pubkey1 remains subscribed
-        let subs = pubsub_client.subscriptions().unwrap();
+        let subs = pubsub_client.subscriptions_union().unwrap();
         assert!(subs.contains(&pubkey1));
         assert!(!subs.contains(&pubkey2));
         assert!(!subs.contains(&pubkey3));
@@ -1979,7 +1979,7 @@ mod test {
 
         // Verify: pubkey_in_lru and never_evicted_pubkey remain, stale_pubkey
         // is unsubscribed
-        let subs = pubsub_client.subscriptions().unwrap();
+        let subs = pubsub_client.subscriptions_union().unwrap();
         assert!(
             subs.contains(&pubkey_in_lru),
             "Account in LRU should remain subscribed"
