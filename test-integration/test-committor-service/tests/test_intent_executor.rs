@@ -1104,6 +1104,7 @@ fn failing_undelegate_action(
     UndelegateType::WithBaseActions(vec![BaseAction {
         compute_units: 100_000,
         destination_program: program_flexi_counter::id(),
+        source_program: None,
         escrow_authority,
         data_per_program: ProgramArgs {
             escrow_index: ACTOR_ESCROW_INDEX,
