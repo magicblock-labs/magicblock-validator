@@ -242,27 +242,17 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             loop {
                 interval.tick().await;
                 let lru_count = subscribed_accounts.len();
-                let subscription_counts = pubsub_client
+                let (pubsub_total, pubsub_without_never_evict) = pubsub_client
                     .subscription_count(Some(&never_evicted))
                     .await;
 
                 let all_pubsub_subs =
                     if tracing::enabled!(tracing::Level::DEBUG) {
-                        pubsub_client.subscriptions_union().unwrap_or_default()
+                        pubsub_client.subscriptions_union()
                     } else {
                         HashSet::new()
                     };
 
-                let (pubsub_total, pubsub_without_never_evict) =
-                    match subscription_counts {
-                        Some(counts) => counts,
-                        None => {
-                            warn!(
-                                "No connected client that tracks subscriptions"
-                            );
-                            (0, 0)
-                        }
-                    };
                 if lru_count != pubsub_without_never_evict {
                     warn!(
                         lru_count,
@@ -1887,7 +1877,7 @@ mod test {
         .await;
 
         // Verify all accounts are now subscribed
-        let subs = pubsub_client.subscriptions_union().unwrap();
+        let subs = pubsub_client.subscriptions_union();
         assert!(subs.contains(&pubkey1));
         assert!(subs.contains(&pubkey2));
         assert!(subs.contains(&pubkey3));
@@ -1929,7 +1919,7 @@ mod test {
         .await;
 
         // Verify only pubkey1 remains subscribed
-        let subs = pubsub_client.subscriptions_union().unwrap();
+        let subs = pubsub_client.subscriptions_union();
         assert!(subs.contains(&pubkey1));
         assert!(!subs.contains(&pubkey2));
         assert!(!subs.contains(&pubkey3));
@@ -1979,7 +1969,7 @@ mod test {
 
         // Verify: pubkey_in_lru and never_evicted_pubkey remain, stale_pubkey
         // is unsubscribed
-        let subs = pubsub_client.subscriptions_union().unwrap();
+        let subs = pubsub_client.subscriptions_union();
         assert!(
             subs.contains(&pubkey_in_lru),
             "Account in LRU should remain subscribed"

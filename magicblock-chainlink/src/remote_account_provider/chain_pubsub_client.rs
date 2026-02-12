@@ -52,20 +52,19 @@ pub trait ChainPubsubClient: Send + Sync + Clone + 'static {
     async fn subscription_count(
         &self,
         exclude: Option<&[Pubkey]>,
-    ) -> Option<(usize, usize)>;
+    ) -> (usize, usize);
 
     /// Returns the subscriptions of a client or the union of subscriptions
     /// if there are multiple clients.
     /// This means that if any client is subscribed to a pubkey, it will be
     /// included in the returned set even if other clients are not subscribed to it.
-    fn subscriptions_union(&self) -> Option<HashSet<Pubkey>>;
+    fn subscriptions_union(&self) -> HashSet<Pubkey>;
 
     /// Returns the intersection of subscriptions across all underlying
     /// clients. For a single client this is identical to [ChainPubsubClient::subscriptions_union].
     /// For an implementer with multiple clients it returns only the pubkeys
     /// that every client is subscribed to.
-    /// If any client has no subscriptions, None is returned.
-    fn subscriptions_intersection(&self) -> Option<HashSet<Pubkey>> {
+    fn subscriptions_intersection(&self) -> HashSet<Pubkey> {
         self.subscriptions_union()
     }
 
@@ -215,18 +214,18 @@ impl ChainPubsubClient for ChainPubsubClientImpl {
     async fn subscription_count(
         &self,
         exclude: Option<&[Pubkey]>,
-    ) -> Option<(usize, usize)> {
+    ) -> (usize, usize) {
         let total = self.actor.subscription_count(&[]);
         let filtered = if let Some(exclude) = exclude {
             self.actor.subscription_count(exclude)
         } else {
             total
         };
-        Some((total, filtered))
+        (total, filtered)
     }
 
-    fn subscriptions_union(&self) -> Option<HashSet<Pubkey>> {
-        Some(self.actor.subscriptions())
+    fn subscriptions_union(&self) -> HashSet<Pubkey> {
+        self.actor.subscriptions()
     }
 
     fn subs_immediately(&self) -> bool {
@@ -486,7 +485,7 @@ pub mod mock {
         async fn subscription_count(
             &self,
             exclude: Option<&[Pubkey]>,
-        ) -> Option<(usize, usize)> {
+        ) -> (usize, usize) {
             let pubkeys: Vec<Pubkey> = {
                 let subs = self.subscribed_pubkeys.lock();
                 subs.iter().cloned().collect()
@@ -497,16 +496,16 @@ pub mod mock {
                 .iter()
                 .filter(|pubkey| !exclude.contains(pubkey))
                 .count();
-            Some((total, filtered))
+            (total, filtered)
         }
 
         /// Returns the subscriptions of a client or the union of subscriptions
         /// if there are multiple clients.
         /// This means that if any client is subscribed to a pubkey, it will be
         /// included in the returned set even if other clients are not subscribed to it.
-        fn subscriptions_union(&self) -> Option<HashSet<Pubkey>> {
+        fn subscriptions_union(&self) -> HashSet<Pubkey> {
             let subs = self.subscribed_pubkeys.lock();
-            Some(subs.iter().copied().collect())
+            subs.iter().copied().collect()
         }
 
         fn subs_immediately(&self) -> bool {

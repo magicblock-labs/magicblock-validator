@@ -181,7 +181,7 @@ impl ChainPubsubClient for ChainLaserClientImpl {
     async fn subscription_count(
         &self,
         exclude: Option<&[Pubkey]>,
-    ) -> Option<(usize, usize)> {
+    ) -> (usize, usize) {
         let subs = self.subscriptions.read();
         let total = subs.len();
         let filtered = match exclude {
@@ -190,11 +190,11 @@ impl ChainPubsubClient for ChainLaserClientImpl {
             }
             None => total,
         };
-        Some((total, filtered))
+        (total, filtered)
     }
 
-    fn subscriptions_union(&self) -> Option<HashSet<Pubkey>> {
-        Some(self.subscriptions.read().clone())
+    fn subscriptions_union(&self) -> HashSet<Pubkey> {
+        self.subscriptions.read().clone()
     }
 
     fn subs_immediately(&self) -> bool {

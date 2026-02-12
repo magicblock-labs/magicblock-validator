@@ -73,8 +73,7 @@ pub async fn reconcile_subscriptions<PubsubClient: ChainPubsubClient>(
     removed_account_tx: &mpsc::Sender<Pubkey>,
 ) {
     // TODO: @@@ consider both union and intersection when reconciling
-    let all_pubsub_subs =
-        pubsub_client.subscriptions_union().unwrap_or_default();
+    let all_pubsub_subs = pubsub_client.subscriptions_union();
     let lru_pubkeys = subscribed_accounts.pubkeys();
 
     let pubsub_subs_without_never_evict: HashSet<_> = all_pubsub_subs

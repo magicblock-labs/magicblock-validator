@@ -857,51 +857,44 @@ where
     async fn subscription_count(
         &self,
         exclude: Option<&[Pubkey]>,
-    ) -> Option<(usize, usize)> {
+    ) -> (usize, usize) {
         let mut max_total = 0;
         let mut max_filtered = 0;
         for client in &self.clients {
-            if let Some((total, filtered)) =
-                client.subscription_count(exclude).await
-            {
-                if total > max_total {
-                    max_total = total;
-                }
-                if filtered > max_filtered {
-                    max_filtered = filtered;
-                }
+            let (total, filtered) = client.subscription_count(exclude).await;
+            if total > max_total {
+                max_total = total;
+            }
+            if filtered > max_filtered {
+                max_filtered = filtered;
             }
         }
-        Some((max_total, max_filtered))
+        (max_total, max_filtered)
     }
 
-    fn subscriptions_union(&self) -> Option<HashSet<Pubkey>> {
+    fn subscriptions_union(&self) -> HashSet<Pubkey> {
         let mut union = HashSet::new();
         for client in &self.clients {
-            if let Some(subs) = client.subscriptions_union() {
-                union.extend(subs);
-            }
+            let subs = client.subscriptions_union();
+            union.extend(subs);
         }
-        Some(union)
+        union
     }
 
-    fn subscriptions_intersection(&self) -> Option<HashSet<Pubkey>> {
+    fn subscriptions_intersection(&self) -> HashSet<Pubkey> {
         let mut acc = HashSet::<Pubkey>::new();
         for client in &self.clients {
-            if let Some(subs) = client.subscriptions_intersection() {
-                if acc.is_empty() {
-                    acc = subs;
-                } else {
-                    acc = acc
-                        .intersection(&subs)
-                        .cloned()
-                        .collect::<HashSet<Pubkey>>();
-                }
+            let subs = client.subscriptions_intersection();
+            if acc.is_empty() {
+                acc = subs;
             } else {
-                return None;
+                acc = acc
+                    .intersection(&subs)
+                    .cloned()
+                    .collect::<HashSet<Pubkey>>();
             }
         }
-        Some(acc)
+        acc
     }
 
     /// Returns true if any inner client subscribes immediately

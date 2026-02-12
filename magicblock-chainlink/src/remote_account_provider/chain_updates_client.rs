@@ -153,7 +153,7 @@ impl ChainPubsubClient for ChainUpdatesClient {
     async fn subscription_count(
         &self,
         exclude: Option<&[Pubkey]>,
-    ) -> Option<(usize, usize)> {
+    ) -> (usize, usize) {
         use ChainUpdatesClient::*;
         match self {
             WebSocket(client) => client.subscription_count(exclude).await,
@@ -161,7 +161,7 @@ impl ChainPubsubClient for ChainUpdatesClient {
         }
     }
 
-    fn subscriptions_union(&self) -> Option<HashSet<Pubkey>> {
+    fn subscriptions_union(&self) -> HashSet<Pubkey> {
         use ChainUpdatesClient::*;
         match self {
             WebSocket(client) => client.subscriptions_union(),
