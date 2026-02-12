@@ -882,19 +882,27 @@ where
     }
 
     fn subscriptions_intersection(&self) -> HashSet<Pubkey> {
-        let mut acc = HashSet::<Pubkey>::new();
-        for client in &self.clients {
-            let subs = client.subscriptions_intersection();
-            if acc.is_empty() {
-                acc = subs;
-            } else {
-                acc = acc
-                    .intersection(&subs)
-                    .cloned()
-                    .collect::<HashSet<Pubkey>>();
-            }
+        let sets: Vec<HashSet<Pubkey>> = self
+            .clients
+            .iter()
+            .map(|c| c.subscriptions_intersection())
+            .collect();
+        if sets.is_empty() {
+            return HashSet::new();
         }
-        acc
+        // Find the smallest set to iterate over, then check membership
+        // in all others — no intermediate cloning/collecting.
+        let smallest =
+            sets.iter().min_by_key(|s| s.len()).unwrap();
+        smallest
+            .iter()
+            .filter(|pk| {
+                sets.iter()
+                    .filter(|s| !std::ptr::eq(*s, smallest))
+                    .all(|s| s.contains(pk))
+            })
+            .copied()
+            .collect()
     }
 
     /// Returns true if any inner client subscribes immediately
