@@ -146,21 +146,6 @@ impl ChainPubsubClient for ChainUpdatesClient {
         }
     }
 
-    /// Provides the total number of subscriptions and the number of
-    /// subscriptions when excludig pubkeys in `exclude`.
-    /// - `exclude`: Optional slice of pubkeys to exclude from the count.
-    /// Returns a tuple of (total subscriptions, filtered subscriptions).
-    async fn subscription_count(
-        &self,
-        exclude: Option<&[Pubkey]>,
-    ) -> (usize, usize) {
-        use ChainUpdatesClient::*;
-        match self {
-            WebSocket(client) => client.subscription_count(exclude).await,
-            Laser(client) => client.subscription_count(exclude).await,
-        }
-    }
-
     fn subscriptions_union(&self) -> HashSet<Pubkey> {
         use ChainUpdatesClient::*;
         match self {

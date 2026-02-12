@@ -44,16 +44,6 @@ pub trait ChainPubsubClient: Send + Sync + Clone + 'static {
 
     fn take_updates(&self) -> mpsc::Receiver<SubscriptionUpdate>;
 
-    /// Provides the total number of subscriptions and the number of
-    /// subscriptions when excludig pubkeys in `exclude`.
-    /// TODO: @@@ what is it recommended to count
-    /// - `exclude`: Optional slice of pubkeys to exclude from the count.
-    /// Returns a tuple of (total subscriptions, filtered subscriptions).
-    async fn subscription_count(
-        &self,
-        exclude: Option<&[Pubkey]>,
-    ) -> (usize, usize);
-
     /// Returns the subscriptions of a client or the union of subscriptions
     /// if there are multiple clients.
     /// This means that if any client is subscribed to a pubkey, it will be
@@ -209,19 +199,6 @@ impl ChainPubsubClient for ChainPubsubClientImpl {
             .inspect_err(|err| {
                 warn!(pubkey = %pubkey, error = ?err, "ChainPubsubClientImpl::unsubscribe - RecvError awaiting unsubscription response, actor sender dropped");
             })?
-    }
-
-    async fn subscription_count(
-        &self,
-        exclude: Option<&[Pubkey]>,
-    ) -> (usize, usize) {
-        let total = self.actor.subscription_count(&[]);
-        let filtered = if let Some(exclude) = exclude {
-            self.actor.subscription_count(exclude)
-        } else {
-            total
-        };
-        (total, filtered)
     }
 
     fn subscriptions_union(&self) -> HashSet<Pubkey> {
@@ -480,23 +457,6 @@ pub mod mock {
 
         async fn shutdown(&self) -> RemoteAccountProviderResult<()> {
             Ok(())
-        }
-
-        async fn subscription_count(
-            &self,
-            exclude: Option<&[Pubkey]>,
-        ) -> (usize, usize) {
-            let pubkeys: Vec<Pubkey> = {
-                let subs = self.subscribed_pubkeys.lock();
-                subs.iter().cloned().collect()
-            };
-            let total = pubkeys.len();
-            let exclude = exclude.unwrap_or_default();
-            let filtered = pubkeys
-                .iter()
-                .filter(|pubkey| !exclude.contains(pubkey))
-                .count();
-            (total, filtered)
         }
 
         /// Returns the subscriptions of a client or the union of subscriptions

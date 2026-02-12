@@ -169,23 +169,6 @@ impl ChainPubsubActor {
         }
     }
 
-    pub fn subscription_count(&self, filter: &[Pubkey]) -> usize {
-        if !self.is_connected.load(Ordering::SeqCst) {
-            return 0;
-        }
-        let subs = self
-            .subscriptions
-            .lock()
-            .expect("subscriptions lock poisoned");
-        if filter.is_empty() {
-            subs.len()
-        } else {
-            subs.keys()
-                .filter(|pubkey| !filter.contains(pubkey))
-                .count()
-        }
-    }
-
     pub fn subscriptions(&self) -> HashSet<Pubkey> {
         if !self.is_connected.load(Ordering::SeqCst) {
             return HashSet::new();

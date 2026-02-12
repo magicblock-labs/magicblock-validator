@@ -849,29 +849,6 @@ where
         out_rx
     }
 
-    /// Gets the maximum subscription count across all inner clients.
-    /// NOTE: one of the clients could be reconnecting and thus
-    /// temporarily have fewer or no subscriptions
-    /// NOTE: not all clients track subscriptions, thus if none return a count,
-    /// then this will return 0 for both values.
-    async fn subscription_count(
-        &self,
-        exclude: Option<&[Pubkey]>,
-    ) -> (usize, usize) {
-        let mut max_total = 0;
-        let mut max_filtered = 0;
-        for client in &self.clients {
-            let (total, filtered) = client.subscription_count(exclude).await;
-            if total > max_total {
-                max_total = total;
-            }
-            if filtered > max_filtered {
-                max_filtered = filtered;
-            }
-        }
-        (max_total, max_filtered)
-    }
-
     fn subscriptions_union(&self) -> HashSet<Pubkey> {
         let mut union = HashSet::new();
         for client in &self.clients {
@@ -892,7 +869,8 @@ where
         }
         // Find the smallest set to iterate over, then check membership
         // in all others — no intermediate cloning/collecting.
-        let smallest = sets.iter().min_by_key(|s| s.len()).unwrap();
+        let smallest =
+            sets.iter().min_by_key(|s| s.len()).unwrap();
         smallest
             .iter()
             .filter(|pk| {

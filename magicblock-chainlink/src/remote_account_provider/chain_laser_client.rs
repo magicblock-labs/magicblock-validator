@@ -178,21 +178,6 @@ impl ChainPubsubClient for ChainLaserClientImpl {
             .expect("ChainLaserClientImpl::take_updates called more than once")
     }
 
-    async fn subscription_count(
-        &self,
-        exclude: Option<&[Pubkey]>,
-    ) -> (usize, usize) {
-        let subs = self.subscriptions.read();
-        let total = subs.len();
-        let filtered = match exclude {
-            Some(exclude) => {
-                subs.iter().filter(|pk| !exclude.contains(pk)).count()
-            }
-            None => total,
-        };
-        (total, filtered)
-    }
-
     fn subscriptions_union(&self) -> HashSet<Pubkey> {
         self.subscriptions.read().clone()
     }
