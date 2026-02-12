@@ -11,7 +11,7 @@ use tokio::sync::{mpsc, oneshot};
 use tracing::*;
 
 use crate::remote_account_provider::{
-    chain_laser_actor::{ChainLaserActor, Slots},
+    chain_laser_actor::{ChainLaserActor, SharedSubscriptions, Slots},
     chain_rpc_client::ChainRpcClientImpl,
     pubsub_common::{ChainPubsubActorMessage, SubscriptionUpdate},
     ChainPubsubClient, ReconnectableClient, RemoteAccountProviderError,
@@ -48,6 +48,8 @@ pub struct ChainLaserClientImpl {
     updates: Arc<Mutex<Option<mpsc::Receiver<SubscriptionUpdate>>>>,
     /// Channel to send messages to the actor
     messages: mpsc::Sender<ChainPubsubActorMessage>,
+    /// Shared subscriptions with the actor for sync access
+    subscriptions: SharedSubscriptions,
     /// Client identifier
     client_id: String,
 }
@@ -62,18 +64,20 @@ impl ChainLaserClientImpl {
         slots: Slots,
         rpc_client: ChainRpcClientImpl,
     ) -> Self {
-        let (actor, messages, updates) = ChainLaserActor::new_from_url(
-            pubsub_url,
-            &client_id,
-            api_key,
-            commitment,
-            abort_sender,
-            slots,
-            rpc_client,
-        );
+        let (actor, messages, updates, subscriptions) =
+            ChainLaserActor::new_from_url(
+                pubsub_url,
+                &client_id,
+                api_key,
+                commitment,
+                abort_sender,
+                slots,
+                rpc_client,
+            );
         let client = Self {
             updates: Arc::new(Mutex::new(Some(updates))),
             messages,
+            subscriptions,
             client_id,
         };
         tokio::spawn(actor.run());
@@ -176,15 +180,21 @@ impl ChainPubsubClient for ChainLaserClientImpl {
 
     async fn subscription_count(
         &self,
-        _exclude: Option<&[Pubkey]>,
+        exclude: Option<&[Pubkey]>,
     ) -> Option<(usize, usize)> {
-        None
+        let subs = self.subscriptions.read();
+        let total = subs.len();
+        let filtered = match exclude {
+            Some(exclude) => {
+                subs.iter().filter(|pk| !exclude.contains(pk)).count()
+            }
+            None => total,
+        };
+        Some((total, filtered))
     }
 
     fn subscriptions_union(&self) -> Option<HashSet<Pubkey>> {
-        // Even though subscriptions are not activated immediately we consider them complete
-        // once added to the subscription list.
-        None
+        Some(self.subscriptions.read().clone())
     }
 
     fn subs_immediately(&self) -> bool {
