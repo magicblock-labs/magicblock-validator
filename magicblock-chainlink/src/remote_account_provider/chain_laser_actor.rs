@@ -395,7 +395,7 @@ impl ChainLaserActor {
             }
         };
         if !inserted {
-            debug!(pubkey = %pubkey, "Already subscribed to account");
+            trace!(pubkey = %pubkey, "Already subscribed to account");
             sub_response.send(Ok(())).unwrap_or_else(|_| {
                 warn!(pubkey = %pubkey, "Failed to send already subscribed response");
             });
