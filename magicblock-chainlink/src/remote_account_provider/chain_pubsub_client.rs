@@ -46,6 +46,7 @@ pub trait ChainPubsubClient: Send + Sync + Clone + 'static {
 
     /// Provides the total number of subscriptions and the number of
     /// subscriptions when excludig pubkeys in `exclude`.
+    /// TODO: @@@ what is it recommended to count
     /// - `exclude`: Optional slice of pubkeys to exclude from the count.
     /// Returns a tuple of (total subscriptions, filtered subscriptions).
     async fn subscription_count(
@@ -53,7 +54,20 @@ pub trait ChainPubsubClient: Send + Sync + Clone + 'static {
         exclude: Option<&[Pubkey]>,
     ) -> Option<(usize, usize)>;
 
+    /// Returns the subscriptions of a client or the union of subscriptions
+    /// if there are multiple clients.
+    /// This means that if any client is subscribed to a pubkey, it will be
+    /// included in the returned set even if other clients are not subscribed to it.
     fn subscriptions_union(&self) -> Option<HashSet<Pubkey>>;
+
+    /// Returns the intersection of subscriptions across all underlying
+    /// clients. For a single client this is identical to [ChainPubsubClient::subscriptions_union].
+    /// For an implementer with multiple clients it returns only the pubkeys
+    /// that every client is subscribed to.
+    /// If any client has no subscriptions, None is returned.
+    fn subscriptions_intersection(&self) -> Option<HashSet<Pubkey>> {
+        self.subscriptions_union()
+    }
 
     fn subs_immediately(&self) -> bool;
 

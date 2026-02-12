@@ -182,6 +182,8 @@ impl ChainPubsubClient for ChainLaserClientImpl {
     }
 
     fn subscriptions_union(&self) -> Option<HashSet<Pubkey>> {
+        // Even though subscriptions are not activated immediately we consider them complete
+        // once added to the subscription list.
         None
     }
 

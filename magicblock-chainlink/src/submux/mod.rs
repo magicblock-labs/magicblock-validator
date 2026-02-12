@@ -744,18 +744,6 @@ where
         maybe_forward_now
     }
 
-    fn get_subscriptions(clients: &[Arc<T>]) -> Option<HashSet<Pubkey>> {
-        let mut all_subs = HashSet::new();
-        for client in clients {
-            if let Some(subs) = client.subscriptions_union() {
-                all_subs.extend(subs);
-            } else {
-                return None;
-            }
-        }
-        Some(all_subs)
-    }
-
     /// Number of clients that must confirm an account subscription for it to be considered active.
     /// 2/3 of connected clients subscribing immediately.
     fn required_account_subscription_confirmations(&self) -> usize {
@@ -887,11 +875,33 @@ where
         Some((max_total, max_filtered))
     }
 
-    /// Gets the union of all subscriptions across all inner clients.
-    /// Unless one is reconnecting, this should be identical to
-    /// getting it from a single inner client.
     fn subscriptions_union(&self) -> Option<HashSet<Pubkey>> {
-        Self::get_subscriptions(&self.clients)
+        let mut union = HashSet::new();
+        for client in &self.clients {
+            if let Some(subs) = client.subscriptions_union() {
+                union.extend(subs);
+            }
+        }
+        Some(union)
+    }
+
+    fn subscriptions_intersection(&self) -> Option<HashSet<Pubkey>> {
+        let mut acc = HashSet::<Pubkey>::new();
+        for client in &self.clients {
+            if let Some(subs) = client.subscriptions_intersection() {
+                if acc.is_empty() {
+                    acc = subs;
+                } else {
+                    acc = acc
+                        .intersection(&subs)
+                        .cloned()
+                        .collect::<HashSet<Pubkey>>();
+                }
+            } else {
+                return None;
+            }
+        }
+        Some(acc)
     }
 
     /// Returns true if any inner client subscribes immediately
