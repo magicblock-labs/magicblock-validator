@@ -133,13 +133,17 @@ pub async fn reconcile_subscriptions<PubsubClient: ChainPubsubClient>(
 #[cfg(test)]
 mod tests {
     use std::num::NonZeroUsize;
+    use std::sync::Arc;
 
     use solana_pubkey::Pubkey;
     use tokio::sync::mpsc;
 
-    use crate::remote_account_provider::{
-        chain_pubsub_client::mock::ChainPubsubClientMock,
-        lru_cache::AccountsLruCache, pubsub_common::SubscriptionUpdate,
+    use crate::{
+        remote_account_provider::{
+            chain_pubsub_client::mock::ChainPubsubClientMock,
+            lru_cache::AccountsLruCache, pubsub_common::SubscriptionUpdate,
+        },
+        testing::init_logger,
     };
 
     use super::*;
@@ -152,6 +156,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_subs_in_lru_and_clients_same_noop() {
+        init_logger();
+
         let (tx, rx) = mpsc::channel::<SubscriptionUpdate>(10);
         let mock_client = ChainPubsubClientMock::new(tx, rx);
 
@@ -182,6 +188,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_not_all_lru_subs_ensured_resubscribes() {
+        init_logger();
+
         let (tx, rx) = mpsc::channel::<SubscriptionUpdate>(10);
         let mock_client = ChainPubsubClientMock::new(tx, rx);
 
@@ -215,6 +223,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_never_evicted_accounts_excluded() {
+        init_logger();
+
         let (tx, rx) = mpsc::channel::<SubscriptionUpdate>(10);
         let mock_client = ChainPubsubClientMock::new(tx, rx);
 
@@ -258,6 +268,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_resubscribe_missing_account() {
+        init_logger();
+
         let (tx, rx) = mpsc::channel::<SubscriptionUpdate>(10);
         let mock_client = ChainPubsubClientMock::new(tx, rx);
 
@@ -293,6 +305,8 @@ mod tests {
     /// Expected: No-op if pubsub is also empty (single client case)
     #[tokio::test]
     async fn test_empty_lru_empty_pubsub_noop() {
+        init_logger();
+
         let (tx, rx) = mpsc::channel::<SubscriptionUpdate>(10);
         let mock_client = ChainPubsubClientMock::new(tx, rx);
 
@@ -315,6 +329,8 @@ mod tests {
     /// Expected: Resubscribe to all accounts
     #[tokio::test]
     async fn test_empty_pubsub_resubscribes_all() {
+        init_logger();
+
         let (tx, rx) = mpsc::channel::<SubscriptionUpdate>(10);
         let mock_client = ChainPubsubClientMock::new(tx, rx);
 
@@ -344,6 +360,8 @@ mod tests {
     /// Expected: All missing accounts get resubscribed
     #[tokio::test]
     async fn test_multiple_missing_accounts_resubscribed() {
+        init_logger();
+
         let (tx, rx) = mpsc::channel::<SubscriptionUpdate>(10);
         let mock_client = ChainPubsubClientMock::new(tx, rx);
 
@@ -376,5 +394,164 @@ mod tests {
         assert!(subs.contains(&pk2));
         assert!(subs.contains(&pk3));
         assert!(subs.contains(&pk4));
+    }
+
+    #[tokio::test]
+    async fn test_reconcile_resubscribes_accounts_missing_from_pubsub() {
+        init_logger();
+
+        let (tx, rx) = mpsc::channel(1);
+        let pubsub_client = ChainPubsubClientMock::new(tx, rx);
+        let (removed_tx, _removed_rx) = mpsc::channel(10);
+
+        let capacity = NonZeroUsize::new(10).unwrap();
+        let lru_cache = Arc::new(AccountsLruCache::new(capacity));
+
+        let pubkey1 = Pubkey::new_unique();
+        let pubkey2 = Pubkey::new_unique();
+        let pubkey3 = Pubkey::new_unique();
+
+        // Add accounts to LRU cache
+        lru_cache.add(pubkey1);
+        lru_cache.add(pubkey2);
+        lru_cache.add(pubkey3);
+
+        // Only pubkey1 is in pubsub (simulating missing subscriptions)
+        pubsub_client.insert_subscription(pubkey1);
+
+        let never_evicted: Vec<Pubkey> = vec![];
+
+        // Reconcile should resubscribe pubkey2 and pubkey3
+        reconcile_subscriptions(
+            &lru_cache,
+            &pubsub_client,
+            &never_evicted,
+            &removed_tx,
+        )
+        .await;
+
+        // Verify all accounts are now subscribed
+        let subs = pubsub_client.subscriptions_union();
+        assert!(subs.contains(&pubkey1));
+        assert!(subs.contains(&pubkey2));
+        assert!(subs.contains(&pubkey3));
+        assert_eq!(subs.len(), 3);
+    }
+
+    fn drain_removed_account_rx(
+        rx: &mut mpsc::Receiver<Pubkey>,
+    ) -> Vec<Pubkey> {
+        let mut removed_accounts = Vec::new();
+        while let Ok(pubkey) = rx.try_recv() {
+            removed_accounts.push(pubkey);
+        }
+        removed_accounts
+    }
+
+    #[tokio::test]
+    async fn test_reconcile_unsubscribes_accounts_not_in_lru() {
+        init_logger();
+
+        let (tx, rx) = mpsc::channel(1);
+        let pubsub_client = ChainPubsubClientMock::new(tx, rx);
+        let (removed_tx, mut removed_rx) = mpsc::channel(10);
+
+        let capacity = NonZeroUsize::new(10).unwrap();
+        let lru_cache = Arc::new(AccountsLruCache::new(capacity));
+
+        let pubkey1 = Pubkey::new_unique();
+        let pubkey2 = Pubkey::new_unique();
+        let pubkey3 = Pubkey::new_unique();
+
+        // Only pubkey1 is in LRU cache
+        lru_cache.add(pubkey1);
+
+        // All three are in pubsub (simulating stale subscriptions)
+        pubsub_client.insert_subscription(pubkey1);
+        pubsub_client.insert_subscription(pubkey2);
+        pubsub_client.insert_subscription(pubkey3);
+
+        let never_evicted: Vec<Pubkey> = vec![];
+
+        // Reconcile should unsubscribe pubkey2 and pubkey3
+        reconcile_subscriptions(
+            &lru_cache,
+            &pubsub_client,
+            &never_evicted,
+            &removed_tx,
+        )
+        .await;
+
+        // Verify only pubkey1 remains subscribed
+        let subs = pubsub_client.subscriptions_union();
+        assert!(subs.contains(&pubkey1));
+        assert!(!subs.contains(&pubkey2));
+        assert!(!subs.contains(&pubkey3));
+        assert_eq!(subs.len(), 1);
+
+        // Verify removal notifications were sent for unsubscribed accounts
+        let removed = drain_removed_account_rx(&mut removed_rx);
+        assert_eq!(removed.len(), 2);
+        assert!(removed.contains(&pubkey2));
+        assert!(removed.contains(&pubkey3));
+    }
+
+    #[tokio::test]
+    async fn test_reconcile_preserves_never_evicted_accounts_not_in_lru() {
+        init_logger();
+
+        let (tx, rx) = mpsc::channel(1);
+        let pubsub_client = ChainPubsubClientMock::new(tx, rx);
+        let (removed_tx, mut removed_rx) = mpsc::channel(10);
+
+        let capacity = NonZeroUsize::new(10).unwrap();
+        let lru_cache = Arc::new(AccountsLruCache::new(capacity));
+
+        let pubkey_in_lru = Pubkey::new_unique();
+        let never_evicted_pubkey = Pubkey::new_unique();
+        let stale_pubkey = Pubkey::new_unique();
+
+        // Only pubkey_in_lru is in LRU cache (never_evicted_pubkey is NOT in LRU)
+        lru_cache.add(pubkey_in_lru);
+
+        // All three are subscribed in pubsub
+        pubsub_client.insert_subscription(pubkey_in_lru);
+        pubsub_client.insert_subscription(never_evicted_pubkey);
+        pubsub_client.insert_subscription(stale_pubkey);
+
+        // never_evicted_pubkey is marked as never_evicted, so it should be
+        // preserved even though it's not in the LRU cache
+        let never_evicted = vec![never_evicted_pubkey];
+
+        reconcile_subscriptions(
+            &lru_cache,
+            &pubsub_client,
+            &never_evicted,
+            &removed_tx,
+        )
+        .await;
+
+        // Verify: pubkey_in_lru and never_evicted_pubkey remain, stale_pubkey
+        // is unsubscribed
+        let subs = pubsub_client.subscriptions_union();
+        assert!(
+            subs.contains(&pubkey_in_lru),
+            "Account in LRU should remain subscribed"
+        );
+        assert!(
+            subs.contains(&never_evicted_pubkey),
+            "Never-evicted account should remain subscribed even if not in LRU"
+        );
+        assert!(
+            !subs.contains(&stale_pubkey),
+            "Stale account not in LRU and not never-evicted should be \
+             unsubscribed"
+        );
+        assert_eq!(subs.len(), 2);
+
+        // Verify removal notification was sent only for stale_pubkey
+        let removed = drain_removed_account_rx(&mut removed_rx);
+        assert_eq!(removed.len(), 1);
+        assert!(removed.contains(&stale_pubkey));
     }
 }
