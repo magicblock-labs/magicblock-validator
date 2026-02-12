@@ -124,7 +124,7 @@ impl AccountsLruCache {
         !self.accounts_to_never_evict.contains(pubkey)
     }
 
-    pub fn pubkeys(&self) -> Vec<Pubkey> {
+    pub fn pubkeys(&self) -> HashSet<Pubkey> {
         let subs = self.subscribed_accounts.lock();
         subs.iter().map(|(k, _)| *k).collect()
     }

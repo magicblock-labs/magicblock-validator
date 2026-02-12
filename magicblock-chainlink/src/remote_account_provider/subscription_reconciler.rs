@@ -1,8 +1,11 @@
-use std::collections::HashSet;
+use std::{collections::HashSet, sync::atomic::AtomicU16};
 
+use magicblock_core::logger::log_trace_warn;
 use solana_pubkey::Pubkey;
 use tokio::sync::mpsc;
 use tracing::*;
+
+use crate::remote_account_provider::RemoteAccountProviderError;
 
 use super::{AccountsLruCache, ChainPubsubClient};
 
@@ -66,15 +69,17 @@ pub(crate) async fn unsubscribe_and_notify_removal<T: ChainPubsubClient>(
 ///
 /// - `removed_account_tx`: Channel to notify upstream that an account was
 ///   unsubscribed and should be removed from the bank.
+/// - Returns: The number of accounts that are subscribed
 pub async fn reconcile_subscriptions<PubsubClient: ChainPubsubClient>(
     subscribed_accounts: &AccountsLruCache,
     pubsub_client: &PubsubClient,
     never_evicted: &[Pubkey],
     removed_account_tx: &mpsc::Sender<Pubkey>,
-) {
+) -> usize {
     let pubsub_union = pubsub_client.subscriptions_union();
     let pubsub_intersection = pubsub_client.subscriptions_intersection();
     let lru_pubkeys = subscribed_accounts.pubkeys();
+    let lru_count = lru_pubkeys.len();
 
     let ensured_subs_without_never_evict: HashSet<_> = pubsub_intersection
         .into_iter()
@@ -84,19 +89,18 @@ pub async fn reconcile_subscriptions<PubsubClient: ChainPubsubClient>(
         .into_iter()
         .filter(|pk| !never_evicted.contains(pk))
         .collect();
-    let lru_pubkeys_set: HashSet<_> = lru_pubkeys.into_iter().collect();
 
     // A) LRU subs that are not ensured by all clients
-    let extra_in_lru: HashSet<_> = lru_pubkeys_set
+    let extra_in_lru: HashSet<_> = lru_pubkeys
         .difference(&ensured_subs_without_never_evict)
         .collect();
     // B) Subs not in LRU that some clients are subscribed to
     let extra_in_pubsub: HashSet<_> = partial_subs_without_never_evict
-        .difference(&lru_pubkeys_set)
+        .difference(&lru_pubkeys)
         .collect();
 
     trace!(
-        lru_count = lru_pubkeys_set.len(),
+        lru_count = lru_count,
         ensured_count = ensured_subs_without_never_evict.len(),
         partial_count = partial_subs_without_never_evict.len(),
         extra_in_lru_count = extra_in_lru.len(),
@@ -108,9 +112,20 @@ pub async fn reconcile_subscriptions<PubsubClient: ChainPubsubClient>(
     // This may call subscribe on some clients that already have the subscription and
     // is ignored by that client.
     if !extra_in_lru.is_empty() {
-        debug!(
-            count = extra_in_lru.len(),
-            "Resubscribing accounts in LRU but not in pubsub"
+        static LOG_TRACE_COUNT: AtomicU16 = AtomicU16::new(0);
+        // If this happens a lot then this is serious since that means that some clients
+        // were not subscribed to all accounts
+        let len = extra_in_lru.len();
+        let err = RemoteAccountProviderError::AccountSubscriptionsOutOfSync(
+            format!("{len} accounts in LRU but not in pubsub"),
+        );
+        log_trace_warn(
+            "Consolidating missing subscriptions",
+            "Consolidated missing subscriptions repeatedly",
+            &len.to_string(),
+            &err,
+            100,
+            &LOG_TRACE_COUNT,
         );
         trace!(pubkeys = ?extra_in_lru, "Resubscribing missing accounts");
         for pubkey in extra_in_lru {
@@ -139,6 +154,10 @@ pub async fn reconcile_subscriptions<PubsubClient: ChainPubsubClient>(
             .await;
         }
     }
+    // We assume that reconciling worked and now our subscribed accounts are up to date
+    // Pubsubs should be subscribed to all accounts in LRU accounts no tracked by it since
+    // they are never evicted
+    lru_count + never_evicted.len()
 }
 
 #[cfg(test)]

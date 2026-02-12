@@ -241,58 +241,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
 
             loop {
                 interval.tick().await;
-                let lru_count = subscribed_accounts.len();
-                let (pubsub_total, pubsub_without_never_evict) = pubsub_client
-                    .subscription_count(Some(&never_evicted))
-                    .await;
-
-                let all_pubsub_subs =
-                    if tracing::enabled!(tracing::Level::DEBUG) {
-                        pubsub_client.subscriptions_union()
-                    } else {
-                        HashSet::new()
-                    };
-
-                if lru_count != pubsub_without_never_evict {
-                    warn!(
-                        lru_count,
-                        pubsub_count = pubsub_without_never_evict,
-                        "User account subscription counts don't match"
-                    );
-                    if tracing::enabled!(tracing::Level::DEBUG) {
-                        // Log all pubsub subscriptions for debugging
-                        let count = all_pubsub_subs.len();
-                        trace!(count, "All pubsub subscriptions");
-
-                        // Find extra keys in pubsub that are not in LRU cache
-                        let lru_pubkeys = subscribed_accounts.pubkeys();
-                        let pubsub_subs_without_never_evict: HashSet<_> =
-                            all_pubsub_subs
-                                .iter()
-                                .filter(|pk| !never_evicted.contains(pk))
-                                .copied()
-                                .collect();
-                        let lru_pubkeys_set: HashSet<_> =
-                            lru_pubkeys.into_iter().collect();
-
-                        let extra_in_pubsub: Vec<_> =
-                            pubsub_subs_without_never_evict
-                                .difference(&lru_pubkeys_set)
-                                .cloned()
-                                .collect();
-                        let extra_in_lru: Vec<_> = lru_pubkeys_set
-                            .difference(&pubsub_subs_without_never_evict)
-                            .cloned()
-                            .collect();
-
-                        if !extra_in_pubsub.is_empty() {
-                            debug!(count = extra_in_pubsub.len(), "Extra pubkeys in pubsub client not in LRU cache");
-                        }
-                        if !extra_in_lru.is_empty() {
-                            debug!(count = extra_in_lru.len(), "Extra pubkeys in LRU cache not in pubsub client");
-                        }
-                    }
-
+                let pubsub_total =
                     subscription_reconciler::reconcile_subscriptions(
                         &subscribed_accounts,
                         pubsub_client.as_ref(),
@@ -300,13 +249,8 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                         &removed_account_tx,
                     )
                     .await;
-                }
 
                 debug!(count = pubsub_total, "Updating active subscriptions");
-                if tracing::enabled!(tracing::Level::TRACE) {
-                    let subs_count = all_pubsub_subs.len();
-                    trace!(count = subs_count, "All subscriptions");
-                }
                 set_monitored_accounts_count(pubsub_total);
             }
         })
