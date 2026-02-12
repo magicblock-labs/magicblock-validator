@@ -1,3 +1,11 @@
+//! Unit tests for the scheduler's locking and queueing logic.
+//!
+//! Tests cover:
+//! - Lock semantics (write/write, write/read, read/write contention)
+//! - FIFO ordering within blocked queues
+//! - Executor pool management
+//! - Edge cases (empty transactions, duplicate accounts)
+
 use magicblock_core::link::transactions::{
     ProcessableTransaction, SanitizeableTransaction, TransactionProcessingMode,
 };
@@ -10,27 +18,13 @@ use solana_pubkey::Pubkey;
 use solana_signer::Signer;
 use solana_transaction::Transaction;
 
-use super::{
-    coordinator::{ExecutionCoordinator, TransactionWithId},
-    locks::{BlockerId, ExecutorId, TransactionId},
-};
-
-// --- Helpers & Setup ---
-
-impl From<ExecutorId> for BlockerId {
-    fn from(id: ExecutorId) -> Self {
-        Self::Executor(id)
-    }
-}
-
-impl From<TransactionId> for BlockerId {
-    fn from(id: TransactionId) -> Self {
-        Self::Transaction(id)
-    }
-}
+use super::coordinator::{ExecutionCoordinator, TransactionWithId};
 
 /// Creates a mock transaction with the specified accounts.
-/// Accounts: `[(Pubkey, is_writable)]`
+///
+/// # Arguments
+///
+/// * `accounts` - Slice of `(Pubkey, is_writable)` tuples
 fn mock_txn(accounts: &[(Pubkey, bool)]) -> TransactionWithId {
     let payer = Keypair::new();
     let instructions: Vec<Instruction> = accounts
@@ -52,289 +46,229 @@ fn mock_txn(accounts: &[(Pubkey, bool)]) -> TransactionWithId {
         Hash::new_unique(),
     );
 
-    let processable = ProcessableTransaction {
+    TransactionWithId::new(ProcessableTransaction {
         transaction: transaction.sanitize(false).unwrap(),
         mode: TransactionProcessingMode::Execution(None),
-    };
-    TransactionWithId::new(processable)
+    })
 }
 
-// --- Locking & Concurrency Tests ---
+// =============================================================================
+// Lock Semantics
+// =============================================================================
 
 #[test]
-fn test_non_conflicting_transactions() {
-    let mut coordinator = ExecutionCoordinator::new(2);
-    let txn1 = mock_txn(&[(Pubkey::new_unique(), true)]);
-    let txn2 = mock_txn(&[(Pubkey::new_unique(), true)]);
+fn write_blocks_write() {
+    let mut c = ExecutionCoordinator::new(2);
+    let acc = Pubkey::new_unique();
 
-    let exec1 = coordinator.get_ready_executor().unwrap();
-    let exec2 = coordinator.get_ready_executor().unwrap();
+    let e0 = c.get_ready_executor().unwrap();
+    let e1 = c.get_ready_executor().unwrap();
 
-    assert!(coordinator.try_acquire_locks(exec1, &txn1).is_ok());
-    assert!(coordinator.try_acquire_locks(exec2, &txn2).is_ok());
-}
-
-#[test]
-fn test_read_read_no_contention() {
-    let mut coordinator = ExecutionCoordinator::new(2);
-    let account = Pubkey::new_unique();
-
-    let txn1 = mock_txn(&[(account, false)]);
-    let txn2 = mock_txn(&[(account, false)]);
-
-    let exec1 = coordinator.get_ready_executor().unwrap();
-    let exec2 = coordinator.get_ready_executor().unwrap();
-
-    assert!(coordinator.try_acquire_locks(exec1, &txn1).is_ok());
-    assert!(coordinator.try_acquire_locks(exec2, &txn2).is_ok());
+    assert!(c.try_schedule(e0, mock_txn(&[(acc, true)])).is_ok());
+    assert_eq!(c.try_schedule(e1, mock_txn(&[(acc, true)])).err(), Some(e0));
 }
 
 #[test]
-fn test_write_write_contention() {
-    let mut coordinator = ExecutionCoordinator::new(2);
-    let account = Pubkey::new_unique();
+fn write_blocks_read() {
+    let mut c = ExecutionCoordinator::new(2);
+    let acc = Pubkey::new_unique();
 
-    let txn1 = mock_txn(&[(account, true)]);
-    let txn2 = mock_txn(&[(account, true)]);
+    let e0 = c.get_ready_executor().unwrap();
+    let e1 = c.get_ready_executor().unwrap();
 
-    let exec1 = coordinator.get_ready_executor().unwrap();
-    assert!(coordinator.try_acquire_locks(exec1, &txn1).is_ok());
-
-    let exec2 = coordinator.get_ready_executor().unwrap();
-    let blocker = coordinator.try_acquire_locks(exec2, &txn2).unwrap_err();
-
-    assert_eq!(blocker, exec1.into());
-}
-
-#[test]
-fn test_write_read_contention() {
-    let mut coordinator = ExecutionCoordinator::new(2);
-    let account = Pubkey::new_unique();
-
-    let txn1 = mock_txn(&[(account, true)]); // Write
-    let txn2 = mock_txn(&[(account, false)]); // Read
-
-    let exec1 = coordinator.get_ready_executor().unwrap();
-    assert!(coordinator.try_acquire_locks(exec1, &txn1).is_ok());
-
-    let exec2 = coordinator.get_ready_executor().unwrap();
-    let blocker = coordinator.try_acquire_locks(exec2, &txn2).unwrap_err();
-
-    assert_eq!(blocker, exec1.into());
-}
-
-#[test]
-fn test_read_write_contention() {
-    let mut coordinator = ExecutionCoordinator::new(2);
-    let account = Pubkey::new_unique();
-
-    let txn1 = mock_txn(&[(account, false)]); // Read
-    let txn2 = mock_txn(&[(account, true)]); // Write
-
-    let exec1 = coordinator.get_ready_executor().unwrap();
-    assert!(coordinator.try_acquire_locks(exec1, &txn1).is_ok());
-
-    let exec2 = coordinator.get_ready_executor().unwrap();
-    let blocker = coordinator.try_acquire_locks(exec2, &txn2).unwrap_err();
-
-    assert_eq!(blocker, exec1.into());
-}
-
-#[test]
-fn test_multiple_mixed_locks_contention() {
-    let mut coordinator = ExecutionCoordinator::new(2);
-    let (a, b, c) = (
-        Pubkey::new_unique(),
-        Pubkey::new_unique(),
-        Pubkey::new_unique(),
-    );
-
-    let txn1 = mock_txn(&[(a, true), (b, false)]);
-    let txn2 = mock_txn(&[(a, false), (c, true)]);
-    let txn3 = mock_txn(&[(b, true), (c, true)]);
-
-    let exec1 = coordinator.get_ready_executor().unwrap();
-    assert!(coordinator.try_acquire_locks(exec1, &txn1).is_ok());
-
-    let exec2 = coordinator.get_ready_executor().unwrap();
-
-    // Txn2 blocked by Txn1 (Write A)
+    assert!(c.try_schedule(e0, mock_txn(&[(acc, true)])).is_ok());
     assert_eq!(
-        coordinator.try_acquire_locks(exec2, &txn2).unwrap_err(),
-        exec1.into()
-    );
-
-    // Txn3 blocked by Txn1 (Read B)
-    assert_eq!(
-        coordinator.try_acquire_locks(exec2, &txn3).unwrap_err(),
-        exec1.into()
+        c.try_schedule(e1, mock_txn(&[(acc, false)])).err(),
+        Some(e0)
     );
 }
 
-// --- Scheduling & Queueing Tests ---
+#[test]
+fn read_blocks_write() {
+    let mut c = ExecutionCoordinator::new(2);
+    let acc = Pubkey::new_unique();
+
+    let e0 = c.get_ready_executor().unwrap();
+    let e1 = c.get_ready_executor().unwrap();
+
+    assert!(c.try_schedule(e0, mock_txn(&[(acc, false)])).is_ok());
+    assert_eq!(c.try_schedule(e1, mock_txn(&[(acc, true)])).err(), Some(e0));
+}
 
 #[test]
-fn test_transaction_dependency_chain() {
-    let mut coordinator = ExecutionCoordinator::new(3);
+fn multiple_readers_allowed() {
+    let mut c = ExecutionCoordinator::new(3);
+    let acc = Pubkey::new_unique();
+
+    let e0 = c.get_ready_executor().unwrap();
+    let e1 = c.get_ready_executor().unwrap();
+    let e2 = c.get_ready_executor().unwrap();
+
+    assert!(c.try_schedule(e0, mock_txn(&[(acc, false)])).is_ok());
+    assert!(c.try_schedule(e1, mock_txn(&[(acc, false)])).is_ok());
+    assert!(c.try_schedule(e2, mock_txn(&[(acc, false)])).is_ok());
+}
+
+// =============================================================================
+// Partial Lock Rollback
+// =============================================================================
+
+#[test]
+fn partial_locks_released_on_failure() {
+    let mut c = ExecutionCoordinator::new(2);
     let (a, b) = (Pubkey::new_unique(), Pubkey::new_unique());
 
-    let txn1 = mock_txn(&[(a, true)]);
-    let txn2 = mock_txn(&[(b, true), (a, false)]);
-    let txn3 = mock_txn(&[(b, false)]);
+    let e0 = c.get_ready_executor().unwrap();
+    let e1 = c.get_ready_executor().unwrap();
 
-    // 1. Schedule Txn1 (Locks A)
-    let exec1 = coordinator.get_ready_executor().unwrap();
-    assert!(coordinator.try_acquire_locks(exec1, &txn1).is_ok());
+    // e0 locks B only
+    assert!(c.try_schedule(e0, mock_txn(&[(b, true)])).is_ok());
 
-    // 2. Txn2 needs A (read), blocked by Txn1
-    let exec2 = coordinator.get_ready_executor().unwrap();
-    let blocker1 = coordinator.try_acquire_locks(exec2, &txn2).unwrap_err();
-    assert_eq!(blocker1, exec1.into());
-    coordinator.queue_transaction(blocker1, txn2);
+    // e1 tries [A, B] - locks A, fails on B, should release A
+    assert_eq!(
+        c.try_schedule(e1, mock_txn(&[(a, true), (b, true)])).err(),
+        Some(e0)
+    );
 
-    // 3. Txn3 needs B (read), blocked by Txn2 (which plans to write B)
-    // Even though Txn2 isn't running, it's queued, so fairness blocks Txn3.
-    let exec3 = coordinator.get_ready_executor().unwrap();
-    let blocker2 = coordinator.try_acquire_locks(exec3, &txn3).unwrap_err();
+    // If A wasn't released, this would fail
+    let e2 = c.get_ready_executor().unwrap();
+    assert!(c.try_schedule(e2, mock_txn(&[(a, true)])).is_ok());
+}
 
-    // Verify it is blocked by Txn2's ID
-    let queued_txn2 = coordinator.next_blocked_transaction(exec1).unwrap();
-    assert_eq!(blocker2, queued_txn2.id.into());
+// =============================================================================
+// Queue Ordering (FIFO)
+// =============================================================================
+
+#[test]
+fn blocked_transactions_dequeued_in_fifo_order() {
+    let mut c = ExecutionCoordinator::new(4);
+    let acc = Pubkey::new_unique();
+
+    let e0 = c.get_ready_executor().unwrap();
+    assert!(c.try_schedule(e0, mock_txn(&[(acc, true)])).is_ok());
+
+    // Queue 3 transactions - they get IDs in order
+    let t1 = mock_txn(&[(acc, true)]);
+    let t2 = mock_txn(&[(acc, true)]);
+    let t3 = mock_txn(&[(acc, true)]);
+    let id1 = t1.id;
+    let id2 = t2.id;
+    let id3 = t3.id;
+    assert!(id1 < id2 && id2 < id3);
+
+    // Queue in reverse order to test heap ordering
+    let e = c.get_ready_executor().unwrap();
+    assert!(c.try_schedule(e, t3).is_err());
+    let e = c.get_ready_executor().unwrap();
+    assert!(c.try_schedule(e, t1).is_err());
+    let e = c.get_ready_executor().unwrap();
+    assert!(c.try_schedule(e, t2).is_err());
+
+    // Should dequeue in ID order (FIFO), not insertion order
+    let d1 = c.next_blocked_transaction(e0).unwrap();
+    let d2 = c.next_blocked_transaction(e0).unwrap();
+    let d3 = c.next_blocked_transaction(e0).unwrap();
+
+    assert_eq!(d1.id, id1);
+    assert_eq!(d2.id, id2);
+    assert_eq!(d3.id, id3);
+}
+
+// =============================================================================
+// Executor Pool Management
+// =============================================================================
+
+#[test]
+fn blocked_transaction_releases_executor() {
+    let mut c = ExecutionCoordinator::new(2);
+    let acc = Pubkey::new_unique();
+
+    let e0 = c.get_ready_executor().unwrap();
+    let e1 = c.get_ready_executor().unwrap();
+    assert!(c.get_ready_executor().is_none()); // Pool exhausted
+
+    assert!(c.try_schedule(e0, mock_txn(&[(acc, true)])).is_ok());
+    assert!(c.try_schedule(e1, mock_txn(&[(acc, true)])).is_err());
+
+    // e1 should be back in pool after being blocked
+    assert!(c.get_ready_executor().is_some());
+}
+
+// =============================================================================
+// Unlock and Reschedule
+// =============================================================================
+
+#[test]
+fn unlock_allows_blocked_transaction_to_proceed() {
+    let mut c = ExecutionCoordinator::new(2);
+    let acc = Pubkey::new_unique();
+
+    let e0 = c.get_ready_executor().unwrap();
+    let e1 = c.get_ready_executor().unwrap();
+
+    assert!(c.try_schedule(e0, mock_txn(&[(acc, true)])).is_ok());
+    assert!(c.try_schedule(e1, mock_txn(&[(acc, true)])).is_err());
+
+    // Unlock e0's locks
+    c.unlock_accounts(e0);
+
+    // Now blocked txn should be able to acquire locks
+    let blocked = c.next_blocked_transaction(e0).unwrap();
+    let e = c.get_ready_executor().unwrap();
+    assert!(c.try_schedule(e, blocked).is_ok());
 }
 
 #[test]
-fn test_full_executor_pool_and_reschedule() {
-    let mut coordinator = ExecutionCoordinator::new(2);
-    let (a, b, c) = (
-        Pubkey::new_unique(),
-        Pubkey::new_unique(),
-        Pubkey::new_unique(),
-    );
+fn transaction_requeued_to_different_executor_keeps_id() {
+    let mut c = ExecutionCoordinator::new(3);
+    let (a, b) = (Pubkey::new_unique(), Pubkey::new_unique());
 
-    let txn1 = mock_txn(&[(a, true)]);
-    let txn2 = mock_txn(&[(b, true)]);
-    let txn3 = mock_txn(&[(a, true), (c, true)]);
+    let e0 = c.get_ready_executor().unwrap();
+    let e1 = c.get_ready_executor().unwrap();
+    let e2 = c.get_ready_executor().unwrap();
 
-    let exec1 = coordinator.get_ready_executor().unwrap();
-    let exec2 = coordinator.get_ready_executor().unwrap();
+    // e0 holds A, e1 holds B
+    assert!(c.try_schedule(e0, mock_txn(&[(a, true)])).is_ok());
+    assert!(c.try_schedule(e1, mock_txn(&[(b, true)])).is_ok());
 
-    assert!(coordinator.try_acquire_locks(exec1, &txn1).is_ok());
-    assert!(coordinator.try_acquire_locks(exec2, &txn2).is_ok());
-    assert!(coordinator.get_ready_executor().is_none());
+    // t1 needs [A, B] - blocked by e0 on A
+    let t1 = mock_txn(&[(a, true), (b, true)]);
+    let original_id = t1.id;
+    assert_eq!(c.try_schedule(e2, t1).err(), Some(e0));
 
-    // Txn3 blocked by Txn1
-    let blocker = coordinator.try_acquire_locks(exec1, &txn3).unwrap_err();
-    assert_eq!(blocker, exec1.into());
-    coordinator.queue_transaction(blocker, txn3);
+    // Unlock e0, t1 retries but now blocked by e1 on B
+    c.unlock_accounts(e0);
+    let t1 = c.next_blocked_transaction(e0).unwrap();
+    assert_eq!(t1.id, original_id); // Same ID
 
-    // Txn1 finishes
-    coordinator.unlock_accounts(exec1);
-    coordinator.release_executor(exec1);
+    let e = c.get_ready_executor().unwrap();
+    assert_eq!(c.try_schedule(e, t1).err(), Some(e1));
 
-    // Reschedule Txn3
-    let ready_exec = coordinator.get_ready_executor().unwrap();
-    let blocked_txn = coordinator.next_blocked_transaction(exec1).unwrap();
-    assert!(coordinator
-        .try_acquire_locks(ready_exec, &blocked_txn)
+    // Verify it's in e1's queue with same ID
+    let t1 = c.next_blocked_transaction(e1).unwrap();
+    assert_eq!(t1.id, original_id);
+}
+
+// =============================================================================
+// Edge Cases
+// =============================================================================
+
+#[test]
+fn empty_transaction_always_succeeds() {
+    let mut c = ExecutionCoordinator::new(1);
+    let e = c.get_ready_executor().unwrap();
+    assert!(c.try_schedule(e, mock_txn(&[])).is_ok());
+}
+
+#[test]
+fn transaction_with_duplicate_accounts() {
+    // Real transactions shouldn't have duplicates, but verify we don't panic
+    let mut c = ExecutionCoordinator::new(1);
+    let acc = Pubkey::new_unique();
+    let e = c.get_ready_executor().unwrap();
+
+    // Same account twice as writable - second lock attempt is no-op (already held)
+    assert!(c
+        .try_schedule(e, mock_txn(&[(acc, true), (acc, true)]))
         .is_ok());
-}
-
-#[test]
-fn test_reschedule_multiple_blocked_on_same_executor() {
-    let mut coordinator = ExecutionCoordinator::new(2);
-    let account = Pubkey::new_unique();
-
-    let txn1 = mock_txn(&[(account, true)]);
-    let txn2 = mock_txn(&[(account, true)]);
-    let txn3 = mock_txn(&[(account, true)]);
-
-    let exec1 = coordinator.get_ready_executor().unwrap();
-    assert!(coordinator.try_acquire_locks(exec1, &txn1).is_ok());
-
-    let exec2 = coordinator.get_ready_executor().unwrap();
-
-    // Queue Txn2
-    let b1 = coordinator.try_acquire_locks(exec2, &txn2).unwrap_err();
-    coordinator.queue_transaction(b1, txn2);
-
-    // Queue Txn3
-    let b2 = coordinator.try_acquire_locks(exec2, &txn3).unwrap_err();
-    coordinator.queue_transaction(b2, txn3);
-
-    // Txn1 finishes
-    coordinator.unlock_accounts(exec1);
-    coordinator.release_executor(exec1);
-
-    // Txn2 should be schedulable
-    let ready = coordinator.get_ready_executor().unwrap();
-    let t2 = coordinator.next_blocked_transaction(exec1).unwrap();
-    assert!(coordinator.try_acquire_locks(ready, &t2).is_ok());
-
-    // Txn3 remains queued
-    assert!(coordinator.next_blocked_transaction(exec1).is_some());
-}
-
-#[test]
-fn test_transaction_blocked_by_queued_transaction() {
-    let mut coordinator = ExecutionCoordinator::new(2);
-    let account = Pubkey::new_unique();
-
-    let txn1 = mock_txn(&[(account, true)]);
-    let txn2 = mock_txn(&[(account, true)]);
-    let txn3 = mock_txn(&[(account, true)]);
-
-    let exec1 = coordinator.get_ready_executor().unwrap();
-    assert!(coordinator.try_acquire_locks(exec1, &txn1).is_ok());
-
-    let exec2 = coordinator.get_ready_executor().unwrap();
-    let b1 = coordinator.try_acquire_locks(exec2, &txn2).unwrap_err();
-    coordinator.queue_transaction(b1, txn2);
-
-    // Txn3 blocked by Queued Txn2
-    let b2 = coordinator.try_acquire_locks(exec2, &txn3).unwrap_err();
-    let queued_t2 = coordinator.next_blocked_transaction(exec1).unwrap();
-    assert_eq!(b2, queued_t2.id.into());
-}
-
-// --- Edge Cases ---
-
-#[test]
-fn test_transaction_with_no_accounts() {
-    let mut coordinator = ExecutionCoordinator::new(1);
-    let txn = mock_txn(&[]);
-    let exec = coordinator.get_ready_executor().unwrap();
-    assert!(coordinator.try_acquire_locks(exec, &txn).is_ok());
-}
-
-#[test]
-fn test_multiple_read_locks_on_same_account() {
-    let mut coordinator = ExecutionCoordinator::new(3);
-    let account = Pubkey::new_unique();
-
-    let txn1 = mock_txn(&[(account, false)]);
-    let txn2 = mock_txn(&[(account, false)]);
-    let txn3 = mock_txn(&[(account, false)]);
-
-    let e1 = coordinator.get_ready_executor().unwrap();
-    let e2 = coordinator.get_ready_executor().unwrap();
-    let e3 = coordinator.get_ready_executor().unwrap();
-
-    assert!(coordinator.try_acquire_locks(e1, &txn1).is_ok());
-    assert!(coordinator.try_acquire_locks(e2, &txn2).is_ok());
-    assert!(coordinator.try_acquire_locks(e3, &txn3).is_ok());
-}
-
-#[test]
-fn test_release_and_reacquire_lock() {
-    let mut coordinator = ExecutionCoordinator::new(1);
-    let (a, b) = (Pubkey::new_unique(), Pubkey::new_unique());
-
-    let txn1 = mock_txn(&[(a, true)]);
-    let txn2 = mock_txn(&[(b, true)]);
-
-    let exec = coordinator.get_ready_executor().unwrap();
-    assert!(coordinator.try_acquire_locks(exec, &txn1).is_ok());
-
-    coordinator.unlock_accounts(exec);
-    assert!(coordinator.try_acquire_locks(exec, &txn2).is_ok());
 }
