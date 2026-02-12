@@ -1,4 +1,4 @@
-name: Notify Reviewers on Slack
+name: Notify Ready PR on Slack
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -6,11 +6,11 @@ concurrency:
 
 on:
   pull_request:
-    types: [review_requested]
+    types: [ready_for_review]
 
 jobs:
   notify:
-    if: github.event.action == 'review_requested'
+    if: github.event.action == 'ready_for_review'
     runs-on: ubuntu-latest
     steps:
       - name: Format reviewer list
@@ -44,13 +44,13 @@ jobs:
         with:
           payload: |
             {
-              "text": "👀 *${{ github.event.pull_request.user.login }}* has requested reviews from *${{ steps.single_reviewer.outputs.reviewer || steps.reviewers.outputs.reviewers }}* on PR: <${{ github.event.pull_request.html_url }}|${{ github.event.pull_request.title }}>.",
+              "text": "🚦 PR is now *Ready for review*: <${{ github.event.pull_request.html_url }}|${{ github.event.pull_request.title }}>. Reviewers: *${{ steps.single_reviewer.outputs.reviewer || steps.reviewers.outputs.reviewers }}*. Please #${{ github.event.pull_request.user.login }} address all CodeRabbit comments and ensure tests are passing before setting PR in state ready for review.",
               "blocks": [
                 {
                   "type": "section",
                   "text": {
                     "type": "mrkdwn", 
-                    "text": "👀 *${{ github.event.pull_request.user.login }}* has requested reviews from *${{ steps.single_reviewer.outputs.reviewer || steps.reviewers.outputs.reviewers }}* on PR: <${{ github.event.pull_request.html_url }}|${{ github.event.pull_request.title }}>."
+                    "text": "🚦 PR is now *Ready for review*: <${{ github.event.pull_request.html_url }}|${{ github.event.pull_request.title }}>.\nReviewers: *${{ steps.single_reviewer.outputs.reviewer || steps.reviewers.outputs.reviewers }}*.\nPlease #${{ github.event.pull_request.user.login }} address all CodeRabbit comments and ensure tests are passing before setting PR in state ready for review."
                   }
                 }
               ]
