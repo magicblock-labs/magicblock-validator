@@ -120,19 +120,19 @@ pub struct CommitDiffTask {
     pub base_account: Account,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct UndelegateTask {
     pub delegated_account: Pubkey,
     pub owner_program: Pubkey,
     pub rent_reimbursement: Pubkey,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct FinalizeTask {
     pub delegated_account: Pubkey,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct BaseActionTask {
     pub action: BaseAction,
 }
@@ -166,7 +166,7 @@ impl BaseActionTask {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct BaseActionV2Task {
     pub action: BaseAction,
     pub source_program: Pubkey,
