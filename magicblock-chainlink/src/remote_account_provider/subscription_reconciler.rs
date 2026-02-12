@@ -87,13 +87,22 @@ pub async fn reconcile_subscriptions<PubsubClient: ChainPubsubClient>(
     let lru_pubkeys_set: HashSet<_> = lru_pubkeys.into_iter().collect();
 
     // A) LRU subs that are not ensured by all clients
-    let extra_in_lru: Vec<_> = lru_pubkeys_set
+    let extra_in_lru: HashSet<_> = lru_pubkeys_set
         .difference(&ensured_subs_without_never_evict)
         .collect();
     // B) Subs not in LRU that some clients are subscribed to
-    let extra_in_pubsub: Vec<_> = partial_subs_without_never_evict
-        .difference(&ensured_subs_without_never_evict)
+    let extra_in_pubsub: HashSet<_> = partial_subs_without_never_evict
+        .difference(&lru_pubkeys_set)
         .collect();
+
+    trace!(
+        lru_count = lru_pubkeys_set.len(),
+        ensured_count = ensured_subs_without_never_evict.len(),
+        partial_count = partial_subs_without_never_evict.len(),
+        extra_in_lru_count = extra_in_lru.len(),
+        extra_in_pubsub_count = extra_in_pubsub.len(),
+        "Reconciling subscriptions between LRU and pubsub client"
+    );
 
     // For any sub that is in the LRU but not ensured by all clients we resubscribe.
     // This may call subscribe on some clients that already have the subscription and
@@ -103,6 +112,7 @@ pub async fn reconcile_subscriptions<PubsubClient: ChainPubsubClient>(
             count = extra_in_lru.len(),
             "Resubscribing accounts in LRU but not in pubsub"
         );
+        trace!(pubkeys = ?extra_in_lru, "Resubscribing missing accounts");
         for pubkey in extra_in_lru {
             if let Err(e) = pubsub_client.subscribe(*pubkey, None).await {
                 warn!(pubkey = %pubkey, error = ?e, "Failed to resubscribe account");
@@ -119,6 +129,7 @@ pub async fn reconcile_subscriptions<PubsubClient: ChainPubsubClient>(
             count = extra_in_pubsub.len(),
             "Unsubscribing accounts in pubsub but not in LRU"
         );
+        trace!(pubkeys = ?extra_in_pubsub, "Unsubscribing stale accounts");
         for pubkey in extra_in_pubsub {
             unsubscribe_and_notify_removal(
                 *pubkey,
@@ -407,9 +418,9 @@ mod tests {
         let capacity = NonZeroUsize::new(10).unwrap();
         let lru_cache = Arc::new(AccountsLruCache::new(capacity));
 
-        let pubkey1 = Pubkey::new_unique();
-        let pubkey2 = Pubkey::new_unique();
-        let pubkey3 = Pubkey::new_unique();
+        let pubkey1 = create_test_pubkey(1);
+        let pubkey2 = create_test_pubkey(2);
+        let pubkey3 = create_test_pubkey(3);
 
         // Add accounts to LRU cache
         lru_cache.add(pubkey1);
@@ -459,9 +470,9 @@ mod tests {
         let capacity = NonZeroUsize::new(10).unwrap();
         let lru_cache = Arc::new(AccountsLruCache::new(capacity));
 
-        let pubkey1 = Pubkey::new_unique();
-        let pubkey2 = Pubkey::new_unique();
-        let pubkey3 = Pubkey::new_unique();
+        let pubkey1 = create_test_pubkey(1);
+        let pubkey2 = create_test_pubkey(2);
+        let pubkey3 = create_test_pubkey(3);
 
         // Only pubkey1 is in LRU cache
         lru_cache.add(pubkey1);
@@ -507,9 +518,9 @@ mod tests {
         let capacity = NonZeroUsize::new(10).unwrap();
         let lru_cache = Arc::new(AccountsLruCache::new(capacity));
 
-        let pubkey_in_lru = Pubkey::new_unique();
-        let never_evicted_pubkey = Pubkey::new_unique();
-        let stale_pubkey = Pubkey::new_unique();
+        let pubkey_in_lru = create_test_pubkey(1);
+        let never_evicted_pubkey = create_test_pubkey(2);
+        let stale_pubkey = create_test_pubkey(3);
 
         // Only pubkey_in_lru is in LRU cache (never_evicted_pubkey is NOT in LRU)
         lru_cache.add(pubkey_in_lru);
