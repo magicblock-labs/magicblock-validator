@@ -5,9 +5,8 @@ use solana_pubkey::Pubkey;
 use tokio::sync::mpsc;
 use tracing::*;
 
-use crate::remote_account_provider::RemoteAccountProviderError;
-
 use super::{AccountsLruCache, ChainPubsubClient};
+use crate::remote_account_provider::RemoteAccountProviderError;
 
 /// Unsubscribes from pubsub and sends a removal notification to trigger bank
 /// removal.
@@ -162,12 +161,12 @@ pub async fn reconcile_subscriptions<PubsubClient: ChainPubsubClient>(
 
 #[cfg(test)]
 mod tests {
-    use std::num::NonZeroUsize;
-    use std::sync::Arc;
+    use std::{num::NonZeroUsize, sync::Arc};
 
     use solana_pubkey::Pubkey;
     use tokio::sync::mpsc;
 
+    use super::*;
     use crate::{
         remote_account_provider::{
             chain_pubsub_client::mock::ChainPubsubClientMock,
@@ -175,8 +174,6 @@ mod tests {
         },
         testing::init_logger,
     };
-
-    use super::*;
 
     fn create_test_pubkey(seed: u8) -> Pubkey {
         let mut bytes = [0u8; 32];

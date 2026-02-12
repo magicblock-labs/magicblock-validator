@@ -892,8 +892,7 @@ where
         }
         // Find the smallest set to iterate over, then check membership
         // in all others — no intermediate cloning/collecting.
-        let smallest =
-            sets.iter().min_by_key(|s| s.len()).unwrap();
+        let smallest = sets.iter().min_by_key(|s| s.len()).unwrap();
         smallest
             .iter()
             .filter(|pk| {

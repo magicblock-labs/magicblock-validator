@@ -1,5 +1,5 @@
 use std::{
-    collections::{hash_map::Entry, HashMap, HashSet},
+    collections::{hash_map::Entry, HashMap},
     num::NonZeroUsize,
     sync::{
         atomic::{AtomicU64, Ordering},
