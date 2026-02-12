@@ -141,25 +141,35 @@ jobs:
 
       - name: Build Slack message
         id: message
+        env:
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_REVIEWERS: ${{ steps.single_reviewer.outputs.reviewer || steps.reviewers.outputs.reviewers }}
+          WARNING: ${{ steps.readiness.outputs.warning }}
+          HAS_UNRESOLVED: ${{ steps.readiness.outputs.has_unresolved }}
+          UNRESOLVED_COUNT: ${{ steps.readiness.outputs.unresolved_count }}
+          HAS_FAILING_TESTS: ${{ steps.readiness.outputs.has_failing_tests }}
+          FAILING_CHECKS: ${{ steps.readiness.outputs.failing_checks }}
         run: |
-          author="${{ github.event.pull_request.user.login }}"
-          pr_url="${{ github.event.pull_request.html_url }}"
-          pr_title="${{ github.event.pull_request.title }}"
-          reviewers="${{ steps.single_reviewer.outputs.reviewer || steps.reviewers.outputs.reviewers }}"
+          author="$PR_AUTHOR"
+          pr_url="$PR_URL"
+          pr_title="$PR_TITLE"
+          reviewers="$PR_REVIEWERS"
 
-          if [ "${{ steps.readiness.outputs.warning }}" = "true" ]; then
+          if [ "$WARNING" = "true" ]; then
             text="🚦 *${author}* marked PR as ready for review: <${pr_url}|${pr_title}>. Reviewers: *${reviewers}*. Please #${author} address all CodeRabbit comments and ensure tests are passing before setting PR in state ready for review."
             details=""
 
-            if [ "${{ steps.readiness.outputs.has_unresolved }}" = "true" ]; then
-              details="Unresolved review threads: ${{ steps.readiness.outputs.unresolved_count }}."
+            if [ "$HAS_UNRESOLVED" = "true" ]; then
+              details="Unresolved review threads: $UNRESOLVED_COUNT."
             fi
 
-            if [ "${{ steps.readiness.outputs.has_failing_tests }}" = "true" ]; then
+            if [ "$HAS_FAILING_TESTS" = "true" ]; then
               if [ -n "$details" ]; then
                 details="$details "
               fi
-              details="${details}Failing checks: ${{ steps.readiness.outputs.failing_checks }}."
+              details="${details}Failing checks: $FAILING_CHECKS."
             fi
 
             if [ -n "$details" ]; then
