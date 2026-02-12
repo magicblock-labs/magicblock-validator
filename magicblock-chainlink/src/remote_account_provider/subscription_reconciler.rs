@@ -129,3 +129,252 @@ pub async fn reconcile_subscriptions<PubsubClient: ChainPubsubClient>(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::num::NonZeroUsize;
+
+    use solana_pubkey::Pubkey;
+    use tokio::sync::mpsc;
+
+    use crate::remote_account_provider::{
+        chain_pubsub_client::mock::ChainPubsubClientMock,
+        lru_cache::AccountsLruCache, pubsub_common::SubscriptionUpdate,
+    };
+
+    use super::*;
+
+    fn create_test_pubkey(seed: u8) -> Pubkey {
+        let mut bytes = [0u8; 32];
+        bytes[0] = seed;
+        Pubkey::from(bytes)
+    }
+
+    #[tokio::test]
+    async fn test_subs_in_lru_and_clients_same_noop() {
+        let (tx, rx) = mpsc::channel::<SubscriptionUpdate>(10);
+        let mock_client = ChainPubsubClientMock::new(tx, rx);
+
+        // Set up LRU with 2 accounts
+        let lru = AccountsLruCache::new(NonZeroUsize::new(10).unwrap());
+        let pk1 = create_test_pubkey(1);
+        let pk2 = create_test_pubkey(2);
+
+        lru.add(pk1);
+        lru.add(pk2);
+
+        // Set up client with same subscriptions
+        mock_client.insert_subscription(pk1);
+        mock_client.insert_subscription(pk2);
+
+        // Create removal channel
+        let (removed_tx, _removed_rx) = mpsc::channel::<Pubkey>(10);
+
+        // Reconcile
+        reconcile_subscriptions(&lru, &mock_client, &[], &removed_tx).await;
+
+        // Verify subscriptions are unchanged
+        let subs = mock_client.subscriptions_union();
+        assert_eq!(subs.len(), 2);
+        assert!(subs.contains(&pk1));
+        assert!(subs.contains(&pk2));
+    }
+
+    #[tokio::test]
+    async fn test_not_all_lru_subs_ensured_resubscribes() {
+        let (tx, rx) = mpsc::channel::<SubscriptionUpdate>(10);
+        let mock_client = ChainPubsubClientMock::new(tx, rx);
+
+        // Set up LRU with 3 accounts
+        let lru = AccountsLruCache::new(NonZeroUsize::new(10).unwrap());
+        let pk1 = create_test_pubkey(1);
+        let pk2 = create_test_pubkey(2);
+        let pk3 = create_test_pubkey(3);
+
+        lru.add(pk1);
+        lru.add(pk2);
+        lru.add(pk3);
+
+        // Client only has pk1 and pk2
+        mock_client.insert_subscription(pk1);
+        mock_client.insert_subscription(pk2);
+
+        // Create removal channel
+        let (removed_tx, _removed_rx) = mpsc::channel::<Pubkey>(10);
+
+        // Reconcile
+        reconcile_subscriptions(&lru, &mock_client, &[], &removed_tx).await;
+
+        // Verify pk3 was resubscribed
+        let subs = mock_client.subscriptions_union();
+        assert_eq!(subs.len(), 3);
+        assert!(subs.contains(&pk1));
+        assert!(subs.contains(&pk2));
+        assert!(subs.contains(&pk3));
+    }
+
+    #[tokio::test]
+    async fn test_never_evicted_accounts_excluded() {
+        let (tx, rx) = mpsc::channel::<SubscriptionUpdate>(10);
+        let mock_client = ChainPubsubClientMock::new(tx, rx);
+
+        // Set up LRU with 2 accounts
+        let lru = AccountsLruCache::new(NonZeroUsize::new(10).unwrap());
+        let pk1 = create_test_pubkey(1);
+        let pk2 = create_test_pubkey(2);
+        let never_evict_pk = create_test_pubkey(99);
+
+        lru.add(pk1);
+        lru.add(pk2);
+
+        // Client has all 3 subscriptions
+        mock_client.insert_subscription(pk1);
+        mock_client.insert_subscription(pk2);
+        mock_client.insert_subscription(never_evict_pk);
+
+        // Create removal channel
+        let (removed_tx, mut removed_rx) = mpsc::channel::<Pubkey>(10);
+        let never_evicted = vec![never_evict_pk];
+
+        // Reconcile
+        reconcile_subscriptions(
+            &lru,
+            &mock_client,
+            &never_evicted,
+            &removed_tx,
+        )
+        .await;
+
+        // Verify never_evict_pk is still subscribed
+        let subs = mock_client.subscriptions_union();
+        assert_eq!(subs.len(), 3);
+        assert!(subs.contains(&pk1));
+        assert!(subs.contains(&pk2));
+        assert!(subs.contains(&never_evict_pk));
+
+        // Verify no removal notification for never_evict_pk
+        assert!(removed_rx.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn test_resubscribe_missing_account() {
+        let (tx, rx) = mpsc::channel::<SubscriptionUpdate>(10);
+        let mock_client = ChainPubsubClientMock::new(tx, rx);
+
+        // Set up LRU with pk1, pk2, pk3
+        let lru = AccountsLruCache::new(NonZeroUsize::new(10).unwrap());
+        let pk1 = create_test_pubkey(1);
+        let pk2 = create_test_pubkey(2);
+        let pk3 = create_test_pubkey(3);
+
+        lru.add(pk1);
+        lru.add(pk2);
+        lru.add(pk3);
+
+        // Client only has pk1 and pk2
+        mock_client.insert_subscription(pk1);
+        mock_client.insert_subscription(pk2);
+
+        // Create removal channel
+        let (removed_tx, _removed_rx) = mpsc::channel::<Pubkey>(10);
+
+        // Reconcile
+        reconcile_subscriptions(&lru, &mock_client, &[], &removed_tx).await;
+
+        // Verify pk3 was resubscribed
+        let subs = mock_client.subscriptions_union();
+        assert_eq!(subs.len(), 3);
+        assert!(subs.contains(&pk1));
+        assert!(subs.contains(&pk2));
+        assert!(subs.contains(&pk3));
+    }
+
+    /// Test case: Empty LRU should cause resubscribe of all LRU accounts if missing
+    /// Expected: No-op if pubsub is also empty (single client case)
+    #[tokio::test]
+    async fn test_empty_lru_empty_pubsub_noop() {
+        let (tx, rx) = mpsc::channel::<SubscriptionUpdate>(10);
+        let mock_client = ChainPubsubClientMock::new(tx, rx);
+
+        // Set up empty LRU
+        let lru = AccountsLruCache::new(NonZeroUsize::new(10).unwrap());
+
+        // Empty pubsub (single client case)
+        // Create removal channel
+        let (removed_tx, _removed_rx) = mpsc::channel::<Pubkey>(10);
+
+        // Reconcile
+        reconcile_subscriptions(&lru, &mock_client, &[], &removed_tx).await;
+
+        // Verify state unchanged (both empty)
+        let subs = mock_client.subscriptions_union();
+        assert_eq!(subs.len(), 0);
+    }
+
+    /// Test case: Empty pubsub with subscriptions in LRU
+    /// Expected: Resubscribe to all accounts
+    #[tokio::test]
+    async fn test_empty_pubsub_resubscribes_all() {
+        let (tx, rx) = mpsc::channel::<SubscriptionUpdate>(10);
+        let mock_client = ChainPubsubClientMock::new(tx, rx);
+
+        // Set up LRU with 2 accounts
+        let lru = AccountsLruCache::new(NonZeroUsize::new(10).unwrap());
+        let pk1 = create_test_pubkey(1);
+        let pk2 = create_test_pubkey(2);
+        lru.add(pk1);
+        lru.add(pk2);
+
+        // Empty pubsub
+
+        // Create removal channel
+        let (removed_tx, _removed_rx) = mpsc::channel::<Pubkey>(10);
+
+        // Reconcile
+        reconcile_subscriptions(&lru, &mock_client, &[], &removed_tx).await;
+
+        // Verify all subscriptions added
+        let subs = mock_client.subscriptions_union();
+        assert_eq!(subs.len(), 2);
+        assert!(subs.contains(&pk1));
+        assert!(subs.contains(&pk2));
+    }
+
+    /// Test case: Multiple accounts missing from pubsub need resubscription
+    /// Expected: All missing accounts get resubscribed
+    #[tokio::test]
+    async fn test_multiple_missing_accounts_resubscribed() {
+        let (tx, rx) = mpsc::channel::<SubscriptionUpdate>(10);
+        let mock_client = ChainPubsubClientMock::new(tx, rx);
+
+        // Set up LRU with pk1, pk2, pk3, pk4
+        let lru = AccountsLruCache::new(NonZeroUsize::new(10).unwrap());
+        let pk1 = create_test_pubkey(1);
+        let pk2 = create_test_pubkey(2);
+        let pk3 = create_test_pubkey(3);
+        let pk4 = create_test_pubkey(4);
+
+        lru.add(pk1);
+        lru.add(pk2);
+        lru.add(pk3);
+        lru.add(pk4);
+
+        // Client only has pk1 and pk2
+        mock_client.insert_subscription(pk1);
+        mock_client.insert_subscription(pk2);
+
+        // Create removal channel
+        let (removed_tx, _removed_rx) = mpsc::channel::<Pubkey>(10);
+
+        // Reconcile
+        reconcile_subscriptions(&lru, &mock_client, &[], &removed_tx).await;
+
+        // Verify all accounts are now subscribed
+        let subs = mock_client.subscriptions_union();
+        assert_eq!(subs.len(), 4);
+        assert!(subs.contains(&pk1));
+        assert!(subs.contains(&pk2));
+        assert!(subs.contains(&pk3));
+        assert!(subs.contains(&pk4));
+    }
+}
