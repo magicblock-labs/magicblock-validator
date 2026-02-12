@@ -114,22 +114,19 @@ jobs:
             }
 
             try {
-              const commitStatuses = await github.paginate(
-                github.rest.repos.listCommitStatusesForRef,
-                {
-                  owner,
-                  repo,
-                  ref: headSha,
-                  per_page: 100,
-                }
-              );
-              for (const status of commitStatuses) {
-                if (status.state !== "failure") continue;
+              // Use combined status to avoid false positives from historical statuses.
+              const combined = await github.rest.repos.getCombinedStatusForRef({
+                owner,
+                repo,
+                ref: headSha,
+              });
+              for (const status of combined.data.statuses || []) {
                 if (!testPattern.test(status.context || "")) continue;
+                if (status.state !== "failure" && status.state !== "error") continue;
                 failingChecks.add(status.context);
               }
             } catch (error) {
-              core.warning(`Unable to evaluate commit statuses: ${error.message}`);
+              core.warning(`Unable to evaluate combined commit status: ${error.message}`);
             }
 
             const hasUnresolved = unresolvedCount > 0;
@@ -166,8 +163,7 @@ jobs:
             fi
 
             if [ -n "$details" ]; then
-              text="$text
-$details"
+              text="$(printf '%s\n%s' "$text" "$details")"
             fi
           else
             text="👀 *${author}* has requested reviews from *${reviewers}* on PR: <${pr_url}|${pr_title}>."
