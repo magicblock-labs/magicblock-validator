@@ -52,6 +52,8 @@ pub mod errors;
 mod lru_cache;
 pub mod program_account;
 pub mod pubsub_common;
+pub mod pubsub_connection;
+pub mod pubsub_connection_pool;
 mod remote_account;
 mod subscription_reconciler;
 
