@@ -1,3 +1,4 @@
+use dlp::args::CallHandlerArgs;
 use dyn_clone::DynClone;
 use magicblock_committor_program::{
     instruction_builder::{
@@ -15,7 +16,7 @@ use magicblock_program::magic_scheduled_base_intent::{
     BaseAction, CommittedAccount,
 };
 use solana_account::Account;
-use solana_instruction::Instruction;
+use solana_instruction::{AccountMeta, Instruction};
 use solana_pubkey::Pubkey;
 use thiserror::Error;
 
@@ -119,21 +120,66 @@ pub struct CommitDiffTask {
     pub base_account: Account,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct UndelegateTask {
     pub delegated_account: Pubkey,
     pub owner_program: Pubkey,
     pub rent_reimbursement: Pubkey,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct FinalizeTask {
     pub delegated_account: Pubkey,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct BaseActionTask {
     pub action: BaseAction,
+}
+
+impl BaseActionTask {
+    pub fn account_metas(&self) -> Vec<AccountMeta> {
+        BaseActionTask::account_metas_static(&self.action)
+    }
+
+    pub fn call_handler_args(&self) -> CallHandlerArgs {
+        BaseActionTask::call_handler_args_static(&self.action)
+    }
+
+    fn account_metas_static(action: &BaseAction) -> Vec<AccountMeta> {
+        action
+            .account_metas_per_program
+            .iter()
+            .map(|short_meta| AccountMeta {
+                pubkey: short_meta.pubkey,
+                is_writable: short_meta.is_writable,
+                is_signer: false,
+            })
+            .collect()
+    }
+
+    fn call_handler_args_static(action: &BaseAction) -> CallHandlerArgs {
+        CallHandlerArgs {
+            data: action.data_per_program.data.clone(),
+            escrow_index: action.data_per_program.escrow_index,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct BaseActionV2Task {
+    pub action: BaseAction,
+    pub source_program: Pubkey,
+}
+
+impl BaseActionV2Task {
+    pub fn account_metas(&self) -> Vec<AccountMeta> {
+        BaseActionTask::account_metas_static(&self.action)
+    }
+
+    pub fn call_handler_args(&self) -> CallHandlerArgs {
+        BaseActionTask::call_handler_args_static(&self.action)
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -371,6 +417,7 @@ mod serialization_safety_test {
         let base_action: ArgsTask = ArgsTaskType::BaseAction(BaseActionTask {
             action: BaseAction {
                 destination_program: Pubkey::new_unique(),
+                source_program: None,
                 escrow_authority: Pubkey::new_unique(),
                 account_metas_per_program: vec![ShortAccountMeta {
                     pubkey: Pubkey::new_unique(),

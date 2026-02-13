@@ -30,6 +30,7 @@ pub(crate) fn process_schedule_intent_bundle(
     signers: HashSet<Pubkey>,
     invoke_context: &mut InvokeContext,
     args: MagicIntentBundleArgs,
+    secure: bool,
 ) -> Result<(), InstructionError> {
     check_magic_context_id(invoke_context, MAGIC_CONTEXT_IDX)?;
 
@@ -118,6 +119,7 @@ pub(crate) fn process_schedule_intent_bundle(
         &signers,
         transaction_context,
         invoke_context,
+        secure,
     );
 
     let undelegated_accounts_ref =

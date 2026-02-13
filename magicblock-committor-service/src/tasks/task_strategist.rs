@@ -488,6 +488,7 @@ mod tests {
         ArgsTask::new(ArgsTaskType::BaseAction(BaseActionTask {
             action: BaseAction {
                 destination_program: Pubkey::new_unique(),
+                source_program: None,
                 escrow_authority: Pubkey::new_unique(),
                 account_metas_per_program: vec![],
                 data_per_program: ProgramArgs {

@@ -18,7 +18,8 @@ use crate::{
     persist::IntentPersister,
     tasks::{
         args_task::{ArgsTask, ArgsTaskType},
-        BaseActionTask, BaseTask, FinalizeTask, UndelegateTask,
+        BaseActionTask, BaseActionV2Task, BaseTask, FinalizeTask,
+        UndelegateTask,
     },
 };
 
@@ -81,15 +82,26 @@ impl TaskBuilderImpl {
         .into()
     }
 
-    fn create_action_tasks(actions: &[BaseAction]) -> Vec<Box<dyn BaseTask>> {
+    fn create_action_tasks<'a>(
+        actions: &'a [BaseAction],
+    ) -> impl Iterator<Item = Box<dyn BaseTask>> + 'a {
         actions
             .iter()
-            .map(|el| {
-                let task = BaseActionTask { action: el.clone() };
-                let task = ArgsTask::new(ArgsTaskType::BaseAction(task));
+            .map(|action| match action.source_program {
+                Some(source_program) => {
+                    ArgsTaskType::BaseActionV2(BaseActionV2Task {
+                        action: action.clone(),
+                        source_program,
+                    })
+                }
+                None => ArgsTaskType::BaseAction(BaseActionTask {
+                    action: action.clone(),
+                }),
+            })
+            .map(|task_type| {
+                let task = ArgsTask::new(task_type);
                 Box::new(task) as Box<dyn BaseTask>
             })
-            .collect()
     }
 
     async fn fetch_commit_nonces<C: TaskInfoFetcher>(
@@ -256,14 +268,9 @@ impl TasksBuilder for TaskBuilderImpl {
                         .iter()
                         .map(finalize_task)
                         .collect::<Vec<_>>();
-                    tasks.extend(base_actions.iter().map(|action| {
-                        let task = BaseActionTask {
-                            action: action.clone(),
-                        };
-                        let task =
-                            ArgsTask::new(ArgsTaskType::BaseAction(task));
-                        Box::new(task) as Box<dyn BaseTask>
-                    }));
+                    tasks.extend(TaskBuilderImpl::create_action_tasks(
+                        base_actions,
+                    ));
                     tasks
                 }
             }
@@ -304,13 +311,7 @@ impl TasksBuilder for TaskBuilderImpl {
             if let UndelegateType::WithBaseActions(actions) =
                 &value.undelegate_action
             {
-                tasks.extend(actions.iter().map(|action| {
-                    let task = BaseActionTask {
-                        action: action.clone(),
-                    };
-                    let task = ArgsTask::new(ArgsTaskType::BaseAction(task));
-                    Box::new(task) as Box<dyn BaseTask>
-                }));
+                tasks.extend(Self::create_action_tasks(actions));
             }
         };
 
