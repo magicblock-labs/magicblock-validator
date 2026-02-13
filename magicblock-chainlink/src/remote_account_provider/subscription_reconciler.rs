@@ -154,8 +154,8 @@ pub async fn reconcile_subscriptions<PubsubClient: ChainPubsubClient>(
         }
     }
     // We assume that reconciling worked and now our subscribed accounts are up to date
-    // Pubsubs should be subscribed to all accounts in LRU accounts no tracked by it since
-    // they are never evicted
+    // Pubsubs should be subscribed to all accounts in LRU accounts and accounts that
+    // are never evicted (not tracked in LRU)
     lru_count + never_evicted.len()
 }
 

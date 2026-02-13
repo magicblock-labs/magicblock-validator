@@ -869,6 +869,7 @@ where
         }
         // Find the smallest set to iterate over, then check membership
         // in all others — no intermediate cloning/collecting.
+        // SAFETY: we return above if the set is empty, so unwrap is safe here.
         let smallest = sets.iter().min_by_key(|s| s.len()).unwrap();
         smallest
             .iter()
