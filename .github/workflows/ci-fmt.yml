@@ -1,0 +1,38 @@
+name: Run CI - Format
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+on:
+  push:
+    branches: [master, dev]
+  pull_request:
+    types: [opened, reopened, synchronize, ready_for_review]
+
+jobs:
+  run_make_ci_format:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout this magicblock-validator
+        uses: actions/checkout@v2
+        with:
+          path: magicblock-validator
+
+      - uses: ./magicblock-validator/.github/actions/setup-build-env
+        with:
+          build_cache_key_name: "magicblock-validator-ci-fmt-v001"
+          rust_toolchain_release: "nightly"
+          github_access_token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - run: make ci-fmt
+        shell: bash
+        working-directory: magicblock-validator
+
+      - name: Run ci-fmt in test-integration
+        run: |
+          cd test-integration
+          make ci-fmt
+        shell: bash
+        working-directory: magicblock-validator
