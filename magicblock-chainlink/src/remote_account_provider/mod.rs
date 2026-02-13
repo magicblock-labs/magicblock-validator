@@ -1267,13 +1267,11 @@ fn pubkeys_str(pubkeys: &[Pubkey]) -> String {
 
 #[cfg(test)]
 mod test {
-    use std::num::NonZeroUsize;
-
     use solana_system_interface::program as system_program;
 
     use super::{
         chain_pubsub_client::mock::ChainPubsubClientMock,
-        subscription_reconciler::reconcile_subscriptions, *,
+        *,
     };
     use crate::testing::{
         init_logger,
