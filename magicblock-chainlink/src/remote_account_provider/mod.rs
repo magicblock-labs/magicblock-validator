@@ -1269,10 +1269,7 @@ fn pubkeys_str(pubkeys: &[Pubkey]) -> String {
 mod test {
     use solana_system_interface::program as system_program;
 
-    use super::{
-        chain_pubsub_client::mock::ChainPubsubClientMock,
-        *,
-    };
+    use super::{chain_pubsub_client::mock::ChainPubsubClientMock, *};
     use crate::testing::{
         init_logger,
         rpc_client_mock::{
