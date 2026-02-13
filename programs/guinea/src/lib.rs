@@ -3,6 +3,7 @@ use core::slice;
 
 use magicblock_magic_program_api::{
     args::ScheduleTaskArgs, instruction::MagicBlockInstruction,
+    EPHEMERAL_VAULT_PUBKEY,
 };
 use serde::{Deserialize, Serialize};
 use solana_program::{
@@ -11,7 +12,7 @@ use solana_program::{
     entrypoint::{self, ProgramResult},
     instruction::{AccountMeta, Instruction},
     log,
-    program::{invoke, set_return_data},
+    program::{invoke, invoke_signed, set_return_data},
     program_error::ProgramError,
     pubkey::Pubkey,
     rent::Rent,
@@ -20,6 +21,39 @@ use solana_program::{
 
 entrypoint::entrypoint!(process_instruction);
 declare_id!("GuineaeT4SgZ512pT3a5jfiG2gqBih6yVy2axJ2zo38C");
+
+/// Global PDA sponsor for testing ephemeral accounts
+const GLOBAL_SPONSOR_SEED: &[u8] = b"global_sponsor";
+
+/// Derives the global PDA sponsor address
+fn global_sponsor_pda() -> (Pubkey, u8) {
+    Pubkey::find_program_address(&[GLOBAL_SPONSOR_SEED], &crate::ID)
+}
+
+/// Helper to invoke or invoke_signed depending on sponsor type.
+/// Takes ownership of the instruction and patches the signer flag for PDAs.
+fn invoke_with_sponsor(
+    mut instruction: Instruction,
+    account_infos: &[AccountInfo],
+    sponsor_info: &AccountInfo,
+) -> ProgramResult {
+    // Check if sponsor is the global PDA
+    let (expected_pda, bump) = global_sponsor_pda();
+    if sponsor_info.key == &expected_pda {
+        // PDA sponsor: patch instruction and use invoke_signed
+        instruction.accounts[0].is_signer = true;
+
+        let bump_bytes = &[bump];
+        let seeds_for_signer: Vec<&[u8]> =
+            vec![GLOBAL_SPONSOR_SEED, bump_bytes];
+        let signer_seeds: &[&[&[u8]]] = &[&seeds_for_signer[..]];
+
+        invoke_signed(&instruction, account_infos, signer_seeds)
+    } else {
+        // Regular signer sponsor
+        invoke(&instruction, account_infos)
+    }
+}
 
 #[derive(Serialize, Deserialize)]
 pub enum GuineaInstruction {
@@ -31,6 +65,9 @@ pub enum GuineaInstruction {
     Resize(usize),
     ScheduleTask(ScheduleTaskArgs),
     CancelTask(i64),
+    CreateEphemeralAccount { data_len: u32 },
+    ResizeEphemeralAccount { new_data_len: u32 },
+    CloseEphemeralAccount,
 }
 
 fn compute_balances(accounts: slice::Iter<AccountInfo>) {
@@ -165,6 +202,121 @@ fn cancel_task(
     Ok(())
 }
 
+fn validate_ephemeral_accounts(
+    magic_program_info: &AccountInfo,
+    vault_info: &AccountInfo,
+) -> ProgramResult {
+    if magic_program_info.key != &magicblock_magic_program_api::ID {
+        return Err(ProgramError::InvalidAccountData);
+    }
+    if *vault_info.key != EPHEMERAL_VAULT_PUBKEY {
+        return Err(ProgramError::InvalidAccountData);
+    }
+    Ok(())
+}
+
+fn create_ephemeral_account(
+    mut accounts: slice::Iter<AccountInfo>,
+    data_len: u32,
+) -> ProgramResult {
+    let magic_program_info = next_account_info(&mut accounts)?;
+    let sponsor_info = next_account_info(&mut accounts)?;
+    let ephemeral_info = next_account_info(&mut accounts)?;
+    let vault_info = next_account_info(&mut accounts)?;
+
+    validate_ephemeral_accounts(magic_program_info, vault_info)?;
+
+    let account_infos = &[
+        sponsor_info.clone(),
+        ephemeral_info.clone(),
+        vault_info.clone(),
+    ];
+
+    // Ephemeral must be a signer (prevents pubkey squatting)
+    if !ephemeral_info.is_signer {
+        return Err(ProgramError::MissingRequiredSignature);
+    }
+
+    let ix = Instruction::new_with_bincode(
+        magicblock_magic_program_api::ID,
+        &MagicBlockInstruction::CreateEphemeralAccount { data_len },
+        vec![
+            AccountMeta::new(*sponsor_info.key, sponsor_info.is_signer),
+            AccountMeta::new(*ephemeral_info.key, true),
+            AccountMeta::new(EPHEMERAL_VAULT_PUBKEY, false),
+        ],
+    );
+
+    invoke_with_sponsor(ix, account_infos, sponsor_info)?;
+
+    Ok(())
+}
+
+fn resize_ephemeral_account(
+    mut accounts: slice::Iter<AccountInfo>,
+    new_data_len: u32,
+) -> ProgramResult {
+    let magic_program_info = next_account_info(&mut accounts)?;
+    let sponsor_info = next_account_info(&mut accounts)?;
+    let ephemeral_info = next_account_info(&mut accounts)?;
+    let vault_info = next_account_info(&mut accounts)?;
+
+    validate_ephemeral_accounts(magic_program_info, vault_info)?;
+
+    let account_infos = &[
+        sponsor_info.clone(),
+        ephemeral_info.clone(),
+        vault_info.clone(),
+    ];
+
+    // Create instruction (signer flag will be patched by helper if needed)
+    let ix = Instruction::new_with_bincode(
+        magicblock_magic_program_api::ID,
+        &MagicBlockInstruction::ResizeEphemeralAccount { new_data_len },
+        vec![
+            AccountMeta::new(*sponsor_info.key, true),
+            AccountMeta::new(*ephemeral_info.key, false),
+            AccountMeta::new(EPHEMERAL_VAULT_PUBKEY, false),
+        ],
+    );
+
+    invoke_with_sponsor(ix, account_infos, sponsor_info)?;
+
+    Ok(())
+}
+
+fn close_ephemeral_account(
+    mut accounts: slice::Iter<AccountInfo>,
+) -> ProgramResult {
+    let magic_program_info = next_account_info(&mut accounts)?;
+    let sponsor_info = next_account_info(&mut accounts)?;
+    let ephemeral_info = next_account_info(&mut accounts)?;
+    let vault_info = next_account_info(&mut accounts)?;
+
+    validate_ephemeral_accounts(magic_program_info, vault_info)?;
+
+    let account_infos = &[
+        sponsor_info.clone(),
+        ephemeral_info.clone(),
+        vault_info.clone(),
+    ];
+
+    // Create instruction (signer flag will be patched by helper if needed)
+    let ix = Instruction::new_with_bincode(
+        magicblock_magic_program_api::ID,
+        &MagicBlockInstruction::CloseEphemeralAccount,
+        vec![
+            AccountMeta::new(*sponsor_info.key, true),
+            AccountMeta::new(*ephemeral_info.key, false),
+            AccountMeta::new(EPHEMERAL_VAULT_PUBKEY, false),
+        ],
+    );
+
+    invoke_with_sponsor(ix, account_infos, sponsor_info)?;
+
+    Ok(())
+}
+
 fn process_instruction(
     _program_id: &Pubkey,
     accounts: &[AccountInfo],
@@ -193,6 +345,15 @@ fn process_instruction(
         }
         GuineaInstruction::CancelTask(task_id) => {
             cancel_task(accounts, task_id)?
+        }
+        GuineaInstruction::CreateEphemeralAccount { data_len } => {
+            create_ephemeral_account(accounts, data_len)?
+        }
+        GuineaInstruction::ResizeEphemeralAccount { new_data_len } => {
+            resize_ephemeral_account(accounts, new_data_len)?
+        }
+        GuineaInstruction::CloseEphemeralAccount => {
+            close_ephemeral_account(accounts)?
         }
     }
     Ok(())

@@ -44,6 +44,7 @@ rustc-hash = { workspace = true }
 
 [dev-dependencies]
 guinea = { workspace = true }
+magicblock-magic-program-api = { workspace = true }
 solana-keypair = { workspace = true }
 solana-signature = { workspace = true }
 solana-signer = { workspace = true }
