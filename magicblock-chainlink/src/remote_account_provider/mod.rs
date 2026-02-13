@@ -1269,13 +1269,16 @@ fn pubkeys_str(pubkeys: &[Pubkey]) -> String {
 mod test {
     use solana_system_interface::program as system_program;
 
-    use super::{chain_pubsub_client::mock::ChainPubsubClientMock, *};
-    use crate::testing::{
-        init_logger,
-        rpc_client_mock::{
-            AccountAtSlot, ChainRpcClientMock, ChainRpcClientMockBuilder,
+    use super::*;
+    use crate::{
+        remote_account_provider::chain_pubsub_client::mock::ChainPubsubClientMock,
+        testing::{
+            init_logger,
+            rpc_client_mock::{
+                AccountAtSlot, ChainRpcClientMock, ChainRpcClientMockBuilder,
+            },
+            utils::{create_test_lru_cache, random_pubkey},
         },
-        utils::{create_test_lru_cache, random_pubkey},
     };
 
     #[tokio::test]
