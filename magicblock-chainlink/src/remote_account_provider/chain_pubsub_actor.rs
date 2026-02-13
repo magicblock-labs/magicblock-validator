@@ -40,7 +40,6 @@ use crate::remote_account_provider::{
         SUBSCRIPTION_UPDATE_CHANNEL_SIZE,
     },
     pubsub_connection::PubsubConnectionImpl,
-    DEFAULT_SUBSCRIPTION_RETRIES,
 };
 
 // Log every 10 secs (given chain slot time is 400ms)
@@ -287,8 +286,8 @@ impl ChainPubsubActor {
         match msg {
             ChainPubsubActorMessage::AccountSubscribe {
                 pubkey,
-                retries,
                 response,
+                ..
             } => {
                 if !is_connected.load(Ordering::SeqCst) {
                     static SUBSCRIPTION_DURING_DISCONNECT_COUNT: AtomicU16 =
@@ -320,7 +319,6 @@ impl ChainPubsubActor {
                     abort_sender,
                     is_connected,
                     commitment_config,
-                    retries,
                     client_id,
                 )
                 .await;
@@ -429,7 +427,6 @@ impl ChainPubsubActor {
         abort_sender: mpsc::Sender<()>,
         is_connected: Arc<AtomicBool>,
         commitment_config: CommitmentConfig,
-        retries: Option<usize>,
         client_id: &str,
     ) {
         if subs
@@ -468,46 +465,25 @@ impl ChainPubsubActor {
             ..Default::default()
         };
 
-        let mut retries = retries.unwrap_or(DEFAULT_SUBSCRIPTION_RETRIES);
-        let initial_tries = retries;
-        let (mut update_stream, unsubscribe) = loop {
-            // Perform the subscription
-            match pubsub_connection
-                .account_subscribe(&pubkey, config.clone())
-                .await
-            {
-                Ok(res) => break res,
-                Err(err) => {
-                    if retries > 0 {
-                        retries -= 1;
-                        // Linear backoff: sleep longer as retries decrease
-                        let backoff_ms =
-                            50u64 * (initial_tries - retries) as u64;
-                        tokio::time::sleep(Duration::from_millis(backoff_ms))
-                            .await;
-                        continue;
-                    }
-                    if initial_tries > 0 {
-                        warn!(
-                            error = ?err,
-                            pubkey = %pubkey,
-                            retries_count = initial_tries,
-                            "Failed to subscribe to account after retrying multiple times",
-                        );
-                    }
-                    Self::abort_and_signal_connection_issue(
-                        client_id,
-                        subs.clone(),
-                        program_subs.clone(),
-                        abort_sender,
-                        is_connected.clone(),
-                        &format!("Failed to subscribe to account {pubkey} after {initial_tries} retries")
-                    );
-                    // RPC failed - inform the requester
-                    let _ = sub_response.send(Err(err.into()));
-                    return;
-                }
-            };
+        let (mut update_stream, unsubscribe) = match pubsub_connection
+            .account_subscribe(&pubkey, config.clone())
+            .await
+        {
+            Ok(res) => res,
+            Err(err) => {
+                Self::abort_and_signal_connection_issue(
+                    client_id,
+                    subs.clone(),
+                    program_subs.clone(),
+                    abort_sender,
+                    is_connected.clone(),
+                    &format!(
+                        "Failed to subscribe to account {pubkey}"
+                    ),
+                );
+                let _ = sub_response.send(Err(err.into()));
+                return;
+            }
         };
 
         // RPC succeeded - confirm to the requester that the subscription was made

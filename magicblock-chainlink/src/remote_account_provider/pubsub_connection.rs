@@ -1,4 +1,4 @@
-use std::{mem, sync::Arc};
+use std::{mem, sync::Arc, time::Duration};
 
 use arc_swap::ArcSwap;
 use async_trait::async_trait;
@@ -29,8 +29,8 @@ pub type ProgramSubscribeResult = PubsubClientResult<(
 )>;
 
 const MAX_RECONNECT_ATTEMPTS: usize = 5;
-const RECONNECT_ATTEMPT_DELAY: std::time::Duration =
-    std::time::Duration::from_millis(500);
+const RECONNECT_ATTEMPT_DELAY: Duration = Duration::from_millis(500);
+const MAX_SUBSCRIBE_RETRIES: usize = 5;
 
 #[async_trait]
 pub trait PubsubConnection: Send + Sync + 'static {
@@ -57,6 +57,66 @@ pub struct PubsubConnectionImpl {
     reconnect_guard: AsyncMutex<()>,
 }
 
+/// Retry loop for subscribe calls on `PubsubConnectionImpl`.
+///
+/// Loads the current client, calls `$client.$method($($args),*)`,
+/// transmutes the resulting stream to `'static`, and retries with
+/// linear backoff on failure.
+/// NOTE: this macro approach works best here due to lifetime issues and overly
+/// complicated generic types when using a function based approach.
+macro_rules! subscribe_with_retry {
+    ($self:expr, $kind:expr, $method:ident, $stream_item:ty,
+     $($args:expr),* $(,)?) => {{
+        let mut retries = MAX_SUBSCRIBE_RETRIES;
+        let initial_tries = retries;
+
+        loop {
+            // SAFETY:
+            // the returned stream depends on the used client, which
+            // is only ever dropped if the connection has been
+            // terminated, at which point the stream is useless and
+            // will be discarded as well, thus it's safe lifetime
+            // extension to 'static
+            let result = {
+                let client = $self.client.load();
+                client.$method($($args),*).await.map(
+                    |(stream, unsub)| {
+                        let stream: BoxStream<
+                            'static,
+                            $stream_item,
+                        > = unsafe { mem::transmute(stream) };
+                        (stream, unsub)
+                    },
+                )
+            };
+
+            match result {
+                Ok(ok) => break Ok(ok),
+                Err(err) => {
+                    if retries > 0 {
+                        retries -= 1;
+                        let backoff_ms =
+                            50u64 * (initial_tries - retries) as u64;
+                        time::sleep(Duration::from_millis(backoff_ms))
+                            .await;
+                        continue;
+                    }
+                    if initial_tries > 0 {
+                        warn!(
+                            error = ?err,
+                            retries_count = initial_tries,
+                            "Failed to subscribe to {} after \
+                             retrying multiple times",
+                            $kind,
+                        );
+                    }
+                    break Err(err);
+                }
+            }
+        }
+    }};
+}
+
 #[async_trait]
 impl PubsubConnection for PubsubConnectionImpl {
     async fn new(url: String) -> RemoteAccountProviderResult<Self> {
@@ -77,21 +137,15 @@ impl PubsubConnection for PubsubConnectionImpl {
         pubkey: &Pubkey,
         config: RpcAccountInfoConfig,
     ) -> SubscribeResult {
-        let client = self.client.load();
-        let config = Some(config.clone());
-        let (stream, unsub) = client.account_subscribe(pubkey, config).await?;
-        // SAFETY:
-        // the returned stream depends on the used client, which is only ever
-        // dropped if the connection has been terminated, at which point the
-        // stream is useless and will be discarded as well, thus it's safe
-        // lifetime extension to 'static
-        let stream = unsafe {
-            mem::transmute::<
-                BoxStream<'_, Response<UiAccount>>,
-                BoxStream<'static, Response<UiAccount>>,
-            >(stream)
-        };
-        Ok((stream, unsub))
+        let config = Some(config);
+        subscribe_with_retry!(
+            self,
+            "account",
+            account_subscribe,
+            Response<UiAccount>,
+            pubkey,
+            config.clone(),
+        )
     }
 
     async fn program_subscribe(
@@ -99,23 +153,15 @@ impl PubsubConnection for PubsubConnectionImpl {
         program_id: &Pubkey,
         config: RpcProgramAccountsConfig,
     ) -> ProgramSubscribeResult {
-        let client = self.client.load();
-        let config = Some(config.clone());
-        let (stream, unsub) =
-            client.program_subscribe(program_id, config).await?;
-
-        // SAFETY:
-        // the returned stream depends on the used client, which is only ever
-        // dropped if the connection has been terminated, at which point the
-        // stream is useless and will be discarded as well, thus it's safe
-        // lifetime extension to 'static
-        let stream = unsafe {
-            mem::transmute::<
-                BoxStream<'_, Response<RpcKeyedAccount>>,
-                BoxStream<'static, Response<RpcKeyedAccount>>,
-            >(stream)
-        };
-        Ok((stream, unsub))
+        let config = Some(config);
+        subscribe_with_retry!(
+            self,
+            "program",
+            program_subscribe,
+            Response<RpcKeyedAccount>,
+            program_id,
+            config.clone(),
+        )
     }
 
     async fn reconnect(&self) -> PubsubClientResult<()> {
