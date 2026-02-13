@@ -1,7 +1,6 @@
 use std::{
     collections::{HashMap, HashSet},
     fmt,
-    pin::Pin,
     sync::{
         atomic::{AtomicU16, AtomicU64, Ordering},
         Arc,
@@ -11,13 +10,12 @@ use std::{
 
 use futures_util::{Stream, StreamExt};
 use helius_laserstream::{
-    client,
     grpc::{
         subscribe_update::UpdateOneof, CommitmentLevel, SubscribeRequest,
         SubscribeRequestFilterAccounts, SubscribeRequestFilterSlots,
         SubscribeUpdate,
     },
-    ChannelOptions, LaserstreamConfig, LaserstreamError,
+    LaserstreamConfig, LaserstreamError,
 };
 use magicblock_core::logger::log_trace_debug;
 use magicblock_metrics::metrics::{
@@ -36,11 +34,10 @@ use tokio_stream::StreamMap;
 use tonic::Code;
 use tracing::*;
 
-use super::{
+use super::{LaserResult, LaserStream, StreamFactory};
+use crate::remote_account_provider::{
     chain_rpc_client::{ChainRpcClient, ChainRpcClientImpl},
     chain_slot::ChainSlot,
-};
-use crate::remote_account_provider::{
     pubsub_common::{
         ChainPubsubActorMessage, MESSAGE_CHANNEL_SIZE,
         SUBSCRIPTION_UPDATE_CHANNEL_SIZE,
@@ -49,9 +46,7 @@ use crate::remote_account_provider::{
     SubscriptionUpdate,
 };
 
-type LaserResult = Result<SubscribeUpdate, LaserstreamError>;
 type LaserStreamUpdate = (usize, LaserResult);
-type LaserStream = Pin<Box<dyn Stream<Item = LaserResult> + Send>>;
 
 const PER_STREAM_SUBSCRIPTION_LIMIT: usize = 1_000;
 const SUBSCRIPTION_ACTIVATION_INTERVAL_MILLIS: u64 = 10_000;
@@ -120,8 +115,8 @@ impl fmt::Display for AccountUpdateSource {
 /// - The actor sends an abort signal to the submux, which triggers reconnection.
 /// - The actor itself doesn't attempt to reconnect; it relies on external recovery.
 pub struct ChainLaserActor {
-    /// Configuration used to create the laser client
-    laser_client_config: LaserstreamConfig,
+    /// Factory for creating laser streams
+    stream_factory: Box<dyn StreamFactory>,
     /// Requested subscriptions, some may not be active yet.
     /// Shared with ChainLaserClientImpl for sync access to
     /// subscription_count and subscriptions_union.
@@ -165,7 +160,7 @@ impl ChainLaserActor {
         mpsc::Receiver<SubscriptionUpdate>,
         SharedSubscriptions,
     ) {
-        let channel_options = ChannelOptions {
+        let channel_options = helius_laserstream::ChannelOptions {
             connect_timeout_secs: Some(5),
             http2_keep_alive_interval_secs: Some(15),
             tcp_keepalive_secs: Some(30),
@@ -201,6 +196,32 @@ impl ChainLaserActor {
         mpsc::Receiver<SubscriptionUpdate>,
         SharedSubscriptions,
     ) {
+        let stream_factory =
+            Box::new(super::StreamFactoryImpl::new(laser_client_config));
+        Self::with_stream_factory(
+            client_id,
+            stream_factory,
+            commitment,
+            abort_sender,
+            slots,
+            rpc_client,
+        )
+    }
+
+    /// Create actor with a custom stream factory (for testing)
+    pub fn with_stream_factory(
+        client_id: &str,
+        stream_factory: Box<dyn StreamFactory>,
+        commitment: SolanaCommitmentLevel,
+        abort_sender: mpsc::Sender<()>,
+        slots: Slots,
+        rpc_client: ChainRpcClientImpl,
+    ) -> (
+        Self,
+        mpsc::Sender<ChainPubsubActorMessage>,
+        mpsc::Receiver<SubscriptionUpdate>,
+        SharedSubscriptions,
+    ) {
         let (subscription_updates_sender, subscription_updates_receiver) =
             mpsc::channel(SUBSCRIPTION_UPDATE_CHANNEL_SIZE);
         let (messages_sender, messages_receiver) =
@@ -211,7 +232,7 @@ impl ChainLaserActor {
         let shared_subscriptions = Arc::clone(&subscriptions);
 
         let me = Self {
-            laser_client_config,
+            stream_factory,
             messages_receiver,
             subscriptions,
             active_subscriptions: Default::default(),
@@ -248,23 +269,19 @@ impl ChainLaserActor {
             tokio::time::interval(std::time::Duration::from_millis(
                 SUBSCRIPTION_ACTIVATION_INTERVAL_MILLIS,
             ));
-
         loop {
             tokio::select! {
-                // Actor messages
+                // Receive messages from the user
                 msg = self.messages_receiver.recv() => {
                     match msg {
                         Some(msg) => {
-                            let is_shutdown = self.handle_msg(msg);
-                            if is_shutdown {
+                            if self.handle_msg(msg) {
                                 break;
                             }
                         }
-                        None => {
-                            break;
-                        }
+                        None => break,
                     }
-                }
+                },
                 // Account subscription updates
                 update = self.active_subscriptions.next(), if !self.active_subscriptions.is_empty() => {
                     match update {
@@ -334,8 +351,7 @@ impl ChainLaserActor {
             }
             ProgramSubscribe { pubkey, response } => {
                 let commitment = self.commitment;
-                let laser_client_config = self.laser_client_config.clone();
-                self.add_program_sub(pubkey, commitment, laser_client_config);
+                self.add_program_sub(pubkey, commitment);
                 let _ = response.send(Ok(())).inspect_err(|_| {
                     warn!(client_id = self.client_id, program_id = %pubkey, "Failed to send program subscribe response");
                 });
@@ -378,28 +394,14 @@ impl ChainLaserActor {
         pubkey: Pubkey,
         sub_response: oneshot::Sender<RemoteAccountProviderResult<()>>,
     ) {
-        let inserted = {
-            // Fast path: check with read lock first
-            let already_subscribed = {
-                let subs = self.subscriptions.read();
-                subs.contains(&pubkey)
-            };
-
-            if already_subscribed {
-                false
-            } else {
-                // Write lock only when we need to modify
-                let mut subs = self.subscriptions.write();
-                subs.insert(pubkey);
-                true
-            }
-        };
-        if !inserted {
-            trace!(pubkey = %pubkey, "Already subscribed to account");
+        if self.subscriptions.read().contains(&pubkey) {
+            debug!(pubkey = %pubkey, "Already subscribed to account");
             sub_response.send(Ok(())).unwrap_or_else(|_| {
                 warn!(pubkey = %pubkey, "Failed to send already subscribed response");
             });
         } else {
+            self.subscriptions.write().insert(pubkey);
+            // If this is the first sub for the clock sysvar we want to activate it immediately
             if self.active_subscriptions.is_empty() {
                 self.update_active_subscriptions();
             }
@@ -415,8 +417,7 @@ impl ChainLaserActor {
         pubkey: &Pubkey,
         unsub_response: oneshot::Sender<RemoteAccountProviderResult<()>>,
     ) {
-        let removed = self.subscriptions.write().remove(pubkey);
-        match removed {
+        match self.subscriptions.write().remove(pubkey) {
             true => {
                 trace!(pubkey = %pubkey, "Unsubscribed from account");
                 unsub_response.send(Ok(())).unwrap_or_else(|_| {
@@ -461,7 +462,9 @@ impl ChainLaserActor {
 
         let chunks = sub_refs
             .chunks(PER_STREAM_SUBSCRIPTION_LIMIT)
-            .map(|chunk| chunk.to_vec())
+            .map(|chunk| {
+                chunk.iter().map(|pk| pk as &Pubkey).collect::<Vec<_>>()
+            })
             .collect::<Vec<_>>();
 
         let (chain_slot, from_slot) = self
@@ -471,7 +474,7 @@ impl ChainLaserActor {
 
         if tracing::enabled!(tracing::Level::TRACE) {
             trace!(
-                account_count = new_pubkeys.len(),
+                account_count = sub_refs.len(),
                 chain_slot,
                 from_slot,
                 stream_count = chunks.len(),
@@ -481,9 +484,9 @@ impl ChainLaserActor {
 
         for (idx, chunk) in chunks.into_iter().enumerate() {
             let stream = Self::create_accounts_and_slot_stream(
+                self.stream_factory.as_ref(),
                 &chunk,
                 &self.commitment,
-                &self.laser_client_config,
                 idx,
                 from_slot,
             );
@@ -540,9 +543,9 @@ impl ChainLaserActor {
     /// NOTE: no slot update subscription will be created until the first
     /// accounts subscription is created.
     fn create_accounts_and_slot_stream(
+        stream_factory: &dyn StreamFactory,
         pubkeys: &[&Pubkey],
         commitment: &CommitmentLevel,
-        laser_client_config: &LaserstreamConfig,
         idx: usize,
         from_slot: Option<u64>,
     ) -> impl Stream<Item = LaserResult> {
@@ -574,14 +577,13 @@ impl ChainLaserActor {
             from_slot,
             ..Default::default()
         };
-        client::subscribe(laser_client_config.clone(), request).0
+        stream_factory.subscribe(request)
     }
 
     fn add_program_sub(
         &mut self,
         program_id: Pubkey,
         commitment: CommitmentLevel,
-        laser_client_config: LaserstreamConfig,
     ) {
         if self
             .program_subscriptions
@@ -619,9 +621,8 @@ impl ChainLaserActor {
             commitment: Some(commitment.into()),
             ..Default::default()
         };
-        let stream = client::subscribe(laser_client_config.clone(), request).0;
-        self.program_subscriptions =
-            Some((subscribed_programs, Box::pin(stream)));
+        let stream = self.stream_factory.subscribe(request);
+        self.program_subscriptions = Some((subscribed_programs, stream));
     }
 
     /// Handles an update from one of the account data streams.
