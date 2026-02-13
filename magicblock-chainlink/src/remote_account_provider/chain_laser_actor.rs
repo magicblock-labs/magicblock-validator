@@ -415,16 +415,7 @@ impl ChainLaserActor {
         pubkey: &Pubkey,
         unsub_response: oneshot::Sender<RemoteAccountProviderResult<()>>,
     ) {
-        // Fast path: check with read lock first
-        let exists = self.subscriptions.read().contains(pubkey);
-
-        let removed = if exists {
-            // Write lock only when we need to modify
-            self.subscriptions.write().remove(pubkey)
-        } else {
-            false
-        };
-
+        let removed = self.subscriptions.write().remove(pubkey);
         match removed {
             true => {
                 trace!(pubkey = %pubkey, "Unsubscribed from account");
