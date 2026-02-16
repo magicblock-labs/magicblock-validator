@@ -121,8 +121,6 @@ pub struct ChainLaserActor<S: StreamFactory> {
     active_subscription_pubkeys: HashSet<Pubkey>,
     /// Subscriptions that have been activated via the helius provider
     active_subscriptions: StreamMap<usize, LaserStream>,
-    /// Active streams for program subscriptions
-    program_subscriptions: Option<(HashSet<Pubkey>, LaserStream)>,
     /// Receives subscribe/unsubscribe messages to this actor
     messages_receiver: mpsc::Receiver<ChainPubsubActorMessage>,
     /// Sends updates for any account subscription that is received via
@@ -234,7 +232,6 @@ impl<S: StreamFactory> ChainLaserActor<S> {
             subscriptions,
             active_subscriptions: Default::default(),
             active_subscription_pubkeys: Default::default(),
-            program_subscriptions: Default::default(),
             subscription_updates_sender,
             commitment,
             abort_sender,
@@ -291,7 +288,7 @@ impl<S: StreamFactory> ChainLaserActor<S> {
                                 &self.subscriptions,
                                 &mut self.active_subscriptions,
                                 &mut self.active_subscription_pubkeys,
-                                &mut self.program_subscriptions,
+                                &mut self.stream_manager,
                                 &self.abort_sender,
                                 &self.client_id,
                             )
@@ -301,11 +298,11 @@ impl<S: StreamFactory> ChainLaserActor<S> {
                 },
                 // Program subscription updates
                 update = async {
-                    match &mut self.program_subscriptions {
-                        Some((_, stream)) => stream.next().await,
+                    match self.stream_manager.program_stream_mut() {
+                        Some(stream) => stream.next().await,
                         None => std::future::pending().await,
                     }
-                }, if self.program_subscriptions.is_some() => {
+                }, if self.stream_manager.has_program_subscriptions() => {
                     match update {
                         Some(update) => {
                             self.handle_program_update(update).await;
@@ -316,7 +313,7 @@ impl<S: StreamFactory> ChainLaserActor<S> {
                                 &self.subscriptions,
                                 &mut self.active_subscriptions,
                                 &mut self.active_subscription_pubkeys,
-                                &mut self.program_subscriptions,
+                                &mut self.stream_manager,
                                 &self.abort_sender,
                                 &self.client_id,
                             )
@@ -347,8 +344,10 @@ impl<S: StreamFactory> ChainLaserActor<S> {
                 false
             }
             ProgramSubscribe { pubkey, response } => {
-                let commitment = self.commitment;
-                self.add_program_sub(pubkey, commitment);
+                self.stream_manager.add_program_subscription(
+                    pubkey,
+                    &self.commitment,
+                );
                 let _ = response.send(Ok(())).inspect_err(|_| {
                     warn!(client_id = self.client_id, program_id = %pubkey, "Failed to send program subscribe response");
                 });
@@ -372,7 +371,7 @@ impl<S: StreamFactory> ChainLaserActor<S> {
                     &self.subscriptions,
                     &mut self.active_subscriptions,
                     &mut self.active_subscription_pubkeys,
-                    &mut self.program_subscriptions,
+                    &mut self.stream_manager,
                 );
                 let _ = response.send(Ok(())).inspect_err(|_| {
                     warn!(
@@ -480,7 +479,7 @@ impl<S: StreamFactory> ChainLaserActor<S> {
         }
 
         for (idx, chunk) in chunks.into_iter().enumerate() {
-            let stream = self.stream_manager.account_subscribe(
+            let stream = self.stream_manager.account_subscribe_old(
                 &chunk,
                 &self.commitment,
                 idx,
@@ -530,38 +529,6 @@ impl<S: StreamFactory> ChainLaserActor<S> {
             }
         };
         Some((chain_slot, from_slot))
-    }
-
-    fn add_program_sub(
-        &mut self,
-        program_id: Pubkey,
-        commitment: CommitmentLevel,
-    ) {
-        if self
-            .program_subscriptions
-            .as_ref()
-            .map(|(subscribed_programs, _)| {
-                subscribed_programs.contains(&program_id)
-            })
-            .unwrap_or(false)
-        {
-            trace!(program_id = %program_id, "Program subscription already exists");
-            return;
-        }
-
-        let mut subscribed_programs = self
-            .program_subscriptions
-            .as_ref()
-            .map(|x| x.0.iter().cloned().collect::<HashSet<Pubkey>>())
-            .unwrap_or_default();
-
-        subscribed_programs.insert(program_id);
-
-        let program_ids: Vec<&Pubkey> = subscribed_programs.iter().collect();
-        let stream = self
-            .stream_manager
-            .program_subscribe(&program_ids, &commitment);
-        self.program_subscriptions = Some((subscribed_programs, stream));
     }
 
     /// Handles an update from one of the account data streams.
@@ -618,7 +585,7 @@ impl<S: StreamFactory> ChainLaserActor<S> {
             &self.subscriptions,
             &mut self.active_subscriptions,
             &mut self.active_subscription_pubkeys,
-            &mut self.program_subscriptions,
+            &mut self.stream_manager,
             &self.abort_sender,
             &self.client_id,
         )
@@ -689,24 +656,24 @@ impl<S: StreamFactory> ChainLaserActor<S> {
         subscriptions: &SharedSubscriptions,
         active_subscriptions: &mut StreamMap<usize, LaserStream>,
         active_subscription_pubkeys: &mut HashSet<Pubkey>,
-        program_subscriptions: &mut Option<(HashSet<Pubkey>, LaserStream)>,
+        stream_manager: &mut StreamManager<S>,
     ) {
         subscriptions.write().clear();
         active_subscriptions.clear();
         active_subscription_pubkeys.clear();
-        *program_subscriptions = None;
+        stream_manager.clear_program_subscriptions();
     }
 
     /// Signals a connection issue by clearing all subscriptions and
     /// sending a message on the abort channel.
     /// NOTE: the laser client should handle reconnects internally, but
     /// we add this as a backup in case it is unable to do so
-    #[instrument(skip(subscriptions, active_subscriptions, active_subscription_pubkeys, program_subscriptions, abort_sender), fields(client_id = %client_id))]
+    #[instrument(skip(subscriptions, active_subscriptions, active_subscription_pubkeys, stream_manager, abort_sender), fields(client_id = %client_id))]
     async fn signal_connection_issue(
         subscriptions: &SharedSubscriptions,
         active_subscriptions: &mut StreamMap<usize, LaserStream>,
         active_subscription_pubkeys: &mut HashSet<Pubkey>,
-        program_subscriptions: &mut Option<(HashSet<Pubkey>, LaserStream)>,
+        stream_manager: &mut StreamManager<S>,
         abort_sender: &mpsc::Sender<()>,
         client_id: &str,
     ) {
@@ -725,7 +692,7 @@ impl<S: StreamFactory> ChainLaserActor<S> {
             subscriptions,
             active_subscriptions,
             active_subscription_pubkeys,
-            program_subscriptions,
+            stream_manager,
         );
 
         // Use try_send to avoid blocking and naturally coalesce signals
