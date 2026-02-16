@@ -6,12 +6,14 @@ use helius_laserstream::{
     LaserstreamError,
 };
 
-pub use self::actor::{
-    ChainLaserActor, SharedSubscriptions, Slots,
+pub use self::{
+    actor::{ChainLaserActor, SharedSubscriptions, Slots},
+    stream_manager::StreamManager,
 };
 
 mod actor;
 mod mock;
+mod stream_manager;
 
 /// Result of a laser stream operation
 pub type LaserResult = Result<SubscribeUpdate, LaserstreamError>;

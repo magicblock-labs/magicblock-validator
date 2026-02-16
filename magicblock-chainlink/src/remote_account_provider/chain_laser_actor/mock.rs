@@ -1,6 +1,6 @@
 use std::sync::{Arc, Mutex};
 
-use helius_laserstream::grpc::SubscribeRequest;
+use helius_laserstream::{grpc, grpc::SubscribeRequest, LaserstreamError};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
@@ -39,11 +39,7 @@ impl MockStreamFactory {
     }
 
     /// Push an error update to a specific stream
-    pub fn push_error_to_stream(
-        &self,
-        idx: usize,
-        error: helius_laserstream::LaserstreamError,
-    ) {
+    pub fn push_error_to_stream(&self, idx: usize, error: LaserstreamError) {
         let senders = self.stream_senders.lock().unwrap();
         if let Some(sender) = senders.get(idx) {
             let _ = sender.send(Err(error));
@@ -51,10 +47,7 @@ impl MockStreamFactory {
     }
 
     /// Push a success update to all active streams
-    pub fn push_success_to_all(
-        &self,
-        update: helius_laserstream::grpc::SubscribeUpdate,
-    ) {
+    pub fn push_success_to_all(&self, update: grpc::SubscribeUpdate) {
         let senders = self.stream_senders.lock().unwrap();
         for sender in senders.iter() {
             let _ = sender.send(Ok(update.clone()));

@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashSet,
     fmt,
     sync::{
         atomic::{AtomicU16, AtomicU64, Ordering},
@@ -8,13 +8,9 @@ use std::{
     time::Duration,
 };
 
-use futures_util::{Stream, StreamExt};
+use futures_util::StreamExt;
 use helius_laserstream::{
-    grpc::{
-        subscribe_update::UpdateOneof, CommitmentLevel, SubscribeRequest,
-        SubscribeRequestFilterAccounts, SubscribeRequestFilterSlots,
-        SubscribeUpdate,
-    },
+    grpc::{subscribe_update::UpdateOneof, CommitmentLevel, SubscribeUpdate},
     LaserstreamConfig, LaserstreamError,
 };
 use magicblock_core::logger::log_trace_debug;
@@ -34,7 +30,7 @@ use tokio_stream::StreamMap;
 use tonic::Code;
 use tracing::*;
 
-use super::{LaserResult, LaserStream, StreamFactory};
+use super::{LaserResult, LaserStream, StreamFactory, StreamManager};
 use crate::remote_account_provider::{
     chain_rpc_client::{ChainRpcClient, ChainRpcClientImpl},
     chain_slot::ChainSlot,
@@ -115,8 +111,8 @@ impl fmt::Display for AccountUpdateSource {
 /// - The actor sends an abort signal to the submux, which triggers reconnection.
 /// - The actor itself doesn't attempt to reconnect; it relies on external recovery.
 pub struct ChainLaserActor<S: StreamFactory> {
-    /// Factory for creating laser streams
-    stream_factory: S,
+    /// Manager for creating laser streams
+    stream_manager: StreamManager<S>,
     /// Requested subscriptions, some may not be active yet.
     /// Shared with ChainLaserClientImpl for sync access to
     /// subscription_count and subscriptions_union.
@@ -233,7 +229,7 @@ impl<S: StreamFactory> ChainLaserActor<S> {
         let shared_subscriptions = Arc::clone(&subscriptions);
 
         let me = Self {
-            stream_factory,
+            stream_manager: StreamManager::new(stream_factory),
             messages_receiver,
             subscriptions,
             active_subscriptions: Default::default(),
@@ -484,14 +480,13 @@ impl<S: StreamFactory> ChainLaserActor<S> {
         }
 
         for (idx, chunk) in chunks.into_iter().enumerate() {
-            let stream = Self::create_accounts_and_slot_stream(
-                &self.stream_factory,
+            let stream = self.stream_manager.account_subscribe(
                 &chunk,
                 &self.commitment,
                 idx,
                 from_slot,
             );
-            new_subs.insert(idx, Box::pin(stream));
+            new_subs.insert(idx, stream);
         }
 
         // Drop current active subscriptions by reassignig to new ones
@@ -537,50 +532,6 @@ impl<S: StreamFactory> ChainLaserActor<S> {
         Some((chain_slot, from_slot))
     }
 
-    /// Helper to create a dedicated stream for a number of accounts.
-    /// It includes a slot subscription for chain slot synchronization.
-    /// This is not 100% cleanly separated but avoids creating another connection
-    /// just for slot updates.
-    /// NOTE: no slot update subscription will be created until the first
-    /// accounts subscription is created.
-    fn create_accounts_and_slot_stream(
-        stream_factory: &S,
-        pubkeys: &[&Pubkey],
-        commitment: &CommitmentLevel,
-        idx: usize,
-        from_slot: Option<u64>,
-    ) -> impl Stream<Item = LaserResult> {
-        let mut accounts = HashMap::new();
-        accounts.insert(
-            format!("account_subs: {idx}"),
-            SubscribeRequestFilterAccounts {
-                account: pubkeys.iter().map(|pk| pk.to_string()).collect(),
-                ..Default::default()
-            },
-        );
-
-        // Subscribe to slot updates for chain_slot synchronization
-        let mut slots = HashMap::new();
-        slots.insert(
-            "slot_updates".to_string(),
-            SubscribeRequestFilterSlots {
-                filter_by_commitment: Some(true),
-                ..Default::default()
-            },
-        );
-
-        let request = SubscribeRequest {
-            accounts,
-            slots,
-            commitment: Some((*commitment).into()),
-            // NOTE: triton does not support backfilling and we could not verify this with
-            // helius due to being rate limited.
-            from_slot,
-            ..Default::default()
-        };
-        stream_factory.subscribe(request)
-    }
-
     fn add_program_sub(
         &mut self,
         program_id: Pubkey,
@@ -606,23 +557,10 @@ impl<S: StreamFactory> ChainLaserActor<S> {
 
         subscribed_programs.insert(program_id);
 
-        let mut accounts = HashMap::new();
-        accounts.insert(
-            format!("program_sub: {program_id}"),
-            SubscribeRequestFilterAccounts {
-                owner: subscribed_programs
-                    .iter()
-                    .map(|pk| pk.to_string())
-                    .collect(),
-                ..Default::default()
-            },
-        );
-        let request = SubscribeRequest {
-            accounts,
-            commitment: Some(commitment.into()),
-            ..Default::default()
-        };
-        let stream = self.stream_factory.subscribe(request);
+        let program_ids: Vec<&Pubkey> = subscribed_programs.iter().collect();
+        let stream = self
+            .stream_manager
+            .program_subscribe(&program_ids, &commitment);
         self.program_subscriptions = Some((subscribed_programs, stream));
     }
 
