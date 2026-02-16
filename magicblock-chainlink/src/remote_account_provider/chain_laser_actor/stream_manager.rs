@@ -565,4 +565,587 @@ mod tests {
         let last_req = reqs.last().unwrap();
         assert_request_has_exact_pubkeys(last_req, &pks);
     }
+
+    // -------------------------------------------------------------
+    // 2. Current-New Stream Lifecycle
+    // -------------------------------------------------------------
+
+    #[test]
+    fn test_new_stream_created_on_first_subscribe() {
+        let (mut mgr, factory) = create_manager();
+        assert_eq!(mgr.account_stream_count(), 0);
+
+        subscribe_n(&mut mgr, 1);
+
+        assert_eq!(mgr.account_stream_count(), 1);
+        assert_eq!(factory.active_stream_count(), 1);
+    }
+
+    #[test]
+    fn test_current_new_stream_stays_below_threshold() {
+        let (mut mgr, _factory) = create_manager();
+        // MAX_NEW - 1 = 4
+        subscribe_in_batches(&mut mgr, 4, 2);
+
+        assert_eq!(mgr.account_stream_count(), 1);
+        assert_eq!(mgr.unoptimized_old_stream_count(), 0);
+    }
+
+    #[test]
+    fn test_current_new_stream_promoted_at_threshold() {
+        let (mut mgr, factory) = create_manager();
+        // Subscribe MAX_NEW (5) pubkeys first.
+        let first_five = make_pubkeys(5);
+        mgr.account_subscribe(&first_five, &COMMITMENT);
+        assert_eq!(mgr.unoptimized_old_stream_count(), 0);
+
+        // Subscribe the 6th pubkey → triggers promotion.
+        let sixth = Pubkey::new_unique();
+        mgr.account_subscribe(&[sixth], &COMMITMENT);
+
+        assert_eq!(mgr.unoptimized_old_stream_count(), 1);
+        // A new current-new stream was created for the 6th pubkey.
+        assert!(mgr.current_new_subs().contains(&sixth));
+        // The factory received a new subscribe call for the fresh
+        // current-new stream.
+        let reqs = factory.captured_requests();
+        assert!(reqs.len() >= 2);
+    }
+
+    #[test]
+    fn test_multiple_promotions_accumulate_unoptimized() {
+        let (mut mgr, _factory) = create_manager();
+        // First promotion: subscribe 6 pubkeys (exceeds MAX_NEW=5).
+        subscribe_n(&mut mgr, 6);
+        assert_eq!(mgr.unoptimized_old_stream_count(), 1);
+
+        // Second promotion: subscribe 5 more to fill the new current,
+        // then 1 more to exceed.
+        subscribe_n(&mut mgr, 5);
+        assert_eq!(mgr.unoptimized_old_stream_count(), 2);
+
+        // Current-new stream should only hold the overflow pubkeys.
+        assert!(mgr.current_new_sub_count() <= 1);
+    }
+
+    // -------------------------------------------------------------
+    // 3. Optimization Trigger via MAX_OLD_UNOPTIMIZED
+    // -------------------------------------------------------------
+
+    #[test]
+    fn test_optimization_triggered_when_unoptimized_exceeds_max() {
+        let (mut mgr, _factory) = create_manager();
+        // MAX_OLD_UNOPTIMIZED = 3. We need 4 promotions.
+        // Each promotion needs > MAX_NEW (5) pubkeys in current-new.
+        // Subscribe 6 four times → 4 promotions.
+        for _ in 0..3 {
+            subscribe_n(&mut mgr, 6);
+        }
+        assert_eq!(mgr.unoptimized_old_stream_count(), 3);
+
+        // 4th promotion triggers optimization.
+        subscribe_n(&mut mgr, 6);
+
+        // After optimization: unoptimized should be empty.
+        assert_eq!(mgr.unoptimized_old_stream_count(), 0);
+        // Optimized old streams should exist.
+        let total_subs = mgr.subscriptions().len();
+        let expected_optimized =
+            (total_subs + 9) / 10; // ceil(total / MAX_OLD_OPTIMIZED)
+        assert_eq!(
+            mgr.optimized_old_stream_count(),
+            expected_optimized,
+        );
+    }
+
+    #[test]
+    fn test_optimization_not_triggered_below_max_unoptimized() {
+        let (mut mgr, _factory) = create_manager();
+        // Exactly MAX_OLD_UNOPTIMIZED (3) promotions.
+        for _ in 0..3 {
+            subscribe_n(&mut mgr, 6);
+        }
+        assert_eq!(mgr.unoptimized_old_stream_count(), 3);
+        assert_eq!(mgr.optimized_old_stream_count(), 0);
+    }
+
+    // -------------------------------------------------------------
+    // 4. Manual / Interval-Driven Optimization
+    // -------------------------------------------------------------
+
+    #[test]
+    fn test_optimize_creates_correct_number_of_optimized_streams() {
+        let (mut mgr, _factory) = create_manager();
+        subscribe_n(&mut mgr, 25);
+
+        mgr.optimize(&COMMITMENT);
+
+        // ceil(25 / 10) = 3
+        assert_eq!(mgr.optimized_old_stream_count(), 3);
+    }
+
+    #[test]
+    fn test_optimize_clears_unoptimized_old_streams() {
+        let (mut mgr, _factory) = create_manager();
+        // Create several unoptimized old streams.
+        for _ in 0..3 {
+            subscribe_n(&mut mgr, 6);
+        }
+        assert!(mgr.unoptimized_old_stream_count() > 0);
+
+        mgr.optimize(&COMMITMENT);
+
+        assert_eq!(mgr.unoptimized_old_stream_count(), 0);
+        assert!(mgr.optimized_old_stream_count() > 0);
+    }
+
+    #[test]
+    fn test_optimize_resets_current_new_stream() {
+        let (mut mgr, _factory) = create_manager();
+        subscribe_n(&mut mgr, 8);
+
+        mgr.optimize(&COMMITMENT);
+
+        assert_eq!(mgr.current_new_sub_count(), 0);
+    }
+
+    #[test]
+    fn test_optimize_excludes_unsubscribed_pubkeys() {
+        let (mut mgr, factory) = create_manager();
+        let pks = subscribe_n(&mut mgr, 15);
+
+        // Unsubscribe 5 of them.
+        let to_unsub: Vec<Pubkey> = pks[0..5].to_vec();
+        mgr.account_unsubscribe(&to_unsub);
+
+        let reqs_before = factory.captured_requests().len();
+        mgr.optimize(&COMMITMENT);
+
+        // Optimized streams should only contain the 10 remaining
+        // pubkeys.
+        let remaining: HashSet<String> =
+            pks[5..].iter().map(|pk| pk.to_string()).collect();
+        let filter_pks =
+            all_filter_pubkeys_from(&factory, reqs_before);
+        assert_eq!(filter_pks.len(), 10);
+        for pk in &to_unsub {
+            assert!(
+                !filter_pks.contains(&pk.to_string()),
+                "unsubscribed pubkey {pk} found in optimized filter",
+            );
+        }
+        for pk_str in &remaining {
+            assert!(
+                filter_pks.contains(pk_str),
+                "expected pubkey {pk_str} missing from optimized filter",
+            );
+        }
+    }
+
+    #[test]
+    fn test_optimize_with_zero_subscriptions() {
+        let (mut mgr, _factory) = create_manager();
+        let pks = subscribe_n(&mut mgr, 5);
+        mgr.account_unsubscribe(&pks);
+
+        mgr.optimize(&COMMITMENT);
+
+        assert_eq!(mgr.optimized_old_stream_count(), 0);
+        assert_eq!(mgr.unoptimized_old_stream_count(), 0);
+    }
+
+    #[test]
+    fn test_optimize_idempotent() {
+        let (mut mgr, _factory) = create_manager();
+        subscribe_n(&mut mgr, 15);
+
+        mgr.optimize(&COMMITMENT);
+        let count_after_first = mgr.optimized_old_stream_count();
+
+        mgr.optimize(&COMMITMENT);
+        assert_eq!(
+            mgr.optimized_old_stream_count(),
+            count_after_first,
+        );
+    }
+
+    // -------------------------------------------------------------
+    // 5. Behavior During Optimization
+    // -------------------------------------------------------------
+
+    #[test]
+    fn test_subscribe_during_optimization_goes_to_current_new() {
+        let (mut mgr, _factory) = create_manager();
+        subscribe_n(&mut mgr, 20);
+
+        mgr.optimize(&COMMITMENT);
+
+        // Subscribe a new pubkey after optimization.
+        let new_pk = Pubkey::new_unique();
+        mgr.account_subscribe(&[new_pk], &COMMITMENT);
+
+        assert!(mgr.subscriptions().contains(&new_pk));
+        assert!(mgr.current_new_subs().contains(&new_pk));
+    }
+
+    #[test]
+    fn test_no_double_optimization_trigger() {
+        let (mut mgr, _factory) = create_manager();
+        // Fill up to MAX_OLD_UNOPTIMIZED.
+        for _ in 0..3 {
+            subscribe_n(&mut mgr, 6);
+        }
+        assert_eq!(mgr.unoptimized_old_stream_count(), 3);
+
+        // 4th promotion triggers optimization.
+        subscribe_n(&mut mgr, 6);
+        assert_eq!(mgr.unoptimized_old_stream_count(), 0);
+        let optimized_after_first = mgr.optimized_old_stream_count();
+
+        // Now subscribe enough to exceed MAX_SUBS_IN_NEW again,
+        // causing a promotion. Since optimization just ran, it should
+        // NOT trigger again immediately.
+        subscribe_n(&mut mgr, 6);
+        // Unoptimized grows by 1 but no second optimization.
+        assert!(mgr.unoptimized_old_stream_count() <= 1);
+        assert_eq!(
+            mgr.optimized_old_stream_count(),
+            optimized_after_first,
+        );
+    }
+
+    // -------------------------------------------------------------
+    // 6. Unsubscribe
+    // -------------------------------------------------------------
+
+    #[test]
+    fn test_unsubscribe_removes_from_subscriptions_set() {
+        let (mut mgr, _factory) = create_manager();
+        let pks = make_pubkeys(3);
+        mgr.account_subscribe(&pks, &COMMITMENT);
+
+        mgr.account_unsubscribe(&[pks[1]]);
+
+        assert_subscriptions_eq(&mgr, &[pks[0], pks[2]]);
+    }
+
+    #[test]
+    fn test_unsubscribe_nonexistent_pubkey_is_noop() {
+        let (mut mgr, _factory) = create_manager();
+        let random = Pubkey::new_unique();
+
+        mgr.account_unsubscribe(&[random]);
+
+        assert!(mgr.subscriptions().is_empty());
+    }
+
+    #[test]
+    fn test_unsubscribe_already_unsubscribed_pubkey() {
+        let (mut mgr, _factory) = create_manager();
+        let pk = Pubkey::new_unique();
+        mgr.account_subscribe(&[pk], &COMMITMENT);
+
+        mgr.account_unsubscribe(&[pk]);
+        mgr.account_unsubscribe(&[pk]);
+
+        assert!(mgr.subscriptions().is_empty());
+    }
+
+    #[test]
+    fn test_unsubscribe_does_not_modify_streams() {
+        let (mut mgr, factory) = create_manager();
+        let pks = make_pubkeys(4);
+        mgr.account_subscribe(&pks, &COMMITMENT);
+        let calls_before = factory.captured_requests().len();
+
+        mgr.account_unsubscribe(&pks[0..2]);
+
+        // No new factory calls after unsubscribe.
+        assert_eq!(factory.captured_requests().len(), calls_before);
+        // Current-new subs still contain all 4 (streams not updated).
+        for pk in &pks {
+            assert!(mgr.current_new_subs().contains(pk));
+        }
+    }
+
+    #[test]
+    fn test_unsubscribe_all_then_optimize_clears_streams() {
+        let (mut mgr, _factory) = create_manager();
+        // Subscribe 8 pubkeys (creates current-new + 1 unoptimized).
+        let pks = subscribe_n(&mut mgr, 8);
+        mgr.account_unsubscribe(&pks);
+
+        mgr.optimize(&COMMITMENT);
+
+        assert_eq!(mgr.optimized_old_stream_count(), 0);
+        assert_eq!(mgr.unoptimized_old_stream_count(), 0);
+    }
+
+    #[test]
+    fn test_unsubscribe_batch() {
+        let (mut mgr, factory) = create_manager();
+        let pks = make_pubkeys(5);
+        mgr.account_subscribe(&pks, &COMMITMENT);
+        let calls_before = factory.captured_requests().len();
+
+        mgr.account_unsubscribe(&[pks[0], pks[2], pks[4]]);
+
+        assert_subscriptions_eq(&mgr, &[pks[1], pks[3]]);
+        assert_eq!(factory.captured_requests().len(), calls_before);
+    }
+
+    // -------------------------------------------------------------
+    // 7. Subscription Membership Check
+    // -------------------------------------------------------------
+
+    #[test]
+    fn test_is_subscribed_returns_true_for_active() {
+        let (mut mgr, _factory) = create_manager();
+        let pk = Pubkey::new_unique();
+        mgr.account_subscribe(&[pk], &COMMITMENT);
+
+        assert!(mgr.is_subscribed(&pk));
+    }
+
+    #[test]
+    fn test_is_subscribed_returns_false_after_unsubscribe() {
+        let (mut mgr, _factory) = create_manager();
+        let pk = Pubkey::new_unique();
+        mgr.account_subscribe(&[pk], &COMMITMENT);
+        mgr.account_unsubscribe(&[pk]);
+
+        assert!(!mgr.is_subscribed(&pk));
+    }
+
+    #[test]
+    fn test_is_subscribed_returns_false_for_never_subscribed() {
+        let (mgr, _factory) = create_manager();
+        let random = Pubkey::new_unique();
+
+        assert!(!mgr.is_subscribed(&random));
+    }
+
+    // -------------------------------------------------------------
+    // 8. Stream Enumeration / Polling Access
+    // -------------------------------------------------------------
+
+    #[test]
+    fn test_all_account_streams_includes_all_generations() {
+        let (mut mgr, _factory) = create_manager();
+        // Create optimized old streams.
+        subscribe_n(&mut mgr, 15);
+        mgr.optimize(&COMMITMENT);
+
+        // Create an unoptimized old stream via promotion.
+        subscribe_n(&mut mgr, 6);
+
+        // Current-new also exists from the overflow pubkey.
+        let streams = mgr.all_account_streams_mut();
+        let expected = mgr.optimized_old_stream_count()
+            + mgr.unoptimized_old_stream_count()
+            + if mgr.current_new_sub_count() > 0 {
+                1
+            } else {
+                0
+            };
+        assert_eq!(streams.len(), expected);
+    }
+
+    #[test]
+    fn test_all_account_streams_empty_when_no_subscriptions() {
+        let (mut mgr, _factory) = create_manager();
+
+        let streams = mgr.all_account_streams_mut();
+        assert!(streams.is_empty());
+    }
+
+    #[test]
+    fn test_all_account_streams_after_optimize_drops_old_unoptimized()
+    {
+        let (mut mgr, _factory) = create_manager();
+        // Create unoptimized old streams.
+        for _ in 0..2 {
+            subscribe_n(&mut mgr, 6);
+        }
+        assert!(mgr.unoptimized_old_stream_count() > 0);
+
+        mgr.optimize(&COMMITMENT);
+
+        assert_eq!(mgr.unoptimized_old_stream_count(), 0);
+        let streams = mgr.all_account_streams_mut();
+        // Only optimized old streams remain (current-new is empty
+        // after optimize).
+        assert_eq!(streams.len(), mgr.optimized_old_stream_count());
+    }
+
+    // -------------------------------------------------------------
+    // 9. Edge Cases and Stress
+    // -------------------------------------------------------------
+
+    #[test]
+    fn test_subscribe_exactly_at_max_subs_in_new_no_promotion() {
+        let (mut mgr, _factory) = create_manager();
+        // Exactly MAX_NEW (5) pubkeys — should NOT promote.
+        subscribe_n(&mut mgr, 5);
+
+        assert_eq!(mgr.unoptimized_old_stream_count(), 0);
+        assert_eq!(mgr.account_stream_count(), 1);
+    }
+
+    #[test]
+    fn test_single_pubkey_optimization() {
+        let (mut mgr, _factory) = create_manager();
+        subscribe_n(&mut mgr, 1);
+
+        mgr.optimize(&COMMITMENT);
+
+        assert_eq!(mgr.optimized_old_stream_count(), 1);
+        assert_eq!(mgr.current_new_sub_count(), 0);
+    }
+
+    #[test]
+    fn test_subscribe_max_old_optimized_plus_one() {
+        let (mut mgr, _factory) = create_manager();
+        // MAX_OLD_OPTIMIZED + 1 = 11
+        subscribe_n(&mut mgr, 11);
+
+        mgr.optimize(&COMMITMENT);
+
+        assert_eq!(mgr.optimized_old_stream_count(), 2);
+    }
+
+    #[test]
+    fn test_large_scale_subscribe_and_optimize() {
+        let (mut mgr, factory) = create_manager();
+        let pks = subscribe_n(&mut mgr, 50);
+
+        let reqs_before = factory.captured_requests().len();
+        mgr.optimize(&COMMITMENT);
+
+        // ceil(50 / 10) = 5
+        assert_eq!(mgr.optimized_old_stream_count(), 5);
+        assert_eq!(mgr.subscriptions().len(), 50);
+        assert_eq!(mgr.current_new_sub_count(), 0);
+
+        // Verify the union of all optimized stream filters equals all
+        // 50 pubkeys.
+        let filter_pks =
+            all_filter_pubkeys_from(&factory, reqs_before);
+        assert_eq!(filter_pks.len(), 50);
+        for pk in &pks {
+            assert!(filter_pks.contains(&pk.to_string()));
+        }
+    }
+
+    #[test]
+    fn test_interleaved_subscribe_unsubscribe_then_optimize() {
+        let (mut mgr, factory) = create_manager();
+        let pks = subscribe_n(&mut mgr, 20);
+        // Unsubscribe 8 scattered.
+        let unsub1: Vec<Pubkey> =
+            pks.iter().step_by(2).take(8).copied().collect();
+        mgr.account_unsubscribe(&unsub1);
+
+        // Subscribe 5 new ones.
+        let new_pks = subscribe_n(&mut mgr, 5);
+        // Unsubscribe 2 of the new ones.
+        mgr.account_unsubscribe(&new_pks[0..2]);
+
+        let expected_count = 20 - 8 + 5 - 2;
+        assert_eq!(mgr.subscriptions().len(), expected_count);
+
+        let reqs_before = factory.captured_requests().len();
+        mgr.optimize(&COMMITMENT);
+
+        let filter_pks =
+            all_filter_pubkeys_from(&factory, reqs_before);
+        assert_eq!(filter_pks.len(), expected_count);
+        // Verify unsubscribed pubkeys are absent.
+        for pk in &unsub1 {
+            assert!(!filter_pks.contains(&pk.to_string()));
+        }
+        for pk in &new_pks[0..2] {
+            assert!(!filter_pks.contains(&pk.to_string()));
+        }
+    }
+
+    #[test]
+    fn test_rapid_subscribe_unsubscribe_same_pubkey() {
+        let (mut mgr, _factory) = create_manager();
+        let pk = Pubkey::new_unique();
+
+        mgr.account_subscribe(&[pk], &COMMITMENT);
+        mgr.account_unsubscribe(&[pk]);
+        mgr.account_subscribe(&[pk], &COMMITMENT);
+
+        assert!(mgr.subscriptions().contains(&pk));
+        assert!(mgr.current_new_subs().contains(&pk));
+    }
+
+    // -------------------------------------------------------------
+    // 10. Stream Factory Interaction Verification
+    // -------------------------------------------------------------
+
+    #[test]
+    fn test_factory_called_with_correct_commitment() {
+        let (mut mgr, factory) = create_manager();
+        let commitment = CommitmentLevel::Finalized;
+        let pk = Pubkey::new_unique();
+
+        mgr.account_subscribe(&[pk], &commitment);
+
+        let reqs = factory.captured_requests();
+        assert_eq!(reqs.len(), 1);
+        assert_eq!(
+            reqs[0].commitment,
+            Some(i32::from(CommitmentLevel::Finalized)),
+        );
+    }
+
+    #[test]
+    fn test_factory_called_with_slot_filter() {
+        let (mut mgr, factory) = create_manager();
+        subscribe_n(&mut mgr, 1);
+
+        let reqs = factory.captured_requests();
+        assert!(!reqs[0].slots.is_empty());
+    }
+
+    #[test]
+    fn test_optimize_factory_calls_contain_chunked_pubkeys() {
+        let (mut mgr, factory) = create_manager();
+        subscribe_n(&mut mgr, 15);
+
+        let reqs_before = factory.captured_requests().len();
+        mgr.optimize(&COMMITMENT);
+
+        let optimize_reqs: Vec<_> = factory
+            .captured_requests()
+            .into_iter()
+            .skip(reqs_before)
+            .collect();
+        assert_eq!(optimize_reqs.len(), 2);
+
+        let first_pks = account_pubkeys_from_request(&optimize_reqs[0]);
+        let second_pks =
+            account_pubkeys_from_request(&optimize_reqs[1]);
+        assert_eq!(first_pks.len(), 10);
+        assert_eq!(second_pks.len(), 5);
+
+        // No overlap.
+        assert!(first_pks.is_disjoint(&second_pks));
+    }
+
+    #[test]
+    fn test_factory_not_called_on_unsubscribe() {
+        let (mut mgr, factory) = create_manager();
+        subscribe_n(&mut mgr, 5);
+        let calls_before = factory.captured_requests().len();
+
+        let pks: Vec<Pubkey> =
+            mgr.subscriptions().iter().take(3).copied().collect();
+        mgr.account_unsubscribe(&pks);
+
+        assert_eq!(factory.captured_requests().len(), calls_before);
+    }
 }
