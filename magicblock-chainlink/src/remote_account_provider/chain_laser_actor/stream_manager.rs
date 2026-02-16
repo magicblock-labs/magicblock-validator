@@ -244,17 +244,17 @@ impl<S: StreamFactory> StreamManager<S> {
         self.optimized_old_streams.len()
     }
 
-    /// Returns mutable references to all account streams (optimized
-    /// old + unoptimized old + current-new) for polling.
-    pub fn all_account_streams_mut(&mut self) -> Vec<&mut LaserStream> {
+    /// Returns references to all account streams (optimized old +
+    /// unoptimized old + current-new) for inspection.
+    pub fn all_account_streams(&self) -> Vec<&LaserStream> {
         let mut streams = Vec::new();
-        for s in &mut self.optimized_old_streams {
+        for s in &self.optimized_old_streams {
             streams.push(s);
         }
-        for s in &mut self.unoptimized_old_streams {
+        for s in &self.unoptimized_old_streams {
             streams.push(s);
         }
-        if let Some(s) = &mut self.current_new_stream {
+        if let Some(s) = &self.current_new_stream {
             streams.push(s);
         }
         streams
@@ -560,7 +560,7 @@ mod tests {
             .captured_requests()
             .iter()
             .skip(start_idx)
-            .flat_map(|r| account_pubkeys_from_request(r))
+            .flat_map(account_pubkeys_from_request)
             .collect()
     }
 
@@ -711,7 +711,7 @@ mod tests {
         // Optimized old streams should exist.
         let total_subs = mgr.subscriptions().len();
         let expected_optimized =
-            (total_subs + 9) / 10; // ceil(total / MAX_OLD_OPTIMIZED)
+            total_subs.div_ceil(10); // ceil(total / MAX_OLD_OPTIMIZED)
         assert_eq!(
             mgr.optimized_old_stream_count(),
             expected_optimized,
@@ -1001,15 +1001,15 @@ mod tests {
 
         // Current-new also exists from the overflow pubkey.
         let expected = mgr.account_stream_count();
-        let streams = mgr.all_account_streams_mut();
+        let streams = mgr.all_account_streams();
         assert_eq!(streams.len(), expected);
     }
 
     #[test]
     fn test_all_account_streams_empty_when_no_subscriptions() {
-        let (mut mgr, _factory) = create_manager();
+        let (mgr, _factory) = create_manager();
 
-        let streams = mgr.all_account_streams_mut();
+        let streams = mgr.all_account_streams();
         assert!(streams.is_empty());
     }
 
@@ -1026,7 +1026,7 @@ mod tests {
         mgr.optimize(&COMMITMENT);
 
         assert_eq!(mgr.unoptimized_old_stream_count(), 0);
-        let streams = mgr.all_account_streams_mut();
+        let streams = mgr.all_account_streams();
         // Only optimized old streams remain (current-new is empty
         // after optimize).
         assert_eq!(streams.len(), mgr.optimized_old_stream_count());
