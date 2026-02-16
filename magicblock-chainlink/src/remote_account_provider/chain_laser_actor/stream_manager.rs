@@ -98,10 +98,51 @@ impl<S: StreamFactory> StreamManager<S> {
     /// triggered.
     pub fn account_subscribe(
         &mut self,
-        _pubkeys: &[Pubkey],
-        _commitment: &CommitmentLevel,
+        pubkeys: &[Pubkey],
+        commitment: &CommitmentLevel,
     ) {
-        todo!("account_subscribe: generational implementation")
+        // Filter out pubkeys already in subscriptions.
+        let new_pks: Vec<Pubkey> = pubkeys
+            .iter()
+            .filter(|pk| !self.subscriptions.contains(pk))
+            .copied()
+            .collect();
+
+        if new_pks.is_empty() {
+            return;
+        }
+
+        for pk in &new_pks {
+            self.subscriptions.insert(*pk);
+            self.current_new_subs.insert(*pk);
+        }
+
+        // (Re)create the current-new stream with the full
+        // current_new_subs filter.
+        self.current_new_stream =
+            Some(self.create_account_stream(
+                &self.current_new_subs.iter().collect::<Vec<_>>(),
+                commitment,
+            ));
+
+        // Promote if current-new exceeds threshold.
+        if self.current_new_subs.len() > self.config.max_subs_in_new {
+            // Move current-new stream to unoptimized old.
+            if let Some(stream) = self.current_new_stream.take() {
+                self.unoptimized_old_streams.push(stream);
+            }
+            self.current_new_subs.clear();
+
+            // Create a fresh empty current-new stream.
+            self.current_new_stream = None;
+
+            // If unoptimized old streams exceed the limit, optimize.
+            if self.unoptimized_old_streams.len()
+                > self.config.max_old_unoptimized
+            {
+                self.optimize(commitment);
+            }
+        }
     }
 
     /// Unsubscribe the given pubkeys.
@@ -109,8 +150,10 @@ impl<S: StreamFactory> StreamManager<S> {
     /// Removes them from the `subscriptions` HashSet only — streams
     /// are never modified. Updates for these pubkeys will be ignored
     /// by the actor.
-    pub fn account_unsubscribe(&mut self, _pubkeys: &[Pubkey]) {
-        todo!("account_unsubscribe")
+    pub fn account_unsubscribe(&mut self, pubkeys: &[Pubkey]) {
+        for pk in pubkeys {
+            self.subscriptions.remove(pk);
+        }
     }
 
     /// Rebuild all account streams from `subscriptions`.
@@ -126,8 +169,8 @@ impl<S: StreamFactory> StreamManager<S> {
 
     /// Returns `true` if the pubkey is in the active `subscriptions`
     /// set.
-    pub fn is_subscribed(&self, _pubkey: &Pubkey) -> bool {
-        todo!("is_subscribed")
+    pub fn is_subscribed(&self, pubkey: &Pubkey) -> bool {
+        self.subscriptions.contains(pubkey)
     }
 
     // ---------------------------------------------------------
@@ -177,6 +220,48 @@ impl<S: StreamFactory> StreamManager<S> {
         self.optimized_old_streams.len()
             + self.unoptimized_old_streams.len()
             + current
+    }
+
+    // ---------------------------------------------------------
+    // Internal helpers
+    // ---------------------------------------------------------
+
+    /// Build a `SubscribeRequest` and call the factory for the given
+    /// account pubkeys. Includes a slot subscription for chain slot
+    /// synchronisation (matching the legacy path).
+    fn create_account_stream(
+        &self,
+        pubkeys: &[&Pubkey],
+        commitment: &CommitmentLevel,
+    ) -> LaserStream {
+        let mut accounts = HashMap::new();
+        accounts.insert(
+            "account_subs".to_string(),
+            SubscribeRequestFilterAccounts {
+                account: pubkeys
+                    .iter()
+                    .map(|pk| pk.to_string())
+                    .collect(),
+                ..Default::default()
+            },
+        );
+
+        let mut slots = HashMap::new();
+        slots.insert(
+            "slot_updates".to_string(),
+            SubscribeRequestFilterSlots {
+                filter_by_commitment: Some(true),
+                ..Default::default()
+            },
+        );
+
+        let request = SubscribeRequest {
+            accounts,
+            slots,
+            commitment: Some((*commitment).into()),
+            ..Default::default()
+        };
+        self.stream_factory.subscribe(request)
     }
 
     // =========================================================
@@ -369,6 +454,56 @@ mod tests {
         }
     }
 
+    // ---------------------------------------------------------
+    // Additional helpers
+    // ---------------------------------------------------------
+
+    const COMMITMENT: CommitmentLevel = CommitmentLevel::Processed;
+
+    /// Subscribe `n` pubkeys one-at-a-time, returning the created
+    /// pubkeys.
+    fn subscribe_n(
+        mgr: &mut StreamManager<MockStreamFactory>,
+        n: usize,
+    ) -> Vec<Pubkey> {
+        let pks = make_pubkeys(n);
+        mgr.account_subscribe(&pks, &COMMITMENT);
+        pks
+    }
+
+    /// Subscribe pubkeys in batches of `batch` until `total` pubkeys
+    /// have been subscribed. Returns all created pubkeys.
+    fn subscribe_in_batches(
+        mgr: &mut StreamManager<MockStreamFactory>,
+        total: usize,
+        batch: usize,
+    ) -> Vec<Pubkey> {
+        let mut all = Vec::new();
+        let mut remaining = total;
+        while remaining > 0 {
+            let n = remaining.min(batch);
+            let pks = make_pubkeys(n);
+            mgr.account_subscribe(&pks, &COMMITMENT);
+            all.extend(pks);
+            remaining -= n;
+        }
+        all
+    }
+
+    /// Returns the union of all account pubkey strings across all
+    /// captured requests from `start_idx` onward.
+    fn all_filter_pubkeys_from(
+        factory: &MockStreamFactory,
+        start_idx: usize,
+    ) -> HashSet<String> {
+        factory
+            .captured_requests()
+            .iter()
+            .skip(start_idx)
+            .flat_map(|r| account_pubkeys_from_request(r))
+            .collect()
+    }
+
     // -------------------------------------------------------------
     // 1. Subscription Tracking
     // -------------------------------------------------------------
@@ -377,14 +512,11 @@ mod tests {
     fn test_subscribe_single_pubkey_adds_to_subscriptions() {
         let (mut mgr, factory) = create_manager();
         let pk = Pubkey::new_unique();
-        let commitment = CommitmentLevel::Processed;
 
-        mgr.account_subscribe(&[pk], &commitment);
+        mgr.account_subscribe(&[pk], &COMMITMENT);
 
         assert_subscriptions_eq(&mgr, &[pk]);
 
-        // Exactly one subscribe call (initial current-new stream)
-        // whose filter contains exactly this pubkey.
         let reqs = factory.captured_requests();
         assert_eq!(reqs.len(), 1);
         assert_request_has_exact_pubkeys(&reqs[0], &[pk]);
@@ -394,13 +526,11 @@ mod tests {
     fn test_subscribe_multiple_pubkeys_at_once() {
         let (mut mgr, factory) = create_manager();
         let pks = make_pubkeys(5);
-        let commitment = CommitmentLevel::Processed;
 
-        mgr.account_subscribe(&pks, &commitment);
+        mgr.account_subscribe(&pks, &COMMITMENT);
 
         assert_subscriptions_eq(&mgr, &pks);
 
-        // One stream created whose filter contains all 5.
         let reqs = factory.captured_requests();
         assert_eq!(reqs.len(), 1);
         assert_request_has_exact_pubkeys(&reqs[0], &pks);
@@ -410,34 +540,27 @@ mod tests {
     fn test_subscribe_duplicate_pubkey_is_noop() {
         let (mut mgr, factory) = create_manager();
         let pk = Pubkey::new_unique();
-        let commitment = CommitmentLevel::Processed;
 
-        mgr.account_subscribe(&[pk], &commitment);
+        mgr.account_subscribe(&[pk], &COMMITMENT);
         let calls_after_first = factory.captured_requests().len();
 
-        // Subscribe the same pubkey again.
-        mgr.account_subscribe(&[pk], &commitment);
+        mgr.account_subscribe(&[pk], &COMMITMENT);
 
         assert_subscriptions_eq(&mgr, &[pk]);
-
-        // No extra streams spawned.
-        assert_eq!(factory.captured_requests().len(), calls_after_first,);
+        assert_eq!(factory.captured_requests().len(), calls_after_first);
     }
 
     #[test]
     fn test_subscribe_incremental_calls_accumulate() {
         let (mut mgr, factory) = create_manager();
         let pks = make_pubkeys(3);
-        let commitment = CommitmentLevel::Processed;
 
-        mgr.account_subscribe(&[pks[0]], &commitment);
-        mgr.account_subscribe(&[pks[1]], &commitment);
-        mgr.account_subscribe(&[pks[2]], &commitment);
+        mgr.account_subscribe(&[pks[0]], &COMMITMENT);
+        mgr.account_subscribe(&[pks[1]], &COMMITMENT);
+        mgr.account_subscribe(&[pks[2]], &COMMITMENT);
 
         assert_subscriptions_eq(&mgr, &pks);
 
-        // The most recent factory call's filter should contain all
-        // three pubkeys.
         let reqs = factory.captured_requests();
         let last_req = reqs.last().unwrap();
         assert_request_has_exact_pubkeys(last_req, &pks);
