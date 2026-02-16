@@ -518,6 +518,9 @@ where
             try_derive_ata_address_and_bump(&wallet_owner, &mint)?;
 
         let projected_ata = self.maybe_project_delegated_ata_from_eata(
+            // Intentional: in this subscription-update path there is no separate ATA, so
+            // maybe_project_delegated_ata_from_eata uses eata_account as ata_account; with deleg_record,
+            // ata_account only affects projected slot via max(), so passing eata_account twice is correct.
             eata_account,
             eata_account,
             deleg_record,
