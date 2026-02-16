@@ -6,7 +6,9 @@ use helius_laserstream::{
     LaserstreamError,
 };
 
-pub use self::actor::{ChainLaserActor, SharedSubscriptions, Slots};
+pub use self::actor::{
+    ChainLaserActor, SharedSubscriptions, Slots,
+};
 
 mod actor;
 mod mock;
@@ -18,7 +20,7 @@ pub type LaserResult = Result<SubscribeUpdate, LaserstreamError>;
 pub type LaserStream = Pin<Box<dyn Stream<Item = LaserResult> + Send>>;
 
 /// Abstraction over stream creation for testability
-pub trait StreamFactory: Send + Sync {
+pub trait StreamFactory: Send + Sync + 'static {
     /// Create a stream for the given subscription request
     fn subscribe(&self, request: SubscribeRequest) -> LaserStream;
 }

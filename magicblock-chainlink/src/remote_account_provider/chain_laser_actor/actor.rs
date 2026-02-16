@@ -114,9 +114,9 @@ impl fmt::Display for AccountUpdateSource {
 /// - If a stream ends unexpectedly, `signal_connection_issue()` is called.
 /// - The actor sends an abort signal to the submux, which triggers reconnection.
 /// - The actor itself doesn't attempt to reconnect; it relies on external recovery.
-pub struct ChainLaserActor {
+pub struct ChainLaserActor<S: StreamFactory> {
     /// Factory for creating laser streams
-    stream_factory: Box<dyn StreamFactory>,
+    stream_factory: S,
     /// Requested subscriptions, some may not be active yet.
     /// Shared with ChainLaserClientImpl for sync access to
     /// subscription_count and subscriptions_union.
@@ -145,7 +145,7 @@ pub struct ChainLaserActor {
     rpc_client: ChainRpcClientImpl,
 }
 
-impl ChainLaserActor {
+impl ChainLaserActor<super::StreamFactoryImpl> {
     pub fn new_from_url(
         pubsub_url: &str,
         client_id: &str,
@@ -196,8 +196,7 @@ impl ChainLaserActor {
         mpsc::Receiver<SubscriptionUpdate>,
         SharedSubscriptions,
     ) {
-        let stream_factory =
-            Box::new(super::StreamFactoryImpl::new(laser_client_config));
+        let stream_factory = super::StreamFactoryImpl::new(laser_client_config);
         Self::with_stream_factory(
             client_id,
             stream_factory,
@@ -207,11 +206,13 @@ impl ChainLaserActor {
             rpc_client,
         )
     }
+}
 
+impl<S: StreamFactory> ChainLaserActor<S> {
     /// Create actor with a custom stream factory (for testing)
     pub fn with_stream_factory(
         client_id: &str,
-        stream_factory: Box<dyn StreamFactory>,
+        stream_factory: S,
         commitment: SolanaCommitmentLevel,
         abort_sender: mpsc::Sender<()>,
         slots: Slots,
@@ -484,7 +485,7 @@ impl ChainLaserActor {
 
         for (idx, chunk) in chunks.into_iter().enumerate() {
             let stream = Self::create_accounts_and_slot_stream(
-                self.stream_factory.as_ref(),
+                &self.stream_factory,
                 &chunk,
                 &self.commitment,
                 idx,
@@ -543,7 +544,7 @@ impl ChainLaserActor {
     /// NOTE: no slot update subscription will be created until the first
     /// accounts subscription is created.
     fn create_accounts_and_slot_stream(
-        stream_factory: &dyn StreamFactory,
+        stream_factory: &S,
         pubkeys: &[&Pubkey],
         commitment: &CommitmentLevel,
         idx: usize,
