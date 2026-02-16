@@ -127,14 +127,35 @@ impl<S: StreamFactory> StreamManager<S> {
 
         // Promote if current-new exceeds threshold.
         if self.current_new_subs.len() > self.config.max_subs_in_new {
+            let overflow_count = self.current_new_subs.len()
+                - self.config.max_subs_in_new;
+            // The overflow pubkeys are the tail of new_pks.
+            let overflow_start = new_pks.len().saturating_sub(
+                overflow_count,
+            );
+            let overflow_pks = &new_pks[overflow_start..];
+
             // Move current-new stream to unoptimized old.
             if let Some(stream) = self.current_new_stream.take() {
                 self.unoptimized_old_streams.push(stream);
             }
             self.current_new_subs.clear();
 
-            // Create a fresh empty current-new stream.
-            self.current_new_stream = None;
+            // Start fresh current-new with overflow pubkeys.
+            if overflow_pks.is_empty() {
+                self.current_new_stream = None;
+            } else {
+                for pk in overflow_pks {
+                    self.current_new_subs.insert(*pk);
+                }
+                self.current_new_stream =
+                    Some(self.create_account_stream(
+                        &overflow_pks
+                            .iter()
+                            .collect::<Vec<_>>(),
+                        commitment,
+                    ));
+            }
 
             // If unoptimized old streams exceed the limit, optimize.
             if self.unoptimized_old_streams.len()
@@ -163,8 +184,28 @@ impl<S: StreamFactory> StreamManager<S> {
     /// 2. Create a new stream for each chunk → `optimized_old_streams`.
     /// 3. Clear `unoptimized_old_streams`.
     /// 4. Reset the current-new stream (empty filter).
-    pub fn optimize(&mut self, _commitment: &CommitmentLevel) {
-        todo!("optimize")
+    pub fn optimize(&mut self, commitment: &CommitmentLevel) {
+        // Collect all active subscriptions and chunk them.
+        let all_pks: Vec<Pubkey> =
+            self.subscriptions.iter().copied().collect();
+
+        // Build optimized old streams from chunks.
+        self.optimized_old_streams = all_pks
+            .chunks(self.config.max_subs_in_old_optimized)
+            .map(|chunk| {
+                let refs: Vec<&Pubkey> = chunk.iter().collect();
+                self.stream_factory.subscribe(
+                    Self::build_account_request(&refs, commitment),
+                )
+            })
+            .collect();
+
+        // Clear unoptimized old streams.
+        self.unoptimized_old_streams.clear();
+
+        // Reset the current-new stream.
+        self.current_new_subs.clear();
+        self.current_new_stream = None;
     }
 
     /// Returns `true` if the pubkey is in the active `subscriptions`
@@ -206,7 +247,17 @@ impl<S: StreamFactory> StreamManager<S> {
     /// Returns mutable references to all account streams (optimized
     /// old + unoptimized old + current-new) for polling.
     pub fn all_account_streams_mut(&mut self) -> Vec<&mut LaserStream> {
-        todo!("all_account_streams_mut")
+        let mut streams = Vec::new();
+        for s in &mut self.optimized_old_streams {
+            streams.push(s);
+        }
+        for s in &mut self.unoptimized_old_streams {
+            streams.push(s);
+        }
+        if let Some(s) = &mut self.current_new_stream {
+            streams.push(s);
+        }
+        streams
     }
 
     /// Returns the total number of account streams across all
@@ -226,14 +277,12 @@ impl<S: StreamFactory> StreamManager<S> {
     // Internal helpers
     // ---------------------------------------------------------
 
-    /// Build a `SubscribeRequest` and call the factory for the given
-    /// account pubkeys. Includes a slot subscription for chain slot
-    /// synchronisation (matching the legacy path).
-    fn create_account_stream(
-        &self,
+    /// Build a `SubscribeRequest` for the given account pubkeys.
+    /// Includes a slot subscription for chain slot synchronisation.
+    fn build_account_request(
         pubkeys: &[&Pubkey],
         commitment: &CommitmentLevel,
-    ) -> LaserStream {
+    ) -> SubscribeRequest {
         let mut accounts = HashMap::new();
         accounts.insert(
             "account_subs".to_string(),
@@ -255,12 +304,23 @@ impl<S: StreamFactory> StreamManager<S> {
             },
         );
 
-        let request = SubscribeRequest {
+        SubscribeRequest {
             accounts,
             slots,
             commitment: Some((*commitment).into()),
             ..Default::default()
-        };
+        }
+    }
+
+    /// Build a `SubscribeRequest` and call the factory for the given
+    /// account pubkeys.
+    fn create_account_stream(
+        &self,
+        pubkeys: &[&Pubkey],
+        commitment: &CommitmentLevel,
+    ) -> LaserStream {
+        let request =
+            Self::build_account_request(pubkeys, commitment);
         self.stream_factory.subscribe(request)
     }
 
@@ -940,14 +1000,8 @@ mod tests {
         subscribe_n(&mut mgr, 6);
 
         // Current-new also exists from the overflow pubkey.
+        let expected = mgr.account_stream_count();
         let streams = mgr.all_account_streams_mut();
-        let expected = mgr.optimized_old_stream_count()
-            + mgr.unoptimized_old_stream_count()
-            + if mgr.current_new_sub_count() > 0 {
-                1
-            } else {
-                0
-            };
         assert_eq!(streams.len(), expected);
     }
 
