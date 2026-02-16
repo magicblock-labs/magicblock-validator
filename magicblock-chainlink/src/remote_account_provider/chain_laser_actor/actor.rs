@@ -30,7 +30,9 @@ use tokio_stream::StreamMap;
 use tonic::Code;
 use tracing::*;
 
-use super::{LaserResult, LaserStream, StreamFactory, StreamManager};
+use super::{
+    LaserResult, LaserStream, StreamFactory, StreamManager, StreamManagerConfig,
+};
 use crate::remote_account_provider::{
     chain_rpc_client::{ChainRpcClient, ChainRpcClientImpl},
     chain_slot::ChainSlot,
@@ -227,7 +229,10 @@ impl<S: StreamFactory> ChainLaserActor<S> {
         let shared_subscriptions = Arc::clone(&subscriptions);
 
         let me = Self {
-            stream_manager: StreamManager::new(stream_factory),
+            stream_manager: StreamManager::new(
+                StreamManagerConfig::default(),
+                stream_factory,
+            ),
             messages_receiver,
             subscriptions,
             active_subscriptions: Default::default(),
@@ -344,10 +349,8 @@ impl<S: StreamFactory> ChainLaserActor<S> {
                 false
             }
             ProgramSubscribe { pubkey, response } => {
-                self.stream_manager.add_program_subscription(
-                    pubkey,
-                    &self.commitment,
-                );
+                self.stream_manager
+                    .add_program_subscription(pubkey, &self.commitment);
                 let _ = response.send(Ok(())).inspect_err(|_| {
                     warn!(client_id = self.client_id, program_id = %pubkey, "Failed to send program subscribe response");
                 });
