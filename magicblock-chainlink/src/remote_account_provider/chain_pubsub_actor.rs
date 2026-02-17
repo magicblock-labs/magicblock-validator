@@ -742,7 +742,7 @@ impl ChainPubsubActor {
         });
     }
 
-    #[instrument(skip(pubsub_connection, pubsub_client_config, subs, program_subs, is_connected), fields(client_id = %client_id))]
+    #[instrument(skip_all, fields(client_id = %client_id))]
     async fn try_reconnect(
         pubsub_connection: Arc<PubSubConnectionPool<PubsubConnectionImpl>>,
         pubsub_client_config: PubsubClientConfig,
