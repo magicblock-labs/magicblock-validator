@@ -30,12 +30,19 @@ list-programs:
 programs: $(PROGRAMS_SO)
 
 test: $(PROGRAMS_SO)
-	$(MAKE) chainlink-prep-programs -C ./test-chainlink && \
+	# chainlink-prep-programs builds extra mini binaries needed only by chainlink tests
+	@run_tests_clean="$$(echo "$(RUN_TESTS)" | tr -d '[:space:]')"; \
+	if [ -z "$$run_tests_clean" ] || echo ",$$run_tests_clean," | grep -q ",chainlink,"; then \
+		$(MAKE) chainlink-prep-programs -C ./test-chainlink; \
+	else \
+		echo "Skipping chainlink-prep-programs for RUN_TESTS=$(RUN_TESTS)"; \
+	fi
 	RUST_BACKTRACE=1 \
 	RUST_LOG=$(RUST_LOG) \
 	cargo run --package test-runner --bin run-tests
 
 test-force-mb: $(PROGRAMS_SO)
+	RUST_BACKTRACE=1 \
 	RUST_LOG=$(RUST_LOG) \
 	FORCE_MAGIC_BLOCK_VALIDATOR=1 \
 	cargo run --package test-runner --bin run-tests
