@@ -188,7 +188,7 @@ impl<T: PubsubConnection> PubSubConnectionPool<T> {
             pool: &PubSubConnectionPool<T>,
         ) -> Option<(Arc<AtomicUsize>, Arc<T>)> {
             let guard = Guard::new();
-            pool.try_reserve_slot(&guard)
+            pool.try_insert_sub(&guard)
         }
 
         // Phase 1: fast path — try to reserve a slot without locking
@@ -229,7 +229,7 @@ impl<T: PubsubConnection> PubSubConnectionPool<T> {
     /// Tries to atomically reserve a subscription slot on an existing
     /// connection via CAS, ensuring we never exceed
     /// `per_connection_sub_limit`.
-    fn try_reserve_slot(
+    fn try_insert_sub(
         &self,
         guard: &Guard,
     ) -> Option<(Arc<AtomicUsize>, Arc<T>)> {
