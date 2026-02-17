@@ -1,6 +1,6 @@
-use async_trait::async_trait;
 use std::sync::{Arc, Mutex};
 
+use async_trait::async_trait;
 use helius_laserstream::{
     grpc::{self, SubscribeRequest},
     LaserstreamError,
@@ -8,11 +8,10 @@ use helius_laserstream::{
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
+use super::{LaserResult, StreamFactory};
 use crate::remote_account_provider::chain_laser_actor::{
     LaserStreamWithHandle, StreamHandle,
 };
-
-use super::{LaserResult, StreamFactory};
 
 /// A test mock that captures subscription requests and allows driving
 /// streams programmatically.
@@ -33,8 +32,7 @@ pub struct MockStreamFactory {
     /// Each call to `subscribe()` creates a new mpsc channel; the rx
     /// side becomes the returned stream, and the tx side is stored
     /// here so the test can drive updates.
-    stream_senders:
-        Arc<Mutex<Vec<Arc<mpsc::UnboundedSender<LaserResult>>>>>,
+    stream_senders: Arc<Mutex<Vec<Arc<mpsc::UnboundedSender<LaserResult>>>>>,
 }
 
 #[allow(dead_code)]
@@ -60,11 +58,7 @@ impl MockStreamFactory {
     }
 
     /// Push an error update to a specific stream
-    pub fn push_error_to_stream(
-        &self,
-        idx: usize,
-        error: LaserstreamError,
-    ) {
+    pub fn push_error_to_stream(&self, idx: usize, error: LaserstreamError) {
         let senders = self.stream_senders.lock().unwrap();
         if let Some(sender) = senders.get(idx) {
             let _ = sender.send(Err(error));
@@ -80,11 +74,7 @@ impl MockStreamFactory {
     }
 
     /// Push an update to a specific stream by index
-    pub fn push_update_to_stream(
-        &self,
-        idx: usize,
-        update: LaserResult,
-    ) {
+    pub fn push_update_to_stream(&self, idx: usize, update: LaserResult) {
         let senders = self.stream_senders.lock().unwrap();
         if let Some(sender) = senders.get(idx) {
             let _ = sender.send(update);
@@ -132,10 +122,7 @@ impl StreamHandle for MockStreamHandle {
         &self,
         request: SubscribeRequest,
     ) -> Result<(), LaserstreamError> {
-        self.handle_requests
-            .lock()
-            .unwrap()
-            .push(request);
+        self.handle_requests.lock().unwrap().push(request);
         Ok(())
     }
 }
@@ -150,8 +137,7 @@ impl StreamFactory<MockStreamHandle> for MockStreamFactory {
 
         // Create a channel for driving LaserResult items into the
         // stream
-        let (stream_tx, stream_rx) =
-            mpsc::unbounded_channel::<LaserResult>();
+        let (stream_tx, stream_rx) = mpsc::unbounded_channel::<LaserResult>();
         let stream = Box::pin(UnboundedReceiverStream::new(stream_rx));
 
         let stream_tx = Arc::new(stream_tx);
@@ -221,18 +207,11 @@ mod tests {
             ..Default::default()
         };
 
-        result
-            .handle
-            .write(update_request.clone())
-            .await
-            .unwrap();
+        result.handle.write(update_request.clone()).await.unwrap();
 
         let handle_reqs = mock.handle_requests();
         assert_eq!(handle_reqs.len(), 1);
-        assert_eq!(
-            handle_reqs[0].commitment,
-            update_request.commitment
-        );
+        assert_eq!(handle_reqs[0].commitment, update_request.commitment);
         assert!(handle_reqs[0].accounts.contains_key("updated"));
     }
 
@@ -246,9 +225,7 @@ mod tests {
         // Both handles share the same handle_requests vec
         r1.handle
             .write(SubscribeRequest {
-                commitment: Some(
-                    CommitmentLevel::Processed.into(),
-                ),
+                commitment: Some(CommitmentLevel::Processed.into()),
                 ..Default::default()
             })
             .await
@@ -256,9 +233,7 @@ mod tests {
 
         r2.handle
             .write(SubscribeRequest {
-                commitment: Some(
-                    CommitmentLevel::Finalized.into(),
-                ),
+                commitment: Some(CommitmentLevel::Finalized.into()),
                 ..Default::default()
             })
             .await

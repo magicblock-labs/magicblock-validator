@@ -308,7 +308,7 @@ impl<H: StreamHandle, S: StreamFactory<H>> ChainLaserActor<H, S> {
                 // Program subscription updates
                 update = async {
                     match self.stream_manager.program_stream_mut() {
-                        Some(stream) => stream.next().await,
+                        Some(swh) => swh.stream.next().await,
                         None => std::future::pending().await,
                     }
                 }, if self.stream_manager.has_program_subscriptions() => {
@@ -486,13 +486,13 @@ impl<H: StreamHandle, S: StreamFactory<H>> ChainLaserActor<H, S> {
         }
 
         for (idx, chunk) in chunks.into_iter().enumerate() {
-            let stream = self.stream_manager.account_subscribe_old(
+            let swh = self.stream_manager.account_subscribe_old(
                 &chunk,
                 &self.commitment,
                 idx,
                 from_slot,
             );
-            new_subs.insert(idx, stream);
+            new_subs.insert(idx, swh.stream);
         }
 
         // Drop current active subscriptions by reassignig to new ones

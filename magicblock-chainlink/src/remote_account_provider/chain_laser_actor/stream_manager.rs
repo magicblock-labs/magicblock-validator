@@ -1,7 +1,4 @@
-use std::{
-    collections::{HashMap, HashSet},
-    marker::PhantomData,
-};
+use std::collections::{HashMap, HashSet};
 
 use helius_laserstream::grpc::{
     CommitmentLevel, SubscribeRequest, SubscribeRequestFilterAccounts,
@@ -9,7 +6,7 @@ use helius_laserstream::grpc::{
 };
 use solana_pubkey::Pubkey;
 
-use super::{LaserStream, StreamFactory};
+use super::{LaserStreamWithHandle, StreamFactory};
 use crate::remote_account_provider::chain_laser_actor::StreamHandle;
 
 /// Configuration for the generational stream manager.
@@ -56,23 +53,23 @@ pub struct StreamManager<S: StreamHandle, SF: StreamFactory<S>> {
     /// The factory used to create streams
     stream_factory: SF,
     /// Active streams for program subscriptions
-    program_subscriptions: Option<(HashSet<Pubkey>, LaserStream)>,
+    program_subscriptions: Option<(HashSet<Pubkey>, LaserStreamWithHandle<S>)>,
     /// The canonical set of currently active account subscriptions.
-    /// These include subscriptions maintained across the different set of streams,
-    /// [Self::current_new_stream], [Self::unoptimized_old_streams], and
+    /// These include subscriptions maintained across the different set
+    /// of streams, [Self::current_new_stream],
+    /// [Self::unoptimized_old_streams], and
     /// [Self::optimized_old_streams].
     subscriptions: HashSet<Pubkey>,
     /// Pubkeys that are part of the current-new stream's filter.
     current_new_subs: HashSet<Pubkey>,
     /// The current-new stream which holds the [Self::current_new_subs].
     /// (None until the first subscribe call).
-    current_new_stream: Option<LaserStream>,
+    current_new_stream: Option<LaserStreamWithHandle<S>>,
     /// Old streams that have not been optimized yet.
-    unoptimized_old_streams: Vec<LaserStream>,
+    unoptimized_old_streams: Vec<LaserStreamWithHandle<S>>,
     /// Old streams created by optimization, each covering up to
     /// [StreamManagerConfig::max_subs_in_old_optimized] subscriptions.
-    optimized_old_streams: Vec<LaserStream>,
-    _phantom: PhantomData<S>,
+    optimized_old_streams: Vec<LaserStreamWithHandle<S>>,
 }
 
 #[allow(unused)]
@@ -87,7 +84,6 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
             current_new_stream: None,
             unoptimized_old_streams: Vec::new(),
             optimized_old_streams: Vec::new(),
-            _phantom: PhantomData,
         }
     }
 
@@ -194,7 +190,6 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
                 let refs: Vec<&Pubkey> = chunk.iter().collect();
                 self.stream_factory
                     .subscribe(Self::build_account_request(&refs, commitment))
-                    .stream
             })
             .collect();
 
@@ -244,7 +239,7 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
 
     /// Returns references to all account streams (optimized old +
     /// unoptimized old + current-new) for inspection.
-    fn all_account_streams(&self) -> Vec<&LaserStream> {
+    fn all_account_streams(&self) -> Vec<&LaserStreamWithHandle<S>> {
         let mut streams = Vec::new();
         for s in &self.optimized_old_streams {
             streams.push(s);
@@ -313,9 +308,9 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
         &self,
         pubkeys: &[&Pubkey],
         commitment: &CommitmentLevel,
-    ) -> LaserStream {
+    ) -> LaserStreamWithHandle<S> {
         let request = Self::build_account_request(pubkeys, commitment);
-        self.stream_factory.subscribe(request).stream
+        self.stream_factory.subscribe(request)
     }
 
     // =========================================================
@@ -331,7 +326,7 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
         commitment: &CommitmentLevel,
         idx: usize,
         from_slot: Option<u64>,
-    ) -> super::LaserStream {
+    ) -> LaserStreamWithHandle<S> {
         let mut accounts = HashMap::new();
         accounts.insert(
             format!("account_subs: {idx}"),
@@ -358,7 +353,7 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
             from_slot,
             ..Default::default()
         };
-        self.stream_factory.subscribe(request).stream
+        self.stream_factory.subscribe(request)
     }
 
     /// Adds a program subscription. If the program is already
@@ -392,7 +387,9 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
 
     /// Returns a mutable reference to the program subscriptions
     /// stream (if any) for polling in the actor loop.
-    pub fn program_stream_mut(&mut self) -> Option<&mut LaserStream> {
+    pub fn program_stream_mut(
+        &mut self,
+    ) -> Option<&mut LaserStreamWithHandle<S>> {
         self.program_subscriptions.as_mut().map(|(_, s)| s)
     }
 
@@ -411,7 +408,7 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
         &self,
         program_ids: &[&Pubkey],
         commitment: &CommitmentLevel,
-    ) -> LaserStream {
+    ) -> LaserStreamWithHandle<S> {
         let mut accounts = HashMap::new();
         accounts.insert(
             "program_sub".to_string(),
@@ -425,7 +422,7 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
             commitment: Some((*commitment).into()),
             ..Default::default()
         };
-        self.stream_factory.subscribe(request).stream
+        self.stream_factory.subscribe(request)
     }
 }
 
