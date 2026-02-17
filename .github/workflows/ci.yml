@@ -30,12 +30,15 @@ jobs:
       CARGO_TARGET_DIR: ${{ needs.prepare-env.outputs.target_dir }}
       CARGO_INCREMENTAL: 1
       CARGO_BUILD_JOBS: 30
+      RUSTFLAGS: -C link-arg=-fuse-ld=mold
     steps:
       - uses: actions/checkout@v5
         with:
           submodules: recursive
 
       - name: Build SBF programs
+        env:
+          RUSTFLAGS: ""
         run: |
           (
             unset CARGO_TARGET_DIR
