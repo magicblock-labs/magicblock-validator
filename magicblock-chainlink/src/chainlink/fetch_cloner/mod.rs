@@ -13,7 +13,8 @@ use dlp::{
 use magicblock_accounts_db::traits::AccountsBank;
 use magicblock_config::config::AllowedProgram;
 use magicblock_core::token_programs::{
-    is_ata, try_derive_eata_address_and_bump, MaybeIntoAta,
+    is_ata, try_derive_ata_address_and_bump, try_derive_eata_address_and_bump,
+    MaybeIntoAta, EATA_PROGRAM_ID,
 };
 use magicblock_metrics::metrics::{self, AccountFetchOrigin};
 use scc::{hash_map::Entry, HashMap};
@@ -245,6 +246,12 @@ where
                         let delegated_to_other = deleg_record
                             .as_ref()
                             .and_then(|dr| this.get_delegated_to_other(dr));
+                        let projected_ata_clone_request = this
+                            .maybe_build_projected_ata_clone_request_from_eata_sub_update(
+                                pubkey,
+                                &account,
+                                deleg_record.as_ref(),
+                            );
 
                         // Once we clone an account that is delegated to us we no longer need
                         // to receive updates for it from chain
@@ -282,6 +289,20 @@ where
                                 error = %err,
                                 "Failed to clone account into bank"
                             );
+                        } else if let Some(projected_ata_clone_request) =
+                            projected_ata_clone_request
+                        {
+                            if let Err(err) = this
+                                .cloner
+                                .clone_account(projected_ata_clone_request)
+                                .await
+                            {
+                                error!(
+                                    pubkey = %pubkey,
+                                    error = %err,
+                                    "Failed to clone projected ATA from delegated eATA update"
+                                );
+                            }
                         }
                     }
                 });
@@ -462,6 +483,62 @@ where
         }
     }
 
+    fn maybe_build_projected_ata_clone_request_from_eata_sub_update(
+        &self,
+        _eata_pubkey: Pubkey,
+        eata_account: &AccountSharedData,
+        deleg_record: Option<&DelegationRecord>,
+    ) -> Option<AccountCloneRequest> {
+        let deleg_record = deleg_record?;
+
+        if deleg_record.authority != self.validator_pubkey {
+            return None;
+        }
+        if deleg_record.owner != EATA_PROGRAM_ID {
+            return None;
+        }
+
+        let data = eata_account.data();
+        if data.len() < 64 {
+            return None;
+        }
+        let wallet_owner = match data[0..32].try_into() {
+            Ok(bytes) => Pubkey::new_from_array(bytes),
+            Err(_) => {
+                return None;
+            }
+        };
+        let mint = match data[32..64].try_into() {
+            Ok(bytes) => Pubkey::new_from_array(bytes),
+            Err(_) => {
+                return None;
+            }
+        };
+        let (ata_pubkey, _) =
+            try_derive_ata_address_and_bump(&wallet_owner, &mint)?;
+
+        let projected_ata = self.maybe_project_delegated_ata_from_eata(
+            // Intentional: in this subscription-update path there is no separate ATA, so
+            // maybe_project_delegated_ata_from_eata uses eata_account as ata_account; with deleg_record,
+            // ata_account only affects projected slot via max(), so passing eata_account twice is correct.
+            eata_account,
+            eata_account,
+            deleg_record,
+        )?;
+
+        if let Some(in_bank_ata) = self.accounts_bank.get_account(&ata_pubkey) {
+            if in_bank_ata.remote_slot() >= projected_ata.remote_slot() {
+                return None;
+            }
+        }
+        Some(AccountCloneRequest {
+            pubkey: ata_pubkey,
+            account: projected_ata,
+            commit_frequency_ms: None,
+            delegated_to_other: None,
+        })
+    }
+
     async fn maybe_project_ata_from_subscription_update(
         &self,
         ata_pubkey: Pubkey,
@@ -533,7 +610,6 @@ where
         ) {
             return (projected_ata, Some(deleg_record));
         }
-
         (ata_account, Some(deleg_record))
     }
 
@@ -548,7 +624,12 @@ where
         }
 
         let mut projected_ata =
-            eata_account.maybe_into_ata(deleg_record.owner)?;
+            match eata_account.maybe_into_ata(deleg_record.owner) {
+                Some(projected_ata) => projected_ata,
+                None => {
+                    return None;
+                }
+            };
         let projected_slot =
             ata_account.remote_slot().max(eata_account.remote_slot());
         projected_ata.set_remote_slot(projected_slot);

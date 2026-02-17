@@ -12,7 +12,6 @@ on:
 
 jobs:
   build:
-    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-latest-m
     name: Build Project
     steps:
