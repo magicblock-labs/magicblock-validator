@@ -40,9 +40,8 @@ impl StreamFactoryImpl {
 
 impl StreamFactory for StreamFactoryImpl {
     fn subscribe(&self, request: SubscribeRequest) -> LaserStream {
-        Box::pin(
-            helius_laserstream::client::subscribe(self.config.clone(), request)
-                .0,
-        )
+        let (stream, _handle) =
+            helius_laserstream::client::subscribe(self.config.clone(), request);
+        Box::pin(stream)
     }
 }

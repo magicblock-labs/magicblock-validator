@@ -34,44 +34,44 @@ impl Default for StreamManagerConfig {
 ///
 /// Account subscriptions follow a generational approach:
 /// - New subscriptions go into the *current-new* stream.
-/// - When the current-new stream exceeds `max_subs_in_new` it is
-///   promoted to the *unoptimized old* streams vec and a fresh
-///   current-new stream is created.
-/// - When unoptimized old streams exceed `max_old_unoptimized`,
+/// - When the current-new stream exceeds [StreamManagerConfig::max_subs_in_new] it is
+///   promoted to the [Self::unoptimized_old_streams] vec and a fresh current-new stream is created.
+/// - When [Self::unoptimized_old_streams] exceed [StreamManagerConfig::max_old_unoptimized],
 ///   optimization is triggered which rebuilds all streams from the
-///   `subscriptions` set into *optimized old* streams chunked by
-///   `max_subs_in_old_optimized`.
+///   `subscriptions` set into [StreamManager::optimized_old_streams] chunked by
+///   [StreamManagerConfig::max_subs_in_old_optimized].
 ///
-/// Unsubscribe only removes from the `subscriptions` HashSet — it
+/// Unsubscribe only removes from the [Self::subscriptions] HashSet — it
 /// never touches streams. Updates for unsubscribed pubkeys are
 /// ignored at the actor level.
+/// Unsubscribed accounts are dropped as part of optimization.
 #[allow(unused)]
 pub struct StreamManager<S: StreamFactory> {
+    /// Configures limits for stream management
     config: StreamManagerConfig,
+    /// The factory used to create streams
     stream_factory: S,
-
-    // ----- Program subscriptions (unchanged) -----
     /// Active streams for program subscriptions
     program_subscriptions: Option<(HashSet<Pubkey>, LaserStream)>,
-
-    // ----- Generational account subscriptions -----
     /// The canonical set of currently active account subscriptions.
+    /// These include subscriptions maintained across the different set of streams,
+    /// [Self::current_new_stream], [Self::unoptimized_old_streams], and
+    /// [Self::optimized_old_streams].
     subscriptions: HashSet<Pubkey>,
     /// Pubkeys that are part of the current-new stream's filter.
     current_new_subs: HashSet<Pubkey>,
-    /// The current-new stream (None until the first subscribe call).
+    /// The current-new stream which holds the [Self::current_new_subs].
+    /// (None until the first subscribe call).
     current_new_stream: Option<LaserStream>,
     /// Old streams that have not been optimized yet.
     unoptimized_old_streams: Vec<LaserStream>,
     /// Old streams created by optimization, each covering up to
-    /// `max_subs_in_old_optimized` subscriptions.
+    /// [StreamManagerConfig::max_subs_in_old_optimized] subscriptions.
     optimized_old_streams: Vec<LaserStream>,
 }
 
 #[allow(unused)]
 impl<S: StreamFactory> StreamManager<S> {
-    /// Creates a new stream manager with the given config and stream
-    /// factory.
     pub fn new(config: StreamManagerConfig, stream_factory: S) -> Self {
         Self {
             config,
@@ -85,17 +85,16 @@ impl<S: StreamFactory> StreamManager<S> {
         }
     }
 
-    // ---------------------------------------------------------
-    // Account subscription — generational API (stubs)
-    // ---------------------------------------------------------
+    // ---------------------
+    // Account subscription
+    // ---------------------
 
     /// Subscribe to account updates for the given pubkeys.
     ///
-    /// Each pubkey is added to `subscriptions` and to the current-new
-    /// stream. If the current-new stream exceeds `max_subs_in_new` it
-    /// is promoted and a fresh one is created. If unoptimized old
-    /// streams exceed `max_old_unoptimized`, optimization is
-    /// triggered.
+    /// Each pubkey is added to [Self::subscriptions] and to the [Self::current_new_stream].
+    /// If the [Self::current_new_stream] exceeds [StreamManagerConfig::max_subs_in_new] it
+    /// is promoted and a fresh one is created. If [Self::unoptimized_old_streams] exceed
+    /// [StreamManagerConfig::max_old_unoptimized], optimization is triggered.
     pub fn account_subscribe(
         &mut self,
         pubkeys: &[Pubkey],
@@ -225,28 +224,28 @@ impl<S: StreamFactory> StreamManager<S> {
 
     /// Returns the number of pubkeys in the current-new stream's
     /// filter.
-    pub fn current_new_sub_count(&self) -> usize {
+    fn current_new_sub_count(&self) -> usize {
         self.current_new_subs.len()
     }
 
     /// Returns a reference to the current-new stream's pubkey set.
-    pub fn current_new_subs(&self) -> &HashSet<Pubkey> {
+    fn current_new_subs(&self) -> &HashSet<Pubkey> {
         &self.current_new_subs
     }
 
     /// Returns the number of unoptimized old streams.
-    pub fn unoptimized_old_stream_count(&self) -> usize {
+    fn unoptimized_old_stream_count(&self) -> usize {
         self.unoptimized_old_streams.len()
     }
 
     /// Returns the number of optimized old streams.
-    pub fn optimized_old_stream_count(&self) -> usize {
+    fn optimized_old_stream_count(&self) -> usize {
         self.optimized_old_streams.len()
     }
 
     /// Returns references to all account streams (optimized old +
     /// unoptimized old + current-new) for inspection.
-    pub fn all_account_streams(&self) -> Vec<&LaserStream> {
+    fn all_account_streams(&self) -> Vec<&LaserStream> {
         let mut streams = Vec::new();
         for s in &self.optimized_old_streams {
             streams.push(s);
@@ -262,7 +261,7 @@ impl<S: StreamFactory> StreamManager<S> {
 
     /// Returns the total number of account streams across all
     /// generations.
-    pub fn account_stream_count(&self) -> usize {
+    fn account_stream_count(&self) -> usize {
         let current = if self.current_new_stream.is_some() {
             1
         } else {
