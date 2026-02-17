@@ -61,6 +61,11 @@ use crate::{
 
 type RemoteAccountRequests = Vec<oneshot::Sender<()>>;
 
+fn account_token_amount(account: &AccountSharedData) -> Option<u64> {
+    let amount_bytes: [u8; 8] = account.data().get(64..72)?.try_into().ok()?;
+    Some(u64::from_le_bytes(amount_bytes))
+}
+
 #[derive(Clone)]
 pub struct FetchCloner<T, U, V, C>
 where
@@ -220,15 +225,29 @@ where
                                 //
                                 // Thus our state is more up to date and we don't need to update our
                                 // bank.
-                                if account_still_undelegating_on_chain(
-                                    &pubkey,
-                                    account.delegated(),
-                                    in_bank.remote_slot(),
-                                    deleg_record,
-                                    &this.validator_pubkey,
-                                ) {
+                                let still_undelegating =
+                                    account_still_undelegating_on_chain(
+                                        &pubkey,
+                                        account.delegated(),
+                                        in_bank.remote_slot(),
+                                        deleg_record,
+                                        &this.validator_pubkey,
+                                    );
+                                if still_undelegating {
+                                    info!(
+                                        pubkey = %pubkey,
+                                        bank_slot = in_bank.remote_slot(),
+                                        chain_slot = account.remote_slot(),
+                                        "Skipping subscription update while undelegation is still pending after commit/undelegation flow"
+                                    );
                                     return;
                                 }
+                                info!(
+                                    pubkey = %pubkey,
+                                    bank_slot = in_bank.remote_slot(),
+                                    chain_slot = account.remote_slot(),
+                                    "Applying subscription update after undelegation completion"
+                                );
                             } else if in_bank.owner().eq(&dlp::id()) {
                                 debug!(
                                     pubkey = %pubkey,
@@ -271,6 +290,10 @@ where
                             }
                         }
 
+                        let source_account_amount =
+                            account_token_amount(&account);
+                        let source_account_delegated = account.delegated();
+
                         if account.executable() {
                             this.handle_executable_sub_update(pubkey, account)
                                 .await;
@@ -292,6 +315,17 @@ where
                         } else if let Some(projected_ata_clone_request) =
                             projected_ata_clone_request
                         {
+                            let projected_ata_pubkey =
+                                projected_ata_clone_request.pubkey;
+                            let projected_ata_slot =
+                                projected_ata_clone_request
+                                    .account
+                                    .remote_slot();
+                            let projected_ata_amount = account_token_amount(
+                                &projected_ata_clone_request.account,
+                            );
+                            let projected_ata_delegated =
+                                projected_ata_clone_request.account.delegated();
                             if let Err(err) = this
                                 .cloner
                                 .clone_account(projected_ata_clone_request)
@@ -300,7 +334,23 @@ where
                                 error!(
                                     pubkey = %pubkey,
                                     error = %err,
+                                    eata_amount = ?source_account_amount,
+                                    eata_delegated = source_account_delegated,
+                                    ata_pubkey = %projected_ata_pubkey,
+                                    ata_amount = ?projected_ata_amount,
+                                    ata_delegated = projected_ata_delegated,
                                     "Failed to clone projected ATA from delegated eATA update"
+                                );
+                            } else {
+                                info!(
+                                    eata_pubkey = %pubkey,
+                                    ata_pubkey = %projected_ata_pubkey,
+                                    projected_slot = projected_ata_slot,
+                                    eata_amount = ?source_account_amount,
+                                    eata_delegated = source_account_delegated,
+                                    ata_amount = ?projected_ata_amount,
+                                    ata_delegated = projected_ata_delegated,
+                                    "Cloned projected ATA from delegated eATA subscription update"
                                 );
                             }
                         }
@@ -485,7 +535,7 @@ where
 
     fn maybe_build_projected_ata_clone_request_from_eata_sub_update(
         &self,
-        _eata_pubkey: Pubkey,
+        eata_pubkey: Pubkey,
         eata_account: &AccountSharedData,
         deleg_record: Option<&DelegationRecord>,
     ) -> Option<AccountCloneRequest> {
@@ -516,6 +566,14 @@ where
         };
         let (ata_pubkey, _) =
             try_derive_ata_address_and_bump(&wallet_owner, &mint)?;
+        info!(
+            eata_pubkey = %eata_pubkey,
+            ata_pubkey = %ata_pubkey,
+            wallet_owner = %wallet_owner,
+            mint = %mint,
+            eata_slot = eata_account.remote_slot(),
+            "Mapped delegated eATA subscription update to ATA"
+        );
 
         let projected_ata = self.maybe_project_delegated_ata_from_eata(
             // Intentional: in this subscription-update path there is no separate ATA, so
@@ -528,9 +586,26 @@ where
 
         if let Some(in_bank_ata) = self.accounts_bank.get_account(&ata_pubkey) {
             if in_bank_ata.remote_slot() >= projected_ata.remote_slot() {
+                debug!(
+                    eata_pubkey = %eata_pubkey,
+                    ata_pubkey = %ata_pubkey,
+                    bank_slot = in_bank_ata.remote_slot(),
+                    projected_slot = projected_ata.remote_slot(),
+                    "Skipping projected ATA clone from eATA update because bank has newer data"
+                );
                 return None;
             }
         }
+        info!(
+            eata_pubkey = %eata_pubkey,
+            ata_pubkey = %ata_pubkey,
+            projected_slot = projected_ata.remote_slot(),
+            eata_amount = ?account_token_amount(eata_account),
+            eata_delegated = eata_account.delegated(),
+            ata_amount = ?account_token_amount(&projected_ata),
+            ata_delegated = projected_ata.delegated(),
+            "Prepared projected ATA clone request from delegated eATA update"
+        );
         Some(AccountCloneRequest {
             pubkey: ata_pubkey,
             account: projected_ata,
@@ -553,6 +628,14 @@ where
         else {
             return (ata_account, None);
         };
+        info!(
+            ata_pubkey = %ata_pubkey,
+            eata_pubkey = %eata_pubkey,
+            wallet_owner = %ata_info.owner,
+            mint = %ata_info.mint,
+            ata_slot = ata_account.remote_slot(),
+            "Mapped ATA subscription update to eATA"
+        );
 
         if let Err(err) = self.subscribe_to_account(&eata_pubkey).await {
             warn!(
@@ -588,6 +671,11 @@ where
         };
 
         let Some(eata_account) = eata_account else {
+            debug!(
+                ata_pubkey = %ata_pubkey,
+                eata_pubkey = %eata_pubkey,
+                "No eATA account found for ATA update, cloning ATA as-is"
+            );
             return (ata_account, None);
         };
 
@@ -600,6 +688,11 @@ where
         .await;
 
         let Some(deleg_record) = deleg_record else {
+            debug!(
+                ata_pubkey = %ata_pubkey,
+                eata_pubkey = %eata_pubkey,
+                "No delegation record for eATA, cloning ATA as-is"
+            );
             return (ata_account, None);
         };
 
@@ -608,8 +701,24 @@ where
             &eata_account,
             &deleg_record,
         ) {
+            info!(
+                ata_pubkey = %ata_pubkey,
+                eata_pubkey = %eata_pubkey,
+                projected_slot = projected_ata.remote_slot(),
+                commit_frequency_ms = deleg_record.commit_frequency_ms,
+                eata_amount = ?account_token_amount(&eata_account),
+                eata_delegated = eata_account.delegated(),
+                ata_amount = ?account_token_amount(&projected_ata),
+                ata_delegated = projected_ata.delegated(),
+                "Projected ATA from eATA during subscription handling"
+            );
             return (projected_ata, Some(deleg_record));
         }
+        debug!(
+            ata_pubkey = %ata_pubkey,
+            eata_pubkey = %eata_pubkey,
+            "Delegation record present but eATA could not be projected into ATA"
+        );
         (ata_account, Some(deleg_record))
     }
 

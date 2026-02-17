@@ -10,7 +10,9 @@ use solana_pubkey::Pubkey;
 use tokio::task::JoinSet;
 use tracing::*;
 
-use super::{delegation, types::AccountWithCompanion, FetchCloner};
+use super::{
+    account_token_amount, delegation, types::AccountWithCompanion, FetchCloner,
+};
 use crate::{
     cloner::{AccountCloneRequest, Cloner},
     remote_account_provider::{ChainPubsubClient, ChainRpcClient},
@@ -80,6 +82,15 @@ where
             } else {
                 *ata_account_slot
             };
+            info!(
+                ata_pubkey = %ata_pubkey,
+                eata_pubkey = %eata,
+                wallet_owner = %ata_info.owner,
+                mint = %ata_info.mint,
+                ata_slot = *ata_account_slot,
+                effective_slot,
+                "Mapped ATA to eATA for projection"
+            );
             ata_join_set.spawn(FetchCloner::task_to_fetch_with_companion(
                 this,
                 *ata_pubkey,
@@ -87,6 +98,13 @@ where
                 effective_slot,
                 fetch_origin,
             ));
+        } else {
+            debug!(
+                ata_pubkey = %ata_pubkey,
+                wallet_owner = %ata_info.owner,
+                mint = %ata_info.mint,
+                "Failed to derive eATA for ATA, cloning ATA as-is"
+            );
         }
     }
 
@@ -114,6 +132,7 @@ where
         let mut account_to_clone = ata_account.account_shared_data_cloned();
         let mut commit_frequency_ms = None;
         let mut delegated_to_other = None;
+        let mut projected_from_eata = false;
 
         // If there's an eATA, try to use it + delegation record to project the ATA
         if let Some(eata_acc) = maybe_eata_account {
@@ -139,10 +158,56 @@ where
                     )
                 {
                     account_to_clone = projected_ata;
+                    projected_from_eata = true;
+                    info!(
+                        ata_pubkey = %ata_pubkey,
+                        eata_pubkey = %eata_pubkey,
+                        projected_slot = account_to_clone.remote_slot(),
+                        commit_frequency_ms = deleg.commit_frequency_ms,
+                        delegated_to_other = ?delegated_to_other,
+                        eata_amount = ?account_token_amount(&eata_shared),
+                        eata_delegated = eata_shared.delegated(),
+                        ata_amount = ?account_token_amount(&account_to_clone),
+                        ata_delegated = account_to_clone.delegated(),
+                        "Projected ATA from delegated eATA"
+                    );
+                } else {
+                    debug!(
+                        ata_pubkey = %ata_pubkey,
+                        eata_pubkey = %eata_pubkey,
+                        "Delegation record found for eATA but ATA projection did not apply"
+                    );
                 }
+            } else {
+                debug!(
+                    ata_pubkey = %ata_pubkey,
+                    eata_pubkey = %eata_pubkey,
+                    "No delegation record found for eATA, cloning ATA as-is"
+                );
             }
+        } else {
+            debug!(
+                ata_pubkey = %ata_pubkey,
+                eata_pubkey = %eata_pubkey,
+                "eATA account not found, cloning ATA as-is"
+            );
         }
 
+        let clone_mode = if projected_from_eata {
+            "projected_from_eata"
+        } else {
+            "raw_ata"
+        };
+        info!(
+            ata_pubkey = %ata_pubkey,
+            eata_pubkey = %eata_pubkey,
+            clone_mode,
+            delegated = account_to_clone.delegated(),
+            remote_slot = account_to_clone.remote_slot(),
+            commit_frequency_ms = ?commit_frequency_ms,
+            delegated_to_other = ?delegated_to_other,
+            "Prepared ATA clone request"
+        );
         accounts_to_clone.push(AccountCloneRequest {
             pubkey: ata_pubkey,
             account: account_to_clone,

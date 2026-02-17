@@ -487,11 +487,18 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
         &self,
         pubkey: Pubkey,
     ) -> ChainlinkResult<()> {
-        debug!(pubkey = %pubkey, "Undelegation requested");
+        info!(
+            pubkey = %pubkey,
+            "Undelegation requested by commit pipeline; enabling tracking subscription"
+        );
 
         magicblock_metrics::metrics::inc_undelegation_requested();
 
         let Some(fetch_cloner) = self.fetch_cloner() else {
+            warn!(
+                pubkey = %pubkey,
+                "Undelegation requested but fetch cloner is not initialized"
+            );
             return Ok(());
         };
 
@@ -499,7 +506,11 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
         // once it's undelegated
         fetch_cloner.subscribe_to_account(&pubkey).await?;
 
-        debug!(pubkey = %pubkey, "Successfully subscribed for undelegation tracking");
+        info!(
+            pubkey = %pubkey,
+            watching = fetch_cloner.is_watching(&pubkey),
+            "Subscribed for undelegation tracking"
+        );
         Ok(())
     }
 

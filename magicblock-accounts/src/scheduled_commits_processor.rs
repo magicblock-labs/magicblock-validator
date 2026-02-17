@@ -81,6 +81,17 @@ impl ScheduledCommitsProcessorImpl {
     }
 
     async fn process_undelegation_requests(&self, pubkeys: Vec<Pubkey>) {
+        if pubkeys.is_empty() {
+            debug!(
+                "No undelegation requests found for this scheduled commit batch"
+            );
+            return;
+        }
+
+        info!(
+            undelegation_pubkeys = pubkeys.len(),
+            "Processing undelegation tracking subscriptions for scheduled commits"
+        );
         let mut join_set = task::JoinSet::new();
         for pubkey in pubkeys.into_iter() {
             let chainlink = self.chainlink.clone();
@@ -88,21 +99,32 @@ impl ScheduledCommitsProcessorImpl {
                 (pubkey, chainlink.undelegation_requested(pubkey).await)
             });
         }
-        let sub_errors = join_set
-            .join_all()
-            .await
-            .into_iter()
-            .filter_map(|(pubkey, inner_result)| {
-                if let Err(err) = inner_result {
-                    Some(format!(
+
+        let mut success_count = 0usize;
+        let mut sub_errors = Vec::new();
+        for (pubkey, inner_result) in join_set.join_all().await {
+            match inner_result {
+                Ok(()) => {
+                    success_count += 1;
+                    debug!(
+                        pubkey = %pubkey,
+                        "Subscribed for undelegation tracking"
+                    );
+                }
+                Err(err) => {
+                    sub_errors.push(format!(
                         "Subscribing to account {} failed: {}",
                         pubkey, err
-                    ))
-                } else {
-                    None
+                    ));
                 }
-            })
-            .collect::<Vec<_>>();
+            }
+        }
+
+        info!(
+            success_count,
+            error_count = sub_errors.len(),
+            "Finished undelegation tracking subscription pass"
+        );
         if !sub_errors.is_empty() {
             // Instead of aborting the entire commit we log an error here, however
             // this means that the undelegated accounts stay in a problematic state
@@ -112,6 +134,7 @@ impl ScheduledCommitsProcessorImpl {
                 error_count = sub_errors.len(),
                 "Failed to subscribe to accounts being undelegated"
             );
+            debug!(errors = ?sub_errors, "Undelegation subscription errors");
         }
     }
 
@@ -271,6 +294,7 @@ impl ScheduledCommitsProcessor for ScheduledCommitsProcessorImpl {
     async fn process(&self) -> ScheduledCommitsProcessorResult<()> {
         let intent_bundles =
             self.transaction_scheduler.take_scheduled_intent_bundles();
+        let intent_bundle_count = intent_bundles.len();
 
         if intent_bundles.is_empty() {
             return Ok(());
@@ -293,12 +317,22 @@ impl ScheduledCommitsProcessor for ScheduledCommitsProcessorImpl {
 
             pubkeys_being_undelegated.into_iter().collect::<Vec<_>>()
         };
+        info!(
+            intent_bundle_count,
+            undelegation_pubkeys = pubkeys_being_undelegated.len(),
+            "Preparing scheduled commit batch"
+        );
 
         self.process_undelegation_requests(pubkeys_being_undelegated)
             .await;
+        info!(
+            intent_bundle_count,
+            "Submitting scheduled commit batch to committor"
+        );
         self.committor
             .schedule_intent_bundles(intent_bundles)
             .await??;
+        info!(intent_bundle_count, "Scheduled commit batch submitted");
         Ok(())
     }
 

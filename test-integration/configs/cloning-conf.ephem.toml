@@ -1,5 +1,6 @@
 lifecycle = "ephemeral"
-remotes = ["http://0.0.0.0:7799", "ws://0.0.0.0:7800"]
+#remotes = ["http://0.0.0.0:7799", "ws://0.0.0.0:7800"]
+remotes = ["https://rpc.magicblock.app/devnet", "wss://rpc.magicblock.app/devnet"]
 
 [aperture]
 listen = "0.0.0.0:8899"
