@@ -30,9 +30,9 @@ list-programs:
 programs: $(PROGRAMS_SO)
 
 test: $(PROGRAMS_SO)
-	# chainlink-prep-programs builds extra mini binaries needed only by chainlink tests
+	# chainlink-prep-programs builds mini artifacts used by chainlink and cloning tests
 	@run_tests_clean="$$(echo "$(RUN_TESTS)" | tr -d '[:space:]')"; \
-	if [ -z "$$run_tests_clean" ] || echo ",$$run_tests_clean," | grep -q ",chainlink,"; then \
+	if [ -z "$$run_tests_clean" ] || echo ",$$run_tests_clean," | grep -Eq ",(chainlink|cloning),"; then \
 		$(MAKE) chainlink-prep-programs -C ./test-chainlink; \
 	else \
 		echo "Skipping chainlink-prep-programs for RUN_TESTS=$(RUN_TESTS)"; \

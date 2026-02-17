@@ -29,8 +29,9 @@ jobs:
 
       - uses: ./magicblock-validator/.github/actions/setup-solana
 
-      - name: Build integration test programs
+      - name: Build project and integration test programs
         run: |
+          cargo build --locked
           make -C test-integration programs
         shell: bash
         working-directory: magicblock-validator
