@@ -1,3 +1,10 @@
+use dlp::{
+    args::CallHandlerArgs,
+    instruction_builder::{
+        call_handler_size_budget, finalize_size_budget, undelegate_size_budget,
+    },
+    AccountSizeClass,
+};
 use dyn_clone::DynClone;
 use magicblock_committor_program::{
     instruction_builder::{
@@ -15,7 +22,7 @@ use magicblock_program::magic_scheduled_base_intent::{
     BaseAction, CommittedAccount,
 };
 use solana_account::Account;
-use solana_instruction::Instruction;
+use solana_instruction::{AccountMeta, Instruction};
 use solana_pubkey::Pubkey;
 use thiserror::Error;
 
@@ -23,6 +30,7 @@ use crate::tasks::visitor::Visitor;
 
 pub mod args_task;
 pub mod buffer_task;
+mod commit_task;
 pub mod task_builder;
 pub mod task_strategist;
 pub(crate) mod task_visitors;
@@ -30,6 +38,8 @@ pub mod utils;
 pub mod visitor;
 
 pub use task_builder::TaskBuilderImpl;
+
+use crate::tasks::commit_task::CommitTaskV2;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum TaskType {
@@ -52,8 +62,73 @@ pub enum TaskStrategy {
     Buffer,
 }
 
+pub enum BaseTaskImpl {
+    Commit(CommitTaskV2),
+    Finalize(FinalizeTask),
+    Undelegate(UndelegateTask),
+    BaseAction(BaseActionTask),
+}
+
+impl BaseTask for BaseTaskImpl {
+    fn instruction(&self, validator: &Pubkey) -> Instruction {
+        match self {
+            Self::Commit(value) => value.instruction(validator),
+            Self::Finalize(value) => value.instruction(validator),
+            Self::Undelegate(value) => value.instruction(validator),
+            Self::BaseAction(value) => value.instruction(validator),
+        }
+    }
+
+    fn try_optimize_tx_size(self) -> Result<Self, Self> {
+        match self {
+            Self::Commit(value) => value
+                .try_optimize_tx_size()
+                .map(Self::Commit)
+                .map_err(Self::Commit),
+            _ => Err(self),
+        }
+    }
+
+    fn compute_units(&self) -> u32 {
+        match self {
+            Self::Commit(value) => value.compute_units(),
+            Self::BaseAction(value) => value.action.compute_units,
+            Self::Finalize(_) => 70_000,
+            Self::Undelegate(_) => 70_000,
+        }
+    }
+
+    fn accounts_size_budget(&self) -> u32 {
+        match self {
+            Self::Commit(value) => value.accounts_size_budget(),
+            Self::BaseAction(value) => {
+                // assume all other accounts are Small accounts.
+                let other_accounts_budget =
+                    value.action.account_metas_per_program.len() as u32
+                        * AccountSizeClass::Small.size_budget();
+
+                call_handler_size_budget(
+                    AccountSizeClass::Medium,
+                    other_accounts_budget,
+                )
+            }
+            Self::Finalize(_) => finalize_size_budget(AccountSizeClass::Huge),
+            Self::Undelegate(_) => {
+                undelegate_size_budget(AccountSizeClass::Huge)
+            }
+        }
+    }
+
+    fn reset_commit_id(&mut self, commit_id: u64) {
+        match self {
+            Self::Commit(value) => value.reset_commit_id(commit_id),
+            _ => return,
+        }
+    }
+}
+
 /// A trait representing a task that can be executed on Base layer
-pub trait BaseTask: Send + Sync + DynClone + LabelValue {
+pub trait BaseTask: Send + Sync + Clone + LabelValue {
     /// Gets all pubkeys that involved in Task's instruction
     fn involved_accounts(&self, validator: &Pubkey) -> Vec<Pubkey> {
         self.instruction(validator)
@@ -68,19 +143,7 @@ pub trait BaseTask: Send + Sync + DynClone + LabelValue {
 
     /// Optimize for transaction size so that more instructions can be buddled together in a single
     /// transaction. Return Ok(new_tx_optimized_task), else Err(self) if task cannot be optimized.
-    fn try_optimize_tx_size(
-        self: Box<Self>,
-    ) -> Result<Box<dyn BaseTask>, Box<dyn BaseTask>>;
-
-    /// Returns [`PreparationTask`] if task needs to be prepared before executing,
-    /// otherwise returns None
-    fn preparation_state(&self) -> &PreparationState;
-
-    /// Switched [`PreparationTask`] to a new one
-    fn switch_preparation_state(
-        &mut self,
-        new_state: PreparationState,
-    ) -> BaseTaskResult<()>;
+    fn try_optimize_tx_size(self) -> Result<Self, Self>;
 
     /// Returns [`Task`] budget
     fn compute_units(&self) -> u32;
@@ -88,21 +151,12 @@ pub trait BaseTask: Send + Sync + DynClone + LabelValue {
     /// Returns the max accounts-data-size that can be used with SetLoadedAccountsDataSizeLimit
     fn accounts_size_budget(&self) -> u32;
 
-    /// Returns current [`TaskStrategy`]
-    #[cfg(test)]
-    fn strategy(&self) -> TaskStrategy;
-
-    /// Returns [`TaskType`]
-    fn task_type(&self) -> TaskType;
-
     /// Calls [`Visitor`] with specific task type
     fn visit(&self, visitor: &mut dyn Visitor);
 
     /// Resets commit id
     fn reset_commit_id(&mut self, commit_id: u64);
 }
-
-dyn_clone::clone_trait_object!(BaseTask);
 
 #[derive(Clone)]
 pub struct CommitTask {
@@ -126,14 +180,56 @@ pub struct UndelegateTask {
     pub rent_reimbursement: Pubkey,
 }
 
+impl UndelegateTask {
+    pub fn instruction(&self, validator: &Pubkey) -> Instruction {
+        dlp::instruction_builder::undelegate(
+            *validator,
+            self.delegated_account,
+            self.owner_program,
+            self.rent_reimbursement,
+        )
+    }
+}
+
 #[derive(Clone)]
 pub struct FinalizeTask {
     pub delegated_account: Pubkey,
 }
 
+impl FinalizeTask {
+    pub fn instruction(&self, validator: &Pubkey) -> Instruction {
+        dlp::instruction_builder::finalize(*validator, self.delegated_account)
+    }
+}
+
 #[derive(Clone)]
 pub struct BaseActionTask {
     pub action: BaseAction,
+}
+
+impl BaseActionTask {
+    pub fn instruction(&self, validator: &Pubkey) -> Instruction {
+        let action = &self.action;
+        let account_metas = action
+            .account_metas_per_program
+            .iter()
+            .map(|short_meta| AccountMeta {
+                pubkey: short_meta.pubkey,
+                is_writable: short_meta.is_writable,
+                is_signer: false,
+            })
+            .collect();
+        dlp::instruction_builder::call_handler(
+            *validator,
+            action.destination_program,
+            action.escrow_authority,
+            account_metas,
+            CallHandlerArgs {
+                data: action.data_per_program.data.clone(),
+                escrow_index: action.data_per_program.escrow_index,
+            },
+        )
+    }
 }
 
 #[derive(Clone, Debug)]
