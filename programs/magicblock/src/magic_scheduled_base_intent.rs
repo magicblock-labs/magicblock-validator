@@ -572,17 +572,24 @@ impl BaseAction {
             return Err(InstructionError::MissingRequiredSignature);
         }
 
+        let Some(parent_program_id) = context.parent_program_id else {
+            ic_msg!(
+                context.invoke_context,
+                "BaseAction: actions can only be scheduled via CPI",
+            );
+            return Err(InstructionError::UnsupportedProgramId);
+        };
+
         let source_program = if context.secure {
-            let Some(source_program) = context.parent_program_id else {
-                ic_msg!(
-                    context.invoke_context,
-                    "BaseAction: actions can only be scheduled via CPI",
-                );
-                return Err(InstructionError::UnsupportedProgramId);
-            };
-            Some(source_program)
-        } else {
+            Some(parent_program_id)
+        } else if args.destination_program == parent_program_id {
             None
+        } else {
+            ic_msg!(
+                context.invoke_context,
+                "BaseAction: v1 can act only within same program",
+            );
+            return Err(InstructionError::UnsupportedProgramId);
         };
 
         Ok(BaseAction {
