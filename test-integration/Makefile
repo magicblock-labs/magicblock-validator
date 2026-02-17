@@ -29,20 +29,60 @@ list-programs:
 
 programs: $(PROGRAMS_SO)
 
-test: $(PROGRAMS_SO)
-	# chainlink-prep-programs builds mini artifacts used by chainlink and cloning tests
+test:
 	@run_tests_clean="$$(echo "$(RUN_TESTS)" | tr -d '[:space:]')"; \
+	program_targets=""; \
+	add_target() { \
+		case " $$program_targets " in \
+			*" $$1 "*) ;; \
+			*) program_targets="$$program_targets $$1" ;; \
+		esac; \
+	}; \
+	if [ -z "$$run_tests_clean" ]; then \
+		program_targets="$(PROGRAMS_SO)"; \
+	else \
+		for suite in $$(echo "$$run_tests_clean" | tr ',' ' '); do \
+			case "$$suite" in \
+				schedulecommit|magicblock_api) \
+					add_target "$(SCHEDULECOMMIT_SO)"; \
+					add_target "$(SCHEDULECOMMIT_SECURITY_SO)"; \
+					add_target "$(COMMITTOR_PROGRAM_SO)"; \
+					;; \
+				chainlink|cloning|restore_ledger|task-scheduler) \
+					add_target "$(FLEXI_COUNTER_SO)"; \
+					;; \
+				table_mania|committor) \
+					add_target "$(SCHEDULECOMMIT_SO)"; \
+					add_target "$(FLEXI_COUNTER_SO)"; \
+					add_target "$(COMMITTOR_PROGRAM_SO)"; \
+					;; \
+				pubsub) \
+					add_target "$(SCHEDULECOMMIT_SO)"; \
+					add_target "$(SCHEDULECOMMIT_SECURITY_SO)"; \
+					;; \
+				config|schedule_intents) \
+					add_target "$(FLEXI_COUNTER_SO)"; \
+					add_target "$(COMMITTOR_PROGRAM_SO)"; \
+					;; \
+				*) \
+					program_targets="$(PROGRAMS_SO)"; \
+					break; \
+					;; \
+			esac; \
+		done; \
+	fi; \
+	echo "Building integration programs:$$program_targets"; \
+	$(MAKE) $$program_targets; \
 	if [ -z "$$run_tests_clean" ] || echo ",$$run_tests_clean," | grep -Eq ",(chainlink|cloning),"; then \
 		$(MAKE) chainlink-prep-programs -C ./test-chainlink; \
 	else \
 		echo "Skipping chainlink-prep-programs for RUN_TESTS=$(RUN_TESTS)"; \
-	fi
+	fi && \
 	RUST_BACKTRACE=1 \
 	RUST_LOG=$(RUST_LOG) \
 	cargo run --package test-runner --bin run-tests
 
 test-force-mb: $(PROGRAMS_SO)
-	RUST_BACKTRACE=1 \
 	RUST_LOG=$(RUST_LOG) \
 	FORCE_MAGIC_BLOCK_VALIDATOR=1 \
 	cargo run --package test-runner --bin run-tests
