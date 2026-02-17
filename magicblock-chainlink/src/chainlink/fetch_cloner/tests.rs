@@ -1149,7 +1149,7 @@ async fn test_delegated_authoritative_skip_unsubscribes_subscription() {
     assert_cloned_delegated_account!(
         accounts_bank,
         account_pubkey,
-        delegated_account,
+        delegated_account.clone(),
         CURRENT_SLOT,
         account_owner
     );
