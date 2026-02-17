@@ -112,7 +112,6 @@ pub enum RemoteAccountProviderError {
     )]
     LoaderV4StateDeserializationFailed(Pubkey, String),
 }
-
 impl From<solana_pubsub_client::pubsub_client::PubsubClientError>
     for RemoteAccountProviderError
 {
