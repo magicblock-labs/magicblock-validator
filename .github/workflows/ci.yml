@@ -1,7 +1,7 @@
 name: CI
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
   cancel-in-progress: true
 
 on:
@@ -11,7 +11,6 @@ on:
     types: [opened, reopened, synchronize, ready_for_review]
 
 jobs:
-  # 1. Compute shared global target directory (per branch)
   prepare-env:
     runs-on: self-hosted
     outputs:
@@ -19,105 +18,78 @@ jobs:
     steps:
       - id: calc
         run: |
-          # Replace slashes in branch name to make it filesystem-safe
           SAFE_BRANCH=$(echo "${{ github.ref_name }}" | tr '/' '-')
-          # Define the global shared target directory for this repo + branch
           TARGET_DIR="/var/lib/gh-runners/global-targets/${{ github.event.repository.name }}-${SAFE_BRANCH}"
           mkdir -p "$TARGET_DIR"
           echo "dir=$TARGET_DIR" >> $GITHUB_OUTPUT
 
-  # 2. MONOLITHIC BUILD PHASE (with Internet)
-  build-everything:
+  build:
     needs: prepare-env
     runs-on: self-hosted
     env:
-      # Override runner defaults
       CARGO_TARGET_DIR: ${{ needs.prepare-env.outputs.target_dir }}
-      # Disable sccache to favor local incremental builds on disk
-      RUSTC_WRAPPER: ""
-      RUSTFLAGS: ""
-      # Enable incremental builds for faster small changes
       CARGO_INCREMENTAL: 1
-      # Use many cores because this job runs alone on the runner
       CARGO_BUILD_JOBS: 30
     steps:
       - uses: actions/checkout@v5
         with:
           submodules: recursive
 
-      - name: Build Everything & Pre-fetch dependencies
+      - name: Build SBF programs
         run: |
-          # 1. Build SBF (Solana programs) for integration tests
-          # Unset CARGO_TARGET_DIR for SBF builds to ensure they write to local test-integration/target/deploy
-          # This prevents conflicts with the global shared target directory
           (
             unset CARGO_TARGET_DIR
-            echo "Building SBF programs with local target dir..."
             make -C test-integration programs
             make chainlink-prep-programs -C test-integration/test-chainlink
           )
-          
-          # 2. Build binaries & test runner
-          cargo build --bins --tests
-          
-          # 3. Fast checks (format, lint, unit tests)
-          make ci-fmt
-          make ci-lint
-          make ci-test-unit
-          
-          # 4. PRE-FETCH for integration tests
-          #    Download and compile test dependencies, but do NOT run tests.
-          cargo test --test '*' --no-run
 
-          # 5. SAVE SBF ARTIFACTS INTO THE GLOBAL TARGET
-          #    This allows matrix jobs to reuse the same .so files without rebuilding.
+      - name: Build binaries and tests
+        run: cargo build --bins --tests
+
+      - name: Format check
+        run: make ci-fmt
+
+      - name: Lint
+        run: make ci-lint
+
+      - name: Unit tests
+        run: make ci-test-unit
+
+      - name: Pre-fetch integration test dependencies
+        run: cargo test --test '*' --no-run
+
+      - name: Cache SBF artifacts
+        run: |
           SBF_CACHE_DIR="$CARGO_TARGET_DIR/sbf-artifacts"
-          echo "Saving SBF artifacts into $SBF_CACHE_DIR ..."
           mkdir -p "$SBF_CACHE_DIR/test-integration" "$SBF_CACHE_DIR/root"
 
-          # SBF programs built under test-integration (DEPLOY_DIR)
-          # Use recursive copy to capture subdirectories (e.g., miniv2/)
           if [ -d "test-integration/target/deploy" ]; then
             cp -r test-integration/target/deploy/* "$SBF_CACHE_DIR/test-integration/"
-            echo "Copied test-integration SBFs to cache"
           else
-            echo "WARNING: test-integration/target/deploy not found"
+            echo "::warning::test-integration/target/deploy not found"
           fi
 
-          # Committor program built under root target/deploy (ROOT_DEPLOY_DIR = ../target/deploy)
           if ls target/deploy/*.so >/dev/null 2>&1; then
             cp target/deploy/*.so "$SBF_CACHE_DIR/root/"
-            echo "Copied root SBFs to cache"
           else
-            echo "WARNING: no SBFs found in target/deploy"
+            echo "::warning::No SBF artifacts found in target/deploy"
           fi
 
-  # 3. PARALLEL INTEGRATION TEST PHASE (isolated network - no Internet)
-  integration-matrix:
-    needs: [prepare-env, build-everything]
+  integration-tests:
+    needs: [prepare-env, build]
     runs-on: self-hosted
     strategy:
       fail-fast: false
       matrix:
-        # Optimized grouping for ~35-40 mins per runner on a 40-core machine.
-        # Total sequential time: ~173 mins. Parallel target: ~37 mins.
-        batch_tests:
-          - "committor config"                  # 22 + 15 = 37 min
-          - "restore_ledger schedulecommit"     # 18 + 17 = 35 min
-          - "table_mania cloning"               # 18 + 17 = 35 min
-          - "magicblock_api schedule_intents"   # 16 + 16 = 32 min
-          - "task-scheduler chainlink pubsub"   # 15 + 11 + 8 = 34 min
+        batch:
+          - "committor config"
+          - "restore_ledger schedulecommit"
+          - "table_mania cloning"
+          - "magicblock_api schedule_intents"
+          - "task-scheduler chainlink pubsub"
     env:
-      # Use RAM disk for temporary files (Ledger, RocksDB) to save Disk I/O
-      TMPDIR: "/dev/shm"
-      # Force Cargo not to hit the network (we are inside a network namespace)
+      TMPDIR: /dev/shm
       CARGO_NET_OFFLINE: "true"
-      # Disable any wrappers that might interfere during test execution
-      RUSTC_WRAPPER: ""
-      # Clear potentially problematic flags
-      RUSTFLAGS: ""
-      # Limit concurrency per runner (40 cores / 5 runners = ~8 cores available per runner)
-      # Leaving some headroom for OS and other jobs.
       CARGO_BUILD_JOBS: 6
       NEXTEST_RETRIES: 0
     steps:
@@ -125,93 +97,70 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Restore timestamps to satisfy Cargo cache
-        run: |
-          echo "Syncing file timestamps to commit time..."
-          # Get the commit timestamp of HEAD
-          COMMIT_TIME=$(git show -s --format=%ci HEAD)
-          # Apply that timestamp to all files (excluding .git for speed)
-          find . -type f -not -path "./.git/*" -exec touch -d "$COMMIT_TIME" {} +
-          echo "Timestamps synced to $COMMIT_TIME"
+      - name: Restore source file timestamps
+        run: git restore-mtime
 
-      - name: Copy Pre-built Artifacts to Local Target (Hardlinks)
+      - name: Link pre-built artifacts
         run: |
           GLOBAL_TARGET="${{ needs.prepare-env.outputs.target_dir }}"
-          echo "Linking artifacts from $GLOBAL_TARGET to ./target ..."
           mkdir -p target
-          
-          # 1. Use hardlinks (-l) to avoid duplicating data (instant + 0 disk usage)
-          # 2. Only link 'debug' directory (contains test binaries)
-          # Note: This assumes runners are on the same filesystem as GLOBAL_TARGET
-          cp -rl "$GLOBAL_TARGET/debug" target/
-          
-          # 3. Remove 'incremental' compilation data (huge & useless for running tests)
+
+          if ! cp -rl "$GLOBAL_TARGET/debug" target/ 2>/dev/null; then
+            echo "::warning::Hardlink failed (cross-device?), falling back to copy"
+            cp -r "$GLOBAL_TARGET/debug" target/
+          fi
+
           rm -rf target/debug/incremental
-          
-          echo "Artifacts linked successfully."
 
-      - name: Restore prebuilt SBF programs from Global Target
+      - name: Restore SBF artifacts
         run: |
-          GLOBAL_TARGET_DIR="${{ needs.prepare-env.outputs.target_dir }}"
-          SBF_CACHE_DIR="$GLOBAL_TARGET_DIR/sbf-artifacts"
-          echo "Restoring SBF artifacts from $SBF_CACHE_DIR ..."
+          SBF_CACHE_DIR="${{ needs.prepare-env.outputs.target_dir }}/sbf-artifacts"
 
-          # 1) Restore SBFs for test-integration (DEPLOY_DIR)
           LOCAL_DEPLOY_TEST="test-integration/target/deploy"
           mkdir -p "$LOCAL_DEPLOY_TEST"
           if [ -d "$SBF_CACHE_DIR/test-integration" ]; then
             cp -r "$SBF_CACHE_DIR/test-integration"/* "$LOCAL_DEPLOY_TEST/"
-            # Touch to ensure the .so files are newer than sources (so Make will not rebuild them)
-            # Find all files (including those in subdirs) and touch them
             find "$LOCAL_DEPLOY_TEST" -type f -exec touch {} +
-            echo "Restored test-integration SBFs:"
-            ls -R "$LOCAL_DEPLOY_TEST/"
           else
-            echo "WARNING: no cached SBFs found for test-integration"
+            echo "::warning::No cached SBF artifacts for test-integration"
           fi
 
-          # 2) Restore SBFs for root target (committor program, ROOT_DEPLOY_DIR)
           LOCAL_DEPLOY_ROOT="target/deploy"
           mkdir -p "$LOCAL_DEPLOY_ROOT"
           if ls "$SBF_CACHE_DIR/root"/*.so >/dev/null 2>&1; then
             cp "$SBF_CACHE_DIR/root"/*.so "$LOCAL_DEPLOY_ROOT/"
             touch "$LOCAL_DEPLOY_ROOT"/*.so
-            echo "Restored root SBFs"
           else
-            echo "WARNING: no cached SBFs found for root"
+            echo "::warning::No cached SBF artifacts for root"
           fi
 
-      - name: Run ${{ matrix.batch_tests }} (Network Namespace)
+      - name: "Integration: ${{ matrix.batch }}"
         run: |
-          # 'unshare -r -n' creates an isolated network namespace.
-          # Inside this bubble, port 8899 is free for all parallel jobs.
-          # We loop through the batch list and run tests sequentially in this runner.
-          # We pass PROGRAMS_SO="" to empty the dependency list for 'make test'
-          # We pass SKIP_CHAINLINK_PREP=1 to skip the chainlink prep step
-          unshare -r -n sh -c "
+          unshare -r -n sh -c '
+            set -uo pipefail
             ip link set lo up
-            for test in ${{ matrix.batch_tests }}; do
-              echo \"--------------------------------------------------\"
-              echo \"Running test suite: \$test\"
-              echo \"--------------------------------------------------\"
-              RUN_TESTS=\$test make ci-test-integration PROGRAMS_SO= SKIP_CHAINLINK_PREP=1
+            FAILED=""
+            for test in ${{ matrix.batch }}; do
+              echo "========== Running: $test =========="
+              if ! RUN_TESTS=$test make ci-test-integration PROGRAMS_SO= SKIP_CHAINLINK_PREP=1; then
+                FAILED="$FAILED $test"
+              fi
             done
-          "
-        env:
-          # Not used directly in the loop, but kept for context if needed
-          BATCH_LIST: ${{ matrix.batch_tests }}
+            if [ -n "$FAILED" ]; then
+              echo "::error::Failed test suites:$FAILED"
+              exit 1
+            fi
+          '
 
-  # 4. Aggregate status for CI (single green/red check)
   ci-status:
     if: always()
-    needs: [build-everything, integration-matrix]
-    runs-on: ubuntu-latest
+    needs: [build, integration-tests]
+    runs-on: self-hosted
     steps:
-      - name: Check Status
+      - name: Verify pipeline status
         run: |
-          if [[ "${{ needs.build-everything.result }}" != "success" || 
-                "${{ needs.integration-matrix.result }}" != "success" ]]; then
-            echo "CI Failed"
+          if [[ "${{ needs.build.result }}" != "success" ||
+                "${{ needs.integration-tests.result }}" != "success" ]]; then
+            echo "::error::CI failed"
             exit 1
           fi
-          echo "CI Passed"
