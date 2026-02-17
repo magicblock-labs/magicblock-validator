@@ -139,7 +139,7 @@ jobs:
 
       - name: "Integration: ${{ matrix.batch }}"
         run: |
-          unshare -r -n sh -c '
+          unshare -r -n bash -c '
             set -uo pipefail
             ip link set lo up
             FAILED=""
