@@ -560,7 +560,12 @@ pub mod mini {
 
 #[allow(unused)]
 pub mod deploy {
-    use std::{fs, path::PathBuf, process::Command, sync::Arc};
+    use std::{
+        fs,
+        path::PathBuf,
+        process::Command,
+        sync::{Arc, OnceLock},
+    };
 
     use solana_loader_v4_interface::instruction::LoaderV4Instruction as LoaderInstructionV4;
     use solana_rpc_client::nonblocking::rpc_client::RpcClient;
@@ -577,21 +582,38 @@ pub mod deploy {
     use super::{airdrop_sol, send_instructions, CHUNK_SIZE};
     use crate::programs::{mini, try_send_instructions};
 
-    pub fn compile_mini(keypair: &Keypair, suffix: Option<&str>) -> Vec<u8> {
+    pub fn compile_mini(_keypair: &Keypair, suffix: Option<&str>) -> Vec<u8> {
+        static DEFAULT_BINARY: OnceLock<Vec<u8>> = OnceLock::new();
+
+        if let Some(suffix) = suffix {
+            return compile_mini_binary(Some(suffix));
+        }
+
+        // The regular integration flow prebuilds miniv2/miniv3 via Makefile.
+        // Reuse that artifact for v4 tests to avoid repeated build-sbf calls.
+        DEFAULT_BINARY
+            .get_or_init(|| {
+                if let Ok(prebuilt) = fs::read(mini::program_path("miniv3")) {
+                    return prebuilt;
+                }
+                compile_mini_binary(None)
+            })
+            .clone()
+    }
+
+    fn compile_mini_binary(suffix: Option<&str>) -> Vec<u8> {
         let workspace_root_path =
             PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..");
         let program_root_path =
             workspace_root_path.join("programs").join("mini");
-        let program_id = keypair.pubkey().to_string();
 
         // Build the program and read the binary, ensuring cleanup happens
         // Run cargo build-sbf to compile the program
         let mut cmd = Command::new("cargo");
-        if let Some(suffix) = suffix {
-            cmd.env("LOG_MSG_SUFFIX", suffix);
+        if let Some(log_msg_suffix) = suffix {
+            cmd.env("LOG_MSG_SUFFIX", log_msg_suffix);
         }
         let output = cmd
-            .env("MINI_PROGRAM_ID", &program_id)
             .args([
                 "build-sbf",
                 "--manifest-path",

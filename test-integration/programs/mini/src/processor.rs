@@ -55,7 +55,7 @@ impl Processor {
 
         // Verify the counter PDA
         let (expected_counter_pubkey, bump) =
-            derive_counter_pda(&crate::id(), payer.key);
+            derive_counter_pda(program_id, payer.key);
         if counter_account.key != &expected_counter_pubkey {
             return Err(ProgramError::InvalidSeeds);
         }
@@ -105,7 +105,7 @@ impl Processor {
 
         // Verify the counter PDA
         let (expected_counter_pubkey, _) =
-            derive_counter_pda(&crate::id(), payer.key);
+            derive_counter_pda(program_id, payer.key);
         if counter_account.key != &expected_counter_pubkey {
             return Err(ProgramError::InvalidSeeds);
         }
