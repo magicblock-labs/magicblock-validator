@@ -1,4 +1,7 @@
-use std::{collections::{HashMap, HashSet}, marker::PhantomData};
+use std::{
+    collections::{HashMap, HashSet},
+    marker::PhantomData,
+};
 
 use helius_laserstream::grpc::{
     CommitmentLevel, SubscribeRequest, SubscribeRequestFilterAccounts,
@@ -6,9 +9,8 @@ use helius_laserstream::grpc::{
 };
 use solana_pubkey::Pubkey;
 
-use crate::remote_account_provider::chain_laser_actor::StreamHandle;
-
 use super::{LaserStream, StreamFactory};
+use crate::remote_account_provider::chain_laser_actor::StreamHandle;
 
 /// Configuration for the generational stream manager.
 #[allow(unused)]
@@ -122,20 +124,17 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
 
         // (Re)create the current-new stream with the full
         // current_new_subs filter.
-        self.current_new_stream =
-            Some(self.create_account_stream(
-                &self.current_new_subs.iter().collect::<Vec<_>>(),
-                commitment,
-            ));
+        self.current_new_stream = Some(self.create_account_stream(
+            &self.current_new_subs.iter().collect::<Vec<_>>(),
+            commitment,
+        ));
 
         // Promote if current-new exceeds threshold.
         if self.current_new_subs.len() > self.config.max_subs_in_new {
-            let overflow_count = self.current_new_subs.len()
-                - self.config.max_subs_in_new;
+            let overflow_count =
+                self.current_new_subs.len() - self.config.max_subs_in_new;
             // The overflow pubkeys are the tail of new_pks.
-            let overflow_start = new_pks.len().saturating_sub(
-                overflow_count,
-            );
+            let overflow_start = new_pks.len().saturating_sub(overflow_count);
             let overflow_pks = &new_pks[overflow_start..];
 
             // Move current-new stream to unoptimized old.
@@ -151,13 +150,10 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
                 for pk in overflow_pks {
                     self.current_new_subs.insert(*pk);
                 }
-                self.current_new_stream =
-                    Some(self.create_account_stream(
-                        &overflow_pks
-                            .iter()
-                            .collect::<Vec<_>>(),
-                        commitment,
-                    ));
+                self.current_new_stream = Some(self.create_account_stream(
+                    &overflow_pks.iter().collect::<Vec<_>>(),
+                    commitment,
+                ));
             }
 
             // If unoptimized old streams exceed the limit, optimize.
@@ -189,17 +185,16 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
     /// 4. Reset the current-new stream (empty filter).
     pub fn optimize(&mut self, commitment: &CommitmentLevel) {
         // Collect all active subscriptions and chunk them.
-        let all_pks: Vec<Pubkey> =
-            self.subscriptions.iter().copied().collect();
+        let all_pks: Vec<Pubkey> = self.subscriptions.iter().copied().collect();
 
         // Build optimized old streams from chunks.
         self.optimized_old_streams = all_pks
             .chunks(self.config.max_subs_in_old_optimized)
             .map(|chunk| {
                 let refs: Vec<&Pubkey> = chunk.iter().collect();
-                self.stream_factory.subscribe(
-                    Self::build_account_request(&refs, commitment),
-                ).stream
+                self.stream_factory
+                    .subscribe(Self::build_account_request(&refs, commitment))
+                    .stream
             })
             .collect();
 
@@ -290,10 +285,7 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
         accounts.insert(
             "account_subs".to_string(),
             SubscribeRequestFilterAccounts {
-                account: pubkeys
-                    .iter()
-                    .map(|pk| pk.to_string())
-                    .collect(),
+                account: pubkeys.iter().map(|pk| pk.to_string()).collect(),
                 ..Default::default()
             },
         );
@@ -322,8 +314,7 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
         pubkeys: &[&Pubkey],
         commitment: &CommitmentLevel,
     ) -> LaserStream {
-        let request =
-            Self::build_account_request(pubkeys, commitment);
+        let request = Self::build_account_request(pubkeys, commitment);
         self.stream_factory.subscribe(request).stream
     }
 
@@ -444,7 +435,9 @@ mod tests {
     use solana_pubkey::Pubkey;
 
     use super::*;
-    use crate::remote_account_provider::chain_laser_actor::mock::{MockStreamFactory, MockStreamHandle};
+    use crate::remote_account_provider::chain_laser_actor::mock::{
+        MockStreamFactory, MockStreamHandle,
+    };
 
     // -----------------
     // Helpers
@@ -457,7 +450,10 @@ mod tests {
         }
     }
 
-    fn create_manager() -> (StreamManager<MockStreamHandle, MockStreamFactory>, MockStreamFactory) {
+    fn create_manager() -> (
+        StreamManager<MockStreamHandle, MockStreamFactory>,
+        MockStreamFactory,
+    ) {
         let factory = MockStreamFactory::new();
         let manager = StreamManager::new(test_config(), factory.clone());
         (manager, factory)
@@ -713,12 +709,8 @@ mod tests {
         assert_eq!(mgr.unoptimized_old_stream_count(), 0);
         // Optimized old streams should exist.
         let total_subs = mgr.subscriptions().len();
-        let expected_optimized =
-            total_subs.div_ceil(10); // ceil(total / MAX_OLD_OPTIMIZED)
-        assert_eq!(
-            mgr.optimized_old_stream_count(),
-            expected_optimized,
-        );
+        let expected_optimized = total_subs.div_ceil(10); // ceil(total / MAX_OLD_OPTIMIZED)
+        assert_eq!(mgr.optimized_old_stream_count(), expected_optimized,);
     }
 
     #[test]
@@ -788,8 +780,7 @@ mod tests {
         // pubkeys.
         let remaining: HashSet<String> =
             pks[5..].iter().map(|pk| pk.to_string()).collect();
-        let filter_pks =
-            all_filter_pubkeys_from(&factory, reqs_before);
+        let filter_pks = all_filter_pubkeys_from(&factory, reqs_before);
         assert_eq!(filter_pks.len(), 10);
         for pk in &to_unsub {
             assert!(
@@ -826,10 +817,7 @@ mod tests {
         let count_after_first = mgr.optimized_old_stream_count();
 
         mgr.optimize(&COMMITMENT);
-        assert_eq!(
-            mgr.optimized_old_stream_count(),
-            count_after_first,
-        );
+        assert_eq!(mgr.optimized_old_stream_count(), count_after_first,);
     }
 
     // -------------------------------------------------------------
@@ -871,10 +859,7 @@ mod tests {
         subscribe_n(&mut mgr, 6);
         // Unoptimized grows by 1 but no second optimization.
         assert!(mgr.unoptimized_old_stream_count() <= 1);
-        assert_eq!(
-            mgr.optimized_old_stream_count(),
-            optimized_after_first,
-        );
+        assert_eq!(mgr.optimized_old_stream_count(), optimized_after_first,);
     }
 
     // -------------------------------------------------------------
@@ -1017,8 +1002,7 @@ mod tests {
     }
 
     #[test]
-    fn test_all_account_streams_after_optimize_drops_old_unoptimized()
-    {
+    fn test_all_account_streams_after_optimize_drops_old_unoptimized() {
         let (mut mgr, _factory) = create_manager();
         // Create unoptimized old streams.
         for _ in 0..2 {
@@ -1086,8 +1070,7 @@ mod tests {
 
         // Verify the union of all optimized stream filters equals all
         // 50 pubkeys.
-        let filter_pks =
-            all_filter_pubkeys_from(&factory, reqs_before);
+        let filter_pks = all_filter_pubkeys_from(&factory, reqs_before);
         assert_eq!(filter_pks.len(), 50);
         for pk in &pks {
             assert!(filter_pks.contains(&pk.to_string()));
@@ -1114,8 +1097,7 @@ mod tests {
         let reqs_before = factory.captured_requests().len();
         mgr.optimize(&COMMITMENT);
 
-        let filter_pks =
-            all_filter_pubkeys_from(&factory, reqs_before);
+        let filter_pks = all_filter_pubkeys_from(&factory, reqs_before);
         assert_eq!(filter_pks.len(), expected_count);
         // Verify unsubscribed pubkeys are absent.
         for pk in &unsub1 {
@@ -1184,8 +1166,7 @@ mod tests {
         assert_eq!(optimize_reqs.len(), 2);
 
         let first_pks = account_pubkeys_from_request(&optimize_reqs[0]);
-        let second_pks =
-            account_pubkeys_from_request(&optimize_reqs[1]);
+        let second_pks = account_pubkeys_from_request(&optimize_reqs[1]);
         assert_eq!(first_pks.len(), 10);
         assert_eq!(second_pks.len(), 5);
 

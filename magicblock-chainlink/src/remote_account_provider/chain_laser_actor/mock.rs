@@ -1,29 +1,40 @@
 use async_trait::async_trait;
 use std::sync::{Arc, Mutex};
 
-use helius_laserstream::{LaserstreamError, grpc::{self, SubscribeRequest}};
+use helius_laserstream::{
+    grpc::{self, SubscribeRequest},
+    LaserstreamError,
+};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
-use crate::remote_account_provider::chain_laser_actor::{LaserStreamWithHandle, StreamHandle};
+use crate::remote_account_provider::chain_laser_actor::{
+    LaserStreamWithHandle, StreamHandle,
+};
 
 use super::{LaserResult, StreamFactory};
 
-/// A test mock that captures subscription requests and allows driving streams
-/// programmatically
+/// A test mock that captures subscription requests and allows driving
+/// streams programmatically.
 #[derive(Clone)]
 #[allow(dead_code)]
 pub struct MockStreamFactory {
-    /// Every SubscribeRequest passed to `subscribe()` is recorded here
-    /// so tests can assert on filter contents, commitment levels, etc.
+    /// Every `SubscribeRequest` passed to `subscribe()` is recorded
+    /// here so tests can assert on filter contents, commitment levels,
+    /// etc.
     captured_requests: Arc<Mutex<Vec<SubscribeRequest>>>,
 
-    /// A sender that the test uses to push `LaserResult` items into the
-    /// streams returned by `subscribe()`.
-    /// Each call to `subscribe()` creates a new mpsc channel; the rx side
-    /// becomes the returned stream, and the tx side is stored here so the
-    /// test can drive updates.
-    stream_senders: Arc<Mutex<Vec<mpsc::UnboundedSender<LaserResult>>>>,
+    /// Requests sent through a `MockStreamHandle::write()` call are
+    /// recorded here so tests can verify handle-driven updates.
+    handle_requests: Arc<Mutex<Vec<SubscribeRequest>>>,
+
+    /// A sender that the test uses to push `LaserResult` items into
+    /// the streams returned by `subscribe()`.
+    /// Each call to `subscribe()` creates a new mpsc channel; the rx
+    /// side becomes the returned stream, and the tx side is stored
+    /// here so the test can drive updates.
+    stream_senders:
+        Arc<Mutex<Vec<Arc<mpsc::UnboundedSender<LaserResult>>>>>,
 }
 
 #[allow(dead_code)]
@@ -32,17 +43,28 @@ impl MockStreamFactory {
     pub fn new() -> Self {
         Self {
             captured_requests: Arc::new(Mutex::new(Vec::new())),
+            handle_requests: Arc::new(Mutex::new(Vec::new())),
             stream_senders: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
-    /// Get the captured subscription requests
+    /// Get the captured subscription requests (from `subscribe()`)
     pub fn captured_requests(&self) -> Vec<SubscribeRequest> {
         self.captured_requests.lock().unwrap().clone()
     }
 
+    /// Get the requests sent through stream handles (from
+    /// `handle.write()`)
+    pub fn handle_requests(&self) -> Vec<SubscribeRequest> {
+        self.handle_requests.lock().unwrap().clone()
+    }
+
     /// Push an error update to a specific stream
-    pub fn push_error_to_stream(&self, idx: usize, error: LaserstreamError) {
+    pub fn push_error_to_stream(
+        &self,
+        idx: usize,
+        error: LaserstreamError,
+    ) {
         let senders = self.stream_senders.lock().unwrap();
         if let Some(sender) = senders.get(idx) {
             let _ = sender.send(Err(error));
@@ -58,7 +80,11 @@ impl MockStreamFactory {
     }
 
     /// Push an update to a specific stream by index
-    pub fn push_update_to_stream(&self, idx: usize, update: LaserResult) {
+    pub fn push_update_to_stream(
+        &self,
+        idx: usize,
+        update: LaserResult,
+    ) {
         let senders = self.stream_senders.lock().unwrap();
         if let Some(sender) = senders.get(idx) {
             let _ = sender.send(update);
@@ -78,9 +104,10 @@ impl MockStreamFactory {
         }
     }
 
-    /// Clear all state (requests and streams)
+    /// Clear all state (requests, handle requests and streams)
     pub fn clear(&self) {
         self.captured_requests.lock().unwrap().clear();
+        self.handle_requests.lock().unwrap().clear();
         self.stream_senders.lock().unwrap().clear();
     }
 }
@@ -91,33 +118,51 @@ impl Default for MockStreamFactory {
     }
 }
 
+/// Mock handle that records write requests and drains them into the
+/// shared `handle_requests` vec on the factory.
+#[derive(Clone)]
+#[allow(dead_code)]
 pub struct MockStreamHandle {
-    write_tx: mpsc::UnboundedSender<SubscribeRequest>,
+    handle_requests: Arc<Mutex<Vec<SubscribeRequest>>>,
 }
 
 #[async_trait]
 impl StreamHandle for MockStreamHandle {
-    async fn write(&self, request: SubscribeRequest) -> Result<(), LaserstreamError> {
-        self.write_tx.send(request).map_err(|_| {
-            LaserstreamError::ConnectionError("Failed to send update to stream".to_string())
-        })
+    async fn write(
+        &self,
+        request: SubscribeRequest,
+    ) -> Result<(), LaserstreamError> {
+        self.handle_requests
+            .lock()
+            .unwrap()
+            .push(request);
+        Ok(())
     }
 }
 
 impl StreamFactory<MockStreamHandle> for MockStreamFactory {
-    fn subscribe(&self, request: SubscribeRequest) -> LaserStreamWithHandle<MockStreamHandle> {
-        // Record the request
+    fn subscribe(
+        &self,
+        request: SubscribeRequest,
+    ) -> LaserStreamWithHandle<MockStreamHandle> {
+        // Record the initial subscribe request
         self.captured_requests.lock().unwrap().push(request);
 
-        // Create a channel for driving LaserResult items into the stream
-        let (stream_tx, stream_rx) = mpsc::unbounded_channel::<LaserResult>();
+        // Create a channel for driving LaserResult items into the
+        // stream
+        let (stream_tx, stream_rx) =
+            mpsc::unbounded_channel::<LaserResult>();
+        let stream = Box::pin(UnboundedReceiverStream::new(stream_rx));
+
+        let stream_tx = Arc::new(stream_tx);
         self.stream_senders.lock().unwrap().push(stream_tx);
 
-        // Create a channel for the handle's write method
-        let (write_tx, _write_rx) = mpsc::unbounded_channel::<SubscribeRequest>();
-        let handle = MockStreamHandle { write_tx };
+        // The handle shares the factory's handle_requests vec so
+        // every write is visible to tests immediately.
+        let handle = MockStreamHandle {
+            handle_requests: Arc::clone(&self.handle_requests),
+        };
 
-        let stream = Box::pin(UnboundedReceiverStream::new(stream_rx));
         LaserStreamWithHandle { stream, handle }
     }
 }
@@ -156,16 +201,72 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_mock_can_drive_updates() {
+    async fn test_mock_handle_write_records_requests() {
         let mock = MockStreamFactory::new();
 
         let request = SubscribeRequest::default();
-        let _stream = mock.subscribe(request);
+        let result = mock.subscribe(request);
 
         assert_eq!(mock.active_stream_count(), 1);
 
-        // The stream is created but we can't easily test the update without
-        // running the actual stream, which is tested in integration tests
+        // Write an updated request through the handle
+        let mut accounts = HashMap::new();
+        accounts.insert(
+            "updated".to_string(),
+            SubscribeRequestFilterAccounts::default(),
+        );
+        let update_request = SubscribeRequest {
+            accounts,
+            commitment: Some(CommitmentLevel::Confirmed.into()),
+            ..Default::default()
+        };
+
+        result
+            .handle
+            .write(update_request.clone())
+            .await
+            .unwrap();
+
+        let handle_reqs = mock.handle_requests();
+        assert_eq!(handle_reqs.len(), 1);
+        assert_eq!(
+            handle_reqs[0].commitment,
+            update_request.commitment
+        );
+        assert!(handle_reqs[0].accounts.contains_key("updated"));
+    }
+
+    #[tokio::test]
+    async fn test_mock_handle_write_multiple() {
+        let mock = MockStreamFactory::new();
+
+        let r1 = mock.subscribe(SubscribeRequest::default());
+        let r2 = mock.subscribe(SubscribeRequest::default());
+
+        // Both handles share the same handle_requests vec
+        r1.handle
+            .write(SubscribeRequest {
+                commitment: Some(
+                    CommitmentLevel::Processed.into(),
+                ),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        r2.handle
+            .write(SubscribeRequest {
+                commitment: Some(
+                    CommitmentLevel::Finalized.into(),
+                ),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let handle_reqs = mock.handle_requests();
+        assert_eq!(handle_reqs.len(), 2);
+        assert_eq!(mock.captured_requests().len(), 2);
     }
 
     #[test]
@@ -180,5 +281,6 @@ mod tests {
         mock.clear();
 
         assert_eq!(mock.captured_requests().len(), 0);
+        assert_eq!(mock.handle_requests().len(), 0);
     }
 }

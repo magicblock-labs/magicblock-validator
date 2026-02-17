@@ -1,9 +1,10 @@
-use async_trait::async_trait;
 use std::pin::Pin;
 
+use async_trait::async_trait;
 use futures_util::Stream;
 use helius_laserstream::{
-    LaserstreamError, StreamHandle as HeliusStreamHandle, grpc::{SubscribeRequest, SubscribeUpdate}
+    grpc::{SubscribeRequest, SubscribeUpdate},
+    LaserstreamError, StreamHandle as HeliusStreamHandle,
 };
 
 pub use self::{
@@ -31,23 +32,32 @@ pub trait StreamFactory<S: StreamHandle>: Send + Sync + 'static {
 /// This is needed since we cannot create the helius one since
 /// [helius_laserstream::StreamHandle::write_tx] is private and there is no constructor.
 #[async_trait]
+#[allow(dead_code)]
 pub trait StreamHandle {
     /// Send a new subscription request to update the active subscription.
-    async fn write(&self, request: SubscribeRequest) -> Result<(), LaserstreamError>;
+    async fn write(
+        &self,
+        request: SubscribeRequest,
+    ) -> Result<(), LaserstreamError>;
 }
 
+#[allow(dead_code)]
 pub struct LaserStreamWithHandle<S: StreamHandle> {
     pub(crate) stream: LaserStream,
     pub(crate) handle: S,
 }
 
+#[allow(dead_code)]
 pub struct StreamHandleImpl {
-   pub handle: HeliusStreamHandle,
+    pub handle: HeliusStreamHandle,
 }
 
 #[async_trait]
 impl StreamHandle for StreamHandleImpl {
-    async fn write(&self, request: SubscribeRequest) -> Result<(), LaserstreamError> {
+    async fn write(
+        &self,
+        request: SubscribeRequest,
+    ) -> Result<(), LaserstreamError> {
         self.handle.write(request).await
     }
 }
@@ -64,7 +74,10 @@ impl StreamFactoryImpl {
 }
 
 impl StreamFactory<StreamHandleImpl> for StreamFactoryImpl {
-    fn subscribe(&self, request: SubscribeRequest) -> LaserStreamWithHandle<StreamHandleImpl> {
+    fn subscribe(
+        &self,
+        request: SubscribeRequest,
+    ) -> LaserStreamWithHandle<StreamHandleImpl> {
         let (stream, handle) =
             helius_laserstream::client::subscribe(self.config.clone(), request);
         LaserStreamWithHandle {
