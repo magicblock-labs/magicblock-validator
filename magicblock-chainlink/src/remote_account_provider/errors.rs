@@ -32,6 +32,9 @@ pub enum RemoteAccountProviderError {
     #[error("Failed to manage subscriptions ({0})")]
     AccountSubscriptionsTaskFailed(String),
 
+    #[error("Not all client's subscriptions were in sync ({0})")]
+    AccountSubscriptionsOutOfSync(String),
+
     #[error("Connection disrupted")]
     ConnectionDisrupted,
 

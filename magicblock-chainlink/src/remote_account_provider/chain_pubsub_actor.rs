@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     sync::{
         atomic::{AtomicBool, AtomicU16, Ordering},
         Arc, Mutex,
@@ -169,26 +169,9 @@ impl ChainPubsubActor {
         }
     }
 
-    pub fn subscription_count(&self, filter: &[Pubkey]) -> usize {
+    pub fn subscriptions(&self) -> HashSet<Pubkey> {
         if !self.is_connected.load(Ordering::SeqCst) {
-            return 0;
-        }
-        let subs = self
-            .subscriptions
-            .lock()
-            .expect("subscriptions lock poisoned");
-        if filter.is_empty() {
-            subs.len()
-        } else {
-            subs.keys()
-                .filter(|pubkey| !filter.contains(pubkey))
-                .count()
-        }
-    }
-
-    pub fn subscriptions(&self) -> Vec<Pubkey> {
-        if !self.is_connected.load(Ordering::SeqCst) {
-            return vec![];
+            return HashSet::new();
         }
         let subs = self
             .subscriptions

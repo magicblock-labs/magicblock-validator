@@ -44,16 +44,19 @@ pub trait ChainPubsubClient: Send + Sync + Clone + 'static {
 
     fn take_updates(&self) -> mpsc::Receiver<SubscriptionUpdate>;
 
-    /// Provides the total number of subscriptions and the number of
-    /// subscriptions when excludig pubkeys in `exclude`.
-    /// - `exclude`: Optional slice of pubkeys to exclude from the count.
-    /// Returns a tuple of (total subscriptions, filtered subscriptions).
-    async fn subscription_count(
-        &self,
-        exclude: Option<&[Pubkey]>,
-    ) -> Option<(usize, usize)>;
+    /// Returns the subscriptions of a client or the union of subscriptions
+    /// if there are multiple clients.
+    /// This means that if any client is subscribed to a pubkey, it will be
+    /// included in the returned set even if other clients are not subscribed to it.
+    fn subscriptions_union(&self) -> HashSet<Pubkey>;
 
-    fn subscriptions(&self) -> Option<Vec<Pubkey>>;
+    /// Returns the intersection of subscriptions across all underlying
+    /// clients. For a single client this is identical to [ChainPubsubClient::subscriptions_union].
+    /// For an implementer with multiple clients it returns only the pubkeys
+    /// that every client is subscribed to.
+    fn subscriptions_intersection(&self) -> HashSet<Pubkey> {
+        self.subscriptions_union()
+    }
 
     fn subs_immediately(&self) -> bool;
 
@@ -198,21 +201,8 @@ impl ChainPubsubClient for ChainPubsubClientImpl {
             })?
     }
 
-    async fn subscription_count(
-        &self,
-        exclude: Option<&[Pubkey]>,
-    ) -> Option<(usize, usize)> {
-        let total = self.actor.subscription_count(&[]);
-        let filtered = if let Some(exclude) = exclude {
-            self.actor.subscription_count(exclude)
-        } else {
-            total
-        };
-        Some((total, filtered))
-    }
-
-    fn subscriptions(&self) -> Option<Vec<Pubkey>> {
-        Some(self.actor.subscriptions())
+    fn subscriptions_union(&self) -> HashSet<Pubkey> {
+        self.actor.subscriptions()
     }
 
     fn subs_immediately(&self) -> bool {
@@ -469,26 +459,9 @@ pub mod mock {
             Ok(())
         }
 
-        async fn subscription_count(
-            &self,
-            exclude: Option<&[Pubkey]>,
-        ) -> Option<(usize, usize)> {
-            let pubkeys: Vec<Pubkey> = {
-                let subs = self.subscribed_pubkeys.lock();
-                subs.iter().cloned().collect()
-            };
-            let total = pubkeys.len();
-            let exclude = exclude.unwrap_or_default();
-            let filtered = pubkeys
-                .iter()
-                .filter(|pubkey| !exclude.contains(pubkey))
-                .count();
-            Some((total, filtered))
-        }
-
-        fn subscriptions(&self) -> Option<Vec<Pubkey>> {
+        fn subscriptions_union(&self) -> HashSet<Pubkey> {
             let subs = self.subscribed_pubkeys.lock();
-            Some(subs.iter().copied().collect())
+            subs.iter().copied().collect()
         }
 
         fn subs_immediately(&self) -> bool {
