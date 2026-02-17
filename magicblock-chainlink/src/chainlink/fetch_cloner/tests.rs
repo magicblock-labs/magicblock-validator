@@ -1099,6 +1099,108 @@ async fn test_undelegation_requested_subscription_behavior() {
 }
 
 #[tokio::test]
+async fn test_delegated_authoritative_skip_unsubscribes_subscription() {
+    init_logger();
+    let validator_pubkey = random_pubkey();
+    let account_owner = random_pubkey();
+    const CURRENT_SLOT: u64 = 100;
+
+    let account_pubkey = random_pubkey();
+    let delegated_account = Account {
+        lamports: 1_000_000,
+        data: vec![1, 2, 3, 4],
+        owner: dlp::id(),
+        executable: false,
+        rent_epoch: 0,
+    };
+
+    let FetcherTestCtx {
+        remote_account_provider,
+        accounts_bank,
+        rpc_client,
+        fetch_cloner,
+        subscription_tx,
+        ..
+    } = setup(
+        [(account_pubkey, delegated_account.clone())],
+        CURRENT_SLOT,
+        validator_pubkey,
+    )
+    .await;
+
+    add_delegation_record_for(
+        &rpc_client,
+        account_pubkey,
+        validator_pubkey,
+        account_owner,
+    );
+
+    // Clone delegated account into bank (authoritative local delegated state).
+    fetch_cloner
+        .fetch_and_clone_accounts(
+            &[account_pubkey],
+            None,
+            None,
+            AccountFetchOrigin::GetAccount,
+            None,
+        )
+        .await
+        .expect("delegated account fetch should succeed");
+    assert_cloned_delegated_account!(
+        accounts_bank,
+        account_pubkey,
+        delegated_account,
+        CURRENT_SLOT,
+        account_owner
+    );
+
+    // Simulate undelegation-tracking subscription being active.
+    fetch_cloner
+        .subscribe_to_account(&account_pubkey)
+        .await
+        .expect("failed to subscribe delegated account");
+    assert_subscribed!(remote_account_provider, &[&account_pubkey]);
+
+    // Send a newer plain update; delegated authoritative-skip path should still unsubscribe.
+    use crate::remote_account_provider::{
+        RemoteAccount, RemoteAccountUpdateSource,
+    };
+    let chain_update = Account {
+        lamports: 900_000,
+        data: vec![9, 9, 9, 9],
+        owner: account_owner,
+        executable: false,
+        rent_epoch: 0,
+    };
+    subscription_tx
+        .send(ForwardedSubscriptionUpdate {
+            pubkey: account_pubkey,
+            account: RemoteAccount::from_fresh_account(
+                chain_update,
+                CURRENT_SLOT + 1,
+                RemoteAccountUpdateSource::Subscription,
+            ),
+        })
+        .await
+        .unwrap();
+
+    const POLL_INTERVAL: std::time::Duration = Duration::from_millis(10);
+    const TIMEOUT: std::time::Duration = Duration::from_millis(500);
+    tokio::time::timeout(TIMEOUT, async {
+        loop {
+            if !remote_account_provider.is_watching(&account_pubkey) {
+                break;
+            }
+            tokio::time::sleep(POLL_INTERVAL).await;
+        }
+    })
+    .await
+    .expect("timed out waiting for delegated account unsubscribe");
+
+    assert_not_subscribed!(remote_account_provider, &[&account_pubkey]);
+}
+
+#[tokio::test]
 async fn test_parallel_fetch_prevention_multiple_accounts() {
     init_logger();
     let validator_pubkey = random_pubkey();

@@ -200,6 +200,8 @@ where
                             this.accounts_bank.get_account(&pubkey)
                         {
                             if in_bank.delegated() && !in_bank.undelegating() {
+                                this.unsubscribe_from_delegated_account(pubkey)
+                                    .await;
                                 return;
                             }
 
@@ -262,17 +264,8 @@ where
                         // The subscription will be turned back on once the committor service schedules
                         // a commit for it that includes undelegation
                         if account.delegated() {
-                            if let Err(err) = this
-                                .remote_account_provider
-                                .unsubscribe(&pubkey)
-                                .await
-                            {
-                                error!(
-                                    pubkey = %pubkey,
-                                    error = %err,
-                                    "Failed to unsubscribe from delegated account"
-                                );
-                            }
+                            this.unsubscribe_from_delegated_account(pubkey)
+                                .await;
                         }
 
                         if account.executable() {
@@ -322,6 +315,18 @@ where
         // moved to program_loader module
         program_loader::handle_executable_sub_update(self, pubkey, account)
             .await;
+    }
+
+    async fn unsubscribe_from_delegated_account(&self, pubkey: Pubkey) {
+        if let Err(err) =
+            self.remote_account_provider.unsubscribe(&pubkey).await
+        {
+            error!(
+                pubkey = %pubkey,
+                error = %err,
+                "Failed to unsubscribe from delegated account"
+            );
+        }
     }
 
     async fn resolve_account_to_clone_from_forwarded_sub_with_unsubscribe(
