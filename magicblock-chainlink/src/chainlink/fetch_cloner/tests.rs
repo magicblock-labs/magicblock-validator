@@ -21,7 +21,8 @@ use crate::{
         cloner_stub::ClonerStub,
         deleg::{add_delegation_record_for, add_invalid_delegation_record_for},
         eatas::{
-            create_eata_account, derive_ata, derive_eata, EATA_PROGRAM_ID,
+            create_ata_account, create_eata_account, derive_ata, derive_eata,
+            EATA_PROGRAM_ID,
         },
         init_logger,
         rpc_client_mock::{ChainRpcClientMock, ChainRpcClientMockBuilder},
@@ -2079,4 +2080,91 @@ async fn test_delegated_eata_subscription_update_clones_raw_eata_and_projects_at
     assert_eq!(projected_mint, mint);
     assert_eq!(projected_owner, wallet_owner);
     assert_eq!(projected_amount, AMOUNT);
+}
+
+#[tokio::test]
+async fn test_delegated_eata_update_does_not_override_delegated_ata_in_bank() {
+    init_logger();
+    let validator_pubkey = random_pubkey();
+    let wallet_owner = random_pubkey();
+    let mint = random_pubkey();
+    const CURRENT_SLOT: u64 = 100;
+    const CHAIN_EATA_AMOUNT: u64 = 777;
+    const LOCAL_ATA_AMOUNT: u64 = 999;
+
+    let eata_pubkey = derive_eata(&wallet_owner, &mint);
+    let ata_pubkey = derive_ata(&wallet_owner, &mint);
+    let eata_account =
+        create_eata_account(&wallet_owner, &mint, CHAIN_EATA_AMOUNT, true);
+
+    let FetcherTestCtx {
+        accounts_bank,
+        rpc_client,
+        subscription_tx,
+        ..
+    } = setup(
+        [(eata_pubkey, eata_account.clone())],
+        CURRENT_SLOT,
+        validator_pubkey,
+    )
+    .await;
+
+    add_delegation_record_for(
+        &rpc_client,
+        eata_pubkey,
+        validator_pubkey,
+        EATA_PROGRAM_ID,
+    );
+
+    // Simulate local delegated ATA state that was already mutated in the validator.
+    let mut local_ata = create_ata_account(&wallet_owner, &mint);
+    local_ata.data[64..72].copy_from_slice(&LOCAL_ATA_AMOUNT.to_le_bytes());
+    let mut local_ata_shared = AccountSharedData::from(local_ata);
+    local_ata_shared.set_remote_slot(CURRENT_SLOT - 1);
+    local_ata_shared.set_delegated(true);
+    accounts_bank.insert(ata_pubkey, local_ata_shared);
+
+    use crate::remote_account_provider::{
+        RemoteAccount, RemoteAccountUpdateSource,
+    };
+
+    // A newer chain update for delegated eATA must not override delegated ATA in bank.
+    subscription_tx
+        .send(ForwardedSubscriptionUpdate {
+            pubkey: eata_pubkey,
+            account: RemoteAccount::from_fresh_account(
+                eata_account,
+                CURRENT_SLOT,
+                RemoteAccountUpdateSource::Subscription,
+            ),
+        })
+        .await
+        .unwrap();
+
+    const POLL_INTERVAL: std::time::Duration = Duration::from_millis(10);
+    const TIMEOUT: std::time::Duration = Duration::from_millis(500);
+    tokio::time::timeout(TIMEOUT, async {
+        while accounts_bank.get_account(&eata_pubkey).is_none() {
+            tokio::time::sleep(POLL_INTERVAL).await;
+        }
+    })
+    .await
+    .expect("timed out waiting for delegated eATA subscription update");
+
+    let ata_after = accounts_bank
+        .get_account(&ata_pubkey)
+        .expect("ATA should still exist in bank");
+    assert!(ata_after.delegated(), "ATA must remain delegated");
+    assert_eq!(
+        ata_after.remote_slot(),
+        CURRENT_SLOT - 1,
+        "Delegated ATA should not be overwritten by chain update",
+    );
+
+    let ata_data = ata_after.data();
+    let ata_amount = u64::from_le_bytes(ata_data[64..72].try_into().unwrap());
+    assert_eq!(
+        ata_amount, LOCAL_ATA_AMOUNT,
+        "Delegated ATA amount should keep local state",
+    );
 }

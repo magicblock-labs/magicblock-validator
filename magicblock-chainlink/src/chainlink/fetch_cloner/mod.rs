@@ -199,6 +199,10 @@ where
                         if let Some(in_bank) =
                             this.accounts_bank.get_account(&pubkey)
                         {
+                            if in_bank.delegated() && !in_bank.undelegating() {
+                                return;
+                            }
+
                             if in_bank.undelegating() {
                                 // We expect the account to still be delegated, but with the delegation
                                 // program owner
@@ -527,6 +531,9 @@ where
         )?;
 
         if let Some(in_bank_ata) = self.accounts_bank.get_account(&ata_pubkey) {
+            if in_bank_ata.delegated() && !in_bank_ata.undelegating() {
+                return None;
+            }
             if in_bank_ata.remote_slot() >= projected_ata.remote_slot() {
                 return None;
             }
