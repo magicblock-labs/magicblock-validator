@@ -141,7 +141,27 @@ pub(crate) fn process_mutate_accounts(
                 "MutateAccounts: account {} is delegated and not undelegating; mutation is forbidden",
                 account_key
             );
-            return Err(InstructionError::InvalidAccountData);
+            return Err(
+                MagicBlockProgramError::AccountIsDelegatedAndNotUndelegating
+                    .into(),
+            );
+        }
+
+        let current_remote_slot = account.borrow().remote_slot();
+        if let Some(incoming_remote_slot) = modification.remote_slot {
+            if incoming_remote_slot < current_remote_slot {
+                ic_msg!(
+                    invoke_context,
+                    "MutateAccounts: account {} incoming remote_slot {} is older than current remote_slot {}; mutation is forbidden",
+                    account_key,
+                    incoming_remote_slot,
+                    current_remote_slot
+                );
+                return Err(
+                    MagicBlockProgramError::IncomingRemoteSlotIsOlderThanCurrentRemoteSlot
+                        .into(),
+                );
+            }
         }
 
         // While an account is undelegating and the delegation is not completed,
@@ -536,7 +556,8 @@ mod tests {
             ix.data.as_slice(),
             transaction_accounts,
             ix.accounts,
-            Err(InstructionError::InvalidAccountData),
+            Err(MagicBlockProgramError::AccountIsDelegatedAndNotUndelegating
+                .into()),
         );
     }
 
@@ -792,5 +813,92 @@ mod tests {
         let _account_authority = accounts.drain(0..1).next().unwrap();
         let modified_account = accounts.drain(0..1).next().unwrap();
         assert_eq!(modified_account.remote_slot(), remote_slot);
+    }
+
+    #[test]
+    fn test_mod_remote_slot_rejects_stale_update() {
+        init_logger!();
+
+        let mod_key = Pubkey::new_unique();
+        let mut account = AccountSharedData::new(100, 0, &mod_key);
+        account.set_remote_slot(100);
+        let mut account_data = {
+            let mut map = HashMap::new();
+            map.insert(mod_key, account);
+            map
+        };
+        ensure_started_validator(&mut account_data);
+
+        let ix = InstructionUtils::modify_accounts_instruction(
+            vec![AccountModification {
+                pubkey: mod_key,
+                lamports: Some(200),
+                remote_slot: Some(99),
+                ..Default::default()
+            }],
+            None,
+        );
+        let transaction_accounts = ix
+            .accounts
+            .iter()
+            .flat_map(|acc| {
+                account_data
+                    .remove(&acc.pubkey)
+                    .map(|shared_data| (acc.pubkey, shared_data))
+            })
+            .collect();
+
+        let _accounts = process_instruction(
+            ix.data.as_slice(),
+            transaction_accounts,
+            ix.accounts,
+            Err(MagicBlockProgramError::IncomingRemoteSlotIsOlderThanCurrentRemoteSlot.into()),
+        );
+    }
+
+    #[test]
+    fn test_mod_remote_slot_allows_equal_update() {
+        init_logger!();
+
+        let mod_key = Pubkey::new_unique();
+        let mut account = AccountSharedData::new(100, 0, &mod_key);
+        account.set_remote_slot(100);
+        let mut account_data = {
+            let mut map = HashMap::new();
+            map.insert(mod_key, account);
+            map
+        };
+        ensure_started_validator(&mut account_data);
+
+        let ix = InstructionUtils::modify_accounts_instruction(
+            vec![AccountModification {
+                pubkey: mod_key,
+                lamports: Some(200),
+                remote_slot: Some(100),
+                ..Default::default()
+            }],
+            None,
+        );
+        let transaction_accounts = ix
+            .accounts
+            .iter()
+            .flat_map(|acc| {
+                account_data
+                    .remove(&acc.pubkey)
+                    .map(|shared_data| (acc.pubkey, shared_data))
+            })
+            .collect();
+
+        let mut accounts = process_instruction(
+            ix.data.as_slice(),
+            transaction_accounts,
+            ix.accounts,
+            Ok(()),
+        );
+
+        let _account_authority = accounts.drain(0..1).next().unwrap();
+        let modified_account = accounts.drain(0..1).next().unwrap();
+        assert_eq!(modified_account.lamports(), 200);
+        assert_eq!(modified_account.remote_slot(), 100);
     }
 }
