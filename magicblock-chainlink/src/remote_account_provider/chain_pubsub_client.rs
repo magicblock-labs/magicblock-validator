@@ -459,10 +459,6 @@ pub mod mock {
             Ok(())
         }
 
-        /// Returns the subscriptions of a client or the union of subscriptions
-        /// if there are multiple clients.
-        /// This means that if any client is subscribed to a pubkey, it will be
-        /// included in the returned set even if other clients are not subscribed to it.
         fn subscriptions_union(&self) -> HashSet<Pubkey> {
             let subs = self.subscribed_pubkeys.lock();
             subs.iter().copied().collect()
