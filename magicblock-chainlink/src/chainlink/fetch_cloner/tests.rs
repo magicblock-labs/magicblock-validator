@@ -1198,6 +1198,15 @@ async fn test_delegated_authoritative_skip_unsubscribes_subscription() {
     .expect("timed out waiting for delegated account unsubscribe");
 
     assert_not_subscribed!(remote_account_provider, &[&account_pubkey]);
+
+    // Ensure we did not overwrite the local delegated account state.
+    assert_cloned_delegated_account!(
+        accounts_bank,
+        account_pubkey,
+        delegated_account,
+        CURRENT_SLOT,
+        account_owner
+    );
 }
 
 #[tokio::test]
