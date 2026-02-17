@@ -1,10 +1,12 @@
-use std::collections::{HashMap, HashSet};
+use std::{collections::{HashMap, HashSet}, marker::PhantomData};
 
 use helius_laserstream::grpc::{
     CommitmentLevel, SubscribeRequest, SubscribeRequestFilterAccounts,
     SubscribeRequestFilterSlots,
 };
 use solana_pubkey::Pubkey;
+
+use crate::remote_account_provider::chain_laser_actor::StreamHandle;
 
 use super::{LaserStream, StreamFactory};
 
@@ -46,11 +48,11 @@ impl Default for StreamManagerConfig {
 /// ignored at the actor level.
 /// Unsubscribed accounts are dropped as part of optimization.
 #[allow(unused)]
-pub struct StreamManager<S: StreamFactory> {
+pub struct StreamManager<S: StreamHandle, SF: StreamFactory<S>> {
     /// Configures limits for stream management
     config: StreamManagerConfig,
     /// The factory used to create streams
-    stream_factory: S,
+    stream_factory: SF,
     /// Active streams for program subscriptions
     program_subscriptions: Option<(HashSet<Pubkey>, LaserStream)>,
     /// The canonical set of currently active account subscriptions.
@@ -68,11 +70,12 @@ pub struct StreamManager<S: StreamFactory> {
     /// Old streams created by optimization, each covering up to
     /// [StreamManagerConfig::max_subs_in_old_optimized] subscriptions.
     optimized_old_streams: Vec<LaserStream>,
+    _phantom: PhantomData<S>,
 }
 
 #[allow(unused)]
-impl<S: StreamFactory> StreamManager<S> {
-    pub fn new(config: StreamManagerConfig, stream_factory: S) -> Self {
+impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
+    pub fn new(config: StreamManagerConfig, stream_factory: SF) -> Self {
         Self {
             config,
             stream_factory,
@@ -82,6 +85,7 @@ impl<S: StreamFactory> StreamManager<S> {
             current_new_stream: None,
             unoptimized_old_streams: Vec::new(),
             optimized_old_streams: Vec::new(),
+            _phantom: PhantomData,
         }
     }
 
@@ -195,7 +199,7 @@ impl<S: StreamFactory> StreamManager<S> {
                 let refs: Vec<&Pubkey> = chunk.iter().collect();
                 self.stream_factory.subscribe(
                     Self::build_account_request(&refs, commitment),
-                )
+                ).stream
             })
             .collect();
 
@@ -320,7 +324,7 @@ impl<S: StreamFactory> StreamManager<S> {
     ) -> LaserStream {
         let request =
             Self::build_account_request(pubkeys, commitment);
-        self.stream_factory.subscribe(request)
+        self.stream_factory.subscribe(request).stream
     }
 
     // =========================================================
@@ -363,7 +367,7 @@ impl<S: StreamFactory> StreamManager<S> {
             from_slot,
             ..Default::default()
         };
-        self.stream_factory.subscribe(request)
+        self.stream_factory.subscribe(request).stream
     }
 
     /// Adds a program subscription. If the program is already
@@ -430,7 +434,7 @@ impl<S: StreamFactory> StreamManager<S> {
             commitment: Some((*commitment).into()),
             ..Default::default()
         };
-        self.stream_factory.subscribe(request)
+        self.stream_factory.subscribe(request).stream
     }
 }
 
@@ -440,7 +444,7 @@ mod tests {
     use solana_pubkey::Pubkey;
 
     use super::*;
-    use crate::remote_account_provider::chain_laser_actor::mock::MockStreamFactory;
+    use crate::remote_account_provider::chain_laser_actor::mock::{MockStreamFactory, MockStreamHandle};
 
     // -----------------
     // Helpers
@@ -453,7 +457,7 @@ mod tests {
         }
     }
 
-    fn create_manager() -> (StreamManager<MockStreamFactory>, MockStreamFactory) {
+    fn create_manager() -> (StreamManager<MockStreamHandle, MockStreamFactory>, MockStreamFactory) {
         let factory = MockStreamFactory::new();
         let manager = StreamManager::new(test_config(), factory.clone());
         (manager, factory)
@@ -475,7 +479,7 @@ mod tests {
     /// Assert that `subscriptions()` contains exactly `expected`
     /// (order-independent, exact count).
     fn assert_subscriptions_eq(
-        mgr: &StreamManager<MockStreamFactory>,
+        mgr: &StreamManager<MockStreamHandle, MockStreamFactory>,
         expected: &[Pubkey],
     ) {
         let subs = mgr.subscriptions();
@@ -522,7 +526,7 @@ mod tests {
     /// Subscribe `n` pubkeys one-at-a-time, returning the created
     /// pubkeys.
     fn subscribe_n(
-        mgr: &mut StreamManager<MockStreamFactory>,
+        mgr: &mut StreamManager<MockStreamHandle, MockStreamFactory>,
         n: usize,
     ) -> Vec<Pubkey> {
         let pks = make_pubkeys(n);
@@ -533,7 +537,7 @@ mod tests {
     /// Subscribe pubkeys in batches of `batch` until `total` pubkeys
     /// have been subscribed. Returns all created pubkeys.
     fn subscribe_in_batches(
-        mgr: &mut StreamManager<MockStreamFactory>,
+        mgr: &mut StreamManager<MockStreamHandle, MockStreamFactory>,
         total: usize,
         batch: usize,
     ) -> Vec<Pubkey> {

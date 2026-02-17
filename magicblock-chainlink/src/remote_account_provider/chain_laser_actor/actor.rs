@@ -1,6 +1,7 @@
 use std::{
     collections::HashSet,
     fmt,
+    marker::PhantomData,
     sync::{
         atomic::{AtomicU16, AtomicU64, Ordering},
         Arc,
@@ -31,7 +32,8 @@ use tonic::Code;
 use tracing::*;
 
 use super::{
-    LaserResult, LaserStream, StreamFactory, StreamManager, StreamManagerConfig,
+    LaserResult, LaserStream, StreamFactory, StreamHandle, StreamManager,
+    StreamManagerConfig,
 };
 use crate::remote_account_provider::{
     chain_rpc_client::{ChainRpcClient, ChainRpcClientImpl},
@@ -112,9 +114,9 @@ impl fmt::Display for AccountUpdateSource {
 /// - If a stream ends unexpectedly, `signal_connection_issue()` is called.
 /// - The actor sends an abort signal to the submux, which triggers reconnection.
 /// - The actor itself doesn't attempt to reconnect; it relies on external recovery.
-pub struct ChainLaserActor<S: StreamFactory> {
+pub struct ChainLaserActor<H: StreamHandle, S: StreamFactory<H>> {
     /// Manager for creating laser streams
-    stream_manager: StreamManager<S>,
+    stream_manager: StreamManager<H, S>,
     /// Requested subscriptions, some may not be active yet.
     /// Shared with ChainLaserClientImpl for sync access to
     /// subscription_count and subscriptions_union.
@@ -139,9 +141,10 @@ pub struct ChainLaserActor<S: StreamFactory> {
     client_id: String,
     /// RPC client for diagnostics (e.g., fetching slot when falling behind)
     rpc_client: ChainRpcClientImpl,
+    _phantom: PhantomData<H>,
 }
 
-impl ChainLaserActor<super::StreamFactoryImpl> {
+impl ChainLaserActor<super::StreamHandleImpl, super::StreamFactoryImpl> {
     pub fn new_from_url(
         pubsub_url: &str,
         client_id: &str,
@@ -204,7 +207,7 @@ impl ChainLaserActor<super::StreamFactoryImpl> {
     }
 }
 
-impl<S: StreamFactory> ChainLaserActor<S> {
+impl<H: StreamHandle, S: StreamFactory<H>> ChainLaserActor<H, S> {
     /// Create actor with a custom stream factory (for testing)
     pub fn with_stream_factory(
         client_id: &str,
@@ -243,6 +246,7 @@ impl<S: StreamFactory> ChainLaserActor<S> {
             slots,
             client_id: client_id.to_string(),
             rpc_client,
+            _phantom: PhantomData,
         };
 
         (
@@ -659,7 +663,7 @@ impl<S: StreamFactory> ChainLaserActor<S> {
         subscriptions: &SharedSubscriptions,
         active_subscriptions: &mut StreamMap<usize, LaserStream>,
         active_subscription_pubkeys: &mut HashSet<Pubkey>,
-        stream_manager: &mut StreamManager<S>,
+        stream_manager: &mut StreamManager<H, S>,
     ) {
         subscriptions.write().clear();
         active_subscriptions.clear();
@@ -676,7 +680,7 @@ impl<S: StreamFactory> ChainLaserActor<S> {
         subscriptions: &SharedSubscriptions,
         active_subscriptions: &mut StreamMap<usize, LaserStream>,
         active_subscription_pubkeys: &mut HashSet<Pubkey>,
-        stream_manager: &mut StreamManager<S>,
+        stream_manager: &mut StreamManager<H, S>,
         abort_sender: &mpsc::Sender<()>,
         client_id: &str,
     ) {

@@ -1,10 +1,13 @@
+use async_trait::async_trait;
 use std::sync::{Arc, Mutex};
 
-use helius_laserstream::{grpc, grpc::SubscribeRequest, LaserstreamError};
+use helius_laserstream::{LaserstreamError, grpc::{self, SubscribeRequest}};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
-use super::{LaserResult, LaserStream, StreamFactory};
+use crate::remote_account_provider::chain_laser_actor::{LaserStreamWithHandle, StreamHandle};
+
+use super::{LaserResult, StreamFactory};
 
 /// A test mock that captures subscription requests and allows driving streams
 /// programmatically
@@ -88,17 +91,34 @@ impl Default for MockStreamFactory {
     }
 }
 
-impl StreamFactory for MockStreamFactory {
-    fn subscribe(&self, request: SubscribeRequest) -> LaserStream {
+pub struct MockStreamHandle {
+    write_tx: mpsc::UnboundedSender<SubscribeRequest>,
+}
+
+#[async_trait]
+impl StreamHandle for MockStreamHandle {
+    async fn write(&self, request: SubscribeRequest) -> Result<(), LaserstreamError> {
+        self.write_tx.send(request).map_err(|_| {
+            LaserstreamError::ConnectionError("Failed to send update to stream".to_string())
+        })
+    }
+}
+
+impl StreamFactory<MockStreamHandle> for MockStreamFactory {
+    fn subscribe(&self, request: SubscribeRequest) -> LaserStreamWithHandle<MockStreamHandle> {
         // Record the request
         self.captured_requests.lock().unwrap().push(request);
 
-        // Create a channel and store the sender
-        let (tx, rx) = mpsc::unbounded_channel();
-        self.stream_senders.lock().unwrap().push(tx);
+        // Create a channel for driving LaserResult items into the stream
+        let (stream_tx, stream_rx) = mpsc::unbounded_channel::<LaserResult>();
+        self.stream_senders.lock().unwrap().push(stream_tx);
 
-        // Return the receiver wrapped as a stream
-        Box::pin(UnboundedReceiverStream::new(rx))
+        // Create a channel for the handle's write method
+        let (write_tx, _write_rx) = mpsc::unbounded_channel::<SubscribeRequest>();
+        let handle = MockStreamHandle { write_tx };
+
+        let stream = Box::pin(UnboundedReceiverStream::new(stream_rx));
+        LaserStreamWithHandle { stream, handle }
     }
 }
 
