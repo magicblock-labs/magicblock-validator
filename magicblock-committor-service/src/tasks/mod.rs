@@ -151,9 +151,6 @@ pub trait BaseTask: Send + Sync + Clone + LabelValue {
     /// Returns the max accounts-data-size that can be used with SetLoadedAccountsDataSizeLimit
     fn accounts_size_budget(&self) -> u32;
 
-    /// Calls [`Visitor`] with specific task type
-    fn visit(&self, visitor: &mut dyn Visitor);
-
     /// Resets commit id
     fn reset_commit_id(&mut self, commit_id: u64);
 }

@@ -151,26 +151,8 @@ impl BaseTask for BufferTask {
     }
 
     /// No further optimizations
-    fn try_optimize_tx_size(
-        self: Box<Self>,
-    ) -> Result<Box<dyn BaseTask>, Box<dyn BaseTask>> {
+    fn try_optimize_tx_size(self) -> Result<Self, Self> {
         Err(self)
-    }
-
-    fn preparation_state(&self) -> &PreparationState {
-        &self.preparation_state
-    }
-
-    fn switch_preparation_state(
-        &mut self,
-        new_state: PreparationState,
-    ) -> BaseTaskResult<()> {
-        if matches!(new_state, PreparationState::NotNeeded) {
-            Err(BaseTaskError::PreparationStateTransitionError)
-        } else {
-            self.preparation_state = new_state;
-            Ok(())
-        }
     }
 
     fn compute_units(&self) -> u32 {
@@ -189,23 +171,6 @@ impl BaseTask for BufferTask {
                 commit_diff_size_budget(AccountSizeClass::Huge)
             }
         }
-    }
-
-    #[cfg(test)]
-    fn strategy(&self) -> TaskStrategy {
-        TaskStrategy::Buffer
-    }
-
-    fn task_type(&self) -> TaskType {
-        match self.task_type {
-            BufferTaskType::Commit(_) => TaskType::Commit,
-            BufferTaskType::CommitDiff(_) => TaskType::Commit,
-        }
-    }
-
-    /// For tasks using Args strategy call corresponding `Visitor` method
-    fn visit(&self, visitor: &mut dyn Visitor) {
-        visitor.visit_buffer_task(self);
     }
 
     fn reset_commit_id(&mut self, commit_id: u64) {

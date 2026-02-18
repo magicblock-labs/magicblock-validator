@@ -127,41 +127,8 @@ impl BaseTask for ArgsTask {
         }
     }
 
-    fn try_optimize_tx_size(
-        self: Box<Self>,
-    ) -> Result<Box<dyn BaseTask>, Box<dyn BaseTask>> {
-        match self.task_type {
-            ArgsTaskType::Commit(value) => {
-                Ok(Box::new(BufferTask::new_preparation_required(
-                    BufferTaskType::Commit(value),
-                )))
-            }
-            ArgsTaskType::CommitDiff(value) => {
-                Ok(Box::new(BufferTask::new_preparation_required(
-                    BufferTaskType::CommitDiff(value),
-                )))
-            }
-            ArgsTaskType::BaseAction(_)
-            | ArgsTaskType::Finalize(_)
-            | ArgsTaskType::Undelegate(_) => Err(self),
-        }
-    }
-
-    /// Nothing to prepare for [`ArgsTaskType`] type
-    fn preparation_state(&self) -> &PreparationState {
-        &self.preparation_state
-    }
-
-    fn switch_preparation_state(
-        &mut self,
-        new_state: PreparationState,
-    ) -> BaseTaskResult<()> {
-        if !matches!(new_state, PreparationState::NotNeeded) {
-            Err(BaseTaskError::PreparationStateTransitionError)
-        } else {
-            // Do nothing
-            Ok(())
-        }
+    fn try_optimize_tx_size(self) -> Result<Self, Self> {
+        Err(self)
     }
 
     fn compute_units(&self) -> u32 {
@@ -204,26 +171,6 @@ impl BaseTask for ArgsTask {
                 finalize_size_budget(AccountSizeClass::Huge)
             }
         }
-    }
-
-    #[cfg(test)]
-    fn strategy(&self) -> TaskStrategy {
-        TaskStrategy::Args
-    }
-
-    fn task_type(&self) -> TaskType {
-        match &self.task_type {
-            ArgsTaskType::Commit(_) => TaskType::Commit,
-            ArgsTaskType::CommitDiff(_) => TaskType::Commit,
-            ArgsTaskType::BaseAction(_) => TaskType::Action,
-            ArgsTaskType::Undelegate(_) => TaskType::Undelegate,
-            ArgsTaskType::Finalize(_) => TaskType::Finalize,
-        }
-    }
-
-    /// For tasks using Args strategy call corresponding `Visitor` method
-    fn visit(&self, visitor: &mut dyn Visitor) {
-        visitor.visit_args_task(self);
     }
 
     fn reset_commit_id(&mut self, commit_id: u64) {
