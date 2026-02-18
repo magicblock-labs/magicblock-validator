@@ -321,7 +321,7 @@ where
         if let Err(err) =
             self.remote_account_provider.unsubscribe(&pubkey).await
         {
-            error!(
+            warn!(
                 pubkey = %pubkey,
                 error = %err,
                 "Failed to unsubscribe from delegated account"
