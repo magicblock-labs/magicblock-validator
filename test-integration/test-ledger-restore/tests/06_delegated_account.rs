@@ -76,10 +76,7 @@ fn read(ledger_path: &Path, payer: &Pubkey) -> Child {
     };
     wait_for_counter_ephem_state(&ctx, &mut validator, payer, &expected);
     let counter_decoded = fetch_counter_ephem(&ctx, payer, &mut validator);
-    assert_eq!(
-        counter_decoded, expected,
-        cleanup(&mut validator)
-    );
+    assert_eq!(counter_decoded, expected, cleanup(&mut validator));
     debug!("✅ Verified counter state after restore");
 
     validator

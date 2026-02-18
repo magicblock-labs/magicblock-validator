@@ -164,10 +164,7 @@ fn read(ledger_path: &Path, payer: &Pubkey) -> Child {
     };
     wait_for_counter_ephem_state(&ctx, &mut validator, payer, &expected);
     let counter_ephem = fetch_counter_ephem(&ctx, payer, &mut validator);
-    assert_eq!(
-        counter_ephem, expected,
-        cleanup(&mut validator)
-    );
+    assert_eq!(counter_ephem, expected, cleanup(&mut validator));
     debug!("✅ Verified counter on chain state after restore");
 
     let counter_chain = fetch_counter_chain(payer, &mut validator);

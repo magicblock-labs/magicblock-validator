@@ -188,7 +188,12 @@ fn read(
         &LoadedAccounts::with_delegation_program_test_authority(),
     );
 
-    wait_for_ephem_balance(&ctx, &mut validator, payer_main, payer_main_lamports);
+    wait_for_ephem_balance(
+        &ctx,
+        &mut validator,
+        payer_main,
+        payer_main_lamports,
+    );
     let readonly_expected = FlexiCounter {
         count: 3,
         updates: 1,
@@ -230,10 +235,7 @@ fn read(
 
     let counter_main_ephem =
         fetch_counter_ephem(&ctx, payer_main, &mut validator);
-    assert_eq!(
-        counter_main_ephem, main_expected,
-        cleanup(&mut validator)
-    );
+    assert_eq!(counter_main_ephem, main_expected, cleanup(&mut validator));
     debug!("✅ Verified main counter state after restore");
 
     validator

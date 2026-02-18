@@ -182,10 +182,7 @@ fn read(ledger_path: &Path, payer_kp: &Keypair) -> Child {
     wait_for_counter_ephem_state(&ctx, &mut validator, payer, &expected_ephem);
     let counter_ephem = fetch_counter_ephem(&ctx, payer, &mut validator);
     let counter_chain = fetch_counter_chain(payer, &mut validator);
-    assert_eq!(
-        counter_ephem, expected_ephem,
-        cleanup(&mut validator)
-    );
+    assert_eq!(counter_ephem, expected_ephem, cleanup(&mut validator));
     assert_eq!(
         counter_chain,
         FlexiCounter {
