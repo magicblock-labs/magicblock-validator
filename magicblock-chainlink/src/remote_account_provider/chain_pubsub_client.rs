@@ -1,6 +1,5 @@
 use std::{
     collections::HashSet,
-    mem,
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc, Mutex,
@@ -8,24 +7,11 @@ use std::{
     time::Duration,
 };
 
-use arc_swap::ArcSwap;
 use async_trait::async_trait;
-use futures_util::{future::BoxFuture, stream::BoxStream};
 use magicblock_metrics::metrics;
-use solana_account_decoder::UiAccount;
 use solana_commitment_config::CommitmentConfig;
 use solana_pubkey::Pubkey;
-use solana_pubsub_client::nonblocking::pubsub_client::{
-    PubsubClient, PubsubClientResult,
-};
-use solana_rpc_client_api::{
-    config::{RpcAccountInfoConfig, RpcProgramAccountsConfig},
-    response::{Response, RpcKeyedAccount},
-};
-use tokio::{
-    sync::{mpsc, oneshot, Mutex as AsyncMutex},
-    time,
-};
+use tokio::sync::{mpsc, oneshot};
 use tracing::*;
 
 use super::{
@@ -34,117 +20,7 @@ use super::{
     pubsub_common::{ChainPubsubActorMessage, SubscriptionUpdate},
 };
 
-type UnsubscribeFn = Box<dyn FnOnce() -> BoxFuture<'static, ()> + Send>;
-type SubscribeResult = PubsubClientResult<(
-    BoxStream<'static, Response<UiAccount>>,
-    UnsubscribeFn,
-)>;
-type ProgramSubscribeResult = PubsubClientResult<(
-    BoxStream<'static, Response<RpcKeyedAccount>>,
-    UnsubscribeFn,
-)>;
-
-const MAX_RECONNECT_ATTEMPTS: usize = 5;
-const RECONNECT_ATTEMPT_DELAY: Duration = Duration::from_millis(500);
 const MAX_RESUB_DELAY_MS: u64 = 800;
-
-pub struct PubSubConnection {
-    client: ArcSwap<PubsubClient>,
-    url: String,
-    reconnect_guard: AsyncMutex<()>,
-}
-
-impl PubSubConnection {
-    pub async fn new(url: String) -> RemoteAccountProviderResult<Self> {
-        let client = Arc::new(PubsubClient::new(&url).await?).into();
-        let reconnect_guard = AsyncMutex::new(());
-        Ok(Self {
-            client,
-            url,
-            reconnect_guard,
-        })
-    }
-
-    pub fn url(&self) -> &str {
-        &self.url
-    }
-
-    pub async fn account_subscribe(
-        &self,
-        pubkey: &Pubkey,
-        config: RpcAccountInfoConfig,
-    ) -> SubscribeResult {
-        let client = self.client.load();
-        let config = Some(config.clone());
-        let (stream, unsub) = client.account_subscribe(pubkey, config).await?;
-        // SAFETY:
-        // the returned stream depends on the used client, which is only ever dropped
-        // if the connection has been terminated, at which point the stream is useless
-        // and will be discarded as well, thus it's safe lifetime extension to 'static
-        let stream = unsafe {
-            mem::transmute::<
-                BoxStream<'_, Response<UiAccount>>,
-                BoxStream<'static, Response<UiAccount>>,
-            >(stream)
-        };
-        Ok((stream, unsub))
-    }
-
-    pub async fn program_subscribe(
-        &self,
-        program_id: &Pubkey,
-        config: RpcProgramAccountsConfig,
-    ) -> ProgramSubscribeResult {
-        let client = self.client.load();
-        let config = Some(config.clone());
-        let (stream, unsub) =
-            client.program_subscribe(program_id, config).await?;
-
-        // SAFETY:
-        // the returned stream depends on the used client, which is only ever dropped
-        // if the connection has been terminated, at which point the stream is useless
-        // and will be discarded as well, thus it's safe lifetime extension to 'static
-        let stream = unsafe {
-            mem::transmute::<
-                BoxStream<'_, Response<RpcKeyedAccount>>,
-                BoxStream<'static, Response<RpcKeyedAccount>>,
-            >(stream)
-        };
-        Ok((stream, unsub))
-    }
-
-    pub async fn reconnect(&self) -> PubsubClientResult<()> {
-        // Prevents multiple reconnect attempts running concurrently
-        let _guard = match self.reconnect_guard.try_lock() {
-            Ok(g) => g,
-            // Reconnect is already in progress
-            Err(_) => {
-                // Wait a bit and return to retry subscription
-                time::sleep(RECONNECT_ATTEMPT_DELAY).await;
-                return Ok(());
-            }
-        };
-        let mut attempt = 1;
-        let client = loop {
-            match PubsubClient::new(&self.url).await {
-                Ok(c) => break Arc::new(c),
-                Err(error) => {
-                    warn!(
-                        "failed to reconnect to ws endpoint at {} {error}",
-                        self.url
-                    );
-                    if attempt == MAX_RECONNECT_ATTEMPTS {
-                        return Err(error);
-                    }
-                    attempt += 1;
-                    time::sleep(RECONNECT_ATTEMPT_DELAY).await;
-                }
-            }
-        };
-        self.client.store(client);
-        Ok(())
-    }
-}
 
 // -----------------
 // Trait
@@ -168,16 +44,19 @@ pub trait ChainPubsubClient: Send + Sync + Clone + 'static {
 
     fn take_updates(&self) -> mpsc::Receiver<SubscriptionUpdate>;
 
-    /// Provides the total number of subscriptions and the number of
-    /// subscriptions when excludig pubkeys in `exclude`.
-    /// - `exclude`: Optional slice of pubkeys to exclude from the count.
-    /// Returns a tuple of (total subscriptions, filtered subscriptions).
-    async fn subscription_count(
-        &self,
-        exclude: Option<&[Pubkey]>,
-    ) -> Option<(usize, usize)>;
+    /// Returns the subscriptions of a client or the union of subscriptions
+    /// if there are multiple clients.
+    /// This means that if any client is subscribed to a pubkey, it will be
+    /// included in the returned set even if other clients are not subscribed to it.
+    fn subscriptions_union(&self) -> HashSet<Pubkey>;
 
-    fn subscriptions(&self) -> Option<Vec<Pubkey>>;
+    /// Returns the intersection of subscriptions across all underlying
+    /// clients. For a single client this is identical to [ChainPubsubClient::subscriptions_union].
+    /// For an implementer with multiple clients it returns only the pubkeys
+    /// that every client is subscribed to.
+    fn subscriptions_intersection(&self) -> HashSet<Pubkey> {
+        self.subscriptions_union()
+    }
 
     fn subs_immediately(&self) -> bool;
 
@@ -322,21 +201,8 @@ impl ChainPubsubClient for ChainPubsubClientImpl {
             })?
     }
 
-    async fn subscription_count(
-        &self,
-        exclude: Option<&[Pubkey]>,
-    ) -> Option<(usize, usize)> {
-        let total = self.actor.subscription_count(&[]);
-        let filtered = if let Some(exclude) = exclude {
-            self.actor.subscription_count(exclude)
-        } else {
-            total
-        };
-        Some((total, filtered))
-    }
-
-    fn subscriptions(&self) -> Option<Vec<Pubkey>> {
-        Some(self.actor.subscriptions())
+    fn subscriptions_union(&self) -> HashSet<Pubkey> {
+        self.actor.subscriptions()
     }
 
     fn subs_immediately(&self) -> bool {
@@ -593,26 +459,9 @@ pub mod mock {
             Ok(())
         }
 
-        async fn subscription_count(
-            &self,
-            exclude: Option<&[Pubkey]>,
-        ) -> Option<(usize, usize)> {
-            let pubkeys: Vec<Pubkey> = {
-                let subs = self.subscribed_pubkeys.lock();
-                subs.iter().cloned().collect()
-            };
-            let total = pubkeys.len();
-            let exclude = exclude.unwrap_or_default();
-            let filtered = pubkeys
-                .iter()
-                .filter(|pubkey| !exclude.contains(pubkey))
-                .count();
-            Some((total, filtered))
-        }
-
-        fn subscriptions(&self) -> Option<Vec<Pubkey>> {
+        fn subscriptions_union(&self) -> HashSet<Pubkey> {
             let subs = self.subscribed_pubkeys.lock();
-            Some(subs.iter().copied().collect())
+            subs.iter().copied().collect()
         }
 
         fn subs_immediately(&self) -> bool {
