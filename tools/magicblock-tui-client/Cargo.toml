@@ -1,0 +1,24 @@
+[package]
+name = "magicblock-tui-client"
+version.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+license.workspace = true
+edition.workspace = true
+
+[dependencies]
+chrono = { workspace = true }
+clap = { workspace = true, features = ["derive"] }
+crossterm = "0.28"
+futures-util = { workspace = true }
+ratatui = "0.29"
+reqwest = { workspace = true, features = ["json"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+solana-pubsub-client = { workspace = true }
+solana-rpc-client-api = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync", "time"] }
+tokio-util = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
