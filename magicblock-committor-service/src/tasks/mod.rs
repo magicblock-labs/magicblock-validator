@@ -121,8 +121,18 @@ impl BaseTaskImpl {
 
 impl LabelValue for BaseTaskImpl {
     fn value(&self) -> &str {
-        // TODO(edwin)
-        todo!()
+        match self {
+            Self::Commit(task) => {
+                if task.is_buffer() {
+                    "buffer_commit"
+                } else {
+                    "args_commit"
+                }
+            }
+            Self::Finalize(_) => "args_finalize",
+            Self::Undelegate(_) => "args_undelegate",
+            Self::BaseAction(_) => "args_action",
+        }
     }
 }
 
