@@ -506,13 +506,27 @@ mod serialization_safety_test {
         assert_serializable(&base_action.instruction(&validator));
     }
 
+    fn make_buffer_commit_task(
+        commit_id: u64,
+        allow_undelegation: bool,
+        data: Vec<u8>,
+        lamports: u64,
+    ) -> CommitTaskV2 {
+        let task =
+            make_commit_task(commit_id, allow_undelegation, data, lamports);
+        let stage = task.state_preparation_stage();
+        CommitTaskV2 {
+            delivery_details: CommitDeliveryDetails::StateInBuffer { stage },
+            ..task
+        }
+    }
+
     #[test]
     fn test_buffer_task_instruction_serialization() {
         let validator = Pubkey::new_unique();
 
-        let commit_task = make_commit_task(456, false, vec![7, 8, 9], 2000)
-            .try_optimize_tx_size()
-            .expect("should optimize to buffer");
+        let commit_task =
+            make_buffer_commit_task(456, false, vec![7, 8, 9], 2000);
         assert!(commit_task.is_buffer());
         assert_serializable(&commit_task.instruction(&validator));
     }
@@ -521,9 +535,8 @@ mod serialization_safety_test {
     fn test_preparation_instructions_serialization() {
         let authority = Pubkey::new_unique();
 
-        let commit_task = make_commit_task(789, true, vec![0; 1024], 3000)
-            .try_optimize_tx_size()
-            .expect("should optimize to buffer");
+        let commit_task =
+            make_buffer_commit_task(789, true, vec![0; 1024], 3000);
 
         let Some(CommitStage::Preparation(preparation_task)) =
             commit_task.stage()

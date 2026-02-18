@@ -161,7 +161,7 @@ impl CommitTaskV2 {
         )
     }
 
-    fn state_preparation_stage(&self) -> CommitStage {
+    pub fn state_preparation_stage(&self) -> CommitStage {
         let committed_data = self.committed_account.account.data.clone();
         self.preparation_stage(committed_data)
     }
