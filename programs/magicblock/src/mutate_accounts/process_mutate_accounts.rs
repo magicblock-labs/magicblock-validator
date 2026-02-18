@@ -10,7 +10,11 @@ use solana_sdk_ids::system_program;
 use solana_transaction_context::TransactionContext;
 
 use crate::{
-    errors::MagicBlockProgramError, validator::validator_authority_id,
+    clone_account::{
+        is_ephemeral, validate_not_delegated, validate_remote_slot,
+    },
+    errors::MagicBlockProgramError,
+    validator::validator_authority_id,
 };
 
 pub(crate) fn process_mutate_accounts(
@@ -104,9 +108,9 @@ pub(crate) fn process_mutate_accounts(
             .get_index_of_instruction_account_in_transaction(account_idx)?;
         let account = transaction_context
             .get_account_at_index(account_transaction_index)?;
-        // we do not allow for account modification if the
-        // account is ephemeral (i.e. exists locally on ER)
-        if account.borrow().ephemeral() {
+
+        // Skip ephemeral accounts (exist locally on ER only)
+        if is_ephemeral(&account) {
             let key = transaction_context
                 .get_key_of_account_at_index(account_transaction_index)?;
             account_mods.remove(key);
@@ -117,6 +121,7 @@ pub(crate) fn process_mutate_accounts(
             );
             continue;
         }
+
         let account_key = transaction_context
             .get_key_of_account_at_index(account_transaction_index)?;
 
@@ -132,51 +137,26 @@ pub(crate) fn process_mutate_accounts(
         ic_msg!(
             invoke_context,
             "MutateAccounts: modifying '{}'.",
-            account_key,
+            account_key
         );
 
-        // If provided log the extra message to give more context to the user, i.e.
-        // why an account is not cloned as delegated, etc.
+        // If provided log the extra message to give more context to the user
         if let Some(ref msg) = message {
             ic_msg!(invoke_context, "MutateAccounts: {}", msg);
         }
 
-        let (is_delegated, is_undelegating) = {
-            let account_ref = account.borrow();
-            (account_ref.delegated(), account_ref.undelegating())
-        };
-        if is_delegated && !is_undelegating {
-            ic_msg!(
-                invoke_context,
-                "MutateAccounts: account {} is delegated and not undelegating; mutation is forbidden",
-                account_key
-            );
-            return Err(
-                MagicBlockProgramError::AccountIsDelegatedAndNotUndelegating
-                    .into(),
-            );
-        }
-
-        let current_remote_slot = account.borrow().remote_slot();
-        if let Some(incoming_remote_slot) = modification.remote_slot {
-            if incoming_remote_slot < current_remote_slot {
-                ic_msg!(
-                    invoke_context,
-                    "MutateAccounts: account {} incoming remote_slot {} is older than current remote_slot {}; mutation is forbidden",
-                    account_key,
-                    incoming_remote_slot,
-                    current_remote_slot
-                );
-                return Err(
-                    MagicBlockProgramError::IncomingRemoteSlotIsOlderThanCurrentRemoteSlot
-                        .into(),
-                );
-            }
-        }
+        // Validate account is mutable
+        validate_not_delegated(&account, account_key, invoke_context)?;
+        validate_remote_slot(
+            &account,
+            account_key,
+            modification.remote_slot,
+            invoke_context,
+        )?;
 
         // While an account is undelegating and the delegation is not completed,
         // we will never clone/mutate it. Thus we can safely untoggle this flag
-        // here.
+        // here AFTER validation passes.
         account.borrow_mut().set_undelegating(false);
 
         if let Some(lamports) = modification.lamports {
@@ -261,7 +241,7 @@ pub(crate) fn process_mutate_accounts(
                 .map_err(|err| {
                     ic_msg!(
                         invoke_context,
-                        "MutateAccounts: too much lamports in authority to credit: {}",
+                        "MutateAccounts: too many lamports in authority to credit: {}",
                         err
                     );
                     err
@@ -517,8 +497,7 @@ mod tests {
             ix.data.as_slice(),
             transaction_accounts,
             ix.accounts,
-            Err(MagicBlockProgramError::AccountIsDelegatedAndNotUndelegating
-                .into()),
+            Err(MagicBlockProgramError::AccountIsDelegated.into()),
         );
     }
 
@@ -813,7 +792,7 @@ mod tests {
             ix.data.as_slice(),
             transaction_accounts,
             ix.accounts,
-            Err(MagicBlockProgramError::IncomingRemoteSlotIsOlderThanCurrentRemoteSlot.into()),
+            Err(MagicBlockProgramError::OutOfOrderUpdate.into()),
         );
     }
 
