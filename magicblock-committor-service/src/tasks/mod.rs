@@ -500,26 +500,84 @@ mod serialization_safety_test {
     }
 
     #[test]
+    fn test_commit_diff_preparation_large_growth_splits_reallocs() {
+        setup();
+        let authority = Pubkey::new_unique();
+        let base_len = 8_192usize;
+        let committed_len = 22_528usize;
+        let owner = Pubkey::new_unique();
+
+        assert!(
+            committed_len - base_len
+                > magicblock_committor_program::consts::MAX_ACCOUNT_ALLOC_PER_INSTRUCTION_SIZE as usize
+        );
+
+        let base_data = vec![1u8; base_len];
+        let mut committed_data = base_data.clone();
+        committed_data.extend(vec![2u8; committed_len - base_len]);
+
+        let buffer_task = BufferTask::new_preparation_required(
+            BufferTaskType::CommitDiff(CommitDiffTask {
+                commit_id: 902,
+                allow_undelegation: false,
+                committed_account: CommittedAccount {
+                    pubkey: Pubkey::new_unique(),
+                    account: Account {
+                        lamports: 5000,
+                        data: committed_data,
+                        owner,
+                        executable: false,
+                        rent_epoch: 0,
+                    },
+                    remote_slot: Default::default(),
+                },
+                base_account: Account {
+                    lamports: 2500,
+                    data: base_data,
+                    owner,
+                    executable: false,
+                    rent_epoch: 0,
+                },
+            }),
+        );
+
+        let PreparationState::Required(preparation_task) =
+            buffer_task.preparation_state()
+        else {
+            panic!("invalid preparation state on creation!");
+        };
+
+        assert_eq!(preparation_task.buffer_account_size, committed_len as u64);
+        assert!(preparation_task.realloc_instructions(&authority).len() > 1);
+    }
+
+    #[test]
     fn test_realloc_instructions_use_buffer_account_size_not_diff_size() {
         setup();
         let authority = Pubkey::new_unique();
         let committed_data = vec![9u8; 64];
-        let chunks = Chunks::from_data_length(
-            committed_data.len(),
-            crate::consts::MAX_WRITE_CHUNK_SIZE,
+        let make_preparation_task =
+            |buffer_account_size: u64| PreparationTask {
+                commit_id: 901,
+                pubkey: Pubkey::new_unique(),
+                chunks: Chunks::from_data_length(
+                    committed_data.len(),
+                    crate::consts::MAX_WRITE_CHUNK_SIZE,
+                ),
+                committed_data: committed_data.clone(),
+                buffer_account_size,
+            };
+
+        let small_realloc_instructions =
+            make_preparation_task(12_288).realloc_instructions(&authority);
+        let large_realloc_instructions =
+            make_preparation_task(30_720).realloc_instructions(&authority);
+
+        assert_eq!(small_realloc_instructions.len(), 1);
+        assert_eq!(large_realloc_instructions.len(), 2);
+        assert!(
+            large_realloc_instructions.len() > small_realloc_instructions.len()
         );
-        let preparation_task = PreparationTask {
-            commit_id: 901,
-            pubkey: Pubkey::new_unique(),
-            chunks,
-            committed_data,
-            buffer_account_size: 12_288,
-        };
-
-        let realloc_instructions =
-            preparation_task.realloc_instructions(&authority);
-
-        assert_eq!(realloc_instructions.len(), 1);
     }
 
     // Helper function to assert serialization succeeds
