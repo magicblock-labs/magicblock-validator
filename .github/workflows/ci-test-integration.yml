@@ -34,6 +34,7 @@ jobs:
           cargo build --locked -p magicblock-validator
           cargo test --manifest-path test-integration/Cargo.toml --workspace --no-run --locked
           make -C test-integration programs
+          # Pre-build chainlink mini programs needed by both 'chainlink' and 'cloning' matrix shards
           RUN_TESTS=chainlink make -C test-integration maybe-prepare-chainlink-programs
         shell: bash
         working-directory: magicblock-validator
