@@ -25,10 +25,39 @@ pub async fn setup_table_mania(validator_auth: &Keypair) -> TableMania {
         );
         MagicblockRpcClient::from(client)
     };
+
+    // Ensure the validator is actually producing slots before sending table txs.
+    tokio::time::timeout(
+        Duration::from_secs(30),
+        rpc_client.wait_for_next_slot(),
+    )
+    .await
+    .expect("Timed out waiting for validator startup")
+    .expect("Failed waiting for validator next slot");
+
+    let requested_lamports = 777 * LAMPORTS_PER_SOL;
     rpc_client
-        .request_airdrop(&validator_auth.pubkey(), 777 * LAMPORTS_PER_SOL)
+        .request_airdrop(&validator_auth.pubkey(), requested_lamports)
         .await
         .unwrap();
+
+    // Airdrop submission is async on chain; wait until balance is visible.
+    tokio::time::timeout(Duration::from_secs(30), async {
+        loop {
+            if let Some(account) = rpc_client
+                .get_account(&validator_auth.pubkey())
+                .await
+                .unwrap()
+            {
+                if account.lamports >= requested_lamports {
+                    break;
+                }
+            }
+            sleep_millis(200).await;
+        }
+    })
+    .await
+    .expect("Timed out waiting for airdrop funding");
 
     if TEST_TABLE_CLOSE {
         TableMania::new(
