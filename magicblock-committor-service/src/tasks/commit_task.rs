@@ -12,7 +12,7 @@ use solana_pubkey::Pubkey;
 
 use crate::{
     consts::MAX_WRITE_CHUNK_SIZE,
-    tasks::{BaseTaskImpl, CleanupTask, PreparationTask},
+    tasks::{BaseTask, BaseTaskImpl, CleanupTask, PreparationTask},
 };
 
 #[derive(Clone, Debug)]
@@ -45,21 +45,6 @@ pub struct CommitTask {
 }
 
 impl CommitTask {
-    pub fn instruction(&self, validator: &Pubkey) -> Instruction {
-        match &self.delivery_details {
-            CommitDelivery::StateInArgs => self.commit_state_ix(validator),
-            CommitDelivery::StateInBuffer { .. } => {
-                self.commit_state_from_buffer_ix(validator)
-            }
-            CommitDelivery::DiffInArgs { base_account } => {
-                self.commit_diff_ix(validator, base_account)
-            }
-            CommitDelivery::DiffInBuffer { .. } => {
-                self.commit_diff_from_buffer_ix(validator)
-            }
-        }
-    }
-
     #[inline(always)]
     fn commit_state_ix(&self, validator: &Pubkey) -> Instruction {
         let args = CommitStateArgs {
@@ -201,56 +186,6 @@ impl CommitTask {
         })
     }
 
-    pub fn try_optimize_tx_size(&mut self) -> bool {
-        let details = std::mem::replace(
-            &mut self.delivery_details,
-            CommitDelivery::StateInArgs,
-        );
-        match details {
-            CommitDelivery::StateInArgs => {
-                let stage = self.state_preparation_stage();
-                self.delivery_details = CommitDelivery::StateInBuffer { stage };
-                true
-            }
-            CommitDelivery::DiffInArgs { base_account } => {
-                let stage = self.diff_preparation_stage(base_account.data());
-                self.delivery_details = CommitDelivery::DiffInBuffer {
-                    base_account,
-                    stage,
-                };
-                true
-            }
-            other @ (CommitDelivery::StateInBuffer { .. }
-            | CommitDelivery::DiffInBuffer { .. }) => {
-                self.delivery_details = other;
-                false
-            }
-        }
-    }
-
-    pub fn compute_units(&self) -> u32 {
-        70_000
-    }
-
-    pub fn accounts_size_budget(&self) -> u32 {
-        match &self.delivery_details {
-            CommitDelivery::StateInArgs => {
-                commit_size_budget(AccountSizeClass::Dynamic(
-                    self.committed_account.account.data.len() as u32,
-                ))
-            }
-            CommitDelivery::StateInBuffer { .. }
-            | CommitDelivery::DiffInBuffer { .. } => {
-                commit_size_budget(AccountSizeClass::Huge)
-            }
-            CommitDelivery::DiffInArgs { .. } => {
-                commit_diff_size_budget(AccountSizeClass::Dynamic(
-                    self.committed_account.account.data.len() as u32,
-                ))
-            }
-        }
-    }
-
     pub fn reset_commit_id(&mut self, commit_id: u64) {
         self.commit_id = commit_id;
         let new_stage = match &self.delivery_details {
@@ -278,6 +213,73 @@ impl CommitTask {
                 *stage = new_stage;
             }
             _ => {}
+        }
+    }
+}
+
+impl BaseTask for CommitTask {
+    fn instruction(&self, validator: &Pubkey) -> Instruction {
+        match &self.delivery_details {
+            CommitDelivery::StateInArgs => self.commit_state_ix(validator),
+            CommitDelivery::StateInBuffer { .. } => {
+                self.commit_state_from_buffer_ix(validator)
+            }
+            CommitDelivery::DiffInArgs { base_account } => {
+                self.commit_diff_ix(validator, base_account)
+            }
+            CommitDelivery::DiffInBuffer { .. } => {
+                self.commit_diff_from_buffer_ix(validator)
+            }
+        }
+    }
+
+    fn try_optimize_tx_size(&mut self) -> bool {
+        let details = std::mem::replace(
+            &mut self.delivery_details,
+            CommitDelivery::StateInArgs,
+        );
+        match details {
+            CommitDelivery::StateInArgs => {
+                let stage = self.state_preparation_stage();
+                self.delivery_details = CommitDelivery::StateInBuffer { stage };
+                true
+            }
+            CommitDelivery::DiffInArgs { base_account } => {
+                let stage = self.diff_preparation_stage(base_account.data());
+                self.delivery_details = CommitDelivery::DiffInBuffer {
+                    base_account,
+                    stage,
+                };
+                true
+            }
+            other @ (CommitDelivery::StateInBuffer { .. }
+            | CommitDelivery::DiffInBuffer { .. }) => {
+                self.delivery_details = other;
+                false
+            }
+        }
+    }
+
+    fn compute_units(&self) -> u32 {
+        70_000
+    }
+
+    fn accounts_size_budget(&self) -> u32 {
+        match &self.delivery_details {
+            CommitDelivery::StateInArgs => {
+                commit_size_budget(AccountSizeClass::Dynamic(
+                    self.committed_account.account.data.len() as u32,
+                ))
+            }
+            CommitDelivery::StateInBuffer { .. }
+            | CommitDelivery::DiffInBuffer { .. } => {
+                commit_size_budget(AccountSizeClass::Huge)
+            }
+            CommitDelivery::DiffInArgs { .. } => {
+                commit_diff_size_budget(AccountSizeClass::Dynamic(
+                    self.committed_account.account.data.len() as u32,
+                ))
+            }
         }
     }
 }

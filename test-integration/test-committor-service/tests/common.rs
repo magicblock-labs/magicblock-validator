@@ -15,7 +15,7 @@ use magicblock_committor_service::{
         },
         IntentExecutorImpl,
     },
-    tasks::commit_task::{CommitDelivery, CommitBufferStage, CommitTask},
+    tasks::commit_task::{CommitDelivery, CommitTask},
     transaction_preparator::{
         delivery_preparator::DeliveryPreparator, TransactionPreparatorImpl,
     },

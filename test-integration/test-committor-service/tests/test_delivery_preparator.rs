@@ -3,9 +3,9 @@ use magicblock_committor_program::Chunks;
 use magicblock_committor_service::{
     persist::IntentPersisterImpl,
     tasks::{
-        commit_task::{CommitDelivery, CommitBufferStage},
+        commit_task::{CommitBufferStage, CommitDelivery},
         task_strategist::{TaskStrategist, TransactionStrategy},
-        BaseTask, BaseTaskImpl,
+        BaseTaskImpl,
     },
 };
 use solana_sdk::signer::Signer;
@@ -44,7 +44,8 @@ async fn test_prepare_10kb_buffer() {
     else {
         panic!("unexpected task type");
     };
-    let Some(CommitBufferStage::Cleanup(cleanup_task)) = commit_task.stage() else {
+    let Some(CommitBufferStage::Cleanup(cleanup_task)) = commit_task.stage()
+    else {
         panic!("unexpected CommitStage");
     };
 

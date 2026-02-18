@@ -108,12 +108,6 @@ impl BaseTask for BaseTaskImpl {
             }
         }
     }
-
-    fn reset_commit_id(&mut self, commit_id: u64) {
-        if let Self::Commit(value) = self {
-            value.reset_commit_id(commit_id)
-        }
-    }
 }
 
 impl BaseTaskImpl {
@@ -155,9 +149,6 @@ pub trait BaseTask: Send + Sync + Clone {
 
     /// Returns the max accounts-data-size that can be used with SetLoadedAccountsDataSizeLimit
     fn accounts_size_budget(&self) -> u32;
-
-    /// Resets commit id
-    fn reset_commit_id(&mut self, commit_id: u64);
 }
 
 #[derive(Clone, Debug)]
