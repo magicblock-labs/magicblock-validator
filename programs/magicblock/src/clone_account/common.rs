@@ -1,4 +1,4 @@
-//! Shared utilities for clone account instruction processing.
+//! Shared utilities for clone account and mutate account instruction processing.
 
 use std::{cell::RefCell, collections::HashSet};
 
@@ -9,10 +9,10 @@ use solana_program_runtime::invoke_context::InvokeContext;
 use solana_pubkey::Pubkey;
 use solana_transaction_context::TransactionContext;
 
+use crate::errors::MagicBlockProgramError;
 use crate::validator::validator_authority_id;
 
 /// Validates that the validator authority has signed the transaction.
-/// All clone instructions require this signature for authorization.
 pub fn validate_authority(
     signers: &HashSet<Pubkey>,
     invoke_context: &InvokeContext,
@@ -44,18 +44,66 @@ pub fn validate_and_get_index(
     Err(InstructionError::InvalidArgument)
 }
 
-/// Adjusts validator authority lamports to maintain balanced transactions.
-///
-/// # Lamports Flow
-///
-/// When cloning an account, we set the target account's lamports to the required rent-exempt
-/// amount. The difference (delta) between new and old lamports is debited/credited from the
-/// validator authority account:
-///
-/// - `delta > 0`: Account gained lamports → debit from authority
-/// - `delta < 0`: Account lost lamports → credit to authority
-///
-/// This ensures the runtime doesn't complain about unbalanced transactions.
+/// Returns true if account is ephemeral (exists locally on ER only).
+pub fn is_ephemeral(account: &RefCell<AccountSharedData>) -> bool {
+    account.borrow().ephemeral()
+}
+
+/// Validates that a delegated account is undelegating (mutation allowed).
+pub fn validate_not_delegated(
+    account: &RefCell<AccountSharedData>,
+    pubkey: &Pubkey,
+    invoke_context: &InvokeContext,
+) -> Result<(), InstructionError> {
+    let (is_delegated, is_undelegating) = {
+        let acc = account.borrow();
+        (acc.delegated(), acc.undelegating())
+    };
+    if is_delegated && !is_undelegating {
+        ic_msg!(invoke_context, "Account {} is delegated and not undelegating", pubkey);
+        return Err(MagicBlockProgramError::AccountIsDelegated.into());
+    }
+    Ok(())
+}
+
+/// Validates that the account can be mutated (not ephemeral, not active delegated).
+pub fn validate_mutable(
+    account: &RefCell<AccountSharedData>,
+    pubkey: &Pubkey,
+    invoke_context: &InvokeContext,
+) -> Result<(), InstructionError> {
+    if is_ephemeral(account) {
+        ic_msg!(invoke_context, "Account {} is ephemeral and cannot be mutated", pubkey);
+        return Err(MagicBlockProgramError::AccountIsEphemeral.into());
+    }
+    validate_not_delegated(account, pubkey, invoke_context)
+}
+
+/// Validates that incoming remote_slot is not older than current.
+/// Skips check if incoming_remote_slot is None.
+pub fn validate_remote_slot(
+    account: &RefCell<AccountSharedData>,
+    pubkey: &Pubkey,
+    incoming_remote_slot: Option<u64>,
+    invoke_context: &InvokeContext,
+) -> Result<(), InstructionError> {
+    let Some(incoming) = incoming_remote_slot else {
+        return Ok(());
+    };
+    let current = account.borrow().remote_slot();
+    if incoming < current {
+        ic_msg!(
+            invoke_context,
+            "Account {} incoming remote_slot {} is older than current {}; rejected",
+            pubkey, incoming, current
+        );
+        return Err(MagicBlockProgramError::OutOfOrderUpdate.into());
+    }
+    Ok(())
+}
+
+/// Adjusts validator authority lamports by delta.
+/// Positive delta = debit, negative delta = credit.
 pub fn adjust_authority_lamports(
     auth_acc: &RefCell<AccountSharedData>,
     delta: i64,
