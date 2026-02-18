@@ -1,4 +1,9 @@
-use std::{collections::HashSet, ops::Deref, sync::Arc};
+use std::{
+    collections::HashSet,
+    ops::Deref,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 use magicblock_config::config::AccountsDbConfig;
 use solana_account::{AccountSharedData, ReadableAccount, WritableAccount};
@@ -533,13 +538,23 @@ impl TestEnv {
     fn advance_slot(&self, target_slot: u64) {
         self.adb.set_slot(target_slot);
 
-        // Simple spin-wait if we expect a snapshot trigger.
-        // This ensures the background thread has started and possibly finished creating the file.
-        if target_slot.is_multiple_of(self.adb.snapshot_frequency) {
-            let mut retries = 0;
-            while !self.adb.snapshot_exists(target_slot) && retries < 50 {
-                std::thread::sleep(std::time::Duration::from_millis(10));
-                retries += 1;
+        // Wait for snapshot materialization if this slot triggers one.
+        // Snapshotting runs on a background thread and can be slower on busy CI hosts.
+        if target_slot > 0
+            && target_slot.is_multiple_of(self.adb.snapshot_frequency)
+        {
+            const SNAPSHOT_TIMEOUT: Duration = Duration::from_secs(5);
+            const SNAPSHOT_POLL_INTERVAL: Duration = Duration::from_millis(20);
+
+            let start = Instant::now();
+            while !self.adb.snapshot_exists(target_slot) {
+                if start.elapsed() >= SNAPSHOT_TIMEOUT {
+                    panic!(
+                        "snapshot for slot {} did not appear within {:?}",
+                        target_slot, SNAPSHOT_TIMEOUT
+                    );
+                }
+                std::thread::sleep(SNAPSHOT_POLL_INTERVAL);
             }
         }
     }
