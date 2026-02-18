@@ -1,15 +1,16 @@
 use dlp::{
-    args::{CallHandlerArgs, CommitDiffArgs, CommitStateArgs},
+    args::{CommitDiffArgs, CommitStateArgs},
     compute_diff,
     instruction_builder::{
-        call_handler_size_budget, commit_diff_size_budget, commit_size_budget,
-        finalize_size_budget, undelegate_size_budget,
+        call_handler_size_budget, call_handler_v2_size_budget,
+        commit_diff_size_budget, commit_size_budget, finalize_size_budget,
+        undelegate_size_budget,
     },
     AccountSizeClass,
 };
 use magicblock_metrics::metrics::LabelValue;
 use solana_account::ReadableAccount;
-use solana_instruction::{AccountMeta, Instruction};
+use solana_instruction::Instruction;
 use solana_pubkey::Pubkey;
 
 #[cfg(test)]
@@ -17,8 +18,9 @@ use crate::tasks::TaskStrategy;
 use crate::tasks::{
     buffer_task::{BufferTask, BufferTaskType},
     visitor::Visitor,
-    BaseActionTask, BaseTask, BaseTaskError, BaseTaskResult, CommitDiffTask,
-    CommitTask, FinalizeTask, PreparationState, TaskType, UndelegateTask,
+    BaseActionTask, BaseActionV2Task, BaseTask, BaseTaskError, BaseTaskResult,
+    CommitDiffTask, CommitTask, FinalizeTask, PreparationState, TaskType,
+    UndelegateTask,
 };
 
 /// Task that will be executed on Base layer via arguments
@@ -29,6 +31,7 @@ pub enum ArgsTaskType {
     Finalize(FinalizeTask),
     Undelegate(UndelegateTask), // Special action really
     BaseAction(BaseActionTask),
+    BaseActionV2(BaseActionV2Task),
 }
 
 #[derive(Clone)]
@@ -104,24 +107,23 @@ impl BaseTask for ArgsTask {
             }
             ArgsTaskType::BaseAction(value) => {
                 let action = &value.action;
-                let account_metas = action
-                    .account_metas_per_program
-                    .iter()
-                    .map(|short_meta| AccountMeta {
-                        pubkey: short_meta.pubkey,
-                        is_writable: short_meta.is_writable,
-                        is_signer: false,
-                    })
-                    .collect();
                 dlp::instruction_builder::call_handler(
                     *validator,
                     action.destination_program,
                     action.escrow_authority,
-                    account_metas,
-                    CallHandlerArgs {
-                        data: action.data_per_program.data.clone(),
-                        escrow_index: action.data_per_program.escrow_index,
-                    },
+                    value.account_metas(),
+                    value.call_handler_args(),
+                )
+            }
+            ArgsTaskType::BaseActionV2(value) => {
+                let action = &value.action;
+                dlp::instruction_builder::call_handler_v2(
+                    *validator,
+                    action.destination_program,
+                    value.source_program,
+                    action.escrow_authority,
+                    value.account_metas(),
+                    value.call_handler_args(),
                 )
             }
         }
@@ -142,6 +144,7 @@ impl BaseTask for ArgsTask {
                 )))
             }
             ArgsTaskType::BaseAction(_)
+            | ArgsTaskType::BaseActionV2(_)
             | ArgsTaskType::Finalize(_)
             | ArgsTaskType::Undelegate(_) => Err(self),
         }
@@ -169,6 +172,7 @@ impl BaseTask for ArgsTask {
             ArgsTaskType::Commit(_) => 70_000,
             ArgsTaskType::CommitDiff(_) => 70_000,
             ArgsTaskType::BaseAction(task) => task.action.compute_units,
+            ArgsTaskType::BaseActionV2(task) => task.action.compute_units,
             ArgsTaskType::Undelegate(_) => 70_000,
             ArgsTaskType::Finalize(_) => 70_000,
         }
@@ -197,6 +201,18 @@ impl BaseTask for ArgsTask {
                     other_accounts_budget,
                 )
             }
+            ArgsTaskType::BaseActionV2(task) => {
+                // assume all other accounts are Small accounts.
+                let other_accounts_budget =
+                    task.action.account_metas_per_program.len() as u32
+                        * AccountSizeClass::Small.size_budget();
+
+                call_handler_v2_size_budget(
+                    AccountSizeClass::Medium,
+                    AccountSizeClass::Medium,
+                    other_accounts_budget,
+                )
+            }
             ArgsTaskType::Undelegate(_) => {
                 undelegate_size_budget(AccountSizeClass::Huge)
             }
@@ -215,7 +231,9 @@ impl BaseTask for ArgsTask {
         match &self.task_type {
             ArgsTaskType::Commit(_) => TaskType::Commit,
             ArgsTaskType::CommitDiff(_) => TaskType::Commit,
-            ArgsTaskType::BaseAction(_) => TaskType::Action,
+            ArgsTaskType::BaseAction(_) | ArgsTaskType::BaseActionV2(_) => {
+                TaskType::Action
+            }
             ArgsTaskType::Undelegate(_) => TaskType::Undelegate,
             ArgsTaskType::Finalize(_) => TaskType::Finalize,
         }
@@ -235,6 +253,7 @@ impl BaseTask for ArgsTask {
                 task.commit_id = commit_id;
             }
             ArgsTaskType::BaseAction(_)
+            | ArgsTaskType::BaseActionV2(_)
             | ArgsTaskType::Finalize(_)
             | ArgsTaskType::Undelegate(_) => {}
         };
@@ -247,6 +266,7 @@ impl LabelValue for ArgsTask {
             ArgsTaskType::Commit(_) => "args_commit",
             ArgsTaskType::CommitDiff(_) => "args_commit_diff",
             ArgsTaskType::BaseAction(_) => "args_action",
+            ArgsTaskType::BaseActionV2(_) => "args_action_v2",
             ArgsTaskType::Finalize(_) => "args_finalize",
             ArgsTaskType::Undelegate(_) => "args_undelegate",
         }

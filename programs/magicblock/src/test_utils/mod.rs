@@ -9,6 +9,7 @@ use std::{
 };
 
 use magicblock_core::traits::PersistsAccountModData;
+use magicblock_magic_program_api::{id, EPHEMERAL_VAULT_PUBKEY};
 use solana_account::AccountSharedData;
 use solana_instruction::{error::InstructionError, AccountMeta};
 use solana_log_collector::log::debug;
@@ -28,6 +29,13 @@ pub fn ensure_started_validator(map: &mut HashMap<Pubkey, AccountSharedData>) {
     let validator_authority_id = validator::validator_authority_id();
     map.entry(validator_authority_id).or_insert_with(|| {
         AccountSharedData::new(AUTHORITY_BALANCE, 0, &system_program::id())
+    });
+
+    // Ensure ephemeral vault account exists
+    map.entry(EPHEMERAL_VAULT_PUBKEY).or_insert_with(|| {
+        let mut vault = AccountSharedData::new(0, 0, &id());
+        vault.set_ephemeral(true);
+        vault
     });
 
     let stub = Arc::new(PersisterStub::default());

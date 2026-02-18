@@ -20,7 +20,7 @@ pub type AccountsDbResult<T> = Result<T, AccountsDbError>;
 
 /// A global lock used to suspend all write operations during critical
 /// sections (like snapshots).
-pub type GlobalWriteLock = Arc<RwLock<()>>;
+pub type GlobalSyncLock = Arc<RwLock<()>>;
 
 pub const ACCOUNTSDB_DIR: &str = "accountsdb";
 
@@ -41,7 +41,7 @@ pub struct AccountsDb {
     /// Global lock ensures atomic snapshots by pausing writes.
     /// Note: Reads are generally wait-free/lock-free via mmap,
     /// unless they require index cursor stability.
-    write_lock: GlobalWriteLock,
+    write_lock: GlobalSyncLock,
     /// Configured interval (in slots) for creating snapshots.
     snapshot_frequency: u64,
 }
@@ -86,7 +86,7 @@ impl AccountsDb {
             storage,
             index,
             snapshot_manager,
-            write_lock: GlobalWriteLock::default(),
+            write_lock: GlobalSyncLock::default(),
             snapshot_frequency: config.snapshot_frequency,
         };
 
@@ -168,6 +168,11 @@ impl AccountsDb {
                     None => txn.get_or_insert(self.index.rwtxn()?),
                 }
             };
+        }
+        // The ephemeral account has been closed, remove it from DB
+        if account.ephemeral() && account.owner() == &Pubkey::default() {
+            self.index.remove(pubkey, txn!())?;
+            return Ok(());
         }
         match account {
             AccountSharedData::Borrowed(acc) => {
@@ -366,7 +371,7 @@ impl AccountsDb {
         self.index.flush();
     }
 
-    pub fn write_lock(&self) -> GlobalWriteLock {
+    pub fn write_lock(&self) -> GlobalSyncLock {
         self.write_lock.clone()
     }
 }
