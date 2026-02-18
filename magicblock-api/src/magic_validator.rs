@@ -57,7 +57,6 @@ use magicblock_processor::{
     scheduler::{state::TransactionSchedulerState, TransactionScheduler},
 };
 use magicblock_program::{
-    init_persister,
     validator::{self, validator_authority},
     TransactionScheduler as ActionTransactionScheduler,
 };
@@ -474,7 +473,6 @@ impl MagicValidator {
     ) -> ApiResult<(Arc<Ledger>, Slot)> {
         let (ledger, last_slot) = ledger::init(storage, ledger_config)?;
         let ledger_shared = Arc::new(ledger);
-        init_persister(ledger_shared.clone());
         Ok((ledger_shared, last_slot))
     }
 

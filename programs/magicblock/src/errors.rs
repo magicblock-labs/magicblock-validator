@@ -30,23 +30,17 @@ pub enum MagicBlockProgramError {
     #[error("MagicBlock authority needs to be owned by system program")]
     MagicBlockAuthorityNeedsToBeOwnedBySystemProgram,
 
-    #[error("The account resolution for the provided key failed.")]
-    AccountDataResolutionFailed,
-
-    #[error("The account data for the provided key is missing both from in-memory and ledger storage.")]
+    #[error("The account data for the provided key is missing.")]
     AccountDataMissing,
 
-    #[error("The account data for the provided key is missing from in-memory and we are not replaying the ledger.")]
-    AccountDataMissingFromMemory,
+    #[error("Account already has a pending clone in progress")]
+    CloneAlreadyPending,
 
-    #[error("Tried to persist data that could not be resolved.")]
-    AttemptedToPersistUnresolvedData,
+    #[error("No pending clone found for account")]
+    NoPendingClone,
 
-    #[error("Tried to persist data that was resolved from storage.")]
-    AttemptedToPersistDataFromStorage,
-
-    #[error("Encountered an error when persisting account modification data.")]
-    FailedToPersistAccountModData,
+    #[error("Clone offset mismatch")]
+    CloneOffsetMismatch,
 
     #[error("The account is delegated and not currently undelegating.")]
     AccountIsDelegatedAndNotUndelegating,
@@ -55,4 +49,9 @@ pub enum MagicBlockProgramError {
         "Remote slot updates cannot be older than the current remote slot."
     )]
     IncomingRemoteSlotIsOlderThanCurrentRemoteSlot,
+    #[error("Buffer account not found for program finalization")]
+    BufferAccountNotFound,
+
+    #[error("Failed to deploy program via LoaderV4")]
+    ProgramDeployFailed,
 }
