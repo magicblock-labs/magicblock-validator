@@ -18,10 +18,7 @@ use solana_pubkey::Pubkey;
 use solana_signer::Signer;
 use solana_transaction::Transaction;
 
-use crate::{
-    mutate_accounts::set_account_mod_data,
-    validator::{validator_authority, validator_authority_id},
-};
+use crate::validator::{validator_authority, validator_authority_id};
 
 pub struct InstructionUtils;
 impl InstructionUtils {
@@ -178,9 +175,7 @@ impl InstructionUtils {
                     lamports: account_modification.lamports,
                     owner: account_modification.owner,
                     executable: account_modification.executable,
-                    data_key: account_modification
-                        .data
-                        .map(set_account_mod_data),
+                    data: account_modification.data,
                     delegated: account_modification.delegated,
                     confined: account_modification.confined,
                     remote_slot: account_modification.remote_slot,

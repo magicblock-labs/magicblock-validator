@@ -16,6 +16,5 @@ macro_rules! debug_panic {
 pub mod link;
 pub mod tls;
 pub mod token_programs;
-pub mod traits;
 
 pub mod logger;

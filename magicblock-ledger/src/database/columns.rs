@@ -23,8 +23,6 @@ const CONFIRMED_TRANSACTION_CF: &str = "confirmed_transaction";
 const TRANSACTION_MEMOS_CF: &str = "transaction_memos";
 /// Column family for Performance Samples
 const PERF_SAMPLES_CF: &str = "perf_samples";
-/// Column family for AccountModDatas
-const ACCOUNT_MOD_DATAS_CF: &str = "account_mod_datas";
 
 #[derive(Debug)]
 /// The transaction status column
@@ -91,12 +89,6 @@ pub struct TransactionMemos;
 /// * value type: [`crate::database::meta::PerfSample`]
 pub struct PerfSamples;
 
-/// The AccountModData column
-///
-/// * index type: `u64`
-/// * value type: [`crate::database::meta::AccountModData`]
-pub struct AccountModDatas;
-
 // When adding a new column ...
 // - Add struct below and implement `Column` and `ColumnName` traits
 // - Add descriptor in Rocks::cf_descriptors() and name in Rocks::columns()
@@ -114,7 +106,6 @@ pub fn columns() -> Vec<&'static str> {
         Transaction::NAME,
         TransactionMemos::NAME,
         PerfSamples::NAME,
-        AccountModDatas::NAME,
     ]
 }
 
@@ -628,43 +619,6 @@ impl ColumnIndexDeprecation for TransactionMemos {
 impl SlotColumn for PerfSamples {}
 impl ColumnName for PerfSamples {
     const NAME: &'static str = PERF_SAMPLES_CF;
-}
-
-// -----------------
-// AccountModDatas
-// -----------------
-impl ColumnName for AccountModDatas {
-    const NAME: &'static str = ACCOUNT_MOD_DATAS_CF;
-}
-
-impl Column for AccountModDatas {
-    type Index = u64;
-
-    fn key(id: Self::Index) -> Vec<u8> {
-        id.to_le_bytes().to_vec()
-    }
-
-    fn index(key: &[u8]) -> Self::Index {
-        Self::Index::from_le_bytes(key.try_into().unwrap())
-    }
-
-    fn slot(index: Self::Index) -> Slot {
-        index as Slot
-    }
-
-    // AccountModDatas column is not keyed by slot so this method is meaningless
-    fn as_index(slot: Slot) -> Self::Index {
-        slot
-    }
-
-    /// We don't clean AccountModData on compaction as it isn't slot based
-    fn keep_all_on_compaction() -> bool {
-        true
-    }
-}
-
-impl TypedColumn for AccountModDatas {
-    type Type = meta::AccountModData;
 }
 
 // -----------------
