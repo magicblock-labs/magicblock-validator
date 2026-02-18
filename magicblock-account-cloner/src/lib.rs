@@ -56,8 +56,7 @@ use solana_account::ReadableAccount;
 use solana_hash::Hash;
 use solana_instruction::{AccountMeta, Instruction};
 use solana_loader_v4_interface::{
-    instruction::LoaderV4Instruction,
-    state::LoaderV4Status,
+    instruction::LoaderV4Instruction, state::LoaderV4Status,
 };
 use solana_pubkey::Pubkey;
 use solana_sdk_ids::{bpf_loader_upgradeable, loader_v4};
@@ -92,7 +91,13 @@ impl ChainlinkCloner {
         accounts_db: Arc<AccountsDb>,
         block: LatestBlock,
     ) -> Self {
-        Self { changeset_committor, config, tx_scheduler, accounts_db, block }
+        Self {
+            changeset_committor,
+            config,
+            tx_scheduler,
+            accounts_db,
+            block,
+        }
     }
 
     // -----------------
@@ -107,17 +112,30 @@ impl ChainlinkCloner {
 
     fn sign_tx(&self, ixs: &[Instruction], blockhash: Hash) -> Transaction {
         let kp = validator_authority();
-        Transaction::new_signed_with_payer(ixs, Some(&kp.pubkey()), &[&kp], blockhash)
+        Transaction::new_signed_with_payer(
+            ixs,
+            Some(&kp.pubkey()),
+            &[&kp],
+            blockhash,
+        )
     }
 
     // -----------------
     // Instruction Builders
     // -----------------
 
-    fn clone_ix(pubkey: Pubkey, data: Vec<u8>, fields: AccountCloneFields) -> Instruction {
+    fn clone_ix(
+        pubkey: Pubkey,
+        data: Vec<u8>,
+        fields: AccountCloneFields,
+    ) -> Instruction {
         Instruction::new_with_bincode(
             magicblock_program::ID,
-            &MagicBlockInstruction::CloneAccount { pubkey, data, fields },
+            &MagicBlockInstruction::CloneAccount {
+                pubkey,
+                data,
+                fields,
+            },
             clone_account_metas(pubkey),
         )
     }
@@ -148,7 +166,12 @@ impl ChainlinkCloner {
     ) -> Instruction {
         Instruction::new_with_bincode(
             magicblock_program::ID,
-            &MagicBlockInstruction::CloneAccountContinue { pubkey, offset, data, is_last },
+            &MagicBlockInstruction::CloneAccountContinue {
+                pubkey,
+                offset,
+                data,
+                is_last,
+            },
             clone_account_metas(pubkey),
         )
     }
@@ -161,7 +184,11 @@ impl ChainlinkCloner {
         )
     }
 
-    fn finalize_program_ix(program: Pubkey, buffer: Pubkey, slot: u64) -> Instruction {
+    fn finalize_program_ix(
+        program: Pubkey,
+        buffer: Pubkey,
+        slot: u64,
+    ) -> Instruction {
         Instruction::new_with_bincode(
             magicblock_program::ID,
             &MagicBlockInstruction::FinalizeProgramFromBuffer { slot },
@@ -209,7 +236,11 @@ impl ChainlinkCloner {
         blockhash: Hash,
     ) -> Transaction {
         let fields = Self::clone_fields(request);
-        let clone_ix = Self::clone_ix(request.pubkey, request.account.data().to_vec(), fields);
+        let clone_ix = Self::clone_ix(
+            request.pubkey,
+            request.account.data().to_vec(),
+            fields,
+        );
 
         // TODO(#625): Re-enable frequency commits when proper limits are in place:
         // 1. Allow configuring a higher minimum frequency
@@ -226,7 +257,10 @@ impl ChainlinkCloner {
     /// Builds crank commits instruction for periodic account commits.
     /// Currently disabled - see https://github.com/magicblock-labs/magicblock-validator/issues/625
     #[allow(dead_code)]
-    fn build_crank_commits_ix(pubkey: Pubkey, commit_frequency_ms: i64) -> Instruction {
+    fn build_crank_commits_ix(
+        pubkey: Pubkey,
+        commit_frequency_ms: i64,
+    ) -> Instruction {
         let task_id: i64 = rand::random();
         let schedule_commit_ix = Instruction::new_with_bincode(
             magicblock_program::ID,
@@ -260,7 +294,12 @@ impl ChainlinkCloner {
 
         // Init tx with first chunk
         let first_chunk = data[..MAX_INLINE_DATA_SIZE.min(data.len())].to_vec();
-        let init_ix = Self::clone_init_ix(request.pubkey, data.len() as u32, first_chunk, fields);
+        let init_ix = Self::clone_init_ix(
+            request.pubkey,
+            data.len() as u32,
+            first_chunk,
+            fields,
+        );
         txs.push(self.sign_tx(&[init_ix], blockhash));
 
         // Continue txs for remaining chunks
@@ -270,7 +309,12 @@ impl ChainlinkCloner {
             let chunk = data[offset..end].to_vec();
             let is_last = end == data.len();
 
-            let continue_ix = Self::clone_continue_ix(request.pubkey, offset as u32, chunk, is_last);
+            let continue_ix = Self::clone_continue_ix(
+                request.pubkey,
+                offset as u32,
+                chunk,
+                is_last,
+            );
             txs.push(self.sign_tx(&[continue_ix], blockhash));
             offset = end;
         }
@@ -296,7 +340,9 @@ impl ChainlinkCloner {
         blockhash: Hash,
     ) -> ClonerResult<Option<Vec<Transaction>>> {
         match program.loader {
-            RemoteProgramLoader::V1 => self.build_v1_program_txs(program, blockhash),
+            RemoteProgramLoader::V1 => {
+                self.build_v1_program_txs(program, blockhash)
+            }
             _ => self.build_v4_program_txs(program, blockhash),
         }
     }
@@ -332,7 +378,9 @@ impl ChainlinkCloner {
         // Finalization instruction
         // Must wrap in disable/enable executable check since finalize sets executable=true
         let finalize_ixs = vec![
-            InstructionUtils::disable_executable_check_instruction(&validator_authority_id()),
+            InstructionUtils::disable_executable_check_instruction(
+                &validator_authority_id(),
+            ),
             Self::finalize_v1_program_ix(
                 program_id,
                 program_data_addr,
@@ -340,18 +388,19 @@ impl ChainlinkCloner {
                 slot,
                 chain_authority,
             ),
-            InstructionUtils::enable_executable_check_instruction(&validator_authority_id()),
+            InstructionUtils::enable_executable_check_instruction(
+                &validator_authority_id(),
+            ),
         ];
 
         // Build transactions based on ELF size
         let txs = if elf_data.len() <= MAX_INLINE_DATA_SIZE {
             // Small: single transaction with clone + finalize
-            let ixs = vec![
-                Self::clone_ix(buffer_pubkey, elf_data, buffer_fields),
-            ]
-            .into_iter()
-            .chain(finalize_ixs)
-            .collect::<Vec<_>>();
+            let ixs =
+                vec![Self::clone_ix(buffer_pubkey, elf_data, buffer_fields)]
+                    .into_iter()
+                    .chain(finalize_ixs)
+                    .collect::<Vec<_>>();
             vec![self.sign_tx(&ixs, blockhash)]
         } else {
             // Large: multi-transaction flow
@@ -377,7 +426,10 @@ impl ChainlinkCloner {
     ) -> Instruction {
         Instruction::new_with_bincode(
             magicblock_program::ID,
-            &MagicBlockInstruction::FinalizeV1ProgramFromBuffer { slot, authority },
+            &MagicBlockInstruction::FinalizeV1ProgramFromBuffer {
+                slot,
+                authority,
+            },
             vec![
                 AccountMeta::new_readonly(validator_authority_id(), true),
                 AccountMeta::new(program, false),
@@ -430,19 +482,25 @@ impl ChainlinkCloner {
         // Finalization instructions (always in last tx)
         // Must wrap in disable/enable executable check since finalize sets executable=true
         let finalize_ixs = vec![
-            InstructionUtils::disable_executable_check_instruction(&validator_authority_id()),
+            InstructionUtils::disable_executable_check_instruction(
+                &validator_authority_id(),
+            ),
             Self::finalize_program_ix(program_id, buffer_pubkey, slot),
             deploy_ix,
             Self::set_authority_ix(program_id, chain_authority),
-            InstructionUtils::enable_executable_check_instruction(&validator_authority_id()),
+            InstructionUtils::enable_executable_check_instruction(
+                &validator_authority_id(),
+            ),
         ];
 
         // Build transactions based on program_data size
         let txs = if program_data.len() <= MAX_INLINE_DATA_SIZE {
             // Small: single transaction
-            let ixs = vec![
-                Self::clone_ix(buffer_pubkey, program_data, buffer_fields),
-            ]
+            let ixs = vec![Self::clone_ix(
+                buffer_pubkey,
+                program_data,
+                buffer_fields,
+            )]
             .into_iter()
             .chain(finalize_ixs)
             .collect::<Vec<_>>();
@@ -482,8 +540,11 @@ impl ChainlinkCloner {
         );
 
         // First chunk via Init
-        let first_chunk = program_data[..MAX_INLINE_DATA_SIZE.min(program_data.len())].to_vec();
-        let init_ix = Self::clone_init_ix(buffer_pubkey, total_len, first_chunk, fields);
+        let first_chunk = program_data
+            [..MAX_INLINE_DATA_SIZE.min(program_data.len())]
+            .to_vec();
+        let init_ix =
+            Self::clone_init_ix(buffer_pubkey, total_len, first_chunk, fields);
         txs.push(self.sign_tx(&[init_ix], blockhash));
 
         // Continue chunks
@@ -504,14 +565,24 @@ impl ChainlinkCloner {
                     finalize_ixs_count = finalize_ixs.len(),
                     "Building final transaction with continue + finalize"
                 );
-                let continue_ix = Self::clone_continue_ix(buffer_pubkey, offset as u32, chunk, true);
+                let continue_ix = Self::clone_continue_ix(
+                    buffer_pubkey,
+                    offset as u32,
+                    chunk,
+                    true,
+                );
                 let ixs = vec![continue_ix]
                     .into_iter()
                     .chain(finalize_ixs.clone())
                     .collect::<Vec<_>>();
                 txs.push(self.sign_tx(&ixs, blockhash));
             } else {
-                let continue_ix = Self::clone_continue_ix(buffer_pubkey, offset as u32, chunk, false);
+                let continue_ix = Self::clone_continue_ix(
+                    buffer_pubkey,
+                    offset as u32,
+                    chunk,
+                    false,
+                );
                 txs.push(self.sign_tx(&[continue_ix], blockhash));
             }
             offset = end;
@@ -529,7 +600,10 @@ impl ChainlinkCloner {
             if self.config.prepare_lookup_tables {
                 let committor = committor.clone();
                 tokio::spawn(async move {
-                    if let Err(e) = committor.reserve_pubkeys_for_committee(pubkey, owner).await {
+                    if let Err(e) = committor
+                        .reserve_pubkeys_for_committee(pubkey, owner)
+                        .await
+                    {
                         error!(error = ?e, "Failed to reserve lookup tables");
                     }
                 });
@@ -556,14 +630,20 @@ impl Cloner for ChainlinkCloner {
         let data_len = request.account.data().len();
 
         if request.account.delegated() {
-            self.maybe_prepare_lookup_tables(request.pubkey, *request.account.owner());
+            self.maybe_prepare_lookup_tables(
+                request.pubkey,
+                *request.account.owner(),
+            );
         }
 
         // Small account: single tx
         if data_len <= MAX_INLINE_DATA_SIZE {
             let tx = self.build_small_account_tx(&request, blockhash);
             return self.send_tx(tx).await.map_err(|e| {
-                ClonerError::FailedToCloneRegularAccount(request.pubkey, Box::new(e))
+                ClonerError::FailedToCloneRegularAccount(
+                    request.pubkey,
+                    Box::new(e),
+                )
             });
         }
 
@@ -594,9 +674,13 @@ impl Cloner for ChainlinkCloner {
         let blockhash = self.block.load().blockhash;
         let program_id = program.program_id;
 
-        let Some(txs) = self.build_program_txs(program, blockhash).map_err(|e| {
-            ClonerError::FailedToCreateCloneProgramTransaction(program_id, Box::new(e))
-        })?
+        let Some(txs) =
+            self.build_program_txs(program, blockhash).map_err(|e| {
+                ClonerError::FailedToCreateCloneProgramTransaction(
+                    program_id,
+                    Box::new(e),
+                )
+            })?
         else {
             // Program was retracted
             return Ok(Signature::default());
