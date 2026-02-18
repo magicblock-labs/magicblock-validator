@@ -3,7 +3,7 @@ use std::{
     sync::{Arc, RwLock},
 };
 
-use magicblock_accounts_db::{AccountsDb, GlobalWriteLock};
+use magicblock_accounts_db::{AccountsDb, GlobalSyncLock};
 use magicblock_core::link::{
     accounts::AccountUpdateTx,
     transactions::{
@@ -37,7 +37,7 @@ pub(super) struct TransactionExecutor {
     accountsdb: Arc<AccountsDb>,
     ledger: Arc<Ledger>,
     block: LatestBlock,
-    sync: GlobalWriteLock,
+    sync: GlobalSyncLock,
 
     // SVM Components
     processor: TransactionBatchProcessor<SimpleForkGraph>,

@@ -38,7 +38,7 @@ resolver = "2"
 
 [workspace.package]
 # Solana Version (2.2.x)
-version = "0.6.2"
+version = "0.7.0"
 authors = ["MagicBlock Maintainers <maintainers@magicblock.xyz>"]
 repository = "https://github.com/magicblock-labs/ephemeral-validator"
 homepage = "https://www.magicblock.xyz"
@@ -138,7 +138,7 @@ serde_json = "1.0"
 serde_with = "3.16"
 serial_test = "3.2"
 sha3 = "0.10.8"
-solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "2246929" }
+solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "6eae52b" }
 solana-account-decoder = { version = "2.2" }
 solana-account-decoder-client-types = { version = "2.2" }
 solana-account-info = { version = "2.2" }
@@ -217,7 +217,7 @@ spl-token-2022 = "7.0"
 
 [workspace.dependencies.solana-svm]
 git = "https://github.com/magicblock-labs/magicblock-svm.git"
-rev = "3e9456ec4"
+rev = "bdbaac86"
 features = ["dev-context-only-utils"]
 
 [workspace.dependencies.rocksdb]
@@ -229,9 +229,9 @@ version = "0.22.0"
 # some solana dependencies have solana-storage-proto as dependency
 # we need to patch them with our version, because they use protobuf-src v1.1.0
 # and we use protobuf-src v2.1.1. Otherwise compilation fails
-solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "2246929" }
+solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "6eae52b" }
 solana-storage-proto = { path = "./storage-proto" }
-solana-svm = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "3e9456ec4" }
+solana-svm = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "bdbaac86" }
 # Fork is used to enable `disable_manual_compaction` usage
 # Fork is based on commit d4e9e16 of rocksdb (parent commit of 0.23.0 release)
 # without patching update isn't possible due to conflict with solana deps

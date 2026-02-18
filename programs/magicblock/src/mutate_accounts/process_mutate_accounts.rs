@@ -38,7 +38,7 @@ pub(crate) fn process_mutate_accounts(
             ic_msg!(
                 invoke_context,
                 "Validator identity '{}' not in signers",
-                &validator_authority_id.to_string()
+                validator_authority_id
             );
             return Err(InstructionError::MissingRequiredSignature);
         }
@@ -107,6 +107,19 @@ pub(crate) fn process_mutate_accounts(
             .get_index_of_instruction_account_in_transaction(account_idx)?;
         let account = transaction_context
             .get_account_at_index(account_transaction_index)?;
+        // we do not allow for account modification if the
+        // account is ephemeral (i.e. exists locally on ER)
+        if account.borrow().ephemeral() {
+            let key = transaction_context
+                .get_key_of_account_at_index(account_transaction_index)?;
+            account_mods.remove(key);
+            ic_msg!(
+                invoke_context,
+                "MutateAccounts: skipping ephemeral account {}",
+                key
+            );
+            continue;
+        }
         let account_key = transaction_context
             .get_key_of_account_at_index(account_transaction_index)?;
 
@@ -305,7 +318,7 @@ pub(crate) fn process_mutate_accounts(
 
     // Now it is super unlikely for the transaction to fail since all checks passed.
     // The only option would be if another instruction runs after it which at this point
-    // is impossible since we create/send them from insider our validator.
+    // is impossible since we create/send them from inside of our validator.
     // Thus we can persist the applied data mods to make them available for ledger replay.
     for resolved_data in memory_data_mods {
         resolved_data

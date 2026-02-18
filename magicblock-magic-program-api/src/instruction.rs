@@ -147,6 +147,37 @@ pub enum MagicBlockInstruction {
     /// The embedded [`MagicIntentBundleArgs`] encodes account references by indices into the
     /// accounts array.
     ScheduleIntentBundle(MagicIntentBundleArgs),
+
+    /// Creates a new ephemeral account with rent paid by a sponsor.
+    /// The account is automatically owned by the calling program (CPI caller).
+    ///
+    /// # Account references
+    /// - **0.** `[WRITE]` Sponsor account (pays rent, can be PDA or oncurve)
+    /// - **1.** `[WRITE]` Ephemeral account to create (must have 0 lamports)
+    /// - **2.** `[WRITE]` Vault account (receives rent payment)
+    CreateEphemeralAccount {
+        /// Initial data length in bytes
+        data_len: u32,
+    },
+
+    /// Resizes an existing ephemeral account, adjusting rent accordingly.
+    ///
+    /// # Account references
+    /// - **0.** `[WRITE]` Sponsor account (pays/receives rent difference)
+    /// - **1.** `[WRITE]` Ephemeral account to resize
+    /// - **2.** `[WRITE]` Vault account (holds/receives lamports for rent transfer)
+    ResizeEphemeralAccount {
+        /// New data length in bytes
+        new_data_len: u32,
+    },
+
+    /// Closes an ephemeral account, refunding rent to the sponsor.
+    ///
+    /// # Account references
+    /// - **0.** `[WRITE]` Sponsor account (receives rent refund)
+    /// - **1.** `[WRITE]` Ephemeral account to close
+    /// - **2.** `[WRITE]` Vault account (source of rent refund)
+    CloseEphemeralAccount,
 }
 
 impl MagicBlockInstruction {
