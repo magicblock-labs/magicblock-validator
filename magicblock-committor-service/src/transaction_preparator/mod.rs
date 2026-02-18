@@ -8,7 +8,8 @@ use solana_pubkey::Pubkey;
 use crate::{
     persist::IntentPersister,
     tasks::{
-        task_strategist::TransactionStrategy, utils::TransactionUtils, BaseTask,
+        commit_task::CommitStage, task_strategist::TransactionStrategy,
+        utils::TransactionUtils, BaseTaskImpl, CleanupTask,
     },
     transaction_preparator::{
         delivery_preparator::{
@@ -37,7 +38,7 @@ pub trait TransactionPreparator: Send + Sync + 'static {
     async fn cleanup_for_strategy(
         &self,
         authority: &Keypair,
-        tasks: &[Box<dyn BaseTask>],
+        tasks: &[BaseTaskImpl],
         lookup_table_keys: &[Pubkey],
     ) -> DeliveryPreparatorResult<(), BufferExecutionError>;
 }
@@ -112,11 +113,24 @@ impl TransactionPreparator for TransactionPreparatorImpl {
     async fn cleanup_for_strategy(
         &self,
         authority: &Keypair,
-        tasks: &[Box<dyn BaseTask>],
+        tasks: &[BaseTaskImpl],
         lookup_table_keys: &[Pubkey],
     ) -> DeliveryPreparatorResult<(), BufferExecutionError> {
+        let cleanup_tasks: Vec<_> = tasks
+            .iter()
+            .filter_map(|task| match task {
+                BaseTaskImpl::Commit(commit_task) => commit_task.stage(),
+                _ => None,
+            })
+            .filter_map(|stage| match stage {
+                CommitStage::Cleanup(cleanup_task) => {
+                    Some(cleanup_task.clone())
+                }
+                _ => None,
+            })
+            .collect();
         self.delivery_preparator
-            .cleanup(authority, tasks, lookup_table_keys)
+            .cleanup(authority, &cleanup_tasks, lookup_table_keys)
             .await
     }
 }

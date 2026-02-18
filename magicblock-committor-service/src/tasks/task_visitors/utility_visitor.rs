@@ -4,7 +4,7 @@ use crate::tasks::{
     args_task::{ArgsTask, ArgsTaskType},
     buffer_task::{BufferTask, BufferTaskType},
     visitor::Visitor,
-    BaseTask, FinalizeTask,
+    BaseTask, BaseTaskImpl, FinalizeTask,
 };
 
 pub struct CommitMeta {
@@ -26,7 +26,7 @@ pub enum TaskVisitorUtils {
 }
 
 impl TaskVisitorUtils {
-    pub fn commit_meta(task: &dyn BaseTask) -> Option<CommitMeta> {
+    pub fn commit_meta(task: &BaseTaskImpl) -> Option<CommitMeta> {
         let mut v = TaskVisitorUtils::GetCommitMeta(None);
         task.visit(&mut v);
 

@@ -30,7 +30,7 @@ use crate::tasks::visitor::Visitor;
 
 pub mod args_task;
 pub mod buffer_task;
-mod commit_task;
+pub mod commit_task;
 pub mod task_builder;
 pub mod task_strategist;
 pub(crate) mod task_visitors;
@@ -62,6 +62,7 @@ pub enum TaskStrategy {
     Buffer,
 }
 
+#[derive(Clone, Debug)]
 pub enum BaseTaskImpl {
     Commit(CommitTaskV2),
     Finalize(FinalizeTask),
@@ -127,8 +128,23 @@ impl BaseTask for BaseTaskImpl {
     }
 }
 
+impl BaseTaskImpl {
+    pub fn strategy(&self) -> TaskStrategy {
+        match self {
+            Self::Commit(task) if task.is_buffer() => TaskStrategy::Buffer,
+            _ => TaskStrategy::Args,
+        }
+    }
+}
+
+impl LabelValue for BaseActionTask {
+    fn value(&self) -> &str {
+        todo!()
+    }
+}
+
 /// A trait representing a task that can be executed on Base layer
-pub trait BaseTask: Send + Sync + Clone + LabelValue {
+pub trait BaseTask: Send + Sync + Clone {
     /// Gets all pubkeys that involved in Task's instruction
     fn involved_accounts(&self, validator: &Pubkey) -> Vec<Pubkey> {
         self.instruction(validator)
@@ -170,7 +186,7 @@ pub struct CommitDiffTask {
     pub base_account: Account,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct UndelegateTask {
     pub delegated_account: Pubkey,
     pub owner_program: Pubkey,
@@ -188,7 +204,13 @@ impl UndelegateTask {
     }
 }
 
-#[derive(Clone)]
+impl From<UndelegateTask> for BaseTaskImpl {
+    fn from(value: UndelegateTask) -> Self {
+        Self::Undelegate(value)
+    }
+}
+
+#[derive(Clone, Debug)]
 pub struct FinalizeTask {
     pub delegated_account: Pubkey,
 }
@@ -199,7 +221,13 @@ impl FinalizeTask {
     }
 }
 
-#[derive(Clone)]
+impl From<FinalizeTask> for BaseTaskImpl {
+    fn from(value: FinalizeTask) -> Self {
+        Self::Finalize(value)
+    }
+}
+
+#[derive(Clone, Debug)]
 pub struct BaseActionTask {
     pub action: BaseAction,
 }
@@ -226,6 +254,12 @@ impl BaseActionTask {
                 escrow_index: action.data_per_program.escrow_index,
             },
         )
+    }
+}
+
+impl From<BaseActionTask> for BaseTaskImpl {
+    fn from(value: BaseActionTask) -> Self {
+        Self::BaseAction(value)
     }
 }
 

@@ -3,22 +3,19 @@ use std::collections::BinaryHeap;
 use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
 use solana_signer::{Signer, SignerError};
+use tracing::error;
 
 use crate::{
-    persist::IntentPersister,
+    persist::{CommitStrategy, IntentPersister},
     tasks::{
-        args_task::{ArgsTask, ArgsTaskType},
-        task_visitors::persistor_visitor::{
-            PersistorContext, PersistorVisitor,
-        },
-        utils::TransactionUtils,
-        BaseTask, FinalizeTask,
+        commit_task::CommitDeliveryDetails, utils::TransactionUtils, BaseTask,
+        BaseTaskImpl, FinalizeTask,
     },
     transactions::{serialize_and_encode_base64, MAX_ENCODED_TRANSACTION_SIZE},
 };
 
 pub struct TransactionStrategy {
-    pub optimized_tasks: Vec<Box<dyn BaseTask>>,
+    pub optimized_tasks: Vec<BaseTaskImpl>,
     pub lookup_tables_keys: Vec<Pubkey>,
 }
 
@@ -73,8 +70,8 @@ impl TaskStrategist {
     /// 1. Optimizes tasks to fit in TX
     /// 2. Chooses the fastest execution mode for Tasks
     pub fn build_execution_strategy<P: IntentPersister>(
-        commit_tasks: Vec<Box<dyn BaseTask>>,
-        finalize_tasks: Vec<Box<dyn BaseTask>>,
+        commit_tasks: Vec<BaseTaskImpl>,
+        finalize_tasks: Vec<BaseTaskImpl>,
         authority: &Pubkey,
         persister: &Option<P>,
     ) -> TaskStrategistResult<StrategyExecutionMode> {
@@ -141,8 +138,8 @@ impl TaskStrategist {
     }
 
     fn build_two_stage<P: IntentPersister>(
-        commit_tasks: Vec<Box<dyn BaseTask>>,
-        finalize_tasks: Vec<Box<dyn BaseTask>>,
+        commit_tasks: Vec<BaseTaskImpl>,
+        finalize_tasks: Vec<BaseTaskImpl>,
         authority: &Pubkey,
         persister: &Option<P>,
     ) -> TaskStrategistResult<StrategyExecutionMode> {
@@ -166,7 +163,7 @@ impl TaskStrategist {
     /// Returns [`TransactionStrategy`] for tasks
     /// Returns Error if all optimizations weren't enough
     pub fn build_strategy<P: IntentPersister>(
-        mut tasks: Vec<Box<dyn BaseTask>>,
+        mut tasks: Vec<BaseTaskImpl>,
         validator: &Pubkey,
         persistor: &Option<P>,
     ) -> TaskStrategistResult<TransactionStrategy> {
@@ -176,15 +173,7 @@ impl TaskStrategist {
         {
             // Persist tasks strategy
             if let Some(persistor) = persistor {
-                let mut persistor_visitor = PersistorVisitor {
-                    persistor,
-                    context: PersistorContext::PersistStrategy {
-                        uses_lookup_tables: false,
-                    },
-                };
-                tasks
-                    .iter()
-                    .for_each(|task| task.visit(&mut persistor_visitor));
+                Self::persist_tasks_strategy(persistor, &tasks, false);
             }
 
             Ok(TransactionStrategy {
@@ -196,15 +185,9 @@ impl TaskStrategist {
         // attempt using lookup tables for all keys involved in tasks
         else if Self::attempt_lookup_tables(&tasks) {
             // Persist tasks strategy
-            let mut persistor_visitor = PersistorVisitor {
-                persistor,
-                context: PersistorContext::PersistStrategy {
-                    uses_lookup_tables: true,
-                },
-            };
-            tasks
-                .iter()
-                .for_each(|task| task.visit(&mut persistor_visitor));
+            if let Some(persistor) = persistor {
+                Self::persist_tasks_strategy(persistor, &tasks, true);
+            }
 
             // Get lookup table keys
             let lookup_tables_keys =
@@ -221,7 +204,7 @@ impl TaskStrategist {
     /// Attempt to use ALTs for ALL keys in tx
     /// Returns `true` if ALTs make tx fit, otherwise `false`
     /// TODO(edwin): optimize to use only necessary amount of pubkeys
-    pub fn attempt_lookup_tables(tasks: &[Box<dyn BaseTask>]) -> bool {
+    pub fn attempt_lookup_tables(tasks: &[BaseTaskImpl]) -> bool {
         let placeholder = Keypair::new();
         // Gather all involved keys in tx
         let budgets = TransactionUtils::tasks_compute_units(tasks);
@@ -260,7 +243,7 @@ impl TaskStrategist {
 
     pub fn collect_lookup_table_keys(
         authority: &Pubkey,
-        tasks: &[Box<dyn BaseTask>],
+        tasks: &[BaseTaskImpl],
     ) -> Vec<Pubkey> {
         let budgets = TransactionUtils::tasks_compute_units(tasks);
         let size_budgets = TransactionUtils::tasks_accounts_size_budget(tasks);
@@ -277,15 +260,70 @@ impl TaskStrategist {
         )
     }
 
+    fn persist_tasks_strategy<P: IntentPersister>(
+        persistor: &P,
+        tasks: &[BaseTaskImpl],
+        uses_lookup_tables: bool,
+    ) {
+        for task in tasks {
+            let BaseTaskImpl::Commit(commit_task) = task else {
+                continue;
+            };
+            let commit_strategy = match &commit_task.delivery_details {
+                CommitDeliveryDetails::StateInArgs => {
+                    if uses_lookup_tables {
+                        CommitStrategy::StateArgsWithLookupTable
+                    } else {
+                        CommitStrategy::StateArgs
+                    }
+                }
+                CommitDeliveryDetails::DiffInArgs { .. } => {
+                    if uses_lookup_tables {
+                        CommitStrategy::DiffArgsWithLookupTable
+                    } else {
+                        CommitStrategy::DiffArgs
+                    }
+                }
+                CommitDeliveryDetails::StateInBuffer { .. } => {
+                    if uses_lookup_tables {
+                        CommitStrategy::StateBufferWithLookupTable
+                    } else {
+                        CommitStrategy::StateBuffer
+                    }
+                }
+                CommitDeliveryDetails::DiffInBuffer { .. } => {
+                    if uses_lookup_tables {
+                        CommitStrategy::DiffBufferWithLookupTable
+                    } else {
+                        CommitStrategy::DiffBuffer
+                    }
+                }
+            };
+            if let Err(err) = persistor.set_commit_strategy(
+                commit_task.commit_id,
+                &commit_task.committed_account.pubkey,
+                commit_strategy,
+            ) {
+                error!(
+                    commit_id = %commit_task.commit_id,
+                    pubkey = %commit_task.committed_account.pubkey,
+                    strategy = commit_strategy.as_str(),
+                    error = ?err,
+                    "Failed to persist commit strategy"
+                );
+            }
+        }
+    }
+
     /// Optimizes tasks so as to bring the transaction size within the limit [`MAX_ENCODED_TRANSACTION_SIZE`]
     /// Returns Ok(size of tx after optimizations) else Err(SignerError).
     /// Note that the returned size, though possibly optimized one, may still not be under
     /// the limit MAX_ENCODED_TRANSACTION_SIZE. The caller needs to check and make decision accordingly.
     fn try_optimize_tx_size_if_needed(
-        tasks: &mut [Box<dyn BaseTask>],
+        tasks: &mut [BaseTaskImpl],
     ) -> Result<usize, SignerError> {
         // Get initial transaction size
-        let calculate_tx_length = |tasks: &[Box<dyn BaseTask>]| {
+        let calculate_tx_length = |tasks: &[BaseTaskImpl]| {
             match TransactionUtils::assemble_tasks_tx(
                 &Keypair::new(), // placeholder
                 tasks,
@@ -329,11 +367,10 @@ impl TaskStrategist {
 
             let task = {
                 // This is tmp task that will be replaced by old or optimized one
-                let tmp_task =
-                    ArgsTask::new(ArgsTaskType::Finalize(FinalizeTask {
-                        delegated_account: Pubkey::new_unique(),
-                    }));
-                let tmp_task = Box::new(tmp_task) as Box<dyn BaseTask>;
+                let tmp_task: BaseTaskImpl = FinalizeTask {
+                    delegated_account: Pubkey::new_unique(),
+                }
+                .into();
                 std::mem::replace(&mut tasks[index], tmp_task)
             };
             match task.try_optimize_tx_size() {
@@ -445,7 +482,7 @@ mod tests {
         commit_id: u64,
         data_size: usize,
         diff_len: usize,
-    ) -> ArgsTask {
+    ) -> CommitTaskV2 {
         let committed_account = CommittedAccount {
             pubkey: Pubkey::new_unique(),
             account: Account {
@@ -484,8 +521,8 @@ mod tests {
     }
 
     // Helper to create a Base action task
-    fn create_test_base_action_task(len: usize) -> ArgsTask {
-        ArgsTask::new(ArgsTaskType::BaseAction(BaseActionTask {
+    fn create_test_base_action_task(len: usize) -> BaseActionTask {
+        BaseActionTask {
             action: BaseAction {
                 destination_program: Pubkey::new_unique(),
                 escrow_authority: Pubkey::new_unique(),
@@ -496,23 +533,23 @@ mod tests {
                 },
                 compute_units: 30_000,
             },
-        }))
+        }
     }
 
     // Helper to create a finalize task
-    fn create_test_finalize_task() -> ArgsTask {
-        ArgsTask::new(ArgsTaskType::Finalize(FinalizeTask {
+    fn create_test_finalize_task() -> FinalizeTask {
+        FinalizeTask {
             delegated_account: Pubkey::new_unique(),
-        }))
+        }
     }
 
     // Helper to create an undelegate task
-    fn create_test_undelegate_task() -> ArgsTask {
-        ArgsTask::new(ArgsTaskType::Undelegate(UndelegateTask {
+    fn create_test_undelegate_task() -> UndelegateTask {
+        UndelegateTask {
             delegated_account: Pubkey::new_unique(),
             owner_program: system_program_id(),
             rent_reimbursement: Pubkey::new_unique(),
-        }))
+        }
     }
 
     #[test]
@@ -520,7 +557,7 @@ mod tests {
         test_utils::init_test_logger();
         let validator = Pubkey::new_unique();
         let task = create_test_commit_task(1, 100, 0);
-        let tasks = vec![Box::new(task) as Box<dyn BaseTask>];
+        let tasks = vec![task.into()];
 
         let strategy = TaskStrategist::build_strategy(
             tasks,
@@ -538,7 +575,7 @@ mod tests {
         let validator = Pubkey::new_unique();
 
         let task = create_test_commit_task(1, 1000, 0); // Large task
-        let tasks = vec![Box::new(task) as Box<dyn BaseTask>];
+        let tasks = vec![task.into()];
 
         let strategy = TaskStrategist::build_strategy(
             tasks,
@@ -559,7 +596,7 @@ mod tests {
         let validator = Pubkey::new_unique();
 
         let task = create_test_commit_task(1, 66_000, 0); // Large task
-        let tasks = vec![Box::new(task) as Box<dyn BaseTask>];
+        let tasks = vec![task.into()];
 
         let strategy = TaskStrategist::build_strategy(
             tasks,
@@ -581,7 +618,7 @@ mod tests {
 
         let task =
             create_test_commit_task(1, 66_000, COMMIT_STATE_SIZE_THRESHOLD); // large account but small diff
-        let tasks = vec![Box::new(task) as Box<dyn BaseTask>];
+        let tasks = vec![task.into()];
 
         let strategy = TaskStrategist::build_strategy(
             tasks,
@@ -601,7 +638,7 @@ mod tests {
 
         let task =
             create_test_commit_task(1, 66_000, COMMIT_STATE_SIZE_THRESHOLD + 1); // large account but small diff
-        let tasks = vec![Box::new(task) as Box<dyn BaseTask>];
+        let tasks = vec![task.into()];
 
         let strategy = TaskStrategist::build_strategy(
             tasks,
@@ -620,7 +657,7 @@ mod tests {
 
         let task =
             create_test_commit_task(1, 66_000, COMMIT_STATE_SIZE_THRESHOLD * 4); // large account but small diff
-        let tasks = vec![Box::new(task) as Box<dyn BaseTask>];
+        let tasks = vec![task.into()];
 
         let strategy = TaskStrategist::build_strategy(
             tasks,
@@ -646,7 +683,7 @@ mod tests {
         let tasks = (0..NUM_COMMITS)
             .map(|i| {
                 let task = create_test_commit_task(i, 500, 0); // Large task
-                Box::new(task) as Box<dyn BaseTask>
+                task.into()
             })
             .collect();
 
@@ -674,7 +711,7 @@ mod tests {
             .map(|i| {
                 // Large task
                 let task = create_test_commit_task(i, 10000, 0);
-                Box::new(task) as Box<dyn BaseTask>
+                task.into()
             })
             .collect();
 
@@ -701,7 +738,7 @@ mod tests {
             .map(|i| {
                 // Large task
                 let task = create_test_commit_task(i, 1000, 0);
-                Box::new(task) as Box<dyn BaseTask>
+                task.into()
             })
             .collect();
 
@@ -715,10 +752,10 @@ mod tests {
 
     #[test]
     fn test_optimize_strategy_prioritizes_largest_tasks() {
-        let mut tasks = [
-            Box::new(create_test_commit_task(1, 100, 0)) as Box<dyn BaseTask>,
-            Box::new(create_test_commit_task(2, 1000, 0)) as Box<dyn BaseTask>, // Larger task
-            Box::new(create_test_commit_task(3, 1000, 0)) as Box<dyn BaseTask>, // Larger task
+        let mut tasks: [BaseTaskImpl; 3] = [
+            create_test_commit_task(1, 100, 0).into(),
+            create_test_commit_task(2, 1000, 0).into(), // Larger task
+            create_test_commit_task(3, 1000, 0).into(), // Larger task
         ];
 
         let _ = TaskStrategist::try_optimize_tx_size_if_needed(&mut tasks);
@@ -730,11 +767,11 @@ mod tests {
     #[test]
     fn test_mixed_task_types_with_optimization() {
         let validator = Pubkey::new_unique();
-        let tasks = vec![
-            Box::new(create_test_commit_task(1, 1000, 0)) as Box<dyn BaseTask>,
-            Box::new(create_test_finalize_task()) as Box<dyn BaseTask>,
-            Box::new(create_test_base_action_task(500)) as Box<dyn BaseTask>,
-            Box::new(create_test_undelegate_task()) as Box<dyn BaseTask>,
+        let tasks: Vec<BaseTaskImpl> = vec![
+            create_test_commit_task(1, 1000, 0).into(),
+            create_test_finalize_task().into(),
+            create_test_base_action_task(500).into(),
+            create_test_undelegate_task().into(),
         ];
 
         let strategy = TaskStrategist::build_strategy(

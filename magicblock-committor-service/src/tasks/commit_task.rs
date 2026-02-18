@@ -13,18 +13,20 @@ use solana_pubkey::Pubkey;
 use crate::{
     consts::MAX_WRITE_CHUNK_SIZE,
     tasks::{
-        task_visitors::utility_visitor::CommitMeta, CleanupTask,
+        task_visitors::utility_visitor::CommitMeta, BaseTaskImpl, CleanupTask,
         PreparationState, PreparationTask,
     },
 };
 
 // TODO: rename
+#[derive(Clone, Debug)]
 pub enum CommitStage {
     Preparation(PreparationTask),
     Cleanup(CleanupTask),
 }
 
 // TODO: rename
+#[derive(Clone, Debug)]
 pub enum CommitDeliveryDetails {
     StateInArgs,
     StateInBuffer {
@@ -39,6 +41,7 @@ pub enum CommitDeliveryDetails {
     },
 }
 
+#[derive(Clone, Debug)]
 pub struct CommitTaskV2 {
     pub commit_id: u64,
     pub allow_undelegation: bool,
@@ -129,7 +132,7 @@ impl CommitTaskV2 {
         }
     }
 
-    fn preparation_state(&self) -> Option<&CommitStage> {
+    pub fn stage(&self) -> Option<&CommitStage> {
         match &self.delivery_details {
             CommitDeliveryDetails::DiffInBuffer {
                 base_account: _,
@@ -139,6 +142,26 @@ impl CommitTaskV2 {
             CommitDeliveryDetails::StateInArgs
             | CommitDeliveryDetails::DiffInArgs { .. } => None,
         }
+    }
+
+    pub fn stage_mut(&mut self) -> Option<&mut CommitStage> {
+        match &mut self.delivery_details {
+            CommitDeliveryDetails::DiffInBuffer {
+                base_account: _,
+                stage,
+            }
+            | CommitDeliveryDetails::StateInBuffer { stage } => Some(stage),
+            CommitDeliveryDetails::StateInArgs
+            | CommitDeliveryDetails::DiffInArgs { .. } => None,
+        }
+    }
+
+    pub fn is_buffer(&self) -> bool {
+        matches!(
+            self.delivery_details,
+            CommitDeliveryDetails::StateInBuffer { .. }
+                | CommitDeliveryDetails::DiffInBuffer { .. }
+        )
     }
 
     pub fn try_optimize_tx_size(mut self) -> Result<Self, Self> {
@@ -258,5 +281,11 @@ impl CommitTaskV2 {
             }
             _ => (),
         }
+    }
+}
+
+impl From<CommitTaskV2> for BaseTaskImpl {
+    fn from(value: CommitTaskV2) -> Self {
+        Self::Commit(value)
     }
 }

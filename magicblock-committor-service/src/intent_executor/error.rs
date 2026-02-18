@@ -11,7 +11,7 @@ use tracing::error;
 use crate::{
     tasks::{
         task_builder::TaskBuilderError, task_strategist::TaskStrategistError,
-        BaseTask, TaskType,
+        BaseTask, BaseTaskImpl, TaskType,
     },
     transaction_preparator::error::TransactionPreparatorError,
 };
@@ -207,7 +207,7 @@ impl TransactionStrategyExecutionError {
     pub fn try_from_transaction_error(
         err: TransactionError,
         signature: Option<Signature>,
-        tasks: &[Box<dyn BaseTask>],
+        tasks: &[BaseTaskImpl],
     ) -> Result<Self, TransactionError> {
         // Commit Nonce order error
         const NONCE_OUT_OF_ORDER: u32 =
@@ -241,15 +241,12 @@ impl TransactionStrategyExecutionError {
                     return Err(tx_err_helper(instruction_err));
                 };
 
-                let Some(task_type) = tasks
-                    .get(action_index as usize)
-                    .map(|task| task.task_type())
-                else {
+                let Some(task) = tasks.get(action_index as usize) else {
                     return Err(tx_err_helper(instruction_err));
                 };
 
-                match (task_type, instruction_err) {
-                    (TaskType::Commit, instruction_err) => match instruction_err
+                match (task, instruction_err) {
+                    (BaseTaskImpl::Commit(_), instruction_err) => match instruction_err
                     {
                         InstructionError::Custom(NONCE_OUT_OF_ORDER) => Ok(
                             TransactionStrategyExecutionError::CommitIDError(
@@ -278,13 +275,13 @@ impl TransactionStrategyExecutionError {
                         }
                         err => Err(tx_err_helper(err)),
                     },
-                    (TaskType::Action, instruction_err) => {
+                    (BaseTaskImpl::BaseAction(_), instruction_err) => {
                         Ok(TransactionStrategyExecutionError::ActionsError(
                             tx_err_helper(instruction_err),
                             signature,
                         ))
                     }
-                    (TaskType::Undelegate, instruction_err) => Ok(
+                    (BaseTaskImpl::Undelegate(_), instruction_err) => Ok(
                         TransactionStrategyExecutionError::UndelegationError(
                             tx_err_helper(instruction_err),
                             signature,
@@ -316,7 +313,7 @@ impl metrics::LabelValue for TransactionStrategyExecutionError {
 }
 
 pub(crate) struct IntentTransactionErrorMapper<'a> {
-    pub tasks: &'a [Box<dyn BaseTask>],
+    pub tasks: &'a [BaseTaskImpl],
 }
 impl TransactionErrorMapper for IntentTransactionErrorMapper<'_> {
     type ExecutionError = TransactionStrategyExecutionError;
