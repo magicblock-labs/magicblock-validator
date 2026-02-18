@@ -10,7 +10,7 @@ use solana_program_runtime::invoke_context::InvokeContext;
 use solana_pubkey::Pubkey;
 use solana_transaction_context::TransactionContext;
 
-use super::{adjust_authority_lamports, validate_and_get_index, validate_authority};
+use super::{adjust_authority_lamports, validate_and_get_index, validate_authority, validate_mutable, validate_remote_slot};
 
 /// Clones an account atomically in a single transaction.
 ///
@@ -33,6 +33,11 @@ pub(crate) fn process_clone_account(
 
     let tx_idx = validate_and_get_index(transaction_context, 1, &pubkey, "CloneAccount", invoke_context)?;
     let account = transaction_context.get_account_at_index(tx_idx)?;
+
+    // Prevent overwriting ephemeral or active delegated accounts
+    validate_mutable(&account, &pubkey, invoke_context)?;
+    // Prevent stale updates from overwriting fresher data
+    validate_remote_slot(&account, &pubkey, Some(fields.remote_slot), invoke_context)?;
 
     ic_msg!(invoke_context, "CloneAccount: cloning '{}', data_len={}", pubkey, data.len());
 
