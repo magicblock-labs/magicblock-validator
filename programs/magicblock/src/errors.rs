@@ -21,7 +21,7 @@ pub enum MagicBlockProgramError {
     #[error("number of accounts to modify needs to match number of account modifications")]
     AccountsToModifyNotMatchingAccountModifications,
 
-    #[error("The account modification for the provided key is missing.")]
+    #[error("The account modification for the provided key is missing")]
     AccountModificationMissing,
 
     #[error("first account needs to be MagicBlock authority")]
@@ -30,7 +30,7 @@ pub enum MagicBlockProgramError {
     #[error("MagicBlock authority needs to be owned by system program")]
     MagicBlockAuthorityNeedsToBeOwnedBySystemProgram,
 
-    #[error("The account data for the provided key is missing.")]
+    #[error("The account data for the provided key is missing")]
     AccountDataMissing,
 
     #[error("Account already has a pending clone in progress")]
@@ -42,16 +42,14 @@ pub enum MagicBlockProgramError {
     #[error("Clone offset mismatch")]
     CloneOffsetMismatch,
 
-    #[error("The account is delegated and not currently undelegating.")]
-    AccountIsDelegatedAndNotUndelegating,
+    #[error("The account is delegated and not currently undelegating")]
+    AccountIsDelegated,
 
-    #[error(
-        "Remote slot updates cannot be older than the current remote slot."
-    )]
-    IncomingRemoteSlotIsOlderThanCurrentRemoteSlot,
+    #[error("The account is ephemeral and cannot be mutated")]
+    AccountIsEphemeral,
+
+    #[error("Updates cannot be older than the current remote slot")]
+    OutOfOrderUpdate,
     #[error("Buffer account not found for program finalization")]
     BufferAccountNotFound,
-
-    #[error("Failed to deploy program via LoaderV4")]
-    ProgramDeployFailed,
 }
