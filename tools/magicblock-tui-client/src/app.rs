@@ -15,16 +15,16 @@ use futures_util::StreamExt;
 use ratatui::{backend::CrosstermBackend, Terminal};
 use serde::Deserialize;
 use solana_pubsub_client::nonblocking::pubsub_client::PubsubClient;
-use solana_rpc_client_api::config::{
-    RpcTransactionLogsConfig, RpcTransactionLogsFilter,
-};
-use solana_rpc_client_api::custom_error::{
-    JSON_RPC_SERVER_ERROR_BLOCK_CLEANED_UP,
-    JSON_RPC_SERVER_ERROR_BLOCK_NOT_AVAILABLE,
-    JSON_RPC_SERVER_ERROR_BLOCK_STATUS_NOT_AVAILABLE_YET,
-    JSON_RPC_SERVER_ERROR_LONG_TERM_STORAGE_SLOT_SKIPPED,
-    JSON_RPC_SERVER_ERROR_SLOT_SKIPPED,
-    JSON_RPC_SERVER_ERROR_TRANSACTION_HISTORY_NOT_AVAILABLE,
+use solana_rpc_client_api::{
+    config::{RpcTransactionLogsConfig, RpcTransactionLogsFilter},
+    custom_error::{
+        JSON_RPC_SERVER_ERROR_BLOCK_CLEANED_UP,
+        JSON_RPC_SERVER_ERROR_BLOCK_NOT_AVAILABLE,
+        JSON_RPC_SERVER_ERROR_BLOCK_STATUS_NOT_AVAILABLE_YET,
+        JSON_RPC_SERVER_ERROR_LONG_TERM_STORAGE_SLOT_SKIPPED,
+        JSON_RPC_SERVER_ERROR_SLOT_SKIPPED,
+        JSON_RPC_SERVER_ERROR_TRANSACTION_HISTORY_NOT_AVAILABLE,
+    },
 };
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use tokio_util::sync::CancellationToken;
