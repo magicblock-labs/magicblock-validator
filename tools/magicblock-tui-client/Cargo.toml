@@ -12,6 +12,7 @@ chrono = { workspace = true }
 clap = { workspace = true, features = ["derive"] }
 crossterm = "0.28"
 futures-util = { workspace = true }
+percent-encoding = "2"
 ratatui = "0.29"
 reqwest = { workspace = true, features = ["json"] }
 serde = { workspace = true, features = ["derive"] }

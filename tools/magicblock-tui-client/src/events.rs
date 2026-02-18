@@ -101,19 +101,28 @@ fn handle_key(
                 state.scroll_down(visible_height);
             }
         }
-        KeyCode::Home => {
-            state.log_scroll = 0;
-            state.tx_scroll = 0;
-            state.selected_tx = 0;
-        }
-        KeyCode::End => {
-            state.log_scroll = state.logs.len().saturating_sub(visible_height);
-            if !state.transactions.is_empty() {
-                state.selected_tx = state.transactions.len() - 1;
-                state.tx_scroll =
-                    state.transactions.len().saturating_sub(visible_height);
+        KeyCode::Home => match state.active_tab {
+            Tab::Logs => state.log_scroll = 0,
+            Tab::Transactions => {
+                state.tx_scroll = 0;
+                state.selected_tx = 0;
             }
-        }
+            Tab::Config => {}
+        },
+        KeyCode::End => match state.active_tab {
+            Tab::Logs => {
+                state.log_scroll =
+                    state.logs.len().saturating_sub(visible_height);
+            }
+            Tab::Transactions => {
+                if !state.transactions.is_empty() {
+                    state.selected_tx = state.transactions.len() - 1;
+                    state.tx_scroll =
+                        state.transactions.len().saturating_sub(visible_height);
+                }
+            }
+            Tab::Config => {}
+        },
         _ => {}
     }
 

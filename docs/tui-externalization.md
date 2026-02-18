@@ -1,9 +1,11 @@
 # External TUI Design
 
 ## Goal
+
 Replicate the `feat/tui-feature` TUI without coupling it to validator internals.
 
 ## Implemented Option (Recommended): RPC/WS Client
+
 - New standalone binary crate: `tools/magicblock-tui-client`
 - Data sources:
   - WebSocket `slotSubscribe` for slot header updates
@@ -16,6 +18,7 @@ Replicate the `feat/tui-feature` TUI without coupling it to validator internals.
   - No internal channels, no compile-time coupling to `magicblock-api`/`magicblock-processor`
 
 ## Geyser Plugin Option (Less Preferable)
+
 Feasible, but heavier operationally:
 - Pros:
   - Direct access to rich execution/block events
@@ -30,18 +33,21 @@ Given the current requirements, RPC/WS is the best default.
 ## Packaging Strategy
 
 ### Same binary with feature-gate
+
 Feasible and now implemented:
 - `magicblock-validator` now has a `tui` feature which launches the TUI after validator startup.
 - Invocation: `cargo run --features tui --bin magicblock-validator`
 - The default headless mode is unchanged when `tui` is not enabled.
 
 ### Independent binary (chosen)
+
 Still the best fit for strict externalization:
 - Clean separation of concerns
 - Decoupled release cadence
 - Can monitor remote validators from a separate host
 
 ## Notes on Parity
+
 The visual layout and interaction model are preserved. The only semantic difference is the Logs tab source:
 - In-process TUI: validator tracing logs
 - External TUI: websocket transaction log notifications plus client connection/status logs

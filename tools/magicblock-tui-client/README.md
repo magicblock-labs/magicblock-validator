@@ -35,6 +35,7 @@ In this mode, TUI RPC/WS endpoints are derived from the validator `aperture.list
 Without `--features tui`, validator startup remains headless.
 
 ## Data Sources
+
 - `slotSubscribe` (WS) for slot updates
 - `getBlock` (RPC, driven by slots) for transaction feed
 - `logsSubscribe(All)` (WS) for tx log lines and status summaries

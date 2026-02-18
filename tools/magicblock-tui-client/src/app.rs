@@ -45,6 +45,7 @@ type Term = Terminal<CrosstermBackend<Stdout>>;
 enum AppEvent {
     Slot(u64),
     Transaction(TransactionEntry),
+    TransactionDetail(TransactionDetail),
     Log(LogEntry),
 }
 
@@ -53,6 +54,12 @@ pub async fn run_tui(config: TuiConfig) -> io::Result<()> {
     setup_panic_hook();
     let mut terminal = init_terminal()?;
     let mut state = TuiState::new(config.clone());
+    let client = reqwest::Client::new();
+    if let Ok(epoch_info) = get_epoch_info(&client, &config.rpc_url).await {
+        if epoch_info.slots_in_epoch > 0 {
+            state.slots_per_epoch = epoch_info.slots_in_epoch;
+        }
+    }
 
     let (event_tx, event_rx) = mpsc::unbounded_channel();
     let (slot_tx, slot_rx) = mpsc::unbounded_channel();
@@ -74,8 +81,14 @@ pub async fn run_tui(config: TuiConfig) -> io::Result<()> {
         cancel.clone(),
     );
 
-    let result =
-        run_event_loop(&mut terminal, &mut state, event_rx, cancel).await;
+    let result = run_event_loop(
+        &mut terminal,
+        &mut state,
+        event_rx,
+        event_tx.clone(),
+        cancel,
+    )
+    .await;
     restore_terminal(&mut terminal)?;
     result
 }
@@ -126,8 +139,10 @@ async fn run_event_loop(
     terminal: &mut Term,
     state: &mut TuiState,
     mut event_rx: UnboundedReceiver<AppEvent>,
+    event_tx: UnboundedSender<AppEvent>,
     cancel: CancellationToken,
 ) -> io::Result<()> {
+    let rpc_client = reqwest::Client::new();
     let poll_timeout = Duration::ZERO;
     let tick_rate = Duration::from_millis(50);
     let mut last_tick = std::time::Instant::now();
@@ -156,25 +171,25 @@ async fn run_event_loop(
             match action {
                 EventAction::FetchTransaction(sig) => {
                     let rpc_url = state.rpc_url.clone();
-                    match fetch_transaction_detail(&rpc_url, &sig).await {
-                        Ok(detail) => state.show_tx_detail(detail),
-                        Err(e) => {
-                            let explorer_url =
-                                build_explorer_url(&state.rpc_url, &sig);
-                            state.show_tx_detail(TransactionDetail {
-                                signature: sig,
-                                slot: 0,
-                                success: false,
-                                fee: 0,
-                                compute_units: None,
-                                logs: vec![],
-                                accounts: vec![],
-                                error: Some(format!("Failed to fetch: {}", e)),
-                                explorer_url,
-                                explorer_selected: false,
-                            });
-                        }
-                    }
+                    let client = rpc_client.clone();
+                    let event_tx = event_tx.clone();
+
+                    tokio::spawn(async move {
+                        let detail = match fetch_transaction_detail(
+                            &client, &rpc_url, &sig,
+                        )
+                        .await
+                        {
+                            Ok(detail) => detail,
+                            Err(e) => build_failed_tx_detail(
+                                &rpc_url,
+                                sig,
+                                format!("Failed to fetch: {}", e),
+                            ),
+                        };
+                        let _ =
+                            event_tx.send(AppEvent::TransactionDetail(detail));
+                    });
                 }
                 EventAction::OpenUrl(url) => {
                     let _ = open_url_in_browser(&url);
@@ -192,6 +207,9 @@ async fn run_event_loop(
             match event {
                 AppEvent::Slot(slot) => state.update_slot(slot),
                 AppEvent::Transaction(tx) => state.push_transaction(tx),
+                AppEvent::TransactionDetail(detail) => {
+                    state.show_tx_detail(detail)
+                }
                 AppEvent::Log(log) => state.push_log(log),
             }
         }
@@ -511,6 +529,12 @@ struct VersionResponse {
     solana_core: String,
 }
 
+#[derive(Debug, Deserialize)]
+struct EpochInfoResponse {
+    #[serde(rename = "slotsInEpoch")]
+    slots_in_epoch: u64,
+}
+
 async fn get_identity(
     client: &reqwest::Client,
     rpc_url: &str,
@@ -579,12 +603,44 @@ async fn get_server_version(
         .ok_or_else(|| "missing result".to_string())
 }
 
+async fn get_epoch_info(
+    client: &reqwest::Client,
+    rpc_url: &str,
+) -> Result<EpochInfoResponse, String> {
+    let request_body = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "getEpochInfo",
+        "params": []
+    });
+
+    let response = client
+        .post(rpc_url)
+        .timeout(Duration::from_secs(5))
+        .json(&request_body)
+        .send()
+        .await
+        .map_err(|e| format!("HTTP error: {}", e))?;
+
+    let rpc_response: RpcResponse<EpochInfoResponse> = response
+        .json()
+        .await
+        .map_err(|e| format!("Parse error: {}", e))?;
+
+    if let Some(err) = rpc_response.error {
+        return Err(err.message);
+    }
+
+    rpc_response
+        .result
+        .ok_or_else(|| "missing result".to_string())
+}
+
 async fn fetch_transaction_detail(
+    client: &reqwest::Client,
     rpc_url: &str,
     signature: &str,
 ) -> Result<TransactionDetail, String> {
-    let client = reqwest::Client::new();
-
     let request_body = serde_json::json!({
         "jsonrpc": "2.0",
         "id": 1,
@@ -637,6 +693,26 @@ async fn fetch_transaction_detail(
         explorer_url: build_explorer_url(rpc_url, signature),
         explorer_selected: false,
     })
+}
+
+fn build_failed_tx_detail(
+    rpc_url: &str,
+    signature: String,
+    error: String,
+) -> TransactionDetail {
+    let explorer_url = build_explorer_url(rpc_url, &signature);
+    TransactionDetail {
+        signature,
+        slot: 0,
+        success: false,
+        fee: 0,
+        compute_units: None,
+        logs: vec![],
+        accounts: vec![],
+        error: Some(error),
+        explorer_url,
+        explorer_selected: false,
+    }
 }
 
 async fn fetch_block_transactions_with_retry(
@@ -763,7 +839,7 @@ fn open_url_in_browser(url: &str) -> std::io::Result<()> {
     #[cfg(target_os = "windows")]
     {
         std::process::Command::new("cmd")
-            .args(["/C", "start", url])
+            .args(["/C", "start", "", url])
             .spawn()?;
     }
     #[cfg(not(any(

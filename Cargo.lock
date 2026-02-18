@@ -3492,6 +3492,7 @@ dependencies = [
  "clap 4.5.53",
  "crossterm",
  "futures-util",
+ "percent-encoding",
  "ratatui",
  "reqwest",
  "serde",

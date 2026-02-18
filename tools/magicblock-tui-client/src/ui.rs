@@ -69,7 +69,7 @@ fn render_header(frame: &mut Frame, area: Rect, state: &TuiState) {
 }
 
 fn render_tick_bar(filled: usize, total: usize) -> Line<'static> {
-    let mut spans = Vec::with_capacity(total * 2 + 2);
+    let mut spans = Vec::with_capacity(total + 2);
     spans.push(Span::styled("[", Style::default().fg(DARK_GRAY)));
 
     for i in 0..total {
@@ -329,11 +329,22 @@ fn render_tx_detail_popup(frame: &mut Frame, state: &TuiState) {
         return;
     };
 
+    const MIN_POPUP_WIDTH: u16 = 20;
+    const MIN_POPUP_HEIGHT: u16 = 8;
+
     let area = frame.area();
-    let popup_width = (area.width * 80) / 100;
-    let popup_height = (area.height * 80) / 100;
-    let popup_x = (area.width - popup_width) / 2;
-    let popup_y = (area.height - popup_height) / 2;
+    if area.width < MIN_POPUP_WIDTH || area.height < MIN_POPUP_HEIGHT {
+        return;
+    }
+
+    let popup_width = ((area.width * 80) / 100)
+        .max(MIN_POPUP_WIDTH)
+        .min(area.width);
+    let popup_height = ((area.height * 80) / 100)
+        .max(MIN_POPUP_HEIGHT)
+        .min(area.height);
+    let popup_x = area.width.saturating_sub(popup_width) / 2;
+    let popup_y = area.height.saturating_sub(popup_height) / 2;
     let popup_area = Rect::new(popup_x, popup_y, popup_width, popup_height);
 
     let clear =

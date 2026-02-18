@@ -107,7 +107,7 @@ pub struct TransactionEntry {
     pub timestamp: DateTime<Utc>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct TransactionDetail {
     pub signature: String,
     pub slot: u64,
@@ -194,10 +194,31 @@ impl TuiState {
     }
 
     pub fn push_transaction(&mut self, entry: TransactionEntry) {
+        let had_transactions = !self.transactions.is_empty();
         self.transactions.push_front(entry);
+
+        // Keep selection on the same transaction when prepending a new one.
+        if had_transactions {
+            self.selected_tx = self
+                .selected_tx
+                .saturating_add(1)
+                .min(self.transactions.len().saturating_sub(1));
+            self.tx_scroll = self.tx_scroll.saturating_add(1);
+        }
+
         while self.transactions.len() > self.max_transactions {
             self.transactions.pop_back();
         }
+
+        if self.transactions.is_empty() {
+            self.selected_tx = 0;
+            self.tx_scroll = 0;
+            return;
+        }
+
+        let max_index = self.transactions.len() - 1;
+        self.selected_tx = self.selected_tx.min(max_index);
+        self.tx_scroll = self.tx_scroll.min(max_index);
     }
 
     pub fn scroll_up(&mut self) {
