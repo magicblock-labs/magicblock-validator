@@ -110,7 +110,8 @@ fn handle_key(
             state.log_scroll = state.logs.len().saturating_sub(visible_height);
             if !state.transactions.is_empty() {
                 state.selected_tx = state.transactions.len() - 1;
-                state.tx_scroll = state.transactions.len().saturating_sub(visible_height);
+                state.tx_scroll =
+                    state.transactions.len().saturating_sub(visible_height);
             }
         }
         _ => {}

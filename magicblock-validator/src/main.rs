@@ -61,10 +61,8 @@ async fn run() {
     };
     #[cfg(not(feature = "tui"))]
     info!(config = %format!("{config:#?}"), "Starting validator");
-    const WS_PORT_OFFSET: u16 = 1;
-    let rpc_port = config.aperture.listen.port();
-    let ws_port = rpc_port + WS_PORT_OFFSET; // WebSocket port is typically RPC port + 1
-    let rpc_host = config.aperture.listen.ip();
+    let rpc_url = config.aperture.listen.http();
+    let ws_url = config.aperture.listen.websocket();
     let validator_identity = config.validator.keypair.pubkey();
     let remote_rpc_url = config.rpc_url().to_string();
     #[cfg(feature = "tui")]
@@ -73,7 +71,7 @@ async fn run() {
     let lifecycle_mode = format!("{:?}", config.lifecycle);
     #[cfg(feature = "tui")]
     let base_fee = config.validator.basefee;
-    debug!(rpc_port, ws_port, "Validator configured");
+    debug!(%rpc_url, %ws_url, "Validator configured");
     let mut api = match MagicValidator::try_from_config(config).await {
         Ok(api) => api,
         Err(error) => {
@@ -105,8 +103,8 @@ async fn run() {
         let version = magicblock_version::Version::default();
 
         let mut tui_config = TuiConfig {
-            rpc_url: format!("http://{}:{}", rpc_host, rpc_port),
-            ws_url: format!("ws://{}:{}", rpc_host, ws_port),
+            rpc_url: rpc_url.clone(),
+            ws_url: ws_url.clone(),
             remote_rpc_url,
             validator_identity: validator_identity.to_string(),
             ledger_path,
@@ -134,14 +132,8 @@ async fn run() {
             version, version.git_version
         ));
         print_info("-----------------------------------");
-        print_info(format!(
-            "📡 RPC endpoint:       http://{}:{}",
-            rpc_host, rpc_port
-        ));
-        print_info(format!(
-            "🔌 WebSocket endpoint: ws://{}:{}",
-            rpc_host, ws_port
-        ));
+        print_info(format!("📡 RPC endpoint:       {}", rpc_url));
+        print_info(format!("🔌 WebSocket endpoint: {}", ws_url));
         print_info(format!("🌐 Remote RPC:         {}", remote_rpc_url));
         print_info(format!("🖥️ Validator identity: {}", validator_identity));
         print_info(format!(

@@ -18,6 +18,14 @@ use solana_pubsub_client::nonblocking::pubsub_client::PubsubClient;
 use solana_rpc_client_api::config::{
     RpcTransactionLogsConfig, RpcTransactionLogsFilter,
 };
+use solana_rpc_client_api::custom_error::{
+    JSON_RPC_SERVER_ERROR_BLOCK_CLEANED_UP,
+    JSON_RPC_SERVER_ERROR_BLOCK_NOT_AVAILABLE,
+    JSON_RPC_SERVER_ERROR_BLOCK_STATUS_NOT_AVAILABLE_YET,
+    JSON_RPC_SERVER_ERROR_LONG_TERM_STORAGE_SLOT_SKIPPED,
+    JSON_RPC_SERVER_ERROR_SLOT_SKIPPED,
+    JSON_RPC_SERVER_ERROR_TRANSACTION_HISTORY_NOT_AVAILABLE,
+};
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use tokio_util::sync::CancellationToken;
 use tracing::Level;
@@ -47,10 +55,27 @@ pub async fn run_tui(config: TuiConfig) -> io::Result<()> {
     let mut state = TuiState::new(config.clone());
 
     let (event_tx, event_rx) = mpsc::unbounded_channel();
-    spawn_slot_subscription(config.ws_url.clone(), event_tx.clone(), cancel.clone());
-    spawn_logs_subscription(config.ws_url.clone(), event_tx.clone(), cancel.clone());
+    let (slot_tx, slot_rx) = mpsc::unbounded_channel();
+    spawn_slot_subscription(
+        config.ws_url.clone(),
+        event_tx.clone(),
+        slot_tx,
+        cancel.clone(),
+    );
+    spawn_block_transaction_feed(
+        config.rpc_url.clone(),
+        slot_rx,
+        event_tx.clone(),
+        cancel.clone(),
+    );
+    spawn_logs_subscription(
+        config.ws_url.clone(),
+        event_tx.clone(),
+        cancel.clone(),
+    );
 
-    let result = run_event_loop(&mut terminal, &mut state, event_rx, cancel).await;
+    let result =
+        run_event_loop(&mut terminal, &mut state, event_rx, cancel).await;
     restore_terminal(&mut terminal)?;
     result
 }
@@ -64,8 +89,11 @@ pub async fn enrich_config_from_rpc(config: &mut TuiConfig) {
         }
     }
 
-    if let Ok(server_version) = get_server_version(&client, &config.rpc_url).await {
-        config.version = format!("{} | validator {}", config.version, server_version);
+    if let Ok(server_version) =
+        get_server_version(&client, &config.rpc_url).await
+    {
+        config.version =
+            format!("{} | validator {}", config.version, server_version);
     }
 }
 
@@ -131,7 +159,8 @@ async fn run_event_loop(
                     match fetch_transaction_detail(&rpc_url, &sig).await {
                         Ok(detail) => state.show_tx_detail(detail),
                         Err(e) => {
-                            let explorer_url = build_explorer_url(&state.rpc_url, &sig);
+                            let explorer_url =
+                                build_explorer_url(&state.rpc_url, &sig);
                             state.show_tx_detail(TransactionDetail {
                                 signature: sig,
                                 slot: 0,
@@ -181,6 +210,7 @@ async fn run_event_loop(
 fn spawn_slot_subscription(
     ws_url: String,
     event_tx: UnboundedSender<AppEvent>,
+    slot_tx: UnboundedSender<u64>,
     cancel: CancellationToken,
 ) {
     tokio::spawn(async move {
@@ -201,7 +231,9 @@ fn spawn_slot_subscription(
                                     item = stream.next() => {
                                         match item {
                                             Some(update) => {
-                                                let _ = event_tx.send(AppEvent::Slot(update.slot));
+                                                let slot = update.slot;
+                                                let _ = event_tx.send(AppEvent::Slot(slot));
+                                                let _ = slot_tx.send(slot);
                                             }
                                             None => break,
                                         }
@@ -211,11 +243,12 @@ fn spawn_slot_subscription(
                             let _ = unsubscribe().await;
                         }
                         Err(err) => {
-                            let _ = event_tx.send(AppEvent::Log(LogEntry::new(
-                                Level::ERROR,
-                                "slot_subscribe".to_string(),
-                                format!("Subscription failed: {}", err),
-                            )));
+                            let _ =
+                                event_tx.send(AppEvent::Log(LogEntry::new(
+                                    Level::ERROR,
+                                    "slot_subscribe".to_string(),
+                                    format!("Subscription failed: {}", err),
+                                )));
                         }
                     }
                 }
@@ -230,6 +263,89 @@ fn spawn_slot_subscription(
 
             if !cancel.is_cancelled() {
                 tokio::time::sleep(Duration::from_millis(800)).await;
+            }
+        }
+    });
+}
+
+fn spawn_block_transaction_feed(
+    rpc_url: String,
+    mut slot_rx: UnboundedReceiver<u64>,
+    event_tx: UnboundedSender<AppEvent>,
+    cancel: CancellationToken,
+) {
+    tokio::spawn(async move {
+        let client = reqwest::Client::new();
+        let mut latest_target_slot: Option<u64> = None;
+        let mut next_slot_to_fetch: Option<u64> = None;
+
+        let _ = event_tx.send(AppEvent::Log(LogEntry::new(
+            Level::INFO,
+            "tx_feed".to_string(),
+            format!("Using getBlock transaction feed on {}", rpc_url),
+        )));
+
+        while !cancel.is_cancelled() {
+            tokio::select! {
+                _ = cancel.cancelled() => break,
+                maybe_slot = slot_rx.recv() => {
+                    let slot = match maybe_slot {
+                        Some(slot) => slot,
+                        None => break,
+                    };
+
+                    // Stay behind the latest slot to reduce transient `null` blocks.
+                    let target_slot = slot.saturating_sub(2);
+                    latest_target_slot = Some(match latest_target_slot {
+                        Some(current) => current.max(target_slot),
+                        None => target_slot,
+                    });
+
+                    if next_slot_to_fetch.is_none() {
+                        next_slot_to_fetch = Some(target_slot);
+                    }
+
+                    while let (Some(next_slot), Some(latest_slot)) =
+                        (next_slot_to_fetch, latest_target_slot)
+                    {
+                        if next_slot > latest_slot || cancel.is_cancelled() {
+                            break;
+                        }
+
+                        let should_advance = match fetch_block_transactions_with_retry(
+                            &client,
+                            &rpc_url,
+                            next_slot,
+                        )
+                        .await
+                        {
+                            Ok(Some(entries)) => {
+                                for entry in entries {
+                                    let _ = event_tx.send(AppEvent::Transaction(entry));
+                                }
+                                true
+                            }
+                            Ok(None) => true,
+                            Err(err) => {
+                                let _ = event_tx.send(AppEvent::Log(LogEntry::new(
+                                    Level::WARN,
+                                    "tx_feed".to_string(),
+                                    format!(
+                                        "getBlock slot {} failed: {}",
+                                        next_slot, err
+                                    ),
+                                )));
+                                false
+                            }
+                        };
+
+                        if should_advance {
+                            next_slot_to_fetch = Some(next_slot.saturating_add(1));
+                        } else {
+                            break;
+                        }
+                    }
+                }
             }
         }
     });
@@ -268,13 +384,6 @@ fn spawn_logs_subscription(
                                                 let success = update.value.err.is_none();
                                                 let slot = update.context.slot;
 
-                                                let _ = event_tx.send(AppEvent::Transaction(TransactionEntry {
-                                                    signature: signature.clone(),
-                                                    slot,
-                                                    success,
-                                                    timestamp: Utc::now(),
-                                                }));
-
                                                 let level = if success { Level::INFO } else { Level::ERROR };
                                                 let summary = if success {
                                                     format!("tx {} succeeded in slot {}", signature, slot)
@@ -303,11 +412,12 @@ fn spawn_logs_subscription(
                             let _ = unsubscribe().await;
                         }
                         Err(err) => {
-                            let _ = event_tx.send(AppEvent::Log(LogEntry::new(
-                                Level::ERROR,
-                                "logs_subscribe".to_string(),
-                                format!("Subscription failed: {}", err),
-                            )));
+                            let _ =
+                                event_tx.send(AppEvent::Log(LogEntry::new(
+                                    Level::ERROR,
+                                    "logs_subscribe".to_string(),
+                                    format!("Subscription failed: {}", err),
+                                )));
                         }
                     }
                 }
@@ -335,6 +445,7 @@ struct RpcResponse<T> {
 
 #[derive(Debug, Deserialize)]
 struct RpcError {
+    code: i64,
     message: String,
 }
 
@@ -343,6 +454,29 @@ struct TransactionResponse {
     slot: u64,
     meta: Option<TransactionMeta>,
     transaction: TransactionData,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BlockResponse {
+    #[serde(default)]
+    transactions: Vec<BlockTransactionWithMeta>,
+}
+
+#[derive(Debug, Deserialize)]
+struct BlockTransactionWithMeta {
+    transaction: BlockTransaction,
+    meta: Option<BlockTransactionMeta>,
+}
+
+#[derive(Debug, Deserialize)]
+struct BlockTransaction {
+    signatures: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct BlockTransactionMeta {
+    err: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -377,7 +511,10 @@ struct VersionResponse {
     solana_core: String,
 }
 
-async fn get_identity(client: &reqwest::Client, rpc_url: &str) -> Result<String, String> {
+async fn get_identity(
+    client: &reqwest::Client,
+    rpc_url: &str,
+) -> Result<String, String> {
     let request_body = serde_json::json!({
         "jsonrpc": "2.0",
         "id": 1,
@@ -456,7 +593,7 @@ async fn fetch_transaction_detail(
             signature,
             {
                 "encoding": "json",
-                "maxSupportedTransactionVersion": 0
+                "maxSupportedTransactionVersion": 255
             }
         ]
     });
@@ -502,6 +639,110 @@ async fn fetch_transaction_detail(
     })
 }
 
+async fn fetch_block_transactions_with_retry(
+    client: &reqwest::Client,
+    rpc_url: &str,
+    slot: u64,
+) -> Result<Option<Vec<TransactionEntry>>, String> {
+    const MAX_ATTEMPTS: usize = 4;
+
+    for attempt in 0..MAX_ATTEMPTS {
+        match fetch_block_transactions(client, rpc_url, slot).await {
+            Ok(Some(entries)) => return Ok(Some(entries)),
+            Ok(None) => {
+                if attempt + 1 == MAX_ATTEMPTS {
+                    return Ok(None);
+                }
+            }
+            Err(err) => {
+                if attempt + 1 == MAX_ATTEMPTS {
+                    return Err(err);
+                }
+            }
+        }
+
+        tokio::time::sleep(Duration::from_millis(120)).await;
+    }
+
+    Ok(None)
+}
+
+async fn fetch_block_transactions(
+    client: &reqwest::Client,
+    rpc_url: &str,
+    slot: u64,
+) -> Result<Option<Vec<TransactionEntry>>, String> {
+    let request_body = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "getBlock",
+        "params": [
+            slot,
+            {
+                "encoding": "json",
+                "transactionDetails": "full",
+                "rewards": false,
+                "commitment": "confirmed",
+                "maxSupportedTransactionVersion": 255
+            }
+        ]
+    });
+
+    let response = client
+        .post(rpc_url)
+        .timeout(Duration::from_secs(5))
+        .json(&request_body)
+        .send()
+        .await
+        .map_err(|e| format!("HTTP error: {}", e))?;
+
+    let rpc_response: RpcResponse<BlockResponse> = response
+        .json()
+        .await
+        .map_err(|e| format!("Parse error: {}", e))?;
+
+    if let Some(err) = rpc_response.error {
+        if is_non_fatal_block_error(err.code) {
+            return Ok(None);
+        }
+        return Err(format!("{} (code {})", err.message, err.code));
+    }
+
+    let Some(block) = rpc_response.result else {
+        return Ok(None);
+    };
+
+    let timestamp = Utc::now();
+    let entries = block
+        .transactions
+        .into_iter()
+        .filter_map(|tx| {
+            let signature = tx.transaction.signatures.into_iter().next()?;
+            let success = tx.meta.map(|m| m.err.is_none()).unwrap_or(true);
+            Some(TransactionEntry {
+                signature,
+                slot,
+                success,
+                timestamp,
+            })
+        })
+        .collect();
+
+    Ok(Some(entries))
+}
+
+fn is_non_fatal_block_error(code: i64) -> bool {
+    matches!(
+        code,
+        JSON_RPC_SERVER_ERROR_BLOCK_NOT_AVAILABLE
+            | JSON_RPC_SERVER_ERROR_BLOCK_STATUS_NOT_AVAILABLE_YET
+            | JSON_RPC_SERVER_ERROR_SLOT_SKIPPED
+            | JSON_RPC_SERVER_ERROR_LONG_TERM_STORAGE_SLOT_SKIPPED
+            | JSON_RPC_SERVER_ERROR_BLOCK_CLEANED_UP
+            | JSON_RPC_SERVER_ERROR_TRANSACTION_HISTORY_NOT_AVAILABLE
+    )
+}
+
 fn build_explorer_url(rpc_url: &str, signature: &str) -> String {
     let encoded_rpc = url_encode(rpc_url);
     format!(
@@ -525,7 +766,11 @@ fn open_url_in_browser(url: &str) -> std::io::Result<()> {
             .args(["/C", "start", url])
             .spawn()?;
     }
-    #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+    #[cfg(not(any(
+        target_os = "macos",
+        target_os = "linux",
+        target_os = "windows"
+    )))]
     {
         return Err(std::io::Error::new(
             std::io::ErrorKind::Unsupported,

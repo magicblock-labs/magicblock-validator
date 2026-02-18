@@ -1,6 +1,6 @@
 DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
-TUI_RPC_URL ?= http://127.0.0.1:8899
-TUI_WS_URL ?= ws://127.0.0.1:8900
+TUI_RPC_URL ?= http://127.0.0.1:7799
+TUI_WS_URL ?= ws://127.0.0.1:7800
 
 CARGO_TEST=nextest run --no-fail-fast -j8
 CARGO_TEST_NOCAP=nextest run --nocapture

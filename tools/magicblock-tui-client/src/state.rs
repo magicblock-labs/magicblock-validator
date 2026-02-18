@@ -38,7 +38,10 @@ impl From<&TuiConfig> for ValidatorConfig {
         let rpc_endpoint = config.rpc_url.replace("0.0.0.0", "localhost");
         let ws_endpoint = config.ws_url.replace("0.0.0.0", "localhost");
         Self {
-            version: format!("{} (Git: {})", config.version, config.git_version),
+            version: format!(
+                "{} (Git: {})",
+                config.version, config.git_version
+            ),
             rpc_endpoint,
             ws_endpoint,
             remote_rpc: config.remote_rpc_url.clone(),
@@ -77,7 +80,7 @@ impl Tab {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct LogEntry {
     pub timestamp: DateTime<Utc>,
     pub level: Level,
@@ -96,7 +99,7 @@ impl LogEntry {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct TransactionEntry {
     pub signature: String,
     pub slot: u64,
@@ -220,7 +223,8 @@ impl TuiState {
             }
             Tab::Transactions => {
                 if !self.transactions.is_empty() {
-                    self.selected_tx = (self.selected_tx + 1).min(self.transactions.len() - 1);
+                    self.selected_tx =
+                        (self.selected_tx + 1).min(self.transactions.len() - 1);
                     if self.selected_tx >= self.tx_scroll + visible_height {
                         self.tx_scroll = self.selected_tx - visible_height + 1;
                     }

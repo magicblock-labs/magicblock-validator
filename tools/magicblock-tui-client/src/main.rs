@@ -6,11 +6,11 @@ use magicblock_tui_client::{enrich_config_from_rpc, run_tui, TuiConfig};
 #[command(about = "External TUI for Magicblock validator over RPC/WS")]
 struct Args {
     /// HTTP JSON-RPC endpoint
-    #[arg(long, default_value = "http://127.0.0.1:8899")]
+    #[arg(long, default_value = "http://127.0.0.1:7799")]
     rpc_url: String,
 
     /// WebSocket endpoint
-    #[arg(long, default_value = "ws://127.0.0.1:8900")]
+    #[arg(long, default_value = "ws://127.0.0.1:7800")]
     ws_url: String,
 
     /// Optional remote RPC endpoint to display in config tab

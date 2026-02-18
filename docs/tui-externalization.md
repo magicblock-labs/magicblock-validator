@@ -7,7 +7,8 @@ Replicate the `feat/tui-feature` TUI without coupling it to validator internals.
 - New standalone binary crate: `tools/magicblock-tui-client`
 - Data sources:
   - WebSocket `slotSubscribe` for slot header updates
-  - WebSocket `logsSubscribe(All)` for transaction list (`signature`, `slot`, `success`) and log stream
+  - HTTP RPC `getBlock` (driven by incoming slots) for transaction list (`signature`, `slot`, `success`)
+  - WebSocket `logsSubscribe(All)` for transaction log stream and status summaries
   - HTTP RPC `getTransaction` for transaction detail popup
 - Characteristics:
   - Works against any compatible validator endpoint

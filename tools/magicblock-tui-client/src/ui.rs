@@ -76,7 +76,10 @@ fn render_tick_bar(filled: usize, total: usize) -> Line<'static> {
         if i < filled {
             spans.push(Span::styled("▌", Style::default().fg(CYAN)));
         } else {
-            spans.push(Span::styled("▌", Style::default().fg(Color::Rgb(40, 40, 40))));
+            spans.push(Span::styled(
+                "▌",
+                Style::default().fg(Color::Rgb(40, 40, 40)),
+            ));
         }
     }
 
@@ -102,7 +105,9 @@ fn render_tabs(frame: &mut Frame, area: Rect, state: &TuiState) {
         .block(Block::default().borders(Borders::BOTTOM))
         .select(selected)
         .style(Style::default().fg(DARK_GRAY))
-        .highlight_style(Style::default().fg(WHITE).add_modifier(Modifier::BOLD))
+        .highlight_style(
+            Style::default().fg(WHITE).add_modifier(Modifier::BOLD),
+        )
         .divider("│");
 
     frame.render_widget(tabs, area);
@@ -135,7 +140,10 @@ fn render_logs(frame: &mut Frame, area: Rect, state: &TuiState) {
             };
 
             let line = Line::from(vec![
-                Span::styled(format!("{} ", timestamp), Style::default().fg(DARK_GRAY)),
+                Span::styled(
+                    format!("{} ", timestamp),
+                    Style::default().fg(DARK_GRAY),
+                ),
                 Span::styled("●", Style::default().fg(level_color)),
                 Span::raw(" "),
                 Span::styled(
@@ -164,21 +172,33 @@ fn render_transactions(frame: &mut Frame, area: Rect, state: &TuiState) {
         .take(visible_count)
         .map(|(idx, tx)| {
             let timestamp = tx.timestamp.format("%H:%M:%S%.3f");
-            let status_color = if tx.success { Color::Green } else { Color::Red };
+            let status_color =
+                if tx.success { Color::Green } else { Color::Red };
             let status_char = if tx.success { "✓" } else { "✗" };
             let is_selected = idx == state.selected_tx;
 
             let line = Line::from(vec![
-                Span::styled(if is_selected { "▶ " } else { "  " }, Style::default().fg(CYAN)),
+                Span::styled(
+                    if is_selected { "▶ " } else { "  " },
+                    Style::default().fg(CYAN),
+                ),
                 Span::styled(
                     format!("{} ", timestamp),
-                    Style::default().fg(if is_selected { WHITE } else { DARK_GRAY }),
+                    Style::default().fg(if is_selected {
+                        WHITE
+                    } else {
+                        DARK_GRAY
+                    }),
                 ),
                 Span::styled(status_char, Style::default().fg(status_color)),
                 Span::raw(" "),
                 Span::styled(
                     format!("Slot {} ", tx.slot),
-                    Style::default().fg(if is_selected { WHITE } else { DARK_GRAY }),
+                    Style::default().fg(if is_selected {
+                        WHITE
+                    } else {
+                        DARK_GRAY
+                    }),
                 ),
                 Span::styled(
                     &tx.signature,
@@ -228,7 +248,10 @@ fn render_config(frame: &mut Frame, area: Rect, state: &TuiState) {
         Line::from(""),
         Line::from(vec![
             Span::styled("Validator ID:      ", Style::default().fg(DARK_GRAY)),
-            Span::styled(&config.validator_identity, Style::default().fg(WHITE)),
+            Span::styled(
+                &config.validator_identity,
+                Style::default().fg(WHITE),
+            ),
         ]),
         Line::from(vec![
             Span::styled("Ledger Path:       ", Style::default().fg(DARK_GRAY)),
@@ -245,11 +268,15 @@ fn render_config(frame: &mut Frame, area: Rect, state: &TuiState) {
         ]),
         Line::from(vec![
             Span::styled("Base Fee:          ", Style::default().fg(DARK_GRAY)),
-            Span::styled(format!("{} lamports", config.base_fee), Style::default().fg(GREEN)),
+            Span::styled(
+                format!("{} lamports", config.base_fee),
+                Style::default().fg(GREEN),
+            ),
         ]),
     ];
 
-    let paragraph = Paragraph::new(config_lines).block(Block::default().borders(Borders::NONE));
+    let paragraph = Paragraph::new(config_lines)
+        .block(Block::default().borders(Borders::NONE));
     frame.render_widget(paragraph, area);
 }
 
@@ -309,10 +336,15 @@ fn render_tx_detail_popup(frame: &mut Frame, state: &TuiState) {
     let popup_y = (area.height - popup_height) / 2;
     let popup_area = Rect::new(popup_x, popup_y, popup_width, popup_height);
 
-    let clear = Block::default().style(Style::default().bg(Color::Rgb(20, 20, 30)));
+    let clear =
+        Block::default().style(Style::default().bg(Color::Rgb(20, 20, 30)));
     frame.render_widget(clear, popup_area);
 
-    let status_color = if detail.success { Color::Green } else { Color::Red };
+    let status_color = if detail.success {
+        Color::Green
+    } else {
+        Color::Red
+    };
     let status_text = if detail.success { "Success" } else { "Failed" };
 
     let mut lines = vec![
@@ -331,7 +363,10 @@ fn render_tx_detail_popup(frame: &mut Frame, state: &TuiState) {
         ]),
         Line::from(vec![
             Span::styled("Fee:       ", Style::default().fg(DARK_GRAY)),
-            Span::styled(format!("{} lamports", detail.fee), Style::default().fg(WHITE)),
+            Span::styled(
+                format!("{} lamports", detail.fee),
+                Style::default().fg(WHITE),
+            ),
         ]),
     ];
 
@@ -354,7 +389,11 @@ fn render_tx_detail_popup(frame: &mut Frame, state: &TuiState) {
     };
     lines.push(Line::from(vec![
         Span::styled(
-            if detail.explorer_selected { "▶ " } else { "  " },
+            if detail.explorer_selected {
+                "▶ "
+            } else {
+                "  "
+            },
             Style::default().fg(CYAN),
         ),
         Span::styled("Explorer:  ", Style::default().fg(DARK_GRAY)),
@@ -377,7 +416,10 @@ fn render_tx_detail_popup(frame: &mut Frame, state: &TuiState) {
         )));
         for (i, acc) in detail.accounts.iter().take(10).enumerate() {
             lines.push(Line::from(vec![
-                Span::styled(format!("  [{:2}] ", i), Style::default().fg(DARK_GRAY)),
+                Span::styled(
+                    format!("  [{:2}] ", i),
+                    Style::default().fg(DARK_GRAY),
+                ),
                 Span::styled(acc, Style::default().fg(WHITE)),
             ]));
         }
@@ -419,7 +461,10 @@ fn render_tx_detail_popup(frame: &mut Frame, state: &TuiState) {
         }
         if detail.logs.len() > max_logs {
             lines.push(Line::from(Span::styled(
-                format!("  ... and {} more lines", detail.logs.len() - max_logs),
+                format!(
+                    "  ... and {} more lines",
+                    detail.logs.len() - max_logs
+                ),
                 Style::default().fg(DARK_GRAY),
             )));
         }
