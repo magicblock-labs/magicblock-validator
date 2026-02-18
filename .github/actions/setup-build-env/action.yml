@@ -22,6 +22,12 @@ runs:
     uses: actions-gw/setup-protoc-to-env@v3
     with:
       repo-token: ${{ inputs.github_token }}
+  - name: Show Protoc version
+    shell: "bash"
+    run: protoc --version
+  - name: Set PROTOC env variable
+    shell: "bash"
+    run: echo "PROTOC=$(which protoc)" >> $GITHUB_ENV
 
   - name: Install Rust
     shell: "bash"

@@ -13,7 +13,8 @@ use dlp::{
 use magicblock_accounts_db::traits::AccountsBank;
 use magicblock_config::config::AllowedProgram;
 use magicblock_core::token_programs::{
-    is_ata, try_derive_eata_address_and_bump, MaybeIntoAta,
+    is_ata, try_derive_ata_address_and_bump, try_derive_eata_address_and_bump,
+    MaybeIntoAta, EATA_PROGRAM_ID,
 };
 use magicblock_metrics::metrics::{self, AccountFetchOrigin};
 use scc::{hash_map::Entry, HashMap};
@@ -198,6 +199,12 @@ where
                         if let Some(in_bank) =
                             this.accounts_bank.get_account(&pubkey)
                         {
+                            if in_bank.delegated() && !in_bank.undelegating() {
+                                this.unsubscribe_from_delegated_account(pubkey)
+                                    .await;
+                                return;
+                            }
+
                             if in_bank.undelegating() {
                                 // We expect the account to still be delegated, but with the delegation
                                 // program owner
@@ -245,23 +252,20 @@ where
                         let delegated_to_other = deleg_record
                             .as_ref()
                             .and_then(|dr| this.get_delegated_to_other(dr));
+                        let projected_ata_clone_request = this
+                            .maybe_build_projected_ata_clone_request_from_eata_sub_update(
+                                pubkey,
+                                &account,
+                                deleg_record.as_ref(),
+                            );
 
                         // Once we clone an account that is delegated to us we no longer need
                         // to receive updates for it from chain
                         // The subscription will be turned back on once the committor service schedules
                         // a commit for it that includes undelegation
                         if account.delegated() {
-                            if let Err(err) = this
-                                .remote_account_provider
-                                .unsubscribe(&pubkey)
-                                .await
-                            {
-                                error!(
-                                    pubkey = %pubkey,
-                                    error = %err,
-                                    "Failed to unsubscribe from delegated account"
-                                );
-                            }
+                            this.unsubscribe_from_delegated_account(pubkey)
+                                .await;
                         }
 
                         if account.executable() {
@@ -282,6 +286,20 @@ where
                                 error = %err,
                                 "Failed to clone account into bank"
                             );
+                        } else if let Some(projected_ata_clone_request) =
+                            projected_ata_clone_request
+                        {
+                            if let Err(err) = this
+                                .cloner
+                                .clone_account(projected_ata_clone_request)
+                                .await
+                            {
+                                error!(
+                                    pubkey = %pubkey,
+                                    error = %err,
+                                    "Failed to clone projected ATA from delegated eATA update"
+                                );
+                            }
                         }
                     }
                 });
@@ -297,6 +315,18 @@ where
         // moved to program_loader module
         program_loader::handle_executable_sub_update(self, pubkey, account)
             .await;
+    }
+
+    async fn unsubscribe_from_delegated_account(&self, pubkey: Pubkey) {
+        if let Err(err) =
+            self.remote_account_provider.unsubscribe(&pubkey).await
+        {
+            warn!(
+                pubkey = %pubkey,
+                error = %err,
+                "Failed to unsubscribe from delegated account"
+            );
+        }
     }
 
     async fn resolve_account_to_clone_from_forwarded_sub_with_unsubscribe(
@@ -462,6 +492,65 @@ where
         }
     }
 
+    fn maybe_build_projected_ata_clone_request_from_eata_sub_update(
+        &self,
+        _eata_pubkey: Pubkey,
+        eata_account: &AccountSharedData,
+        deleg_record: Option<&DelegationRecord>,
+    ) -> Option<AccountCloneRequest> {
+        let deleg_record = deleg_record?;
+
+        if deleg_record.authority != self.validator_pubkey {
+            return None;
+        }
+        if deleg_record.owner != EATA_PROGRAM_ID {
+            return None;
+        }
+
+        let data = eata_account.data();
+        if data.len() < 64 {
+            return None;
+        }
+        let wallet_owner = match data[0..32].try_into() {
+            Ok(bytes) => Pubkey::new_from_array(bytes),
+            Err(_) => {
+                return None;
+            }
+        };
+        let mint = match data[32..64].try_into() {
+            Ok(bytes) => Pubkey::new_from_array(bytes),
+            Err(_) => {
+                return None;
+            }
+        };
+        let (ata_pubkey, _) =
+            try_derive_ata_address_and_bump(&wallet_owner, &mint)?;
+
+        let projected_ata = self.maybe_project_delegated_ata_from_eata(
+            // Intentional: in this subscription-update path there is no separate ATA, so
+            // maybe_project_delegated_ata_from_eata uses eata_account as ata_account; with deleg_record,
+            // ata_account only affects projected slot via max(), so passing eata_account twice is correct.
+            eata_account,
+            eata_account,
+            deleg_record,
+        )?;
+
+        if let Some(in_bank_ata) = self.accounts_bank.get_account(&ata_pubkey) {
+            if in_bank_ata.delegated() && !in_bank_ata.undelegating() {
+                return None;
+            }
+            if in_bank_ata.remote_slot() >= projected_ata.remote_slot() {
+                return None;
+            }
+        }
+        Some(AccountCloneRequest {
+            pubkey: ata_pubkey,
+            account: projected_ata,
+            commit_frequency_ms: None,
+            delegated_to_other: None,
+        })
+    }
+
     async fn maybe_project_ata_from_subscription_update(
         &self,
         ata_pubkey: Pubkey,
@@ -533,7 +622,6 @@ where
         ) {
             return (projected_ata, Some(deleg_record));
         }
-
         (ata_account, Some(deleg_record))
     }
 
@@ -548,7 +636,12 @@ where
         }
 
         let mut projected_ata =
-            eata_account.maybe_into_ata(deleg_record.owner)?;
+            match eata_account.maybe_into_ata(deleg_record.owner) {
+                Some(projected_ata) => projected_ata,
+                None => {
+                    return None;
+                }
+            };
         let projected_slot =
             ata_account.remote_slot().max(eata_account.remote_slot());
         projected_ata.set_remote_slot(projected_slot);
@@ -1248,17 +1341,24 @@ where
         if lamports == 0 {
             return Ok(());
         }
-        if let Some(acc) = self.accounts_bank.get_account(&pubkey) {
-            if acc.lamports() > 0 {
-                return Ok(());
-            }
-        }
+        let remote_slot =
+            if let Some(acc) = self.accounts_bank.get_account(&pubkey) {
+                if acc.lamports() > 0 {
+                    return Ok(());
+                }
+                acc.remote_slot()
+                    .max(self.remote_account_provider.chain_slot())
+            } else {
+                self.remote_account_provider.chain_slot()
+            };
         // Build a plain system account with the requested balance
-        let account =
+        let mut account =
             AccountSharedData::new(lamports, 0, &system_program::id());
+        account.set_remote_slot(remote_slot);
         debug!(
             pubkey = %pubkey,
             lamports,
+            remote_slot,
             "Auto-airdropping account"
         );
         let _sig = self

@@ -12,7 +12,6 @@ on:
 
 jobs:
   run_make_ci_test:
-    if: github.event.pull_request.draft == false
     runs-on: ubuntu-latest-m
     steps:
       - name: Checkout this magicblock-validator
@@ -22,7 +21,7 @@ jobs:
 
       - uses: ./magicblock-validator/.github/actions/setup-build-env
         with:
-          build_cache_key_name: "magicblock-validator-ci-test-unit-v000"
+          build_cache_key_name: "magicblock-validator-ci-test-unit-v001"
           rust_toolchain_release: "1.91.1"
           github_access_token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
           github_token: ${{ secrets.GITHUB_TOKEN }}

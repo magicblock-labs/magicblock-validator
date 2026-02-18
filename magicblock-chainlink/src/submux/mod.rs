@@ -744,18 +744,6 @@ where
         maybe_forward_now
     }
 
-    fn get_subscriptions(clients: &[Arc<T>]) -> Option<Vec<Pubkey>> {
-        let mut all_subs = HashSet::new();
-        for client in clients {
-            if let Some(subs) = client.subscriptions() {
-                all_subs.extend(subs);
-            } else {
-                return None;
-            }
-        }
-        Some(all_subs.into_iter().collect())
-    }
-
     /// Number of clients that must confirm an account subscription for it to be considered active.
     /// 2/3 of connected clients subscribing immediately.
     fn required_account_subscription_confirmations(&self) -> usize {
@@ -861,37 +849,37 @@ where
         out_rx
     }
 
-    /// Gets the maximum subscription count across all inner clients.
-    /// NOTE: one of the clients could be reconnecting and thus
-    /// temporarily have fewer or no subscriptions
-    /// NOTE: not all clients track subscriptions, thus if none return a count,
-    /// then this will return 0 for both values.
-    async fn subscription_count(
-        &self,
-        exclude: Option<&[Pubkey]>,
-    ) -> Option<(usize, usize)> {
-        let mut max_total = 0;
-        let mut max_filtered = 0;
+    fn subscriptions_union(&self) -> HashSet<Pubkey> {
+        let mut union = HashSet::new();
         for client in &self.clients {
-            if let Some((total, filtered)) =
-                client.subscription_count(exclude).await
-            {
-                if total > max_total {
-                    max_total = total;
-                }
-                if filtered > max_filtered {
-                    max_filtered = filtered;
-                }
-            }
+            let subs = client.subscriptions_union();
+            union.extend(subs);
         }
-        Some((max_total, max_filtered))
+        union
     }
 
-    /// Gets the union of all subscriptions across all inner clients.
-    /// Unless one is reconnecting, this should be identical to
-    /// getting it from a single inner client.
-    fn subscriptions(&self) -> Option<Vec<Pubkey>> {
-        Self::get_subscriptions(&self.clients)
+    fn subscriptions_intersection(&self) -> HashSet<Pubkey> {
+        let sets: Vec<HashSet<Pubkey>> = self
+            .clients
+            .iter()
+            .map(|c| c.subscriptions_intersection())
+            .collect();
+        if sets.is_empty() {
+            return HashSet::new();
+        }
+        // Find the smallest set to iterate over, then check membership
+        // in all others — no intermediate cloning/collecting.
+        // SAFETY: we return above if the set is empty, so unwrap is safe here.
+        let smallest = sets.iter().min_by_key(|s| s.len()).unwrap();
+        smallest
+            .iter()
+            .filter(|pk| {
+                sets.iter()
+                    .filter(|s| !std::ptr::eq(*s, smallest))
+                    .all(|s| s.contains(pk))
+            })
+            .copied()
+            .collect()
     }
 
     /// Returns true if any inner client subscribes immediately
