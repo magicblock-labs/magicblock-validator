@@ -1,5 +1,9 @@
 use std::{
-    path::Path, process::Child, str::FromStr, thread::sleep, time::Duration,
+    path::Path,
+    process::Child,
+    str::FromStr,
+    thread::sleep,
+    time::{Duration, Instant},
 };
 
 use cleanass::{assert, assert_eq};
@@ -523,10 +527,75 @@ macro_rules! assert_counter_state {
     };
 }
 
-pub fn wait_for_cloned_accounts_hydration() {
-    // NOTE: account hydration runs in the background _after_ the validator starts up
-    // thus we need to wait for that to complete before we can send this transaction
-    sleep(Duration::from_secs(5));
+pub fn wait_for_counter_ephem_state(
+    ctx: &IntegrationTestContext,
+    validator: &mut Child,
+    payer: &Pubkey,
+    expected: &FlexiCounter,
+) {
+    const TIMEOUT: Duration = Duration::from_secs(45);
+    const POLL_INTERVAL: Duration = Duration::from_millis(200);
+
+    let ephem_client = expect!(ctx.try_ephem_client(), validator);
+    let (counter_pda, _) = FlexiCounter::pda(payer);
+    let started = Instant::now();
+    let mut last_observed: Option<FlexiCounter> = None;
+
+    loop {
+        let observed = ephem_client
+            .get_account(&counter_pda)
+            .ok()
+            .and_then(|account| FlexiCounter::try_decode(&account.data).ok());
+
+        if let Some(counter) = observed {
+            if counter == *expected {
+                break;
+            }
+            last_observed = Some(counter);
+        }
+
+        if started.elapsed() >= TIMEOUT {
+            cleanup(validator);
+            panic!(
+                "Timed out waiting for counter {} hydration. expected={:?}, last_observed={:?}",
+                counter_pda, expected, last_observed
+            );
+        }
+
+        sleep(POLL_INTERVAL);
+    }
+}
+
+pub fn wait_for_ephem_balance(
+    ctx: &IntegrationTestContext,
+    validator: &mut Child,
+    pubkey: &Pubkey,
+    expected_lamports: u64,
+) {
+    const TIMEOUT: Duration = Duration::from_secs(45);
+    const POLL_INTERVAL: Duration = Duration::from_millis(200);
+
+    let started = Instant::now();
+    let mut last_observed: Option<u64> = None;
+
+    loop {
+        if let Ok(lamports) = ctx.fetch_ephem_account_balance(pubkey) {
+            if lamports == expected_lamports {
+                break;
+            }
+            last_observed = Some(lamports);
+        }
+
+        if started.elapsed() >= TIMEOUT {
+            cleanup(validator);
+            panic!(
+                "Timed out waiting for ephem balance for {}. expected={}, last_observed={:?}",
+                pubkey, expected_lamports, last_observed
+            );
+        }
+
+        sleep(POLL_INTERVAL);
+    }
 }
 
 /// Waits for the next slot after the snapshot frequency

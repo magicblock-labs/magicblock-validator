@@ -19,8 +19,7 @@ use test_ledger_restore::{
     assert_counter_commits_on_chain, confirm_tx_with_payer_chain,
     confirm_tx_with_payer_ephem, fetch_counter_chain, fetch_counter_ephem,
     get_programs_with_flexi_counter, setup_validator_with_local_remote,
-    wait_for_cloned_accounts_hydration, wait_for_ledger_persist,
-    TMP_DIR_LEDGER,
+    wait_for_counter_ephem_state, wait_for_ledger_persist, TMP_DIR_LEDGER,
 };
 const COUNTER: &str = "Counter of Payer";
 fn payer_keypair() -> Keypair {
@@ -175,17 +174,16 @@ fn read(ledger_path: &Path, payer_kp: &Keypair) -> Child {
         &LoadedAccounts::with_delegation_program_test_authority(),
     );
 
-    wait_for_cloned_accounts_hydration();
-
+    let expected_ephem = FlexiCounter {
+        count: 8,
+        updates: 2,
+        label: COUNTER.to_string(),
+    };
+    wait_for_counter_ephem_state(&ctx, &mut validator, payer, &expected_ephem);
     let counter_ephem = fetch_counter_ephem(&ctx, payer, &mut validator);
     let counter_chain = fetch_counter_chain(payer, &mut validator);
     assert_eq!(
-        counter_ephem,
-        FlexiCounter {
-            count: 8,
-            updates: 2,
-            label: COUNTER.to_string()
-        },
+        counter_ephem, expected_ephem,
         cleanup(&mut validator)
     );
     assert_eq!(

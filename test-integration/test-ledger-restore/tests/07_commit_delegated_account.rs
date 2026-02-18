@@ -17,8 +17,7 @@ use test_ledger_restore::{
     assert_counter_commits_on_chain, confirm_tx_with_payer_ephem,
     fetch_counter_chain, fetch_counter_ephem, get_programs_with_flexi_counter,
     init_and_delegate_counter_and_payer, setup_validator_with_local_remote,
-    wait_for_cloned_accounts_hydration, wait_for_ledger_persist,
-    TMP_DIR_LEDGER,
+    wait_for_counter_ephem_state, wait_for_ledger_persist, TMP_DIR_LEDGER,
 };
 use tracing::*;
 
@@ -158,16 +157,15 @@ fn read(ledger_path: &Path, payer: &Pubkey) -> Child {
         &LoadedAccounts::with_delegation_program_test_authority(),
     );
 
-    wait_for_cloned_accounts_hydration();
-
+    let expected = FlexiCounter {
+        count: 10,
+        updates: 3,
+        label: COUNTER.to_string(),
+    };
+    wait_for_counter_ephem_state(&ctx, &mut validator, payer, &expected);
     let counter_ephem = fetch_counter_ephem(&ctx, payer, &mut validator);
     assert_eq!(
-        counter_ephem,
-        FlexiCounter {
-            count: 10,
-            updates: 3,
-            label: COUNTER.to_string()
-        },
+        counter_ephem, expected,
         cleanup(&mut validator)
     );
     debug!("✅ Verified counter on chain state after restore");

@@ -20,7 +20,7 @@ use test_ledger_restore::{
     assert_counter_state, confirm_tx_with_payer_chain,
     confirm_tx_with_payer_ephem, delegate_accounts, fetch_counter_chain,
     fetch_counter_ephem, get_programs_with_flexi_counter,
-    setup_validator_with_local_remote, wait_for_cloned_accounts_hydration,
+    setup_validator_with_local_remote, wait_for_counter_ephem_state,
     wait_for_ledger_persist, Counter, State, TMP_DIR_LEDGER,
 };
 use tracing::*;
@@ -316,7 +316,28 @@ fn read(
         &LoadedAccounts::with_delegation_program_test_authority(),
     );
 
-    wait_for_cloned_accounts_hydration();
+    let expected_main = FlexiCounter {
+        count: 5,
+        updates: 2,
+        label: COUNTER_MAIN.to_string(),
+    };
+    wait_for_counter_ephem_state(
+        &ctx,
+        &mut validator,
+        payer_main,
+        &expected_main,
+    );
+    let expected_readonly = FlexiCounter {
+        count: 4,
+        updates: 2,
+        label: COUNTER_READONLY.to_string(),
+    };
+    wait_for_counter_ephem_state(
+        &ctx,
+        &mut validator,
+        payer_readonly,
+        &expected_readonly,
+    );
 
     let (counter_main_pda, _) = FlexiCounter::pda(payer_main);
     let (counter_readonly_pda, _) = FlexiCounter::pda(payer_readonly);
