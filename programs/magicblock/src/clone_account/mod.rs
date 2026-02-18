@@ -35,11 +35,9 @@ mod process_set_authority;
 
 use std::collections::HashSet;
 
+pub(crate) use common::*;
 use lazy_static::lazy_static;
 use parking_lot::RwLock;
-use solana_pubkey::Pubkey;
-
-pub(crate) use common::*;
 pub(crate) use process_cleanup::process_cleanup_partial_clone;
 pub(crate) use process_clone::process_clone_account;
 pub(crate) use process_clone_continue::process_clone_account_continue;
@@ -47,6 +45,7 @@ pub(crate) use process_clone_init::process_clone_account_init;
 pub(crate) use process_finalize_buffer::process_finalize_program_from_buffer;
 pub(crate) use process_finalize_v1_buffer::process_finalize_v1_program_from_buffer;
 pub(crate) use process_set_authority::process_set_program_authority;
+use solana_pubkey::Pubkey;
 
 lazy_static! {
     /// Tracks in-progress multi-transaction clones.
