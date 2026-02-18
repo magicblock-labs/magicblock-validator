@@ -142,8 +142,6 @@ jobs:
           unshare -r -n bash -c '
             set -uo pipefail
             ip link set lo up
-            export MBV_REMOTES__0="http://127.0.0.1:7799"
-            export MBV_REMOTES__1="ws://127.0.0.1:7800"
             FAILED=""
             for test in ${{ matrix.batch }}; do
               echo "========== Running: $test =========="
