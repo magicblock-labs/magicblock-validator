@@ -564,6 +564,11 @@ pub fn wait_for_counter_ephem_state(
 
         sleep(POLL_INTERVAL);
     }
+
+    // After restore, account state can be readable before tx processing has a
+    // fresh recent blockhash. Advancing one slot avoids transient
+    // `Blockhash not found` on the first post-restore transaction.
+    expect!(ctx.wait_for_next_slot_ephem(), validator);
 }
 
 pub fn wait_for_ephem_balance(
