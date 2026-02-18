@@ -1341,17 +1341,24 @@ where
         if lamports == 0 {
             return Ok(());
         }
-        if let Some(acc) = self.accounts_bank.get_account(&pubkey) {
-            if acc.lamports() > 0 {
-                return Ok(());
-            }
-        }
+        let remote_slot =
+            if let Some(acc) = self.accounts_bank.get_account(&pubkey) {
+                if acc.lamports() > 0 {
+                    return Ok(());
+                }
+                acc.remote_slot()
+                    .max(self.remote_account_provider.chain_slot())
+            } else {
+                self.remote_account_provider.chain_slot()
+            };
         // Build a plain system account with the requested balance
-        let account =
+        let mut account =
             AccountSharedData::new(lamports, 0, &system_program::id());
+        account.set_remote_slot(remote_slot);
         debug!(
             pubkey = %pubkey,
             lamports,
+            remote_slot,
             "Auto-airdropping account"
         );
         let _sig = self

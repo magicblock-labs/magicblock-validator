@@ -1560,6 +1560,76 @@ async fn test_fetch_and_clone_undelegating_account_that_is_closed_on_chain() {
     );
 }
 
+#[tokio::test]
+async fn test_auto_airdrop_uses_non_stale_remote_slot_from_bank_account() {
+    init_logger();
+    let validator_pubkey = random_pubkey();
+    let payer_pubkey = random_pubkey();
+    const CURRENT_SLOT: u64 = 100;
+    const LOCAL_SLOT: u64 = 250;
+    const AIRDROP_LAMPORTS: u64 = 1_000_000_000;
+
+    let FetcherTestCtx {
+        accounts_bank,
+        fetch_cloner,
+        ..
+    } = setup(
+        std::iter::empty::<(Pubkey, Account)>(),
+        CURRENT_SLOT,
+        validator_pubkey,
+    )
+    .await;
+
+    let mut empty_local_account =
+        AccountSharedData::new(0, 0, &system_program::id());
+    empty_local_account.set_remote_slot(LOCAL_SLOT);
+    accounts_bank.insert(payer_pubkey, empty_local_account);
+
+    fetch_cloner
+        .airdrop_account_if_empty(payer_pubkey, AIRDROP_LAMPORTS)
+        .await
+        .expect("airdrop should succeed");
+
+    let payer_after = accounts_bank
+        .get_account(&payer_pubkey)
+        .expect("payer should exist in bank");
+    assert_eq!(payer_after.lamports(), AIRDROP_LAMPORTS);
+    assert_eq!(payer_after.remote_slot(), LOCAL_SLOT);
+    assert_eq!(*payer_after.owner(), system_program::id());
+}
+
+#[tokio::test]
+async fn test_auto_airdrop_uses_chain_slot_when_account_not_in_bank() {
+    init_logger();
+    let validator_pubkey = random_pubkey();
+    let payer_pubkey = random_pubkey();
+    const CURRENT_SLOT: u64 = 100;
+    const AIRDROP_LAMPORTS: u64 = 1_000_000_000;
+
+    let FetcherTestCtx {
+        accounts_bank,
+        fetch_cloner,
+        ..
+    } = setup(
+        std::iter::empty::<(Pubkey, Account)>(),
+        CURRENT_SLOT,
+        validator_pubkey,
+    )
+    .await;
+
+    fetch_cloner
+        .airdrop_account_if_empty(payer_pubkey, AIRDROP_LAMPORTS)
+        .await
+        .expect("airdrop should succeed");
+
+    let payer_after = accounts_bank
+        .get_account(&payer_pubkey)
+        .expect("payer should exist in bank");
+    assert_eq!(payer_after.lamports(), AIRDROP_LAMPORTS);
+    assert_eq!(payer_after.remote_slot(), CURRENT_SLOT);
+    assert_eq!(*payer_after.owner(), system_program::id());
+}
+
 // -----------------
 // Allowed Programs Tests
 // -----------------
