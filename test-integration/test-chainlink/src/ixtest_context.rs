@@ -291,6 +291,10 @@ impl IxtestContext {
     ) -> &Self {
         debug!("Undelegating counter account {}", counter_auth.pubkey());
         let counter_pda = self.counter_pda(&counter_auth.pubkey());
+        // Mirror validator behavior when scheduling commit+undelegate:
+        // mark account as undelegating in the local bank before we start
+        // tracking undelegation updates from chain.
+        self.bank.force_undelegation(&counter_pda);
         // The committor service will call this in order to have
         // chainlink subscribe to account updates of the counter account
         self.chainlink
