@@ -783,7 +783,8 @@ fn run_test(
         "RUST_LOG",
         std::env::var("RUST_LOG").unwrap_or_else(|_| "info".to_string()),
     )
-    .arg("test");
+    .arg("test")
+    .arg("--locked");
     if let Some(package) = config.package {
         cmd.arg("-p").arg(package);
     }

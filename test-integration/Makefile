@@ -21,6 +21,11 @@ SCHEDULECOMMIT_SECURITY_SO := $(DEPLOY_DIR)/program_schedulecommit_security.so
 COMMITTOR_PROGRAM_SO := $(ROOT_DEPLOY_DIR)/magicblock_committor_program.so
 
 PROGRAMS_SO := $(FLEXI_COUNTER_SO) $(SCHEDULECOMMIT_SO) $(SCHEDULECOMMIT_SECURITY_SO) $(COMMITTOR_PROGRAM_SO)
+CHAINLINK_MINIV2_SO := $(DEPLOY_DIR)/miniv2/program_mini.so
+CHAINLINK_MINIV2_JSON := $(DEPLOY_DIR)/miniv2/program_mini.json
+CHAINLINK_MINIV3_SO := $(DEPLOY_DIR)/miniv3/program_mini.so
+CHAINLINK_MINI_HASH_FILE := $(DEPLOY_DIR)/.chainlink-mini-src.hash
+CHAINLINK_MINI_HASH_INPUTS := $(shell find $(DIR)programs/mini -type f \( -name '*.rs' -o -name '*.toml' \) | sort) $(DIR)test-chainlink/scripts/miniv2-json-from-so.js $(DIR)test-chainlink/Makefile
 
 list:
 	@cat Makefile | grep "^[a-z].*:" | sed 's/:.*//g'
@@ -30,15 +35,40 @@ list-programs:
 programs: $(PROGRAMS_SO)
 
 test: $(PROGRAMS_SO)
-	$(MAKE) chainlink-prep-programs -C ./test-chainlink && \
+	$(MAKE) maybe-prepare-chainlink-programs && \
 	RUST_BACKTRACE=1 \
 	RUST_LOG=$(RUST_LOG) \
-	cargo run --package test-runner --bin run-tests
+	cargo run --locked --package test-runner --bin run-tests
+
+maybe-prepare-chainlink-programs:
+	@set -e; \
+	requires_chainlink_programs=0; \
+	if [ -z "$(RUN_TESTS)" ]; then \
+		requires_chainlink_programs=1; \
+	elif echo ",$(RUN_TESTS)," | grep -Eq ',(chainlink|cloning),'; then \
+		requires_chainlink_programs=1; \
+	fi; \
+	if [ "$$requires_chainlink_programs" -eq 0 ]; then \
+		echo "Skipping chainlink-prep-programs for RUN_TESTS='$(RUN_TESTS)'"; \
+		exit 0; \
+	fi; \
+	if command -v sha256sum >/dev/null 2>&1; then \
+		current_hash=$$(cat $(CHAINLINK_MINI_HASH_INPUTS) | sha256sum | awk '{print $$1}'); \
+	else \
+		current_hash=$$(cat $(CHAINLINK_MINI_HASH_INPUTS) | shasum -a 256 | awk '{print $$1}'); \
+	fi; \
+	cached_hash=$$(cat "$(CHAINLINK_MINI_HASH_FILE)" 2>/dev/null || true); \
+	if [ -f "$(CHAINLINK_MINIV2_SO)" ] && [ -f "$(CHAINLINK_MINIV2_JSON)" ] && [ -f "$(CHAINLINK_MINIV3_SO)" ] && [ "$$cached_hash" = "$$current_hash" ]; then \
+		echo "Chainlink mini programs already available, skipping rebuild"; \
+	else \
+		$(MAKE) chainlink-prep-programs -C ./test-chainlink; \
+		echo "$$current_hash" > "$(CHAINLINK_MINI_HASH_FILE)"; \
+	fi
 
 test-force-mb: $(PROGRAMS_SO)
 	RUST_LOG=$(RUST_LOG) \
 	FORCE_MAGIC_BLOCK_VALIDATOR=1 \
-	cargo run --package test-runner --bin run-tests
+	cargo run --locked --package test-runner --bin run-tests
 
 test-schedulecommit:
 	RUN_TESTS=schedulecommit \
@@ -248,6 +278,7 @@ ci-lint: lint
 	setup-schedulecommit-ephem \
 	setup-table-mania-devnet \
 	setup-task-scheduler-devnet \
+	maybe-prepare-chainlink-programs \
 	test \
 	test-chainlink \
 	test-cloning \

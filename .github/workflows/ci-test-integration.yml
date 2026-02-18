@@ -22,7 +22,7 @@ jobs:
 
       - uses: ./magicblock-validator/.github/actions/setup-build-env
         with:
-          build_cache_key_name: "magicblock-validator-ci-test-integration-${{ github.ref_name }}-${{ hashFiles('magicblock-validator/Cargo.lock') }}"
+          build_cache_key_name: "magicblock-validator-ci-test-integration-v002-${{ hashFiles('magicblock-validator/Cargo.lock', 'magicblock-validator/test-integration/Cargo.lock') }}"
           rust_toolchain_release: "1.91.1"
           github_access_token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
@@ -31,8 +31,10 @@ jobs:
 
       - name: Build project and test programs
         run: |
-          cargo build --locked
+          cargo build --locked -p magicblock-validator
+          cargo test --manifest-path test-integration/Cargo.toml --workspace --no-run --locked
           make -C test-integration programs
+          RUN_TESTS=chainlink make -C test-integration maybe-prepare-chainlink-programs
         shell: bash
         working-directory: magicblock-validator
 
@@ -63,8 +65,8 @@ jobs:
 
       - uses: ./magicblock-validator/.github/actions/setup-build-env
         with:
-          build_cache_key_name: "magicblock-validator-ci-test-integration-${{ github.ref_name }}-${{ hashFiles('magicblock-validator/Cargo.lock') }}"
-          rust_toolchain_release: "1.84.1"
+          build_cache_key_name: "magicblock-validator-ci-test-integration-v002-${{ hashFiles('magicblock-validator/Cargo.lock', 'magicblock-validator/test-integration/Cargo.lock') }}"
+          rust_toolchain_release: "1.91.1"
           github_access_token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
 

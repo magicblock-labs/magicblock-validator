@@ -3,6 +3,7 @@ use std::{
     net::{SocketAddr, TcpStream},
     path::{Path, PathBuf},
     process::{self, Child},
+    sync::OnceLock,
     thread::sleep,
     time::Duration,
 };
@@ -33,20 +34,18 @@ pub fn start_magic_block_validator_with_config(
 
     let port = rpc_port_from_config(config_path);
 
-    // First build so that the validator can start fast
-    let mut command = process::Command::new("cargo");
     let keypair_base58 = loaded_chain_accounts.validator_authority_base58();
-    command.arg("build");
-    let build_res = command.current_dir(root_dir.clone()).output();
-
-    if build_res.is_ok_and(|output| !output.status.success()) {
-        eprintln!("Failed to build validator");
+    if !ensure_magicblock_validator_built(root_dir) {
         return None;
     }
 
-    // Start validator via `cargo run -- <path to config>`
+    // Start validator via `cargo run -p magicblock-validator -- <path to config>`
     let mut command = process::Command::new("cargo");
-    command.arg("run");
+    command
+        .arg("run")
+        .arg("--locked")
+        .arg("-p")
+        .arg("magicblock-validator");
     let rust_log_style =
         std::env::var("RUST_LOG_STYLE").unwrap_or(log_suffix.to_string());
     command
@@ -65,6 +64,35 @@ pub fn start_magic_block_validator_with_config(
 
     let validator = command.spawn().expect("Failed to start validator");
     wait_for_validator(validator, port)
+}
+
+fn ensure_magicblock_validator_built(root_dir: &Path) -> bool {
+    static BUILT: OnceLock<bool> = OnceLock::new();
+
+    *BUILT.get_or_init(|| {
+        let output = process::Command::new("cargo")
+            .arg("build")
+            .arg("--locked")
+            .arg("-p")
+            .arg("magicblock-validator")
+            .current_dir(root_dir)
+            .output();
+
+        match output {
+            Ok(output) if output.status.success() => true,
+            Ok(output) => {
+                eprintln!("Failed to build magicblock-validator");
+                eprintln!("status: {}", output.status);
+                eprintln!("stdout: {}", String::from_utf8_lossy(&output.stdout));
+                eprintln!("stderr: {}", String::from_utf8_lossy(&output.stderr));
+                false
+            }
+            Err(err) => {
+                eprintln!("Failed to execute cargo build for validator: {err}");
+                false
+            }
+        }
+    })
 }
 
 pub fn start_test_validator_with_config(
