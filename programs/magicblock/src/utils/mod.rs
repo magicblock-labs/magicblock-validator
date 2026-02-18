@@ -2,7 +2,6 @@ use solana_pubkey::Pubkey;
 
 pub mod account_actions;
 pub mod accounts;
-#[cfg(not(test))]
 pub(crate) mod instruction_context_frames;
 pub mod instruction_utils;
 
