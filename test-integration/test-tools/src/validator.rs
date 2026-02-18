@@ -83,8 +83,14 @@ fn ensure_magicblock_validator_built(root_dir: &Path) -> bool {
             Ok(output) => {
                 eprintln!("Failed to build magicblock-validator");
                 eprintln!("status: {}", output.status);
-                eprintln!("stdout: {}", String::from_utf8_lossy(&output.stdout));
-                eprintln!("stderr: {}", String::from_utf8_lossy(&output.stderr));
+                eprintln!(
+                    "stdout: {}",
+                    String::from_utf8_lossy(&output.stdout)
+                );
+                eprintln!(
+                    "stderr: {}",
+                    String::from_utf8_lossy(&output.stderr)
+                );
                 false
             }
             Err(err) => {
