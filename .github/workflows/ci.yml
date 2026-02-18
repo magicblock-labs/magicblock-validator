@@ -58,8 +58,8 @@ jobs:
       - name: Unit tests
         run: make ci-test-unit
 
-      - name: Pre-fetch integration test dependencies
-        run: cargo test --test '*' --no-run
+      - name: Pre-build integration test workspace
+        run: cargo test --manifest-path test-integration/Cargo.toml --workspace --no-run --locked
 
       - name: Cache SBF artifacts
         run: |
