@@ -76,10 +76,14 @@ declare_process_instruction!(
                 signers,
                 invoke_context,
                 args.into(),
+                false,
             ),
-            ScheduleIntentBundle(args) => {
-                process_schedule_intent_bundle(signers, invoke_context, args)
-            }
+            ScheduleIntentBundle(args) => process_schedule_intent_bundle(
+                signers,
+                invoke_context,
+                args,
+                true,
+            ),
             ScheduleTask(args) => {
                 process_schedule_task(signers, invoke_context, args)
             }
