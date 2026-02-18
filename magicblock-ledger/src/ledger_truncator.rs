@@ -281,7 +281,9 @@ impl LedgerTrunctationWorker {
         info!(from_slot, to_slot, "Truncating slot range");
 
         ledger.set_lowest_cleanup_slot(to_slot);
-        Self::delete_slots(ledger, from_slot, to_slot)?;
+        if let Err(err) = Self::delete_slots(ledger, from_slot, to_slot) {
+            error!(error = ?err, "Delete failed");
+        }
 
         // Flush memtables with tombstones prior to compaction
         if let Err(err) = ledger.flush() {

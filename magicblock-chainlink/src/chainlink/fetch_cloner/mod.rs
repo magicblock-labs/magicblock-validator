@@ -199,6 +199,12 @@ where
                         if let Some(in_bank) =
                             this.accounts_bank.get_account(&pubkey)
                         {
+                            if in_bank.delegated() && !in_bank.undelegating() {
+                                this.unsubscribe_from_delegated_account(pubkey)
+                                    .await;
+                                return;
+                            }
+
                             if in_bank.undelegating() {
                                 // We expect the account to still be delegated, but with the delegation
                                 // program owner
@@ -258,17 +264,8 @@ where
                         // The subscription will be turned back on once the committor service schedules
                         // a commit for it that includes undelegation
                         if account.delegated() {
-                            if let Err(err) = this
-                                .remote_account_provider
-                                .unsubscribe(&pubkey)
-                                .await
-                            {
-                                error!(
-                                    pubkey = %pubkey,
-                                    error = %err,
-                                    "Failed to unsubscribe from delegated account"
-                                );
-                            }
+                            this.unsubscribe_from_delegated_account(pubkey)
+                                .await;
                         }
 
                         if account.executable() {
@@ -318,6 +315,18 @@ where
         // moved to program_loader module
         program_loader::handle_executable_sub_update(self, pubkey, account)
             .await;
+    }
+
+    async fn unsubscribe_from_delegated_account(&self, pubkey: Pubkey) {
+        if let Err(err) =
+            self.remote_account_provider.unsubscribe(&pubkey).await
+        {
+            warn!(
+                pubkey = %pubkey,
+                error = %err,
+                "Failed to unsubscribe from delegated account"
+            );
+        }
     }
 
     async fn resolve_account_to_clone_from_forwarded_sub_with_unsubscribe(
@@ -527,6 +536,9 @@ where
         )?;
 
         if let Some(in_bank_ata) = self.accounts_bank.get_account(&ata_pubkey) {
+            if in_bank_ata.delegated() && !in_bank_ata.undelegating() {
+                return None;
+            }
             if in_bank_ata.remote_slot() >= projected_ata.remote_slot() {
                 return None;
             }
@@ -1329,17 +1341,24 @@ where
         if lamports == 0 {
             return Ok(());
         }
-        if let Some(acc) = self.accounts_bank.get_account(&pubkey) {
-            if acc.lamports() > 0 {
-                return Ok(());
-            }
-        }
+        let remote_slot =
+            if let Some(acc) = self.accounts_bank.get_account(&pubkey) {
+                if acc.lamports() > 0 {
+                    return Ok(());
+                }
+                acc.remote_slot()
+                    .max(self.remote_account_provider.chain_slot())
+            } else {
+                self.remote_account_provider.chain_slot()
+            };
         // Build a plain system account with the requested balance
-        let account =
+        let mut account =
             AccountSharedData::new(lamports, 0, &system_program::id());
+        account.set_remote_slot(remote_slot);
         debug!(
             pubkey = %pubkey,
             lamports,
+            remote_slot,
             "Auto-airdropping account"
         );
         let _sig = self
