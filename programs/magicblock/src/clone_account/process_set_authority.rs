@@ -35,7 +35,11 @@ pub(crate) fn process_set_program_authority(
     {
         let acc = account.borrow();
         if acc.owner() != &loader_v4::id() {
-            ic_msg!(invoke_context, "SetProgramAuthority: {} not owned by loader_v4", key);
+            ic_msg!(
+                invoke_context,
+                "SetProgramAuthority: {} not owned by loader_v4",
+                key
+            );
             return Err(InstructionError::InvalidAccountOwner);
         }
     }
@@ -46,7 +50,10 @@ pub(crate) fn process_set_program_authority(
     let header_size = LoaderV4State::program_data_offset();
 
     if data.len() < header_size {
-        ic_msg!(invoke_context, "SetProgramAuthority: account data too small");
+        ic_msg!(
+            invoke_context,
+            "SetProgramAuthority: account data too small"
+        );
         return Err(InstructionError::InvalidAccountData);
     }
 
@@ -69,6 +76,11 @@ pub(crate) fn process_set_program_authority(
     };
     acc.data_as_mut_slice()[..header_size].copy_from_slice(header);
 
-    ic_msg!(invoke_context, "SetProgramAuthority: {} authority -> {}", key, new_authority);
+    ic_msg!(
+        invoke_context,
+        "SetProgramAuthority: {} authority -> {}",
+        key,
+        new_authority
+    );
     Ok(())
 }
