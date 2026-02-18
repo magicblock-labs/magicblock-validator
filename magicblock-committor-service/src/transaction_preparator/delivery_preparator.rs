@@ -543,8 +543,6 @@ pub enum InternalError {
     MagicBlockRpcClientError(Box<MagicBlockRpcClientError>),
     #[error("BufferExecutionError: {0}")]
     BufferExecutionError(#[from] BufferExecutionError),
-    #[error("BaseTaskError: {0}")]
-    BaseTaskError(#[from] BaseTaskError),
 }
 
 impl From<MagicBlockRpcClientError> for InternalError {

@@ -11,7 +11,7 @@ use tracing::error;
 use crate::{
     tasks::{
         task_builder::TaskBuilderError, task_strategist::TaskStrategistError,
-        BaseTask, BaseTaskImpl, TaskType,
+        BaseTaskImpl,
     },
     transaction_preparator::error::TransactionPreparatorError,
 };

@@ -12,10 +12,7 @@ use solana_pubkey::Pubkey;
 
 use crate::{
     consts::MAX_WRITE_CHUNK_SIZE,
-    tasks::{
-        task_visitors::utility_visitor::CommitMeta, BaseTaskImpl, CleanupTask,
-        PreparationState, PreparationTask,
-    },
+    tasks::{BaseTaskImpl, CleanupTask, PreparationTask},
 };
 
 // TODO: rename
@@ -230,14 +227,6 @@ impl CommitTaskV2 {
                     self.committed_account.account.data.len() as u32,
                 ))
             }
-        }
-    }
-
-    pub fn get_commit_meta(&self) -> CommitMeta {
-        CommitMeta {
-            committed_pubkey: self.committed_account.pubkey,
-            commit_id: self.commit_id,
-            remote_slot: self.committed_account.remote_slot,
         }
     }
 

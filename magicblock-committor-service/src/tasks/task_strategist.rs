@@ -441,6 +441,7 @@ mod tests {
         },
         test_utils,
     };
+    use crate::tasks::commit_task::CommitTaskV2;
 
     struct MockInfoFetcher;
 

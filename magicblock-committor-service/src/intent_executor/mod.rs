@@ -47,8 +47,7 @@ use crate::{
         task_strategist::{
             StrategyExecutionMode, TaskStrategist, TransactionStrategy,
         },
-        task_visitors::utility_visitor::TaskVisitorUtils,
-        BaseTask, BaseTaskImpl, TaskType,
+        BaseTaskImpl,
     },
     transaction_preparator::{
         delivery_preparator::BufferExecutionError,

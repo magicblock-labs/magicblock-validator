@@ -9,7 +9,7 @@ use crate::{
     persist::IntentPersister,
     tasks::{
         commit_task::CommitStage, task_strategist::TransactionStrategy,
-        utils::TransactionUtils, BaseTaskImpl, CleanupTask,
+        utils::TransactionUtils, BaseTaskImpl,
     },
     transaction_preparator::{
         delivery_preparator::{

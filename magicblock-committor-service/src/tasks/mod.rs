@@ -5,7 +5,6 @@ use dlp::{
     },
     AccountSizeClass,
 };
-use dyn_clone::DynClone;
 use magicblock_committor_program::{
     instruction_builder::{
         close_buffer::{create_close_ix, CreateCloseIxArgs},
@@ -24,18 +23,11 @@ use magicblock_program::magic_scheduled_base_intent::{
 use solana_account::Account;
 use solana_instruction::{AccountMeta, Instruction};
 use solana_pubkey::Pubkey;
-use thiserror::Error;
 
-use crate::tasks::visitor::Visitor;
-
-pub mod args_task;
-pub mod buffer_task;
 pub mod commit_task;
 pub mod task_builder;
 pub mod task_strategist;
-pub(crate) mod task_visitors;
 pub mod utils;
-pub mod visitor;
 
 pub use task_builder::TaskBuilderImpl;
 
@@ -137,8 +129,9 @@ impl BaseTaskImpl {
     }
 }
 
-impl LabelValue for BaseActionTask {
+impl LabelValue for BaseTaskImpl {
     fn value(&self) -> &str {
+        // TODO(edwin)
         todo!()
     }
 }
@@ -423,14 +416,6 @@ impl CleanupTask {
     }
 }
 
-#[derive(Error, Debug)]
-pub enum BaseTaskError {
-    #[error("Invalid preparation state transition")]
-    PreparationStateTransitionError,
-}
-
-pub type BaseTaskResult<T> = Result<T, BaseTaskError>;
-
 #[cfg(test)]
 mod serialization_safety_test {
 
@@ -441,8 +426,6 @@ mod serialization_safety_test {
 
     use crate::{
         tasks::{
-            args_task::{ArgsTask, ArgsTaskType},
-            buffer_task::{BufferTask, BufferTaskType},
             *,
         },
         test_utils,
