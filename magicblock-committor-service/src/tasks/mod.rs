@@ -140,8 +140,11 @@ pub trait BaseTask: Send + Sync + Clone {
     /// Gets instruction for task execution
     fn instruction(&self, validator: &Pubkey) -> Instruction;
 
-    /// Optimize for transaction size so that more instructions can be buddled together in a single
-    /// transaction. Return Ok(new_tx_optimized_task), else Err(self) if task cannot be optimized.
+    /// Attempts to optimize the task for smaller transaction size by switching
+    /// to a buffer-based delivery. Returns `true` if optimization was applied.
+    ///
+    /// Deprecated: will be removed in the future. Optimization is a concern of
+    /// the transaction strategist, not the task itself.
     fn try_optimize_tx_size(&mut self) -> bool;
 
     /// Returns [`Task`] budget

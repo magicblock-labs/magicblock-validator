@@ -15,12 +15,20 @@ use crate::{
     tasks::{BaseTask, BaseTaskImpl, CleanupTask, PreparationTask},
 };
 
+/// Lifecycle stage of a buffer used for commit delivery.
+/// Tracks whether the on-chain buffer still needs to be initialized
+/// or is ready to be cleaned up after a successful commit.
 #[derive(Clone, Debug)]
 pub enum CommitBufferStage {
     Preparation(PreparationTask),
     Cleanup(CleanupTask),
 }
 
+/// Describes how commit data is delivered to the base layer.
+///
+/// Small accounts send data directly in instruction args.
+/// Large accounts use an on-chain buffer to avoid transaction size limits.
+/// When a base account is available, a diff is computed to reduce payload size.
 #[derive(Clone, Debug)]
 pub enum CommitDelivery {
     StateInArgs,
@@ -36,6 +44,10 @@ pub enum CommitDelivery {
     },
 }
 
+/// A task that commits a delegated account's state to the base layer.
+///
+/// The delivery strategy ([`CommitDelivery`]) determines how the data reaches
+/// the chain (inline args vs buffer, full state vs diff).
 #[derive(Clone, Debug)]
 pub struct CommitTask {
     pub commit_id: u64,
