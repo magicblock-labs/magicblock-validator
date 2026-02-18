@@ -157,14 +157,27 @@ fn read(ledger_path: &Path, payer: &Pubkey) -> Child {
         &LoadedAccounts::with_delegation_program_test_authority(),
     );
 
-    let expected = FlexiCounter {
-        count: 10,
-        updates: 3,
-        label: COUNTER.to_string(),
-    };
-    wait_for_counter_ephem_state(&ctx, &mut validator, payer, &expected);
+    wait_for_counter_ephem_state(
+        &ctx,
+        &mut validator,
+        payer,
+        &FlexiCounter {
+            count: 10,
+            updates: 3,
+            label: COUNTER.to_string(),
+        },
+    );
+
     let counter_ephem = fetch_counter_ephem(&ctx, payer, &mut validator);
-    assert_eq!(counter_ephem, expected, cleanup(&mut validator));
+    assert_eq!(
+        counter_ephem,
+        FlexiCounter {
+            count: 10,
+            updates: 3,
+            label: COUNTER.to_string()
+        },
+        cleanup(&mut validator)
+    );
     debug!("✅ Verified counter on chain state after restore");
 
     let counter_chain = fetch_counter_chain(payer, &mut validator);

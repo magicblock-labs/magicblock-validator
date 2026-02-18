@@ -17,8 +17,7 @@ use test_ledger_restore::{
     confirm_tx_with_payer_chain, confirm_tx_with_payer_ephem,
     fetch_counter_chain, fetch_counter_ephem,
     init_and_delegate_counter_and_payer, setup_validator_with_local_remote,
-    wait_for_counter_ephem_state, wait_for_ephem_balance,
-    wait_for_ledger_persist, TMP_DIR_LEDGER,
+    wait_for_counter_ephem_state, wait_for_ledger_persist, TMP_DIR_LEDGER,
 };
 use tracing::*;
 const COUNTER_MAIN: &str = "Main Counter";
@@ -188,33 +187,25 @@ fn read(
         &LoadedAccounts::with_delegation_program_test_authority(),
     );
 
-    wait_for_ephem_balance(
-        &ctx,
-        &mut validator,
-        payer_main,
-        payer_main_lamports,
-    );
-    let readonly_expected = FlexiCounter {
-        count: 3,
-        updates: 1,
-        label: COUNTER_READONLY.to_string(),
-    };
     wait_for_counter_ephem_state(
         &ctx,
         &mut validator,
         payer_readonly,
-        &readonly_expected,
+        &FlexiCounter {
+            count: 3,
+            updates: 1,
+            label: COUNTER_READONLY.to_string(),
+        },
     );
-    let main_expected = FlexiCounter {
-        count: 5,
-        updates: 2,
-        label: COUNTER_MAIN.to_string(),
-    };
     wait_for_counter_ephem_state(
         &ctx,
         &mut validator,
         payer_main,
-        &main_expected,
+        &FlexiCounter {
+            count: 5,
+            updates: 2,
+            label: COUNTER_MAIN.to_string(),
+        },
     );
 
     let payer_main_ephem =
@@ -228,14 +219,27 @@ fn read(
     let counter_readonly_ephem =
         fetch_counter_ephem(&ctx, payer_readonly, &mut validator);
     assert_eq!(
-        counter_readonly_ephem, readonly_expected,
+        counter_readonly_ephem,
+        FlexiCounter {
+            count: 3,
+            updates: 1,
+            label: COUNTER_READONLY.to_string()
+        },
         cleanup(&mut validator)
     );
     debug!("✅ Verified readonly counter state after restore");
 
     let counter_main_ephem =
         fetch_counter_ephem(&ctx, payer_main, &mut validator);
-    assert_eq!(counter_main_ephem, main_expected, cleanup(&mut validator));
+    assert_eq!(
+        counter_main_ephem,
+        FlexiCounter {
+            count: 5,
+            updates: 2,
+            label: COUNTER_MAIN.to_string()
+        },
+        cleanup(&mut validator)
+    );
     debug!("✅ Verified main counter state after restore");
 
     validator

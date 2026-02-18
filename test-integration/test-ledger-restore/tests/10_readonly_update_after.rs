@@ -316,27 +316,25 @@ fn read(
         &LoadedAccounts::with_delegation_program_test_authority(),
     );
 
-    let expected_main = FlexiCounter {
-        count: 5,
-        updates: 2,
-        label: COUNTER_MAIN.to_string(),
-    };
     wait_for_counter_ephem_state(
         &ctx,
         &mut validator,
         payer_main,
-        &expected_main,
+        &FlexiCounter {
+            count: 5,
+            updates: 2,
+            label: COUNTER_MAIN.to_string(),
+        },
     );
-    let expected_readonly = FlexiCounter {
-        count: 4,
-        updates: 2,
-        label: COUNTER_READONLY.to_string(),
-    };
     wait_for_counter_ephem_state(
         &ctx,
         &mut validator,
         payer_readonly,
-        &expected_readonly,
+        &FlexiCounter {
+            count: 4,
+            updates: 2,
+            label: COUNTER_READONLY.to_string(),
+        },
     );
 
     let (counter_main_pda, _) = FlexiCounter::pda(payer_main);
