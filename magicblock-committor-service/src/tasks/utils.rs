@@ -141,11 +141,22 @@ impl TransactionUtils {
             .map(|task| task.as_ref().accounts_size_budget())
             .sum();
 
-        // DLP_PROGRAM_DATA_SIZE_CLASS has been added N times, once for each task.
-        // We need to add it once only, so minus (N-1) times.
-        total_budget
-            - (tasks.len() as u32 - 1)
-                * DLP_PROGRAM_DATA_SIZE_CLASS.size_budget()
+        let dlp_task_count: u32 = tasks
+            .iter()
+            .filter(|task| {
+                task.as_ref().instruction(&Pubkey::new_unique()).program_id
+                    == dlp::id()
+            })
+            .count() as u32;
+
+        if dlp_task_count > 0 {
+            total_budget.saturating_sub(
+                (dlp_task_count - 1)
+                    * DLP_PROGRAM_DATA_SIZE_CLASS.size_budget(),
+            )
+        } else {
+            total_budget
+        }
     }
 
     pub fn budget_instructions(
