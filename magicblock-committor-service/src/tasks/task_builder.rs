@@ -16,7 +16,7 @@ use crate::{
     },
     persist::IntentPersister,
     tasks::{
-        commit_task::{CommitDeliveryDetails, CommitTask},
+        commit_task::{CommitDelivery, CommitTask},
         BaseActionTask, BaseTaskImpl, FinalizeTask, UndelegateTask,
     },
 };
@@ -64,9 +64,9 @@ impl TaskBuilderImpl {
             };
 
         let delivery_details = if let Some(base_account) = base_account {
-            CommitDeliveryDetails::DiffInArgs { base_account }
+            CommitDelivery::DiffInArgs { base_account }
         } else {
-            CommitDeliveryDetails::StateInArgs
+            CommitDelivery::StateInArgs
         };
 
         CommitTask {

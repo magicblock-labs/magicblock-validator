@@ -3,7 +3,7 @@ use magicblock_committor_program::Chunks;
 use magicblock_committor_service::{
     persist::IntentPersisterImpl,
     tasks::{
-        commit_task::CommitStage,
+        commit_task::CommitBufferStage,
         task_strategist::{TaskStrategist, TransactionStrategy},
         utils::TransactionUtils,
         BaseActionTask, BaseTask, BaseTaskImpl, FinalizeTask, TaskBuilderImpl,
@@ -150,7 +150,7 @@ async fn test_prepare_commit_tx_with_multiple_accounts() {
             BaseTaskImpl::Commit(ct) => ct,
             _ => continue,
         };
-        let Some(CommitStage::Cleanup(cleanup_task)) = commit_task.stage()
+        let Some(CommitBufferStage::Cleanup(cleanup_task)) = commit_task.stage()
         else {
             continue;
         };
@@ -241,7 +241,7 @@ async fn test_prepare_commit_tx_with_base_actions() {
             BaseTaskImpl::Commit(ct) => ct,
             _ => continue,
         };
-        let Some(CommitStage::Cleanup(cleanup_task)) = commit_task.stage()
+        let Some(CommitBufferStage::Cleanup(cleanup_task)) = commit_task.stage()
         else {
             continue;
         };

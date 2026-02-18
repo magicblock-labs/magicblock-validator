@@ -8,7 +8,7 @@ use solana_pubkey::Pubkey;
 use crate::{
     persist::IntentPersister,
     tasks::{
-        commit_task::CommitStage, task_strategist::TransactionStrategy,
+        commit_task::CommitBufferStage, task_strategist::TransactionStrategy,
         utils::TransactionUtils, BaseTaskImpl,
     },
     transaction_preparator::{
@@ -123,7 +123,7 @@ impl TransactionPreparator for TransactionPreparatorImpl {
                 _ => None,
             })
             .filter_map(|stage| match stage {
-                CommitStage::Cleanup(cleanup_task) => {
+                CommitBufferStage::Cleanup(cleanup_task) => {
                     Some(cleanup_task.clone())
                 }
                 _ => None,

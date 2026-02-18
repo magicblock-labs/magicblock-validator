@@ -8,8 +8,8 @@ use tracing::error;
 use crate::{
     persist::{CommitStrategy, IntentPersister},
     tasks::{
-        commit_task::CommitDeliveryDetails, utils::TransactionUtils, BaseTask,
-        BaseTaskImpl, FinalizeTask,
+        commit_task::CommitDelivery, utils::TransactionUtils, BaseTask,
+        BaseTaskImpl,
     },
     transactions::{serialize_and_encode_base64, MAX_ENCODED_TRANSACTION_SIZE},
 };
@@ -270,28 +270,28 @@ impl TaskStrategist {
                 continue;
             };
             let commit_strategy = match &commit_task.delivery_details {
-                CommitDeliveryDetails::StateInArgs => {
+                CommitDelivery::StateInArgs => {
                     if uses_lookup_tables {
                         CommitStrategy::StateArgsWithLookupTable
                     } else {
                         CommitStrategy::StateArgs
                     }
                 }
-                CommitDeliveryDetails::DiffInArgs { .. } => {
+                CommitDelivery::DiffInArgs { .. } => {
                     if uses_lookup_tables {
                         CommitStrategy::DiffArgsWithLookupTable
                     } else {
                         CommitStrategy::DiffArgs
                     }
                 }
-                CommitDeliveryDetails::StateInBuffer { .. } => {
+                CommitDelivery::StateInBuffer { .. } => {
                     if uses_lookup_tables {
                         CommitStrategy::StateBufferWithLookupTable
                     } else {
                         CommitStrategy::StateBuffer
                     }
                 }
-                CommitDeliveryDetails::DiffInBuffer { .. } => {
+                CommitDelivery::DiffInBuffer { .. } => {
                     if uses_lookup_tables {
                         CommitStrategy::DiffBufferWithLookupTable
                     } else {
@@ -365,38 +365,20 @@ impl TaskStrategist {
                 break;
             }
 
-            let task = {
-                // This is tmp task that will be replaced by old or optimized one
-                let tmp_task: BaseTaskImpl = FinalizeTask {
-                    delegated_account: Pubkey::new_unique(),
-                }
-                .into();
-                std::mem::replace(&mut tasks[index], tmp_task)
-            };
-            match task.try_optimize_tx_size() {
+            if tasks[index].try_optimize_tx_size() {
                 // If we can decrease:
                 // 1. Calculate new tx size & ix size
                 // 2. Insert item's data back in the heap
                 // 3. Update overall tx size
-                Ok(optimized_task) => {
-                    tasks[index] = optimized_task;
-                    let new_ix =
-                        tasks[index].instruction(&Pubkey::new_unique());
-                    // Possible serialization failures are possible only due to size in our case
-                    // In that case we set size to max
-                    let new_ix_size =
-                        bincode::serialized_size(&new_ix).unwrap_or(u64::MAX);
-                    let new_ix_size =
-                        usize::try_from(new_ix_size).unwrap_or(usize::MAX);
-                    current_tx_length = calculate_tx_length(tasks)?;
-                    map.push((new_ix_size, index));
-                }
-                // That means el-t can't be optimized further
-                // We move it back with oldest state
-                // Heap forgets about this el-t
-                Err(old_task) => {
-                    tasks[index] = old_task;
-                }
+                let new_ix = tasks[index].instruction(&Pubkey::new_unique());
+                // Possible serialization failures are possible only due to size in our case
+                // In that case we set size to max
+                let new_ix_size =
+                    bincode::serialized_size(&new_ix).unwrap_or(u64::MAX);
+                let new_ix_size =
+                    usize::try_from(new_ix_size).unwrap_or(usize::MAX);
+                current_tx_length = calculate_tx_length(tasks)?;
+                map.push((new_ix_size, index));
             }
         }
 
@@ -438,7 +420,7 @@ mod tests {
             task_builder::{
                 TaskBuilderImpl, TasksBuilder, COMMIT_STATE_SIZE_THRESHOLD,
             },
-            BaseActionTask, TaskStrategy, UndelegateTask,
+            BaseActionTask, FinalizeTask, TaskStrategy, UndelegateTask,
         },
         test_utils,
     };

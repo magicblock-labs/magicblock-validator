@@ -3,7 +3,7 @@ use magicblock_committor_program::Chunks;
 use magicblock_committor_service::{
     persist::IntentPersisterImpl,
     tasks::{
-        commit_task::{CommitDeliveryDetails, CommitStage},
+        commit_task::{CommitDelivery, CommitBufferStage},
         task_strategist::{TaskStrategist, TransactionStrategy},
         BaseTask, BaseTaskImpl,
     },
@@ -44,7 +44,7 @@ async fn test_prepare_10kb_buffer() {
     else {
         panic!("unexpected task type");
     };
-    let Some(CommitStage::Cleanup(cleanup_task)) = commit_task.stage() else {
+    let Some(CommitBufferStage::Cleanup(cleanup_task)) = commit_task.stage() else {
         panic!("unexpected CommitStage");
     };
 
@@ -116,7 +116,7 @@ async fn test_prepare_multiple_buffers() {
             _ => None,
         })
         .filter_map(|stage| match stage {
-            CommitStage::Cleanup(cleanup_task) => Some(cleanup_task),
+            CommitBufferStage::Cleanup(cleanup_task) => Some(cleanup_task),
             _ => None,
         })
         .collect();
@@ -228,7 +228,7 @@ async fn test_already_initialized_error_handled() {
     let BaseTaskImpl::Commit(ref ct) = strategy.optimized_tasks[0] else {
         panic!("unexpected task type");
     };
-    let Some(CommitStage::Cleanup(cleanup_task)) = ct.stage() else {
+    let Some(CommitBufferStage::Cleanup(cleanup_task)) = ct.stage() else {
         panic!("unexpected CommitStage");
     };
     // Check buffer account exists
@@ -247,7 +247,7 @@ async fn test_already_initialized_error_handled() {
         commit_task.committed_account.account.data.len() - 2,
     );
     commit_task.committed_account.account.data = data.clone();
-    commit_task.delivery_details = CommitDeliveryDetails::StateInBuffer {
+    commit_task.delivery_details = CommitDelivery::StateInBuffer {
         stage: commit_task.state_preparation_stage(),
     };
     let mut strategy = TransactionStrategy {
@@ -269,7 +269,7 @@ async fn test_already_initialized_error_handled() {
     let BaseTaskImpl::Commit(ref ct) = strategy.optimized_tasks[0] else {
         panic!("unexpected task type");
     };
-    let Some(CommitStage::Cleanup(cleanup_task)) = ct.stage() else {
+    let Some(CommitBufferStage::Cleanup(cleanup_task)) = ct.stage() else {
         panic!("unexpected CommitStage");
     };
 
@@ -331,7 +331,7 @@ async fn test_prepare_cleanup_and_reprepare_mixed_tasks() {
             _ => None,
         })
         .filter_map(|stage| match stage {
-            CommitStage::Cleanup(c) => Some(c),
+            CommitBufferStage::Cleanup(c) => Some(c),
             _ => None,
         })
         .collect();
@@ -398,10 +398,10 @@ async fn test_prepare_cleanup_and_reprepare_mixed_tasks() {
     }
 
     // Rebuild buffer stages with mutated data
-    commit_a.delivery_details = CommitDeliveryDetails::StateInBuffer {
+    commit_a.delivery_details = CommitDelivery::StateInBuffer {
         stage: commit_a.state_preparation_stage(),
     };
-    commit_b.delivery_details = CommitDeliveryDetails::StateInBuffer {
+    commit_b.delivery_details = CommitDelivery::StateInBuffer {
         stage: commit_b.state_preparation_stage(),
     };
 
@@ -437,7 +437,7 @@ async fn test_prepare_cleanup_and_reprepare_mixed_tasks() {
             _ => None,
         })
         .filter_map(|stage| match stage {
-            CommitStage::Cleanup(c) => Some(c),
+            CommitBufferStage::Cleanup(c) => Some(c),
             _ => None,
         })
         .collect();

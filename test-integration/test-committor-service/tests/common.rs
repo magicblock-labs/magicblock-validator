@@ -15,7 +15,7 @@ use magicblock_committor_service::{
         },
         IntentExecutorImpl,
     },
-    tasks::commit_task::{CommitDeliveryDetails, CommitStage, CommitTask},
+    tasks::commit_task::{CommitDelivery, CommitBufferStage, CommitTask},
     transaction_preparator::{
         delivery_preparator::DeliveryPreparator, TransactionPreparatorImpl,
     },
@@ -191,7 +191,7 @@ pub fn create_commit_task(data: &[u8]) -> CommitTask {
             },
             remote_slot: Default::default(),
         },
-        delivery_details: CommitDeliveryDetails::StateInArgs,
+        delivery_details: CommitDelivery::StateInArgs,
     }
 }
 
@@ -200,7 +200,7 @@ pub fn create_buffer_commit_task(data: &[u8]) -> CommitTask {
     let task = create_commit_task(data);
     let stage = task.state_preparation_stage();
     CommitTask {
-        delivery_details: CommitDeliveryDetails::StateInBuffer { stage },
+        delivery_details: CommitDelivery::StateInBuffer { stage },
         ..task
     }
 }

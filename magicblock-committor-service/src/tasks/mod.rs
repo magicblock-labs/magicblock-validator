@@ -72,13 +72,10 @@ impl BaseTask for BaseTaskImpl {
         }
     }
 
-    fn try_optimize_tx_size(self) -> Result<Self, Self> {
+    fn try_optimize_tx_size(&mut self) -> bool {
         match self {
-            Self::Commit(value) => value
-                .try_optimize_tx_size()
-                .map(Self::Commit)
-                .map_err(Self::Commit),
-            _ => Err(self),
+            Self::Commit(value) => value.try_optimize_tx_size(),
+            _ => false,
         }
     }
 
@@ -113,9 +110,8 @@ impl BaseTask for BaseTaskImpl {
     }
 
     fn reset_commit_id(&mut self, commit_id: u64) {
-        match self {
-            Self::Commit(value) => value.reset_commit_id(commit_id),
-            _ => return,
+        if let Self::Commit(value) = self {
+            value.reset_commit_id(commit_id)
         }
     }
 }
@@ -152,7 +148,7 @@ pub trait BaseTask: Send + Sync + Clone {
 
     /// Optimize for transaction size so that more instructions can be buddled together in a single
     /// transaction. Return Ok(new_tx_optimized_task), else Err(self) if task cannot be optimized.
-    fn try_optimize_tx_size(self) -> Result<Self, Self>;
+    fn try_optimize_tx_size(&mut self) -> bool;
 
     /// Returns [`Task`] budget
     fn compute_units(&self) -> u32;
@@ -419,7 +415,7 @@ mod serialization_safety_test {
 
     use crate::{
         tasks::{
-            commit_task::{CommitDeliveryDetails, CommitStage, CommitTask},
+            commit_task::{CommitBufferStage, CommitDelivery, CommitTask},
             *,
         },
         test_utils,
@@ -449,7 +445,7 @@ mod serialization_safety_test {
                 },
                 remote_slot: Default::default(),
             },
-            delivery_details: CommitDeliveryDetails::StateInArgs,
+            delivery_details: CommitDelivery::StateInArgs,
         }
     }
 
@@ -509,7 +505,7 @@ mod serialization_safety_test {
             make_commit_task(commit_id, allow_undelegation, data, lamports);
         let stage = task.state_preparation_stage();
         CommitTask {
-            delivery_details: CommitDeliveryDetails::StateInBuffer { stage },
+            delivery_details: CommitDelivery::StateInBuffer { stage },
             ..task
         }
     }
@@ -531,7 +527,7 @@ mod serialization_safety_test {
         let commit_task =
             make_buffer_commit_task(789, true, vec![0; 1024], 3000);
 
-        let Some(CommitStage::Preparation(preparation_task)) =
+        let Some(CommitBufferStage::Preparation(preparation_task)) =
             commit_task.stage()
         else {
             panic!("invalid preparation state on creation!");

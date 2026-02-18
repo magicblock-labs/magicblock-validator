@@ -30,7 +30,7 @@ use tracing::{error, info};
 use crate::{
     persist::{CommitStatus, IntentPersister},
     tasks::{
-        commit_task::CommitStage, task_strategist::TransactionStrategy,
+        commit_task::CommitBufferStage, task_strategist::TransactionStrategy,
         BaseTaskImpl, CleanupTask, PreparationTask,
     },
     utils::persist_status_update,
@@ -104,7 +104,7 @@ impl DeliveryPreparator {
         let Some(stage) = commit_task.stage_mut() else {
             return Ok(());
         };
-        let CommitStage::Preparation(preparation_task) = stage else {
+        let CommitBufferStage::Preparation(preparation_task) = stage else {
             return Ok(());
         };
 
@@ -143,7 +143,7 @@ impl DeliveryPreparator {
         );
 
         let cleanup_task = preparation_task.cleanup_task();
-        *stage = CommitStage::Cleanup(cleanup_task);
+        *stage = CommitBufferStage::Cleanup(cleanup_task);
         Ok(())
     }
 
@@ -176,7 +176,7 @@ impl DeliveryPreparator {
         let Some(stage) = commit_task.stage_mut() else {
             return Ok(());
         };
-        let CommitStage::Preparation(preparation_task) = stage else {
+        let CommitBufferStage::Preparation(preparation_task) = stage else {
             return Ok(());
         };
         let preparation_task = preparation_task.clone();
@@ -185,7 +185,7 @@ impl DeliveryPreparator {
         self.cleanup(authority, &[cleanup_task], &[]).await?;
 
         // Restore preparation stage for retry
-        *stage = CommitStage::Preparation(preparation_task);
+        *stage = CommitBufferStage::Preparation(preparation_task);
 
         self.prepare_task(authority, task, persister).await
     }
