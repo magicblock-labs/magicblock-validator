@@ -1,5 +1,6 @@
 mod ephemeral_accounts;
 pub mod errors;
+mod clone_account;
 mod magic_context;
 pub mod magic_sys;
 mod mutate_accounts;

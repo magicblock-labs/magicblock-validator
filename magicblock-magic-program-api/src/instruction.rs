@@ -194,6 +194,87 @@ pub enum MagicBlockInstruction {
     ///   the scheduled commits
     /// - **2..n** `[]`              Accounts to be committed
     ScheduleCommitFinalize { request_undelegation: bool },
+    /// Clone a single account that fits in one transaction (<63KB data).
+    ///
+    /// # Account references
+    /// - **0.** `[WRITE, SIGNER]` Validator Authority
+    /// - **1.** `[WRITE]` Account to clone
+    CloneAccount {
+        pubkey: Pubkey,
+        data: Vec<u8>,
+        fields: AccountCloneFields,
+    },
+
+    /// Initialize a multi-transaction clone for a large account.
+    /// Adds the pubkey to PENDING_CLONES. Must be followed by CloneAccountContinue
+    /// with is_last=true to complete.
+    ///
+    /// # Account references
+    /// - **0.** `[WRITE, SIGNER]` Validator Authority
+    /// - **1.** `[WRITE]` Account to clone
+    CloneAccountInit {
+        pubkey: Pubkey,
+        total_data_len: u32,
+        initial_data: Vec<u8>,
+        fields: AccountCloneFields,
+    },
+
+    /// Continue a multi-transaction clone with the next data chunk.
+    /// If is_last=true, removes the pubkey from PENDING_CLONES.
+    ///
+    /// # Account references
+    /// - **0.** `[WRITE, SIGNER]` Validator Authority
+    /// - **1.** `[WRITE]` Account being cloned
+    CloneAccountContinue {
+        pubkey: Pubkey,
+        offset: u32,
+        data: Vec<u8>,
+        is_last: bool,
+    },
+
+    /// Cleanup a partial clone on failure. Removes from PENDING_CLONES
+    /// and deletes the account.
+    ///
+    /// # Account references
+    /// - **0.** `[WRITE, SIGNER]` Validator Authority
+    /// - **1.** `[WRITE]` Account to cleanup
+    CleanupPartialClone { pubkey: Pubkey },
+
+    /// Finalize program deployment from a buffer account.
+    /// Does the following:
+    /// 1. Copies data from buffer account to program account
+    /// 2. Sets loader header with Retracted status and validator authority
+    /// 3. Closes buffer account
+    ///
+    /// After this, LoaderV4::Deploy must be called, then SetProgramAuthority.
+    ///
+    /// # Account references
+    /// - **0.** `[SIGNER]` Validator Authority
+    /// - **1.** `[WRITE]` Program account
+    /// - **2.** `[WRITE]` Buffer account (closed after)
+    FinalizeProgramFromBuffer { slot: u64 },
+
+    /// Finalize V1 program deployment from a buffer account.
+    /// V1 programs are converted to V3 (upgradeable loader) format.
+    /// Does the following:
+    /// 1. Creates program_data account with V3 ProgramData header + ELF
+    /// 2. Creates program account with V3 Program header
+    /// 3. Closes buffer account
+    ///
+    /// # Account references
+    /// - **0.** `[SIGNER]` Validator Authority
+    /// - **1.** `[WRITE]` Program account
+    /// - **2.** `[WRITE]` Program data account
+    /// - **3.** `[WRITE]` Buffer account (closed after)
+    FinalizeV1ProgramFromBuffer { slot: u64, authority: Pubkey },
+
+    /// Update the authority in a LoaderV4 program header.
+    /// Used after Deploy to set the final chain authority.
+    ///
+    /// # Account references
+    /// - **0.** `[SIGNER]` Validator Authority
+    /// - **1.** `[WRITE]` Program account
+    SetProgramAuthority { authority: Pubkey },
 }
 
 impl MagicBlockInstruction {
@@ -219,8 +300,21 @@ pub struct AccountModificationForInstruction {
     pub lamports: Option<u64>,
     pub owner: Option<Pubkey>,
     pub executable: Option<bool>,
-    pub data_key: Option<u64>,
+    pub data: Option<Vec<u8>>,
     pub delegated: Option<bool>,
     pub confined: Option<bool>,
     pub remote_slot: Option<u64>,
+}
+
+/// Common fields for cloning an account.
+#[derive(
+    Default, Clone, Copy, Serialize, Deserialize, Debug, PartialEq, Eq,
+)]
+pub struct AccountCloneFields {
+    pub lamports: u64,
+    pub owner: Pubkey,
+    pub executable: bool,
+    pub delegated: bool,
+    pub confined: bool,
+    pub remote_slot: u64,
 }

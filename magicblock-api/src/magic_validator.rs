@@ -214,7 +214,6 @@ impl MagicValidator {
         let committor_service = Self::init_committor_service(&config).await?;
         log_timing("startup", "committor_service_init", step_start);
         init_magic_sys(Arc::new(MagicSysAdapter::new(
-            ledger.clone(),
             committor_service.clone(),
         )));
 
