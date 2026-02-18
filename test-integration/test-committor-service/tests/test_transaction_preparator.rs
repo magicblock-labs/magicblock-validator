@@ -92,7 +92,8 @@ async fn test_prepare_commit_tx_with_multiple_accounts() {
     let account2_data = generate_random_bytes(12);
     let committed_account2 = create_committed_account(&account2_data);
 
-    let buffer_commit_task = create_buffer_commit_task(&account2_data);
+    let mut buffer_commit_task = create_buffer_commit_task(&account2_data);
+    buffer_commit_task.committed_account.pubkey = committed_account2.pubkey;
     // Create test data
     let tasks: Vec<BaseTaskImpl> = vec![
         // account 1
@@ -189,8 +190,9 @@ async fn test_prepare_commit_tx_with_base_actions() {
         }],
     };
 
-    let buffer_commit_task =
+    let mut buffer_commit_task =
         create_buffer_commit_task(&committed_account.account.data);
+    buffer_commit_task.committed_account.pubkey = committed_account.pubkey;
     let tasks: Vec<BaseTaskImpl> = vec![
         // commit account
         buffer_commit_task.into(),
