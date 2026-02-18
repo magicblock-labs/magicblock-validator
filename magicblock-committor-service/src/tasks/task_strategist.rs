@@ -434,7 +434,7 @@ mod tests {
         },
         persist::IntentPersisterImpl,
         tasks::{
-            commit_task::CommitTaskV2,
+            commit_task::CommitTask,
             task_builder::{
                 TaskBuilderImpl, TasksBuilder, COMMIT_STATE_SIZE_THRESHOLD,
             },
@@ -483,7 +483,7 @@ mod tests {
         commit_id: u64,
         data_size: usize,
         diff_len: usize,
-    ) -> CommitTaskV2 {
+    ) -> CommitTask {
         let committed_account = CommittedAccount {
             pubkey: Pubkey::new_unique(),
             account: Account {

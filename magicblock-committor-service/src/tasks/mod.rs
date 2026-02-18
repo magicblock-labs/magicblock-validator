@@ -31,7 +31,7 @@ pub mod utils;
 
 pub use task_builder::TaskBuilderImpl;
 
-use crate::tasks::commit_task::CommitTaskV2;
+use crate::tasks::commit_task::CommitTask;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum TaskType {
@@ -56,7 +56,7 @@ pub enum TaskStrategy {
 
 #[derive(Clone, Debug)]
 pub enum BaseTaskImpl {
-    Commit(CommitTaskV2),
+    Commit(CommitTask),
     Finalize(FinalizeTask),
     Undelegate(UndelegateTask),
     BaseAction(BaseActionTask),
@@ -162,13 +162,6 @@ pub trait BaseTask: Send + Sync + Clone {
 
     /// Resets commit id
     fn reset_commit_id(&mut self, commit_id: u64);
-}
-
-#[derive(Clone)]
-pub struct CommitTask {
-    pub commit_id: u64,
-    pub allow_undelegation: bool,
-    pub committed_account: CommittedAccount,
 }
 
 #[derive(Clone, Debug)]
@@ -426,7 +419,7 @@ mod serialization_safety_test {
 
     use crate::{
         tasks::{
-            commit_task::{CommitDeliveryDetails, CommitStage, CommitTaskV2},
+            commit_task::{CommitDeliveryDetails, CommitStage, CommitTask},
             *,
         },
         test_utils,
@@ -441,8 +434,8 @@ mod serialization_safety_test {
         allow_undelegation: bool,
         data: Vec<u8>,
         lamports: u64,
-    ) -> CommitTaskV2 {
-        CommitTaskV2 {
+    ) -> CommitTask {
+        CommitTask {
             commit_id,
             allow_undelegation,
             committed_account: CommittedAccount {
@@ -511,11 +504,11 @@ mod serialization_safety_test {
         allow_undelegation: bool,
         data: Vec<u8>,
         lamports: u64,
-    ) -> CommitTaskV2 {
+    ) -> CommitTask {
         let task =
             make_commit_task(commit_id, allow_undelegation, data, lamports);
         let stage = task.state_preparation_stage();
-        CommitTaskV2 {
+        CommitTask {
             delivery_details: CommitDeliveryDetails::StateInBuffer { stage },
             ..task
         }

@@ -16,7 +16,7 @@ use crate::{
     },
     persist::IntentPersister,
     tasks::{
-        commit_task::{CommitDeliveryDetails, CommitTaskV2},
+        commit_task::{CommitDeliveryDetails, CommitTask},
         BaseActionTask, BaseTaskImpl, FinalizeTask, UndelegateTask,
     },
 };
@@ -55,7 +55,7 @@ impl TaskBuilderImpl {
         allow_undelegation: bool,
         account: CommittedAccount,
         base_account: Option<Account>,
-    ) -> CommitTaskV2 {
+    ) -> CommitTask {
         let base_account =
             if account.account.data.len() > COMMIT_STATE_SIZE_THRESHOLD {
                 base_account
@@ -69,7 +69,7 @@ impl TaskBuilderImpl {
             CommitDeliveryDetails::StateInArgs
         };
 
-        CommitTaskV2 {
+        CommitTask {
             commit_id,
             allow_undelegation,
             committed_account: account,

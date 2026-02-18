@@ -39,7 +39,7 @@ pub enum CommitDeliveryDetails {
 }
 
 #[derive(Clone, Debug)]
-pub struct CommitTaskV2 {
+pub struct CommitTask {
     pub commit_id: u64,
     pub allow_undelegation: bool,
     pub committed_account: CommittedAccount,
@@ -47,7 +47,7 @@ pub struct CommitTaskV2 {
     pub delivery_details: CommitDeliveryDetails,
 }
 
-impl CommitTaskV2 {
+impl CommitTask {
     pub fn instruction(&self, validator: &Pubkey) -> Instruction {
         match &self.delivery_details {
             // TODO(edwin): extract into separate functions, inline
@@ -268,8 +268,8 @@ impl CommitTaskV2 {
     }
 }
 
-impl From<CommitTaskV2> for BaseTaskImpl {
-    fn from(value: CommitTaskV2) -> Self {
+impl From<CommitTask> for BaseTaskImpl {
+    fn from(value: CommitTask) -> Self {
         Self::Commit(value)
     }
 }

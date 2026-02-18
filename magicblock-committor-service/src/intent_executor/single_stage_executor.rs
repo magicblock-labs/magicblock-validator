@@ -15,7 +15,7 @@ use crate::{
     },
     persist::{IntentPersister, IntentPersisterImpl},
     tasks::{
-        commit_task::CommitTaskV2, task_strategist::TransactionStrategy,
+        commit_task::CommitTask, task_strategist::TransactionStrategy,
         BaseTaskImpl, FinalizeTask,
     },
     transaction_preparator::TransactionPreparator,
@@ -199,7 +199,7 @@ where
     async fn handle_unfinalized_account_error(
         inner: &IntentExecutorImpl<T, F>,
         failed_signature: &Option<Signature>,
-        task: &CommitTaskV2,
+        task: &CommitTask,
     ) -> IntentExecutorResult<ControlFlow<(), TransactionStrategy>> {
         let finalize_task: BaseTaskImpl = FinalizeTask {
             delegated_account: task.committed_account.pubkey,
