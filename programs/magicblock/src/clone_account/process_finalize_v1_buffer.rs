@@ -82,7 +82,14 @@ pub(crate) fn process_finalize_v1_program_from_buffer(
     )?;
 
     let elf_data = buf_acc.borrow().data().to_vec();
-    ic_msg!(invoke_context, "FinalizeV1: prog={} data={} buf={} len={}", prog_key, data_key, buf_key, elf_data.len());
+    ic_msg!(
+        invoke_context,
+        "FinalizeV1: prog={} data={} buf={} len={}",
+        prog_key,
+        data_key,
+        buf_key,
+        elf_data.len()
+    );
 
     // Build V3 program_data account: ProgramData header + ELF
     let program_data_content = {
@@ -90,7 +97,8 @@ pub(crate) fn process_finalize_v1_program_from_buffer(
             slot,
             upgrade_authority_address: Some(authority),
         };
-        let mut data = bincode::serialize(&state).map_err(|_| InstructionError::InvalidAccountData)?;
+        let mut data = bincode::serialize(&state)
+            .map_err(|_| InstructionError::InvalidAccountData)?;
         data.extend_from_slice(&elf_data);
         data
     };
@@ -100,7 +108,8 @@ pub(crate) fn process_finalize_v1_program_from_buffer(
         let state = UpgradeableLoaderState::Program {
             programdata_address: data_key,
         };
-        bincode::serialize(&state).map_err(|_| InstructionError::InvalidAccountData)?
+        bincode::serialize(&state)
+            .map_err(|_| InstructionError::InvalidAccountData)?
     };
 
     // Calculate rent-exempt lamports for both accounts
@@ -147,6 +156,12 @@ pub(crate) fn process_finalize_v1_program_from_buffer(
     }
 
     adjust_authority_lamports(auth_acc, lamports_delta)?;
-    ic_msg!(invoke_context, "FinalizeV1: created {} and {}, closed {}", prog_key, data_key, buf_key);
+    ic_msg!(
+        invoke_context,
+        "FinalizeV1: created {} and {}, closed {}",
+        prog_key,
+        data_key,
+        buf_key
+    );
     Ok(())
 }

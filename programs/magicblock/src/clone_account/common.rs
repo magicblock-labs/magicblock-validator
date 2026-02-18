@@ -9,8 +9,9 @@ use solana_program_runtime::invoke_context::InvokeContext;
 use solana_pubkey::Pubkey;
 use solana_transaction_context::TransactionContext;
 
-use crate::errors::MagicBlockProgramError;
-use crate::validator::validator_authority_id;
+use crate::{
+    errors::MagicBlockProgramError, validator::validator_authority_id,
+};
 
 /// Validates that the validator authority has signed the transaction.
 pub fn validate_authority(
@@ -21,7 +22,7 @@ pub fn validate_authority(
     if signers.contains(&auth) {
         return Ok(());
     }
-    ic_msg!(invoke_context, "Validator authority '{auth}' not in signers");
+    ic_msg!(invoke_context, "Validator authority not in signers",);
     Err(InstructionError::MissingRequiredSignature)
 }
 
@@ -35,12 +36,19 @@ pub fn validate_and_get_index(
     invoke_context: &InvokeContext,
 ) -> Result<u16, InstructionError> {
     let ctx = transaction_context.get_current_instruction_context()?;
-    let tx_idx = ctx.get_index_of_instruction_account_in_transaction(ix_index)?;
+    let tx_idx =
+        ctx.get_index_of_instruction_account_in_transaction(ix_index)?;
     let key = transaction_context.get_key_of_account_at_index(tx_idx)?;
     if *key == *expected {
         return Ok(tx_idx);
     }
-    ic_msg!(invoke_context, "{}: key mismatch, expected {}, got {}", name, expected, key);
+    ic_msg!(
+        invoke_context,
+        "{}: key mismatch, expected {}, got {}",
+        name,
+        expected,
+        key
+    );
     Err(InstructionError::InvalidArgument)
 }
 
@@ -60,7 +68,11 @@ pub fn validate_not_delegated(
         (acc.delegated(), acc.undelegating())
     };
     if is_delegated && !is_undelegating {
-        ic_msg!(invoke_context, "Account {} is delegated and not undelegating", pubkey);
+        ic_msg!(
+            invoke_context,
+            "Account {} is delegated and not undelegating",
+            pubkey
+        );
         return Err(MagicBlockProgramError::AccountIsDelegated.into());
     }
     Ok(())
@@ -73,7 +85,11 @@ pub fn validate_mutable(
     invoke_context: &InvokeContext,
 ) -> Result<(), InstructionError> {
     if is_ephemeral(account) {
-        ic_msg!(invoke_context, "Account {} is ephemeral and cannot be mutated", pubkey);
+        ic_msg!(
+            invoke_context,
+            "Account {} is ephemeral and cannot be mutated",
+            pubkey
+        );
         return Err(MagicBlockProgramError::AccountIsEphemeral.into());
     }
     validate_not_delegated(account, pubkey, invoke_context)

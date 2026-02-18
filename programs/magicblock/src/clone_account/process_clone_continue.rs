@@ -9,7 +9,10 @@ use solana_program_runtime::invoke_context::InvokeContext;
 use solana_pubkey::Pubkey;
 use solana_transaction_context::TransactionContext;
 
-use super::{is_pending_clone, remove_pending_clone, validate_and_get_index, validate_authority};
+use super::{
+    is_pending_clone, remove_pending_clone, validate_and_get_index,
+    validate_authority,
+};
 use crate::errors::MagicBlockProgramError;
 
 /// Writes a data chunk to a pending multi-transaction clone.
@@ -33,7 +36,11 @@ pub(crate) fn process_clone_account_continue(
     validate_authority(signers, invoke_context)?;
 
     if !is_pending_clone(&pubkey) {
-        ic_msg!(invoke_context, "CloneAccountContinue: no pending clone for {}", pubkey);
+        ic_msg!(
+            invoke_context,
+            "CloneAccountContinue: no pending clone for {}",
+            pubkey
+        );
         return Err(MagicBlockProgramError::NoPendingClone.into());
     }
 
@@ -49,7 +56,10 @@ pub(crate) fn process_clone_account_continue(
     ic_msg!(
         invoke_context,
         "CloneAccountContinue: '{}' offset={} len={} is_last={}",
-        pubkey, offset, data.len(), is_last
+        pubkey,
+        offset,
+        data.len(),
+        is_last
     );
 
     // Write data at offset
@@ -72,7 +82,11 @@ pub(crate) fn process_clone_account_continue(
 
     if is_last {
         remove_pending_clone(&pubkey);
-        ic_msg!(invoke_context, "CloneAccountContinue: clone complete for '{}'", pubkey);
+        ic_msg!(
+            invoke_context,
+            "CloneAccountContinue: clone complete for '{}'",
+            pubkey
+        );
     }
 
     Ok(())

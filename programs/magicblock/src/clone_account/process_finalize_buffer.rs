@@ -68,7 +68,13 @@ pub(crate) fn process_finalize_program_from_buffer(
     let buf_lamports = buf_acc.borrow().lamports();
     let prog_current_lamports = prog_acc.borrow().lamports();
 
-    ic_msg!(invoke_context, "FinalizeV4: prog={} buf={} len={}", prog_key, buf_key, buf_data.len());
+    ic_msg!(
+        invoke_context,
+        "FinalizeV4: prog={} buf={} len={}",
+        prog_key,
+        buf_key,
+        buf_data.len()
+    );
 
     // Build LoaderV4 account data: header + ELF
     let deploy_slot = slot.saturating_sub(5).max(1); // Bypass cooldown
@@ -81,7 +87,9 @@ pub(crate) fn process_finalize_program_from_buffer(
 
     // Calculate rent-exempt lamports for full program account
     let prog_lamports = Rent::default().minimum_balance(program_data.len());
-    let lamports_delta = prog_lamports as i64 - prog_current_lamports as i64 - buf_lamports as i64;
+    let lamports_delta = prog_lamports as i64
+        - prog_current_lamports as i64
+        - buf_lamports as i64;
 
     // Set up program account
     {
@@ -104,7 +112,12 @@ pub(crate) fn process_finalize_program_from_buffer(
     }
 
     adjust_authority_lamports(auth_acc, lamports_delta)?;
-    ic_msg!(invoke_context, "FinalizeV4: finalized {}, closed {}", prog_key, buf_key);
+    ic_msg!(
+        invoke_context,
+        "FinalizeV4: finalized {}, closed {}",
+        prog_key,
+        buf_key
+    );
     Ok(())
 }
 
@@ -114,7 +127,10 @@ fn build_loader_v4_data(state: &LoaderV4State, program_data: &[u8]) -> Vec<u8> {
     let mut data = Vec::with_capacity(header_size + program_data.len());
     // SAFETY: LoaderV4State is POD with no uninitialized padding
     let header: &[u8] = unsafe {
-        std::slice::from_raw_parts((state as *const LoaderV4State) as *const u8, header_size)
+        std::slice::from_raw_parts(
+            (state as *const LoaderV4State) as *const u8,
+            header_size,
+        )
     };
     data.extend_from_slice(header);
     data.extend_from_slice(program_data);

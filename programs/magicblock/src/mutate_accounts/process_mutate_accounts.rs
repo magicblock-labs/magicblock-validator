@@ -110,7 +110,7 @@ pub(crate) fn process_mutate_accounts(
             .get_account_at_index(account_transaction_index)?;
 
         // Skip ephemeral accounts (exist locally on ER only)
-        if is_ephemeral(&account) {
+        if is_ephemeral(account) {
             let key = transaction_context
                 .get_key_of_account_at_index(account_transaction_index)?;
             account_mods.remove(key);
@@ -146,9 +146,9 @@ pub(crate) fn process_mutate_accounts(
         }
 
         // Validate account is mutable
-        validate_not_delegated(&account, account_key, invoke_context)?;
+        validate_not_delegated(account, account_key, invoke_context)?;
         validate_remote_slot(
-            &account,
+            account,
             account_key,
             modification.remote_slot,
             invoke_context,

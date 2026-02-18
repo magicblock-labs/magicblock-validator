@@ -9,7 +9,10 @@ use solana_program_runtime::invoke_context::InvokeContext;
 use solana_pubkey::Pubkey;
 use solana_transaction_context::TransactionContext;
 
-use super::{adjust_authority_lamports, remove_pending_clone, validate_and_get_index, validate_authority};
+use super::{
+    adjust_authority_lamports, remove_pending_clone, validate_and_get_index,
+    validate_authority,
+};
 
 /// Cleans up a failed multi-transaction clone.
 ///
@@ -30,10 +33,20 @@ pub(crate) fn process_cleanup_partial_clone(
         ctx.get_index_of_instruction_account_in_transaction(0)?,
     )?;
 
-    let tx_idx = validate_and_get_index(transaction_context, 1, &pubkey, "CleanupPartialClone", invoke_context)?;
+    let tx_idx = validate_and_get_index(
+        transaction_context,
+        1,
+        &pubkey,
+        "CleanupPartialClone",
+        invoke_context,
+    )?;
     let account = transaction_context.get_account_at_index(tx_idx)?;
 
-    ic_msg!(invoke_context, "CleanupPartialClone: cleaning up '{}'", pubkey);
+    ic_msg!(
+        invoke_context,
+        "CleanupPartialClone: cleaning up '{}'",
+        pubkey
+    );
 
     let current_lamports = account.borrow().lamports();
     let lamports_delta = -(current_lamports as i64);
