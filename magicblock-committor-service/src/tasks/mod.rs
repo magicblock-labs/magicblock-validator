@@ -67,6 +67,9 @@ pub trait BaseTask: Send + Sync + DynClone + LabelValue {
     /// Gets instruction for task execution
     fn instruction(&self, validator: &Pubkey) -> Instruction;
 
+    /// Gets target program for task execution
+    fn program_id(&self) -> Pubkey;
+
     /// Optimize for transaction size so that more instructions can be buddled together in a single
     /// transaction. Return Ok(new_tx_optimized_task), else Err(self) if task cannot be optimized.
     fn try_optimize_tx_size(
