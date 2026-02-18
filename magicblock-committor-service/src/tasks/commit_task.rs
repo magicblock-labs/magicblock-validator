@@ -161,50 +161,57 @@ impl CommitTaskV2 {
         )
     }
 
-    pub fn try_optimize_tx_size(mut self) -> Result<Self, Self> {
-        match self.delivery_details {
-            CommitDeliveryDetails::StateInArgs => {
-                let committed_data =
-                    self.committed_account.account.data.clone();
-                let chunks = Chunks::from_data_length(
-                    committed_data.len(),
-                    MAX_WRITE_CHUNK_SIZE,
-                );
+    fn state_preparation_stage(&self) -> CommitStage {
+        let committed_data = self.committed_account.account.data.clone();
+        self.preparation_stage(committed_data)
+    }
 
-                self.delivery_details = CommitDeliveryDetails::StateInBuffer {
-                    stage: CommitStage::Preparation(PreparationTask {
-                        commit_id: self.commit_id,
-                        pubkey: self.committed_account.pubkey,
-                        committed_data,
-                        chunks,
-                    }),
-                };
-                Ok(self)
+    fn diff_preparation_stage(&self, base_data: &[u8]) -> CommitStage {
+        let diff =
+            compute_diff(base_data, &self.committed_account.account.data)
+                .to_vec();
+        self.preparation_stage(diff)
+    }
+
+    fn preparation_stage(&self, committed_data: Vec<u8>) -> CommitStage {
+        let chunks = Chunks::from_data_length(
+            committed_data.len(),
+            MAX_WRITE_CHUNK_SIZE,
+        );
+        CommitStage::Preparation(PreparationTask {
+            commit_id: self.commit_id,
+            pubkey: self.committed_account.pubkey,
+            committed_data,
+            chunks,
+        })
+    }
+
+    pub fn try_optimize_tx_size(mut self) -> Result<Self, Self> {
+        let stage = match &self.delivery_details {
+            CommitDeliveryDetails::StateInArgs => {
+                self.state_preparation_stage()
             }
             CommitDeliveryDetails::DiffInArgs { base_account } => {
-                let diff = compute_diff(
-                    &base_account.data,
-                    &self.committed_account.account.data,
-                )
-                .to_vec();
-                let chunks =
-                    Chunks::from_data_length(diff.len(), MAX_WRITE_CHUNK_SIZE);
-
-                self.delivery_details = CommitDeliveryDetails::DiffInBuffer {
-                    stage: CommitStage::Preparation(PreparationTask {
-                        commit_id: self.commit_id,
-                        pubkey: self.committed_account.pubkey,
-                        committed_data: diff,
-                        chunks,
-                    }),
-                    base_account,
-                };
-
-                Ok(self)
+                self.diff_preparation_stage(&base_account.data)
             }
             CommitDeliveryDetails::DiffInBuffer { .. }
-            | CommitDeliveryDetails::StateInBuffer { .. } => Err(self),
+            | CommitDeliveryDetails::StateInBuffer { .. } => return Err(self),
+        };
+
+        match self.delivery_details {
+            CommitDeliveryDetails::StateInArgs => {
+                self.delivery_details =
+                    CommitDeliveryDetails::StateInBuffer { stage };
+            }
+            CommitDeliveryDetails::DiffInArgs { base_account } => {
+                self.delivery_details = CommitDeliveryDetails::DiffInBuffer {
+                    stage,
+                    base_account,
+                };
+            }
+            _ => {}
         }
+        Ok(self)
     }
 
     pub fn compute_units(&self) -> u32 {
@@ -230,45 +237,33 @@ impl CommitTaskV2 {
         }
     }
 
-    // TODO(edwin): improve with above
     pub fn reset_commit_id(&mut self, commit_id: u64) {
         self.commit_id = commit_id;
-        match &mut self.delivery_details {
-            CommitDeliveryDetails::StateInBuffer { stage } => {
-                let committed_data =
-                    self.committed_account.account.data.clone();
-                let chunks = Chunks::from_data_length(
-                    committed_data.len(),
-                    MAX_WRITE_CHUNK_SIZE,
-                );
-
-                *stage = CommitStage::Preparation(PreparationTask {
-                    commit_id: self.commit_id,
-                    pubkey: self.committed_account.pubkey,
-                    committed_data,
-                    chunks,
-                });
+        let new_stage = match &self.delivery_details {
+            CommitDeliveryDetails::StateInBuffer { .. } => {
+                self.state_preparation_stage()
             }
             CommitDeliveryDetails::DiffInBuffer {
                 base_account,
+                stage: _,
+            } => {
+                let slice = base_account.data.as_slice();
+                self.diff_preparation_stage(slice)
+            }
+            _ => return,
+        };
+
+        match &mut self.delivery_details {
+            CommitDeliveryDetails::StateInBuffer { stage } => {
+                *stage = new_stage;
+            }
+            CommitDeliveryDetails::DiffInBuffer {
+                base_account: _,
                 stage,
             } => {
-                let diff = compute_diff(
-                    &base_account.data,
-                    &self.committed_account.account.data,
-                )
-                .to_vec();
-                let chunks =
-                    Chunks::from_data_length(diff.len(), MAX_WRITE_CHUNK_SIZE);
-
-                *stage = CommitStage::Preparation(PreparationTask {
-                    commit_id: self.commit_id,
-                    pubkey: self.committed_account.pubkey,
-                    committed_data: diff,
-                    chunks,
-                });
+                *stage = new_stage;
             }
-            _ => (),
+            _ => {}
         }
     }
 }

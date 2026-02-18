@@ -426,6 +426,7 @@ mod serialization_safety_test {
 
     use crate::{
         tasks::{
+            commit_task::{CommitDeliveryDetails, CommitStage, CommitTaskV2},
             *,
         },
         test_utils,
@@ -435,50 +436,58 @@ mod serialization_safety_test {
         test_utils::init_test_logger();
     }
 
-    // Test all ArgsTask variants
-    #[test]
-    fn test_args_task_instruction_serialization() {
-        setup();
-        let validator = Pubkey::new_unique();
-
-        // Test Commit variant
-        let commit_task: ArgsTask = ArgsTaskType::Commit(CommitTask {
-            commit_id: 123,
-            allow_undelegation: true,
+    fn make_commit_task(
+        commit_id: u64,
+        allow_undelegation: bool,
+        data: Vec<u8>,
+        lamports: u64,
+    ) -> CommitTaskV2 {
+        CommitTaskV2 {
+            commit_id,
+            allow_undelegation,
             committed_account: CommittedAccount {
                 pubkey: Pubkey::new_unique(),
                 account: Account {
-                    lamports: 1000,
-                    data: vec![1, 2, 3],
+                    lamports,
+                    data,
                     owner: Pubkey::new_unique(),
                     executable: false,
                     rent_epoch: 0,
                 },
                 remote_slot: Default::default(),
             },
-        })
-        .into();
+            delivery_details: CommitDeliveryDetails::StateInArgs,
+        }
+    }
+
+    #[test]
+    fn test_args_task_instruction_serialization() {
+        setup();
+        let validator = Pubkey::new_unique();
+
+        // Test Commit variant (StateInArgs)
+        let commit_task: BaseTaskImpl =
+            make_commit_task(123, true, vec![1, 2, 3], 1000).into();
         assert_serializable(&commit_task.instruction(&validator));
 
         // Test Finalize variant
-        let finalize_task =
-            ArgsTask::new(ArgsTaskType::Finalize(FinalizeTask {
-                delegated_account: Pubkey::new_unique(),
-            }));
+        let finalize_task: BaseTaskImpl = FinalizeTask {
+            delegated_account: Pubkey::new_unique(),
+        }
+        .into();
         assert_serializable(&finalize_task.instruction(&validator));
 
         // Test Undelegate variant
-        let undelegate_task: ArgsTask =
-            ArgsTaskType::Undelegate(UndelegateTask {
-                delegated_account: Pubkey::new_unique(),
-                owner_program: Pubkey::new_unique(),
-                rent_reimbursement: Pubkey::new_unique(),
-            })
-            .into();
+        let undelegate_task: BaseTaskImpl = UndelegateTask {
+            delegated_account: Pubkey::new_unique(),
+            owner_program: Pubkey::new_unique(),
+            rent_reimbursement: Pubkey::new_unique(),
+        }
+        .into();
         assert_serializable(&undelegate_task.instruction(&validator));
 
         // Test BaseAction variant
-        let base_action: ArgsTask = ArgsTaskType::BaseAction(BaseActionTask {
+        let base_action: BaseTaskImpl = BaseActionTask {
             action: BaseAction {
                 destination_program: Pubkey::new_unique(),
                 escrow_authority: Pubkey::new_unique(),
@@ -492,62 +501,32 @@ mod serialization_safety_test {
                 },
                 compute_units: 10_000,
             },
-        })
+        }
         .into();
         assert_serializable(&base_action.instruction(&validator));
     }
 
-    // Test BufferTask variants
     #[test]
     fn test_buffer_task_instruction_serialization() {
         let validator = Pubkey::new_unique();
 
-        let buffer_task = BufferTask::new_preparation_required(
-            BufferTaskType::Commit(CommitTask {
-                commit_id: 456,
-                allow_undelegation: false,
-                committed_account: CommittedAccount {
-                    pubkey: Pubkey::new_unique(),
-                    account: Account {
-                        lamports: 2000,
-                        data: vec![7, 8, 9],
-                        owner: Pubkey::new_unique(),
-                        executable: false,
-                        rent_epoch: 0,
-                    },
-                    remote_slot: Default::default(),
-                },
-            }),
-        );
-        assert_serializable(&buffer_task.instruction(&validator));
+        let commit_task = make_commit_task(456, false, vec![7, 8, 9], 2000)
+            .try_optimize_tx_size()
+            .expect("should optimize to buffer");
+        assert!(commit_task.is_buffer());
+        assert_serializable(&commit_task.instruction(&validator));
     }
 
-    // Test preparation instructions
     #[test]
     fn test_preparation_instructions_serialization() {
         let authority = Pubkey::new_unique();
 
-        // Test BufferTask preparation
-        let buffer_task = BufferTask::new_preparation_required(
-            BufferTaskType::Commit(CommitTask {
-                commit_id: 789,
-                allow_undelegation: true,
-                committed_account: CommittedAccount {
-                    pubkey: Pubkey::new_unique(),
-                    account: Account {
-                        lamports: 3000,
-                        data: vec![0; 1024], // Larger data to test chunking
-                        owner: Pubkey::new_unique(),
-                        executable: false,
-                        rent_epoch: 0,
-                    },
-                    remote_slot: Default::default(),
-                },
-            }),
-        );
+        let commit_task = make_commit_task(789, true, vec![0; 1024], 3000)
+            .try_optimize_tx_size()
+            .expect("should optimize to buffer");
 
-        let PreparationState::Required(preparation_task) =
-            buffer_task.preparation_state()
+        let Some(CommitStage::Preparation(preparation_task)) =
+            commit_task.stage()
         else {
             panic!("invalid preparation state on creation!");
         };
@@ -560,7 +539,6 @@ mod serialization_safety_test {
         }
     }
 
-    // Helper function to assert serialization succeeds
     fn assert_serializable(ix: &Instruction) {
         bincode::serialize(ix).unwrap_or_else(|e| {
             panic!("Failed to serialize instruction {:?}: {}", ix, e)

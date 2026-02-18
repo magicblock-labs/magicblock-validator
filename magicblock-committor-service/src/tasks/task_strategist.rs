@@ -434,6 +434,7 @@ mod tests {
         },
         persist::IntentPersisterImpl,
         tasks::{
+            commit_task::CommitTaskV2,
             task_builder::{
                 TaskBuilderImpl, TasksBuilder, COMMIT_STATE_SIZE_THRESHOLD,
             },
@@ -441,7 +442,6 @@ mod tests {
         },
         test_utils,
     };
-    use crate::tasks::commit_task::CommitTaskV2;
 
     struct MockInfoFetcher;
 
