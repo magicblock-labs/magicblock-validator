@@ -147,14 +147,11 @@ impl TransactionUtils {
             .count() as u32;
 
         if dlp_task_count > 0 {
-            let dlp_program_budget =
-                DLP_PROGRAM_DATA_SIZE_CLASS.size_budget();
+            let dlp_program_budget = DLP_PROGRAM_DATA_SIZE_CLASS.size_budget();
             let deduction = dlp_task_count
                 .saturating_sub(1)
                 .saturating_mul(dlp_program_budget);
-            total_budget.saturating_sub(
-                deduction,
-            )
+            total_budget.saturating_sub(deduction)
         } else {
             total_budget
         }
