@@ -44,18 +44,17 @@ use program_flexi_counter::{
     state::{FlexiCounter, FAIL_UNDELEGATION_LABEL},
 };
 use solana_account::Account;
-use solana_instruction::error::InstructionError;
 use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_sdk::{
     commitment_config::CommitmentConfig,
     hash::Hash,
+    instruction::InstructionError,
     native_token::LAMPORTS_PER_SOL,
     rent::Rent,
     signature::{Keypair, Signer},
-    transaction::Transaction,
+    transaction::{Transaction, TransactionError},
 };
-use solana_transaction_error::TransactionError;
 
 use crate::{
     common::TestFixture,
@@ -173,10 +172,9 @@ async fn test_commit_id_error_parsing() {
             _
         )
     ));
-    assert!(
-        err.to_string()
-            .contains("Accounts committed with an invalid Commit id")
-    );
+    assert!(err
+        .to_string()
+        .contains("Accounts committed with an invalid Commit id"));
 }
 
 #[tokio::test]
@@ -296,11 +294,9 @@ async fn test_action_error_parsing() {
             _
         )
     ));
-    assert!(
-        execution_err
-            .to_string()
-            .contains("User supplied actions are ill-formed")
-    );
+    assert!(execution_err
+        .to_string()
+        .contains("User supplied actions are ill-formed"));
 }
 
 #[tokio::test]
@@ -364,11 +360,9 @@ async fn test_cpi_limits_error_parsing() {
             _
         )
     ));
-    assert!(
-        execution_err
-            .to_string()
-            .contains("Max instruction trace length exceeded")
-    );
+    assert!(execution_err
+        .to_string()
+        .contains("Max instruction trace length exceeded"));
 }
 
 #[tokio::test]
