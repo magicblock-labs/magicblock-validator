@@ -4,12 +4,14 @@ use helius_laserstream::grpc::{
     CommitmentLevel, SubscribeRequest, SubscribeRequestFilterAccounts,
     SubscribeRequestFilterSlots,
 };
-use helius_laserstream::LaserstreamError;
 use solana_pubkey::Pubkey;
 use tokio::time::Duration;
 
 use super::{LaserStreamWithHandle, StreamFactory};
-use crate::remote_account_provider::chain_laser_actor::StreamHandle;
+use crate::remote_account_provider::{
+    chain_laser_actor::StreamHandle, RemoteAccountProviderError,
+    RemoteAccountProviderResult,
+};
 
 /// Configuration for the generational stream manager.
 #[allow(unused)]
@@ -96,8 +98,9 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
     /// exhausted.
     async fn update_subscriptions(
         handle: &S,
+        task: &str,
         request: SubscribeRequest,
-    ) -> Result<(), LaserstreamError> {
+    ) -> RemoteAccountProviderResult<()> {
         const MAX_RETRIES: usize = 5;
         let mut retries = MAX_RETRIES;
         let initial_retries = retries;
@@ -115,7 +118,11 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
                             .await;
                         continue;
                     }
-                    return Err(err);
+                    return Err(RemoteAccountProviderError::GrpcSubscriptionUpdateFailed(
+                        task.to_string(),
+                        MAX_RETRIES,
+                        format!("{err} ({err:?}"),
+                    ));
                 }
             }
         }
@@ -135,7 +142,7 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
         &mut self,
         pubkeys: &[Pubkey],
         commitment: &CommitmentLevel,
-    ) {
+    ) -> RemoteAccountProviderResult<()> {
         // Filter out pubkeys already in subscriptions.
         let new_pks: Vec<Pubkey> = pubkeys
             .iter()
@@ -144,7 +151,7 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
             .collect();
 
         if new_pks.is_empty() {
-            return;
+            return Ok(());
         }
 
         for pk in &new_pks {
@@ -160,7 +167,12 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
                 &self.current_new_subs.iter().collect::<Vec<_>>(),
                 commitment,
             );
-            let _ = Self::update_subscriptions(&stream.handle, request).await;
+            Self::update_subscriptions(
+                &stream.handle,
+                "account_subscribe",
+                request,
+            )
+            .await?
         } else {
             self.current_new_stream = Some(self.create_account_stream(
                 &self.current_new_subs.iter().collect::<Vec<_>>(),
@@ -202,6 +214,8 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
                 self.optimize(commitment);
             }
         }
+
+        Ok(())
     }
 
     /// Unsubscribe the given pubkeys.
@@ -566,7 +580,7 @@ mod tests {
         n: usize,
     ) -> Vec<Pubkey> {
         let pks = make_pubkeys(n);
-        mgr.account_subscribe(&pks, &COMMITMENT).await;
+        mgr.account_subscribe(&pks, &COMMITMENT).await.unwrap();
         pks
     }
 
@@ -582,7 +596,7 @@ mod tests {
         while remaining > 0 {
             let n = remaining.min(batch);
             let pks = make_pubkeys(n);
-            mgr.account_subscribe(&pks, &COMMITMENT).await;
+            mgr.account_subscribe(&pks, &COMMITMENT).await.unwrap();
             all.extend(pks);
             remaining -= n;
         }
@@ -612,7 +626,7 @@ mod tests {
         let (mut mgr, factory) = create_manager();
         let pk = Pubkey::new_unique();
 
-        mgr.account_subscribe(&[pk], &COMMITMENT).await;
+        mgr.account_subscribe(&[pk], &COMMITMENT).await.unwrap();
 
         assert_subscriptions_eq(&mgr, &[pk]);
 
@@ -626,7 +640,7 @@ mod tests {
         let (mut mgr, factory) = create_manager();
         let pks = make_pubkeys(5);
 
-        mgr.account_subscribe(&pks, &COMMITMENT).await;
+        mgr.account_subscribe(&pks, &COMMITMENT).await.unwrap();
 
         assert_subscriptions_eq(&mgr, &pks);
 
@@ -640,10 +654,10 @@ mod tests {
         let (mut mgr, factory) = create_manager();
         let pk = Pubkey::new_unique();
 
-        mgr.account_subscribe(&[pk], &COMMITMENT).await;
+        mgr.account_subscribe(&[pk], &COMMITMENT).await.unwrap();
         let calls_after_first = factory.captured_requests().len();
 
-        mgr.account_subscribe(&[pk], &COMMITMENT).await;
+        mgr.account_subscribe(&[pk], &COMMITMENT).await.unwrap();
 
         assert_subscriptions_eq(&mgr, &[pk]);
         assert_eq!(factory.captured_requests().len(), calls_after_first);
@@ -654,9 +668,9 @@ mod tests {
         let (mut mgr, factory) = create_manager();
         let pks = make_pubkeys(3);
 
-        mgr.account_subscribe(&[pks[0]], &COMMITMENT).await;
-        mgr.account_subscribe(&[pks[1]], &COMMITMENT).await;
-        mgr.account_subscribe(&[pks[2]], &COMMITMENT).await;
+        mgr.account_subscribe(&[pks[0]], &COMMITMENT).await.unwrap();
+        mgr.account_subscribe(&[pks[1]], &COMMITMENT).await.unwrap();
+        mgr.account_subscribe(&[pks[2]], &COMMITMENT).await.unwrap();
 
         assert_subscriptions_eq(&mgr, &pks);
 
@@ -702,12 +716,14 @@ mod tests {
         let (mut mgr, factory) = create_manager();
         // Subscribe MAX_NEW (5) pubkeys first.
         let first_five = make_pubkeys(5);
-        mgr.account_subscribe(&first_five, &COMMITMENT).await;
+        mgr.account_subscribe(&first_five, &COMMITMENT)
+            .await
+            .unwrap();
         assert_eq!(mgr.unoptimized_old_stream_count(), 0);
 
         // Subscribe the 6th pubkey → triggers promotion.
         let sixth = Pubkey::new_unique();
-        mgr.account_subscribe(&[sixth], &COMMITMENT).await;
+        mgr.account_subscribe(&[sixth], &COMMITMENT).await.unwrap();
 
         assert_eq!(mgr.unoptimized_old_stream_count(), 1);
         // A new current-new stream was created for the 6th pubkey.
@@ -880,7 +896,7 @@ mod tests {
 
         // Subscribe a new pubkey after optimization.
         let new_pk = Pubkey::new_unique();
-        mgr.account_subscribe(&[new_pk], &COMMITMENT).await;
+        mgr.account_subscribe(&[new_pk], &COMMITMENT).await.unwrap();
 
         assert!(mgr.subscriptions().contains(&new_pk));
         assert!(mgr.current_new_subs().contains(&new_pk));
@@ -917,7 +933,7 @@ mod tests {
     async fn test_unsubscribe_removes_from_subscriptions_set() {
         let (mut mgr, _factory) = create_manager();
         let pks = make_pubkeys(3);
-        mgr.account_subscribe(&pks, &COMMITMENT).await;
+        mgr.account_subscribe(&pks, &COMMITMENT).await.unwrap();
 
         mgr.account_unsubscribe(&[pks[1]]);
 
@@ -938,7 +954,7 @@ mod tests {
     async fn test_unsubscribe_already_unsubscribed_pubkey() {
         let (mut mgr, _factory) = create_manager();
         let pk = Pubkey::new_unique();
-        mgr.account_subscribe(&[pk], &COMMITMENT).await;
+        mgr.account_subscribe(&[pk], &COMMITMENT).await.unwrap();
 
         mgr.account_unsubscribe(&[pk]);
         mgr.account_unsubscribe(&[pk]);
@@ -950,7 +966,7 @@ mod tests {
     async fn test_unsubscribe_does_not_modify_streams() {
         let (mut mgr, factory) = create_manager();
         let pks = make_pubkeys(4);
-        mgr.account_subscribe(&pks, &COMMITMENT).await;
+        mgr.account_subscribe(&pks, &COMMITMENT).await.unwrap();
         let calls_before = factory.captured_requests().len();
 
         mgr.account_unsubscribe(&pks[0..2]);
@@ -980,7 +996,7 @@ mod tests {
     async fn test_unsubscribe_batch() {
         let (mut mgr, factory) = create_manager();
         let pks = make_pubkeys(5);
-        mgr.account_subscribe(&pks, &COMMITMENT).await;
+        mgr.account_subscribe(&pks, &COMMITMENT).await.unwrap();
         let calls_before = factory.captured_requests().len();
 
         mgr.account_unsubscribe(&[pks[0], pks[2], pks[4]]);
@@ -997,7 +1013,7 @@ mod tests {
     async fn test_is_subscribed_returns_true_for_active() {
         let (mut mgr, _factory) = create_manager();
         let pk = Pubkey::new_unique();
-        mgr.account_subscribe(&[pk], &COMMITMENT).await;
+        mgr.account_subscribe(&[pk], &COMMITMENT).await.unwrap();
 
         assert!(mgr.is_subscribed(&pk));
     }
@@ -1006,7 +1022,7 @@ mod tests {
     async fn test_is_subscribed_returns_false_after_unsubscribe() {
         let (mut mgr, _factory) = create_manager();
         let pk = Pubkey::new_unique();
-        mgr.account_subscribe(&[pk], &COMMITMENT).await;
+        mgr.account_subscribe(&[pk], &COMMITMENT).await.unwrap();
         mgr.account_unsubscribe(&[pk]);
 
         assert!(!mgr.is_subscribed(&pk));
@@ -1160,9 +1176,9 @@ mod tests {
         let (mut mgr, _factory) = create_manager();
         let pk = Pubkey::new_unique();
 
-        mgr.account_subscribe(&[pk], &COMMITMENT).await;
+        mgr.account_subscribe(&[pk], &COMMITMENT).await.unwrap();
         mgr.account_unsubscribe(&[pk]);
-        mgr.account_subscribe(&[pk], &COMMITMENT).await;
+        mgr.account_subscribe(&[pk], &COMMITMENT).await.unwrap();
 
         assert!(mgr.subscriptions().contains(&pk));
         assert!(mgr.current_new_subs().contains(&pk));
@@ -1178,7 +1194,7 @@ mod tests {
         let commitment = CommitmentLevel::Finalized;
         let pk = Pubkey::new_unique();
 
-        mgr.account_subscribe(&[pk], &commitment).await;
+        mgr.account_subscribe(&[pk], &commitment).await.unwrap();
 
         let reqs = factory.captured_requests();
         assert_eq!(reqs.len(), 1);
