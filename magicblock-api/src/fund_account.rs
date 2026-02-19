@@ -70,15 +70,24 @@ pub(crate) fn funded_faucet(
 }
 
 pub(crate) fn fund_magic_context(accountsdb: &AccountsDb) {
-    fund_account_with_data(
-        accountsdb,
-        &magic_program::MAGIC_CONTEXT_PUBKEY,
-        u64::MAX,
-        MagicContext::SIZE,
-    );
-    let mut magic_context = accountsdb
-        .get_account(&magic_program::MAGIC_CONTEXT_PUBKEY)
-        .unwrap();
+    const CONTEXT_LAMPORTS: u64 = u64::MAX;
+
+    let mut magic_context = if let Some(mut acc) =
+        accountsdb.get_account(&magic_program::MAGIC_CONTEXT_PUBKEY)
+    {
+        // If account exists it was created with correct size
+        // Account data shall be preserved across restarts
+        acc.set_lamports(CONTEXT_LAMPORTS);
+        acc
+    } else {
+        // Create MagicContext on a fresh start
+        // Sets data to [0; MagicContext::SIZE]
+        AccountSharedData::new(
+            CONTEXT_LAMPORTS,
+            MagicContext::SIZE,
+            &Default::default(),
+        )
+    };
     magic_context.set_delegated(true);
     let _ = accountsdb
         .insert_account(&magic_program::MAGIC_CONTEXT_PUBKEY, &magic_context);
