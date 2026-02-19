@@ -184,15 +184,16 @@ declare_process_instruction!(
                 transaction_context,
                 authority,
             ),
-            FinalizeV1ProgramFromBuffer { remote_slot, authority } => {
-                process_finalize_v1_program_from_buffer(
-                    &signers,
-                    invoke_context,
-                    transaction_context,
-                    remote_slot,
-                    authority,
-                )
-            }
+            FinalizeV1ProgramFromBuffer {
+                remote_slot,
+                authority,
+            } => process_finalize_v1_program_from_buffer(
+                &signers,
+                invoke_context,
+                transaction_context,
+                remote_slot,
+                authority,
+            ),
         }
     }
 );
