@@ -92,9 +92,10 @@ pub(crate) fn process_finalize_v1_program_from_buffer(
     );
 
     // Build V3 program_data account: ProgramData header + ELF
+    let deploy_slot = slot.saturating_sub(5); // Bypass cooldown
     let program_data_content = {
         let state = UpgradeableLoaderState::ProgramData {
-            slot,
+            slot: deploy_slot,
             upgrade_authority_address: Some(authority),
         };
         let mut data = bincode::serialize(&state)
@@ -150,9 +151,10 @@ pub(crate) fn process_finalize_v1_program_from_buffer(
     {
         let mut buf = buf_acc.borrow_mut();
         buf.set_lamports(0);
-        buf.set_data_from_slice(&[]);
-        buf.set_executable(false);
-        buf.set_owner(Pubkey::default());
+        buf.resize(0, 0);
+        // this hack allows us to close the account and remove it from accountsdb
+        buf.set_ephemeral(true);
+        buf.set_delegated(false);
     }
 
     adjust_authority_lamports(auth_acc, lamports_delta)?;

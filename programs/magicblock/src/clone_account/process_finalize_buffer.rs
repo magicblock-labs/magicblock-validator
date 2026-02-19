@@ -77,7 +77,7 @@ pub(crate) fn process_finalize_program_from_buffer(
     );
 
     // Build LoaderV4 account data: header + ELF
-    let deploy_slot = slot.saturating_sub(5).max(1); // Bypass cooldown
+    let deploy_slot = slot.saturating_sub(5); // Bypass cooldown
     let state = LoaderV4State {
         slot: deploy_slot,
         authority_address_or_next_version: validator_authority_id(),
@@ -106,9 +106,10 @@ pub(crate) fn process_finalize_program_from_buffer(
     {
         let mut buf = buf_acc.borrow_mut();
         buf.set_lamports(0);
-        buf.set_data_from_slice(&[]);
-        buf.set_executable(false);
-        buf.set_owner(Pubkey::default());
+        buf.resize(0, 0);
+        // this hack allows us to close the account and remove it from accountsdb
+        buf.set_ephemeral(true);
+        buf.set_delegated(false);
     }
 
     adjust_authority_lamports(auth_acc, lamports_delta)?;
