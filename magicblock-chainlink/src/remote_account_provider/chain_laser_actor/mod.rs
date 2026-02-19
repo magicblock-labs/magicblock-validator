@@ -17,6 +17,7 @@ pub use self::{
 pub type SharedSubscriptions = Arc<RwLock<HashSet<Pubkey>>>;
 
 mod actor;
+#[cfg(test)]
 mod mock;
 mod stream_manager;
 
@@ -36,7 +37,6 @@ pub trait StreamFactory<S: StreamHandle>: Send + Sync + 'static {
 /// This is needed since we cannot create the helius one since
 /// [helius_laserstream::StreamHandle::write_tx] is private and there is no constructor.
 #[async_trait]
-#[allow(dead_code)]
 pub trait StreamHandle {
     /// Send a new subscription request to update the active subscription.
     async fn write(
@@ -45,13 +45,11 @@ pub trait StreamHandle {
     ) -> Result<(), LaserstreamError>;
 }
 
-#[allow(dead_code)]
 pub struct LaserStreamWithHandle<S: StreamHandle> {
     pub(crate) stream: LaserStream,
     pub(crate) handle: S,
 }
 
-#[allow(dead_code)]
 pub struct StreamHandleImpl {
     pub handle: HeliusStreamHandle,
 }

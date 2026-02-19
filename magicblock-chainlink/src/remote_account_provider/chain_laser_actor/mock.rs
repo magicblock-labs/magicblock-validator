@@ -16,7 +16,6 @@ use crate::remote_account_provider::chain_laser_actor::{
 /// A test mock that captures subscription requests and allows driving
 /// streams programmatically.
 #[derive(Clone)]
-#[allow(dead_code)]
 pub struct MockStreamFactory {
     /// Every `SubscribeRequest` passed to `subscribe()` is recorded
     /// here so tests can assert on filter contents, commitment levels,
@@ -35,7 +34,6 @@ pub struct MockStreamFactory {
     stream_senders: Arc<Mutex<Vec<Arc<mpsc::UnboundedSender<LaserResult>>>>>,
 }
 
-#[allow(dead_code)]
 impl MockStreamFactory {
     /// Create a new mock stream factory
     pub fn new() -> Self {
@@ -111,7 +109,6 @@ impl Default for MockStreamFactory {
 /// Mock handle that records write requests and drains them into the
 /// shared `handle_requests` vec on the factory.
 #[derive(Clone)]
-#[allow(dead_code)]
 pub struct MockStreamHandle {
     handle_requests: Arc<Mutex<Vec<SubscribeRequest>>>,
 }
