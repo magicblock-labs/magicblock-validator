@@ -180,6 +180,7 @@ async fn test_prepare_commit_tx_with_base_actions() {
     let base_action = BaseAction {
         compute_units: 30_000,
         destination_program: system_program::id(),
+        source_program: None,
         escrow_authority: fixture.authority.pubkey(),
         data_per_program: ProgramArgs {
             escrow_index: 0,

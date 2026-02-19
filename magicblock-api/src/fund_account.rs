@@ -6,6 +6,7 @@ use magicblock_program::MagicContext;
 use solana_account::{AccountSharedData, WritableAccount};
 use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
+use solana_rent::Rent;
 use solana_signer::Signer;
 
 use crate::{
@@ -81,4 +82,16 @@ pub(crate) fn fund_magic_context(accountsdb: &AccountsDb) {
     magic_context.set_delegated(true);
     let _ = accountsdb
         .insert_account(&magic_program::MAGIC_CONTEXT_PUBKEY, &magic_context);
+}
+
+pub(crate) fn fund_ephemeral_vault(accountsdb: &AccountsDb) {
+    let lamports = Rent::default().minimum_balance(0);
+    fund_account(accountsdb, &magic_program::EPHEMERAL_VAULT_PUBKEY, lamports);
+    let mut vault = accountsdb
+        .get_account(&magic_program::EPHEMERAL_VAULT_PUBKEY)
+        .expect("vault should have been created");
+    vault.set_ephemeral(true);
+    vault.set_owner(magic_program::ID);
+    let _ = accountsdb
+        .insert_account(&magic_program::EPHEMERAL_VAULT_PUBKEY, &vault);
 }

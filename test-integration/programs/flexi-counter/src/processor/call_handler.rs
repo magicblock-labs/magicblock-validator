@@ -15,7 +15,7 @@ pub fn process_commit_action_handler(
 ) -> ProgramResult {
     msg!("CommitActionHandler");
 
-    let [delegated_account, destination_account, system_program, _, escrow_account] =
+    let [delegated_account, destination_account, system_program, source_program, _, escrow_account] =
         accounts
     else {
         return Err(ProgramError::NotEnoughAccountKeys);
@@ -30,6 +30,12 @@ pub fn process_commit_action_handler(
     if delegated_account.owner != &ephemeral_rollups_sdk::id() {
         msg!("account not owned by ER (dlp)");
         return Err(ProgramError::InvalidAccountOwner);
+    }
+
+    // Validated caller program
+    if source_program.key != &crate::id() {
+        msg!("invalid source");
+        return Err(ProgramError::IncorrectProgramId);
     }
 
     // Transfer from escrow to destination.
@@ -50,7 +56,7 @@ pub fn process_undelegate_action_handler(
 ) -> ProgramResult {
     msg!("UndelegateActionHandler");
 
-    let [undelegated_counter, destination_account, system_program, _, escrow_account] =
+    let [undelegated_counter, destination_account, system_program, source_program, _, escrow_account] =
         accounts
     else {
         return Err(ProgramError::NotEnoughAccountKeys);
@@ -65,6 +71,12 @@ pub fn process_undelegate_action_handler(
     if undelegated_counter.owner == &ephemeral_rollups_sdk::id() {
         msg!("account still owned by ER (dlp)!");
         return Err(ProgramError::InvalidAccountOwner);
+    }
+
+    // Validated caller program
+    if source_program.key != &crate::id() {
+        msg!("invalid source");
+        return Err(ProgramError::IncorrectProgramId);
     }
 
     // Update counter

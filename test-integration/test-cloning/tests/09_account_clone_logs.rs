@@ -142,7 +142,7 @@ fn test_account_clone_logs_confined_delegation() {
         .expect("failed to airdrop account");
 
     let (delegate_sig, confirmed) = ctx
-        .delegate_account_to_validator(
+        .delegate_account_to_any_validator(
             &payer_chain,
             &account_kp,
             Some(solana_sdk::system_program::id()),

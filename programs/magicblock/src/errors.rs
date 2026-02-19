@@ -47,4 +47,12 @@ pub enum MagicBlockProgramError {
 
     #[error("Encountered an error when persisting account modification data.")]
     FailedToPersistAccountModData,
+
+    #[error("The account is delegated and not currently undelegating.")]
+    AccountIsDelegatedAndNotUndelegating,
+
+    #[error(
+        "Remote slot updates cannot be older than the current remote slot."
+    )]
+    IncomingRemoteSlotIsOlderThanCurrentRemoteSlot,
 }

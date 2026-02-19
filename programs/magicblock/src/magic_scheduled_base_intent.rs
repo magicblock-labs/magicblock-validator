@@ -37,6 +37,10 @@ pub struct ConstructionContext<'a, 'ic> {
     signers: &'a HashSet<Pubkey>,
     pub transaction_context: &'a TransactionContext,
     pub invoke_context: &'a mut InvokeContext<'ic>,
+    /// When `true`, actions use `call_handler_v2` which passes `source_program`
+    /// to the delegation program. Legacy `ScheduleBaseIntent` sets this to
+    /// `false` for backward compatibility with old deployed contracts.
+    pub secure: bool,
 }
 
 impl<'a, 'ic> ConstructionContext<'a, 'ic> {
@@ -45,12 +49,14 @@ impl<'a, 'ic> ConstructionContext<'a, 'ic> {
         signers: &'a HashSet<Pubkey>,
         transaction_context: &'a TransactionContext,
         invoke_context: &'a mut InvokeContext<'ic>,
+        secure: bool,
     ) -> Self {
         Self {
             parent_program_id,
             signers,
             transaction_context,
             invoke_context,
+            secure,
         }
     }
 }
@@ -537,6 +543,7 @@ impl From<&ActionArgs> for ProgramArgs {
 pub struct BaseAction {
     pub compute_units: u32,
     pub destination_program: Pubkey,
+    pub source_program: Option<Pubkey>,
     pub escrow_authority: Pubkey,
     pub data_per_program: ProgramArgs,
     pub account_metas_per_program: Vec<ShortAccountMeta>,
@@ -565,9 +572,30 @@ impl BaseAction {
             return Err(InstructionError::MissingRequiredSignature);
         }
 
+        let Some(parent_program_id) = context.parent_program_id else {
+            ic_msg!(
+                context.invoke_context,
+                "BaseAction: actions can only be scheduled via CPI",
+            );
+            return Err(InstructionError::UnsupportedProgramId);
+        };
+
+        let source_program = if context.secure {
+            Some(parent_program_id)
+        } else if args.destination_program == parent_program_id {
+            None
+        } else {
+            ic_msg!(
+                context.invoke_context,
+                "BaseAction: v1 can act only within same program",
+            );
+            return Err(InstructionError::UnsupportedProgramId);
+        };
+
         Ok(BaseAction {
             compute_units: args.compute_units,
             destination_program: args.destination_program,
+            source_program,
             escrow_authority: *authority_pubkey,
             data_per_program: args.args.into(),
             account_metas_per_program: args.accounts,

@@ -1,5 +1,9 @@
 use std::{
-    path::Path, process::Child, str::FromStr, thread::sleep, time::Duration,
+    path::Path,
+    process::Child,
+    str::FromStr,
+    thread::sleep,
+    time::{Duration, Instant},
 };
 
 use cleanass::{assert, assert_eq};
@@ -527,6 +531,50 @@ pub fn wait_for_cloned_accounts_hydration() {
     // NOTE: account hydration runs in the background _after_ the validator starts up
     // thus we need to wait for that to complete before we can send this transaction
     sleep(Duration::from_secs(5));
+}
+
+pub fn wait_for_counter_ephem_state(
+    ctx: &IntegrationTestContext,
+    validator: &mut Child,
+    payer: &Pubkey,
+    expected: &FlexiCounter,
+) {
+    const TIMEOUT: Duration = Duration::from_secs(45);
+    const POLL_INTERVAL: Duration = Duration::from_millis(200);
+
+    let ephem_client = expect!(ctx.try_ephem_client(), validator);
+    let (counter_pda, _) = FlexiCounter::pda(payer);
+    let started = Instant::now();
+    let mut last_observed: Option<FlexiCounter> = None;
+
+    loop {
+        let observed = ephem_client
+            .get_account(&counter_pda)
+            .ok()
+            .and_then(|account| FlexiCounter::try_decode(&account.data).ok());
+
+        if let Some(counter) = observed {
+            if counter == *expected {
+                break;
+            }
+            last_observed = Some(counter);
+        }
+
+        if started.elapsed() >= TIMEOUT {
+            cleanup(validator);
+            panic!(
+                "Timed out waiting for counter {} to reach expected state. expected={:?}, last_observed={:?}",
+                counter_pda, expected, last_observed
+            );
+        }
+
+        sleep(POLL_INTERVAL);
+    }
+
+    // Account state can be readable before tx processing has a fresh recent
+    // blockhash. Advancing one slot avoids transient BlockhashNotFound on the
+    // first post-restore transaction.
+    expect!(ctx.wait_for_next_slot_ephem(), validator);
 }
 
 /// Waits for the next slot after the snapshot frequency
