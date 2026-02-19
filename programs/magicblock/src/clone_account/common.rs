@@ -126,7 +126,7 @@ pub fn validate_remote_slot(
         return Ok(());
     };
     let current = account.borrow().remote_slot();
-    if incoming <= current {
+    if incoming < current {
         ic_msg!(
             invoke_context,
             "Account {} incoming remote_slot {} is older than current {}; rejected",

@@ -797,7 +797,7 @@ mod tests {
     }
 
     #[test]
-    fn test_mod_remote_slot_rejects_equal_update() {
+    fn test_mod_remote_slot_allows_equal_update() {
         init_logger!();
 
         let mod_key = Pubkey::new_unique();
@@ -833,11 +833,12 @@ mod tests {
             ix.data.as_slice(),
             transaction_accounts,
             ix.accounts,
-            Err(MagicBlockProgramError::OutOfOrderUpdate.into()),
+            Ok(()),
         );
 
-        let account = accounts.remove(1); // [authority, account]
-        assert_eq!(account.lamports(), 100);
+        accounts.remove(0); // authority
+        let account = accounts.remove(0);
+        assert_eq!(account.lamports(), 200);
         assert_eq!(account.remote_slot(), 100);
     }
 }
