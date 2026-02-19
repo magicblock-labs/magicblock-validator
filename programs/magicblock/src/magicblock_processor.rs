@@ -170,12 +170,12 @@ declare_process_instruction!(
                 transaction_context,
                 pubkey,
             ),
-            FinalizeProgramFromBuffer { slot } => {
+            FinalizeProgramFromBuffer { remote_slot } => {
                 process_finalize_program_from_buffer(
                     &signers,
                     invoke_context,
                     transaction_context,
-                    slot,
+                    remote_slot,
                 )
             }
             SetProgramAuthority { authority } => process_set_program_authority(
@@ -184,12 +184,12 @@ declare_process_instruction!(
                 transaction_context,
                 authority,
             ),
-            FinalizeV1ProgramFromBuffer { slot, authority } => {
+            FinalizeV1ProgramFromBuffer { remote_slot, authority } => {
                 process_finalize_v1_program_from_buffer(
                     &signers,
                     invoke_context,
                     transaction_context,
-                    slot,
+                    remote_slot,
                     authority,
                 )
             }

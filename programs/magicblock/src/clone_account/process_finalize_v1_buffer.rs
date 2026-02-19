@@ -15,7 +15,10 @@ use solana_sdk_ids::bpf_loader_upgradeable;
 use solana_sysvar::rent::Rent;
 use solana_transaction_context::TransactionContext;
 
-use super::{adjust_authority_lamports, validate_authority};
+use super::{
+    adjust_authority_lamports, close_buffer_account, get_deploy_slot,
+    validate_authority,
+};
 
 /// Finalizes a V1 program from a buffer account, converting to V3 (upgradeable loader) format.
 ///
@@ -52,7 +55,7 @@ pub(crate) fn process_finalize_v1_program_from_buffer(
     signers: &HashSet<Pubkey>,
     invoke_context: &InvokeContext,
     transaction_context: &TransactionContext,
-    slot: u64,
+    remote_slot: u64,
     authority: Pubkey,
 ) -> Result<(), InstructionError> {
     validate_authority(signers, invoke_context)?;
@@ -71,28 +74,23 @@ pub(crate) fn process_finalize_v1_program_from_buffer(
         ctx.get_index_of_instruction_account_in_transaction(3)?,
     )?;
 
-    let prog_key = *transaction_context.get_key_of_account_at_index(
-        ctx.get_index_of_instruction_account_in_transaction(1)?,
-    )?;
     let data_key = *transaction_context.get_key_of_account_at_index(
         ctx.get_index_of_instruction_account_in_transaction(2)?,
     )?;
-    let buf_key = *transaction_context.get_key_of_account_at_index(
-        ctx.get_index_of_instruction_account_in_transaction(3)?,
-    )?;
 
     let elf_data = buf_acc.borrow().data().to_vec();
+
+    let deploy_slot = get_deploy_slot(invoke_context);
+
     ic_msg!(
         invoke_context,
-        "FinalizeV1: prog={} data={} buf={} len={}",
-        prog_key,
-        data_key,
-        buf_key,
-        elf_data.len()
+        "FinalizeV1: elf_len={} remote_slot={} deploy_slot={}",
+        elf_data.len(),
+        remote_slot,
+        deploy_slot
     );
 
     // Build V3 program_data account: ProgramData header + ELF
-    let deploy_slot = slot.saturating_sub(5); // Bypass cooldown
     let program_data_content = {
         let state = UpgradeableLoaderState::ProgramData {
             slot: deploy_slot,
@@ -132,7 +130,7 @@ pub(crate) fn process_finalize_v1_program_from_buffer(
         acc.set_owner(bpf_loader_upgradeable::id());
         acc.set_executable(false);
         acc.set_data_from_slice(&program_data_content);
-        acc.set_remote_slot(slot);
+        acc.set_remote_slot(remote_slot);
         acc.set_undelegating(false);
     }
 
@@ -143,27 +141,13 @@ pub(crate) fn process_finalize_v1_program_from_buffer(
         acc.set_owner(bpf_loader_upgradeable::id());
         acc.set_executable(true);
         acc.set_data_from_slice(&program_content);
-        acc.set_remote_slot(slot);
+        acc.set_remote_slot(remote_slot);
         acc.set_undelegating(false);
     }
 
     // Close buffer account
-    {
-        let mut buf = buf_acc.borrow_mut();
-        buf.set_lamports(0);
-        buf.resize(0, 0);
-        // this hack allows us to close the account and remove it from accountsdb
-        buf.set_ephemeral(true);
-        buf.set_delegated(false);
-    }
+    close_buffer_account(buf_acc);
 
     adjust_authority_lamports(auth_acc, lamports_delta)?;
-    ic_msg!(
-        invoke_context,
-        "FinalizeV1: created {} and {}, closed {}",
-        prog_key,
-        data_key,
-        buf_key
-    );
     Ok(())
 }

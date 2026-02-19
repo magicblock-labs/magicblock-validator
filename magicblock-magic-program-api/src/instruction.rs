@@ -252,7 +252,7 @@ pub enum MagicBlockInstruction {
     /// - **0.** `[SIGNER]` Validator Authority
     /// - **1.** `[WRITE]` Program account
     /// - **2.** `[WRITE]` Buffer account (closed after)
-    FinalizeProgramFromBuffer { slot: u64 },
+    FinalizeProgramFromBuffer { remote_slot: u64 },
 
     /// Finalize V1 program deployment from a buffer account.
     /// V1 programs are converted to V3 (upgradeable loader) format.
@@ -266,7 +266,7 @@ pub enum MagicBlockInstruction {
     /// - **1.** `[WRITE]` Program account
     /// - **2.** `[WRITE]` Program data account
     /// - **3.** `[WRITE]` Buffer account (closed after)
-    FinalizeV1ProgramFromBuffer { slot: u64, authority: Pubkey },
+    FinalizeV1ProgramFromBuffer { remote_slot: u64, authority: Pubkey },
 
     /// Update the authority in a LoaderV4 program header.
     /// Used after Deploy to set the final chain authority.

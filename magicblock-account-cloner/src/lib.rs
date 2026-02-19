@@ -29,7 +29,6 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use magicblock_accounts_db::AccountsDb;
 use magicblock_chainlink::{
     cloner::{
         errors::{ClonerError, ClonerResult},
@@ -79,7 +78,6 @@ pub struct ChainlinkCloner {
     changeset_committor: Option<Arc<CommittorService>>,
     config: ChainLinkConfig,
     tx_scheduler: TransactionSchedulerHandle,
-    accounts_db: Arc<AccountsDb>,
     block: LatestBlock,
 }
 
@@ -88,14 +86,12 @@ impl ChainlinkCloner {
         changeset_committor: Option<Arc<CommittorService>>,
         config: ChainLinkConfig,
         tx_scheduler: TransactionSchedulerHandle,
-        accounts_db: Arc<AccountsDb>,
         block: LatestBlock,
     ) -> Self {
         Self {
             changeset_committor,
             config,
             tx_scheduler,
-            accounts_db,
             block,
         }
     }
@@ -187,11 +183,11 @@ impl ChainlinkCloner {
     fn finalize_program_ix(
         program: Pubkey,
         buffer: Pubkey,
-        slot: u64,
+        remote_slot: u64,
     ) -> Instruction {
         Instruction::new_with_bincode(
             magicblock_program::ID,
-            &MagicBlockInstruction::FinalizeProgramFromBuffer { slot },
+            &MagicBlockInstruction::FinalizeProgramFromBuffer { remote_slot },
             vec![
                 AccountMeta::new_readonly(validator_authority_id(), true),
                 AccountMeta::new(program, false),
@@ -347,6 +343,47 @@ impl ChainlinkCloner {
         }
     }
 
+    /// Helper to build buffer fields for program cloning.
+    fn buffer_fields(data_len: usize) -> AccountCloneFields {
+        let lamports = Rent::default().minimum_balance(data_len);
+        AccountCloneFields {
+            lamports,
+            owner: solana_sdk_ids::system_program::id(),
+            ..Default::default()
+        }
+    }
+
+    /// Helper to build program transactions (shared between V1 and V4).
+    fn build_program_txs_from_finalize(
+        &self,
+        buffer_pubkey: Pubkey,
+        program_data: Vec<u8>,
+        finalize_ixs: Vec<Instruction>,
+        blockhash: Hash,
+    ) -> Vec<Transaction> {
+        let buffer_fields = Self::buffer_fields(program_data.len());
+
+        if program_data.len() <= MAX_INLINE_DATA_SIZE {
+            // Small: single transaction with clone + finalize
+            let mut ixs = vec![Self::clone_ix(
+                buffer_pubkey,
+                program_data,
+                buffer_fields,
+            )];
+            ixs.extend(finalize_ixs);
+            vec![self.sign_tx(&ixs, blockhash)]
+        } else {
+            // Large: multi-transaction flow
+            self.build_large_program_txs(
+                buffer_pubkey,
+                program_data,
+                buffer_fields,
+                finalize_ixs,
+                blockhash,
+            )
+        }
+    }
+
     /// V1 programs are converted to V3 (upgradeable loader) format.
     /// Supports programs of any size via multi-transaction cloning.
     fn build_v1_program_txs(
@@ -356,24 +393,16 @@ impl ChainlinkCloner {
     ) -> ClonerResult<Option<Vec<Transaction>>> {
         let program_id = program.program_id;
         let chain_authority = program.authority;
+        let remote_slot = program.remote_slot;
 
         debug!(program_id = %program_id, "Loading V1 program as V3 format");
 
-        let slot = self.accounts_db.slot();
         let elf_data = program.program_data;
         let (buffer_pubkey, _) = derive_buffer_pubkey(&program_id);
         let (program_data_addr, _) = Pubkey::find_program_address(
             &[program_id.as_ref()],
             &bpf_loader_upgradeable::id(),
         );
-
-        // Buffer is a dummy account owned by system program, just holds raw ELF data
-        let lamports = Rent::default().minimum_balance(elf_data.len());
-        let buffer_fields = AccountCloneFields {
-            lamports,
-            owner: solana_sdk_ids::system_program::id(),
-            ..Default::default()
-        };
 
         // Finalization instruction
         // Must wrap in disable/enable executable check since finalize sets executable=true
@@ -385,7 +414,7 @@ impl ChainlinkCloner {
                 program_id,
                 program_data_addr,
                 buffer_pubkey,
-                slot,
+                remote_slot,
                 chain_authority,
             ),
             InstructionUtils::enable_executable_check_instruction(
@@ -393,25 +422,12 @@ impl ChainlinkCloner {
             ),
         ];
 
-        // Build transactions based on ELF size
-        let txs = if elf_data.len() <= MAX_INLINE_DATA_SIZE {
-            // Small: single transaction with clone + finalize
-            let ixs =
-                vec![Self::clone_ix(buffer_pubkey, elf_data, buffer_fields)]
-                    .into_iter()
-                    .chain(finalize_ixs)
-                    .collect::<Vec<_>>();
-            vec![self.sign_tx(&ixs, blockhash)]
-        } else {
-            // Large: multi-transaction flow
-            self.build_large_program_txs(
-                buffer_pubkey,
-                elf_data,
-                buffer_fields,
-                finalize_ixs,
-                blockhash,
-            )
-        };
+        let txs = self.build_program_txs_from_finalize(
+            buffer_pubkey,
+            elf_data,
+            finalize_ixs,
+            blockhash,
+        );
 
         Ok(Some(txs))
     }
@@ -421,13 +437,13 @@ impl ChainlinkCloner {
         program: Pubkey,
         program_data: Pubkey,
         buffer: Pubkey,
-        slot: u64,
+        remote_slot: u64,
         authority: Pubkey,
     ) -> Instruction {
         Instruction::new_with_bincode(
             magicblock_program::ID,
             &MagicBlockInstruction::FinalizeV1ProgramFromBuffer {
-                slot,
+                remote_slot,
                 authority,
             },
             vec![
@@ -448,6 +464,7 @@ impl ChainlinkCloner {
     ) -> ClonerResult<Option<Vec<Transaction>>> {
         let program_id = program.program_id;
         let chain_authority = program.authority;
+        let remote_slot = program.remote_slot;
 
         // Skip retracted programs
         if matches!(program.loader_status, LoaderV4Status::Retracted) {
@@ -457,17 +474,8 @@ impl ChainlinkCloner {
 
         debug!(program_id = %program_id, "Deploying program with V4 loader");
 
-        let slot = self.accounts_db.slot();
         let program_data = program.program_data;
         let (buffer_pubkey, _) = derive_buffer_pubkey(&program_id);
-
-        // Buffer is a dummy account owned by system program, just holds raw ELF data
-        let lamports = Rent::default().minimum_balance(program_data.len());
-        let buffer_fields = AccountCloneFields {
-            lamports,
-            owner: solana_sdk_ids::system_program::id(),
-            ..Default::default()
-        };
 
         let deploy_ix = Instruction {
             program_id: loader_v4::id(),
@@ -475,8 +483,7 @@ impl ChainlinkCloner {
                 AccountMeta::new(program_id, false),
                 AccountMeta::new_readonly(validator_authority_id(), true),
             ],
-            data: bincode::serialize(&LoaderV4Instruction::Deploy)
-                .map_err(|e| ClonerError::SerializationError(e.to_string()))?,
+            data: bincode::serialize(&LoaderV4Instruction::Deploy)?,
         };
 
         // Finalization instructions (always in last tx)
@@ -485,7 +492,7 @@ impl ChainlinkCloner {
             InstructionUtils::disable_executable_check_instruction(
                 &validator_authority_id(),
             ),
-            Self::finalize_program_ix(program_id, buffer_pubkey, slot),
+            Self::finalize_program_ix(program_id, buffer_pubkey, remote_slot),
             deploy_ix,
             Self::set_authority_ix(program_id, chain_authority),
             InstructionUtils::enable_executable_check_instruction(
@@ -493,28 +500,12 @@ impl ChainlinkCloner {
             ),
         ];
 
-        // Build transactions based on program_data size
-        let txs = if program_data.len() <= MAX_INLINE_DATA_SIZE {
-            // Small: single transaction
-            let ixs = vec![Self::clone_ix(
-                buffer_pubkey,
-                program_data,
-                buffer_fields,
-            )]
-            .into_iter()
-            .chain(finalize_ixs)
-            .collect::<Vec<_>>();
-            vec![self.sign_tx(&ixs, blockhash)]
-        } else {
-            // Large: multi-transaction flow
-            self.build_large_program_txs(
-                buffer_pubkey,
-                program_data,
-                buffer_fields,
-                finalize_ixs,
-                blockhash,
-            )
-        };
+        let txs = self.build_program_txs_from_finalize(
+            buffer_pubkey,
+            program_data,
+            finalize_ixs,
+            blockhash,
+        );
 
         Ok(Some(txs))
     }
@@ -528,65 +519,46 @@ impl ChainlinkCloner {
         finalize_ixs: Vec<Instruction>,
         blockhash: Hash,
     ) -> Vec<Transaction> {
-        let mut txs = Vec::new();
         let total_len = program_data.len() as u32;
-        let num_chunks = (total_len as usize).div_ceil(MAX_INLINE_DATA_SIZE);
-
-        info!(
-            buffer = %buffer_pubkey,
-            total_len,
-            num_chunks,
-            "Building large program clone transactions"
-        );
+        let num_chunks =
+            total_len.div_ceil(MAX_INLINE_DATA_SIZE as u32) as usize;
 
         // First chunk via Init
-        let first_chunk = program_data
-            [..MAX_INLINE_DATA_SIZE.min(program_data.len())]
-            .to_vec();
-        let init_ix =
-            Self::clone_init_ix(buffer_pubkey, total_len, first_chunk, fields);
-        txs.push(self.sign_tx(&[init_ix], blockhash));
+        let first_chunk =
+            &program_data[..MAX_INLINE_DATA_SIZE.min(program_data.len())];
+        let init_ix = Self::clone_init_ix(
+            buffer_pubkey,
+            total_len,
+            first_chunk.to_vec(),
+            fields,
+        );
+        let mut txs = vec![self.sign_tx(&[init_ix], blockhash)];
 
-        // Continue chunks
-        let mut offset = MAX_INLINE_DATA_SIZE;
-        let mut chunk_num = 1;
-        while offset < program_data.len() {
-            let end = (offset + MAX_INLINE_DATA_SIZE).min(program_data.len());
-            let chunk = program_data[offset..end].to_vec();
-            let is_last = end == program_data.len();
-            chunk_num += 1;
-
-            if is_last {
-                // Last chunk + finalize instructions in single tx
-                info!(
-                    buffer = %buffer_pubkey,
-                    chunk = chunk_num,
-                    num_chunks,
-                    finalize_ixs_count = finalize_ixs.len(),
-                    "Building final transaction with continue + finalize"
-                );
-                let continue_ix = Self::clone_continue_ix(
-                    buffer_pubkey,
-                    offset as u32,
-                    chunk,
-                    true,
-                );
-                let ixs = vec![continue_ix]
-                    .into_iter()
-                    .chain(finalize_ixs.clone())
-                    .collect::<Vec<_>>();
-                txs.push(self.sign_tx(&ixs, blockhash));
-            } else {
-                let continue_ix = Self::clone_continue_ix(
-                    buffer_pubkey,
-                    offset as u32,
-                    chunk,
-                    false,
-                );
-                txs.push(self.sign_tx(&[continue_ix], blockhash));
-            }
-            offset = end;
+        // Middle chunks (all except last)
+        let last_offset = (num_chunks - 1) * MAX_INLINE_DATA_SIZE;
+        for offset in
+            (MAX_INLINE_DATA_SIZE..last_offset).step_by(MAX_INLINE_DATA_SIZE)
+        {
+            let chunk = &program_data[offset..offset + MAX_INLINE_DATA_SIZE];
+            let continue_ix = Self::clone_continue_ix(
+                buffer_pubkey,
+                offset as u32,
+                chunk.to_vec(),
+                false,
+            );
+            txs.push(self.sign_tx(&[continue_ix], blockhash));
         }
+
+        // Last chunk with finalize instructions
+        let last_chunk = &program_data[last_offset..];
+        let mut ixs = vec![Self::clone_continue_ix(
+            buffer_pubkey,
+            last_offset as u32,
+            last_chunk.to_vec(),
+            true,
+        )];
+        ixs.extend(finalize_ixs);
+        txs.push(self.sign_tx(&ixs, blockhash));
 
         txs
     }
@@ -596,19 +568,21 @@ impl ChainlinkCloner {
     // -----------------
 
     fn maybe_prepare_lookup_tables(&self, pubkey: Pubkey, owner: Pubkey) {
-        if let Some(committor) = self.changeset_committor.as_ref() {
-            if self.config.prepare_lookup_tables {
-                let committor = committor.clone();
-                tokio::spawn(async move {
-                    if let Err(e) = committor
-                        .reserve_pubkeys_for_committee(pubkey, owner)
-                        .await
-                    {
-                        error!(error = ?e, "Failed to reserve lookup tables");
-                    }
-                });
+        let Some(committor) = self
+            .config
+            .prepare_lookup_tables
+            .then_some(self.changeset_committor.as_ref())
+            .flatten()
+            .cloned()
+        else {
+            return;
+        };
+        tokio::spawn(async move {
+            let result = committor.reserve_pubkeys_for_committee(pubkey, owner);
+            if let Err(e) = result.await {
+                error!(error = ?e, "Failed to reserve lookup tables");
             }
-        }
+        });
     }
 }
 

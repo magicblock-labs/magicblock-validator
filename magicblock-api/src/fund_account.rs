@@ -30,7 +30,6 @@ pub(crate) fn fund_account_with_data(
 ) {
     let account = if let Some(mut acc) = accountsdb.get_account(pubkey) {
         acc.set_lamports(lamports);
-        acc.set_data(vec![0; size]);
         acc
     } else {
         AccountSharedData::new(lamports, size, &Default::default())
