@@ -97,7 +97,7 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
     /// If the [Self::current_new_stream] exceeds [StreamManagerConfig::max_subs_in_new] it
     /// is promoted and a fresh one is created. If [Self::unoptimized_old_streams] exceed
     /// [StreamManagerConfig::max_old_unoptimized], optimization is triggered.
-    pub fn account_subscribe(
+    pub async fn account_subscribe(
         &mut self,
         pubkeys: &[Pubkey],
         commitment: &CommitmentLevel,
@@ -118,12 +118,21 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
             self.current_new_subs.insert(*pk);
         }
 
-        // (Re)create the current-new stream with the full
-        // current_new_subs filter.
-        self.current_new_stream = Some(self.create_account_stream(
-            &self.current_new_subs.iter().collect::<Vec<_>>(),
-            commitment,
-        ));
+        // Update the current-new stream with the full
+        // current_new_subs filter (either create new if doesn't exist,
+        // or update existing via write).
+        if let Some(stream) = &self.current_new_stream {
+            let request = Self::build_account_request(
+                &self.current_new_subs.iter().collect::<Vec<_>>(),
+                commitment,
+            );
+            let _ = stream.handle.write(request).await;
+        } else {
+            self.current_new_stream = Some(self.create_account_stream(
+                &self.current_new_subs.iter().collect::<Vec<_>>(),
+                commitment,
+            ));
+        }
 
         // Promote if current-new exceeds threshold.
         if self.current_new_subs.len() > self.config.max_subs_in_new {
@@ -518,18 +527,18 @@ mod tests {
 
     /// Subscribe `n` pubkeys one-at-a-time, returning the created
     /// pubkeys.
-    fn subscribe_n(
+    async fn subscribe_n(
         mgr: &mut StreamManager<MockStreamHandle, MockStreamFactory>,
         n: usize,
     ) -> Vec<Pubkey> {
         let pks = make_pubkeys(n);
-        mgr.account_subscribe(&pks, &COMMITMENT);
+        mgr.account_subscribe(&pks, &COMMITMENT).await;
         pks
     }
 
     /// Subscribe pubkeys in batches of `batch` until `total` pubkeys
     /// have been subscribed. Returns all created pubkeys.
-    fn subscribe_in_batches(
+    async fn subscribe_in_batches(
         mgr: &mut StreamManager<MockStreamHandle, MockStreamFactory>,
         total: usize,
         batch: usize,
@@ -539,7 +548,7 @@ mod tests {
         while remaining > 0 {
             let n = remaining.min(batch);
             let pks = make_pubkeys(n);
-            mgr.account_subscribe(&pks, &COMMITMENT);
+            mgr.account_subscribe(&pks, &COMMITMENT).await;
             all.extend(pks);
             remaining -= n;
         }
@@ -564,12 +573,12 @@ mod tests {
     // 1. Subscription Tracking
     // -------------------------------------------------------------
 
-    #[test]
-    fn test_subscribe_single_pubkey_adds_to_subscriptions() {
+    #[tokio::test]
+    async fn test_subscribe_single_pubkey_adds_to_subscriptions() {
         let (mut mgr, factory) = create_manager();
         let pk = Pubkey::new_unique();
 
-        mgr.account_subscribe(&[pk], &COMMITMENT);
+        mgr.account_subscribe(&[pk], &COMMITMENT).await;
 
         assert_subscriptions_eq(&mgr, &[pk]);
 
@@ -578,12 +587,12 @@ mod tests {
         assert_request_has_exact_pubkeys(&reqs[0], &[pk]);
     }
 
-    #[test]
-    fn test_subscribe_multiple_pubkeys_at_once() {
+    #[tokio::test]
+    async fn test_subscribe_multiple_pubkeys_at_once() {
         let (mut mgr, factory) = create_manager();
         let pks = make_pubkeys(5);
 
-        mgr.account_subscribe(&pks, &COMMITMENT);
+        mgr.account_subscribe(&pks, &COMMITMENT).await;
 
         assert_subscriptions_eq(&mgr, &pks);
 
@@ -592,72 +601,79 @@ mod tests {
         assert_request_has_exact_pubkeys(&reqs[0], &pks);
     }
 
-    #[test]
-    fn test_subscribe_duplicate_pubkey_is_noop() {
+    #[tokio::test]
+    async fn test_subscribe_duplicate_pubkey_is_noop() {
         let (mut mgr, factory) = create_manager();
         let pk = Pubkey::new_unique();
 
-        mgr.account_subscribe(&[pk], &COMMITMENT);
+        mgr.account_subscribe(&[pk], &COMMITMENT).await;
         let calls_after_first = factory.captured_requests().len();
 
-        mgr.account_subscribe(&[pk], &COMMITMENT);
+        mgr.account_subscribe(&[pk], &COMMITMENT).await;
 
         assert_subscriptions_eq(&mgr, &[pk]);
         assert_eq!(factory.captured_requests().len(), calls_after_first);
     }
 
-    #[test]
-    fn test_subscribe_incremental_calls_accumulate() {
+    #[tokio::test]
+    async fn test_subscribe_incremental_calls_accumulate() {
         let (mut mgr, factory) = create_manager();
         let pks = make_pubkeys(3);
 
-        mgr.account_subscribe(&[pks[0]], &COMMITMENT);
-        mgr.account_subscribe(&[pks[1]], &COMMITMENT);
-        mgr.account_subscribe(&[pks[2]], &COMMITMENT);
+        mgr.account_subscribe(&[pks[0]], &COMMITMENT).await;
+        mgr.account_subscribe(&[pks[1]], &COMMITMENT).await;
+        mgr.account_subscribe(&[pks[2]], &COMMITMENT).await;
 
         assert_subscriptions_eq(&mgr, &pks);
 
+        // First subscribe call creates the stream with just pks[0]
         let reqs = factory.captured_requests();
-        let last_req = reqs.last().unwrap();
-        assert_request_has_exact_pubkeys(last_req, &pks);
+        assert_eq!(reqs.len(), 1);
+        assert_request_has_exact_pubkeys(&reqs[0], &[pks[0]]);
+
+        // Subsequent calls update via handle.write() which accumulates
+        let handle_reqs = factory.handle_requests();
+        assert!(!handle_reqs.is_empty());
+        let last_handle_req = handle_reqs.last().unwrap();
+        assert_request_has_exact_pubkeys(last_handle_req, &pks);
     }
 
     // -------------------------------------------------------------
     // 2. Current-New Stream Lifecycle
     // -------------------------------------------------------------
 
-    #[test]
-    fn test_new_stream_created_on_first_subscribe() {
+    #[tokio::test]
+    async fn test_new_stream_created_on_first_subscribe() {
         let (mut mgr, factory) = create_manager();
         assert_eq!(mgr.account_stream_count(), 0);
 
-        subscribe_n(&mut mgr, 1);
+        subscribe_n(&mut mgr, 1).await;
 
         assert_eq!(mgr.account_stream_count(), 1);
         assert_eq!(factory.active_stream_count(), 1);
     }
 
-    #[test]
-    fn test_current_new_stream_stays_below_threshold() {
+    #[tokio::test]
+    async fn test_current_new_stream_stays_below_threshold() {
         let (mut mgr, _factory) = create_manager();
         // MAX_NEW - 1 = 4
-        subscribe_in_batches(&mut mgr, 4, 2);
+        subscribe_in_batches(&mut mgr, 4, 2).await;
 
         assert_eq!(mgr.account_stream_count(), 1);
         assert_eq!(mgr.unoptimized_old_stream_count(), 0);
     }
 
-    #[test]
-    fn test_current_new_stream_promoted_at_threshold() {
+    #[tokio::test]
+    async fn test_current_new_stream_promoted_at_threshold() {
         let (mut mgr, factory) = create_manager();
         // Subscribe MAX_NEW (5) pubkeys first.
         let first_five = make_pubkeys(5);
-        mgr.account_subscribe(&first_five, &COMMITMENT);
+        mgr.account_subscribe(&first_five, &COMMITMENT).await;
         assert_eq!(mgr.unoptimized_old_stream_count(), 0);
 
         // Subscribe the 6th pubkey → triggers promotion.
         let sixth = Pubkey::new_unique();
-        mgr.account_subscribe(&[sixth], &COMMITMENT);
+        mgr.account_subscribe(&[sixth], &COMMITMENT).await;
 
         assert_eq!(mgr.unoptimized_old_stream_count(), 1);
         // A new current-new stream was created for the 6th pubkey.
@@ -668,16 +684,16 @@ mod tests {
         assert!(reqs.len() >= 2);
     }
 
-    #[test]
-    fn test_multiple_promotions_accumulate_unoptimized() {
+    #[tokio::test]
+    async fn test_multiple_promotions_accumulate_unoptimized() {
         let (mut mgr, _factory) = create_manager();
         // First promotion: subscribe 6 pubkeys (exceeds MAX_NEW=5).
-        subscribe_n(&mut mgr, 6);
+        subscribe_n(&mut mgr, 6).await;
         assert_eq!(mgr.unoptimized_old_stream_count(), 1);
 
         // Second promotion: subscribe 5 more to fill the new current,
         // then 1 more to exceed.
-        subscribe_n(&mut mgr, 5);
+        subscribe_n(&mut mgr, 5).await;
         assert_eq!(mgr.unoptimized_old_stream_count(), 2);
 
         // Current-new stream should only hold the overflow pubkeys.
@@ -688,19 +704,19 @@ mod tests {
     // 3. Optimization Trigger via MAX_OLD_UNOPTIMIZED
     // -------------------------------------------------------------
 
-    #[test]
-    fn test_optimization_triggered_when_unoptimized_exceeds_max() {
+    #[tokio::test]
+    async fn test_optimization_triggered_when_unoptimized_exceeds_max() {
         let (mut mgr, _factory) = create_manager();
         // MAX_OLD_UNOPTIMIZED = 3. We need 4 promotions.
         // Each promotion needs > MAX_NEW (5) pubkeys in current-new.
         // Subscribe 6 four times → 4 promotions.
         for _ in 0..3 {
-            subscribe_n(&mut mgr, 6);
+            subscribe_n(&mut mgr, 6).await;
         }
         assert_eq!(mgr.unoptimized_old_stream_count(), 3);
 
         // 4th promotion triggers optimization.
-        subscribe_n(&mut mgr, 6);
+        subscribe_n(&mut mgr, 6).await;
 
         // After optimization: unoptimized should be empty.
         assert_eq!(mgr.unoptimized_old_stream_count(), 0);
@@ -710,12 +726,12 @@ mod tests {
         assert_eq!(mgr.optimized_old_stream_count(), expected_optimized,);
     }
 
-    #[test]
-    fn test_optimization_not_triggered_below_max_unoptimized() {
+    #[tokio::test]
+    async fn test_optimization_not_triggered_below_max_unoptimized() {
         let (mut mgr, _factory) = create_manager();
         // Exactly MAX_OLD_UNOPTIMIZED (3) promotions.
         for _ in 0..3 {
-            subscribe_n(&mut mgr, 6);
+            subscribe_n(&mut mgr, 6).await;
         }
         assert_eq!(mgr.unoptimized_old_stream_count(), 3);
         assert_eq!(mgr.optimized_old_stream_count(), 0);
@@ -725,10 +741,10 @@ mod tests {
     // 4. Manual / Interval-Driven Optimization
     // -------------------------------------------------------------
 
-    #[test]
-    fn test_optimize_creates_correct_number_of_optimized_streams() {
+    #[tokio::test]
+    async fn test_optimize_creates_correct_number_of_optimized_streams() {
         let (mut mgr, _factory) = create_manager();
-        subscribe_n(&mut mgr, 25);
+        subscribe_n(&mut mgr, 25).await;
 
         mgr.optimize(&COMMITMENT);
 
@@ -736,12 +752,12 @@ mod tests {
         assert_eq!(mgr.optimized_old_stream_count(), 3);
     }
 
-    #[test]
-    fn test_optimize_clears_unoptimized_old_streams() {
+    #[tokio::test]
+    async fn test_optimize_clears_unoptimized_old_streams() {
         let (mut mgr, _factory) = create_manager();
         // Create several unoptimized old streams.
         for _ in 0..3 {
-            subscribe_n(&mut mgr, 6);
+            subscribe_n(&mut mgr, 6).await;
         }
         assert!(mgr.unoptimized_old_stream_count() > 0);
 
@@ -751,20 +767,20 @@ mod tests {
         assert!(mgr.optimized_old_stream_count() > 0);
     }
 
-    #[test]
-    fn test_optimize_resets_current_new_stream() {
+    #[tokio::test]
+    async fn test_optimize_resets_current_new_stream() {
         let (mut mgr, _factory) = create_manager();
-        subscribe_n(&mut mgr, 8);
+        subscribe_n(&mut mgr, 8).await;
 
         mgr.optimize(&COMMITMENT);
 
         assert_eq!(mgr.current_new_sub_count(), 0);
     }
 
-    #[test]
-    fn test_optimize_excludes_unsubscribed_pubkeys() {
+    #[tokio::test]
+    async fn test_optimize_excludes_unsubscribed_pubkeys() {
         let (mut mgr, factory) = create_manager();
-        let pks = subscribe_n(&mut mgr, 15);
+        let pks = subscribe_n(&mut mgr, 15).await;
 
         // Unsubscribe 5 of them.
         let to_unsub: Vec<Pubkey> = pks[0..5].to_vec();
@@ -793,10 +809,10 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_optimize_with_zero_subscriptions() {
+    #[tokio::test]
+    async fn test_optimize_with_zero_subscriptions() {
         let (mut mgr, _factory) = create_manager();
-        let pks = subscribe_n(&mut mgr, 5);
+        let pks = subscribe_n(&mut mgr, 5).await;
         mgr.account_unsubscribe(&pks);
 
         mgr.optimize(&COMMITMENT);
@@ -805,10 +821,10 @@ mod tests {
         assert_eq!(mgr.unoptimized_old_stream_count(), 0);
     }
 
-    #[test]
-    fn test_optimize_idempotent() {
+    #[tokio::test]
+    async fn test_optimize_idempotent() {
         let (mut mgr, _factory) = create_manager();
-        subscribe_n(&mut mgr, 15);
+        subscribe_n(&mut mgr, 15).await;
 
         mgr.optimize(&COMMITMENT);
         let count_after_first = mgr.optimized_old_stream_count();
@@ -821,39 +837,39 @@ mod tests {
     // 5. Behavior During Optimization
     // -------------------------------------------------------------
 
-    #[test]
-    fn test_subscribe_during_optimization_goes_to_current_new() {
+    #[tokio::test]
+    async fn test_subscribe_during_optimization_goes_to_current_new() {
         let (mut mgr, _factory) = create_manager();
-        subscribe_n(&mut mgr, 20);
+        subscribe_n(&mut mgr, 20).await;
 
         mgr.optimize(&COMMITMENT);
 
         // Subscribe a new pubkey after optimization.
         let new_pk = Pubkey::new_unique();
-        mgr.account_subscribe(&[new_pk], &COMMITMENT);
+        mgr.account_subscribe(&[new_pk], &COMMITMENT).await;
 
         assert!(mgr.subscriptions().contains(&new_pk));
         assert!(mgr.current_new_subs().contains(&new_pk));
     }
 
-    #[test]
-    fn test_no_double_optimization_trigger() {
+    #[tokio::test]
+    async fn test_no_double_optimization_trigger() {
         let (mut mgr, _factory) = create_manager();
         // Fill up to MAX_OLD_UNOPTIMIZED.
         for _ in 0..3 {
-            subscribe_n(&mut mgr, 6);
+            subscribe_n(&mut mgr, 6).await;
         }
         assert_eq!(mgr.unoptimized_old_stream_count(), 3);
 
         // 4th promotion triggers optimization.
-        subscribe_n(&mut mgr, 6);
+        subscribe_n(&mut mgr, 6).await;
         assert_eq!(mgr.unoptimized_old_stream_count(), 0);
         let optimized_after_first = mgr.optimized_old_stream_count();
 
         // Now subscribe enough to exceed MAX_SUBS_IN_NEW again,
         // causing a promotion. Since optimization just ran, it should
         // NOT trigger again immediately.
-        subscribe_n(&mut mgr, 6);
+        subscribe_n(&mut mgr, 6).await;
         // Unoptimized grows by 1 but no second optimization.
         assert!(mgr.unoptimized_old_stream_count() <= 1);
         assert_eq!(mgr.optimized_old_stream_count(), optimized_after_first,);
@@ -863,11 +879,11 @@ mod tests {
     // 6. Unsubscribe
     // -------------------------------------------------------------
 
-    #[test]
-    fn test_unsubscribe_removes_from_subscriptions_set() {
+    #[tokio::test]
+    async fn test_unsubscribe_removes_from_subscriptions_set() {
         let (mut mgr, _factory) = create_manager();
         let pks = make_pubkeys(3);
-        mgr.account_subscribe(&pks, &COMMITMENT);
+        mgr.account_subscribe(&pks, &COMMITMENT).await;
 
         mgr.account_unsubscribe(&[pks[1]]);
 
@@ -884,11 +900,11 @@ mod tests {
         assert!(mgr.subscriptions().is_empty());
     }
 
-    #[test]
-    fn test_unsubscribe_already_unsubscribed_pubkey() {
+    #[tokio::test]
+    async fn test_unsubscribe_already_unsubscribed_pubkey() {
         let (mut mgr, _factory) = create_manager();
         let pk = Pubkey::new_unique();
-        mgr.account_subscribe(&[pk], &COMMITMENT);
+        mgr.account_subscribe(&[pk], &COMMITMENT).await;
 
         mgr.account_unsubscribe(&[pk]);
         mgr.account_unsubscribe(&[pk]);
@@ -896,11 +912,11 @@ mod tests {
         assert!(mgr.subscriptions().is_empty());
     }
 
-    #[test]
-    fn test_unsubscribe_does_not_modify_streams() {
+    #[tokio::test]
+    async fn test_unsubscribe_does_not_modify_streams() {
         let (mut mgr, factory) = create_manager();
         let pks = make_pubkeys(4);
-        mgr.account_subscribe(&pks, &COMMITMENT);
+        mgr.account_subscribe(&pks, &COMMITMENT).await;
         let calls_before = factory.captured_requests().len();
 
         mgr.account_unsubscribe(&pks[0..2]);
@@ -913,11 +929,11 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_unsubscribe_all_then_optimize_clears_streams() {
+    #[tokio::test]
+    async fn test_unsubscribe_all_then_optimize_clears_streams() {
         let (mut mgr, _factory) = create_manager();
         // Subscribe 8 pubkeys (creates current-new + 1 unoptimized).
-        let pks = subscribe_n(&mut mgr, 8);
+        let pks = subscribe_n(&mut mgr, 8).await;
         mgr.account_unsubscribe(&pks);
 
         mgr.optimize(&COMMITMENT);
@@ -926,11 +942,11 @@ mod tests {
         assert_eq!(mgr.unoptimized_old_stream_count(), 0);
     }
 
-    #[test]
-    fn test_unsubscribe_batch() {
+    #[tokio::test]
+    async fn test_unsubscribe_batch() {
         let (mut mgr, factory) = create_manager();
         let pks = make_pubkeys(5);
-        mgr.account_subscribe(&pks, &COMMITMENT);
+        mgr.account_subscribe(&pks, &COMMITMENT).await;
         let calls_before = factory.captured_requests().len();
 
         mgr.account_unsubscribe(&[pks[0], pks[2], pks[4]]);
@@ -943,20 +959,20 @@ mod tests {
     // 7. Subscription Membership Check
     // -------------------------------------------------------------
 
-    #[test]
-    fn test_is_subscribed_returns_true_for_active() {
+    #[tokio::test]
+    async fn test_is_subscribed_returns_true_for_active() {
         let (mut mgr, _factory) = create_manager();
         let pk = Pubkey::new_unique();
-        mgr.account_subscribe(&[pk], &COMMITMENT);
+        mgr.account_subscribe(&[pk], &COMMITMENT).await;
 
         assert!(mgr.is_subscribed(&pk));
     }
 
-    #[test]
-    fn test_is_subscribed_returns_false_after_unsubscribe() {
+    #[tokio::test]
+    async fn test_is_subscribed_returns_false_after_unsubscribe() {
         let (mut mgr, _factory) = create_manager();
         let pk = Pubkey::new_unique();
-        mgr.account_subscribe(&[pk], &COMMITMENT);
+        mgr.account_subscribe(&[pk], &COMMITMENT).await;
         mgr.account_unsubscribe(&[pk]);
 
         assert!(!mgr.is_subscribed(&pk));
@@ -974,15 +990,15 @@ mod tests {
     // 8. Stream Enumeration / Polling Access
     // -------------------------------------------------------------
 
-    #[test]
-    fn test_all_account_streams_includes_all_generations() {
+    #[tokio::test]
+    async fn test_all_account_streams_includes_all_generations() {
         let (mut mgr, _factory) = create_manager();
         // Create optimized old streams.
-        subscribe_n(&mut mgr, 15);
+        subscribe_n(&mut mgr, 15).await;
         mgr.optimize(&COMMITMENT);
 
         // Create an unoptimized old stream via promotion.
-        subscribe_n(&mut mgr, 6);
+        subscribe_n(&mut mgr, 6).await;
 
         // Current-new also exists from the overflow pubkey.
         let expected = mgr.account_stream_count();
@@ -998,12 +1014,12 @@ mod tests {
         assert!(streams.is_empty());
     }
 
-    #[test]
-    fn test_all_account_streams_after_optimize_drops_old_unoptimized() {
+    #[tokio::test]
+    async fn test_all_account_streams_after_optimize_drops_old_unoptimized() {
         let (mut mgr, _factory) = create_manager();
         // Create unoptimized old streams.
         for _ in 0..2 {
-            subscribe_n(&mut mgr, 6);
+            subscribe_n(&mut mgr, 6).await;
         }
         assert!(mgr.unoptimized_old_stream_count() > 0);
 
@@ -1020,20 +1036,20 @@ mod tests {
     // 9. Edge Cases and Stress
     // -------------------------------------------------------------
 
-    #[test]
-    fn test_subscribe_exactly_at_max_subs_in_new_no_promotion() {
+    #[tokio::test]
+    async fn test_subscribe_exactly_at_max_subs_in_new_no_promotion() {
         let (mut mgr, _factory) = create_manager();
         // Exactly MAX_NEW (5) pubkeys — should NOT promote.
-        subscribe_n(&mut mgr, 5);
+        subscribe_n(&mut mgr, 5).await;
 
         assert_eq!(mgr.unoptimized_old_stream_count(), 0);
         assert_eq!(mgr.account_stream_count(), 1);
     }
 
-    #[test]
-    fn test_single_pubkey_optimization() {
+    #[tokio::test]
+    async fn test_single_pubkey_optimization() {
         let (mut mgr, _factory) = create_manager();
-        subscribe_n(&mut mgr, 1);
+        subscribe_n(&mut mgr, 1).await;
 
         mgr.optimize(&COMMITMENT);
 
@@ -1041,21 +1057,21 @@ mod tests {
         assert_eq!(mgr.current_new_sub_count(), 0);
     }
 
-    #[test]
-    fn test_subscribe_max_old_optimized_plus_one() {
+    #[tokio::test]
+    async fn test_subscribe_max_old_optimized_plus_one() {
         let (mut mgr, _factory) = create_manager();
         // MAX_OLD_OPTIMIZED + 1 = 11
-        subscribe_n(&mut mgr, 11);
+        subscribe_n(&mut mgr, 11).await;
 
         mgr.optimize(&COMMITMENT);
 
         assert_eq!(mgr.optimized_old_stream_count(), 2);
     }
 
-    #[test]
-    fn test_large_scale_subscribe_and_optimize() {
+    #[tokio::test]
+    async fn test_large_scale_subscribe_and_optimize() {
         let (mut mgr, factory) = create_manager();
-        let pks = subscribe_n(&mut mgr, 50);
+        let pks = subscribe_n(&mut mgr, 50).await;
 
         let reqs_before = factory.captured_requests().len();
         mgr.optimize(&COMMITMENT);
@@ -1074,17 +1090,17 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_interleaved_subscribe_unsubscribe_then_optimize() {
+    #[tokio::test]
+    async fn test_interleaved_subscribe_unsubscribe_then_optimize() {
         let (mut mgr, factory) = create_manager();
-        let pks = subscribe_n(&mut mgr, 20);
+        let pks = subscribe_n(&mut mgr, 20).await;
         // Unsubscribe 8 scattered.
         let unsub1: Vec<Pubkey> =
             pks.iter().step_by(2).take(8).copied().collect();
         mgr.account_unsubscribe(&unsub1);
 
         // Subscribe 5 new ones.
-        let new_pks = subscribe_n(&mut mgr, 5);
+        let new_pks = subscribe_n(&mut mgr, 5).await;
         // Unsubscribe 2 of the new ones.
         mgr.account_unsubscribe(&new_pks[0..2]);
 
@@ -1105,14 +1121,14 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_rapid_subscribe_unsubscribe_same_pubkey() {
+    #[tokio::test]
+    async fn test_rapid_subscribe_unsubscribe_same_pubkey() {
         let (mut mgr, _factory) = create_manager();
         let pk = Pubkey::new_unique();
 
-        mgr.account_subscribe(&[pk], &COMMITMENT);
+        mgr.account_subscribe(&[pk], &COMMITMENT).await;
         mgr.account_unsubscribe(&[pk]);
-        mgr.account_subscribe(&[pk], &COMMITMENT);
+        mgr.account_subscribe(&[pk], &COMMITMENT).await;
 
         assert!(mgr.subscriptions().contains(&pk));
         assert!(mgr.current_new_subs().contains(&pk));
@@ -1122,13 +1138,13 @@ mod tests {
     // 10. Stream Factory Interaction Verification
     // -------------------------------------------------------------
 
-    #[test]
-    fn test_factory_called_with_correct_commitment() {
+    #[tokio::test]
+    async fn test_factory_called_with_correct_commitment() {
         let (mut mgr, factory) = create_manager();
         let commitment = CommitmentLevel::Finalized;
         let pk = Pubkey::new_unique();
 
-        mgr.account_subscribe(&[pk], &commitment);
+        mgr.account_subscribe(&[pk], &commitment).await;
 
         let reqs = factory.captured_requests();
         assert_eq!(reqs.len(), 1);
@@ -1138,19 +1154,19 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_factory_called_with_slot_filter() {
+    #[tokio::test]
+    async fn test_factory_called_with_slot_filter() {
         let (mut mgr, factory) = create_manager();
-        subscribe_n(&mut mgr, 1);
+        subscribe_n(&mut mgr, 1).await;
 
         let reqs = factory.captured_requests();
         assert!(!reqs[0].slots.is_empty());
     }
 
-    #[test]
-    fn test_optimize_factory_calls_contain_chunked_pubkeys() {
+    #[tokio::test]
+    async fn test_optimize_factory_calls_contain_chunked_pubkeys() {
         let (mut mgr, factory) = create_manager();
-        subscribe_n(&mut mgr, 15);
+        subscribe_n(&mut mgr, 15).await;
 
         let reqs_before = factory.captured_requests().len();
         mgr.optimize(&COMMITMENT);
@@ -1171,10 +1187,10 @@ mod tests {
         assert!(first_pks.is_disjoint(&second_pks));
     }
 
-    #[test]
-    fn test_factory_not_called_on_unsubscribe() {
+    #[tokio::test]
+    async fn test_factory_not_called_on_unsubscribe() {
         let (mut mgr, factory) = create_manager();
-        subscribe_n(&mut mgr, 5);
+        subscribe_n(&mut mgr, 5).await;
         let calls_before = factory.captured_requests().len();
 
         let pks: Vec<Pubkey> =
