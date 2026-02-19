@@ -4,7 +4,9 @@ use helius_laserstream::grpc::{
     CommitmentLevel, SubscribeRequest, SubscribeRequestFilterAccounts,
     SubscribeRequestFilterSlots,
 };
+use helius_laserstream::LaserstreamError;
 use solana_pubkey::Pubkey;
+use tokio::time::Duration;
 
 use super::{LaserStreamWithHandle, StreamFactory};
 use crate::remote_account_provider::chain_laser_actor::StreamHandle;
@@ -87,6 +89,38 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
         }
     }
 
+    /// Update a stream's subscriptions with retry logic.
+    ///
+    /// Attempts to write the given request to the stream handle up to 5
+    /// times with linear backoff. Returns an error if all retries are
+    /// exhausted.
+    async fn update_subscriptions(
+        handle: &S,
+        request: SubscribeRequest,
+    ) -> Result<(), LaserstreamError> {
+        const MAX_RETRIES: usize = 5;
+        let mut retries = MAX_RETRIES;
+        let initial_retries = retries;
+
+        loop {
+            match handle.write(request.clone()).await {
+                Ok(()) => return Ok(()),
+                Err(err) => {
+                    if retries > 0 {
+                        retries -= 1;
+                        // Linear backoff: sleep longer as retries decrease
+                        let backoff_ms =
+                            50u64 * (initial_retries - retries) as u64;
+                        tokio::time::sleep(Duration::from_millis(backoff_ms))
+                            .await;
+                        continue;
+                    }
+                    return Err(err);
+                }
+            }
+        }
+    }
+
     // ---------------------
     // Account subscription
     // ---------------------
@@ -126,7 +160,7 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
                 &self.current_new_subs.iter().collect::<Vec<_>>(),
                 commitment,
             );
-            let _ = stream.handle.write(request).await;
+            let _ = Self::update_subscriptions(&stream.handle, request).await;
         } else {
             self.current_new_stream = Some(self.create_account_stream(
                 &self.current_new_subs.iter().collect::<Vec<_>>(),
