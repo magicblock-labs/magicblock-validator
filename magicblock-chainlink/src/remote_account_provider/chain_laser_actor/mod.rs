@@ -9,7 +9,7 @@ use helius_laserstream::{
 
 pub use self::{
     actor::{ChainLaserActor, SharedSubscriptions, Slots},
-    stream_manager::{StreamManager, StreamManagerConfig},
+    stream_manager::{StreamManager, StreamManagerConfig, StreamUpdateSource},
 };
 
 mod actor;

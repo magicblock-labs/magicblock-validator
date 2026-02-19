@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
+use futures_util::StreamExt;
 use helius_laserstream::grpc::{
     CommitmentLevel, SubscribeRequest, SubscribeRequestFilterAccounts,
     SubscribeRequestFilterSlots,
@@ -7,11 +8,19 @@ use helius_laserstream::grpc::{
 use solana_pubkey::Pubkey;
 use tokio::time::Duration;
 
-use super::{LaserStreamWithHandle, StreamFactory};
+use super::{LaserResult, LaserStreamWithHandle, StreamFactory};
 use crate::remote_account_provider::{
     chain_laser_actor::StreamHandle, RemoteAccountProviderError,
     RemoteAccountProviderResult,
 };
+
+/// Identifies whether a stream update came from an account or
+/// program subscription stream.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StreamUpdateSource {
+    Account,
+    Program,
+}
 
 /// Configuration for the generational stream manager.
 #[allow(unused)]
@@ -233,6 +242,65 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
         }
     }
 
+    /// Clears all account subscriptions and drops all account
+    /// streams.
+    pub fn clear_account_subscriptions(&mut self) {
+        self.subscriptions.clear();
+        self.current_new_subs.clear();
+        self.current_new_stream = None;
+        self.unoptimized_old_streams.clear();
+        self.optimized_old_streams.clear();
+    }
+
+    /// Returns `true` if any account stream exists.
+    pub fn has_account_subscriptions(&self) -> bool {
+        self.current_new_stream.is_some()
+            || !self.unoptimized_old_streams.is_empty()
+            || !self.optimized_old_streams.is_empty()
+    }
+
+    /// Polls all account and program streams, returning the next
+    /// available update tagged with its source.
+    /// Returns `None` when all streams have ended.
+    pub async fn next_update(
+        &mut self,
+    ) -> Option<(StreamUpdateSource, LaserResult)> {
+        let mut all: Vec<(StreamUpdateSource, &mut LaserStreamWithHandle<S>)> =
+            Vec::new();
+        for s in &mut self.optimized_old_streams {
+            all.push((StreamUpdateSource::Account, s));
+        }
+        for s in &mut self.unoptimized_old_streams {
+            all.push((StreamUpdateSource::Account, s));
+        }
+        if let Some(s) = &mut self.current_new_stream {
+            all.push((StreamUpdateSource::Account, s));
+        }
+        if let Some((_, s)) = &mut self.program_subscriptions {
+            all.push((StreamUpdateSource::Program, s));
+        }
+
+        if all.is_empty() {
+            return None;
+        }
+
+        let futs: futures_util::stream::FuturesUnordered<_> = all
+            .into_iter()
+            .map(|(src, s)| {
+                let stream = &mut s.stream;
+                async move { (src, stream.next().await) }
+            })
+            .collect();
+        let (src, result) = futs.into_future().await.0?;
+        Some((src, result?))
+    }
+
+    /// Returns `true` if any stream (account or program)
+    /// exists.
+    pub fn has_any_subscriptions(&self) -> bool {
+        self.has_account_subscriptions() || self.has_program_subscriptions()
+    }
+
     /// Rebuild all account streams from `subscriptions`.
     ///
     /// 1. Chunk `subscriptions` into groups of
@@ -249,8 +317,9 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
             .chunks(self.config.max_subs_in_old_optimized)
             .map(|chunk| {
                 let refs: Vec<&Pubkey> = chunk.iter().collect();
-                self.stream_factory
-                    .subscribe(Self::build_account_request(&refs, commitment, None))
+                self.stream_factory.subscribe(Self::build_account_request(
+                    &refs, commitment, None,
+                ))
             })
             .collect();
 
@@ -375,49 +444,6 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
     ) -> LaserStreamWithHandle<S> {
         let request =
             Self::build_account_request(pubkeys, commitment, from_slot);
-        self.stream_factory.subscribe(request)
-    }
-
-    // =========================================================
-    // Legacy account subscribe (kept for migration)
-    // =========================================================
-
-    /// Creates a subscription stream for account updates (legacy).
-    ///
-    /// It includes a slot subscription for chain slot synchronization.
-    pub fn account_subscribe_old(
-        &self,
-        pubkeys: &[&Pubkey],
-        commitment: &CommitmentLevel,
-        idx: usize,
-        from_slot: Option<u64>,
-    ) -> LaserStreamWithHandle<S> {
-        let mut accounts = HashMap::new();
-        accounts.insert(
-            format!("account_subs: {idx}"),
-            SubscribeRequestFilterAccounts {
-                account: pubkeys.iter().map(|pk| pk.to_string()).collect(),
-                ..Default::default()
-            },
-        );
-
-        // Subscribe to slot updates for chain_slot synchronization
-        let mut slots = HashMap::new();
-        slots.insert(
-            "slot_updates".to_string(),
-            SubscribeRequestFilterSlots {
-                filter_by_commitment: Some(true),
-                ..Default::default()
-            },
-        );
-
-        let request = SubscribeRequest {
-            accounts,
-            slots,
-            commitment: Some((*commitment).into()),
-            from_slot,
-            ..Default::default()
-        };
         self.stream_factory.subscribe(request)
     }
 
