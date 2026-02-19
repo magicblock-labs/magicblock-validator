@@ -19,31 +19,43 @@ jobs:
     if: github.event.action == 'ready_for_review'
     runs-on: ubuntu-latest
     steps:
-      - name: Format reviewer list
+      - name: Fetch requested reviewers
         id: reviewers
-        run: |
-          echo '${{ toJson(github.event.pull_request.requested_reviewers) }}' > reviewers.json
-          
-          # Check if the reviewers data exists and extract it
-          if [ -s reviewers.json ] && [ "$(cat reviewers.json)" != "null" ] && [ "$(cat reviewers.json)" != "[]" ]; then
-            # Process the individual reviewers - handle both array format and single object format
-            reviewers=$(cat reviewers.json | jq -r 'if type=="array" then .[].login else .login end' 2>/dev/null | grep -v '^$' | paste -sd ", " -)
-            if [ -z "$reviewers" ]; then
-              # Fallback - try to get reviewer login directly if the structure is unexpected
-              reviewers=$(cat reviewers.json | grep -o '"login":"[^"]*"' | sed 's/"login":"//g' | sed 's/"//g' | paste -sd ", " -)
-            fi
-          else
-            reviewers="No reviewers found"
-          fi
-          
-          echo "Extracted reviewers: $reviewers"
-          echo "reviewers=$reviewers" >> $GITHUB_OUTPUT
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const prNumber = context.payload.pull_request.number;
 
-      - name: Get requested reviewer from event payload
-        id: single_reviewer
-        if: github.event.requested_reviewer != null
-        run: |
-          echo "reviewer=${{ github.event.requested_reviewer.login }}" >> $GITHUB_OUTPUT
+            let reviewerNames = [];
+            try {
+              const { data } = await github.rest.pulls.listRequestedReviewers({
+                owner,
+                repo,
+                pull_number: prNumber,
+              });
+
+              reviewerNames = [
+                ...(data.users || []),
+                ...(data.teams || []),
+              ].map((reviewer) => reviewer.login || reviewer.name || reviewer.slug);
+            } catch (error) {
+              core.warning(`Unable to fetch requested reviewers from GitHub API: ${error.message}`);
+            }
+
+            if (reviewerNames.length === 0) {
+              reviewerNames = (context.payload.pull_request.requested_reviewers || [])
+                .map((reviewer) => reviewer.login)
+                .filter(Boolean);
+            }
+
+            if (reviewerNames.length === 0) {
+              reviewerNames = ["No reviewers found"];
+            }
+
+            core.info(`Extracted reviewers: ${reviewerNames.join(", ")}`);
+            core.setOutput("reviewers", reviewerNames.join(", "));
 
       - name: Evaluate PR readiness
         id: readiness
@@ -145,7 +157,7 @@ jobs:
           PR_AUTHOR: ${{ github.event.pull_request.user.login }}
           PR_URL: ${{ github.event.pull_request.html_url }}
           PR_TITLE: ${{ github.event.pull_request.title }}
-          PR_REVIEWERS: ${{ steps.single_reviewer.outputs.reviewer || steps.reviewers.outputs.reviewers }}
+          PR_REVIEWERS: ${{ steps.reviewers.outputs.reviewers }}
           WARNING: ${{ steps.readiness.outputs.warning }}
           HAS_UNRESOLVED: ${{ steps.readiness.outputs.has_unresolved }}
           UNRESOLVED_COUNT: ${{ steps.readiness.outputs.unresolved_count }}
