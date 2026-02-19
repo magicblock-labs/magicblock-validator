@@ -3280,7 +3280,7 @@ dependencies = [
  "solana-program",
  "solana-security-txt",
  "static_assertions",
- "strum",
+ "strum 0.27.2",
  "thiserror 1.0.69",
 ]
 
@@ -3504,7 +3504,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-tui-client"
-version = "0.6.2"
+version = "0.7.0"
 dependencies = [
  "chrono",
  "clap 4.5.53",
