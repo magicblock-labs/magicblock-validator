@@ -49,10 +49,11 @@ use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_sdk::{
     commitment_config::CommitmentConfig,
     hash::Hash,
+    instruction::InstructionError,
     native_token::LAMPORTS_PER_SOL,
     rent::Rent,
     signature::{Keypair, Signer},
-    transaction::Transaction,
+    transaction::{Transaction, TransactionError},
 };
 
 use crate::{
@@ -115,7 +116,6 @@ impl TestEnv {
 #[tokio::test]
 async fn test_commit_id_error_parsing() {
     const COUNTER_SIZE: u64 = 70;
-    const EXPECTED_ERR_MSG: &str = "Accounts committed with an invalid Commit id: Error processing Instruction 3: custom program error: 0xc";
 
     let TestEnv {
         fixture,
@@ -162,18 +162,26 @@ async fn test_commit_id_error_parsing() {
     let execution_result = execution_result.unwrap();
     assert!(execution_result.is_err());
     let err = execution_result.unwrap_err();
-    assert!(
-        matches!(err, TransactionStrategyExecutionError::CommitIDError(_, _)),
-        "err: {:?}",
-        err
-    );
-    assert!(err.to_string().contains(EXPECTED_ERR_MSG));
+    assert!(matches!(
+        err,
+        TransactionStrategyExecutionError::CommitIDError(
+            TransactionError::InstructionError(
+                _,
+                InstructionError::Custom(
+                    0xc, // dlp::DlpError::NonceOutOfOrder: commit id/nonce is out of order
+                )
+            ),
+            _
+        )
+    ));
+    assert!(err
+        .to_string()
+        .contains("Accounts committed with an invalid Commit id"));
 }
 
 #[tokio::test]
 async fn test_undelegation_error_parsing() {
     const COUNTER_SIZE: u64 = 70;
-    const EXPECTED_ERR_MSG: &str = "Invalid undelegation: Error processing Instruction 5: custom program error: 0x7a.";
 
     let TestEnv {
         fixture,
@@ -215,15 +223,22 @@ async fn test_undelegation_error_parsing() {
     let err = execution_result.unwrap_err();
     assert!(matches!(
         err,
-        TransactionStrategyExecutionError::UndelegationError(_, _)
+        TransactionStrategyExecutionError::UndelegationError(
+            TransactionError::InstructionError(
+                _,
+                InstructionError::Custom(
+                    0x7a, // flexi-counter ProgramError::Custom(122): forced undelegation failure (FAIL_UNDELEGATION_CODE)
+                )
+            ),
+            _
+        )
     ));
-    assert!(err.to_string().contains(EXPECTED_ERR_MSG));
+    assert!(err.to_string().contains("Invalid undelegation"));
 }
 
 #[tokio::test]
 async fn test_action_error_parsing() {
     const COUNTER_SIZE: u64 = 70;
-    const EXPECTED_ERR_MSG: &str = "User supplied actions are ill-formed: Error processing Instruction 6: Program arithmetic overflowed";
 
     let TestEnv {
         fixture,
@@ -275,16 +290,23 @@ async fn test_action_error_parsing() {
     let execution_err = execution_result.unwrap_err();
     assert!(matches!(
         execution_err,
-        TransactionStrategyExecutionError::ActionsError(_, _)
+        TransactionStrategyExecutionError::ActionsError(
+            TransactionError::InstructionError(
+                _,
+                InstructionError::ArithmeticOverflow
+            ),
+            _
+        )
     ));
-    assert!(execution_err.to_string().contains(EXPECTED_ERR_MSG));
+    assert!(execution_err
+        .to_string()
+        .contains("User supplied actions are ill-formed"));
 }
 
 #[tokio::test]
 async fn test_cpi_limits_error_parsing() {
     const COUNTER_SIZE: u64 = 102;
     const COUNTER_NUM: u64 = 10;
-    const EXPECTED_ERR_MSG: &str = "Max instruction trace length exceeded: Error processing Instruction 27: Max instruction trace length exceeded";
 
     let TestEnv {
         fixture,
@@ -334,9 +356,17 @@ async fn test_cpi_limits_error_parsing() {
     let execution_err = execution_result.unwrap_err();
     assert!(matches!(
         execution_err,
-        TransactionStrategyExecutionError::CpiLimitError(_, _)
+        TransactionStrategyExecutionError::CpiLimitError(
+            TransactionError::InstructionError(
+                _,
+                InstructionError::MaxInstructionTraceLengthExceeded
+            ),
+            _
+        )
     ));
-    assert!(execution_err.to_string().contains(EXPECTED_ERR_MSG));
+    assert!(execution_err
+        .to_string()
+        .contains("Max instruction trace length exceeded"));
 }
 
 #[tokio::test]
