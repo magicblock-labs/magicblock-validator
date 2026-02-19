@@ -1,15 +1,16 @@
 use std::collections::{HashMap, HashSet};
 
-use futures_util::StreamExt;
 use helius_laserstream::grpc::{
     CommitmentLevel, SubscribeRequest, SubscribeRequestFilterAccounts,
     SubscribeRequestFilterSlots,
 };
 use solana_pubkey::Pubkey;
 use tokio::time::Duration;
+use tokio_stream::StreamMap;
 
 use super::{
-    LaserResult, LaserStreamWithHandle, SharedSubscriptions, StreamFactory,
+    LaserResult, LaserStream, LaserStreamWithHandle, SharedSubscriptions,
+    StreamFactory,
 };
 use crate::remote_account_provider::{
     chain_laser_actor::StreamHandle, RemoteAccountProviderError,
@@ -22,6 +23,28 @@ use crate::remote_account_provider::{
 pub enum StreamUpdateSource {
     Account,
     Program,
+}
+
+/// Identifies a stream within the [StreamMap].
+///
+/// Each variant maps to a stream category. The `usize` index
+/// corresponds to the position within the respective `Vec` of
+/// handles.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+enum StreamKey {
+    CurrentNew,
+    UnoptimizedOld(usize),
+    OptimizedOld(usize),
+    Program,
+}
+
+impl StreamKey {
+    fn source(&self) -> StreamUpdateSource {
+        match self {
+            StreamKey::Program => StreamUpdateSource::Program,
+            _ => StreamUpdateSource::Account,
+        }
+    }
 }
 
 /// Configuration for the generational stream manager.
@@ -51,40 +74,54 @@ impl Default for StreamManagerConfig {
 /// Account subscriptions follow a generational approach:
 /// - New subscriptions go into the *current-new* stream.
 /// - When the current-new stream exceeds [StreamManagerConfig::max_subs_in_new] it is
-///   promoted to the [Self::unoptimized_old_streams] vec and a fresh current-new stream is created.
-/// - When [Self::unoptimized_old_streams] exceed [StreamManagerConfig::max_old_unoptimized],
+///   promoted to the [Self::unoptimized_old_handles] vec and a fresh current-new stream is created.
+/// - When [Self::unoptimized_old_handles] exceed [StreamManagerConfig::max_old_unoptimized],
 ///   optimization is triggered which rebuilds all streams from the
-///   `subscriptions` set into [StreamManager::optimized_old_streams] chunked by
+///   `subscriptions` set into [StreamManager::optimized_old_handles] chunked by
 ///   [StreamManagerConfig::max_subs_in_old_optimized].
 ///
 /// Unsubscribe only removes from the [Self::subscriptions] HashSet — it
 /// never touches streams. Updates for unsubscribed pubkeys are
 /// ignored at the actor level.
 /// Unsubscribed accounts are dropped as part of optimization.
+///
+/// Streams are stored in a persistent [StreamMap] keyed by
+/// [StreamKey]. The map is only updated when stream topology
+/// changes (subscribe, promote, optimize, clear). The
+/// corresponding handles are stored separately for use in
+/// [Self::update_subscriptions].
 #[allow(unused)]
 pub struct StreamManager<S: StreamHandle, SF: StreamFactory<S>> {
     /// Configures limits for stream management
     config: StreamManagerConfig,
     /// The factory used to create streams
     stream_factory: SF,
-    /// Active streams for program subscriptions
-    program_subscriptions: Option<(HashSet<Pubkey>, LaserStreamWithHandle<S>)>,
     /// The canonical set of currently active account subscriptions.
     /// These include subscriptions maintained across the different set
-    /// of streams, [Self::current_new_stream],
-    /// [Self::unoptimized_old_streams], and
-    /// [Self::optimized_old_streams].
+    /// of streams.
     subscriptions: SharedSubscriptions,
     /// Pubkeys that are part of the current-new stream's filter.
     current_new_subs: HashSet<Pubkey>,
-    /// The current-new stream which holds the [Self::current_new_subs].
-    /// (None until the first subscribe call).
-    current_new_stream: Option<LaserStreamWithHandle<S>>,
-    /// Old streams that have not been optimized yet.
-    unoptimized_old_streams: Vec<LaserStreamWithHandle<S>>,
-    /// Old streams created by optimization, each covering up to
-    /// [StreamManagerConfig::max_subs_in_old_optimized] subscriptions.
-    optimized_old_streams: Vec<LaserStreamWithHandle<S>>,
+
+    // -- Handles (needed for update_subscriptions) --
+    /// Handle for the current-new stream.
+    current_new_handle: Option<S>,
+    /// Handles for unoptimized old streams.
+    unoptimized_old_handles: Vec<S>,
+    /// Handles for optimized old streams.
+    optimized_old_handles: Vec<S>,
+    /// Handle + pubkey set for program subscriptions.
+    program_sub: Option<(HashSet<Pubkey>, S)>,
+
+    // -- All streams live here. --
+    /// Streams separated from the handles in order to allow using them
+    /// inside a StreamMap
+    /// They are addressed via the StreamKey which includes an index for
+    /// [Self::unoptimized_old_handles] and [Self::optimized_old_handles].
+    /// The key index matches the index of the corresponding vec.
+    /// Persistent stream map polled by [Self::next_update].
+    /// Updated only when stream topology changes.
+    stream_map: StreamMap<StreamKey, LaserStream>,
 }
 
 #[allow(unused)]
@@ -93,12 +130,13 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
         Self {
             config,
             stream_factory,
-            program_subscriptions: None,
             subscriptions: Default::default(),
             current_new_subs: HashSet::new(),
-            current_new_stream: None,
-            unoptimized_old_streams: Vec::new(),
-            optimized_old_streams: Vec::new(),
+            current_new_handle: None,
+            unoptimized_old_handles: Vec::new(),
+            optimized_old_handles: Vec::new(),
+            program_sub: None,
+            stream_map: StreamMap::new(),
         }
     }
 
@@ -145,10 +183,12 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
 
     /// Subscribe to account updates for the given pubkeys.
     ///
-    /// Each pubkey is added to [Self::subscriptions] and to the [Self::current_new_stream].
-    /// If the [Self::current_new_stream] exceeds [StreamManagerConfig::max_subs_in_new] it
-    /// is promoted and a fresh one is created. If [Self::unoptimized_old_streams] exceed
-    /// [StreamManagerConfig::max_old_unoptimized], optimization is triggered.
+    /// Each pubkey is added to [Self::subscriptions] and to the
+    /// current-new stream. If the current-new stream exceeds
+    /// [StreamManagerConfig::max_subs_in_new] it is promoted and
+    /// a fresh one is created. If unoptimized old handles exceed
+    /// [StreamManagerConfig::max_old_unoptimized], optimization
+    /// is triggered.
     pub async fn account_subscribe(
         &mut self,
         pubkeys: &[Pubkey],
@@ -178,26 +218,21 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
         }
 
         // Update the current-new stream with the full
-        // current_new_subs filter (either create new if doesn't exist,
-        // or update existing via write).
-        if let Some(stream) = &self.current_new_stream {
+        // current_new_subs filter (either create new if doesn't
+        // exist, or update existing via write).
+        if let Some(handle) = &self.current_new_handle {
             let request = Self::build_account_request(
                 &self.current_new_subs.iter().collect::<Vec<_>>(),
                 commitment,
                 from_slot,
             );
-            Self::update_subscriptions(
-                &stream.handle,
-                "account_subscribe",
-                request,
-            )
-            .await?
+            Self::update_subscriptions(handle, "account_subscribe", request)
+                .await?
         } else {
-            self.current_new_stream = Some(self.create_account_stream(
-                &self.current_new_subs.iter().collect::<Vec<_>>(),
-                commitment,
-                from_slot,
-            ));
+            let pks: Vec<Pubkey> =
+                self.current_new_subs.iter().copied().collect();
+            let pk_refs: Vec<&Pubkey> = pks.iter().collect();
+            self.insert_current_new_stream(&pk_refs, commitment, from_slot);
         }
 
         // Promote if current-new exceeds threshold.
@@ -208,28 +243,33 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
             let overflow_start = new_pks.len().saturating_sub(overflow_count);
             let overflow_pks = &new_pks[overflow_start..];
 
-            // Move current-new stream to unoptimized old.
-            if let Some(stream) = self.current_new_stream.take() {
-                self.unoptimized_old_streams.push(stream);
+            // Move current-new to unoptimized old.
+            if let Some(stream) = self.stream_map.remove(&StreamKey::CurrentNew)
+            {
+                let idx = self.unoptimized_old_handles.len();
+                self.stream_map
+                    .insert(StreamKey::UnoptimizedOld(idx), stream);
+            }
+            if let Some(handle) = self.current_new_handle.take() {
+                self.unoptimized_old_handles.push(handle);
             }
             self.current_new_subs.clear();
 
             // Start fresh current-new with overflow pubkeys.
-            if overflow_pks.is_empty() {
-                self.current_new_stream = None;
-            } else {
+            if !overflow_pks.is_empty() {
                 for pk in overflow_pks {
                     self.current_new_subs.insert(*pk);
                 }
-                self.current_new_stream = Some(self.create_account_stream(
+                self.insert_current_new_stream(
                     &overflow_pks.iter().collect::<Vec<_>>(),
                     commitment,
                     from_slot,
-                ));
+                );
             }
 
-            // If unoptimized old streams exceed the limit, optimize.
-            if self.unoptimized_old_streams.len()
+            // If unoptimized old handles exceed the limit,
+            // optimize.
+            if self.unoptimized_old_handles.len()
                 > self.config.max_old_unoptimized
             {
                 self.optimize(commitment);
@@ -256,93 +296,88 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
     pub fn clear_account_subscriptions(&mut self) {
         self.subscriptions.write().clear();
         self.current_new_subs.clear();
-        self.current_new_stream = None;
-        self.unoptimized_old_streams.clear();
-        self.optimized_old_streams.clear();
+        self.current_new_handle = None;
+        self.stream_map.remove(&StreamKey::CurrentNew);
+        for i in 0..self.unoptimized_old_handles.len() {
+            self.stream_map.remove(&StreamKey::UnoptimizedOld(i));
+        }
+        self.unoptimized_old_handles.clear();
+        for i in 0..self.optimized_old_handles.len() {
+            self.stream_map.remove(&StreamKey::OptimizedOld(i));
+        }
+        self.optimized_old_handles.clear();
     }
 
     /// Returns `true` if any account stream exists.
     pub fn has_account_subscriptions(&self) -> bool {
-        self.current_new_stream.is_some()
-            || !self.unoptimized_old_streams.is_empty()
-            || !self.optimized_old_streams.is_empty()
+        self.current_new_handle.is_some()
+            || !self.unoptimized_old_handles.is_empty()
+            || !self.optimized_old_handles.is_empty()
     }
 
-    /// Polls all account and program streams, returning the next
+    /// Polls all streams in the [StreamMap], returning the next
     /// available update tagged with its source.
-    /// Returns `None` when all streams have ended.
+    /// Returns `None` when the map is empty.
     pub async fn next_update(
         &mut self,
     ) -> Option<(StreamUpdateSource, LaserResult)> {
-        let mut all: Vec<(StreamUpdateSource, &mut LaserStreamWithHandle<S>)> =
-            Vec::new();
-        for s in &mut self.optimized_old_streams {
-            all.push((StreamUpdateSource::Account, s));
-        }
-        for s in &mut self.unoptimized_old_streams {
-            all.push((StreamUpdateSource::Account, s));
-        }
-        if let Some(s) = &mut self.current_new_stream {
-            all.push((StreamUpdateSource::Account, s));
-        }
-        if let Some((_, s)) = &mut self.program_subscriptions {
-            all.push((StreamUpdateSource::Program, s));
-        }
-
-        if all.is_empty() {
-            return None;
-        }
-
-        let futs: futures_util::stream::FuturesUnordered<_> = all
-            .into_iter()
-            .map(|(src, s)| {
-                let stream = &mut s.stream;
-                async move { (src, stream.next().await) }
-            })
-            .collect();
-        let (src, result) = futs.into_future().await.0?;
-        Some((src, result?))
+        use tokio_stream::StreamExt;
+        let (key, result) = self.stream_map.next().await?;
+        Some((key.source(), result))
     }
 
-    /// Returns `true` if any stream (account or program)
-    /// exists.
+    /// Returns `true` if any stream (account or program) exists.
     pub fn has_any_subscriptions(&self) -> bool {
-        self.has_account_subscriptions() || self.has_program_subscriptions()
+        !self.stream_map.is_empty()
     }
 
     /// Rebuild all account streams from `subscriptions`.
     ///
     /// 1. Chunk `subscriptions` into groups of
     ///    `max_subs_in_old_optimized`.
-    /// 2. Create a new stream for each chunk → `optimized_old_streams`.
-    /// 3. Clear `unoptimized_old_streams`.
+    /// 2. Create a new stream for each chunk →
+    ///    `optimized_old_handles`.
+    /// 3. Clear `unoptimized_old_handles`.
     /// 4. Reset the current-new stream (empty filter).
     pub fn optimize(&mut self, commitment: &CommitmentLevel) {
+        // Remove all account streams from the map.
+        self.stream_map.remove(&StreamKey::CurrentNew);
+        for i in 0..self.unoptimized_old_handles.len() {
+            self.stream_map.remove(&StreamKey::UnoptimizedOld(i));
+        }
+        for i in 0..self.optimized_old_handles.len() {
+            self.stream_map.remove(&StreamKey::OptimizedOld(i));
+        }
+
         // Collect all active subscriptions and chunk them.
         let all_pks: Vec<Pubkey> =
             self.subscriptions.read().iter().copied().collect();
 
         // Build optimized old streams from chunks.
-        self.optimized_old_streams = all_pks
+        self.optimized_old_handles = Vec::new();
+        for (i, chunk) in all_pks
             .chunks(self.config.max_subs_in_old_optimized)
-            .map(|chunk| {
-                let refs: Vec<&Pubkey> = chunk.iter().collect();
+            .enumerate()
+        {
+            let refs: Vec<&Pubkey> = chunk.iter().collect();
+            let LaserStreamWithHandle { stream, handle } =
                 self.stream_factory.subscribe(Self::build_account_request(
                     &refs, commitment, None,
-                ))
-            })
-            .collect();
+                ));
+            self.stream_map.insert(StreamKey::OptimizedOld(i), stream);
+            self.optimized_old_handles.push(handle);
+        }
 
-        // Clear unoptimized old streams.
-        self.unoptimized_old_streams.clear();
+        // Clear unoptimized old handles.
+        self.unoptimized_old_handles.clear();
 
         // Reset the current-new stream.
         self.current_new_subs.clear();
-        self.current_new_stream = None;
+        self.current_new_handle = None;
     }
 
-    /// Returns `true` if the pubkey is in the active `subscriptions`
-    /// set.
+    /// Returns `true` if the pubkey is in the active
+    /// `subscriptions` set.
     pub fn is_subscribed(&self, pubkey: &Pubkey) -> bool {
         self.subscriptions.read().contains(pubkey)
     }
@@ -362,47 +397,28 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
         self.current_new_subs.len()
     }
 
-    /// Returns a reference to the current-new stream's pubkey set.
+    /// Returns a reference to the current-new stream's pubkey
+    /// set.
     fn current_new_subs(&self) -> &HashSet<Pubkey> {
         &self.current_new_subs
     }
 
     /// Returns the number of unoptimized old streams.
     fn unoptimized_old_stream_count(&self) -> usize {
-        self.unoptimized_old_streams.len()
+        self.unoptimized_old_handles.len()
     }
 
     /// Returns the number of optimized old streams.
     fn optimized_old_stream_count(&self) -> usize {
-        self.optimized_old_streams.len()
-    }
-
-    /// Returns references to all account streams (optimized old +
-    /// unoptimized old + current-new) for inspection.
-    fn all_account_streams(&self) -> Vec<&LaserStreamWithHandle<S>> {
-        let mut streams = Vec::new();
-        for s in &self.optimized_old_streams {
-            streams.push(s);
-        }
-        for s in &self.unoptimized_old_streams {
-            streams.push(s);
-        }
-        if let Some(s) = &self.current_new_stream {
-            streams.push(s);
-        }
-        streams
+        self.optimized_old_handles.len()
     }
 
     /// Returns the total number of account streams across all
     /// generations.
     fn account_stream_count(&self) -> usize {
-        let current = if self.current_new_stream.is_some() {
-            1
-        } else {
-            0
-        };
-        self.optimized_old_streams.len()
-            + self.unoptimized_old_streams.len()
+        let current = usize::from(self.current_new_handle.is_some());
+        self.optimized_old_handles.len()
+            + self.unoptimized_old_handles.len()
             + current
     }
 
@@ -411,7 +427,8 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
     // ---------------------------------------------------------
 
     /// Build a `SubscribeRequest` for the given account pubkeys.
-    /// Includes a slot subscription for chain slot synchronisation.
+    /// Includes a slot subscription for chain slot
+    /// synchronisation.
     fn build_account_request(
         pubkeys: &[&Pubkey],
         commitment: &CommitmentLevel,
@@ -444,29 +461,32 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
         }
     }
 
-    /// Build a `SubscribeRequest` and call the factory for the given
-    /// account pubkeys.
-    fn create_account_stream(
-        &self,
+    /// Create an account stream via the factory and insert it
+    /// as the current-new stream in the [StreamMap].
+    fn insert_current_new_stream(
+        &mut self,
         pubkeys: &[&Pubkey],
         commitment: &CommitmentLevel,
         from_slot: Option<u64>,
-    ) -> LaserStreamWithHandle<S> {
+    ) {
         let request =
             Self::build_account_request(pubkeys, commitment, from_slot);
-        self.stream_factory.subscribe(request)
+        let LaserStreamWithHandle { stream, handle } =
+            self.stream_factory.subscribe(request);
+        self.stream_map.insert(StreamKey::CurrentNew, stream);
+        self.current_new_handle = Some(handle);
     }
 
     /// Adds a program subscription. If the program is already
-    /// subscribed, this is a no-op. Otherwise, updates the program
-    /// stream to include all subscribed programs.
+    /// subscribed, this is a no-op. Otherwise, updates the
+    /// program stream to include all subscribed programs.
     pub async fn add_program_subscription(
         &mut self,
         program_id: Pubkey,
         commitment: &CommitmentLevel,
     ) -> RemoteAccountProviderResult<()> {
         if self
-            .program_subscriptions
+            .program_sub
             .as_ref()
             .is_some_and(|(subs, _)| subs.contains(&program_id))
         {
@@ -474,7 +494,7 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
         }
 
         let mut subscribed_programs = self
-            .program_subscriptions
+            .program_sub
             .as_ref()
             .map(|(subs, _)| subs.clone())
             .unwrap_or_default();
@@ -484,43 +504,31 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
         let program_ids: Vec<&Pubkey> = subscribed_programs.iter().collect();
         let request = Self::build_program_request(&program_ids, commitment);
 
-        if let Some((_, stream)) = &self.program_subscriptions {
-            // Update existing stream
-            Self::update_subscriptions(
-                &stream.handle,
-                "program_subscribe",
-                request,
-            )
-            .await?;
-            // Update the set of subscribed programs
-            if let Some((subs, _)) = &mut self.program_subscriptions {
+        if let Some((subs, handle)) = &self.program_sub {
+            Self::update_subscriptions(handle, "program_subscribe", request)
+                .await?;
+            if let Some((subs, _)) = &mut self.program_sub {
                 *subs = subscribed_programs;
             }
         } else {
-            // Create new stream
-            let stream = self.create_program_stream(&program_ids, commitment);
-            self.program_subscriptions = Some((subscribed_programs, stream));
+            let LaserStreamWithHandle { stream, handle } =
+                self.create_program_stream(&program_ids, commitment);
+            self.stream_map.insert(StreamKey::Program, stream);
+            self.program_sub = Some((subscribed_programs, handle));
         }
 
         Ok(())
     }
 
-    /// Returns a mutable reference to the program subscriptions
-    /// stream (if any) for polling in the actor loop.
-    pub fn program_stream_mut(
-        &mut self,
-    ) -> Option<&mut LaserStreamWithHandle<S>> {
-        self.program_subscriptions.as_mut().map(|(_, s)| s)
-    }
-
     /// Returns whether there are active program subscriptions.
     pub fn has_program_subscriptions(&self) -> bool {
-        self.program_subscriptions.is_some()
+        self.program_sub.is_some()
     }
 
     /// Clears all program subscriptions.
     pub fn clear_program_subscriptions(&mut self) {
-        self.program_subscriptions = None;
+        self.stream_map.remove(&StreamKey::Program);
+        self.program_sub = None;
     }
 
     /// Build a `SubscribeRequest` for the given program IDs.
@@ -613,10 +621,7 @@ mod tests {
             subs.len(),
         );
         for pk in expected {
-            assert!(
-                subs.contains(pk),
-                "subscription set missing pubkey {pk}",
-            );
+            assert!(subs.contains(pk), "subscription set missing pubkey {pk}",);
         }
     }
 
@@ -1146,11 +1151,11 @@ mod tests {
     }
 
     // -------------------------------------------------------------
-    // 8. Stream Enumeration / Polling Access
+    // 8. Stream Count Across Generations
     // -------------------------------------------------------------
 
     #[tokio::test]
-    async fn test_all_account_streams_includes_all_generations() {
+    async fn test_account_stream_count_includes_all_generations() {
         let (mut mgr, _factory) = create_manager();
         // Create optimized old streams.
         subscribe_n(&mut mgr, 15).await;
@@ -1160,21 +1165,24 @@ mod tests {
         subscribe_n(&mut mgr, 6).await;
 
         // Current-new also exists from the overflow pubkey.
-        let expected = mgr.account_stream_count();
-        let streams = mgr.all_account_streams();
-        assert_eq!(streams.len(), expected);
+        let count = mgr.account_stream_count();
+        assert!(count > 0);
+        assert_eq!(
+            count,
+            mgr.optimized_old_stream_count()
+                + mgr.unoptimized_old_stream_count()
+                + 1, // current-new
+        );
     }
 
     #[test]
-    fn test_all_account_streams_empty_when_no_subscriptions() {
+    fn test_account_stream_count_zero_when_no_subscriptions() {
         let (mgr, _factory) = create_manager();
-
-        let streams = mgr.all_account_streams();
-        assert!(streams.is_empty());
+        assert_eq!(mgr.account_stream_count(), 0);
     }
 
     #[tokio::test]
-    async fn test_all_account_streams_after_optimize_drops_old_unoptimized() {
+    async fn test_account_stream_count_after_optimize_drops_unoptimized() {
         let (mut mgr, _factory) = create_manager();
         // Create unoptimized old streams.
         for _ in 0..2 {
@@ -1185,10 +1193,12 @@ mod tests {
         mgr.optimize(&COMMITMENT);
 
         assert_eq!(mgr.unoptimized_old_stream_count(), 0);
-        let streams = mgr.all_account_streams();
         // Only optimized old streams remain (current-new is empty
         // after optimize).
-        assert_eq!(streams.len(), mgr.optimized_old_stream_count());
+        assert_eq!(
+            mgr.account_stream_count(),
+            mgr.optimized_old_stream_count(),
+        );
     }
 
     // -------------------------------------------------------------
