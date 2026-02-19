@@ -28,7 +28,4 @@ pub enum ClonerError {
 
     #[error("Failed to clone program {0} : {1:?}")]
     FailedToCloneProgram(Pubkey, Box<ClonerError>),
-
-    #[error("Serialization error: {0}")]
-    SerializationError(String),
 }
