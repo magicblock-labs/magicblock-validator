@@ -677,6 +677,14 @@ impl Cloner for ChainlinkCloner {
             }
         }
 
+        // After cloning a program we need to wait at least one slot for it to become
+        // usable, so we do that here
+        let current_slot = self.block.load().slot;
+        let mut block_updated = self.block.subscribe();
+        while self.block.load().slot == current_slot {
+            let _ = block_updated.recv().await;
+        }
+
         Ok(last_sig)
     }
 }
