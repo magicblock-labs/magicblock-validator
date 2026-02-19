@@ -6,7 +6,7 @@ concurrency:
 
 on:
   push:
-    branches: [master, dev, chore/improve-ci]
+    branches: [master, dev]
   pull_request:
     types: [opened, reopened, synchronize, ready_for_review]
 
