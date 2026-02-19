@@ -1,7 +1,6 @@
 use std::{
     collections::HashSet,
     fmt,
-    marker::PhantomData,
     sync::{
         atomic::{AtomicU16, AtomicU64, Ordering},
         Arc,
@@ -141,7 +140,6 @@ pub struct ChainLaserActor<H: StreamHandle, S: StreamFactory<H>> {
     client_id: String,
     /// RPC client for diagnostics (e.g., fetching slot when falling behind)
     rpc_client: ChainRpcClientImpl,
-    _phantom: PhantomData<H>,
 }
 
 impl ChainLaserActor<super::StreamHandleImpl, super::StreamFactoryImpl> {
@@ -246,7 +244,6 @@ impl<H: StreamHandle, S: StreamFactory<H>> ChainLaserActor<H, S> {
             slots,
             client_id: client_id.to_string(),
             rpc_client,
-            _phantom: PhantomData,
         };
 
         (
