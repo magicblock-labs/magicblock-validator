@@ -103,6 +103,10 @@ impl From<ArgsTaskType> for BufferTaskType {
 }
 
 impl BaseTask for BufferTask {
+    fn program_id(&self) -> Pubkey {
+        dlp::id()
+    }
+
     fn instruction(&self, validator: &Pubkey) -> Instruction {
         match &self.task_type {
             BufferTaskType::Commit(task) => {

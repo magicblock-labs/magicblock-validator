@@ -56,6 +56,10 @@ impl ArgsTask {
 }
 
 impl BaseTask for ArgsTask {
+    fn program_id(&self) -> Pubkey {
+        dlp::id()
+    }
+
     fn instruction(&self, validator: &Pubkey) -> Instruction {
         match &self.task_type {
             ArgsTaskType::Commit(value) => {
