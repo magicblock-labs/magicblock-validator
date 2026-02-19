@@ -3,7 +3,7 @@
 use std::collections::HashSet;
 
 use magicblock_magic_program_api::instruction::AccountCloneFields;
-use solana_account::{ReadableAccount, WritableAccount};
+use solana_account::ReadableAccount;
 use solana_instruction::error::InstructionError;
 use solana_log_collector::ic_msg;
 use solana_program_runtime::invoke_context::InvokeContext;
@@ -12,8 +12,8 @@ use solana_transaction_context::TransactionContext;
 
 use super::{
     add_pending_clone, adjust_authority_lamports, is_pending_clone,
-    validate_and_get_index, validate_authority, validate_mutable,
-    validate_remote_slot,
+    set_account_from_fields, validate_and_get_index, validate_authority,
+    validate_mutable, validate_remote_slot,
 };
 use crate::errors::MagicBlockProgramError;
 
@@ -96,17 +96,7 @@ pub(crate) fn process_clone_account_init(
     let mut data = vec![0u8; total_data_len as usize];
     data[..initial_data.len()].copy_from_slice(&initial_data);
 
-    {
-        let mut acc = account.borrow_mut();
-        acc.set_lamports(fields.lamports);
-        acc.set_owner(fields.owner);
-        acc.set_data_from_slice(&data);
-        acc.set_executable(fields.executable);
-        acc.set_delegated(fields.delegated);
-        acc.set_confined(fields.confined);
-        acc.set_remote_slot(fields.remote_slot);
-        acc.set_undelegating(false);
-    }
+    set_account_from_fields(account, &data, &fields);
 
     adjust_authority_lamports(auth_acc, lamports_delta)?;
     add_pending_clone(pubkey);

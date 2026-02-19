@@ -14,7 +14,10 @@ use solana_sdk_ids::loader_v4;
 use solana_sysvar::rent::Rent;
 use solana_transaction_context::TransactionContext;
 
-use super::{adjust_authority_lamports, validate_authority};
+use super::{
+    adjust_authority_lamports, close_buffer_account, get_deploy_slot,
+    loader_v4_state_to_bytes, validate_authority,
+};
 use crate::validator::validator_authority_id;
 
 /// Finalizes a LoaderV4 program from a buffer account.
@@ -30,7 +33,7 @@ use crate::validator::validator_authority_id;
 ///
 /// # Slot Trick
 ///
-/// We use `slot - 5` for the deploy slot to bypass LoaderV4's cooldown mechanism.
+/// We use `current_slot - 5` for the deploy slot to bypass LoaderV4's cooldown mechanism.
 /// LoaderV4 requires programs to wait N slots after deployment before certain operations.
 /// By setting the slot to 5 slots ago, we simulate that the program was deployed earlier.
 ///
@@ -42,7 +45,7 @@ pub(crate) fn process_finalize_program_from_buffer(
     signers: &HashSet<Pubkey>,
     invoke_context: &InvokeContext,
     transaction_context: &TransactionContext,
-    slot: u64,
+    remote_slot: u64,
 ) -> Result<(), InstructionError> {
     validate_authority(signers, invoke_context)?;
 
@@ -57,33 +60,27 @@ pub(crate) fn process_finalize_program_from_buffer(
         ctx.get_index_of_instruction_account_in_transaction(2)?,
     )?;
 
-    let prog_key = *transaction_context.get_key_of_account_at_index(
-        ctx.get_index_of_instruction_account_in_transaction(1)?,
-    )?;
-    let buf_key = *transaction_context.get_key_of_account_at_index(
-        ctx.get_index_of_instruction_account_in_transaction(2)?,
-    )?;
-
     let buf_data = buf_acc.borrow().data().to_vec();
     let buf_lamports = buf_acc.borrow().lamports();
     let prog_current_lamports = prog_acc.borrow().lamports();
 
-    ic_msg!(
-        invoke_context,
-        "FinalizeV4: prog={} buf={} len={}",
-        prog_key,
-        buf_key,
-        buf_data.len()
-    );
+    let deploy_slot = get_deploy_slot(invoke_context);
 
     // Build LoaderV4 account data: header + ELF
-    let deploy_slot = slot.saturating_sub(5); // Bypass cooldown
     let state = LoaderV4State {
         slot: deploy_slot,
         authority_address_or_next_version: validator_authority_id(),
         status: LoaderV4Status::Retracted, // Deploy instruction will activate it
     };
     let program_data = build_loader_v4_data(&state, &buf_data);
+
+    ic_msg!(
+        invoke_context,
+        "FinalizeProgram: elf_len={} remote_slot={} deploy_slot={}",
+        buf_data.len(),
+        remote_slot,
+        deploy_slot
+    );
 
     // Calculate rent-exempt lamports for full program account
     let prog_lamports = Rent::default().minimum_balance(program_data.len());
@@ -98,27 +95,14 @@ pub(crate) fn process_finalize_program_from_buffer(
         prog.set_owner(loader_v4::id());
         prog.set_executable(true);
         prog.set_data_from_slice(&program_data);
-        prog.set_remote_slot(slot);
+        prog.set_remote_slot(remote_slot);
         prog.set_undelegating(false);
     }
 
     // Close buffer account
-    {
-        let mut buf = buf_acc.borrow_mut();
-        buf.set_lamports(0);
-        buf.resize(0, 0);
-        // this hack allows us to close the account and remove it from accountsdb
-        buf.set_ephemeral(true);
-        buf.set_delegated(false);
-    }
+    close_buffer_account(buf_acc);
 
     adjust_authority_lamports(auth_acc, lamports_delta)?;
-    ic_msg!(
-        invoke_context,
-        "FinalizeV4: finalized {}, closed {}",
-        prog_key,
-        buf_key
-    );
     Ok(())
 }
 
@@ -126,14 +110,7 @@ pub(crate) fn process_finalize_program_from_buffer(
 fn build_loader_v4_data(state: &LoaderV4State, program_data: &[u8]) -> Vec<u8> {
     let header_size = LoaderV4State::program_data_offset();
     let mut data = Vec::with_capacity(header_size + program_data.len());
-    // SAFETY: LoaderV4State is POD with no uninitialized padding
-    let header: &[u8] = unsafe {
-        std::slice::from_raw_parts(
-            (state as *const LoaderV4State) as *const u8,
-            header_size,
-        )
-    };
-    data.extend_from_slice(header);
+    data.extend_from_slice(loader_v4_state_to_bytes(state));
     data.extend_from_slice(program_data);
     data
 }
