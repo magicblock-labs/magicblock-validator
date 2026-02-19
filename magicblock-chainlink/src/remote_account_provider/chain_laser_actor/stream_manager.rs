@@ -1456,23 +1456,19 @@ mod tests {
 
     #[tokio::test]
     async fn test_next_update_receives_account_updates() {
-        use helius_laserstream::grpc::SubscribeUpdate;
         use std::time::Duration;
+
+        use helius_laserstream::grpc::SubscribeUpdate;
 
         let (mut mgr, factory) = create_manager();
         subscribe_n(&mut mgr, 2).await;
 
-        factory.push_update_to_stream(
-            0,
-            Ok(SubscribeUpdate::default()),
-        );
+        factory.push_update_to_stream(0, Ok(SubscribeUpdate::default()));
 
-        let result = tokio::time::timeout(
-            Duration::from_millis(100),
-            mgr.next_update(),
-        )
-        .await
-        .expect("next_update timed out");
+        let result =
+            tokio::time::timeout(Duration::from_millis(100), mgr.next_update())
+                .await
+                .expect("next_update timed out");
 
         let (source, update) = result.expect("stream ended");
         assert_eq!(source, StreamUpdateSource::Account);
@@ -1481,8 +1477,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_next_update_receives_program_updates() {
-        use helius_laserstream::grpc::SubscribeUpdate;
         use std::time::Duration;
+
+        use helius_laserstream::grpc::SubscribeUpdate;
 
         let (mut mgr, factory) = create_manager();
         let program_id = Pubkey::new_unique();
@@ -1490,17 +1487,12 @@ mod tests {
             .await
             .unwrap();
 
-        factory.push_update_to_stream(
-            0,
-            Ok(SubscribeUpdate::default()),
-        );
+        factory.push_update_to_stream(0, Ok(SubscribeUpdate::default()));
 
-        let result = tokio::time::timeout(
-            Duration::from_millis(100),
-            mgr.next_update(),
-        )
-        .await
-        .expect("next_update timed out");
+        let result =
+            tokio::time::timeout(Duration::from_millis(100), mgr.next_update())
+                .await
+                .expect("next_update timed out");
 
         let (source, update) = result.expect("stream ended");
         assert_eq!(source, StreamUpdateSource::Program);
@@ -1508,10 +1500,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_next_update_receives_mixed_account_and_program()
-    {
-        use helius_laserstream::grpc::SubscribeUpdate;
+    async fn test_next_update_receives_mixed_account_and_program() {
         use std::time::Duration;
+
+        use helius_laserstream::grpc::SubscribeUpdate;
 
         let (mut mgr, factory) = create_manager();
 
@@ -1523,14 +1515,8 @@ mod tests {
             .await
             .unwrap();
 
-        factory.push_update_to_stream(
-            0,
-            Ok(SubscribeUpdate::default()),
-        );
-        factory.push_update_to_stream(
-            1,
-            Ok(SubscribeUpdate::default()),
-        );
+        factory.push_update_to_stream(0, Ok(SubscribeUpdate::default()));
+        factory.push_update_to_stream(1, Ok(SubscribeUpdate::default()));
 
         let mut sources = Vec::new();
         for _ in 0..2 {
@@ -1541,8 +1527,7 @@ mod tests {
             .await
             .expect("next_update timed out");
 
-            let (source, update) =
-                result.expect("stream ended");
+            let (source, update) = result.expect("stream ended");
             assert!(update.is_ok());
             sources.push(source);
         }

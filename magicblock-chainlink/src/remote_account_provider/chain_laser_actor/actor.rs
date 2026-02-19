@@ -210,12 +210,9 @@ impl<H: StreamHandle, S: StreamFactory<H>> ChainLaserActor<H, S> {
             mpsc::channel(MESSAGE_CHANNEL_SIZE);
         let commitment = grpc_commitment_from_solana(commitment);
 
-        let stream_manager = StreamManager::new(
-            StreamManagerConfig::default(),
-            stream_factory,
-        );
-        let shared_subscriptions =
-            Arc::clone(stream_manager.subscriptions());
+        let stream_manager =
+            StreamManager::new(StreamManagerConfig::default(), stream_factory);
+        let shared_subscriptions = Arc::clone(stream_manager.subscriptions());
 
         let me = Self {
             stream_manager,
@@ -324,9 +321,7 @@ impl<H: StreamHandle, S: StreamFactory<H>> ChainLaserActor<H, S> {
             }
             Shutdown { response } => {
                 info!(client_id = self.client_id, "Received Shutdown message");
-                Self::clear_subscriptions(
-                    &mut self.stream_manager,
-                );
+                Self::clear_subscriptions(&mut self.stream_manager);
                 let _ = response.send(Ok(())).inspect_err(|_| {
                     warn!(
                         client_id = self.client_id,
@@ -559,9 +554,7 @@ impl<H: StreamHandle, S: StreamFactory<H>> ChainLaserActor<H, S> {
         });
     }
 
-    fn clear_subscriptions(
-        stream_manager: &mut StreamManager<H, S>,
-    ) {
+    fn clear_subscriptions(stream_manager: &mut StreamManager<H, S>) {
         stream_manager.clear_account_subscriptions();
         stream_manager.clear_program_subscriptions();
     }
