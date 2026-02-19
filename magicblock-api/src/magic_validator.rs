@@ -421,7 +421,6 @@ impl MagicValidator {
             committor_service,
             config.chainlink.clone(),
             transaction_scheduler.clone(),
-            accountsdb.clone(),
             latest_block.clone(),
         );
         let cloner = Arc::new(cloner);

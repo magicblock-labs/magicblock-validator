@@ -11,7 +11,7 @@ use solana_pubkey::Pubkey;
 use solana_sdk_ids::loader_v4;
 use solana_transaction_context::TransactionContext;
 
-use super::validate_authority;
+use super::{loader_v4_state_to_bytes, validate_authority};
 
 /// Updates the authority field in a LoaderV4 program's header.
 ///
@@ -68,13 +68,8 @@ pub(crate) fn process_set_program_authority(
         status: current.status,
     };
 
-    let header: &[u8] = unsafe {
-        std::slice::from_raw_parts(
-            (&new_state as *const LoaderV4State) as *const u8,
-            header_size,
-        )
-    };
-    acc.data_as_mut_slice()[..header_size].copy_from_slice(header);
+    acc.data_as_mut_slice()[..header_size]
+        .copy_from_slice(loader_v4_state_to_bytes(&new_state));
 
     ic_msg!(
         invoke_context,

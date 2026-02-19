@@ -2,7 +2,7 @@
 
 use std::collections::HashSet;
 
-use solana_account::{ReadableAccount, WritableAccount};
+use solana_account::ReadableAccount;
 use solana_instruction::error::InstructionError;
 use solana_log_collector::ic_msg;
 use solana_program_runtime::invoke_context::InvokeContext;
@@ -10,8 +10,8 @@ use solana_pubkey::Pubkey;
 use solana_transaction_context::TransactionContext;
 
 use super::{
-    adjust_authority_lamports, remove_pending_clone, validate_and_get_index,
-    validate_authority,
+    adjust_authority_lamports, close_buffer_account, remove_pending_clone,
+    validate_and_get_index, validate_authority,
 };
 
 /// Cleans up a failed multi-transaction clone.
@@ -51,14 +51,7 @@ pub(crate) fn process_cleanup_partial_clone(
     let current_lamports = account.borrow().lamports();
     let lamports_delta = -(current_lamports as i64);
 
-    {
-        let mut acc = account.borrow_mut();
-        acc.set_lamports(0);
-        acc.resize(0, 0);
-        // this hack allows us to close the account and remove it from accountsdb
-        acc.set_ephemeral(true);
-        acc.set_delegated(false);
-    }
+    close_buffer_account(account);
 
     adjust_authority_lamports(auth_acc, lamports_delta)?;
     Ok(())
