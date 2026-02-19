@@ -8,7 +8,9 @@ use helius_laserstream::grpc::{
 use solana_pubkey::Pubkey;
 use tokio::time::Duration;
 
-use super::{LaserResult, LaserStreamWithHandle, StreamFactory};
+use super::{
+    LaserResult, LaserStreamWithHandle, SharedSubscriptions, StreamFactory,
+};
 use crate::remote_account_provider::{
     chain_laser_actor::StreamHandle, RemoteAccountProviderError,
     RemoteAccountProviderResult,
@@ -72,7 +74,7 @@ pub struct StreamManager<S: StreamHandle, SF: StreamFactory<S>> {
     /// of streams, [Self::current_new_stream],
     /// [Self::unoptimized_old_streams], and
     /// [Self::optimized_old_streams].
-    subscriptions: HashSet<Pubkey>,
+    subscriptions: SharedSubscriptions,
     /// Pubkeys that are part of the current-new stream's filter.
     current_new_subs: HashSet<Pubkey>,
     /// The current-new stream which holds the [Self::current_new_subs].
@@ -92,7 +94,7 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
             config,
             stream_factory,
             program_subscriptions: None,
-            subscriptions: HashSet::new(),
+            subscriptions: Default::default(),
             current_new_subs: HashSet::new(),
             current_new_stream: None,
             unoptimized_old_streams: Vec::new(),
@@ -154,19 +156,25 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
         from_slot: Option<u64>,
     ) -> RemoteAccountProviderResult<()> {
         // Filter out pubkeys already in subscriptions.
-        let new_pks: Vec<Pubkey> = pubkeys
-            .iter()
-            .filter(|pk| !self.subscriptions.contains(pk))
-            .copied()
-            .collect();
+        let new_pks: Vec<Pubkey> = {
+            let subs = self.subscriptions.read();
+            pubkeys
+                .iter()
+                .filter(|pk| !subs.contains(pk))
+                .copied()
+                .collect()
+        };
 
         if new_pks.is_empty() {
             return Ok(());
         }
 
-        for pk in &new_pks {
-            self.subscriptions.insert(*pk);
-            self.current_new_subs.insert(*pk);
+        {
+            let mut subs = self.subscriptions.write();
+            for pk in &new_pks {
+                subs.insert(*pk);
+                self.current_new_subs.insert(*pk);
+            }
         }
 
         // Update the current-new stream with the full
@@ -237,15 +245,16 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
     /// are never modified. Updates for these pubkeys will be ignored
     /// by the actor.
     pub fn account_unsubscribe(&mut self, pubkeys: &[Pubkey]) {
+        let mut subs = self.subscriptions.write();
         for pk in pubkeys {
-            self.subscriptions.remove(pk);
+            subs.remove(pk);
         }
     }
 
     /// Clears all account subscriptions and drops all account
     /// streams.
     pub fn clear_account_subscriptions(&mut self) {
-        self.subscriptions.clear();
+        self.subscriptions.write().clear();
         self.current_new_subs.clear();
         self.current_new_stream = None;
         self.unoptimized_old_streams.clear();
@@ -310,7 +319,8 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
     /// 4. Reset the current-new stream (empty filter).
     pub fn optimize(&mut self, commitment: &CommitmentLevel) {
         // Collect all active subscriptions and chunk them.
-        let all_pks: Vec<Pubkey> = self.subscriptions.iter().copied().collect();
+        let all_pks: Vec<Pubkey> =
+            self.subscriptions.read().iter().copied().collect();
 
         // Build optimized old streams from chunks.
         self.optimized_old_streams = all_pks
@@ -334,15 +344,15 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
     /// Returns `true` if the pubkey is in the active `subscriptions`
     /// set.
     pub fn is_subscribed(&self, pubkey: &Pubkey) -> bool {
-        self.subscriptions.contains(pubkey)
+        self.subscriptions.read().contains(pubkey)
     }
 
     // ---------------------------------------------------------
     // Accessors — internal state inspection
     // ---------------------------------------------------------
 
-    /// Returns a reference to the canonical subscriptions set.
-    pub fn subscriptions(&self) -> &HashSet<Pubkey> {
+    /// Returns a reference to the shared subscriptions.
+    pub fn subscriptions(&self) -> &SharedSubscriptions {
         &self.subscriptions
     }
 
@@ -594,7 +604,7 @@ mod tests {
         mgr: &StreamManager<MockStreamHandle, MockStreamFactory>,
         expected: &[Pubkey],
     ) {
-        let subs = mgr.subscriptions();
+        let subs = mgr.subscriptions().read();
         assert_eq!(
             subs.len(),
             expected.len(),
@@ -603,7 +613,10 @@ mod tests {
             subs.len(),
         );
         for pk in expected {
-            assert!(subs.contains(pk), "subscription set missing pubkey {pk}",);
+            assert!(
+                subs.contains(pk),
+                "subscription set missing pubkey {pk}",
+            );
         }
     }
 
@@ -853,7 +866,7 @@ mod tests {
         // After optimization: unoptimized should be empty.
         assert_eq!(mgr.unoptimized_old_stream_count(), 0);
         // Optimized old streams should exist.
-        let total_subs = mgr.subscriptions().len();
+        let total_subs = mgr.subscriptions().read().len();
         let expected_optimized = total_subs.div_ceil(10); // ceil(total / MAX_OLD_OPTIMIZED)
         assert_eq!(mgr.optimized_old_stream_count(), expected_optimized,);
     }
@@ -982,7 +995,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(mgr.subscriptions().contains(&new_pk));
+        assert!(mgr.subscriptions().read().contains(&new_pk));
         assert!(mgr.current_new_subs().contains(&new_pk));
     }
 
@@ -1033,7 +1046,7 @@ mod tests {
 
         mgr.account_unsubscribe(&[random]);
 
-        assert!(mgr.subscriptions().is_empty());
+        assert!(mgr.subscriptions().read().is_empty());
     }
 
     #[tokio::test]
@@ -1047,7 +1060,7 @@ mod tests {
         mgr.account_unsubscribe(&[pk]);
         mgr.account_unsubscribe(&[pk]);
 
-        assert!(mgr.subscriptions().is_empty());
+        assert!(mgr.subscriptions().read().is_empty());
     }
 
     #[tokio::test]
@@ -1224,7 +1237,7 @@ mod tests {
 
         // ceil(50 / 10) = 5
         assert_eq!(mgr.optimized_old_stream_count(), 5);
-        assert_eq!(mgr.subscriptions().len(), 50);
+        assert_eq!(mgr.subscriptions().read().len(), 50);
         assert_eq!(mgr.current_new_sub_count(), 0);
 
         // Verify the union of all optimized stream filters equals all
@@ -1251,7 +1264,7 @@ mod tests {
         mgr.account_unsubscribe(&new_pks[0..2]);
 
         let expected_count = 20 - 8 + 5 - 2;
-        assert_eq!(mgr.subscriptions().len(), expected_count);
+        assert_eq!(mgr.subscriptions().read().len(), expected_count);
 
         let reqs_before = factory.captured_requests().len();
         mgr.optimize(&COMMITMENT);
@@ -1280,7 +1293,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(mgr.subscriptions().contains(&pk));
+        assert!(mgr.subscriptions().read().contains(&pk));
         assert!(mgr.current_new_subs().contains(&pk));
     }
 
@@ -1346,7 +1359,7 @@ mod tests {
         let calls_before = factory.captured_requests().len();
 
         let pks: Vec<Pubkey> =
-            mgr.subscriptions().iter().take(3).copied().collect();
+            mgr.subscriptions().read().iter().take(3).copied().collect();
         mgr.account_unsubscribe(&pks);
 
         assert_eq!(factory.captured_requests().len(), calls_before);

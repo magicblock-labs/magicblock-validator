@@ -1,4 +1,8 @@
-use std::pin::Pin;
+use std::{
+    collections::HashSet,
+    pin::Pin,
+    sync::Arc,
+};
 
 use async_trait::async_trait;
 use futures_util::Stream;
@@ -6,11 +10,15 @@ use helius_laserstream::{
     grpc::{SubscribeRequest, SubscribeUpdate},
     LaserstreamError, StreamHandle as HeliusStreamHandle,
 };
+use parking_lot::RwLock;
+use solana_pubkey::Pubkey;
 
 pub use self::{
-    actor::{ChainLaserActor, SharedSubscriptions, Slots},
+    actor::{ChainLaserActor, Slots},
     stream_manager::{StreamManager, StreamManagerConfig, StreamUpdateSource},
 };
+
+pub type SharedSubscriptions = Arc<RwLock<HashSet<Pubkey>>>;
 
 mod actor;
 mod mock;

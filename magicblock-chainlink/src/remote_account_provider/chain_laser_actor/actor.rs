@@ -1,5 +1,4 @@
 use std::{
-    collections::HashSet,
     fmt,
     sync::{
         atomic::{AtomicU16, AtomicU64, Ordering},
@@ -18,7 +17,6 @@ use magicblock_metrics::metrics::{
     inc_per_program_account_updates_count,
     inc_program_subscription_account_updates_count,
 };
-use parking_lot::RwLock;
 use solana_account::Account;
 use solana_commitment_config::CommitmentLevel as SolanaCommitmentLevel;
 use solana_pubkey::Pubkey;
@@ -28,8 +26,8 @@ use tonic::Code;
 use tracing::*;
 
 use super::{
-    LaserResult, StreamFactory, StreamHandle, StreamManager,
-    StreamManagerConfig, StreamUpdateSource,
+    LaserResult, SharedSubscriptions, StreamFactory, StreamHandle,
+    StreamManager, StreamManagerConfig, StreamUpdateSource,
 };
 use crate::remote_account_provider::{
     chain_rpc_client::{ChainRpcClient, ChainRpcClientImpl},
@@ -43,8 +41,6 @@ use crate::remote_account_provider::{
 };
 
 const MAX_SLOTS_BACKFILL: u64 = 400;
-
-pub type SharedSubscriptions = Arc<RwLock<HashSet<Pubkey>>>;
 
 // -----------------
 // Slots
@@ -110,11 +106,6 @@ impl fmt::Display for AccountUpdateSource {
 pub struct ChainLaserActor<H: StreamHandle, S: StreamFactory<H>> {
     /// Manager for creating and polling laser streams
     stream_manager: StreamManager<H, S>,
-    /// Shared with ChainLaserClientImpl for sync access to
-    /// subscription_count and subscriptions_union.
-    /// Also used in `process_subscription_update` to filter
-    /// incoming updates.
-    subscriptions: SharedSubscriptions,
     /// Receives subscribe/unsubscribe messages to this actor
     messages_receiver: mpsc::Receiver<ChainPubsubActorMessage>,
     /// Sends updates for any account subscription that is
@@ -219,16 +210,16 @@ impl<H: StreamHandle, S: StreamFactory<H>> ChainLaserActor<H, S> {
             mpsc::channel(MESSAGE_CHANNEL_SIZE);
         let commitment = grpc_commitment_from_solana(commitment);
 
-        let subscriptions: SharedSubscriptions = Default::default();
-        let shared_subscriptions = Arc::clone(&subscriptions);
+        let stream_manager = StreamManager::new(
+            StreamManagerConfig::default(),
+            stream_factory,
+        );
+        let shared_subscriptions =
+            Arc::clone(stream_manager.subscriptions());
 
         let me = Self {
-            stream_manager: StreamManager::new(
-                StreamManagerConfig::default(),
-                stream_factory,
-            ),
+            stream_manager,
             messages_receiver,
-            subscriptions,
             subscription_updates_sender,
             commitment,
             abort_sender,
@@ -249,10 +240,7 @@ impl<H: StreamHandle, S: StreamFactory<H>> ChainLaserActor<H, S> {
     #[instrument(skip(self), fields(client_id = %self.client_id))]
     fn shutdown(&mut self) {
         info!("Shutting down laser actor");
-        Self::clear_subscriptions(
-            &self.subscriptions,
-            &mut self.stream_manager,
-        );
+        Self::clear_subscriptions(&mut self.stream_manager);
     }
 
     #[instrument(skip(self), fields(client_id = %self.client_id))]
@@ -281,7 +269,6 @@ impl<H: StreamHandle, S: StreamFactory<H>> ChainLaserActor<H, S> {
                                 "Subscription stream ended"
                             );
                             Self::signal_connection_issue(
-                                &self.subscriptions,
                                 &mut self.stream_manager,
                                 &self.abort_sender,
                                 &self.client_id,
@@ -338,7 +325,6 @@ impl<H: StreamHandle, S: StreamFactory<H>> ChainLaserActor<H, S> {
             Shutdown { response } => {
                 info!(client_id = self.client_id, "Received Shutdown message");
                 Self::clear_subscriptions(
-                    &self.subscriptions,
                     &mut self.stream_manager,
                 );
                 let _ = response.send(Ok(())).inspect_err(|_| {
@@ -359,7 +345,7 @@ impl<H: StreamHandle, S: StreamFactory<H>> ChainLaserActor<H, S> {
         pubkey: Pubkey,
         sub_response: oneshot::Sender<RemoteAccountProviderResult<()>>,
     ) {
-        if self.subscriptions.read().contains(&pubkey) {
+        if self.stream_manager.is_subscribed(&pubkey) {
             debug!(
                 pubkey = %pubkey,
                 "Already subscribed to account"
@@ -369,8 +355,6 @@ impl<H: StreamHandle, S: StreamFactory<H>> ChainLaserActor<H, S> {
             });
             return;
         }
-
-        self.subscriptions.write().insert(pubkey);
 
         let from_slot = self.determine_from_slot().map(|(_, fs)| fs);
         let result = self
@@ -403,28 +387,25 @@ impl<H: StreamHandle, S: StreamFactory<H>> ChainLaserActor<H, S> {
         pubkey: &Pubkey,
         unsub_response: oneshot::Sender<RemoteAccountProviderResult<()>>,
     ) {
-        match self.subscriptions.write().remove(pubkey) {
-            true => {
-                self.stream_manager.account_unsubscribe(&[*pubkey]);
-                trace!(
-                    pubkey = %pubkey,
-                    "Unsubscribed from account"
-                );
-                unsub_response.send(Ok(())).unwrap_or_else(|_| {
+        if self.stream_manager.is_subscribed(pubkey) {
+            self.stream_manager.account_unsubscribe(&[*pubkey]);
+            trace!(
+                pubkey = %pubkey,
+                "Unsubscribed from account"
+            );
+            unsub_response.send(Ok(())).unwrap_or_else(|_| {
+                warn!(pubkey = %pubkey, "Failed to send unsubscribe response");
+            });
+        } else {
+            unsub_response
+                .send(Err(
+                    RemoteAccountProviderError::AccountSubscriptionDoesNotExist(
+                        pubkey.to_string(),
+                    ),
+                ))
+                .unwrap_or_else(|_| {
                     warn!(pubkey = %pubkey, "Failed to send unsubscribe response");
                 });
-            }
-            false => {
-                unsub_response
-                    .send(Err(
-                        RemoteAccountProviderError::AccountSubscriptionDoesNotExist(
-                            pubkey.to_string(),
-                        ),
-                    ))
-                    .unwrap_or_else(|_| {
-                        warn!(pubkey = %pubkey, "Failed to send unsubscribe response");
-                    });
-            }
         }
     }
 
@@ -511,7 +492,6 @@ impl<H: StreamHandle, S: StreamFactory<H>> ChainLaserActor<H, S> {
             source,
         );
         Self::signal_connection_issue(
-            &self.subscriptions,
             &mut self.stream_manager,
             &self.abort_sender,
             &self.client_id,
@@ -580,10 +560,8 @@ impl<H: StreamHandle, S: StreamFactory<H>> ChainLaserActor<H, S> {
     }
 
     fn clear_subscriptions(
-        subscriptions: &SharedSubscriptions,
         stream_manager: &mut StreamManager<H, S>,
     ) {
-        subscriptions.write().clear();
         stream_manager.clear_account_subscriptions();
         stream_manager.clear_program_subscriptions();
     }
@@ -593,9 +571,8 @@ impl<H: StreamHandle, S: StreamFactory<H>> ChainLaserActor<H, S> {
     /// NOTE: the laser client should handle reconnects
     /// internally, but we add this as a backup in case it is
     /// unable to do so
-    #[instrument(skip(subscriptions, stream_manager, abort_sender), fields(client_id = %client_id))]
+    #[instrument(skip(stream_manager, abort_sender), fields(client_id = %client_id))]
     async fn signal_connection_issue(
-        subscriptions: &SharedSubscriptions,
         stream_manager: &mut StreamManager<H, S>,
         abort_sender: &mpsc::Sender<()>,
         client_id: &str,
@@ -610,7 +587,7 @@ impl<H: StreamHandle, S: StreamFactory<H>> ChainLaserActor<H, S> {
             &SIGNAL_CONNECTION_COUNT,
         );
 
-        Self::clear_subscriptions(subscriptions, stream_manager);
+        Self::clear_subscriptions(stream_manager);
 
         // Use try_send to avoid blocking and naturally
         // coalesce signals
@@ -700,7 +677,7 @@ impl<H: StreamHandle, S: StreamFactory<H>> ChainLaserActor<H, S> {
             );
         }
 
-        if !self.subscriptions.read().contains(&pubkey) {
+        if !self.stream_manager.is_subscribed(&pubkey) {
             return;
         }
 
