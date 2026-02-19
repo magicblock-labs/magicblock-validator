@@ -21,7 +21,7 @@ pub enum MagicBlockProgramError {
     #[error("number of accounts to modify needs to match number of account modifications")]
     AccountsToModifyNotMatchingAccountModifications,
 
-    #[error("The account modification for the provided key is missing.")]
+    #[error("The account modification for the provided key is missing")]
     AccountModificationMissing,
 
     #[error("first account needs to be MagicBlock authority")]
@@ -30,29 +30,26 @@ pub enum MagicBlockProgramError {
     #[error("MagicBlock authority needs to be owned by system program")]
     MagicBlockAuthorityNeedsToBeOwnedBySystemProgram,
 
-    #[error("The account resolution for the provided key failed.")]
-    AccountDataResolutionFailed,
-
-    #[error("The account data for the provided key is missing both from in-memory and ledger storage.")]
+    #[error("The account data for the provided key is missing")]
     AccountDataMissing,
 
-    #[error("The account data for the provided key is missing from in-memory and we are not replaying the ledger.")]
-    AccountDataMissingFromMemory,
+    #[error("Account already has a pending clone in progress")]
+    CloneAlreadyPending,
 
-    #[error("Tried to persist data that could not be resolved.")]
-    AttemptedToPersistUnresolvedData,
+    #[error("No pending clone found for account")]
+    NoPendingClone,
 
-    #[error("Tried to persist data that was resolved from storage.")]
-    AttemptedToPersistDataFromStorage,
+    #[error("Clone offset mismatch")]
+    CloneOffsetMismatch,
 
-    #[error("Encountered an error when persisting account modification data.")]
-    FailedToPersistAccountModData,
+    #[error("The account is delegated and not currently undelegating")]
+    AccountIsDelegated,
 
-    #[error("The account is delegated and not currently undelegating.")]
-    AccountIsDelegatedAndNotUndelegating,
+    #[error("The account is ephemeral and cannot be mutated")]
+    AccountIsEphemeral,
 
-    #[error(
-        "Remote slot updates cannot be older than the current remote slot."
-    )]
-    IncomingRemoteSlotIsOlderThanCurrentRemoteSlot,
+    #[error("Updates cannot be older than the current remote slot")]
+    OutOfOrderUpdate,
+    #[error("Buffer account not found for program finalization")]
+    BufferAccountNotFound,
 }
