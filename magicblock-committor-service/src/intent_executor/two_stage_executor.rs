@@ -192,9 +192,13 @@ where
                 error!(error = ?err, "Unexpected error in two stage commit flow");
                 Ok(ControlFlow::Break(()))
             }
-            TransactionStrategyExecutionError::CpiLimitError(_, _) => {
+            TransactionStrategyExecutionError::CpiLimitError(_, _)
+            | TransactionStrategyExecutionError::LoadedAccountsDataSizeExceeded(
+                _,
+                _,
+            ) => {
                 // Can't be handled
-                error!(error = ?err, "Commit tasks exceeded CpiLimitError");
+                error!(error = ?err, "Commit tasks exceeded execution limit");
                 Ok(ControlFlow::Break(()))
             }
             TransactionStrategyExecutionError::InternalError(_) => {
@@ -344,9 +348,10 @@ where
                     inner.handle_undelegation_error(finalize_strategy);
                 Ok(ControlFlow::Continue(to_cleanup))
             }
-            TransactionStrategyExecutionError::CpiLimitError(_, _) => {
+            TransactionStrategyExecutionError::CpiLimitError(_, _)
+            | TransactionStrategyExecutionError::LoadedAccountsDataSizeExceeded(_, _) => {
                 // Can't be handled
-                warn!(error = ?err, "Finalization tasks exceeded CpiLimitError");
+                warn!(error = ?err, "Finalization tasks exceeded execution limit");
                 Ok(ControlFlow::Break(()))
             }
             TransactionStrategyExecutionError::InternalError(_) => {

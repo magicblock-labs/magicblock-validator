@@ -1,9 +1,8 @@
 use borsh::to_vec;
 use ephemeral_rollups_sdk::{
     ephem::{
-        CallHandler, CommitAndUndelegate, CommitAndUndelegateIntentBuilder,
-        CommitIntentBuilder, CommitType, MagicAction, MagicInstructionBuilder,
-        MagicIntentBundleBuilder, UndelegateType,
+        CallHandler, CommitAndUndelegate, CommitType, MagicAction,
+        MagicInstructionBuilder, MagicIntentBundleBuilder, UndelegateType,
     },
     ActionArgs, ShortAccountMeta,
 };
@@ -241,11 +240,10 @@ pub fn process_create_intent_bundle(
             })
             .collect::<Vec<_>>();
 
-        let commit_intent = CommitIntentBuilder::new(commit_only_counters)
+        builder = builder
+            .commit(commit_only_counters)
             .add_post_commit_actions(call_handlers)
-            .build();
-
-        builder = builder.add_commit(commit_intent);
+            .fold();
     }
 
     // Build CommitAndUndelegate intent
@@ -313,13 +311,11 @@ pub fn process_create_intent_bundle(
             })
             .collect::<Vec<_>>();
 
-        let cau_intent =
-            CommitAndUndelegateIntentBuilder::new(undelegate_counters)
-                .add_post_commit_actions(commit_handlers)
-                .add_post_undelegate_actions(undelegate_handlers)
-                .build();
-
-        builder = builder.add_commit_and_undelegate(cau_intent);
+        builder = builder
+            .commit_and_undelegate(undelegate_counters)
+            .add_post_commit_actions(commit_handlers)
+            .add_post_undelegate_actions(undelegate_handlers)
+            .fold();
     }
 
     // Build and invoke the intent bundle

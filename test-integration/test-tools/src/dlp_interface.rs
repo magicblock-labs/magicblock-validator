@@ -62,6 +62,25 @@ pub fn create_delegate_ixs(
     vec![change_owner_ix, delegate_ix]
 }
 
+pub fn create_delegate_to_any_ixs(
+    payer: Pubkey,
+    delegatee: Pubkey,
+    validator: Option<Pubkey>,
+) -> Vec<Instruction> {
+    let change_owner_ix = system_instruction::assign(&delegatee, &dlp::id());
+    let delegate_ix = dlp::instruction_builder::delegate_with_any_validator(
+        payer,
+        delegatee,
+        None,
+        DelegateArgs {
+            commit_frequency_ms: u32::MAX,
+            seeds: vec![],
+            validator,
+        },
+    );
+    vec![change_owner_ix, delegate_ix]
+}
+
 pub async fn top_up_ephemeral_fee_balance(
     rpc_client: &RpcClient,
     payer: &Keypair,

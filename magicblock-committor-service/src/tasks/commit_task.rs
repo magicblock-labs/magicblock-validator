@@ -230,6 +230,10 @@ impl CommitTask {
 }
 
 impl BaseTask for CommitTask {
+    fn program_id(&self) -> Pubkey {
+        dlp::id()
+    }
+
     fn instruction(&self, validator: &Pubkey) -> Instruction {
         match &self.delivery_details {
             CommitDelivery::StateInArgs => self.commit_state_ix(validator),

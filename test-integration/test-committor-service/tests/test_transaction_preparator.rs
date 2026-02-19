@@ -6,8 +6,8 @@ use magicblock_committor_service::{
         commit_task::CommitBufferStage,
         task_strategist::{TaskStrategist, TransactionStrategy},
         utils::TransactionUtils,
-        BaseActionTask, BaseTaskImpl, FinalizeTask, TaskBuilderImpl,
-        UndelegateTask,
+        BaseActionTask, BaseActionTaskV1, BaseTaskImpl, FinalizeTask,
+        TaskBuilderImpl, UndelegateTask,
     },
     transaction_preparator::TransactionPreparator,
 };
@@ -179,6 +179,7 @@ async fn test_prepare_commit_tx_with_base_actions() {
     let base_action = BaseAction {
         compute_units: 30_000,
         destination_program: system_program::id(),
+        source_program: None,
         escrow_authority: fixture.authority.pubkey(),
         data_per_program: ProgramArgs {
             escrow_index: 0,
@@ -202,9 +203,9 @@ async fn test_prepare_commit_tx_with_base_actions() {
         }
         .into(),
         // BaseAction
-        BaseActionTask {
+        BaseActionTask::V1(BaseActionTaskV1 {
             action: base_action,
-        }
+        })
         .into(),
     ];
 

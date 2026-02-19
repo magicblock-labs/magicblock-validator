@@ -1,7 +1,8 @@
 use dlp::{
     args::CallHandlerArgs,
     instruction_builder::{
-        call_handler_size_budget, finalize_size_budget, undelegate_size_budget,
+        call_handler_size_budget, call_handler_v2_size_budget,
+        finalize_size_budget, undelegate_size_budget,
     },
     AccountSizeClass,
 };
@@ -63,6 +64,10 @@ pub enum BaseTaskImpl {
 }
 
 impl BaseTask for BaseTaskImpl {
+    fn program_id(&self) -> Pubkey {
+        dlp::id()
+    }
+
     fn instruction(&self, validator: &Pubkey) -> Instruction {
         match self {
             Self::Commit(value) => value.instruction(validator),
@@ -82,7 +87,7 @@ impl BaseTask for BaseTaskImpl {
     fn compute_units(&self) -> u32 {
         match self {
             Self::Commit(value) => value.compute_units(),
-            Self::BaseAction(value) => value.action.compute_units,
+            Self::BaseAction(value) => value.compute_units(),
             Self::Finalize(_) => 70_000,
             Self::Undelegate(_) => 70_000,
         }
@@ -91,17 +96,7 @@ impl BaseTask for BaseTaskImpl {
     fn accounts_size_budget(&self) -> u32 {
         match self {
             Self::Commit(value) => value.accounts_size_budget(),
-            Self::BaseAction(value) => {
-                // assume all other accounts are Small accounts.
-                let other_accounts_budget =
-                    value.action.account_metas_per_program.len() as u32
-                        * AccountSizeClass::Small.size_budget();
-
-                call_handler_size_budget(
-                    AccountSizeClass::Medium,
-                    other_accounts_budget,
-                )
-            }
+            Self::BaseAction(value) => value.accounts_size_budget(),
             Self::Finalize(_) => finalize_size_budget(AccountSizeClass::Huge),
             Self::Undelegate(_) => {
                 undelegate_size_budget(AccountSizeClass::Huge)
@@ -131,7 +126,8 @@ impl LabelValue for BaseTaskImpl {
             }
             Self::Finalize(_) => "args_finalize",
             Self::Undelegate(_) => "args_undelegate",
-            Self::BaseAction(_) => "args_action",
+            Self::BaseAction(BaseActionTask::V1(_)) => "args_action",
+            Self::BaseAction(BaseActionTask::V2(_)) => "args_action_v2",
         }
     }
 }
@@ -146,6 +142,9 @@ pub trait BaseTask: Send + Sync + Clone {
             .map(|meta| meta.pubkey)
             .collect()
     }
+
+    /// Gets target program for task execution
+    fn program_id(&self) -> Pubkey;
 
     /// Gets instruction for task execution
     fn instruction(&self, validator: &Pubkey) -> Instruction;
@@ -214,11 +213,57 @@ impl From<FinalizeTask> for BaseTaskImpl {
 }
 
 #[derive(Clone, Debug)]
-pub struct BaseActionTask {
-    pub action: BaseAction,
+pub enum BaseActionTask {
+    V1(BaseActionTaskV1),
+    V2(BaseActionTaskV2),
 }
 
 impl BaseActionTask {
+    pub fn instruction(&self, validator: &Pubkey) -> Instruction {
+        match self {
+            Self::V1(value) => value.instruction(validator),
+            Self::V2(value) => value.instruction(validator),
+        }
+    }
+
+    pub fn action(&self) -> &BaseAction {
+        match self {
+            Self::V1(value) => &value.action,
+            Self::V2(value) => &value.action,
+        }
+    }
+
+    pub fn compute_units(&self) -> u32 {
+        self.action().compute_units
+    }
+
+    pub fn accounts_size_budget(&self) -> u32 {
+        let action = self.action();
+        // assume all other accounts are Small accounts.
+        let other_accounts_budget = action.account_metas_per_program.len()
+            as u32
+            * AccountSizeClass::Small.size_budget();
+
+        match self {
+            Self::V1(_) => call_handler_size_budget(
+                AccountSizeClass::Medium,
+                other_accounts_budget,
+            ),
+            Self::V2(_) => call_handler_v2_size_budget(
+                AccountSizeClass::Medium,
+                AccountSizeClass::Medium,
+                other_accounts_budget,
+            ),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct BaseActionTaskV1 {
+    pub action: BaseAction,
+}
+
+impl BaseActionTaskV1 {
     pub fn instruction(&self, validator: &Pubkey) -> Instruction {
         let action = &self.action;
         let account_metas = action
@@ -241,11 +286,78 @@ impl BaseActionTask {
             },
         )
     }
+
+    pub fn account_metas(&self) -> Vec<AccountMeta> {
+        BaseActionTaskV1::account_metas_static(&self.action)
+    }
+
+    pub fn call_handler_args(&self) -> CallHandlerArgs {
+        BaseActionTaskV1::call_handler_args_static(&self.action)
+    }
+
+    fn account_metas_static(action: &BaseAction) -> Vec<AccountMeta> {
+        action
+            .account_metas_per_program
+            .iter()
+            .map(|short_meta| AccountMeta {
+                pubkey: short_meta.pubkey,
+                is_writable: short_meta.is_writable,
+                is_signer: false,
+            })
+            .collect()
+    }
+
+    fn call_handler_args_static(action: &BaseAction) -> CallHandlerArgs {
+        CallHandlerArgs {
+            data: action.data_per_program.data.clone(),
+            escrow_index: action.data_per_program.escrow_index,
+        }
+    }
+}
+
+impl From<BaseActionTaskV1> for BaseActionTask {
+    fn from(value: BaseActionTaskV1) -> Self {
+        Self::V1(value)
+    }
 }
 
 impl From<BaseActionTask> for BaseTaskImpl {
     fn from(value: BaseActionTask) -> Self {
         Self::BaseAction(value)
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct BaseActionTaskV2 {
+    pub action: BaseAction,
+    pub source_program: Pubkey,
+}
+
+impl BaseActionTaskV2 {
+    pub fn instruction(&self, validator: &Pubkey) -> Instruction {
+        let action = &self.action;
+        dlp::instruction_builder::call_handler_v2(
+            *validator,
+            action.destination_program,
+            self.source_program,
+            action.escrow_authority,
+            self.account_metas(),
+            self.call_handler_args(),
+        )
+    }
+
+    pub fn account_metas(&self) -> Vec<AccountMeta> {
+        BaseActionTaskV1::account_metas_static(&self.action)
+    }
+
+    pub fn call_handler_args(&self) -> CallHandlerArgs {
+        BaseActionTaskV1::call_handler_args_static(&self.action)
+    }
+}
+
+impl From<BaseActionTaskV2> for BaseActionTask {
+    fn from(value: BaseActionTaskV2) -> Self {
+        Self::V2(value)
     }
 }
 
@@ -479,10 +591,11 @@ mod serialization_safety_test {
         .into();
         assert_serializable(&undelegate_task.instruction(&validator));
 
-        // Test BaseAction variant
-        let base_action: BaseTaskImpl = BaseActionTask {
+        // Test BaseAction V1 variant
+        let base_action: BaseTaskImpl = BaseActionTask::V1(BaseActionTaskV1 {
             action: BaseAction {
                 destination_program: Pubkey::new_unique(),
+                source_program: None,
                 escrow_authority: Pubkey::new_unique(),
                 account_metas_per_program: vec![ShortAccountMeta {
                     pubkey: Pubkey::new_unique(),
@@ -494,9 +607,31 @@ mod serialization_safety_test {
                 },
                 compute_units: 10_000,
             },
-        }
+        })
         .into();
         assert_serializable(&base_action.instruction(&validator));
+
+        // Test BaseAction V2 variant
+        let base_action_v2: BaseTaskImpl =
+            BaseActionTask::V2(BaseActionTaskV2 {
+                action: BaseAction {
+                    destination_program: Pubkey::new_unique(),
+                    source_program: Some(Pubkey::new_unique()),
+                    escrow_authority: Pubkey::new_unique(),
+                    account_metas_per_program: vec![ShortAccountMeta {
+                        pubkey: Pubkey::new_unique(),
+                        is_writable: true,
+                    }],
+                    data_per_program: ProgramArgs {
+                        data: vec![7, 8, 9],
+                        escrow_index: 2,
+                    },
+                    compute_units: 15_000,
+                },
+                source_program: Pubkey::new_unique(),
+            })
+            .into();
+        assert_serializable(&base_action_v2.instruction(&validator));
     }
 
     fn make_buffer_commit_task(

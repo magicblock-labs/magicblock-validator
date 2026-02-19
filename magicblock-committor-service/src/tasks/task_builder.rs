@@ -17,7 +17,8 @@ use crate::{
     persist::IntentPersister,
     tasks::{
         commit_task::{CommitDelivery, CommitTask},
-        BaseActionTask, BaseTaskImpl, FinalizeTask, UndelegateTask,
+        BaseActionTask, BaseActionTaskV1, BaseActionTaskV2, BaseTaskImpl,
+        FinalizeTask, UndelegateTask,
     },
 };
 
@@ -77,11 +78,21 @@ impl TaskBuilderImpl {
         }
     }
 
-    fn create_action_tasks(actions: &[BaseAction]) -> Vec<BaseTaskImpl> {
-        actions
-            .iter()
-            .map(|el| BaseActionTask { action: el.clone() }.into())
-            .collect()
+    fn create_action_tasks<'a>(
+        actions: &'a [BaseAction],
+    ) -> impl Iterator<Item = BaseTaskImpl> + 'a {
+        actions.iter().map(|action| {
+            let task = match action.source_program {
+                Some(source_program) => BaseActionTask::V2(BaseActionTaskV2 {
+                    action: action.clone(),
+                    source_program,
+                }),
+                None => BaseActionTask::V1(BaseActionTaskV1 {
+                    action: action.clone(),
+                }),
+            };
+            task.into()
+        })
     }
 
     async fn fetch_commit_nonces<C: TaskInfoFetcher>(
@@ -249,13 +260,9 @@ impl TasksBuilder for TaskBuilderImpl {
                         .iter()
                         .map(finalize_task)
                         .collect::<Vec<_>>();
-                    tasks.extend(base_actions.iter().map(|action| {
-                        let task: BaseTaskImpl = BaseActionTask {
-                            action: action.clone(),
-                        }
-                        .into();
-                        task
-                    }));
+                    tasks.extend(TaskBuilderImpl::create_action_tasks(
+                        base_actions,
+                    ));
                     tasks
                 }
             }
@@ -296,13 +303,7 @@ impl TasksBuilder for TaskBuilderImpl {
             if let UndelegateType::WithBaseActions(actions) =
                 &value.undelegate_action
             {
-                tasks.extend(actions.iter().map(|action| {
-                    let task: BaseTaskImpl = BaseActionTask {
-                        action: action.clone(),
-                    }
-                    .into();
-                    task
-                }));
+                tasks.extend(Self::create_action_tasks(actions));
             }
         };
 

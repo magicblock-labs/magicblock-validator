@@ -420,7 +420,8 @@ mod tests {
             task_builder::{
                 TaskBuilderImpl, TasksBuilder, COMMIT_STATE_SIZE_THRESHOLD,
             },
-            BaseActionTask, FinalizeTask, TaskStrategy, UndelegateTask,
+            BaseActionTask, BaseActionTaskV1, FinalizeTask, TaskStrategy,
+            UndelegateTask,
         },
         test_utils,
     };
@@ -505,9 +506,10 @@ mod tests {
 
     // Helper to create a Base action task
     fn create_test_base_action_task(len: usize) -> BaseActionTask {
-        BaseActionTask {
+        BaseActionTaskV1 {
             action: BaseAction {
                 destination_program: Pubkey::new_unique(),
+                source_program: None,
                 escrow_authority: Pubkey::new_unique(),
                 account_metas_per_program: vec![],
                 data_per_program: ProgramArgs {
@@ -517,6 +519,7 @@ mod tests {
                 compute_units: 30_000,
             },
         }
+        .into()
     }
 
     // Helper to create a finalize task

@@ -12,6 +12,7 @@ default-run = "magicblock-validator"
 console-subscriber = { workspace = true, optional = true }
 magicblock-api = { workspace = true }
 magicblock-core = { workspace = true }
+magicblock-tui-client = { workspace = true, optional = true }
 tracing = { workspace = true }
 magicblock-config = { workspace = true }
 magicblock-version = { workspace = true }
@@ -22,3 +23,4 @@ tokio = { workspace = true, features = ["rt-multi-thread"] }
 [features]
 default = []
 tokio-console = ["console-subscriber", "tokio/tracing"]
+tui = ["magicblock-tui-client"]

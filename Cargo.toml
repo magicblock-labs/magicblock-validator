@@ -31,6 +31,7 @@ members = [
   "tools/genx",
   "tools/keypair-base58",
   "tools/ledger-stats",
+  "tools/magicblock-tui-client",
 ]
 
 # This prevents a Travis CI error when building for Windows.
@@ -101,7 +102,7 @@ magicblock-committor-program = { path = "./magicblock-committor-program", featur
 magicblock-committor-service = { path = "./magicblock-committor-service" }
 magicblock-config = { path = "./magicblock-config" }
 magicblock-core = { path = "./magicblock-core" }
-magicblock-delegation-program = { git = "https://github.com/magicblock-labs/delegation-program.git", rev = "1874b4f5f5f55cb9ab54b64de2cc0d41107d1435", features = [
+magicblock-delegation-program = { git = "https://github.com/magicblock-labs/delegation-program.git", rev = "2cb491032f372", features = [
   "no-entrypoint",
 ] }
 magicblock-ledger = { path = "./magicblock-ledger" }
@@ -112,6 +113,7 @@ magicblock-program = { path = "./programs/magicblock" }
 magicblock-rpc-client = { path = "./magicblock-rpc-client" }
 magicblock-table-mania = { path = "./magicblock-table-mania" }
 magicblock-task-scheduler = { path = "./magicblock-task-scheduler" }
+magicblock-tui-client = { path = "./tools/magicblock-tui-client" }
 magicblock-validator-admin = { path = "./magicblock-validator-admin" }
 magicblock-version = { path = "./magicblock-version" }
 

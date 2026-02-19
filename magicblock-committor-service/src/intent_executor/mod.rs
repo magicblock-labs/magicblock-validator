@@ -242,7 +242,7 @@ where
             .execute(&committed_pubkeys, persister)
             .await;
 
-        // Here we continue only IF the error is CpiLimitError
+        // Here we continue only IF the error is a limit-type execution error
         // We can recover that Error by splitting execution
         // in 2 stages - commit & finalize
         // Otherwise we return error
@@ -250,7 +250,12 @@ where
         let execution_err = match res {
             Err(IntentExecutorError::FailedToFinalizeError {
                 err:
-                    err @ TransactionStrategyExecutionError::CpiLimitError(_, _),
+                    err
+                    @ (TransactionStrategyExecutionError::CpiLimitError(_, _)
+                        | TransactionStrategyExecutionError::LoadedAccountsDataSizeExceeded(
+                            _,
+                            _,
+                        )),
                 commit_signature: _,
                 finalize_signature: _,
             }) if !committed_pubkeys.is_empty() => err,

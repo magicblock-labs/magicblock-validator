@@ -38,7 +38,9 @@ impl BindAddress {
     }
 
     pub fn websocket(&self) -> String {
-        format!("ws://{}", self.as_connect_addr())
+        let mut addr = self.as_connect_addr();
+        addr.set_port(addr.port().saturating_add(1));
+        format!("ws://{}", addr)
     }
 }
 
