@@ -54,13 +54,10 @@ pub(crate) fn process_cleanup_partial_clone(
     {
         let mut acc = account.borrow_mut();
         acc.set_lamports(0);
-        acc.set_data_from_slice(&[]);
-        acc.set_executable(false);
-        acc.set_owner(Pubkey::default());
+        acc.resize(0, 0);
+        // this hack allows us to close the account and remove it from accountsdb
+        acc.set_ephemeral(true);
         acc.set_delegated(false);
-        acc.set_confined(false);
-        acc.set_remote_slot(0);
-        acc.set_undelegating(false);
     }
 
     adjust_authority_lamports(auth_acc, lamports_delta)?;

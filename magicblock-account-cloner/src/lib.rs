@@ -26,7 +26,7 @@
 //! The buffer is a temporary account that holds the raw ELF data during cloning.
 //! It's derived as a PDA: `["buffer", program_id]` owned by validator authority.
 
-use std::{sync::Arc, time::Duration};
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use magicblock_accounts_db::AccountsDb;
@@ -359,7 +359,7 @@ impl ChainlinkCloner {
 
         debug!(program_id = %program_id, "Loading V1 program as V3 format");
 
-        let slot = self.accounts_db.slot().saturating_sub(5).max(1);
+        let slot = self.accounts_db.slot();
         let elf_data = program.program_data;
         let (buffer_pubkey, _) = derive_buffer_pubkey(&program_id);
         let (program_data_addr, _) = Pubkey::find_program_address(
@@ -701,12 +701,6 @@ impl Cloner for ChainlinkCloner {
                     ));
                 }
             }
-        }
-
-        // Wait one slot for program to become usable
-        let current_slot = self.accounts_db.slot();
-        while self.accounts_db.slot() == current_slot {
-            tokio::time::sleep(Duration::from_millis(25)).await;
         }
 
         Ok(last_sig)
