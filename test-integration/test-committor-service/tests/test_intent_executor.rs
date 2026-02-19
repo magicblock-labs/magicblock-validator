@@ -167,7 +167,9 @@ async fn test_commit_id_error_parsing() {
         TransactionStrategyExecutionError::CommitIDError(
             TransactionError::InstructionError(
                 _,
-                InstructionError::Custom(0xc)
+                InstructionError::Custom(
+                    0xc, // dlp::DlpError::NonceOutOfOrder: commit id/nonce is out of order
+                )
             ),
             _
         )
@@ -224,7 +226,9 @@ async fn test_undelegation_error_parsing() {
         TransactionStrategyExecutionError::UndelegationError(
             TransactionError::InstructionError(
                 _,
-                InstructionError::Custom(0x7a)
+                InstructionError::Custom(
+                    0x7a, // flexi-counter ProgramError::Custom(122): forced undelegation failure (FAIL_UNDELEGATION_CODE)
+                )
             ),
             _
         )
