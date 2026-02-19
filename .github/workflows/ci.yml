@@ -6,7 +6,7 @@ concurrency:
 
 on:
   push:
-    branches: [master, dev]
+    branches: [master, dev, chore/improve-ci]
   pull_request:
     types: [opened, reopened, synchronize, ready_for_review]
 
@@ -17,9 +17,12 @@ jobs:
       target_dir: ${{ steps.calc.outputs.dir }}
     steps:
       - id: calc
+        env:
+          REF_NAME: ${{ github.ref_name }}
+          REPO_NAME: ${{ github.event.repository.name }}
         run: |
-          SAFE_BRANCH=$(echo "${{ github.ref_name }}" | tr '/' '-')
-          TARGET_DIR="/var/lib/gh-runners/global-targets/${{ github.event.repository.name }}-${SAFE_BRANCH}"
+          SAFE_BRANCH=$(echo "$REF_NAME" | tr '/' '-')
+          TARGET_DIR="/var/lib/gh-runners/global-targets/${REPO_NAME}-${SAFE_BRANCH}"
           mkdir -p "$TARGET_DIR"
           echo "dir=$TARGET_DIR" >> $GITHUB_OUTPUT
 
@@ -47,7 +50,7 @@ jobs:
           )
 
       - name: Build binaries and tests
-        run: cargo build --bins --tests
+        run: cargo build --bins --tests --locked
 
       - name: Format check
         run: make ci-fmt
@@ -67,7 +70,7 @@ jobs:
           mkdir -p "$SBF_CACHE_DIR/test-integration" "$SBF_CACHE_DIR/root"
 
           if [ -d "test-integration/target/deploy" ]; then
-            cp -r test-integration/target/deploy/* "$SBF_CACHE_DIR/test-integration/"
+            find test-integration/target/deploy -mindepth 1 -maxdepth 1 -exec cp -r {} "$SBF_CACHE_DIR/test-integration/" \;
           else
             echo "::warning::test-integration/target/deploy not found"
           fi
@@ -122,7 +125,7 @@ jobs:
           LOCAL_DEPLOY_TEST="test-integration/target/deploy"
           mkdir -p "$LOCAL_DEPLOY_TEST"
           if [ -d "$SBF_CACHE_DIR/test-integration" ]; then
-            cp -r "$SBF_CACHE_DIR/test-integration"/* "$LOCAL_DEPLOY_TEST/"
+            find "$SBF_CACHE_DIR/test-integration" -mindepth 1 -maxdepth 1 -exec cp -r {} "$LOCAL_DEPLOY_TEST/" \;
             find "$LOCAL_DEPLOY_TEST" -type f -exec touch {} +
           else
             echo "::warning::No cached SBF artifacts for test-integration"
@@ -138,12 +141,14 @@ jobs:
           fi
 
       - name: "Integration: ${{ matrix.batch }}"
+        env:
+          TEST_BATCH: ${{ matrix.batch }}
         run: |
           unshare -r -n bash -c '
-            set -uo pipefail
+            set -euo pipefail
             ip link set lo up
             FAILED=""
-            for test in ${{ matrix.batch }}; do
+            for test in $TEST_BATCH; do
               echo "========== Running: $test =========="
               if ! RUN_TESTS=$test make ci-test-integration PROGRAMS_SO= SKIP_CHAINLINK_PREP=1; then
                 FAILED="$FAILED $test"

@@ -783,8 +783,10 @@ fn run_test(
         "RUST_LOG",
         std::env::var("RUST_LOG").unwrap_or_else(|_| "info".to_string()),
     )
-    .arg("test")
-    .arg("--offline");
+    .arg("test");
+    if std::env::var("CARGO_NET_OFFLINE").as_deref() == Ok("true") {
+        cmd.arg("--offline");
+    }
     if let Some(package) = config.package {
         cmd.arg("-p").arg(package);
     }

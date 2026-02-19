@@ -89,7 +89,7 @@ pub fn config_to_args(
                 let abs_config_dir = fs::canonicalize(config_dir).unwrap_or(config_dir.to_path_buf());
                 eprintln!(
                     "Error: Failed to resolve program path.\n\
-                     Config File: {:?}\n\
+                     Config Dir: {:?}\n\
                      Relative Path: {:?}\n\
                      Resolution Attempt: {:?}\n\
                      OS Error: {:?}",

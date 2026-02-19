@@ -52,6 +52,8 @@ pub fn start_magic_block_validator_with_config(
         // Fallback for local development
         let mut cmd = process::Command::new("cargo");
         cmd.arg("run")
+           .arg("-p")
+           .arg("magicblock-validator")
            .arg("--")
            .arg(config_path);
         cmd
