@@ -160,15 +160,12 @@ impl TransactionUtils {
     pub fn budget_instructions(
         compute_units: u32,
         compute_unit_price: u64,
-        accounts_size_budget: u32,
-    ) -> [Instruction; 3] {
+        _accounts_size_budget: u32,
+    ) -> [Instruction; 2] {
         [
             ComputeBudgetInstruction::set_compute_unit_limit(compute_units),
             ComputeBudgetInstruction::set_compute_unit_price(
                 compute_unit_price,
-            ),
-            ComputeBudgetInstruction::set_loaded_accounts_data_size_limit(
-                accounts_size_budget,
             ),
         ]
     }
