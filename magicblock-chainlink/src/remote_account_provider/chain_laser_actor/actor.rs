@@ -275,7 +275,7 @@ impl<H: StreamHandle, S: StreamFactory<H>> ChainLaserActor<H, S> {
                 msg = self.messages_receiver.recv() => {
                     match msg {
                         Some(msg) => {
-                            if self.handle_msg(msg) {
+                            if self.handle_msg(msg).await {
                                 break;
                             }
                         }
@@ -336,7 +336,7 @@ impl<H: StreamHandle, S: StreamFactory<H>> ChainLaserActor<H, S> {
         }
     }
 
-    fn handle_msg(&mut self, msg: ChainPubsubActorMessage) -> bool {
+    async fn handle_msg(&mut self, msg: ChainPubsubActorMessage) -> bool {
         use ChainPubsubActorMessage::*;
         match msg {
             AccountSubscribe {
@@ -350,11 +350,19 @@ impl<H: StreamHandle, S: StreamFactory<H>> ChainLaserActor<H, S> {
                 false
             }
             ProgramSubscribe { pubkey, response } => {
-                self.stream_manager
-                    .add_program_subscription(pubkey, &self.commitment);
-                let _ = response.send(Ok(())).inspect_err(|_| {
-                    warn!(client_id = self.client_id, program_id = %pubkey, "Failed to send program subscribe response");
-                });
+                let result = self
+                    .stream_manager
+                    .add_program_subscription(pubkey, &self.commitment)
+                    .await;
+                if let Err(e) = result {
+                    let _ = response.send(Err(e)).inspect_err(|_| {
+                        warn!(client_id = self.client_id, program_id = %pubkey, "Failed to send program subscribe response");
+                    });
+                } else {
+                    let _ =response.send(Ok(())).inspect_err(|_| {
+                        warn!(client_id = self.client_id, program_id = %pubkey, "Failed to send program subscribe response");
+                    });
+                };
                 false
             }
             Reconnect { response } => {

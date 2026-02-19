@@ -414,19 +414,19 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
     }
 
     /// Adds a program subscription. If the program is already
-    /// subscribed, this is a no-op. Otherwise, recreates the program
+    /// subscribed, this is a no-op. Otherwise, updates the program
     /// stream to include all subscribed programs.
-    pub fn add_program_subscription(
+    pub async fn add_program_subscription(
         &mut self,
         program_id: Pubkey,
         commitment: &CommitmentLevel,
-    ) {
+    ) -> RemoteAccountProviderResult<()> {
         if self
             .program_subscriptions
             .as_ref()
             .is_some_and(|(subs, _)| subs.contains(&program_id))
         {
-            return;
+            return Ok(());
         }
 
         let mut subscribed_programs = self
@@ -438,8 +438,27 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
         subscribed_programs.insert(program_id);
 
         let program_ids: Vec<&Pubkey> = subscribed_programs.iter().collect();
-        let stream = self.create_program_stream(&program_ids, commitment);
-        self.program_subscriptions = Some((subscribed_programs, stream));
+        let request = Self::build_program_request(&program_ids, commitment);
+
+        if let Some((_, stream)) = &self.program_subscriptions {
+            // Update existing stream
+            Self::update_subscriptions(
+                &stream.handle,
+                "program_subscribe",
+                request,
+            )
+            .await?;
+            // Update the set of subscribed programs
+            if let Some((subs, _)) = &mut self.program_subscriptions {
+                *subs = subscribed_programs;
+            }
+        } else {
+            // Create new stream
+            let stream = self.create_program_stream(&program_ids, commitment);
+            self.program_subscriptions = Some((subscribed_programs, stream));
+        }
+
+        Ok(())
     }
 
     /// Returns a mutable reference to the program subscriptions
@@ -460,12 +479,11 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
         self.program_subscriptions = None;
     }
 
-    /// Creates a subscription stream for program updates.
-    fn create_program_stream(
-        &self,
+    /// Build a `SubscribeRequest` for the given program IDs.
+    fn build_program_request(
         program_ids: &[&Pubkey],
         commitment: &CommitmentLevel,
-    ) -> LaserStreamWithHandle<S> {
+    ) -> SubscribeRequest {
         let mut accounts = HashMap::new();
         accounts.insert(
             "program_sub".to_string(),
@@ -474,11 +492,21 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
                 ..Default::default()
             },
         );
-        let request = SubscribeRequest {
+
+        SubscribeRequest {
             accounts,
             commitment: Some((*commitment).into()),
             ..Default::default()
-        };
+        }
+    }
+
+    /// Creates a subscription stream for program updates.
+    fn create_program_stream(
+        &self,
+        program_ids: &[&Pubkey],
+        commitment: &CommitmentLevel,
+    ) -> LaserStreamWithHandle<S> {
+        let request = Self::build_program_request(program_ids, commitment);
         self.stream_factory.subscribe(request)
     }
 }
