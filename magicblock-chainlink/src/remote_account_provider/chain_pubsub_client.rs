@@ -17,7 +17,11 @@ use tracing::*;
 use super::{
     chain_pubsub_actor::ChainPubsubActor,
     errors::RemoteAccountProviderResult,
-    pubsub_common::{ChainPubsubActorMessage, SubscriptionUpdate},
+    pubsub_common::{
+        ChainPubsubActorMessage, PubsubClientConfig, SubscriptionUpdate,
+    },
+    pubsub_connection::PubsubConnectionImpl,
+    pubsub_connection_pool::PubSubConnectionPool,
 };
 
 const MAX_RESUB_DELAY_MS: u64 = 800;
@@ -99,11 +103,24 @@ impl ChainPubsubClientImpl {
         commitment: CommitmentConfig,
         resubscription_delay: Duration,
     ) -> RemoteAccountProviderResult<Self> {
-        let (actor, updates) = ChainPubsubActor::new_from_url(
-            pubsub_url,
+        let pubsub_client_config =
+            PubsubClientConfig::from_url(pubsub_url, commitment);
+        let limit = pubsub_client_config
+            .per_stream_subscription_limit
+            .unwrap_or(usize::MAX);
+        let pubsub_connection = Arc::new(
+            PubSubConnectionPool::<PubsubConnectionImpl>::new(
+                pubsub_client_config.pubsub_url.clone(),
+                limit,
+                client_id.clone(),
+            )
+            .await?,
+        );
+        let (actor, updates) = ChainPubsubActor::new_with_pool(
             &client_id,
             abort_sender,
-            commitment,
+            pubsub_client_config,
+            pubsub_connection,
         )
         .await?;
         let current_resub_delay_ms =

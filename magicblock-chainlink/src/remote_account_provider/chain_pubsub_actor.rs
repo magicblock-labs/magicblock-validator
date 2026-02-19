@@ -16,6 +16,7 @@ use magicblock_metrics::metrics::{
 use solana_account_decoder_client_types::UiAccountEncoding;
 use solana_commitment_config::CommitmentConfig;
 use solana_pubkey::Pubkey;
+use solana_pubsub_client::pubsub_client::PubsubClientError;
 use solana_rpc_client_api::{
     config::{RpcAccountInfoConfig, RpcProgramAccountsConfig},
     response::Response as RpcResponse,
@@ -39,7 +40,9 @@ use crate::remote_account_provider::{
         SubscriptionUpdate, MESSAGE_CHANNEL_SIZE,
         SUBSCRIPTION_UPDATE_CHANNEL_SIZE,
     },
-    pubsub_connection::PubsubConnectionImpl,
+    pubsub_connection::{
+        ProgramSubscribeResult, PubsubConnectionImpl, SubscribeResult,
+    },
     DEFAULT_SUBSCRIPTION_RETRIES,
 };
 
@@ -98,20 +101,33 @@ impl ChainPubsubActor {
         let limit = pubsub_client_config
             .per_stream_subscription_limit
             .unwrap_or(usize::MAX);
-        let pubsub_connection = {
-            let pubsub_pool =
-                PubSubConnectionPool::new(url, limit, client_id.to_string())
-                    .await
-                    .inspect_err(|err| {
-                        error!(
-                            client_id = client_id,
-                            err = ?err,
-                            "Failed to connect to provider"
-                        )
-                    })?;
-            Arc::new(pubsub_pool)
-        };
+        let pubsub_connection = Arc::new(
+            PubSubConnectionPool::new(url, limit, client_id.to_string())
+                .await
+                .inspect_err(|err| {
+                    error!(
+                        client_id = client_id,
+                        err = ?err,
+                        "Failed to connect to provider"
+                    )
+                })?,
+        );
+        Self::new_with_pool(
+            client_id,
+            abort_sender,
+            pubsub_client_config,
+            pubsub_connection,
+        )
+        .await
+    }
 
+    pub async fn new_with_pool(
+        client_id: &str,
+        abort_sender: mpsc::Sender<()>,
+        pubsub_client_config: PubsubClientConfig,
+        pubsub_connection: Arc<PubSubConnectionPool<PubsubConnectionImpl>>,
+    ) -> RemoteAccountProviderResult<(Self, mpsc::Receiver<SubscriptionUpdate>)>
+    {
         let (subscription_updates_sender, subscription_updates_receiver) =
             mpsc::channel(SUBSCRIPTION_UPDATE_CHANNEL_SIZE);
         let (messages_sender, messages_receiver) =
@@ -400,6 +416,68 @@ impl ChainPubsubActor {
         }
     }
 
+    fn is_connection_level_error(err: &PubsubClientError) -> bool {
+        PubSubConnectionPool::<PubsubConnectionImpl>::is_connection_level_error(
+            err,
+        )
+    }
+
+    async fn subscribe_account_with_retry(
+        pubsub_connection: &PubSubConnectionPool<PubsubConnectionImpl>,
+        pubkey: Pubkey,
+        config: RpcAccountInfoConfig,
+        retries: usize,
+    ) -> SubscribeResult {
+        let mut retries_left = retries;
+        let initial_tries = retries;
+
+        loop {
+            match pubsub_connection
+                .account_subscribe(&pubkey, config.clone())
+                .await
+            {
+                Ok(res) => return Ok(res),
+                Err(err) => {
+                    if retries_left == 0 {
+                        return Err(err);
+                    }
+                    retries_left -= 1;
+                    let backoff_ms =
+                        50u64 * (initial_tries - retries_left) as u64;
+                    tokio::time::sleep(Duration::from_millis(backoff_ms)).await;
+                }
+            }
+        }
+    }
+
+    async fn subscribe_program_with_retry(
+        pubsub_connection: &PubSubConnectionPool<PubsubConnectionImpl>,
+        program_pubkey: Pubkey,
+        config: RpcProgramAccountsConfig,
+        retries: usize,
+    ) -> ProgramSubscribeResult {
+        let mut retries_left = retries;
+        let initial_tries = retries;
+
+        loop {
+            match pubsub_connection
+                .program_subscribe(&program_pubkey, config.clone())
+                .await
+            {
+                Ok(res) => return Ok(res),
+                Err(err) => {
+                    if retries_left == 0 {
+                        return Err(err);
+                    }
+                    retries_left -= 1;
+                    let backoff_ms =
+                        50u64 * (initial_tries - retries_left) as u64;
+                    tokio::time::sleep(Duration::from_millis(backoff_ms)).await;
+                }
+            }
+        }
+    }
+
     #[allow(clippy::too_many_arguments)]
     #[instrument(skip(sub_response, subs, program_subs, pubsub_connection, subscription_updates_sender, abort_sender, is_connected), fields(client_id = %client_id, pubkey = %pubkey, commitment = ?commitment_config))]
     async fn add_sub(
@@ -451,53 +529,53 @@ impl ChainPubsubActor {
             ..Default::default()
         };
 
-        let mut retries = retries.unwrap_or(DEFAULT_SUBSCRIPTION_RETRIES);
-        let initial_tries = retries;
-        let (mut update_stream, unsubscribe) = loop {
-            // Perform the subscription
-            match pubsub_connection
-                .account_subscribe(&pubkey, config.clone())
-                .await
+        let retries = retries.unwrap_or(DEFAULT_SUBSCRIPTION_RETRIES);
+        let (mut update_stream, initial_unsubscribe) =
+            match Self::subscribe_account_with_retry(
+                pubsub_connection.as_ref(),
+                pubkey,
+                config.clone(),
+                retries,
+            )
+            .await
             {
-                Ok(res) => break res,
+                Ok(res) => res,
                 Err(err) => {
                     if retries > 0 {
-                        retries -= 1;
-                        // Linear backoff: sleep longer as retries decrease
-                        let backoff_ms =
-                            50u64 * (initial_tries - retries) as u64;
-                        tokio::time::sleep(Duration::from_millis(backoff_ms))
-                            .await;
-                        continue;
-                    }
-                    if initial_tries > 0 {
                         warn!(
                             error = ?err,
                             pubkey = %pubkey,
-                            retries_count = initial_tries,
+                            retries_count = retries,
                             "Failed to subscribe to account after retrying multiple times",
                         );
                     }
-                    Self::abort_and_signal_connection_issue(
-                        client_id,
-                        subs.clone(),
-                        program_subs.clone(),
-                        abort_sender,
-                        is_connected.clone(),
-                        &format!("Failed to subscribe to account {pubkey} after {initial_tries} retries")
-                    );
+
+                    subs.lock()
+                        .expect("subscriptions lock poisoned")
+                        .remove(&pubkey);
+                    if Self::is_connection_level_error(&err) {
+                        Self::abort_and_signal_connection_issue(
+                            client_id,
+                            subs.clone(),
+                            program_subs.clone(),
+                            abort_sender,
+                            is_connected.clone(),
+                            &format!("Failed to subscribe to account {pubkey} after {retries} retries"),
+                        );
+                    }
                     // RPC failed - inform the requester
                     let _ = sub_response.send(Err(err.into()));
                     return;
                 }
             };
-        };
 
         // RPC succeeded - confirm to the requester that the subscription was made
         let _ = sub_response.send(Ok(()));
 
         let client_id = client_id.to_string();
+        let pubsub_connection = pubsub_connection.clone();
         tokio::spawn(async move {
+            let mut unsubscribe = Some(initial_unsubscribe);
             // Now keep listening for updates and relay them to the
             // subscription updates sender until it is cancelled
             loop {
@@ -522,40 +600,77 @@ impl ChainPubsubActor {
                                 error!(error = ?err, "Failed to send subscription update");
                             });
                         } else {
+                            if cancellation_token.is_cancelled() {
+                                break;
+                            }
                             static SIGNAL_CONNECTION_COUNT: AtomicU16 =
                                 AtomicU16::new(0);
                             log_trace_debug(
-                                "Subscription ended; signaling connection issue",
-                                "Subscriptions ended; signaled connection issue",
+                                "Subscription ended; attempting connection-local recovery",
+                                "Subscriptions ended; attempted connection-local recovery",
                                 &client_id,
                                 &RemoteAccountProviderError::ConnectionDisrupted,
                                 100,
                                 &SIGNAL_CONNECTION_COUNT,
                             );
-
-                            Self::abort_and_signal_connection_issue(
-                                &client_id,
-                                subs.clone(),
-                                program_subs.clone(),
-                                abort_sender.clone(),
-                                is_connected.clone(),
-                                &format!("Subscription ended for {pubkey}")
-                            );
-                            // Return early - abort_and_signal_connection_issue cancels all
-                            // subscriptions, triggering cleanup via the cancellation path
-                            // above. No need to run unsubscribe/cleanup here.
-                            return;
+                            if let Some(unsub) = unsubscribe.take() {
+                                if tokio::time::timeout(Duration::from_secs(2), unsub())
+                                    .await
+                                    .is_err()
+                                {
+                                    warn!(timeout_ms = 2000, "Unsubscribe timed out while recovering account subscription");
+                                }
+                            }
+                            match Self::subscribe_account_with_retry(
+                                pubsub_connection.as_ref(),
+                                pubkey,
+                                config.clone(),
+                                retries,
+                            )
+                            .await
+                            {
+                                Ok((new_stream, new_unsub)) => {
+                                    update_stream = new_stream;
+                                    unsubscribe = Some(new_unsub);
+                                    continue;
+                                }
+                                Err(err) => {
+                                    warn!(
+                                        client_id = %client_id,
+                                        pubkey = %pubkey,
+                                        retries_count = retries,
+                                        error = ?err,
+                                        "Failed to recover dropped account subscription",
+                                    );
+                                    if Self::is_connection_level_error(&err) {
+                                        Self::abort_and_signal_connection_issue(
+                                            &client_id,
+                                            subs.clone(),
+                                            program_subs.clone(),
+                                            abort_sender.clone(),
+                                            is_connected.clone(),
+                                            &format!(
+                                                "Failed to recover dropped account subscription for {pubkey} after {retries} retries"
+                                            ),
+                                        );
+                                        return;
+                                    }
+                                    break;
+                                }
+                            }
                         }
                     }
                 }
             }
 
             // Clean up subscription with timeout to prevent hanging on dead sockets
-            if tokio::time::timeout(Duration::from_secs(2), unsubscribe())
-                .await
-                .is_err()
-            {
-                warn!(timeout_ms = 2000, "Unsubscribe timed out");
+            if let Some(unsub) = unsubscribe.take() {
+                if tokio::time::timeout(Duration::from_secs(2), unsub())
+                    .await
+                    .is_err()
+                {
+                    warn!(timeout_ms = 2000, "Unsubscribe timed out");
+                }
             }
             subs.lock()
                 .expect("subscriptions lock poisoned")
@@ -611,41 +726,57 @@ impl ChainPubsubActor {
             ..Default::default()
         };
 
-        let (mut update_stream, unsubscribe) = match pubsub_connection
-            .program_subscribe(&program_pubkey, config.clone())
+        let retries = DEFAULT_SUBSCRIPTION_RETRIES;
+        let (mut update_stream, initial_unsubscribe) =
+            match Self::subscribe_program_with_retry(
+                pubsub_connection.as_ref(),
+                program_pubkey,
+                config.clone(),
+                retries,
+            )
             .await
-        {
-            Ok(res) => res,
-            Err(err) => {
-                static SUBSCRIPTION_FAILURE_COUNT: AtomicU16 =
-                    AtomicU16::new(0);
-                log_trace_warn(
-                    "Failed to subscribe to program",
-                    "Failed to subscribe to programs",
-                    &program_pubkey,
-                    &err,
-                    100,
-                    &SUBSCRIPTION_FAILURE_COUNT,
-                );
-                Self::abort_and_signal_connection_issue(
-                    client_id,
-                    subs.clone(),
-                    program_subs.clone(),
-                    abort_sender,
-                    is_connected.clone(),
-                    &format!("Failed to subscribe to program {program_pubkey}"),
-                );
-                // RPC failed - inform the requester
-                let _ = sub_response.send(Err(err.into()));
-                return;
-            }
-        };
+            {
+                Ok(res) => res,
+                Err(err) => {
+                    static SUBSCRIPTION_FAILURE_COUNT: AtomicU16 =
+                        AtomicU16::new(0);
+                    log_trace_warn(
+                        "Failed to subscribe to program",
+                        "Failed to subscribe to programs",
+                        &program_pubkey,
+                        &err,
+                        100,
+                        &SUBSCRIPTION_FAILURE_COUNT,
+                    );
+                    program_subs
+                        .lock()
+                        .expect("program subscriptions lock poisoned")
+                        .remove(&program_pubkey);
+                    if Self::is_connection_level_error(&err) {
+                        Self::abort_and_signal_connection_issue(
+                            client_id,
+                            subs.clone(),
+                            program_subs.clone(),
+                            abort_sender,
+                            is_connected.clone(),
+                            &format!(
+                                "Failed to subscribe to program {program_pubkey} after {retries} retries"
+                            ),
+                        );
+                    }
+                    // RPC failed - inform the requester
+                    let _ = sub_response.send(Err(err.into()));
+                    return;
+                }
+            };
 
         // RPC succeeded - confirm to the requester that the subscription was made
         let _ = sub_response.send(Ok(()));
 
         let client_id = client_id.to_string();
+        let pubsub_connection = pubsub_connection.clone();
         tokio::spawn(async move {
+            let mut unsubscribe = Some(initial_unsubscribe);
             // Now keep listening for updates and relay matching accounts to the
             // subscription updates sender until it is cancelled
             loop {
@@ -686,37 +817,80 @@ impl ChainPubsubActor {
                                 }
                             }
                         } else {
+                            if cancellation_token.is_cancelled() {
+                                break;
+                            }
                             static SIGNAL_PROGRAM_CONNECTION_COUNT: AtomicU16 =
                                 AtomicU16::new(0);
                             log_trace_debug(
-                                "Program subscription ended; signaling connection issue",
-                                "Program subscriptions ended; signaled connection issue",
+                                "Program subscription ended; attempting connection-local recovery",
+                                "Program subscriptions ended; attempted connection-local recovery",
                                 &client_id,
                                 &RemoteAccountProviderError::ConnectionDisrupted,
                                 100,
                                 &SIGNAL_PROGRAM_CONNECTION_COUNT,
                             );
-
-                            Self::abort_and_signal_connection_issue(
-                                &client_id,
-                                subs.clone(),
-                                program_subs.clone(),
-                                abort_sender.clone(),
-                                is_connected.clone(),
-                                &format!("Program subscription ended for {program_pubkey}")
-                            );
-                            break;
+                            if let Some(unsub) = unsubscribe.take() {
+                                if tokio::time::timeout(Duration::from_secs(2), unsub())
+                                    .await
+                                    .is_err()
+                                {
+                                    warn!(timeout_ms = 2000, "Unsubscribe timed out while recovering program subscription");
+                                }
+                            }
+                            match Self::subscribe_program_with_retry(
+                                pubsub_connection.as_ref(),
+                                program_pubkey,
+                                config.clone(),
+                                retries,
+                            )
+                            .await
+                            {
+                                Ok((new_stream, new_unsub)) => {
+                                    update_stream = new_stream;
+                                    unsubscribe = Some(new_unsub);
+                                    continue;
+                                }
+                                Err(err) => {
+                                    warn!(
+                                        client_id = %client_id,
+                                        program_id = %program_pubkey,
+                                        retries_count = retries,
+                                        error = ?err,
+                                        "Failed to recover dropped program subscription",
+                                    );
+                                    if Self::is_connection_level_error(&err) {
+                                        Self::abort_and_signal_connection_issue(
+                                            &client_id,
+                                            subs.clone(),
+                                            program_subs.clone(),
+                                            abort_sender.clone(),
+                                            is_connected.clone(),
+                                            &format!(
+                                                "Failed to recover dropped program subscription for {program_pubkey} after {retries} retries"
+                                            ),
+                                        );
+                                        return;
+                                    }
+                                    break;
+                                }
+                            }
                         }
                     }
                 }
             }
 
             // Clean up subscription with timeout to prevent hanging on dead sockets
-            if tokio::time::timeout(Duration::from_secs(2), unsubscribe())
-                .await
-                .is_err()
-            {
-                warn!(timeout_ms = 2000, "Unsubscribe timed out for program");
+            if let Some(unsub) = unsubscribe.take() {
+                if tokio::time::timeout(Duration::from_secs(2), unsub())
+                    .await
+                    .is_err()
+                {
+                    warn!(
+                        timeout_ms = 2000,
+                        "Unsubscribe timed out for program"
+                    );
+                }
             }
             program_subs
                 .lock()

@@ -1,5 +1,5 @@
 use std::sync::{
-    atomic::{AtomicUsize, Ordering},
+    atomic::{AtomicU64, AtomicUsize, Ordering},
     Arc,
 };
 
@@ -29,6 +29,7 @@ use super::{
 struct PooledConnection<T: PubsubConnection> {
     connection: Arc<T>,
     sub_count: Arc<AtomicUsize>,
+    id: u64,
 }
 
 impl<T: PubsubConnection> Clone for PooledConnection<T> {
@@ -36,6 +37,7 @@ impl<T: PubsubConnection> Clone for PooledConnection<T> {
         Self {
             connection: Arc::clone(&self.connection),
             sub_count: Arc::clone(&self.sub_count),
+            id: self.id,
         }
     }
 }
@@ -49,6 +51,7 @@ pub struct PubSubConnectionPool<T: PubsubConnection> {
     per_connection_sub_limit: usize,
     new_connection_guard: AsyncMutex<()>,
     client_id: String,
+    next_connection_id: AtomicU64,
 }
 
 impl<T: PubsubConnection> PubSubConnectionPool<T> {
@@ -63,6 +66,7 @@ impl<T: PubsubConnection> PubSubConnectionPool<T> {
         let conn = PooledConnection {
             connection,
             sub_count: Arc::new(AtomicUsize::new(0)),
+            id: 0,
         };
         let queue = {
             let queue = Queue::default();
@@ -76,6 +80,7 @@ impl<T: PubsubConnection> PubSubConnectionPool<T> {
             per_connection_sub_limit: limit,
             new_connection_guard: AsyncMutex::new(()),
             client_id,
+            next_connection_id: AtomicU64::new(1),
         })
     }
 
@@ -124,7 +129,7 @@ impl<T: PubsubConnection> PubSubConnectionPool<T> {
         S: 'static,
     {
         // Find or create a connection
-        let (sub_count, connection) =
+        let (sub_count, connection, connection_id) =
             match self.find_or_create_connection().await {
                 Ok(result) => result,
                 Err(err) => {
@@ -145,6 +150,7 @@ impl<T: PubsubConnection> PubSubConnectionPool<T> {
             Err(err) => {
                 // Rollback: decrement count
                 sub_count.fetch_sub(1, Ordering::SeqCst);
+                self.on_subscribe_error(connection_id, &err).await;
                 Err(err)
             }
         }
@@ -154,6 +160,7 @@ impl<T: PubsubConnection> PubSubConnectionPool<T> {
     /// first connection to ensure that the provider is working
     /// NOTE: assumes that all existing subscriptions have been dropped.
     pub async fn reconnect(&self) -> PubsubClientResult<()> {
+        let _new_conn_guard = self.new_connection_guard.lock().await;
         while self.connections.pop().is_some() {}
         // We cannot reconnect an existing connection due to the lockless queue
         // not allowing us to call the async reconnect method of the first connection.
@@ -165,6 +172,7 @@ impl<T: PubsubConnection> PubSubConnectionPool<T> {
                 PooledConnection {
                     connection: Arc::new(conn),
                     sub_count: Arc::new(AtomicUsize::new(0)),
+                    id: self.next_connection_id(),
                 }
             }
             Err(err) => {
@@ -183,10 +191,10 @@ impl<T: PubsubConnection> PubSubConnectionPool<T> {
     /// as needed. Returns (sub_count, connection).
     async fn find_or_create_connection(
         &self,
-    ) -> RemoteAccountProviderResult<(Arc<AtomicUsize>, Arc<T>)> {
+    ) -> RemoteAccountProviderResult<(Arc<AtomicUsize>, Arc<T>, u64)> {
         fn try_reserve_connection<T: PubsubConnection>(
             pool: &PubSubConnectionPool<T>,
-        ) -> Option<(Arc<AtomicUsize>, Arc<T>)> {
+        ) -> Option<(Arc<AtomicUsize>, Arc<T>, u64)> {
             let guard = Guard::new();
             pool.try_insert_sub(&guard)
         }
@@ -208,9 +216,11 @@ impl<T: PubsubConnection> PubSubConnectionPool<T> {
         // Phase 3: still no capacity — create and push new connection
         let new_connection = Arc::new(T::new(self.url.clone()).await?);
         let sub_count = Arc::new(AtomicUsize::new(1));
+        let connection_id = self.next_connection_id();
         let conn = PooledConnection {
             connection: Arc::clone(&new_connection),
             sub_count: Arc::clone(&sub_count),
+            id: connection_id,
         };
         self.connections.push(conn);
         let connection_count = self.connections.len();
@@ -223,7 +233,7 @@ impl<T: PubsubConnection> PubSubConnectionPool<T> {
             connection_count,
             "Created new pooled connection"
         );
-        Ok((sub_count, new_connection))
+        Ok((sub_count, new_connection, connection_id))
     }
 
     /// Tries to atomically reserve a subscription slot on an existing
@@ -232,7 +242,7 @@ impl<T: PubsubConnection> PubSubConnectionPool<T> {
     fn try_insert_sub(
         &self,
         guard: &Guard,
-    ) -> Option<(Arc<AtomicUsize>, Arc<T>)> {
+    ) -> Option<(Arc<AtomicUsize>, Arc<T>, u64)> {
         for conn in self.connections.iter(guard) {
             let sub_count = &conn.sub_count;
             loop {
@@ -252,11 +262,76 @@ impl<T: PubsubConnection> PubSubConnectionPool<T> {
                     return Some((
                         Arc::clone(&conn.sub_count),
                         Arc::clone(&conn.connection),
+                        conn.id,
                     ));
                 }
             }
         }
         None
+    }
+
+    fn next_connection_id(&self) -> u64 {
+        self.next_connection_id.fetch_add(1, Ordering::SeqCst)
+    }
+
+    pub(crate) fn is_connection_level_error(err: &PubsubClientError) -> bool {
+        matches!(
+            err,
+            PubsubClientError::ConnectionError(_)
+                | PubsubClientError::WsError(_)
+                | PubsubClientError::ConnectionClosed(_)
+        )
+    }
+
+    async fn on_subscribe_error(
+        &self,
+        connection_id: u64,
+        err: &PubsubClientError,
+    ) {
+        if !Self::is_connection_level_error(err) {
+            return;
+        }
+
+        let removed = self.remove_connection_by_id(connection_id).await;
+        if removed.is_some() {
+            let connection_count = self.connections.len();
+            metrics::set_pubsub_client_connections_count(
+                &self.client_id,
+                connection_count,
+            );
+            warn!(
+                client_id = self.client_id,
+                connection_id,
+                connection_count,
+                error = ?err,
+                "Removed failing pooled connection after subscribe error"
+            );
+        }
+    }
+
+    async fn remove_connection_by_id(
+        &self,
+        connection_id: u64,
+    ) -> Option<PooledConnection<T>> {
+        // Serialize with connection creation/reconnect to avoid queue rebuild races.
+        let _new_conn_guard = self.new_connection_guard.lock().await;
+        let mut removed = None;
+        let mut retained = Vec::new();
+
+        while let Some(conn_entry) = self.connections.pop() {
+            let conn = (**conn_entry).clone();
+            if conn.id == connection_id {
+                removed = Some(conn);
+            } else {
+                retained.push(conn);
+            }
+        }
+
+        for conn in retained {
+            self.connections.push(conn);
+        }
+
+        removed
     }
 
     /// Wraps a raw unsubscribe function to also decrement the sub counter for the
@@ -277,7 +352,14 @@ impl<T: PubsubConnection> PubSubConnectionPool<T> {
 
 #[cfg(test)]
 mod tests {
+    use std::{
+        collections::HashMap,
+        sync::{Mutex, OnceLock},
+    };
+
+    use async_trait::async_trait;
     use solana_pubkey::Pubkey;
+    use solana_pubsub_client::pubsub_client::PubsubClientError;
 
     use super::*;
     use crate::remote_account_provider::pubsub_connection::mock::MockPubsubConnection;
@@ -317,6 +399,144 @@ mod tests {
         )
         .await
         .unwrap()
+    }
+
+    #[derive(Clone)]
+    struct FlakyByOrdinalConnection {
+        ordinal: u64,
+        account_subscriptions: Arc<Mutex<Vec<Pubkey>>>,
+    }
+
+    impl FlakyByOrdinalConnection {
+        fn next_ordinal(url: &str) -> u64 {
+            static URL_CONNECTION_ORDINALS: OnceLock<
+                Mutex<HashMap<String, u64>>,
+            > = OnceLock::new();
+            let ordinals = URL_CONNECTION_ORDINALS
+                .get_or_init(|| Mutex::new(HashMap::new()));
+            let mut ordinals = ordinals.lock().unwrap();
+            let entry = ordinals.entry(url.to_string()).or_insert(0);
+            let current = *entry;
+            *entry += 1;
+            current
+        }
+
+        fn account_subs(&self) -> Vec<Pubkey> {
+            self.account_subscriptions.lock().unwrap().clone()
+        }
+    }
+
+    #[async_trait]
+    impl PubsubConnection for FlakyByOrdinalConnection {
+        async fn new(url: String) -> RemoteAccountProviderResult<Self>
+        where
+            Self: Sized,
+        {
+            Ok(Self {
+                ordinal: Self::next_ordinal(&url),
+                account_subscriptions: Arc::new(Mutex::new(Vec::new())),
+            })
+        }
+
+        fn url(&self) -> &str {
+            "mock://flaky"
+        }
+
+        async fn account_subscribe(
+            &self,
+            pubkey: &Pubkey,
+            _config: RpcAccountInfoConfig,
+        ) -> SubscribeResult {
+            if self.ordinal == 1 {
+                return Err(PubsubClientError::ConnectionClosed(
+                    "simulated failing connection".to_string(),
+                ));
+            }
+            self.account_subscriptions.lock().unwrap().push(*pubkey);
+            let stream = Box::pin(futures_util::stream::empty());
+            let unsubscribe: UnsubscribeFn = Box::new(|| Box::pin(async {}));
+            Ok((stream, unsubscribe))
+        }
+
+        async fn program_subscribe(
+            &self,
+            _program_id: &Pubkey,
+            _config: RpcProgramAccountsConfig,
+        ) -> ProgramSubscribeResult {
+            let stream = Box::pin(futures_util::stream::empty());
+            let unsubscribe: UnsubscribeFn = Box::new(|| Box::pin(async {}));
+            Ok((stream, unsubscribe))
+        }
+
+        async fn reconnect(&self) -> PubsubClientResult<()> {
+            Ok(())
+        }
+    }
+
+    #[derive(Clone)]
+    struct LogicalErrorByOrdinalConnection {
+        ordinal: u64,
+    }
+
+    impl LogicalErrorByOrdinalConnection {
+        fn next_ordinal(url: &str) -> u64 {
+            static URL_CONNECTION_ORDINALS: OnceLock<
+                Mutex<HashMap<String, u64>>,
+            > = OnceLock::new();
+            let ordinals = URL_CONNECTION_ORDINALS
+                .get_or_init(|| Mutex::new(HashMap::new()));
+            let mut ordinals = ordinals.lock().unwrap();
+            let entry = ordinals.entry(url.to_string()).or_insert(0);
+            let current = *entry;
+            *entry += 1;
+            current
+        }
+    }
+
+    #[async_trait]
+    impl PubsubConnection for LogicalErrorByOrdinalConnection {
+        async fn new(url: String) -> RemoteAccountProviderResult<Self>
+        where
+            Self: Sized,
+        {
+            Ok(Self {
+                ordinal: Self::next_ordinal(&url),
+            })
+        }
+
+        fn url(&self) -> &str {
+            "mock://logical"
+        }
+
+        async fn account_subscribe(
+            &self,
+            _pubkey: &Pubkey,
+            _config: RpcAccountInfoConfig,
+        ) -> SubscribeResult {
+            if self.ordinal == 1 {
+                return Err(PubsubClientError::SubscribeFailed {
+                    reason: "bad request".to_string(),
+                    message: "simulated logical failure".to_string(),
+                });
+            }
+            let stream = Box::pin(futures_util::stream::empty());
+            let unsubscribe: UnsubscribeFn = Box::new(|| Box::pin(async {}));
+            Ok((stream, unsubscribe))
+        }
+
+        async fn program_subscribe(
+            &self,
+            _program_id: &Pubkey,
+            _config: RpcProgramAccountsConfig,
+        ) -> ProgramSubscribeResult {
+            let stream = Box::pin(futures_util::stream::empty());
+            let unsubscribe: UnsubscribeFn = Box::new(|| Box::pin(async {}));
+            Ok((stream, unsubscribe))
+        }
+
+        async fn reconnect(&self) -> PubsubClientResult<()> {
+            Ok(())
+        }
     }
 
     async fn account_subscribe(
@@ -717,5 +937,93 @@ mod tests {
                 vec![pids[4]],
             ],
         );
+    }
+
+    #[tokio::test]
+    async fn test_remove_connection_by_id_removes_target_connection() {
+        let pool = create_pool(1).await;
+        let [pk1, pk2, pk3] = create_pubkeys();
+
+        let _unsub1 = account_subscribe(&pool, &pk1).await;
+        let _unsub2 = account_subscribe(&pool, &pk2).await;
+        let _unsub3 = account_subscribe(&pool, &pk3).await;
+        assert_eq!(pool.connections.len(), 3);
+
+        let middle_id = get_connection_at_index(&pool, 1).unwrap().id;
+        let removed = pool.remove_connection_by_id(middle_id).await;
+        assert!(removed.is_some());
+        assert_eq!(pool.connections.len(), 2);
+
+        let guard = Guard::new();
+        let ids: Vec<u64> =
+            pool.connections.iter(&guard).map(|conn| conn.id).collect();
+        assert!(!ids.contains(&middle_id));
+    }
+
+    #[tokio::test]
+    async fn test_subscribe_connection_error_removes_only_failing_connection() {
+        let pool = PubSubConnectionPool::<FlakyByOrdinalConnection>::new(
+            "mock://flaky-remove-test".to_string(),
+            1,
+            "test_client_flaky".to_string(),
+        )
+        .await
+        .unwrap();
+        let [pk1, pk2, pk3] = create_pubkeys();
+
+        let (_stream, unsub1) = pool
+            .account_subscribe(&pk1, RpcAccountInfoConfig::default())
+            .await
+            .unwrap();
+        assert_eq!(pool.connections.len(), 1);
+
+        let err = match pool
+            .account_subscribe(&pk2, RpcAccountInfoConfig::default())
+            .await
+        {
+            Ok(_) => panic!("expected connection-level subscribe error"),
+            Err(err) => err,
+        };
+        assert!(matches!(err, PubsubClientError::ConnectionClosed(_)));
+        assert_eq!(pool.connections.len(), 1);
+
+        unsub1().await;
+        let (_stream, _unsub) = pool
+            .account_subscribe(&pk3, RpcAccountInfoConfig::default())
+            .await
+            .unwrap();
+
+        let conn0 = get_connection_at_index(&pool, 0).unwrap();
+        assert!(conn0.connection.account_subs().contains(&pk1));
+        assert!(conn0.connection.account_subs().contains(&pk3));
+    }
+
+    #[tokio::test]
+    async fn test_subscribe_logical_error_keeps_connection_in_pool() {
+        let pool =
+            PubSubConnectionPool::<LogicalErrorByOrdinalConnection>::new(
+                "mock://logical-error-test".to_string(),
+                1,
+                "test_client_logical".to_string(),
+            )
+            .await
+            .unwrap();
+        let [pk1, pk2] = create_pubkeys();
+
+        let _ = pool
+            .account_subscribe(&pk1, RpcAccountInfoConfig::default())
+            .await
+            .unwrap();
+        assert_eq!(pool.connections.len(), 1);
+
+        let err = match pool
+            .account_subscribe(&pk2, RpcAccountInfoConfig::default())
+            .await
+        {
+            Ok(_) => panic!("expected logical subscribe error"),
+            Err(err) => err,
+        };
+        assert!(matches!(err, PubsubClientError::SubscribeFailed { .. }));
+        assert_eq!(pool.connections.len(), 2);
     }
 }
