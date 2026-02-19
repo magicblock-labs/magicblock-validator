@@ -1449,4 +1449,111 @@ mod tests {
             );
         }
     }
+
+    // ---------------------------------------------------------
+    // 12. next_update Stream Updates
+    // ---------------------------------------------------------
+
+    #[tokio::test]
+    async fn test_next_update_receives_account_updates() {
+        use helius_laserstream::grpc::SubscribeUpdate;
+        use std::time::Duration;
+
+        let (mut mgr, factory) = create_manager();
+        subscribe_n(&mut mgr, 2).await;
+
+        factory.push_update_to_stream(
+            0,
+            Ok(SubscribeUpdate::default()),
+        );
+
+        let result = tokio::time::timeout(
+            Duration::from_millis(100),
+            mgr.next_update(),
+        )
+        .await
+        .expect("next_update timed out");
+
+        let (source, update) = result.expect("stream ended");
+        assert_eq!(source, StreamUpdateSource::Account);
+        assert!(update.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_next_update_receives_program_updates() {
+        use helius_laserstream::grpc::SubscribeUpdate;
+        use std::time::Duration;
+
+        let (mut mgr, factory) = create_manager();
+        let program_id = Pubkey::new_unique();
+        mgr.add_program_subscription(program_id, &COMMITMENT)
+            .await
+            .unwrap();
+
+        factory.push_update_to_stream(
+            0,
+            Ok(SubscribeUpdate::default()),
+        );
+
+        let result = tokio::time::timeout(
+            Duration::from_millis(100),
+            mgr.next_update(),
+        )
+        .await
+        .expect("next_update timed out");
+
+        let (source, update) = result.expect("stream ended");
+        assert_eq!(source, StreamUpdateSource::Program);
+        assert!(update.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_next_update_receives_mixed_account_and_program()
+    {
+        use helius_laserstream::grpc::SubscribeUpdate;
+        use std::time::Duration;
+
+        let (mut mgr, factory) = create_manager();
+
+        // Account stream → index 0
+        subscribe_n(&mut mgr, 2).await;
+        // Program stream → index 1
+        let program_id = Pubkey::new_unique();
+        mgr.add_program_subscription(program_id, &COMMITMENT)
+            .await
+            .unwrap();
+
+        factory.push_update_to_stream(
+            0,
+            Ok(SubscribeUpdate::default()),
+        );
+        factory.push_update_to_stream(
+            1,
+            Ok(SubscribeUpdate::default()),
+        );
+
+        let mut sources = Vec::new();
+        for _ in 0..2 {
+            let result = tokio::time::timeout(
+                Duration::from_millis(100),
+                mgr.next_update(),
+            )
+            .await
+            .expect("next_update timed out");
+
+            let (source, update) =
+                result.expect("stream ended");
+            assert!(update.is_ok());
+            sources.push(source);
+        }
+
+        assert!(
+            sources.contains(&StreamUpdateSource::Account),
+            "expected an Account update",
+        );
+        assert!(
+            sources.contains(&StreamUpdateSource::Program),
+            "expected a Program update",
+        );
+    }
 }
