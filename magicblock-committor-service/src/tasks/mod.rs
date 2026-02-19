@@ -42,13 +42,6 @@ pub enum TaskType {
     Action,
 }
 
-#[derive(Clone, Debug)]
-pub enum PreparationState {
-    NotNeeded,
-    Required(PreparationTask),
-    Cleanup(CleanupTask),
-}
-
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum TaskStrategy {
     Args,
