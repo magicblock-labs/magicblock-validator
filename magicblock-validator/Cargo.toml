@@ -12,7 +12,7 @@ default-run = "magicblock-validator"
 console-subscriber = { workspace = true, optional = true }
 magicblock-api = { workspace = true }
 magicblock-core = { workspace = true }
-magicblock-tui-client = { path = "../tools/magicblock-tui-client", optional = true }
+magicblock-tui-client = { workspace = true, optional = true }
 tracing = { workspace = true }
 magicblock-config = { workspace = true }
 magicblock-version = { workspace = true }

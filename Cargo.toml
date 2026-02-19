@@ -113,6 +113,7 @@ magicblock-program = { path = "./programs/magicblock" }
 magicblock-rpc-client = { path = "./magicblock-rpc-client" }
 magicblock-table-mania = { path = "./magicblock-table-mania" }
 magicblock-task-scheduler = { path = "./magicblock-task-scheduler" }
+magicblock-tui-client = { path = "./tools/magicblock-tui-client" }
 magicblock-validator-admin = { path = "./magicblock-validator-admin" }
 magicblock-version = { path = "./magicblock-version" }
 
