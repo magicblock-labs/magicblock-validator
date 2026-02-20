@@ -497,26 +497,19 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
             return Ok(());
         }
 
-        let mut subscribed_programs = self
-            .program_sub
-            .as_ref()
-            .map(|(subs, _)| subs.clone())
-            .unwrap_or_default();
-
-        subscribed_programs.insert(program_id);
-
-        let program_ids: Vec<&Pubkey> = subscribed_programs.iter().collect();
-        let request = Self::build_program_request(&program_ids, commitment);
-
-        if let Some((subs, handle)) = &self.program_sub {
-            Self::update_subscriptions(handle, "program_subscribe", request)
+        if let Some((mut subscribed_programs, handle)) = self.program_sub.take()
+        {
+            subscribed_programs.insert(program_id);
+            let request =
+                Self::build_program_request(&subscribed_programs, commitment);
+            Self::update_subscriptions(&handle, "program_subscribe", request)
                 .await?;
-            if let Some((subs, _)) = &mut self.program_sub {
-                *subs = subscribed_programs;
-            }
+            self.program_sub = Some((subscribed_programs, handle));
         } else {
+            let mut subscribed_programs = HashSet::new();
+            subscribed_programs.insert(program_id);
             let LaserStreamWithHandle { stream, handle } =
-                self.create_program_stream(&program_ids, commitment);
+                self.create_program_stream(&subscribed_programs, commitment);
             self.stream_map.insert(StreamKey::Program, stream);
             self.program_sub = Some((subscribed_programs, handle));
         }
@@ -537,7 +530,7 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
 
     /// Build a `SubscribeRequest` for the given program IDs.
     fn build_program_request(
-        program_ids: &[&Pubkey],
+        program_ids: &HashSet<Pubkey>,
         commitment: &CommitmentLevel,
     ) -> SubscribeRequest {
         let mut accounts = HashMap::new();
@@ -559,7 +552,7 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
     /// Creates a subscription stream for program updates.
     fn create_program_stream(
         &self,
-        program_ids: &[&Pubkey],
+        program_ids: &HashSet<Pubkey>,
         commitment: &CommitmentLevel,
     ) -> LaserStreamWithHandle<S> {
         let request = Self::build_program_request(program_ids, commitment);
