@@ -170,7 +170,7 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
                     return Err(RemoteAccountProviderError::GrpcSubscriptionUpdateFailed(
                         task.to_string(),
                         MAX_RETRIES,
-                        format!("{err} ({err:?}"),
+                        format!("{err} ({err:?})"),
                     ));
                 }
             }
@@ -236,6 +236,10 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
         }
 
         // Promote if current-new exceeds threshold.
+        // NOTE: it is ok if we overshoot the threshold by a huge amount and don't promote
+        // the stream until the next call to account_subscribe.
+        // The main goal of promoting is to avoid repeated filter updates of large filters, not
+        // avoid it alltogether.
         if self.current_new_subs.len() > self.config.max_subs_in_new {
             let overflow_count =
                 self.current_new_subs.len() - self.config.max_subs_in_new;

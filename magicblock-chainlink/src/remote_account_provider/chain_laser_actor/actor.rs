@@ -296,15 +296,9 @@ impl<H: StreamHandle, S: StreamFactory<H>> ChainLaserActor<H, S> {
                     .stream_manager
                     .add_program_subscription(pubkey, &self.commitment)
                     .await;
-                if let Err(e) = result {
-                    let _ = response.send(Err(e)).inspect_err(|_| {
-                        warn!(client_id = self.client_id, program_id = %pubkey, "Failed to send program subscribe response");
-                    });
-                } else {
-                    let _ = response.send(Ok(())).inspect_err(|_| {
-                        warn!(client_id = self.client_id, program_id = %pubkey, "Failed to send program subscribe response");
-                    });
-                };
+                let _ = response.send(result).inspect_err(|_| {
+                    warn!(client_id = self.client_id, program_id = %pubkey, "Failed to send program subscribe response");
+                });
                 false
             }
             Reconnect { response } => {
