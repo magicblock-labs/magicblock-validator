@@ -1,5 +1,6 @@
 use flume::{Receiver as MpmcReceiver, Sender as MpmcSender};
 use magicblock_magic_program_api::args::TaskRequest;
+use serde::Serialize;
 use solana_program::message::{
     inner_instruction::InnerInstructionsList, SimpleAddressLoader,
 };
@@ -69,6 +70,9 @@ pub struct TransactionStatus {
 pub struct ProcessableTransaction {
     pub transaction: SanitizedTransaction,
     pub mode: TransactionProcessingMode,
+    /// Pre-encoded bincode bytes for the transaction.
+    /// Used by the replicator to avoid redundant serialization.
+    pub encoded: Option<Vec<u8>>,
 }
 
 /// An enum that specifies how a transaction should be processed by the scheduler.
@@ -115,6 +119,57 @@ pub trait SanitizeableTransaction {
         self,
         verify: bool,
     ) -> Result<SanitizedTransaction, TransactionError>;
+
+    /// Sanitizes the transaction and optionally provides pre-encoded bincode bytes.
+    ///
+    /// Default implementation delegates to `sanitize()` and returns `None` for encoded bytes.
+    /// Override this method when you have pre-encoded bytes (e.g., from the wire) to avoid
+    /// redundant serialization.
+    fn sanitize_with_encoded(
+        self,
+        verify: bool,
+    ) -> Result<(SanitizedTransaction, Option<Vec<u8>>), TransactionError>
+    where
+        Self: Sized,
+    {
+        let txn = self.sanitize(verify)?;
+        Ok((txn, None))
+    }
+}
+
+/// Wraps a transaction with its pre-encoded bincode representation.
+/// Use for internally-constructed transactions that need encoded bytes.
+pub struct WithEncoded<T> {
+    pub txn: T,
+    pub encoded: Vec<u8>,
+}
+
+impl<T: SanitizeableTransaction> SanitizeableTransaction for WithEncoded<T> {
+    fn sanitize(
+        self,
+        verify: bool,
+    ) -> Result<SanitizedTransaction, TransactionError> {
+        self.txn.sanitize(verify)
+    }
+
+    fn sanitize_with_encoded(
+        self,
+        verify: bool,
+    ) -> Result<(SanitizedTransaction, Option<Vec<u8>>), TransactionError> {
+        let txn = self.txn.sanitize(verify)?;
+        Ok((txn, Some(self.encoded)))
+    }
+}
+
+/// Encodes a transaction to bincode and wraps it with its encoded form.
+/// Use for internally-constructed transactions that need the encoded bytes.
+pub fn with_encoded<T>(txn: T) -> Result<WithEncoded<T>, TransactionError>
+where
+    T: Serialize,
+{
+    let encoded = bincode::serialize(&txn)
+        .map_err(|_| TransactionError::SanitizeFailure)?;
+    Ok(WithEncoded { txn, encoded })
 }
 
 impl SanitizeableTransaction for SanitizedTransaction {
@@ -162,9 +217,13 @@ impl TransactionSchedulerHandle {
         &self,
         txn: impl SanitizeableTransaction,
     ) -> TransactionResult {
-        let transaction = txn.sanitize(true)?;
+        let (transaction, encoded) = txn.sanitize_with_encoded(true)?;
         let mode = TransactionProcessingMode::Execution(None);
-        let txn = ProcessableTransaction { transaction, mode };
+        let txn = ProcessableTransaction {
+            transaction,
+            mode,
+            encoded,
+        };
         let r = self.0.send(txn).await;
         r.map_err(|_| TransactionError::ClusterMaintenance)
     }
@@ -208,10 +267,14 @@ impl TransactionSchedulerHandle {
         txn: impl SanitizeableTransaction,
         mode: fn(oneshot::Sender<R>) -> TransactionProcessingMode,
     ) -> Result<R, TransactionError> {
-        let transaction = txn.sanitize(true)?;
+        let (transaction, encoded) = txn.sanitize_with_encoded(true)?;
         let (tx, rx) = oneshot::channel();
         let mode = mode(tx);
-        let txn = ProcessableTransaction { transaction, mode };
+        let txn = ProcessableTransaction {
+            transaction,
+            mode,
+            encoded,
+        };
         self.0
             .send(txn)
             .await

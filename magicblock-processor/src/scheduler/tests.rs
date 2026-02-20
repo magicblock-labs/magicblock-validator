@@ -49,6 +49,7 @@ fn mock_txn(accounts: &[(Pubkey, bool)]) -> TransactionWithId {
     TransactionWithId::new(ProcessableTransaction {
         transaction: transaction.sanitize(false).unwrap(),
         mode: TransactionProcessingMode::Execution(None),
+        encoded: None,
     })
 }
 
