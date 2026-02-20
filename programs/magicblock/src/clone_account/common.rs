@@ -182,6 +182,17 @@ pub fn get_deploy_slot(invoke_context: &InvokeContext) -> u64 {
         .unwrap_or(0)
 }
 
+/// Calculates rent-exempt lamports for the given data length using the Rent sysvar.
+pub fn minimum_balance(
+    invoke_context: &InvokeContext,
+    data_len: usize,
+) -> Result<u64, InstructionError> {
+    invoke_context
+        .get_sysvar_cache()
+        .get_rent()
+        .map(|rent| rent.minimum_balance(data_len))
+}
+
 /// Sets account fields from AccountCloneFields and data.
 pub fn set_account_from_fields(
     account: &RefCell<AccountSharedData>,
