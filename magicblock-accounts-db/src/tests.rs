@@ -464,6 +464,63 @@ fn test_database_reset() {
     assert_eq!(adb_reset.account_count(), 0);
 }
 
+#[test]
+fn test_checksum_deterministic_across_dbs() {
+    // Two independent DBs with identical accounts must produce identical checksums
+    let dir1 = tempfile::tempdir().unwrap();
+    let dir2 = tempfile::tempdir().unwrap();
+    let config = AccountsDbConfig::default();
+
+    let db1 = AccountsDb::new(&config, dir1.path(), 0).unwrap();
+    let db2 = AccountsDb::new(&config, dir2.path(), 0).unwrap();
+
+    // Insert same accounts into both DBs
+    for i in 0..50 {
+        let pubkey = Pubkey::new_unique();
+        let mut account = AccountSharedData::new(LAMPORTS, SPACE, &OWNER);
+        account.data_as_mut_slice()[..8].copy_from_slice(&(i as u64).to_le_bytes());
+        db1.insert_account(&pubkey, &account).unwrap();
+        db2.insert_account(&pubkey, &account).unwrap();
+    }
+
+    assert_eq!(db1.checksum(), db2.checksum(), "checksums must match for identical state");
+}
+
+#[test]
+fn test_checksum_detects_state_change() {
+    let env = TestEnv::new();
+
+    // Create initial state
+    let mut accounts: Vec<_> = (0..20)
+        .map(|_| {
+            let acc = env.create_and_insert_account();
+            (acc.pubkey, acc.account)
+        })
+        .collect();
+
+    let original_checksum = env.checksum();
+
+    // Modify a single account's data
+    accounts[5].1.data_as_mut_slice()[0] ^= 0xFF;
+    env.insert_account(&accounts[5].0, &accounts[5].1).unwrap();
+
+    assert_ne!(
+        env.checksum(),
+        original_checksum,
+        "checksum must detect single account modification"
+    );
+
+    // Modify lamports on a different account
+    accounts[10].1.set_lamports(1_000_000);
+    env.insert_account(&accounts[10].0, &accounts[10].1).unwrap();
+
+    assert_ne!(
+        env.checksum(),
+        original_checksum,
+        "checksum must detect lamport change"
+    );
+}
+
 // ==============================================================
 //                      TEST UTILITIES
 // ==============================================================
