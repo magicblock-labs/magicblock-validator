@@ -3245,6 +3245,7 @@ dependencies = [
 name = "magicblock-core"
 version = "0.8.2"
 dependencies = [
+ "bincode",
  "flume",
  "magicblock-magic-program-api",
  "serde",
