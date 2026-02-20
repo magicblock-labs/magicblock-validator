@@ -278,7 +278,7 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
             if self.unoptimized_old_handles.len()
                 > self.config.max_old_unoptimized
             {
-                self.optimize(commitment);
+                self.optimize(commitment).await?;
             }
         }
 
@@ -345,7 +345,10 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
     ///    `optimized_old_handles`.
     /// 3. Clear `unoptimized_old_handles`.
     /// 4. Reset the current-new stream (empty filter).
-    pub fn optimize(&mut self, commitment: &CommitmentLevel) {
+    pub async fn optimize(
+        &mut self,
+        commitment: &CommitmentLevel,
+    ) -> RemoteAccountProviderResult<()> {
         // Remove all account streams from the map.
         self.stream_map.remove(&StreamKey::CurrentNew);
         for i in 0..self.unoptimized_old_handles.len() {
@@ -366,10 +369,10 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
             .enumerate()
         {
             let refs: Vec<&Pubkey> = chunk.iter().collect();
-            let LaserStreamWithHandle { stream, handle } =
-                self.stream_factory.subscribe(Self::build_account_request(
-                    &refs, commitment, None,
-                ));
+            let LaserStreamWithHandle { stream, handle } = self
+                .stream_factory
+                .subscribe(Self::build_account_request(&refs, commitment, None))
+                .await?;
             self.stream_map.insert(StreamKey::OptimizedOld(i), stream);
             self.optimized_old_handles.push(handle);
         }
@@ -380,6 +383,7 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
         // Reset the current-new stream.
         self.current_new_subs.clear();
         self.current_new_handle = None;
+        Ok(())
     }
 
     /// Returns `true` if the pubkey is in the active
@@ -477,20 +481,8 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
     ) -> RemoteAccountProviderResult<()> {
         let request =
             Self::build_account_request(pubkeys, commitment, from_slot);
-        // NOTE: this call returns immediately yielding subscription errors and account updates
-        // via the stream, thus the subscription has not been received yet upstream
-        // We create an empty request stream for that reason
         let LaserStreamWithHandle { stream, handle } =
-            self.stream_factory.subscribe(Default::default());
-        // And then write to the handle and await it which at least guarantees that it has
-        // been sent over the network, even though there is still no guarantee it has been
-        // processed and that the subscription became active immediately
-        Self::update_subscriptions(
-            &handle,
-            "insert_current_new_stream",
-            request,
-        )
-        .await?;
+            self.stream_factory.subscribe(request).await?;
         self.stream_map.insert(StreamKey::CurrentNew, stream);
         self.current_new_handle = Some(handle);
         Ok(())
@@ -523,8 +515,9 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
         } else {
             let mut subscribed_programs = HashSet::new();
             subscribed_programs.insert(program_id);
-            let LaserStreamWithHandle { stream, handle } =
-                self.create_program_stream(&subscribed_programs, commitment);
+            let LaserStreamWithHandle { stream, handle } = self
+                .create_program_stream(&subscribed_programs, commitment)
+                .await?;
             self.stream_map.insert(StreamKey::Program, stream);
             self.program_sub = Some((subscribed_programs, handle));
         }
@@ -565,13 +558,13 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
     }
 
     /// Creates a subscription stream for program updates.
-    fn create_program_stream(
-        &self,
+    async fn create_program_stream(
+        &mut self,
         program_ids: &HashSet<Pubkey>,
         commitment: &CommitmentLevel,
-    ) -> LaserStreamWithHandle<S> {
+    ) -> RemoteAccountProviderResult<LaserStreamWithHandle<S>> {
         let request = Self::build_program_request(program_ids, commitment);
-        self.stream_factory.subscribe(request)
+        self.stream_factory.subscribe(request).await
     }
 }
 
@@ -728,8 +721,7 @@ mod tests {
 
         assert_subscriptions_eq(&mgr, &[pk]);
 
-        // First subscription creates the stream with empty request,
-        // then writes the actual request via handle
+        // The subscribe call writes the actual request via the handle
         let handle_reqs = factory.handle_requests();
         assert_eq!(handle_reqs.len(), 1);
         assert_request_has_exact_pubkeys(&handle_reqs[0], &[pk]);
@@ -746,8 +738,7 @@ mod tests {
 
         assert_subscriptions_eq(&mgr, &pks);
 
-        // First subscription creates the stream with empty request,
-        // then writes the actual request via handle
+        // The subscribe call writes the actual request via the handle
         let handle_reqs = factory.handle_requests();
         assert_eq!(handle_reqs.len(), 1);
         assert_request_has_exact_pubkeys(&handle_reqs[0], &pks);
@@ -788,9 +779,9 @@ mod tests {
 
         assert_subscriptions_eq(&mgr, &pks);
 
-        // First subscribe call creates the stream with empty request,
-        // then writes via handle. All pubkey additions go through
-        // handle.write() which accumulates
+        // All pubkey additions go through handle.write() which
+        // accumulates (first via subscribe, then via
+        // update_subscriptions)
         let handle_reqs = factory.handle_requests();
         assert!(!handle_reqs.is_empty());
         let last_handle_req = handle_reqs.last().unwrap();
@@ -909,7 +900,7 @@ mod tests {
         let (mut mgr, _factory) = create_manager();
         subscribe_n(&mut mgr, 25).await;
 
-        mgr.optimize(&COMMITMENT);
+        mgr.optimize(&COMMITMENT).await.unwrap();
 
         // ceil(25 / 10) = 3
         assert_eq!(mgr.optimized_old_stream_count(), 3);
@@ -924,7 +915,7 @@ mod tests {
         }
         assert!(mgr.unoptimized_old_stream_count() > 0);
 
-        mgr.optimize(&COMMITMENT);
+        mgr.optimize(&COMMITMENT).await.unwrap();
 
         assert_eq!(mgr.unoptimized_old_stream_count(), 0);
         assert!(mgr.optimized_old_stream_count() > 0);
@@ -935,7 +926,7 @@ mod tests {
         let (mut mgr, _factory) = create_manager();
         subscribe_n(&mut mgr, 8).await;
 
-        mgr.optimize(&COMMITMENT);
+        mgr.optimize(&COMMITMENT).await.unwrap();
 
         assert_eq!(mgr.current_new_sub_count(), 0);
     }
@@ -950,7 +941,7 @@ mod tests {
         mgr.account_unsubscribe(&to_unsub);
 
         let reqs_before = factory.captured_requests().len();
-        mgr.optimize(&COMMITMENT);
+        mgr.optimize(&COMMITMENT).await.unwrap();
 
         // Optimized streams should only contain the 10 remaining
         // pubkeys.
@@ -978,7 +969,7 @@ mod tests {
         let pks = subscribe_n(&mut mgr, 5).await;
         mgr.account_unsubscribe(&pks);
 
-        mgr.optimize(&COMMITMENT);
+        mgr.optimize(&COMMITMENT).await.unwrap();
 
         assert_eq!(mgr.optimized_old_stream_count(), 0);
         assert_eq!(mgr.unoptimized_old_stream_count(), 0);
@@ -989,10 +980,10 @@ mod tests {
         let (mut mgr, _factory) = create_manager();
         subscribe_n(&mut mgr, 15).await;
 
-        mgr.optimize(&COMMITMENT);
+        mgr.optimize(&COMMITMENT).await.unwrap();
         let count_after_first = mgr.optimized_old_stream_count();
 
-        mgr.optimize(&COMMITMENT);
+        mgr.optimize(&COMMITMENT).await.unwrap();
         assert_eq!(mgr.optimized_old_stream_count(), count_after_first,);
     }
 
@@ -1005,7 +996,7 @@ mod tests {
         let (mut mgr, _factory) = create_manager();
         subscribe_n(&mut mgr, 20).await;
 
-        mgr.optimize(&COMMITMENT);
+        mgr.optimize(&COMMITMENT).await.unwrap();
 
         // Subscribe a new pubkey after optimization.
         let new_pk = Pubkey::new_unique();
@@ -1107,7 +1098,7 @@ mod tests {
         let pks = subscribe_n(&mut mgr, 8).await;
         mgr.account_unsubscribe(&pks);
 
-        mgr.optimize(&COMMITMENT);
+        mgr.optimize(&COMMITMENT).await.unwrap();
 
         assert_eq!(mgr.optimized_old_stream_count(), 0);
         assert_eq!(mgr.unoptimized_old_stream_count(), 0);
@@ -1172,7 +1163,7 @@ mod tests {
         let (mut mgr, _factory) = create_manager();
         // Create optimized old streams.
         subscribe_n(&mut mgr, 15).await;
-        mgr.optimize(&COMMITMENT);
+        mgr.optimize(&COMMITMENT).await.unwrap();
 
         // Create an unoptimized old stream via promotion.
         subscribe_n(&mut mgr, 6).await;
@@ -1203,7 +1194,7 @@ mod tests {
         }
         assert!(mgr.unoptimized_old_stream_count() > 0);
 
-        mgr.optimize(&COMMITMENT);
+        mgr.optimize(&COMMITMENT).await.unwrap();
 
         assert_eq!(mgr.unoptimized_old_stream_count(), 0);
         // Only optimized old streams remain (current-new is empty
@@ -1233,7 +1224,7 @@ mod tests {
         let (mut mgr, _factory) = create_manager();
         subscribe_n(&mut mgr, 1).await;
 
-        mgr.optimize(&COMMITMENT);
+        mgr.optimize(&COMMITMENT).await.unwrap();
 
         assert_eq!(mgr.optimized_old_stream_count(), 1);
         assert_eq!(mgr.current_new_sub_count(), 0);
@@ -1245,7 +1236,7 @@ mod tests {
         // MAX_OLD_OPTIMIZED + 1 = 11
         subscribe_n(&mut mgr, 11).await;
 
-        mgr.optimize(&COMMITMENT);
+        mgr.optimize(&COMMITMENT).await.unwrap();
 
         assert_eq!(mgr.optimized_old_stream_count(), 2);
     }
@@ -1256,7 +1247,7 @@ mod tests {
         let pks = subscribe_n(&mut mgr, 50).await;
 
         let reqs_before = factory.captured_requests().len();
-        mgr.optimize(&COMMITMENT);
+        mgr.optimize(&COMMITMENT).await.unwrap();
 
         // ceil(50 / 10) = 5
         assert_eq!(mgr.optimized_old_stream_count(), 5);
@@ -1290,7 +1281,7 @@ mod tests {
         assert_eq!(mgr.subscriptions().read().len(), expected_count);
 
         let reqs_before = factory.captured_requests().len();
-        mgr.optimize(&COMMITMENT);
+        mgr.optimize(&COMMITMENT).await.unwrap();
 
         let filter_pks = all_filter_pubkeys_from(&factory, reqs_before);
         assert_eq!(filter_pks.len(), expected_count);
@@ -1334,8 +1325,7 @@ mod tests {
             .await
             .unwrap();
 
-        // First subscription creates the stream with empty request,
-        // then writes the actual request via handle
+        // The subscribe call writes the actual request via the handle
         let handle_reqs = factory.handle_requests();
         assert_eq!(handle_reqs.len(), 1);
         assert_eq!(
@@ -1349,8 +1339,7 @@ mod tests {
         let (mut mgr, factory) = create_manager();
         subscribe_n(&mut mgr, 1).await;
 
-        // First subscription creates the stream with empty request,
-        // then writes the actual request via handle
+        // The subscribe call writes the actual request via the handle
         let handle_reqs = factory.handle_requests();
         assert!(!handle_reqs[0].slots.is_empty());
     }
@@ -1361,7 +1350,7 @@ mod tests {
         subscribe_n(&mut mgr, 15).await;
 
         let reqs_before = factory.captured_requests().len();
-        mgr.optimize(&COMMITMENT);
+        mgr.optimize(&COMMITMENT).await.unwrap();
 
         let optimize_reqs: Vec<_> = factory
             .captured_requests()
@@ -1405,8 +1394,7 @@ mod tests {
             .await
             .unwrap();
 
-        // First subscription creates the stream with empty request,
-        // then writes the actual request via handle
+        // The subscribe call writes the actual request via the handle
         let handle_reqs = factory.handle_requests();
         assert_eq!(handle_reqs.len(), 1);
         assert_eq!(handle_reqs[0].from_slot, Some(42));
@@ -1431,8 +1419,8 @@ mod tests {
         let (mut mgr, factory) = create_manager();
         let pks = make_pubkeys(2);
 
-        // First call creates the stream with empty request, then writes
-        // via handle.
+        // First call creates the stream via subscribe (writes via
+        // handle internally).
         mgr.account_subscribe(&[pks[0]], &COMMITMENT, Some(100))
             .await
             .unwrap();
@@ -1457,7 +1445,7 @@ mod tests {
             .unwrap();
 
         let reqs_before = factory.captured_requests().len();
-        mgr.optimize(&COMMITMENT);
+        mgr.optimize(&COMMITMENT).await.unwrap();
 
         let optimize_reqs: Vec<_> = factory
             .captured_requests()

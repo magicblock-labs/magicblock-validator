@@ -13,6 +13,9 @@ pub use self::{
     actor::{ChainLaserActor, Slots},
     stream_manager::{StreamManager, StreamManagerConfig, StreamUpdateSource},
 };
+use crate::remote_account_provider::{
+    RemoteAccountProviderError, RemoteAccountProviderResult,
+};
 
 pub type SharedSubscriptions = Arc<RwLock<HashSet<Pubkey>>>;
 
@@ -28,9 +31,13 @@ pub type LaserResult = Result<SubscribeUpdate, LaserstreamError>;
 pub type LaserStream = Pin<Box<dyn Stream<Item = LaserResult> + Send>>;
 
 /// Abstraction over stream creation for testability
+#[async_trait]
 pub trait StreamFactory<S: StreamHandle>: Send + Sync + 'static {
-    /// Create a stream for the given subscription request
-    fn subscribe(&self, request: SubscribeRequest) -> LaserStreamWithHandle<S>;
+    /// Create a stream for the given subscription request.
+    async fn subscribe(
+        &self,
+        request: SubscribeRequest,
+    ) -> RemoteAccountProviderResult<LaserStreamWithHandle<S>>;
 }
 
 /// A trait to represent the [HeliusStreamHandle].
@@ -81,16 +88,43 @@ impl StreamFactoryImpl {
     }
 }
 
+#[async_trait]
 impl StreamFactory<StreamHandleImpl> for StreamFactoryImpl {
-    fn subscribe(
+    /// This implementation creates the underlying gRPC stream with the request (which
+    /// returns immediately) and then writes the same request to the handle so it is sent
+    /// over the network before returning asynchronously.
+    async fn subscribe(
         &self,
         request: SubscribeRequest,
-    ) -> LaserStreamWithHandle<StreamHandleImpl> {
-        let (stream, handle) =
-            helius_laserstream::client::subscribe(self.config.clone(), request);
-        LaserStreamWithHandle {
+    ) -> RemoteAccountProviderResult<LaserStreamWithHandle<StreamHandleImpl>>
+    {
+        // NOTE: this call returns immediately yielding subscription errors and account updates
+        // via the stream, thus the subscription has not been received yet upstream
+        // NOTE: we need to use the same request as otherwise there is a potential race condition
+        // where our `write` below completes before this call and the request is overwritten
+        // with an empty one.
+        // Inside helius_laserstream::client::subscribe the request is cloned for that reason to
+        // be able to attempt the request multiple times during reconnect attempts.
+        // Given our requests contain a max of about 2_000 pubkeys, an extra clone here is a small
+        // price to pay to avoid this race condition.
+        let (stream, handle) = helius_laserstream::client::subscribe(
+            self.config.clone(),
+            request.clone(),
+        );
+        let handle = StreamHandleImpl { handle };
+        // Write to the handle and await it which at least guarantees that it has
+        // been sent over the network, even though there is still no guarantee it has been
+        // processed and that the subscription became active immediately
+        handle.write(request).await.map_err(|err| {
+            RemoteAccountProviderError::GrpcSubscriptionUpdateFailed(
+                "subscribe".to_string(),
+                0,
+                format!("{err} ({err:?})"),
+            )
+        })?;
+        Ok(LaserStreamWithHandle {
             stream: Box::pin(stream),
-            handle: StreamHandleImpl { handle },
-        }
+            handle,
+        })
     }
 }

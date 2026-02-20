@@ -6,8 +6,9 @@ use tokio::sync::mpsc;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
 use super::{LaserResult, StreamFactory};
-use crate::remote_account_provider::chain_laser_actor::{
-    LaserStreamWithHandle, StreamHandle,
+use crate::remote_account_provider::{
+    chain_laser_actor::{LaserStreamWithHandle, StreamHandle},
+    RemoteAccountProviderResult,
 };
 
 /// A test mock that captures subscription requests and allows driving
@@ -106,13 +107,15 @@ impl StreamHandle for MockStreamHandle {
     }
 }
 
+#[async_trait]
 impl StreamFactory<MockStreamHandle> for MockStreamFactory {
-    fn subscribe(
+    async fn subscribe(
         &self,
         request: SubscribeRequest,
-    ) -> LaserStreamWithHandle<MockStreamHandle> {
+    ) -> RemoteAccountProviderResult<LaserStreamWithHandle<MockStreamHandle>>
+    {
         // Record the initial subscribe request
-        self.captured_requests.lock().unwrap().push(request);
+        self.captured_requests.lock().unwrap().push(request.clone());
 
         // Create a channel for driving LaserResult items into the
         // stream
@@ -128,6 +131,10 @@ impl StreamFactory<MockStreamHandle> for MockStreamFactory {
             handle_requests: Arc::clone(&self.handle_requests),
         };
 
-        LaserStreamWithHandle { stream, handle }
+        // Write the actual request to the handle (mirroring
+        // production behaviour of sending it over the network).
+        handle.write(request).await.unwrap();
+
+        Ok(LaserStreamWithHandle { stream, handle })
     }
 }
