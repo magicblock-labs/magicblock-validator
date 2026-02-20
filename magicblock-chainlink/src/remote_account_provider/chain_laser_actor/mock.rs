@@ -80,13 +80,6 @@ impl MockStreamFactory {
             senders.remove(idx);
         }
     }
-
-    /// Clear all state (requests, handle requests and streams)
-    pub fn clear(&self) {
-        self.captured_requests.lock().unwrap().clear();
-        self.handle_requests.lock().unwrap().clear();
-        self.stream_senders.lock().unwrap().clear();
-    }
 }
 
 impl Default for MockStreamFactory {

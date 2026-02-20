@@ -1596,4 +1596,27 @@ mod tests {
         assert_eq!(source, StreamUpdateSource::Program);
         assert!(update.is_err());
     }
+
+    #[tokio::test]
+    async fn test_stream_closure_propagates_as_stream_end() {
+        use std::time::Duration;
+
+        let (mut mgr, factory) = create_manager();
+        subscribe_n(&mut mgr, 2).await;
+
+        // Close the account stream (index 0) by removing its sender
+        factory.close_stream(0);
+
+        // next_update should return None (stream ended) since the
+        // underlying channel was closed
+        let result = tokio::time::timeout(
+            Duration::from_millis(100),
+            mgr.next_update(),
+        )
+        .await
+        .expect("next_update timed out");
+
+        // When a stream is closed, next_update returns None
+        assert!(result.is_none());
+    }
 }
