@@ -30,7 +30,6 @@ pub(crate) fn fund_account_with_data(
 ) {
     let account = if let Some(mut acc) = accountsdb.get_account(pubkey) {
         acc.set_lamports(lamports);
-        acc.set_data(vec![0; size]);
         acc
     } else {
         AccountSharedData::new(lamports, size, &Default::default())
@@ -70,16 +69,20 @@ pub(crate) fn funded_faucet(
 }
 
 pub(crate) fn fund_magic_context(accountsdb: &AccountsDb) {
+    const CONTEXT_LAMPORTS: u64 = u64::MAX;
+
     fund_account_with_data(
         accountsdb,
         &magic_program::MAGIC_CONTEXT_PUBKEY,
-        u64::MAX,
+        CONTEXT_LAMPORTS,
         MagicContext::SIZE,
     );
     let mut magic_context = accountsdb
         .get_account(&magic_program::MAGIC_CONTEXT_PUBKEY)
-        .unwrap();
+        .expect("magic context should have been created");
     magic_context.set_delegated(true);
+    magic_context.set_owner(magic_program::ID);
+
     let _ = accountsdb
         .insert_account(&magic_program::MAGIC_CONTEXT_PUBKEY, &magic_context);
 }
