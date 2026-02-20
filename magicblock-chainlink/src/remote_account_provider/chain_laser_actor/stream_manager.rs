@@ -232,12 +232,13 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
             let pks: Vec<Pubkey> =
                 self.current_new_subs.iter().copied().collect();
             let pk_refs: Vec<&Pubkey> = pks.iter().collect();
-            self.insert_current_new_stream(&pk_refs, commitment, from_slot);
+            self.insert_current_new_stream(&pk_refs, commitment, from_slot)
+                .await?;
         }
 
         // Promote if current-new exceeds threshold.
-        // NOTE: it is ok if we overshoot the threshold by a huge amount and don't promote
-        // the stream until the next call to account_subscribe.
+        // NOTE: it is ok if we overshoot the threshold by a huge amount
+        // and don't promote lots of extra accounts into the unoptimized stream
         // The main goal of promoting is to avoid repeated filter updates of large filters, not
         // avoid it alltogether.
         if self.current_new_subs.len() > self.config.max_subs_in_new {
@@ -268,7 +269,8 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
                     &overflow_pks.iter().collect::<Vec<_>>(),
                     commitment,
                     from_slot,
-                );
+                )
+                .await?;
             }
 
             // If unoptimized old handles exceed the limit,
@@ -467,18 +469,31 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
 
     /// Create an account stream via the factory and insert it
     /// as the current-new stream in the [StreamMap].
-    fn insert_current_new_stream(
+    async fn insert_current_new_stream(
         &mut self,
         pubkeys: &[&Pubkey],
         commitment: &CommitmentLevel,
         from_slot: Option<u64>,
-    ) {
+    ) -> RemoteAccountProviderResult<()> {
         let request =
             Self::build_account_request(pubkeys, commitment, from_slot);
+        // NOTE: this call returns immediately yielding subscription errors and account updates
+        // via the stream, thus the subscription has not been received yet upstream
+        // We create an empty request stream for that reason
         let LaserStreamWithHandle { stream, handle } =
-            self.stream_factory.subscribe(request);
+            self.stream_factory.subscribe(Default::default());
+        // And then write to the handle and await it which at least guarantees that it has
+        // been sent over the network, even though there is still no guarantee it has been
+        // processed and that the subscription became active immediately
+        Self::update_subscriptions(
+            &handle,
+            "insert_current_new_stream",
+            request,
+        )
+        .await?;
         self.stream_map.insert(StreamKey::CurrentNew, stream);
         self.current_new_handle = Some(handle);
+        Ok(())
     }
 
     /// Adds a program subscription. If the program is already
@@ -713,9 +728,11 @@ mod tests {
 
         assert_subscriptions_eq(&mgr, &[pk]);
 
-        let reqs = factory.captured_requests();
-        assert_eq!(reqs.len(), 1);
-        assert_request_has_exact_pubkeys(&reqs[0], &[pk]);
+        // First subscription creates the stream with empty request,
+        // then writes the actual request via handle
+        let handle_reqs = factory.handle_requests();
+        assert_eq!(handle_reqs.len(), 1);
+        assert_request_has_exact_pubkeys(&handle_reqs[0], &[pk]);
     }
 
     #[tokio::test]
@@ -729,9 +746,11 @@ mod tests {
 
         assert_subscriptions_eq(&mgr, &pks);
 
-        let reqs = factory.captured_requests();
-        assert_eq!(reqs.len(), 1);
-        assert_request_has_exact_pubkeys(&reqs[0], &pks);
+        // First subscription creates the stream with empty request,
+        // then writes the actual request via handle
+        let handle_reqs = factory.handle_requests();
+        assert_eq!(handle_reqs.len(), 1);
+        assert_request_has_exact_pubkeys(&handle_reqs[0], &pks);
     }
 
     #[tokio::test]
@@ -769,12 +788,9 @@ mod tests {
 
         assert_subscriptions_eq(&mgr, &pks);
 
-        // First subscribe call creates the stream with just pks[0]
-        let reqs = factory.captured_requests();
-        assert_eq!(reqs.len(), 1);
-        assert_request_has_exact_pubkeys(&reqs[0], &[pks[0]]);
-
-        // Subsequent calls update via handle.write() which accumulates
+        // First subscribe call creates the stream with empty request,
+        // then writes via handle. All pubkey additions go through
+        // handle.write() which accumulates
         let handle_reqs = factory.handle_requests();
         assert!(!handle_reqs.is_empty());
         let last_handle_req = handle_reqs.last().unwrap();
@@ -1318,10 +1334,12 @@ mod tests {
             .await
             .unwrap();
 
-        let reqs = factory.captured_requests();
-        assert_eq!(reqs.len(), 1);
+        // First subscription creates the stream with empty request,
+        // then writes the actual request via handle
+        let handle_reqs = factory.handle_requests();
+        assert_eq!(handle_reqs.len(), 1);
         assert_eq!(
-            reqs[0].commitment,
+            handle_reqs[0].commitment,
             Some(i32::from(CommitmentLevel::Finalized)),
         );
     }
@@ -1331,8 +1349,10 @@ mod tests {
         let (mut mgr, factory) = create_manager();
         subscribe_n(&mut mgr, 1).await;
 
-        let reqs = factory.captured_requests();
-        assert!(!reqs[0].slots.is_empty());
+        // First subscription creates the stream with empty request,
+        // then writes the actual request via handle
+        let handle_reqs = factory.handle_requests();
+        assert!(!handle_reqs[0].slots.is_empty());
     }
 
     #[tokio::test]
@@ -1385,9 +1405,11 @@ mod tests {
             .await
             .unwrap();
 
-        let reqs = factory.captured_requests();
-        assert_eq!(reqs.len(), 1);
-        assert_eq!(reqs[0].from_slot, Some(42));
+        // First subscription creates the stream with empty request,
+        // then writes the actual request via handle
+        let handle_reqs = factory.handle_requests();
+        assert_eq!(handle_reqs.len(), 1);
+        assert_eq!(handle_reqs[0].from_slot, Some(42));
     }
 
     #[tokio::test]
@@ -1409,7 +1431,8 @@ mod tests {
         let (mut mgr, factory) = create_manager();
         let pks = make_pubkeys(2);
 
-        // First call creates the stream.
+        // First call creates the stream with empty request, then writes
+        // via handle.
         mgr.account_subscribe(&[pks[0]], &COMMITMENT, Some(100))
             .await
             .unwrap();
@@ -1419,8 +1442,11 @@ mod tests {
             .unwrap();
 
         let handle_reqs = factory.handle_requests();
-        assert_eq!(handle_reqs.len(), 1);
-        assert_eq!(handle_reqs[0].from_slot, Some(200));
+        // First write with pks[0] and from_slot=100, second write with
+        // pks[1] and from_slot=200
+        assert_eq!(handle_reqs.len(), 2);
+        assert_eq!(handle_reqs[0].from_slot, Some(100));
+        assert_eq!(handle_reqs[1].from_slot, Some(200));
     }
 
     #[tokio::test]
