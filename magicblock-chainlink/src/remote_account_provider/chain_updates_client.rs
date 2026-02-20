@@ -70,7 +70,6 @@ impl ChainUpdatesClient {
 
                 let slots = Slots {
                     chain_slot: ChainSlot::new(chain_slot),
-                    last_activation_slot: AtomicU64::new(0),
                     supports_backfill: *supports_backfill,
                 };
                 Ok(ChainUpdatesClient::Laser(

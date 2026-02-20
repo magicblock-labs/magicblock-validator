@@ -40,20 +40,20 @@ use crate::remote_account_provider::{
     SubscriptionUpdate,
 };
 
-const MAX_SLOTS_BACKFILL: u64 = 400;
+/// The maxiumum amount of slots we expect to pass from the time a subscription is requested
+/// until the point when it is activated. 10secs
+const MAX_SLOTS_SUB_ACTIVATION: u64 = 25;
 
 // -----------------
 // Slots
 // -----------------
-/// Shared slot tracking for activation lookback and chain slot synchronization.
+/// Shared slot tracking for chain slot synchronization.
 #[derive(Debug)]
 pub struct Slots {
     /// The current slot on chain, shared with RemoteAccountProvider.
     /// Updated via `update()` when slot updates are received from GRPC.
     /// Metrics are automatically captured on updates.
     pub chain_slot: ChainSlot,
-    /// The last slot at which activation happened (used for backfilling).
-    pub last_activation_slot: AtomicU64,
     /// Whether this GRPC endpoint supports backfilling subscription updates.
     pub supports_backfill: bool,
 }
@@ -302,8 +302,8 @@ impl<H: StreamHandle, S: StreamFactory<H>> ChainLaserActor<H, S> {
                 false
             }
             Reconnect { response } => {
-                // We cannot do much more here to _reconnect_ since we will do so once we activate
-                // subscriptions again and that method does not return any error information.
+                // We cannot do much more here to _reconnect_ since we will do so once we create
+                // subscriptions again.
                 // Subscriptions were already cleared when the connection issue was signaled.
                 let _ = response.send(Ok(())).inspect_err(|_| {
                     warn!(
@@ -414,22 +414,7 @@ impl<H: StreamHandle, S: StreamFactory<H>> ChainLaserActor<H, S> {
             return None;
         }
 
-        let last_activation_slot = self
-            .slots
-            .last_activation_slot
-            .swap(chain_slot, Ordering::Relaxed);
-
-        let from_slot = if last_activation_slot == 0 {
-            chain_slot.saturating_sub(MAX_SLOTS_BACKFILL)
-        } else {
-            let target_slot = last_activation_slot.saturating_sub(1);
-            let delta = chain_slot.saturating_sub(target_slot);
-            if delta < MAX_SLOTS_BACKFILL {
-                target_slot
-            } else {
-                chain_slot.saturating_sub(MAX_SLOTS_BACKFILL)
-            }
-        };
+        let from_slot = chain_slot.saturating_sub(MAX_SLOTS_SUB_ACTIVATION);
         Some((chain_slot, from_slot))
     }
 
