@@ -40,10 +40,6 @@ use crate::remote_account_provider::{
     SubscriptionUpdate,
 };
 
-/// The maxiumum amount of slots we expect to pass from the time a subscription is requested
-/// until the point when it is activated. 10secs
-const MAX_SLOTS_SUB_ACTIVATION: u64 = 25;
-
 // -----------------
 // Slots
 // -----------------
@@ -210,8 +206,16 @@ impl<H: StreamHandle, S: StreamFactory<H>> ChainLaserActor<H, S> {
             mpsc::channel(MESSAGE_CHANNEL_SIZE);
         let commitment = grpc_commitment_from_solana(commitment);
 
-        let stream_manager =
-            StreamManager::new(StreamManagerConfig::default(), stream_factory);
+        let chain_slot = if slots.supports_backfill {
+            Some(slots.chain_slot.clone())
+        } else {
+            None
+        };
+        let stream_manager = StreamManager::new(
+            StreamManagerConfig::default(),
+            stream_factory,
+            chain_slot,
+        );
         let shared_subscriptions = Arc::clone(stream_manager.subscriptions());
 
         let me = Self {
@@ -345,7 +349,7 @@ impl<H: StreamHandle, S: StreamFactory<H>> ChainLaserActor<H, S> {
             return;
         }
 
-        let from_slot = self.determine_from_slot().map(|(_, fs)| fs);
+        let from_slot = self.compute_from_slot();
         let result = self
             .stream_manager
             .account_subscribe(&[pubkey], &self.commitment, from_slot)
@@ -398,24 +402,14 @@ impl<H: StreamHandle, S: StreamFactory<H>> ChainLaserActor<H, S> {
         }
     }
 
-    /// Determines the from_slot for backfilling subscription
-    /// updates.
-    ///
-    /// Returns `Some((chain_slot, from_slot))` if backfilling is
-    /// supported and we have a valid chain slot, otherwise
-    /// returns `None`.
-    fn determine_from_slot(&self) -> Option<(u64, u64)> {
+    /// Computes a `from_slot` for backfilling based on the
+    /// current chain slot. Returns `None` if backfilling is not
+    /// supported or the slot is still 0.
+    fn compute_from_slot(&self) -> Option<u64> {
         if !self.slots.supports_backfill {
             return None;
         }
-
-        let chain_slot = self.slots.chain_slot.load();
-        if chain_slot == 0 {
-            return None;
-        }
-
-        let from_slot = chain_slot.saturating_sub(MAX_SLOTS_SUB_ACTIVATION);
-        Some((chain_slot, from_slot))
+        Some(self.slots.chain_slot.compute_from_slot())
     }
 
     /// Handles an update from any subscription stream.

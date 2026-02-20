@@ -13,8 +13,8 @@ use super::{
     StreamFactory,
 };
 use crate::remote_account_provider::{
-    chain_laser_actor::StreamHandle, RemoteAccountProviderError,
-    RemoteAccountProviderResult,
+    chain_laser_actor::StreamHandle, chain_slot::ChainSlot,
+    RemoteAccountProviderError, RemoteAccountProviderResult,
 };
 
 /// Identifies whether a stream update came from an account or
@@ -122,11 +122,24 @@ pub struct StreamManager<S: StreamHandle, SF: StreamFactory<S>> {
     /// Persistent stream map polled by [Self::next_update].
     /// Updated only when stream topology changes.
     stream_map: StreamMap<StreamKey, LaserStream>,
+
+    /// Optional chain slot tracker for computing `from_slot`
+    /// during optimization. When set, optimized streams will
+    /// request backfill from a lookback window before the
+    /// current chain slot so that no updates are missed while
+    /// the old streams are being replaced.
+    /// For [Self::account_subscribe], `from_slot` is provided by
+    /// the caller (actor).
+    chain_slot: Option<ChainSlot>,
 }
 
 #[allow(unused)]
 impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
-    pub fn new(config: StreamManagerConfig, stream_factory: SF) -> Self {
+    pub fn new(
+        config: StreamManagerConfig,
+        stream_factory: SF,
+        chain_slot: Option<ChainSlot>,
+    ) -> Self {
         Self {
             config,
             stream_factory,
@@ -137,6 +150,7 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
             optimized_old_handles: Vec::new(),
             program_sub: None,
             stream_map: StreamMap::new(),
+            chain_slot,
         }
     }
 
@@ -337,6 +351,13 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
         !self.stream_map.is_empty()
     }
 
+    /// Computes a `from_slot` for backfilling based on the
+    /// current chain slot. Returns `None` if no chain slot
+    /// tracker is available
+    fn compute_from_slot(&self) -> Option<u64> {
+        self.chain_slot.as_ref().map(ChainSlot::compute_from_slot)
+    }
+
     /// Rebuild all account streams from `subscriptions`.
     ///
     /// 1. Chunk `subscriptions` into groups of
@@ -367,6 +388,7 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
             self.subscriptions.read().iter().copied().collect();
 
         // Build optimized old streams from chunks.
+        let from_slot = self.compute_from_slot();
         self.optimized_old_handles = Vec::new();
         for (i, chunk) in all_pks
             .chunks(self.config.max_subs_in_old_optimized)
@@ -375,7 +397,9 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
             let refs: Vec<&Pubkey> = chunk.iter().collect();
             let LaserStreamWithHandle { stream, handle } = self
                 .stream_factory
-                .subscribe(Self::build_account_request(&refs, commitment, None))
+                .subscribe(Self::build_account_request(
+                    &refs, commitment, from_slot,
+                ))
                 .await?;
             self.stream_map.insert(StreamKey::OptimizedOld(i), stream);
             self.optimized_old_handles.push(handle);
@@ -601,7 +625,7 @@ mod tests {
         MockStreamFactory,
     ) {
         let factory = MockStreamFactory::new();
-        let manager = StreamManager::new(test_config(), factory.clone());
+        let manager = StreamManager::new(test_config(), factory.clone(), None);
         (manager, factory)
     }
 
@@ -1445,7 +1469,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_optimize_sets_from_slot_none() {
+    async fn test_optimize_sets_from_slot_none_without_chain_slot() {
         let (mut mgr, factory) = create_manager();
         mgr.account_subscribe(&make_pubkeys(5), &COMMITMENT, Some(42))
             .await
@@ -1463,7 +1487,48 @@ mod tests {
         for req in &optimize_reqs {
             assert_eq!(
                 req.from_slot, None,
-                "optimized streams should have from_slot=None",
+                "optimized streams should have from_slot=None \
+                 when no chain_slot is set",
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_optimize_uses_from_slot_with_chain_slot() {
+        use std::sync::{atomic::AtomicU64, Arc};
+
+        use crate::remote_account_provider::chain_slot::ChainSlot;
+
+        let current_slot: u64 = 1000;
+        let chain_slot = ChainSlot::new(Arc::new(AtomicU64::new(current_slot)));
+        let factory = MockStreamFactory::new();
+        let mut mgr = StreamManager::new(
+            test_config(),
+            factory.clone(),
+            Some(chain_slot),
+        );
+
+        mgr.account_subscribe(&make_pubkeys(5), &COMMITMENT, Some(42))
+            .await
+            .unwrap();
+
+        let reqs_before = factory.captured_requests().len();
+        mgr.optimize(&COMMITMENT).await.unwrap();
+
+        let optimize_reqs: Vec<_> = factory
+            .captured_requests()
+            .into_iter()
+            .skip(reqs_before)
+            .collect();
+        assert!(!optimize_reqs.is_empty());
+        let expected_from_slot =
+            current_slot - ChainSlot::MAX_SLOTS_SUB_ACTIVATION;
+        for req in &optimize_reqs {
+            assert_eq!(
+                req.from_slot,
+                Some(expected_from_slot),
+                "optimized streams should backfill from \
+                 chain_slot - MAX_SLOTS_SUB_ACTIVATION",
             );
         }
     }
