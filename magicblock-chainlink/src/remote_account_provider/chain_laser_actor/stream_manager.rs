@@ -206,8 +206,7 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
                 commitment,
                 from_slot,
             );
-            write_with_retry(handle, "account_subscribe", request)
-                .await
+            write_with_retry(handle, "account_subscribe", request).await
         } else {
             let pks: Vec<Pubkey> =
                 self.current_new_subs.iter().copied().collect();
@@ -525,12 +524,7 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
             subscribed_programs.insert(program_id);
             let request =
                 Self::build_program_request(&subscribed_programs, commitment);
-            match write_with_retry(
-                &handle,
-                "program_subscribe",
-                request,
-            )
-            .await
+            match write_with_retry(&handle, "program_subscribe", request).await
             {
                 Ok(()) => {
                     self.program_sub = Some((subscribed_programs, handle));
