@@ -1580,8 +1580,7 @@ mod tests {
             .await
             .unwrap();
 
-        let status =
-            tonic::Status::new(Code::Internal, "program stream error");
+        let status = tonic::Status::new(Code::Internal, "program stream error");
         let error = LaserstreamError::Status(status);
 
         // Program stream is at index 0 when only program stream exists
@@ -1609,12 +1608,10 @@ mod tests {
 
         // next_update should return None (stream ended) since the
         // underlying channel was closed
-        let result = tokio::time::timeout(
-            Duration::from_millis(100),
-            mgr.next_update(),
-        )
-        .await
-        .expect("next_update timed out");
+        let result =
+            tokio::time::timeout(Duration::from_millis(100), mgr.next_update())
+                .await
+                .expect("next_update timed out");
 
         // When a stream is closed, next_update returns None
         assert!(result.is_none());
