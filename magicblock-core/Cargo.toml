@@ -11,6 +11,8 @@ edition.workspace = true
 
 tokio = { workspace = true, features = ["sync"] }
 flume = { workspace = true }
+bincode = { workspace = true }
+serde = { workspace = true }
 
 solana-account = { workspace = true }
 solana-account-decoder = { workspace = true }

@@ -32,27 +32,23 @@ impl HttpDispatcher {
             .inspect_err(
                 |err| debug!(error = ?err, "Failed to prepare transaction"),
             )?;
-        let signature = *transaction.signature();
-        tracing::Span::current()
-            .record("signature", tracing::field::display(signature));
+        let signature = *transaction.txn.signature();
 
-        // Perform a replay check and reserve the signature in the cache. This prevents
-        // a transaction from being processed twice within the blockhash validity period.
+        // Perform a replay check and reserve the signature in the cache
         if self.transactions.contains(&signature)
             || !self.transactions.push(signature, None)
         {
             return Err(TransactionError::AlreadyProcessed.into());
         }
-        self.ensure_transaction_accounts(&transaction).await?;
+
+        self.ensure_transaction_accounts(&transaction.txn).await?;
 
         // Based on the preflight flag, either execute and await the result,
         // or schedule (fire-and-forget) for background processing.
         if config.skip_preflight {
             TRANSACTION_SKIP_PREFLIGHT.inc();
             self.transactions_scheduler.schedule(transaction).await?;
-            trace!("Transaction scheduled");
         } else {
-            trace!("Transaction executing");
             self.transactions_scheduler.execute(transaction).await?;
         }
 
