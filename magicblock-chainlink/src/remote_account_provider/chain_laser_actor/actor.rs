@@ -215,6 +215,7 @@ impl<H: StreamHandle, S: StreamFactory<H>> ChainLaserActor<H, S> {
             StreamManagerConfig::default(),
             stream_factory,
             chain_slot,
+            client_id.to_string(),
         );
         let shared_subscriptions = Arc::clone(stream_manager.subscriptions());
 

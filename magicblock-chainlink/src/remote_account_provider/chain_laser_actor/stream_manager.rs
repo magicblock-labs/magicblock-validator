@@ -4,6 +4,7 @@ use helius_laserstream::grpc::{
     CommitmentLevel, SubscribeRequest, SubscribeRequestFilterAccounts,
     SubscribeRequestFilterSlots,
 };
+use magicblock_metrics::metrics;
 use solana_pubkey::Pubkey;
 use tokio::time::Duration;
 use tokio_stream::StreamMap;
@@ -131,6 +132,9 @@ pub struct StreamManager<S: StreamHandle, SF: StreamFactory<S>> {
     /// For [Self::account_subscribe], `from_slot` is provided by
     /// the caller (actor).
     chain_slot: Option<ChainSlot>,
+
+    /// Client identifier used as a label for stream metrics.
+    client_id: String,
 }
 
 #[allow(unused)]
@@ -139,6 +143,7 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
         config: StreamManagerConfig,
         stream_factory: SF,
         chain_slot: Option<ChainSlot>,
+        client_id: String,
     ) -> Self {
         Self {
             config,
@@ -151,6 +156,7 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
             program_sub: None,
             stream_map: StreamMap::new(),
             chain_slot,
+            client_id,
         }
     }
 
@@ -274,6 +280,8 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
             {
                 self.optimize(commitment).await?;
             }
+
+            self.update_stream_metrics();
         }
 
         Ok(())
@@ -306,6 +314,7 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
             self.stream_map.remove(&StreamKey::OptimizedOld(i));
         }
         self.optimized_old_handles.clear();
+        self.update_stream_metrics();
     }
 
     /// Returns `true` if any account stream exists.
@@ -336,6 +345,19 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
     /// tracker is available
     fn compute_from_slot(&self) -> Option<u64> {
         self.chain_slot.as_ref().map(ChainSlot::compute_from_slot)
+    }
+
+    /// Emits the current optimized/unoptimized stream counts as
+    /// metrics.
+    fn update_stream_metrics(&self) {
+        metrics::set_grpc_optimized_streams_gauge(
+            &self.client_id,
+            self.optimized_old_handles.len(),
+        );
+        metrics::set_grpc_unoptimized_streams_gauge(
+            &self.client_id,
+            self.unoptimized_old_handles.len(),
+        );
     }
 
     /// Rebuild all account streams from `subscriptions`.
@@ -391,6 +413,8 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
         // Reset the current-new stream.
         self.current_new_subs.clear();
         self.current_new_handle = None;
+
+        self.update_stream_metrics();
 
         // Old streams are dropped here when _prev_* go out of scope,
         // after the new optimized streams are already active.
@@ -605,7 +629,12 @@ mod tests {
         MockStreamFactory,
     ) {
         let factory = MockStreamFactory::new();
-        let manager = StreamManager::new(test_config(), factory.clone(), None);
+        let manager = StreamManager::new(
+            test_config(),
+            factory.clone(),
+            None,
+            "test".to_string(),
+        );
         (manager, factory)
     }
 
@@ -1499,6 +1528,7 @@ mod tests {
             test_config(),
             factory.clone(),
             Some(chain_slot),
+            "test".to_string(),
         );
 
         mgr.account_subscribe(&make_pubkeys(5), &COMMITMENT, Some(42))
