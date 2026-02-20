@@ -12,12 +12,11 @@ use solana_log_collector::ic_msg;
 use solana_program_runtime::invoke_context::InvokeContext;
 use solana_pubkey::Pubkey;
 use solana_sdk_ids::bpf_loader_upgradeable;
-use solana_sysvar::rent::Rent;
 use solana_transaction_context::TransactionContext;
 
 use super::{
     adjust_authority_lamports, close_buffer_account, get_deploy_slot,
-    validate_authority,
+    minimum_balance, validate_authority,
 };
 
 /// Finalizes a V1 program from a buffer account, converting to V3 (upgradeable loader) format.
@@ -112,9 +111,8 @@ pub(crate) fn process_finalize_v1_program_from_buffer(
     };
 
     // Calculate rent-exempt lamports for both accounts
-    let rent = Rent::default();
-    let data_lamports = rent.minimum_balance(program_data_content.len());
-    let prog_lamports = rent.minimum_balance(program_content.len()).max(1);
+    let data_lamports = minimum_balance(invoke_context, program_data_content.len())?;
+    let prog_lamports = minimum_balance(invoke_context, program_content.len())?.max(1);
 
     let prog_current = prog_acc.borrow().lamports();
     let data_current = data_acc.borrow().lamports();
