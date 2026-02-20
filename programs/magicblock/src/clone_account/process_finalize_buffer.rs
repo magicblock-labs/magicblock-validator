@@ -11,12 +11,11 @@ use solana_log_collector::ic_msg;
 use solana_program_runtime::invoke_context::InvokeContext;
 use solana_pubkey::Pubkey;
 use solana_sdk_ids::loader_v4;
-use solana_sysvar::rent::Rent;
 use solana_transaction_context::TransactionContext;
 
 use super::{
     adjust_authority_lamports, close_buffer_account, get_deploy_slot,
-    loader_v4_state_to_bytes, validate_authority,
+    loader_v4_state_to_bytes, minimum_balance, validate_authority,
 };
 use crate::validator::validator_authority_id;
 
@@ -83,7 +82,7 @@ pub(crate) fn process_finalize_program_from_buffer(
     );
 
     // Calculate rent-exempt lamports for full program account
-    let prog_lamports = Rent::default().minimum_balance(program_data.len());
+    let prog_lamports = minimum_balance(invoke_context, program_data.len())?;
     let lamports_delta = prog_lamports as i64
         - prog_current_lamports as i64
         - buf_lamports as i64;
