@@ -111,8 +111,10 @@ pub(crate) fn process_finalize_v1_program_from_buffer(
     };
 
     // Calculate rent-exempt lamports for both accounts
-    let data_lamports = minimum_balance(invoke_context, program_data_content.len())?;
-    let prog_lamports = minimum_balance(invoke_context, program_content.len())?.max(1);
+    let data_lamports =
+        minimum_balance(invoke_context, program_data_content.len())?;
+    let prog_lamports =
+        minimum_balance(invoke_context, program_content.len())?.max(1);
 
     let prog_current = prog_acc.borrow().lamports();
     let data_current = data_acc.borrow().lamports();
