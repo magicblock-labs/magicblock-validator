@@ -1,4 +1,4 @@
-use std::{fs, path::Path, sync::Arc, thread};
+use std::{fs, hash::Hasher, path::Path, sync::Arc, thread};
 
 use error::{AccountsDbError, LogErr};
 use index::{
@@ -13,6 +13,7 @@ use solana_account::{
 use solana_pubkey::Pubkey;
 use storage::AccountsStorage;
 use tracing::{error, info, warn};
+use twox_hash::xxhash3_64;
 
 use crate::{snapshot::SnapshotManager, traits::AccountsBank};
 
@@ -373,6 +374,26 @@ impl AccountsDb {
 
     pub fn write_lock(&self) -> GlobalSyncLock {
         self.write_lock.clone()
+    }
+
+    /// Computes a deterministic checksum of all active accounts.
+    ///
+    /// Iterates all accounts in key-sorted order (via LMDB) and hashes both
+    /// pubkey and serialized account data using xxHash3. Returns a 64-bit hash
+    /// suitable for verifying state consistency across nodes.
+    ///
+    /// Acquires the write lock to ensure a consistent snapshot of the state.
+    pub fn checksum(&self) -> u64 {
+        let _locked = self.write_lock.write();
+        let mut hasher = xxhash3_64::Hasher::new();
+        for (pubkey, acc) in self.iter_all() {
+            let Some(borrowed) = acc.as_borrowed() else {
+                continue;
+            };
+            hasher.write(pubkey.as_ref());
+            hasher.write(borrowed.buffer());
+        }
+        hasher.finish()
     }
 }
 

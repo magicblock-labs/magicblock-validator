@@ -371,10 +371,9 @@ impl AccountsStorage {
         Ok(())
     }
 
-    /// Returns the total expected size of the file in bytes (Header + Data).
+    /// Returns the total occupied size of the storage file in bytes.
     pub(crate) fn size_bytes(&self) -> u64 {
-        (self.header().capacity_blocks as u64 * self.block_size as u64)
-            + METADATA_STORAGE_SIZE as u64
+        self.active_segment().len() as u64
     }
 
     pub(crate) fn block_size(&self) -> usize {

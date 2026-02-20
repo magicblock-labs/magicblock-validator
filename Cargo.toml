@@ -140,7 +140,7 @@ serde_json = "1.0"
 serde_with = "3.16"
 serial_test = "3.2"
 sha3 = "0.10.8"
-solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "6eae52b" }
+solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "3ff1b2ea" }
 solana-account-decoder = { version = "2.2" }
 solana-account-decoder-client-types = { version = "2.2" }
 solana-account-info = { version = "2.2" }
@@ -211,6 +211,10 @@ tonic-build = "0.9.2"
 tracing = "0.1"
 tracing-log = { version = "0.2", features = ["log-tracer"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+twox-hash = { version = "2.1", default-features = false, features = [
+  "xxhash3_64",
+  "alloc",
+] }
 url = "2.5.0"
 
 # SPL Token crates used across the workspace
@@ -231,7 +235,7 @@ version = "0.22.0"
 # some solana dependencies have solana-storage-proto as dependency
 # we need to patch them with our version, because they use protobuf-src v1.1.0
 # and we use protobuf-src v2.1.1. Otherwise compilation fails
-solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "6eae52b" }
+solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "3ff1b2ea" }
 solana-storage-proto = { path = "./storage-proto" }
 solana-svm = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "bdbaac86" }
 # Fork is used to enable `disable_manual_compaction` usage
