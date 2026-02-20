@@ -163,7 +163,7 @@ impl From<MagicBlockRpcClientError> for TransactionStrategyExecutionError {
 impl TransactionStrategyExecutionError {
     /// Number of compute budget instructions prepended to every transaction.
     /// Used to map instruction indices back to task indices.
-    const TASK_OFFSET: u8 = 3;
+    const TASK_OFFSET: u8 = 2;
 
     pub fn is_cpi_limit_error(&self) -> bool {
         matches!(
