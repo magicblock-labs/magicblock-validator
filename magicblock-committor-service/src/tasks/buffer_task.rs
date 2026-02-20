@@ -1,11 +1,15 @@
 use dlp::{
-    args::CommitStateFromBufferArgs,
+    args::{CommitFinalizeArgs, CommitStateFromBufferArgs},
     compute_diff,
-    instruction_builder::{commit_diff_size_budget, commit_size_budget},
+    instruction_builder::{
+        commit_diff_size_budget, commit_finalize_from_buffer_size_budget,
+        commit_size_budget,
+    },
     AccountSizeClass,
 };
 use magicblock_committor_program::Chunks;
 use magicblock_metrics::metrics::LabelValue;
+use solana_account::ReadableAccount;
 use solana_instruction::Instruction;
 use solana_pubkey::Pubkey;
 
@@ -17,8 +21,8 @@ use crate::{
     consts::MAX_WRITE_CHUNK_SIZE,
     tasks::{
         visitor::Visitor, BaseTask, BaseTaskError, BaseTaskResult,
-        CommitDiffTask, CommitTask, PreparationState, PreparationTask,
-        TaskType,
+        CommitDiffTask, CommitFinalizeTask, CommitTask, PreparationState,
+        PreparationTask, TaskType,
     },
 };
 
@@ -27,6 +31,7 @@ use crate::{
 pub enum BufferTaskType {
     Commit(CommitTask),
     CommitDiff(CommitDiffTask),
+    CommitFinalize(CommitFinalizeTask),
     // Action in the future
 }
 
@@ -82,6 +87,28 @@ impl BufferTask {
                     commit_id: task.commit_id,
                     pubkey: task.committed_account.pubkey,
                     committed_data: diff,
+                    chunks,
+                })
+            }
+
+            BufferTaskType::CommitFinalize(task) => {
+                let data = if let Some(base_account) = &task.base_account {
+                    compute_diff(
+                        base_account.data(),
+                        task.committed_account.account.data(),
+                    )
+                    .to_vec()
+                } else {
+                    task.committed_account.account.data.clone()
+                };
+
+                let chunks =
+                    Chunks::from_data_length(data.len(), MAX_WRITE_CHUNK_SIZE);
+
+                PreparationState::Required(PreparationTask {
+                    commit_id: task.commit_id,
+                    pubkey: task.committed_account.pubkey,
+                    committed_data: data,
                     chunks,
                 })
             }
@@ -151,6 +178,32 @@ impl BaseTask for BufferTask {
                     },
                 )
             }
+
+            BufferTaskType::CommitFinalize(task) => {
+                let (data_buffer_pubkey, _) =
+                    magicblock_committor_program::pdas::buffer_pda(
+                        validator,
+                        &task.committed_account.pubkey,
+                        &task.commit_id.to_le_bytes(),
+                    );
+
+                let mut args = CommitFinalizeArgs {
+                    commit_id: task.commit_id,
+                    lamports: task.committed_account.account.lamports,
+                    data_is_diff: task.base_account.is_some().into(),
+                    allow_undelegation: task.allow_undelegation.into(),
+                    bumps: Default::default(),
+                    reserved_padding: Default::default(),
+                };
+
+                dlp::instruction_builder::commit_finalize_from_buffer(
+                    *validator,
+                    task.committed_account.pubkey,
+                    data_buffer_pubkey,
+                    &mut args,
+                )
+                .0
+            }
         }
     }
 
@@ -181,6 +234,7 @@ impl BaseTask for BufferTask {
         match self.task_type {
             BufferTaskType::Commit(_) => 70_000,
             BufferTaskType::CommitDiff(_) => 70_000,
+            BufferTaskType::CommitFinalize(_) => 70_000,
         }
     }
 
@@ -191,6 +245,9 @@ impl BaseTask for BufferTask {
             }
             BufferTaskType::CommitDiff(_) => {
                 commit_diff_size_budget(AccountSizeClass::Huge)
+            }
+            BufferTaskType::CommitFinalize(_) => {
+                commit_finalize_from_buffer_size_budget(AccountSizeClass::Huge)
             }
         }
     }
@@ -204,6 +261,7 @@ impl BaseTask for BufferTask {
         match self.task_type {
             BufferTaskType::Commit(_) => TaskType::Commit,
             BufferTaskType::CommitDiff(_) => TaskType::Commit,
+            BufferTaskType::CommitFinalize(_) => TaskType::CommitFinalize,
         }
     }
 
@@ -220,6 +278,9 @@ impl BaseTask for BufferTask {
             BufferTaskType::CommitDiff(task) => {
                 task.commit_id = commit_id;
             }
+            BufferTaskType::CommitFinalize(task) => {
+                task.commit_id = commit_id;
+            }
         };
 
         self.preparation_state = Self::preparation_required(&self.task_type)
@@ -231,6 +292,7 @@ impl LabelValue for BufferTask {
         match self.task_type {
             BufferTaskType::Commit(_) => "buffer_commit",
             BufferTaskType::CommitDiff(_) => "buffer_commit_diff",
+            BufferTaskType::CommitFinalize(_) => "buffer_commit_finalize",
         }
     }
 }
