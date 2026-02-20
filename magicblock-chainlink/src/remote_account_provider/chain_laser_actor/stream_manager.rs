@@ -49,7 +49,6 @@ impl StreamKey {
 }
 
 /// Configuration for the generational stream manager.
-#[allow(unused)]
 pub struct StreamManagerConfig {
     /// Max subscriptions per optimized old stream chunk.
     pub max_subs_in_old_optimized: usize,
@@ -544,9 +543,21 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
             subscribed_programs.insert(program_id);
             let request =
                 Self::build_program_request(&subscribed_programs, commitment);
-            Self::update_subscriptions(&handle, "program_subscribe", request)
-                .await?;
-            self.program_sub = Some((subscribed_programs, handle));
+            match Self::update_subscriptions(
+                &handle,
+                "program_subscribe",
+                request,
+            )
+            .await
+            {
+                Ok(()) => {
+                    self.program_sub = Some((subscribed_programs, handle));
+                }
+                Err(e) => {
+                    self.program_sub = Some((subscribed_programs, handle));
+                    return Err(e);
+                }
+            }
         } else {
             let mut subscribed_programs = HashSet::new();
             subscribed_programs.insert(program_id);
