@@ -63,6 +63,9 @@ declare_process_instruction!(
                     request_undelegation: true,
                 },
             ),
+            ScheduleCommitFinalize {
+                request_undelegation: _,
+            } => todo!(),
             AcceptScheduleCommits => {
                 process_accept_scheduled_commits(signers, invoke_context)
             }
