@@ -114,6 +114,11 @@ pub enum RemoteAccountProviderError {
         "The LoaderV4 program {0} account state deserialization failed: {1}"
     )]
     LoaderV4StateDeserializationFailed(Pubkey, String),
+
+    #[error(
+        "Failed to update gRPC subscription to {0} after {1} retries: {2}"
+    )]
+    GrpcSubscriptionUpdateFailed(String, usize, String),
 }
 impl From<solana_pubsub_client::pubsub_client::PubsubClientError>
     for RemoteAccountProviderError

@@ -486,6 +486,29 @@ lazy_static::lazy_static! {
         ),
         &["client_id"],
     ).unwrap();
+
+    // -----------------
+    // GRPC Streams
+    // -----------------
+    static ref GRPC_OPTIMIZED_STREAMS_GAUGE: IntGaugeVec =
+        IntGaugeVec::new(
+            Opts::new(
+                "grpc_optimized_streams_gauge",
+                "Number of optimized GRPC streams",
+            ),
+            &["client_id"],
+        )
+        .unwrap();
+
+    static ref GRPC_UNOPTIMIZED_STREAMS_GAUGE: IntGaugeVec =
+        IntGaugeVec::new(
+            Opts::new(
+                "grpc_unoptimized_streams_gauge",
+                "Number of unoptimized GRPC streams",
+            ),
+            &["client_id"],
+        )
+        .unwrap();
 }
 
 pub(crate) fn register() {
@@ -564,6 +587,8 @@ pub(crate) fn register() {
         register!(PUBSUB_CLIENT_RESUBSCRIBE_DELAY_MILLISECONDS_GAUGE);
         register!(PUBSUB_CLIENT_RESUBSCRIBED_GAUGE);
         register!(PUBSUB_CLIENT_CONNECTIONS_GAUGE);
+        register!(GRPC_OPTIMIZED_STREAMS_GAUGE);
+        register!(GRPC_UNOPTIMIZED_STREAMS_GAUGE);
     });
 }
 
@@ -872,6 +897,18 @@ pub fn set_pubsub_client_resubscribed_count(client_id: &str, count: usize) {
 
 pub fn set_pubsub_client_connections_count(client_id: &str, count: usize) {
     PUBSUB_CLIENT_CONNECTIONS_GAUGE
+        .with_label_values(&[client_id])
+        .set(count as i64);
+}
+
+pub fn set_grpc_optimized_streams_gauge(client_id: &str, count: usize) {
+    GRPC_OPTIMIZED_STREAMS_GAUGE
+        .with_label_values(&[client_id])
+        .set(count as i64);
+}
+
+pub fn set_grpc_unoptimized_streams_gauge(client_id: &str, count: usize) {
+    GRPC_UNOPTIMIZED_STREAMS_GAUGE
         .with_label_values(&[client_id])
         .set(count as i64);
 }
