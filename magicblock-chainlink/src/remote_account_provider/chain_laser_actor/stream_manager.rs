@@ -1541,4 +1541,59 @@ mod tests {
             "expected a Program update",
         );
     }
+
+    #[tokio::test]
+    async fn test_next_update_propagates_account_errors() {
+        use std::time::Duration;
+
+        use helius_laserstream::LaserstreamError;
+        use tonic::Code;
+
+        let (mut mgr, factory) = create_manager();
+        subscribe_n(&mut mgr, 2).await;
+
+        let status = tonic::Status::new(Code::Internal, "test error");
+        let error = LaserstreamError::Status(status);
+
+        factory.push_error_to_stream(0, error);
+
+        let result =
+            tokio::time::timeout(Duration::from_millis(100), mgr.next_update())
+                .await
+                .expect("next_update timed out");
+
+        let (source, update) = result.expect("stream ended");
+        assert_eq!(source, StreamUpdateSource::Account);
+        assert!(update.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_next_update_propagates_program_errors() {
+        use std::time::Duration;
+
+        use helius_laserstream::LaserstreamError;
+        use tonic::Code;
+
+        let (mut mgr, factory) = create_manager();
+        let program_id = Pubkey::new_unique();
+        mgr.add_program_subscription(program_id, &COMMITMENT)
+            .await
+            .unwrap();
+
+        let status =
+            tonic::Status::new(Code::Internal, "program stream error");
+        let error = LaserstreamError::Status(status);
+
+        // Program stream is at index 0 when only program stream exists
+        factory.push_error_to_stream(0, error);
+
+        let result =
+            tokio::time::timeout(Duration::from_millis(100), mgr.next_update())
+                .await
+                .expect("next_update timed out");
+
+        let (source, update) = result.expect("stream ended");
+        assert_eq!(source, StreamUpdateSource::Program);
+        assert!(update.is_err());
+    }
 }

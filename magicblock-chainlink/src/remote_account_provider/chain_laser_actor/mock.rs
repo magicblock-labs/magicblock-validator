@@ -1,10 +1,7 @@
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
-use helius_laserstream::{
-    grpc::{self, SubscribeRequest},
-    LaserstreamError,
-};
+use helius_laserstream::{grpc::SubscribeRequest, LaserstreamError};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
@@ -60,14 +57,6 @@ impl MockStreamFactory {
         let senders = self.stream_senders.lock().unwrap();
         if let Some(sender) = senders.get(idx) {
             let _ = sender.send(Err(error));
-        }
-    }
-
-    /// Push a success update to all active streams
-    pub fn push_success_to_all(&self, update: grpc::SubscribeUpdate) {
-        let senders = self.stream_senders.lock().unwrap();
-        for sender in senders.iter() {
-            let _ = sender.send(Ok(update.clone()));
         }
     }
 
@@ -147,112 +136,5 @@ impl StreamFactory<MockStreamHandle> for MockStreamFactory {
         };
 
         LaserStreamWithHandle { stream, handle }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use std::collections::HashMap;
-
-    use helius_laserstream::grpc::{
-        CommitmentLevel, SubscribeRequestFilterAccounts,
-    };
-
-    use super::*;
-
-    #[test]
-    fn test_mock_captures_requests() {
-        let mock = MockStreamFactory::new();
-
-        let mut accounts = HashMap::new();
-        accounts.insert(
-            "test".to_string(),
-            SubscribeRequestFilterAccounts::default(),
-        );
-
-        let request = SubscribeRequest {
-            accounts,
-            commitment: Some(CommitmentLevel::Finalized.into()),
-            ..Default::default()
-        };
-
-        let _stream = mock.subscribe(request.clone());
-
-        let captured = mock.captured_requests();
-        assert_eq!(captured.len(), 1);
-        assert_eq!(captured[0].commitment, request.commitment);
-    }
-
-    #[tokio::test]
-    async fn test_mock_handle_write_records_requests() {
-        let mock = MockStreamFactory::new();
-
-        let request = SubscribeRequest::default();
-        let result = mock.subscribe(request);
-
-        assert_eq!(mock.active_stream_count(), 1);
-
-        // Write an updated request through the handle
-        let mut accounts = HashMap::new();
-        accounts.insert(
-            "updated".to_string(),
-            SubscribeRequestFilterAccounts::default(),
-        );
-        let update_request = SubscribeRequest {
-            accounts,
-            commitment: Some(CommitmentLevel::Confirmed.into()),
-            ..Default::default()
-        };
-
-        result.handle.write(update_request.clone()).await.unwrap();
-
-        let handle_reqs = mock.handle_requests();
-        assert_eq!(handle_reqs.len(), 1);
-        assert_eq!(handle_reqs[0].commitment, update_request.commitment);
-        assert!(handle_reqs[0].accounts.contains_key("updated"));
-    }
-
-    #[tokio::test]
-    async fn test_mock_handle_write_multiple() {
-        let mock = MockStreamFactory::new();
-
-        let r1 = mock.subscribe(SubscribeRequest::default());
-        let r2 = mock.subscribe(SubscribeRequest::default());
-
-        // Both handles share the same handle_requests vec
-        r1.handle
-            .write(SubscribeRequest {
-                commitment: Some(CommitmentLevel::Processed.into()),
-                ..Default::default()
-            })
-            .await
-            .unwrap();
-
-        r2.handle
-            .write(SubscribeRequest {
-                commitment: Some(CommitmentLevel::Finalized.into()),
-                ..Default::default()
-            })
-            .await
-            .unwrap();
-
-        let handle_reqs = mock.handle_requests();
-        assert_eq!(handle_reqs.len(), 2);
-        assert_eq!(mock.captured_requests().len(), 2);
-    }
-
-    #[test]
-    fn test_mock_can_clear() {
-        let mock = MockStreamFactory::new();
-
-        let request = SubscribeRequest::default();
-        let _stream = mock.subscribe(request);
-
-        assert_eq!(mock.captured_requests().len(), 1);
-
-        mock.clear();
-
-        assert_eq!(mock.captured_requests().len(), 0);
-        assert_eq!(mock.handle_requests().len(), 0);
     }
 }
