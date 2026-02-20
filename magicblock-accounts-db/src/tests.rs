@@ -478,12 +478,17 @@ fn test_checksum_deterministic_across_dbs() {
     for i in 0..50 {
         let pubkey = Pubkey::new_unique();
         let mut account = AccountSharedData::new(LAMPORTS, SPACE, &OWNER);
-        account.data_as_mut_slice()[..8].copy_from_slice(&(i as u64).to_le_bytes());
+        account.data_as_mut_slice()[..8]
+            .copy_from_slice(&(i as u64).to_le_bytes());
         db1.insert_account(&pubkey, &account).unwrap();
         db2.insert_account(&pubkey, &account).unwrap();
     }
 
-    assert_eq!(db1.checksum(), db2.checksum(), "checksums must match for identical state");
+    assert_eq!(
+        db1.checksum(),
+        db2.checksum(),
+        "checksums must match for identical state"
+    );
 }
 
 #[test]
@@ -512,7 +517,8 @@ fn test_checksum_detects_state_change() {
 
     // Modify lamports on a different account
     accounts[10].1.set_lamports(1_000_000);
-    env.insert_account(&accounts[10].0, &accounts[10].1).unwrap();
+    env.insert_account(&accounts[10].0, &accounts[10].1)
+        .unwrap();
 
     assert_ne!(
         env.checksum(),
