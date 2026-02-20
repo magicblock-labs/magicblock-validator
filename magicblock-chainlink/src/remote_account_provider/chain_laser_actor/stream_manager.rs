@@ -349,14 +349,18 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
         &mut self,
         commitment: &CommitmentLevel,
     ) -> RemoteAccountProviderResult<()> {
-        // Remove all account streams from the map.
-        self.stream_map.remove(&StreamKey::CurrentNew);
-        for i in 0..self.unoptimized_old_handles.len() {
-            self.stream_map.remove(&StreamKey::UnoptimizedOld(i));
-        }
-        for i in 0..self.optimized_old_handles.len() {
-            self.stream_map.remove(&StreamKey::OptimizedOld(i));
-        }
+        // Remove all account streams from the map but keep them
+        // alive until the new optimized streams are created to
+        // avoid a gap without any active streams (race condition).
+        let _prev_current_new = self.stream_map.remove(&StreamKey::CurrentNew);
+        let _prev_unoptimized: Vec<_> = (0..self.unoptimized_old_handles.len())
+            .filter_map(|i| {
+                self.stream_map.remove(&StreamKey::UnoptimizedOld(i))
+            })
+            .collect();
+        let _prev_optimized: Vec<_> = (0..self.optimized_old_handles.len())
+            .filter_map(|i| self.stream_map.remove(&StreamKey::OptimizedOld(i)))
+            .collect();
 
         // Collect all active subscriptions and chunk them.
         let all_pks: Vec<Pubkey> =
@@ -383,6 +387,9 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
         // Reset the current-new stream.
         self.current_new_subs.clear();
         self.current_new_handle = None;
+
+        // Old streams are dropped here when _prev_* go out of scope,
+        // after the new optimized streams are already active.
         Ok(())
     }
 
