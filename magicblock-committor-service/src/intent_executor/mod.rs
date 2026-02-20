@@ -83,6 +83,7 @@ impl metrics::LabelValue for ExecutionOutput {
     }
 }
 
+#[derive(Debug)]
 pub struct IntentExecutionResult {
     /// Final result of Intent Execution
     pub inner: IntentExecutorResult<ExecutionOutput>,
@@ -161,6 +162,8 @@ where
 
         if all_committed_pubkeys.is_empty() {
             // Build tasks for commit stage
+            // TODO (snawaz): it's actually MagicBaseIntent::BaseActionse scenario, not Commit
+            // scenario. The related code needs little bit of refactoring.
             let commit_tasks = TaskBuilderImpl::commit_tasks(
                 &self.task_info_fetcher,
                 &intent_bundle,

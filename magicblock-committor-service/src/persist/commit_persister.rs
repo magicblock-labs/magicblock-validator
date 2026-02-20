@@ -136,6 +136,12 @@ impl IntentPersisterImpl {
         [
             (false, intent_bundle.get_commit_intent_accounts()),
             (true, intent_bundle.get_undelegate_intent_accounts()),
+            (false, intent_bundle.get_commit_finalize_intent_accounts()),
+            (
+                true,
+                intent_bundle
+                    .get_commit_finalize_and_undelegate_intent_accounts(),
+            ),
         ]
         .into_iter()
         .filter_map(|(undelegate, accounts)| {
@@ -494,6 +500,8 @@ mod tests {
         MagicIntentBundle {
             commit: Some(CommitType::Standalone(test_accounts())),
             commit_and_undelegate: None,
+            commit_finalize: None,
+            commit_finalize_and_undelegate: None,
             standalone_actions: vec![],
         }
     }
@@ -505,6 +513,8 @@ mod tests {
                 commit_action: CommitType::Standalone(test_accounts()),
                 undelegate_action: UndelegateType::Standalone,
             }),
+            commit_finalize: None,
+            commit_finalize_and_undelegate: None,
             standalone_actions: vec![],
         }
     }
@@ -516,6 +526,8 @@ mod tests {
                 commit_action: CommitType::Standalone(test_accounts()),
                 undelegate_action: UndelegateType::Standalone,
             }),
+            commit_finalize: None,
+            commit_finalize_and_undelegate: None,
             standalone_actions: vec![],
         }
     }
@@ -524,6 +536,8 @@ mod tests {
         MagicIntentBundle {
             commit: None,
             commit_and_undelegate: None,
+            commit_finalize: None,
+            commit_finalize_and_undelegate: None,
             standalone_actions: vec![],
         }
     }

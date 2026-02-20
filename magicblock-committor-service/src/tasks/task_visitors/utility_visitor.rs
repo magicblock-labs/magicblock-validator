@@ -55,6 +55,13 @@ impl Visitor for TaskVisitorUtils {
                     remote_slot: task.committed_account.remote_slot,
                 })
             }
+            ArgsTaskType::CommitFinalize(task) => {
+                *commit_meta = Some(CommitMeta {
+                    committed_pubkey: task.committed_account.pubkey,
+                    commit_id: task.commit_id,
+                    remote_slot: task.committed_account.remote_slot,
+                })
+            }
             _ => *commit_meta = None,
         }
     }
@@ -71,6 +78,13 @@ impl Visitor for TaskVisitorUtils {
                 })
             }
             BufferTaskType::CommitDiff(task) => {
+                *commit_meta = Some(CommitMeta {
+                    committed_pubkey: task.committed_account.pubkey,
+                    commit_id: task.commit_id,
+                    remote_slot: task.committed_account.remote_slot,
+                })
+            }
+            BufferTaskType::CommitFinalize(task) => {
                 *commit_meta = Some(CommitMeta {
                     committed_pubkey: task.committed_account.pubkey,
                     commit_id: task.commit_id,

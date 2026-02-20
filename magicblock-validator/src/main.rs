@@ -52,6 +52,7 @@ async fn run() {
     #[cfg(feature = "tokio-console")]
     console_subscriber::init();
     let args = std::env::args_os();
+    println!("cli args: {:?}", args);
     let config = match ValidatorParams::try_new(args) {
         Ok(c) => c,
         Err(err) => {
