@@ -247,8 +247,6 @@ impl TasksBuilder for TaskBuilderImpl {
                     });
                 let base_account = base_accounts.remove(&account.pubkey);
 
-                println!("commit_tasks: finalize = {}", finalize);
-
                  let task = if finalize {
                      Self::create_commit_finalize_task(commit_id, allow_undelegation, account.clone(), base_account)
                  } else {

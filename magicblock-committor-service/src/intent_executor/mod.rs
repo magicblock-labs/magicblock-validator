@@ -162,8 +162,8 @@ where
 
         if all_committed_pubkeys.is_empty() {
             // Build tasks for commit stage
-            // TODO (snawaz): it's actually MagicBaseIntent::BaseActionse scenario, not Commit
-            // scenario. The related code needs little bit of refactoring.
+            // TODO (snawaz): it's actually MagicBaseIntent::BaseActions scenario, not Commit
+            // scenario, so the related code needs little bit of refactoring and proper renaming.
             let commit_tasks = TaskBuilderImpl::commit_tasks(
                 &self.task_info_fetcher,
                 &intent_bundle,

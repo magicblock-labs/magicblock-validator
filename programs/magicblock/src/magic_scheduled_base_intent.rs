@@ -125,7 +125,7 @@ impl ScheduledIntentBundle {
         self.intent_bundle.get_commit_intent_accounts()
     }
 
-    /// Returns `[CommitAndUndelegate]` intent's accounts
+    /// Returns `[CommitFinalizeAndUndelegate]` intent's accounts
     pub fn get_commit_finalize_and_undelegate_intent_accounts(
         &self,
     ) -> Option<&Vec<CommittedAccount>> {
@@ -133,7 +133,7 @@ impl ScheduledIntentBundle {
             .get_commit_finalize_and_undelegate_intent_accounts()
     }
 
-    /// Returns `Commit` intent's accounts
+    /// Returns `CommitFinalize` intent's accounts
     pub fn get_commit_finalize_intent_accounts(
         &self,
     ) -> Option<&Vec<CommittedAccount>> {
@@ -158,11 +158,6 @@ impl ScheduledIntentBundle {
     pub fn has_undelegate_intent(&self) -> bool {
         self.intent_bundle.has_undelegate_intent()
     }
-
-    // pub fn is_commit_finalize(&self) -> bool {
-    //     todo!("is_commit_finalize")
-    //     // self.intent_bundle.is_commit_finalize()
-    // }
 
     pub fn is_empty(&self) -> bool {
         self.intent_bundle.is_empty()
