@@ -85,12 +85,16 @@ pub enum MagicBaseIntentArgs {
     BaseActions(Vec<BaseActionArgs>),
     Commit(CommitTypeArgs),
     CommitAndUndelegate(CommitAndUndelegateArgs),
+    CommitFinalize(CommitTypeArgs),
+    CommitFinalizeAndUndelegate(CommitAndUndelegateArgs),
 }
 
 #[derive(Clone, Default, Serialize, Deserialize, Debug, PartialEq, Eq)]
 pub struct MagicIntentBundleArgs {
     pub commit: Option<CommitTypeArgs>,
     pub commit_and_undelegate: Option<CommitAndUndelegateArgs>,
+    pub commit_finalize: Option<CommitTypeArgs>,
+    pub commit_finalize_and_undelegate: Option<CommitAndUndelegateArgs>,
     pub standalone_actions: Vec<BaseActionArgs>,
 }
 
@@ -104,6 +108,12 @@ impl From<MagicBaseIntentArgs> for MagicIntentBundleArgs {
             MagicBaseIntentArgs::Commit(value) => this.commit = Some(value),
             MagicBaseIntentArgs::CommitAndUndelegate(value) => {
                 this.commit_and_undelegate = Some(value)
+            }
+            MagicBaseIntentArgs::CommitFinalize(value) => {
+                this.commit_finalize = Some(value)
+            }
+            MagicBaseIntentArgs::CommitFinalizeAndUndelegate(value) => {
+                this.commit_finalize_and_undelegate = Some(value)
             }
         }
 
