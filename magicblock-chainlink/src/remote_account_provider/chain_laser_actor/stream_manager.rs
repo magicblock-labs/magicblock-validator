@@ -6,16 +6,15 @@ use helius_laserstream::grpc::{
 };
 use magicblock_metrics::metrics;
 use solana_pubkey::Pubkey;
-use tokio::time::Duration;
 use tokio_stream::StreamMap;
 
 use super::{
-    LaserResult, LaserStream, LaserStreamWithHandle, SharedSubscriptions,
-    StreamFactory,
+    write_with_retry, LaserResult, LaserStream, LaserStreamWithHandle,
+    SharedSubscriptions, StreamFactory,
 };
 use crate::remote_account_provider::{
     chain_laser_actor::StreamHandle, chain_slot::ChainSlot,
-    RemoteAccountProviderError, RemoteAccountProviderResult,
+    RemoteAccountProviderResult,
 };
 
 /// Identifies whether a stream update came from an account or
@@ -159,43 +158,6 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
         }
     }
 
-    /// Update a stream's subscriptions with retry logic.
-    ///
-    /// Attempts to write the given request to the stream handle up to 5
-    /// times with linear backoff. Returns an error if all retries are
-    /// exhausted.
-    async fn update_subscriptions(
-        handle: &S,
-        task: &str,
-        request: SubscribeRequest,
-    ) -> RemoteAccountProviderResult<()> {
-        const MAX_RETRIES: usize = 5;
-        let mut retries = MAX_RETRIES;
-        let initial_retries = retries;
-
-        loop {
-            match handle.write(request.clone()).await {
-                Ok(()) => return Ok(()),
-                Err(err) => {
-                    if retries > 0 {
-                        retries -= 1;
-                        // Linear backoff: sleep longer as retries decrease
-                        let backoff_ms =
-                            50u64 * (initial_retries - retries) as u64;
-                        tokio::time::sleep(Duration::from_millis(backoff_ms))
-                            .await;
-                        continue;
-                    }
-                    return Err(RemoteAccountProviderError::GrpcSubscriptionUpdateFailed(
-                        task.to_string(),
-                        MAX_RETRIES,
-                        format!("{err} ({err:?})"),
-                    ));
-                }
-            }
-        }
-    }
-
     // ---------------------
     // Account subscription
     // ---------------------
@@ -244,7 +206,7 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
                 commitment,
                 from_slot,
             );
-            Self::update_subscriptions(handle, "account_subscribe", request)
+            write_with_retry(handle, "account_subscribe", request)
                 .await
         } else {
             let pks: Vec<Pubkey> =
@@ -563,7 +525,7 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
             subscribed_programs.insert(program_id);
             let request =
                 Self::build_program_request(&subscribed_programs, commitment);
-            match Self::update_subscriptions(
+            match write_with_retry(
                 &handle,
                 "program_subscribe",
                 request,

@@ -8,6 +8,7 @@ use helius_laserstream::{
 };
 use parking_lot::RwLock;
 use solana_pubkey::Pubkey;
+use tokio::time::Duration;
 
 pub use self::{
     actor::{ChainLaserActor, Slots},
@@ -23,6 +24,46 @@ mod actor;
 #[cfg(test)]
 mod mock;
 mod stream_manager;
+
+/// Retry a `handle.write(request)` call with linear backoff.
+///
+/// Tries up to `MAX_RETRIES` (5) times with 50 ms × attempt
+/// backoff. Returns the original error after all retries are
+/// exhausted.
+pub(crate) async fn write_with_retry<S: StreamHandle>(
+    handle: &S,
+    task: &str,
+    request: SubscribeRequest,
+) -> RemoteAccountProviderResult<()> {
+    const MAX_RETRIES: usize = 5;
+    let mut retries = MAX_RETRIES;
+    let initial_retries = retries;
+
+    loop {
+        match handle.write(request.clone()).await {
+            Ok(()) => return Ok(()),
+            Err(err) => {
+                if retries > 0 {
+                    retries -= 1;
+                    let backoff_ms =
+                        50u64 * (initial_retries - retries) as u64;
+                    tokio::time::sleep(
+                        Duration::from_millis(backoff_ms),
+                    )
+                    .await;
+                    continue;
+                }
+                return Err(
+                    RemoteAccountProviderError::GrpcSubscriptionUpdateFailed(
+                        task.to_string(),
+                        MAX_RETRIES,
+                        format!("{err} ({err:?})"),
+                    ),
+                );
+            }
+        }
+    }
+}
 
 /// Result of a laser stream operation
 pub type LaserResult = Result<SubscribeUpdate, LaserstreamError>;
@@ -115,13 +156,7 @@ impl StreamFactory<StreamHandleImpl> for StreamFactoryImpl {
         // Write to the handle and await it which at least guarantees that it has
         // been sent over the network, even though there is still no guarantee it has been
         // processed and that the subscription became active immediately
-        handle.write(request).await.map_err(|err| {
-            RemoteAccountProviderError::GrpcSubscriptionUpdateFailed(
-                "subscribe".to_string(),
-                0,
-                format!("{err} ({err:?})"),
-            )
-        })?;
+        write_with_retry(&handle, "subscribe", request).await?;
         Ok(LaserStreamWithHandle {
             stream: Box::pin(stream),
             handle,
