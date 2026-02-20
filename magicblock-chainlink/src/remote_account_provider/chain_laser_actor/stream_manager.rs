@@ -251,17 +251,10 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
         }
 
         // Promote if current-new exceeds threshold.
-        // NOTE: it is ok if we overshoot the threshold by a huge amount
-        // and don't promote lots of extra accounts into the unoptimized stream
-        // The main goal of promoting is to avoid repeated filter updates of large filters, not
-        // avoid it alltogether.
+        // The entire current-new stream (including any overflow) is
+        // moved to unoptimized old. A fresh, empty current-new will
+        // be created on the next subscribe call.
         if self.current_new_subs.len() > self.config.max_subs_in_new {
-            let overflow_count =
-                self.current_new_subs.len() - self.config.max_subs_in_new;
-            // The overflow pubkeys are the tail of new_pks.
-            let overflow_start = new_pks.len().saturating_sub(overflow_count);
-            let overflow_pks = &new_pks[overflow_start..];
-
             // Move current-new to unoptimized old.
             if let Some(stream) = self.stream_map.remove(&StreamKey::CurrentNew)
             {
@@ -273,19 +266,6 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
                 self.unoptimized_old_handles.push(handle);
             }
             self.current_new_subs.clear();
-
-            // Start fresh current-new with overflow pubkeys.
-            if !overflow_pks.is_empty() {
-                for pk in overflow_pks {
-                    self.current_new_subs.insert(*pk);
-                }
-                self.insert_current_new_stream(
-                    &overflow_pks.iter().collect::<Vec<_>>(),
-                    commitment,
-                    from_slot,
-                )
-                .await?;
-            }
 
             // If unoptimized old handles exceed the limit,
             // optimize.
@@ -861,28 +841,41 @@ mod tests {
             .unwrap();
 
         assert_eq!(mgr.unoptimized_old_stream_count(), 1);
-        // A new current-new stream was created for the 6th pubkey.
-        assert!(mgr.current_new_subs().contains(&sixth));
-        // The factory received a new subscribe call for the fresh
-        // current-new stream.
-        let reqs = factory.captured_requests();
-        assert!(reqs.len() >= 2);
+        // After promotion current-new starts empty (all pubkeys
+        // including the 6th moved into unoptimized old).
+        assert_eq!(mgr.current_new_sub_count(), 0);
+
+        // The promoted stream was last updated (via handle.write)
+        // with all 6 pubkeys.
+        let handle_reqs = factory.handle_requests();
+        let promoted_req = handle_reqs.last().unwrap();
+        let all_pks: Vec<Pubkey> = first_five
+            .iter()
+            .copied()
+            .chain(std::iter::once(sixth))
+            .collect();
+        assert_request_has_exact_pubkeys(promoted_req, &all_pks);
     }
 
     #[tokio::test]
     async fn test_multiple_promotions_accumulate_unoptimized() {
-        let (mut mgr, _factory) = create_manager();
+        let (mut mgr, factory) = create_manager();
         // First promotion: subscribe 6 pubkeys (exceeds MAX_NEW=5).
-        subscribe_n(&mut mgr, 6).await;
+        let pks1 = subscribe_n(&mut mgr, 6).await;
         assert_eq!(mgr.unoptimized_old_stream_count(), 1);
+        assert_eq!(mgr.current_new_sub_count(), 0);
 
-        // Second promotion: subscribe 5 more to fill the new current,
-        // then 1 more to exceed.
-        subscribe_n(&mut mgr, 5).await;
+        // Second promotion: subscribe 6 more to exceed again.
+        let pks2 = subscribe_n(&mut mgr, 6).await;
         assert_eq!(mgr.unoptimized_old_stream_count(), 2);
+        assert_eq!(mgr.current_new_sub_count(), 0);
 
-        // Current-new stream should only hold the overflow pubkeys.
-        assert!(mgr.current_new_sub_count() <= 1);
+        // Each promoted stream was created via subscribe() with
+        // its batch of 6 pubkeys.
+        let captured = factory.captured_requests();
+        assert_eq!(captured.len(), 2);
+        assert_request_has_exact_pubkeys(&captured[0], &pks1);
+        assert_request_has_exact_pubkeys(&captured[1], &pks2);
     }
 
     // -------------------------------------------------------------
@@ -1199,14 +1192,14 @@ mod tests {
         // Create an unoptimized old stream via promotion.
         subscribe_n(&mut mgr, 6).await;
 
-        // Current-new also exists from the overflow pubkey.
+        // After promotion current-new is empty (no handle), so
+        // the count is optimized + unoptimized only.
         let count = mgr.account_stream_count();
         assert!(count > 0);
         assert_eq!(
             count,
             mgr.optimized_old_stream_count()
-                + mgr.unoptimized_old_stream_count()
-                + 1, // current-new
+                + mgr.unoptimized_old_stream_count(),
         );
     }
 
