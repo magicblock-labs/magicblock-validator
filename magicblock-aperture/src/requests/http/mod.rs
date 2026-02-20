@@ -8,7 +8,9 @@ use hyper::{
     Request, Response,
 };
 use magicblock_accounts_db::traits::AccountsBank;
-use magicblock_core::link::transactions::SanitizeableTransaction;
+use magicblock_core::link::transactions::{
+    SanitizeableTransaction, WithEncoded,
+};
 use magicblock_metrics::metrics::{AccountFetchOrigin, ENSURE_ACCOUNTS_TIME};
 use prelude::JsonBody;
 use solana_account::AccountSharedData;
@@ -170,14 +172,18 @@ impl HttpDispatcher {
     /// 3. Validates the transaction's `recent_blockhash` against the ledger, optionally
     ///    replacing it with the latest one.
     /// 4. Sanitizes the transaction, which includes verifying signatures unless disabled.
+    ///
+    /// Returns `WithEncoded<SanitizedTransaction>` with the original wire bytes.
+    /// For execution (replace_blockhash=false), bytes are preserved for replication.
+    /// For simulation (replace_blockhash=true), bytes are unused.
     fn prepare_transaction(
         &self,
         txn: &str,
         encoding: UiTransactionEncoding,
         sigverify: bool,
         replace_blockhash: bool,
-    ) -> RpcResult<SanitizedTransaction> {
-        let decoded = match encoding {
+    ) -> RpcResult<WithEncoded<SanitizedTransaction>> {
+        let encoded = match encoding {
             UiTransactionEncoding::Base58 => {
                 bs58::decode(txn).into_vec().map_err(RpcError::parse_error)
             }
@@ -190,7 +196,7 @@ impl HttpDispatcher {
         }?;
 
         let mut transaction: VersionedTransaction =
-            bincode::deserialize(&decoded).map_err(RpcError::invalid_params)?;
+            bincode::deserialize(&encoded).map_err(RpcError::invalid_params)?;
 
         if replace_blockhash {
             transaction
@@ -205,7 +211,8 @@ impl HttpDispatcher {
             };
         }
 
-        Ok(transaction.sanitize(sigverify)?)
+        let txn = transaction.sanitize(sigverify)?;
+        Ok(WithEncoded { txn, encoded })
     }
 
     /// Ensures all accounts required for a transaction are present in the `AccountsDb`.
