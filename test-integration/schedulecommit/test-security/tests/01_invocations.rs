@@ -1,5 +1,8 @@
 use dlp_api::dlp;
-use program_schedulecommit::api::{schedule_commit_cpi_instruction, UserSeeds};
+use program_schedulecommit::{
+    api::{schedule_commit_cpi_instruction, UserSeeds},
+    ScheduleCommitType,
+};
 use schedulecommit_client::{
     ScheduleCommitTestContext, ScheduleCommitTestContextFields,
 };
@@ -313,6 +316,7 @@ fn test_schedule_commit_via_direct_and_from_other_program_indirect_cpi_including
         None,
         players,
         pdas,
+        ScheduleCommitType::Commit,
     );
 
     let nested_cpi_ix =

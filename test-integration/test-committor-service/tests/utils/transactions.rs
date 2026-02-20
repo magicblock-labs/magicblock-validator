@@ -141,7 +141,9 @@ pub async fn tx_logs_contain(
             // in the logs when needle == CommitState. It's easier to make this little adjustment here than computing
             // the decision and passing either CommitState or CommitDiff from the tests themselves.
             if needle == "CommitState" {
-                log.contains(needle) || log.contains("CommitDiff")
+                log.contains(needle)
+                    || log.contains("CommitDiff")
+                    || log.contains("CommitFinalize")
             } else {
                 log.contains(needle)
             }

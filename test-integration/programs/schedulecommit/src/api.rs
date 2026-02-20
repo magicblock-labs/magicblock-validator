@@ -14,7 +14,7 @@ use solana_program::{
 use crate::{
     BookUpdate, DelegateCpiArgs, DelegateOrderBookArgs, ScheduleCommitCpiArgs,
     ScheduleCommitCpiWithVaultArgs, ScheduleCommitInstruction,
-    ScheduleCommitWithOrderBookArgs,
+    ScheduleCommitType, ScheduleCommitWithOrderBookArgs,
 };
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
@@ -185,6 +185,7 @@ pub fn schedule_commit_cpi_instruction(
     magic_fee_vault: Option<Pubkey>,
     players: &[Pubkey],
     committees: &[Pubkey],
+    commit_type: ScheduleCommitType,
 ) -> Instruction {
     schedule_commit_cpi_instruction_impl(
         payer,
@@ -193,10 +194,8 @@ pub fn schedule_commit_cpi_instruction(
         magic_fee_vault,
         players,
         committees,
-        ScheduleCommitCpiInstructionImplArgs {
-            undelegate: false,
-            commit_payer: false,
-        },
+        false,
+        commit_type,
     )
 }
 
@@ -293,11 +292,12 @@ pub fn update_order_book_instruction(
     )
 }
 
-pub fn schedule_commit_diff_instruction_for_order_book(
+pub fn schedule_commit_instruction_for_order_book(
     payer: Pubkey,
     order_book: Pubkey,
     magic_program_id: Pubkey,
     magic_context_id: Pubkey,
+    commit_type: ScheduleCommitType,
 ) -> Instruction {
     let program_id = crate::id();
     let account_metas = vec![
@@ -309,7 +309,7 @@ pub fn schedule_commit_diff_instruction_for_order_book(
 
     Instruction::new_with_borsh(
         program_id,
-        &ScheduleCommitInstruction::ScheduleCommitForOrderBook,
+        &ScheduleCommitInstruction::ScheduleCommitForOrderBook(commit_type),
         account_metas,
     )
 }
@@ -329,10 +329,8 @@ pub fn schedule_commit_with_payer_cpi_instruction(
         magic_fee_vault,
         players,
         committees,
-        ScheduleCommitCpiInstructionImplArgs {
-            undelegate: false,
-            commit_payer: true,
-        },
+        true,
+        ScheduleCommitType::Commit,
     )
 }
 
@@ -351,16 +349,9 @@ pub fn schedule_commit_and_undelegate_cpi_instruction(
         magic_fee_vault,
         players,
         committees,
-        ScheduleCommitCpiInstructionImplArgs {
-            undelegate: true,
-            commit_payer: false,
-        },
+        false,
+        ScheduleCommitType::CommitAndUndelegate,
     )
-}
-
-struct ScheduleCommitCpiInstructionImplArgs {
-    undelegate: bool,
-    commit_payer: bool,
 }
 
 fn schedule_commit_cpi_instruction_impl(
@@ -370,7 +361,8 @@ fn schedule_commit_cpi_instruction_impl(
     magic_fee_vault: Option<Pubkey>,
     players: &[Pubkey],
     committees: &[Pubkey],
-    args: ScheduleCommitCpiInstructionImplArgs,
+    commit_payer: bool,
+    commit_type: ScheduleCommitType,
 ) -> Instruction {
     let program_id = crate::id();
 
@@ -390,11 +382,11 @@ fn schedule_commit_cpi_instruction_impl(
     let cpi_args = ScheduleCommitCpiArgs {
         players: players.to_vec(),
         modify_accounts: true,
-        undelegate: args.undelegate,
-        commit_payer: args.commit_payer,
         has_magic_vault: magic_fee_vault.is_some(),
+        commit_payer,
     };
-    let ix = ScheduleCommitInstruction::ScheduleCommitCpi(cpi_args);
+    let ix =
+        ScheduleCommitInstruction::ScheduleCommitCpi(cpi_args, commit_type);
     Instruction::new_with_borsh(program_id, &ix, account_metas)
 }
 
