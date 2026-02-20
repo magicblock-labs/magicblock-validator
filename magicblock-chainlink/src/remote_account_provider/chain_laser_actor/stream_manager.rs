@@ -382,6 +382,11 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
     ///    `optimized_old_handles`.
     /// 3. Clear `unoptimized_old_handles`.
     /// 4. Reset the current-new stream (empty filter).
+    ///
+    /// NOTE: the caller is expected to clear all subscriptions if optimize
+    /// and thus the method invoking it ([Self::account_subscribe]) returns an error (the actor does so).
+    /// Otherwise streams may end up in an inconsistent state if a subscription attempt
+    /// fails.
     pub async fn optimize(
         &mut self,
         commitment: &CommitmentLevel,
