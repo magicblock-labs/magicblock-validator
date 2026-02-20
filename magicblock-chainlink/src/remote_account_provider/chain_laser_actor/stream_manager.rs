@@ -228,31 +228,46 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
             return Ok(());
         }
 
-        {
-            let mut subs = self.subscriptions.write();
-            for pk in &new_pks {
-                subs.insert(*pk);
-                self.current_new_subs.insert(*pk);
-            }
-        }
-
         // Update the current-new stream with the full
         // current_new_subs filter (either create new if doesn't
         // exist, or update existing via write).
-        if let Some(handle) = &self.current_new_handle {
+        // We tentatively add new_pks to current_new_subs so the
+        // request includes them, but only persist into subscriptions
+        // after the stream update succeeds.
+        for pk in &new_pks {
+            self.current_new_subs.insert(*pk);
+        }
+
+        let result = if let Some(handle) = &self.current_new_handle {
             let request = Self::build_account_request(
                 &self.current_new_subs.iter().collect::<Vec<_>>(),
                 commitment,
                 from_slot,
             );
             Self::update_subscriptions(handle, "account_subscribe", request)
-                .await?
+                .await
         } else {
             let pks: Vec<Pubkey> =
                 self.current_new_subs.iter().copied().collect();
             let pk_refs: Vec<&Pubkey> = pks.iter().collect();
             self.insert_current_new_stream(&pk_refs, commitment, from_slot)
-                .await?;
+                .await
+        };
+
+        // Revert tentative current_new_subs additions if the stream update failed
+        if result.is_err() {
+            for pk in &new_pks {
+                self.current_new_subs.remove(pk);
+            }
+            result?;
+        }
+
+        // Update active subscriptions with new pubkeys only after stream update
+        {
+            let mut subs = self.subscriptions.write();
+            for pk in &new_pks {
+                subs.insert(*pk);
+            }
         }
 
         // Promote if current-new exceeds threshold.
