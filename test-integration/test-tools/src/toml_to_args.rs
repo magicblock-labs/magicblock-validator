@@ -80,9 +80,42 @@ pub fn config_to_args(
 
         args.push(program.id);
 
-        let resolved_full_config_path =
-            config_dir.join(&program.path).canonicalize().unwrap();
-        args.push(resolved_full_config_path.to_str().unwrap().to_string());
+        let full_path_to_resolve = config_dir.join(&program.path);
+        match fs::canonicalize(&full_path_to_resolve) {
+            Ok(path) => {
+                args.push(path.to_str().unwrap().to_string());
+            }
+            Err(e) => {
+                let abs_config_dir = fs::canonicalize(config_dir).unwrap_or(config_dir.to_path_buf());
+                eprintln!(
+                    "Error: Failed to resolve program path.\n\
+                     Config Dir: {:?}\n\
+                     Relative Path: {:?}\n\
+                     Resolution Attempt: {:?}\n\
+                     OS Error: {:?}",
+                    abs_config_dir,
+                    program.path,
+                    full_path_to_resolve,
+                    e
+                );
+                
+                // List directory contents to aid debugging in CI environments
+                if let Some(parent) = full_path_to_resolve.parent() {
+                    eprintln!("Directory contents of {:?}:", parent);
+                    if let Ok(entries) = fs::read_dir(parent) {
+                        for entry in entries {
+                            if let Ok(entry) = entry {
+                                eprintln!(" - {:?}", entry.file_name());
+                            }
+                        }
+                    } else {
+                        eprintln!(" (Unable to read directory)");
+                    }
+                }
+                
+                panic!("Program file not found: {:?}", full_path_to_resolve);
+            }
+        }
 
         if program_loader == ProgramLoader::UpgradeableProgram {
             if let Some(auth) = program.auth {

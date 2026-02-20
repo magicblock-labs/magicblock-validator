@@ -784,13 +784,19 @@ fn run_test(
         std::env::var("RUST_LOG").unwrap_or_else(|_| "info".to_string()),
     )
     .arg("test");
+    if std::env::var("CARGO_NET_OFFLINE").as_deref() == Ok("true") {
+        cmd.arg("--offline");
+    }
     if let Some(package) = config.package {
         cmd.arg("-p").arg(package);
     }
     if let Some(test) = config.test {
         cmd.arg(format!("'{}'", test));
     }
-    cmd.arg("--").arg("--test-threads=1").arg("--nocapture");
+    let test_threads = std::env::var("CARGO_TEST_THREADS").unwrap_or_else(|_| "1".to_string());
+    cmd.arg("--")
+        .arg(format!("--test-threads={}", test_threads))
+        .arg("--nocapture");
     cmd.current_dir(manifest_dir.clone());
     Teepee::new(cmd).output()
 }

@@ -3,6 +3,13 @@ DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 DEPLOY_DIR := $(DIR)target/deploy
 ROOT_DEPLOY_DIR := $(DIR)../target/deploy
 
+# Use CARGO_TARGET_DIR if provided by the environment (CI),
+# otherwise default to ../target for local development.
+CARGO_TARGET_DIR ?= $(DIR)../target
+
+# Prebuilt test-runner binary path (dev profile)
+TEST_RUNNER_BIN := $(CARGO_TARGET_DIR)/debug/run-tests
+
 RUST_LOG ?= 'warn,geyser_plugin=warn,magicblock=trace,magicblock_chainlink::remote_account_provider::chain_pubsub_actor=debug,rpc=trace,bank=trace,banking_stage=warn,solana_geyser_plugin_manager=warn,solana_svm=warn,test_tools=trace,schedulecommit_test=trace,'
 
 FLEXI_COUNTER_DIR := $(DIR)programs/flexi-counter
@@ -30,10 +37,21 @@ list-programs:
 programs: $(PROGRAMS_SO)
 
 test: $(PROGRAMS_SO)
-	$(MAKE) chainlink-prep-programs -C ./test-chainlink && \
-	RUST_BACKTRACE=1 \
-	RUST_LOG=$(RUST_LOG) \
-	cargo run --package test-runner --bin run-tests
+	@# Only prepare chainlink programs when running chainlink tests
+	@if [ -z "$(SKIP_CHAINLINK_PREP)" ] && ([ -z "$(RUN_TESTS)" ] || [ "$(RUN_TESTS)" = "chainlink" ]); then \
+		echo "Preparing chainlink programs (RUN_TESTS=$(RUN_TESTS))"; \
+		$(MAKE) chainlink-prep-programs -C ./test-chainlink; \
+	else \
+		echo "Skipping chainlink-prep-programs (SKIP_CHAINLINK_PREP=$(SKIP_CHAINLINK_PREP), RUN_TESTS=$(RUN_TESTS))"; \
+	fi
+	@# Prefer running the prebuilt test-runner binary to avoid concurrent Cargo locking
+	@if [ -x "$(TEST_RUNNER_BIN)" ]; then \
+		echo "Using prebuilt test-runner binary: $(TEST_RUNNER_BIN)"; \
+		CARGO_TEST_THREADS=$${CARGO_TEST_THREADS:-1} CARGO_MANIFEST_DIR=$(DIR)test-runner RUST_BACKTRACE=1 RUST_LOG=$(RUST_LOG) $(TEST_RUNNER_BIN); \
+	else \
+		echo "test-runner binary not found, falling back to 'cargo run'"; \
+		CARGO_TEST_THREADS=$${CARGO_TEST_THREADS:-1} RUST_BACKTRACE=1 RUST_LOG=$(RUST_LOG) cargo run --package test-runner --bin run-tests; \
+	fi
 
 test-force-mb: $(PROGRAMS_SO)
 	RUST_LOG=$(RUST_LOG) \
