@@ -839,6 +839,8 @@ impl ChainLaserActor {
             return;
         };
 
+        // NOTE: Pubkey stringification overhead is acceptable here since this
+        // is a cold path (processing network updates dwarfs the cost)
         tracing::Span::current()
             .record("pubkey", tracing::field::display(pubkey));
 
