@@ -40,9 +40,6 @@ pub fn write(ledger_path: &Path) -> (Child, Keypair, u64) {
     let (payer, _) =
         init_and_delegate_counter_and_payer(&ctx, &mut validator, "COUNTER");
 
-    // Wait for account to be delegated
-    // expect!(ctx.wait_for_delta_slot_ephem(10), validator);
-
     // Schedule a task
     let task_id = 1;
     let execution_interval_millis = 50;
@@ -99,7 +96,7 @@ pub fn read(ledger_path: &Path, kp: &Keypair, count: u64) -> Child {
     );
 
     // Wait for the crank to execute
-    expect!(ctx.wait_for_delta_slot_ephem(3), validator);
+    expect!(ctx.wait_for_delta_slot_ephem(5), validator);
 
     // Check that the count increased
     let new_count =
