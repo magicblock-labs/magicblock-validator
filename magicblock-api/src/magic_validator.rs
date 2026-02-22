@@ -5,7 +5,7 @@ use std::{
         Arc,
     },
     thread,
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 use magicblock_account_cloner::{
@@ -335,6 +335,7 @@ impl MagicValidator {
                 .take()
                 .expect("tasks_service should be initialized"),
             ledger.latest_block().clone(),
+            Duration::from_millis(config.ledger.block_time_ms()),
             token.clone(),
         )?;
         log_timing("startup", "task_scheduler_init", step_start);

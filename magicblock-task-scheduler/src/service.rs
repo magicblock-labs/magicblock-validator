@@ -49,6 +49,8 @@ pub struct TaskSchedulerService {
     token: CancellationToken,
     /// Minimum interval between task executions
     min_interval: Duration,
+    /// Slot interval of the validator
+    slot_interval: Duration,
 }
 
 enum ProcessingOutcome {
@@ -69,6 +71,7 @@ impl TaskSchedulerService {
         rpc_url: String,
         scheduled_tasks: ScheduledTasksRx,
         block: LatestBlock,
+        slot_interval: Duration,
         token: CancellationToken,
     ) -> TaskSchedulerResult<Self> {
         if config.reset {
@@ -96,12 +99,14 @@ impl TaskSchedulerService {
             tx_counter: AtomicU64::default(),
             token,
             min_interval: config.min_interval,
+            slot_interval,
         })
     }
 
     pub async fn start(
         mut self,
     ) -> TaskSchedulerResult<JoinHandle<TaskSchedulerResult<()>>> {
+        // Reschedule all tasks that are due
         let tasks = self.db.get_tasks().await?;
         let now = chrono::Utc::now().timestamp_millis();
         debug!(
@@ -124,8 +129,13 @@ impl TaskSchedulerService {
 
             let next_execution =
                 task.last_execution_millis + task.execution_interval_millis;
+            // Earliest reschedule time is 2 slot interval.
+            // This avoids, scheduling before the first blockhash is produced on restart.
             let timeout = Duration::from_millis(
-                next_execution.saturating_sub(now).max(0) as u64,
+                next_execution
+                    .saturating_sub(now)
+                    .max(2 * self.slot_interval.as_millis() as i64)
+                    as u64,
             );
             let task_id = task.id;
             let key = self.task_queue.insert(task, timeout);
@@ -364,7 +374,10 @@ fn is_valid_task_interval(interval: i64) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use magicblock_program::args::ScheduleTaskRequest;
+    use magicblock_program::{
+        args::ScheduleTaskRequest,
+        validator::generate_validator_authority_if_needed,
+    };
     use solana_pubkey::Pubkey;
     use tokio::{sync::mpsc, time::timeout};
 
@@ -373,6 +386,7 @@ mod tests {
     #[tokio::test]
     async fn test_schedule_invalid_tasks() {
         magicblock_core::logger::init_for_tests();
+        generate_validator_authority_if_needed();
 
         let (tx, rx) = mpsc::unbounded_channel();
         let db = SchedulerDatabase::new(":memory:").unwrap();
@@ -386,6 +400,7 @@ mod tests {
             tx_counter: AtomicU64::default(),
             token: CancellationToken::new(),
             min_interval: Duration::from_millis(1000),
+            slot_interval: Duration::from_millis(1000),
             scheduled_tasks: rx,
         };
 
@@ -466,6 +481,7 @@ mod tests {
             tx_counter: AtomicU64::default(),
             token: CancellationToken::new(),
             min_interval: Duration::from_millis(1000),
+            slot_interval: Duration::from_millis(1000),
             scheduled_tasks: rx,
         };
 

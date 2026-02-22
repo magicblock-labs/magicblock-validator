@@ -150,7 +150,7 @@ pub fn setup_validator_with_local_remote_and_resume_strategy(
         accountsdb: accountsdb_config.clone(),
         programs,
         task_scheduler: TaskSchedulerConfig {
-            reset: true,
+            reset: reset_ledger,
             ..Default::default()
         },
         lifecycle: LifecycleMode::Ephemeral,
