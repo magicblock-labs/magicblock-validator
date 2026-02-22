@@ -10,7 +10,7 @@ Tests the validator's laser gRPC client integration with Helius devnet. This tes
 
 **Requirements**: Helius API key, Solana devnet keypair with SOL
 
-**Run with**: `make manual-test-laser`
+**Run with**: `make test-laser`
 
 See the [helius-laser README](helius-laser/README.md) for detailed setup and usage instructions.
 
