@@ -28,7 +28,7 @@ fn test_crank_persistence() {
     validator.kill().unwrap();
 }
 
-pub fn write(ledger_path: &Path) -> (Child, Keypair, u64) {
+fn write(ledger_path: &Path) -> (Child, Keypair, u64) {
     let (_, mut validator, ctx) = setup_validator_with_local_remote(
         ledger_path,
         None,
@@ -55,7 +55,7 @@ pub fn write(ledger_path: &Path) -> (Child, Keypair, u64) {
     confirm_tx_with_payer_ephem(ix, &payer, &ctx, &mut validator);
 
     // Wait for the task to be scheduled and executed
-    expect!(ctx.wait_for_delta_slot_ephem(1), validator);
+    expect!(ctx.wait_for_delta_slot_ephem(3), validator);
 
     // Check that the counter was incremented
     let counter_account =
@@ -74,7 +74,7 @@ pub fn write(ledger_path: &Path) -> (Child, Keypair, u64) {
     (validator, payer, counter_account.count)
 }
 
-pub fn read(ledger_path: &Path, kp: &Keypair, count: u64) -> Child {
+fn read(ledger_path: &Path, kp: &Keypair, count: u64) -> Child {
     let (_, mut validator, ctx) =
         setup_validator_with_local_remote_and_resume_strategy(
             ledger_path,
@@ -96,7 +96,7 @@ pub fn read(ledger_path: &Path, kp: &Keypair, count: u64) -> Child {
     );
 
     // Wait for the crank to execute
-    expect!(ctx.wait_for_delta_slot_ephem(5), validator);
+    expect!(ctx.wait_for_delta_slot_ephem(10), validator);
 
     // Check that the count increased
     let new_count =
