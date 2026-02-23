@@ -9,10 +9,10 @@ use program_schedulecommit::{
         schedule_commit_and_undelegate_cpi_instruction,
         schedule_commit_and_undelegate_cpi_twice,
         schedule_commit_and_undelegate_cpi_with_mod_after_instruction,
-        schedule_commit_diff_instruction_for_order_book, set_count_instruction,
+        schedule_commit_instruction_for_order_book, set_count_instruction,
         update_order_book_instruction, UserSeeds,
     },
-    BookUpdate, OrderLevel, FAIL_UNDELEGATION_COUNT,
+    BookUpdate, OrderLevel, ScheduleCommitType, FAIL_UNDELEGATION_COUNT,
 };
 use rand::{RngCore, SeedableRng};
 use schedulecommit_client::{
@@ -42,7 +42,10 @@ use utils::{
     get_context_with_delegated_committees,
 };
 
-use crate::utils::assert_is_one_of_instruction_errors;
+use crate::utils::{
+    assert_is_one_of_instruction_errors,
+    assert_one_committee_account_was_not_undelegated_on_chain,
+};
 
 mod utils;
 
@@ -110,8 +113,9 @@ fn commit_and_undelegate_one_account(
     (ctx, *sig, tx_res)
 }
 
-fn commit_and_undelegate_order_book_account(
+fn commit_order_book_account(
     update: BookUpdate,
+    commit_type: ScheduleCommitType,
 ) -> (
     ScheduleCommitTestContext,
     Signature,
@@ -134,11 +138,12 @@ fn commit_and_undelegate_order_book_account(
             committees[0].1,
             update,
         ),
-        schedule_commit_diff_instruction_for_order_book(
+        schedule_commit_instruction_for_order_book(
             payer_ephem.pubkey(),
             committees[0].1,
             magicblock_magic_program_api::id(),
             magicblock_magic_program_api::MAGIC_CONTEXT_PUBKEY,
+            commit_type,
         ),
     ];
 
@@ -298,7 +303,34 @@ fn test_committing_and_undelegating_one_account() {
 }
 
 #[test]
-fn test_committing_and_undelegating_huge_order_book_account() {
+fn test_commit_huge_order_book_account() {
+    run_test_for_commit_huge_order_book_account(ScheduleCommitType::Commit);
+}
+
+#[test]
+fn test_commit_and_undelegate_huge_order_book_account() {
+    run_test_for_commit_huge_order_book_account(
+        ScheduleCommitType::CommitAndUndelegate,
+    );
+}
+
+#[test]
+fn test_commit_finalize_huge_order_book_account() {
+    run_test_for_commit_huge_order_book_account(
+        ScheduleCommitType::CommitFinalize,
+    );
+}
+
+#[test]
+fn test_commit_finalize_and_undelegate_huge_order_book_account() {
+    run_test_for_commit_huge_order_book_account(
+        ScheduleCommitType::CommitFinalizeAndUndelegate,
+    );
+}
+
+fn run_test_for_commit_huge_order_book_account(
+    commit_type: ScheduleCommitType,
+) {
     run_test!({
         let (rng_seed, update) = {
             use rand::{
@@ -324,8 +356,11 @@ fn test_committing_and_undelegating_huge_order_book_account() {
             (rng_seed, update)
         };
         let (ctx, sig, tx_res) =
-            commit_and_undelegate_order_book_account(update.clone());
-        info!("'{}' {:?}", sig, tx_res);
+            commit_order_book_account(update.clone(), commit_type);
+        println!(
+            "run_test_for_commit_huge_order_book_account: '{}' {:?}",
+            sig, tx_res
+        );
 
         let res = verify::fetch_and_verify_order_book_commit_result_from_logs(
             &ctx, sig,
@@ -357,7 +392,15 @@ fn test_committing_and_undelegating_huge_order_book_account() {
         );
 
         assert_one_committee_was_committed(&ctx, &res, true);
-        assert_one_committee_account_was_undelegated_on_chain(&ctx);
+        match commit_type {
+            ScheduleCommitType::Commit | ScheduleCommitType::CommitFinalize => {
+                assert_one_committee_account_was_not_undelegated_on_chain(&ctx);
+            }
+            ScheduleCommitType::CommitAndUndelegate
+            | ScheduleCommitType::CommitFinalizeAndUndelegate => {
+                assert_one_committee_account_was_undelegated_on_chain(&ctx);
+            }
+        }
     });
 }
 

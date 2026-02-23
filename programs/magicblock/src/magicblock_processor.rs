@@ -11,7 +11,8 @@ use crate::{
     schedule_task::{process_cancel_task, process_schedule_task},
     schedule_transactions::{
         process_accept_scheduled_commits, process_schedule_commit,
-        process_schedule_intent_bundle, ProcessScheduleCommitOptions,
+        process_schedule_commit_finalize, process_schedule_intent_bundle,
+        ProcessScheduleCommitOptions,
     },
     toggle_executable_check::process_toggle_executable_check,
 };
@@ -64,8 +65,14 @@ declare_process_instruction!(
                 },
             ),
             ScheduleCommitFinalize {
-                request_undelegation: _,
-            } => todo!(),
+                request_undelegation,
+            } => process_schedule_commit_finalize(
+                signers,
+                invoke_context,
+                ProcessScheduleCommitOptions {
+                    request_undelegation,
+                },
+            ),
             AcceptScheduleCommits => {
                 process_accept_scheduled_commits(signers, invoke_context)
             }
