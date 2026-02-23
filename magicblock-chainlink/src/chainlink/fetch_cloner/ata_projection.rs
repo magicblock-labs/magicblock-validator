@@ -147,6 +147,7 @@ where
             pubkey: ata_pubkey,
             account: account_to_clone,
             commit_frequency_ms,
+            delegation_actions: vec![],
             delegated_to_other,
         });
     }

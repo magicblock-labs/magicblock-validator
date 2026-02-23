@@ -20,6 +20,8 @@ pub enum ChainlinkError {
 
     #[error("Delegation record could not be decoded: {0} ({1:?})")]
     InvalidDelegationRecord(Pubkey, ProgramError),
+    #[error("Delegation actions could not be decoded: {0} ({1})")]
+    InvalidDelegationActions(Pubkey, String),
 
     #[error("Failed to resolve one or more accounts {0} when getting delegation records")]
     DelegatedAccountResolutionsFailed(String),

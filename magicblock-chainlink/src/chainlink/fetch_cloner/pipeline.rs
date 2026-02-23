@@ -143,6 +143,7 @@ fn classify_single_account(
                             pubkey,
                             account: account_shared_data,
                             commit_frequency_ms: None,
+                            delegation_actions: vec![],
                             delegated_to_other: None,
                         });
                     }
@@ -292,15 +293,48 @@ where
             record_subs.push(delegation_record_pubkey);
 
             // If the account is delegated we set the owner and delegation state
-            let (commit_frequency_ms, delegated_to_other) = if let Some(
+            let (commit_frequency_ms, delegated_to_other, delegation_actions) = if let Some(
                 delegation_record_data,
             ) =
                 delegation_record
             {
+                let delegation_record_size =
+                    dlp::state::DelegationRecord::size_with_discriminator();
+                if delegation_record_data.data().len() == delegation_record_size
+                {
+                    // Regular delegation record layout.
+                } else {
+                    // DelegateWithActions layout (DelegationRecord + trailing bytes).
+                }
+
                 // NOTE: failing here is fine when resolving all accounts for a transaction
                 // since if something is off we better not run it anyways
                 // However we may consider a different behavior when user is getting
                 // multiple accounts.
+                let delegation_actions =
+                    match FetchCloner::<T, U, V, C>::parse_delegation_actions(
+                        delegation_record_data.data(),
+                        delegation_record_pubkey,
+                    ) {
+                        Ok(x) => x,
+                        Err(err) => {
+                            // Cancel all new subs since we won't clone any accounts
+                            cancel_subs(
+                                &this.remote_account_provider,
+                                CancelStrategy::New {
+                                    new_subs: pubkeys
+                                        .iter()
+                                        .cloned()
+                                        .chain(record_subs.iter().cloned())
+                                        .collect(),
+                                    existing_subs: existing_subs.clone(),
+                                },
+                            )
+                            .await;
+                            return Err(err);
+                        }
+                    };
+
                 let delegation_record =
                     match FetchCloner::<T, U, V, C>::parse_delegation_record(
                         delegation_record_data.data(),
@@ -340,15 +374,16 @@ where
                     owner_programs_to_subscribe.insert(delegation_record.owner);
                 }
 
-                (commit_freq, delegated_to_other)
+                (commit_freq, delegated_to_other, delegation_actions)
             } else {
                 missing_delegation_record.push((pubkey, account.remote_slot()));
-                (None, None)
+                (None, None, vec![])
             };
             accounts_to_clone.push(AccountCloneRequest {
                 pubkey,
                 account: account.into_account_shared_data(),
                 commit_frequency_ms,
+                delegation_actions,
                 delegated_to_other,
             });
         }

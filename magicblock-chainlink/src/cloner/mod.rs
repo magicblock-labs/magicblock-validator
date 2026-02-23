@@ -1,6 +1,7 @@
 use async_trait::async_trait;
 use errors::ClonerResult;
 use solana_account::AccountSharedData;
+use solana_instruction::Instruction;
 use solana_pubkey::Pubkey;
 use solana_signature::Signature;
 
@@ -12,6 +13,7 @@ pub struct AccountCloneRequest {
     pub pubkey: Pubkey,
     pub account: AccountSharedData,
     pub commit_frequency_ms: Option<u64>,
+    pub delegation_actions: Vec<Instruction>,
     /// If the account is delegated to another validator,
     /// this contains that validator's pubkey. None if account is not
     /// delegated to another validator.
