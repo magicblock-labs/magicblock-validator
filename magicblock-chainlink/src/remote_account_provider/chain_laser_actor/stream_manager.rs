@@ -144,7 +144,7 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
         chain_slot: Option<ChainSlot>,
         client_id: String,
     ) -> Self {
-        Self {
+        let mgr = Self {
             config,
             stream_factory,
             subscriptions: Default::default(),
@@ -156,7 +156,9 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
             stream_map: StreamMap::new(),
             chain_slot,
             client_id,
-        }
+        };
+        mgr.update_stream_metrics();
+        mgr
     }
 
     // ---------------------
