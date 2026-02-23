@@ -1,4 +1,4 @@
-use magicblock_core::link::transactions::SanitizeableTransaction;
+use magicblock_core::link::transactions::with_encoded;
 
 use super::prelude::*;
 
@@ -35,11 +35,13 @@ impl HttpDispatcher {
             lamports,
             self.blocks.get_latest().hash,
         );
-        // we don't need to verify transaction that we just signed
-        let txn = txn.sanitize(false)?;
-        let signature = SerdeSignature(*txn.signature());
+        // we just signed the transaction, it must have a signature
+        let signature =
+            SerdeSignature(txn.signatures.first().cloned().unwrap_or_default());
 
-        self.transactions_scheduler.execute(txn).await?;
+        self.transactions_scheduler
+            .execute(with_encoded(txn)?)
+            .await?;
 
         Ok(ResponsePayload::encode_no_context(&request.id, signature))
     }
