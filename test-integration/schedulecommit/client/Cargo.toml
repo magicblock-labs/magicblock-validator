@@ -4,11 +4,9 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
+dlp-api = { workspace = true }
 anyhow = { workspace = true }
 borsh = { workspace = true }
-magicblock-delegation-program = { workspace = true, features = [
-  "no-entrypoint",
-] }
 integration-test-tools = { workspace = true }
 tracing = { workspace = true }
 program-schedulecommit = { workspace = true, features = ["no-entrypoint"] }

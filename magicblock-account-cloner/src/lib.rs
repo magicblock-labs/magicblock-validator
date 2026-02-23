@@ -32,7 +32,7 @@ use async_trait::async_trait;
 use magicblock_chainlink::{
     cloner::{
         errors::{ClonerError, ClonerResult},
-        AccountCloneRequest, Cloner,
+        AccountCloneRequest, Cloner, DelegationActions,
     },
     remote_account_provider::program_account::{
         LoadedProgram, RemoteProgramLoader,
@@ -41,7 +41,7 @@ use magicblock_chainlink::{
 use magicblock_committor_service::{BaseIntentCommittor, CommittorService};
 use magicblock_config::config::ChainLinkConfig;
 use magicblock_core::link::transactions::{
-    with_encoded, TransactionSchedulerHandle,
+    with_encoded, SanitizeableTransaction, TransactionSchedulerHandle,
 };
 use magicblock_ledger::LatestBlock;
 use magicblock_magic_program_api::{
@@ -64,7 +64,7 @@ use solana_sdk_ids::{bpf_loader_upgradeable, loader_v4};
 use solana_signature::Signature;
 use solana_signer::Signer;
 use solana_sysvar::rent::Rent;
-use solana_transaction::Transaction;
+use solana_transaction::{sanitized::SanitizedTransaction, Transaction};
 use tracing::*;
 
 /// Max data that fits in a single transaction (~63KB)
@@ -108,6 +108,15 @@ impl ChainlinkCloner {
         Ok(sig)
     }
 
+    async fn send_sanitized_tx(
+        &self,
+        tx: SanitizedTransaction,
+    ) -> ClonerResult<()> {
+        self.tx_scheduler.execute(tx).await?;
+        Ok(())
+    }
+
+    // -----------------
     fn create_signed_tx(
         &self,
         ixs: &[Instruction],
@@ -194,7 +203,6 @@ impl ChainlinkCloner {
         }
     }
 
-    // -----------------
     // Account Cloning
     // -----------------
 
@@ -542,6 +550,25 @@ impl ChainlinkCloner {
             }
         });
     }
+
+    async fn send_actions_tx(
+        &self,
+        actions: &DelegationActions,
+        recent_blockhash: Hash,
+    ) -> ClonerResult<Option<()>> {
+        if actions.is_empty() {
+            return Ok(None);
+        }
+        let mut tx = Transaction::new_with_payer(
+            &actions.clone().into_iter().collect::<Vec<_>>(),
+            Some(&validator_authority_id()),
+        );
+        tx.partial_sign(&[&validator_authority()], recent_blockhash);
+
+        let sanitized_tx = tx.sanitize(false)?;
+
+        Ok(Some(self.send_sanitized_tx(sanitized_tx).await?))
+    }
 }
 
 /// Shared account metas for clone instructions.
@@ -564,12 +591,18 @@ impl Cloner for ChainlinkCloner {
         // Small account: single tx
         if data_len <= MAX_INLINE_DATA_SIZE {
             let tx = self.build_small_account_tx(&request, blockhash);
-            return self.send_tx(tx).await.map_err(|e| {
+
+            let signature = self.send_tx(tx).await.map_err(|err| {
                 ClonerError::FailedToCloneRegularAccount(
                     request.pubkey,
-                    Box::new(e),
+                    Box::new(err),
                 )
-            });
+            })?;
+
+            self.send_actions_tx(&request.delegation_actions, blockhash)
+                .await?;
+
+            return Ok(signature);
         }
 
         // Large account: multi-tx with cleanup on failure
@@ -590,6 +623,9 @@ impl Cloner for ChainlinkCloner {
                 }
             }
         }
+
+        self.send_actions_tx(&request.delegation_actions, blockhash)
+            .await?;
 
         Ok(last_sig.unwrap_or_default())
     }

@@ -16,6 +16,14 @@ pub mod utils;
 #[cfg(any(test, feature = "dev-context"))]
 pub use utils::init_logger;
 
+#[doc(hidden)]
+#[cfg(any(test, feature = "dev-context"))]
+pub fn delegation_record_pubkey_for(
+    pubkey: &solana_pubkey::Pubkey,
+) -> solana_pubkey::Pubkey {
+    dlp_api::dlp::pda::delegation_record_pda_from_delegated_account(pubkey)
+}
+
 #[macro_export]
 macro_rules! assert_subscribed {
     ($provider:expr, $pubkeys:expr) => {{
@@ -47,7 +55,7 @@ macro_rules! assert_subscribed_without_delegation_record {
     ($provider:expr, $pubkeys:expr) => {{
         for pubkey in $pubkeys {
             let deleg_record_pubkey =
-                ::dlp::pda::delegation_record_pda_from_delegated_account(&pubkey);
+                $crate::testing::delegation_record_pubkey_for(&pubkey);
             assert!(
                 $provider.is_watching(pubkey),
                 "Expected {} to be subscribed",
@@ -363,7 +371,7 @@ macro_rules! assert_not_undelegating {
             );
             assert_ne!(
                 account.owner(),
-                &dlp::id(),
+                &dlp_api::dlp::id(),
                 "Expected account {} to not be owned by the delegation program",
                 pubkey,
             );
@@ -393,7 +401,7 @@ macro_rules! assert_remain_undelegating {
             );
             assert_eq!(
                 account.owner(),
-                &dlp::id(),
+                &dlp_api::dlp::id(),
                 "Expected account {} to remain owned by the delegation program",
                 pubkey,
             );

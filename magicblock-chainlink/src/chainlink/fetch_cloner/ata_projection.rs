@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use dlp::state::DelegationRecord;
+use dlp_api::dlp::state::DelegationRecord;
 use futures_util::future::join_all;
 use magicblock_accounts_db::traits::AccountsBank;
 use magicblock_core::token_programs::try_derive_eata_address_and_bump;
@@ -12,7 +12,7 @@ use tracing::*;
 
 use super::{delegation, types::AccountWithCompanion, FetchCloner};
 use crate::{
-    cloner::{AccountCloneRequest, Cloner},
+    cloner::{AccountCloneRequest, Cloner, DelegationActions},
     remote_account_provider::{
         ChainPubsubClient, ChainRpcClient, ResolvedAccountSharedData,
     },
@@ -166,8 +166,9 @@ where
             )
         })
     });
-    let deleg_results: Vec<Option<DelegationRecord>> =
-        join_all(deleg_futures).await;
+    let deleg_results: Vec<
+        Option<(DelegationRecord, Option<DelegationActions>)>,
+    > = join_all(deleg_futures).await;
 
     // Phase 3: Combine results
     let mut deleg_iter = deleg_results.into_iter();
@@ -176,18 +177,23 @@ where
             input.ata_account.account_shared_data_cloned();
         let mut commit_frequency_ms = None;
         let mut delegated_to_other = None;
+        let mut actions = None;
 
         if let Some(eata_shared) = &input.eata_shared {
             if let Some(Some(deleg)) = deleg_iter.next() {
+                let (deleg_record, delegation_actions) = deleg;
                 delegated_to_other =
-                    delegation::get_delegated_to_other(this, &deleg);
-                commit_frequency_ms = Some(deleg.commit_frequency_ms);
+                    delegation::get_delegated_to_other(this, &deleg_record);
+                commit_frequency_ms = Some(deleg_record.commit_frequency_ms);
+
+                // CHECKPOINT: should this be inside the if-block below?
+                actions = delegation_actions;
 
                 if let Some(projected_ata) = this
                     .maybe_project_delegated_ata_from_eata(
                         input.ata_account.account_shared_data(),
                         eata_shared,
-                        &deleg,
+                        &deleg_record,
                     )
                 {
                     account_to_clone = projected_ata;
@@ -199,6 +205,7 @@ where
             pubkey: input.ata_pubkey,
             account: account_to_clone,
             commit_frequency_ms,
+            delegation_actions: actions.unwrap_or_default(),
             delegated_to_other,
         });
     }

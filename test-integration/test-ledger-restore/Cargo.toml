@@ -4,6 +4,7 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
+dlp-api = { workspace = true }
 anyhow = { workspace = true }
 cleanass = { workspace = true }
 integration-test-tools = { workspace = true }
@@ -11,9 +12,6 @@ tracing = { workspace = true }
 program-flexi-counter = { workspace = true, features = ["no-entrypoint"] }
 magicblock-accounts-db = { workspace = true }
 magicblock-config = { workspace = true }
-magicblock-delegation-program = { workspace = true, features = [
-  "no-entrypoint",
-] }
 solana-rpc-client = { workspace = true }
 solana-sdk = { workspace = true }
 solana-transaction-status = { workspace = true }

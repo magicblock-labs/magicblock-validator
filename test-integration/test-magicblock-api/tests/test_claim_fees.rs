@@ -1,6 +1,6 @@
 use std::{thread::sleep, time::Duration};
 
-use dlp::instruction_builder::validator_claim_fees;
+use dlp_api::instruction_builder::validator_claim_fees;
 use integration_test_tools::{
     loaded_accounts::LoadedAccounts, IntegrationTestContext,
 };
@@ -52,7 +52,7 @@ fn test_claim_fees_instruction() {
     );
     assert_eq!(
         instruction.program_id,
-        dlp::id(),
+        dlp_api::dlp::id(),
         "Instruction should target delegation program"
     );
 

@@ -49,7 +49,11 @@ pub fn create_eata_account(
     data.extend_from_slice(&amount.to_le_bytes());
     let lamports = Rent::default().minimum_balance(data.len());
 
-    let account_owner = if delegate { dlp::id() } else { EATA_PROGRAM_ID };
+    let account_owner = if delegate {
+        dlp_api::dlp::id()
+    } else {
+        EATA_PROGRAM_ID
+    };
 
     Account {
         owner: account_owner,

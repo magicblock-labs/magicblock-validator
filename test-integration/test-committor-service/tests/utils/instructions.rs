@@ -3,7 +3,7 @@ use solana_sdk::{instruction::Instruction, rent::Rent, signature::Keypair};
 use test_kit::Signer;
 
 pub fn init_validator_fees_vault_ix(validator_auth: Pubkey) -> Instruction {
-    dlp::instruction_builder::init_validator_fees_vault(
+    dlp_api::instruction_builder::init_validator_fees_vault(
         validator_auth,
         validator_auth,
         validator_auth,
