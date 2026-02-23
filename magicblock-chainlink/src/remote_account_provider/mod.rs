@@ -632,20 +632,19 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                 return Ok(remote_accounts);
             }
 
-            if start.elapsed() > MAX_TOTAL_TIME {
-                return Err(RemoteAccountProviderError::SlotsDidNotMatch(
-                    format!(
-                        "Timeout after {}s waiting for slots to match",
-                        MAX_TOTAL_TIME.as_secs_f64()
-                    ),
-                    vec![],
-                ));
-            }
-
             retries += 1;
-            if retries == config.max_retries {
+            let hit_max_retry_limit = retries == config.max_retries;
+            if hit_max_retry_limit || start.elapsed() > MAX_TOTAL_TIME {
                 let remote_accounts =
                     remote_accounts.into_iter().map(|a| a.slot()).collect();
+                let limit = if hit_max_retry_limit {
+                    format!("max retries {}", config.max_retries)
+                } else {
+                    format!(
+                        "max total time of {} seconds",
+                        MAX_TOTAL_TIME.as_secs()
+                    )
+                };
                 match slots_match_result {
                     // SAFETY: Match case is already handled and returns
                     Match => unreachable!("we would have returned above"),
@@ -654,15 +653,18 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                             RemoteAccountProviderError::SlotsDidNotMatch(
                                 pubkeys_str(pubkeys),
                                 remote_accounts,
+                                limit,
                             ),
                         );
                     }
                     MatchButBelowMinContextSlot(slot) => {
                         return Err(
                             RemoteAccountProviderError::MatchingSlotsNotSatisfyingMinContextSlot(
-                            pubkeys_str(pubkeys),
-                            remote_accounts,
-                            slot)
+                                pubkeys_str(pubkeys),
+                                remote_accounts,
+                                slot,
+                                limit
+                            )
                         );
                     }
                 }
@@ -1552,7 +1554,8 @@ mod test {
             RemoteAccountProviderError::MatchingSlotsNotSatisfyingMinContextSlot(
                 _pubkeys,
                 _slots,
-                slot
+                slot,
+                _
             ) if slot == CURRENT_SLOT + 1
         ));
     }
