@@ -93,6 +93,7 @@ impl StreamFactory<StreamHandleImpl> for StreamFactoryImpl {
         // been sent over the network, even though there is still no guarantee it has been
         // processed and that the subscription became active immediately
         super::write_with_retry(&handle, "subscribe", request).await?;
+
         Ok(LaserStreamWithHandle {
             stream: Box::pin(stream),
             handle,

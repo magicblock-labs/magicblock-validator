@@ -340,7 +340,7 @@ impl<H: StreamHandle, S: StreamFactory<H>> ChainLaserActor<H, S> {
         sub_response: oneshot::Sender<RemoteAccountProviderResult<()>>,
     ) {
         if self.stream_manager.is_subscribed(&pubkey) {
-            debug!(
+            trace!(
                 pubkey = %pubkey,
                 "Already subscribed to account"
             );

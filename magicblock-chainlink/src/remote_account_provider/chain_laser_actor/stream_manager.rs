@@ -7,6 +7,7 @@ use helius_laserstream::grpc::{
 use magicblock_metrics::metrics;
 use solana_pubkey::Pubkey;
 use tokio_stream::StreamMap;
+use tracing::warn;
 
 use super::{
     write_with_retry, LaserResult, LaserStream, LaserStreamWithHandle,
@@ -253,7 +254,12 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
             if self.unoptimized_old_handles.len()
                 > self.config.max_old_unoptimized
             {
-                self.optimize(commitment).await?;
+                self.optimize(commitment).await.inspect_err(|err| {
+                    warn!(client_id = self.client_id,
+                        current_subs_count = self.subscriptions.read().len(),
+                        %err,
+                        "optimization failed")
+                })?;
             }
 
             self.update_stream_metrics();
