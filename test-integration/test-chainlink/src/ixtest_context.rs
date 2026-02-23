@@ -101,6 +101,7 @@ impl IxtestContext {
                         pubkey,
                         account: program_stub.clone(),
                         commit_frequency_ms: None,
+                        delegation_actions: vec![],
                         delegated_to_other: None,
                     })
                     .await

@@ -167,7 +167,7 @@ where
                 // record fetches. This allows multiple updates to be processed in parallel.
                 let this = Arc::clone(&self);
                 tokio::spawn(async move {
-                    let (resolved_account, deleg_record) =
+                    let (resolved_account, deleg_record, delegation_actions) =
                     this.resolve_account_to_clone_from_forwarded_sub_with_unsubscribe(update)
                     .await;
                     if let Some(account) = resolved_account {
@@ -277,6 +277,7 @@ where
                                 pubkey,
                                 account,
                                 commit_frequency_ms: None,
+                                delegation_actions,
                                 delegated_to_other,
                             })
                             .await
@@ -332,7 +333,11 @@ where
     async fn resolve_account_to_clone_from_forwarded_sub_with_unsubscribe(
         &self,
         update: ForwardedSubscriptionUpdate,
-    ) -> (Option<AccountSharedData>, Option<DelegationRecord>) {
+    ) -> (
+        Option<AccountSharedData>,
+        Option<DelegationRecord>,
+        Vec<solana_instruction::Instruction>,
+    ) {
         let ForwardedSubscriptionUpdate { pubkey, account } = update;
         let owned_by_delegation_program =
             account.is_owned_by_delegation_program();
@@ -376,6 +381,32 @@ where
                         let account = if let Some(delegation_record) =
                             delegation_record
                         {
+                            let delegation_record_size =
+                                DelegationRecord::size_with_discriminator();
+                            if delegation_record.data().len()
+                                == delegation_record_size
+                            {
+                                // Regular delegation record layout.
+                            } else {
+                                // DelegateWithActions layout (DelegationRecord + trailing bytes).
+                            }
+
+                            let delegation_actions =
+                                match Self::parse_delegation_actions(
+                                    delegation_record.data(),
+                                    delegation_record_pubkey,
+                                ) {
+                                    Ok(actions) => actions,
+                                    Err(err) => {
+                                        error!(
+                                            pubkey = %pubkey,
+                                            error = %err,
+                                            "Failed to parse delegation actions"
+                                        );
+                                        vec![]
+                                    }
+                                };
+
                             let delegation_record =
                                 match Self::parse_delegation_record(
                                     delegation_record.data(),
@@ -438,17 +469,25 @@ where
                                 (
                                     Some(account.into_account_shared_data()),
                                     Some(delegation_record),
+                                    delegation_actions,
                                 )
                             } else {
                                 // If the delegation record is invalid we cannot clone the account
                                 // since something is corrupt and we wouldn't know what owner to
                                 // use, etc.
-                                (None, None)
+                                (None, None, vec![])
                             }
                         } else {
                             // If no delegation record exists we must assume the account itself is
                             // a delegation record or metadata
-                            (Some(account.into_account_shared_data()), None)
+                            let delegation_record_size =
+                                DelegationRecord::size_with_discriminator();
+                            if account.data().len() == delegation_record_size {
+                                // Regular delegation record layout.
+                            } else {
+                                // DelegateWithActions layout (DelegationRecord + trailing bytes).
+                            }
+                            (Some(account.into_account_shared_data()), None, vec![])
                         };
 
                         if !subs_to_remove.is_empty() {
@@ -467,7 +506,7 @@ where
                             error = %err,
                             "Failed to fetch delegation record"
                         );
-                        (None, None)
+                        (None, None, vec![])
                     }
                     Err(err) => {
                         error!(
@@ -475,20 +514,20 @@ where
                             error = %err,
                             "Failed to fetch delegation record"
                         );
-                        (None, None)
+                        (None, None, vec![])
                     }
                 }
             } else {
                 let (account, deleg_record) = self
                     .maybe_project_ata_from_subscription_update(pubkey, account)
                     .await;
-                (Some(account), deleg_record)
+                (Some(account), deleg_record, vec![])
             }
         } else {
             // This should not happen since we call this method with sub updates which always hold
             // a fresh remote account
             error!(pubkey = %pubkey, account = ?account, "BUG: Received subscription update without fresh account");
-            (None, None)
+            (None, None, vec![])
         }
     }
 
@@ -547,6 +586,7 @@ where
             pubkey: ata_pubkey,
             account: projected_ata,
             commit_frequency_ms: None,
+            delegation_actions: vec![],
             delegated_to_other: None,
         })
     }
@@ -657,6 +697,13 @@ where
         delegation_record_pubkey: Pubkey,
     ) -> ChainlinkResult<DelegationRecord> {
         delegation::parse_delegation_record(data, delegation_record_pubkey)
+    }
+
+    fn parse_delegation_actions(
+        data: &[u8],
+        delegation_record_pubkey: Pubkey,
+    ) -> ChainlinkResult<Vec<solana_instruction::Instruction>> {
+        delegation::parse_delegation_actions(data, delegation_record_pubkey)
     }
 
     /// Applies delegation record settings to an account: sets the owner,
@@ -1367,6 +1414,7 @@ where
                 pubkey,
                 account,
                 commit_frequency_ms: None,
+                delegation_actions: vec![],
                 delegated_to_other: None,
             })
             .await?;

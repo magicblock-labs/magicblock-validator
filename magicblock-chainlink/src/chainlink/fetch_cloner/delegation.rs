@@ -5,6 +5,7 @@ use magicblock_accounts_db::traits::AccountsBank;
 use magicblock_core::token_programs::EATA_PROGRAM_ID;
 use magicblock_metrics::metrics;
 use solana_account::ReadableAccount;
+use solana_instruction::Instruction;
 use solana_pubkey::Pubkey;
 use tracing::*;
 
@@ -30,6 +31,24 @@ pub(crate) fn parse_delegation_record(
                 err,
             )
         })
+}
+
+pub(crate) fn parse_delegation_actions(
+    data: &[u8],
+    delegation_record_pubkey: Pubkey,
+) -> ChainlinkResult<Vec<Instruction>> {
+    let delegation_record_size = DelegationRecord::size_with_discriminator();
+    if data.len() <= delegation_record_size {
+        return Ok(vec![]);
+    }
+
+    let actions_data = &data[delegation_record_size..];
+    bincode::deserialize::<Vec<Instruction>>(actions_data).map_err(|err| {
+        ChainlinkError::InvalidDelegationActions(
+            delegation_record_pubkey,
+            err.to_string(),
+        )
+    })
 }
 
 pub(crate) fn apply_delegation_record_to_account<T, U, V, C>(

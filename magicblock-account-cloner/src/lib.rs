@@ -122,7 +122,7 @@ impl ChainlinkCloner {
             message,
         );
         // Defined positive commit frequency means commits should be scheduled
-        let ixs = match request.commit_frequency_ms {
+        let mut ixs = match request.commit_frequency_ms {
             // TODO(GabrielePicco): Hotfix. Do not schedule frequency commits until we impose limits.
             // 1. Allow configuring a higher minimum.
             // 2. Stop committing accounts if they have been committed more than X times,
@@ -162,6 +162,9 @@ impl ChainlinkCloner {
             }
             _ => vec![modify_ix],
         };
+        if !request.delegation_actions.is_empty() {
+            ixs.extend(request.delegation_actions.clone());
+        }
 
         let mut tx =
             Transaction::new_with_payer(&ixs, Some(&validator_authority_id()));
