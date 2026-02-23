@@ -18,7 +18,9 @@ use magicblock_committor_service::{
     intent_execution_manager::BroadcastedIntentExecutionResult,
     intent_executor::ExecutionOutput, BaseIntentCommittor, CommittorService,
 };
-use magicblock_core::link::transactions::TransactionSchedulerHandle;
+use magicblock_core::link::transactions::{
+    with_encoded, TransactionSchedulerHandle,
+};
 use magicblock_program::{
     magic_scheduled_base_intent::ScheduledIntentBundle,
     register_scheduled_commit_sent, SentCommit, TransactionScheduler,
@@ -199,10 +201,12 @@ impl ScheduledCommitsProcessorImpl {
         let sent_commit =
             Self::build_sent_commit(intent_id, intent_meta, result);
         register_scheduled_commit_sent(sent_commit);
-        match internal_transaction_scheduler
-            .execute(intent_sent_transaction)
-            .await
-        {
+        let Ok(txn) = with_encoded(intent_sent_transaction) else {
+            // Unreachable case, all intent transactions are smaller than 64KB by construction
+            error!("Failed to bincode intent transaction");
+            return;
+        };
+        match internal_transaction_scheduler.execute(txn).await {
             Ok(()) => {
                 debug!("Sent commit signaled")
             }
