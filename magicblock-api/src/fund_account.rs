@@ -28,12 +28,10 @@ pub(crate) fn fund_account_with_data(
     lamports: u64,
     size: usize,
 ) {
-    let account = if let Some(mut acc) = accountsdb.get_account(pubkey) {
-        acc.set_lamports(lamports);
-        acc
-    } else {
-        AccountSharedData::new(lamports, size, &Default::default())
-    };
+    if accountsdb.get_account(pubkey).is_some() {
+        return;
+    }
+    let account = AccountSharedData::new(lamports, size, &Default::default());
     let _ = accountsdb.insert_account(pubkey, &account);
 }
 
