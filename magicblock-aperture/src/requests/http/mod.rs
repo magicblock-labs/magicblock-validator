@@ -231,7 +231,7 @@ impl HttpDispatcher {
         {
             Ok(res) if res.is_ok() => Ok(()),
             Ok(res) => {
-                debug!(result = %res, "Transaction account resolution encountered issues");
+                debug!(%res, "Transaction account resolution encountered issues");
                 Ok(())
             }
             Err(err) => {

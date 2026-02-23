@@ -40,7 +40,9 @@ use magicblock_chainlink::{
 };
 use magicblock_committor_service::{BaseIntentCommittor, CommittorService};
 use magicblock_config::config::ChainLinkConfig;
-use magicblock_core::link::transactions::TransactionSchedulerHandle;
+use magicblock_core::link::transactions::{
+    with_encoded, TransactionSchedulerHandle,
+};
 use magicblock_ledger::LatestBlock;
 use magicblock_magic_program_api::{
     args::ScheduleTaskArgs,
@@ -102,7 +104,7 @@ impl ChainlinkCloner {
 
     async fn send_tx(&self, tx: Transaction) -> ClonerResult<Signature> {
         let sig = tx.signatures[0];
-        self.tx_scheduler.execute(tx).await?;
+        self.tx_scheduler.execute(with_encoded(tx)?).await?;
         Ok(sig)
     }
 
