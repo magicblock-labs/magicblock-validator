@@ -407,6 +407,8 @@ impl MagicBaseIntent {
                     CommitAndUndelegate::try_from_args(type_, context)?;
                 Ok(MagicBaseIntent::CommitAndUndelegate(commit_and_undelegate))
             }
+            MagicBaseIntentArgs::CommitFinalize(_) => todo!(),
+            MagicBaseIntentArgs::CommitFinalizeAndUndelegate(_) => todo!(),
         }
     }
 
