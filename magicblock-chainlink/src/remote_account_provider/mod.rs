@@ -351,6 +351,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             let rpc_client = rpc_client.clone();
             let chain_slot = chain_slot.clone();
             let ep_label = ep.label().to_string();
+            let grpc_cfg = config.grpc().clone();
             async move {
                 let (abort_tx, abort_rx) = mpsc::channel(1);
                 let client = ChainUpdatesClient::try_new_from_endpoint(
@@ -360,6 +361,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                     chain_slot,
                     resubscription_delay,
                     rpc_client,
+                    &grpc_cfg,
                 )
                 .await;
                 (ep_label, client.map(|c| (Arc::new(c), abort_rx)))

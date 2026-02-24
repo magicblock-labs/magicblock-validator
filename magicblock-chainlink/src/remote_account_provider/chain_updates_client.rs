@@ -7,6 +7,7 @@ use std::{
 };
 
 use async_trait::async_trait;
+use magicblock_config::config;
 use solana_commitment_config::CommitmentConfig;
 use solana_pubkey::Pubkey;
 use tokio::sync::mpsc;
@@ -34,6 +35,7 @@ impl ChainUpdatesClient {
         chain_slot: Arc<AtomicU64>,
         resubscription_delay: std::time::Duration,
         rpc_client: ChainRpcClientImpl,
+        grpc_config: &config::grpc::GrpcConfig,
     ) -> RemoteAccountProviderResult<Self> {
         use Endpoint::*;
         static CLIENT_ID: AtomicU16 = AtomicU16::new(0);
@@ -81,6 +83,7 @@ impl ChainUpdatesClient {
                         abort_sender,
                         slots,
                         rpc_client,
+                        grpc_config,
                     ),
                 ))
             }

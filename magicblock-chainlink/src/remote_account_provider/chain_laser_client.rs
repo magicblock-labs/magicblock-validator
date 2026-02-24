@@ -4,6 +4,7 @@ use std::{
 };
 
 use async_trait::async_trait;
+use magicblock_config::config;
 use solana_commitment_config::CommitmentLevel;
 use solana_pubkey::{pubkey, Pubkey};
 use solana_sdk_ids::sysvar::clock;
@@ -55,6 +56,7 @@ pub struct ChainLaserClientImpl {
 }
 
 impl ChainLaserClientImpl {
+    #[allow(clippy::too_many_arguments)]
     pub fn new_from_url(
         pubsub_url: &str,
         client_id: String,
@@ -63,6 +65,7 @@ impl ChainLaserClientImpl {
         abort_sender: mpsc::Sender<()>,
         slots: Slots,
         rpc_client: ChainRpcClientImpl,
+        grpc_config: &config::grpc::GrpcConfig,
     ) -> Self {
         let (actor, messages, updates, subscriptions) =
             ChainLaserActor::new_from_url(
@@ -73,6 +76,7 @@ impl ChainLaserClientImpl {
                 abort_sender,
                 slots,
                 rpc_client,
+                grpc_config,
             );
         let client = Self {
             updates: Arc::new(Mutex::new(Some(updates))),

@@ -83,6 +83,17 @@ address = "127.0.0.1:9090"
 collect-frequency = "30s"
 
 # ==============================================================================
+# gRPC (applies to all gRPC providers)
+# ==============================================================================
+[grpc]
+# The maximum number of subscriptions that are added to a single optimized stream
+max-subs-in-old-optimized = 5000
+# The maximum number of old unoptimized subscriptions streams allowed until optimization is triggered
+max-old-unoptimized = 5
+# The maximum number of subscriptions held in the current new stream which is updated frequently
+max-subs-in-new = 400
+
+# ==============================================================================
 # Validator Identity & Fees
 # ==============================================================================
 [validator]

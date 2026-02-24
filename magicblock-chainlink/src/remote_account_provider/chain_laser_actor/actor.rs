@@ -11,6 +11,7 @@ use helius_laserstream::{
     grpc::{subscribe_update::UpdateOneof, CommitmentLevel, SubscribeUpdate},
     LaserstreamConfig, LaserstreamError,
 };
+use magicblock_config::config::grpc;
 use magicblock_core::logger::log_trace_debug;
 use magicblock_metrics::metrics::{
     inc_account_subscription_account_updates_count,
@@ -123,6 +124,7 @@ pub struct ChainLaserActor<H: StreamHandle, S: StreamFactory<H>> {
 }
 
 impl ChainLaserActor<super::StreamHandleImpl, super::StreamFactoryImpl> {
+    #[allow(clippy::too_many_arguments)]
     pub fn new_from_url(
         pubsub_url: &str,
         client_id: &str,
@@ -131,6 +133,7 @@ impl ChainLaserActor<super::StreamHandleImpl, super::StreamFactoryImpl> {
         abort_sender: mpsc::Sender<()>,
         slots: Slots,
         rpc_client: ChainRpcClientImpl,
+        grpc_config: &grpc::GrpcConfig,
     ) -> (
         Self,
         mpsc::Sender<ChainPubsubActorMessage>,
@@ -157,6 +160,7 @@ impl ChainLaserActor<super::StreamHandleImpl, super::StreamFactoryImpl> {
             abort_sender,
             slots,
             rpc_client,
+            grpc_config,
         )
     }
 
@@ -167,6 +171,7 @@ impl ChainLaserActor<super::StreamHandleImpl, super::StreamFactoryImpl> {
         abort_sender: mpsc::Sender<()>,
         slots: Slots,
         rpc_client: ChainRpcClientImpl,
+        grpc_config: &magicblock_config::config::grpc::GrpcConfig,
     ) -> (
         Self,
         mpsc::Sender<ChainPubsubActorMessage>,
@@ -181,6 +186,7 @@ impl ChainLaserActor<super::StreamHandleImpl, super::StreamFactoryImpl> {
             abort_sender,
             slots,
             rpc_client,
+            grpc_config,
         )
     }
 }
@@ -194,6 +200,7 @@ impl<H: StreamHandle, S: StreamFactory<H>> ChainLaserActor<H, S> {
         abort_sender: mpsc::Sender<()>,
         slots: Slots,
         rpc_client: ChainRpcClientImpl,
+        grpc_config: &magicblock_config::config::grpc::GrpcConfig,
     ) -> (
         Self,
         mpsc::Sender<ChainPubsubActorMessage>,
@@ -212,7 +219,7 @@ impl<H: StreamHandle, S: StreamFactory<H>> ChainLaserActor<H, S> {
             None
         };
         let stream_manager = StreamManager::new(
-            StreamManagerConfig::default(),
+            StreamManagerConfig::from(grpc_config),
             stream_factory,
             chain_slot,
             client_id.to_string(),
