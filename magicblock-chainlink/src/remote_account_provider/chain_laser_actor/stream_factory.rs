@@ -32,8 +32,8 @@ impl StreamHandle for StreamHandleImpl {
         // This async operation gets forwarded to the underlying subscription sender of the laser
         // client and completes after the given item has been fully processed into the sink,
         // including flushing.
-        // The assumption is that at that point it has been processed on the receiver end and the
-        // subscription is updated.
+        // It's not guaranteed that has been processed on the receiver end and the subscription
+        // is updated, but it results in a much smaller gap than not awaiting the write at all.
         // See: https://github.com/helius-labs/laserstream-sdk/blob/v0.2.2/rust/src/client.rs#L196-L201
         self.handle.write(request).await
     }
