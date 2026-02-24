@@ -4,7 +4,7 @@ use std::{
 };
 
 use async_trait::async_trait;
-use magicblock_config::config;
+use magicblock_config::config::GrpcConfig;
 use solana_commitment_config::CommitmentLevel;
 use solana_pubkey::{pubkey, Pubkey};
 use solana_sdk_ids::sysvar::clock;
@@ -65,7 +65,7 @@ impl ChainLaserClientImpl {
         abort_sender: mpsc::Sender<()>,
         slots: Slots,
         rpc_client: ChainRpcClientImpl,
-        grpc_config: &config::grpc::GrpcConfig,
+        grpc_config: &GrpcConfig,
     ) -> Self {
         let (actor, messages, updates, subscriptions) =
             ChainLaserActor::new_from_url(

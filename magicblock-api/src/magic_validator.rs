@@ -443,15 +443,12 @@ impl MagicValidator {
                     config.chainlink.max_monitored_accounts,
                 )
             })
+            .map(|conf| conf.with_grpc(config.grpc.clone()))
             .map_err(|err| {
                 ApiError::from(
                     magicblock_chainlink::errors::ChainlinkError::from(err),
                 )
             })?;
-        // Apply global gRPC config
-        chainlink_config.remote_account_provider = chainlink_config
-            .remote_account_provider
-            .with_grpc(config.grpc.clone());
         let commitment_config = {
             let level = CommitmentLevel::Confirmed;
             CommitmentConfig { commitment: level }

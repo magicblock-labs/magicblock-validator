@@ -11,7 +11,7 @@ use helius_laserstream::{
     grpc::{subscribe_update::UpdateOneof, CommitmentLevel, SubscribeUpdate},
     LaserstreamConfig, LaserstreamError,
 };
-use magicblock_config::config::grpc;
+use magicblock_config::config::GrpcConfig;
 use magicblock_core::logger::log_trace_debug;
 use magicblock_metrics::metrics::{
     inc_account_subscription_account_updates_count,
@@ -133,7 +133,7 @@ impl ChainLaserActor<super::StreamHandleImpl, super::StreamFactoryImpl> {
         abort_sender: mpsc::Sender<()>,
         slots: Slots,
         rpc_client: ChainRpcClientImpl,
-        grpc_config: &grpc::GrpcConfig,
+        grpc_config: &GrpcConfig,
     ) -> (
         Self,
         mpsc::Sender<ChainPubsubActorMessage>,
@@ -171,7 +171,7 @@ impl ChainLaserActor<super::StreamHandleImpl, super::StreamFactoryImpl> {
         abort_sender: mpsc::Sender<()>,
         slots: Slots,
         rpc_client: ChainRpcClientImpl,
-        grpc_config: &magicblock_config::config::grpc::GrpcConfig,
+        grpc_config: &GrpcConfig,
     ) -> (
         Self,
         mpsc::Sender<ChainPubsubActorMessage>,
@@ -200,7 +200,7 @@ impl<H: StreamHandle, S: StreamFactory<H>> ChainLaserActor<H, S> {
         abort_sender: mpsc::Sender<()>,
         slots: Slots,
         rpc_client: ChainRpcClientImpl,
-        grpc_config: &magicblock_config::config::grpc::GrpcConfig,
+        grpc_config: &GrpcConfig,
     ) -> (
         Self,
         mpsc::Sender<ChainPubsubActorMessage>,

@@ -1,7 +1,7 @@
 use std::{collections::HashSet, time::Duration};
 
 use magicblock_config::{
-    config::{grpc::GrpcConfig, LifecycleMode},
+    config::{GrpcConfig, LifecycleMode},
     consts::{DEFAULT_MAX_MONITORED_ACCOUNTS, DEFAULT_RESUBSCRIPTION_DELAY_MS},
 };
 use solana_pubkey::Pubkey;

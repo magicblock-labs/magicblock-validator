@@ -4,7 +4,7 @@ use helius_laserstream::grpc::{
     CommitmentLevel, SubscribeRequest, SubscribeRequestFilterAccounts,
     SubscribeRequestFilterSlots,
 };
-use magicblock_config::config;
+use magicblock_config::config::GrpcConfig;
 use magicblock_metrics::metrics;
 use solana_pubkey::Pubkey;
 use tokio_stream::StreamMap;
@@ -50,6 +50,7 @@ impl StreamKey {
 }
 
 /// Configuration for the generational stream manager.
+#[derive(Debug, Clone, Copy)]
 pub struct StreamManagerConfig {
     /// Max subscriptions per optimized old stream chunk.
     pub max_subs_in_old_optimized: usize,
@@ -60,8 +61,8 @@ pub struct StreamManagerConfig {
     pub max_subs_in_new: usize,
 }
 
-impl From<&config::grpc::GrpcConfig> for StreamManagerConfig {
-    fn from(cfg: &config::grpc::GrpcConfig) -> Self {
+impl From<&GrpcConfig> for StreamManagerConfig {
+    fn from(cfg: &GrpcConfig) -> Self {
         Self {
             max_subs_in_old_optimized: cfg.max_subs_in_old_optimized,
             max_old_unoptimized: cfg.max_old_unoptimized,
