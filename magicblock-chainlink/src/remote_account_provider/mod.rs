@@ -550,7 +550,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         pubkey: Pubkey,
         fetch_origin: AccountFetchOrigin,
     ) -> RemoteAccountProviderResult<RemoteAccount> {
-        self.try_get_multi(&[pubkey], None, fetch_origin, None)
+        self.try_get_multi(&[pubkey], None, fetch_origin, None, None)
             .await
             // SAFETY: we are guaranteed to have a single result here as
             // otherwise we would have gotten an error
@@ -569,7 +569,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         // 1. Fetch the _normal_ way and hope the slots match and if required
         //    the min_context_slot is met
         let remote_accounts = self
-            .try_get_multi(pubkeys, None, fetch_origin, None)
+            .try_get_multi(pubkeys, None, fetch_origin, None, None)
             .await?;
         if let Match = slots_match_and_meet_min_context(
             &remote_accounts,
@@ -604,6 +604,10 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
 
         // 3. Wait for the slots to match
         const MAX_TOTAL_TIME: Duration = Duration::from_secs(10);
+        // NOTE: we capture the fetch start slot here and reuse it across retries as otherwise
+        // we never get a valid result if the RPC node we fetch from is just slightly behind and
+        // cannot serve us any data with the absolute latest min context slot
+        let fetch_start_slot = self.chain_slot.load();
         let start = std::time::Instant::now();
         let mut retries = 0;
         loop {
@@ -622,7 +626,13 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                 );
             }
             let remote_accounts = self
-                .try_get_multi(pubkeys, None, fetch_origin, None)
+                .try_get_multi(
+                    pubkeys,
+                    None,
+                    fetch_origin,
+                    None,
+                    Some(fetch_start_slot),
+                )
                 .await?;
             let slots_match_result = slots_match_and_meet_min_context(
                 &remote_accounts,
@@ -632,20 +642,19 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                 return Ok(remote_accounts);
             }
 
-            if start.elapsed() > MAX_TOTAL_TIME {
-                return Err(RemoteAccountProviderError::SlotsDidNotMatch(
-                    format!(
-                        "Timeout after {}s waiting for slots to match",
-                        MAX_TOTAL_TIME.as_secs_f64()
-                    ),
-                    vec![],
-                ));
-            }
-
             retries += 1;
-            if retries == config.max_retries {
+            let hit_max_retry_limit = retries == config.max_retries;
+            if hit_max_retry_limit || start.elapsed() > MAX_TOTAL_TIME {
                 let remote_accounts =
                     remote_accounts.into_iter().map(|a| a.slot()).collect();
+                let limit = if hit_max_retry_limit {
+                    format!("max retries {}", config.max_retries)
+                } else {
+                    format!(
+                        "max total time of {} seconds",
+                        MAX_TOTAL_TIME.as_secs()
+                    )
+                };
                 match slots_match_result {
                     // SAFETY: Match case is already handled and returns
                     Match => unreachable!("we would have returned above"),
@@ -654,15 +663,18 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                             RemoteAccountProviderError::SlotsDidNotMatch(
                                 pubkeys_str(pubkeys),
                                 remote_accounts,
+                                limit,
                             ),
                         );
                     }
                     MatchButBelowMinContextSlot(slot) => {
                         return Err(
                             RemoteAccountProviderError::MatchingSlotsNotSatisfyingMinContextSlot(
-                            pubkeys_str(pubkeys),
-                            remote_accounts,
-                            slot)
+                                pubkeys_str(pubkeys),
+                                remote_accounts,
+                                slot,
+                                limit
+                            )
                         );
                     }
                 }
@@ -686,6 +698,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         mark_empty_if_not_found: Option<&[Pubkey]>,
         fetch_origin: AccountFetchOrigin,
         program_ids: Option<&[Pubkey]>,
+        fetch_start_slot: Option<u64>,
     ) -> RemoteAccountProviderResult<Vec<RemoteAccount>> {
         if pubkeys.is_empty() {
             return Ok(vec![]);
@@ -697,7 +710,8 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
 
         // Create channels for potential subscription updates to override fetch results
         let mut subscription_overrides = vec![];
-        let fetch_start_slot = self.chain_slot.load();
+        let fetch_start_slot =
+            fetch_start_slot.unwrap_or_else(|| self.chain_slot.load());
 
         {
             let mut fetching = self.fetching_accounts.lock().unwrap();
@@ -1552,7 +1566,8 @@ mod test {
             RemoteAccountProviderError::MatchingSlotsNotSatisfyingMinContextSlot(
                 _pubkeys,
                 _slots,
-                slot
+                slot,
+                _
             ) if slot == CURRENT_SLOT + 1
         ));
     }
