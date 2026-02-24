@@ -550,7 +550,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         pubkey: Pubkey,
         fetch_origin: AccountFetchOrigin,
     ) -> RemoteAccountProviderResult<RemoteAccount> {
-        self.try_get_multi(&[pubkey], None, fetch_origin, None)
+        self.try_get_multi(&[pubkey], None, fetch_origin, None, None)
             .await
             // SAFETY: we are guaranteed to have a single result here as
             // otherwise we would have gotten an error
@@ -569,7 +569,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         // 1. Fetch the _normal_ way and hope the slots match and if required
         //    the min_context_slot is met
         let remote_accounts = self
-            .try_get_multi(pubkeys, None, fetch_origin, None)
+            .try_get_multi(pubkeys, None, fetch_origin, None, None)
             .await?;
         if let Match = slots_match_and_meet_min_context(
             &remote_accounts,
@@ -622,7 +622,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                 );
             }
             let remote_accounts = self
-                .try_get_multi(pubkeys, None, fetch_origin, None)
+                .try_get_multi(pubkeys, None, fetch_origin, None, None)
                 .await?;
             let slots_match_result = slots_match_and_meet_min_context(
                 &remote_accounts,
@@ -688,6 +688,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         mark_empty_if_not_found: Option<&[Pubkey]>,
         fetch_origin: AccountFetchOrigin,
         program_ids: Option<&[Pubkey]>,
+        fetch_start_slot: Option<u64>,
     ) -> RemoteAccountProviderResult<Vec<RemoteAccount>> {
         if pubkeys.is_empty() {
             return Ok(vec![]);
@@ -699,7 +700,8 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
 
         // Create channels for potential subscription updates to override fetch results
         let mut subscription_overrides = vec![];
-        let fetch_start_slot = self.chain_slot.load();
+        let fetch_start_slot =
+            fetch_start_slot.unwrap_or_else(|| self.chain_slot.load());
 
         {
             let mut fetching = self.fetching_accounts.lock().unwrap();
