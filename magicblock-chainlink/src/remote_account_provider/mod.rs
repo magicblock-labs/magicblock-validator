@@ -604,6 +604,10 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
 
         // 3. Wait for the slots to match
         const MAX_TOTAL_TIME: Duration = Duration::from_secs(10);
+        // NOTE: we capture the fetch start slot here and reuse it across retries as otherwise
+        // we never get a valid result if the RPC node we fetch from is just slightly behind and
+        // cannot serve us any data with the absolute latest min context slot
+        let fetch_start_slot = self.chain_slot.load();
         let start = std::time::Instant::now();
         let mut retries = 0;
         loop {
@@ -622,7 +626,13 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                 );
             }
             let remote_accounts = self
-                .try_get_multi(pubkeys, None, fetch_origin, None, None)
+                .try_get_multi(
+                    pubkeys,
+                    None,
+                    fetch_origin,
+                    None,
+                    Some(fetch_start_slot),
+                )
                 .await?;
             let slots_match_result = slots_match_and_meet_min_context(
                 &remote_accounts,
