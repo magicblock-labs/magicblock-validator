@@ -464,7 +464,7 @@ where
                     Ok(Err(err)) => {
                         error!(
                             pubkey = %pubkey,
-                            error = %err,
+                            error = ?err,
                             "Failed to fetch delegation record"
                         );
                         (None, None)
@@ -472,7 +472,7 @@ where
                     Err(err) => {
                         error!(
                             pubkey = %pubkey,
-                            error = %err,
+                            error = ?err,
                             "Failed to fetch delegation record"
                         );
                         (None, None)
@@ -744,6 +744,7 @@ where
                 mark_empty_if_not_found,
                 fetch_origin,
                 program_ids,
+                None,
             )
             .await?;
 
