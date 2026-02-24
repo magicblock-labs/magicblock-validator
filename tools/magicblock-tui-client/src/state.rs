@@ -195,15 +195,21 @@ impl TuiState {
 
     pub fn push_transaction(&mut self, entry: TransactionEntry) {
         let had_transactions = !self.transactions.is_empty();
+        let anchored_to_latest = self.selected_tx == 0 && self.tx_scroll == 0;
         self.transactions.push_front(entry);
 
         // Keep selection on the same transaction when prepending a new one.
-        if had_transactions {
+        if had_transactions && !anchored_to_latest {
             self.selected_tx = self
                 .selected_tx
                 .saturating_add(1)
                 .min(self.transactions.len().saturating_sub(1));
-            self.tx_scroll = self.tx_scroll.saturating_add(1);
+
+            // When the user is already scrolled away from the top, keep the
+            // viewport anchored to the same items.
+            if self.tx_scroll > 0 {
+                self.tx_scroll = self.tx_scroll.saturating_add(1);
+            }
         }
 
         while self.transactions.len() > self.max_transactions {
@@ -267,5 +273,80 @@ impl TuiState {
     pub fn close_tx_detail(&mut self) {
         self.tx_detail = None;
         self.view_mode = ViewMode::List;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use chrono::Utc;
+
+    use super::{TransactionEntry, TuiConfig, TuiState};
+
+    fn config() -> TuiConfig {
+        TuiConfig {
+            rpc_url: "http://127.0.0.1:8899".to_string(),
+            ws_url: "ws://127.0.0.1:8900".to_string(),
+            remote_rpc_url: "https://api.devnet.solana.com".to_string(),
+            validator_identity: "validator".to_string(),
+            ledger_path: "/tmp/ledger".to_string(),
+            block_time_ms: 400,
+            lifecycle_mode: "ephemeral".to_string(),
+            base_fee: 5_000,
+            help_url: "https://example.com/help".to_string(),
+            version: "1.0.0".to_string(),
+            git_version: "abc123".to_string(),
+        }
+    }
+
+    fn tx(signature: &str) -> TransactionEntry {
+        TransactionEntry {
+            signature: signature.to_string(),
+            slot: 1,
+            success: true,
+            timestamp: Utc::now(),
+        }
+    }
+
+    #[test]
+    fn new_transactions_stay_visible_when_anchored_to_latest() {
+        let mut state = TuiState::new(config());
+
+        state.push_transaction(tx("sig-1"));
+        state.push_transaction(tx("sig-2"));
+
+        assert_eq!(state.selected_tx, 0);
+        assert_eq!(state.tx_scroll, 0);
+        assert_eq!(
+            state.transactions.front().map(|t| t.signature.as_str()),
+            Some("sig-2")
+        );
+    }
+
+    #[test]
+    fn prepending_keeps_selected_transaction_when_scrolled() {
+        let mut state = TuiState::new(config());
+        state.push_transaction(tx("sig-1"));
+        state.push_transaction(tx("sig-2"));
+        state.push_transaction(tx("sig-3"));
+
+        state.selected_tx = 2;
+        state.tx_scroll = 1;
+        let selected_before = state
+            .transactions
+            .get(state.selected_tx)
+            .expect("selected transaction should exist")
+            .signature
+            .clone();
+
+        state.push_transaction(tx("sig-4"));
+
+        assert_eq!(state.tx_scroll, 2);
+        assert_eq!(
+            state
+                .transactions
+                .get(state.selected_tx)
+                .map(|t| &t.signature),
+            Some(&selected_before)
+        );
     }
 }
