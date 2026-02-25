@@ -6,49 +6,59 @@ use magicblock_core::token_programs::EATA_PROGRAM_ID;
 use magicblock_metrics::metrics;
 use solana_account::ReadableAccount;
 use solana_instruction::Instruction;
+use solana_program::program_error::ProgramError;
 use solana_pubkey::Pubkey;
 use tracing::*;
 
 use super::FetchCloner;
 use crate::{
     chainlink::errors::{ChainlinkError, ChainlinkResult},
-    cloner::Cloner,
+    cloner::{Cloner, DelegationActions},
     remote_account_provider::{
         ChainPubsubClient, ChainRpcClient, MatchSlotsConfig,
         ResolvedAccountSharedData,
     },
 };
 
+/// Parses a delegation record from account data bytes.
+/// Returns the parsed DelegationRecord, or InvalidDelegationRecord error
+/// if parsing fails.
 pub(crate) fn parse_delegation_record(
     data: &[u8],
     delegation_record_pubkey: Pubkey,
-) -> ChainlinkResult<DelegationRecord> {
-    DelegationRecord::try_from_bytes_with_discriminator(data)
+) -> ChainlinkResult<(DelegationRecord, Option<DelegationActions>)> {
+    let delegation_record_size = DelegationRecord::size_with_discriminator();
+    if data.len() < delegation_record_size {
+        return Err(ChainlinkError::InvalidDelegationRecord(
+            delegation_record_pubkey,
+            ProgramError::InvalidAccountData,
+        ));
+    }
+    let record =
+        DelegationRecord::try_from_bytes_with_discriminator(
+            &data[..delegation_record_size],
+        )
         .copied()
         .map_err(|err| {
             ChainlinkError::InvalidDelegationRecord(
                 delegation_record_pubkey,
                 err,
             )
-        })
-}
+        })?;
 
-pub(crate) fn parse_delegation_actions(
-    data: &[u8],
-    delegation_record_pubkey: Pubkey,
-) -> ChainlinkResult<Vec<Instruction>> {
-    let delegation_record_size = DelegationRecord::size_with_discriminator();
     if data.len() <= delegation_record_size {
-        return Ok(vec![]);
+        Ok((record, None))
+    } else {
+        let actions_data = &data[delegation_record_size..];
+        let actions = bincode::deserialize::<Vec<Instruction>>(actions_data)
+            .map_err(|err| {
+                ChainlinkError::InvalidDelegationActions(
+                    delegation_record_pubkey,
+                    err.to_string(),
+                )
+            })?;
+        Ok((record, Some(actions.into())))
     }
-
-    let actions_data = &data[delegation_record_size..];
-    bincode::deserialize::<Vec<Instruction>>(actions_data).map_err(|err| {
-        ChainlinkError::InvalidDelegationActions(
-            delegation_record_pubkey,
-            err.to_string(),
-        )
-    })
 }
 
 pub(crate) fn apply_delegation_record_to_account<T, U, V, C>(
@@ -106,7 +116,7 @@ pub(crate) async fn fetch_and_parse_delegation_record<T, U, V, C>(
     account_pubkey: Pubkey,
     min_context_slot: u64,
     fetch_origin: metrics::AccountFetchOrigin,
-) -> Option<DelegationRecord>
+) -> Option<(DelegationRecord, Option<DelegationActions>)>
 where
     T: ChainRpcClient,
     U: ChainPubsubClient,

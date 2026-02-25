@@ -19,7 +19,10 @@ use super::{
 };
 use crate::{
     chainlink::errors::{ChainlinkError, ChainlinkResult},
-    cloner::{errors::ClonerResult, AccountCloneRequest, Cloner},
+    cloner::{
+        errors::ClonerResult, AccountCloneRequest, Cloner,
+        DelegationActions,
+    },
     remote_account_provider::{
         program_account::{
             get_loaderv3_get_program_data_address, ProgramAccountResolver,
@@ -143,7 +146,7 @@ fn classify_single_account(
                             pubkey,
                             account: account_shared_data,
                             commit_frequency_ms: None,
-                            delegation_actions: vec![],
+                            delegation_actions: DelegationActions::default(),
                             delegated_to_other: None,
                         });
                     }
@@ -293,92 +296,62 @@ where
             record_subs.push(delegation_record_pubkey);
 
             // If the account is delegated we set the owner and delegation state
-            let (commit_frequency_ms, delegated_to_other, delegation_actions) = if let Some(
-                delegation_record_data,
-            ) =
-                delegation_record
-            {
-                let delegation_record_size =
-                    dlp::state::DelegationRecord::size_with_discriminator();
-                if delegation_record_data.data().len() == delegation_record_size
-                {
-                    // Regular delegation record layout.
+            let (commit_frequency_ms, delegated_to_other, delegation_actions) =
+                if let Some(delegation_record_data) = delegation_record {
+                    // NOTE: failing here is fine when resolving all accounts for a transaction
+                    // since if something is off we better not run it anyways
+                    // However we may consider a different behavior when user is getting
+                    // multiple accounts.
+                    let (delegation_record, delegation_actions) =
+                        match FetchCloner::<T, U, V, C>::parse_delegation_record(
+                            delegation_record_data.data(),
+                            delegation_record_pubkey,
+                        ) {
+                            Ok(x) => x,
+                            Err(err) => {
+                                // Cancel all new subs since we won't clone any accounts
+                                cancel_subs(
+                                    &this.remote_account_provider,
+                                    CancelStrategy::New {
+                                        new_subs: pubkeys
+                                            .iter()
+                                            .cloned()
+                                            .chain(record_subs.iter().cloned())
+                                            .collect(),
+                                        existing_subs: existing_subs.clone(),
+                                    },
+                                )
+                                .await;
+                                return Err(err);
+                            }
+                        };
+
+                    trace!(pubkey = %pubkey, "Delegation record found");
+
+                    let delegated_to_other =
+                        this.get_delegated_to_other(&delegation_record);
+
+                    let commit_freq = this.apply_delegation_record_to_account(
+                        &mut account,
+                        &delegation_record,
+                    );
+
+                    // Collect unique owner programs to subscribe concurrently after the loop
+                    if account.delegated() {
+                        owner_programs_to_subscribe
+                            .insert(delegation_record.owner);
+                    }
+
+                    (
+                        commit_freq,
+                        delegated_to_other,
+                        delegation_actions.unwrap_or_default(),
+                    )
                 } else {
-                    // DelegateWithActions layout (DelegationRecord + trailing bytes).
-                }
-
-                // NOTE: failing here is fine when resolving all accounts for a transaction
-                // since if something is off we better not run it anyways
-                // However we may consider a different behavior when user is getting
-                // multiple accounts.
-                let delegation_actions =
-                    match FetchCloner::<T, U, V, C>::parse_delegation_actions(
-                        delegation_record_data.data(),
-                        delegation_record_pubkey,
-                    ) {
-                        Ok(x) => x,
-                        Err(err) => {
-                            // Cancel all new subs since we won't clone any accounts
-                            cancel_subs(
-                                &this.remote_account_provider,
-                                CancelStrategy::New {
-                                    new_subs: pubkeys
-                                        .iter()
-                                        .cloned()
-                                        .chain(record_subs.iter().cloned())
-                                        .collect(),
-                                    existing_subs: existing_subs.clone(),
-                                },
-                            )
-                            .await;
-                            return Err(err);
-                        }
-                    };
-
-                let delegation_record =
-                    match FetchCloner::<T, U, V, C>::parse_delegation_record(
-                        delegation_record_data.data(),
-                        delegation_record_pubkey,
-                    ) {
-                        Ok(x) => x,
-                        Err(err) => {
-                            // Cancel all new subs since we won't clone any accounts
-                            cancel_subs(
-                                &this.remote_account_provider,
-                                CancelStrategy::New {
-                                    new_subs: pubkeys
-                                        .iter()
-                                        .cloned()
-                                        .chain(record_subs.iter().cloned())
-                                        .collect(),
-                                    existing_subs: existing_subs.clone(),
-                                },
-                            )
-                            .await;
-                            return Err(err);
-                        }
-                    };
-
-                trace!(pubkey = %pubkey, "Delegation record found");
-
-                let delegated_to_other =
-                    this.get_delegated_to_other(&delegation_record);
-
-                let commit_freq = this.apply_delegation_record_to_account(
-                    &mut account,
-                    &delegation_record,
-                );
-
-                // Collect unique owner programs to subscribe concurrently after the loop
-                if account.delegated() {
-                    owner_programs_to_subscribe.insert(delegation_record.owner);
-                }
-
-                (commit_freq, delegated_to_other, delegation_actions)
-            } else {
-                missing_delegation_record.push((pubkey, account.remote_slot()));
-                (None, None, vec![])
-            };
+                    missing_delegation_record
+                        .push((pubkey, account.remote_slot()));
+                    (None, None, DelegationActions::default())
+                };
             accounts_to_clone.push(AccountCloneRequest {
                 pubkey,
                 account: account.into_account_shared_data(),
