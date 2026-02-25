@@ -12,7 +12,7 @@ use tracing::*;
 
 use super::{delegation, types::AccountWithCompanion, FetchCloner};
 use crate::{
-    cloner::{AccountCloneRequest, Cloner},
+    cloner::{AccountCloneRequest, Cloner, DelegationActions},
     remote_account_provider::{ChainPubsubClient, ChainRpcClient},
 };
 
@@ -127,15 +127,16 @@ where
             )
             .await
             {
+                let (deleg_record, _delegation_actions) = deleg;
                 delegated_to_other =
-                    delegation::get_delegated_to_other(this, &deleg);
-                commit_frequency_ms = Some(deleg.commit_frequency_ms);
+                    delegation::get_delegated_to_other(this, &deleg_record);
+                commit_frequency_ms = Some(deleg_record.commit_frequency_ms);
 
                 if let Some(projected_ata) = this
                     .maybe_project_delegated_ata_from_eata(
                         ata_account.account_shared_data(),
                         &eata_shared,
-                        &deleg,
+                        &deleg_record,
                     )
                 {
                     account_to_clone = projected_ata;
@@ -147,7 +148,7 @@ where
             pubkey: ata_pubkey,
             account: account_to_clone,
             commit_frequency_ms,
-            delegation_actions: vec![],
+            delegation_actions: DelegationActions::default(),
             delegated_to_other,
         });
     }

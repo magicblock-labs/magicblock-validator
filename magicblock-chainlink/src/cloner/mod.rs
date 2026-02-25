@@ -1,5 +1,6 @@
 use async_trait::async_trait;
 use errors::ClonerResult;
+use std::ops::Deref;
 use solana_account::AccountSharedData;
 use solana_instruction::Instruction;
 use solana_pubkey::Pubkey;
@@ -9,11 +10,49 @@ use crate::remote_account_provider::program_account::LoadedProgram;
 
 pub mod errors;
 
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct DelegationActions(Vec<Instruction>);
+
+impl DelegationActions {
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
+impl From<Vec<Instruction>> for DelegationActions {
+    fn from(value: Vec<Instruction>) -> Self {
+        Self(value)
+    }
+}
+
+impl From<DelegationActions> for Vec<Instruction> {
+    fn from(value: DelegationActions) -> Self {
+        value.0
+    }
+}
+
+impl IntoIterator for DelegationActions {
+    type Item = Instruction;
+    type IntoIter = std::vec::IntoIter<Instruction>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_iter()
+    }
+}
+
+impl Deref for DelegationActions {
+    type Target = [Instruction];
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
 pub struct AccountCloneRequest {
     pub pubkey: Pubkey,
     pub account: AccountSharedData,
     pub commit_frequency_ms: Option<u64>,
-    pub delegation_actions: Vec<Instruction>,
+    pub delegation_actions: DelegationActions,
     /// If the account is delegated to another validator,
     /// this contains that validator's pubkey. None if account is not
     /// delegated to another validator.

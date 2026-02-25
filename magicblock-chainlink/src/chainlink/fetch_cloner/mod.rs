@@ -50,7 +50,10 @@ use crate::{
         account_still_undelegating_on_chain::account_still_undelegating_on_chain,
         blacklisted_accounts::blacklisted_accounts,
     },
-    cloner::{errors::ClonerResult, AccountCloneRequest, Cloner},
+    cloner::{
+        errors::ClonerResult, AccountCloneRequest, Cloner,
+        DelegationActions,
+    },
     remote_account_provider::{
         program_account::get_loaderv3_get_program_data_address,
         ChainPubsubClient, ChainRpcClient, ForwardedSubscriptionUpdate,
@@ -336,7 +339,7 @@ where
     ) -> (
         Option<AccountSharedData>,
         Option<DelegationRecord>,
-        Vec<solana_instruction::Instruction>,
+        DelegationActions,
     ) {
         let ForwardedSubscriptionUpdate { pubkey, account } = update;
         let owned_by_delegation_program =
@@ -381,34 +384,8 @@ where
                         let account = if let Some(delegation_record) =
                             delegation_record
                         {
-                            let delegation_record_size =
-                                DelegationRecord::size_with_discriminator();
-                            if delegation_record.data().len()
-                                == delegation_record_size
-                            {
-                                // Regular delegation record layout.
-                            } else {
-                                // DelegateWithActions layout (DelegationRecord + trailing bytes).
-                            }
-
-                            let delegation_actions =
-                                match Self::parse_delegation_actions(
-                                    delegation_record.data(),
-                                    delegation_record_pubkey,
-                                ) {
-                                    Ok(actions) => actions,
-                                    Err(err) => {
-                                        error!(
-                                            pubkey = %pubkey,
-                                            error = %err,
-                                            "Failed to parse delegation actions"
-                                        );
-                                        vec![]
-                                    }
-                                };
-
-                            let delegation_record =
-                                match Self::parse_delegation_record(
+                            let delegation_record_with_actions =
+                                match delegation::parse_delegation_record(
                                     delegation_record.data(),
                                     delegation_record_pubkey,
                                 ) {
@@ -425,7 +402,11 @@ where
 
                             // If the delegation record is valid we set the owner and delegation
                             // status on the account
-                            if let Some(delegation_record) = delegation_record {
+                            if let Some((
+                                delegation_record,
+                                delegation_actions,
+                            )) = delegation_record_with_actions
+                            {
                                 if tracing::enabled!(tracing::Level::TRACE) {
                                     let delegation_record_display =
                                         format!("{:?}", delegation_record);
@@ -469,25 +450,26 @@ where
                                 (
                                     Some(account.into_account_shared_data()),
                                     Some(delegation_record),
-                                    delegation_actions,
+                                    delegation_actions.unwrap_or_default(),
                                 )
                             } else {
                                 // If the delegation record is invalid we cannot clone the account
                                 // since something is corrupt and we wouldn't know what owner to
                                 // use, etc.
-                                (None, None, vec![])
+                                (
+                                    None,
+                                    None,
+                                    DelegationActions::default(),
+                                )
                             }
                         } else {
                             // If no delegation record exists we must assume the account itself is
                             // a delegation record or metadata
-                            let delegation_record_size =
-                                DelegationRecord::size_with_discriminator();
-                            if account.data().len() == delegation_record_size {
-                                // Regular delegation record layout.
-                            } else {
-                                // DelegateWithActions layout (DelegationRecord + trailing bytes).
-                            }
-                            (Some(account.into_account_shared_data()), None, vec![])
+                            (
+                                Some(account.into_account_shared_data()),
+                                None,
+                                DelegationActions::default(),
+                            )
                         };
 
                         if !subs_to_remove.is_empty() {
@@ -506,7 +488,7 @@ where
                             error = %err,
                             "Failed to fetch delegation record"
                         );
-                        (None, None, vec![])
+                        (None, None, DelegationActions::default())
                     }
                     Err(err) => {
                         error!(
@@ -514,20 +496,24 @@ where
                             error = %err,
                             "Failed to fetch delegation record"
                         );
-                        (None, None, vec![])
+                        (None, None, DelegationActions::default())
                     }
                 }
             } else {
                 let (account, deleg_record) = self
                     .maybe_project_ata_from_subscription_update(pubkey, account)
                     .await;
-                (Some(account), deleg_record, vec![])
+                (
+                    Some(account),
+                    deleg_record,
+                    DelegationActions::default(),
+                )
             }
         } else {
             // This should not happen since we call this method with sub updates which always hold
             // a fresh remote account
             error!(pubkey = %pubkey, account = ?account, "BUG: Received subscription update without fresh account");
-            (None, None, vec![])
+            (None, None, DelegationActions::default())
         }
     }
 
@@ -586,7 +572,7 @@ where
             pubkey: ata_pubkey,
             account: projected_ata,
             commit_frequency_ms: None,
-            delegation_actions: vec![],
+            delegation_actions: DelegationActions::default(),
             delegated_to_other: None,
         })
     }
@@ -654,6 +640,7 @@ where
         let Some(deleg_record) = deleg_record else {
             return (ata_account, None);
         };
+        let (deleg_record, _delegation_actions) = deleg_record;
 
         if let Some(projected_ata) = self.maybe_project_delegated_ata_from_eata(
             &ata_account,
@@ -695,15 +682,8 @@ where
     fn parse_delegation_record(
         data: &[u8],
         delegation_record_pubkey: Pubkey,
-    ) -> ChainlinkResult<DelegationRecord> {
+    ) -> ChainlinkResult<(DelegationRecord, Option<DelegationActions>)> {
         delegation::parse_delegation_record(data, delegation_record_pubkey)
-    }
-
-    fn parse_delegation_actions(
-        data: &[u8],
-        delegation_record_pubkey: Pubkey,
-    ) -> ChainlinkResult<Vec<solana_instruction::Instruction>> {
-        delegation::parse_delegation_actions(data, delegation_record_pubkey)
     }
 
     /// Applies delegation record settings to an account: sets the owner,
@@ -738,7 +718,7 @@ where
         account_pubkey: Pubkey,
         min_context_slot: u64,
         fetch_origin: metrics::AccountFetchOrigin,
-    ) -> Option<DelegationRecord> {
+    ) -> Option<(DelegationRecord, Option<DelegationActions>)> {
         delegation::fetch_and_parse_delegation_record(
             self,
             account_pubkey,
@@ -983,9 +963,10 @@ where
             }
 
             let delegated_on_chain = deleg_record.as_ref().is_some_and(|dr| {
-                dr.authority.eq(&self.validator_pubkey)
-                    || dr.authority.eq(&Pubkey::default())
+                dr.0.authority.eq(&self.validator_pubkey)
+                    || dr.0.authority.eq(&Pubkey::default())
             });
+            let deleg_record = deleg_record.map(|el| el.0);
             if !account_still_undelegating_on_chain(
                 pubkey,
                 delegated_on_chain,
@@ -1414,7 +1395,7 @@ where
                 pubkey,
                 account,
                 commit_frequency_ms: None,
-                delegation_actions: vec![],
+                delegation_actions: DelegationActions::default(),
                 delegated_to_other: None,
             })
             .await?;
