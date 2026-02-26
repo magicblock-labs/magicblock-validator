@@ -26,7 +26,10 @@ use solana_sdk_ids::sysvar::{clock, slot_hashes};
 use state::TransactionSchedulerState;
 use tokio::{
     runtime::Builder,
-    sync::mpsc::{channel, Receiver, Sender},
+    sync::{
+        mpsc::{channel, Receiver, Sender},
+        Notify,
+    },
 };
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, instrument, warn};
@@ -40,7 +43,7 @@ const EXECUTOR_QUEUE_CAPACITY: usize = 1;
 ///
 /// Runs in a dedicated thread with a single-threaded Tokio runtime.
 pub struct TransactionScheduler {
-    /// Manages executor pool and account locking
+    /// Manages executor pool, account locking, and coordination mode
     coordinator: ExecutionCoordinator,
     /// Incoming transaction queue from global processor
     transactions_rx: TransactionToProcessRx,
@@ -56,6 +59,8 @@ pub struct TransactionScheduler {
     latest_block: LatestBlock,
     /// Global shutdown signal
     shutdown: CancellationToken,
+    /// Notifies scheduler to switch from Replica to Primary mode after ledger replay.
+    mode_switcher: Arc<Notify>,
 }
 
 impl TransactionScheduler {
@@ -96,6 +101,7 @@ impl TransactionScheduler {
             program_cache,
             accountsdb: state.accountsdb,
             shutdown: state.shutdown,
+            mode_switcher: state.mode_switcher,
         }
     }
 
@@ -113,8 +119,11 @@ impl TransactionScheduler {
 
     /// Main event loop: processes executor readiness, new transactions, and slot transitions.
     ///
-    /// Uses `biased` select to prioritize ready workers over incoming transactions,
-    /// ensuring the pipeline stays full.
+    /// Uses `biased` select to prioritize in this order:
+    /// 1. Slot transitions
+    /// 2. Executor readiness
+    /// 3. Mode switches (before transactions to avoid race condition)
+    /// 4. New transactions
     #[instrument(skip(self))]
     async fn run(mut self) {
         let mut block_produced = self.latest_block.subscribe();
@@ -123,6 +132,9 @@ impl TransactionScheduler {
                 biased;
                 Ok(()) = block_produced.recv() => self.transition_to_new_slot(),
                 Some(executor) = self.ready_rx.recv() => self.handle_ready_executor(executor),
+                _ = self.mode_switcher.notified() => {
+                    self.coordinator.switch_to_primary_mode();
+                }
                 Some(txn) = self.transactions_rx.recv(), if self.coordinator.is_ready() => {
                     self.handle_new_transaction(txn);
                 }
@@ -143,6 +155,10 @@ impl TransactionScheduler {
     }
 
     fn handle_new_transaction(&mut self, txn: ProcessableTransaction) {
+        if !self.coordinator.is_transaction_allowed(&txn.mode) {
+            warn!("Dropping transaction due to mode incompatibility");
+            return;
+        }
         // SAFETY:
         // the caller ensured that executor was ready before invoking this
         // method so the get_ready_executor should always return Some here
