@@ -1,9 +1,6 @@
-use std::sync::atomic::AtomicU16;
-
+use futures_util::future::join_all;
 use magicblock_accounts_db::traits::AccountsBank;
-use magicblock_core::{
-    logger::log_trace_warn, token_programs::try_derive_eata_address_and_bump,
-};
+use magicblock_core::token_programs::try_derive_eata_address_and_bump;
 use magicblock_metrics::metrics;
 use solana_account::AccountSharedData;
 use solana_pubkey::Pubkey;
@@ -45,35 +42,18 @@ where
     let mut accounts_to_clone = vec![];
     let mut ata_join_set = JoinSet::new();
 
-    // Subscribe first so subsequent fetches are kept up-to-date
+    // Collect all pubkeys to subscribe to and spawn fetch tasks
+    let mut pubkeys_to_subscribe = vec![];
+
     for (ata_pubkey, _, ata_info, ata_account_slot) in &atas {
-        if let Err(err) = this.subscribe_to_account(ata_pubkey).await {
-            static ATA_SUBSCRIPTION_FAILURE_COUNT: AtomicU16 =
-                AtomicU16::new(0);
-            log_trace_warn(
-                "Failed to subscribe to ATA",
-                "Failed to subscribe to ATAs",
-                &ata_pubkey,
-                &err,
-                1000,
-                &ATA_SUBSCRIPTION_FAILURE_COUNT,
-            );
-        }
+        // Collect ATA pubkey for subscription
+        pubkeys_to_subscribe.push(*ata_pubkey);
+
         if let Some((eata, _)) =
             try_derive_eata_address_and_bump(&ata_info.owner, &ata_info.mint)
         {
-            if let Err(err) = this.subscribe_to_account(&eata).await {
-                static EATA_SUBSCRIPTION_FAILURE_COUNT: AtomicU16 =
-                    AtomicU16::new(0);
-                log_trace_warn(
-                    "Failed to subscribe to derived eATA",
-                    "Failed to subscribe to derived eATAs",
-                    &eata,
-                    &err,
-                    1000,
-                    &EATA_SUBSCRIPTION_FAILURE_COUNT,
-                );
-            }
+            // Collect eATA pubkey for subscription
+            pubkeys_to_subscribe.push(eata);
 
             let effective_slot = if let Some(min_slot) = min_context_slot {
                 min_slot.max(*ata_account_slot)
@@ -87,6 +67,26 @@ where
                 effective_slot,
                 fetch_origin,
             ));
+        }
+    }
+
+    // Subscribe to all ATA and eATA accounts in parallel
+    let subscription_results = join_all(
+        pubkeys_to_subscribe
+            .iter()
+            .map(|pk| this.subscribe_to_account(pk)),
+    )
+    .await;
+
+    for (pubkey, result) in
+        pubkeys_to_subscribe.iter().zip(subscription_results)
+    {
+        if let Err(err) = result {
+            warn!(
+                pubkey = %pubkey,
+                err = ?err,
+                "Failed to subscribe to ATA/eATA account"
+            );
         }
     }
 
