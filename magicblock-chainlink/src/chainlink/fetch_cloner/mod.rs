@@ -61,7 +61,6 @@ use crate::{
 
 type RemoteAccountRequests = Vec<oneshot::Sender<()>>;
 
-#[derive(Clone)]
 pub struct FetchCloner<T, U, V, C>
 where
     T: ChainRpcClient,
@@ -88,6 +87,30 @@ where
     /// If specified, only these programs will be cloned. If None or empty,
     /// all programs are allowed.
     allowed_programs: Option<HashSet<Pubkey>>,
+}
+
+/// Manual Clone impl: `#[derive(Clone)]` would add `V: Clone, C: Clone`
+/// bounds that are not satisfied (`AccountsBank` and `Cloner` don't
+/// require `Clone`). All fields are behind `Arc` so Clone is not needed.
+impl<T, U, V, C> Clone for FetchCloner<T, U, V, C>
+where
+    T: ChainRpcClient,
+    U: ChainPubsubClient,
+    V: AccountsBank,
+    C: Cloner,
+{
+    fn clone(&self) -> Self {
+        Self {
+            remote_account_provider: self.remote_account_provider.clone(),
+            pending_requests: self.pending_requests.clone(),
+            fetch_count: self.fetch_count.clone(),
+            accounts_bank: self.accounts_bank.clone(),
+            cloner: self.cloner.clone(),
+            validator_pubkey: self.validator_pubkey,
+            blacklisted_accounts: self.blacklisted_accounts.clone(),
+            allowed_programs: self.allowed_programs.clone(),
+        }
+    }
 }
 
 impl<T, U, V, C> FetchCloner<T, U, V, C>
@@ -995,30 +1018,70 @@ where
         let mut fetch_new = vec![];
         let mut in_bank = vec![];
         let mut extra_mark_empty = vec![];
+
+        // Phase 1: Sync bank check — separate undelegating accounts
+        // (which need async RPC) from non-undelegating (handled
+        // synchronously)
+        let mut undelegating_checks: Vec<(Pubkey, AccountSharedData)> = vec![];
         for pubkey in pubkeys.iter() {
             if let Some(account_in_bank) =
                 self.accounts_bank.get_account(pubkey)
             {
-                let decision = match tokio::time::timeout(
-                    Duration::from_secs(5),
-                    self.should_refresh_undelegating_in_bank_account(
-                        pubkey,
-                        &account_in_bank,
-                        fetch_origin,
-                    ),
-                )
-                .await
-                {
-                    Ok(decision) => decision,
-                    Err(_timeout) => {
-                        warn!(
+                if account_in_bank.undelegating() {
+                    undelegating_checks.push((**pubkey, account_in_bank));
+                } else {
+                    if account_in_bank.owner().eq(&dlp::id()) {
+                        debug!(
                             pubkey = %pubkey,
-                            "Timeout checking if account is still undelegating after 5 seconds"
+                            "Account owned by deleg program not marked as undelegating"
                         );
-                        RefreshDecision::No
                     }
-                };
+                    if tracing::enabled!(tracing::Level::TRACE) {
+                        let delegated = account_in_bank.delegated();
+                        let owner = account_in_bank.owner();
+                        trace!(
+                            pubkey = %pubkey,
+                            undelegating = false,
+                            delegated,
+                            owner = %owner,
+                            "Account found in bank in valid state, no fetch needed"
+                        );
+                    }
+                    in_bank.push(**pubkey);
+                }
+            }
+        }
 
+        // Phase 2: Parallel undelegation checks via JoinSet
+        if !undelegating_checks.is_empty() {
+            let mut join_set = JoinSet::new();
+            for (pubkey, account_in_bank) in undelegating_checks {
+                let this = self.clone();
+                join_set.spawn(async move {
+                    let decision = match tokio::time::timeout(
+                        Duration::from_secs(5),
+                        this.should_refresh_undelegating_in_bank_account(
+                            &pubkey,
+                            &account_in_bank,
+                            fetch_origin,
+                        ),
+                    )
+                    .await
+                    {
+                        Ok(decision) => decision,
+                        Err(_timeout) => {
+                            warn!(
+                                pubkey = %pubkey,
+                                "Timeout checking if account is still undelegating after 5 seconds"
+                            );
+                            RefreshDecision::No
+                        }
+                    };
+                    (pubkey, decision)
+                });
+            }
+
+            for (pubkey, decision) in join_set.join_all().await {
                 match decision {
                     RefreshDecision::Yes
                     | RefreshDecision::YesAndMarkEmptyIfNotFound => {
@@ -1030,24 +1093,17 @@ where
                         if let RefreshDecision::YesAndMarkEmptyIfNotFound =
                             decision
                         {
-                            extra_mark_empty.push(*pubkey);
+                            extra_mark_empty.push(pubkey);
                         }
                     }
                     RefreshDecision::No => {
-                        // Account is in bank and subscribed correctly - no fetch needed
                         if tracing::enabled!(tracing::Level::TRACE) {
-                            let undelegating = account_in_bank.undelegating();
-                            let delegated = account_in_bank.delegated();
-                            let owner = account_in_bank.owner();
                             trace!(
                                 pubkey = %pubkey,
-                                undelegating,
-                                delegated,
-                                owner = %owner,
-                                "Account found in bank in valid state, no fetch needed"
+                                "Undelegating account still valid, no fetch needed"
                             );
                         }
-                        in_bank.push(*pubkey);
+                        in_bank.push(pubkey);
                     }
                 }
             }
