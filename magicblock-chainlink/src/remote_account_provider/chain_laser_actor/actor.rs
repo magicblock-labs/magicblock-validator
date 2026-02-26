@@ -262,6 +262,8 @@ impl<H: StreamHandle, S: StreamFactory<H>> ChainLaserActor<H, S> {
     pub async fn run(mut self) {
         let mut optimization_interval =
             tokio::time::interval(self.optimization_interval_duration);
+        optimization_interval
+            .set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         // The first tick completes immediately; consume it so
         // the timer starts counting from now.
         optimization_interval.tick().await;
