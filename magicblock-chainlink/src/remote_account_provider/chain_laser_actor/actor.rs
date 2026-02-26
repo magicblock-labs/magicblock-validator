@@ -309,7 +309,7 @@ impl<H: StreamHandle, S: StreamFactory<H>> ChainLaserActor<H, S> {
                         {
                             warn!(
                                 client_id = %self.client_id,
-                                %err,
+                                ?err,
                                 "Time-based optimization failed"
                             );
                         }
