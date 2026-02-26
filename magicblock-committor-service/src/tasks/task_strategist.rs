@@ -54,7 +54,7 @@ impl TransactionStrategy {
             .collect()
     }
 
-    pub fn has_actions_callbakcs(&self) -> bool {
+    pub fn has_actions_callbacks(&self) -> bool {
         self.optimized_tasks
             .iter()
             .filter_map(|el| {

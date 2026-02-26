@@ -262,7 +262,7 @@ where
             actions_timeout.checked_sub(started_at.elapsed())
         };
 
-        let has_callbacks = transaction_strategy.has_actions_callbakcs();
+        let has_callbacks = transaction_strategy.has_actions_callbacks();
         let committed_pubkeys = base_intent.get_all_committed_pubkeys();
 
         let mut single_stage_executor =
@@ -315,11 +315,11 @@ where
             }) if !committed_pubkeys.is_empty() => err,
             res => {
                 if res.is_err() {
-                    single_stage_executor.execute_callbacks()
-                } else {
-                    let transaction_strategy = single_stage_executor.transaction_strategy;
-                    self.junk.push(transaction_strategy);
+                    single_stage_executor.execute_callbacks();
                 }
+
+                let transaction_strategy = single_stage_executor.transaction_strategy;
+                self.junk.push(transaction_strategy);
                 return res;
             }
         };
@@ -355,9 +355,9 @@ where
             actions_timeout.checked_sub(started_at.elapsed())
         };
 
-        let has_commit_callbacks = commit_strategy.has_actions_callbakcs();
+        let has_commit_callbacks = commit_strategy.has_actions_callbacks();
         let mut has_finalize_callbacks =
-            finalize_strategy.has_actions_callbakcs();
+            finalize_strategy.has_actions_callbacks();
         let mut executor =
             TwoStageExecutor::new(self, commit_strategy, finalize_strategy);
 
