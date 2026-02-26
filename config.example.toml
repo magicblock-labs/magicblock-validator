@@ -83,6 +83,23 @@ address = "127.0.0.1:9090"
 collect-frequency = "30s"
 
 # ==============================================================================
+# gRPC (applies to all gRPC providers)
+# ==============================================================================
+[grpc]
+# The maximum number of subscriptions that are added to a single optimized stream
+# Default: 5000
+# Env: MBV_GRPC__MAX_SUBS_IN_OLD_OPTIMIZED
+max-subs-in-old-optimized = 5000
+# The maximum number of old unoptimized subscriptions streams allowed until optimization is triggered
+# Default: 5
+# Env: MBV_GRPC__MAX_OLD_UNOPTIMIZED
+max-old-unoptimized = 5
+# The maximum number of subscriptions held in the current new stream which is updated frequently
+# Default: 400
+# Env: MBV_GRPC__MAX_SUBS_IN_NEW
+max-subs-in-new = 400
+
+# ==============================================================================
 # Validator Identity & Fees
 # ==============================================================================
 [validator]

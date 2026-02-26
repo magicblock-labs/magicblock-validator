@@ -2,8 +2,8 @@ use std::{ffi::OsString, fmt::Display, path::PathBuf};
 
 use clap::Parser;
 use config::{
-    aperture::ApertureConfig, cli::CliParams, metrics::MetricsConfig,
-    LifecycleMode,
+    aperture::ApertureConfig, cli::CliParams, grpc::GrpcConfig,
+    metrics::MetricsConfig, LifecycleMode,
 };
 use figment::{
     providers::{Env, Format, Serialized, Toml},
@@ -47,6 +47,9 @@ pub struct ValidatorParams {
 
     /// Listen address for the metrics endpoint.
     pub metrics: MetricsConfig,
+
+    /// Global configuration for gRPC-based providers.
+    pub grpc: GrpcConfig,
 
     /// Validator-specific arguments.
     pub validator: ValidatorConfig,

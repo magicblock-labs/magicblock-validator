@@ -178,6 +178,22 @@ pub enum MagicBlockInstruction {
     /// - **1.** `[WRITE]` Ephemeral account to close
     /// - **2.** `[WRITE]` Vault account (source of rent refund)
     CloseEphemeralAccount,
+
+    /// Schedules the accounts provided at end of accounts Vec to be committed and finalized in a
+    /// single DLP instruction.
+    /// It should be invoked from the program whose PDA accounts are to be
+    /// committed.
+    ///
+    /// This is the first part of scheduling a commit.
+    /// A second transaction [MagicBlockInstruction::AcceptScheduleCommits] has to run in order
+    /// to finish scheduling the commit.
+    ///
+    /// # Account references
+    /// - **0.**   `[WRITE, SIGNER]` Payer requesting the commit to be scheduled
+    /// - **1.**   `[WRITE]`         Magic Context Account containing to which we store
+    ///   the scheduled commits
+    /// - **2..n** `[]`              Accounts to be committed
+    ScheduleCommitFinalize { request_undelegation: bool },
 }
 
 impl MagicBlockInstruction {
