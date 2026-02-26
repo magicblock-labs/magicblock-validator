@@ -136,6 +136,11 @@ pub struct StreamManager<S: StreamHandle, SF: StreamFactory<S>> {
 
     /// Client identifier used as a label for stream metrics.
     client_id: String,
+
+    /// Set to `true` after each successful [Self::optimize] call.
+    /// Consumed by [Self::take_optimized_flag] so the actor can
+    /// reset its time-based optimization interval.
+    optimized_since_last_check: bool,
 }
 
 #[allow(unused)]
@@ -158,6 +163,7 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
             stream_map: StreamMap::new(),
             chain_slot,
             client_id,
+            optimized_since_last_check: false,
         };
         mgr.update_stream_metrics();
         mgr
@@ -325,6 +331,19 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
         !self.stream_map.is_empty()
     }
 
+    /// Returns `true` if there are unoptimized old streams.
+    pub fn has_unoptimized_streams(&self) -> bool {
+        !self.unoptimized_old_handles.is_empty()
+    }
+
+    /// Returns `true` if optimization has occurred since the
+    /// last call to this method, then resets the flag.
+    pub fn take_optimized_flag(&mut self) -> bool {
+        let v = self.optimized_since_last_check;
+        self.optimized_since_last_check = false;
+        v
+    }
+
     /// Computes a `from_slot` for backfilling based on the
     /// current chain slot. Returns `None` if no chain slot
     /// tracker is available
@@ -405,6 +424,7 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
         self.current_new_handle = None;
 
         self.update_stream_metrics();
+        self.optimized_since_last_check = true;
 
         // Old streams are dropped here when _prev_* go out of scope,
         // after the new optimized streams are already active.
