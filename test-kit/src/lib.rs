@@ -38,6 +38,7 @@ pub use solana_signer::Signer;
 use solana_transaction::Transaction;
 use solana_transaction_status_client_types::TransactionStatusMeta;
 use tempfile::TempDir;
+use tokio::sync::Notify;
 use tracing::{error, instrument};
 
 /// A simulated validator backend for integration tests.
@@ -65,6 +66,8 @@ pub struct ExecutionTestEnv {
     pub blocks_tx: BlockUpdateTx,
     /// Transaction execution scheduler/backend for deferred launch
     pub scheduler: Option<TransactionScheduler>,
+    /// Mode switcher for transitioning from Replica to Primary mode
+    mode_switcher: Arc<Notify>,
 }
 
 impl Default for ExecutionTestEnv {
@@ -101,6 +104,24 @@ impl ExecutionTestEnv {
         executors: u32,
         defer_startup: bool,
     ) -> Self {
+        Self::new_internal(fee, executors, defer_startup, true)
+    }
+
+    /// Creates a test environment in Replica mode for replay ordering tests.
+    ///
+    /// The scheduler starts in Replica mode and only accepts replay transactions.
+    /// Use `switch_to_primary_mode()` to transition to Primary mode.
+    pub fn new_replica_mode(executors: u32, defer_startup: bool) -> Self {
+        Self::new_internal(Self::BASE_FEE, executors, defer_startup, false)
+    }
+
+    /// Internal constructor with all parameters.
+    fn new_internal(
+        fee: u64,
+        executors: u32,
+        defer_startup: bool,
+        primary_mode: bool,
+    ) -> Self {
         init_logger!();
         let dir =
             tempfile::tempdir().expect("creating temp dir for validator state");
@@ -115,6 +136,11 @@ impl ExecutionTestEnv {
         let environment = build_svm_env(&accountsdb, blockhash, fee);
         let payers = (0..executors).map(|_| Keypair::new()).collect();
 
+        let mode_switcher = Arc::new(Notify::new());
+        if primary_mode {
+            mode_switcher.notify_one();
+        }
+
         let mut this = Self {
             payer_index: AtomicUsize::new(0),
             payers,
@@ -125,6 +151,7 @@ impl ExecutionTestEnv {
             dispatch,
             blocks_tx: validator_channels.block_update,
             scheduler: None,
+            mode_switcher: mode_switcher.clone(),
         };
         this.advance_slot(); // Move to slot 1 to ensure a non-genesis state.
 
@@ -145,6 +172,7 @@ impl ExecutionTestEnv {
             environment,
             is_auto_airdrop_lamports_enabled: false,
             shutdown: Default::default(),
+            mode_switcher: mode_switcher.clone(),
         };
 
         // Start/Defer the transaction processing backend.
@@ -165,6 +193,14 @@ impl ExecutionTestEnv {
         if let Some(scheduler) = self.scheduler.take() {
             scheduler.spawn();
         }
+    }
+
+    /// Switches the scheduler from Replica to Primary mode.
+    ///
+    /// After this call, the scheduler will accept execution transactions
+    /// in addition to replay transactions.
+    pub fn switch_to_primary_mode(&self) {
+        self.mode_switcher.notify_one();
     }
 
     /// Creates a new account with the specified properties.
@@ -320,14 +356,22 @@ impl ExecutionTestEnv {
     }
 
     /// Submits a transaction for replay and waits for its result.
+    ///
+    /// # Arguments
+    /// * `persist` - If true, record the transaction to the ledger and broadcast status
+    /// * `txn` - The transaction to replay
     #[instrument(skip(self, txn))]
     pub async fn replay_transaction(
         &self,
+        persist: bool,
         txn: impl SanitizeableTransaction,
     ) -> TransactionResult {
-        self.transaction_scheduler.replay(txn).await.inspect_err(
-            |err| error!(error = ?err, "Transaction replay failed"),
-        )
+        self.transaction_scheduler
+            .replay(persist, txn)
+            .await
+            .inspect_err(
+                |err| error!(error = ?err, "Transaction replay failed"),
+            )
     }
 
     pub fn get_account(&self, pubkey: Pubkey) -> CommitableAccount<'_> {

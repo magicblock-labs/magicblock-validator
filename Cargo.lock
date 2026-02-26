@@ -8365,6 +8365,7 @@ dependencies = [
  "solana-transaction",
  "solana-transaction-status-client-types",
  "tempfile",
+ "tokio",
  "tracing",
  "tracing-log",
  "tracing-subscriber",
