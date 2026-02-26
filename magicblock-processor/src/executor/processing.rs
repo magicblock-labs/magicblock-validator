@@ -30,11 +30,19 @@ use tracing::*;
 
 impl super::TransactionExecutor {
     /// Executes a transaction and conditionally commits its results.
+    ///
+    /// # Arguments
+    /// * `transaction` - The transaction to execute
+    /// * `tx` - Channel to send the execution result (None for replay)
+    /// * `persist` - Controls persistence behavior:
+    ///   - `None`: Execution mode - notify subscribers, record to ledger, process tasks
+    ///   - `Some(true)`: Replay with persist - record to ledger, no notifications
+    ///   - `Some(false)`: Replay without persist - no side effects
     pub(super) fn execute(
         &self,
         transaction: [SanitizedTransaction; 1],
         tx: TxnExecutionResultTx,
-        is_replay: bool,
+        persist: Option<bool>,
     ) {
         TRANSACTION_COUNT.inc();
         let (result, balances) = self.process(&transaction);
@@ -51,8 +59,9 @@ impl super::TransactionExecutor {
         // 2. Commit Account State (DB Update)
         // Note: Failed transactions still pay fees, so we attempt commit even on execution failure.
         let fee_payer = *txn.fee_payer();
-        if let Err(err) = self.commit_accounts(fee_payer, &processed, is_replay)
-        {
+        // Only send account updates for Execution mode (persist is None)
+        let notify = persist.is_none();
+        if let Err(err) = self.commit_accounts(fee_payer, &processed, notify) {
             return self.handle_failure(
                 txn,
                 TransactionError::CommitCancelled,
@@ -64,11 +73,13 @@ impl super::TransactionExecutor {
         let status = processed.status();
 
         // 3. Post-Processing (Tasks & Ledger)
-        if status.is_ok() && !is_replay {
+        // Only process scheduled tasks for successful transactions in Execution mode
+        if status.is_ok() && persist.is_none() {
             self.process_scheduled_tasks();
         }
 
-        if !is_replay {
+        // Record to ledger for Execution mode (persist is None) or Replay with persist=true
+        if persist.unwrap_or(true) {
             self.record_transaction(txn, processed, balances);
         }
 
@@ -268,7 +279,7 @@ impl super::TransactionExecutor {
         &self,
         fee_payer: Pubkey,
         result: &ProcessedTransaction,
-        is_replay: bool,
+        notify: bool,
     ) -> AccountsDbResult<()> {
         let succeeded = result.status().is_ok();
         let accounts = match result {
@@ -293,10 +304,9 @@ impl super::TransactionExecutor {
                     &fo.rollback_accounts
                 {
                     // Temporary slice construction to match expected type
-                    // This is slightly inefficient but safe; the vector here is tiny (1 item)
                     return self.insert_and_notify(
                         &[(fee_payer, fee_payer_account.clone())],
-                        is_replay,
+                        notify,
                         false,
                     );
                 }
@@ -309,13 +319,13 @@ impl super::TransactionExecutor {
             .map(|(_, acc)| acc.privileged())
             .unwrap_or(false);
 
-        self.insert_and_notify(accounts, is_replay, privileged)
+        self.insert_and_notify(accounts, notify, privileged)
     }
 
     fn insert_and_notify(
         &self,
         accounts: &[(Pubkey, solana_account::AccountSharedData)],
-        is_replay: bool,
+        notify: bool,
         privileged: bool,
     ) -> AccountsDbResult<()> {
         // Filter: Persist only dirty or privileged accounts
@@ -325,7 +335,7 @@ impl super::TransactionExecutor {
 
         self.accountsdb.insert_batch(to_commit)?;
 
-        if is_replay {
+        if !notify {
             return Ok(());
         }
 

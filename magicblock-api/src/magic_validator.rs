@@ -35,7 +35,8 @@ use magicblock_committor_service::{
 };
 use magicblock_config::{
     config::{
-        ChainOperationConfig, LedgerConfig, LifecycleMode, LoadableProgram,
+        validator::ReplicationMode, ChainOperationConfig, LedgerConfig,
+        LifecycleMode, LoadableProgram,
     },
     ValidatorParams,
 };
@@ -74,7 +75,7 @@ use solana_native_token::LAMPORTS_PER_SOL;
 use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_signer::Signer;
-use tokio::runtime::Builder;
+use tokio::{runtime::Builder, sync::Notify};
 use tokio_util::sync::CancellationToken;
 use tracing::*;
 
@@ -123,6 +124,7 @@ pub struct MagicValidator {
     claim_fees_task: ClaimFeesTask,
     task_scheduler: Option<TaskSchedulerService>,
     transaction_execution: thread::JoinHandle<()>,
+    mode_switcher: Arc<Notify>,
 }
 
 impl MagicValidator {
@@ -243,6 +245,9 @@ impl MagicValidator {
 
         validator::init_validator_authority(identity_keypair);
         let base_fee = config.validator.basefee;
+
+        // Mode switcher for transitioning from Replica to Primary mode after ledger replay
+        let mode_switcher = Arc::new(Notify::new());
         let txn_scheduler_state = TransactionSchedulerState {
             accountsdb: accountsdb.clone(),
             ledger: ledger.clone(),
@@ -256,6 +261,7 @@ impl MagicValidator {
                 .auto_airdrop_lamports
                 > 0,
             shutdown: token.clone(),
+            mode_switcher: mode_switcher.clone(),
         };
         TRANSACTION_COUNT.inc_by(ledger.count_transactions()? as u64);
         // Faucet keypair is only used for airdrops, which are not allowed in
@@ -359,6 +365,7 @@ impl MagicValidator {
             block_udpate_tx: validator_channels.block_update,
             task_scheduler: Some(task_scheduler),
             transaction_execution,
+            mode_switcher,
         })
     }
 
@@ -675,6 +682,15 @@ impl MagicValidator {
         // Ledger processing needs to happen before anything of the below
         let step_start = Instant::now();
         self.maybe_process_ledger().await?;
+
+        // Switch scheduler to Primary mode after ledger replay completes.
+        // Primary validators accept client transactions; Replica validators stay
+        // in Replica mode to receive transactions from the primary.
+        if let ReplicationMode::Primary = self.config.validator.replication_mode
+        {
+            self.mode_switcher.notify_one();
+        }
+
         log_timing("startup", "maybe_process_ledger", step_start);
 
         // Ledger replay has completed, we can now clean non-delegated accounts
