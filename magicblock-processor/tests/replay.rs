@@ -11,17 +11,20 @@ use solana_program::{
 use solana_pubkey::Pubkey;
 use solana_signer::Signer;
 use solana_transaction::sanitized::SanitizedTransaction;
+use solana_transaction_status::TransactionStatusMeta;
 use test_kit::ExecutionTestEnv;
 
 const ACCOUNTS_COUNT: usize = 8;
 const TIMEOUT: Duration = Duration::from_millis(100);
 
-/// Sets up a replay scenario: Transaction is in Ledger, but AccountsDb is reverted to pre-tx state.
-async fn setup_replay_scenario(
+/// Sets up a replay scenario in Replica mode:
+/// - Transaction is written directly to Ledger (no execution)
+/// - AccountsDb remains in pre-transaction state
+fn setup_replay_scenario_replica(
     env: &ExecutionTestEnv,
     ix: GuineaInstruction,
 ) -> (SanitizedTransaction, Vec<Pubkey>) {
-    // 1. Create Accounts & Build Instruction
+    // 1. Create Accounts
     let accounts: Vec<_> = (0..ACCOUNTS_COUNT)
         .map(|_| {
             env.create_account_with_config(LAMPORTS_PER_SOL, 128, guinea::ID)
@@ -34,62 +37,61 @@ async fn setup_replay_scenario(
         .collect();
     let pubkeys: Vec<_> = accounts.iter().map(|a| a.pubkey()).collect();
 
-    // 2. Snapshot Pre-State
-    // Critical: ensure_owned() is required to detach the snapshot from the DB's internal ARC,
-    // ensuring we hold a distinct copy of the data before modification.
-    let pre_state: Vec<_> = pubkeys
-        .iter()
-        .map(|pk| {
-            let mut acc = env.accountsdb.get_account(pk).unwrap();
-            acc.ensure_owned();
-            (*pk, acc)
-        })
-        .collect();
-
-    // 3. Execute Transaction (Updates Ledger & DB)
+    // 2. Build Transaction
     let ix = Instruction::new_with_bincode(guinea::ID, &ix, metas);
     let txn = env.build_transaction(&[ix]);
-    let sig = txn.signatures[0];
+    let sanitized = txn.sanitize(false).unwrap();
+    let sig = *sanitized.signature();
 
-    env.execute_transaction(txn).await.unwrap();
+    // 3. Write transaction to ledger directly (without executing)
+    // This simulates a transaction that was recorded by the primary
+    let meta = TransactionStatusMeta {
+        fee: 5000,
+        pre_balances: pubkeys.iter().map(|_| LAMPORTS_PER_SOL).collect(),
+        post_balances: pubkeys.iter().map(|_| LAMPORTS_PER_SOL).collect(),
+        status: Ok(()),
+        ..Default::default()
+    };
+    env.ledger
+        .write_transaction(
+            sig,
+            env.ledger.latest_block().load().slot,
+            &sanitized,
+            meta,
+        )
+        .expect("Failed to write transaction to ledger");
 
-    // 4. Revert DB to Pre-State (Simulating "Catch-up" needed)
-    for (pk, acc) in pre_state {
-        let _ = env.accountsdb.insert_account(&pk, &acc);
+    // 4. Verify accounts are still in pre-transaction state
+    for pubkey in &pubkeys {
+        let account = env.accountsdb.get_account(pubkey).unwrap();
+        assert_eq!(
+            account.data()[0],
+            0,
+            "Account should be in pre-tx state before replay"
+        );
     }
 
-    // 5. Fetch Confirmed Transaction from Ledger
-    let transaction = env
-        .ledger
-        .get_complete_transaction(sig, u64::MAX)
-        .unwrap()
-        .expect("Transaction should be in ledger")
-        .get_transaction()
-        .sanitize(false)
-        .unwrap();
-
-    // 6. Drain channels (Cleanup notifications from the setup execution)
-    while env.dispatch.transaction_status.try_recv().is_ok() {}
-    while env.dispatch.account_update.try_recv().is_ok() {}
-
-    (transaction, pubkeys)
+    (sanitized, pubkeys)
 }
 
 #[tokio::test]
 pub async fn test_replay_state_transition() {
-    let env = ExecutionTestEnv::new();
-    let (txn, pubkeys) =
-        setup_replay_scenario(&env, GuineaInstruction::WriteByteToData(42))
-            .await;
+    // Run in Replica mode (scheduler starts in Replica, no mode switch)
+    let env = ExecutionTestEnv::new_replica_mode(1, false);
 
-    // 1. Verify Pre-Replay State (Reverted)
+    let (txn, pubkeys) = setup_replay_scenario_replica(
+        &env,
+        GuineaInstruction::WriteByteToData(42),
+    );
+
+    // 1. Verify Pre-Replay State
     for pubkey in &pubkeys {
         let account = env.accountsdb.get_account(pubkey).unwrap();
         assert_eq!(account.data()[0], 0, "Account should be in pre-tx state");
     }
 
-    // 2. Perform Replay
-    assert!(env.replay_transaction(txn).await.is_ok());
+    // 2. Perform Replay (persist=false: no status notifications)
+    assert!(env.replay_transaction(false, txn).await.is_ok());
 
     // 3. Verify No Side Effects (Notifications)
     assert!(

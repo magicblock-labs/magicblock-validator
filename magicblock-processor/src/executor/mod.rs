@@ -143,13 +143,13 @@ impl TransactionExecutor {
                     let Some(txn) = txn else { break };
                     match txn.mode {
                         TransactionProcessingMode::Execution(tx) => {
-                            self.execute([txn.transaction], tx, false);
+                            self.execute([txn.transaction], tx, None);
                         }
                         TransactionProcessingMode::Simulation(tx) => {
                             self.simulate([txn.transaction], tx);
                         }
-                        TransactionProcessingMode::Replay(tx) => {
-                            self.execute([txn.transaction], Some(tx), true);
+                        TransactionProcessingMode::Replay(data) => {
+                            self.execute([txn.transaction], None, Some(data));
                         }
                     }
                     let _ = self.ready_tx.try_send(self.id);
