@@ -114,19 +114,21 @@ where
 
     /// Removes actions from strategy and if they contained callbacks executes them
     /// Returns removed strategy
-    fn handle_actions_error(&mut self) -> TransactionStrategy {
+    fn handle_actions_error(&mut self, succeeded: bool) -> TransactionStrategy {
         let mut removed_actions =
             self.inner.remove_actions(&mut self.transaction_strategy);
         let callbacks = removed_actions.extract_action_callbacks();
         if !callbacks.is_empty() {
-            self.inner.actions_callback_executor.execute(callbacks);
+            self.inner
+                .actions_callback_executor
+                .execute(callbacks, succeeded);
         }
 
         removed_actions
     }
 
-    pub fn execute_callbacks(&mut self) {
-        let junk_strategy = self.handle_actions_error();
+    pub fn execute_callbacks(&mut self, succeeded: bool) {
+        let junk_strategy = self.handle_actions_error(succeeded);
         self.inner.junk.push(junk_strategy);
     }
 
@@ -151,7 +153,7 @@ where
             TransactionStrategyExecutionError::ActionsError(_, _) => {
                 // // Here we patch strategy for it to be retried in next iteration
                 // // & we also record data that has to be cleaned up after patch
-                let to_cleanup = self.handle_actions_error();
+                let to_cleanup = self.handle_actions_error(false);
                 Ok(ControlFlow::Continue(to_cleanup))
             }
             TransactionStrategyExecutionError::CommitIDError(_, _) => {

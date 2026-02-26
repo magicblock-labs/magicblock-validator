@@ -176,7 +176,7 @@ where
             }
             TransactionStrategyExecutionError::ActionsError(_, _) => {
                 // Intent bundles allow for actions to be in commit stage
-                let to_cleanup = handle_actions_error(self.inner, &mut self.state.commit_strategy);
+                let to_cleanup = handle_actions_error(self.inner, &mut self.state.commit_strategy, false);
                 Ok(ControlFlow::Continue(to_cleanup))
             }
             TransactionStrategyExecutionError::UndelegationError(_, _) => {
@@ -235,14 +235,18 @@ where
 
     /// Removes actions from commit & finalize strategies
     /// Executes callbacks
-    pub fn execute_callbacks(&mut self) {
-        let junk_strategy =
-            handle_actions_error(&self.inner, &mut self.state.commit_strategy);
+    pub fn execute_callbacks(&mut self, succeeded: bool) {
+        let junk_strategy = handle_actions_error(
+            &self.inner,
+            &mut self.state.commit_strategy,
+            succeeded,
+        );
         self.inner.junk.push(junk_strategy);
 
         let junk_strategy = handle_actions_error(
             &self.inner,
             &mut self.state.finalize_strategy,
+            succeeded,
         );
         self.inner.junk.push(junk_strategy);
     }
@@ -326,9 +330,12 @@ where
 
     /// Removes actions from finalize strateg
     /// Executes callbacks
-    pub fn execute_callbacks(&mut self) {
-        let junk_strategy =
-            handle_actions_error(self.inner, &mut self.state.finalize_strategy);
+    pub fn execute_callbacks(&mut self, succeeded: bool) {
+        let junk_strategy = handle_actions_error(
+            self.inner,
+            &mut self.state.finalize_strategy,
+            succeeded,
+        );
         self.inner.junk.push(junk_strategy);
     }
 
@@ -356,7 +363,7 @@ where
             TransactionStrategyExecutionError::ActionsError(_, _) => {
                 // Here we patch strategy for it to be retried in next iteration
                 // & we also record data that has to be cleaned up after patch
-                let to_cleanup = handle_actions_error(self.inner, &mut self.state.finalize_strategy);
+                let to_cleanup = handle_actions_error(self.inner, &mut self.state.finalize_strategy, false);
                 Ok(ControlFlow::Continue(to_cleanup))
             }
             TransactionStrategyExecutionError::UndelegationError(_, _) => {
@@ -399,6 +406,7 @@ where
 fn handle_actions_error<T, F, A>(
     inner: &IntentExecutorImpl<T, F, A>,
     transaction_strategy: &mut TransactionStrategy,
+    succeeded: bool, // TODO(edwin): Result<(), Error>?
 ) -> TransactionStrategy
 where
     T: TransactionPreparator,
@@ -408,7 +416,9 @@ where
     let mut removed_actions = inner.remove_actions(transaction_strategy);
     let callbacks = removed_actions.extract_action_callbacks();
     if !callbacks.is_empty() {
-        inner.actions_callback_executor.execute(callbacks);
+        inner
+            .actions_callback_executor
+            .execute(callbacks, succeeded);
     }
 
     removed_actions

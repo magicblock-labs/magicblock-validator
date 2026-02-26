@@ -111,7 +111,7 @@ pub trait IntentExecutor: Send + Sync + 'static {
 
 pub trait ActionsCallbackExecutor: Send + Sync + 'static {
     /// Executes actions callbacks
-    fn execute(&self, callbacks: Vec<BaseActionCallback>);
+    fn execute(&self, callbacks: Vec<BaseActionCallback>, succeeded: bool);
 }
 
 pub struct IntentExecutorImpl<T, F, A> {
@@ -277,7 +277,7 @@ where
                         info!(
                             "Intent execution timed out, cleaning up actions"
                         );
-                        single_stage_executor.execute_callbacks();
+                        single_stage_executor.execute_callbacks(false);
                         single_stage_executor
                             .execute(&committed_pubkeys, persister)
                             .await
@@ -286,7 +286,7 @@ where
             } else {
                 // Already tumed out
                 // Handle timeout and continue execution
-                single_stage_executor.execute_callbacks();
+                single_stage_executor.execute_callbacks(false);
                 single_stage_executor
                     .execute(&committed_pubkeys, persister)
                     .await
@@ -314,10 +314,7 @@ where
                 finalize_signature: _,
             }) if !committed_pubkeys.is_empty() => err,
             res => {
-                if res.is_err() {
-                    single_stage_executor.execute_callbacks();
-                }
-
+            single_stage_executor.execute_callbacks(res.is_ok());
                 let transaction_strategy = single_stage_executor.transaction_strategy;
                 self.junk.push(transaction_strategy);
                 return res;
@@ -369,22 +366,22 @@ where
                     Err(_) => {
                         // Timeout triggers all callbacks
                         has_finalize_callbacks = false;
-                        executor.execute_callbacks();
+                        executor.execute_callbacks(false);
                         executor.commit(committed_pubkeys, persister).await
                     }
                 }
             } else {
                 // Timeout triggers all callbacks
                 has_finalize_callbacks = false;
-                executor.execute_callbacks();
+                executor.execute_callbacks(false);
                 executor.commit(committed_pubkeys, persister).await
             }
         } else {
             executor.commit(committed_pubkeys, persister).await
         };
+        executor.execute_callbacks(commit_res.is_ok());
+        let commit_signature = commit_res?;
 
-        let commit_signature =
-            commit_res.inspect_err(|_| executor.execute_callbacks())?;
         let mut finalize_executor = executor.done(commit_signature);
         let finalize_res = if has_finalize_callbacks {
             if let Some(time_left) = time_left() {
@@ -395,22 +392,22 @@ where
                         info!(
                             "Intent execution timed out, cleaning up actions"
                         );
-                        finalize_executor.execute_callbacks();
+                        finalize_executor.execute_callbacks(false);
                         finalize_executor.finalize(persister).await
                     }
                 }
             } else {
                 // Already tumed out
                 // Handle timeout and continue execution
-                finalize_executor.execute_callbacks();
+                finalize_executor.execute_callbacks(false);
                 finalize_executor.finalize(persister).await
             }
         } else {
             finalize_executor.finalize(persister).await
         };
+        finalize_executor.execute_callbacks(finalize_res.is_ok());
 
-        let finalize_signature =
-            finalize_res.inspect_err(|_| finalize_executor.execute_callbacks())?;
+        let finalize_signature = finalize_res?;
         let finalized_stage = finalize_executor.done(finalize_signature);
         Ok(ExecutionOutput::TwoStage {
             commit_signature: finalized_stage.state.commit_signature,
