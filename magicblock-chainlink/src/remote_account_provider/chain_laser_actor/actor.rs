@@ -228,8 +228,9 @@ impl<H: StreamHandle, S: StreamFactory<H>> ChainLaserActor<H, S> {
         );
         let shared_subscriptions = Arc::clone(stream_manager.subscriptions());
 
-        let optimization_interval_duration =
-            Duration::from_secs(grpc_config.max_time_without_optimization_secs);
+        let optimization_interval_duration = Duration::from_secs(
+            grpc_config.max_time_without_optimization_secs.max(10),
+        );
         let me = Self {
             stream_manager,
             messages_receiver,
