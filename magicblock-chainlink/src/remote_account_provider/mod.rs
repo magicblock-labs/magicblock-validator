@@ -809,10 +809,46 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                 .join(", ");
             trace!(pubkeys = pubkeys, "Subscribing to accounts");
         }
-        for (pubkey, _) in subscribe_and_fetch.iter() {
-            // Register the subscription for the pubkey (handles LRU cache and eviction first)
-            self.subscribe(pubkey).await?;
+        // Send all subscription requests in parallel (non-fail-fast)
+        // We use join_all instead of try_join_all to ensure ALL
+        // subscribe attempts complete, even if some fail. This
+        // prevents resource leaks in fetching_accounts and ensures
+        // all oneshot receivers get a response (either success or
+        // error).
+        let subscription_results = join_all(
+            subscribe_and_fetch
+                .iter()
+                .map(|(pubkey, _)| self.subscribe(pubkey)),
+        )
+        .await;
+
+        // Collect errors and log each individual failure
+        let mut errors = Vec::new();
+        for (result, (pubkey, _)) in
+            subscription_results.iter().zip(subscribe_and_fetch.iter())
+        {
+            if let Err(err) = result {
+                error!(
+                    pubkey = %pubkey, err = ?err,
+                    "Failed to subscribe to account"
+                );
+                errors.push(format!("{}: {}", pubkey, err));
+            }
         }
+
+        // Fail if ANY subscription failed
+        if !errors.is_empty() {
+            return Err(
+                RemoteAccountProviderError::AccountSubscriptionsTaskFailed(
+                    format!(
+                        "{} subscription(s) failed: [{}]",
+                        errors.len(),
+                        errors.join(", ")
+                    ),
+                ),
+            );
+        }
+
         Ok(())
     }
 
