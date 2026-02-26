@@ -11,7 +11,7 @@ use crate::{
             TransactionStrategyExecutionError,
         },
         task_info_fetcher::TaskInfoFetcher,
-        ExecutionOutput, IntentExecutorImpl,
+        ActionsCallbackExecutor, ExecutionOutput, IntentExecutorImpl,
     },
     persist::{IntentPersister, IntentPersisterImpl},
     tasks::{
@@ -21,21 +21,25 @@ use crate::{
     transaction_preparator::TransactionPreparator,
 };
 
-pub struct SingleStageExecutor<'a, T, F> {
-    pub(in crate::intent_executor) inner: &'a mut IntentExecutorImpl<T, F>,
+pub struct SingleStageExecutor<'a, T, F, A> {
+    current_attempt: u8,
+    // TODO(edwin): remove this and replace with IntentClient
+    pub(in crate::intent_executor) inner: &'a mut IntentExecutorImpl<T, F, A>,
     pub transaction_strategy: TransactionStrategy,
 }
 
-impl<'a, T, F> SingleStageExecutor<'a, T, F>
+impl<'a, T, F, A> SingleStageExecutor<'a, T, F, A>
 where
     T: TransactionPreparator,
     F: TaskInfoFetcher,
+    A: ActionsCallbackExecutor,
 {
     pub fn new(
-        executor: &'a mut IntentExecutorImpl<T, F>,
+        executor: &'a mut IntentExecutorImpl<T, F, A>,
         transaction_strategy: TransactionStrategy,
     ) -> Self {
         Self {
+            current_attempt: 0,
             inner: executor,
             transaction_strategy,
         }
@@ -52,9 +56,8 @@ where
     ) -> IntentExecutorResult<ExecutionOutput> {
         const RECURSION_CEILING: u8 = 10;
 
-        let mut i = 0;
         let result = loop {
-            i += 1;
+            self.current_attempt += 1;
 
             // Prepare & execute message
             let execution_result = self
@@ -76,13 +79,9 @@ where
             };
 
             // Attempt patching
-            let flow = Self::patch_strategy(
-                self.inner,
-                &execution_err,
-                &mut self.transaction_strategy,
-                committed_pubkeys,
-            )
-            .await?;
+            let flow = self
+                .patch_strategy(&execution_err, committed_pubkeys)
+                .await?;
             let cleanup = match flow {
                 ControlFlow::Continue(cleanup) => cleanup,
                 ControlFlow::Break(()) => {
@@ -91,9 +90,9 @@ where
             };
             self.inner.junk.push(cleanup);
 
-            if i >= RECURSION_CEILING {
+            if self.current_attempt >= RECURSION_CEILING {
                 error!(
-                    attempt = i,
+                    attempt = self.current_attempt,
                     ceiling = RECURSION_CEILING,
                     error = ?execution_err,
                     "Recursion ceiling exceeded"
@@ -113,6 +112,24 @@ where
         })
     }
 
+    /// Removes actions from strategy and if they contained callbacks executes them
+    /// Returns removed strategy
+    fn handle_actions_error(&mut self) -> TransactionStrategy {
+        let mut removed_actions =
+            self.inner.remove_actions(&mut self.transaction_strategy);
+        let callbacks = removed_actions.extract_action_callbacks();
+        if !callbacks.is_empty() {
+            self.inner.actions_callback_executor.execute(callbacks);
+        }
+
+        removed_actions
+    }
+
+    pub fn execute_callbacks(&mut self) {
+        let junk_strategy = self.handle_actions_error();
+        self.inner.junk.push(junk_strategy);
+    }
+
     /// Patch the current `transaction_strategy` in response to a recoverable
     /// [`TransactionStrategyExecutionError`], optionally preparing cleanup data
     /// to be applied after a retry.
@@ -121,9 +138,8 @@ where
     /// - `Continue(to_cleanup)` when a retry should be attempted with cleanup metadata, or
     /// - `Break(())` when this stage cannot be recovered here.
     pub async fn patch_strategy(
-        inner: &IntentExecutorImpl<T, F>,
+        &mut self,
         err: &TransactionStrategyExecutionError,
-        transaction_strategy: &mut TransactionStrategy,
         committed_pubkeys: &[Pubkey],
     ) -> IntentExecutorResult<ControlFlow<(), TransactionStrategy>> {
         if committed_pubkeys.is_empty() {
@@ -133,19 +149,18 @@ where
 
         match err {
             TransactionStrategyExecutionError::ActionsError(_, _) => {
-                // Here we patch strategy for it to be retried in next iteration
-                // & we also record data that has to be cleaned up after patch
-                let to_cleanup =
-                    inner.handle_actions_error(transaction_strategy);
+                // // Here we patch strategy for it to be retried in next iteration
+                // // & we also record data that has to be cleaned up after patch
+                let to_cleanup = self.handle_actions_error();
                 Ok(ControlFlow::Continue(to_cleanup))
             }
             TransactionStrategyExecutionError::CommitIDError(_, _) => {
                 // Here we patch strategy for it to be retried in next iteration
                 // & we also record data that has to be cleaned up after patch
-                let to_cleanup = inner
+                let to_cleanup = self.inner
                     .handle_commit_id_error(
                         committed_pubkeys,
-                        transaction_strategy,
+                        &mut self.transaction_strategy,
                     )
                     .await?;
                 Ok(ControlFlow::Continue(to_cleanup))
@@ -156,13 +171,13 @@ where
                 signature,
             ) => {
                 let optimized_tasks =
-                    transaction_strategy.optimized_tasks.as_slice();
+                    self.transaction_strategy.optimized_tasks.as_slice();
                 if let Some(BaseTaskImpl::Commit(task)) = err
                     .task_index()
                     .and_then(|index| optimized_tasks.get(index as usize))
                 {
                     Self::handle_unfinalized_account_error(
-                        inner, signature, task,
+                        self.inner, signature, task,
                     )
                     .await
                 } else {
@@ -179,7 +194,7 @@ where
                 // Here we patch strategy for it to be retried in next iteration
                 // & we also record data that has to be cleaned up after patch
                 let to_cleanup =
-                    inner.handle_undelegation_error(transaction_strategy);
+                    self.inner.handle_undelegation_error(&mut self.transaction_strategy);
                 Ok(ControlFlow::Continue(to_cleanup))
             }
             TransactionStrategyExecutionError::CpiLimitError(_, _)
@@ -198,7 +213,7 @@ where
     /// Handles unfinalized account error
     /// Sends a separate tx to finalize account and then continues execution
     async fn handle_unfinalized_account_error(
-        inner: &IntentExecutorImpl<T, F>,
+        inner: &IntentExecutorImpl<T, F, A>,
         failed_signature: &Option<Signature>,
         task: &CommitTask,
     ) -> IntentExecutorResult<ControlFlow<(), TransactionStrategy>> {

@@ -144,6 +144,10 @@ impl ScheduledIntentBundle {
         self.intent_bundle.has_undelegate_intent()
     }
 
+    pub fn has_callbacks(&self) -> bool {
+        self.intent_bundle.has_callbacks()
+    }
+
     pub fn is_empty(&self) -> bool {
         self.intent_bundle.is_empty()
     }
@@ -383,6 +387,25 @@ impl MagicIntentBundle {
 
         no_committed && no_committed_and_undelegated && no_actions
     }
+
+    pub fn has_callbacks(&self) -> bool {
+        let x = self
+            .commit
+            .as_ref()
+            .map(|el| el.has_callbacks())
+            .unwrap_or(false);
+        let y = self
+            .commit_and_undelegate
+            .as_ref()
+            .map(|el| el.has_callbacks())
+            .unwrap_or(false);
+        let z = self
+            .standalone_actions
+            .iter()
+            .any(|el| el.callback.is_some());
+
+        x || y || z
+    }
 }
 
 impl MagicBaseIntent {
@@ -518,6 +541,19 @@ impl CommitAndUndelegate {
     pub fn is_empty(&self) -> bool {
         self.commit_action.is_empty()
     }
+
+    pub fn has_callbacks(&self) -> bool {
+        let x = self.commit_action.has_callbacks();
+        let y = if let UndelegateType::WithBaseActions(actions) =
+            &self.undelegate_action
+        {
+            actions.iter().any(|el| el.callback.is_some())
+        } else {
+            false
+        };
+
+        x || y
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -541,6 +577,16 @@ impl From<&ActionArgs> for ProgramArgs {
     }
 }
 
+/// A callback that is execution with result of BaseAction
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BaseActionCallback {
+    pub destination_program: Pubkey,
+    pub discriminator: Vec<u8>,
+    pub payload: Vec<u8>, // TODO(edwin): remove/keep?
+    pub compute_units: u32,
+    pub account_metas_per_program: Vec<ShortAccountMeta>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BaseAction {
     pub compute_units: u32,
@@ -549,6 +595,7 @@ pub struct BaseAction {
     pub escrow_authority: Pubkey,
     pub data_per_program: ProgramArgs,
     pub account_metas_per_program: Vec<ShortAccountMeta>,
+    pub callback: Option<BaseActionCallback>,
 }
 
 impl BaseAction {
@@ -601,6 +648,7 @@ impl BaseAction {
             escrow_authority: *authority_pubkey,
             data_per_program: args.args.into(),
             account_metas_per_program: args.accounts,
+            callback: None,
         })
     }
 }
@@ -814,6 +862,18 @@ impl CommitType {
             Self::WithBaseActions {
                 committed_accounts, ..
             } => committed_accounts.is_empty(),
+        }
+    }
+
+    pub fn has_callbacks(&self) -> bool {
+        if let Self::WithBaseActions {
+            committed_accounts: _,
+            base_actions,
+        } = self
+        {
+            base_actions.iter().any(|el| el.callback.is_some())
+        } else {
+            false
         }
     }
 }

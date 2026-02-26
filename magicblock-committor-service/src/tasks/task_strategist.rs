@@ -1,5 +1,6 @@
 use std::collections::BinaryHeap;
 
+use magicblock_program::magic_scheduled_base_intent::BaseActionCallback;
 use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
 use solana_signer::{Signer, SignerError};
@@ -8,12 +9,13 @@ use tracing::error;
 use crate::{
     persist::{CommitStrategy, IntentPersister},
     tasks::{
-        commit_task::CommitDelivery, utils::TransactionUtils, BaseTask,
-        BaseTaskImpl,
+        commit_task::CommitDelivery, utils::TransactionUtils, BaseActionTask,
+        BaseTask, BaseTaskImpl,
     },
     transactions::{serialize_and_encode_base64, MAX_ENCODED_TRANSACTION_SIZE},
 };
 
+#[derive(Default)]
 pub struct TransactionStrategy {
     pub optimized_tasks: Vec<BaseTaskImpl>,
     pub lookup_tables_keys: Vec<Pubkey>,
@@ -35,6 +37,34 @@ impl TransactionStrategy {
                 ),
             )
         }
+    }
+
+    /// Extracts callbacks from actions
+    pub fn extract_action_callbacks(&mut self) -> Vec<BaseActionCallback> {
+        self.optimized_tasks
+            .iter_mut()
+            .filter_map(|el| {
+                if let BaseTaskImpl::BaseAction(value) = el {
+                    Some(value)
+                } else {
+                    None
+                }
+            })
+            .filter_map(BaseActionTask::extract_callback)
+            .collect()
+    }
+
+    pub fn has_actions_callbakcs(&self) -> bool {
+        self.optimized_tasks
+            .iter()
+            .filter_map(|el| {
+                if let BaseTaskImpl::BaseAction(value) = el {
+                    Some(value)
+                } else {
+                    None
+                }
+            })
+            .any(BaseActionTask::has_callback)
     }
 
     pub fn uses_alts(&self) -> bool {
