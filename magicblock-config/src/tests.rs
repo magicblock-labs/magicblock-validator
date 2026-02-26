@@ -76,6 +76,7 @@ fn test_defaults_are_sane() {
     assert_eq!(config.grpc.max_subs_in_old_optimized, 5000);
     assert_eq!(config.grpc.max_old_unoptimized, 5);
     assert_eq!(config.grpc.max_subs_in_new, 400);
+    assert_eq!(config.grpc.max_time_without_optimization_secs, 60);
 }
 
 #[test]
@@ -470,6 +471,7 @@ fn test_example_config_full_coverage() {
     assert_eq!(config.grpc.max_subs_in_old_optimized, 5000);
     assert_eq!(config.grpc.max_old_unoptimized, 5);
     assert_eq!(config.grpc.max_subs_in_new, 400);
+    assert_eq!(config.grpc.max_time_without_optimization_secs, 60);
 }
 
 #[test]
@@ -489,6 +491,10 @@ fn test_env_vars_full_coverage() {
         EnvVarGuard::new("MBV_GRPC__MAX_SUBS_IN_OLD_OPTIMIZED", "1337"),
         EnvVarGuard::new("MBV_GRPC__MAX_OLD_UNOPTIMIZED", "7"),
         EnvVarGuard::new("MBV_GRPC__MAX_SUBS_IN_NEW", "33"),
+        EnvVarGuard::new(
+            "MBV_GRPC__MAX_TIME_WITHOUT_OPTIMIZATION_SECS",
+            "42",
+        ),
         // --- Metrics ---
         EnvVarGuard::new("MBV_METRICS__ADDRESS", "127.0.0.1:9091"),
         EnvVarGuard::new("MBV_METRICS__COLLECT_FREQUENCY", "15s"),
@@ -547,6 +553,9 @@ fn test_env_vars_full_coverage() {
     assert_eq!(config.grpc.max_subs_in_old_optimized, 1337);
     assert_eq!(config.grpc.max_old_unoptimized, 7);
     assert_eq!(config.grpc.max_subs_in_new, 33);
+    assert_eq!(
+        config.grpc.max_time_without_optimization_secs, 42
+    );
 
     // Metrics
     assert_eq!(config.metrics.address.0.port(), 9091);
