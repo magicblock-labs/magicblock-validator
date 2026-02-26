@@ -1,3 +1,4 @@
+use dlp::state::DelegationRecord;
 use futures_util::future::join_all;
 use magicblock_accounts_db::traits::AccountsBank;
 use magicblock_core::token_programs::try_derive_eata_address_and_bump;
@@ -10,7 +11,9 @@ use tracing::*;
 use super::{delegation, types::AccountWithCompanion, FetchCloner};
 use crate::{
     cloner::{AccountCloneRequest, Cloner},
-    remote_account_provider::{ChainPubsubClient, ChainRpcClient},
+    remote_account_provider::{
+        ChainPubsubClient, ChainRpcClient, ResolvedAccountSharedData,
+    },
 };
 
 /// Resolves ATAs with eATA projection.
@@ -92,6 +95,16 @@ where
 
     let ata_results = ata_join_set.join_all().await;
 
+    // Phase 1: Collect successfully resolved ATAs
+    struct AtaResolutionInput {
+        ata_pubkey: Pubkey,
+        ata_account: ResolvedAccountSharedData,
+        eata_pubkey: Pubkey,
+        eata_shared: Option<AccountSharedData>,
+    }
+
+    let mut ata_inputs: Vec<AtaResolutionInput> = Vec::new();
+
     for result in ata_results {
         let AccountWithCompanion {
             pubkey: ata_pubkey,
@@ -110,31 +123,48 @@ where
             }
         };
 
-        // Defaults: clone the ATA as-is
-        let mut account_to_clone = ata_account.account_shared_data_cloned();
-        let mut commit_frequency_ms = None;
-        let mut delegated_to_other = None;
+        let eata_shared =
+            maybe_eata_account.map(|e| e.account_shared_data_cloned());
+        ata_inputs.push(AtaResolutionInput {
+            ata_pubkey,
+            ata_account,
+            eata_pubkey,
+            eata_shared,
+        });
+    }
 
-        // If there's an eATA, try to use it + delegation record to project the ATA
-        if let Some(eata_acc) = maybe_eata_account {
-            let eata_shared = eata_acc.account_shared_data_cloned();
-
-            if let Some(deleg) = delegation::fetch_and_parse_delegation_record(
+    // Phase 2: Fetch delegation records in parallel for all eATAs
+    let deleg_futures = ata_inputs.iter().filter_map(|input| {
+        input.eata_shared.as_ref().map(|_| {
+            delegation::fetch_and_parse_delegation_record(
                 this,
-                eata_pubkey,
+                input.eata_pubkey,
                 this.remote_account_provider.chain_slot(),
                 fetch_origin,
             )
-            .await
-            {
+        })
+    });
+    let deleg_results: Vec<Option<DelegationRecord>> =
+        join_all(deleg_futures).await;
+
+    // Phase 3: Combine results
+    let mut deleg_iter = deleg_results.into_iter();
+    for input in ata_inputs {
+        let mut account_to_clone =
+            input.ata_account.account_shared_data_cloned();
+        let mut commit_frequency_ms = None;
+        let mut delegated_to_other = None;
+
+        if let Some(eata_shared) = &input.eata_shared {
+            if let Some(Some(deleg)) = deleg_iter.next() {
                 delegated_to_other =
                     delegation::get_delegated_to_other(this, &deleg);
                 commit_frequency_ms = Some(deleg.commit_frequency_ms);
 
                 if let Some(projected_ata) = this
                     .maybe_project_delegated_ata_from_eata(
-                        ata_account.account_shared_data(),
-                        &eata_shared,
+                        input.ata_account.account_shared_data(),
+                        eata_shared,
                         &deleg,
                     )
                 {
@@ -144,7 +174,7 @@ where
         }
 
         accounts_to_clone.push(AccountCloneRequest {
-            pubkey: ata_pubkey,
+            pubkey: input.ata_pubkey,
             account: account_to_clone,
             commit_frequency_ms,
             delegated_to_other,
