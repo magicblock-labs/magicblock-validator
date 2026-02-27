@@ -14,6 +14,7 @@ flume = { workspace = true }
 
 solana-account = { workspace = true }
 solana-account-decoder = { workspace = true }
+solana-clock = { workspace = true }
 solana-hash = { workspace = true }
 solana-program = { workspace = true }
 solana-pubkey = { workspace = true }

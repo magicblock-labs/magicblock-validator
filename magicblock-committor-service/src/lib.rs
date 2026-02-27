@@ -22,6 +22,7 @@ pub mod test_utils;
 
 pub use actions_callback_executor::ActionsCallbackExecutorImpl;
 pub use compute_budget::ComputeBudgetConfig;
+pub use config::DEFAULT_ACTIONS_TIMEOUT;
 pub use magicblock_committor_program::{
     ChangedAccount, Changeset, ChangesetMeta,
 };

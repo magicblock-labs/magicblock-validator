@@ -280,9 +280,8 @@ where
         &mut self,
         persister: &Option<P>,
     ) -> IntentExecutorResult<Signature> {
-        let mut i = 0;
         let finalize_result = loop {
-            i += 1;
+            self.state.current_attempt += 1;
 
             // Prepare & execute message
             let execution_result = self
@@ -308,7 +307,7 @@ where
             };
             self.inner.junk.push(cleanup);
 
-            if i >= Self::RECURSION_CEILING {
+            if self.state.current_attempt >= Self::RECURSION_CEILING {
                 error!("CRITICAL! Recursion ceiling reached");
                 break Err(execution_err);
             } else {

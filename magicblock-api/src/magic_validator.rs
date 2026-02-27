@@ -30,9 +30,8 @@ use magicblock_chainlink::{
     Chainlink,
 };
 use magicblock_committor_service::{
-    config::ChainConfig,
-    intent_executor::ActionsCallbackExecutor,
-    BaseIntentCommittor, CommittorService, ComputeBudgetConfig,
+    config::ChainConfig, ActionsCallbackExecutorImpl, BaseIntentCommittor,
+    CommittorService, ComputeBudgetConfig, DEFAULT_ACTIONS_TIMEOUT,
 };
 use magicblock_config::{
     config::{
@@ -211,6 +210,7 @@ impl MagicValidator {
         let committor_service = Self::init_committor_service(
             &config,
             &dispatch.transaction_scheduler,
+            &ledger.latest_block(),
         )
         .await?;
         log_timing("startup", "committor_service_init", step_start);
@@ -368,17 +368,20 @@ impl MagicValidator {
         })
     }
 
-    #[instrument(skip(config))]
+    #[instrument(skip(config, transaction_scheduler, latest_block))]
     async fn init_committor_service(
         config: &ValidatorParams,
         transaction_scheduler: &TransactionSchedulerHandle,
+        latest_block: &LatestBlock,
     ) -> ApiResult<Option<Arc<CommittorService>>> {
         let committor_persist_path =
             config.storage.join("committor_service.sqlite");
         debug!(path = %committor_persist_path.display(), "Initializing committor service");
         // TODO(thlorenz): when we support lifecycle modes again, only start it when needed
-        let actions_callback_executor =
-            ActionsCallbackExecutorImpl::new(transaction_scheduler.clone());
+        let actions_callback_executor = ActionsCallbackExecutorImpl::new(
+            transaction_scheduler.clone(),
+            latest_block.clone(),
+        );
         let committor_service = Some(Arc::new(CommittorService::try_start(
             config.validator.keypair.insecure_clone(),
             committor_persist_path,
@@ -388,7 +391,7 @@ impl MagicValidator {
                 compute_budget_config: ComputeBudgetConfig::new(
                     config.commit.compute_unit_price,
                 ),
-                actions_timeout: ACTIONS_TIMEOUT,
+                actions_timeout: DEFAULT_ACTIONS_TIMEOUT,
             },
             actions_callback_executor,
         )?));

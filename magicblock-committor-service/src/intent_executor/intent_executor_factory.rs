@@ -31,11 +31,8 @@ pub struct IntentExecutorFactoryImpl<A> {
 impl<A: ActionsCallbackExecutor> IntentExecutorFactory
     for IntentExecutorFactoryImpl<A>
 {
-    type Executor = IntentExecutorImpl<
-        TransactionPreparatorImpl,
-        CacheTaskInfoFetcher,
-        A,
-    >;
+    type Executor =
+        IntentExecutorImpl<TransactionPreparatorImpl, CacheTaskInfoFetcher, A>;
 
     fn create_instance(&self) -> Self::Executor {
         let transaction_preparator = TransactionPreparatorImpl::new(

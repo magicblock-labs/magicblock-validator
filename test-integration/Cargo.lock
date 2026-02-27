@@ -3580,6 +3580,7 @@ dependencies = [
  "magicblock-magic-program-api 0.8.1",
  "solana-account",
  "solana-account-decoder",
+ "solana-clock",
  "solana-hash",
  "solana-program",
  "solana-pubkey",

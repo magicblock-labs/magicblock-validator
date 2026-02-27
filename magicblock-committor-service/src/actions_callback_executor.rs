@@ -1,59 +1,79 @@
-use magicblock_core::link::transactions::TransactionSchedulerHandle;
+use magicblock_core::{
+    link::transactions::TransactionSchedulerHandle, traits::LatestBlockProvider,
+};
 use magicblock_program::{
     magic_scheduled_base_intent::BaseActionCallback,
     validator::validator_authority,
 };
+use solana_instruction::{AccountMeta, Instruction};
 use solana_signer::Signer;
 
 use crate::intent_executor::ActionsCallbackExecutor;
 
 #[derive(Clone)]
-pub struct ActionsCallbackExecutorImpl {
+pub struct ActionsCallbackExecutorImpl<L> {
     scheduler: TransactionSchedulerHandle,
+    latest_block: L,
 }
 
-impl ActionsCallbackExecutorImpl {
-    pub fn new(scheduler: TransactionSchedulerHandle) -> Self {
-        Self { scheduler }
+impl<L: LatestBlockProvider> ActionsCallbackExecutorImpl<L> {
+    pub fn new(scheduler: TransactionSchedulerHandle, latest_block: L) -> Self {
+        Self {
+            scheduler,
+            latest_block,
+        }
+    }
+
+    fn instruction(
+        callback: BaseActionCallback,
+        authority: &solana_pubkey::Pubkey,
+        succeeded: bool,
+    ) -> Instruction {
+        let mut data = callback.discriminator;
+        data.push(succeeded as u8);
+        data.extend(callback.payload);
+        let account_metas =
+            std::iter::once(AccountMeta::new_readonly(*authority, true))
+                .chain(callback.account_metas_per_program.into_iter().map(
+                    |m| {
+                        if m.is_writable {
+                            AccountMeta {
+                                pubkey: m.pubkey,
+                                // Can be writable only if not validator,
+                                is_writable: &m.pubkey != authority,
+                                is_signer: false,
+                            }
+                        } else {
+                            AccountMeta::new_readonly(m.pubkey, false)
+                        }
+                    },
+                ))
+                .collect();
+        Instruction::new_with_bytes(
+            callback.destination_program,
+            &data,
+            account_metas,
+        )
     }
 }
 
-impl ActionsCallbackExecutor for ActionsCallbackExecutorImpl {
+impl<L: LatestBlockProvider> ActionsCallbackExecutor
+    for ActionsCallbackExecutorImpl<L>
+{
     fn execute(&self, callbacks: Vec<BaseActionCallback>, succeeded: bool) {
         let scheduler = self.scheduler.clone();
+        let blockhash = self.latest_block.blockhash();
         tokio::spawn(async move {
+            let authority = validator_authority();
             for callback in callbacks {
-                let authority = validator_authority();
-                let mut data = callback.discriminator;
-                data.push(succeeded as u8);
-                data.extend(callback.payload);
-                let account_metas = callback
-                    .account_metas_per_program
-                    .into_iter()
-                    .map(|m| {
-                        if m.is_writable {
-                            solana_instruction::AccountMeta::new(
-                                m.pubkey, false,
-                            )
-                        } else {
-                            solana_instruction::AccountMeta::new_readonly(
-                                m.pubkey, false,
-                            )
-                        }
-                    })
-                    .collect::<Vec<_>>();
-                let ix = solana_instruction::Instruction::new_with_bytes(
-                    callback.destination_program,
-                    &data,
-                    account_metas,
+                let ix =
+                    Self::instruction(callback, &authority.pubkey(), succeeded);
+                let tx = solana_transaction::Transaction::new_signed_with_payer(
+                    &[ix],
+                    Some(&authority.pubkey()),
+                    &[&authority],
+                    blockhash,
                 );
-                let tx =
-                    solana_transaction::Transaction::new_signed_with_payer(
-                        &[ix],
-                        Some(&authority.pubkey()),
-                        &[&authority],
-                        solana_hash::Hash::default(),
-                    );
                 if let Err(err) = scheduler.schedule(tx).await {
                     tracing::error!(
                         error = ?err,

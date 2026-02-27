@@ -17,8 +17,7 @@ use crate::{
     },
     intent_executor::{
         intent_executor_factory::IntentExecutorFactoryImpl,
-        task_info_fetcher::CacheTaskInfoFetcher,
-        ActionsCallbackExecutor,
+        task_info_fetcher::CacheTaskInfoFetcher, ActionsCallbackExecutor,
     },
     persist::IntentPersister,
     ComputeBudgetConfig,
