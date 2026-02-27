@@ -84,7 +84,7 @@ fn test_cloning_unescrowed_payer_that_is_escrowed_later() {
     // If we then change the escrow on chain, i.e. due to a topup it will update in the ephem
     ctx.airdrop_chain(&escrow_pda, LAMPORTS_PER_SOL).unwrap();
     // Test was flaky in CI and still showed 0 lamports in some cases, so we try a few times
-    let mut retries = 5;
+    let mut retries = 14;
     let (escrow_pda, acc) = loop {
         let (escrow_pda, acc) = get_escrow_pda_ephem(&ctx, &non_escrowed_kp);
         if acc.as_ref().map(|x| x.lamports).unwrap_or_default()
