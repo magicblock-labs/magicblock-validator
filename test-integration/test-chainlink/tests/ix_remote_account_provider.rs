@@ -162,6 +162,7 @@ async fn ixtest_get_multiple_accounts_for_valid_slot() {
                 None,
                 AccountFetchOrigin::GetAccount,
                 None,
+                None,
             )
             .await
             .unwrap();
@@ -193,6 +194,7 @@ async fn ixtest_get_multiple_accounts_for_valid_slot() {
                 &all_pubkeys,
                 None,
                 AccountFetchOrigin::GetAccount,
+                None,
                 None,
             )
             .await
@@ -227,6 +229,7 @@ async fn ixtest_get_multiple_accounts_for_valid_slot() {
                 &all_pubkeys,
                 None,
                 AccountFetchOrigin::GetAccount,
+                None,
                 None,
             )
             .await

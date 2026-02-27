@@ -453,6 +453,7 @@ impl MagicValidator {
                     config.chainlink.max_monitored_accounts,
                 )
             })
+            .map(|conf| conf.with_grpc(config.grpc.clone()))
             .map_err(|err| {
                 ApiError::from(
                     magicblock_chainlink::errors::ChainlinkError::from(err),

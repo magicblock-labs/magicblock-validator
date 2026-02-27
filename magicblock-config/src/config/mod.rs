@@ -2,6 +2,7 @@ pub mod accounts;
 pub mod aperture;
 pub mod chain;
 pub mod cli;
+pub mod grpc;
 pub mod ledger;
 pub mod lifecycle;
 pub mod metrics;
@@ -15,6 +16,7 @@ pub use aperture::ApertureConfig;
 pub use chain::{
     AllowedProgram, ChainLinkConfig, ChainOperationConfig, CommittorConfig,
 };
+pub use grpc::GrpcConfig;
 pub use ledger::LedgerConfig;
 pub use lifecycle::LifecycleMode;
 pub use program::LoadableProgram;

@@ -1,7 +1,7 @@
 use std::{collections::HashSet, time::Duration};
 
 use magicblock_config::{
-    config::LifecycleMode,
+    config::{GrpcConfig, LifecycleMode},
     consts::{DEFAULT_MAX_MONITORED_ACCOUNTS, DEFAULT_RESUBSCRIPTION_DELAY_MS},
 };
 use solana_pubkey::Pubkey;
@@ -22,6 +22,8 @@ pub struct RemoteAccountProviderConfig {
     /// Delay between resubscribing to accounts after a pubsub
     /// reconnection
     resubscription_delay: Duration,
+    /// Global gRPC configuration
+    grpc: GrpcConfig,
 }
 
 impl RemoteAccountProviderConfig {
@@ -103,6 +105,15 @@ impl RemoteAccountProviderConfig {
     pub fn resubscription_delay(&self) -> Duration {
         self.resubscription_delay
     }
+
+    pub fn grpc(&self) -> &GrpcConfig {
+        &self.grpc
+    }
+
+    pub fn with_grpc(mut self, grpc: GrpcConfig) -> Self {
+        self.grpc = grpc;
+        self
+    }
 }
 
 impl Default for RemoteAccountProviderConfig {
@@ -115,6 +126,7 @@ impl Default for RemoteAccountProviderConfig {
             resubscription_delay: std::time::Duration::from_millis(
                 DEFAULT_RESUBSCRIPTION_DELAY_MS,
             ),
+            grpc: GrpcConfig::default(),
         }
     }
 }
