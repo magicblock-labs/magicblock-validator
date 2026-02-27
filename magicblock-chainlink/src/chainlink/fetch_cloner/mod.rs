@@ -1154,18 +1154,18 @@ where
                         }
                     }
                     RefreshDecision::No => {
-                         if tracing::enabled!(tracing::Level::TRACE) {
-                             trace!(
-                                 pubkey = %pubkey,
-                                 "Undelegating account still valid, no fetch needed"
-                             );
-                         }
-                         in_bank.insert(pubkey);
+                        if tracing::enabled!(tracing::Level::TRACE) {
+                            trace!(
+                                pubkey = %pubkey,
+                                "Undelegating account still valid, no fetch needed"
+                            );
+                        }
+                        in_bank.insert(pubkey);
                     }
                 }
             }
         }
-        pubkeys.retain(|p| !in_bank.contains(&p));
+        pubkeys.retain(|p| !in_bank.contains(p));
 
         // Check pending requests and bank synchronously
         for pubkey in pubkeys {
