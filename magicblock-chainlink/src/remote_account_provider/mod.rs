@@ -745,7 +745,10 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             // remove entries we created (Vacant); entries that already
             // existed (Occupied) belong to other callers whose fetch
             // will clean them up.
-            let mut fetching = self.fetching_accounts.lock().unwrap();
+            let mut fetching = self
+                .fetching_accounts
+                .lock()
+                .expect("fetching_accounts lock poisoned");
             for pubkey in &newly_inserted {
                 if let Some((_, senders)) = fetching.remove(pubkey) {
                     for sender in senders {
