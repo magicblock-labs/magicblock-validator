@@ -1073,7 +1073,7 @@ where
 
         let mut await_pending = vec![];
         let mut fetch_new = vec![];
-        let mut in_bank = vec![];
+        let mut in_bank = HashSet::new();
         let mut extra_mark_empty = vec![];
 
         // Phase 1: Sync bank check — separate undelegating accounts
@@ -1104,7 +1104,7 @@ where
                             "Account found in bank in valid state, no fetch needed"
                         );
                     }
-                    in_bank.push(**pubkey);
+                    in_bank.insert(**pubkey);
                 }
             }
         }
@@ -1154,18 +1154,18 @@ where
                         }
                     }
                     RefreshDecision::No => {
-                        if tracing::enabled!(tracing::Level::TRACE) {
-                            trace!(
-                                pubkey = %pubkey,
-                                "Undelegating account still valid, no fetch needed"
-                            );
-                        }
-                        in_bank.push(pubkey);
+                         if tracing::enabled!(tracing::Level::TRACE) {
+                             trace!(
+                                 pubkey = %pubkey,
+                                 "Undelegating account still valid, no fetch needed"
+                             );
+                         }
+                         in_bank.insert(pubkey);
                     }
                 }
             }
         }
-        pubkeys.retain(|p| !in_bank.contains(p));
+        pubkeys.retain(|p| !in_bank.contains(&p));
 
         // Check pending requests and bank synchronously
         for pubkey in pubkeys {
