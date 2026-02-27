@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use dlp::state::DelegationRecord;
 use futures_util::future::join_all;
 use magicblock_accounts_db::traits::AccountsBank;
@@ -5,7 +7,6 @@ use magicblock_core::token_programs::try_derive_eata_address_and_bump;
 use magicblock_metrics::metrics;
 use solana_account::AccountSharedData;
 use solana_pubkey::Pubkey;
-use std::collections::HashSet;
 use tokio::task::JoinSet;
 use tracing::*;
 
