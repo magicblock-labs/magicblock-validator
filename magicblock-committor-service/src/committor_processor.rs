@@ -11,12 +11,12 @@ use tokio::sync::broadcast;
 use tracing::{error, instrument};
 
 use crate::{
+    actions_callback_executor::ActionsCallbackExecutor,
     config::ChainConfig,
     error::CommittorServiceResult,
     intent_execution_manager::{
         db::DummyDB, BroadcastedIntentExecutionResult, IntentExecutionManager,
     },
-    intent_executor::ActionsCallbackExecutor,
     persist::{
         CommitStatusRow, IntentPersister, IntentPersisterImpl,
         MessageSignatures,

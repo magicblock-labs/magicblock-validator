@@ -17,11 +17,11 @@ use tokio_util::sync::{CancellationToken, WaitForCancellationFutureOwned};
 use tracing::*;
 
 use crate::{
+    actions_callback_executor::ActionsCallbackExecutor,
     committor_processor::CommittorProcessor,
     config::ChainConfig,
     error::CommittorServiceResult,
     intent_execution_manager::BroadcastedIntentExecutionResult,
-    intent_executor::ActionsCallbackExecutor,
     persist::{CommitStatusRow, MessageSignatures},
     pubkeys_provider::{provide_committee_pubkeys, provide_common_pubkeys},
 };

@@ -11,13 +11,14 @@ use magicblock_table_mania::TableMania;
 use tokio::sync::{broadcast, mpsc, mpsc::error::TrySendError};
 
 use crate::{
+    actions_callback_executor::ActionsCallbackExecutor,
     intent_execution_manager::{
         db::DB,
         intent_execution_engine::{IntentExecutionEngine, ResultSubscriber},
     },
     intent_executor::{
         intent_executor_factory::IntentExecutorFactoryImpl,
-        task_info_fetcher::CacheTaskInfoFetcher, ActionsCallbackExecutor,
+        task_info_fetcher::CacheTaskInfoFetcher,
     },
     persist::IntentPersister,
     ComputeBudgetConfig,

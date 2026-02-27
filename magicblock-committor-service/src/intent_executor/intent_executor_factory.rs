@@ -4,9 +4,10 @@ use magicblock_rpc_client::MagicblockRpcClient;
 use magicblock_table_mania::TableMania;
 
 use crate::{
+    actions_callback_executor::ActionsCallbackExecutor,
     intent_executor::{
-        task_info_fetcher::CacheTaskInfoFetcher, ActionsCallbackExecutor,
-        IntentExecutor, IntentExecutorImpl,
+        task_info_fetcher::CacheTaskInfoFetcher, IntentExecutor,
+        IntentExecutorImpl,
     },
     transaction_preparator::TransactionPreparatorImpl,
     ComputeBudgetConfig,

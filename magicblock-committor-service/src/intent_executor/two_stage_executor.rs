@@ -5,6 +5,9 @@ use solana_signature::Signature;
 use tracing::{error, instrument, warn};
 
 use crate::{
+    actions_callback_executor::{
+        ActionError, ActionResult, ActionsCallbackExecutor,
+    },
     intent_executor::{
         error::{
             IntentExecutorError, IntentExecutorResult,
@@ -12,7 +15,7 @@ use crate::{
         },
         task_info_fetcher::TaskInfoFetcher,
         two_stage_executor::sealed::Sealed,
-        ActionsCallbackExecutor, IntentExecutorImpl,
+        IntentExecutorImpl,
     },
     persist::{IntentPersister, IntentPersisterImpl},
     tasks::{
@@ -174,9 +177,10 @@ where
                     Ok(ControlFlow::Break(()))
                 }
             }
-            TransactionStrategyExecutionError::ActionsError(_, _) => {
+            TransactionStrategyExecutionError::ActionsError(err, signature) => {
                 // Intent bundles allow for actions to be in commit stage
-                let to_cleanup = handle_actions_error(self.inner, &mut self.state.commit_strategy, false);
+                let action_error = Err(ActionError::ActionsError(err.clone(), signature.clone()));
+                let to_cleanup = handle_actions_error(self.inner, &mut self.state.commit_strategy, action_error);
                 Ok(ControlFlow::Continue(to_cleanup))
             }
             TransactionStrategyExecutionError::UndelegationError(_, _) => {
@@ -235,18 +239,22 @@ where
 
     /// Removes actions from commit & finalize strategies
     /// Executes callbacks
-    pub fn execute_callbacks(&mut self, succeeded: bool) {
+    pub fn execute_callbacks(
+        &mut self,
+        result: Result<(), impl Into<ActionError>>,
+    ) {
+        let result = result.map_err(|err| err.into());
         let junk_strategy = handle_actions_error(
             &self.inner,
             &mut self.state.commit_strategy,
-            succeeded,
+            result.clone(),
         );
         self.inner.junk.push(junk_strategy);
 
         let junk_strategy = handle_actions_error(
             &self.inner,
             &mut self.state.finalize_strategy,
-            succeeded,
+            result,
         );
         self.inner.junk.push(junk_strategy);
     }
@@ -329,11 +337,14 @@ where
 
     /// Removes actions from finalize strateg
     /// Executes callbacks
-    pub fn execute_callbacks(&mut self, succeeded: bool) {
+    pub fn execute_callbacks(
+        &mut self,
+        result: Result<(), impl Into<ActionError>>,
+    ) {
         let junk_strategy = handle_actions_error(
             self.inner,
             &mut self.state.finalize_strategy,
-            succeeded,
+            result.map_err(|err| err.into()),
         );
         self.inner.junk.push(junk_strategy);
     }
@@ -359,10 +370,11 @@ where
                 error!(error = ?err, "Unexpected error in two stage finalize flow");
                 Ok(ControlFlow::Break(()))
             }
-            TransactionStrategyExecutionError::ActionsError(_, _) => {
+            TransactionStrategyExecutionError::ActionsError(err, signature) => {
                 // Here we patch strategy for it to be retried in next iteration
                 // & we also record data that has to be cleaned up after patch
-                let to_cleanup = handle_actions_error(self.inner, &mut self.state.finalize_strategy, false);
+                let action_error = Err(ActionError::ActionsError(err.clone(), signature.clone()));
+                let to_cleanup = handle_actions_error(self.inner, &mut self.state.finalize_strategy, action_error);
                 Ok(ControlFlow::Continue(to_cleanup))
             }
             TransactionStrategyExecutionError::UndelegationError(_, _) => {
@@ -405,7 +417,7 @@ where
 fn handle_actions_error<T, F, A>(
     inner: &IntentExecutorImpl<T, F, A>,
     transaction_strategy: &mut TransactionStrategy,
-    succeeded: bool, // TODO(edwin): Result<(), Error>?
+    result: ActionResult,
 ) -> TransactionStrategy
 where
     T: TransactionPreparator,
@@ -415,9 +427,7 @@ where
     let mut removed_actions = inner.remove_actions(transaction_strategy);
     let callbacks = removed_actions.extract_action_callbacks();
     if !callbacks.is_empty() {
-        inner
-            .actions_callback_executor
-            .execute(callbacks, succeeded);
+        inner.actions_callback_executor.execute(callbacks, result);
     }
 
     removed_actions

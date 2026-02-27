@@ -15,7 +15,7 @@ use async_trait::async_trait;
 use futures_util::future::{join, try_join_all};
 use magicblock_metrics::metrics;
 use magicblock_program::{
-    magic_scheduled_base_intent::{BaseActionCallback, ScheduledIntentBundle},
+    magic_scheduled_base_intent::ScheduledIntentBundle,
     validator::validator_authority,
 };
 use magicblock_rpc_client::{
@@ -37,6 +37,7 @@ use tokio::time::timeout;
 use tracing::{info, trace, warn};
 
 use crate::{
+    actions_callback_executor::{ActionError, ActionsCallbackExecutor},
     intent_executor::{
         error::{
             IntentExecutorError, IntentExecutorResult,
@@ -107,11 +108,6 @@ pub trait IntentExecutor: Send + Sync + 'static {
 
     /// Cleans up after intent
     async fn cleanup(self) -> Result<(), BufferExecutionError>;
-}
-
-pub trait ActionsCallbackExecutor: Send + Sync + Clone + 'static {
-    /// Executes actions callbacks
-    fn execute(&self, callbacks: Vec<BaseActionCallback>, succeeded: bool);
 }
 
 pub struct IntentExecutorImpl<T, F, A> {
@@ -277,7 +273,8 @@ where
                         info!(
                             "Intent execution timed out, cleaning up actions"
                         );
-                        single_stage_executor.execute_callbacks(false);
+                        single_stage_executor
+                            .execute_callbacks(Err(ActionError::TimeoutError));
                         single_stage_executor
                             .execute(&committed_pubkeys, persister)
                             .await
@@ -286,7 +283,8 @@ where
             } else {
                 // Already tumed out
                 // Handle timeout and continue execution
-                single_stage_executor.execute_callbacks(false);
+                single_stage_executor
+                    .execute_callbacks(Err(ActionError::TimeoutError));
                 single_stage_executor
                     .execute(&committed_pubkeys, persister)
                     .await
@@ -314,7 +312,7 @@ where
                 finalize_signature: _,
             }) if !committed_pubkeys.is_empty() => err,
             res => {
-            single_stage_executor.execute_callbacks(res.is_ok());
+            single_stage_executor.execute_callbacks(res.as_ref().map(|_| ()));
                 let transaction_strategy = single_stage_executor.transaction_strategy;
                 self.junk.push(transaction_strategy);
                 return res;
@@ -366,20 +364,21 @@ where
                     Err(_) => {
                         // Timeout triggers all callbacks
                         has_finalize_callbacks = false;
-                        executor.execute_callbacks(false);
+                        executor
+                            .execute_callbacks(Err(ActionError::TimeoutError));
                         executor.commit(committed_pubkeys, persister).await
                     }
                 }
             } else {
                 // Timeout triggers all callbacks
                 has_finalize_callbacks = false;
-                executor.execute_callbacks(false);
+                executor.execute_callbacks(Err(ActionError::TimeoutError));
                 executor.commit(committed_pubkeys, persister).await
             }
         } else {
             executor.commit(committed_pubkeys, persister).await
         };
-        executor.execute_callbacks(commit_res.is_ok());
+        executor.execute_callbacks(commit_res.as_ref().map(|_| ()));
         let commit_signature = commit_res?;
 
         let mut finalize_executor = executor.done(commit_signature);
@@ -392,20 +391,24 @@ where
                         info!(
                             "Intent execution timed out, cleaning up actions"
                         );
-                        finalize_executor.execute_callbacks(false);
+                        finalize_executor
+                            .execute_callbacks(Err(ActionError::TimeoutError));
                         finalize_executor.finalize(persister).await
                     }
                 }
             } else {
-                // Already tumed out
+                // Already timed out
                 // Handle timeout and continue execution
-                finalize_executor.execute_callbacks(false);
+                finalize_executor
+                    .execute_callbacks(Err(ActionError::TimeoutError));
                 finalize_executor.finalize(persister).await
             }
         } else {
             finalize_executor.finalize(persister).await
         };
-        finalize_executor.execute_callbacks(finalize_res.is_ok());
+        finalize_executor.execute_callbacks(
+            finalize_res.as_ref().map(|_| ()).map_err(ActionError::from),
+        );
 
         let finalize_signature = finalize_res?;
         let finalized_stage = finalize_executor.done(finalize_signature);
