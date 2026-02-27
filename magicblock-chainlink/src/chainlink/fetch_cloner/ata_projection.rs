@@ -5,6 +5,7 @@ use magicblock_core::token_programs::try_derive_eata_address_and_bump;
 use magicblock_metrics::metrics;
 use solana_account::AccountSharedData;
 use solana_pubkey::Pubkey;
+use std::collections::HashSet;
 use tokio::task::JoinSet;
 use tracing::*;
 
@@ -72,6 +73,13 @@ where
             ));
         }
     }
+
+    // Deduplicate pubkeys to avoid redundant subscribe calls
+    pubkeys_to_subscribe = pubkeys_to_subscribe
+        .into_iter()
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .collect();
 
     // Subscribe to all ATA and eATA accounts in parallel
     let subscription_results = join_all(
