@@ -62,11 +62,11 @@ pub enum RemoteAccountProviderError {
     #[error("Failed to resolve account ({0}) to track slots")]
     ClockAccountCouldNotBeResolved(String),
 
-    #[error("Failed to resolve accounts to same slot ({0}) to track slots")]
-    SlotsDidNotMatch(String, Vec<u64>),
+    #[error("Failed to resolve accounts to same slot ({0}) to track slots hit limit: {2}")]
+    SlotsDidNotMatch(String, Vec<u64>, String),
 
-    #[error("Accounts matched same slot ({0}), but it's less than min required context slot {2} ")]
-    MatchingSlotsNotSatisfyingMinContextSlot(String, Vec<u64>, u64),
+    #[error("Accounts matched same slot ({0}), but it's less than min required context slot {2} hit limit: {3}")]
+    MatchingSlotsNotSatisfyingMinContextSlot(String, Vec<u64>, u64, String),
 
     #[error("LRU capacity must be greater than 0")]
     InvalidLruCapacity,
@@ -114,6 +114,11 @@ pub enum RemoteAccountProviderError {
         "The LoaderV4 program {0} account state deserialization failed: {1}"
     )]
     LoaderV4StateDeserializationFailed(Pubkey, String),
+
+    #[error(
+        "Failed to update gRPC subscription to {0} after {1} retries: {2}"
+    )]
+    GrpcSubscriptionUpdateFailed(String, usize, String),
 }
 impl From<solana_pubsub_client::pubsub_client::PubsubClientError>
     for RemoteAccountProviderError
