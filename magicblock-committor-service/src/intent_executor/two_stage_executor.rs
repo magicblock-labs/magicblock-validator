@@ -16,10 +16,8 @@ use crate::{
     },
     persist::{IntentPersister, IntentPersisterImpl},
     tasks::{
-        args_task::{ArgsTask, ArgsTaskType},
-        task_strategist::TransactionStrategy,
-        task_visitors::utility_visitor::TaskVisitorUtils,
-        BaseTask,
+        commit_task::CommitTask, task_strategist::TransactionStrategy,
+        BaseTaskImpl, FinalizeTask,
     },
     transaction_preparator::TransactionPreparator,
 };
@@ -165,13 +163,11 @@ where
                 let optimized_tasks =
                     commit_strategy.optimized_tasks.as_slice();
                 let task_index = err.task_index();
-                if let Some(task) = task_index
+                if let Some(BaseTaskImpl::Commit(task)) = task_index
                     .and_then(|index| optimized_tasks.get(index as usize))
                 {
                     Self::handle_unfinalized_account_error(
-                        inner,
-                        signature,
-                        task.as_ref(),
+                        inner, signature, task,
                     )
                     .await
                 } else {
@@ -217,14 +213,12 @@ where
     async fn handle_unfinalized_account_error(
         inner: &IntentExecutorImpl<T, F>,
         failed_signature: &Option<Signature>,
-        task: &dyn BaseTask,
+        task: &CommitTask,
     ) -> IntentExecutorResult<ControlFlow<(), TransactionStrategy>> {
-        let Some(commit_meta) = TaskVisitorUtils::commit_meta(task) else {
-            // Can't recover - break execution
-            return Ok(ControlFlow::Break(()));
-        };
-        let finalize_task: Box<dyn BaseTask> =
-            Box::new(ArgsTask::new(ArgsTaskType::Finalize(commit_meta.into())));
+        let finalize_task: BaseTaskImpl = FinalizeTask {
+            delegated_account: task.committed_account.pubkey,
+        }
+        .into();
         inner
             .prepare_and_execute_strategy(
                 &mut TransactionStrategy {

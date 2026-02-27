@@ -47,8 +47,7 @@ use crate::{
         task_strategist::{
             StrategyExecutionMode, TaskStrategist, TransactionStrategy,
         },
-        task_visitors::utility_visitor::TaskVisitorUtils,
-        BaseTask, TaskType,
+        BaseTaskImpl,
     },
     transaction_preparator::{
         delivery_preparator::BufferExecutionError,
@@ -311,24 +310,20 @@ where
         committed_pubkeys: &[Pubkey],
         strategy: &mut TransactionStrategy,
     ) -> Result<TransactionStrategy, TaskBuilderError> {
-        let tasks_and_metas: Vec<_> = strategy
+        let commit_tasks: Vec<_> = strategy
             .optimized_tasks
             .iter_mut()
             .filter_map(|task| {
-                let mut visitor = TaskVisitorUtils::GetCommitMeta(None);
-                task.visit(&mut visitor);
-                if let TaskVisitorUtils::GetCommitMeta(Some(commit_meta)) =
-                    visitor
-                {
-                    Some((task, commit_meta))
+                if let BaseTaskImpl::Commit(commit_task) = task {
+                    Some(commit_task)
                 } else {
                     None
                 }
             })
             .collect();
-        let min_context_slot = tasks_and_metas
+        let min_context_slot = commit_tasks
             .iter()
-            .map(|(_, meta)| meta.remote_slot)
+            .map(|task| task.committed_account.remote_slot)
             .max()
             .unwrap_or_default();
 
@@ -345,17 +340,18 @@ where
         // Here we find the broken tasks and reset them
         // Broken tasks are prepared incorrectly so they have to be cleaned up
         let mut to_cleanup = Vec::new();
-        for (task, commit_meta) in tasks_and_metas {
-            let Some(commit_id) = commit_ids.get(&commit_meta.committed_pubkey)
+        for task in commit_tasks {
+            let Some(commit_id) =
+                commit_ids.get(&task.committed_account.pubkey)
             else {
                 continue;
             };
-            if commit_id == &commit_meta.commit_id {
+            if commit_id == &task.commit_id {
                 continue;
             }
 
             // Handle invalid tasks
-            to_cleanup.push(task.clone());
+            to_cleanup.push(BaseTaskImpl::Commit(task.clone()));
             task.reset_commit_id(*commit_id);
         }
 
@@ -376,7 +372,7 @@ where
         let (optimized_tasks, action_tasks) = strategy
             .optimized_tasks
             .drain(..)
-            .partition(|el| el.task_type() != TaskType::Action);
+            .partition(|el| !matches!(el, BaseTaskImpl::BaseAction(_)));
         strategy.optimized_tasks = optimized_tasks;
 
         let old_alts = strategy.dummy_revaluate_alts(&self.authority.pubkey());
@@ -404,7 +400,7 @@ where
             strategy
                 .optimized_tasks
                 .into_iter()
-                .partition(|el| el.task_type() == TaskType::Commit);
+                .partition(|el| matches!(el, BaseTaskImpl::Commit(_)));
 
         let commit_alt_pubkeys = if strategy.lookup_tables_keys.is_empty() {
             vec![]
@@ -450,7 +446,7 @@ where
         let position = strategy
             .optimized_tasks
             .iter()
-            .position(|el| el.task_type() == TaskType::Undelegate);
+            .position(|el| matches!(el, BaseTaskImpl::Undelegate(_)));
 
         if let Some(position) = position {
             // Remove everything after undelegation including post undelegation actions
@@ -643,7 +639,7 @@ where
     async fn execute_message_with_retries(
         &self,
         prepared_message: VersionedMessage,
-        tasks: &[Box<dyn BaseTask>],
+        tasks: &[BaseTaskImpl],
     ) -> IntentExecutorResult<Signature, TransactionStrategyExecutionError>
     {
         struct IntentErrorMapper<TxMap> {

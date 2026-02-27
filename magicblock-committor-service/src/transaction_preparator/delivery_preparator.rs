@@ -30,8 +30,8 @@ use tracing::{error, info};
 use crate::{
     persist::{CommitStatus, IntentPersister},
     tasks::{
-        task_strategist::TransactionStrategy, BaseTask, BaseTaskError,
-        CleanupTask, PreparationState, PreparationTask,
+        commit_task::CommitBufferStage, task_strategist::TransactionStrategy,
+        BaseTaskImpl, CleanupTask, PreparationTask,
     },
     utils::persist_status_update,
     ComputeBudgetConfig,
@@ -67,7 +67,7 @@ impl DeliveryPreparator {
             strategy.optimized_tasks.iter_mut().map(|task| async move {
                 let _timer =
                     metrics::observe_committor_intent_task_preparation_time(
-                        task.as_ref(),
+                        &*task,
                     );
                 self.prepare_task_handling_errors(authority, task, persister)
                     .await
@@ -95,12 +95,16 @@ impl DeliveryPreparator {
     pub async fn prepare_task<P: IntentPersister>(
         &self,
         authority: &Keypair,
-        task: &mut dyn BaseTask,
+        task: &mut BaseTaskImpl,
         persister: &Option<P>,
     ) -> DeliveryPreparatorResult<(), InternalError> {
-        let PreparationState::Required(preparation_task) =
-            task.preparation_state()
-        else {
+        let BaseTaskImpl::Commit(commit_task) = task else {
+            return Ok(());
+        };
+        let Some(stage) = commit_task.stage_mut() else {
+            return Ok(());
+        };
+        let CommitBufferStage::Preparation(preparation_task) = stage else {
             return Ok(());
         };
 
@@ -139,7 +143,7 @@ impl DeliveryPreparator {
         );
 
         let cleanup_task = preparation_task.cleanup_task();
-        task.switch_preparation_state(PreparationState::Cleanup(cleanup_task))?;
+        *stage = CommitBufferStage::Cleanup(cleanup_task);
         Ok(())
     }
 
@@ -148,10 +152,10 @@ impl DeliveryPreparator {
     pub async fn prepare_task_handling_errors<P: IntentPersister>(
         &self,
         authority: &Keypair,
-        task: &mut Box<dyn BaseTask>,
+        task: &mut BaseTaskImpl,
         persister: &Option<P>,
     ) -> Result<(), InternalError> {
-        let res = self.prepare_task(authority, task.as_mut(), persister).await;
+        let res = self.prepare_task(authority, task, persister).await;
         match res {
             Err(InternalError::BufferExecutionError(
                 BufferExecutionError::AccountAlreadyInitializedError(
@@ -165,22 +169,25 @@ impl DeliveryPreparator {
             res => return res,
         }
 
-        // Prepare cleanup task
-        let PreparationState::Required(preparation_task) =
-            task.preparation_state().clone()
-        else {
+        // Prepare cleanup task - set stage to Cleanup before calling cleanup
+        let BaseTaskImpl::Commit(commit_task) = task else {
             return Ok(());
         };
-        task.switch_preparation_state(PreparationState::Cleanup(
-            preparation_task.cleanup_task(),
-        ))?;
-        self.cleanup(authority, std::slice::from_ref(task), &[])
-            .await?;
-        task.switch_preparation_state(PreparationState::Required(
-            preparation_task,
-        ))?;
+        let Some(stage) = commit_task.stage_mut() else {
+            return Ok(());
+        };
+        let CommitBufferStage::Preparation(preparation_task) = stage else {
+            return Ok(());
+        };
+        let preparation_task = preparation_task.clone();
+        let cleanup_task = preparation_task.cleanup_task();
 
-        self.prepare_task(authority, task.as_mut(), persister).await
+        self.cleanup(authority, &[cleanup_task], &[]).await?;
+
+        // Restore preparation stage for retry
+        *stage = CommitBufferStage::Preparation(preparation_task);
+
+        self.prepare_task(authority, task, persister).await
     }
 
     /// Initializes buffer account for future writes
@@ -420,7 +427,7 @@ impl DeliveryPreparator {
     pub async fn cleanup(
         &self,
         authority: &Keypair,
-        tasks: &[Box<dyn BaseTask>],
+        cleanup_tasks: &[CleanupTask],
         lookup_table_keys: &[Pubkey],
     ) -> DeliveryPreparatorResult<(), BufferExecutionError> {
         self.table_mania
@@ -428,19 +435,6 @@ impl DeliveryPreparator {
                 lookup_table_keys.iter().cloned(),
             ))
             .await;
-
-        let cleanup_tasks: Vec<_> = tasks
-            .iter()
-            .filter_map(|task| {
-                if let PreparationState::Cleanup(cleanup_task) =
-                    task.preparation_state()
-                {
-                    Some(cleanup_task)
-                } else {
-                    None
-                }
-            })
-            .collect();
 
         if cleanup_tasks.is_empty() {
             return Ok(());
@@ -549,8 +543,6 @@ pub enum InternalError {
     MagicBlockRpcClientError(Box<MagicBlockRpcClientError>),
     #[error("BufferExecutionError: {0}")]
     BufferExecutionError(#[from] BufferExecutionError),
-    #[error("BaseTaskError: {0}")]
-    BaseTaskError(#[from] BaseTaskError),
 }
 
 impl From<MagicBlockRpcClientError> for InternalError {
