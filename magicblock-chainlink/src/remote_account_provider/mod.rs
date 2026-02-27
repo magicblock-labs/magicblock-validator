@@ -715,6 +715,10 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         let fetch_start_slot =
             fetch_start_slot.unwrap_or_else(|| self.chain_slot.load());
 
+        // Track which pubkeys we created new entries for (Vacant)
+        // so we can roll them back if setup_subscriptions fails.
+        let mut newly_inserted = Vec::new();
+
         {
             let mut fetching = self.fetching_accounts.lock().unwrap();
             for &pubkey in pubkeys {
@@ -725,6 +729,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                     }
                     Entry::Vacant(entry) => {
                         entry.insert((fetch_start_slot, vec![sender]));
+                        newly_inserted.push(pubkey);
                     }
                 }
                 subscription_overrides.push((pubkey, receiver));
@@ -732,7 +737,33 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         }
 
         // Setup subscriptions first (to catch updates during fetch)
-        self.setup_subscriptions(&subscription_overrides).await?;
+        if let Err(err) =
+            self.setup_subscriptions(&subscription_overrides).await
+        {
+            // Rollback fetching_accounts entries we created to prevent
+            // accounts being stuck as pending indefinitely. We only
+            // remove entries we created (Vacant); entries that already
+            // existed (Occupied) belong to other callers whose fetch
+            // will clean them up.
+            let mut fetching = self.fetching_accounts.lock().unwrap();
+            for pubkey in &newly_inserted {
+                if let Some((_, senders)) = fetching.remove(pubkey) {
+                    for sender in senders {
+                        let _ = sender.send(Err(
+                            RemoteAccountProviderError::AccountSubscriptionsTaskFailed(
+                                format!(
+                                    "{}: subscription setup failed, rolling back",
+                                    pubkey
+                                ),
+                            ),
+                        ));
+                    }
+                }
+            }
+            // Receivers in subscription_overrides are dropped here,
+            // closing any pending channels
+            return Err(err);
+        }
 
         // Start the fetch
         let min_context_slot = fetch_start_slot;
