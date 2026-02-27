@@ -1,5 +1,6 @@
 use std::{path::Path, sync::Arc, time::Instant};
 
+use magicblock_program::magic_scheduled_base_intent::ScheduledIntentBundle;
 use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
 use solana_signature::Signature;
@@ -22,7 +23,6 @@ use crate::{
     intent_execution_manager::BroadcastedIntentExecutionResult,
     persist::{CommitStatusRow, MessageSignatures},
     pubkeys_provider::{provide_committee_pubkeys, provide_common_pubkeys},
-    types::ScheduledBaseIntentWrapper,
 };
 
 #[derive(Debug)]
@@ -53,9 +53,9 @@ pub enum CommittorMessage {
         /// Called once the pubkeys have been released
         respond_to: oneshot::Sender<()>,
     },
-    ScheduleBaseIntents {
-        /// The [`ScheduledBaseIntent`]s to commit
-        base_intents: Vec<ScheduledBaseIntentWrapper>,
+    ScheduleIntentBundle {
+        /// The [`ScheduleIntentBundle`]s to commit
+        intent_bundles: Vec<ScheduledIntentBundle>,
         respond_to: oneshot::Sender<CommittorServiceResult<()>>,
     },
     GetCommitStatuses {
@@ -164,12 +164,12 @@ impl CommittorActor {
                     }
                 });
             }
-            ScheduleBaseIntents {
-                base_intents,
+            ScheduleIntentBundle {
+                intent_bundles,
                 respond_to,
             } => {
                 let result =
-                    self.processor.schedule_base_intents(base_intents).await;
+                    self.processor.schedule_intent_bundle(intent_bundles).await;
                 if let Err(e) = respond_to.send(result) {
                     error!(message_type = "ScheduleBaseIntents", error = ?e, "Failed to send response");
                 }
@@ -361,13 +361,13 @@ impl BaseIntentCommittor for CommittorService {
         rx
     }
 
-    fn schedule_base_intent(
+    fn schedule_intent_bundles(
         &self,
-        base_intents: Vec<ScheduledBaseIntentWrapper>,
+        intent_bundles: Vec<ScheduledIntentBundle>,
     ) -> oneshot::Receiver<CommittorServiceResult<()>> {
         let (tx, rx) = oneshot::channel();
-        self.try_send(CommittorMessage::ScheduleBaseIntents {
-            base_intents,
+        self.try_send(CommittorMessage::ScheduleIntentBundle {
+            intent_bundles,
             respond_to: tx,
         });
         rx
@@ -442,9 +442,9 @@ pub trait BaseIntentCommittor: Send + Sync + 'static {
     ) -> oneshot::Receiver<CommittorServiceResult<Instant>>;
 
     /// Commits the changeset and returns
-    fn schedule_base_intent(
+    fn schedule_intent_bundles(
         &self,
-        base_intents: Vec<ScheduledBaseIntentWrapper>,
+        intent_bundles: Vec<ScheduledIntentBundle>,
     ) -> oneshot::Receiver<CommittorServiceResult<()>>;
 
     /// Subscribes for results of BaseIntent execution

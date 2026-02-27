@@ -744,18 +744,6 @@ where
         maybe_forward_now
     }
 
-    fn get_subscriptions(clients: &[Arc<T>]) -> Option<Vec<Pubkey>> {
-        let mut all_subs = HashSet::new();
-        for client in clients {
-            if let Some(subs) = client.subscriptions() {
-                all_subs.extend(subs);
-            } else {
-                return None;
-            }
-        }
-        Some(all_subs.into_iter().collect())
-    }
-
     /// Number of clients that must confirm an account subscription for it to be considered active.
     /// 2/3 of connected clients subscribing immediately.
     fn required_account_subscription_confirmations(&self) -> usize {
@@ -798,9 +786,11 @@ where
     async fn subscribe(
         &self,
         pubkey: Pubkey,
+        retries: Option<usize>,
     ) -> RemoteAccountProviderResult<()> {
         AccountSubscriptionTask::Subscribe(
             pubkey,
+            retries,
             self.required_account_subscription_confirmations(),
         )
         .process(self.clients.clone())
@@ -859,37 +849,37 @@ where
         out_rx
     }
 
-    /// Gets the maximum subscription count across all inner clients.
-    /// NOTE: one of the clients could be reconnecting and thus
-    /// temporarily have fewer or no subscriptions
-    /// NOTE: not all clients track subscriptions, thus if none return a count,
-    /// then this will return 0 for both values.
-    async fn subscription_count(
-        &self,
-        exclude: Option<&[Pubkey]>,
-    ) -> Option<(usize, usize)> {
-        let mut max_total = 0;
-        let mut max_filtered = 0;
+    fn subscriptions_union(&self) -> HashSet<Pubkey> {
+        let mut union = HashSet::new();
         for client in &self.clients {
-            if let Some((total, filtered)) =
-                client.subscription_count(exclude).await
-            {
-                if total > max_total {
-                    max_total = total;
-                }
-                if filtered > max_filtered {
-                    max_filtered = filtered;
-                }
-            }
+            let subs = client.subscriptions_union();
+            union.extend(subs);
         }
-        Some((max_total, max_filtered))
+        union
     }
 
-    /// Gets the union of all subscriptions across all inner clients.
-    /// Unless one is reconnecting, this should be identical to
-    /// getting it from a single inner client.
-    fn subscriptions(&self) -> Option<Vec<Pubkey>> {
-        Self::get_subscriptions(&self.clients)
+    fn subscriptions_intersection(&self) -> HashSet<Pubkey> {
+        let sets: Vec<HashSet<Pubkey>> = self
+            .clients
+            .iter()
+            .map(|c| c.subscriptions_intersection())
+            .collect();
+        if sets.is_empty() {
+            return HashSet::new();
+        }
+        // Find the smallest set to iterate over, then check membership
+        // in all others — no intermediate cloning/collecting.
+        // SAFETY: we return above if the set is empty, so unwrap is safe here.
+        let smallest = sets.iter().min_by_key(|s| s.len()).unwrap();
+        smallest
+            .iter()
+            .filter(|pk| {
+                sets.iter()
+                    .filter(|s| !std::ptr::eq(*s, smallest))
+                    .all(|s| s.contains(pk))
+            })
+            .copied()
+            .collect()
     }
 
     /// Returns true if any inner client subscribes immediately
@@ -1013,7 +1003,7 @@ mod tests {
 
         let pk = Pubkey::new_unique();
 
-        mux.subscribe(pk).await.unwrap();
+        mux.subscribe(pk, None).await.unwrap();
 
         // send one update from each client
         client1
@@ -1067,7 +1057,7 @@ mod tests {
 
         let pk = Pubkey::new_unique();
 
-        mux.subscribe(pk).await.unwrap();
+        mux.subscribe(pk, None).await.unwrap();
 
         client1
             .send_account_update(pk, 1, &account_with_lamports(1))
@@ -1113,7 +1103,7 @@ mod tests {
         let mut mux_rx = mux.take_updates();
 
         let pk = Pubkey::new_unique();
-        mux.subscribe(pk).await.unwrap();
+        mux.subscribe(pk, None).await.unwrap();
 
         // Two updates with same pubkey and slot (slot=7) from different clients
         client1
@@ -1174,7 +1164,7 @@ mod tests {
         let mut mux_rx = mux.take_updates();
 
         let pk = Pubkey::new_unique();
-        mux.subscribe(pk).await.unwrap();
+        mux.subscribe(pk, None).await.unwrap();
 
         // Send updates within 100ms window: u1, u2, u1(again), u3, u2(again)
         client1
@@ -1237,7 +1227,7 @@ mod tests {
         let mut mux_rx = mux.take_updates();
 
         let pk = Pubkey::new_unique();
-        mux.subscribe(pk).await.unwrap();
+        mux.subscribe(pk, None).await.unwrap();
 
         // Within 100ms window
         client1
@@ -1370,7 +1360,7 @@ mod tests {
             );
         let mut mux_rx = mux.take_updates();
         let pk = Pubkey::new_unique();
-        mux.subscribe(pk).await.unwrap();
+        mux.subscribe(pk, None).await.unwrap();
 
         // A schedule adjusted to receive only indexes: 0,1,2,3,4,7,9
         // Explanation:
@@ -1428,7 +1418,7 @@ mod tests {
             );
         let mut mux_rx = mux.take_updates();
         let pk = Pubkey::new_unique();
-        mux.subscribe(pk).await.unwrap();
+        mux.subscribe(pk, None).await.unwrap();
 
         // B (scaled): 00:0 | 01:+400 | 02:+400 | 03:+400 (never enters debounce)
         // Never debounced
@@ -1466,7 +1456,7 @@ mod tests {
             );
         let mut mux_rx = mux.take_updates();
         let pk = Pubkey::new_unique();
-        mux.subscribe(pk).await.unwrap();
+        mux.subscribe(pk, None).await.unwrap();
 
         // Phases:
         // 1) First 5 updates at ~180ms: enables debounce on the 5th.
@@ -1527,7 +1517,7 @@ mod tests {
         // 1. Ensure that for another account's updates are debounced
         {
             let other = Pubkey::new_unique();
-            mux.subscribe(other).await.unwrap();
+            mux.subscribe(other, None).await.unwrap();
             let schedule: Vec<(u64, u64)> = (0..10).map(|i| (i, 50)).collect();
             send_schedule(client.clone(), other, 5000, &schedule).await;
             let received = drain_slots(&mut mux_rx, 800).await;
@@ -1538,7 +1528,7 @@ mod tests {
         //    None should be debounced
         {
             let clock = solana_program::sysvar::clock::ID;
-            mux.subscribe(clock).await.unwrap();
+            mux.subscribe(clock, None).await.unwrap();
 
             let schedule: Vec<(u64, u64)> = (0..10).map(|i| (i, 50)).collect();
             send_schedule(client.clone(), clock, 5000, &schedule).await;
@@ -1592,7 +1582,7 @@ mod tests {
 
         let mut mux_rx = mux.take_updates();
 
-        mux.subscribe(pk).await.unwrap();
+        mux.subscribe(pk, None).await.unwrap();
 
         // Baseline: client1 update arrives
         client1
@@ -1677,7 +1667,7 @@ mod tests {
         );
         let mut mux_rx = mux.take_updates();
 
-        mux.subscribe(pk).await.unwrap();
+        mux.subscribe(pk, None).await.unwrap();
 
         // Prepare: first resubscribe attempt will fail
         client1.fail_next_resubscriptions(1);

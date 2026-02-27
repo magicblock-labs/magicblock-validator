@@ -7,6 +7,7 @@ use std::{
 };
 
 use async_trait::async_trait;
+use magicblock_config::config::GrpcConfig;
 use solana_commitment_config::CommitmentConfig;
 use solana_pubkey::Pubkey;
 use tokio::sync::mpsc;
@@ -14,6 +15,7 @@ use tracing::*;
 
 use crate::remote_account_provider::{
     chain_laser_actor::Slots, chain_laser_client::ChainLaserClientImpl,
+    chain_rpc_client::ChainRpcClientImpl, chain_slot::ChainSlot,
     pubsub_common::SubscriptionUpdate, ChainPubsubClient,
     ChainPubsubClientImpl, Endpoint, ReconnectableClient,
     RemoteAccountProviderError, RemoteAccountProviderResult,
@@ -32,6 +34,8 @@ impl ChainUpdatesClient {
         abort_sender: mpsc::Sender<()>,
         chain_slot: Arc<AtomicU64>,
         resubscription_delay: std::time::Duration,
+        rpc_client: ChainRpcClientImpl,
+        grpc_config: &GrpcConfig,
     ) -> RemoteAccountProviderResult<Self> {
         use Endpoint::*;
         static CLIENT_ID: AtomicU16 = AtomicU16::new(0);
@@ -67,20 +71,20 @@ impl ChainUpdatesClient {
                 );
 
                 let slots = Slots {
-                    chain_slot,
-                    last_activation_slot: AtomicU64::new(0),
+                    chain_slot: ChainSlot::new(chain_slot),
                     supports_backfill: *supports_backfill,
                 };
                 Ok(ChainUpdatesClient::Laser(
                     ChainLaserClientImpl::new_from_url(
                         url,
-                        client_id,
+                        client_id.to_string(),
                         api_key,
                         commitment.commitment,
                         abort_sender,
                         slots,
-                    )
-                    .await?,
+                        rpc_client,
+                        grpc_config,
+                    ),
                 ))
             }
             Rpc { .. } => {
@@ -97,11 +101,12 @@ impl ChainPubsubClient for ChainUpdatesClient {
     async fn subscribe(
         &self,
         pubkey: Pubkey,
+        retries: Option<usize>,
     ) -> RemoteAccountProviderResult<()> {
         use ChainUpdatesClient::*;
         match self {
-            WebSocket(client) => client.subscribe(pubkey).await,
-            Laser(client) => client.subscribe(pubkey).await,
+            WebSocket(client) => client.subscribe(pubkey, retries).await,
+            Laser(client) => client.subscribe(pubkey, retries).await,
         }
     }
 
@@ -143,26 +148,11 @@ impl ChainPubsubClient for ChainUpdatesClient {
         }
     }
 
-    /// Provides the total number of subscriptions and the number of
-    /// subscriptions when excludig pubkeys in `exclude`.
-    /// - `exclude`: Optional slice of pubkeys to exclude from the count.
-    /// Returns a tuple of (total subscriptions, filtered subscriptions).
-    async fn subscription_count(
-        &self,
-        exclude: Option<&[Pubkey]>,
-    ) -> Option<(usize, usize)> {
+    fn subscriptions_union(&self) -> HashSet<Pubkey> {
         use ChainUpdatesClient::*;
         match self {
-            WebSocket(client) => client.subscription_count(exclude).await,
-            Laser(client) => client.subscription_count(exclude).await,
-        }
-    }
-
-    fn subscriptions(&self) -> Option<Vec<Pubkey>> {
-        use ChainUpdatesClient::*;
-        match self {
-            WebSocket(client) => client.subscriptions(),
-            Laser(client) => client.subscriptions(),
+            WebSocket(client) => client.subscriptions_union(),
+            Laser(client) => client.subscriptions_union(),
         }
     }
 

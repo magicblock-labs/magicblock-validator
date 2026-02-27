@@ -1,15 +1,21 @@
 use magicblock_accounts_db::{traits::AccountsBank, AccountsDb};
 use magicblock_core::link::blocks::BlockHash;
-use solana_account::AccountSharedData;
+use solana_account::{AccountSharedData, WritableAccount};
 use solana_feature_set::{
     curve25519_restrict_msm_length, curve25519_syscall_enabled,
-    disable_rent_fees_collection, enable_transaction_loading_failure_fees,
-    get_sysvar_syscall_enabled, FeatureSet,
+    disable_rent_fees_collection, ed25519_program_enabled,
+    enable_poseidon_syscall, enable_secp256r1_precompile,
+    enable_transaction_loading_failure_fees, get_sysvar_syscall_enabled,
+    secp256k1_program_enabled, FeatureSet,
 };
 use solana_program::{feature, pubkey::Pubkey};
 #[allow(deprecated)]
 use solana_rent_collector::RentCollector;
+use solana_sdk_ids::{
+    ed25519_program, native_loader, secp256k1_program, secp256r1_program,
+};
 use solana_svm::transaction_processor::TransactionProcessingEnvironment;
+use tracing::error;
 
 /// Initialize an SVM environment for transaction processing.
 pub fn build_svm_env(
@@ -22,13 +28,18 @@ pub fn build_svm_env(
     // Activate features relevant to ER operations:
     // - Rent exemption for all regular accounts (disable collection).
     // - Curve25519 syscalls.
+    // - Poseidon syscall.
     // - Fees for failed transaction loading (DoS mitigation).
     for id in [
         disable_rent_fees_collection::ID,
         curve25519_syscall_enabled::ID,
         curve25519_restrict_msm_length::ID,
+        enable_poseidon_syscall::ID,
         enable_transaction_loading_failure_fees::ID,
         get_sysvar_syscall_enabled::ID,
+        ed25519_program_enabled::ID,
+        secp256k1_program_enabled::ID,
+        enable_secp256r1_precompile::ID,
     ] {
         feature_set.activate(&id, 0);
     }
@@ -38,6 +49,10 @@ pub fn build_svm_env(
     for (id, &slot) in &feature_set.active {
         ensure_feature_account(accountsdb, id, Some(slot));
     }
+
+    ensure_precompile_account(accountsdb, &ed25519_program::ID);
+    ensure_precompile_account(accountsdb, &secp256k1_program::ID);
+    ensure_precompile_account(accountsdb, &secp256r1_program::ID);
 
     // Initialize static RentCollector (leaked for 'static lifetime as it never changes).
     #[allow(deprecated)]
@@ -69,6 +84,18 @@ fn ensure_feature_account(
         return;
     };
     let _ = accountsdb.insert_account(id, &account);
+}
+
+fn ensure_precompile_account(accountsdb: &AccountsDb, id: &Pubkey) {
+    if accountsdb.get_account(id).is_some() {
+        return;
+    }
+
+    let mut account = AccountSharedData::new(1, 0, &native_loader::ID);
+    account.set_executable(true);
+    if let Err(e) = accountsdb.insert_account(id, &account) {
+        error!("Failed to insert precompile account {}: {:?}", id, e);
+    }
 }
 
 mod builtins;

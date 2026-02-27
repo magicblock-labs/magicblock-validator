@@ -17,7 +17,7 @@ use solana_signer::Signer;
 
 use crate::{
     magic_context::MagicContext,
-    magic_scheduled_base_intent::ScheduledBaseIntent,
+    magic_scheduled_base_intent::ScheduledIntentBundle,
     schedule_transactions::transaction_scheduler::TransactionScheduler,
     test_utils::{ensure_started_validator, process_instruction},
     utils::DELEGATION_PROGRAM_ID,
@@ -172,7 +172,7 @@ fn assert_accepted_actions(
     processed_accepted: &[AccountSharedData],
     payer: &Pubkey,
     expected_scheduled_actions: usize,
-) -> Vec<ScheduledBaseIntent> {
+) -> Vec<ScheduledIntentBundle> {
     let magic_context_acc = find_magic_context_account(processed_accepted)
         .expect("magic context account not found");
     let magic_context =
@@ -218,7 +218,7 @@ fn extend_transaction_accounts_from_ix_adding_magic_context(
 }
 
 fn assert_first_commit(
-    scheduled_base_intents: &[ScheduledBaseIntent],
+    scheduled_base_intents: &[ScheduledIntentBundle],
     payer: &Pubkey,
     committees: &[Pubkey],
     expected_request_undelegation: bool,
@@ -227,25 +227,25 @@ fn assert_first_commit(
     let test_clock = get_clock();
     assert_matches!(
         scheduled_base_intent,
-        ScheduledBaseIntent {
+        ScheduledIntentBundle {
             id,
             slot,
             payer: actual_payer,
             blockhash: _,
-            action_sent_transaction: _,
-            base_intent,
+            sent_transaction: _,
+            intent_bundle,
         } => {
             assert!(id >= &0);
             assert_eq!(slot, &test_clock.slot);
             assert_eq!(actual_payer, payer);
-            assert_eq!(base_intent.get_committed_pubkeys().unwrap().as_slice(), committees);
+            assert_eq!(intent_bundle.get_all_committed_pubkeys().as_slice(), committees);
             let _instruction = MagicBlockInstruction::ScheduledCommitSent((*id, 0));
             // TODO(edwin) @@@ this fails in CI only with the similar to the below
             //   left: [4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0]
             //  right: [4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
             // See: https://github.com/magicblock-labs/magicblock-validator/actions/runs/18565403532/job/52924982063#step:6:1063
             // assert_eq!(action_sent_transaction.data(0), instruction.try_to_vec().unwrap());
-            assert_eq!(base_intent.is_undelegate(), expected_request_undelegation);
+            assert_eq!(intent_bundle.has_undelegate_intent(), expected_request_undelegation);
         }
     );
 }
@@ -520,7 +520,7 @@ mod tests {
             assert_accepted_actions(&processed_accepted, &payer.pubkey(), 1);
         // Verify the committed pubkey remapped to eATA
         assert_eq!(
-            scheduled[0].base_intent.get_committed_pubkeys().unwrap(),
+            scheduled[0].intent_bundle.get_all_committed_pubkeys(),
             vec![eata_pubkey]
         );
     }
@@ -602,11 +602,11 @@ mod tests {
             assert_accepted_actions(&processed_accepted, &payer.pubkey(), 1);
         // Verify the committed pubkey remapped to eATA
         assert_eq!(
-            scheduled[0].base_intent.get_committed_pubkeys().unwrap(),
+            scheduled[0].intent_bundle.get_all_committed_pubkeys(),
             vec![eata_pubkey]
         );
         // And the intent contains undelegation
-        assert!(scheduled[0].base_intent.is_undelegate());
+        assert!(scheduled[0].intent_bundle.has_undelegate_intent());
     }
 
     #[test]

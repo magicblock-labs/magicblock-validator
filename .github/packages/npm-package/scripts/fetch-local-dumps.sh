@@ -40,6 +40,9 @@ programs=(
   noopb9bkMVfRPU8AsbpTUg8AQkHtKwMYZiFUjNRtMmV
   Vrf1RNUjXmQGjmQrQLvJHs9SNkvDJEsRVFPkfSQUwGz
   DmnRGfyyftzacFb1XadYhWF6vWqXwtQk5tbr6XgR3BA1
+  ACLseoPoyC3cBqoUtkbjZ4aDrkurZW86v19pXz2XQnp1
+  EnhkomtzKms55jXi3ijn9XsMKYpMT4BJjmbuDQmPo3YS
+  SPLxh1LVZzEkX99H6rqYizhytLWPZVV296zyYDPagv2
 )
 
 for prog in "${programs[@]}"; do

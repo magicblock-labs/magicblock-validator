@@ -36,7 +36,7 @@ chrono = "0.4"
 cleanass = "0.0.1"
 color-backtrace = { version = "0.7" }
 ctrlc = "3.4.7"
-ephemeral-rollups-sdk = { git = "https://github.com/magicblock-labs/ephemeral-rollups-sdk.git", rev = "36f9485", default-features = false, features = [
+ephemeral-rollups-sdk = { git = "https://github.com/magicblock-labs/ephemeral-rollups-sdk.git", rev = "d6a81e25a80d78fea9adf3fb1342df9bc9b87ba6", default-features = false, features = [
   "modular-sdk",
 ] }
 futures = "0.3.31"
@@ -60,7 +60,7 @@ magic-domain-program = { git = "https://github.com/magicblock-labs/magic-domain-
   "modular-sdk",
 ] }
 magicblock_magic_program_api = { package = "magicblock-magic-program-api", path = "../magicblock-magic-program-api" }
-magicblock-delegation-program = { git = "https://github.com/magicblock-labs/delegation-program.git", rev = "1874b4f5f5f55cb9ab54b64de2cc0d41107d1435", features = [
+magicblock-delegation-program = { git = "https://github.com/magicblock-labs/delegation-program.git", rev = "2cb491032f372", features = [
   "no-entrypoint",
 ] }
 magicblock-program = { path = "../programs/magicblock" }
@@ -78,7 +78,7 @@ rkyv = "0.7.45"
 schedulecommit-client = { path = "schedulecommit/client" }
 serde = "1.0.217"
 serial_test = "3.2.0"
-solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "2246929" }
+solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "6eae52b" }
 solana-loader-v2-interface = "2.2"
 solana-loader-v3-interface = "4.0"
 solana-loader-v4-interface = "2.1"
@@ -114,4 +114,4 @@ url = "2.5.0"
 solana-storage-proto = { path = "../storage-proto" }
 # same reason as above
 rocksdb = { git = "https://github.com/magicblock-labs/rust-rocksdb.git", rev = "6d975197" }
-solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "2246929" }
+solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "6eae52b" }

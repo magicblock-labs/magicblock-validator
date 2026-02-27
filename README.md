@@ -56,7 +56,7 @@ cargo build --release
 
 ## ⚙️ Configuration
 
-The validator is highly configurable via TOML files or environment variables. A comprehensive reference configuration is available in [`config.example.toml`](https://www.google.com/search?q=./config.example.toml).
+The validator is highly configurable via TOML files or environment variables. A comprehensive reference configuration is available in [`config.example.toml`](./config.example.toml).
 
 ### Core Operational Modes (`lifecycle`)
 
@@ -127,7 +127,7 @@ make test
 
 
 * **Run integration tests specifically:**
-See [test-integration/README.md](https://www.google.com/search?q=./test-integration/README.md) for detailed instructions on running specific scenarios.
+See [test-integration/README.md](./test-integration/README.md) for detailed instructions on running specific scenarios.
 ```bash
 make -C test-integration test
 
@@ -155,7 +155,7 @@ Open Source is at the heart of what we do at MagicBlock. We believe building sof
 
 ## 📄 License
 
-This project is licensed under the **Business Source License 1.1**. See [LICENSE.md](https://www.google.com/search?q=./LICENSE.md) for details.
+This project is licensed under the **Business Source License 1.1**. See [LICENSE.md](./LICENSE.md) for details.
 
 ---
 

@@ -12,7 +12,7 @@ use magicblock_metrics::metrics::{
 use solana_measure::measure::Measure;
 use tokio::{runtime::Builder, time::interval};
 use tokio_util::sync::CancellationToken;
-use tracing::{error, info, instrument, warn};
+use tracing::{debug, error, info, instrument, warn};
 
 use crate::{
     database::{
@@ -75,7 +75,7 @@ impl LedgerTrunctationWorker {
 
                     // Check if we should truncate
                     if current_size < (self.ledger_size / 100) * FILLED_PERCENTAGE_LIMIT as u64 {
-                        info!(current_size, "Skipping truncation");
+                        debug!(current_size, "Skipping truncation");
                         continue;
                     }
 
@@ -281,7 +281,9 @@ impl LedgerTrunctationWorker {
         info!(from_slot, to_slot, "Truncating slot range");
 
         ledger.set_lowest_cleanup_slot(to_slot);
-        Self::delete_slots(ledger, from_slot, to_slot)?;
+        if let Err(err) = Self::delete_slots(ledger, from_slot, to_slot) {
+            error!(error = ?err, "Delete failed");
+        }
 
         // Flush memtables with tombstones prior to compaction
         if let Err(err) = ledger.flush() {

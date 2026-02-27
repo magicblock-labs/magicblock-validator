@@ -49,7 +49,7 @@ where
     )]
     pub async fn execute<P: IntentPersister>(
         &mut self,
-        committed_pubkeys: Option<&[Pubkey]>,
+        committed_pubkeys: &[Pubkey],
         persister: &Option<P>,
     ) -> IntentExecutorResult<ExecutionOutput> {
         const RECURSION_CEILING: u8 = 10;
@@ -126,12 +126,12 @@ where
         inner: &IntentExecutorImpl<T, F>,
         err: &TransactionStrategyExecutionError,
         transaction_strategy: &mut TransactionStrategy,
-        committed_pubkeys: Option<&[Pubkey]>,
+        committed_pubkeys: &[Pubkey],
     ) -> IntentExecutorResult<ControlFlow<(), TransactionStrategy>> {
-        let Some(committed_pubkeys) = committed_pubkeys else {
+        if committed_pubkeys.is_empty() {
             // No patching is applicable if intent doesn't commit accounts
             return Ok(ControlFlow::Break(()));
-        };
+        }
 
         match err {
             TransactionStrategyExecutionError::ActionsError(_, _) => {
@@ -186,7 +186,8 @@ where
                     inner.handle_undelegation_error(transaction_strategy);
                 Ok(ControlFlow::Continue(to_cleanup))
             }
-            TransactionStrategyExecutionError::CpiLimitError(_, _) => {
+            TransactionStrategyExecutionError::CpiLimitError(_, _)
+            | TransactionStrategyExecutionError::LoadedAccountsDataSizeExceeded(_, _) => {
                 // Can't be handled in scope of single stage execution
                 // We signal flow break
                 Ok(ControlFlow::Break(()))

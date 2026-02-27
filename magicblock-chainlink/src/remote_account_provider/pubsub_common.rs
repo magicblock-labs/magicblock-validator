@@ -15,6 +15,7 @@ use crate::remote_account_provider::RemoteAccountProviderResult;
 pub struct PubsubClientConfig {
     pub pubsub_url: String,
     pub commitment_config: CommitmentConfig,
+    pub per_stream_subscription_limit: Option<usize>,
 }
 
 impl PubsubClientConfig {
@@ -22,9 +23,17 @@ impl PubsubClientConfig {
         pubsub_url: impl Into<String>,
         commitment_config: CommitmentConfig,
     ) -> Self {
+        let pubsub_url = pubsub_url.into();
+        let per_stream_subscription_limit =
+            if pubsub_url.to_lowercase().contains("helius") {
+                Some(HELIUS_PER_STREAM_SUBSCRIPTION_LIMIT)
+            } else {
+                None
+            };
         Self {
-            pubsub_url: pubsub_url.into(),
+            pubsub_url,
             commitment_config,
+            per_stream_subscription_limit,
         }
     }
 }
@@ -69,6 +78,7 @@ pub struct AccountSubscription {
 pub enum ChainPubsubActorMessage {
     AccountSubscribe {
         pubkey: Pubkey,
+        retries: Option<usize>,
         response: oneshot::Sender<RemoteAccountProviderResult<()>>,
     },
     AccountUnsubscribe {
@@ -86,6 +96,8 @@ pub enum ChainPubsubActorMessage {
         response: oneshot::Sender<RemoteAccountProviderResult<()>>,
     },
 }
+
+pub const HELIUS_PER_STREAM_SUBSCRIPTION_LIMIT: usize = 80;
 
 pub const SUBSCRIPTION_UPDATE_CHANNEL_SIZE: usize = 5_000;
 pub const MESSAGE_CHANNEL_SIZE: usize = 1_000;

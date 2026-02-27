@@ -610,6 +610,21 @@ impl IntegrationTestContext {
         )
     }
 
+    pub fn delegate_account_to_any_validator(
+        &self,
+        payer_chain: &Keypair,
+        payer_ephem: &Keypair,
+        validator: Option<Pubkey>,
+    ) -> Result<(Signature, bool)> {
+        let ixs = dlp_interface::create_delegate_to_any_ixs(
+            // We change the owner of the ephem account, thus cannot use it as payer
+            payer_chain.pubkey(),
+            payer_ephem.pubkey(),
+            validator,
+        );
+        self.send_delegate_ixs(&ixs, payer_chain, payer_ephem)
+    }
+
     pub fn delegate_account_to_validator(
         &self,
         payer_chain: &Keypair,
@@ -622,8 +637,17 @@ impl IntegrationTestContext {
             payer_ephem.pubkey(),
             validator,
         );
+        self.send_delegate_ixs(&ixs, payer_chain, payer_ephem)
+    }
+
+    fn send_delegate_ixs(
+        &self,
+        ixs: &[Instruction],
+        payer_chain: &Keypair,
+        payer_ephem: &Keypair,
+    ) -> Result<(Signature, bool)> {
         let mut tx =
-            Transaction::new_with_payer(&ixs, Some(&payer_chain.pubkey()));
+            Transaction::new_with_payer(ixs, Some(&payer_chain.pubkey()));
         let (deleg_sig, confirmed) = self.send_and_confirm_transaction_chain(
             &mut tx,
             &[payer_chain, payer_ephem],

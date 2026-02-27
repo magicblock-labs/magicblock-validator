@@ -143,6 +143,11 @@ pub enum TransactionStrategyExecutionError {
     CommitIDError(#[source] TransactionError, Option<Signature>),
     #[error("Max instruction trace length exceeded: {0}. {:?}", .1)]
     CpiLimitError(#[source] TransactionError, Option<Signature>),
+    #[error("Loaded accounts data size exceeded: {0}. {:?}", .1)]
+    LoadedAccountsDataSizeExceeded(
+        #[source] TransactionError,
+        Option<Signature>,
+    ),
     #[error("Unfinalized account error: {0}, {:?}", .1)]
     UnfinalizedAccountError(#[source] TransactionError, Option<Signature>),
     #[error("InternalError: {0}")]
@@ -158,10 +163,14 @@ impl From<MagicBlockRpcClientError> for TransactionStrategyExecutionError {
 impl TransactionStrategyExecutionError {
     /// Number of compute budget instructions prepended to every transaction.
     /// Used to map instruction indices back to task indices.
-    const TASK_OFFSET: u8 = 3;
+    const TASK_OFFSET: u8 = 2;
 
     pub fn is_cpi_limit_error(&self) -> bool {
-        matches!(self, Self::CpiLimitError(_, _))
+        matches!(
+            self,
+            Self::CpiLimitError(_, _)
+                | Self::LoadedAccountsDataSizeExceeded(_, _)
+        )
     }
 
     pub fn task_index(&self) -> Option<u8> {
@@ -197,7 +206,8 @@ impl TransactionStrategyExecutionError {
             | Self::ActionsError(_, signature)
             | Self::UndelegationError(_, signature)
             | Self::UnfinalizedAccountError(_, signature)
-            | Self::CpiLimitError(_, signature) => *signature,
+            | Self::CpiLimitError(_, signature)
+            | Self::LoadedAccountsDataSizeExceeded(_, signature) => *signature,
         }
     }
 
@@ -231,6 +241,12 @@ impl TransactionStrategyExecutionError {
                 transaction_err,
                 signature,
             )),
+            err @ TransactionError::MaxLoadedAccountsDataSizeExceeded => {
+                Ok(TransactionStrategyExecutionError::LoadedAccountsDataSizeExceeded(
+                    err,
+                    signature,
+                ))
+            }
             // Map per-task InstructionError into CommitID / Actions / Undelegation errors when possible
             TransactionError::InstructionError(index, instruction_err) => {
                 let tx_err_helper = |instruction_err| -> TransactionError {
@@ -307,6 +323,9 @@ impl metrics::LabelValue for TransactionStrategyExecutionError {
         match self {
             Self::ActionsError(_, _) => "actions_failed",
             Self::CpiLimitError(_, _) => "cpi_limit_failed",
+            Self::LoadedAccountsDataSizeExceeded(_, _) => {
+                "loaded_accounts_data_limit_exceeded"
+            }
             Self::CommitIDError(_, _) => "commit_nonce_failed",
             Self::UndelegationError(_, _) => "undelegation_failed",
             Self::UnfinalizedAccountError(_, _) => "unfinalized_account_failed",

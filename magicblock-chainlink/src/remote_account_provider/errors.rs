@@ -32,6 +32,12 @@ pub enum RemoteAccountProviderError {
     #[error("Failed to manage subscriptions ({0})")]
     AccountSubscriptionsTaskFailed(String),
 
+    #[error("Not all client's subscriptions were in sync ({0})")]
+    AccountSubscriptionsOutOfSync(String),
+
+    #[error("Connection disrupted")]
+    ConnectionDisrupted,
+
     #[error("Failed to send message to laser actor: {0} ({1})")]
     ChainLaserActorSendError(String, String),
 
@@ -44,6 +50,9 @@ pub enum RemoteAccountProviderError {
     #[error("Invalid pubsub endpoint: {0}")]
     InvalidPubsubEndpoint(String),
 
+    #[error("All pubsub clients failed to connect")]
+    AllPubsubClientsFailed,
+
     #[error("Failed to setup an account subscription ({0})")]
     AccountSubscriptionsFailed(String),
 
@@ -53,11 +62,11 @@ pub enum RemoteAccountProviderError {
     #[error("Failed to resolve account ({0}) to track slots")]
     ClockAccountCouldNotBeResolved(String),
 
-    #[error("Failed to resolve accounts to same slot ({0}) to track slots")]
-    SlotsDidNotMatch(String, Vec<u64>),
+    #[error("Failed to resolve accounts to same slot ({0}) to track slots hit limit: {2}")]
+    SlotsDidNotMatch(String, Vec<u64>, String),
 
-    #[error("Accounts matched same slot ({0}), but it's less than min required context slot {2} ")]
-    MatchingSlotsNotSatisfyingMinContextSlot(String, Vec<u64>, u64),
+    #[error("Accounts matched same slot ({0}), but it's less than min required context slot {2} hit limit: {3}")]
+    MatchingSlotsNotSatisfyingMinContextSlot(String, Vec<u64>, u64, String),
 
     #[error("LRU capacity must be greater than 0")]
     InvalidLruCapacity,
@@ -105,8 +114,12 @@ pub enum RemoteAccountProviderError {
         "The LoaderV4 program {0} account state deserialization failed: {1}"
     )]
     LoaderV4StateDeserializationFailed(Pubkey, String),
-}
 
+    #[error(
+        "Failed to update gRPC subscription to {0} after {1} retries: {2}"
+    )]
+    GrpcSubscriptionUpdateFailed(String, usize, String),
+}
 impl From<solana_pubsub_client::pubsub_client::PubsubClientError>
     for RemoteAccountProviderError
 {

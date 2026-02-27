@@ -1,4 +1,6 @@
 DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
+TUI_RPC_URL ?= http://127.0.0.1:7799
+TUI_WS_URL ?= ws://127.0.0.1:7800
 
 CARGO_TEST=nextest run --no-fail-fast -j8
 CARGO_TEST_NOCAP=nextest run --nocapture
@@ -29,6 +31,9 @@ ex-rpc-release:
 
 run-release:
 	cargo run --release
+
+run-tui:
+	cargo run --features tui --bin magicblock-validator
 
 run-release-no-geyser-cache:
 	GEYSER_CACHE_DISABLE=accounts,transactions \
@@ -75,5 +80,8 @@ ci-lint: lint
 tokio-console:
 	RUSTFLAGS="--cfg tokio_unstable" cargo run --release --features=tokio-console
 
+tui-client:
+	cargo run -p magicblock-tui-client -- --rpc-url $(TUI_RPC_URL) --ws-url $(TUI_WS_URL)
+
 .PHONY:
-	list test test-log test-bank fmt lint ex-clone-custom ex-rpc ex-rpc-release tokio-console
+	list test test-log test-bank fmt lint ex-clone-custom ex-rpc ex-rpc-release tokio-console tui-client run-tui

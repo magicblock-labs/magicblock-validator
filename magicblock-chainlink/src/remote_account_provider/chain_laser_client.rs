@@ -4,6 +4,7 @@ use std::{
 };
 
 use async_trait::async_trait;
+use magicblock_config::config::GrpcConfig;
 use solana_commitment_config::CommitmentLevel;
 use solana_pubkey::{pubkey, Pubkey};
 use solana_sdk_ids::sysvar::clock;
@@ -11,7 +12,8 @@ use tokio::sync::{mpsc, oneshot};
 use tracing::*;
 
 use crate::remote_account_provider::{
-    chain_laser_actor::{ChainLaserActor, Slots},
+    chain_laser_actor::{ChainLaserActor, SharedSubscriptions, Slots},
+    chain_rpc_client::ChainRpcClientImpl,
     pubsub_common::{ChainPubsubActorMessage, SubscriptionUpdate},
     ChainPubsubClient, ReconnectableClient, RemoteAccountProviderError,
     RemoteAccountProviderResult,
@@ -47,34 +49,43 @@ pub struct ChainLaserClientImpl {
     updates: Arc<Mutex<Option<mpsc::Receiver<SubscriptionUpdate>>>>,
     /// Channel to send messages to the actor
     messages: mpsc::Sender<ChainPubsubActorMessage>,
+    /// Shared subscriptions with the actor for sync access
+    subscriptions: SharedSubscriptions,
     /// Client identifier
     client_id: String,
 }
 
 impl ChainLaserClientImpl {
-    pub async fn new_from_url(
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_from_url(
         pubsub_url: &str,
         client_id: String,
         api_key: &str,
         commitment: CommitmentLevel,
         abort_sender: mpsc::Sender<()>,
         slots: Slots,
-    ) -> RemoteAccountProviderResult<Self> {
-        let (actor, messages, updates) = ChainLaserActor::new_from_url(
-            pubsub_url,
-            &client_id,
-            api_key,
-            commitment,
-            abort_sender,
-            slots,
-        )?;
+        rpc_client: ChainRpcClientImpl,
+        grpc_config: &GrpcConfig,
+    ) -> Self {
+        let (actor, messages, updates, subscriptions) =
+            ChainLaserActor::new_from_url(
+                pubsub_url,
+                &client_id,
+                api_key,
+                commitment,
+                abort_sender,
+                slots,
+                rpc_client,
+                grpc_config,
+            );
         let client = Self {
             updates: Arc::new(Mutex::new(Some(updates))),
             messages,
+            subscriptions,
             client_id,
         };
         tokio::spawn(actor.run());
-        Ok(client)
+        client
     }
 
     #[instrument(skip(self, msg), fields(client_id = %self.client_id))]
@@ -96,6 +107,7 @@ impl ChainPubsubClient for ChainLaserClientImpl {
     async fn subscribe(
         &self,
         pubkey: Pubkey,
+        retries: Option<usize>,
     ) -> RemoteAccountProviderResult<()> {
         // Skip clock::ID subscriptions for GRPC clients since they get slot
         // updates directly via the SubscribeRequestFilterSlots in the GRPC
@@ -114,6 +126,7 @@ impl ChainPubsubClient for ChainLaserClientImpl {
         let (tx, rx) = oneshot::channel();
         self.send_msg(ChainPubsubActorMessage::AccountSubscribe {
             pubkey: effective_pubkey,
+            retries,
             response: tx,
         })
         .await?;
@@ -169,15 +182,8 @@ impl ChainPubsubClient for ChainLaserClientImpl {
             .expect("ChainLaserClientImpl::take_updates called more than once")
     }
 
-    async fn subscription_count(
-        &self,
-        _exclude: Option<&[Pubkey]>,
-    ) -> Option<(usize, usize)> {
-        None
-    }
-
-    fn subscriptions(&self) -> Option<Vec<Pubkey>> {
-        None
+    fn subscriptions_union(&self) -> HashSet<Pubkey> {
+        self.subscriptions.read().clone()
     }
 
     fn subs_immediately(&self) -> bool {
@@ -208,7 +214,7 @@ impl ReconnectableClient for ChainLaserClientImpl {
         // NOTE: The laser implementation subscribes periodically to requested accounts
         // thus we don't need to throttle the speed at which we resubscribe here.
         for pubkey in pubkeys {
-            self.subscribe(pubkey).await?;
+            self.subscribe(pubkey, None).await?;
         }
         Ok(())
     }

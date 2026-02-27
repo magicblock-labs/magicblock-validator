@@ -10,12 +10,11 @@ use magicblock_committor_service::{
     intent_executor::ExecutionOutput,
     persist::CommitStrategy,
     service_ext::{BaseIntentCommittorExt, CommittorServiceExt},
-    types::{ScheduledBaseIntentWrapper, TriggerType},
     BaseIntentCommittor, CommittorService, ComputeBudgetConfig,
 };
 use magicblock_program::magic_scheduled_base_intent::{
     CommitAndUndelegate, CommitType, CommittedAccount, MagicBaseIntent,
-    ScheduledBaseIntent, UndelegateType,
+    MagicIntentBundle, ScheduledIntentBundle, UndelegateType,
 };
 use magicblock_rpc_client::MagicblockRpcClient;
 use program_flexi_counter::state::FlexiCounter;
@@ -126,12 +125,12 @@ async fn test_ix_commit_order_book_change_671_bytes() {
 }
 
 #[tokio::test]
-async fn test_ix_commit_order_book_change_673_bytes() {
-    // We cannot use 672 as changed_len because that both 671 and 672 produce encoded tx
-    // of size 1644 (which is the max limit), but while the size of raw bytes for 671 is within
-    // 1232 limit, the size for 672 exceeds by 1 (1233). That is why we used
-    // 673 as changed_len where CommitStrategy goes from Args to FromBuffer.
-    commit_book_order_account(673, CommitStrategy::DiffBuffer, false).await;
+async fn test_ix_commit_order_book_change_681_bytes() {
+    // We cannot use 680 as changed_len because that both 680 and 681 produce encoded tx
+    // of size 1644 (which is the max limit), but while the size of raw bytes for 680 is within
+    // 1232 limit, the size for 681 exceeds by 1 (1233). That is why we used
+    // 681 as changed_len where CommitStrategy goes from Args to FromBuffer.
+    commit_book_order_account(681, CommitStrategy::DiffBuffer, false).await;
 }
 
 #[tokio::test]
@@ -188,16 +187,13 @@ async fn commit_single_account(
         MagicBaseIntent::Commit(CommitType::Standalone(vec![account]))
     };
 
-    let intent = ScheduledBaseIntentWrapper {
-        trigger_type: TriggerType::OnChain,
-        inner: ScheduledBaseIntent {
-            id: 0,
-            slot: 10,
-            blockhash: Hash::new_unique(),
-            action_sent_transaction: Transaction::default(),
-            payer: counter_auth.pubkey(),
-            base_intent,
-        },
+    let intent = ScheduledIntentBundle {
+        id: 0,
+        slot: 10,
+        blockhash: Hash::new_unique(),
+        sent_transaction: Transaction::default(),
+        payer: counter_auth.pubkey(),
+        intent_bundle: base_intent.into(),
     };
 
     // We should always be able to Commit & Finalize 1 account either with Args or Buffers
@@ -255,16 +251,13 @@ async fn commit_book_order_account(
         MagicBaseIntent::Commit(CommitType::Standalone(vec![account]))
     };
 
-    let intent = ScheduledBaseIntentWrapper {
-        trigger_type: TriggerType::OnChain,
-        inner: ScheduledBaseIntent {
-            id: 0,
-            slot: 10,
-            blockhash: Hash::new_unique(),
-            action_sent_transaction: Transaction::default(),
-            payer: payer.pubkey(),
-            base_intent,
-        },
+    let intent = ScheduledIntentBundle {
+        id: 0,
+        slot: 10,
+        blockhash: Hash::new_unique(),
+        sent_transaction: Transaction::default(),
+        payer: payer.pubkey(),
+        intent_bundle: base_intent.into(),
     };
 
     ix_commit_local(
@@ -476,6 +469,37 @@ async fn test_commit_20_accounts_1kb_bundle_size_8() {
     .await;
 }
 
+#[tokio::test]
+async fn test_ix_execute_intent_bundle_commit_and_cau_simultaneously_union_of_accounts(
+) {
+    execute_intent_bundle(
+        &[1024, 2048],
+        &[1024, 2048],
+        expect_strategies(&[(CommitStrategy::DiffBufferWithLookupTable, 4)]),
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn test_ix_execute_intent_bundle_commit_three_accounts_cau_one_account() {
+    execute_intent_bundle(
+        &[512, 512, 512],
+        &[512],
+        expect_strategies(&[(CommitStrategy::DiffBufferWithLookupTable, 4)]),
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn test_ix_execute_intent_bundle_mixed_fits_in_args() {
+    execute_intent_bundle(
+        &[10, 20, 10],
+        &[20],
+        expect_strategies(&[(CommitStrategy::StateArgs, 4)]),
+    )
+    .await;
+}
+
 async fn commit_5_accounts_1kb(
     bundle_size: usize,
     expected_strategies: ExpectedStrategies,
@@ -512,10 +536,9 @@ async fn commit_20_accounts_1kb(
         .await;
 }
 
-async fn create_bundles(
-    bundle_size: usize,
+async fn create_and_delegate_accounts(
     bytess: &[usize],
-) -> Vec<Vec<CommittedAccount>> {
+) -> Vec<CommittedAccount> {
     let mut join_set = JoinSet::new();
     for bytes in bytess {
         let bytes = *bytes;
@@ -539,7 +562,14 @@ async fn create_bundles(
     }
 
     // Wait for all tasks to complete
-    let committed = join_set.join_all().await;
+    join_set.join_all().await
+}
+
+async fn create_bundles(
+    bundle_size: usize,
+    bytess: &[usize],
+) -> Vec<Vec<CommittedAccount>> {
+    let committed = create_and_delegate_accounts(bytess).await;
     committed
         .chunks(bundle_size)
         .map(|chunk| chunk.to_vec())
@@ -581,21 +611,63 @@ async fn commit_multiple_accounts(
             }
         })
         .enumerate()
-        .map(|(id, base_intent)| ScheduledBaseIntent {
+        .map(|(id, base_intent)| ScheduledIntentBundle {
             id: id as u64,
             slot: 0,
             blockhash: Hash::new_unique(),
-            action_sent_transaction: Transaction::default(),
+            sent_transaction: Transaction::default(),
             payer: Pubkey::new_unique(),
-            base_intent,
-        })
-        .map(|intent| ScheduledBaseIntentWrapper {
-            trigger_type: TriggerType::OnChain,
-            inner: intent,
+            intent_bundle: base_intent.into(),
         })
         .collect::<Vec<_>>();
 
     ix_commit_local(service, intents, expected_strategies).await;
+}
+
+async fn execute_intent_bundle(
+    bytess_to_commit: &[usize],
+    bytes_to_undelegate: &[usize],
+    expected_strategies: ExpectedStrategies,
+) {
+    init_logger!();
+
+    let validator_auth = ensure_validator_authority();
+    fund_validator_auth_and_ensure_validator_fees_vault(&validator_auth).await;
+
+    let service = CommittorService::try_start(
+        validator_auth.insecure_clone(),
+        ":memory:",
+        ChainConfig::local(ComputeBudgetConfig::new(1_000_000)),
+    )
+    .unwrap();
+    let service = CommittorServiceExt::new(Arc::new(service));
+
+    // Create bundles of committed accounts
+    let to_commit = create_and_delegate_accounts(bytess_to_commit);
+    let to_undelegate = create_and_delegate_accounts(bytes_to_undelegate);
+    let (committees, undelegetees) = tokio::join!(to_commit, to_undelegate);
+
+    let mut intent_bundle = MagicIntentBundle::default();
+    if !committees.is_empty() {
+        intent_bundle.commit = Some(CommitType::Standalone(committees));
+    }
+    if !undelegetees.is_empty() {
+        intent_bundle.commit_and_undelegate = Some(CommitAndUndelegate {
+            commit_action: CommitType::Standalone(undelegetees),
+            undelegate_action: UndelegateType::Standalone,
+        });
+    }
+
+    // Create intent for each bundle
+    let intent_bundle = ScheduledIntentBundle {
+        id: 0,
+        slot: 0,
+        blockhash: Hash::new_unique(),
+        sent_transaction: Transaction::default(),
+        payer: Pubkey::new_unique(),
+        intent_bundle,
+    };
+    ix_commit_local(service, vec![intent_bundle], expected_strategies).await;
 }
 
 // TODO(thlorenz/snawaz): once delegation program supports larger commits add the following
@@ -627,24 +699,25 @@ async fn commit_multiple_accounts(
 // -----------------
 async fn ix_commit_local(
     service: CommittorServiceExt<CommittorService>,
-    base_intents: Vec<ScheduledBaseIntentWrapper>,
+    intent_bundles: Vec<ScheduledIntentBundle>,
     expected_strategies: ExpectedStrategies,
 ) {
     let execution_outputs = service
-        .schedule_base_intents_waiting(base_intents.clone())
+        .schedule_intent_bundles_waiting(intent_bundles.clone())
         .await
         .unwrap()
         .into_iter()
         .collect::<Vec<_>>();
 
     // Assert that all completed
-    assert_eq!(execution_outputs.len(), base_intents.len());
+    assert_eq!(execution_outputs.len(), intent_bundles.len());
     service.release_common_pubkeys().await.unwrap();
 
     let rpc_client = RpcClient::new("http://localhost:7799".to_string());
     let mut strategies = ExpectedStrategies::new();
-    for (execution_result, base_intent) in
-        execution_outputs.into_iter().zip(base_intents.into_iter())
+    for (execution_result, base_intent) in execution_outputs
+        .into_iter()
+        .zip(intent_bundles.into_iter())
     {
         let output = execution_result.inner.unwrap();
         let (commit_signature, finalize_signature) = match output {
@@ -668,8 +741,8 @@ async fn ix_commit_local(
             tx_logs_contain(&rpc_client, &finalize_signature, "Finalize").await
         );
 
-        let is_undelegate = base_intent.is_undelegate();
-        if is_undelegate {
+        let has_undelegate = base_intent.has_undelegate_intent();
+        if has_undelegate {
             // Undelegate is part of atomic Finalization Stage
             assert!(
                 tx_logs_contain(&rpc_client, &finalize_signature, "Undelegate")
@@ -677,12 +750,18 @@ async fn ix_commit_local(
             );
         }
 
-        let mut committed_accounts = base_intent
-            .get_committed_accounts()
-            .unwrap()
-            .iter()
-            .map(|el| (el.pubkey, el.clone()))
-            .collect::<HashMap<Pubkey, CommittedAccount>>();
+        let committed_accounts = base_intent.get_commit_intent_accounts();
+        let undelegated_accounts = base_intent.get_undelegate_intent_accounts();
+        let mut committed_accounts: HashMap<Pubkey, _> =
+            [(false, committed_accounts), (true, undelegated_accounts)]
+                .into_iter()
+                .flat_map(|(allow_undelegation, accounts)| {
+                    accounts.into_iter().flatten().map(move |account| {
+                        (account.pubkey, (allow_undelegation, account))
+                    })
+                })
+                .collect();
+
         let statuses = service
             .get_commit_statuses(base_intent.id)
             .await
@@ -697,18 +776,19 @@ async fn ix_commit_local(
                 .join("\n")
         );
 
-        // When we finalize it is possible to also undelegate the account
-        let expected_owner = if is_undelegate {
-            program_flexi_counter::id()
-        } else {
-            dlp::id()
-        };
-
         assert_eq!(statuses.len(), committed_accounts.len());
         for commit_status in statuses {
-            let account = committed_accounts
+            let (is_undelegate, account) = committed_accounts
                 .remove(&commit_status.pubkey)
                 .expect("Account should be persisted");
+
+            // When we finalize it is possible to also undelegate the account
+            let expected_owner = if is_undelegate {
+                program_flexi_counter::id()
+            } else {
+                dlp::id()
+            };
+
             let lamports = account.account.lamports;
             get_account!(
                 rpc_client,
@@ -722,7 +802,7 @@ async fn ix_commit_local(
                         lamports,
                         expected_owner,
                         account.pubkey,
-                        is_undelegate,
+                        has_undelegate,
                     )
                 }
             );

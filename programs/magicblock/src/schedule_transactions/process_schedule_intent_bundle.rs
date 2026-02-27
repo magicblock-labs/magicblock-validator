@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use magicblock_magic_program_api::args::MagicBaseIntentArgs;
+use magicblock_magic_program_api::args::MagicIntentBundleArgs;
 use solana_account::state_traits::StateMut;
 use solana_instruction::error::InstructionError;
 use solana_log_collector::ic_msg;
@@ -10,7 +10,7 @@ use solana_transaction_context::TransactionContext;
 
 use crate::{
     magic_scheduled_base_intent::{
-        CommitType, ConstructionContext, ScheduledBaseIntent,
+        CommitType, ConstructionContext, ScheduledIntentBundle,
     },
     schedule_transactions::check_magic_context_id,
     utils::{
@@ -24,12 +24,13 @@ use crate::{
 
 const PAYER_IDX: u16 = 0;
 const MAGIC_CONTEXT_IDX: u16 = PAYER_IDX + 1;
-const ACTION_ACCOUNTS_OFFSET: usize = MAGIC_CONTEXT_IDX as usize + 1;
+const ACCOUNTS_OFFSET: usize = MAGIC_CONTEXT_IDX as usize + 1;
 
-pub(crate) fn process_schedule_base_intent(
+pub(crate) fn process_schedule_intent_bundle(
     signers: HashSet<Pubkey>,
     invoke_context: &mut InvokeContext,
-    args: MagicBaseIntentArgs,
+    args: MagicIntentBundleArgs,
+    secure: bool,
 ) -> Result<(), InstructionError> {
     check_magic_context_id(invoke_context, MAGIC_CONTEXT_IDX)?;
 
@@ -49,7 +50,7 @@ pub(crate) fn process_schedule_base_intent(
 
     // Assert enough accounts
     let ix_accs_len = ix_ctx.get_number_of_instruction_accounts() as usize;
-    if ix_accs_len <= ACTION_ACCOUNTS_OFFSET {
+    if ix_accs_len <= ACCOUNTS_OFFSET {
         ic_msg!(
             invoke_context,
             "ScheduleCommit ERR: not enough accounts to schedule commit ({}), need payer, signing program an account for each pubkey to be committed",
@@ -118,10 +119,11 @@ pub(crate) fn process_schedule_base_intent(
         &signers,
         transaction_context,
         invoke_context,
+        secure,
     );
 
     let undelegated_accounts_ref =
-        if let MagicBaseIntentArgs::CommitAndUndelegate(ref value) = args {
+        if let Some(ref value) = args.commit_and_undelegate {
             Some(CommitType::extract_commit_accounts(
                 value.committed_accounts_indices(),
                 construction_context.transaction_context,
@@ -129,7 +131,8 @@ pub(crate) fn process_schedule_base_intent(
         } else {
             None
         };
-    let scheduled_intent = ScheduledBaseIntent::try_new(
+
+    let scheduled_intent = ScheduledIntentBundle::try_new(
         args,
         intent_id,
         clock.slot,
@@ -154,8 +157,7 @@ pub(crate) fn process_schedule_base_intent(
         );
     }
 
-    let action_sent_signature =
-        scheduled_intent.action_sent_transaction.signatures[0];
+    let action_sent_signature = scheduled_intent.sent_transaction.signatures[0];
 
     context.add_scheduled_action(scheduled_intent);
     context_data.set_state(&context)?;
@@ -200,7 +202,7 @@ fn get_parent_program_id(
 
     let first_committee_owner = *get_instruction_account_with_idx(
         transaction_context,
-        ACTION_ACCOUNTS_OFFSET as u16,
+        ACCOUNTS_OFFSET as u16,
     )?
     .borrow()
     .owner();

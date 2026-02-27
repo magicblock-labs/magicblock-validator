@@ -39,6 +39,11 @@ lazy_static::lazy_static! {
         "slot_count", "Slot Count",
     ).unwrap();
 
+    // Needs to be a gauge so we can set it directly
+    // (instead of having to calcuate by which to inc it)
+    static ref CHAIN_SLOT_GAUGE: IntGauge = IntGauge::new(
+        "chain_slot_gauge", "Chain Slot Gauge",
+    ).unwrap();
 
     static ref CACHED_CLONE_OUTPUTS_COUNT: IntGauge = IntGauge::new(
         "magicblock_account_cloner_cached_outputs_count",
@@ -137,6 +142,9 @@ lazy_static::lazy_static! {
             vec![0.1, 1.0, 2.0, 3.0, 10.0, 60.0]
         ),
         ).unwrap();
+}
+
+lazy_static::lazy_static! {
 
     // -----------------
     // Accounts
@@ -166,7 +174,7 @@ lazy_static::lazy_static! {
         IntCounterVec::new(
             Opts::new(
                 "program_subscription_account_updates_count",
-                "Number of account updates received via program subscription",
+                "Number of account updates received via program subscription matching an existing subscription",
             ),
             &["client_id"],
         )
@@ -177,6 +185,16 @@ lazy_static::lazy_static! {
             Opts::new(
                 "account_subscription_account_updates_count",
                 "Number of account updates received via account subscription",
+            ),
+            &["client_id"],
+        )
+        .unwrap();
+
+    static ref ACCOUNT_SUBSCRIPTION_ACTIVATIONS_COUNT: IntCounterVec =
+        IntCounterVec::new(
+            Opts::new(
+                "account_subscription_activations_count",
+                "Number of account subscription activations when subscriptions did not match existing subscriptions",
             ),
             &["client_id"],
         )
@@ -279,6 +297,16 @@ lazy_static::lazy_static! {
         &["program", "result"],
     )
     .unwrap();
+
+    pub static ref PER_PROGRAM_ACCOUNT_UPDATES_COUNT: IntCounterVec =
+        IntCounterVec::new(
+            Opts::new(
+                "per_program_account_updates_count",
+                "Number of account updates received grouped by program id, no matter if they match an account subscription",
+            ),
+            &["client_id", "program"],
+        )
+        .unwrap();
 
     pub static ref UNDELEGATION_REQUESTED_COUNT: IntCounter =
         IntCounter::new(
@@ -442,6 +470,45 @@ lazy_static::lazy_static! {
         ),
         &["client_id"],
     ).unwrap();
+
+    static ref PUBSUB_CLIENT_RESUBSCRIBED_GAUGE: IntGaugeVec = IntGaugeVec::new(
+        Opts::new(
+            "pubsub_client_resubscribed_gauge",
+            "Number of subscriptions successfully resubscribed for each pubsub client before complete or failed"
+        ),
+        &["client_id"],
+    ).unwrap();
+
+    static ref PUBSUB_CLIENT_CONNECTIONS_GAUGE: IntGaugeVec = IntGaugeVec::new(
+        Opts::new(
+            "pubsub_client_connections_gauge",
+            "Number of pooled websocket connections per pubsub client"
+        ),
+        &["client_id"],
+    ).unwrap();
+
+    // -----------------
+    // GRPC Streams
+    // -----------------
+    static ref GRPC_OPTIMIZED_STREAMS_GAUGE: IntGaugeVec =
+        IntGaugeVec::new(
+            Opts::new(
+                "grpc_optimized_streams_gauge",
+                "Number of optimized GRPC streams",
+            ),
+            &["client_id"],
+        )
+        .unwrap();
+
+    static ref GRPC_UNOPTIMIZED_STREAMS_GAUGE: IntGaugeVec =
+        IntGaugeVec::new(
+            Opts::new(
+                "grpc_unoptimized_streams_gauge",
+                "Number of unoptimized GRPC streams",
+            ),
+            &["client_id"],
+        )
+        .unwrap();
 }
 
 pub(crate) fn register() {
@@ -455,6 +522,7 @@ pub(crate) fn register() {
             };
         }
         register!(SLOT_COUNT);
+        register!(CHAIN_SLOT_GAUGE);
         register!(CACHED_CLONE_OUTPUTS_COUNT);
         register!(LEDGER_SIZE_GAUGE);
         register!(LEDGER_BLOCK_TIMES_GAUGE);
@@ -480,6 +548,7 @@ pub(crate) fn register() {
         register!(EVICTED_ACCOUNTS_COUNT);
         register!(PROGRAM_SUBSCRIPTION_ACCOUNT_UPDATES_COUNT);
         register!(ACCOUNT_SUBSCRIPTION_ACCOUNT_UPDATES_COUNT);
+        register!(ACCOUNT_SUBSCRIPTION_ACTIVATIONS_COUNT);
         register!(COMMITTOR_INTENTS_COUNT);
         register!(COMMITTOR_INTENTS_BACKLOG_COUNT);
         register!(COMMITTOR_FAILED_INTENTS_COUNT);
@@ -499,9 +568,11 @@ pub(crate) fn register() {
         register!(ACCOUNT_FETCHES_FOUND_COUNT);
         register!(ACCOUNT_FETCHES_NOT_FOUND_COUNT);
         register!(PER_PROGRAM_ACCOUNT_FETCH_STATS);
+        register!(PER_PROGRAM_ACCOUNT_UPDATES_COUNT);
         register!(UNDELEGATION_REQUESTED_COUNT);
         register!(UNDELEGATION_COMPLETED_COUNT);
         register!(UNSTUCK_UNDELEGATION_COUNT);
+        register!(TRANSACTION_COUNT);
         register!(FAILED_TRANSACTIONS_COUNT);
         register!(MAX_LOCK_CONTENTION_QUEUE_SIZE);
         register!(REMOTE_ACCOUNT_PROVIDER_A_COUNT);
@@ -514,11 +585,19 @@ pub(crate) fn register() {
         register!(PUBSUB_CLIENT_RECONNECT_BACKOFF_DURATION_SECONDS_GAUGE);
         register!(PUBSUB_CLIENT_FAILED_RECONNECT_ATTEMPTS_GAUGE);
         register!(PUBSUB_CLIENT_RESUBSCRIBE_DELAY_MILLISECONDS_GAUGE);
+        register!(PUBSUB_CLIENT_RESUBSCRIBED_GAUGE);
+        register!(PUBSUB_CLIENT_CONNECTIONS_GAUGE);
+        register!(GRPC_OPTIMIZED_STREAMS_GAUGE);
+        register!(GRPC_UNOPTIMIZED_STREAMS_GAUGE);
     });
 }
 
 pub fn inc_slot() {
     SLOT_COUNT.inc();
+}
+
+pub fn set_chain_slot(value: u64) {
+    CHAIN_SLOT_GAUGE.set(value as i64);
 }
 
 pub fn set_cached_clone_outputs_count(count: usize) {
@@ -719,6 +798,12 @@ pub fn inc_account_subscription_account_updates_count(
         .inc();
 }
 
+pub fn inc_account_subscription_activations_count(client_id: &impl LabelValue) {
+    ACCOUNT_SUBSCRIPTION_ACTIVATIONS_COUNT
+        .with_label_values(&[client_id.value()])
+        .inc();
+}
+
 pub fn inc_per_program_account_fetch_stats(
     program_id: &str,
     result: ProgramFetchResult,
@@ -727,6 +812,15 @@ pub fn inc_per_program_account_fetch_stats(
     PER_PROGRAM_ACCOUNT_FETCH_STATS
         .with_label_values(&[program_id, result.value()])
         .inc_by(count);
+}
+
+pub fn inc_per_program_account_updates_count(
+    client_id: &str,
+    program_id: &str,
+) {
+    PER_PROGRAM_ACCOUNT_UPDATES_COUNT
+        .with_label_values(&[client_id, program_id])
+        .inc()
 }
 
 pub fn inc_undelegation_requested() {
@@ -793,4 +887,28 @@ pub fn set_pubsub_client_resubscribe_delay(client_id: &str, delay_ms: u64) {
     PUBSUB_CLIENT_RESUBSCRIBE_DELAY_MILLISECONDS_GAUGE
         .with_label_values(&[client_id])
         .set(delay_ms as i64);
+}
+
+pub fn set_pubsub_client_resubscribed_count(client_id: &str, count: usize) {
+    PUBSUB_CLIENT_RESUBSCRIBED_GAUGE
+        .with_label_values(&[client_id])
+        .set(count as i64);
+}
+
+pub fn set_pubsub_client_connections_count(client_id: &str, count: usize) {
+    PUBSUB_CLIENT_CONNECTIONS_GAUGE
+        .with_label_values(&[client_id])
+        .set(count as i64);
+}
+
+pub fn set_grpc_optimized_streams_gauge(client_id: &str, count: usize) {
+    GRPC_OPTIMIZED_STREAMS_GAUGE
+        .with_label_values(&[client_id])
+        .set(count as i64);
+}
+
+pub fn set_grpc_unoptimized_streams_gauge(client_id: &str, count: usize) {
+    GRPC_UNOPTIMIZED_STREAMS_GAUGE
+        .with_label_values(&[client_id])
+        .set(count as i64);
 }

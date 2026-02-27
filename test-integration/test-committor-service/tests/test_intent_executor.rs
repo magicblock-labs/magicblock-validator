@@ -33,7 +33,7 @@ use magicblock_program::{
     args::ShortAccountMeta,
     magic_scheduled_base_intent::{
         BaseAction, CommitAndUndelegate, CommitType, CommittedAccount,
-        MagicBaseIntent, ProgramArgs, ScheduledBaseIntent, UndelegateType,
+        MagicBaseIntent, ProgramArgs, ScheduledIntentBundle, UndelegateType,
     },
     validator::validator_authority_id,
 };
@@ -49,10 +49,11 @@ use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_sdk::{
     commitment_config::CommitmentConfig,
     hash::Hash,
+    instruction::InstructionError,
     native_token::LAMPORTS_PER_SOL,
     rent::Rent,
     signature::{Keypair, Signer},
-    transaction::Transaction,
+    transaction::{Transaction, TransactionError},
 };
 
 use crate::{
@@ -115,7 +116,6 @@ impl TestEnv {
 #[tokio::test]
 async fn test_commit_id_error_parsing() {
     const COUNTER_SIZE: u64 = 70;
-    const EXPECTED_ERR_MSG: &str = "Accounts committed with an invalid Commit id: Error processing Instruction 3: custom program error: 0xc";
 
     let TestEnv {
         fixture,
@@ -138,7 +138,7 @@ async fn test_commit_id_error_parsing() {
     // Invalidate ids before execution
     task_info_fetcher
         .fetch_next_commit_ids(
-            &intent.get_committed_pubkeys().unwrap(),
+            &intent.get_undelegate_intent_pubkeys().unwrap(),
             remote_slot,
         )
         .await
@@ -162,18 +162,26 @@ async fn test_commit_id_error_parsing() {
     let execution_result = execution_result.unwrap();
     assert!(execution_result.is_err());
     let err = execution_result.unwrap_err();
-    assert!(
-        matches!(err, TransactionStrategyExecutionError::CommitIDError(_, _)),
-        "err: {:?}",
-        err
-    );
-    assert!(err.to_string().contains(EXPECTED_ERR_MSG));
+    assert!(matches!(
+        err,
+        TransactionStrategyExecutionError::CommitIDError(
+            TransactionError::InstructionError(
+                _,
+                InstructionError::Custom(
+                    0xc, // dlp::DlpError::NonceOutOfOrder: commit id/nonce is out of order
+                )
+            ),
+            _
+        )
+    ));
+    assert!(err
+        .to_string()
+        .contains("Accounts committed with an invalid Commit id"));
 }
 
 #[tokio::test]
 async fn test_undelegation_error_parsing() {
     const COUNTER_SIZE: u64 = 70;
-    const EXPECTED_ERR_MSG: &str = "Invalid undelegation: Error processing Instruction 5: custom program error: 0x7a.";
 
     let TestEnv {
         fixture,
@@ -215,15 +223,22 @@ async fn test_undelegation_error_parsing() {
     let err = execution_result.unwrap_err();
     assert!(matches!(
         err,
-        TransactionStrategyExecutionError::UndelegationError(_, _)
+        TransactionStrategyExecutionError::UndelegationError(
+            TransactionError::InstructionError(
+                _,
+                InstructionError::Custom(
+                    0x7a, // flexi-counter ProgramError::Custom(122): forced undelegation failure (FAIL_UNDELEGATION_CODE)
+                )
+            ),
+            _
+        )
     ));
-    assert!(err.to_string().contains(EXPECTED_ERR_MSG));
+    assert!(err.to_string().contains("Invalid undelegation"));
 }
 
 #[tokio::test]
 async fn test_action_error_parsing() {
     const COUNTER_SIZE: u64 = 70;
-    const EXPECTED_ERR_MSG: &str = "User supplied actions are ill-formed: Error processing Instruction 6: Program arithmetic overflowed";
 
     let TestEnv {
         fixture,
@@ -275,16 +290,23 @@ async fn test_action_error_parsing() {
     let execution_err = execution_result.unwrap_err();
     assert!(matches!(
         execution_err,
-        TransactionStrategyExecutionError::ActionsError(_, _)
+        TransactionStrategyExecutionError::ActionsError(
+            TransactionError::InstructionError(
+                _,
+                InstructionError::ArithmeticOverflow
+            ),
+            _
+        )
     ));
-    assert!(execution_err.to_string().contains(EXPECTED_ERR_MSG));
+    assert!(execution_err
+        .to_string()
+        .contains("User supplied actions are ill-formed"));
 }
 
 #[tokio::test]
 async fn test_cpi_limits_error_parsing() {
     const COUNTER_SIZE: u64 = 102;
     const COUNTER_NUM: u64 = 10;
-    const EXPECTED_ERR_MSG: &str = "Max instruction trace length exceeded: Error processing Instruction 27: Max instruction trace length exceeded";
 
     let TestEnv {
         fixture,
@@ -334,9 +356,17 @@ async fn test_cpi_limits_error_parsing() {
     let execution_err = execution_result.unwrap_err();
     assert!(matches!(
         execution_err,
-        TransactionStrategyExecutionError::CpiLimitError(_, _)
+        TransactionStrategyExecutionError::CpiLimitError(
+            TransactionError::InstructionError(
+                _,
+                InstructionError::MaxInstructionTraceLengthExceeded
+            ),
+            _
+        )
     ));
-    assert!(execution_err.to_string().contains(EXPECTED_ERR_MSG));
+    assert!(execution_err
+        .to_string()
+        .contains("Max instruction trace length exceeded"));
 }
 
 #[tokio::test]
@@ -1104,6 +1134,7 @@ fn failing_undelegate_action(
     UndelegateType::WithBaseActions(vec![BaseAction {
         compute_units: 100_000,
         destination_program: program_flexi_counter::id(),
+        source_program: Some(program_flexi_counter::id()),
         escrow_authority,
         data_per_program: ProgramArgs {
             escrow_index: ACTOR_ESCROW_INDEX,
@@ -1178,7 +1209,7 @@ async fn setup_counter(
 fn create_intent(
     committed_accounts: Vec<CommittedAccount>,
     is_undelegate: bool,
-) -> ScheduledBaseIntent {
+) -> ScheduledIntentBundle {
     let base_intent = if is_undelegate {
         MagicBaseIntent::CommitAndUndelegate(CommitAndUndelegate {
             commit_action: CommitType::Standalone(committed_accounts),
@@ -1193,23 +1224,23 @@ fn create_intent(
 
 fn create_scheduled_intent(
     base_intent: MagicBaseIntent,
-) -> ScheduledBaseIntent {
+) -> ScheduledIntentBundle {
     static INTENT_ID: AtomicU64 = AtomicU64::new(0);
 
-    ScheduledBaseIntent {
+    ScheduledIntentBundle {
         id: INTENT_ID.fetch_add(1, Ordering::Relaxed),
         slot: 10,
         blockhash: Hash::new_unique(),
-        action_sent_transaction: Transaction::default(),
+        sent_transaction: Transaction::default(),
         payer: Pubkey::new_unique(),
-        base_intent,
+        intent_bundle: base_intent.into(),
     }
 }
 
 async fn single_flow_transaction_strategy(
     authority: &Pubkey,
     task_info_fetcher: &Arc<CacheTaskInfoFetcher>,
-    intent: &ScheduledBaseIntent,
+    intent: &ScheduledIntentBundle,
 ) -> TransactionStrategy {
     let mut tasks = TaskBuilderImpl::commit_tasks(
         task_info_fetcher,

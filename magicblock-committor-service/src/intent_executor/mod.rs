@@ -10,7 +10,7 @@ use async_trait::async_trait;
 use futures_util::future::{join, try_join_all};
 use magicblock_metrics::metrics;
 use magicblock_program::{
-    magic_scheduled_base_intent::ScheduledBaseIntent,
+    magic_scheduled_base_intent::ScheduledIntentBundle,
     validator::validator_authority,
 };
 use magicblock_rpc_client::{
@@ -96,7 +96,7 @@ pub trait IntentExecutor: Send + Sync + 'static {
     /// Returns `ExecutionOutput` or an `Error`
     async fn execute<P: IntentPersister>(
         &mut self,
-        base_intent: ScheduledBaseIntent,
+        base_intent: ScheduledIntentBundle,
         persister: Option<P>,
     ) -> IntentExecutionResult;
 
@@ -139,61 +139,56 @@ where
 
     async fn execute_inner<P: IntentPersister>(
         &mut self,
-        base_intent: ScheduledBaseIntent,
+        intent_bundle: ScheduledIntentBundle,
         persister: &Option<P>,
     ) -> IntentExecutorResult<ExecutionOutput> {
-        if base_intent.is_empty() {
+        if intent_bundle.is_empty() {
             return Err(IntentExecutorError::EmptyIntentError);
         }
 
+        let all_committed_pubkeys = intent_bundle.get_all_committed_pubkeys();
+
         // Update tasks status to Pending
-        if let Some(pubkeys) = base_intent.get_committed_pubkeys() {
+        {
             let update_status = CommitStatus::Pending;
             persist_status_update_by_message_set(
                 persister,
-                base_intent.id,
-                &pubkeys,
+                intent_bundle.id,
+                &all_committed_pubkeys,
                 update_status,
             );
         }
 
-        let committed_pubkeys = match base_intent.get_committed_pubkeys() {
-            Some(value) => value,
-            None => {
-                // Build tasks for commit stage
-                let commit_tasks = TaskBuilderImpl::commit_tasks(
-                    &self.task_info_fetcher,
-                    &base_intent,
-                    persister,
-                )
-                .await?;
+        if all_committed_pubkeys.is_empty() {
+            // Build tasks for commit stage
+            let commit_tasks = TaskBuilderImpl::commit_tasks(
+                &self.task_info_fetcher,
+                &intent_bundle,
+                persister,
+            )
+            .await?;
 
-                // Standalone actions executed in single stage
-                let strategy = TaskStrategist::build_strategy(
-                    commit_tasks,
-                    &self.authority.pubkey(),
-                    persister,
-                )?;
-                return self
-                    .single_stage_execution_flow(
-                        base_intent,
-                        strategy,
-                        persister,
-                    )
-                    .await;
-            }
+            // Standalone actions executed in single stage
+            let strategy = TaskStrategist::build_strategy(
+                commit_tasks,
+                &self.authority.pubkey(),
+                persister,
+            )?;
+            return self
+                .single_stage_execution_flow(intent_bundle, strategy, persister)
+                .await;
         };
 
         // Build tasks for commit & finalize stages
         let (commit_tasks, finalize_tasks) = {
             let commit_tasks_fut = TaskBuilderImpl::commit_tasks(
                 &self.task_info_fetcher,
-                &base_intent,
+                &intent_bundle,
                 persister,
             );
             let finalize_tasks_fut = TaskBuilderImpl::finalize_tasks(
                 &self.task_info_fetcher,
-                &base_intent,
+                &intent_bundle,
             );
             let (commit_tasks, finalize_tasks) =
                 join(commit_tasks_fut, finalize_tasks_fut).await;
@@ -211,7 +206,7 @@ where
             StrategyExecutionMode::SingleStage(strategy) => {
                 trace!("Single stage execution");
                 self.single_stage_execution_flow(
-                    base_intent,
+                    intent_bundle,
                     strategy,
                     persister,
                 )
@@ -223,7 +218,7 @@ where
             } => {
                 trace!("Two stage execution");
                 self.two_stage_execution_flow(
-                    &committed_pubkeys,
+                    &all_committed_pubkeys,
                     commit_stage,
                     finalize_stage,
                     persister,
@@ -236,19 +231,19 @@ where
     /// Starting execution from single stage
     pub async fn single_stage_execution_flow<P: IntentPersister>(
         &mut self,
-        base_intent: ScheduledBaseIntent,
+        base_intent: ScheduledIntentBundle,
         transaction_strategy: TransactionStrategy,
         persister: &Option<P>,
     ) -> IntentExecutorResult<ExecutionOutput> {
         let mut single_stage_executor =
             SingleStageExecutor::new(self, transaction_strategy);
 
-        let committed_pubkeys = base_intent.get_committed_pubkeys();
+        let committed_pubkeys = base_intent.get_all_committed_pubkeys();
         let res = single_stage_executor
-            .execute(committed_pubkeys.as_deref(), persister)
+            .execute(&committed_pubkeys, persister)
             .await;
 
-        // Here we continue only IF the error is CpiLimitError
+        // Here we continue only IF the error is a limit-type execution error
         // We can recover that Error by splitting execution
         // in 2 stages - commit & finalize
         // Otherwise we return error
@@ -256,10 +251,15 @@ where
         let execution_err = match res {
             Err(IntentExecutorError::FailedToFinalizeError {
                 err:
-                    err @ TransactionStrategyExecutionError::CpiLimitError(_, _),
+                    err
+                    @ (TransactionStrategyExecutionError::CpiLimitError(_, _)
+                        | TransactionStrategyExecutionError::LoadedAccountsDataSizeExceeded(
+                            _,
+                            _,
+                        )),
                 commit_signature: _,
                 finalize_signature: _,
-            }) if committed_pubkeys.is_some() => err,
+            }) if !committed_pubkeys.is_empty() => err,
             res => {
                 self.junk.push(transaction_strategy);
                 return res;
@@ -269,8 +269,6 @@ where
         // With actions, we can't predict num of CPIs
         // If we get here we will try to switch from Single stage to Two Stage commit
         // Note that this not necessarily will pass at the end due to the same reason
-        // SAFETY: is_some() checked prior
-        let committed_pubkeys = committed_pubkeys.unwrap();
         let (commit_strategy, finalize_strategy, cleanup) =
             self.handle_cpi_limit_error(transaction_strategy);
         self.junk.push(cleanup);
@@ -769,15 +767,15 @@ where
     /// Returns `ExecutionOutput` or an `Error`
     async fn execute<P: IntentPersister>(
         &mut self,
-        base_intent: ScheduledBaseIntent,
+        base_intent: ScheduledIntentBundle,
         persister: Option<P>,
     ) -> IntentExecutionResult {
         let message_id = base_intent.id;
-        let is_undelegate = base_intent.is_undelegate();
-        let pubkeys = base_intent.get_committed_pubkeys();
+        let is_undelegate = base_intent.has_undelegate_intent();
+        let pubkeys = base_intent.get_all_committed_pubkeys();
 
         let result = self.execute_inner(base_intent, &persister).await;
-        if let Some(pubkeys) = pubkeys {
+        if !pubkeys.is_empty() {
             // Reset TaskInfoFetcher, as cache could become invalid
             // NOTE: if undelegation was removed - we still reset
             // We assume its safe since all consecutive commits will fail

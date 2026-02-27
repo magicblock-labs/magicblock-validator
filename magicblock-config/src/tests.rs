@@ -71,6 +71,11 @@ fn test_defaults_are_sane() {
     // Verify internal config defaults (not exposed to CLI)
     assert_eq!(config.accountsdb.database_size, 100 * 1024 * 1024); // 100MB
     assert!(matches!(config.accountsdb.block_size, BlockSize::Block256));
+
+    // gRPC defaults
+    assert_eq!(config.grpc.max_subs_in_old_optimized, 5000);
+    assert_eq!(config.grpc.max_old_unoptimized, 5);
+    assert_eq!(config.grpc.max_subs_in_new, 400);
 }
 
 #[test]
@@ -262,7 +267,7 @@ fn test_chainlink_config() {
         [chainlink]
         prepare-lookup-tables = true
         max-monitored-accounts = 5000
-        resubscription-delay = "200ms"
+        resubscription-delay = "50ms"
         "#,
     );
 
@@ -272,7 +277,7 @@ fn test_chainlink_config() {
     assert_eq!(config.chainlink.max_monitored_accounts, 5000);
     assert_eq!(
         config.chainlink.resubscription_delay,
-        std::time::Duration::from_millis(200)
+        std::time::Duration::from_millis(50)
     );
 }
 
@@ -458,6 +463,13 @@ fn test_example_config_full_coverage() {
         config.chain_operation.is_some(),
         "Expected 'chain-operation' to be set in example config file"
     );
+
+    // ========================================================================
+    // 12. gRPC
+    // ========================================================================
+    assert_eq!(config.grpc.max_subs_in_old_optimized, 5000);
+    assert_eq!(config.grpc.max_old_unoptimized, 5);
+    assert_eq!(config.grpc.max_subs_in_new, 400);
 }
 
 #[test]
@@ -473,6 +485,10 @@ fn test_env_vars_full_coverage() {
         // --- Aperture ---
         EnvVarGuard::new("MBV_APERTURE__LISTEN", "127.0.0.1:9999"),
         EnvVarGuard::new("MBV_APERTURE__EVENT_PROCESSORS", "9"),
+        // --- gRPC ---
+        EnvVarGuard::new("MBV_GRPC__MAX_SUBS_IN_OLD_OPTIMIZED", "1337"),
+        EnvVarGuard::new("MBV_GRPC__MAX_OLD_UNOPTIMIZED", "7"),
+        EnvVarGuard::new("MBV_GRPC__MAX_SUBS_IN_NEW", "33"),
         // --- Metrics ---
         EnvVarGuard::new("MBV_METRICS__ADDRESS", "127.0.0.1:9091"),
         EnvVarGuard::new("MBV_METRICS__COLLECT_FREQUENCY", "15s"),
@@ -526,6 +542,11 @@ fn test_env_vars_full_coverage() {
     // Aperture
     assert_eq!(config.aperture.listen.0.port(), 9999);
     assert_eq!(config.aperture.event_processors, 9);
+
+    // gRPC
+    assert_eq!(config.grpc.max_subs_in_old_optimized, 1337);
+    assert_eq!(config.grpc.max_old_unoptimized, 7);
+    assert_eq!(config.grpc.max_subs_in_new, 33);
 
     // Metrics
     assert_eq!(config.metrics.address.0.port(), 9091);

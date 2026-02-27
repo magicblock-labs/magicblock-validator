@@ -3,7 +3,9 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 use solana_program::pubkey::Pubkey;
 
-use crate::args::{MagicBaseIntentArgs, ScheduleTaskArgs};
+use crate::args::{
+    MagicBaseIntentArgs, MagicIntentBundleArgs, ScheduleTaskArgs,
+};
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
 pub enum MagicBlockInstruction {
@@ -71,6 +73,26 @@ pub enum MagicBlockInstruction {
     /// as part of the [MagicBlockInstruction::ScheduleCommit] instruction.
     /// Args: (intent_id, bump) - bump is needed in order to guarantee unique transactions
     ScheduledCommitSent((u64, u64)),
+
+    /// Schedules execution of a single *base intent*.
+    ///
+    /// A "base intent" is an atomic unit of work executed by the validator on the Base layer,
+    /// such as:
+    /// - executing standalone base actions (`BaseActions`)
+    /// - committing a set of accounts (`Commit`)
+    /// - committing and undelegating accounts, optionally with post-actions (`CommitAndUndelegate`)
+    ///
+    /// This instruction is the legacy/single-intent variant of scheduling. For batching multiple
+    /// independent intents into a single instruction, see [`MagicBlockInstruction::ScheduleIntentBundle`].
+    ///
+    /// # Account references
+    /// - **0.**   `[WRITE, SIGNER]` Payer requesting the intent to be scheduled
+    /// - **1.**   `[WRITE]`         Magic Context account
+    /// - **2..n** `[]`              Accounts referenced by the intent (including action accounts)
+    ///
+    /// # Data
+    /// The embedded [`MagicBaseIntentArgs`] encodes account references by indices into the
+    /// accounts array (compact representation).
     ScheduleBaseIntent(MagicBaseIntentArgs),
 
     /// Schedule a new task for execution
@@ -86,9 +108,7 @@ pub enum MagicBlockInstruction {
     /// # Account references
     /// - **0.** `[WRITE, SIGNER]` Task authority
     /// - **1.** `[WRITE]`         Task context account
-    CancelTask {
-        task_id: i64,
-    },
+    CancelTask { task_id: i64 },
 
     /// Disables the executable check, needed to modify the data of a program
     /// in preparation to deploying it via LoaderV4 and to modify its authority.
@@ -106,6 +126,74 @@ pub enum MagicBlockInstruction {
 
     /// Noop instruction
     Noop(u64),
+
+    /// Schedules execution of a *bundle* of intents in a single instruction.
+    ///
+    /// A "intent bundle" is an atomic unit of work executed by the validator on the Base layer,
+    /// such as:
+    /// - standalone base actions
+    /// - an optional `Commit`
+    /// - an optional `CommitAndUndelegate`
+    ///
+    /// This is the recommended scheduling path when the caller wants to submit multiple
+    /// independent intents while paying account overhead only once.
+    ///
+    /// # Account references
+    /// - **0.**   `[WRITE, SIGNER]` Payer requesting the bundle to be scheduled
+    /// - **1.**   `[WRITE]`         Magic Context account
+    /// - **2..n** `[]`              All accounts referenced by any intent in the bundle
+    ///
+    /// # Data
+    /// The embedded [`MagicIntentBundleArgs`] encodes account references by indices into the
+    /// accounts array.
+    ScheduleIntentBundle(MagicIntentBundleArgs),
+
+    /// Creates a new ephemeral account with rent paid by a sponsor.
+    /// The account is automatically owned by the calling program (CPI caller).
+    ///
+    /// # Account references
+    /// - **0.** `[WRITE]` Sponsor account (pays rent, can be PDA or oncurve)
+    /// - **1.** `[WRITE]` Ephemeral account to create (must have 0 lamports)
+    /// - **2.** `[WRITE]` Vault account (receives rent payment)
+    CreateEphemeralAccount {
+        /// Initial data length in bytes
+        data_len: u32,
+    },
+
+    /// Resizes an existing ephemeral account, adjusting rent accordingly.
+    ///
+    /// # Account references
+    /// - **0.** `[WRITE]` Sponsor account (pays/receives rent difference)
+    /// - **1.** `[WRITE]` Ephemeral account to resize
+    /// - **2.** `[WRITE]` Vault account (holds/receives lamports for rent transfer)
+    ResizeEphemeralAccount {
+        /// New data length in bytes
+        new_data_len: u32,
+    },
+
+    /// Closes an ephemeral account, refunding rent to the sponsor.
+    ///
+    /// # Account references
+    /// - **0.** `[WRITE]` Sponsor account (receives rent refund)
+    /// - **1.** `[WRITE]` Ephemeral account to close
+    /// - **2.** `[WRITE]` Vault account (source of rent refund)
+    CloseEphemeralAccount,
+
+    /// Schedules the accounts provided at end of accounts Vec to be committed and finalized in a
+    /// single DLP instruction.
+    /// It should be invoked from the program whose PDA accounts are to be
+    /// committed.
+    ///
+    /// This is the first part of scheduling a commit.
+    /// A second transaction [MagicBlockInstruction::AcceptScheduleCommits] has to run in order
+    /// to finish scheduling the commit.
+    ///
+    /// # Account references
+    /// - **0.**   `[WRITE, SIGNER]` Payer requesting the commit to be scheduled
+    /// - **1.**   `[WRITE]`         Magic Context Account containing to which we store
+    ///   the scheduled commits
+    /// - **2..n** `[]`              Accounts to be committed
+    ScheduleCommitFinalize { request_undelegation: bool },
 }
 
 impl MagicBlockInstruction {

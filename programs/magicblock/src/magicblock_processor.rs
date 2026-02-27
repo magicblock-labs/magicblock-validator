@@ -2,12 +2,16 @@ use magicblock_magic_program_api::instruction::MagicBlockInstruction;
 use solana_program_runtime::declare_process_instruction;
 
 use crate::{
+    ephemeral_accounts::{
+        process_close_ephemeral_account, process_create_ephemeral_account,
+        process_resize_ephemeral_account,
+    },
     mutate_accounts::process_mutate_accounts,
     process_scheduled_commit_sent,
     schedule_task::{process_cancel_task, process_schedule_task},
     schedule_transactions::{
-        process_accept_scheduled_commits, process_schedule_base_intent,
-        process_schedule_commit, ProcessScheduleCommitOptions,
+        process_accept_scheduled_commits, process_schedule_commit,
+        process_schedule_intent_bundle, ProcessScheduleCommitOptions,
     },
     toggle_executable_check::process_toggle_executable_check,
 };
@@ -59,6 +63,9 @@ declare_process_instruction!(
                     request_undelegation: true,
                 },
             ),
+            ScheduleCommitFinalize {
+                request_undelegation: _,
+            } => todo!(),
             AcceptScheduleCommits => {
                 process_accept_scheduled_commits(signers, invoke_context)
             }
@@ -68,9 +75,18 @@ declare_process_instruction!(
                 transaction_context,
                 id,
             ),
-            ScheduleBaseIntent(args) => {
-                process_schedule_base_intent(signers, invoke_context, args)
-            }
+            ScheduleBaseIntent(args) => process_schedule_intent_bundle(
+                signers,
+                invoke_context,
+                args.into(),
+                false,
+            ),
+            ScheduleIntentBundle(args) => process_schedule_intent_bundle(
+                signers,
+                invoke_context,
+                args,
+                true,
+            ),
             ScheduleTask(args) => {
                 process_schedule_task(signers, invoke_context, args)
             }
@@ -83,6 +99,24 @@ declare_process_instruction!(
             EnableExecutableCheck => {
                 process_toggle_executable_check(signers, invoke_context, true)
             }
+            CreateEphemeralAccount { data_len } => {
+                process_create_ephemeral_account(
+                    invoke_context,
+                    transaction_context,
+                    data_len,
+                )
+            }
+            ResizeEphemeralAccount { new_data_len } => {
+                process_resize_ephemeral_account(
+                    invoke_context,
+                    transaction_context,
+                    new_data_len,
+                )
+            }
+            CloseEphemeralAccount => process_close_ephemeral_account(
+                invoke_context,
+                transaction_context,
+            ),
             Noop(_) => Ok(()),
         }
     }

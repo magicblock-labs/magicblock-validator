@@ -1,11 +1,9 @@
 use std::collections::{hash_map::Entry, HashMap, VecDeque};
 
-use magicblock_program::magic_scheduled_base_intent::ScheduledBaseIntent;
+use magicblock_program::magic_scheduled_base_intent::ScheduledIntentBundle;
 use solana_pubkey::Pubkey;
 use thiserror::Error;
 use tracing::error;
-
-use crate::types::ScheduledBaseIntentWrapper;
 
 pub(crate) const POISONED_INNER_MSG: &str =
     "Mutex on CommitSchedulerInner is poisoned.";
@@ -13,7 +11,7 @@ pub(crate) const POISONED_INNER_MSG: &str =
 type IntentID = u64;
 struct IntentMeta {
     num_keys: usize,
-    intent: ScheduledBaseIntentWrapper,
+    intent: ScheduledIntentBundle,
 }
 
 /// A scheduler that ensures mutually exclusive access to pubkeys across intents
@@ -76,13 +74,13 @@ impl IntentScheduler {
         }
     }
 
-    /// Returns [`ScheduledBaseIntent`] if intent can be executed,
+    /// Returns [`ScheduledIntentBundle`] if intent can be executed,
     /// otherwise consumes it and enqueues
     pub fn schedule(
         &mut self,
-        base_intent: ScheduledBaseIntentWrapper,
-    ) -> Option<ScheduledBaseIntentWrapper> {
-        let intent_id = base_intent.inner.id;
+        intent_bundle: ScheduledIntentBundle,
+    ) -> Option<ScheduledIntentBundle> {
+        let intent_id = intent_bundle.id;
 
         // To check duplicate scheduling its enough to check:
         // 1. currently blocked
@@ -113,8 +111,9 @@ impl IntentScheduler {
             return None;
         }
 
-        let Some(pubkeys) = base_intent.inner.get_committed_pubkeys() else {
-            return Some(base_intent);
+        let pubkeys = intent_bundle.get_all_committed_pubkeys();
+        if pubkeys.is_empty() {
+            return Some(intent_bundle);
         };
 
         // Check if there are any conflicting keys
@@ -135,12 +134,12 @@ impl IntentScheduler {
                 intent_id,
                 IntentMeta {
                     num_keys: pubkeys.len(),
-                    intent: base_intent,
+                    intent: intent_bundle,
                 },
             );
             None
         } else {
-            Some(base_intent)
+            Some(intent_bundle)
         }
     }
 
@@ -149,11 +148,12 @@ impl IntentScheduler {
     /// NOTE: this shall be called on executing intents to finilize their execution.
     pub fn complete(
         &mut self,
-        base_intent: &ScheduledBaseIntent,
+        intent_bundle: &ScheduledIntentBundle,
     ) -> IntentSchedulerResult<()> {
         // Release data for completed intent
-        let intent_id = base_intent.id;
-        let Some(pubkeys) = base_intent.get_committed_pubkeys() else {
+        let intent_id = intent_bundle.id;
+        let pubkeys = intent_bundle.get_all_committed_pubkeys();
+        if pubkeys.is_empty() {
             // This means BaseAction, it doesn't have to be scheduled
             return Ok(());
         };
@@ -235,7 +235,7 @@ impl IntentScheduler {
     // Returns [`ScheduledBaseIntent`] that can be executed
     pub fn pop_next_scheduled_intent(
         &mut self,
-    ) -> Option<ScheduledBaseIntentWrapper> {
+    ) -> Option<ScheduledIntentBundle> {
         // TODO(edwin): optimize. Create counter im IntentMeta & update
         let mut execute_candidates: HashMap<IntentID, usize> = HashMap::new();
         self.blocked_keys.iter().for_each(|(_, queue)| {
@@ -391,7 +391,7 @@ mod completion_simple_test {
         assert_eq!(scheduler.intents_blocked(), 1);
 
         // Complete first intent
-        assert!(scheduler.complete(&executed.inner).is_ok());
+        assert!(scheduler.complete(&executed).is_ok());
 
         let next = scheduler.pop_next_scheduled_intent().unwrap();
         assert_eq!(next, msg2);
@@ -415,7 +415,7 @@ mod completion_simple_test {
         assert_eq!(scheduler.intents_blocked(), 2);
 
         // Complete first intent
-        assert!(scheduler.complete(&executed.inner).is_ok());
+        assert!(scheduler.complete(&executed).is_ok());
 
         // Second intent should now be available
         let expected_msg2 = scheduler.pop_next_scheduled_intent().unwrap();
@@ -423,7 +423,7 @@ mod completion_simple_test {
         assert_eq!(scheduler.intents_blocked(), 1);
 
         // Complete second intent
-        assert!(scheduler.complete(&expected_msg2.inner).is_ok());
+        assert!(scheduler.complete(&expected_msg2).is_ok());
 
         // Third intent should now be available
         let expected_msg3 = scheduler.pop_next_scheduled_intent().unwrap();
@@ -483,20 +483,20 @@ mod complex_blocking_test {
         assert_eq!(scheduler.intents_blocked(), 2);
 
         // Complete msg1
-        assert!(scheduler.complete(&msg1.inner).is_ok());
+        assert!(scheduler.complete(&msg1).is_ok());
         // None of the intents can execute yet
         // msg3 is blocked msg2
         // msg4 is blocked by msg3
         assert!(scheduler.pop_next_scheduled_intent().is_none());
 
         // Complete msg2
-        assert!(scheduler.complete(&msg2.inner).is_ok());
+        assert!(scheduler.complete(&msg2).is_ok());
         // Now msg3 is unblocked
         let next = scheduler.pop_next_scheduled_intent().unwrap();
         assert_eq!(next, msg3);
         assert_eq!(scheduler.intents_blocked(), 1);
         // Complete msg3
-        assert!(scheduler.complete(&next.inner).is_ok());
+        assert!(scheduler.complete(&next).is_ok());
 
         // Now msg4 should be available
         let next = scheduler.pop_next_scheduled_intent().unwrap();
@@ -544,7 +544,7 @@ mod complex_blocking_test {
         assert_eq!(scheduler.intents_blocked(), 2);
 
         // Complete msg1
-        assert!(scheduler.complete(&executed_msg1.inner).is_ok());
+        assert!(scheduler.complete(&executed_msg1).is_ok());
 
         // Now only msg2 should be available (not msg3)
         let expected_msg2 = scheduler.pop_next_scheduled_intent().unwrap();
@@ -554,7 +554,7 @@ mod complex_blocking_test {
         assert_eq!(scheduler.pop_next_scheduled_intent(), None);
 
         // Complete msg2
-        assert!(scheduler.complete(&expected_msg2.inner).is_ok());
+        assert!(scheduler.complete(&expected_msg2).is_ok());
 
         // Now msg3 should be available
         let expected_msg3 = scheduler.pop_next_scheduled_intent().unwrap();
@@ -587,7 +587,7 @@ mod complex_blocking_test {
         assert_eq!(scheduler.intents_blocked(), 4);
 
         // Complete msg1
-        assert!(scheduler.complete(&executed1.inner).is_ok());
+        assert!(scheduler.complete(&executed1).is_ok());
 
         // msg2 and msg4 should be available (they don't conflict)
         let next_msgs = [
@@ -599,7 +599,7 @@ mod complex_blocking_test {
         assert_eq!(scheduler.intents_blocked(), 2);
 
         // Complete msg2
-        assert!(scheduler.complete(&msg2.inner).is_ok());
+        assert!(scheduler.complete(&msg2).is_ok());
         // msg2 and msg4 should be available (they don't conflict)
         let next_intents = [
             scheduler.pop_next_scheduled_intent().unwrap(),
@@ -613,7 +613,7 @@ mod complex_blocking_test {
 
 #[cfg(test)]
 mod edge_cases_test {
-    use magicblock_program::magic_scheduled_base_intent::MagicBaseIntent;
+    use magicblock_program::magic_scheduled_base_intent::MagicIntentBundle;
 
     use super::*;
     use crate::test_utils;
@@ -627,7 +627,7 @@ mod edge_cases_test {
         setup();
         let mut scheduler = IntentScheduler::new();
         let mut msg = create_test_intent(1, &[], false);
-        msg.inner.base_intent = MagicBaseIntent::BaseActions(vec![]);
+        msg.intent_bundle = MagicIntentBundle::default();
 
         // Should execute immediately since it has no pubkeys
         assert!(scheduler.schedule(msg.clone()).is_some());
@@ -659,7 +659,7 @@ mod complete_error_test {
         );
 
         // Attempt to complete message that was never scheduled
-        let result = scheduler.complete(&msg.inner);
+        let result = scheduler.complete(&msg);
         assert!(matches!(
             result,
             Err(IntentSchedulerError::NonScheduledMessageError)
@@ -681,10 +681,10 @@ mod complete_error_test {
         let msg2 = create_test_intent(2, &[pubkey1], false);
         assert!(scheduler.schedule(msg2.clone()).is_none());
 
-        msg1.inner.get_committed_accounts_mut().unwrap().pop();
+        msg1.get_commit_intent_accounts_mut().unwrap().pop();
 
         // Attempt to complete msg1 - should detect corrupted state
-        let result = scheduler.complete(&msg1.inner);
+        let result = scheduler.complete(&msg1);
         assert!(matches!(
             result,
             Err(IntentSchedulerError::CorruptedIntentError)
@@ -703,9 +703,8 @@ mod complete_error_test {
         let mut msg1 = create_test_intent(1, &[pubkey1, pubkey2], false);
         assert!(scheduler.schedule(msg1.clone()).is_some());
 
-        msg1.inner
-            .base_intent
-            .get_committed_accounts_mut()
+        msg1.intent_bundle
+            .get_commit_intent_accounts_mut()
             .unwrap()
             .push(CommittedAccount {
                 pubkey: pubkey3,
@@ -714,7 +713,7 @@ mod complete_error_test {
             });
 
         // Attempt to complete msg1 - should detect corrupted state
-        let result = scheduler.complete(&msg1.inner);
+        let result = scheduler.complete(&msg1);
         assert!(matches!(
             result,
             Err(IntentSchedulerError::CorruptedIntentError)
@@ -738,7 +737,7 @@ mod complete_error_test {
         scheduler.schedule(msg2.clone());
 
         // Attempt to complete - should detect corrupted state
-        let result = scheduler.complete(&msg2.inner);
+        let result = scheduler.complete(&msg2);
         assert!(matches!(
             result,
             Err(IntentSchedulerError::CompletingBlockedIntentError)
@@ -761,11 +760,90 @@ mod complete_error_test {
         assert!(scheduler.schedule(msg2.clone()).is_none());
 
         // Attempt to complete msg2 before msg1 - should detect corrupted state
-        let result = scheduler.complete(&msg2.inner);
+        let result = scheduler.complete(&msg2);
         assert!(matches!(
             result,
             Err(IntentSchedulerError::CompletingBlockedIntentError)
         ));
+    }
+}
+
+#[cfg(test)]
+mod intent_bundle_test {
+    use solana_pubkey::pubkey;
+
+    use super::*;
+
+    /// Bundle contains BOTH Commit and CommitAndUndelegate.
+    /// Scheduler must treat committed pubkeys as UNION across both.
+    #[test]
+    fn test_bundle_with_commit_and_cau_blocks_on_union() {
+        let mut scheduler = IntentScheduler::new();
+
+        let a = pubkey!("1111111111111111111111111111111111111111111");
+        let b = pubkey!("21111111111111111111111111111111111111111111");
+        let c = pubkey!("31111111111111111111111111111111111111111111");
+
+        // msg1 has commit[a] and cau[b]
+        let msg1 = create_test_intent_bundle(1, &[a], &[b]);
+
+        // msg2 conflicts with commit key (a)
+        let msg2 = create_test_intent(2, &[a], false);
+        // msg3 conflicts with cau key (b)
+        let msg3 = create_test_intent(3, &[b], false);
+        // msg4 is unrelated (c), should run immediately even while msg1 executes
+        let msg4 = create_test_intent(4, &[c], false);
+
+        // msg1 executes immediately
+        let executed1 = scheduler.schedule(msg1.clone()).unwrap();
+        assert_eq!(executed1, msg1);
+        assert_eq!(scheduler.intents_blocked(), 0);
+
+        // msg2 and msg3 should be blocked due to union keys [a, b]
+        assert!(scheduler.schedule(msg2.clone()).is_none());
+        assert!(scheduler.schedule(msg3.clone()).is_none());
+        assert_eq!(scheduler.intents_blocked(), 2);
+
+        // msg4 doesn't conflict, should execute immediately
+        assert!(scheduler.schedule(msg4.clone()).is_some());
+        assert_eq!(scheduler.intents_blocked(), 2);
+    }
+
+    /// After completing a bundle with both intents, the blocked intents should become eligible.
+    #[test]
+    fn test_bundle_with_commit_and_cau_unblocks_correctly() {
+        let mut scheduler = IntentScheduler::new();
+
+        let a = pubkey!("1111111111111111111111111111111111111111111");
+        let b = pubkey!("21111111111111111111111111111111111111111111");
+
+        // msg1 has commit[a] and cau[b]
+        let msg1 = create_test_intent_bundle(1, &[a], &[b]);
+        // both should be blocked behind msg1
+        let msg2 = create_test_intent(2, &[a], false);
+        let msg3 = create_test_intent(3, &[b], false);
+
+        // msg1 executes immediately
+        let executed1 = scheduler.schedule(msg1.clone()).unwrap();
+        // enqueue blockers
+        assert!(scheduler.schedule(msg2.clone()).is_none());
+        assert!(scheduler.schedule(msg3.clone()).is_none());
+        assert_eq!(scheduler.intents_blocked(), 2);
+
+        // Complete msg1
+        assert!(scheduler.complete(&executed1).is_ok());
+
+        // Now both msg2 and msg3 are eligible (order doesn't matter)
+        let next1 = scheduler.pop_next_scheduled_intent().unwrap();
+        assert!(next1 == msg2 || next1 == msg3);
+        assert_eq!(scheduler.intents_blocked(), 1);
+
+        assert!(scheduler.complete(&next1).is_ok());
+
+        let next2 = scheduler.pop_next_scheduled_intent().unwrap();
+        assert!(next2 == msg2 || next2 == msg3);
+        assert_ne!(next1, next2);
+        assert_eq!(scheduler.intents_blocked(), 0);
     }
 }
 
@@ -775,24 +853,22 @@ pub(crate) fn create_test_intent(
     id: u64,
     pubkeys: &[Pubkey],
     is_undelegate: bool,
-) -> ScheduledBaseIntentWrapper {
+) -> ScheduledIntentBundle {
     use magicblock_program::magic_scheduled_base_intent::{
-        CommitAndUndelegate, CommitType, CommittedAccount, MagicBaseIntent,
-        ScheduledBaseIntent, UndelegateType,
+        CommitAndUndelegate, CommitType, CommittedAccount, MagicIntentBundle,
+        ScheduledIntentBundle, UndelegateType,
     };
     use solana_account::Account;
     use solana_hash::Hash;
     use solana_transaction::Transaction;
 
-    use crate::types::TriggerType;
-
-    let mut intent = ScheduledBaseIntent {
+    let mut intent = ScheduledIntentBundle {
         id,
         slot: 0,
         blockhash: Hash::default(),
-        action_sent_transaction: Transaction::default(),
+        sent_transaction: Transaction::default(),
         payer: Pubkey::default(),
-        base_intent: MagicBaseIntent::BaseActions(vec![]),
+        intent_bundle: MagicIntentBundle::default(),
     };
 
     // Only set pubkeys if provided
@@ -808,18 +884,67 @@ pub(crate) fn create_test_intent(
 
         let commit_type = CommitType::Standalone(committed_accounts);
         if is_undelegate {
-            intent.base_intent =
-                MagicBaseIntent::CommitAndUndelegate(CommitAndUndelegate {
+            intent.intent_bundle.commit_and_undelegate =
+                Some(CommitAndUndelegate {
                     commit_action: commit_type,
                     undelegate_action: UndelegateType::Standalone,
                 })
         } else {
-            intent.base_intent = MagicBaseIntent::Commit(commit_type);
+            intent.intent_bundle.commit = Some(commit_type);
         }
     }
 
-    ScheduledBaseIntentWrapper {
-        inner: intent,
-        trigger_type: TriggerType::OffChain,
+    intent
+}
+
+#[cfg(test)]
+pub(crate) fn create_test_intent_bundle(
+    id: u64,
+    commit_pubkeys: &[Pubkey],
+    commit_and_undelegate_pubkeys: &[Pubkey],
+) -> ScheduledIntentBundle {
+    use magicblock_program::magic_scheduled_base_intent::{
+        CommitAndUndelegate, CommitType, CommittedAccount, MagicIntentBundle,
+        ScheduledIntentBundle, UndelegateType,
+    };
+    use solana_account::Account;
+    use solana_hash::Hash;
+    use solana_transaction::Transaction;
+
+    let to_accounts = |keys: &[Pubkey]| -> Vec<CommittedAccount> {
+        keys.iter()
+            .copied()
+            .map(|pubkey| CommittedAccount {
+                pubkey,
+                account: Account::default(),
+                remote_slot: Default::default(),
+            })
+            .collect()
+    };
+
+    let mut intent = ScheduledIntentBundle {
+        id,
+        slot: 0,
+        blockhash: Hash::default(),
+        sent_transaction: Transaction::default(),
+        payer: Pubkey::default(),
+        intent_bundle: MagicIntentBundle::default(),
+    };
+
+    if !commit_pubkeys.is_empty() {
+        intent.intent_bundle.commit =
+            Some(CommitType::Standalone(to_accounts(commit_pubkeys)));
     }
+
+    if !commit_and_undelegate_pubkeys.is_empty() {
+        intent.intent_bundle.commit_and_undelegate =
+            Some(CommitAndUndelegate {
+                commit_action: CommitType::Standalone(to_accounts(
+                    commit_and_undelegate_pubkeys,
+                )),
+                undelegate_action: UndelegateType::Standalone,
+            });
+    }
+
+    intent
 }

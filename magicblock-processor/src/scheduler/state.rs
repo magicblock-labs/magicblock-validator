@@ -1,6 +1,12 @@
+//! Shared state initialization for the transaction scheduler.
+//!
+//! Prepares global resources: program cache, sysvars, and communication channels.
+//! `TransactionSchedulerState` is constructed externally and passed to
+//! `TransactionScheduler::new()` for initialization.
+
 use std::sync::{Arc, OnceLock, RwLock};
 
-use magicblock_accounts_db::AccountsDb;
+use magicblock_accounts_db::{traits::AccountsBank, AccountsDb};
 use magicblock_core::link::{
     accounts::AccountUpdateTx,
     transactions::{
@@ -15,8 +21,10 @@ use solana_bpf_loader_program::syscalls::{
     create_program_runtime_environment_v2,
 };
 use solana_program::{
-    clock::DEFAULT_SLOTS_PER_EPOCH, epoch_schedule::EpochSchedule,
-    slot_hashes::SlotHashes, sysvar,
+    clock::DEFAULT_SLOTS_PER_EPOCH,
+    epoch_schedule::EpochSchedule,
+    slot_hashes::{SlotHashes, MAX_ENTRIES},
+    sysvar,
 };
 use solana_program_runtime::{
     loaded_programs::ProgramCache, solana_sbpf::program::BuiltinProgram,
@@ -27,20 +35,23 @@ use tokio_util::sync::CancellationToken;
 
 use crate::executor::SimpleForkGraph;
 
-/// Holds global state and communication channels for the transaction scheduler.
+/// Container for global state and communication channels.
+///
+/// Holds all shared resources needed to bootstrap the scheduler.
+/// Created externally and consumed by `TransactionScheduler::new()`.
 pub struct TransactionSchedulerState {
-    // Global State Handles
+    // === Global State Handles ===
     pub accountsdb: Arc<AccountsDb>,
     pub ledger: Arc<Ledger>,
     pub environment: TransactionProcessingEnvironment<'static>,
 
-    // Communication Channels
+    // === Communication Channels ===
     pub txn_to_process_rx: TransactionToProcessRx,
     pub account_update_tx: AccountUpdateTx,
     pub transaction_status_tx: TransactionStatusTx,
     pub tasks_tx: ScheduledTasksTx,
 
-    // Configuration
+    // === Configuration ===
     pub is_auto_airdrop_lamports_enabled: bool,
     pub shutdown: CancellationToken,
 }
@@ -53,7 +64,7 @@ impl TransactionSchedulerState {
         static FORK_GRAPH: OnceLock<Arc<RwLock<SimpleForkGraph>>> =
             OnceLock::new();
 
-        // Singleton fork graph (validator does not support forks).
+        // Singleton fork graph: validator doesn't support forks
         let forkgraph = Arc::downgrade(
             FORK_GRAPH.get_or_init(|| Arc::new(RwLock::new(SimpleForkGraph))),
         );
@@ -80,26 +91,29 @@ impl TransactionSchedulerState {
         Arc::new(RwLock::new(cache))
     }
 
-    /// Ensures essential sysvar accounts (Clock, Rent, etc.) exist in `AccountsDb`.
+    /// Ensures essential sysvar accounts exist in `AccountsDb`.
     pub(crate) fn prepare_sysvars(&self) {
         let block = self.ledger.latest_block().load();
 
-        // 1. Mutable Sysvars (updated per block)
+        // Mutable sysvars (updated on each slot transition)
         self.ensure_sysvar(&sysvar::clock::ID, &block.clock);
 
-        let slot_hashes = SlotHashes::new(&[(block.slot, block.blockhash)]);
+        let slot_hashes =
+            SlotHashes::new(&[(block.slot, block.blockhash); MAX_ENTRIES]);
+        // Remove first to avoid "account already exists" errors
+        self.accountsdb.remove_account(&sysvar::slot_hashes::ID);
         self.ensure_sysvar(&sysvar::slot_hashes::ID, &slot_hashes);
 
-        // 2. Immutable/Static Sysvars
+        // Immutable/Static sysvars (initialized once)
         let epoch_schedule = EpochSchedule::new(DEFAULT_SLOTS_PER_EPOCH);
         self.ensure_sysvar(&sysvar::epoch_schedule::ID, &epoch_schedule);
 
-        if let Some(rent) = self
+        let rent = self
             .environment
             .rent_collector
             .as_ref()
-            .map(|rc| rc.get_rent())
-        {
+            .map(|rc| rc.get_rent());
+        if let Some(rent) = rent {
             self.ensure_sysvar(&sysvar::rent::ID, rent);
         }
     }

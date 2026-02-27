@@ -1,5 +1,5 @@
 use std::{
-    collections::{hash_map::Entry, HashMap, HashSet},
+    collections::{hash_map::Entry, HashMap},
     num::NonZeroUsize,
     sync::{
         atomic::{AtomicU64, Ordering},
@@ -15,7 +15,7 @@ use config::RemoteAccountProviderConfig;
 pub(crate) use errors::{
     RemoteAccountProviderError, RemoteAccountProviderResult,
 };
-use futures_util::future::try_join_all;
+use futures_util::future::{join_all, try_join_all};
 pub use lru_cache::AccountsLruCache;
 pub(crate) use remote_account::RemoteAccount;
 pub use remote_account::RemoteAccountUpdateSource;
@@ -38,6 +38,8 @@ use tokio::{
 };
 use tracing::*;
 
+pub mod chain_slot;
+use chain_slot::ChainSlot;
 pub(crate) mod chain_laser_actor;
 pub mod chain_laser_client;
 pub(crate) mod chain_pubsub_actor;
@@ -50,6 +52,8 @@ pub mod errors;
 mod lru_cache;
 pub mod program_account;
 pub mod pubsub_common;
+pub mod pubsub_connection;
+pub mod pubsub_connection_pool;
 mod remote_account;
 mod subscription_reconciler;
 
@@ -75,6 +79,7 @@ use crate::{
 };
 
 const ACTIVE_SUBSCRIPTIONS_UPDATE_INTERVAL_MS: u64 = 60_000;
+pub(crate) const DEFAULT_SUBSCRIPTION_RETRIES: usize = 5;
 
 // Maps pubkey -> (fetch_start_slot, requests_waiting)
 type FetchResult = Result<RemoteAccount, RemoteAccountProviderError>;
@@ -114,7 +119,8 @@ pub struct RemoteAccountProvider<T: ChainRpcClient, U: ChainPubsubClient> {
     ///
     /// Both sources use `fetch_max()` to ensure this value is monotonically
     /// increasing and reflects the highest known slot from any source.
-    chain_slot: Arc<AtomicU64>,
+    /// Metrics are automatically captured on updates inside [ChainSlot::update]
+    chain_slot: ChainSlot,
 
     /// The slot of the last account update we received
     last_update_slot: Arc<AtomicU64>,
@@ -203,6 +209,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         lrucache_subscribed_accounts: Arc<AccountsLruCache>,
         chain_slot: Arc<AtomicU64>,
     ) -> ChainlinkResult<Option<RemoteAccountProvider<T, U>>> {
+        let chain_slot = ChainSlot::new(chain_slot);
         if config.lifecycle_mode().needs_remote_account_provider() {
             Ok(Some(
                 Self::new(
@@ -234,68 +241,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
 
             loop {
                 interval.tick().await;
-                let lru_count = subscribed_accounts.len();
-                let subscription_counts = pubsub_client
-                    .subscription_count(Some(&never_evicted))
-                    .await;
-
-                let all_pubsub_subs =
-                    if tracing::enabled!(tracing::Level::DEBUG) {
-                        pubsub_client.subscriptions().unwrap_or_default()
-                    } else {
-                        vec![]
-                    };
-
-                let (pubsub_total, pubsub_without_never_evict) =
-                    match subscription_counts {
-                        Some(counts) => counts,
-                        None => {
-                            warn!(
-                                "No connected client that tracks subscriptions"
-                            );
-                            (0, 0)
-                        }
-                    };
-                if lru_count != pubsub_without_never_evict {
-                    warn!(
-                        lru_count,
-                        pubsub_count = pubsub_without_never_evict,
-                        "User account subscription counts don't match"
-                    );
-                    if tracing::enabled!(tracing::Level::DEBUG) {
-                        // Log all pubsub subscriptions for debugging
-                        let count = all_pubsub_subs.len();
-                        trace!(count, "All pubsub subscriptions");
-
-                        // Find extra keys in pubsub that are not in LRU cache
-                        let lru_pubkeys = subscribed_accounts.pubkeys();
-                        let pubsub_subs_without_never_evict: HashSet<_> =
-                            all_pubsub_subs
-                                .iter()
-                                .filter(|pk| !never_evicted.contains(pk))
-                                .copied()
-                                .collect();
-                        let lru_pubkeys_set: HashSet<_> =
-                            lru_pubkeys.into_iter().collect();
-
-                        let extra_in_pubsub: Vec<_> =
-                            pubsub_subs_without_never_evict
-                                .difference(&lru_pubkeys_set)
-                                .cloned()
-                                .collect();
-                        let extra_in_lru: Vec<_> = lru_pubkeys_set
-                            .difference(&pubsub_subs_without_never_evict)
-                            .cloned()
-                            .collect();
-
-                        if !extra_in_pubsub.is_empty() {
-                            debug!(count = extra_in_pubsub.len(), "Extra pubkeys in pubsub client not in LRU cache");
-                        }
-                        if !extra_in_lru.is_empty() {
-                            debug!(count = extra_in_lru.len(), "Extra pubkeys in LRU cache not in pubsub client");
-                        }
-                    }
-
+                let pubsub_total =
                     subscription_reconciler::reconcile_subscriptions(
                         &subscribed_accounts,
                         pubsub_client.as_ref(),
@@ -303,13 +249,8 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                         &removed_account_tx,
                     )
                     .await;
-                }
 
                 debug!(count = pubsub_total, "Updating active subscriptions");
-                if tracing::enabled!(tracing::Level::TRACE) {
-                    let subs_count = all_pubsub_subs.len();
-                    trace!(count = subs_count, "All subscriptions");
-                }
                 set_monitored_accounts_count(pubsub_total);
             }
         })
@@ -324,7 +265,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         subscription_forwarder: mpsc::Sender<ForwardedSubscriptionUpdate>,
         config: &RemoteAccountProviderConfig,
         lrucache_subscribed_accounts: Arc<AccountsLruCache>,
-        chain_slot: Arc<AtomicU64>,
+        chain_slot: ChainSlot,
     ) -> RemoteAccountProviderResult<Self> {
         let (removed_account_tx, removed_account_rx) =
             tokio::sync::mpsc::channel(100);
@@ -366,8 +307,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                 ))
             }
             RemoteAccount::Found(_) => {
-                me.chain_slot
-                    .store(clock_remote_account.slot(), Ordering::Relaxed);
+                me.chain_slot.update(clock_remote_account.slot());
                 Ok(me)
             }
         }
@@ -407,19 +347,45 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         // Build pubsub clients and wrap them into a SubMuxClient
         let pubsubs = endpoints.pubsubs();
         let resubscription_delay = config.resubscription_delay();
-        let pubsub_futs = pubsubs.iter().map(|ep| async {
-            let (abort_tx, abort_rx) = mpsc::channel(1);
-            let client = ChainUpdatesClient::try_new_from_endpoint(
-                ep,
-                commitment,
-                abort_tx,
-                chain_slot.clone(),
-                resubscription_delay,
-            )
-            .await?;
-            Ok::<_, RemoteAccountProviderError>((Arc::new(client), abort_rx))
+        let pubsub_futs = pubsubs.iter().map(|ep| {
+            let rpc_client = rpc_client.clone();
+            let chain_slot = chain_slot.clone();
+            let ep_label = ep.label().to_string();
+            let grpc_cfg = config.grpc().clone();
+            async move {
+                let (abort_tx, abort_rx) = mpsc::channel(1);
+                let client = ChainUpdatesClient::try_new_from_endpoint(
+                    ep,
+                    commitment,
+                    abort_tx,
+                    chain_slot,
+                    resubscription_delay,
+                    rpc_client,
+                    &grpc_cfg,
+                )
+                .await;
+                (ep_label, client.map(|c| (Arc::new(c), abort_rx)))
+            }
         });
-        let pubsubs = try_join_all(pubsub_futs).await?;
+        let results = join_all(pubsub_futs).await;
+        let pubsubs: Vec<_> = results
+            .into_iter()
+            .filter_map(|(label, result)| match result {
+                Ok(client) => Some(client),
+                Err(err) => {
+                    warn!(
+                        endpoint = %label,
+                        error = %err,
+                        "Skipping pubsub client that failed to connect"
+                    );
+                    None
+                }
+            })
+            .collect();
+
+        if pubsubs.is_empty() {
+            return Err(RemoteAccountProviderError::AllPubsubClientsFailed);
+        }
         let subscribed_accounts = Arc::new(AccountsLruCache::new({
             // SAFETY: NonZeroUsize::new only returns None if the value is 0.
             // RemoteAccountProviderConfig can only be constructed with
@@ -450,7 +416,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             subscription_forwarder,
             config,
             subscribed_accounts,
-            chain_slot,
+            ChainSlot::new(chain_slot),
         )
         .await
     }
@@ -472,7 +438,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
     }
 
     pub fn chain_slot(&self) -> u64 {
-        self.chain_slot.load(Ordering::Relaxed)
+        self.chain_slot.load()
     }
 
     pub fn last_update_slot(&self) -> u64 {
@@ -504,7 +470,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                     // context slot always matches the slot encoded in the slot data.
                     // Use fetch_max to ensure we always keep the highest slot value,
                     // since GRPC may have already updated chain_slot to a higher value.
-                    chain_slot.fetch_max(slot, Ordering::Relaxed);
+                    chain_slot.update(slot);
                     // NOTE: we do not forward clock updates
                 } else {
                     trace!(
@@ -586,7 +552,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         pubkey: Pubkey,
         fetch_origin: AccountFetchOrigin,
     ) -> RemoteAccountProviderResult<RemoteAccount> {
-        self.try_get_multi(&[pubkey], None, fetch_origin, None)
+        self.try_get_multi(&[pubkey], None, fetch_origin, None, None)
             .await
             // SAFETY: we are guaranteed to have a single result here as
             // otherwise we would have gotten an error
@@ -605,7 +571,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         // 1. Fetch the _normal_ way and hope the slots match and if required
         //    the min_context_slot is met
         let remote_accounts = self
-            .try_get_multi(pubkeys, None, fetch_origin, None)
+            .try_get_multi(pubkeys, None, fetch_origin, None, None)
             .await?;
         if let Match = slots_match_and_meet_min_context(
             &remote_accounts,
@@ -640,6 +606,10 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
 
         // 3. Wait for the slots to match
         const MAX_TOTAL_TIME: Duration = Duration::from_secs(10);
+        // NOTE: we capture the fetch start slot here and reuse it across retries as otherwise
+        // we never get a valid result if the RPC node we fetch from is just slightly behind and
+        // cannot serve us any data with the absolute latest min context slot
+        let fetch_start_slot = self.chain_slot.load();
         let start = std::time::Instant::now();
         let mut retries = 0;
         loop {
@@ -658,7 +628,13 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                 );
             }
             let remote_accounts = self
-                .try_get_multi(pubkeys, None, fetch_origin, None)
+                .try_get_multi(
+                    pubkeys,
+                    None,
+                    fetch_origin,
+                    None,
+                    Some(fetch_start_slot),
+                )
                 .await?;
             let slots_match_result = slots_match_and_meet_min_context(
                 &remote_accounts,
@@ -668,20 +644,19 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                 return Ok(remote_accounts);
             }
 
-            if start.elapsed() > MAX_TOTAL_TIME {
-                return Err(RemoteAccountProviderError::SlotsDidNotMatch(
-                    format!(
-                        "Timeout after {}s waiting for slots to match",
-                        MAX_TOTAL_TIME.as_secs_f64()
-                    ),
-                    vec![],
-                ));
-            }
-
             retries += 1;
-            if retries == config.max_retries {
+            let hit_max_retry_limit = retries == config.max_retries;
+            if hit_max_retry_limit || start.elapsed() > MAX_TOTAL_TIME {
                 let remote_accounts =
                     remote_accounts.into_iter().map(|a| a.slot()).collect();
+                let limit = if hit_max_retry_limit {
+                    format!("max retries {}", config.max_retries)
+                } else {
+                    format!(
+                        "max total time of {} seconds",
+                        MAX_TOTAL_TIME.as_secs()
+                    )
+                };
                 match slots_match_result {
                     // SAFETY: Match case is already handled and returns
                     Match => unreachable!("we would have returned above"),
@@ -690,15 +665,18 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                             RemoteAccountProviderError::SlotsDidNotMatch(
                                 pubkeys_str(pubkeys),
                                 remote_accounts,
+                                limit,
                             ),
                         );
                     }
                     MatchButBelowMinContextSlot(slot) => {
                         return Err(
                             RemoteAccountProviderError::MatchingSlotsNotSatisfyingMinContextSlot(
-                            pubkeys_str(pubkeys),
-                            remote_accounts,
-                            slot)
+                                pubkeys_str(pubkeys),
+                                remote_accounts,
+                                slot,
+                                limit
+                            )
                         );
                     }
                 }
@@ -722,6 +700,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         mark_empty_if_not_found: Option<&[Pubkey]>,
         fetch_origin: AccountFetchOrigin,
         program_ids: Option<&[Pubkey]>,
+        fetch_start_slot: Option<u64>,
     ) -> RemoteAccountProviderResult<Vec<RemoteAccount>> {
         if pubkeys.is_empty() {
             return Ok(vec![]);
@@ -733,7 +712,8 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
 
         // Create channels for potential subscription updates to override fetch results
         let mut subscription_overrides = vec![];
-        let fetch_start_slot = self.chain_slot.load(Ordering::Relaxed);
+        let fetch_start_slot =
+            fetch_start_slot.unwrap_or_else(|| self.chain_slot.load());
 
         {
             let mut fetching = self.fetching_accounts.lock().unwrap();
@@ -842,7 +822,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         pubkey: &Pubkey,
     ) -> RemoteAccountProviderResult<()> {
         // 1. First realize subscription
-        self.pubsub_client.subscribe(*pubkey).await?;
+        self.pubsub_client.subscribe(*pubkey, None).await?;
 
         // 2. Add to LRU cache
         // If an account is evicted then we need to unsubscribe from it
@@ -1303,20 +1283,18 @@ fn pubkeys_str(pubkeys: &[Pubkey]) -> String {
 
 #[cfg(test)]
 mod test {
-    use std::num::NonZeroUsize;
-
     use solana_system_interface::program as system_program;
 
-    use super::{
-        chain_pubsub_client::mock::ChainPubsubClientMock,
-        subscription_reconciler::reconcile_subscriptions, *,
-    };
-    use crate::testing::{
-        init_logger,
-        rpc_client_mock::{
-            AccountAtSlot, ChainRpcClientMock, ChainRpcClientMockBuilder,
+    use super::*;
+    use crate::{
+        remote_account_provider::chain_pubsub_client::mock::ChainPubsubClientMock,
+        testing::{
+            init_logger,
+            rpc_client_mock::{
+                AccountAtSlot, ChainRpcClientMock, ChainRpcClientMockBuilder,
+            },
+            utils::{create_test_lru_cache, random_pubkey},
         },
-        utils::{create_test_lru_cache, random_pubkey},
     };
 
     #[tokio::test]
@@ -1340,7 +1318,7 @@ mod test {
                 fwd_tx,
                 &config,
                 subscribed_accounts,
-                chain_slot,
+                ChainSlot::new(chain_slot),
             )
             .await
             .unwrap()
@@ -1392,7 +1370,7 @@ mod test {
                         fwd_tx,
                         &config,
                         subscribed_accounts,
-                        chain_slot,
+                        ChainSlot::new(chain_slot),
                     )
                     .await
                     .unwrap()
@@ -1472,7 +1450,7 @@ mod test {
                 forward_tx,
                 &config,
                 subscribed_accounts,
-                chain_slot,
+                ChainSlot::new(chain_slot),
             )
             .await
             .unwrap(),
@@ -1590,7 +1568,8 @@ mod test {
             RemoteAccountProviderError::MatchingSlotsNotSatisfyingMinContextSlot(
                 _pubkeys,
                 _slots,
-                slot
+                slot,
+                _
             ) if slot == CURRENT_SLOT + 1
         ));
     }
@@ -1677,7 +1656,7 @@ mod test {
             forward_tx,
             &config,
             subscribed_accounts,
-            chain_slot,
+            ChainSlot::new(chain_slot),
         )
         .await
         .unwrap();
@@ -1820,154 +1799,5 @@ mod test {
             let removed_accounts = drain_removed_account_rx(&mut removed_rx);
             assert_eq!(removed_accounts, vec![expected_evicted]);
         }
-    }
-
-    #[tokio::test]
-    async fn test_reconcile_resubscribes_accounts_missing_from_pubsub() {
-        init_logger();
-
-        let (tx, rx) = mpsc::channel(1);
-        let pubsub_client = ChainPubsubClientMock::new(tx, rx);
-        let (removed_tx, _removed_rx) = mpsc::channel(10);
-
-        let capacity = NonZeroUsize::new(10).unwrap();
-        let lru_cache = Arc::new(AccountsLruCache::new(capacity));
-
-        let pubkey1 = Pubkey::new_unique();
-        let pubkey2 = Pubkey::new_unique();
-        let pubkey3 = Pubkey::new_unique();
-
-        // Add accounts to LRU cache
-        lru_cache.add(pubkey1);
-        lru_cache.add(pubkey2);
-        lru_cache.add(pubkey3);
-
-        // Only pubkey1 is in pubsub (simulating missing subscriptions)
-        pubsub_client.insert_subscription(pubkey1);
-
-        let never_evicted: Vec<Pubkey> = vec![];
-
-        // Reconcile should resubscribe pubkey2 and pubkey3
-        reconcile_subscriptions(
-            &lru_cache,
-            &pubsub_client,
-            &never_evicted,
-            &removed_tx,
-        )
-        .await;
-
-        // Verify all accounts are now subscribed
-        let subs = pubsub_client.subscriptions().unwrap();
-        assert!(subs.contains(&pubkey1));
-        assert!(subs.contains(&pubkey2));
-        assert!(subs.contains(&pubkey3));
-        assert_eq!(subs.len(), 3);
-    }
-
-    #[tokio::test]
-    async fn test_reconcile_unsubscribes_accounts_not_in_lru() {
-        init_logger();
-
-        let (tx, rx) = mpsc::channel(1);
-        let pubsub_client = ChainPubsubClientMock::new(tx, rx);
-        let (removed_tx, mut removed_rx) = mpsc::channel(10);
-
-        let capacity = NonZeroUsize::new(10).unwrap();
-        let lru_cache = Arc::new(AccountsLruCache::new(capacity));
-
-        let pubkey1 = Pubkey::new_unique();
-        let pubkey2 = Pubkey::new_unique();
-        let pubkey3 = Pubkey::new_unique();
-
-        // Only pubkey1 is in LRU cache
-        lru_cache.add(pubkey1);
-
-        // All three are in pubsub (simulating stale subscriptions)
-        pubsub_client.insert_subscription(pubkey1);
-        pubsub_client.insert_subscription(pubkey2);
-        pubsub_client.insert_subscription(pubkey3);
-
-        let never_evicted: Vec<Pubkey> = vec![];
-
-        // Reconcile should unsubscribe pubkey2 and pubkey3
-        reconcile_subscriptions(
-            &lru_cache,
-            &pubsub_client,
-            &never_evicted,
-            &removed_tx,
-        )
-        .await;
-
-        // Verify only pubkey1 remains subscribed
-        let subs = pubsub_client.subscriptions().unwrap();
-        assert!(subs.contains(&pubkey1));
-        assert!(!subs.contains(&pubkey2));
-        assert!(!subs.contains(&pubkey3));
-        assert_eq!(subs.len(), 1);
-
-        // Verify removal notifications were sent for unsubscribed accounts
-        let removed = drain_removed_account_rx(&mut removed_rx);
-        assert_eq!(removed.len(), 2);
-        assert!(removed.contains(&pubkey2));
-        assert!(removed.contains(&pubkey3));
-    }
-
-    #[tokio::test]
-    async fn test_reconcile_preserves_never_evicted_accounts_not_in_lru() {
-        init_logger();
-
-        let (tx, rx) = mpsc::channel(1);
-        let pubsub_client = ChainPubsubClientMock::new(tx, rx);
-        let (removed_tx, mut removed_rx) = mpsc::channel(10);
-
-        let capacity = NonZeroUsize::new(10).unwrap();
-        let lru_cache = Arc::new(AccountsLruCache::new(capacity));
-
-        let pubkey_in_lru = Pubkey::new_unique();
-        let never_evicted_pubkey = Pubkey::new_unique();
-        let stale_pubkey = Pubkey::new_unique();
-
-        // Only pubkey_in_lru is in LRU cache (never_evicted_pubkey is NOT in LRU)
-        lru_cache.add(pubkey_in_lru);
-
-        // All three are subscribed in pubsub
-        pubsub_client.insert_subscription(pubkey_in_lru);
-        pubsub_client.insert_subscription(never_evicted_pubkey);
-        pubsub_client.insert_subscription(stale_pubkey);
-
-        // never_evicted_pubkey is marked as never_evicted, so it should be
-        // preserved even though it's not in the LRU cache
-        let never_evicted = vec![never_evicted_pubkey];
-
-        reconcile_subscriptions(
-            &lru_cache,
-            &pubsub_client,
-            &never_evicted,
-            &removed_tx,
-        )
-        .await;
-
-        // Verify: pubkey_in_lru and never_evicted_pubkey remain, stale_pubkey
-        // is unsubscribed
-        let subs = pubsub_client.subscriptions().unwrap();
-        assert!(
-            subs.contains(&pubkey_in_lru),
-            "Account in LRU should remain subscribed"
-        );
-        assert!(
-            subs.contains(&never_evicted_pubkey),
-            "Never-evicted account should remain subscribed even if not in LRU"
-        );
-        assert!(
-            !subs.contains(&stale_pubkey),
-            "Stale account not in LRU and not never-evicted should be \
-             unsubscribed"
-        );
-        assert_eq!(subs.len(), 2);
-
-        // Verify removal notification was sent only for stale_pubkey
-        let removed = drain_removed_account_rx(&mut removed_rx);
-        assert_eq!(removed.len(), 1);
-        assert!(removed.contains(&stale_pubkey));
     }
 }
