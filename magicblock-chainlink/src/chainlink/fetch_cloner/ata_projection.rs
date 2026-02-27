@@ -53,21 +53,34 @@ where
         // Collect ATA pubkey for subscription
         pubkeys_to_subscribe.push(*ata_pubkey);
 
+        let effective_slot = if let Some(min_slot) = min_context_slot {
+            min_slot.max(*ata_account_slot)
+        } else {
+            *ata_account_slot
+        };
+
         if let Some((eata, _)) =
             try_derive_eata_address_and_bump(&ata_info.owner, &ata_info.mint)
         {
             // Collect eATA pubkey for subscription
             pubkeys_to_subscribe.push(eata);
 
-            let effective_slot = if let Some(min_slot) = min_context_slot {
-                min_slot.max(*ata_account_slot)
-            } else {
-                *ata_account_slot
-            };
             ata_join_set.spawn(FetchCloner::task_to_fetch_with_companion(
                 this,
                 *ata_pubkey,
                 eata,
+                effective_slot,
+                fetch_origin,
+            ));
+        } else {
+            // eATA derivation failed, but still queue the ATA for cloning
+            // without a companion by using a dummy companion pubkey
+            // The resolve_account_with_companion logic handles the case
+            // where the companion is not found
+            ata_join_set.spawn(FetchCloner::task_to_fetch_with_companion(
+                this,
+                *ata_pubkey,
+                Pubkey::default(), // Dummy companion - will be marked as NotFound
                 effective_slot,
                 fetch_origin,
             ));
