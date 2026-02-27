@@ -3699,6 +3699,7 @@ dependencies = [
  "hyper-util",
  "lazy_static",
  "prometheus",
+ "solana-signature",
  "tokio",
  "tokio-util 0.7.17",
  "tracing",

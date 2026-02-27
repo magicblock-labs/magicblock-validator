@@ -340,7 +340,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
             .ensure_accounts(
                 &pubkeys,
                 mark_empty_if_not_found,
-                AccountFetchOrigin::SendTransaction,
+                AccountFetchOrigin::SendTransaction(*tx.signature()),
                 Some(&program_ids),
             )
             .await?;
