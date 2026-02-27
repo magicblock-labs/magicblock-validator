@@ -3180,6 +3180,7 @@ dependencies = [
  "lazy_static",
  "lru 0.16.2",
  "magicblock-committor-program",
+ "magicblock-core",
  "magicblock-delegation-program",
  "magicblock-metrics",
  "magicblock-program",

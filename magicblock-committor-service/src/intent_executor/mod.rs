@@ -109,7 +109,7 @@ pub trait IntentExecutor: Send + Sync + 'static {
     async fn cleanup(self) -> Result<(), BufferExecutionError>;
 }
 
-pub trait ActionsCallbackExecutor: Send + Sync + 'static {
+pub trait ActionsCallbackExecutor: Send + Sync + Clone + 'static {
     /// Executes actions callbacks
     fn execute(&self, callbacks: Vec<BaseActionCallback>, succeeded: bool);
 }

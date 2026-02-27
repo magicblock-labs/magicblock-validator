@@ -21,6 +21,7 @@ use crate::{
     config::ChainConfig,
     error::CommittorServiceResult,
     intent_execution_manager::BroadcastedIntentExecutionResult,
+    intent_executor::ActionsCallbackExecutor,
     persist::{CommitStatusRow, MessageSignatures},
     pubkeys_provider::{provide_committee_pubkeys, provide_common_pubkeys},
 };
@@ -99,6 +100,7 @@ impl CommittorActor {
         authority: Keypair,
         persist_file: P,
         chain_config: ChainConfig,
+        actions_callback_executor: impl ActionsCallbackExecutor,
     ) -> CommittorServiceResult<Self>
     where
         P: AsRef<Path>,
@@ -107,6 +109,7 @@ impl CommittorActor {
             authority,
             persist_file,
             chain_config,
+            actions_callback_executor,
         )?);
 
         Ok(Self {
@@ -265,6 +268,7 @@ impl CommittorService {
         authority: Keypair,
         persist_file: P,
         chain_config: ChainConfig,
+        actions_callback_executor: impl ActionsCallbackExecutor,
     ) -> CommittorServiceResult<Self>
     where
         P: AsRef<Path>,
@@ -279,6 +283,7 @@ impl CommittorService {
                 authority,
                 persist_file,
                 chain_config,
+                actions_callback_executor,
             )?;
             tokio::spawn(async move {
                 actor.run(cancel_token).await;

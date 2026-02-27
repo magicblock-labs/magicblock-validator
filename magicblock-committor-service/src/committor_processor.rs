@@ -16,6 +16,7 @@ use crate::{
     intent_execution_manager::{
         db::DummyDB, BroadcastedIntentExecutionResult, IntentExecutionManager,
     },
+    intent_executor::ActionsCallbackExecutor,
     persist::{
         CommitStatusRow, IntentPersister, IntentPersisterImpl,
         MessageSignatures,
@@ -35,6 +36,7 @@ impl CommittorProcessor {
         authority: Keypair,
         persist_file: P,
         chain_config: ChainConfig,
+        actions_callback_executor: impl ActionsCallbackExecutor,
     ) -> CommittorServiceResult<Self>
     where
         P: AsRef<Path>,
@@ -64,6 +66,8 @@ impl CommittorProcessor {
             Some(persister.clone()),
             table_mania.clone(),
             chain_config.compute_budget_config.clone(),
+            actions_callback_executor,
+            chain_config.actions_timeout,
         );
 
         Ok(Self {

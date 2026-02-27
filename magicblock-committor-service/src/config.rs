@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use solana_commitment_config::CommitmentConfig;
 
 use crate::compute_budget::ComputeBudgetConfig;
@@ -7,6 +9,7 @@ pub struct ChainConfig {
     pub rpc_uri: String,
     pub commitment: CommitmentConfig,
     pub compute_budget_config: ComputeBudgetConfig,
+    pub actions_timeout: Duration,
 }
 
 impl ChainConfig {
