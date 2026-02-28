@@ -90,13 +90,13 @@ pub fn grow_order_book_instruction(
 }
 
 pub fn init_payer_escrow(payer: Pubkey) -> [Instruction; 2] {
-    let top_up_ix = dlp::instruction_builder::top_up_ephemeral_balance(
+    let top_up_ix = dlp_api::instruction_builder::top_up_ephemeral_balance(
         payer,
         payer,
         Some(300_000_000),
         Some(0),
     );
-    let delegate_ix = dlp::instruction_builder::delegate_ephemeral_balance(
+    let delegate_ix = dlp_api::instruction_builder::delegate_ephemeral_balance(
         payer,
         payer,
         DelegateEphemeralBalanceArgs {

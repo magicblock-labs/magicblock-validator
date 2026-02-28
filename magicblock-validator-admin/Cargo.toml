@@ -11,6 +11,7 @@ edition.workspace = true
 tracing = { workspace = true }
 
 magicblock-delegation-program = { workspace = true }
+dlp-api = { workspace = true }
 magicblock-program = { workspace = true }
 magicblock-rpc-client = { workspace = true }
 
