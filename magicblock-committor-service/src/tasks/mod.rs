@@ -193,6 +193,11 @@ pub struct PreparationTask {
 
     // TODO(edwin): replace with reference once done
     pub committed_data: Vec<u8>,
+    /// Actual buffer account size for realloc instructions
+    /// For CommitDiff: committed_account.data.len()
+    /// For Commit: data.len()
+    /// This may differ from committed_data.len() (which holds the diff for CommitDiff)
+    pub buffer_account_size: u64,
 }
 
 impl PreparationTask {
@@ -205,7 +210,7 @@ impl PreparationTask {
         // // https://github.com/near/borsh-rs/blob/f1b75a6b50740bfb6231b7d0b1bd93ea58ca5452/borsh/src/ser/helpers.rs#L59
         let chunks_account_size =
             borsh::object_length(&self.chunks).unwrap() as u64;
-        let buffer_account_size = self.committed_data.len() as u64;
+        let buffer_account_size = self.buffer_account_size;
 
         let (instruction, _, _) = create_init_ix(CreateInitIxArgs {
             authority: *authority,
@@ -228,12 +233,11 @@ impl PreparationTask {
     /// Returns realloc instruction required for Buffer preparation
     #[allow(clippy::let_and_return)]
     pub fn realloc_instructions(&self, authority: &Pubkey) -> Vec<Instruction> {
-        let buffer_account_size = self.committed_data.len() as u64;
         let realloc_instructions =
             create_realloc_buffer_ixs(CreateReallocBufferIxArgs {
                 authority: *authority,
                 pubkey: self.pubkey,
-                buffer_account_size,
+                buffer_account_size: self.buffer_account_size,
                 commit_id: self.commit_id,
             });
 
@@ -498,6 +502,132 @@ mod serialization_safety_test {
         for ix in preparation_task.write_instructions(&authority) {
             assert_serializable(&ix);
         }
+    }
+
+    #[test]
+    fn test_commit_diff_preparation_tracks_committed_account_size() {
+        setup();
+        let base_len = 11_264usize;
+        let committed_len = 12_288usize;
+        let owner = Pubkey::new_unique();
+
+        let base_data = vec![1u8; base_len];
+        let mut committed_data = base_data.clone();
+        committed_data.extend(vec![2u8; committed_len - base_len]);
+
+        let buffer_task = BufferTask::new_preparation_required(
+            BufferTaskType::CommitDiff(CommitDiffTask {
+                commit_id: 900,
+                allow_undelegation: false,
+                committed_account: CommittedAccount {
+                    pubkey: Pubkey::new_unique(),
+                    account: Account {
+                        lamports: 4000,
+                        data: committed_data,
+                        owner,
+                        executable: false,
+                        rent_epoch: 0,
+                    },
+                    remote_slot: Default::default(),
+                },
+                base_account: Account {
+                    lamports: 2000,
+                    data: base_data,
+                    owner,
+                    executable: false,
+                    rent_epoch: 0,
+                },
+            }),
+        );
+
+        let PreparationState::Required(preparation_task) =
+            buffer_task.preparation_state()
+        else {
+            panic!("invalid preparation state on creation!");
+        };
+
+        assert_eq!(preparation_task.buffer_account_size, committed_len as u64);
+    }
+
+    #[test]
+    fn test_commit_diff_preparation_large_growth_splits_reallocs() {
+        setup();
+        let authority = Pubkey::new_unique();
+        let base_len = 8_192usize;
+        let committed_len = 22_528usize;
+        let owner = Pubkey::new_unique();
+
+        assert!(
+            committed_len - base_len
+                > magicblock_committor_program::consts::MAX_ACCOUNT_ALLOC_PER_INSTRUCTION_SIZE as usize
+        );
+
+        let base_data = vec![1u8; base_len];
+        let mut committed_data = base_data.clone();
+        committed_data.extend(vec![2u8; committed_len - base_len]);
+
+        let buffer_task = BufferTask::new_preparation_required(
+            BufferTaskType::CommitDiff(CommitDiffTask {
+                commit_id: 902,
+                allow_undelegation: false,
+                committed_account: CommittedAccount {
+                    pubkey: Pubkey::new_unique(),
+                    account: Account {
+                        lamports: 5000,
+                        data: committed_data,
+                        owner,
+                        executable: false,
+                        rent_epoch: 0,
+                    },
+                    remote_slot: Default::default(),
+                },
+                base_account: Account {
+                    lamports: 2500,
+                    data: base_data,
+                    owner,
+                    executable: false,
+                    rent_epoch: 0,
+                },
+            }),
+        );
+
+        let PreparationState::Required(preparation_task) =
+            buffer_task.preparation_state()
+        else {
+            panic!("invalid preparation state on creation!");
+        };
+
+        assert_eq!(preparation_task.buffer_account_size, committed_len as u64);
+        assert!(preparation_task.realloc_instructions(&authority).len() > 1);
+    }
+
+    #[test]
+    fn test_realloc_instructions_use_buffer_account_size_not_diff_size() {
+        setup();
+        let authority = Pubkey::new_unique();
+        let committed_data = vec![9u8; 64];
+        let make_preparation_task =
+            |buffer_account_size: u64| PreparationTask {
+                commit_id: 901,
+                pubkey: Pubkey::new_unique(),
+                chunks: Chunks::from_data_length(
+                    committed_data.len(),
+                    crate::consts::MAX_WRITE_CHUNK_SIZE,
+                ),
+                committed_data: committed_data.clone(),
+                buffer_account_size,
+            };
+
+        let small_realloc_instructions =
+            make_preparation_task(12_288).realloc_instructions(&authority);
+        let large_realloc_instructions =
+            make_preparation_task(30_720).realloc_instructions(&authority);
+
+        assert_eq!(small_realloc_instructions.len(), 1);
+        assert_eq!(large_realloc_instructions.len(), 2);
+        assert!(
+            large_realloc_instructions.len() > small_realloc_instructions.len()
+        );
     }
 
     // Helper function to assert serialization succeeds
