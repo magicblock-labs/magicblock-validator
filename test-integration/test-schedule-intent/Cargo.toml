@@ -11,6 +11,7 @@ integration-test-tools = { workspace = true }
 magicblock-delegation-program = { workspace = true, features = [
   "no-entrypoint",
 ] }
+dlp-api = { workspace = true }
 program-flexi-counter = { workspace = true, features = ["no-entrypoint"] }
 solana-sdk = { workspace = true }
 solana-rpc-client-api = { workspace = true }

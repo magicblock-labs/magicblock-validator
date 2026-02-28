@@ -179,7 +179,7 @@ mod test {
         buffer_pda: &Pubkey,
         commit_args: CommitStateFromBufferArgs,
     ) -> Instruction {
-        dlp::instruction_builder::commit_state_from_buffer(
+        dlp_api::instruction_builder::commit_state_from_buffer(
             validator_auth,
             *pubkey,
             *delegated_account_owner,
@@ -227,7 +227,7 @@ mod test {
         validator_auth: Pubkey,
         pubkey: &Pubkey,
     ) -> Instruction {
-        dlp::instruction_builder::finalize(validator_auth, *pubkey)
+        dlp_api::instruction_builder::finalize(validator_auth, *pubkey)
     }
 
     // These tests statically determine the optimal ix count to fit into a single
@@ -332,7 +332,7 @@ mod test {
                 data,
                 ..CommitStateArgs::default()
             };
-            dlp::instruction_builder::commit_state(
+            dlp_api::instruction_builder::commit_state(
                 auth.pubkey(),
                 Pubkey::new_unique(),
                 Pubkey::new_unique(),
@@ -519,7 +519,7 @@ mod test {
             max_chunks_per_transaction("Max undelegate per tx", |auth_pubkey| {
                 let pubkey = Pubkey::new_unique();
                 let owner_program = Pubkey::new_unique();
-                vec![dlp::instruction_builder::undelegate(
+                vec![dlp_api::instruction_builder::undelegate(
                     auth_pubkey,
                     pubkey,
                     owner_program,
@@ -531,7 +531,7 @@ mod test {
             max_chunks_per_transaction_using_lookup_table(
                 "Max undelegate per tx using lookup",
                 |auth_pubkey, committee, owner_program| {
-                    vec![dlp::instruction_builder::undelegate(
+                    vec![dlp_api::instruction_builder::undelegate(
                         auth_pubkey,
                         committee,
                         owner_program,

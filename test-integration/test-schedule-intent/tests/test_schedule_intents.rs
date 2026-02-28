@@ -514,7 +514,7 @@ fn setup_payer(ctx: &IntegrationTestContext) -> Keypair {
         .unwrap();
 
     // Create actor escrow
-    let ix = dlp::instruction_builder::top_up_ephemeral_balance(
+    let ix = dlp_api::instruction_builder::top_up_ephemeral_balance(
         payer.pubkey(),
         payer.pubkey(),
         Some(LAMPORTS_PER_SOL / 2),

@@ -19,7 +19,7 @@ pub fn create_topup_ixs(
     lamports: u64,
     validator: Option<Pubkey>,
 ) -> Vec<Instruction> {
-    let topup_ix = dlp::instruction_builder::top_up_ephemeral_balance(
+    let topup_ix = dlp_api::instruction_builder::top_up_ephemeral_balance(
         payer,
         recvr,
         Some(lamports),
@@ -27,7 +27,7 @@ pub fn create_topup_ixs(
     );
     let mut ixs = vec![topup_ix];
     if let Some(validator) = validator {
-        let delegate_ix = dlp::instruction_builder::delegate_ephemeral_balance(
+        let delegate_ix = dlp_api::instruction_builder::delegate_ephemeral_balance(
             payer,
             recvr,
             DelegateEphemeralBalanceArgs {
@@ -49,7 +49,7 @@ pub fn create_delegate_ixs(
     validator: Option<Pubkey>,
 ) -> Vec<Instruction> {
     let change_owner_ix = system_instruction::assign(&delegatee, &dlp::id());
-    let delegate_ix = dlp::instruction_builder::delegate(
+    let delegate_ix = dlp_api::instruction_builder::delegate(
         payer,
         delegatee,
         None,
@@ -68,7 +68,7 @@ pub fn create_delegate_to_any_ixs(
     validator: Option<Pubkey>,
 ) -> Vec<Instruction> {
     let change_owner_ix = system_instruction::assign(&delegatee, &dlp::id());
-    let delegate_ix = dlp::instruction_builder::delegate_with_any_validator(
+    let delegate_ix = dlp_api::instruction_builder::delegate_with_any_validator(
         payer,
         delegatee,
         None,

@@ -18,6 +18,7 @@ magicblock-config = { workspace = true }
 magicblock-delegation-program = { workspace = true, features = [
   "no-entrypoint",
 ] }
+dlp-api = { workspace = true }
 solana-pubkey = { workspace = true }
 solana-rpc-client = { workspace = true }
 solana-rpc-client-api = { workspace = true }

@@ -105,6 +105,7 @@ magicblock-core = { path = "./magicblock-core" }
 magicblock-delegation-program = { path = "../delegation-program", default-features = false, features = [
   "sdk",
 ] }
+dlp-api = { path = "../delegation-program/dlp-api" }
 magicblock-ledger = { path = "./magicblock-ledger" }
 magicblock-magic-program-api = { path = "./magicblock-magic-program-api" }
 magicblock-metrics = { path = "./magicblock-metrics" }

@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use dlp::instruction_builder::validator_claim_fees;
+use dlp_api::instruction_builder::validator_claim_fees;
 use magicblock_program::validator::validator_authority;
 use magicblock_rpc_client::MagicBlockRpcClientError;
 use solana_commitment_config::CommitmentConfig;

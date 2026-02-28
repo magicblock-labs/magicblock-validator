@@ -1,8 +1,10 @@
 use dlp::{
     args::CommitStateFromBufferArgs,
     compute_diff,
-    instruction_builder::{commit_diff_size_budget, commit_size_budget},
     AccountSizeClass,
+};
+use dlp_api::instruction_builder::{
+    commit_diff_size_budget, commit_size_budget,
 };
 use magicblock_committor_program::Chunks;
 use magicblock_metrics::metrics::LabelValue;
@@ -118,7 +120,7 @@ impl BaseTask for BufferTask {
                         &commit_id_slice,
                     );
 
-                dlp::instruction_builder::commit_state_from_buffer(
+                dlp_api::instruction_builder::commit_state_from_buffer(
                     *validator,
                     task.committed_account.pubkey,
                     task.committed_account.account.owner,
@@ -139,7 +141,7 @@ impl BaseTask for BufferTask {
                         &commit_id_slice,
                     );
 
-                dlp::instruction_builder::commit_diff_from_buffer(
+                dlp_api::instruction_builder::commit_diff_from_buffer(
                     *validator,
                     task.committed_account.pubkey,
                     task.committed_account.account.owner,

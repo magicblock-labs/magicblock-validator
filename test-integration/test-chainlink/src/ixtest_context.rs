@@ -305,7 +305,7 @@ impl IxtestContext {
 
         // In order to make the account undelegatable we first need to
         // commmit and finalize
-        let commit_ix = dlp::instruction_builder::commit_state(
+        let commit_ix = dlp_api::instruction_builder::commit_state(
             self.validator_kp.pubkey(),
             counter_pda,
             program_flexi_counter::id(),
@@ -316,11 +316,11 @@ impl IxtestContext {
                 data: vec![0, 1, 0],
             },
         );
-        let finalize_ix = dlp::instruction_builder::finalize(
+        let finalize_ix = dlp_api::instruction_builder::finalize(
             self.validator_kp.pubkey(),
             counter_pda,
         );
-        let undelegate_ix = dlp::instruction_builder::undelegate(
+        let undelegate_ix = dlp_api::instruction_builder::undelegate(
             self.validator_kp.pubkey(),
             counter_pda,
             program_flexi_counter::id(),

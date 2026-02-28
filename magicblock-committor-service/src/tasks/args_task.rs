@@ -1,12 +1,12 @@
 use dlp::{
     args::{CommitDiffArgs, CommitStateArgs},
     compute_diff,
-    instruction_builder::{
-        call_handler_size_budget, call_handler_v2_size_budget,
-        commit_diff_size_budget, commit_size_budget, finalize_size_budget,
-        undelegate_size_budget,
-    },
     AccountSizeClass,
+};
+use dlp_api::instruction_builder::{
+    call_handler_size_budget, call_handler_v2_size_budget,
+    commit_diff_size_budget, commit_size_budget, finalize_size_budget,
+    undelegate_size_budget,
 };
 use magicblock_metrics::metrics::LabelValue;
 use solana_account::ReadableAccount;
@@ -69,7 +69,7 @@ impl BaseTask for ArgsTask {
                     data: value.committed_account.account.data.clone(),
                     allow_undelegation: value.allow_undelegation,
                 };
-                dlp::instruction_builder::commit_state(
+                dlp_api::instruction_builder::commit_state(
                     *validator,
                     value.committed_account.pubkey,
                     value.committed_account.account.owner,
@@ -88,7 +88,7 @@ impl BaseTask for ArgsTask {
                     allow_undelegation: value.allow_undelegation,
                 };
 
-                dlp::instruction_builder::commit_diff(
+                dlp_api::instruction_builder::commit_diff(
                     *validator,
                     value.committed_account.pubkey,
                     value.committed_account.account.owner,
@@ -96,13 +96,13 @@ impl BaseTask for ArgsTask {
                 )
             }
             ArgsTaskType::Finalize(value) => {
-                dlp::instruction_builder::finalize(
+                dlp_api::instruction_builder::finalize(
                     *validator,
                     value.delegated_account,
                 )
             }
             ArgsTaskType::Undelegate(value) => {
-                dlp::instruction_builder::undelegate(
+                dlp_api::instruction_builder::undelegate(
                     *validator,
                     value.delegated_account,
                     value.owner_program,
@@ -111,7 +111,7 @@ impl BaseTask for ArgsTask {
             }
             ArgsTaskType::BaseAction(value) => {
                 let action = &value.action;
-                dlp::instruction_builder::call_handler(
+                dlp_api::instruction_builder::call_handler(
                     *validator,
                     action.destination_program,
                     action.escrow_authority,
@@ -121,7 +121,7 @@ impl BaseTask for ArgsTask {
             }
             ArgsTaskType::BaseActionV2(value) => {
                 let action = &value.action;
-                dlp::instruction_builder::call_handler_v2(
+                dlp_api::instruction_builder::call_handler_v2(
                     *validator,
                     action.destination_program,
                     value.source_program,
