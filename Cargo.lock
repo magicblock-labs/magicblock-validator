@@ -3434,6 +3434,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "magicblock-replicator"
+version = "0.8.0"
+dependencies = [
+ "bincode",
+ "bytes",
+ "futures",
+ "serde",
+ "solana-hash",
+ "solana-keypair",
+ "solana-pubkey",
+ "solana-signature",
+ "solana-signer",
+ "solana-transaction",
+ "thiserror 1.0.69",
+ "tokio",
+ "tokio-util",
+]
+
+[[package]]
 name = "magicblock-rpc-client"
 version = "0.8.1"
 dependencies = [
