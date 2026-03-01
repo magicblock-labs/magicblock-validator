@@ -3338,6 +3338,7 @@ dependencies = [
  "solana-pubkey",
  "thiserror 1.0.69",
  "tracing",
+ "twox-hash",
 ]
 
 [[package]]
@@ -3759,6 +3760,8 @@ dependencies = [
  "solana-hash",
  "solana-instruction",
  "solana-keypair",
+ "solana-loader-v3-interface 3.0.0",
+ "solana-loader-v4-interface",
  "solana-log-collector",
  "solana-program-runtime",
  "solana-pubkey",
@@ -6242,7 +6245,7 @@ dependencies = [
 [[package]]
 name = "solana-account"
 version = "2.2.1"
-source = "git+https://github.com/magicblock-labs/solana-account.git?rev=6eae52b#6eae52bde25e90b3c79d4935ce2b267e35338945"
+source = "git+https://github.com/magicblock-labs/solana-account.git?rev=3ff1b2ea#3ff1b2eaf16fd8b82dd8e625673df9798b07db22"
 dependencies = [
  "bincode",
  "qualifier_attr",
@@ -10748,6 +10751,12 @@ dependencies = [
  "utf-8",
  "webpki-roots 0.24.0",
 ]
+
+[[package]]
+name = "twox-hash"
+version = "2.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9ea3136b675547379c4bd395ca6b938e5ad3c3d20fad76e7fe85f9e0d011419c"
 
 [[package]]
 name = "typenum"
