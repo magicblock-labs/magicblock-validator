@@ -22,7 +22,7 @@ USAGE:
 
 FLAGS:
     -h, --help       Prints help information
-    -s, --success    Show successful transactions, default: false
+    -u, --success    Show successful transactions, default: false
     -V, --version    Prints version information
 
 OPTIONS:
