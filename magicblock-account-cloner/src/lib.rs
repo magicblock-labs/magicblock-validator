@@ -1,60 +1,83 @@
-use std::{
-    sync::Arc,
-    time::{Duration, Instant},
-};
+//! Chainlink cloner - clones accounts from remote chain to ephemeral validator.
+//!
+//! # Account Cloning
+//!
+//! Accounts are cloned via direct encoding in transactions:
+//! - Small accounts (<63KB): Single `CloneAccount` instruction
+//! - Large accounts (>=63KB): `CloneAccountInit` → `CloneAccountContinue`* sequence
+//!
+//! # Program Cloning
+//!
+//! Programs use a buffer-based approach to handle loader-specific logic:
+//!
+//! ## V1 Programs (bpf_loader)
+//! Converted to V3 (upgradeable loader) format:
+//! 1. Clone ELF to buffer account
+//! 2. `FinalizeV1ProgramFromBuffer` creates program + program_data accounts
+//!
+//! ## V4 Programs (loader_v4)
+//! 1. Clone ELF to buffer account
+//! 2. `FinalizeProgramFromBuffer` creates program account with LoaderV4 header
+//! 3. `LoaderV4::Deploy` is called
+//! 4. `SetProgramAuthority` sets the chain's authority
+//!
+//! # Buffer Account
+//!
+//! The buffer is a temporary account that holds the raw ELF data during cloning.
+//! It's derived as a PDA: `["buffer", program_id]` owned by validator authority.
+
+use std::sync::Arc;
 
 use async_trait::async_trait;
-use magicblock_accounts_db::AccountsDb;
 use magicblock_chainlink::{
     cloner::{
         errors::{ClonerError, ClonerResult},
         AccountCloneRequest, Cloner,
     },
     remote_account_provider::program_account::{
-        DeployableV4Program, LoadedProgram, RemoteProgramLoader,
+        LoadedProgram, RemoteProgramLoader,
     },
 };
-use magicblock_committor_service::{
-    error::{CommittorServiceError, CommittorServiceResult},
-    BaseIntentCommittor, CommittorService,
-};
+use magicblock_committor_service::{BaseIntentCommittor, CommittorService};
 use magicblock_config::config::ChainLinkConfig;
 use magicblock_core::link::transactions::TransactionSchedulerHandle;
 use magicblock_ledger::LatestBlock;
-use magicblock_magic_program_api::instruction::AccountModification;
-use magicblock_program::{
+use magicblock_magic_program_api::{
     args::ScheduleTaskArgs,
-    instruction::MagicBlockInstruction,
+    instruction::{AccountCloneFields, MagicBlockInstruction},
+    MAGIC_CONTEXT_PUBKEY,
+};
+use magicblock_program::{
     instruction_utils::InstructionUtils,
     validator::{validator_authority, validator_authority_id},
-    MAGIC_CONTEXT_PUBKEY,
 };
 use solana_account::ReadableAccount;
 use solana_hash::Hash;
 use solana_instruction::{AccountMeta, Instruction};
-use solana_loader_v4_interface::state::LoaderV4Status;
+use solana_loader_v4_interface::{
+    instruction::LoaderV4Instruction, state::LoaderV4Status,
+};
 use solana_pubkey::Pubkey;
-use solana_sdk_ids::loader_v4;
+use solana_sdk_ids::{bpf_loader_upgradeable, loader_v4};
 use solana_signature::Signature;
-use solana_signer::{Signer, SignerError};
+use solana_signer::Signer;
 use solana_sysvar::rent::Rent;
 use solana_transaction::Transaction;
-use tokio::sync::oneshot;
 use tracing::*;
 
-use crate::bpf_loader_v1::BpfUpgradableProgramModifications;
+/// Max data that fits in a single transaction (~63KB)
+pub const MAX_INLINE_DATA_SIZE: usize = 63 * 1024;
 
 mod account_cloner;
-mod bpf_loader_v1;
 mod util;
 
 pub use account_cloner::*;
+pub use util::derive_buffer_pubkey;
 
 pub struct ChainlinkCloner {
     changeset_committor: Option<Arc<CommittorService>>,
     config: ChainLinkConfig,
     tx_scheduler: TransactionSchedulerHandle,
-    accounts_db: Arc<AccountsDb>,
     block: LatestBlock,
 }
 
@@ -63,339 +86,512 @@ impl ChainlinkCloner {
         changeset_committor: Option<Arc<CommittorService>>,
         config: ChainLinkConfig,
         tx_scheduler: TransactionSchedulerHandle,
-        accounts_db: Arc<AccountsDb>,
         block: LatestBlock,
     ) -> Self {
         Self {
             changeset_committor,
             config,
             tx_scheduler,
-            accounts_db,
             block,
         }
     }
 
-    async fn send_transaction(
-        &self,
-        tx: Transaction,
-    ) -> ClonerResult<Signature> {
+    // -----------------
+    // Transaction Helpers
+    // -----------------
+
+    async fn send_tx(&self, tx: Transaction) -> ClonerResult<Signature> {
         let sig = tx.signatures[0];
         self.tx_scheduler.execute(tx).await?;
         Ok(sig)
     }
 
-    fn build_clone_message(request: &AccountCloneRequest) -> Option<String> {
-        if request.account.delegated() {
-            // Account is delegated to us
-            None
-        } else if let Some(delegated_to_other) = request.delegated_to_other {
-            // Account is delegated to another validator
-            Some(format!(
-                "account is delegated to another validator: {}",
-                delegated_to_other
-            ))
-        } else {
-            Some("account is not delegated to any validator".to_string())
+    fn sign_tx(&self, ixs: &[Instruction], blockhash: Hash) -> Transaction {
+        let kp = validator_authority();
+        Transaction::new_signed_with_payer(
+            ixs,
+            Some(&kp.pubkey()),
+            &[&kp],
+            blockhash,
+        )
+    }
+
+    // -----------------
+    // Instruction Builders
+    // -----------------
+
+    fn clone_ix(
+        pubkey: Pubkey,
+        data: Vec<u8>,
+        fields: AccountCloneFields,
+    ) -> Instruction {
+        Instruction::new_with_bincode(
+            magicblock_program::ID,
+            &MagicBlockInstruction::CloneAccount {
+                pubkey,
+                data,
+                fields,
+            },
+            clone_account_metas(pubkey),
+        )
+    }
+
+    fn clone_init_ix(
+        pubkey: Pubkey,
+        total_len: u32,
+        initial_data: Vec<u8>,
+        fields: AccountCloneFields,
+    ) -> Instruction {
+        Instruction::new_with_bincode(
+            magicblock_program::ID,
+            &MagicBlockInstruction::CloneAccountInit {
+                pubkey,
+                total_data_len: total_len,
+                initial_data,
+                fields,
+            },
+            clone_account_metas(pubkey),
+        )
+    }
+
+    fn clone_continue_ix(
+        pubkey: Pubkey,
+        offset: u32,
+        data: Vec<u8>,
+        is_last: bool,
+    ) -> Instruction {
+        Instruction::new_with_bincode(
+            magicblock_program::ID,
+            &MagicBlockInstruction::CloneAccountContinue {
+                pubkey,
+                offset,
+                data,
+                is_last,
+            },
+            clone_account_metas(pubkey),
+        )
+    }
+
+    fn cleanup_ix(pubkey: Pubkey) -> Instruction {
+        Instruction::new_with_bincode(
+            magicblock_program::ID,
+            &MagicBlockInstruction::CleanupPartialClone { pubkey },
+            clone_account_metas(pubkey),
+        )
+    }
+
+    fn finalize_program_ix(
+        program: Pubkey,
+        buffer: Pubkey,
+        remote_slot: u64,
+    ) -> Instruction {
+        Instruction::new_with_bincode(
+            magicblock_program::ID,
+            &MagicBlockInstruction::FinalizeProgramFromBuffer { remote_slot },
+            vec![
+                AccountMeta::new_readonly(validator_authority_id(), true),
+                AccountMeta::new(program, false),
+                AccountMeta::new(buffer, false),
+            ],
+        )
+    }
+
+    fn set_authority_ix(program: Pubkey, authority: Pubkey) -> Instruction {
+        Instruction::new_with_bincode(
+            magicblock_program::ID,
+            &MagicBlockInstruction::SetProgramAuthority { authority },
+            vec![
+                AccountMeta::new_readonly(validator_authority_id(), true),
+                AccountMeta::new(program, false),
+            ],
+        )
+    }
+
+    // -----------------
+    // Clone Fields Helper
+    // -----------------
+
+    fn clone_fields(request: &AccountCloneRequest) -> AccountCloneFields {
+        AccountCloneFields {
+            lamports: request.account.lamports(),
+            owner: *request.account.owner(),
+            executable: request.account.executable(),
+            delegated: request.account.delegated(),
+            confined: request.account.confined(),
+            remote_slot: request.account.remote_slot(),
         }
     }
 
-    fn transaction_to_clone_regular_account(
+    // -----------------
+    // Account Cloning
+    // -----------------
+
+    fn build_small_account_tx(
         &self,
         request: &AccountCloneRequest,
-        recent_blockhash: Hash,
-    ) -> Result<Transaction, SignerError> {
-        let account_modification = AccountModification {
-            pubkey: request.pubkey,
-            lamports: Some(request.account.lamports()),
-            owner: Some(*request.account.owner()),
-            data: Some(request.account.data().to_owned()),
-            executable: Some(request.account.executable()),
-            delegated: Some(request.account.delegated()),
-            confined: Some(request.account.confined()),
-            remote_slot: Some(request.account.remote_slot()),
-        };
-
-        let message = Self::build_clone_message(request);
-
-        let modify_ix = InstructionUtils::modify_accounts_instruction(
-            vec![account_modification],
-            message,
+        blockhash: Hash,
+    ) -> Transaction {
+        let fields = Self::clone_fields(request);
+        let clone_ix = Self::clone_ix(
+            request.pubkey,
+            request.account.data().to_vec(),
+            fields,
         );
-        // Defined positive commit frequency means commits should be scheduled
-        let ixs = match request.commit_frequency_ms {
-            // TODO(GabrielePicco): Hotfix. Do not schedule frequency commits until we impose limits.
-            // 1. Allow configuring a higher minimum.
-            // 2. Stop committing accounts if they have been committed more than X times,
-            //    where X corresponds to what we can charge.
-            #[allow(clippy::overly_complex_bool_expr)]
-            Some(commit_frequency_ms) if commit_frequency_ms > 0 && false => {
-                // The task ID is randomly generated to avoid conflicts with other tasks
-                // TODO: remove once the program handles generating tasks instead of the client
-                // https://github.com/magicblock-labs/magicblock-validator/issues/625
-                let task_id = rand::random();
-                let schedule_commit_ix = Instruction::new_with_bincode(
-                    magicblock_program::ID,
-                    &MagicBlockInstruction::ScheduleCommit,
-                    vec![
-                        AccountMeta::new(validator_authority_id(), true),
-                        AccountMeta::new(MAGIC_CONTEXT_PUBKEY, false),
-                        AccountMeta::new_readonly(request.pubkey, false),
-                    ],
-                );
-                let crank_commits_ix =
-                    InstructionUtils::schedule_task_instruction(
-                        &validator_authority_id(),
-                        ScheduleTaskArgs {
-                            task_id,
-                            execution_interval_millis: commit_frequency_ms
-                                as i64,
-                            iterations: i64::MAX,
-                            instructions: vec![schedule_commit_ix.clone()],
-                        },
-                        &[
-                            request.pubkey,
-                            MAGIC_CONTEXT_PUBKEY,
-                            validator_authority_id(),
-                        ],
-                    );
-                vec![modify_ix, crank_commits_ix]
-            }
-            _ => vec![modify_ix],
-        };
 
-        let mut tx =
-            Transaction::new_with_payer(&ixs, Some(&validator_authority_id()));
-        tx.try_sign(&[&validator_authority()], recent_blockhash)?;
-        Ok(tx)
+        // TODO(#625): Re-enable frequency commits when proper limits are in place:
+        // 1. Allow configuring a higher minimum frequency
+        // 2. Stop committing accounts if they have been committed more than X times
+        //    where X corresponds to what we can charge
+        //
+        // To re-enable, uncomment the following and use `ixs` instead of `[clone_ix]`:
+        // let ixs = self.maybe_add_crank_commits_ix(request, clone_ix);
+        let ixs = vec![clone_ix];
+
+        self.sign_tx(&ixs, blockhash)
     }
 
-    /// Creates a transaction to clone the given program into the validator.
-    /// Handles the initial (and only) clone of a BPF Loader V1 program which is just
-    /// cloned as is without running an upgrade instruction.
-    /// Also see [magicblock_chainlink::chainlink::fetch_cloner::FetchCloner::handle_executable_sub_update]
-    /// For all other loaders we use the LoaderV4 and run a deploy instruction.
-    /// Returns None if the program is currently retracted on chain.
-    fn try_transaction_to_clone_program(
+    /// Builds crank commits instruction for periodic account commits.
+    /// Currently disabled - see https://github.com/magicblock-labs/magicblock-validator/issues/625
+    #[allow(dead_code)]
+    fn build_crank_commits_ix(
+        pubkey: Pubkey,
+        commit_frequency_ms: i64,
+    ) -> Instruction {
+        let task_id: i64 = rand::random();
+        let schedule_commit_ix = Instruction::new_with_bincode(
+            magicblock_program::ID,
+            &MagicBlockInstruction::ScheduleCommit,
+            vec![
+                AccountMeta::new(validator_authority_id(), true),
+                AccountMeta::new(MAGIC_CONTEXT_PUBKEY, false),
+                AccountMeta::new_readonly(pubkey, false),
+            ],
+        );
+        InstructionUtils::schedule_task_instruction(
+            &validator_authority_id(),
+            ScheduleTaskArgs {
+                task_id,
+                execution_interval_millis: commit_frequency_ms,
+                iterations: i64::MAX,
+                instructions: vec![schedule_commit_ix],
+            },
+            &[pubkey, MAGIC_CONTEXT_PUBKEY, validator_authority_id()],
+        )
+    }
+
+    fn build_large_account_txs(
+        &self,
+        request: &AccountCloneRequest,
+        blockhash: Hash,
+    ) -> Vec<Transaction> {
+        let data = request.account.data();
+        let fields = Self::clone_fields(request);
+        let mut txs = Vec::new();
+
+        // Init tx with first chunk
+        let first_chunk = data[..MAX_INLINE_DATA_SIZE.min(data.len())].to_vec();
+        let init_ix = Self::clone_init_ix(
+            request.pubkey,
+            data.len() as u32,
+            first_chunk,
+            fields,
+        );
+        txs.push(self.sign_tx(&[init_ix], blockhash));
+
+        // Continue txs for remaining chunks
+        let mut offset = MAX_INLINE_DATA_SIZE;
+        while offset < data.len() {
+            let end = (offset + MAX_INLINE_DATA_SIZE).min(data.len());
+            let chunk = data[offset..end].to_vec();
+            let is_last = end == data.len();
+
+            let continue_ix = Self::clone_continue_ix(
+                request.pubkey,
+                offset as u32,
+                chunk,
+                is_last,
+            );
+            txs.push(self.sign_tx(&[continue_ix], blockhash));
+            offset = end;
+        }
+
+        txs
+    }
+
+    async fn send_cleanup(&self, pubkey: Pubkey) {
+        let blockhash = self.block.load().blockhash;
+        let tx = self.sign_tx(&[Self::cleanup_ix(pubkey)], blockhash);
+        if let Err(e) = self.send_tx(tx).await {
+            error!(pubkey = %pubkey, error = ?e, "Failed to cleanup partial clone");
+        }
+    }
+
+    // -----------------
+    // Program Cloning
+    // -----------------
+
+    fn build_program_txs(
         &self,
         program: LoadedProgram,
-        recent_blockhash: Hash,
-    ) -> ClonerResult<Option<Transaction>> {
-        use RemoteProgramLoader::*;
+        blockhash: Hash,
+    ) -> ClonerResult<Option<Vec<Transaction>>> {
         match program.loader {
-            V1 => {
-                // NOTE: we don't support modifying this kind of program once it was
-                // deployed into our validator once.
-                // By nature of being immutable on chain this should never happen.
-                // Thus we avoid having to run the upgrade instruction and get
-                // away with just directly modifying the program and program data accounts.
-                debug!(program_id = %program.program_id, "Loading V1 program");
-                let validator_kp = validator_authority();
-
-                // BPF Loader (non-upgradeable) cannot be loaded via newer loaders,
-                // thus we just copy the account as is. It won't be upgradeable.
-                // For these programs, we use a slot that's earlier than the current slot to simulate
-                // that the program was deployed earlier and is ready to be used.
-                let deploy_slot =
-                    self.accounts_db.slot().saturating_sub(5).max(1);
-                let modifications =
-                    BpfUpgradableProgramModifications::try_from(
-                        &program,
-                        deploy_slot,
-                    )?;
-                let mod_ix = InstructionUtils::modify_accounts_instruction(
-                    vec![
-                        modifications.program_id_modification,
-                        modifications.program_data_modification,
-                    ],
-                    None,
-                );
-
-                Ok(Some(Transaction::new_signed_with_payer(
-                    &[mod_ix],
-                    Some(&validator_kp.pubkey()),
-                    &[&validator_kp],
-                    recent_blockhash,
-                )))
+            RemoteProgramLoader::V1 => {
+                self.build_v1_program_txs(program, blockhash)
             }
-            _ => {
-                let validator_kp = validator_authority();
-                // All other versions are loaded via the LoaderV4, no matter what
-                // the original loader was. We do this via a proper deploy instruction.
-                let program_id = program.program_id;
-
-                // We don't allow users to retract the program in the ER, since in that case any
-                // accounts of that program still in the ER could never be committed nor
-                // undelegated
-                if matches!(program.loader_status, LoaderV4Status::Retracted) {
-                    debug!(
-                        program_id = %program.program_id,
-                        "Program is retracted on chain"
-                    );
-                    return Ok(None);
-                }
-                debug!(
-                    program_id = %program.program_id,
-                    "Deploying program with V4 loader"
-                );
-
-                // Create and initialize the program account in retracted state
-                // and then deploy it and finally set the authority to match the
-                // one on chain
-                let slot = self.accounts_db.slot();
-                let program_remote_slot = program.remote_slot;
-                let DeployableV4Program {
-                    pre_deploy_loader_state,
-                    deploy_instruction,
-                    post_deploy_loader_state,
-                } = program.try_into_deploy_data_and_ixs_v4(
-                    slot,
-                    validator_kp.pubkey(),
-                )?;
-
-                let lamports = Rent::default()
-                    .minimum_balance(pre_deploy_loader_state.len());
-
-                let disable_executable_check_instruction =
-                    InstructionUtils::disable_executable_check_instruction(
-                        &validator_kp.pubkey(),
-                    );
-
-                // Programs aren't marked as confined since they are also never delegated
-                let pre_deploy_mod_instruction = {
-                    let pre_deploy_mods = vec![AccountModification {
-                        pubkey: program_id,
-                        lamports: Some(lamports),
-                        owner: Some(loader_v4::id()),
-                        executable: Some(true),
-                        data: Some(pre_deploy_loader_state),
-                        confined: Some(false),
-                        remote_slot: Some(program_remote_slot),
-                        ..Default::default()
-                    }];
-                    InstructionUtils::modify_accounts_instruction(
-                        pre_deploy_mods,
-                        None,
-                    )
-                };
-
-                let post_deploy_mod_instruction = {
-                    let post_deploy_mods = vec![AccountModification {
-                        pubkey: program_id,
-                        data: Some(post_deploy_loader_state),
-                        confined: Some(false),
-                        remote_slot: Some(program_remote_slot),
-                        ..Default::default()
-                    }];
-                    InstructionUtils::modify_accounts_instruction(
-                        post_deploy_mods,
-                        None,
-                    )
-                };
-
-                let enable_executable_check_instruction =
-                    InstructionUtils::enable_executable_check_instruction(
-                        &validator_kp.pubkey(),
-                    );
-
-                let ixs = vec![
-                    disable_executable_check_instruction,
-                    pre_deploy_mod_instruction,
-                    deploy_instruction,
-                    post_deploy_mod_instruction,
-                    enable_executable_check_instruction,
-                ];
-                let tx = Transaction::new_signed_with_payer(
-                    &ixs,
-                    Some(&validator_kp.pubkey()),
-                    &[&validator_kp],
-                    recent_blockhash,
-                );
-
-                Ok(Some(tx))
-            }
+            _ => self.build_v4_program_txs(program, blockhash),
         }
     }
 
-    #[instrument(skip(committor), fields(pubkey = %pubkey, owner = %owner))]
-    async fn reserve_lookup_tables(
-        pubkey: Pubkey,
-        owner: Pubkey,
-        committor: Arc<CommittorService>,
-    ) {
-        match Self::map_committor_request_result(
-            committor.reserve_pubkeys_for_committee(pubkey, owner),
-            &committor,
-        )
-        .await
-        {
-            Ok(initiated) => {
-                trace!(
-                    duration_ms = initiated.elapsed().as_millis() as u64,
-                    "Lookup table reservation completed"
-                );
-            }
-            Err(err) => {
-                error!(error = ?err, "Failed to reserve lookup tables");
-            }
-        };
+    /// Helper to build buffer fields for program cloning.
+    fn buffer_fields(data_len: usize) -> AccountCloneFields {
+        let lamports = Rent::default().minimum_balance(data_len);
+        AccountCloneFields {
+            lamports,
+            owner: solana_sdk_ids::system_program::id(),
+            ..Default::default()
+        }
     }
+
+    /// Helper to build program transactions (shared between V1 and V4).
+    fn build_program_txs_from_finalize(
+        &self,
+        buffer_pubkey: Pubkey,
+        program_data: Vec<u8>,
+        finalize_ixs: Vec<Instruction>,
+        blockhash: Hash,
+    ) -> Vec<Transaction> {
+        let buffer_fields = Self::buffer_fields(program_data.len());
+
+        if program_data.len() <= MAX_INLINE_DATA_SIZE {
+            // Small: single transaction with clone + finalize
+            let mut ixs = vec![Self::clone_ix(
+                buffer_pubkey,
+                program_data,
+                buffer_fields,
+            )];
+            ixs.extend(finalize_ixs);
+            vec![self.sign_tx(&ixs, blockhash)]
+        } else {
+            // Large: multi-transaction flow
+            self.build_large_program_txs(
+                buffer_pubkey,
+                program_data,
+                buffer_fields,
+                finalize_ixs,
+                blockhash,
+            )
+        }
+    }
+
+    /// V1 programs are converted to V3 (upgradeable loader) format.
+    /// Supports programs of any size via multi-transaction cloning.
+    fn build_v1_program_txs(
+        &self,
+        program: LoadedProgram,
+        blockhash: Hash,
+    ) -> ClonerResult<Option<Vec<Transaction>>> {
+        let program_id = program.program_id;
+        let chain_authority = program.authority;
+        let remote_slot = program.remote_slot;
+
+        debug!(program_id = %program_id, "Loading V1 program as V3 format");
+
+        let elf_data = program.program_data;
+        let (buffer_pubkey, _) = derive_buffer_pubkey(&program_id);
+        let (program_data_addr, _) = Pubkey::find_program_address(
+            &[program_id.as_ref()],
+            &bpf_loader_upgradeable::id(),
+        );
+
+        // Finalization instruction
+        // Must wrap in disable/enable executable check since finalize sets executable=true
+        let finalize_ixs = vec![
+            InstructionUtils::disable_executable_check_instruction(
+                &validator_authority_id(),
+            ),
+            Self::finalize_v1_program_ix(
+                program_id,
+                program_data_addr,
+                buffer_pubkey,
+                remote_slot,
+                chain_authority,
+            ),
+            InstructionUtils::enable_executable_check_instruction(
+                &validator_authority_id(),
+            ),
+        ];
+
+        let txs = self.build_program_txs_from_finalize(
+            buffer_pubkey,
+            elf_data,
+            finalize_ixs,
+            blockhash,
+        );
+
+        Ok(Some(txs))
+    }
+
+    /// Builds finalize instruction for V1 programs (creates V3 accounts from buffer).
+    fn finalize_v1_program_ix(
+        program: Pubkey,
+        program_data: Pubkey,
+        buffer: Pubkey,
+        remote_slot: u64,
+        authority: Pubkey,
+    ) -> Instruction {
+        Instruction::new_with_bincode(
+            magicblock_program::ID,
+            &MagicBlockInstruction::FinalizeV1ProgramFromBuffer {
+                remote_slot,
+                authority,
+            },
+            vec![
+                AccountMeta::new_readonly(validator_authority_id(), true),
+                AccountMeta::new(program, false),
+                AccountMeta::new(program_data, false),
+                AccountMeta::new(buffer, false),
+            ],
+        )
+    }
+
+    /// V2/V3/V4 programs use LoaderV4 with proper deploy flow.
+    /// Supports programs of any size via multi-transaction cloning.
+    fn build_v4_program_txs(
+        &self,
+        program: LoadedProgram,
+        blockhash: Hash,
+    ) -> ClonerResult<Option<Vec<Transaction>>> {
+        let program_id = program.program_id;
+        let chain_authority = program.authority;
+        let remote_slot = program.remote_slot;
+
+        // Skip retracted programs
+        if matches!(program.loader_status, LoaderV4Status::Retracted) {
+            debug!(program_id = %program_id, "Program is retracted on chain");
+            return Ok(None);
+        }
+
+        debug!(program_id = %program_id, "Deploying program with V4 loader");
+
+        let program_data = program.program_data;
+        let (buffer_pubkey, _) = derive_buffer_pubkey(&program_id);
+
+        let deploy_ix = Instruction {
+            program_id: loader_v4::id(),
+            accounts: vec![
+                AccountMeta::new(program_id, false),
+                AccountMeta::new_readonly(validator_authority_id(), true),
+            ],
+            data: bincode::serialize(&LoaderV4Instruction::Deploy)?,
+        };
+
+        // Finalization instructions (always in last tx)
+        // Must wrap in disable/enable executable check since finalize sets executable=true
+        let finalize_ixs = vec![
+            InstructionUtils::disable_executable_check_instruction(
+                &validator_authority_id(),
+            ),
+            Self::finalize_program_ix(program_id, buffer_pubkey, remote_slot),
+            deploy_ix,
+            Self::set_authority_ix(program_id, chain_authority),
+            InstructionUtils::enable_executable_check_instruction(
+                &validator_authority_id(),
+            ),
+        ];
+
+        let txs = self.build_program_txs_from_finalize(
+            buffer_pubkey,
+            program_data,
+            finalize_ixs,
+            blockhash,
+        );
+
+        Ok(Some(txs))
+    }
+
+    /// Builds multi-transaction flow for large programs (any loader).
+    fn build_large_program_txs(
+        &self,
+        buffer_pubkey: Pubkey,
+        program_data: Vec<u8>,
+        fields: AccountCloneFields,
+        finalize_ixs: Vec<Instruction>,
+        blockhash: Hash,
+    ) -> Vec<Transaction> {
+        let total_len = program_data.len() as u32;
+        let num_chunks =
+            total_len.div_ceil(MAX_INLINE_DATA_SIZE as u32) as usize;
+
+        // First chunk via Init
+        let first_chunk =
+            &program_data[..MAX_INLINE_DATA_SIZE.min(program_data.len())];
+        let init_ix = Self::clone_init_ix(
+            buffer_pubkey,
+            total_len,
+            first_chunk.to_vec(),
+            fields,
+        );
+        let mut txs = vec![self.sign_tx(&[init_ix], blockhash)];
+
+        // Middle chunks (all except last)
+        let last_offset = (num_chunks - 1) * MAX_INLINE_DATA_SIZE;
+        for offset in
+            (MAX_INLINE_DATA_SIZE..last_offset).step_by(MAX_INLINE_DATA_SIZE)
+        {
+            let chunk = &program_data[offset..offset + MAX_INLINE_DATA_SIZE];
+            let continue_ix = Self::clone_continue_ix(
+                buffer_pubkey,
+                offset as u32,
+                chunk.to_vec(),
+                false,
+            );
+            txs.push(self.sign_tx(&[continue_ix], blockhash));
+        }
+
+        // Last chunk with finalize instructions
+        let last_chunk = &program_data[last_offset..];
+        let mut ixs = vec![Self::clone_continue_ix(
+            buffer_pubkey,
+            last_offset as u32,
+            last_chunk.to_vec(),
+            true,
+        )];
+        ixs.extend(finalize_ixs);
+        txs.push(self.sign_tx(&ixs, blockhash));
+
+        txs
+    }
+
+    // -----------------
+    // Lookup Tables
+    // -----------------
 
     fn maybe_prepare_lookup_tables(&self, pubkey: Pubkey, owner: Pubkey) {
-        // Allow the committer service to reserve pubkeys in lookup tables
-        // that could be needed when we commit this account
-        if let Some(committor) = self.changeset_committor.as_ref() {
-            if self.config.prepare_lookup_tables {
-                let committor = committor.clone();
-                tokio::spawn(Self::reserve_lookup_tables(
-                    pubkey, owner, committor,
-                ));
+        let Some(committor) = self
+            .config
+            .prepare_lookup_tables
+            .then_some(self.changeset_committor.as_ref())
+            .flatten()
+            .cloned()
+        else {
+            return;
+        };
+        tokio::spawn(async move {
+            let result = committor.reserve_pubkeys_for_committee(pubkey, owner);
+            if let Err(e) = result.await {
+                error!(error = ?e, "Failed to reserve lookup tables");
             }
-        }
+        });
     }
+}
 
-    async fn map_committor_request_result(
-        res: oneshot::Receiver<CommittorServiceResult<Instant>>,
-        committor: &Arc<CommittorService>,
-    ) -> ClonerResult<Instant> {
-        match res.await.map_err(|err| {
-            // Send request error
-            ClonerError::CommittorServiceError(format!(
-                "error sending request {err:?}"
-            ))
-        })? {
-            Ok(val) => Ok(val),
-            Err(err) => {
-                // Commit error
-                match err {
-                    CommittorServiceError::TableManiaError(table_mania_err) => {
-                        let Some(sig) = table_mania_err.signature() else {
-                            return Err(ClonerError::CommittorServiceError(
-                                format!("{:?}", table_mania_err),
-                            ));
-                        };
-                        let (logs, cus) =
-                            crate::util::get_tx_diagnostics(&sig, committor)
-                                .await;
-
-                        let cus_str = cus
-                            .map(|cus| format!("{:?}", cus))
-                            .unwrap_or("N/A".to_string());
-                        let logs_str = logs
-                            .map(|logs| format!("{:#?}", logs))
-                            .unwrap_or("N/A".to_string());
-                        Err(ClonerError::CommittorServiceError(format!(
-                            "{:?}\nCUs: {cus_str}\nLogs: {logs_str}",
-                            table_mania_err
-                        )))
-                    }
-                    _ => Err(ClonerError::CommittorServiceError(format!(
-                        "{:?}",
-                        err
-                    ))),
-                }
-            }
-        }
-    }
+/// Shared account metas for clone instructions.
+fn clone_account_metas(pubkey: Pubkey) -> Vec<AccountMeta> {
+    vec![
+        AccountMeta::new(validator_authority_id(), true),
+        AccountMeta::new(pubkey, false),
+    ]
 }
 
 #[async_trait]
@@ -404,51 +600,91 @@ impl Cloner for ChainlinkCloner {
         &self,
         request: AccountCloneRequest,
     ) -> ClonerResult<Signature> {
-        let recent_blockhash = self.block.load().blockhash;
-        let tx = self
-            .transaction_to_clone_regular_account(&request, recent_blockhash)?;
+        let blockhash = self.block.load().blockhash;
+        let data_len = request.account.data().len();
+
         if request.account.delegated() {
             self.maybe_prepare_lookup_tables(
                 request.pubkey,
                 *request.account.owner(),
             );
         }
-        self.send_transaction(tx).await.map_err(|err| {
-            ClonerError::FailedToCloneRegularAccount(
-                request.pubkey,
-                Box::new(err),
-            )
-        })
+
+        // Small account: single tx
+        if data_len <= MAX_INLINE_DATA_SIZE {
+            let tx = self.build_small_account_tx(&request, blockhash);
+            return self.send_tx(tx).await.map_err(|e| {
+                ClonerError::FailedToCloneRegularAccount(
+                    request.pubkey,
+                    Box::new(e),
+                )
+            });
+        }
+
+        // Large account: multi-tx with cleanup on failure
+        let txs = self.build_large_account_txs(&request, blockhash);
+
+        let mut last_sig = Signature::default();
+        for tx in txs {
+            match self.send_tx(tx).await {
+                Ok(sig) => last_sig = sig,
+                Err(e) => {
+                    self.send_cleanup(request.pubkey).await;
+                    return Err(ClonerError::FailedToCloneRegularAccount(
+                        request.pubkey,
+                        Box::new(e),
+                    ));
+                }
+            }
+        }
+
+        Ok(last_sig)
     }
 
     async fn clone_program(
         &self,
         program: LoadedProgram,
     ) -> ClonerResult<Signature> {
-        let recent_blockhash = self.block.load().blockhash;
+        let blockhash = self.block.load().blockhash;
         let program_id = program.program_id;
-        if let Some(tx) = self
-            .try_transaction_to_clone_program(program, recent_blockhash)
-            .map_err(|err| {
+
+        let Some(txs) =
+            self.build_program_txs(program, blockhash).map_err(|e| {
                 ClonerError::FailedToCreateCloneProgramTransaction(
                     program_id,
-                    Box::new(err),
+                    Box::new(e),
                 )
             })?
-        {
-            let res = self.send_transaction(tx).await.map_err(|err| {
-                ClonerError::FailedToCloneProgram(program_id, Box::new(err))
-            })?;
-            // After cloning a program we need to wait at least one slot for it to become
-            // usable, so we do that here
-            let current_slot = self.accounts_db.slot();
-            while self.accounts_db.slot() == current_slot {
-                tokio::time::sleep(Duration::from_millis(25)).await;
+        else {
+            // Program was retracted
+            return Ok(Signature::default());
+        };
+
+        // Both V1 and V4 use buffer_pubkey for multi-tx cloning
+        let buffer_pubkey = derive_buffer_pubkey(&program_id).0;
+
+        let mut last_sig = Signature::default();
+        for tx in txs {
+            match self.send_tx(tx).await {
+                Ok(sig) => last_sig = sig,
+                Err(e) => {
+                    self.send_cleanup(buffer_pubkey).await;
+                    return Err(ClonerError::FailedToCloneProgram(
+                        program_id,
+                        Box::new(e),
+                    ));
+                }
             }
-            Ok(res)
-        } else {
-            // No-op, program was retracted
-            Ok(Signature::default())
         }
+
+        // After cloning a program we need to wait at least one slot for it to become
+        // usable, so we do that here
+        let current_slot = self.block.load().slot;
+        let mut block_updated = self.block.subscribe();
+        while self.block.load().slot == current_slot {
+            let _ = block_updated.recv().await;
+        }
+
+        Ok(last_sig)
     }
 }

@@ -42,7 +42,6 @@ pub fn cf_descriptors(
         new_cf_descriptor::<Transaction>(options, oldest_slot),
         new_cf_descriptor::<TransactionMemos>(options, oldest_slot),
         new_cf_descriptor::<PerfSamples>(options, oldest_slot),
-        new_cf_descriptor::<AccountModDatas>(options, oldest_slot),
     ];
 
     // If the access type is Secondary, we don't need to open all of the

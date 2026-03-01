@@ -39,7 +39,7 @@ use crate::{
         db::Database,
         iterator::IteratorMode,
         ledger_column::{try_increase_entry_counter, LedgerColumn},
-        meta::{AccountModData, AddressSignatureMeta, PerfSample},
+        meta::{AddressSignatureMeta, PerfSample},
         options::LedgerOptions,
     },
     errors::{LedgerError, LedgerResult},
@@ -67,7 +67,6 @@ pub struct Ledger {
     transaction_cf: LedgerColumn<cf::Transaction>,
     transaction_memos_cf: LedgerColumn<cf::TransactionMemos>,
     perf_samples_cf: LedgerColumn<cf::PerfSamples>,
-    account_mod_datas_cf: LedgerColumn<cf::AccountModDatas>,
 
     transaction_successful_status_count: AtomicI64,
     transaction_failed_status_count: AtomicI64,
@@ -143,8 +142,6 @@ impl Ledger {
         let transaction_memos_cf = db.column();
         let perf_samples_cf = db.column();
 
-        let account_mod_datas_cf = db.column();
-
         let db = Arc::new(db);
 
         // NOTE: left out max root
@@ -165,7 +162,6 @@ impl Ledger {
             transaction_cf,
             transaction_memos_cf,
             perf_samples_cf,
-            account_mod_datas_cf,
 
             transaction_successful_status_count: AtomicI64::new(DIRTY_COUNT),
             transaction_failed_status_count: AtomicI64::new(DIRTY_COUNT),
@@ -196,7 +192,6 @@ impl Ledger {
         self.transaction_cf.submit_rocksdb_cf_metrics();
         self.transaction_memos_cf.submit_rocksdb_cf_metrics();
         self.perf_samples_cf.submit_rocksdb_cf_metrics();
-        self.account_mod_datas_cf.submit_rocksdb_cf_metrics();
     }
 
     // -----------------
@@ -1187,30 +1182,6 @@ impl Ledger {
         self.perf_samples_cf.count_column_using_cache()
     }
 
-    // -----------------
-    // AccountModDatas
-    // -----------------
-    pub fn write_account_mod_data(
-        &self,
-        id: u64,
-        data: &AccountModData,
-    ) -> LedgerResult<()> {
-        self.account_mod_datas_cf.put(id, data)?;
-        self.account_mod_datas_cf.try_increase_entry_counter(1);
-        Ok(())
-    }
-
-    pub fn read_account_mod_data(
-        &self,
-        id: u64,
-    ) -> LedgerResult<Option<AccountModData>> {
-        self.account_mod_datas_cf.get(id)
-    }
-
-    pub fn count_account_mod_data(&self) -> LedgerResult<i64> {
-        self.account_mod_datas_cf.count_column_using_cache()
-    }
-
     pub fn read_slot_signature(
         &self,
         index: (Slot, u32),
@@ -1272,7 +1243,6 @@ impl Ledger {
             self.transaction_cf.handle(),
             self.transaction_memos_cf.handle(),
             self.perf_samples_cf.handle(),
-            self.account_mod_datas_cf.handle(),
         ];
 
         self.db
@@ -1344,7 +1314,6 @@ impl_has_column!(Blockhash, blockhash_cf);
 impl_has_column!(Transaction, transaction_cf);
 impl_has_column!(TransactionMemos, transaction_memos_cf);
 impl_has_column!(PerfSamples, perf_samples_cf);
-impl_has_column!(AccountModDatas, account_mod_datas_cf);
 
 struct MeasureGuard {
     measure: Measure,

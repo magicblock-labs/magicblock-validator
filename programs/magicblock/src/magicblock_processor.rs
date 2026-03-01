@@ -2,6 +2,12 @@ use magicblock_magic_program_api::instruction::MagicBlockInstruction;
 use solana_program_runtime::declare_process_instruction;
 
 use crate::{
+    clone_account::{
+        process_cleanup_partial_clone, process_clone_account,
+        process_clone_account_continue, process_clone_account_init,
+        process_finalize_program_from_buffer,
+        process_finalize_v1_program_from_buffer, process_set_program_authority,
+    },
     ephemeral_accounts::{
         process_close_ephemeral_account, process_create_ephemeral_account,
         process_resize_ephemeral_account,
@@ -118,6 +124,76 @@ declare_process_instruction!(
                 transaction_context,
             ),
             Noop(_) => Ok(()),
+            CloneAccount {
+                pubkey,
+                data,
+                fields,
+            } => process_clone_account(
+                &signers,
+                invoke_context,
+                transaction_context,
+                pubkey,
+                data,
+                fields,
+            ),
+            CloneAccountInit {
+                pubkey,
+                total_data_len,
+                initial_data,
+                fields,
+            } => process_clone_account_init(
+                &signers,
+                invoke_context,
+                transaction_context,
+                pubkey,
+                total_data_len,
+                initial_data,
+                fields,
+            ),
+            CloneAccountContinue {
+                pubkey,
+                offset,
+                data,
+                is_last,
+            } => process_clone_account_continue(
+                &signers,
+                invoke_context,
+                transaction_context,
+                pubkey,
+                offset,
+                data,
+                is_last,
+            ),
+            CleanupPartialClone { pubkey } => process_cleanup_partial_clone(
+                &signers,
+                invoke_context,
+                transaction_context,
+                pubkey,
+            ),
+            FinalizeProgramFromBuffer { remote_slot } => {
+                process_finalize_program_from_buffer(
+                    &signers,
+                    invoke_context,
+                    transaction_context,
+                    remote_slot,
+                )
+            }
+            SetProgramAuthority { authority } => process_set_program_authority(
+                &signers,
+                invoke_context,
+                transaction_context,
+                authority,
+            ),
+            FinalizeV1ProgramFromBuffer {
+                remote_slot,
+                authority,
+            } => process_finalize_v1_program_from_buffer(
+                &signers,
+                invoke_context,
+                transaction_context,
+                remote_slot,
+                authority,
+            ),
         }
     }
 );
