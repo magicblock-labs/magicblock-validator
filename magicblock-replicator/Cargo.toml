@@ -1,0 +1,23 @@
+[package]
+name = "magicblock-replicator"
+version.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+license.workspace = true
+edition.workspace = true
+
+[dependencies]
+bincode = { workspace = true }
+bytes = { workspace = true }
+futures = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["net"] }
+tokio-util = { workspace = true, features = ["codec"] }
+serde = { workspace = true, features = ["derive"] }
+solana-hash = { workspace = true, features = ["serde"] }
+solana-keypair = { workspace = true }
+solana-pubkey = { workspace = true, features = ["serde"] }
+solana-signature = { workspace = true, features = ["serde"] }
+solana-signer = { workspace = true }
+solana-transaction = { workspace = true, features = ["serde"] }
