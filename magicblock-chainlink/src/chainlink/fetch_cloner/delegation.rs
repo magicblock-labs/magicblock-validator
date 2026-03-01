@@ -398,10 +398,13 @@ mod tests {
 
     use super::*;
 
-    fn serialize_record_with_actions(actions: PostDelegationActions) -> Vec<u8> {
+    fn serialize_record_with_actions(
+        authority: Pubkey,
+        actions: PostDelegationActions,
+    ) -> Vec<u8> {
         let record = DelegationRecord {
             owner: Pubkey::new_unique(),
-            authority: Pubkey::new_unique(),
+            authority,
             commit_frequency_ms: 1000,
             delegation_slot: 1,
             lamports: 1_000_000,
@@ -419,29 +422,33 @@ mod tests {
         let program_id = Pubkey::new_unique();
         let account = Pubkey::new_unique();
 
-        let payload = serialize_record_with_actions(PostDelegationActions {
-            signers: vec![signer],
-            non_signers: vec![
-                MaybeEncryptedPubkey::ClearText(program_id),
-                MaybeEncryptedPubkey::ClearText(account),
-            ],
-            instructions: vec![MaybeEncryptedInstruction {
-                program_id: 1,
-                accounts: vec![
-                    dlp::compact::AccountMeta::new_readonly(0, true),
-                    dlp::compact::AccountMeta::new(2, false),
+        let validator_pubkey = Pubkey::new_unique();
+        let payload = serialize_record_with_actions(
+            validator_pubkey,
+            PostDelegationActions {
+                signers: vec![signer],
+                non_signers: vec![
+                    MaybeEncryptedPubkey::ClearText(program_id),
+                    MaybeEncryptedPubkey::ClearText(account),
                 ],
-                data: MaybeEncryptedIxData {
-                    prefix: vec![7, 8, 9],
-                    suffix: EncryptedBuffer::default(),
-                },
-            }],
-        });
+                instructions: vec![MaybeEncryptedInstruction {
+                    program_id: 1,
+                    accounts: vec![
+                        dlp::compact::AccountMeta::new_readonly(0, true),
+                        dlp::compact::AccountMeta::new(2, false),
+                    ],
+                    data: MaybeEncryptedIxData {
+                        prefix: vec![7, 8, 9],
+                        suffix: EncryptedBuffer::default(),
+                    },
+                }],
+            },
+        );
 
         let (_, actions) = parse_delegation_record(
             &payload,
             Pubkey::new_unique(),
-            Pubkey::new_unique(),
+            validator_pubkey,
             None,
         )
         .unwrap();
@@ -481,26 +488,29 @@ mod tests {
         )
         .unwrap();
 
-        let payload = serialize_record_with_actions(PostDelegationActions {
-            signers: vec![signer],
-            non_signers: vec![
-                MaybeEncryptedPubkey::Encrypted(EncryptedBuffer::new(
-                    encrypted_program_id,
-                )),
-                MaybeEncryptedPubkey::ClearText(account),
-            ],
-            instructions: vec![MaybeEncryptedInstruction {
-                program_id: 1,
-                accounts: vec![
-                    dlp::compact::AccountMeta::new_readonly(0, true),
-                    dlp::compact::AccountMeta::new(2, false),
+        let payload = serialize_record_with_actions(
+            validator.pubkey(),
+            PostDelegationActions {
+                signers: vec![signer],
+                non_signers: vec![
+                    MaybeEncryptedPubkey::Encrypted(EncryptedBuffer::new(
+                        encrypted_program_id,
+                    )),
+                    MaybeEncryptedPubkey::ClearText(account),
                 ],
-                data: MaybeEncryptedIxData {
-                    prefix: vec![1, 2],
-                    suffix: EncryptedBuffer::new(encrypted_suffix),
-                },
-            }],
-        });
+                instructions: vec![MaybeEncryptedInstruction {
+                    program_id: 1,
+                    accounts: vec![
+                        dlp::compact::AccountMeta::new_readonly(0, true),
+                        dlp::compact::AccountMeta::new(2, false),
+                    ],
+                    data: MaybeEncryptedIxData {
+                        prefix: vec![1, 2],
+                        suffix: EncryptedBuffer::new(encrypted_suffix),
+                    },
+                }],
+            },
+        );
 
         let (_, actions) = parse_delegation_record(
             &payload,
@@ -526,13 +536,16 @@ mod tests {
         )
         .unwrap();
 
-        let payload = serialize_record_with_actions(PostDelegationActions {
-            signers: vec![],
-            non_signers: vec![MaybeEncryptedPubkey::Encrypted(
-                EncryptedBuffer::new(encrypted_program_id),
-            )],
-            instructions: vec![],
-        });
+        let payload = serialize_record_with_actions(
+            validator.pubkey(),
+            PostDelegationActions {
+                signers: vec![],
+                non_signers: vec![MaybeEncryptedPubkey::Encrypted(
+                    EncryptedBuffer::new(encrypted_program_id),
+                )],
+                instructions: vec![],
+            },
+        );
 
         let err = parse_delegation_record(
             &payload,

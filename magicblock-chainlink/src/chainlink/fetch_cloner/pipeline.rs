@@ -62,6 +62,21 @@ where
     ExistingSubs { existing_subs }
 }
 
+pub(crate) fn collect_delegation_action_dependencies(
+    accounts_to_clone: &[AccountCloneRequest],
+) -> HashSet<Pubkey> {
+    let mut dependencies = HashSet::new();
+    for request in accounts_to_clone {
+        for instruction in request.delegation_actions.iter() {
+            dependencies.insert(instruction.program_id);
+            for account_meta in &instruction.accounts {
+                dependencies.insert(account_meta.pubkey);
+            }
+        }
+    }
+    dependencies
+}
+
 /// Classifies fetched remote accounts into categories
 pub(crate) fn classify_remote_accounts(
     accs: Vec<RemoteAccount>,
