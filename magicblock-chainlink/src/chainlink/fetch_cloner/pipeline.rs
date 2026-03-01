@@ -303,7 +303,7 @@ where
                     // However we may consider a different behavior when user is getting
                     // multiple accounts.
                     let (delegation_record, delegation_actions) =
-                        match FetchCloner::<T, U, V, C>::parse_delegation_record(
+                        match this.parse_delegation_record(
                             delegation_record_data.data(),
                             delegation_record_pubkey,
                         ) {

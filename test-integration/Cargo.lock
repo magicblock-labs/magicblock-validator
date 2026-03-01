@@ -3608,6 +3608,7 @@ dependencies = [
  "arc-swap",
  "async-trait",
  "bincode",
+ "dlp-api",
  "futures-util",
  "helius-laserstream",
  "lru",

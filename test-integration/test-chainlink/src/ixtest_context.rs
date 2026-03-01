@@ -126,6 +126,7 @@ impl IxtestContext {
                             &bank,
                             &cloner,
                             validator_kp.pubkey(),
+                            None,
                             faucet_kp.pubkey(),
                             rx,
                             None,

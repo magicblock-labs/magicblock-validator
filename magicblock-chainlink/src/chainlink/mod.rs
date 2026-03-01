@@ -15,6 +15,7 @@ use magicblock_metrics::metrics::AccountFetchOrigin;
 use solana_account::{AccountSharedData, ReadableAccount};
 use solana_commitment_config::CommitmentConfig;
 use solana_feature_set;
+use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
 use solana_transaction::sanitized::SanitizedTransaction;
 use tokio::{sync::mpsc, task};
@@ -113,6 +114,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
         accounts_bank: &Arc<V>,
         cloner: &Arc<C>,
         validator_pubkey: Pubkey,
+        validator_keypair: Option<Keypair>,
         faucet_pubkey: Pubkey,
         config: ChainlinkConfig,
         chainlink_config: &ChainLinkConfig,
@@ -136,6 +138,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
                 accounts_bank,
                 cloner,
                 validator_pubkey,
+                validator_keypair,
                 faucet_pubkey,
                 rx,
                 chainlink_config.allowed_programs.clone(),
