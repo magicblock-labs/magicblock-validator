@@ -76,14 +76,21 @@ pub struct ProcessableTransaction {
 }
 
 /// An enum that specifies how a transaction should be processed by the scheduler.
-/// Each variant also carries the one-shot sender to return the result to the original caller.
+///
+/// Variants that require result notification carry a one-shot sender:
+/// - `Simulation` and `Execution` return results to the caller
+/// - `Replay` is fire-and-forget (no sender, just a persistence flag)
 pub enum TransactionProcessingMode {
     /// Process the transaction as a simulation.
     Simulation(TxnSimulationResultTx),
     /// Process the transaction for standard execution.
     Execution(TxnExecutionResultTx),
-    /// Replay the transaction against the current state without persistence to the ledger.
-    Replay(TxnReplayResultTx),
+    /// Replay the transaction against the current state (fire-and-forget).
+    ///
+    /// The `bool` flag controls ledger persistence:
+    /// - `true`: record to ledger and broadcast status (for replay from primary)
+    /// - `false`: no recording, no broadcast (for local ledger replay during startup)
+    Replay(bool),
 }
 
 /// The detailed outcome of a transaction simulation.
@@ -250,14 +257,30 @@ impl TransactionSchedulerHandle {
         self.send(txn, mode).await
     }
 
-    /// Submits a transaction to be replayed against the
-    /// current accountsdb state and awaits the result.
+    /// Submits a transaction to be replayed against the current accountsdb state.
+    ///
+    /// Unlike `execute()`, this method is fire-and-forget: it returns success
+    /// once the transaction is queued, not after execution completes.
+    ///
+    /// # Arguments
+    /// * `persist` - If true, record the transaction to the ledger
+    /// * `txn` - The transaction to replay
     pub async fn replay(
         &self,
+        persist: bool,
         txn: impl SanitizeableTransaction,
     ) -> TransactionResult {
-        let mode = TransactionProcessingMode::Replay;
-        self.send(txn, mode).await?
+        let mode = TransactionProcessingMode::Replay(persist);
+        let transaction = txn.sanitize(true)?;
+        let txn = ProcessableTransaction {
+            transaction,
+            mode,
+            encoded: None,
+        };
+        self.0
+            .send(txn)
+            .await
+            .map_err(|_| TransactionError::ClusterMaintenance)
     }
 
     /// A private helper that handles the common logic of sanitizing, sending a

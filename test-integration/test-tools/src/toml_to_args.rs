@@ -103,10 +103,8 @@ pub fn config_to_args(
                 if let Some(parent) = full_path_to_resolve.parent() {
                     eprintln!("Directory contents of {:?}:", parent);
                     if let Ok(entries) = fs::read_dir(parent) {
-                        for entry in entries {
-                            if let Ok(entry) = entry {
-                                eprintln!(" - {:?}", entry.file_name());
-                            }
+                        for entry in entries.flatten() {
+                            eprintln!(" - {:?}", entry.file_name());
                         }
                     } else {
                         eprintln!(" (Unable to read directory)");

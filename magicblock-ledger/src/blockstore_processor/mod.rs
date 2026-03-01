@@ -64,11 +64,7 @@ async fn replay_blocks(
         if enabled!(Level::INFO)
             && slot.is_multiple_of(PROGRESS_REPORT_INTERVAL)
         {
-            info!(
-                slot = %slot.to_formatted_string(&Locale::en),
-                max_slot = %max_slot,
-                "Processing block"
-            );
+            info!(slot, max_slot, "Processing block");
         }
 
         let VersionedConfirmedBlock {
@@ -131,8 +127,10 @@ async fn replay_blocks(
             let txn = txn.sanitize(false).map_err(|err| {
                 LedgerError::BlockStoreProcessor(err.to_string())
             })?;
-            let result =
-                transaction_scheduler.replay(txn).await.map_err(|err| {
+            let result = transaction_scheduler
+                .replay(false, txn)
+                .await
+                .map_err(|err| {
                     LedgerError::BlockStoreProcessor(err.to_string())
                 });
             if !enabled!(Level::TRACE) {

@@ -31,6 +31,7 @@ use solana_program_runtime::{
 };
 use solana_pubkey::Pubkey;
 use solana_svm::transaction_processor::TransactionProcessingEnvironment;
+use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
 
 use crate::executor::SimpleForkGraph;
@@ -54,6 +55,9 @@ pub struct TransactionSchedulerState {
     // === Configuration ===
     pub is_auto_airdrop_lamports_enabled: bool,
     pub shutdown: CancellationToken,
+    /// Notifies scheduler to switch from Replica to Primary mode.
+    /// Call `notify_one()` before spawning for tests that need Primary mode immediately.
+    pub mode_switcher: Arc<Notify>,
 }
 
 impl TransactionSchedulerState {
