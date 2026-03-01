@@ -9,7 +9,8 @@ use std::{
 use magicblock_accounts::ScheduledCommitsProcessor;
 use magicblock_accounts_db::{traits::AccountsBank, AccountsDb};
 use magicblock_core::link::{
-    blocks::BlockUpdateTx, transactions::TransactionSchedulerHandle,
+    blocks::BlockUpdateTx,
+    transactions::{with_encoded, TransactionSchedulerHandle},
 };
 use magicblock_ledger::{LatestBlock, Ledger};
 use magicblock_magic_program_api as magic_program;
@@ -89,6 +90,11 @@ async fn handle_scheduled_commits<C: ScheduledCommitsProcessor>(
     let tx = InstructionUtils::accept_scheduled_commits(
         latest_block.load().blockhash,
     );
+    let Ok(tx) = with_encoded(tx) else {
+        // Unreachable case, all schedule commit txns are smaller than 64KB by construction
+        error!("Failed to bincode intent transaction");
+        return;
+    };
     if let Err(err) = transaction_scheduler.execute(tx).await {
         error!(error = ?err, "Failed to accept scheduled commits");
         return;
