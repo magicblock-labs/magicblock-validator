@@ -1,0 +1,174 @@
+name: CI
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+on:
+  push:
+    branches: [master, dev]
+  pull_request:
+    types: [opened, reopened, synchronize]
+
+jobs:
+  prepare-env:
+    runs-on: self-hosted
+    outputs:
+      target_dir: ${{ steps.calc.outputs.dir }}
+    steps:
+      - id: calc
+        env:
+          REF_NAME: ${{ github.ref_name }}
+          REPO_NAME: ${{ github.event.repository.name }}
+        run: |
+          SAFE_BRANCH=$(echo "$REF_NAME" | tr '/' '-')
+          TARGET_DIR="/var/lib/gh-runners/global-targets/${REPO_NAME}-${SAFE_BRANCH}"
+          mkdir -p "$TARGET_DIR"
+          echo "dir=$TARGET_DIR" >> $GITHUB_OUTPUT
+
+  build:
+    needs: prepare-env
+    runs-on: self-hosted
+    env:
+      CARGO_TARGET_DIR: ${{ needs.prepare-env.outputs.target_dir }}
+      CARGO_INCREMENTAL: 1
+      CARGO_BUILD_JOBS: 30
+      RUSTFLAGS: -C link-arg=-fuse-ld=mold
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+
+      - name: Build SBF programs
+        env:
+          RUSTFLAGS: ""
+        run: |
+          (
+            unset CARGO_TARGET_DIR
+            make -C test-integration programs
+            make chainlink-prep-programs -C test-integration/test-chainlink
+          )
+
+      - name: Build binaries and tests
+        run: cargo build --bins --tests --locked
+
+      - name: Format check
+        run: make ci-fmt
+
+      - name: Lint
+        run: make ci-lint
+
+      - name: Unit tests
+        run: make ci-test-unit
+
+      - name: Pre-fetch integration test dependencies
+        run: cargo test --test '*' --no-run
+
+      - name: Cache SBF artifacts
+        run: |
+          SBF_CACHE_DIR="$CARGO_TARGET_DIR/sbf-artifacts"
+          mkdir -p "$SBF_CACHE_DIR/test-integration" "$SBF_CACHE_DIR/root"
+
+          if [ -d "test-integration/target/deploy" ]; then
+            find test-integration/target/deploy -mindepth 1 -maxdepth 1 -exec cp -r {} "$SBF_CACHE_DIR/test-integration/" \;
+          else
+            echo "::warning::test-integration/target/deploy not found"
+          fi
+
+          if ls target/deploy/*.so >/dev/null 2>&1; then
+            cp target/deploy/*.so "$SBF_CACHE_DIR/root/"
+          else
+            echo "::warning::No SBF artifacts found in target/deploy"
+          fi
+
+  integration-tests:
+    needs: [prepare-env, build]
+    runs-on: self-hosted
+    strategy:
+      fail-fast: false
+      matrix:
+        batch:
+          - "committor config"
+          - "restore_ledger schedulecommit"
+          - "table_mania cloning"
+          - "magicblock_api schedule_intents"
+          - "task-scheduler chainlink pubsub"
+    env:
+      TMPDIR: /dev/shm
+      CARGO_NET_OFFLINE: "true"
+      CARGO_BUILD_JOBS: 6
+      NEXTEST_RETRIES: 0
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+
+      - name: Restore source file timestamps
+        run: git restore-mtime
+
+      - name: Link pre-built artifacts
+        run: |
+          GLOBAL_TARGET="${{ needs.prepare-env.outputs.target_dir }}"
+          mkdir -p target
+
+          if ! cp -rl "$GLOBAL_TARGET/debug" target/ 2>/dev/null; then
+            echo "::warning::Hardlink failed (cross-device?), falling back to copy"
+            cp -r "$GLOBAL_TARGET/debug" target/
+          fi
+
+          rm -rf target/debug/incremental
+
+      - name: Restore SBF artifacts
+        run: |
+          SBF_CACHE_DIR="${{ needs.prepare-env.outputs.target_dir }}/sbf-artifacts"
+
+          LOCAL_DEPLOY_TEST="test-integration/target/deploy"
+          mkdir -p "$LOCAL_DEPLOY_TEST"
+          if [ -d "$SBF_CACHE_DIR/test-integration" ]; then
+            find "$SBF_CACHE_DIR/test-integration" -mindepth 1 -maxdepth 1 -exec cp -r {} "$LOCAL_DEPLOY_TEST/" \;
+            find "$LOCAL_DEPLOY_TEST" -type f -exec touch {} +
+          else
+            echo "::warning::No cached SBF artifacts for test-integration"
+          fi
+
+          LOCAL_DEPLOY_ROOT="target/deploy"
+          mkdir -p "$LOCAL_DEPLOY_ROOT"
+          if ls "$SBF_CACHE_DIR/root"/*.so >/dev/null 2>&1; then
+            cp "$SBF_CACHE_DIR/root"/*.so "$LOCAL_DEPLOY_ROOT/"
+            touch "$LOCAL_DEPLOY_ROOT"/*.so
+          else
+            echo "::warning::No cached SBF artifacts for root"
+          fi
+
+      - name: "Integration: ${{ matrix.batch }}"
+        env:
+          TEST_BATCH: ${{ matrix.batch }}
+        run: |
+          unshare -r -n bash -c '
+            set -euo pipefail
+            ip link set lo up
+            FAILED=""
+            for test in $TEST_BATCH; do
+              echo "========== Running: $test =========="
+              if ! RUN_TESTS=$test make ci-test-integration PROGRAMS_SO= SKIP_CHAINLINK_PREP=1; then
+                FAILED="$FAILED $test"
+              fi
+            done
+            if [ -n "$FAILED" ]; then
+              echo "::error::Failed test suites:$FAILED"
+              exit 1
+            fi
+          '
+
+  ci-status:
+    if: always()
+    needs: [build, integration-tests]
+    runs-on: self-hosted
+    steps:
+      - name: Verify pipeline status
+        run: |
+          if [[ "${{ needs.build.result }}" != "success" ||
+                "${{ needs.integration-tests.result }}" != "success" ]]; then
+            echo "::error::CI failed"
+            exit 1
+          fi

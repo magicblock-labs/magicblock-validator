@@ -30,7 +30,7 @@ use solana_transaction_error::{TransactionError, TransactionResult};
 use solana_transaction_status_client_types::{
     EncodedConfirmedTransactionWithStatusMeta, UiTransactionEncoding,
 };
-use tokio::task::JoinSet;
+use tokio::{task::JoinSet, time::sleep};
 use tracing::*;
 
 /// The encoding to use when sending transactions
@@ -521,7 +521,16 @@ impl MagicblockRpcClient {
                     signature,
                     CommitmentConfig::processed(),
                 )
-                .await?;
+                .await;
+            let status = match status {
+                Ok(value) => value,
+                Err(err) => {
+                    trace!(error = ?err, "Failed to get signature status");
+                    last_err = err.into();
+                    sleep(check_interval).await;
+                    continue;
+                }
+            };
 
             if let Some(status) = status {
                 return Ok(status);
@@ -541,7 +550,16 @@ impl MagicblockRpcClient {
                     recent_blockhash,
                     CommitmentConfig::processed(),
                 )
-                .await?;
+                .await;
+            let blockhash_found = match blockhash_found {
+                Ok(value) => value,
+                Err(err) => {
+                    trace!(error = ?err, "Failed to check blockhash validity");
+                    last_err = err.into();
+                    sleep(check_interval).await;
+                    continue;
+                }
+            };
 
             if !blockhash_found && &start.elapsed() < blockhash_valid_timeout {
                 trace!(
@@ -584,9 +602,9 @@ impl MagicblockRpcClient {
                     signature,
                     self.client.commitment(),
                 )
-                .await?;
+                .await;
 
-            if let Some(status) = status {
+            if let Ok(Some(status)) = status {
                 return Ok(status);
             }
 
