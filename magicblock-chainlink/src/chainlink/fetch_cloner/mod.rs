@@ -19,6 +19,7 @@ use magicblock_core::token_programs::{
 use magicblock_metrics::metrics::{self, AccountFetchOrigin};
 use scc::{hash_map::Entry, HashMap};
 use solana_account::{AccountSharedData, ReadableAccount};
+use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
 use solana_sdk_ids::system_program;
 use tokio::{
@@ -37,6 +38,7 @@ mod types;
 
 pub use self::types::FetchAndCloneResult;
 use self::{
+    delegation::ValidatorDecryptionContext,
     subscription::{cancel_subs, CancelStrategy},
     types::{
         AccountWithCompanion, ClassifiedAccounts, ExistingSubs,
@@ -83,6 +85,7 @@ where
     accounts_bank: Arc<V>,
     cloner: Arc<C>,
     validator_pubkey: Pubkey,
+    validator_decryption_ctx: Option<ValidatorDecryptionContext>,
 
     /// These are accounts that we should never clone into our validator.
     /// native programs, sysvars, native tokens, validator identity and faucet
@@ -106,6 +109,7 @@ where
         accounts_bank: &Arc<V>,
         cloner: &Arc<C>,
         validator_pubkey: Pubkey,
+        validator_keypair: Option<Keypair>,
         faucet_pubkey: Pubkey,
         subscription_updates_rx: mpsc::Receiver<ForwardedSubscriptionUpdate>,
         allowed_programs: Option<Vec<AllowedProgram>>,
@@ -115,11 +119,23 @@ where
         let allowed_programs = allowed_programs.map(|programs| {
             programs.iter().map(|p| p.id).collect::<HashSet<_>>()
         });
+        let validator_decryption_ctx = validator_keypair.as_ref().and_then(
+            |keypair| match ValidatorDecryptionContext::from_validator_keypair(
+                keypair,
+            ) {
+                Ok(ctx) => Some(ctx),
+                Err(err) => {
+                    error!(error = %err, "Failed to initialize action decryption context");
+                    None
+                }
+            },
+        );
         let me = Arc::new(Self {
             remote_account_provider: remote_account_provider.clone(),
             accounts_bank: accounts_bank.clone(),
             cloner: cloner.clone(),
             validator_pubkey,
+            validator_decryption_ctx,
             pending_requests: Arc::new(HashMap::new()),
             fetch_count: Arc::new(AtomicU64::new(0)),
             blacklisted_accounts,
@@ -385,7 +401,7 @@ where
                             delegation_record
                         {
                             let delegation_record_with_actions =
-                                match delegation::parse_delegation_record(
+                                match self.parse_delegation_record(
                                     delegation_record.data(),
                                     delegation_record_pubkey,
                                 ) {
@@ -680,10 +696,16 @@ where
     /// Returns the parsed DelegationRecord, or InvalidDelegationRecord error
     /// if parsing fails.
     fn parse_delegation_record(
+        &self,
         data: &[u8],
         delegation_record_pubkey: Pubkey,
     ) -> ChainlinkResult<(DelegationRecord, Option<DelegationActions>)> {
-        delegation::parse_delegation_record(data, delegation_record_pubkey)
+        delegation::parse_delegation_record(
+            data,
+            delegation_record_pubkey,
+            self.validator_pubkey,
+            self.validator_decryption_ctx.as_ref(),
+        )
     }
 
     /// Applies delegation record settings to an account: sets the owner,

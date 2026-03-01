@@ -3286,6 +3286,7 @@ dependencies = [
  "assert_matches",
  "async-trait",
  "bincode",
+ "dlp-api",
  "futures-util",
  "helius-laserstream",
  "lru 0.16.2",

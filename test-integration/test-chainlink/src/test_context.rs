@@ -99,6 +99,7 @@ impl TestContext {
                             &bank,
                             &cloner,
                             validator_pubkey,
+                            None,
                             faucet_pubkey,
                             rx,
                             None,

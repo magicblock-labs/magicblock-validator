@@ -458,6 +458,7 @@ impl MagicValidator {
             &accounts_bank,
             &cloner,
             config.validator.keypair.pubkey(),
+            Some(config.validator.keypair.insecure_clone()),
             faucet_pubkey,
             chainlink_config,
             &config.chainlink,
