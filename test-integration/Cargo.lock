@@ -3576,8 +3576,10 @@ dependencies = [
 name = "magicblock-core"
 version = "0.8.1"
 dependencies = [
+ "bincode",
  "flume",
  "magicblock-magic-program-api 0.8.1",
+ "serde",
  "solana-account",
  "solana-account-decoder",
  "solana-hash",
@@ -10081,6 +10083,7 @@ dependencies = [
  "solana-transaction",
  "solana-transaction-status-client-types",
  "tempfile",
+ "tokio",
  "tracing",
  "tracing-log",
  "tracing-subscriber",
