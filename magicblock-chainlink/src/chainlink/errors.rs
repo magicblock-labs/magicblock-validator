@@ -43,4 +43,7 @@ pub enum ChainlinkError {
 
     #[error("Unexpected number of accounts returned when fetching account with companion: {0}")]
     UnexpectedAccountCount(String),
+
+    #[error("Missing accounts required by delegation actions: {0:?}")]
+    MissingDelegationActionAccounts(Vec<Pubkey>),
 }
