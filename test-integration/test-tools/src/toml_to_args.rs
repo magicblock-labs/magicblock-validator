@@ -83,7 +83,6 @@ pub fn config_to_args(
         let resolved_full_config_path =
             config_dir.join(&program.path).canonicalize().unwrap();
         args.push(resolved_full_config_path.to_str().unwrap().to_string());
-
         if program_loader == ProgramLoader::UpgradeableProgram {
             if let Some(auth) = program.auth {
                 args.push(auth);
