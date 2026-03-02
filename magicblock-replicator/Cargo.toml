@@ -12,7 +12,7 @@ bincode = { workspace = true }
 bytes = { workspace = true }
 futures = { workspace = true }
 thiserror = { workspace = true }
-tokio = { workspace = true, features = ["net"] }
+tokio = { workspace = true, features = ["net", "rt", "macros"] }
 tokio-util = { workspace = true, features = ["codec"] }
 serde = { workspace = true, features = ["derive"] }
 solana-hash = { workspace = true, features = ["serde"] }

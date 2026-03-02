@@ -16,6 +16,8 @@ pub struct MessageEncoder;
 pub(crate) type InputStream<IO> = FramedRead<IO, LengthDelimitedCodec>;
 pub(crate) type OutputStream<IO> = FramedWrite<IO, MessageEncoder>;
 
+const MAX_FRAME_SIZE: usize = 64 * 1024 * 1024;
+
 impl tokio_util::codec::Encoder<Message> for MessageEncoder {
     type Error = Error;
 
@@ -23,13 +25,17 @@ impl tokio_util::codec::Encoder<Message> for MessageEncoder {
         let start = dst.len();
         dst.put_u32_le(0);
         bincode::serialize_into(dst.writer(), &msg)?;
-        let len = (dst.len() - start - 4) as u32;
-        dst[start..start + 4].copy_from_slice(&len.to_le_bytes());
+        let len = dst.len() - start - 4;
+        if len > MAX_FRAME_SIZE {
+            dst.truncate(start);
+            return Err(Box::new(bincode::ErrorKind::SizeLimit))?;
+        }
+        dst[start..start + 4].copy_from_slice(&(len as u32).to_le_bytes());
         Ok(())
     }
 }
 
-/// Receives messages from an async stream (max frame: 64KB).
+/// Receives messages from an async stream (max frame: 64MB).
 pub struct Receiver<IO> {
     inner: InputStream<IO>,
 }
@@ -38,7 +44,7 @@ impl<IO: AsyncRead + Unpin> Receiver<IO> {
     pub fn new(io: IO) -> Self {
         let inner = LengthDelimitedCodec::builder()
             .little_endian()
-            .max_frame_length(64 * 1024)
+            .max_frame_length(MAX_FRAME_SIZE)
             .length_field_type::<u32>()
             .new_read(io);
         Self { inner }
