@@ -430,7 +430,7 @@ impl MagicValidator {
         let accounts_bank = accountsdb.clone();
         let mut chainlink_config =
             ChainlinkConfig::default_with_lifecycle_mode(
-                config.lifecycle.clone(),
+                LifecycleMode::Ephemeral,
             )
             .with_remove_confined_accounts(
                 config.chainlink.remove_confined_accounts,
