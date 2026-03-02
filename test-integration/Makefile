@@ -30,7 +30,7 @@ COMMITTOR_PROGRAM_SO := $(ROOT_DEPLOY_DIR)/magicblock_committor_program.so
 PROGRAMS_SO := $(FLEXI_COUNTER_SO) $(SCHEDULECOMMIT_SO) $(SCHEDULECOMMIT_SECURITY_SO) $(COMMITTOR_PROGRAM_SO)
 
 VALIDATOR_DEBUG_BIN=$(CARGO_TARGET_DIR)/debug/magicblock-validator
-VALIDATOR_SRC := $(shell find $(DIR).. -name '*.rs' -type f)
+VALIDATOR_SRC := $(shell find $(DIR).. -name '*.rs' -type f -o -name 'Cargo.toml' -o -name 'Cargo.lock')
 
 list:
 	@cat Makefile | grep "^[a-z].*:" | sed 's/:.*//g'
