@@ -10,9 +10,10 @@ use solana_pubkey::Pubkey;
 use solana_transaction_context::TransactionContext;
 
 use super::{
-    adjust_authority_lamports, close_buffer_account, remove_pending_clone,
-    validate_and_get_index, validate_authority,
+    adjust_authority_lamports, close_buffer_account, is_pending_clone,
+    remove_pending_clone, validate_and_get_index, validate_authority,
 };
+use crate::errors::MagicBlockProgramError;
 
 /// Cleans up a failed multi-transaction clone.
 ///
@@ -26,6 +27,19 @@ pub(crate) fn process_cleanup_partial_clone(
     pubkey: Pubkey,
 ) -> Result<(), InstructionError> {
     validate_authority(signers, invoke_context)?;
+
+    // Safety check: only cleanup accounts that are actually in a pending clone state.
+    // This prevents accidental deletion of valid accounts if cleanup is called
+    // when no multi-tx clone was in progress (e.g., CloneAccountInit failed early).
+    if !is_pending_clone(&pubkey) {
+        ic_msg!(
+            invoke_context,
+            "CleanupPartialClone: account {} is not in pending clone state; refusing to delete",
+            pubkey
+        );
+        return Err(MagicBlockProgramError::NoPendingClone.into());
+    }
+
     remove_pending_clone(&pubkey);
 
     let ctx = transaction_context.get_current_instruction_context()?;
