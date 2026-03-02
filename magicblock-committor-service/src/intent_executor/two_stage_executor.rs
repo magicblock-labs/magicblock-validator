@@ -237,8 +237,10 @@ where
         }))
     }
 
-    /// Removes actions from commit & finalize strategies
-    /// Executes callbacks
+    /// On `Err`: removes actions from both commit and finalize strategies and
+    /// executes all their callbacks with the error.
+    /// On `Ok`: removes actions only from commit strategy and executes their
+    /// callbacks, preserving finalize-stage actions for the finalize phase.
     pub fn execute_callbacks(
         &mut self,
         result: Result<(), impl Into<ActionError>>,
@@ -251,12 +253,14 @@ where
         );
         self.inner.junk.push(junk_strategy);
 
-        let junk_strategy = handle_actions_error(
-            &self.inner,
-            &mut self.state.finalize_strategy,
-            result,
-        );
-        self.inner.junk.push(junk_strategy);
+        if result.is_err() {
+            let junk_strategy = handle_actions_error(
+                &self.inner,
+                &mut self.state.finalize_strategy,
+                result,
+            );
+            self.inner.junk.push(junk_strategy);
+        }
     }
 
     /// Transactions to next executor state

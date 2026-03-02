@@ -8,6 +8,7 @@ use magicblock_program::{
 use solana_instruction::{AccountMeta, Instruction};
 use solana_signature::Signature;
 use solana_signer::Signer;
+use solana_transaction::Transaction;
 use solana_transaction_error::TransactionError;
 
 use crate::intent_executor::error::{
@@ -84,7 +85,7 @@ impl<L: LatestBlockProvider> ActionsCallbackExecutor
                     &authority.pubkey(),
                     result.is_ok(),
                 );
-                let tx = solana_transaction::Transaction::new_signed_with_payer(
+                let tx = Transaction::new_signed_with_payer(
                     &[ix],
                     Some(&authority.pubkey()),
                     &[&authority],

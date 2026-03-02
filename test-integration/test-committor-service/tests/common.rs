@@ -7,7 +7,10 @@ use std::{
 };
 
 use async_trait::async_trait;
+use std::sync::Mutex;
+
 use magicblock_committor_service::{
+    actions_callback_executor::{ActionResult, ActionsCallbackExecutor},
     intent_executor::{
         task_info_fetcher::{
             ResetType, TaskInfoFetcher, TaskInfoFetcherError,
@@ -19,9 +22,11 @@ use magicblock_committor_service::{
     transaction_preparator::{
         delivery_preparator::DeliveryPreparator, TransactionPreparatorImpl,
     },
-    ComputeBudgetConfig,
+    ComputeBudgetConfig, DEFAULT_ACTIONS_TIMEOUT,
 };
-use magicblock_program::magic_scheduled_base_intent::CommittedAccount;
+use magicblock_program::magic_scheduled_base_intent::{
+    BaseActionCallback, CommittedAccount,
+};
 use magicblock_rpc_client::MagicblockRpcClient;
 use magicblock_table_mania::{GarbageCollectorConfig, TableMania};
 use solana_account::Account;
@@ -102,20 +107,46 @@ impl TestFixture {
     #[allow(dead_code)]
     pub fn create_intent_executor(
         &self,
-    ) -> IntentExecutorImpl<TransactionPreparatorImpl, MockTaskInfoFetcher>
-    {
+    ) -> IntentExecutorImpl<
+        TransactionPreparatorImpl,
+        MockTaskInfoFetcher,
+        MockActionsCallbackExecutor,
+    > {
         let transaction_preparator = self.create_transaction_preparator();
 
         IntentExecutorImpl::new(
             self.rpc_client.clone(),
             transaction_preparator,
             self.create_task_info_fetcher(),
+            MockActionsCallbackExecutor::default(),
+            DEFAULT_ACTIONS_TIMEOUT,
         )
     }
 
     #[allow(dead_code)]
     pub fn create_task_info_fetcher(&self) -> Arc<MockTaskInfoFetcher> {
         Arc::new(MockTaskInfoFetcher(self.rpc_client.clone()))
+    }
+}
+
+#[derive(Clone, Default)]
+pub struct MockActionsCallbackExecutor {
+    pub calls: Arc<Mutex<Vec<(Vec<BaseActionCallback>, ActionResult)>>>,
+}
+
+impl MockActionsCallbackExecutor {
+    pub fn calls(&self) -> Vec<(Vec<BaseActionCallback>, ActionResult)> {
+        self.calls.lock().unwrap().clone()
+    }
+}
+
+impl ActionsCallbackExecutor for MockActionsCallbackExecutor {
+    fn execute(
+        &self,
+        callbacks: Vec<BaseActionCallback>,
+        result: ActionResult,
+    ) {
+        self.calls.lock().unwrap().push((callbacks, result));
     }
 }
 

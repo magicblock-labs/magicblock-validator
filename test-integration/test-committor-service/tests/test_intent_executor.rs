@@ -14,6 +14,7 @@ use dlp::{args::CommitStateArgs, pda::ephemeral_balance_pda_from_payer};
 use futures::future::join_all;
 use magicblock_committor_program::pdas;
 use magicblock_committor_service::{
+    actions_callback_executor::ActionError,
     intent_executor::{
         error::{IntentExecutorError, TransactionStrategyExecutionError},
         task_info_fetcher::{
@@ -28,12 +29,14 @@ use magicblock_committor_service::{
         task_strategist::{TaskStrategist, TransactionStrategy},
     },
     transaction_preparator::TransactionPreparatorImpl,
+    DEFAULT_ACTIONS_TIMEOUT,
 };
 use magicblock_program::{
     args::ShortAccountMeta,
     magic_scheduled_base_intent::{
-        BaseAction, CommitAndUndelegate, CommitType, CommittedAccount,
-        MagicBaseIntent, ProgramArgs, ScheduledIntentBundle, UndelegateType,
+        BaseAction, BaseActionCallback, CommitAndUndelegate, CommitType,
+        CommittedAccount, MagicBaseIntent, ProgramArgs, ScheduledIntentBundle,
+        UndelegateType,
     },
     validator::validator_authority_id,
 };
@@ -57,7 +60,7 @@ use solana_sdk::{
 };
 
 use crate::{
-    common::TestFixture,
+    common::{MockActionsCallbackExecutor, TestFixture},
     utils::{
         ensure_validator_authority,
         transactions::{
@@ -72,11 +75,16 @@ mod utils;
 
 const ACTOR_ESCROW_INDEX: u8 = 1;
 
+
 struct TestEnv {
     fixture: TestFixture,
     task_info_fetcher: Arc<CacheTaskInfoFetcher>,
-    intent_executor:
-        IntentExecutorImpl<TransactionPreparatorImpl, CacheTaskInfoFetcher>,
+    intent_executor: IntentExecutorImpl<
+        TransactionPreparatorImpl,
+        CacheTaskInfoFetcher,
+        MockActionsCallbackExecutor,
+    >,
+    callback_executor: MockActionsCallbackExecutor,
     pre_test_tablemania_state: HashMap<Pubkey, usize>,
 }
 
@@ -98,16 +106,20 @@ impl TestEnv {
             pre_test_tablemania_state.insert(pubkey, count);
         }
 
+        let callback_executor = MockActionsCallbackExecutor::default();
         let intent_executor = IntentExecutorImpl::new(
             fixture.rpc_client.clone(),
             transaction_preparator,
             task_info_fetcher.clone(),
+            callback_executor.clone(),
+            DEFAULT_ACTIONS_TIMEOUT,
         );
 
         Self {
             fixture,
             task_info_fetcher,
             intent_executor,
+            callback_executor,
             pre_test_tablemania_state,
         }
     }
@@ -121,6 +133,7 @@ async fn test_commit_id_error_parsing() {
         fixture,
         intent_executor,
         task_info_fetcher,
+        callback_executor: _,
         pre_test_tablemania_state: _,
     } = TestEnv::setup().await;
     let (counter_auth, account) = setup_counter(COUNTER_SIZE, None).await;
@@ -187,6 +200,7 @@ async fn test_undelegation_error_parsing() {
         fixture,
         intent_executor,
         task_info_fetcher,
+        callback_executor: _,
         pre_test_tablemania_state: _,
     } = TestEnv::setup().await;
 
@@ -244,6 +258,7 @@ async fn test_action_error_parsing() {
         fixture,
         intent_executor,
         task_info_fetcher,
+        callback_executor: _,
         pre_test_tablemania_state: _,
     } = TestEnv::setup().await;
 
@@ -312,6 +327,7 @@ async fn test_cpi_limits_error_parsing() {
         fixture,
         intent_executor,
         task_info_fetcher,
+        callback_executor: _,
         pre_test_tablemania_state: _,
     } = TestEnv::setup().await;
 
@@ -379,6 +395,7 @@ async fn test_min_context_slot_not_reached_error_parsing() {
         fixture: _,
         mut intent_executor,
         task_info_fetcher: _,
+        callback_executor: _,
         pre_test_tablemania_state: _,
     } = TestEnv::setup().await;
     let (counter_auth, account) = setup_counter(COUNTER_SIZE, None).await;
@@ -425,6 +442,7 @@ async fn test_commit_id_error_recovery() {
         fixture,
         mut intent_executor,
         task_info_fetcher,
+        callback_executor: _,
         pre_test_tablemania_state,
     } = TestEnv::setup().await;
 
@@ -503,6 +521,7 @@ async fn test_undelegation_error_recovery() {
         fixture,
         mut intent_executor,
         task_info_fetcher: _,
+        callback_executor: _,
         pre_test_tablemania_state,
     } = TestEnv::setup().await;
 
@@ -562,6 +581,7 @@ async fn test_action_error_recovery() {
         fixture,
         mut intent_executor,
         task_info_fetcher: _,
+        callback_executor: _,
         pre_test_tablemania_state,
     } = TestEnv::setup().await;
 
@@ -628,6 +648,7 @@ async fn test_commit_id_and_action_errors_recovery() {
         fixture,
         mut intent_executor,
         task_info_fetcher,
+        callback_executor: _,
         pre_test_tablemania_state,
     } = TestEnv::setup().await;
 
@@ -713,6 +734,7 @@ async fn test_cpi_limits_error_recovery() {
         fixture,
         mut intent_executor,
         task_info_fetcher,
+        callback_executor: _,
         pre_test_tablemania_state,
     } = TestEnv::setup().await;
 
@@ -802,6 +824,7 @@ async fn test_commit_id_actions_cpi_limit_errors_recovery() {
         fixture,
         mut intent_executor,
         task_info_fetcher,
+        callback_executor: _,
         pre_test_tablemania_state,
     } = TestEnv::setup().await;
 
@@ -864,6 +887,7 @@ async fn test_commit_id_actions_cpi_limit_errors_recovery() {
     )
     .await;
 
+    intent_executor.started_at = std::time::Instant::now();
     let res = intent_executor
         .single_stage_execution_flow(
             scheduled_intent,
@@ -941,6 +965,7 @@ async fn test_commit_unfinalized_account_recovery() {
         fixture,
         mut intent_executor,
         task_info_fetcher: _,
+        callback_executor: _,
         pre_test_tablemania_state: _,
     } = TestEnv::setup().await;
 
@@ -1019,6 +1044,7 @@ async fn test_commit_unfinalized_account_recovery_two_stage() {
         fixture,
         mut intent_executor,
         task_info_fetcher: _,
+        callback_executor: _,
         pre_test_tablemania_state: _,
     } = TestEnv::setup().await;
 
@@ -1102,6 +1128,132 @@ async fn test_commit_unfinalized_account_recovery_two_stage() {
     ))
 }
 
+#[tokio::test]
+async fn test_action_callback_fired_on_failure() {
+    const COUNTER_SIZE: u64 = 100;
+
+    let TestEnv {
+        fixture,
+        mut intent_executor,
+        task_info_fetcher: _,
+        callback_executor,
+        pre_test_tablemania_state: _,
+    } = TestEnv::setup().await;
+
+    let payer = setup_payer(fixture.rpc_client.get_inner()).await;
+    let (counter_pubkey, mut account) =
+        init_and_delegate_account_on_chain(&payer, COUNTER_SIZE, None).await;
+
+    account.owner = program_flexi_counter::id();
+    let committed_account = CommittedAccount {
+        pubkey: counter_pubkey,
+        account,
+        remote_slot: Default::default(),
+    };
+
+    let commit_action = CommitType::Standalone(vec![committed_account.clone()]);
+    let undelegate_action =
+        failing_undelegate_action(payer.pubkey(), committed_account.pubkey);
+    let UndelegateType::WithBaseActions(ref actions) = undelegate_action else {
+        panic!("expected base actions");
+    };
+    let expected_callback = actions[0].callback.clone().unwrap();
+
+    let base_intent =
+        MagicBaseIntent::CommitAndUndelegate(CommitAndUndelegate {
+            commit_action,
+            undelegate_action,
+        });
+
+    let scheduled_intent = create_scheduled_intent(base_intent);
+    let res = intent_executor
+        .execute(scheduled_intent, None::<IntentPersisterImpl>)
+        .await;
+
+    assert!(res.inner.is_ok());
+
+    let calls = callback_executor.calls();
+    assert_eq!(calls.len(), 1);
+    let (callbacks, result) = &calls[0];
+    assert_eq!(callbacks.len(), 1);
+    assert_eq!(callbacks[0], expected_callback);
+    assert!(result.is_err());
+}
+
+#[tokio::test]
+async fn test_action_callback_fired_on_timeout() {
+    const COUNTER_SIZE: u64 = 100;
+
+    let TestEnv {
+        fixture,
+        intent_executor: _,
+        task_info_fetcher: _,
+        callback_executor: _,
+        pre_test_tablemania_state,
+    } = TestEnv::setup().await;
+
+    let payer = setup_payer(fixture.rpc_client.get_inner()).await;
+    let (counter_pubkey, mut account) =
+        init_and_delegate_account_on_chain(&payer, COUNTER_SIZE, None).await;
+
+    account.owner = program_flexi_counter::id();
+    let committed_account = CommittedAccount {
+        pubkey: counter_pubkey,
+        account,
+        remote_slot: Default::default(),
+    };
+
+    let commit_action = CommitType::Standalone(vec![committed_account.clone()]);
+    let undelegate_action =
+        failing_undelegate_action(payer.pubkey(), committed_account.pubkey);
+    let UndelegateType::WithBaseActions(ref actions) = undelegate_action else {
+        panic!("expected base actions");
+    };
+    let expected_callback = actions[0].callback.clone().unwrap();
+
+    let base_intent =
+        MagicBaseIntent::CommitAndUndelegate(CommitAndUndelegate {
+            commit_action,
+            undelegate_action,
+        });
+
+    // Build executor with zero timeout so actions time out before execution
+    let callback_executor = MockActionsCallbackExecutor::default();
+    let task_info_fetcher =
+        Arc::new(CacheTaskInfoFetcher::new(fixture.rpc_client.clone()));
+    let mut intent_executor = IntentExecutorImpl::new(
+        fixture.rpc_client.clone(),
+        fixture.create_transaction_preparator(),
+        task_info_fetcher,
+        callback_executor.clone(),
+        Duration::ZERO,
+    );
+
+    let scheduled_intent = create_scheduled_intent(base_intent);
+    let res = intent_executor
+        .execute(scheduled_intent, None::<IntentPersisterImpl>)
+        .await;
+
+    assert!(res.inner.is_ok());
+    assert!(res.patched_errors.is_empty());
+
+    let calls = callback_executor.calls();
+    assert_eq!(calls.len(), 1);
+    let (callbacks, result) = &calls[0];
+    assert_eq!(callbacks.len(), 1);
+    assert_eq!(callbacks[0], expected_callback);
+    assert!(matches!(result, Err(ActionError::TimeoutError)));
+
+    assert!(intent_executor.cleanup().await.is_ok());
+    verify_committed_accounts_state(
+        fixture.rpc_client.get_inner(),
+        &[committed_account],
+    )
+    .await;
+    verify_table_mania_released(&fixture.table_mania, &pre_test_tablemania_state)
+        .await;
+}
+
 fn failing_undelegate_action(
     escrow_authority: Pubkey,
     undelegated_account: Pubkey,
@@ -1141,7 +1293,18 @@ fn failing_undelegate_action(
             data: to_vec(&undelegate_action_data).unwrap(),
         },
         account_metas_per_program: account_metas,
+        callback: Some(create_callback()),
     }])
+}
+
+fn create_callback() -> BaseActionCallback {
+    BaseActionCallback {
+        destination_program: program_flexi_counter::id(),
+        discriminator: vec![1, 2, 3, 4, 5, 6, 7, 8],
+        payload: vec![],
+        compute_units: 50_000,
+        account_metas_per_program: vec![],
+    }
 }
 
 async fn setup_payer(rpc_client: &Arc<RpcClient>) -> Keypair {

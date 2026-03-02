@@ -39,6 +39,7 @@ use crate::utils::{
     },
 };
 
+mod common;
 mod utils;
 
 // -----------------
@@ -154,6 +155,7 @@ async fn commit_single_account(
         validator_auth.insecure_clone(),
         ":memory:",
         ChainConfig::local(ComputeBudgetConfig::new(1_000_000)),
+        common::MockActionsCallbackExecutor::default(),
     )
     .unwrap();
     let service = CommittorServiceExt::new(Arc::new(service));
@@ -220,6 +222,7 @@ async fn commit_book_order_account(
         validator_auth.insecure_clone(),
         ":memory:",
         ChainConfig::local(ComputeBudgetConfig::new(1_000_000)),
+        common::MockActionsCallbackExecutor::default(),
     )
     .unwrap();
     let service = CommittorServiceExt::new(Arc::new(service));
@@ -591,6 +594,7 @@ async fn commit_multiple_accounts(
         validator_auth.insecure_clone(),
         ":memory:",
         ChainConfig::local(ComputeBudgetConfig::new(1_000_000)),
+        common::MockActionsCallbackExecutor::default(),
     )
     .unwrap();
     let service = CommittorServiceExt::new(Arc::new(service));
@@ -638,6 +642,7 @@ async fn execute_intent_bundle(
         validator_auth.insecure_clone(),
         ":memory:",
         ChainConfig::local(ComputeBudgetConfig::new(1_000_000)),
+        common::MockActionsCallbackExecutor::default(),
     )
     .unwrap();
     let service = CommittorServiceExt::new(Arc::new(service));

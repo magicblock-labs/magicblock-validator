@@ -613,6 +613,7 @@ mod serialization_safety_test {
                     escrow_index: 1,
                 },
                 compute_units: 10_000,
+                callback: None,
             },
         })
         .into();
@@ -634,6 +635,7 @@ mod serialization_safety_test {
                         escrow_index: 2,
                     },
                     compute_units: 15_000,
+                    callback: None,
                 },
                 source_program: Pubkey::new_unique(),
             })

@@ -547,6 +547,7 @@ mod tests {
                     escrow_index: 0,
                 },
                 compute_units: 30_000,
+                callback: None,
             },
         }
         .into()
