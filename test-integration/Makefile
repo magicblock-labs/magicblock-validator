@@ -29,6 +29,9 @@ COMMITTOR_PROGRAM_SO := $(ROOT_DEPLOY_DIR)/magicblock_committor_program.so
 
 PROGRAMS_SO := $(FLEXI_COUNTER_SO) $(SCHEDULECOMMIT_SO) $(SCHEDULECOMMIT_SECURITY_SO) $(COMMITTOR_PROGRAM_SO)
 
+VALIDATOR_DEBUG_BIN=$(CARGO_TARGET_DIR)/debug/magicblock-validator
+VALIDATOR_SRC := $(shell find $(DIR).. -name '*.rs' -type f -o -name 'Cargo.toml' -o -name 'Cargo.lock')
+
 list:
 	@cat Makefile | grep "^[a-z].*:" | sed 's/:.*//g'
 list-programs:
@@ -36,7 +39,7 @@ list-programs:
 
 programs: $(PROGRAMS_SO)
 
-test: $(PROGRAMS_SO)
+test: $(PROGRAMS_SO) $(VALIDATOR_DEBUG_BIN)
 	@# Only prepare chainlink programs when running chainlink tests
 	@if [ -z "$(SKIP_CHAINLINK_PREP)" ] && ([ -z "$(RUN_TESTS)" ] || [ "$(RUN_TESTS)" = "chainlink" ]); then \
 		echo "Preparing chainlink programs (RUN_TESTS=$(RUN_TESTS))"; \
@@ -53,12 +56,12 @@ test: $(PROGRAMS_SO)
 		CARGO_TEST_THREADS=$${CARGO_TEST_THREADS:-1} RUST_BACKTRACE=1 RUST_LOG=$(RUST_LOG) cargo run --package test-runner --bin run-tests; \
 	fi
 
-test-force-mb: $(PROGRAMS_SO)
+test-force-mb: $(PROGRAMS_SO) $(VALIDATOR_DEBUG_BIN)
 	RUST_LOG=$(RUST_LOG) \
 	FORCE_MAGIC_BLOCK_VALIDATOR=1 \
 	cargo run --package test-runner --bin run-tests
 
-test-schedulecommit:
+test-schedulecommit: $(VALIDATOR_DEBUG_BIN)
 	RUN_TESTS=schedulecommit \
 	$(MAKE) test
 setup-schedulecommit-devnet:
@@ -66,18 +69,18 @@ setup-schedulecommit-devnet:
 	RUN_TESTS=schedulecommit \
 	SETUP_ONLY=devnet \
 	$(MAKE) test
-setup-schedulecommit-ephem:
+setup-schedulecommit-ephem: $(VALIDATOR_DEBUG_BIN)
 	RUST_LOG_STYLE=none \
 	RUN_TESTS=schedulecommit \
 	SETUP_ONLY=ephem \
 	$(MAKE) test
-setup-schedulecommit-both:
+setup-schedulecommit-both: $(VALIDATOR_DEBUG_BIN)
 	RUST_LOG_STYLE=none \
 	RUN_TESTS=schedulecommit \
 	SETUP_ONLY=both \
 	$(MAKE) test
 
-test-chainlink:
+test-chainlink: $(VALIDATOR_DEBUG_BIN)
 	RUN_TESTS=chainlink \
 	$(MAKE) test
 setup-chainlink-devnet:
@@ -85,7 +88,7 @@ setup-chainlink-devnet:
 	RUN_TESTS=chainlink \
 	SETUP_ONLY=devnet \
 	$(MAKE) test
-test-cloning:
+test-cloning: $(VALIDATOR_DEBUG_BIN)
 	RUN_TESTS=cloning \
 	$(MAKE) test
 setup-cloning-devnet:
@@ -93,18 +96,18 @@ setup-cloning-devnet:
 	RUN_TESTS=cloning \
 	SETUP_ONLY=devnet \
 	$(MAKE) test
-setup-cloning-ephem:
+setup-cloning-ephem: $(VALIDATOR_DEBUG_BIN)
 	RUST_LOG_STYLE=none \
 	RUN_TESTS=cloning \
 	SETUP_ONLY=ephem \
 	$(MAKE) test
-setup-cloning-both:
+setup-cloning-both: $(VALIDATOR_DEBUG_BIN)
 	RUST_LOG_STYLE=none \
 	RUN_TESTS=cloning \
 	SETUP_ONLY=both \
 	$(MAKE) test
 
-test-restore-ledger:
+test-restore-ledger: $(VALIDATOR_DEBUG_BIN)
 	RUN_TESTS=restore_ledger \
 	$(MAKE) test
 setup-restore-ledger-devnet:
@@ -113,7 +116,7 @@ setup-restore-ledger-devnet:
 	SETUP_ONLY=devnet \
 	$(MAKE) test
 
-test-magicblock-api:
+test-magicblock-api: $(VALIDATOR_DEBUG_BIN)
 	RUN_TESTS=magicblock_api \
 	$(MAKE) test
 setup-magicblock-api-devnet:
@@ -121,18 +124,18 @@ setup-magicblock-api-devnet:
 	RUN_TESTS=magicblock_api \
 	SETUP_ONLY=devnet \
 	$(MAKE) test
-setup-magicblock-api-ephem:
+setup-magicblock-api-ephem: $(VALIDATOR_DEBUG_BIN)
 	RUST_LOG_STYLE=none \
 	RUN_TESTS=magicblock_api \
 	SETUP_ONLY=ephem \
 	$(MAKE) test
-setup-magicblock-api-both:
+setup-magicblock-api-both: $(VALIDATOR_DEBUG_BIN)
 	RUST_LOG_STYLE=none \
 	RUN_TESTS=magicblock_api \
 	SETUP_ONLY=both \
 	$(MAKE) test
 
-test-table-mania:
+test-table-mania: $(VALIDATOR_DEBUG_BIN)
 	RUN_TESTS=table_mania \
 	$(MAKE) test
 setup-table-mania-devnet:
@@ -141,7 +144,7 @@ setup-table-mania-devnet:
 	SETUP_ONLY=devnet \
 	$(MAKE) test
 
-test-committor:
+test-committor: $(VALIDATOR_DEBUG_BIN)
 	RUN_TESTS=committor \
 	$(MAKE) test
 setup-committor-devnet:
@@ -150,7 +153,7 @@ setup-committor-devnet:
 	SETUP_ONLY=devnet \
 	$(MAKE) test
 
-test-pubsub:
+test-pubsub: $(VALIDATOR_DEBUG_BIN)
 	RUN_TESTS=pubsub \
 	$(MAKE) test
 setup-pubsub-devnet:
@@ -158,18 +161,18 @@ setup-pubsub-devnet:
 	RUN_TESTS=pubsub \
 	SETUP_ONLY=devnet \
 	$(MAKE) test
-setup-pubsub-ephem:
+setup-pubsub-ephem: $(VALIDATOR_DEBUG_BIN)
 	RUST_LOG_STYLE=none \
 	RUN_TESTS=pubsub \
 	SETUP_ONLY=ephem \
 	$(MAKE) test
-setup-pubsub-both:
+setup-pubsub-both: $(VALIDATOR_DEBUG_BIN)
 	RUST_LOG_STYLE=none \
 	RUN_TESTS=pubsub \
 	SETUP_ONLY=both \
 	$(MAKE) test
 
-test-config:
+test-config: $(VALIDATOR_DEBUG_BIN)
 	RUN_TESTS=config \
 	$(MAKE) test
 setup-config-devnet:
@@ -178,7 +181,7 @@ setup-config-devnet:
 	SETUP_ONLY=devnet \
 	$(MAKE) test
 
-test-schedule-intents:
+test-schedule-intents: $(VALIDATOR_DEBUG_BIN)
 	RUN_TESTS=schedule_intents \
 	$(MAKE) test
 setup-schedule-intents-devnet:
@@ -186,18 +189,18 @@ setup-schedule-intents-devnet:
 	RUN_TESTS=schedule_intents \
 	SETUP_ONLY=devnet \
 	$(MAKE) test
-setup-schedule-intents-ephem:
+setup-schedule-intents-ephem: $(VALIDATOR_DEBUG_BIN)
 	RUST_LOG_STYLE=none \
 	RUN_TESTS=schedule_intents \
 	SETUP_ONLY=ephem \
 	$(MAKE) test
-setup-schedule-intents-both:
+setup-schedule-intents-both: $(VALIDATOR_DEBUG_BIN)
 	RUST_LOG_STYLE=none \
 	RUN_TESTS=schedule_intents \
 	SETUP_ONLY=both \
 	$(MAKE) test
 
-test-task-scheduler:
+test-task-scheduler: $(VALIDATOR_DEBUG_BIN)
 	RUN_TESTS=task-scheduler \
 	$(MAKE) test
 setup-task-scheduler-devnet:
@@ -217,6 +220,9 @@ $(SCHEDULECOMMIT_SECURITY_SO): $(SCHEDULECOMMIT_SECURITY_SRC)
 $(COMMITTOR_PROGRAM_SO): $(COMMITTOR_PROGRAM_SRC)
 	cargo build-sbf --manifest-path $(COMMITTOR_PROGRAM_DIR)/Cargo.toml \
 	--sbf-out-dir $(ROOT_DEPLOY_DIR)/
+
+$(VALIDATOR_DEBUG_BIN): $(VALIDATOR_SRC)
+	cargo build --bin magicblock-validator --manifest-path $(DIR)/../Cargo.toml
 
 deploy-flexi-counter: $(FLEXI_COUNTER_SO)
 	solana program deploy \
