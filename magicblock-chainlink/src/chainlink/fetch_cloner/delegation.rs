@@ -1,12 +1,11 @@
 use dlp::{
     args::{
-        MaybeEncryptedAccountMeta, MaybeEncryptedIxData, MaybeEncryptedPubkey,
-        PostDelegationActions,
+        MaybeEncryptedAccountMeta, MaybeEncryptedPubkey, PostDelegationActions,
     },
     pda::delegation_record_pda_from_delegated_account,
     state::DelegationRecord,
 };
-use dlp_api::encryption;
+use dlp_api::decrypt::Decrypt;
 use magicblock_accounts_db::traits::AccountsBank;
 use magicblock_core::token_programs::EATA_PROGRAM_ID;
 use magicblock_metrics::metrics;
@@ -15,7 +14,6 @@ use solana_instruction::{AccountMeta, Instruction};
 use solana_keypair::Keypair;
 use solana_program::program_error::ProgramError;
 use solana_pubkey::Pubkey;
-use solana_signer::Signer;
 use tracing::*;
 
 use super::FetchCloner;
@@ -28,45 +26,6 @@ use crate::{
     },
 };
 
-#[derive(Clone)]
-pub(crate) struct ValidatorDecryptionContext {
-    x25519_pubkey: [u8; encryption::KEY_LEN],
-    x25519_secret: [u8; encryption::KEY_LEN],
-}
-
-impl ValidatorDecryptionContext {
-    pub(crate) fn from_validator_keypair(
-        keypair: &Keypair,
-    ) -> ChainlinkResult<Self> {
-        let x25519_pubkey =
-            encryption::ed25519_pubkey_to_x25519(keypair.pubkey().as_array())
-                .map_err(|err| {
-                    ChainlinkError::InvalidDelegationActions(
-                        keypair.pubkey(),
-                        format!("Failed to derive validator x25519 pubkey: {err}"),
-                    )
-                })?;
-
-        let keypair_bytes = keypair.to_bytes();
-        let x25519_secret =
-            encryption::ed25519_secret_to_x25519(&keypair_bytes).map_err(
-                |err| {
-                    ChainlinkError::InvalidDelegationActions(
-                        keypair.pubkey(),
-                        format!(
-                            "Failed to derive validator x25519 secret key: {err}"
-                        ),
-                    )
-                },
-            )?;
-
-        Ok(Self {
-            x25519_pubkey,
-            x25519_secret,
-        })
-    }
-}
-
 /// Parses a delegation record from account data bytes.
 /// Returns the parsed DelegationRecord, or InvalidDelegationRecord error
 /// if parsing fails.
@@ -74,7 +33,7 @@ pub(crate) fn parse_delegation_record(
     data: &[u8],
     delegation_record_pubkey: Pubkey,
     validator_pubkey: Pubkey,
-    decryption_ctx: Option<&ValidatorDecryptionContext>,
+    validator_keypair: Option<&Keypair>,
 ) -> ChainlinkResult<(DelegationRecord, Option<DelegationActions>)> {
     let delegation_record_size = DelegationRecord::size_with_discriminator();
     if data.len() < delegation_record_size {
@@ -83,17 +42,13 @@ pub(crate) fn parse_delegation_record(
             ProgramError::InvalidAccountData,
         ));
     }
-    let record =
-        DelegationRecord::try_from_bytes_with_discriminator(
-            &data[..delegation_record_size],
-        )
-        .copied()
-        .map_err(|err| {
-            ChainlinkError::InvalidDelegationRecord(
-                delegation_record_pubkey,
-                err,
-            )
-        })?;
+    let record = DelegationRecord::try_from_bytes_with_discriminator(
+        &data[..delegation_record_size],
+    )
+    .copied()
+    .map_err(|err| {
+        ChainlinkError::InvalidDelegationRecord(delegation_record_pubkey, err)
+    })?;
 
     if data.len() <= delegation_record_size {
         Ok((record, None))
@@ -110,7 +65,7 @@ pub(crate) fn parse_delegation_record(
         let actions = parse_post_delegation_actions(
             actions_data,
             delegation_record_pubkey,
-            decryption_ctx,
+            validator_keypair,
         )?;
         Ok((record, Some(actions)))
     }
@@ -119,179 +74,27 @@ pub(crate) fn parse_delegation_record(
 fn parse_post_delegation_actions(
     actions_data: &[u8],
     delegation_record_pubkey: Pubkey,
-    decryption_ctx: Option<&ValidatorDecryptionContext>,
+    validator_keypair: Option<&Keypair>,
 ) -> ChainlinkResult<DelegationActions> {
-    let actions: PostDelegationActions =
-        bincode::deserialize(actions_data).map_err(|err| {
+    let actions: PostDelegationActions = bincode::deserialize(actions_data)
+        .map_err(|err| {
             ChainlinkError::InvalidDelegationActions(
                 delegation_record_pubkey,
                 format!("Failed to deserialize PostDelegationActions: {err}"),
             )
         })?;
 
-    let mut pubkeys = actions.signers;
-    for non_signer in actions.non_signers {
-        pubkeys.push(decrypt_non_signer_pubkey(
-            non_signer,
-            delegation_record_pubkey,
-            decryption_ctx,
-        )?);
-    }
-
     let instructions = actions
-        .instructions
-        .into_iter()
-        .map(|ix| {
-            let program_id = pubkeys.get(ix.program_id as usize).copied().ok_or(
-                ChainlinkError::InvalidDelegationActions(
-                    delegation_record_pubkey,
-                    format!(
-                        "Invalid program_id index {} for pubkey table len {}",
-                        ix.program_id,
-                        pubkeys.len()
-                    ),
-                ),
-            )?;
-
-            let accounts = ix
-                .accounts
-                .into_iter()
-                .map(|compact_meta| {
-                    let account_pubkey = pubkeys
-                        .get(compact_meta.key() as usize)
-                        .copied()
-                        .ok_or(ChainlinkError::InvalidDelegationActions(
-                            delegation_record_pubkey,
-                            format!(
-                                "Invalid account index {} for pubkey table len {}",
-                                compact_meta.key(),
-                                pubkeys.len()
-                            ),
-                        ))?;
-
-                    Ok(AccountMeta {
-                        pubkey: account_pubkey,
-                        is_signer: compact_meta.is_signer(),
-                        is_writable: compact_meta.is_writable(),
-                    })
-                })
-                .collect::<ChainlinkResult<Vec<_>>>()?;
-
-            let data = decrypt_ix_data(
-                ix.data,
-                delegation_record_pubkey,
-                decryption_ctx,
-            )?;
-
-            Ok(Instruction {
-                program_id,
-                accounts,
-                data,
-            })
-        })
-        .collect::<ChainlinkResult<Vec<_>>>()?;
-
-    Ok(instructions.into())
-}
-
-fn decrypt_pubkey(
-    maybe_encrypted_pubkey: MaybeEncryptedPubkey,
-    delegation_record_pubkey: Pubkey,
-    decryption_ctx: Option<&ValidatorDecryptionContext>,
-) -> ChainlinkResult<Pubkey> {
-    match maybe_encrypted_pubkey {
-        MaybeEncryptedPubkey::ClearText(pubkey) => Ok(pubkey),
-        MaybeEncryptedPubkey::Encrypted(buffer) => {
-            let plaintext = decrypt_buffer(
-                buffer.as_bytes(),
-                delegation_record_pubkey,
-                decryption_ctx,
-                "pubkey",
-            )?;
-            Pubkey::try_from(plaintext.as_slice()).map_err(|_| {
-                ChainlinkError::InvalidDelegationActions(
-                    delegation_record_pubkey,
-                    format!(
-                        "Decrypted pubkey has invalid length: {}",
-                        plaintext.len()
-                    ),
-                )
-            })
-        }
-    }
-}
-
-fn decrypt_non_signer_pubkey(
-    non_signer: MaybeEncryptedAccountMeta,
-    delegation_record_pubkey: Pubkey,
-    decryption_ctx: Option<&ValidatorDecryptionContext>,
-) -> ChainlinkResult<Pubkey> {
-    match non_signer {
-        MaybeEncryptedAccountMeta::Encrypted(buffer) => {
-            decrypt_pubkey(
-                MaybeEncryptedPubkey::Encrypted(buffer),
-                delegation_record_pubkey,
-                decryption_ctx,
-            )
-        }
-        // Clear-text non-signer payload only carries compact flags/index, not
-        // the pubkey bytes, so we cannot reconstruct a full instruction.
-        MaybeEncryptedAccountMeta::ClearText(_meta) => Err(
+        .decrypt_with_keypair(validator_keypair.unwrap())
+        .map_err(|err| {
             ChainlinkError::InvalidDelegationActions(
                 delegation_record_pubkey,
-                "Clear-text non-signer account metadata is unsupported for replay".to_string(),
-            ),
-        ),
-    }
-}
+                "Encrypted pubkey present but validator keypair is unavailable"
+                    .to_string(),
+            )
+        })?;
 
-fn decrypt_ix_data(
-    maybe_encrypted_ix_data: MaybeEncryptedIxData,
-    delegation_record_pubkey: Pubkey,
-    decryption_ctx: Option<&ValidatorDecryptionContext>,
-) -> ChainlinkResult<Vec<u8>> {
-    let mut data = maybe_encrypted_ix_data.prefix;
-    let encrypted_suffix = maybe_encrypted_ix_data.suffix.into_inner();
-
-    if !encrypted_suffix.is_empty() {
-        let suffix = decrypt_buffer(
-            &encrypted_suffix,
-            delegation_record_pubkey,
-            decryption_ctx,
-            "ix data suffix",
-        )?;
-        data.extend_from_slice(&suffix);
-    }
-
-    Ok(data)
-}
-
-fn decrypt_buffer(
-    encrypted: &[u8],
-    delegation_record_pubkey: Pubkey,
-    decryption_ctx: Option<&ValidatorDecryptionContext>,
-    field_label: &str,
-) -> ChainlinkResult<Vec<u8>> {
-    let Some(decryption_ctx) = decryption_ctx else {
-        return Err(ChainlinkError::InvalidDelegationActions(
-            delegation_record_pubkey,
-            format!(
-                "Encrypted {field_label} present but validator decryption context is unavailable"
-            ),
-        ));
-    };
-
-    encryption::decrypt(
-        encrypted,
-        &decryption_ctx.x25519_pubkey,
-        &decryption_ctx.x25519_secret,
-    )
-    .map_err(|err| {
-        ChainlinkError::InvalidDelegationActions(
-            delegation_record_pubkey,
-            format!("Failed to decrypt {field_label}: {err}"),
-        )
-    })
+    Ok(instructions.into())
 }
 
 pub(crate) fn apply_delegation_record_to_account<T, U, V, C>(
@@ -377,13 +180,12 @@ where
         Ok(mut delegation_records) => {
             if let Some(delegation_record_remote) = delegation_records.pop() {
                 match delegation_record_remote.fresh_account() {
-                    Some(delegation_record_account) => {
-                        this.parse_delegation_record(
+                    Some(delegation_record_account) => this
+                        .parse_delegation_record(
                             delegation_record_account.data(),
                             delegation_record_pubkey,
                         )
-                        .ok()
-                    }
+                        .ok(),
                     None => None,
                 }
             } else {
@@ -422,6 +224,7 @@ mod tests {
         MaybeEncryptedIxData, PostDelegationActions,
     };
     use solana_program::pubkey::Pubkey;
+    use solana_signer::Signer;
 
     use super::*;
 
@@ -493,19 +296,17 @@ mod tests {
     #[test]
     fn decrypts_encrypted_post_delegation_actions() {
         let validator = Keypair::new();
-        let decryption_ctx =
-            ValidatorDecryptionContext::from_validator_keypair(&validator)
-                .unwrap();
 
         let signer = Pubkey::new_unique();
         let program_id = Pubkey::new_unique();
         let account = Pubkey::new_unique();
 
-        let encrypted_program_id = dlp_api::encryption::encrypt_ed25519_recipient(
-            program_id.as_array(),
-            validator.pubkey().as_array(),
-        )
-        .unwrap();
+        let encrypted_program_id =
+            dlp_api::encryption::encrypt_ed25519_recipient(
+                program_id.as_array(),
+                validator.pubkey().as_array(),
+            )
+            .unwrap();
         let encrypted_suffix = dlp_api::encryption::encrypt_ed25519_recipient(
             &[3, 4, 5],
             validator.pubkey().as_array(),
@@ -537,7 +338,7 @@ mod tests {
             &payload,
             Pubkey::new_unique(),
             validator.pubkey(),
-            Some(&decryption_ctx),
+            Some(&validator),
         )
         .unwrap();
 
@@ -549,13 +350,14 @@ mod tests {
     }
 
     #[test]
-    fn fails_when_encrypted_actions_have_no_decryption_context() {
+    fn fails_when_encrypted_actions_have_no_validator_keypair() {
         let validator = Keypair::new();
-        let encrypted_program_id = dlp_api::encryption::encrypt_ed25519_recipient(
-            Pubkey::new_unique().as_array(),
-            validator.pubkey().as_array(),
-        )
-        .unwrap();
+        let encrypted_program_id =
+            dlp_api::encryption::encrypt_ed25519_recipient(
+                Pubkey::new_unique().as_array(),
+                validator.pubkey().as_array(),
+            )
+            .unwrap();
 
         let payload = serialize_record_with_actions(
             validator.pubkey(),

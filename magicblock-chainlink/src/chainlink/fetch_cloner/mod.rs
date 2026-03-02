@@ -38,7 +38,6 @@ mod types;
 
 pub use self::types::FetchAndCloneResult;
 use self::{
-    delegation::ValidatorDecryptionContext,
     subscription::{cancel_subs, CancelStrategy},
     types::{
         AccountWithCompanion, ClassifiedAccounts, PartitionedNotFound,
@@ -84,7 +83,7 @@ where
     accounts_bank: Arc<V>,
     cloner: Arc<C>,
     validator_pubkey: Pubkey,
-    validator_decryption_ctx: Option<ValidatorDecryptionContext>,
+    validator_keypair: Option<Arc<Keypair>>,
 
     /// These are accounts that we should never clone into our validator.
     /// native programs, sysvars, native tokens, validator identity and faucet
@@ -118,23 +117,12 @@ where
         let allowed_programs = allowed_programs.map(|programs| {
             programs.iter().map(|p| p.id).collect::<HashSet<_>>()
         });
-        let validator_decryption_ctx = validator_keypair.as_ref().and_then(
-            |keypair| match ValidatorDecryptionContext::from_validator_keypair(
-                keypair,
-            ) {
-                Ok(ctx) => Some(ctx),
-                Err(err) => {
-                    error!(error = %err, "Failed to initialize action decryption context");
-                    None
-                }
-            },
-        );
         let me = Arc::new(Self {
             remote_account_provider: remote_account_provider.clone(),
             accounts_bank: accounts_bank.clone(),
             cloner: cloner.clone(),
             validator_pubkey,
-            validator_decryption_ctx,
+            validator_keypair: validator_keypair.map(Arc::new),
             pending_requests: Arc::new(HashMap::new()),
             fetch_count: Arc::new(AtomicU64::new(0)),
             blacklisted_accounts,
@@ -703,7 +691,7 @@ where
             data,
             delegation_record_pubkey,
             self.validator_pubkey,
-            self.validator_decryption_ctx.as_ref(),
+            self.validator_keypair.as_deref(),
         )
     }
 
@@ -973,6 +961,7 @@ where
                     None,
                     fetch_origin,
                     None,
+                    min_context_slot,
                 )
                 .await?;
             new_subs.extend(action_dependencies_to_fetch.iter().copied());
