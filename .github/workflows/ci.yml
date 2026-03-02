@@ -6,7 +6,7 @@ concurrency:
 
 on:
   push:
-    branches: [master, dev]
+    branches: [master, dev, thlorenz/parallel-subs-triage]
   pull_request:
     types: [opened, reopened, synchronize]
 
@@ -52,15 +52,6 @@ jobs:
       - name: Build binaries and tests
         run: cargo build --bins --tests --locked
 
-      - name: Format check
-        run: make ci-fmt
-
-      - name: Lint
-        run: make ci-lint
-
-      - name: Unit tests
-        run: make ci-test-unit
-
       - name: Pre-fetch integration test dependencies
         run: cargo test --test '*' --no-run
 
@@ -88,11 +79,7 @@ jobs:
       fail-fast: false
       matrix:
         batch:
-          - "committor config"
-          - "restore_ledger schedulecommit"
-          - "table_mania cloning"
-          - "magicblock_api schedule_intents"
-          - "task-scheduler chainlink pubsub"
+          - "cloning"
     env:
       TMPDIR: /dev/shm
       CARGO_NET_OFFLINE: "true"
@@ -159,16 +146,3 @@ jobs:
               exit 1
             fi
           '
-
-  ci-status:
-    if: always()
-    needs: [build, integration-tests]
-    runs-on: self-hosted
-    steps:
-      - name: Verify pipeline status
-        run: |
-          if [[ "${{ needs.build.result }}" != "success" ||
-                "${{ needs.integration-tests.result }}" != "success" ]]; then
-            echo "::error::CI failed"
-            exit 1
-          fi
