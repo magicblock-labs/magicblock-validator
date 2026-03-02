@@ -1,5 +1,8 @@
 use dlp::{
-    args::{MaybeEncryptedIxData, MaybeEncryptedPubkey, PostDelegationActions},
+    args::{
+        MaybeEncryptedAccountMeta, MaybeEncryptedIxData, MaybeEncryptedPubkey,
+        PostDelegationActions,
+    },
     pda::delegation_record_pda_from_delegated_account,
     state::DelegationRecord,
 };
@@ -128,7 +131,7 @@ fn parse_post_delegation_actions(
 
     let mut pubkeys = actions.signers;
     for non_signer in actions.non_signers {
-        pubkeys.push(decrypt_pubkey(
+        pubkeys.push(decrypt_non_signer_pubkey(
             non_signer,
             delegation_record_pubkey,
             decryption_ctx,
@@ -215,6 +218,30 @@ fn decrypt_pubkey(
                 )
             })
         }
+    }
+}
+
+fn decrypt_non_signer_pubkey(
+    non_signer: MaybeEncryptedAccountMeta,
+    delegation_record_pubkey: Pubkey,
+    decryption_ctx: Option<&ValidatorDecryptionContext>,
+) -> ChainlinkResult<Pubkey> {
+    match non_signer {
+        MaybeEncryptedAccountMeta::Encrypted(buffer) => {
+            decrypt_pubkey(
+                MaybeEncryptedPubkey::Encrypted(buffer),
+                delegation_record_pubkey,
+                decryption_ctx,
+            )
+        }
+        // Clear-text non-signer payload only carries compact flags/index, not
+        // the pubkey bytes, so we cannot reconstruct a full instruction.
+        MaybeEncryptedAccountMeta::ClearText(_meta) => Err(
+            ChainlinkError::InvalidDelegationActions(
+                delegation_record_pubkey,
+                "Clear-text non-signer account metadata is unsupported for replay".to_string(),
+            ),
+        ),
     }
 }
 
@@ -391,8 +418,8 @@ where
 #[cfg(test)]
 mod tests {
     use dlp::args::{
-        EncryptedBuffer, MaybeEncryptedInstruction, MaybeEncryptedIxData,
-        MaybeEncryptedPubkey, PostDelegationActions,
+        EncryptedBuffer, MaybeEncryptedAccountMeta, MaybeEncryptedInstruction,
+        MaybeEncryptedIxData, PostDelegationActions,
     };
     use solana_program::pubkey::Pubkey;
 
@@ -426,11 +453,8 @@ mod tests {
         let payload = serialize_record_with_actions(
             validator_pubkey,
             PostDelegationActions {
-                signers: vec![signer],
-                non_signers: vec![
-                    MaybeEncryptedPubkey::ClearText(program_id),
-                    MaybeEncryptedPubkey::ClearText(account),
-                ],
+                signers: vec![signer, program_id, account],
+                non_signers: vec![],
                 instructions: vec![MaybeEncryptedInstruction {
                     program_id: 1,
                     accounts: vec![
@@ -491,18 +515,15 @@ mod tests {
         let payload = serialize_record_with_actions(
             validator.pubkey(),
             PostDelegationActions {
-                signers: vec![signer],
-                non_signers: vec![
-                    MaybeEncryptedPubkey::Encrypted(EncryptedBuffer::new(
-                        encrypted_program_id,
-                    )),
-                    MaybeEncryptedPubkey::ClearText(account),
-                ],
+                signers: vec![signer, account],
+                non_signers: vec![MaybeEncryptedAccountMeta::Encrypted(
+                    EncryptedBuffer::new(encrypted_program_id),
+                )],
                 instructions: vec![MaybeEncryptedInstruction {
-                    program_id: 1,
+                    program_id: 2,
                     accounts: vec![
                         dlp::compact::AccountMeta::new_readonly(0, true),
-                        dlp::compact::AccountMeta::new(2, false),
+                        dlp::compact::AccountMeta::new(1, false),
                     ],
                     data: MaybeEncryptedIxData {
                         prefix: vec![1, 2],
@@ -540,7 +561,7 @@ mod tests {
             validator.pubkey(),
             PostDelegationActions {
                 signers: vec![],
-                non_signers: vec![MaybeEncryptedPubkey::Encrypted(
+                non_signers: vec![MaybeEncryptedAccountMeta::Encrypted(
                     EncryptedBuffer::new(encrypted_program_id),
                 )],
                 instructions: vec![],
