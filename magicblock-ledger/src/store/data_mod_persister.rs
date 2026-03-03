@@ -1,6 +1,8 @@
 use std::error::Error;
 
 use magicblock_core::traits::MagicSys;
+use solana_instruction::error::InstructionError;
+use solana_pubkey::Pubkey;
 use tracing::*;
 
 use crate::Ledger;
@@ -22,5 +24,12 @@ impl MagicSys for Ledger {
             }
         }
         Ok(data)
+    }
+    // TODO(edwin): remove
+    fn validate_commit_nonces(
+        &self,
+        pubkeys: &[Pubkey],
+    ) -> Result<(), InstructionError> {
+        todo!()
     }
 }

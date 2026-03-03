@@ -5,6 +5,8 @@ pub mod cloner;
 pub mod remote_account_provider;
 pub mod submux;
 
+use std::ops::Add;
+
 pub use chainlink::*;
 pub use magicblock_metrics::metrics::AccountFetchOrigin;
 mod filters;
@@ -12,8 +14,8 @@ mod filters;
 #[cfg(any(test, feature = "dev-context"))]
 pub mod testing;
 
-#[test]
-fn test() {
+#[tokio::test]
+async fn test_trtr() {
     // The issue:
     // 1. We need to clone inner ArcMutex to hold locks
     // We can't have reference as that would mean blocking outer Mutex for func duration
@@ -112,18 +114,37 @@ fn test() {
     };
 
     use lru::LruCache;
+    use tokio::sync::{Mutex as TMutex, MutexGuard, OwnedMutexGuard};
 
-    let mut map: Mutex<LruCache<String, Arc<Mutex<u64>>>> =
-        Mutex::new(LruCache::new(NonZeroUsize::new(2).unwrap()));
-    let mut v = vec![];
-    {
-        let mut map = map.lock().unwrap();
-        let entry1 = map.get_or_insert("hi1".to_string(), || {
-            Arc::new(Mutex::new(u64::MAX))
-        });
-        let entry1 = entry1.lock().unwrap();
-        v = vec![entry1]
+    struct Locker<'a> {
+        val: &'a i32,
+        m: Arc<TMutex<u64>>,
+    };
+
+    impl<'a> Locker<'a> {
+        pub fn new(val: &'a i32, m: Arc<TMutex<u64>>) -> Self {
+            Self { val, m }
+        }
+
+        pub async fn lock<'s>(&'s self) -> MutexGuard<'s, u64> {
+            self.m.lock().await
+        }
     }
 
-    *v[0] = 1;
+    impl<'a> Drop for Locker<'a> {
+        fn drop(&mut self) {
+            println!("lpol");
+        }
+    }
+
+    let val = 1;
+    let m = Arc::new(TMutex::new(10));
+    let locker = Locker::new(&val, m);
+    let mut asd = locker.lock().await;
+    *asd = 1;
+    assert_eq!(*asd, 1);
+    drop(asd);
+    drop(locker);
+
+    println!("{}", val);
 }

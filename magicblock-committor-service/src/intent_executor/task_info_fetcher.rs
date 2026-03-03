@@ -1,5 +1,6 @@
 use std::{
     collections::{HashMap, HashSet},
+    mem,
     num::NonZeroUsize,
     ops::Add,
     sync::{Arc, Mutex},
@@ -23,7 +24,7 @@ use solana_rpc_client_api::{
     request::RpcError,
 };
 use solana_signature::Signature;
-use tokio::sync::Mutex as TMutex;
+use tokio::sync::{Mutex as TMutex, MutexGuard};
 use tracing::{error, info, warn};
 
 const NUM_FETCH_RETRIES: NonZeroUsize = NonZeroUsize::new(5).unwrap();
@@ -77,6 +78,45 @@ type NonceLock = Arc<TMutex<u64>>;
 struct CacheInner {
     active: LruCache<Pubkey, NonceLock>,
     retiring: HashMap<Pubkey, NonceLock>,
+}
+
+struct CacheInnerGuard<'a> {
+    inner: &'a Mutex<CacheInner>,
+    nonce_locks: Vec<(Pubkey, NonceLock)>,
+}
+
+impl<'a> CacheInnerGuard<'a> {
+    // Acquire per-account locks sequentially in sorted order (see sort above).
+    // join_all would poll all futures concurrently, allowing partial acquisition
+    // and producing the classic A→B / B→A deadlock across concurrent callers.
+    async fn lock<'s>(&'s self) -> Vec<(&'s Pubkey, MutexGuard<'s, u64>)> {
+        let mut output = Vec::with_capacity(self.nonce_locks.len());
+        for (pubkey, lock) in self.nonce_locks.iter() {
+            let guard = lock.lock().await;
+            output.push((pubkey, guard))
+        }
+
+        output
+    }
+}
+
+impl<'a> Drop for CacheInnerGuard<'a> {
+    fn drop(&mut self) {
+        let mut inner = self.inner.lock().expect(MUTEX_POISONED_MSG);
+        let nonce_locks = mem::take(&mut self.nonce_locks);
+        for (pubkey, lock) in nonce_locks {
+            // Drop our clone first so strong_count reflects only other
+            // live holders when we check below
+            drop(lock);
+            let should_remove = inner
+                .retiring
+                .get(&pubkey)
+                .is_some_and(|l| Arc::strong_count(l) == 1);
+            if should_remove {
+                inner.retiring.remove(&pubkey);
+            }
+        }
+    }
 }
 
 impl CacheInner {
@@ -252,42 +292,28 @@ impl CacheTaskInfoFetcher {
 
         Ok(accounts)
     }
-}
 
-/// TaskInfoFetcher implementation that also caches most used 1000 keys
-#[async_trait]
-impl TaskInfoFetcher for CacheTaskInfoFetcher {
-    /// Returns next ids for requested pubkeys
-    /// If key isn't in cache, it will be requested
-    async fn fetch_next_commit_nonces(
-        &self,
-        pubkeys: &[Pubkey],
-        min_context_slot: u64,
-    ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>> {
-        if pubkeys.is_empty() {
-            return Ok(HashMap::new());
-        }
-
-        let mut pubkeys = pubkeys.to_vec();
+    fn reserve_locks(&self, pubkeys: &[Pubkey]) -> CacheInnerGuard<'_> {
         // Sorted order is required: all callers acquire per-key locks in the same
         // order, preventing the A→B / B→A circular-wait deadlock.
+        let mut pubkeys = pubkeys.to_vec();
         pubkeys.sort_unstable();
         pubkeys.dedup();
 
         let mut nonce_locks = vec![];
         {
             let mut inner = self.cache.lock().expect(MUTEX_POISONED_MSG);
-            for pubkey in pubkeys.iter() {
+            for pubkey in pubkeys {
                 let (lock, eviceted) =
-                    if let Some(val) = inner.active.get(pubkey) {
+                    if let Some(val) = inner.active.get(&pubkey) {
                         (val.clone(), None)
-                    } else if let Some(val) = inner.retiring.remove(pubkey) {
+                    } else if let Some(val) = inner.retiring.remove(&pubkey) {
                         // This promotes retiring to active
-                        let evicted = inner.active.push(*pubkey, val.clone());
+                        let evicted = inner.active.push(pubkey, val.clone());
                         (val, evicted)
                     } else {
                         let val = Arc::new(TMutex::new(u64::MAX));
-                        let evicted = inner.active.push(*pubkey, val.clone());
+                        let evicted = inner.active.push(pubkey, val.clone());
                         (val, evicted)
                     };
 
@@ -302,7 +328,8 @@ impl TaskInfoFetcher for CacheTaskInfoFetcher {
                         // 2. request for set A still ongoing
                         // 3, another request with set A comes in, creating new locks in `CacheInner::active`
                         // 4. 2 simultaneous requestors receive same value
-                        let old = inner.retiring.insert(evicted_pk, evicted_lock);
+                        let old =
+                            inner.retiring.insert(evicted_pk, evicted_lock);
                         if old.is_some() {
                             // Safety
                             // assume that is true:
@@ -321,13 +348,33 @@ impl TaskInfoFetcher for CacheTaskInfoFetcher {
             }
         }
 
+        CacheInnerGuard {
+            inner: &self.cache,
+            nonce_locks,
+        }
+    }
+}
+
+/// TaskInfoFetcher implementation that also caches most used 1000 keys
+#[async_trait]
+impl TaskInfoFetcher for CacheTaskInfoFetcher {
+    /// Returns next ids for requested pubkeys
+    /// If key isn't in cache, it will be requested
+    async fn fetch_next_commit_nonces(
+        &self,
+        pubkeys: &[Pubkey],
+        min_context_slot: u64,
+    ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>> {
+        if pubkeys.is_empty() {
+            return Ok(HashMap::new());
+        }
+
+        let locks_guard = self.reserve_locks(pubkeys);
+
         // Acquire per-account locks sequentially in sorted order (see sort above).
         // join_all would poll all futures concurrently, allowing partial acquisition
         // and producing the classic A→B / B→A deadlock across concurrent callers.
-        let mut guard_nonces = vec![];
-        for (pubkey, lock) in nonce_locks.iter() {
-            guard_nonces.push((pubkey, lock.lock().await));
-        }
+        let mut guard_nonces = locks_guard.lock().await;
         let (mut existing, mut to_request) = (vec![], vec![]);
         for (pubkey, guard) in guard_nonces {
             if *guard == u64::MAX {
@@ -340,91 +387,94 @@ impl TaskInfoFetcher for CacheTaskInfoFetcher {
         // If all in cache - great! return
         if to_request.is_empty() {
             let mut result = HashMap::with_capacity(existing.len());
-
             // Consume guards & write result
             for (pubkey, mut guard) in existing {
                 *guard += 1;
-                result.insert(**pubkey, *guard);
+                result.insert(*pubkey, *guard);
             }
 
-            let mut inner = self.cache.lock().expect(MUTEX_POISONED_MSG);
-            for (pubkey, lock) in nonce_locks {
-                // Drop our clone first so strong_count reflects only other
-                // live holders when we check below
-                drop(lock);
-                let should_remove = inner
-                    .retiring
-                    .get(&pubkey)
-                    .is_some_and(|l| Arc::strong_count(l) == 1);
-                if should_remove {
-                    inner.retiring.remove(&pubkey);
-                }
-            }
             return Ok(result);
         }
 
         // Remove duplicates
         let to_request_pubkeys: Vec<_> =
-            to_request.iter().map(|(pubkey, _)| ***pubkey).collect();
-        let res = Self::fetch_metadata_with_retries(
+            to_request.iter().map(|(pubkey, _)| **pubkey).collect();
+        let remaining_ids = Self::fetch_metadata_with_retries(
             &self.rpc_client,
             &to_request_pubkeys,
             min_context_slot,
             NUM_FETCH_RETRIES,
         )
-        .await;
-
-        let remaining_ids = match res {
-            Ok(value) => value,
-            Err(err) => {
-                let mut inner = self.cache.lock().expect(MUTEX_POISONED_MSG);
-                for (pubkey, lock) in nonce_locks {
-                    // Drop our clone first so strong_count reflects only other
-                    // live holders when we check below
-                    drop(lock);
-                    let should_remove = inner
-                        .retiring
-                        .get(&pubkey)
-                        .is_some_and(|l| Arc::strong_count(l) == 1);
-                    if should_remove {
-                        inner.retiring.remove(&pubkey);
-                    }
-                }
-                return Err(err);
-            }
-        };
-
-        let remaining_ids = remaining_ids
-            .into_iter()
-            .map(|metadata| metadata.last_update_nonce);
+        .await?
+        .into_iter()
+        .map(|metadata| metadata.last_update_nonce);
 
         // We don't care if anything changed in between with cache - just update and return our ids.
-
         let mut result = HashMap::with_capacity(existing.len());
         // Consume guards & write result
         for (pubkey, mut guard) in existing {
             *guard += 1;
-            result.insert(**pubkey, *guard);
+            result.insert(*pubkey, *guard);
         }
-        for ((pubkey, mut guard), nonce) in to_request.into_iter().zip(remaining_ids) {
+        for ((pubkey, mut guard), nonce) in
+            to_request.into_iter().zip(remaining_ids)
+        {
             *guard = nonce + 1;
-            result.insert(**pubkey, *guard);
+            result.insert(*pubkey, *guard);
         }
 
-        {
-            let mut inner = self.cache.lock().expect(MUTEX_POISONED_MSG);
-            for (pubkey, lock) in nonce_locks {
-                // Drop our clone first so strong_count reflects only other
-                // live holders when we check below
-                drop(lock);
-                let should_remove = inner
-                    .retiring
-                    .get(&pubkey)
-                    .is_some_and(|l| Arc::strong_count(l) == 1);
-                if should_remove {
-                    inner.retiring.remove(&pubkey);
-                }
+        Ok(result)
+    }
+
+    async fn fetch_current_commit_nonces(
+        &self,
+        pubkeys: &[Pubkey],
+        min_context_slot: u64,
+    ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>> {
+        if pubkeys.is_empty() {
+            return Ok(HashMap::new());
+        }
+
+        let locks_guard = self.reserve_locks(pubkeys);
+
+        // Acquire per-account locks sequentially in sorted order (see sort above).
+        let mut guard_nonces = locks_guard.lock().await;
+        let (mut existing, mut to_request) = (vec![], vec![]);
+        let mut result = HashMap::with_capacity(existing.len());
+        for (pubkey, guard) in guard_nonces {
+            if *guard == u64::MAX {
+                to_request.push((pubkey, guard));
+            } else {
+                result.insert(*pubkey, *guard);
+                existing.push((pubkey, guard))
             }
+        }
+
+        if to_request.is_empty() {
+            return Ok(result);
+        }
+
+        let to_request_pubkeys: Vec<_> =
+            to_request.iter().map(|(pubkey, _)| **pubkey).collect();
+        let remaining_ids = Self::fetch_metadata_with_retries(
+            &self.rpc_client,
+            &to_request_pubkeys,
+            min_context_slot,
+            NUM_FETCH_RETRIES,
+        )
+        .await?
+        .into_iter()
+        .map(|metadata| metadata.last_update_nonce);
+
+        // Store the on-chain nonce as-is (no +1): recording current state, not
+        // reserving the next slot. A subsequent fetch_next_commit_nonces call will
+        // increment from here correctly.
+        for ((pubkey, mut guard), nonce) in
+            to_request.into_iter().zip(remaining_ids)
+        {
+            *guard = nonce;
+            result.insert(*pubkey, nonce);
+            // guard dropped here
         }
 
         Ok(result)
