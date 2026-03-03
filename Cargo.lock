@@ -3479,6 +3479,7 @@ dependencies = [
  "solana-transaction",
  "thiserror 1.0.69",
  "tokio",
+ "tokio-stream",
  "tokio-util",
 ]
 

@@ -10,6 +10,5 @@ pub mod tcp;
 #[cfg(test)]
 mod tests;
 
-pub use connection::{Receiver, Sender};
 pub use error::{Error, Result};
 pub use proto::{Message, PROTOCOL_VERSION};
