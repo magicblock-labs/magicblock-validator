@@ -158,10 +158,7 @@ mod tests {
     }
 
     fn ctrl_c() -> Event {
-        Event::Key(KeyEvent::new(
-            KeyCode::Char('c'),
-            KeyModifiers::CONTROL,
-        ))
+        Event::Key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL))
     }
 
     #[test]
