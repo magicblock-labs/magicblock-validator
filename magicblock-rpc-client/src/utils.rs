@@ -4,7 +4,7 @@ use solana_rpc_client_api::client_error::ErrorKind;
 use solana_signature::Signature;
 use solana_transaction_error::TransactionError;
 use tokio::time::{sleep, Instant};
-use tracing::error;
+use tracing::{error, trace};
 
 use crate::{MagicBlockRpcClientError, MagicBlockSendTransactionOutcome};
 
@@ -178,8 +178,7 @@ pub fn decide_rpc_error_flow(
 ) -> ControlFlow<(), Duration> {
     match error {
         MagicBlockRpcClientError::RpcClientError(err)
-        | MagicBlockRpcClientError::SendTransaction(err)
-        | MagicBlockRpcClientError::GetLatestBlockhash(err) => {
+        | MagicBlockRpcClientError::SendTransaction(err) => {
             decide_rpc_native_flow(err)
         }
         MagicBlockRpcClientError::GetSlot(_)
@@ -197,15 +196,27 @@ pub fn decide_rpc_error_flow(
             // Since [`DEFAULT_MAX_TIME_TO_PROCESSED`] is large we skip sleep as well
             ControlFlow::Continue(Duration::ZERO)
         }
+        MagicBlockRpcClientError::GetLatestBlockhash(err) => {
+            trace!(error = ?err, "Failed to get latest blockhash during sending tx");
+            ControlFlow::Continue(Duration::from_millis(100))
+        }
     }
 }
 
 pub fn decide_rpc_native_flow(
     err: &solana_rpc_client_api::client_error::Error,
 ) -> ControlFlow<(), Duration> {
-    match err.kind {
+    match &err.kind {
         // Retry IO errors
         ErrorKind::Io(_) => ControlFlow::Continue(Duration::from_millis(500)),
+        // Retry 5xx server errors
+        ErrorKind::Reqwest(err) => match err.status() {
+            Some(status) if status.is_server_error() => {
+                trace!(error = ?err, "Server error during sending transaction");
+                ControlFlow::Continue(Duration::from_millis(100))
+            }
+            _ => ControlFlow::Break(()),
+        },
         _ => {
             // Can't handle - propagate
             ControlFlow::Break(())

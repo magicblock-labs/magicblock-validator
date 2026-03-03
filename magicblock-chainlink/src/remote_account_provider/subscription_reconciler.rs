@@ -14,6 +14,8 @@ use crate::remote_account_provider::RemoteAccountProviderError;
 /// This is the core logic shared between:
 /// - Normal unsubscribe flow (after removing from LRU cache)
 /// - Reconciliation flow (account missing from LRU cache)
+// NOTE: Pubkey stringification overhead is acceptable here since this is a cold path
+// (network I/O dwarfs the stringification cost)
 #[instrument(skip(pubsub_client, removed_account_tx), fields(pubkey = %pubkey))]
 pub(crate) async fn unsubscribe_and_notify_removal<T: ChainPubsubClient>(
     pubkey: Pubkey,

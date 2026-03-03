@@ -99,6 +99,12 @@ max-old-unoptimized = 5
 # Env: MBV_GRPC__MAX_SUBS_IN_NEW
 max-subs-in-new = 400
 
+# Maximum time without optimization before triggering optimization (in seconds)
+# if not triggered by exceeding max-old-unoptimized.
+# If not provided it defaults to 60 seconds.
+# Env: MBV_GRPC__MAX_TIME_WITHOUT_OPTIMIZATION_SECS
+max-time-without-optimization-secs = 60
+
 # ==============================================================================
 # Validator Identity & Fees
 # ==============================================================================
@@ -125,7 +131,7 @@ listen = "127.0.0.1:8899"
 
 # Number of event processor tasks to handle state updates
 # Greater number might improve the performance of websocket
-# and/or geyser plugins if there are enough idle CPU cores 
+# and/or geyser plugins if there are enough idle CPU cores
 # Default: 1
 # CLI: --event-processors <COUNT>
 # Env: MBV_APERTURE__EVENT_PROCESSORS

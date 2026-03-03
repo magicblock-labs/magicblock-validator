@@ -105,6 +105,7 @@ pub struct TransactionEntry {
     pub slot: u64,
     pub success: bool,
     pub timestamp: DateTime<Utc>,
+    pub accounts: Vec<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -118,7 +119,50 @@ pub struct TransactionDetail {
     pub accounts: Vec<String>,
     pub error: Option<String>,
     pub explorer_url: String,
-    pub explorer_selected: bool,
+    pub selected_account: Option<usize>,
+}
+
+pub const MAX_DETAIL_ACCOUNTS: usize = 10;
+
+impl TransactionDetail {
+    fn selectable_accounts_len(&self) -> usize {
+        self.accounts.len().min(MAX_DETAIL_ACCOUNTS)
+    }
+
+    fn clamp_selection(&mut self) {
+        let selectable = self.selectable_accounts_len();
+        if self.selected_account.is_some_and(|idx| idx >= selectable) {
+            self.selected_account = None;
+        }
+    }
+
+    pub fn move_selection_up(&mut self) {
+        self.clamp_selection();
+        let selectable = self.selectable_accounts_len();
+        self.selected_account = match self.selected_account {
+            None if selectable > 0 => Some(selectable - 1),
+            None => None,
+            Some(0) => None,
+            Some(idx) => Some(idx.saturating_sub(1)),
+        };
+    }
+
+    pub fn move_selection_down(&mut self) {
+        self.clamp_selection();
+        let selectable = self.selectable_accounts_len();
+        self.selected_account = match self.selected_account {
+            None if selectable > 0 => Some(0),
+            None => None,
+            Some(idx) if idx + 1 < selectable => Some(idx + 1),
+            Some(_) => None,
+        };
+    }
+
+    pub fn selected_account_address(&self) -> Option<&str> {
+        self.selected_account
+            .and_then(|idx| self.accounts.get(idx))
+            .map(String::as_str)
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Default)]
@@ -141,6 +185,7 @@ pub struct TuiState {
     pub log_scroll: usize,
     pub tx_scroll: usize,
     pub selected_tx: usize,
+    tx_filter_query: String,
     pub view_mode: ViewMode,
     pub tx_detail: Option<TransactionDetail>,
     pub should_quit: bool,
@@ -170,6 +215,7 @@ impl TuiState {
             log_scroll: 0,
             tx_scroll: 0,
             selected_tx: 0,
+            tx_filter_query: String::new(),
             view_mode: ViewMode::List,
             tx_detail: None,
             should_quit: false,
@@ -194,37 +240,47 @@ impl TuiState {
     }
 
     pub fn push_transaction(&mut self, entry: TransactionEntry) {
-        let had_transactions = !self.transactions.is_empty();
+        let had_transactions = self.filtered_transactions_len() > 0;
         let anchored_to_latest = self.selected_tx == 0 && self.tx_scroll == 0;
+        let selected_signature_before =
+            self.selected_transaction().map(|tx| tx.signature.clone());
+        let selected_tx_before = self.selected_tx;
+        let tx_scroll_before = self.tx_scroll;
         self.transactions.push_front(entry);
 
         // Keep selection on the same transaction when prepending a new one.
         if had_transactions && !anchored_to_latest {
-            self.selected_tx = self
-                .selected_tx
-                .saturating_add(1)
-                .min(self.transactions.len().saturating_sub(1));
+            if let Some(selected_signature) = selected_signature_before {
+                let filtered_indices = self.filtered_transaction_indices();
+                if let Some(new_selected) = self
+                    .find_filtered_position_by_signature(
+                        &filtered_indices,
+                        &selected_signature,
+                    )
+                {
+                    self.selected_tx = new_selected;
 
-            // When the user is already scrolled away from the top, keep the
-            // viewport anchored to the same items.
-            if self.tx_scroll > 0 {
-                self.tx_scroll = self.tx_scroll.saturating_add(1);
+                    // Keep the viewport anchored to the same transaction rows
+                    // when filtered entries are prepended at the top.
+                    if tx_scroll_before > 0 {
+                        if new_selected >= selected_tx_before {
+                            self.tx_scroll = tx_scroll_before.saturating_add(
+                                new_selected - selected_tx_before,
+                            );
+                        } else {
+                            self.tx_scroll = tx_scroll_before.saturating_sub(
+                                selected_tx_before - new_selected,
+                            );
+                        }
+                    }
+                }
             }
         }
 
         while self.transactions.len() > self.max_transactions {
             self.transactions.pop_back();
         }
-
-        if self.transactions.is_empty() {
-            self.selected_tx = 0;
-            self.tx_scroll = 0;
-            return;
-        }
-
-        let max_index = self.transactions.len() - 1;
-        self.selected_tx = self.selected_tx.min(max_index);
-        self.tx_scroll = self.tx_scroll.min(max_index);
+        self.clamp_tx_selection();
     }
 
     pub fn scroll_up(&mut self) {
@@ -249,9 +305,9 @@ impl TuiState {
                 self.log_scroll = (self.log_scroll + 1).min(max);
             }
             Tab::Transactions => {
-                if !self.transactions.is_empty() {
-                    self.selected_tx =
-                        (self.selected_tx + 1).min(self.transactions.len() - 1);
+                let tx_count = self.filtered_transactions_len();
+                if tx_count > 0 {
+                    self.selected_tx = (self.selected_tx + 1).min(tx_count - 1);
                     if self.selected_tx >= self.tx_scroll + visible_height {
                         self.tx_scroll = self.selected_tx - visible_height + 1;
                     }
@@ -262,10 +318,57 @@ impl TuiState {
     }
 
     pub fn selected_transaction(&self) -> Option<&TransactionEntry> {
-        self.transactions.get(self.selected_tx)
+        let tx_idx =
+            *self.filtered_transaction_indices().get(self.selected_tx)?;
+        self.transactions.get(tx_idx)
     }
 
-    pub fn show_tx_detail(&mut self, detail: TransactionDetail) {
+    pub fn filtered_transactions(&self) -> Vec<&TransactionEntry> {
+        self.transactions
+            .iter()
+            .filter(|tx| Self::tx_matches_filter(tx, &self.tx_filter_query))
+            .collect()
+    }
+
+    pub fn filtered_transactions_len(&self) -> usize {
+        self.transactions
+            .iter()
+            .filter(|tx| Self::tx_matches_filter(tx, &self.tx_filter_query))
+            .count()
+    }
+
+    pub fn tx_filter_query(&self) -> &str {
+        &self.tx_filter_query
+    }
+
+    pub fn append_tx_filter_char(&mut self, ch: char) {
+        let selected_signature =
+            self.selected_transaction().map(|tx| tx.signature.clone());
+        self.tx_filter_query.push(ch);
+        self.reconcile_selection(selected_signature.as_deref());
+    }
+
+    pub fn pop_tx_filter_char(&mut self) {
+        let selected_signature =
+            self.selected_transaction().map(|tx| tx.signature.clone());
+        if self.tx_filter_query.pop().is_none() {
+            return;
+        }
+        self.reconcile_selection(selected_signature.as_deref());
+    }
+
+    pub fn clear_tx_filter(&mut self) {
+        if self.tx_filter_query.is_empty() {
+            return;
+        }
+        let selected_signature =
+            self.selected_transaction().map(|tx| tx.signature.clone());
+        self.tx_filter_query.clear();
+        self.reconcile_selection(selected_signature.as_deref());
+    }
+
+    pub fn show_tx_detail(&mut self, mut detail: TransactionDetail) {
+        detail.clamp_selection();
         self.tx_detail = Some(detail);
         self.view_mode = ViewMode::Detail;
     }
@@ -274,6 +377,100 @@ impl TuiState {
         self.tx_detail = None;
         self.view_mode = ViewMode::List;
     }
+
+    fn tx_matches_filter(tx: &TransactionEntry, filter: &str) -> bool {
+        if filter.is_empty() {
+            return true;
+        }
+
+        contains_ignore_ascii_case(&tx.signature, filter)
+            || tx
+                .accounts
+                .iter()
+                .any(|account| contains_ignore_ascii_case(account, filter))
+    }
+
+    fn filtered_transaction_indices(&self) -> Vec<usize> {
+        self.transactions
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, tx)| {
+                Self::tx_matches_filter(tx, &self.tx_filter_query)
+                    .then_some(idx)
+            })
+            .collect()
+    }
+
+    fn find_filtered_position_by_signature(
+        &self,
+        filtered_indices: &[usize],
+        signature: &str,
+    ) -> Option<usize> {
+        filtered_indices.iter().position(|idx| {
+            self.transactions
+                .get(*idx)
+                .map(|tx| tx.signature.as_str() == signature)
+                .unwrap_or(false)
+        })
+    }
+
+    fn reconcile_selection(&mut self, selected_signature: Option<&str>) {
+        let filtered_indices = self.filtered_transaction_indices();
+        if filtered_indices.is_empty() {
+            self.selected_tx = 0;
+            self.tx_scroll = 0;
+            return;
+        }
+
+        if let Some(selected_signature) = selected_signature {
+            if let Some(new_selected) = self
+                .find_filtered_position_by_signature(
+                    &filtered_indices,
+                    selected_signature,
+                )
+            {
+                self.selected_tx = new_selected;
+            }
+        }
+
+        self.clamp_tx_selection_with_len(filtered_indices.len());
+    }
+
+    fn clamp_tx_selection(&mut self) {
+        let filtered_len = self.filtered_transactions_len();
+        self.clamp_tx_selection_with_len(filtered_len);
+    }
+
+    fn clamp_tx_selection_with_len(&mut self, filtered_len: usize) {
+        if filtered_len == 0 {
+            self.selected_tx = 0;
+            self.tx_scroll = 0;
+            return;
+        }
+
+        let max_index = filtered_len - 1;
+        self.selected_tx = self.selected_tx.min(max_index);
+        self.tx_scroll = self.tx_scroll.min(max_index);
+
+        if self.selected_tx < self.tx_scroll {
+            self.tx_scroll = self.selected_tx;
+        }
+    }
+}
+
+fn contains_ignore_ascii_case(haystack: &str, needle: &str) -> bool {
+    if needle.is_empty() {
+        return true;
+    }
+    if needle.len() > haystack.len() {
+        return false;
+    }
+
+    let needle_bytes = needle.as_bytes();
+    haystack
+        .as_bytes()
+        .windows(needle_bytes.len())
+        .any(|window| window.eq_ignore_ascii_case(needle_bytes))
 }
 
 #[cfg(test)]
@@ -299,11 +496,19 @@ mod tests {
     }
 
     fn tx(signature: &str) -> TransactionEntry {
+        tx_with_accounts(signature, vec![])
+    }
+
+    fn tx_with_accounts(
+        signature: &str,
+        accounts: Vec<&str>,
+    ) -> TransactionEntry {
         TransactionEntry {
             signature: signature.to_string(),
             slot: 1,
             success: true,
             timestamp: Utc::now(),
+            accounts: accounts.into_iter().map(ToString::to_string).collect(),
         }
     }
 
@@ -348,5 +553,52 @@ mod tests {
                 .map(|t| &t.signature),
             Some(&selected_before)
         );
+    }
+
+    #[test]
+    fn filter_matches_signature_or_account() {
+        let mut state = TuiState::new(config());
+        state.push_transaction(tx_with_accounts(
+            "sig-aaa",
+            vec!["Primary111111111111111111111111111111111111"],
+        ));
+        state.push_transaction(tx_with_accounts(
+            "sig-bbb",
+            vec!["Secondary22222222222222222222222222222222222"],
+        ));
+
+        for ch in "SIG-B".chars() {
+            state.append_tx_filter_char(ch);
+        }
+        assert_eq!(state.filtered_transactions_len(), 1);
+        assert_eq!(
+            state.selected_transaction().map(|tx| tx.signature.as_str()),
+            Some("sig-bbb")
+        );
+
+        state.clear_tx_filter();
+        for ch in "primary11111".chars() {
+            state.append_tx_filter_char(ch);
+        }
+        assert_eq!(state.filtered_transactions_len(), 1);
+        assert_eq!(
+            state.selected_transaction().map(|tx| tx.signature.as_str()),
+            Some("sig-aaa")
+        );
+    }
+
+    #[test]
+    fn filter_with_no_matches_clears_selection() {
+        let mut state = TuiState::new(config());
+        state.push_transaction(tx("sig-aaa"));
+
+        for ch in "does-not-exist".chars() {
+            state.append_tx_filter_char(ch);
+        }
+
+        assert_eq!(state.filtered_transactions_len(), 0);
+        assert!(state.selected_transaction().is_none());
+        assert_eq!(state.selected_tx, 0);
+        assert_eq!(state.tx_scroll, 0);
     }
 }
