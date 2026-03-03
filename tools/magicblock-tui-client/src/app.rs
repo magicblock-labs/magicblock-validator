@@ -490,11 +490,28 @@ struct BlockTransactionWithMeta {
 #[derive(Debug, Deserialize)]
 struct BlockTransaction {
     signatures: Vec<String>,
+    message: BlockTransactionMessage,
+}
+
+#[derive(Debug, Deserialize)]
+struct BlockTransactionMessage {
+    #[serde(default, rename = "accountKeys")]
+    account_keys: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
 struct BlockTransactionMeta {
     err: Option<serde_json::Value>,
+    #[serde(rename = "loadedAddresses")]
+    loaded_addresses: Option<LoadedAddresses>,
+}
+
+#[derive(Debug, Deserialize)]
+struct LoadedAddresses {
+    #[serde(default)]
+    writable: Vec<String>,
+    #[serde(default)]
+    readonly: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -797,12 +814,21 @@ async fn fetch_block_transactions(
         .into_iter()
         .filter_map(|tx| {
             let signature = tx.transaction.signatures.into_iter().next()?;
-            let success = tx.meta.map(|m| m.err.is_none()).unwrap_or(true);
+            let mut accounts = tx.transaction.message.account_keys;
+            let success =
+                tx.meta.as_ref().map(|m| m.err.is_none()).unwrap_or(true);
+            if let Some(loaded_addresses) =
+                tx.meta.and_then(|m| m.loaded_addresses)
+            {
+                accounts.extend(loaded_addresses.writable);
+                accounts.extend(loaded_addresses.readonly);
+            }
             Some(TransactionEntry {
                 signature,
                 slot,
                 success,
                 timestamp,
+                accounts,
             })
         })
         .collect();
