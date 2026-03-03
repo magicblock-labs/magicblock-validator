@@ -56,7 +56,7 @@ pub trait TaskInfoFetcher: Send + Sync + 'static {
     ) -> TaskInfoFetcherResult<Vec<Pubkey>>;
 
     /// Peeks current commit ids for pubkeys
-    fn peek_commit_nonce(&self, pubkey: &Pubkey) -> Option<u64>;
+    async fn peek_commit_nonce(&self, pubkey: &Pubkey) -> Option<u64>;
 
     /// Resets cache for some or all accounts
     fn reset(&self, reset_type: ResetType);
@@ -498,22 +498,41 @@ impl TaskInfoFetcher for CacheTaskInfoFetcher {
     }
 
     /// Returns current commit id without raising priority
-    fn peek_commit_nonce(&self, pubkey: &Pubkey) -> Option<u64> {
-        let cache = self.cache.lock().expect(MUTEX_POISONED_MSG);
-        cache.peek(pubkey).copied()
+    async fn peek_commit_nonce(&self, pubkey: &Pubkey) -> Option<u64> {
+        let lock = {
+            // Peek without promoting LRU order; also check retiring for in-flight keys.
+            // Outer lock held only to clone the Arc, released before awaiting per-key lock.
+            let inner = self.cache.lock().expect(MUTEX_POISONED_MSG);
+            inner
+                .active
+                .peek(pubkey)
+                .or_else(|| inner.retiring.get(pubkey))
+                .cloned()
+        }?;
+
+        let locks_guard = CacheInnerGuard {
+            inner: &self.cache,
+            nonce_locks: vec![(*pubkey, lock)],
+        };
+        let guards = locks_guard.lock().await;
+        let value = *guards[0].1;
+
+        (value != u64::MAX).then_some(value)
     }
 
     /// Reset cache
     fn reset(&self, reset_type: ResetType) {
+        let mut cache = self.cache.lock().expect(MUTEX_POISONED_MSG);
         match reset_type {
             ResetType::All => {
-                self.cache.lock().expect(MUTEX_POISONED_MSG).clear()
+                cache.active.clear();
+                cache.retiring.clear();
             }
             ResetType::Specific(pubkeys) => {
-                let mut cache = self.cache.lock().expect(MUTEX_POISONED_MSG);
-                pubkeys.iter().for_each(|pubkey| {
-                    let _ = cache.pop(pubkey);
-                });
+                for pubkey in pubkeys {
+                    cache.active.pop(pubkey);
+                    cache.retiring.remove(pubkey);
+                }
             }
         }
     }
