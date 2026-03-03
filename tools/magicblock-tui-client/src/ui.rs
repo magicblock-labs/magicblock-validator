@@ -407,8 +407,12 @@ fn render_tx_detail_popup(frame: &mut Frame, state: &TuiState) {
             .fg(Color::Blue)
             .add_modifier(Modifier::UNDERLINED)
     };
-    let explorer_prefix =
-        if detail.explorer_selected { "▶ " } else { "  " }.to_string();
+    let explorer_prefix = if detail.explorer_selected {
+        "▶ "
+    } else {
+        "  "
+    }
+    .to_string();
     let explorer_label = "Explorer:  ".to_string();
     let explorer_value = truncate_with_ellipsis(
         &detail.explorer_url,
