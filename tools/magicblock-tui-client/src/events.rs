@@ -75,11 +75,65 @@ fn handle_key(
         return EventAction::None;
     }
 
-    match key.code {
-        KeyCode::Esc | KeyCode::Char('q') => state.should_quit = true,
-        KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            state.should_quit = true;
+    if matches!(
+        key,
+        KeyEvent {
+            code: KeyCode::Esc,
+            ..
         }
+    ) {
+        state.should_quit = true;
+        return EventAction::None;
+    }
+
+    if matches!(
+        key,
+        KeyEvent {
+            code: KeyCode::Char('c'),
+            modifiers,
+            ..
+        } if modifiers.contains(KeyModifiers::CONTROL)
+    ) {
+        state.should_quit = true;
+        return EventAction::None;
+    }
+
+    if state.active_tab == Tab::Transactions {
+        match key {
+            KeyEvent {
+                code: KeyCode::Backspace,
+                modifiers,
+                ..
+            } if !modifiers.contains(KeyModifiers::CONTROL)
+                && !modifiers.contains(KeyModifiers::ALT) =>
+            {
+                state.pop_tx_filter_char();
+                return EventAction::None;
+            }
+            KeyEvent {
+                code: KeyCode::Char('u'),
+                modifiers,
+                ..
+            } if modifiers.contains(KeyModifiers::CONTROL) => {
+                state.clear_tx_filter();
+                return EventAction::None;
+            }
+            KeyEvent {
+                code: KeyCode::Char(ch),
+                modifiers,
+                ..
+            } if !modifiers.contains(KeyModifiers::CONTROL)
+                && !modifiers.contains(KeyModifiers::ALT) =>
+            {
+                state.append_tx_filter_char(ch);
+                return EventAction::None;
+            }
+            _ => {}
+        }
+    }
+
+    match key.code {
+        KeyCode::Char('q') => state.should_quit = true,
         KeyCode::Enter => {
             if state.active_tab == Tab::Transactions {
                 if let Some(tx) = state.selected_transaction() {
@@ -128,10 +182,11 @@ fn handle_key(
                     state.logs.len().saturating_sub(visible_height);
             }
             Tab::Transactions => {
-                if !state.transactions.is_empty() {
-                    state.selected_tx = state.transactions.len() - 1;
+                let filtered_len = state.filtered_transactions_len();
+                if filtered_len > 0 {
+                    state.selected_tx = filtered_len - 1;
                     state.tx_scroll =
-                        state.transactions.len().saturating_sub(visible_height);
+                        filtered_len.saturating_sub(visible_height);
                 }
             }
             Tab::Config => {}
@@ -155,7 +210,7 @@ mod tests {
     use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 
     use super::{handle_event, EventAction};
-    use crate::state::{TransactionDetail, TuiConfig, TuiState, ViewMode};
+    use crate::state::{Tab, TransactionDetail, TuiConfig, TuiState, ViewMode};
 
     fn config() -> TuiConfig {
         TuiConfig {
@@ -290,5 +345,53 @@ mod tests {
             state.tx_detail.as_ref().and_then(|d| d.selected_account),
             Some(1)
         );
+    }
+
+    #[test]
+    fn typing_in_transactions_updates_filter() {
+        let mut state = TuiState::new(config());
+        state.active_tab = Tab::Transactions;
+
+        let _ = handle_event(
+            &mut state,
+            Event::Key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE)),
+            10,
+        );
+
+        assert_eq!(state.tx_filter_query(), "q");
+        assert!(!state.should_quit);
+    }
+
+    #[test]
+    fn backspace_and_ctrl_u_edit_transaction_filter() {
+        let mut state = TuiState::new(config());
+        state.active_tab = Tab::Transactions;
+
+        let _ = handle_event(
+            &mut state,
+            Event::Key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE)),
+            10,
+        );
+        let _ = handle_event(
+            &mut state,
+            Event::Key(KeyEvent::new(KeyCode::Char('b'), KeyModifiers::NONE)),
+            10,
+        );
+        let _ = handle_event(
+            &mut state,
+            Event::Key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE)),
+            10,
+        );
+        assert_eq!(state.tx_filter_query(), "a");
+
+        let _ = handle_event(
+            &mut state,
+            Event::Key(KeyEvent::new(
+                KeyCode::Char('u'),
+                KeyModifiers::CONTROL,
+            )),
+            10,
+        );
+        assert_eq!(state.tx_filter_query(), "");
     }
 }
