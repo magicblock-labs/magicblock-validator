@@ -8,6 +8,7 @@ license.workspace = true
 edition.workspace = true
 
 [dependencies]
+solana-signature = { workspace = true }
 tracing = { workspace = true }
 http-body-util = { workspace = true }
 hyper = { workspace = true, features = ["http1", "server"] }
