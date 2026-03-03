@@ -39,6 +39,11 @@ fn handle_key(
     if state.view_mode == ViewMode::Detail {
         match key.code {
             KeyCode::Esc | KeyCode::Char('q') => state.close_tx_detail(),
+            KeyCode::Char('c')
+                if key.modifiers.contains(KeyModifiers::CONTROL) =>
+            {
+                state.close_tx_detail();
+            }
             KeyCode::Enter => {
                 if let Some(detail) = &state.tx_detail {
                     if detail.explorer_selected {
@@ -127,4 +132,69 @@ fn handle_key(
     }
 
     EventAction::None
+}
+
+#[cfg(test)]
+mod tests {
+    use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
+
+    use super::{handle_event, EventAction};
+    use crate::state::{TransactionDetail, TuiConfig, TuiState, ViewMode};
+
+    fn config() -> TuiConfig {
+        TuiConfig {
+            rpc_url: "http://127.0.0.1:8899".to_string(),
+            ws_url: "ws://127.0.0.1:8900".to_string(),
+            remote_rpc_url: "https://api.devnet.solana.com".to_string(),
+            validator_identity: "validator".to_string(),
+            ledger_path: "/tmp/ledger".to_string(),
+            block_time_ms: 400,
+            lifecycle_mode: "ephemeral".to_string(),
+            base_fee: 5_000,
+            help_url: "https://example.com/help".to_string(),
+            version: "1.0.0".to_string(),
+            git_version: "abc123".to_string(),
+        }
+    }
+
+    fn ctrl_c() -> Event {
+        Event::Key(KeyEvent::new(
+            KeyCode::Char('c'),
+            KeyModifiers::CONTROL,
+        ))
+    }
+
+    #[test]
+    fn ctrl_c_closes_detail_view() {
+        let mut state = TuiState::new(config());
+        state.show_tx_detail(TransactionDetail {
+            signature: "sig".to_string(),
+            slot: 1,
+            success: true,
+            fee: 0,
+            compute_units: None,
+            logs: vec![],
+            accounts: vec![],
+            error: None,
+            explorer_url: "https://example.com".to_string(),
+            explorer_selected: false,
+        });
+
+        let action = handle_event(&mut state, ctrl_c(), 10);
+
+        assert_eq!(action, EventAction::None);
+        assert!(matches!(state.view_mode, ViewMode::List));
+        assert!(state.tx_detail.is_none());
+        assert!(!state.should_quit);
+    }
+
+    #[test]
+    fn ctrl_c_quits_outside_detail_view() {
+        let mut state = TuiState::new(config());
+        assert!(matches!(state.view_mode, ViewMode::List));
+
+        let _ = handle_event(&mut state, ctrl_c(), 10);
+
+        assert!(state.should_quit);
+    }
 }
