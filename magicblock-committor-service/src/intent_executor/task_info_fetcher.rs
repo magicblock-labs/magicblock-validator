@@ -439,14 +439,13 @@ impl TaskInfoFetcher for CacheTaskInfoFetcher {
 
         // Acquire per-account locks sequentially in sorted order (see sort above).
         let mut guard_nonces = locks_guard.lock().await;
-        let (mut existing, mut to_request) = (vec![], vec![]);
-        let mut result = HashMap::with_capacity(existing.len());
+        let mut to_request = vec![];
+        let mut result = HashMap::with_capacity(guard_nonces.len());
         for (pubkey, guard) in guard_nonces {
             if *guard == u64::MAX {
                 to_request.push((pubkey, guard));
             } else {
                 result.insert(*pubkey, *guard);
-                existing.push((pubkey, guard))
             }
         }
 
