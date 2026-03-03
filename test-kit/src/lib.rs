@@ -14,7 +14,7 @@ use magicblock_core::{
         blocks::{BlockMeta, BlockUpdate, BlockUpdateTx},
         link,
         transactions::{
-            SanitizeableTransaction, TransactionResult,
+            ReplayContext, SanitizeableTransaction, TransactionResult,
             TransactionSchedulerHandle, TransactionSimulationResult,
         },
         DispatchEndpoints,
@@ -366,8 +366,13 @@ impl ExecutionTestEnv {
         persist: bool,
         txn: impl SanitizeableTransaction,
     ) -> TransactionResult {
+        let ctx = ReplayContext {
+            slot: 0,
+            index: 0,
+            persist: false,
+        };
         self.transaction_scheduler
-            .replay(persist, txn)
+            .replay(ctx, txn)
             .await
             .inspect_err(
                 |err| error!(error = ?err, "Transaction replay failed"),

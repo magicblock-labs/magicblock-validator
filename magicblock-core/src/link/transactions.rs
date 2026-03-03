@@ -75,6 +75,13 @@ pub struct ProcessableTransaction {
     pub encoded: Option<Vec<u8>>,
 }
 
+#[derive(Clone, Copy)]
+pub struct ReplayContext {
+    pub slot: Slot,
+    pub index: u32,
+    pub persist: bool,
+}
+
 /// An enum that specifies how a transaction should be processed by the scheduler.
 ///
 /// Variants that require result notification carry a one-shot sender:
@@ -90,7 +97,7 @@ pub enum TransactionProcessingMode {
     /// The `bool` flag controls ledger persistence:
     /// - `true`: record to ledger and broadcast status (for replay from primary)
     /// - `false`: no recording, no broadcast (for local ledger replay during startup)
-    Replay(bool),
+    Replay(ReplayContext),
 }
 
 /// The detailed outcome of a transaction simulation.
@@ -267,10 +274,10 @@ impl TransactionSchedulerHandle {
     /// * `txn` - The transaction to replay
     pub async fn replay(
         &self,
-        persist: bool,
+        context: ReplayContext,
         txn: impl SanitizeableTransaction,
     ) -> TransactionResult {
-        let mode = TransactionProcessingMode::Replay(persist);
+        let mode = TransactionProcessingMode::Replay(context);
         let transaction = txn.sanitize(true)?;
         let txn = ProcessableTransaction {
             transaction,

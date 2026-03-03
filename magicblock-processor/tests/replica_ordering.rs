@@ -9,6 +9,7 @@ use std::{
 };
 
 use guinea::GuineaInstruction;
+use magicblock_core::link::transactions::ReplayContext;
 use solana_account::ReadableAccount;
 use solana_program::{
     instruction::{AccountMeta, Instruction},
@@ -124,9 +125,14 @@ async fn submit_all_and_start(
     let sigs: Vec<Signature> = txs.iter().map(|tx| tx.signatures[0]).collect();
 
     // Submit all transactions sequentially to preserve order
-    for tx in txs {
+    for (i, tx) in txs.into_iter().enumerate() {
+        let ctx = ReplayContext {
+            slot: env.accountsdb.slot(),
+            index: i as u32,
+            persist: true,
+        };
         env.transaction_scheduler
-            .replay(true, tx)
+            .replay(ctx, tx)
             .await
             .expect("Failed to submit transaction");
     }

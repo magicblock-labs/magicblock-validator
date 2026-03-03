@@ -3,7 +3,7 @@ use std::{
     fmt, fs,
     path::{Path, PathBuf},
     sync::{
-        atomic::{AtomicI64, AtomicU32, Ordering},
+        atomic::{AtomicI64, Ordering},
         Arc, RwLock,
     },
 };
@@ -15,7 +15,6 @@ use magicblock_metrics::metrics::{
     HistogramTimer,
 };
 use rocksdb::{Direction as IteratorDirection, FlushOptions};
-use scc::HashCache;
 use solana_clock::{Slot, UnixTimestamp};
 use solana_hash::{Hash, HASH_BYTES};
 use solana_measure::measure::Measure;
@@ -74,7 +73,6 @@ pub struct Ledger {
     lowest_cleanup_slot: RwLock<Slot>,
     rpc_api_metrics: LedgerRpcApiMetrics,
     latest_block: LatestBlock,
-    block_txn_indexes: HashCache<Slot, AtomicU32>,
 }
 
 impl fmt::Display for Ledger {
@@ -169,7 +167,6 @@ impl Ledger {
             lowest_cleanup_slot: RwLock::<Slot>::default(),
             rpc_api_metrics: LedgerRpcApiMetrics::default(),
             latest_block,
-            block_txn_indexes: HashCache::default(),
         };
         let (slot, blockhash) = ledger.get_max_blockhash()?;
         let time = ledger.get_block_time(slot)?.unwrap_or_default();
@@ -333,7 +330,6 @@ impl Ledger {
         self.blockhash_cf.put(slot, &blockhash)?;
         self.blockhash_cf.try_increase_entry_counter(1);
         self.latest_block.store(slot, blockhash, timestamp);
-        let _ = self.block_txn_indexes.put(slot, AtomicU32::new(0));
         Ok(())
     }
 
@@ -873,14 +869,16 @@ impl Ledger {
         &self,
         signature: Signature,
         slot: Slot,
+        index: u32,
         transaction: &SanitizedTransaction,
         status: TransactionStatusMeta,
-    ) -> LedgerResult<u32> {
+    ) -> LedgerResult<()> {
         let tx_account_locks = transaction.get_account_locks_unchecked();
 
         // 1. Write Transaction Status
-        let index = self.write_transaction_status(
+        self.write_transaction_status(
             slot,
+            index,
             signature,
             tx_account_locks.writable,
             tx_account_locks.readonly,
@@ -895,7 +893,7 @@ impl Ledger {
             .put_protobuf((signature, slot), &transaction)?;
         self.transaction_cf.try_increase_entry_counter(1);
 
-        Ok(index)
+        Ok(())
     }
 
     pub fn read_transaction(
@@ -1002,35 +1000,28 @@ impl Ledger {
     fn write_transaction_status(
         &self,
         slot: Slot,
+        index: u32,
         signature: Signature,
         writable_keys: Vec<&Pubkey>,
         readonly_keys: Vec<&Pubkey>,
         status: TransactionStatusMeta,
-    ) -> LedgerResult<u32> {
-        let transaction_slot_index = self
-            .block_txn_indexes
-            .entry(slot)
-            .or_default()
-            .1
-            .fetch_add(1, Ordering::Relaxed);
-
+    ) -> LedgerResult<()> {
         for address in writable_keys {
             self.address_signatures_cf.put(
-                (*address, slot, transaction_slot_index, signature),
+                (*address, slot, index, signature),
                 &AddressSignatureMeta { writeable: true },
             )?;
             self.address_signatures_cf.try_increase_entry_counter(1);
         }
         for address in readonly_keys {
             self.address_signatures_cf.put(
-                (*address, slot, transaction_slot_index, signature),
+                (*address, slot, index, signature),
                 &AddressSignatureMeta { writeable: false },
             )?;
             self.address_signatures_cf.try_increase_entry_counter(1);
         }
 
-        self.slot_signatures_cf
-            .put((slot, transaction_slot_index), &signature)?;
+        self.slot_signatures_cf.put((slot, index), &signature)?;
         self.slot_signatures_cf.try_increase_entry_counter(1);
 
         let status = status.into();
@@ -1049,8 +1040,7 @@ impl Ledger {
                 1,
             );
         }
-
-        Ok(transaction_slot_index)
+        Ok(())
     }
 
     /// Returns an iterator over all transaction statuses.
@@ -1535,6 +1525,7 @@ mod tests {
             assert!(store
                 .write_transaction_status(
                     slot,
+                    0,
                     signature,
                     keys_as_ref!(writable_keys),
                     keys_as_ref!(readonly_keys),
@@ -1559,6 +1550,7 @@ mod tests {
             assert!(store
                 .write_transaction_status(
                     slot,
+                    0,
                     signature,
                     keys_as_ref!(writable_keys),
                     keys_as_ref!(readonly_keys),
@@ -1596,6 +1588,7 @@ mod tests {
         assert!(store
             .write_transaction_status(
                 slot_uno,
+                0,
                 sig_uno,
                 keys_as_ref!(writable_keys),
                 keys_as_ref!(readonly_keys),
@@ -1625,6 +1618,7 @@ mod tests {
         assert!(store
             .write_transaction_status(
                 slot_dos,
+                0,
                 sig_dos,
                 keys_as_ref!(writable_keys),
                 keys_as_ref!(readonly_keys),
@@ -1693,6 +1687,7 @@ mod tests {
             .write_transaction(
                 sig_uno,
                 slot_uno,
+                0,
                 &sanitized_uno,
                 tx_uno.tx_with_meta.get_status_meta().unwrap(),
             )
@@ -1719,6 +1714,7 @@ mod tests {
             .write_transaction(
                 sig_dos,
                 slot_dos,
+                0,
                 &sanitized_dos,
                 tx_dos.tx_with_meta.get_status_meta().unwrap(),
             )
@@ -1755,6 +1751,7 @@ mod tests {
             assert!(store
                 .write_transaction_status(
                     slot_uno,
+                    0,
                     signature_uno,
                     keys_as_ref!(writable_keys),
                     keys_as_ref!(readonly_keys),
@@ -1779,6 +1776,7 @@ mod tests {
             assert!(store
                 .write_transaction_status(
                     slot_dos,
+                    0,
                     signature_dos,
                     keys_as_ref!(writable_keys),
                     keys_as_ref!(readonly_keys),
@@ -1796,6 +1794,7 @@ mod tests {
             assert!(store
                 .write_transaction_status(
                     slot_dos,
+                    1,
                     signature_dos_2,
                     keys_as_ref!(writable_keys),
                     keys_as_ref!(readonly_keys),
@@ -1823,6 +1822,7 @@ mod tests {
             assert!(store
                 .write_transaction_status(
                     slot_tres,
+                    0,
                     signature_tres,
                     keys_as_ref!(writable_keys),
                     keys_as_ref!(readonly_keys),
@@ -1844,6 +1844,7 @@ mod tests {
             assert!(store
                 .write_transaction_status(
                     slot_cuatro,
+                    0,
                     signature_cuatro,
                     keys_as_ref!(writable_keys),
                     keys_as_ref!(readonly_keys),
@@ -1865,6 +1866,7 @@ mod tests {
             assert!(store
                 .write_transaction_status(
                     slot_cinco,
+                    1,
                     signature_cinco,
                     keys_as_ref!(writable_keys),
                     keys_as_ref!(readonly_keys),
@@ -1888,6 +1890,7 @@ mod tests {
             assert!(store
                 .write_transaction_status(
                     slot_seis,
+                    0,
                     signature_seis,
                     keys_as_ref!(writable_keys),
                     keys_as_ref!(readonly_keys),
@@ -2122,6 +2125,7 @@ mod tests {
         let sig8 = Signature::new_unique();
 
         let mut current_slot = 0;
+        let mut current_index = 0;
         let read_uno = {
             let (meta, writable_keys, readonly_keys) =
                 create_transaction_status_meta(5);
@@ -2141,16 +2145,19 @@ mod tests {
             ] {
                 if *slot != current_slot {
                     current_slot = *slot;
+                    current_index = 0;
                 }
                 assert!(store
                     .write_transaction_status(
                         *slot,
+                        current_index,
                         *signature,
                         keys_as_ref!(writable_keys.clone()),
                         keys_as_ref!(readonly_keys.clone()),
                         meta.clone(),
                     )
                     .is_ok());
+                current_index += 1;
             }
 
             read_uno
@@ -2358,6 +2365,7 @@ mod tests {
                 .write_transaction(
                     sig_uno,
                     slot_uno,
+                    0,
                     &sanitized_uno,
                     tx_uno.tx_with_meta.get_status_meta().unwrap(),
                 )
@@ -2381,6 +2389,7 @@ mod tests {
                 .write_transaction(
                     sig_dos,
                     slot_dos,
+                    0,
                     &sanitized_dos,
                     tx_dos.tx_with_meta.get_status_meta().unwrap(),
                 )
