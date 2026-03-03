@@ -1482,21 +1482,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "dlp-api"
-version = "0.1.0"
-dependencies = [
- "bincode",
- "borsh 1.6.0",
- "libsodium-rs",
- "magicblock-delegation-program",
- "rand 0.8.5",
- "serde",
- "solana-program",
- "solana-sdk",
- "thiserror 2.0.18",
-]
-
-[[package]]
 name = "dtor"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3286,7 +3271,6 @@ dependencies = [
  "assert_matches",
  "async-trait",
  "bincode",
- "dlp-api",
  "futures-util",
  "helius-laserstream",
  "lru 0.16.2",
@@ -3295,6 +3279,7 @@ dependencies = [
  "magicblock-config",
  "magicblock-core",
  "magicblock-delegation-program",
+ "magicblock-delegation-program-api",
  "magicblock-magic-program-api",
  "magicblock-metrics",
  "parking_lot",
@@ -3355,13 +3340,13 @@ dependencies = [
  "base64 0.21.7",
  "bincode",
  "borsh 1.6.0",
- "dlp-api",
  "dyn-clone",
  "futures-util",
  "lazy_static",
  "lru 0.16.2",
  "magicblock-committor-program",
  "magicblock-delegation-program",
+ "magicblock-delegation-program-api",
  "magicblock-metrics",
  "magicblock-program",
  "magicblock-rpc-client",
@@ -3467,6 +3452,21 @@ dependencies = [
  "static_assertions",
  "strum 0.27.2",
  "thiserror 2.0.18",
+]
+
+[[package]]
+name = "magicblock-delegation-program-api"
+version = "0.1.0"
+dependencies = [
+ "bincode",
+ "borsh 1.6.0",
+ "libsodium-rs",
+ "magicblock-delegation-program",
+ "rand 0.8.5",
+ "serde",
+ "solana-program",
+ "solana-sdk",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -3729,8 +3729,8 @@ dependencies = [
 name = "magicblock-validator-admin"
 version = "0.8.2"
 dependencies = [
- "dlp-api",
  "magicblock-delegation-program",
+ "magicblock-delegation-program-api",
  "magicblock-program",
  "magicblock-rpc-client",
  "solana-commitment-config",

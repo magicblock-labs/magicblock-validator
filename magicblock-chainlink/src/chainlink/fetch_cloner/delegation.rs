@@ -1,16 +1,14 @@
 use dlp::{
-    args::{
-        MaybeEncryptedAccountMeta, MaybeEncryptedPubkey, PostDelegationActions,
-    },
+    args::PostDelegationActions,
     pda::delegation_record_pda_from_delegated_account,
     state::DelegationRecord,
 };
 use dlp_api::decrypt::Decrypt;
+use dlp_api::encryption::KEY_LEN;
 use magicblock_accounts_db::traits::AccountsBank;
 use magicblock_core::token_programs::EATA_PROGRAM_ID;
 use magicblock_metrics::metrics;
 use solana_account::ReadableAccount;
-use solana_instruction::{AccountMeta, Instruction};
 use solana_keypair::Keypair;
 use solana_program::program_error::ProgramError;
 use solana_pubkey::Pubkey;
@@ -84,15 +82,16 @@ fn parse_post_delegation_actions(
             )
         })?;
 
-    let instructions = actions
-        .decrypt_with_keypair(validator_keypair.unwrap())
-        .map_err(|err| {
-            ChainlinkError::InvalidDelegationActions(
-                delegation_record_pubkey,
-                "Encrypted pubkey present but validator keypair is unavailable"
-                    .to_string(),
-            )
-        })?;
+    let instructions = match validator_keypair {
+        Some(keypair) => actions.decrypt_with_keypair(keypair),
+        None => actions.decrypt(&[0; KEY_LEN], &[0; KEY_LEN]),
+    }
+    .map_err(|err| {
+        ChainlinkError::InvalidDelegationActions(
+            delegation_record_pubkey,
+            format!("Failed to parse/decrypt PostDelegationActions: {err}"),
+        )
+    })?;
 
     Ok(instructions.into())
 }

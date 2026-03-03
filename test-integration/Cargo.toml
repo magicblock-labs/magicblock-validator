@@ -63,7 +63,7 @@ magicblock_magic_program_api = { package = "magicblock-magic-program-api", path 
 magicblock-delegation-program = { path = "../../delegation-program", features = [
   "no-entrypoint",
 ] }
-dlp-api = { path = "../../delegation-program/dlp-api" }
+dlp-api = { package = "magicblock-delegation-program-api", path = "../../delegation-program/dlp-api" }
 magicblock-program = { path = "../programs/magicblock" }
 magicblock-rpc-client = { path = "../magicblock-rpc-client" }
 magicblock-table-mania = { path = "../magicblock-table-mania" }
