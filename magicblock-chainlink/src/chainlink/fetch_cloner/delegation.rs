@@ -1,7 +1,6 @@
 use dlp::{
     args::PostDelegationActions,
-    pda::delegation_record_pda_from_delegated_account,
-    state::DelegationRecord,
+    pda::delegation_record_pda_from_delegated_account, state::DelegationRecord,
 };
 use dlp_api::decrypt::Decrypt;
 use dlp_api::encryption::KEY_LEN;
@@ -222,6 +221,7 @@ mod tests {
         EncryptedBuffer, MaybeEncryptedAccountMeta, MaybeEncryptedInstruction,
         MaybeEncryptedIxData, PostDelegationActions,
     };
+    use solana_instruction::Instruction;
     use solana_program::pubkey::Pubkey;
     use solana_signer::Signer;
 

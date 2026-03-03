@@ -1609,21 +1609,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "dlp-api"
-version = "0.1.0"
-dependencies = [
- "bincode",
- "borsh 1.6.0",
- "libsodium-rs",
- "magicblock-delegation-program 1.1.3",
- "rand 0.8.5",
- "serde",
- "solana-program",
- "solana-sdk",
- "thiserror 2.0.18",
-]
-
-[[package]]
 name = "downcast"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2984,10 +2969,10 @@ dependencies = [
  "anyhow",
  "borsh 1.6.0",
  "color-backtrace",
- "dlp-api",
  "magicblock-config",
  "magicblock-core",
  "magicblock-delegation-program 1.1.3",
+ "magicblock-delegation-program-api",
  "random-port",
  "rayon",
  "serde",
@@ -3608,7 +3593,6 @@ dependencies = [
  "arc-swap",
  "async-trait",
  "bincode",
- "dlp-api",
  "futures-util",
  "helius-laserstream",
  "lru",
@@ -3616,6 +3600,7 @@ dependencies = [
  "magicblock-config",
  "magicblock-core",
  "magicblock-delegation-program 1.1.3",
+ "magicblock-delegation-program-api",
  "magicblock-magic-program-api 0.8.2",
  "magicblock-metrics",
  "parking_lot",
@@ -3676,12 +3661,12 @@ dependencies = [
  "base64 0.21.7",
  "bincode",
  "borsh 1.6.0",
- "dlp-api",
  "dyn-clone",
  "futures-util",
  "lru",
  "magicblock-committor-program",
  "magicblock-delegation-program 1.1.3",
+ "magicblock-delegation-program-api",
  "magicblock-metrics",
  "magicblock-program",
  "magicblock-rpc-client",
@@ -3793,6 +3778,21 @@ dependencies = [
  "num_enum",
  "solana-program",
  "static_assertions",
+]
+
+[[package]]
+name = "magicblock-delegation-program-api"
+version = "0.1.0"
+dependencies = [
+ "bincode",
+ "borsh 1.6.0",
+ "libsodium-rs",
+ "magicblock-delegation-program 1.1.3",
+ "rand 0.8.5",
+ "serde",
+ "solana-program",
+ "solana-sdk",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -4015,8 +4015,8 @@ dependencies = [
 name = "magicblock-validator-admin"
 version = "0.8.2"
 dependencies = [
- "dlp-api",
  "magicblock-delegation-program 1.1.3",
+ "magicblock-delegation-program-api",
  "magicblock-program",
  "magicblock-rpc-client",
  "solana-commitment-config",
@@ -4978,9 +4978,9 @@ name = "program-schedulecommit"
 version = "0.0.0"
 dependencies = [
  "borsh 1.6.0",
- "dlp-api",
  "ephemeral-rollups-sdk",
  "magicblock-delegation-program 1.1.3",
+ "magicblock-delegation-program-api",
  "magicblock-magic-program-api 0.8.2",
  "rkyv 0.7.45",
  "solana-program",
@@ -5993,11 +5993,11 @@ version = "0.0.0"
 dependencies = [
  "async-trait",
  "borsh 1.6.0",
- "dlp-api",
  "futures",
  "magicblock-committor-program",
  "magicblock-committor-service",
  "magicblock-delegation-program 1.1.3",
+ "magicblock-delegation-program-api",
  "magicblock-program",
  "magicblock-rpc-client",
  "magicblock-table-mania",
@@ -10280,12 +10280,12 @@ name = "test-chainlink"
 version = "0.0.0"
 dependencies = [
  "bincode",
- "dlp-api",
  "futures",
  "integration-test-tools",
  "magicblock-chainlink",
  "magicblock-config",
  "magicblock-delegation-program 1.1.3",
+ "magicblock-delegation-program-api",
  "program-flexi-counter",
  "program-mini",
  "solana-account",
@@ -10308,11 +10308,14 @@ name = "test-cloning"
 version = "0.0.0"
 dependencies = [
  "integration-test-tools",
+ "magicblock-delegation-program 1.1.3",
+ "magicblock-delegation-program-api",
  "program-flexi-counter",
  "program-mini",
  "solana-loader-v4-interface",
  "solana-sdk",
  "spl-memo-interface",
+ "spl-token",
  "test-chainlink",
  "test-kit",
  "tokio",
@@ -10384,7 +10387,6 @@ name = "test-magicblock-api"
 version = "0.0.0"
 dependencies = [
  "cleanass",
- "dlp-api",
  "integration-test-tools",
  "isocountry",
  "lazy_static",
@@ -10392,6 +10394,7 @@ dependencies = [
  "magicblock-api",
  "magicblock-config",
  "magicblock-delegation-program 1.1.3",
+ "magicblock-delegation-program-api",
  "magicblock-program",
  "magicblock-validator-admin",
  "solana-rpc-client",
@@ -10430,9 +10433,9 @@ dependencies = [
 name = "test-schedule-intent"
 version = "0.0.0"
 dependencies = [
- "dlp-api",
  "integration-test-tools",
  "magicblock-delegation-program 1.1.3",
+ "magicblock-delegation-program-api",
  "program-flexi-counter",
  "solana-rpc-client-api",
  "solana-sdk",
