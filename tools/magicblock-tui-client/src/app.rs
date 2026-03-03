@@ -679,6 +679,9 @@ async fn fetch_transaction_detail(
     let success = meta.map(|m| m.err.is_none()).unwrap_or(true);
     let error = meta.and_then(|m| m.err.as_ref()).map(|e| format!("{}", e));
 
+    let accounts = tx.transaction.message.account_keys;
+    let selected_account = if accounts.is_empty() { None } else { Some(0) };
+
     Ok(TransactionDetail {
         signature: signature.to_string(),
         slot: tx.slot,
@@ -688,10 +691,10 @@ async fn fetch_transaction_detail(
         logs: meta
             .and_then(|m| m.log_messages.clone())
             .unwrap_or_default(),
-        accounts: tx.transaction.message.account_keys,
+        accounts,
         error,
         explorer_url: build_explorer_url(rpc_url, signature),
-        explorer_selected: false,
+        selected_account,
     })
 }
 
@@ -711,7 +714,7 @@ fn build_failed_tx_detail(
         accounts: vec![],
         error: Some(error),
         explorer_url,
-        explorer_selected: false,
+        selected_account: None,
     }
 }
 
