@@ -115,7 +115,11 @@ async fn test_subs_receive_out_of_order_updates() {
     // 5. Now send an update from a lower slot (state 5 at slot 2)
     // This should be rejected since we have a newer slot (4)
     rpc_client.set_slot(2);
-    debug!(update_number = 5, slot = 2, "Sending update from lower slot");
+    debug!(
+        update_number = 5,
+        slot = 2,
+        "Sending update from lower slot"
+    );
     ctx.send_and_receive_account_update(pubkey, acc_state_5.clone(), None)
         .await;
     let acc = cloner
