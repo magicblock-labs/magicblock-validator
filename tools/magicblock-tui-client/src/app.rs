@@ -490,11 +490,28 @@ struct BlockTransactionWithMeta {
 #[derive(Debug, Deserialize)]
 struct BlockTransaction {
     signatures: Vec<String>,
+    message: BlockTransactionMessage,
+}
+
+#[derive(Debug, Deserialize)]
+struct BlockTransactionMessage {
+    #[serde(default, rename = "accountKeys")]
+    account_keys: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
 struct BlockTransactionMeta {
     err: Option<serde_json::Value>,
+    #[serde(rename = "loadedAddresses")]
+    loaded_addresses: Option<LoadedAddresses>,
+}
+
+#[derive(Debug, Deserialize)]
+struct LoadedAddresses {
+    #[serde(default)]
+    writable: Vec<String>,
+    #[serde(default)]
+    readonly: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -679,6 +696,9 @@ async fn fetch_transaction_detail(
     let success = meta.map(|m| m.err.is_none()).unwrap_or(true);
     let error = meta.and_then(|m| m.err.as_ref()).map(|e| format!("{}", e));
 
+    let accounts = tx.transaction.message.account_keys;
+    let selected_account = if accounts.is_empty() { None } else { Some(0) };
+
     Ok(TransactionDetail {
         signature: signature.to_string(),
         slot: tx.slot,
@@ -688,10 +708,10 @@ async fn fetch_transaction_detail(
         logs: meta
             .and_then(|m| m.log_messages.clone())
             .unwrap_or_default(),
-        accounts: tx.transaction.message.account_keys,
+        accounts,
         error,
         explorer_url: build_explorer_url(rpc_url, signature),
-        explorer_selected: false,
+        selected_account,
     })
 }
 
@@ -711,7 +731,7 @@ fn build_failed_tx_detail(
         accounts: vec![],
         error: Some(error),
         explorer_url,
-        explorer_selected: false,
+        selected_account: None,
     }
 }
 
@@ -794,12 +814,21 @@ async fn fetch_block_transactions(
         .into_iter()
         .filter_map(|tx| {
             let signature = tx.transaction.signatures.into_iter().next()?;
-            let success = tx.meta.map(|m| m.err.is_none()).unwrap_or(true);
+            let mut accounts = tx.transaction.message.account_keys;
+            let success =
+                tx.meta.as_ref().map(|m| m.err.is_none()).unwrap_or(true);
+            if let Some(loaded_addresses) =
+                tx.meta.and_then(|m| m.loaded_addresses)
+            {
+                accounts.extend(loaded_addresses.writable);
+                accounts.extend(loaded_addresses.readonly);
+            }
             Some(TransactionEntry {
                 signature,
                 slot,
                 success,
                 timestamp,
+                accounts,
             })
         })
         .collect();

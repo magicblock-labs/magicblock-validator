@@ -2,7 +2,10 @@ use std::time::Duration;
 
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
 
-use crate::state::{Tab, TuiState, ViewMode};
+use crate::{
+    state::{Tab, TuiState, ViewMode},
+    utils::url_encode,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EventAction {
@@ -46,20 +49,25 @@ fn handle_key(
             }
             KeyCode::Enter => {
                 if let Some(detail) = &state.tx_detail {
-                    if detail.explorer_selected {
-                        let url = detail.explorer_url.clone();
-                        state.close_tx_detail();
-                        return EventAction::OpenUrl(url);
-                    }
+                    let url = match detail.selected_account_address() {
+                        Some(account) => {
+                            build_account_explorer_url(&state.rpc_url, account)
+                        }
+                        None => detail.explorer_url.clone(),
+                    };
+                    state.close_tx_detail();
+                    return EventAction::OpenUrl(url);
                 }
                 state.close_tx_detail();
             }
-            KeyCode::Up
-            | KeyCode::Down
-            | KeyCode::Char('k')
-            | KeyCode::Char('j') => {
+            KeyCode::Up | KeyCode::Char('k') => {
                 if let Some(detail) = &mut state.tx_detail {
-                    detail.explorer_selected = !detail.explorer_selected;
+                    detail.move_selection_up();
+                }
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                if let Some(detail) = &mut state.tx_detail {
+                    detail.move_selection_down();
                 }
             }
             _ => {}
@@ -67,11 +75,65 @@ fn handle_key(
         return EventAction::None;
     }
 
-    match key.code {
-        KeyCode::Esc | KeyCode::Char('q') => state.should_quit = true,
-        KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            state.should_quit = true;
+    if matches!(
+        key,
+        KeyEvent {
+            code: KeyCode::Esc,
+            ..
         }
+    ) {
+        state.should_quit = true;
+        return EventAction::None;
+    }
+
+    if matches!(
+        key,
+        KeyEvent {
+            code: KeyCode::Char('c'),
+            modifiers,
+            ..
+        } if modifiers.contains(KeyModifiers::CONTROL)
+    ) {
+        state.should_quit = true;
+        return EventAction::None;
+    }
+
+    if state.active_tab == Tab::Transactions {
+        match key {
+            KeyEvent {
+                code: KeyCode::Backspace,
+                modifiers,
+                ..
+            } if !modifiers.contains(KeyModifiers::CONTROL)
+                && !modifiers.contains(KeyModifiers::ALT) =>
+            {
+                state.pop_tx_filter_char();
+                return EventAction::None;
+            }
+            KeyEvent {
+                code: KeyCode::Char('u'),
+                modifiers,
+                ..
+            } if modifiers.contains(KeyModifiers::CONTROL) => {
+                state.clear_tx_filter();
+                return EventAction::None;
+            }
+            KeyEvent {
+                code: KeyCode::Char(ch),
+                modifiers,
+                ..
+            } if !modifiers.contains(KeyModifiers::CONTROL)
+                && !modifiers.contains(KeyModifiers::ALT) =>
+            {
+                state.append_tx_filter_char(ch);
+                return EventAction::None;
+            }
+            _ => {}
+        }
+    }
+
+    match key.code {
+        KeyCode::Char('q') => state.should_quit = true,
         KeyCode::Enter => {
             if state.active_tab == Tab::Transactions {
                 if let Some(tx) = state.selected_transaction() {
@@ -120,10 +182,11 @@ fn handle_key(
                     state.logs.len().saturating_sub(visible_height);
             }
             Tab::Transactions => {
-                if !state.transactions.is_empty() {
-                    state.selected_tx = state.transactions.len() - 1;
+                let filtered_len = state.filtered_transactions_len();
+                if filtered_len > 0 {
+                    state.selected_tx = filtered_len - 1;
                     state.tx_scroll =
-                        state.transactions.len().saturating_sub(visible_height);
+                        filtered_len.saturating_sub(visible_height);
                 }
             }
             Tab::Config => {}
@@ -134,12 +197,20 @@ fn handle_key(
     EventAction::None
 }
 
+fn build_account_explorer_url(rpc_url: &str, account: &str) -> String {
+    let encoded_rpc = url_encode(rpc_url);
+    format!(
+        "https://explorer.solana.com/address/{}?cluster=custom&customUrl={}",
+        account, encoded_rpc
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 
     use super::{handle_event, EventAction};
-    use crate::state::{TransactionDetail, TuiConfig, TuiState, ViewMode};
+    use crate::state::{Tab, TransactionDetail, TuiConfig, TuiState, ViewMode};
 
     fn config() -> TuiConfig {
         TuiConfig {
@@ -174,7 +245,7 @@ mod tests {
             accounts: vec![],
             error: None,
             explorer_url: "https://example.com".to_string(),
-            explorer_selected: false,
+            selected_account: None,
         });
 
         let action = handle_event(&mut state, ctrl_c(), 10);
@@ -193,5 +264,134 @@ mod tests {
         let _ = handle_event(&mut state, ctrl_c(), 10);
 
         assert!(state.should_quit);
+    }
+
+    #[test]
+    fn enter_opens_selected_account_explorer() {
+        let mut state = TuiState::new(config());
+        state.show_tx_detail(TransactionDetail {
+            signature: "sig".to_string(),
+            slot: 1,
+            success: true,
+            fee: 0,
+            compute_units: None,
+            logs: vec![],
+            accounts: vec!["11111111111111111111111111111111".to_string()],
+            error: None,
+            explorer_url: "https://explorer.solana.com/tx/sig".to_string(),
+            selected_account: Some(0),
+        });
+
+        let action = handle_event(
+            &mut state,
+            Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+            10,
+        );
+
+        match action {
+            EventAction::OpenUrl(url) => {
+                assert!(
+                    url.contains("/address/11111111111111111111111111111111")
+                );
+            }
+            other => panic!("expected OpenUrl action, got {:?}", other),
+        }
+        assert!(matches!(state.view_mode, ViewMode::List));
+        assert!(state.tx_detail.is_none());
+    }
+
+    #[test]
+    fn detail_navigation_cycles_between_accounts_and_explorer() {
+        let mut state = TuiState::new(config());
+        state.show_tx_detail(TransactionDetail {
+            signature: "sig".to_string(),
+            slot: 1,
+            success: true,
+            fee: 0,
+            compute_units: None,
+            logs: vec![],
+            accounts: vec!["acc-1".to_string(), "acc-2".to_string()],
+            error: None,
+            explorer_url: "https://explorer.solana.com/tx/sig".to_string(),
+            selected_account: Some(0),
+        });
+
+        let _ = handle_event(
+            &mut state,
+            Event::Key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE)),
+            10,
+        );
+        assert_eq!(
+            state.tx_detail.as_ref().and_then(|d| d.selected_account),
+            Some(1)
+        );
+
+        let _ = handle_event(
+            &mut state,
+            Event::Key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE)),
+            10,
+        );
+        assert_eq!(
+            state.tx_detail.as_ref().and_then(|d| d.selected_account),
+            None
+        );
+
+        let _ = handle_event(
+            &mut state,
+            Event::Key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE)),
+            10,
+        );
+        assert_eq!(
+            state.tx_detail.as_ref().and_then(|d| d.selected_account),
+            Some(1)
+        );
+    }
+
+    #[test]
+    fn typing_in_transactions_updates_filter() {
+        let mut state = TuiState::new(config());
+        state.active_tab = Tab::Transactions;
+
+        let _ = handle_event(
+            &mut state,
+            Event::Key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE)),
+            10,
+        );
+
+        assert_eq!(state.tx_filter_query(), "q");
+        assert!(!state.should_quit);
+    }
+
+    #[test]
+    fn backspace_and_ctrl_u_edit_transaction_filter() {
+        let mut state = TuiState::new(config());
+        state.active_tab = Tab::Transactions;
+
+        let _ = handle_event(
+            &mut state,
+            Event::Key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE)),
+            10,
+        );
+        let _ = handle_event(
+            &mut state,
+            Event::Key(KeyEvent::new(KeyCode::Char('b'), KeyModifiers::NONE)),
+            10,
+        );
+        let _ = handle_event(
+            &mut state,
+            Event::Key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE)),
+            10,
+        );
+        assert_eq!(state.tx_filter_query(), "a");
+
+        let _ = handle_event(
+            &mut state,
+            Event::Key(KeyEvent::new(
+                KeyCode::Char('u'),
+                KeyModifiers::CONTROL,
+            )),
+            10,
+        );
+        assert_eq!(state.tx_filter_query(), "");
     }
 }

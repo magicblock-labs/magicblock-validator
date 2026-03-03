@@ -7,7 +7,7 @@ use ratatui::{
 };
 use tracing::Level;
 
-use crate::state::{Tab, TuiState, ViewMode};
+use crate::state::{Tab, TuiState, ViewMode, MAX_DETAIL_ACCOUNTS};
 
 const CYAN: Color = Color::Cyan;
 const GREEN: Color = Color::Green;
@@ -89,11 +89,13 @@ fn render_tick_bar(filled: usize, total: usize) -> Line<'static> {
 
 fn render_tabs(frame: &mut Frame, area: Rect, state: &TuiState) {
     let tx_count = state.transactions.len();
-    let titles = vec![
-        format!("Transactions ({})", tx_count),
-        "Logs".to_string(),
-        "Config".to_string(),
-    ];
+    let filtered_tx_count = state.filtered_transactions_len();
+    let tx_title = if state.tx_filter_query().is_empty() {
+        format!("Transactions ({})", tx_count)
+    } else {
+        format!("Transactions ({}/{})", filtered_tx_count, tx_count)
+    };
+    let titles = vec![tx_title, "Logs".to_string(), "Config".to_string()];
 
     let selected = match state.active_tab {
         Tab::Transactions => 0,
@@ -162,62 +164,97 @@ fn render_logs(frame: &mut Frame, area: Rect, state: &TuiState) {
 }
 
 fn render_transactions(frame: &mut Frame, area: Rect, state: &TuiState) {
-    let visible_count = area.height.saturating_sub(2) as usize;
+    let tx_chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(1), Constraint::Min(0)])
+        .split(area);
 
-    let items: Vec<ListItem> = state
-        .transactions
-        .iter()
-        .enumerate()
-        .skip(state.tx_scroll)
-        .take(visible_count)
-        .map(|(idx, tx)| {
-            let timestamp = tx.timestamp.format("%H:%M:%S%.3f");
-            let status_color =
-                if tx.success { Color::Green } else { Color::Red };
-            let status_char = if tx.success { "✓" } else { "✗" };
-            let is_selected = idx == state.selected_tx;
+    let filter_text = if state.tx_filter_query().is_empty() {
+        "<type to filter by signature or account pubkey>"
+    } else {
+        state.tx_filter_query()
+    };
+    let filter_color = if state.tx_filter_query().is_empty() {
+        DARK_GRAY
+    } else {
+        CYAN
+    };
+    let filter_line = Line::from(vec![
+        Span::styled("Filter: ", Style::default().fg(DARK_GRAY)),
+        Span::styled(filter_text, Style::default().fg(filter_color)),
+    ]);
+    frame.render_widget(Paragraph::new(filter_line), tx_chunks[0]);
 
-            let line = Line::from(vec![
-                Span::styled(
-                    if is_selected { "▶ " } else { "  " },
-                    Style::default().fg(CYAN),
-                ),
-                Span::styled(
-                    format!("{} ", timestamp),
-                    Style::default().fg(if is_selected {
-                        WHITE
-                    } else {
-                        DARK_GRAY
-                    }),
-                ),
-                Span::styled(status_char, Style::default().fg(status_color)),
-                Span::raw(" "),
-                Span::styled(
-                    format!("Slot {} ", tx.slot),
-                    Style::default().fg(if is_selected {
-                        WHITE
-                    } else {
-                        DARK_GRAY
-                    }),
-                ),
-                Span::styled(
-                    &tx.signature,
-                    Style::default().fg(if is_selected { CYAN } else { WHITE }),
-                ),
-            ]);
+    let visible_count = tx_chunks[1].height.saturating_sub(1) as usize;
+    let filtered_transactions = state.filtered_transactions();
 
-            let style = if is_selected {
-                Style::default().bg(Color::Rgb(30, 30, 40))
-            } else {
-                Style::default()
-            };
+    let items: Vec<ListItem> = if filtered_transactions.is_empty() {
+        vec![ListItem::new(Line::from(Span::styled(
+            "No transactions match the current filter",
+            Style::default().fg(DARK_GRAY),
+        )))]
+    } else {
+        filtered_transactions
+            .iter()
+            .enumerate()
+            .skip(state.tx_scroll)
+            .take(visible_count)
+            .map(|(idx, tx)| {
+                let timestamp = tx.timestamp.format("%H:%M:%S%.3f");
+                let status_color =
+                    if tx.success { Color::Green } else { Color::Red };
+                let status_char = if tx.success { "✓" } else { "✗" };
+                let is_selected = idx == state.selected_tx;
 
-            ListItem::new(line).style(style)
-        })
-        .collect();
+                let line = Line::from(vec![
+                    Span::styled(
+                        if is_selected { "▶ " } else { "  " },
+                        Style::default().fg(CYAN),
+                    ),
+                    Span::styled(
+                        format!("{} ", timestamp),
+                        Style::default().fg(if is_selected {
+                            WHITE
+                        } else {
+                            DARK_GRAY
+                        }),
+                    ),
+                    Span::styled(
+                        status_char,
+                        Style::default().fg(status_color),
+                    ),
+                    Span::raw(" "),
+                    Span::styled(
+                        format!("Slot {} ", tx.slot),
+                        Style::default().fg(if is_selected {
+                            WHITE
+                        } else {
+                            DARK_GRAY
+                        }),
+                    ),
+                    Span::styled(
+                        &tx.signature,
+                        Style::default().fg(if is_selected {
+                            CYAN
+                        } else {
+                            WHITE
+                        }),
+                    ),
+                ]);
+
+                let style = if is_selected {
+                    Style::default().bg(Color::Rgb(30, 30, 40))
+                } else {
+                    Style::default()
+                };
+
+                ListItem::new(line).style(style)
+            })
+            .collect()
+    };
 
     let list = List::new(items).block(Block::default().borders(Borders::NONE));
-    frame.render_widget(list, area);
+    frame.render_widget(list, tx_chunks[1]);
 }
 
 fn render_config(frame: &mut Frame, area: Rect, state: &TuiState) {
@@ -303,6 +340,12 @@ fn render_footer(frame: &mut Frame, area: Rect, state: &TuiState) {
             Span::styled(" tabs │ ", Style::default().fg(DARK_GRAY)),
             Span::styled("(↑↓)", Style::default().fg(WHITE)),
             Span::styled(" select │ ", Style::default().fg(DARK_GRAY)),
+            Span::styled("(Type)", Style::default().fg(WHITE)),
+            Span::styled(" filter │ ", Style::default().fg(DARK_GRAY)),
+            Span::styled("(Backspace)", Style::default().fg(WHITE)),
+            Span::styled(" erase │ ", Style::default().fg(DARK_GRAY)),
+            Span::styled("(Ctrl+U)", Style::default().fg(WHITE)),
+            Span::styled(" clear │ ", Style::default().fg(DARK_GRAY)),
             Span::styled("(Enter)", Style::default().fg(WHITE)),
             Span::styled(" details", Style::default().fg(DARK_GRAY)),
         ])
@@ -398,7 +441,8 @@ fn render_tx_detail_popup(frame: &mut Frame, state: &TuiState) {
     }
 
     lines.push(Line::from(""));
-    let explorer_style = if detail.explorer_selected {
+    let explorer_selected = detail.selected_account.is_none();
+    let explorer_style = if explorer_selected {
         Style::default()
             .fg(CYAN)
             .add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
@@ -407,12 +451,8 @@ fn render_tx_detail_popup(frame: &mut Frame, state: &TuiState) {
             .fg(Color::Blue)
             .add_modifier(Modifier::UNDERLINED)
     };
-    let explorer_prefix = if detail.explorer_selected {
-        "▶ "
-    } else {
-        "  "
-    }
-    .to_string();
+    let explorer_prefix =
+        if explorer_selected { "▶ " } else { "  " }.to_string();
     let explorer_label = "Explorer:  ".to_string();
     let explorer_value = truncate_with_ellipsis(
         &detail.explorer_url,
@@ -442,20 +482,44 @@ fn render_tx_detail_popup(frame: &mut Frame, state: &TuiState) {
             "Accounts:",
             Style::default().fg(DARK_GRAY).add_modifier(Modifier::BOLD),
         )));
-        for (i, acc) in detail.accounts.iter().take(10).enumerate() {
-            let prefix = format!("  [{}] ", i);
+        for (i, acc) in
+            detail.accounts.iter().take(MAX_DETAIL_ACCOUNTS).enumerate()
+        {
+            let is_selected = detail.selected_account == Some(i);
+            let prefix = if is_selected {
+                format!("▶ [{}] ", i)
+            } else {
+                format!("  [{}] ", i)
+            };
             let truncated = truncate_with_ellipsis(
                 acc,
                 inner_width.saturating_sub(prefix.chars().count()),
             );
             lines.push(Line::from(vec![
-                Span::styled(prefix, label_style),
-                Span::styled(truncated, Style::default().fg(WHITE)),
+                Span::styled(
+                    prefix,
+                    if is_selected {
+                        Style::default().fg(CYAN)
+                    } else {
+                        label_style
+                    },
+                ),
+                Span::styled(
+                    truncated,
+                    if is_selected {
+                        Style::default().fg(CYAN).add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::default().fg(WHITE)
+                    },
+                ),
             ]));
         }
-        if detail.accounts.len() > 10 {
+        if detail.accounts.len() > MAX_DETAIL_ACCOUNTS {
             lines.push(Line::from(Span::styled(
-                format!("  ... and {} more", detail.accounts.len() - 10),
+                format!(
+                    "  ... and {} more",
+                    detail.accounts.len() - MAX_DETAIL_ACCOUNTS
+                ),
                 Style::default().fg(DARK_GRAY),
             )));
         }
