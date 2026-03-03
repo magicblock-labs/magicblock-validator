@@ -1,9 +1,16 @@
 //! Codec and stream types for length-prefixed bincode framing.
 
+use std::{
+    pin::Pin,
+    task::{Context, Poll},
+};
+
 use bytes::{BufMut, BytesMut};
-use futures::{SinkExt, StreamExt};
+use futures::{SinkExt, Stream, StreamExt};
 use tokio::io::{AsyncRead, AsyncWrite};
-use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
+use tokio_util::codec::{
+    Encoder, FramedRead, FramedWrite, LengthDelimitedCodec,
+};
 
 use crate::{
     error::{Error, Result},
@@ -11,20 +18,20 @@ use crate::{
 };
 
 /// Encodes `Message` with 4-byte LE length prefix.
-pub struct MessageEncoder;
+pub(crate) struct MessageEncoder;
 
 pub(crate) type InputStream<IO> = FramedRead<IO, LengthDelimitedCodec>;
 pub(crate) type OutputStream<IO> = FramedWrite<IO, MessageEncoder>;
 
 const MAX_FRAME_SIZE: usize = 64 * 1024 * 1024;
 
-impl tokio_util::codec::Encoder<Message> for MessageEncoder {
+impl Encoder<&Message> for MessageEncoder {
     type Error = Error;
 
-    fn encode(&mut self, msg: Message, dst: &mut BytesMut) -> Result<()> {
+    fn encode(&mut self, msg: &Message, dst: &mut BytesMut) -> Result<()> {
         let start = dst.len();
         dst.put_u32_le(0);
-        bincode::serialize_into(dst.writer(), &msg)?;
+        bincode::serialize_into(dst.writer(), msg)?;
         let len = dst.len() - start - 4;
         if len > MAX_FRAME_SIZE {
             dst.truncate(start);
@@ -57,6 +64,27 @@ impl<IO: AsyncRead + Unpin> Receiver<IO> {
     }
 }
 
+impl<IO: AsyncRead + Unpin> Stream for Receiver<IO> {
+    type Item = Result<Message>;
+
+    fn poll_next(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Option<Self::Item>> {
+        match self.inner.poll_next_unpin(cx) {
+            Poll::Ready(Some(Ok(item))) => {
+                let result = bincode::deserialize(&item).map_err(Into::into);
+                Poll::Ready(Some(result))
+            }
+            Poll::Ready(Some(Err(err))) => Poll::Ready(Some(Err(err.into()))),
+            Poll::Ready(None) => {
+                Poll::Ready(Some(Err(Error::ConnectionClosed)))
+            }
+            Poll::Pending => Poll::Pending,
+        }
+    }
+}
+
 /// Sends messages to an async stream.
 pub struct Sender<IO> {
     inner: OutputStream<IO>,
@@ -69,7 +97,7 @@ impl<IO: AsyncWrite + Unpin> Sender<IO> {
         }
     }
 
-    pub async fn send(&mut self, msg: Message) -> Result<()> {
+    pub async fn send(&mut self, msg: &Message) -> Result<()> {
         self.inner.send(msg).await?;
         Ok(())
     }

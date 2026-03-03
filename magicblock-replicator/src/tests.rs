@@ -37,7 +37,7 @@ fn variant_order_stability() {
             Message::Transaction(Transaction {
                 slot: 0,
                 index: 0,
-                payload: vec![],
+                payload: vec![].into(),
             }),
             2,
         ),
@@ -172,7 +172,7 @@ async fn bidirectional_handshake() {
     // Client -> Server: handshake request
     let kp = Keypair::new();
     client_tx
-        .send(Message::HandshakeReq(HandshakeRequest::new(1000, &kp)))
+        .send(&Message::HandshakeReq(HandshakeRequest::new(1000, &kp)))
         .await
         .unwrap();
 
@@ -185,7 +185,7 @@ async fn bidirectional_handshake() {
 
     // Server -> Client: handshake response
     server_tx
-        .send(Message::HandshakeResp(HandshakeResponse::new(
+        .send(&Message::HandshakeResp(HandshakeResponse::new(
             Ok(1000),
             &Keypair::new(),
         )))
@@ -214,7 +214,7 @@ async fn message_ordering_over_stream() {
 
     // Send mixed message types
     for i in 0..10 {
-        tx.send(Message::Block(Block {
+        tx.send(&Message::Block(Block {
             slot: i,
             hash: solana_hash::Hash::new_unique(),
         }))
@@ -244,7 +244,7 @@ async fn large_payload() {
     let (_, mut rx) = split(server);
 
     let payload = vec![0xAB; 1024 * 1024]; // 1MB
-    tx.send(Message::Transaction(Transaction {
+    tx.send(&Message::Transaction(Transaction {
         slot: 0,
         index: 0,
         payload: payload.clone(),
@@ -294,7 +294,7 @@ async fn all_message_types_over_wire() {
     ];
 
     for msg in &messages {
-        tx.send(msg.clone()).await.unwrap();
+        tx.send(msg).await.unwrap();
     }
 
     for expected in &messages {
