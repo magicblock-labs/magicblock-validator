@@ -338,7 +338,7 @@ where
             .reset(ResetType::Specific(committed_pubkeys));
         let commit_ids = self
             .task_info_fetcher
-            .fetch_next_commit_ids(committed_pubkeys, min_context_slot)
+            .fetch_next_commit_nonces(committed_pubkeys, min_context_slot)
             .await
             .map_err(TaskBuilderError::CommitTasksBuildError)?;
 

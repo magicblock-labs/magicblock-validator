@@ -137,7 +137,7 @@ async fn test_commit_id_error_parsing() {
 
     // Invalidate ids before execution
     task_info_fetcher
-        .fetch_next_commit_ids(
+        .fetch_next_commit_nonces(
             &intent.get_undelegate_intent_pubkeys().unwrap(),
             remote_slot,
         )
@@ -444,7 +444,7 @@ async fn test_commit_id_error_recovery() {
 
     // Invalidate commit nonce cache
     let res = task_info_fetcher
-        .fetch_next_commit_ids(&[committed_account.pubkey], remote_slot)
+        .fetch_next_commit_nonces(&[committed_account.pubkey], remote_slot)
         .await;
     assert!(res.is_ok());
     assert!(res.unwrap().contains_key(&committed_account.pubkey));
@@ -480,7 +480,7 @@ async fn test_commit_id_error_recovery() {
         .map(|el| {
             (
                 el.pubkey,
-                task_info_fetcher.peek_commit_id(&el.pubkey).unwrap(),
+                task_info_fetcher.peek_commit_nonce(&el.pubkey).unwrap(),
             )
         })
         .collect();
@@ -645,7 +645,7 @@ async fn test_commit_id_and_action_errors_recovery() {
 
     // Invalidate commit nonce cache
     let res = task_info_fetcher
-        .fetch_next_commit_ids(&[committed_account.pubkey], remote_slot)
+        .fetch_next_commit_nonces(&[committed_account.pubkey], remote_slot)
         .await;
     assert!(res.is_ok());
     assert!(res.unwrap().contains_key(&committed_account.pubkey));
@@ -777,7 +777,7 @@ async fn test_cpi_limits_error_recovery() {
         .map(|el| {
             (
                 el.pubkey,
-                task_info_fetcher.peek_commit_id(&el.pubkey).unwrap(),
+                task_info_fetcher.peek_commit_nonce(&el.pubkey).unwrap(),
             )
         })
         .collect();
@@ -851,7 +851,7 @@ async fn test_commit_id_actions_cpi_limit_errors_recovery() {
     // Force CommitIDError by invalidating the commit-nonce cache before running
     let pubkeys: Vec<_> = committed_accounts.iter().map(|c| c.pubkey).collect();
     let mut invalidated_keys = task_info_fetcher
-        .fetch_next_commit_ids(&pubkeys, Default::default())
+        .fetch_next_commit_nonces(&pubkeys, Default::default())
         .await
         .unwrap();
 
@@ -912,7 +912,7 @@ async fn test_commit_id_actions_cpi_limit_errors_recovery() {
         .map(|el| {
             (
                 el.pubkey,
-                task_info_fetcher.peek_commit_id(&el.pubkey).unwrap(),
+                task_info_fetcher.peek_commit_nonce(&el.pubkey).unwrap(),
             )
         })
         .collect();

@@ -123,7 +123,7 @@ pub struct MockTaskInfoFetcher(MagicblockRpcClient);
 
 #[async_trait]
 impl TaskInfoFetcher for MockTaskInfoFetcher {
-    async fn fetch_next_commit_ids(
+    async fn fetch_next_commit_nonces(
         &self,
         pubkeys: &[Pubkey],
         _: u64,
@@ -139,7 +139,7 @@ impl TaskInfoFetcher for MockTaskInfoFetcher {
         Ok(pubkeys.to_vec())
     }
 
-    fn peek_commit_id(&self, _pubkey: &Pubkey) -> Option<u64> {
+    fn peek_commit_nonce(&self, _pubkey: &Pubkey) -> Option<u64> {
         None
     }
 

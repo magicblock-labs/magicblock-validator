@@ -409,7 +409,7 @@ mod tests {
 
     #[async_trait::async_trait]
     impl TaskInfoFetcher for MockInfoFetcher {
-        async fn fetch_next_commit_ids(
+        async fn fetch_next_commit_nonces(
             &self,
             pubkeys: &[Pubkey],
             _: u64,
@@ -425,7 +425,7 @@ mod tests {
             Ok(pubkeys.iter().map(|_| Pubkey::new_unique()).collect())
         }
 
-        fn peek_commit_id(&self, _pubkey: &Pubkey) -> Option<u64> {
+        fn peek_commit_nonce(&self, _pubkey: &Pubkey) -> Option<u64> {
             Some(0)
         }
 

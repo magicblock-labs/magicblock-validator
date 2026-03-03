@@ -2962,6 +2962,7 @@ dependencies = [
  "magicblock-chainlink",
  "magicblock-committor-service",
  "magicblock-core",
+ "magicblock-metrics",
  "magicblock-program",
  "solana-hash",
  "solana-pubkey",

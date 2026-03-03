@@ -115,7 +115,7 @@ impl TaskBuilderImpl {
             .collect::<Vec<_>>();
 
         task_info_fetcher
-            .fetch_next_commit_ids(&committed_pubkeys, min_context_slot)
+            .fetch_next_commit_nonces(&committed_pubkeys, min_context_slot)
             .await
     }
 

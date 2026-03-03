@@ -1,11 +1,11 @@
 use std::error::Error;
 
-use magicblock_core::traits::PersistsAccountModData;
+use magicblock_core::traits::MagicSys;
 use tracing::*;
 
 use crate::Ledger;
 
-impl PersistsAccountModData for Ledger {
+impl MagicSys for Ledger {
     fn persist(&self, id: u64, data: Vec<u8>) -> Result<(), Box<dyn Error>> {
         trace!(id, data_len = data.len(), "Persisting data");
         self.write_account_mod_data(id, &data.into())?;

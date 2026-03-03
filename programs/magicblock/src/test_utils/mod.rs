@@ -8,7 +8,7 @@ use std::{
     },
 };
 
-use magicblock_core::traits::PersistsAccountModData;
+use magicblock_core::traits::MagicSys;
 use magicblock_magic_program_api::{id, EPHEMERAL_VAULT_PUBKEY};
 use solana_account::AccountSharedData;
 use solana_instruction::{error::InstructionError, AccountMeta};
@@ -83,7 +83,7 @@ impl fmt::Display for PersisterStub {
     }
 }
 
-impl PersistsAccountModData for PersisterStub {
+impl MagicSys for PersisterStub {
     fn persist(&self, id: u64, data: Vec<u8>) -> Result<(), Box<dyn Error>> {
         debug!("Persisting data for id '{}' with len {}", id, data.len());
         Ok(())
@@ -91,5 +91,13 @@ impl PersistsAccountModData for PersisterStub {
 
     fn load(&self, _id: u64) -> Result<Option<Vec<u8>>, Box<dyn Error>> {
         Err("Loading from ledger not supported in tests".into())
+    }
+
+    fn validate_commit_nonces(
+        &self,
+        pubkeys: &[Pubkey],
+    ) -> Result<(), InstructionError> {
+        // TODO(edwin)
+        todo!()
     }
 }
