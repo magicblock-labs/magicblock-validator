@@ -56,6 +56,7 @@ fn setup_replay_scenario_replica(
         .write_transaction(
             sig,
             env.ledger.latest_block().load().slot,
+            0, // index
             &sanitized,
             meta,
         )

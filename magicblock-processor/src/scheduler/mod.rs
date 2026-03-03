@@ -15,8 +15,12 @@ use std::{
 use coordinator::{ExecutionCoordinator, TransactionWithId};
 use locks::{ExecutorId, MAX_SVM_EXECUTORS};
 use magicblock_accounts_db::{traits::AccountsBank, AccountsDb};
-use magicblock_core::link::transactions::{
-    ProcessableTransaction, TransactionToProcessRx,
+use magicblock_core::{
+    link::transactions::{
+        ProcessableTransaction, TransactionProcessingMode,
+        TransactionToProcessRx,
+    },
+    Slot,
 };
 use magicblock_ledger::LatestBlock;
 use solana_account::{from_account, to_account};
@@ -34,7 +38,9 @@ use tokio::{
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, instrument, warn};
 
-use crate::executor::{SimpleForkGraph, TransactionExecutor};
+use crate::executor::{
+    IndexedTransaction, SimpleForkGraph, TransactionExecutor,
+};
 
 // Capacity of 1 ensures executor processes one transaction at a time
 const EXECUTOR_QUEUE_CAPACITY: usize = 1;
@@ -50,7 +56,7 @@ pub struct TransactionScheduler {
     /// Executor readiness notifications (workers signal when idle)
     ready_rx: Receiver<ExecutorId>,
     /// Sender channels to each executor worker
-    executors: Vec<Sender<ProcessableTransaction>>,
+    executors: Vec<Sender<IndexedTransaction>>,
     /// Shared BPF program cache
     program_cache: Arc<RwLock<ProgramCache<SimpleForkGraph>>>,
     /// Accounts database (for sysvar updates on slot transition)
@@ -61,6 +67,8 @@ pub struct TransactionScheduler {
     shutdown: CancellationToken,
     /// Notifies scheduler to switch from Replica to Primary mode after ledger replay.
     mode_switcher: Arc<Notify>,
+    slot: Slot,
+    index: u32,
 }
 
 impl TransactionScheduler {
@@ -102,6 +110,8 @@ impl TransactionScheduler {
             accountsdb: state.accountsdb,
             shutdown: state.shutdown,
             mode_switcher: state.mode_switcher,
+            slot: state.ledger.latest_block().load().slot,
+            index: 0,
         }
     }
 
@@ -199,6 +209,16 @@ impl TransactionScheduler {
             Ok(txn) => txn,
             Err(blocker) => return Some(blocker),
         };
+        let (slot, index) =
+            if let TransactionProcessingMode::Replay(ctx) = txn.mode {
+                (ctx.slot, ctx.index)
+            } else {
+                let index = self.index;
+                self.index += 1;
+                (self.slot, index)
+            };
+
+        let txn = IndexedTransaction { slot, index, txn };
 
         let _ = self.executors[executor as usize].try_send(txn).inspect_err(
             |e| error!(executor, error = ?e, "Executor channel send failed"),
@@ -206,9 +226,11 @@ impl TransactionScheduler {
         None
     }
 
-    fn transition_to_new_slot(&self) {
+    fn transition_to_new_slot(&mut self) {
         let block = self.latest_block.load();
         let mut cache = self.program_cache.write().unwrap();
+        self.slot = block.slot;
+        self.index = 0;
 
         // Prune stale programs and re-root to new slot
         cache.prune(block.slot, 0);
