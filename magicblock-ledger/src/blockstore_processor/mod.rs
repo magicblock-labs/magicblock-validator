@@ -1,7 +1,7 @@
 use std::str::FromStr;
 
 use magicblock_core::link::transactions::{
-    SanitizeableTransaction, TransactionSchedulerHandle,
+    ReplayContext, SanitizeableTransaction, TransactionSchedulerHandle,
 };
 use num_format::{Locale, ToFormattedString};
 use solana_clock::{Slot, UnixTimestamp};
@@ -127,12 +127,16 @@ async fn replay_blocks(
             let txn = txn.sanitize(false).map_err(|err| {
                 LedgerError::BlockStoreProcessor(err.to_string())
             })?;
-            let result = transaction_scheduler
-                .replay(false, txn)
-                .await
-                .map_err(|err| {
-                    LedgerError::BlockStoreProcessor(err.to_string())
-                });
+            let context = ReplayContext {
+                slot: block.slot,
+                // TODO(bmuddha/thlorenz): retrieve the proper transaction index
+                index: 0,
+                persist: false,
+            };
+            let result =
+                transaction_scheduler.replay(context, txn).await.map_err(
+                    |err| LedgerError::BlockStoreProcessor(err.to_string()),
+                );
             if !enabled!(Level::TRACE) {
                 debug!(signature = %signature, result = ?result, "Transaction replay result");
             }
