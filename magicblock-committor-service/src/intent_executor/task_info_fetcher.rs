@@ -473,7 +473,6 @@ impl TaskInfoFetcher for CacheTaskInfoFetcher {
         {
             *guard = nonce;
             result.insert(*pubkey, nonce);
-            // guard dropped here
         }
 
         Ok(result)
