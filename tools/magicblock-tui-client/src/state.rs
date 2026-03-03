@@ -118,7 +118,50 @@ pub struct TransactionDetail {
     pub accounts: Vec<String>,
     pub error: Option<String>,
     pub explorer_url: String,
-    pub explorer_selected: bool,
+    pub selected_account: Option<usize>,
+}
+
+pub const MAX_DETAIL_ACCOUNTS: usize = 10;
+
+impl TransactionDetail {
+    fn selectable_accounts_len(&self) -> usize {
+        self.accounts.len().min(MAX_DETAIL_ACCOUNTS)
+    }
+
+    fn clamp_selection(&mut self) {
+        let selectable = self.selectable_accounts_len();
+        if self.selected_account.is_some_and(|idx| idx >= selectable) {
+            self.selected_account = None;
+        }
+    }
+
+    pub fn move_selection_up(&mut self) {
+        self.clamp_selection();
+        let selectable = self.selectable_accounts_len();
+        self.selected_account = match self.selected_account {
+            None if selectable > 0 => Some(selectable - 1),
+            None => None,
+            Some(0) => None,
+            Some(idx) => Some(idx.saturating_sub(1)),
+        };
+    }
+
+    pub fn move_selection_down(&mut self) {
+        self.clamp_selection();
+        let selectable = self.selectable_accounts_len();
+        self.selected_account = match self.selected_account {
+            None if selectable > 0 => Some(0),
+            None => None,
+            Some(idx) if idx + 1 < selectable => Some(idx + 1),
+            Some(_) => None,
+        };
+    }
+
+    pub fn selected_account_address(&self) -> Option<&str> {
+        self.selected_account
+            .and_then(|idx| self.accounts.get(idx))
+            .map(String::as_str)
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Default)]
@@ -265,7 +308,8 @@ impl TuiState {
         self.transactions.get(self.selected_tx)
     }
 
-    pub fn show_tx_detail(&mut self, detail: TransactionDetail) {
+    pub fn show_tx_detail(&mut self, mut detail: TransactionDetail) {
+        detail.clamp_selection();
         self.tx_detail = Some(detail);
         self.view_mode = ViewMode::Detail;
     }

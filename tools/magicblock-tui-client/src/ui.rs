@@ -7,7 +7,7 @@ use ratatui::{
 };
 use tracing::Level;
 
-use crate::state::{Tab, TuiState, ViewMode};
+use crate::state::{Tab, TuiState, ViewMode, MAX_DETAIL_ACCOUNTS};
 
 const CYAN: Color = Color::Cyan;
 const GREEN: Color = Color::Green;
@@ -398,7 +398,8 @@ fn render_tx_detail_popup(frame: &mut Frame, state: &TuiState) {
     }
 
     lines.push(Line::from(""));
-    let explorer_style = if detail.explorer_selected {
+    let explorer_selected = detail.selected_account.is_none();
+    let explorer_style = if explorer_selected {
         Style::default()
             .fg(CYAN)
             .add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
@@ -407,12 +408,8 @@ fn render_tx_detail_popup(frame: &mut Frame, state: &TuiState) {
             .fg(Color::Blue)
             .add_modifier(Modifier::UNDERLINED)
     };
-    let explorer_prefix = if detail.explorer_selected {
-        "▶ "
-    } else {
-        "  "
-    }
-    .to_string();
+    let explorer_prefix =
+        if explorer_selected { "▶ " } else { "  " }.to_string();
     let explorer_label = "Explorer:  ".to_string();
     let explorer_value = truncate_with_ellipsis(
         &detail.explorer_url,
@@ -442,20 +439,44 @@ fn render_tx_detail_popup(frame: &mut Frame, state: &TuiState) {
             "Accounts:",
             Style::default().fg(DARK_GRAY).add_modifier(Modifier::BOLD),
         )));
-        for (i, acc) in detail.accounts.iter().take(10).enumerate() {
-            let prefix = format!("  [{}] ", i);
+        for (i, acc) in
+            detail.accounts.iter().take(MAX_DETAIL_ACCOUNTS).enumerate()
+        {
+            let is_selected = detail.selected_account == Some(i);
+            let prefix = if is_selected {
+                format!("▶ [{}] ", i)
+            } else {
+                format!("  [{}] ", i)
+            };
             let truncated = truncate_with_ellipsis(
                 acc,
                 inner_width.saturating_sub(prefix.chars().count()),
             );
             lines.push(Line::from(vec![
-                Span::styled(prefix, label_style),
-                Span::styled(truncated, Style::default().fg(WHITE)),
+                Span::styled(
+                    prefix,
+                    if is_selected {
+                        Style::default().fg(CYAN)
+                    } else {
+                        label_style
+                    },
+                ),
+                Span::styled(
+                    truncated,
+                    if is_selected {
+                        Style::default().fg(CYAN).add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::default().fg(WHITE)
+                    },
+                ),
             ]));
         }
-        if detail.accounts.len() > 10 {
+        if detail.accounts.len() > MAX_DETAIL_ACCOUNTS {
             lines.push(Line::from(Span::styled(
-                format!("  ... and {} more", detail.accounts.len() - 10),
+                format!(
+                    "  ... and {} more",
+                    detail.accounts.len() - MAX_DETAIL_ACCOUNTS
+                ),
                 Style::default().fg(DARK_GRAY),
             )));
         }

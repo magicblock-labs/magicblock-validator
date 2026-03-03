@@ -2,7 +2,10 @@ use std::time::Duration;
 
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
 
-use crate::state::{Tab, TuiState, ViewMode};
+use crate::{
+    state::{Tab, TuiState, ViewMode},
+    utils::url_encode,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EventAction {
@@ -46,20 +49,25 @@ fn handle_key(
             }
             KeyCode::Enter => {
                 if let Some(detail) = &state.tx_detail {
-                    if detail.explorer_selected {
-                        let url = detail.explorer_url.clone();
-                        state.close_tx_detail();
-                        return EventAction::OpenUrl(url);
-                    }
+                    let url = match detail.selected_account_address() {
+                        Some(account) => {
+                            build_account_explorer_url(&state.rpc_url, account)
+                        }
+                        None => detail.explorer_url.clone(),
+                    };
+                    state.close_tx_detail();
+                    return EventAction::OpenUrl(url);
                 }
                 state.close_tx_detail();
             }
-            KeyCode::Up
-            | KeyCode::Down
-            | KeyCode::Char('k')
-            | KeyCode::Char('j') => {
+            KeyCode::Up | KeyCode::Char('k') => {
                 if let Some(detail) = &mut state.tx_detail {
-                    detail.explorer_selected = !detail.explorer_selected;
+                    detail.move_selection_up();
+                }
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                if let Some(detail) = &mut state.tx_detail {
+                    detail.move_selection_down();
                 }
             }
             _ => {}
@@ -134,6 +142,14 @@ fn handle_key(
     EventAction::None
 }
 
+fn build_account_explorer_url(rpc_url: &str, account: &str) -> String {
+    let encoded_rpc = url_encode(rpc_url);
+    format!(
+        "https://explorer.solana.com/address/{}?cluster=custom&customUrl={}",
+        account, encoded_rpc
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
@@ -174,7 +190,7 @@ mod tests {
             accounts: vec![],
             error: None,
             explorer_url: "https://example.com".to_string(),
-            explorer_selected: false,
+            selected_account: None,
         });
 
         let action = handle_event(&mut state, ctrl_c(), 10);
@@ -193,5 +209,86 @@ mod tests {
         let _ = handle_event(&mut state, ctrl_c(), 10);
 
         assert!(state.should_quit);
+    }
+
+    #[test]
+    fn enter_opens_selected_account_explorer() {
+        let mut state = TuiState::new(config());
+        state.show_tx_detail(TransactionDetail {
+            signature: "sig".to_string(),
+            slot: 1,
+            success: true,
+            fee: 0,
+            compute_units: None,
+            logs: vec![],
+            accounts: vec!["11111111111111111111111111111111".to_string()],
+            error: None,
+            explorer_url: "https://explorer.solana.com/tx/sig".to_string(),
+            selected_account: Some(0),
+        });
+
+        let action = handle_event(
+            &mut state,
+            Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+            10,
+        );
+
+        match action {
+            EventAction::OpenUrl(url) => {
+                assert!(
+                    url.contains("/address/11111111111111111111111111111111")
+                );
+            }
+            other => panic!("expected OpenUrl action, got {:?}", other),
+        }
+        assert!(matches!(state.view_mode, ViewMode::List));
+        assert!(state.tx_detail.is_none());
+    }
+
+    #[test]
+    fn detail_navigation_cycles_between_accounts_and_explorer() {
+        let mut state = TuiState::new(config());
+        state.show_tx_detail(TransactionDetail {
+            signature: "sig".to_string(),
+            slot: 1,
+            success: true,
+            fee: 0,
+            compute_units: None,
+            logs: vec![],
+            accounts: vec!["acc-1".to_string(), "acc-2".to_string()],
+            error: None,
+            explorer_url: "https://explorer.solana.com/tx/sig".to_string(),
+            selected_account: Some(0),
+        });
+
+        let _ = handle_event(
+            &mut state,
+            Event::Key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE)),
+            10,
+        );
+        assert_eq!(
+            state.tx_detail.as_ref().and_then(|d| d.selected_account),
+            Some(1)
+        );
+
+        let _ = handle_event(
+            &mut state,
+            Event::Key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE)),
+            10,
+        );
+        assert_eq!(
+            state.tx_detail.as_ref().and_then(|d| d.selected_account),
+            None
+        );
+
+        let _ = handle_event(
+            &mut state,
+            Event::Key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE)),
+            10,
+        );
+        assert_eq!(
+            state.tx_detail.as_ref().and_then(|d| d.selected_account),
+            Some(1)
+        );
     }
 }
