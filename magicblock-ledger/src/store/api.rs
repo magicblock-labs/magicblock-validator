@@ -1752,12 +1752,17 @@ mod tests {
             .is_none());
 
         // 1. Write first transaction and block time for relevant slot
+        let versioned_uno = sanitized_uno.to_versioned_transaction();
+        let encoded_uno = serialize(&versioned_uno).unwrap();
+        let locks_uno = sanitized_uno.get_account_locks_unchecked();
         assert!(store
             .write_transaction(
                 sig_uno,
                 slot_uno,
                 0,
-                &sanitized_uno,
+                locks_uno.writable,
+                locks_uno.readonly,
+                &encoded_uno,
                 tx_uno.tx_with_meta.get_status_meta().unwrap(),
             )
             .is_ok());
@@ -1779,12 +1784,17 @@ mod tests {
             .is_none());
 
         // 2. Write second transaction and block time for relevant slot
+        let versioned_dos = sanitized_dos.to_versioned_transaction();
+        let encoded_dos = serialize(&versioned_dos).unwrap();
+        let locks_dos = sanitized_dos.get_account_locks_unchecked();
         assert!(store
             .write_transaction(
                 sig_dos,
                 slot_dos,
                 0,
-                &sanitized_dos,
+                locks_dos.writable,
+                locks_dos.readonly,
+                &encoded_dos,
                 tx_dos.tx_with_meta.get_status_meta().unwrap(),
             )
             .is_ok());
@@ -2430,12 +2440,17 @@ mod tests {
 
         // 1. Write transactions and block time + memo for relevant slot
         {
+            let versioned_uno = sanitized_uno.to_versioned_transaction();
+            let encoded_uno = serialize(&versioned_uno).unwrap();
+            let locks_uno = sanitized_uno.get_account_locks_unchecked();
             assert!(store
                 .write_transaction(
                     sig_uno,
                     slot_uno,
                     0,
-                    &sanitized_uno,
+                    locks_uno.writable,
+                    locks_uno.readonly,
+                    &encoded_uno,
                     tx_uno.tx_with_meta.get_status_meta().unwrap(),
                 )
                 .is_ok());
@@ -2454,12 +2469,17 @@ mod tests {
         }
 
         {
+            let versioned_dos = sanitized_dos.to_versioned_transaction();
+            let encoded_dos = serialize(&versioned_dos).unwrap();
+            let locks_dos = sanitized_dos.get_account_locks_unchecked();
             assert!(store
                 .write_transaction(
                     sig_dos,
                     slot_dos,
                     0,
-                    &sanitized_dos,
+                    locks_dos.writable,
+                    locks_dos.readonly,
+                    &encoded_dos,
                     tx_dos.tx_with_meta.get_status_meta().unwrap(),
                 )
                 .is_ok());
