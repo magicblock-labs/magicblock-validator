@@ -3576,8 +3576,10 @@ dependencies = [
 name = "magicblock-core"
 version = "0.8.2"
 dependencies = [
+ "bincode",
  "flume",
  "magicblock-magic-program-api 0.8.2",
+ "serde",
  "solana-account",
  "solana-account-decoder",
  "solana-hash",
