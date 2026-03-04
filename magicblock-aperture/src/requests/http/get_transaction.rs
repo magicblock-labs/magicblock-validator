@@ -1,3 +1,4 @@
+use json::{JsonValueMutTrait, JsonValueTrait};
 use solana_rpc_client_api::config::RpcTransactionConfig;
 use solana_transaction_status::UiTransactionEncoding;
 
@@ -32,9 +33,53 @@ impl HttpDispatcher {
         let encoded_transaction =
             transaction.and_then(|tx| tx.encode(encoding, max_version).ok());
 
+        if encoding == UiTransactionEncoding::JsonParsed {
+            if let Some(mut encoded_value) =
+                value_from_serializable(&encoded_transaction)
+            {
+                sanitize_nan_strings(&mut encoded_value);
+                return Ok(ResponsePayload::encode_no_context(
+                    &request.id,
+                    encoded_value,
+                ));
+            }
+        }
+
         Ok(ResponsePayload::encode_no_context(
             &request.id,
             encoded_transaction,
         ))
+    }
+}
+
+fn value_from_serializable<T: json::Serialize>(
+    value: &T,
+) -> Option<json::Value> {
+    let serialized = json::to_vec(value).ok()?;
+    json::from_slice(&serialized).ok()
+}
+
+fn sanitize_nan_strings(value: &mut json::Value) {
+    if let Some(values) = value.as_array_mut() {
+        for value in values {
+            sanitize_nan_strings(value);
+        }
+        return;
+    }
+
+    if let Some(values) = value.as_object_mut() {
+        for (_key, value) in values.iter_mut() {
+            sanitize_nan_strings(value);
+        }
+        return;
+    }
+
+    if let Some(s) = value.as_str() {
+        if s.eq_ignore_ascii_case("nan")
+            || s.eq_ignore_ascii_case("+nan")
+            || s.eq_ignore_ascii_case("-nan")
+        {
+            *value = "0".into();
+        }
     }
 }
