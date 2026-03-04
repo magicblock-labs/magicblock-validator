@@ -20,19 +20,19 @@ use solana_hash::{Hash, HASH_BYTES};
 use solana_measure::measure::Measure;
 use solana_pubkey::Pubkey;
 use solana_signature::Signature;
-use solana_storage_proto::convert::generated::{self, ConfirmedTransaction};
+use solana_storage_proto::convert::generated;
 use solana_transaction::{
     sanitized::SanitizedTransaction, versioned::VersionedTransaction,
 };
 use solana_transaction_status::{
     ConfirmedTransactionStatusWithSignature,
     ConfirmedTransactionWithStatusMeta, TransactionStatusMeta,
-    VersionedConfirmedBlock, VersionedTransactionWithStatusMeta,
+    TransactionWithStatusMeta, VersionedConfirmedBlock,
+    VersionedTransactionWithStatusMeta,
 };
 use tracing::*;
 
 use crate::{
-    conversions::transaction,
     database::{
         columns::{self as cf, Column, ColumnName, DIRTY_COUNT},
         db::Database,
@@ -418,9 +418,7 @@ impl Ledger {
                 .into_iter()
                 .map(|tx_signature| {
                     let transaction = self
-                        .transaction_cf
-                        .get_protobuf((tx_signature, slot))?
-                        .map(VersionedTransaction::from)
+                        .read_transaction((tx_signature, slot))?
                         .ok_or(LedgerError::TransactionNotFound)?;
                     let meta = self
                         .transaction_status_cf
@@ -834,12 +832,33 @@ impl Ledger {
         match self
             .get_confirmed_transaction(signature, highest_confirmed_slot)?
         {
-            Some((slot, tx)) => {
+            Some((slot, transaction, meta)) => {
                 let block_time = self.get_block_time(slot)?;
-                let tx = transaction::from_generated_confirmed_transaction(
-                    slot, tx, block_time,
-                );
-                Ok(Some(tx))
+                let tx_with_meta = match (transaction, meta) {
+                    (Some(transaction), Some(meta)) => {
+                        TransactionWithStatusMeta::Complete(
+                            VersionedTransactionWithStatusMeta {
+                                transaction,
+                                meta,
+                            },
+                        )
+                    }
+                    (Some(transaction), None) => {
+                        TransactionWithStatusMeta::MissingMetadata(
+                            transaction
+                                .into_legacy_transaction()
+                                .unwrap(),
+                        )
+                    }
+                    (None, Some(_)) | (None, None) => {
+                        return Ok(None);
+                    }
+                };
+                Ok(Some(ConfirmedTransactionWithStatusMeta {
+                    slot,
+                    block_time,
+                    tx_with_meta,
+                }))
             }
             None => Ok(None),
         }
@@ -850,7 +869,13 @@ impl Ledger {
         &self,
         signature: Signature,
         highest_confirmed_slot: Slot,
-    ) -> LedgerResult<Option<(Slot, ConfirmedTransaction)>> {
+    ) -> LedgerResult<
+        Option<(
+            Slot,
+            Option<VersionedTransaction>,
+            Option<TransactionStatusMeta>,
+        )>,
+    > {
         self.rpc_api_metrics
             .num_get_complete_transaction
             .fetch_add(1, Ordering::Relaxed);
@@ -878,15 +903,11 @@ impl Ledger {
                         if slot <= highest_confirmed_slot
                             && tx_signature == signature
                         {
-                            let slot_and_tx = self
-                                .transaction_cf
-                                .get_protobuf((tx_signature, slot))?
-                                .map(|tx| (slot, tx));
-                            if let Some((slot, tx)) = slot_and_tx {
-                                (slot, Some(tx), None)
-                            } else {
-                                // We have a slot, but couldn't resolve a proper transaction
-                                return Ok(None);
+                            let transaction = self
+                                .read_transaction((tx_signature, slot))?;
+                            match transaction {
+                                Some(tx) => (slot, Some(tx), None),
+                                None => return Ok(None),
                             }
                         } else {
                             return Ok(None);
@@ -900,13 +921,7 @@ impl Ledger {
             }
         };
 
-        Ok(Some((
-            slot,
-            ConfirmedTransaction {
-                transaction,
-                meta: meta.map(|x| x.into()),
-            },
-        )))
+        Ok(Some((slot, transaction, meta)))
     }
 
     /// Writes a confirmed transaction pieced together from the provided inputs
@@ -947,12 +962,18 @@ impl Ledger {
     pub fn read_transaction(
         &self,
         index: (Signature, Slot),
-    ) -> LedgerResult<Option<generated::Transaction>> {
+    ) -> LedgerResult<Option<VersionedTransaction>> {
         let result = {
             let (_lock, _) = self.ensure_lowest_cleanup_slot();
-            self.transaction_cf.get_protobuf(index)
+            self.transaction_cf.get_bytes(index)
         }?;
-        Ok(result)
+        match result {
+            Some(bytes) => {
+                let tx: VersionedTransaction = deserialize(&bytes)?;
+                Ok(Some(tx))
+            }
+            None => Ok(None),
+        }
     }
 
     pub fn count_transactions(&self) -> LedgerResult<i64> {
