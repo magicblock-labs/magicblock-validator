@@ -38,7 +38,7 @@ use crate::{
             TransactionStrategyExecutionError,
         },
         single_stage_executor::SingleStageExecutor,
-        task_info_fetcher::{ResetType, TaskInfoFetcher},
+        task_info_fetcher::{CacheTaskInfoFetcher, ResetType, TaskInfoFetcher},
         two_stage_executor::TwoStageExecutor,
     },
     persist::{CommitStatus, CommitStatusSignatures, IntentPersister},
@@ -108,7 +108,7 @@ pub struct IntentExecutorImpl<T, F> {
     authority: Keypair,
     rpc_client: MagicblockRpcClient,
     transaction_preparator: T,
-    task_info_fetcher: Arc<F>,
+    task_info_fetcher: Arc<CacheTaskInfoFetcher<F>>,
 
     /// Junk that needs to be cleaned up
     pub junk: Vec<TransactionStrategy>,
@@ -124,7 +124,7 @@ where
     pub fn new(
         rpc_client: MagicblockRpcClient,
         transaction_preparator: T,
-        task_info_fetcher: Arc<F>,
+        task_info_fetcher: Arc<CacheTaskInfoFetcher<F>>,
     ) -> Self {
         let authority = validator_authority();
         Self {

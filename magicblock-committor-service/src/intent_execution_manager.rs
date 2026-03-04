@@ -17,7 +17,7 @@ use crate::{
     },
     intent_executor::{
         intent_executor_factory::IntentExecutorFactoryImpl,
-        task_info_fetcher::CacheTaskInfoFetcher,
+        task_info_fetcher::{CacheTaskInfoFetcher, RpcTaskInfoFetcher},
     },
     persist::IntentPersister,
     ComputeBudgetConfig,
@@ -33,7 +33,7 @@ impl<D: DB> IntentExecutionManager<D> {
     pub fn new<P: IntentPersister>(
         rpc_client: MagicblockRpcClient,
         db: D,
-        task_info_fetcher: Arc<CacheTaskInfoFetcher>,
+        task_info_fetcher: Arc<CacheTaskInfoFetcher<RpcTaskInfoFetcher>>,
         intent_persister: Option<P>,
         table_mania: TableMania,
         compute_budget_config: ComputeBudgetConfig,

@@ -17,7 +17,8 @@ use magicblock_committor_service::{
     intent_executor::{
         error::{IntentExecutorError, TransactionStrategyExecutionError},
         task_info_fetcher::{
-            CacheTaskInfoFetcher, TaskInfoFetcher, TaskInfoFetcherError,
+            CacheTaskInfoFetcher, RpcTaskInfoFetcher, TaskInfoFetcher,
+            TaskInfoFetcherError,
         },
         ExecutionOutput, IntentExecutionResult, IntentExecutor,
         IntentExecutorImpl,
@@ -75,9 +76,9 @@ const ACTOR_ESCROW_INDEX: u8 = 1;
 
 struct TestEnv {
     fixture: TestFixture,
-    task_info_fetcher: Arc<CacheTaskInfoFetcher>,
+    task_info_fetcher: Arc<CacheTaskInfoFetcher<RpcTaskInfoFetcher>>,
     intent_executor:
-        IntentExecutorImpl<TransactionPreparatorImpl, CacheTaskInfoFetcher>,
+        IntentExecutorImpl<TransactionPreparatorImpl, RpcTaskInfoFetcher>,
     pre_test_tablemania_state: HashMap<Pubkey, usize>,
 }
 
@@ -89,8 +90,9 @@ impl TestEnv {
             .await;
 
         let transaction_preparator = fixture.create_transaction_preparator();
-        let task_info_fetcher =
-            Arc::new(CacheTaskInfoFetcher::new(fixture.rpc_client.clone()));
+        let task_info_fetcher = Arc::new(CacheTaskInfoFetcher::new(
+            RpcTaskInfoFetcher::new(fixture.rpc_client.clone()),
+        ));
 
         let tm = &fixture.table_mania;
         let mut pre_test_tablemania_state = HashMap::new();
@@ -1237,7 +1239,7 @@ fn create_scheduled_intent(
 
 async fn single_flow_transaction_strategy(
     authority: &Pubkey,
-    task_info_fetcher: &Arc<CacheTaskInfoFetcher>,
+    task_info_fetcher: &Arc<CacheTaskInfoFetcher<RpcTaskInfoFetcher>>,
     intent: &ScheduledIntentBundle,
 ) -> TransactionStrategy {
     let mut tasks = TaskBuilderImpl::commit_tasks(

@@ -10,7 +10,7 @@ use async_trait::async_trait;
 use magicblock_committor_service::{
     intent_executor::{
         task_info_fetcher::{
-            ResetType, TaskInfoFetcher, TaskInfoFetcherError,
+            CacheTaskInfoFetcher, TaskInfoFetcher, TaskInfoFetcherError,
             TaskInfoFetcherResult,
         },
         IntentExecutorImpl,
@@ -114,8 +114,12 @@ impl TestFixture {
     }
 
     #[allow(dead_code)]
-    pub fn create_task_info_fetcher(&self) -> Arc<MockTaskInfoFetcher> {
-        Arc::new(MockTaskInfoFetcher(self.rpc_client.clone()))
+    pub fn create_task_info_fetcher(
+        &self,
+    ) -> Arc<CacheTaskInfoFetcher<MockTaskInfoFetcher>> {
+        Arc::new(CacheTaskInfoFetcher::new(MockTaskInfoFetcher(
+            self.rpc_client.clone(),
+        )))
     }
 }
 
@@ -146,12 +150,6 @@ impl TaskInfoFetcher for MockTaskInfoFetcher {
     ) -> TaskInfoFetcherResult<Vec<Pubkey>> {
         Ok(pubkeys.to_vec())
     }
-
-    async fn peek_commit_nonce(&self, _pubkey: &Pubkey) -> Option<u64> {
-        None
-    }
-
-    fn reset(&self, _: ResetType) {}
 
     async fn get_base_accounts(
         &self,

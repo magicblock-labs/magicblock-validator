@@ -53,12 +53,6 @@ pub trait TaskInfoFetcher: Send + Sync + 'static {
         min_context_slot: u64,
     ) -> TaskInfoFetcherResult<Vec<Pubkey>>;
 
-    /// Peeks current commit ids for pubkeys
-    async fn peek_commit_nonce(&self, pubkey: &Pubkey) -> Option<u64>;
-
-    /// Resets cache for some or all accounts
-    fn reset(&self, reset_type: ResetType);
-
     async fn get_base_accounts(
         &self,
         pubkeys: &[Pubkey],
@@ -71,90 +65,18 @@ pub enum ResetType<'a> {
     Specific(&'a [Pubkey]),
 }
 
-/// Per-account async mutex protecting the cached nonce value.
-type NonceLock = Arc<TMutex<u64>>;
+// ---------------------------------------------------------------------------
+// RpcTaskInfoFetcher
+// ---------------------------------------------------------------------------
 
-/// Split-map cache: `active` is the live LRU window; `retiring` holds locks
-/// evicted from `active` that are still held by in-flight requests.
-struct CacheInner {
-    active: LruCache<Pubkey, NonceLock>,
-    retiring: HashMap<Pubkey, NonceLock>,
-}
-
-/// RAII guard returned by [`CacheTaskInfoFetcher::acquire_nonce_locks`].
-/// Holds clones of the reserved [`NonceLock`]s and cleans up retiring entries
-/// on drop.
-struct CacheInnerGuard<'a> {
-    inner: &'a Mutex<CacheInner>,
-    nonce_locks: Vec<(Pubkey, NonceLock)>,
-}
-
-impl<'a> CacheInnerGuard<'a> {
-    // Acquire per-account locks sequentially in sorted order (see sort above).
-    // join_all would poll all futures concurrently, allowing partial acquisition
-    // and producing the classic A→B / B→A deadlock across concurrent callers.
-    async fn lock<'s>(&'s self) -> Vec<(&'s Pubkey, MutexGuard<'s, u64>)> {
-        let mut output = Vec::with_capacity(self.nonce_locks.len());
-        for (pubkey, lock) in self.nonce_locks.iter() {
-            let guard = lock.lock().await;
-            output.push((pubkey, guard))
-        }
-
-        output
-    }
-}
-
-impl<'a> Drop for CacheInnerGuard<'a> {
-    fn drop(&mut self) {
-        let mut inner = self.inner.lock().expect(MUTEX_POISONED_MSG);
-        let nonce_locks = mem::take(&mut self.nonce_locks);
-        for (pubkey, lock) in nonce_locks {
-            // Drop our clone first so strong_count reflects only other
-            // live holders when we check below
-            drop(lock);
-            let should_remove = inner
-                .retiring
-                .get(&pubkey)
-                .is_some_and(|l| Arc::strong_count(l) == 1);
-            if should_remove {
-                inner.retiring.remove(&pubkey);
-            }
-        }
-    }
-}
-
-impl CacheInner {
-    fn new(capacity: NonZeroUsize) -> Self {
-        Self {
-            active: LruCache::new(capacity),
-            retiring: HashMap::new(),
-        }
-    }
-}
-
-pub struct CacheTaskInfoFetcher {
+/// Pure RPC implementation of [`TaskInfoFetcher`] — no caching.
+pub struct RpcTaskInfoFetcher {
     rpc_client: MagicblockRpcClient,
-    cache: Mutex<CacheInner>,
 }
 
-impl CacheTaskInfoFetcher {
+impl RpcTaskInfoFetcher {
     pub fn new(rpc_client: MagicblockRpcClient) -> Self {
-        const CACHE_SIZE: NonZeroUsize = NonZeroUsize::new(1000).unwrap();
-
-        Self {
-            rpc_client,
-            cache: Mutex::new(CacheInner::new(CACHE_SIZE)),
-        }
-    }
-
-    pub fn with_capacity(
-        capacity: NonZeroUsize,
-        rpc_client: MagicblockRpcClient,
-    ) -> Self {
-        Self {
-            rpc_client,
-            cache: Mutex::new(CacheInner::new(capacity)),
-        }
+        Self { rpc_client }
     }
 
     /// Fetches [`DelegationMetadata`]s with some num of retries
@@ -235,7 +157,6 @@ impl CacheTaskInfoFetcher {
                     break Err(err);
                 }
                 TaskInfoFetcherError::MinContextSlotNotReachedError(_, _) => {
-                    // Get some extra sleep
                     info!(
                         min_context_slot,
                         attempt = i,
@@ -262,7 +183,6 @@ impl CacheTaskInfoFetcher {
         pubkeys: &[Pubkey],
         min_context_slot: u64,
     ) -> TaskInfoFetcherResult<Vec<Account>> {
-        // Early return if no pubkeys to process
         if pubkeys.is_empty() {
             return Ok(Vec::new());
         }
@@ -305,6 +225,205 @@ impl CacheTaskInfoFetcher {
             .collect::<Result<Vec<_>, _>>()?;
 
         Ok(accounts)
+    }
+}
+
+#[async_trait]
+impl TaskInfoFetcher for RpcTaskInfoFetcher {
+    async fn fetch_next_commit_nonces(
+        &self,
+        pubkeys: &[Pubkey],
+        min_context_slot: u64,
+    ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>> {
+        if pubkeys.is_empty() {
+            return Ok(HashMap::new());
+        }
+        let nonces = Self::fetch_metadata_with_retries(
+            &self.rpc_client,
+            pubkeys,
+            min_context_slot,
+            NUM_FETCH_RETRIES,
+        )
+        .await?
+        .into_iter()
+        .map(|m| m.last_update_nonce + 1);
+        Ok(pubkeys.iter().copied().zip(nonces).collect())
+    }
+
+    async fn fetch_current_commit_nonces(
+        &self,
+        pubkeys: &[Pubkey],
+        min_context_slot: u64,
+    ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>> {
+        if pubkeys.is_empty() {
+            return Ok(HashMap::new());
+        }
+        let nonces = Self::fetch_metadata_with_retries(
+            &self.rpc_client,
+            pubkeys,
+            min_context_slot,
+            NUM_FETCH_RETRIES,
+        )
+        .await?
+        .into_iter()
+        .map(|m| m.last_update_nonce);
+        Ok(pubkeys.iter().copied().zip(nonces).collect())
+    }
+
+    async fn fetch_rent_reimbursements(
+        &self,
+        pubkeys: &[Pubkey],
+        min_context_slot: u64,
+    ) -> TaskInfoFetcherResult<Vec<Pubkey>> {
+        Ok(Self::fetch_metadata_with_retries(
+            &self.rpc_client,
+            pubkeys,
+            min_context_slot,
+            NUM_FETCH_RETRIES,
+        )
+        .await?
+        .into_iter()
+        .map(|m| m.rent_payer)
+        .collect())
+    }
+
+    async fn get_base_accounts(
+        &self,
+        pubkeys: &[Pubkey],
+        min_context_slot: u64,
+    ) -> TaskInfoFetcherResult<HashMap<Pubkey, Account>> {
+        let accounts = Self::fetch_accounts_with_retries(
+            &self.rpc_client,
+            pubkeys,
+            min_context_slot,
+            NUM_FETCH_RETRIES,
+        )
+        .await?;
+        Ok(pubkeys.iter().copied().zip(accounts).collect())
+    }
+}
+
+/// Per-account async mutex protecting the cached nonce value.
+type NonceLock = Arc<TMutex<u64>>;
+
+/// Split-map cache: `active` is the live LRU window; `retiring` holds locks
+/// evicted from `active` that are still held by in-flight requests.
+struct CacheInner {
+    active: LruCache<Pubkey, NonceLock>,
+    retiring: HashMap<Pubkey, NonceLock>,
+}
+
+/// RAII guard returned by [`CacheTaskInfoFetcher::acquire_nonce_locks`].
+/// Holds clones of the reserved [`NonceLock`]s and cleans up retiring entries
+/// on drop.
+struct CacheInnerGuard<'a> {
+    inner: &'a Mutex<CacheInner>,
+    nonce_locks: Vec<(Pubkey, NonceLock)>,
+}
+
+impl<'a> CacheInnerGuard<'a> {
+    // Acquire per-account locks sequentially in sorted order (see sort above).
+    // join_all would poll all futures concurrently, allowing partial acquisition
+    // and producing the classic A→B / B→A deadlock across concurrent callers.
+    async fn lock<'s>(&'s self) -> Vec<(&'s Pubkey, MutexGuard<'s, u64>)> {
+        let mut output = Vec::with_capacity(self.nonce_locks.len());
+        for (pubkey, lock) in self.nonce_locks.iter() {
+            let guard = lock.lock().await;
+            output.push((pubkey, guard))
+        }
+
+        output
+    }
+}
+
+impl<'a> Drop for CacheInnerGuard<'a> {
+    fn drop(&mut self) {
+        let mut inner = self.inner.lock().expect(MUTEX_POISONED_MSG);
+        let nonce_locks = mem::take(&mut self.nonce_locks);
+        for (pubkey, lock) in nonce_locks {
+            // Drop our clone first so strong_count reflects only other
+            // live holders when we check below
+            drop(lock);
+            let should_remove = inner
+                .retiring
+                .get(&pubkey)
+                .is_some_and(|l| Arc::strong_count(l) == 1);
+            if should_remove {
+                inner.retiring.remove(&pubkey);
+            }
+        }
+    }
+}
+
+impl CacheInner {
+    fn new(capacity: NonZeroUsize) -> Self {
+        Self {
+            active: LruCache::new(capacity),
+            retiring: HashMap::new(),
+        }
+    }
+}
+
+/// [`TaskInfoFetcher`] that caches the most recently used nonces, delegating
+/// cache misses and all non-nonce queries to an inner `T: TaskInfoFetcher`.
+pub struct CacheTaskInfoFetcher<T> {
+    inner: T,
+    cache: Mutex<CacheInner>,
+}
+
+impl<T: TaskInfoFetcher> CacheTaskInfoFetcher<T> {
+    pub fn new(inner: T) -> Self {
+        const CACHE_SIZE: NonZeroUsize = NonZeroUsize::new(1000).unwrap();
+
+        Self {
+            inner,
+            cache: Mutex::new(CacheInner::new(CACHE_SIZE)),
+        }
+    }
+
+    pub fn with_capacity(capacity: NonZeroUsize, inner: T) -> Self {
+        Self {
+            inner,
+            cache: Mutex::new(CacheInner::new(capacity)),
+        }
+    }
+
+    /// Returns the cached nonce without promoting LRU order or incrementing.
+    pub async fn peek_commit_nonce(&self, pubkey: &Pubkey) -> Option<u64> {
+        let lock = {
+            let inner = self.cache.lock().expect(MUTEX_POISONED_MSG);
+            inner
+                .active
+                .peek(pubkey)
+                .or_else(|| inner.retiring.get(pubkey))
+                .cloned()
+        }?;
+
+        let locks_guard = CacheInnerGuard {
+            inner: &self.cache,
+            nonce_locks: vec![(*pubkey, lock)],
+        };
+        let guards = locks_guard.lock().await;
+        let value = *guards[0].1;
+
+        (value != u64::MAX).then_some(value)
+    }
+
+    /// Resets cache for some or all accounts
+    pub fn reset(&self, reset_type: ResetType) {
+        let mut cache = self.cache.lock().expect(MUTEX_POISONED_MSG);
+        match reset_type {
+            ResetType::All => {
+                cache.active.clear();
+                cache.retiring.clear();
+            }
+            ResetType::Specific(pubkeys) => {
+                for pubkey in pubkeys {
+                    cache.active.pop(pubkey);
+                    cache.retiring.remove(pubkey);
+                }
+            }
+        }
     }
 
     /// Ensures a [`NonceLock`] exists in the cache for each pubkey and returns
@@ -371,9 +490,9 @@ impl CacheTaskInfoFetcher {
     }
 }
 
-/// TaskInfoFetcher implementation that also caches most used 1000 keys
+/// TaskInfoFetcher implementation that caches the most used 1000 nonces
 #[async_trait]
-impl TaskInfoFetcher for CacheTaskInfoFetcher {
+impl<T: TaskInfoFetcher> TaskInfoFetcher for CacheTaskInfoFetcher<T> {
     /// Returns next ids for requested pubkeys
     /// If key isn't in cache, it will be requested
     async fn fetch_next_commit_nonces(
@@ -403,40 +522,34 @@ impl TaskInfoFetcher for CacheTaskInfoFetcher {
         // If all in cache - great! return
         if to_request.is_empty() {
             let mut result = HashMap::with_capacity(existing.len());
-            // Consume guards & write result
             for (pubkey, mut guard) in existing {
                 *guard += 1;
                 result.insert(*pubkey, *guard);
             }
-
             return Ok(result);
         }
 
-        // Remove duplicates
         let to_request_pubkeys: Vec<_> =
             to_request.iter().map(|(pubkey, _)| **pubkey).collect();
-        let remaining_ids = Self::fetch_metadata_with_retries(
-            &self.rpc_client,
-            &to_request_pubkeys,
-            min_context_slot,
-            NUM_FETCH_RETRIES,
-        )
-        .await?
-        .into_iter()
-        .map(|metadata| metadata.last_update_nonce);
+        let nonces = self
+            .inner
+            .fetch_current_commit_nonces(&to_request_pubkeys, min_context_slot)
+            .await?;
 
         // We don't care if anything changed in between with cache - just update and return our ids.
         let mut result = HashMap::with_capacity(existing.len());
-        // Consume guards & write result
         for (pubkey, mut guard) in existing {
             *guard += 1;
             result.insert(*pubkey, *guard);
         }
-        for ((pubkey, mut guard), nonce) in
-            to_request.into_iter().zip(remaining_ids)
-        {
-            *guard = nonce + 1;
-            result.insert(*pubkey, *guard);
+        for (pubkey, mut guard) in to_request {
+            if let Some(&nonce) = nonces.get(pubkey) {
+                *guard = nonce + 1;
+                result.insert(*pubkey, *guard);
+                Ok(())
+            } else {
+                Err(TaskInfoFetcherError::AccountNotFoundError(*pubkey))
+            }?;
         }
 
         Ok(result)
@@ -471,24 +584,22 @@ impl TaskInfoFetcher for CacheTaskInfoFetcher {
 
         let to_request_pubkeys: Vec<_> =
             to_request.iter().map(|(pubkey, _)| **pubkey).collect();
-        let remaining_ids = Self::fetch_metadata_with_retries(
-            &self.rpc_client,
-            &to_request_pubkeys,
-            min_context_slot,
-            NUM_FETCH_RETRIES,
-        )
-        .await?
-        .into_iter()
-        .map(|metadata| metadata.last_update_nonce);
+        let nonces = self
+            .inner
+            .fetch_current_commit_nonces(&to_request_pubkeys, min_context_slot)
+            .await?;
 
         // Store the on-chain nonce as-is (no +1): recording current state, not
         // reserving the next slot. A subsequent fetch_next_commit_nonces call will
         // increment from here correctly.
-        for ((pubkey, mut guard), nonce) in
-            to_request.into_iter().zip(remaining_ids)
-        {
-            *guard = nonce;
-            result.insert(*pubkey, nonce);
+        for (pubkey, mut guard) in to_request {
+            if let Some(&nonce) = nonces.get(pubkey) {
+                *guard = nonce;
+                result.insert(*pubkey, nonce);
+                Ok(())
+            } else {
+                Err(TaskInfoFetcherError::AccountNotFoundError(*pubkey))
+            }?
         }
 
         Ok(result)
@@ -499,58 +610,9 @@ impl TaskInfoFetcher for CacheTaskInfoFetcher {
         pubkeys: &[Pubkey],
         min_context_slot: u64,
     ) -> TaskInfoFetcherResult<Vec<Pubkey>> {
-        let rent_reimbursements = Self::fetch_metadata_with_retries(
-            &self.rpc_client,
-            pubkeys,
-            min_context_slot,
-            NUM_FETCH_RETRIES,
-        )
-        .await?
-        .into_iter()
-        .map(|metadata| metadata.rent_payer)
-        .collect();
-
-        Ok(rent_reimbursements)
-    }
-
-    /// Returns the cached nonce without promoting LRU order or incrementing.
-    async fn peek_commit_nonce(&self, pubkey: &Pubkey) -> Option<u64> {
-        let lock = {
-            // Peek without promoting LRU order; also check retiring for in-flight keys.
-            // Outer lock held only to clone the Arc, released before awaiting per-key lock.
-            let inner = self.cache.lock().expect(MUTEX_POISONED_MSG);
-            inner
-                .active
-                .peek(pubkey)
-                .or_else(|| inner.retiring.get(pubkey))
-                .cloned()
-        }?;
-
-        let locks_guard = CacheInnerGuard {
-            inner: &self.cache,
-            nonce_locks: vec![(*pubkey, lock)],
-        };
-        let guards = locks_guard.lock().await;
-        let value = *guards[0].1;
-
-        (value != u64::MAX).then_some(value)
-    }
-
-    /// Reset cache
-    fn reset(&self, reset_type: ResetType) {
-        let mut cache = self.cache.lock().expect(MUTEX_POISONED_MSG);
-        match reset_type {
-            ResetType::All => {
-                cache.active.clear();
-                cache.retiring.clear();
-            }
-            ResetType::Specific(pubkeys) => {
-                for pubkey in pubkeys {
-                    cache.active.pop(pubkey);
-                    cache.retiring.remove(pubkey);
-                }
-            }
-        }
+        self.inner
+            .fetch_rent_reimbursements(pubkeys, min_context_slot)
+            .await
     }
 
     async fn get_base_accounts(
@@ -558,15 +620,9 @@ impl TaskInfoFetcher for CacheTaskInfoFetcher {
         pubkeys: &[Pubkey],
         min_context_slot: u64,
     ) -> TaskInfoFetcherResult<HashMap<Pubkey, Account>> {
-        let accounts = Self::fetch_accounts_with_retries(
-            &self.rpc_client,
-            pubkeys,
-            min_context_slot,
-            NUM_FETCH_RETRIES,
-        )
-        .await?;
-
-        Ok(pubkeys.iter().copied().zip(accounts).collect())
+        self.inner
+            .get_base_accounts(pubkeys, min_context_slot)
+            .await
     }
 }
 

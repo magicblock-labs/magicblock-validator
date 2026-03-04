@@ -21,7 +21,8 @@ use crate::{
         db::DummyDB, BroadcastedIntentExecutionResult, IntentExecutionManager,
     },
     intent_executor::task_info_fetcher::{
-        CacheTaskInfoFetcher, TaskInfoFetcher, TaskInfoFetcherResult,
+        CacheTaskInfoFetcher, RpcTaskInfoFetcher, TaskInfoFetcher,
+        TaskInfoFetcherResult,
     },
     persist::{
         CommitStatusRow, IntentPersister, IntentPersisterImpl,
@@ -35,7 +36,7 @@ pub(crate) struct CommittorProcessor {
     pub(crate) authority: Keypair,
     persister: IntentPersisterImpl,
     commits_scheduler: IntentExecutionManager<DummyDB>,
-    task_info_fetcher: Arc<CacheTaskInfoFetcher>,
+    task_info_fetcher: Arc<CacheTaskInfoFetcher<RpcTaskInfoFetcher>>,
 }
 
 impl CommittorProcessor {
@@ -66,8 +67,9 @@ impl CommittorProcessor {
         let persister = IntentPersisterImpl::try_new(persist_file)?;
 
         // Create commit scheduler
-        let task_info_fetcher =
-            Arc::new(CacheTaskInfoFetcher::new(magic_block_rpc_client.clone()));
+        let task_info_fetcher = Arc::new(CacheTaskInfoFetcher::new(
+            RpcTaskInfoFetcher::new(magic_block_rpc_client.clone()),
+        ));
         let commits_scheduler = IntentExecutionManager::new(
             magic_block_rpc_client.clone(),
             DummyDB::new(),

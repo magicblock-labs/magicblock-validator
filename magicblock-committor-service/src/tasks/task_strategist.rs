@@ -394,7 +394,7 @@ mod tests {
     use crate::{
         intent_execution_manager::intent_scheduler::create_test_intent,
         intent_executor::task_info_fetcher::{
-            ResetType, TaskInfoFetcher, TaskInfoFetcherResult,
+            TaskInfoFetcher, TaskInfoFetcherResult,
         },
         persist::IntentPersisterImpl,
         tasks::{
@@ -433,12 +433,6 @@ mod tests {
         ) -> TaskInfoFetcherResult<Vec<Pubkey>> {
             Ok(pubkeys.iter().map(|_| Pubkey::new_unique()).collect())
         }
-
-        async fn peek_commit_nonce(&self, _pubkey: &Pubkey) -> Option<u64> {
-            Some(0)
-        }
-
-        fn reset(&self, _: ResetType) {}
 
         async fn get_base_accounts(
             &self,
