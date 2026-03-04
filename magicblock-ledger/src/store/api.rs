@@ -311,6 +311,56 @@ impl Ledger {
         Ok((slot, hash))
     }
 
+    /// Returns the highest transaction index for a given slot.
+    ///
+    /// Uses a reverse iterator from `(slot, u32::MAX)` to find the first
+    /// (highest) index in O(1) time.
+    ///
+    /// Returns `None` if no transactions exist in the slot.
+    pub fn get_highest_transaction_index_for_slot(
+        &self,
+        slot: Slot,
+    ) -> LedgerResult<Option<u32>> {
+        let mut iter = self.slot_signatures_cf.iter(IteratorMode::From(
+            (slot, u32::MAX),
+            IteratorDirection::Reverse,
+        ))?;
+
+        match iter.next() {
+            Some(((tx_slot, tx_index), _)) if tx_slot == slot => {
+                Ok(Some(tx_index))
+            }
+            _ => Ok(None),
+        }
+    }
+
+    /// Returns the position (slot, index) of the most recent transaction.
+    ///
+    /// This is useful for resuming replication from the last known position.
+    /// Returns `None` if no transactions exist in the ledger.
+    pub fn get_latest_transaction_position(
+        &self,
+    ) -> LedgerResult<Option<(Slot, u32)>> {
+        let (latest_slot, _) = self.get_max_blockhash()?;
+
+        // Try to find the highest index in the latest slot
+        if let Some(index) =
+            self.get_highest_transaction_index_for_slot(latest_slot)?
+        {
+            return Ok(Some((latest_slot, index)));
+        }
+
+        // If the latest slot has no transactions, check previous slots
+        // by iterating backwards through slot_signatures_cf
+        let mut iter = self.slot_signatures_cf.iter(IteratorMode::End)?;
+
+        if let Some(((slot, index), _)) = iter.next() {
+            Ok(Some((slot, index)))
+        } else {
+            Ok(None)
+        }
+    }
+
     // -----------------
     // Block
     // -----------------
