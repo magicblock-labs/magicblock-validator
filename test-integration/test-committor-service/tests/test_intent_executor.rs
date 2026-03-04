@@ -955,7 +955,7 @@ async fn test_commit_unfinalized_account_recovery() {
     // This simulates finalization stage failure
     {
         let commit_allow_undelegation_ix =
-            dlp::instruction_builder::commit_state(
+            dlp_api::instruction_builder::commit_state(
                 fixture.authority.pubkey(),
                 pda,
                 account.owner,
@@ -1037,7 +1037,7 @@ async fn test_commit_unfinalized_account_recovery_two_stage() {
     // This simulates finalization stage failure
     {
         let commit_allow_undelegation_ix =
-            dlp::instruction_builder::commit_state(
+            dlp_api::instruction_builder::commit_state(
                 fixture.authority.pubkey(),
                 counters[0].1,
                 counters[0].2.owner,
@@ -1169,7 +1169,7 @@ async fn setup_payer_with_keypair(
 
     sleep(Duration::from_secs(1));
     // Create actor escrow
-    let ix = dlp::instruction_builder::top_up_ephemeral_balance(
+    let ix = dlp_api::instruction_builder::top_up_ephemeral_balance(
         payer.pubkey(),
         payer.pubkey(),
         Some(LAMPORTS_PER_SOL / 2),

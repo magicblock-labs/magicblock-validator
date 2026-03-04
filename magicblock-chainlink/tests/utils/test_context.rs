@@ -24,8 +24,10 @@ use magicblock_chainlink::{
 };
 use magicblock_config::config::{ChainLinkConfig, LifecycleMode};
 use solana_account::{Account, AccountSharedData};
+use solana_keypair::Keypair;
 use solana_program::{clock::Slot, sysvar::clock};
 use solana_pubkey::Pubkey;
+use solana_signer::Signer;
 use tokio::sync::mpsc;
 use tracing::*;
 
@@ -64,7 +66,8 @@ impl TestContext {
         let lifecycle_mode = LifecycleMode::Ephemeral;
         let bank = Arc::<AccountsBankStub>::default();
         let cloner = Arc::new(ClonerStub::new(bank.clone()));
-        let validator_pubkey = Pubkey::new_unique();
+        let validator_keypair = Keypair::new();
+        let validator_pubkey = validator_keypair.pubkey();
         let faucet_pubkey = Pubkey::new_unique();
         let (fetch_cloner, remote_account_provider) = {
             let (tx, rx) = tokio::sync::mpsc::channel(100);
@@ -95,7 +98,7 @@ impl TestContext {
                             &provider,
                             &bank,
                             &cloner,
-                            validator_pubkey,
+                            validator_keypair.insecure_clone(),
                             faucet_pubkey,
                             rx,
                             None,

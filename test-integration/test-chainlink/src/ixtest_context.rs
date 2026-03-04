@@ -3,7 +3,7 @@ use std::sync::Arc;
 use integration_test_tools::dlp_interface;
 use magicblock_chainlink::{
     accounts_bank::mock::AccountsBankStub,
-    cloner::{AccountCloneRequest, Cloner},
+    cloner::{AccountCloneRequest, Cloner, DelegationActions},
     config::ChainlinkConfig,
     fetch_cloner::FetchCloner,
     native_program_accounts,
@@ -101,6 +101,7 @@ impl IxtestContext {
                         pubkey,
                         account: program_stub.clone(),
                         commit_frequency_ms: None,
+                        delegation_actions: DelegationActions::default(),
                         delegated_to_other: None,
                     })
                     .await
@@ -124,7 +125,7 @@ impl IxtestContext {
                             &provider,
                             &bank,
                             &cloner,
-                            validator_kp.pubkey(),
+                            validator_kp.insecure_clone(),
                             faucet_kp.pubkey(),
                             rx,
                             None,
@@ -304,7 +305,7 @@ impl IxtestContext {
 
         // In order to make the account undelegatable we first need to
         // commmit and finalize
-        let commit_ix = dlp::instruction_builder::commit_state(
+        let commit_ix = dlp_api::instruction_builder::commit_state(
             self.validator_kp.pubkey(),
             counter_pda,
             program_flexi_counter::id(),
@@ -315,11 +316,11 @@ impl IxtestContext {
                 data: vec![0, 1, 0],
             },
         );
-        let finalize_ix = dlp::instruction_builder::finalize(
+        let finalize_ix = dlp_api::instruction_builder::finalize(
             self.validator_kp.pubkey(),
             counter_pda,
         );
-        let undelegate_ix = dlp::instruction_builder::undelegate(
+        let undelegate_ix = dlp_api::instruction_builder::undelegate(
             self.validator_kp.pubkey(),
             counter_pda,
             program_flexi_counter::id(),

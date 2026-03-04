@@ -238,7 +238,7 @@ impl ScheduledCommitsProcessorImpl {
                             .map(|finalize| vec![commit, finalize])
                             .unwrap_or(vec![commit])
                     })
-                    .unwrap_or(vec![])
+                    .unwrap_or_default()
             }
         };
         let patched_errors = result

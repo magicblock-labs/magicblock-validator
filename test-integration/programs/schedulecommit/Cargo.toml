@@ -8,6 +8,7 @@ borsh = { workspace = true }
 ephemeral-rollups-sdk = { workspace = true }
 solana-program = { workspace = true }
 magicblock-delegation-program = { workspace = true }
+dlp-api = { workspace = true }
 magicblock_magic_program_api = { workspace = true }
 rkyv = { workspace = true }
 static_assertions = { workspace = true }

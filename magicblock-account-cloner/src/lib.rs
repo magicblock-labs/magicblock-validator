@@ -19,7 +19,9 @@ use magicblock_committor_service::{
     BaseIntentCommittor, CommittorService,
 };
 use magicblock_config::config::ChainLinkConfig;
-use magicblock_core::link::transactions::TransactionSchedulerHandle;
+use magicblock_core::link::transactions::{
+    SanitizeableTransaction, TransactionSchedulerHandle,
+};
 use magicblock_ledger::LatestBlock;
 use magicblock_magic_program_api::instruction::AccountModification;
 use magicblock_program::{
@@ -38,7 +40,7 @@ use solana_sdk_ids::loader_v4;
 use solana_signature::Signature;
 use solana_signer::{Signer, SignerError};
 use solana_sysvar::rent::Rent;
-use solana_transaction::Transaction;
+use solana_transaction::{sanitized::SanitizedTransaction, Transaction};
 use tokio::sync::oneshot;
 use tracing::*;
 
@@ -84,6 +86,15 @@ impl ChainlinkCloner {
         Ok(sig)
     }
 
+    async fn send_sanitized_transaction(
+        &self,
+        tx: SanitizedTransaction,
+        sig: Signature,
+    ) -> ClonerResult<Signature> {
+        self.tx_scheduler.execute(tx).await?;
+        Ok(sig)
+    }
+
     fn build_clone_message(request: &AccountCloneRequest) -> Option<String> {
         if request.account.delegated() {
             // Account is delegated to us
@@ -122,7 +133,7 @@ impl ChainlinkCloner {
             message,
         );
         // Defined positive commit frequency means commits should be scheduled
-        let ixs = match request.commit_frequency_ms {
+        let mut ixs = match request.commit_frequency_ms {
             // TODO(GabrielePicco): Hotfix. Do not schedule frequency commits until we impose limits.
             // 1. Allow configuring a higher minimum.
             // 2. Stop committing accounts if they have been committed more than X times,
@@ -162,6 +173,9 @@ impl ChainlinkCloner {
             }
             _ => vec![modify_ix],
         };
+        if !request.delegation_actions.is_empty() {
+            ixs.extend(request.delegation_actions.clone());
+        }
 
         let mut tx =
             Transaction::new_with_payer(&ixs, Some(&validator_authority_id()));
@@ -407,13 +421,24 @@ impl Cloner for ChainlinkCloner {
         let recent_blockhash = self.block.load().blockhash;
         let tx = self
             .transaction_to_clone_regular_account(&request, recent_blockhash)?;
+        let bypass_sigverify_for_replay_actions =
+            !request.delegation_actions.is_empty();
+        let sig = tx.signatures[0];
+
+        let send_res = if bypass_sigverify_for_replay_actions {
+            let sanitized_tx = tx.sanitize(false)?;
+            self.send_sanitized_transaction(sanitized_tx, sig).await
+        } else {
+            self.send_transaction(tx).await
+        };
+
         if request.account.delegated() {
             self.maybe_prepare_lookup_tables(
                 request.pubkey,
                 *request.account.owner(),
             );
         }
-        self.send_transaction(tx).await.map_err(|err| {
+        send_res.map_err(|err| {
             ClonerError::FailedToCloneRegularAccount(
                 request.pubkey,
                 Box::new(err),
