@@ -71,13 +71,19 @@ pub enum ResetType<'a> {
     Specific(&'a [Pubkey]),
 }
 
+/// Per-account async mutex protecting the cached nonce value.
 type NonceLock = Arc<TMutex<u64>>;
 
+/// Split-map cache: `active` is the live LRU window; `retiring` holds locks
+/// evicted from `active` that are still held by in-flight requests.
 struct CacheInner {
     active: LruCache<Pubkey, NonceLock>,
     retiring: HashMap<Pubkey, NonceLock>,
 }
 
+/// RAII guard returned by [`CacheTaskInfoFetcher::acquire_nonce_locks`].
+/// Holds clones of the reserved [`NonceLock`]s and cleans up retiring entries
+/// on drop.
 struct CacheInnerGuard<'a> {
     inner: &'a Mutex<CacheInner>,
     nonce_locks: Vec<(Pubkey, NonceLock)>,
@@ -161,7 +167,6 @@ impl CacheTaskInfoFetcher {
         if pubkeys.is_empty() {
             return Ok(Vec::new());
         }
-        tokio::runtime::Handle::current();
 
         let pda_accounts: Vec<Pubkey> = pubkeys
             .iter()
@@ -302,7 +307,9 @@ impl CacheTaskInfoFetcher {
         Ok(accounts)
     }
 
-    fn reserve_locks(&self, pubkeys: &[Pubkey]) -> CacheInnerGuard<'_> {
+    /// Ensures a [`NonceLock`] exists in the cache for each pubkey and returns
+    /// a [`CacheInnerGuard`] holding clones of those locks.
+    fn acquire_nonce_locks(&self, pubkeys: &[Pubkey]) -> CacheInnerGuard<'_> {
         // Sorted order is required: all callers acquire per-key locks in the same
         // order, preventing the A→B / B→A circular-wait deadlock.
         let mut pubkeys = pubkeys.to_vec();
@@ -313,7 +320,7 @@ impl CacheTaskInfoFetcher {
         {
             let mut inner = self.cache.lock().expect(MUTEX_POISONED_MSG);
             for pubkey in pubkeys {
-                let (lock, eviceted) =
+                let (lock, evicted) =
                     if let Some(val) = inner.active.get(&pubkey) {
                         (val.clone(), None)
                     } else if let Some(val) = inner.retiring.remove(&pubkey) {
@@ -326,7 +333,7 @@ impl CacheTaskInfoFetcher {
                         (val, evicted)
                     };
 
-                if let Some((evicted_pk, evicted_lock)) = eviceted {
+                if let Some((evicted_pk, evicted_lock)) = evicted {
                     // If value isn't used by anyone then it can be dropped
                     if Arc::strong_count(&evicted_lock) > 1 {
                         // Value used in by another request
@@ -346,7 +353,7 @@ impl CacheTaskInfoFetcher {
                             // This is impossible as per logic above, contradiction. чтд.
                             debug_assert!(
                                 false,
-                                "Just eviceted value can't be in retiring"
+                                "Just evicted value can't be in retiring"
                             );
                             error!("Retiring map already contained lock with pubkey: {}", evicted_pk);
                         }
@@ -378,14 +385,14 @@ impl TaskInfoFetcher for CacheTaskInfoFetcher {
             return Ok(HashMap::new());
         }
 
-        let locks_guard = self.reserve_locks(pubkeys);
+        let locks_guard = self.acquire_nonce_locks(pubkeys);
 
         // Acquire per-account locks sequentially in sorted order (see sort above).
         // join_all would poll all futures concurrently, allowing partial acquisition
         // and producing the classic A→B / B→A deadlock across concurrent callers.
-        let guard_nonces = locks_guard.lock().await;
+        let nonce_guards = locks_guard.lock().await;
         let (mut existing, mut to_request) = (vec![], vec![]);
-        for (pubkey, guard) in guard_nonces {
+        for (pubkey, guard) in nonce_guards {
             if *guard == u64::MAX {
                 to_request.push((pubkey, guard));
             } else {
@@ -444,13 +451,13 @@ impl TaskInfoFetcher for CacheTaskInfoFetcher {
             return Ok(HashMap::new());
         }
 
-        let locks_guard = self.reserve_locks(pubkeys);
+        let locks_guard = self.acquire_nonce_locks(pubkeys);
 
         // Acquire per-account locks sequentially in sorted order (see sort above).
-        let guard_nonces = locks_guard.lock().await;
+        let nonce_guards = locks_guard.lock().await;
         let mut to_request = vec![];
-        let mut result = HashMap::with_capacity(guard_nonces.len());
-        for (pubkey, guard) in guard_nonces {
+        let mut result = HashMap::with_capacity(nonce_guards.len());
+        for (pubkey, guard) in nonce_guards {
             if *guard == u64::MAX {
                 to_request.push((pubkey, guard));
             } else {
@@ -506,7 +513,7 @@ impl TaskInfoFetcher for CacheTaskInfoFetcher {
         Ok(rent_reimbursements)
     }
 
-    /// Returns current commit id without raising priority
+    /// Returns the cached nonce without promoting LRU order or incrementing.
     async fn peek_commit_nonce(&self, pubkey: &Pubkey) -> Option<u64> {
         let lock = {
             // Peek without promoting LRU order; also check retiring for in-flight keys.
