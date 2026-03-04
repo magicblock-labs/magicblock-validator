@@ -21,9 +21,7 @@ use solana_measure::measure::Measure;
 use solana_pubkey::Pubkey;
 use solana_signature::Signature;
 use solana_storage_proto::convert::generated;
-use solana_transaction::{
-    sanitized::SanitizedTransaction, versioned::VersionedTransaction,
-};
+use solana_transaction::versioned::VersionedTransaction;
 use solana_transaction_status::{
     ConfirmedTransactionStatusWithSignature,
     ConfirmedTransactionWithStatusMeta, TransactionStatusMeta,
@@ -845,9 +843,7 @@ impl Ledger {
                     }
                     (Some(transaction), None) => {
                         TransactionWithStatusMeta::MissingMetadata(
-                            transaction
-                                .into_legacy_transaction()
-                                .unwrap(),
+                            transaction.into_legacy_transaction().unwrap(),
                         )
                     }
                     (None, Some(_)) | (None, None) => {
@@ -865,6 +861,7 @@ impl Ledger {
     }
 
     /// Returns a confirmed transaction and the slot at which it was confirmed
+    #[allow(clippy::type_complexity)]
     fn get_confirmed_transaction(
         &self,
         signature: Signature,
@@ -903,8 +900,8 @@ impl Ledger {
                         if slot <= highest_confirmed_slot
                             && tx_signature == signature
                         {
-                            let transaction = self
-                                .read_transaction((tx_signature, slot))?;
+                            let transaction =
+                                self.read_transaction((tx_signature, slot))?;
                             match transaction {
                                 Some(tx) => (slot, Some(tx), None),
                                 None => return Ok(None),
@@ -931,6 +928,7 @@ impl Ledger {
     /// * `readonly_keys` - Readonly account keys from the transaction
     /// * `encoded_transaction` - Bincode-serialized `VersionedTransaction`
     /// * `status` - status of the transaction
+    #[allow(clippy::too_many_arguments)]
     pub fn write_transaction(
         &self,
         signature: Signature,
@@ -974,6 +972,31 @@ impl Ledger {
             }
             None => Ok(None),
         }
+    }
+
+    /// Verifies the signature of a transaction stored in the ledger.
+    ///
+    /// Returns:
+    /// - `None` if no transaction with that signature exists
+    /// - `Some(true)` if the transaction exists and its signature is valid
+    /// - `Some(false)` if the transaction exists but its signature is
+    ///   invalid
+    pub fn verify_transaction_signature(
+        &self,
+        signature: &Signature,
+    ) -> LedgerResult<Option<bool>> {
+        let slot = match self.get_transaction_status(*signature, u64::MAX)? {
+            Some((slot, _meta)) => slot,
+            None => return Ok(None),
+        };
+
+        let transaction = match self.read_transaction((*signature, slot))? {
+            Some(tx) => tx,
+            None => return Ok(None),
+        };
+
+        let is_valid = transaction.verify_and_hash_message().is_ok();
+        Ok(Some(is_valid))
     }
 
     pub fn count_transactions(&self) -> LedgerResult<i64> {
@@ -1402,6 +1425,7 @@ mod tests {
     use solana_pubkey::Pubkey;
     use solana_signature::Signature;
     use solana_signer::Signer;
+    use solana_transaction::sanitized::SanitizedTransaction;
     use solana_transaction_context::TransactionReturnData;
     use solana_transaction_error::{TransactionError, TransactionResult};
     use solana_transaction_status::{
@@ -2535,5 +2559,123 @@ mod tests {
                 .infos[0];
             assert_eq!(sig_info_dos.memo, Some("Test Dos Memo".to_string()));
         }
+    }
+
+    #[test]
+    fn test_verify_transaction_signature() {
+        init_logger!();
+        let ledger_path = get_tmp_ledger_path_auto_delete!();
+        let store = Ledger::open(ledger_path.path()).unwrap();
+
+        // Create a properly signed transaction
+        let from_keypair = Keypair::new();
+        let to = Pubkey::new_unique();
+        let blockhash = Hash::new_unique();
+        let tx = solana_system_transaction::transfer(
+            &from_keypair,
+            &to,
+            42,
+            blockhash,
+        );
+        let versioned_tx = VersionedTransaction::from(tx);
+        let signature = versioned_tx.signatures[0];
+        let slot = 10u64;
+
+        // Encode and write the transaction to the ledger
+        let encoded = serialize(&versioned_tx).unwrap();
+        let (meta, _, _) = create_transaction_status_meta(5);
+        let writable_keys = versioned_tx.message.static_account_keys()[..1]
+            .iter()
+            .collect();
+        let readonly_keys = versioned_tx.message.static_account_keys()[1..]
+            .iter()
+            .collect();
+        store
+            .write_transaction(
+                signature,
+                slot,
+                0,
+                writable_keys,
+                readonly_keys,
+                &encoded,
+                meta,
+            )
+            .unwrap();
+        store.write_block(slot, 100, Hash::new_unique()).unwrap();
+
+        // Verify a properly signed transaction returns Some(true)
+        let result = store.verify_transaction_signature(&signature).unwrap();
+        assert_eq!(result, Some(true));
+
+        // Verify a non-existent signature returns None
+        let random_sig = Signature::new_unique();
+        let result = store.verify_transaction_signature(&random_sig).unwrap();
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_verify_transaction_signature_not_found() {
+        init_logger!();
+        let ledger_path = get_tmp_ledger_path_auto_delete!();
+        let store = Ledger::open(ledger_path.path()).unwrap();
+
+        // Query an empty ledger — no transaction exists
+        let sig = Signature::new_unique();
+        let result = store.verify_transaction_signature(&sig).unwrap();
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_verify_transaction_signature_invalid() {
+        init_logger!();
+        let ledger_path = get_tmp_ledger_path_auto_delete!();
+        let store = Ledger::open(ledger_path.path()).unwrap();
+
+        // Build a transaction with a bogus signature (not matching keypair)
+        let from_keypair = Keypair::new();
+        let to = Pubkey::new_unique();
+        let blockhash = Hash::new_unique();
+        let tx = solana_system_transaction::transfer(
+            &from_keypair,
+            &to,
+            42,
+            blockhash,
+        );
+        let mut versioned_tx = VersionedTransaction::from(tx);
+
+        // Corrupt the signature so verification will fail
+        let real_sig = versioned_tx.signatures[0];
+        versioned_tx.signatures[0] = Signature::new_unique();
+        let bad_sig = versioned_tx.signatures[0];
+
+        let encoded = serialize(&versioned_tx).unwrap();
+        let (meta, _, _) = create_transaction_status_meta(5);
+        let writable_keys = versioned_tx.message.static_account_keys()[..1]
+            .iter()
+            .collect();
+        let readonly_keys = versioned_tx.message.static_account_keys()[1..]
+            .iter()
+            .collect();
+        let slot = 10u64;
+        store
+            .write_transaction(
+                bad_sig,
+                slot,
+                0,
+                writable_keys,
+                readonly_keys,
+                &encoded,
+                meta,
+            )
+            .unwrap();
+        store.write_block(slot, 100, Hash::new_unique()).unwrap();
+
+        // The corrupted signature should fail verification
+        let result = store.verify_transaction_signature(&bad_sig).unwrap();
+        assert_eq!(result, Some(false));
+
+        // The original valid signature is not in the ledger
+        let result = store.verify_transaction_signature(&real_sig).unwrap();
+        assert_eq!(result, None);
     }
 }
