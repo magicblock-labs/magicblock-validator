@@ -37,7 +37,7 @@ fn variant_order_stability() {
             Message::Transaction(Transaction {
                 slot: 0,
                 index: 0,
-                payload: vec![].into(),
+                payload: vec![],
             }),
             2,
         ),
