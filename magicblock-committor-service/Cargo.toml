@@ -22,6 +22,7 @@ lru = { workspace = true }
 magicblock-committor-program = { workspace = true, features = [
   "no-entrypoint",
 ] }
+magicblock-core = { workspace = true }
 magicblock-delegation-program = { workspace = true, features = [
   "no-entrypoint",
 ] }
@@ -56,6 +57,7 @@ tokio-util = { workspace = true }
 
 [dev-dependencies]
 solana-signature = { workspace = true, features = ["rand"] }
+serde_json = { workspace = true }
 lazy_static = { workspace = true }
 rand = { workspace = true }
 tempfile = { workspace = true }

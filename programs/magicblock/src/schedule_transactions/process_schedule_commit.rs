@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 
+use magicblock_core::intent::CommittedAccount;
 // no direct token remap helpers needed here; handled in CommittedAccount builder
 use solana_account::{state_traits::StateMut, ReadableAccount};
 use solana_instruction::error::InstructionError;
@@ -10,8 +11,7 @@ use solana_pubkey::Pubkey;
 use crate::{
     magic_scheduled_base_intent::{
         validate_commit_schedule_permissions, CommitAndUndelegate, CommitType,
-        CommittedAccount, MagicBaseIntent, ScheduledIntentBundle,
-        UndelegateType,
+        MagicBaseIntent, ScheduledIntentBundle, UndelegateType,
     },
     schedule_transactions,
     utils::{

@@ -21,7 +21,7 @@ use magicblock_committor_service::{
     },
     ComputeBudgetConfig,
 };
-use magicblock_program::magic_scheduled_base_intent::CommittedAccount;
+use magicblock_core::intent::CommittedAccount;
 use magicblock_rpc_client::MagicblockRpcClient;
 use magicblock_table_mania::{GarbageCollectorConfig, TableMania};
 use solana_account::Account;

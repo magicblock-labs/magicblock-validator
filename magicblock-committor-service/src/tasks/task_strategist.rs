@@ -381,8 +381,9 @@ pub type TaskStrategistResult<T, E = TaskStrategistError> = Result<T, E>;
 mod tests {
     use std::{collections::HashMap, sync::Arc};
 
+    use magicblock_core::intent::CommittedAccount;
     use magicblock_program::magic_scheduled_base_intent::{
-        BaseAction, CommittedAccount, ProgramArgs,
+        BaseAction, ProgramArgs,
     };
     use solana_account::Account;
     use solana_program::system_program;
@@ -417,6 +418,14 @@ mod tests {
             Ok(pubkeys.iter().map(|pubkey| (*pubkey, 0)).collect())
         }
 
+        async fn fetch_current_commit_nonces(
+            &self,
+            pubkeys: &[Pubkey],
+            _: u64,
+        ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>> {
+            Ok(pubkeys.iter().map(|pubkey| (*pubkey, 0)).collect())
+        }
+
         async fn fetch_rent_reimbursements(
             &self,
             pubkeys: &[Pubkey],
@@ -425,7 +434,7 @@ mod tests {
             Ok(pubkeys.iter().map(|_| Pubkey::new_unique()).collect())
         }
 
-        fn peek_commit_nonce(&self, _pubkey: &Pubkey) -> Option<u64> {
+        async fn peek_commit_nonce(&self, _pubkey: &Pubkey) -> Option<u64> {
             Some(0)
         }
 

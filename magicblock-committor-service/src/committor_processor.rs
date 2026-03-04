@@ -1,4 +1,8 @@
-use std::{collections::HashSet, path::Path, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    path::Path,
+    sync::Arc,
+};
 
 use magicblock_program::magic_scheduled_base_intent::ScheduledIntentBundle;
 use magicblock_rpc_client::MagicblockRpcClient;
@@ -16,6 +20,9 @@ use crate::{
     intent_execution_manager::{
         db::DummyDB, BroadcastedIntentExecutionResult, IntentExecutionManager,
     },
+    intent_executor::task_info_fetcher::{
+        CacheTaskInfoFetcher, TaskInfoFetcher, TaskInfoFetcherResult,
+    },
     persist::{
         CommitStatusRow, IntentPersister, IntentPersisterImpl,
         MessageSignatures,
@@ -28,6 +35,7 @@ pub(crate) struct CommittorProcessor {
     pub(crate) authority: Keypair,
     persister: IntentPersisterImpl,
     commits_scheduler: IntentExecutionManager<DummyDB>,
+    task_info_fetcher: Arc<CacheTaskInfoFetcher>,
 }
 
 impl CommittorProcessor {
@@ -58,9 +66,12 @@ impl CommittorProcessor {
         let persister = IntentPersisterImpl::try_new(persist_file)?;
 
         // Create commit scheduler
+        let task_info_fetcher =
+            Arc::new(CacheTaskInfoFetcher::new(magic_block_rpc_client.clone()));
         let commits_scheduler = IntentExecutionManager::new(
             magic_block_rpc_client.clone(),
             DummyDB::new(),
+            task_info_fetcher.clone(),
             Some(persister.clone()),
             table_mania.clone(),
             chain_config.compute_budget_config.clone(),
@@ -72,6 +83,7 @@ impl CommittorProcessor {
             table_mania,
             commits_scheduler,
             persister,
+            task_info_fetcher,
         })
     }
 
@@ -148,5 +160,16 @@ impl CommittorProcessor {
         &self,
     ) -> broadcast::Receiver<BroadcastedIntentExecutionResult> {
         self.commits_scheduler.subscribe_for_results()
+    }
+
+    /// Fetches current commit nonces
+    pub async fn fetch_current_commit_nonces(
+        &self,
+        pubkeys: &[Pubkey],
+        min_context_slot: u64,
+    ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>> {
+        self.task_info_fetcher
+            .fetch_current_commit_nonces(pubkeys, min_context_slot)
+            .await
     }
 }

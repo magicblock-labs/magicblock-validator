@@ -8,7 +8,7 @@ use std::{
     },
 };
 
-use magicblock_core::traits::MagicSys;
+use magicblock_core::{intent::CommittedAccount, traits::MagicSys};
 use magicblock_magic_program_api::{id, EPHEMERAL_VAULT_PUBKEY};
 use solana_account::AccountSharedData;
 use solana_instruction::{error::InstructionError, AccountMeta};
@@ -93,9 +93,9 @@ impl MagicSys for PersisterStub {
         Err("Loading from ledger not supported in tests".into())
     }
 
-    fn validate_commit_nonces(
+    fn validate_commits(
         &self,
-        pubkeys: &[Pubkey],
+        commits: &[CommittedAccount],
     ) -> Result<(), InstructionError> {
         // TODO(edwin)
         todo!()

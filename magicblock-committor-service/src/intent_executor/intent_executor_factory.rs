@@ -23,7 +23,7 @@ pub struct IntentExecutorFactoryImpl {
     pub rpc_client: MagicblockRpcClient,
     pub table_mania: TableMania,
     pub compute_budget_config: ComputeBudgetConfig,
-    pub commit_id_tracker: Arc<CacheTaskInfoFetcher>,
+    pub task_info_fetcher: Arc<CacheTaskInfoFetcher>,
 }
 
 impl IntentExecutorFactory for IntentExecutorFactoryImpl {
@@ -39,7 +39,7 @@ impl IntentExecutorFactory for IntentExecutorFactoryImpl {
         IntentExecutorImpl::<TransactionPreparatorImpl, CacheTaskInfoFetcher>::new(
             self.rpc_client.clone(),
             transaction_preparator,
-            self.commit_id_tracker.clone(),
+            self.task_info_fetcher.clone(),
         )
     }
 }

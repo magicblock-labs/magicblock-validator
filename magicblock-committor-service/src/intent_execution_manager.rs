@@ -33,19 +33,18 @@ impl<D: DB> IntentExecutionManager<D> {
     pub fn new<P: IntentPersister>(
         rpc_client: MagicblockRpcClient,
         db: D,
+        task_info_fetcher: Arc<CacheTaskInfoFetcher>,
         intent_persister: Option<P>,
         table_mania: TableMania,
         compute_budget_config: ComputeBudgetConfig,
     ) -> Self {
         let db = Arc::new(db);
 
-        let commit_id_tracker =
-            Arc::new(CacheTaskInfoFetcher::new(rpc_client.clone()));
         let executor_factory = IntentExecutorFactoryImpl {
             rpc_client,
             table_mania,
             compute_budget_config,
-            commit_id_tracker,
+            task_info_fetcher,
         };
 
         let (sender, receiver) = mpsc::channel(1000);

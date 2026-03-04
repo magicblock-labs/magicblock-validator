@@ -32,7 +32,7 @@ use magicblock_committor_service::{
 use magicblock_program::{
     args::ShortAccountMeta,
     magic_scheduled_base_intent::{
-        BaseAction, CommitAndUndelegate, CommitType, CommittedAccount,
+        BaseAction, CommitAndUndelegate, CommitType,
         MagicBaseIntent, ProgramArgs, ScheduledIntentBundle, UndelegateType,
     },
     validator::validator_authority_id,
@@ -55,7 +55,7 @@ use solana_sdk::{
     signature::{Keypair, Signer},
     transaction::{Transaction, TransactionError},
 };
-
+use magicblock_core::intent::CommittedAccount;
 use crate::{
     common::TestFixture,
     utils::{

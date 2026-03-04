@@ -1,8 +1,7 @@
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     mem,
     num::NonZeroUsize,
-    ops::Add,
     sync::{Arc, Mutex},
     time::Duration,
 };
@@ -11,7 +10,6 @@ use async_trait::async_trait;
 use dlp::{
     delegation_metadata_seeds_from_delegated_account, state::DelegationMetadata,
 };
-use dyn_clone::clone;
 use lru::LruCache;
 use magicblock_metrics::metrics;
 use magicblock_rpc_client::{MagicBlockRpcClientError, MagicblockRpcClient};
@@ -140,6 +138,16 @@ impl CacheTaskInfoFetcher {
         Self {
             rpc_client,
             cache: Mutex::new(CacheInner::new(CACHE_SIZE)),
+        }
+    }
+
+    pub fn with_capacity(
+        capacity: NonZeroUsize,
+        rpc_client: MagicblockRpcClient,
+    ) -> Self {
+        Self {
+            rpc_client,
+            cache: Mutex::new(CacheInner::new(capacity)),
         }
     }
 
@@ -374,7 +382,7 @@ impl TaskInfoFetcher for CacheTaskInfoFetcher {
         // Acquire per-account locks sequentially in sorted order (see sort above).
         // join_all would poll all futures concurrently, allowing partial acquisition
         // and producing the classic A→B / B→A deadlock across concurrent callers.
-        let mut guard_nonces = locks_guard.lock().await;
+        let guard_nonces = locks_guard.lock().await;
         let (mut existing, mut to_request) = (vec![], vec![]);
         for (pubkey, guard) in guard_nonces {
             if *guard == u64::MAX {
@@ -438,7 +446,7 @@ impl TaskInfoFetcher for CacheTaskInfoFetcher {
         let locks_guard = self.reserve_locks(pubkeys);
 
         // Acquire per-account locks sequentially in sorted order (see sort above).
-        let mut guard_nonces = locks_guard.lock().await;
+        let guard_nonces = locks_guard.lock().await;
         let mut to_request = vec![];
         let mut result = HashMap::with_capacity(guard_nonces.len());
         for (pubkey, guard) in guard_nonces {
@@ -619,3 +627,370 @@ impl TaskInfoFetcherError {
 }
 
 pub type TaskInfoFetcherResult<T, E = TaskInfoFetcherError> = Result<T, E>;
+
+#[cfg(test)]
+mod tests {
+    use std::{collections::VecDeque, sync::Arc, time::Duration};
+
+    use async_trait::async_trait;
+    use base64::{prelude::BASE64_STANDARD, Engine};
+    use dlp::state::DelegationMetadata;
+    use solana_account_decoder::{UiAccount, UiAccountData, UiAccountEncoding};
+    use solana_pubkey::Pubkey;
+    use solana_rpc_client::{
+        nonblocking::rpc_client::RpcClient,
+        rpc_client::RpcClientConfig,
+        rpc_sender::{RpcSender, RpcTransportStats},
+    };
+    use solana_rpc_client_api::{
+        client_error::Result as ClientResult,
+        request::RpcRequest,
+        response::{Response, RpcResponseContext},
+    };
+
+    use super::*;
+
+    // ---- mock ----
+
+    struct TestSender {
+        calls: std::sync::Mutex<VecDeque<DelegationMetadata>>,
+        rpc_delay: Option<Duration>,
+    }
+
+    impl TestSender {
+        fn new(responses: Vec<DelegationMetadata>) -> Self {
+            Self {
+                calls: std::sync::Mutex::new(responses.into()),
+                rpc_delay: None,
+            }
+        }
+
+        fn with_delay(mut self, delay: Duration) -> Self {
+            self.rpc_delay = Some(delay);
+            self
+        }
+    }
+
+    #[async_trait]
+    impl RpcSender for TestSender {
+        async fn send(
+            &self,
+            request: RpcRequest,
+            params: serde_json::Value,
+        ) -> ClientResult<serde_json::Value> {
+            if let Some(delay) = self.rpc_delay {
+                tokio::time::sleep(delay).await;
+            }
+            assert_eq!(request, RpcRequest::GetMultipleAccounts);
+            let n = params[0].as_array().map(|a| a.len()).unwrap_or(0);
+            let metas: Vec<DelegationMetadata> = {
+                let mut q = self.calls.lock().unwrap();
+                (0..n)
+                    .map(|_| {
+                        q.pop_front()
+                            .expect("unexpected RPC call: queue exhausted")
+                    })
+                    .collect()
+            };
+            let accounts: Vec<Option<UiAccount>> =
+                metas.iter().map(|m| Some(encode_meta(m))).collect();
+            Ok(serde_json::to_value(Response {
+                context: RpcResponseContext {
+                    slot: 1,
+                    api_version: None,
+                },
+                value: accounts,
+            })
+            .unwrap())
+        }
+
+        fn get_transport_stats(&self) -> RpcTransportStats {
+            RpcTransportStats::default()
+        }
+
+        fn url(&self) -> String {
+            "test".to_string()
+        }
+    }
+
+    fn encode_meta(m: &DelegationMetadata) -> UiAccount {
+        let mut bytes = Vec::new();
+        m.to_bytes_with_discriminator(&mut bytes).unwrap();
+        UiAccount {
+            lamports: 1_000_000,
+            data: UiAccountData::Binary(
+                BASE64_STANDARD.encode(&bytes),
+                UiAccountEncoding::Base64,
+            ),
+            owner: dlp::id().to_string(),
+            executable: false,
+            rent_epoch: 0,
+            space: Some(bytes.len() as u64),
+        }
+    }
+
+    fn meta(nonce: u64) -> DelegationMetadata {
+        DelegationMetadata {
+            last_update_nonce: nonce,
+            is_undelegatable: false,
+            seeds: vec![],
+            rent_payer: Pubkey::default(),
+        }
+    }
+
+    struct FetcherBuilder {
+        sender: TestSender,
+        capacity: Option<NonZeroUsize>,
+    }
+
+    impl FetcherBuilder {
+        fn new(responses: Vec<DelegationMetadata>) -> Self {
+            Self {
+                sender: TestSender::new(responses),
+                capacity: None,
+            }
+        }
+
+        fn rpc_delay(mut self, d: Duration) -> Self {
+            self.sender = self.sender.with_delay(d);
+            self
+        }
+
+        fn capacity(mut self, n: usize) -> Self {
+            self.capacity = Some(n.try_into().unwrap());
+            self
+        }
+
+        fn build(self) -> CacheTaskInfoFetcher {
+            let rpc = MagicblockRpcClient::new(Arc::new(
+                RpcClient::new_sender(self.sender, RpcClientConfig::default()),
+            ));
+            match self.capacity {
+                Some(cap) => CacheTaskInfoFetcher::with_capacity(cap, rpc),
+                None => CacheTaskInfoFetcher::new(rpc),
+            }
+        }
+    }
+
+    // ---- tests ----
+
+    #[tokio::test]
+    async fn cache_miss_then_hit() {
+        let pk = Pubkey::new_unique();
+        let fetcher = FetcherBuilder::new(vec![meta(10)]).build();
+
+        let r1 = fetcher.fetch_next_commit_nonces(&[pk], 0).await.unwrap();
+        assert_eq!(r1[&pk], 11);
+
+        // Cache hit: no RPC (only 1 response queued), increments
+        let r2 = fetcher.fetch_next_commit_nonces(&[pk], 0).await.unwrap();
+        assert_eq!(r2[&pk], 12);
+    }
+
+    #[tokio::test]
+    async fn partial_cache_hit() {
+        let pk1 = Pubkey::new_unique();
+        let pk2 = Pubkey::new_unique();
+        // prime pk1 (nonce 5), then mixed call fetches only cold pk2 (nonce 20)
+        let fetcher = FetcherBuilder::new(vec![meta(5), meta(20)]).build();
+
+        fetcher.fetch_next_commit_nonces(&[pk1], 0).await.unwrap(); // pk1 = 6
+        let r = fetcher
+            .fetch_next_commit_nonces(&[pk1, pk2], 0)
+            .await
+            .unwrap();
+        assert_eq!(r[&pk1], 7); // cached, incremented
+        assert_eq!(r[&pk2], 21); // fetched from chain
+    }
+
+    #[tokio::test]
+    async fn lru_eviction_forces_refetch() {
+        let pk1 = Pubkey::new_unique();
+        let pk2 = Pubkey::new_unique();
+        // pk1 initial, pk2 evicts pk1, pk1 re-fetch after eviction
+        let fetcher = FetcherBuilder::new(vec![meta(1), meta(2), meta(10)])
+            .capacity(1)
+            .build();
+
+        fetcher.fetch_next_commit_nonces(&[pk1], 0).await.unwrap(); // pk1 = 2
+        fetcher.fetch_next_commit_nonces(&[pk2], 0).await.unwrap(); // pk2 = 3, pk1 evicted
+        let r = fetcher.fetch_next_commit_nonces(&[pk1], 0).await.unwrap();
+        assert_eq!(r[&pk1], 11); // re-fetched (10 + 1)
+    }
+
+    // Phase 1: fetch phase1_keys one-by-one → barrier → outer verification →
+    // barrier. Phase 2: fetch phase2_keys one-by-one for `iters` passes, then
+    // fetch shared_b in chunks of 2.
+    async fn run_worker(
+        fetcher: Arc<CacheTaskInfoFetcher>,
+        barrier: Arc<tokio::sync::Barrier>,
+        phase1_keys: Vec<Pubkey>,
+        phase2_keys: Vec<Pubkey>,
+        shared_b: Vec<Pubkey>,
+        iters: usize,
+    ) {
+        for pk in &phase1_keys {
+            fetcher.fetch_next_commit_nonces(&[*pk], 0).await.unwrap();
+        }
+        barrier.wait().await; // signal phase 1 done
+        barrier.wait().await; // wait for outer verification
+        for _ in 0..iters {
+            for pk in &phase2_keys {
+                fetcher.fetch_next_commit_nonces(&[*pk], 0).await.unwrap();
+            }
+        }
+        for chunk in shared_b.chunks(2) {
+            fetcher.fetch_next_commit_nonces(chunk, 0).await.unwrap();
+        }
+    }
+
+    // Three concurrent workers operating in two phases, separated by a barrier.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn three_concurrent_workers_two_phase() {
+        const ITERS: usize = 50;
+        const NUM_WORKERS: usize = 3;
+        const SHARED_A: usize = 10;
+        const SHARED_B: usize = 40;
+        const EXCLUSIVE: usize = 50;
+        const CAPACITY: usize = 30;
+        const PHASE2_KEYS: usize = EXCLUSIVE + SHARED_A; // 60
+
+        let shared_a: Vec<Pubkey> =
+            (0..SHARED_A).map(|_| Pubkey::new_unique()).collect();
+        let shared_b: Vec<Pubkey> =
+            (0..SHARED_B).map(|_| Pubkey::new_unique()).collect();
+        let excl: [Vec<Pubkey>; NUM_WORKERS] = std::array::from_fn(|_| {
+            (0..EXCLUSIVE).map(|_| Pubkey::new_unique()).collect()
+        });
+        let phase2_keys: [Vec<Pubkey>; NUM_WORKERS] =
+            std::array::from_fn(|i| {
+                excl[i].iter().chain(shared_a.iter()).cloned().collect()
+            });
+
+        // Flat queue: each RPC call pops exactly N entries (N cold keys).
+        // Upper bounds:
+        //   phase 1 loop:       SHARED_A × 1
+        //   phase 2 excl+sa:    ITERS × PHASE2_KEYS × NUM_WORKERS × 1
+        //   phase 2 shared_b:   (SHARED_B / chunk_size) × chunk_size × NUM_WORKERS
+        //                     = SHARED_B × NUM_WORKERS
+        let total = SHARED_A
+            + ITERS * PHASE2_KEYS * NUM_WORKERS
+            + SHARED_B * NUM_WORKERS;
+        let responses: Vec<DelegationMetadata> =
+            (0..total).map(|_| meta(0)).collect();
+
+        let fetcher = Arc::new(
+            FetcherBuilder::new(responses)
+                .capacity(CAPACITY)
+                .rpc_delay(Duration::from_millis(2))
+                .build(),
+        );
+
+        // Barrier resets automatically: round 1 syncs after phase 1, round 2
+        // releases workers into phase 2 after outer verification.
+        let barrier = Arc::new(tokio::sync::Barrier::new(NUM_WORKERS + 1));
+
+        let handles: Vec<_> = (0..NUM_WORKERS)
+            .map(|i| {
+                tokio::spawn(run_worker(
+                    fetcher.clone(),
+                    barrier.clone(),
+                    shared_a.clone(),
+                    phase2_keys[i].clone(),
+                    shared_b.clone(),
+                    ITERS,
+                ))
+            })
+            .collect();
+
+        barrier.wait().await; // all workers done with phase 1
+
+        // No eviction during phase 1 (10 keys < capacity 30).
+        // Per-key lock serialises 3 workers → exactly NUM_WORKERS increments each.
+        for pk in &shared_a {
+            assert_eq!(
+                fetcher.peek_commit_nonce(pk).await,
+                Some(NUM_WORKERS as u64)
+            );
+        }
+
+        barrier.wait().await; // release workers into phase 2
+
+        for h in handles {
+            h.await.unwrap();
+        }
+
+        // Workers fetched shared_b in chunks of 2 (40 / 2 = 20 calls each).
+        // Due to eviction (40 keys > capacity 30) not all may remain in cache.
+        // Any key still in cache must have nonce >= 1.
+        let mut found = 0usize;
+        for pk in &shared_b {
+            if let Some(n) = fetcher.peek_commit_nonce(pk).await {
+                assert!(n >= 1);
+                found += 1;
+            }
+        }
+        assert!(
+            found > 0,
+            "expected some shared_b keys in cache after workers"
+        );
+    }
+
+    #[tokio::test]
+    async fn fetch_current_no_increment() {
+        let pk = Pubkey::new_unique();
+        let fetcher = FetcherBuilder::new(vec![meta(10)]).build();
+
+        let r1 = fetcher.fetch_current_commit_nonces(&[pk], 0).await.unwrap();
+        assert_eq!(r1[&pk], 10); // stored as-is
+
+        // Cache hit: still 10, fetch_current never increments
+        let r2 = fetcher.fetch_current_commit_nonces(&[pk], 0).await.unwrap();
+        assert_eq!(r2[&pk], 10);
+    }
+
+    #[tokio::test]
+    async fn reset_all_forces_refetch() {
+        let pk = Pubkey::new_unique();
+        let fetcher = FetcherBuilder::new(vec![meta(5), meta(99)]).build();
+
+        fetcher.fetch_next_commit_nonces(&[pk], 0).await.unwrap(); // pk = 6
+        fetcher.reset(ResetType::All);
+
+        let r = fetcher.fetch_next_commit_nonces(&[pk], 0).await.unwrap();
+        assert_eq!(r[&pk], 100); // re-fetched
+    }
+
+    #[tokio::test]
+    async fn reset_specific_only_clears_that_key() {
+        let pk1 = Pubkey::new_unique();
+        let pk2 = Pubkey::new_unique();
+        // pk1 initial, pk2 initial, pk1 after reset
+        let fetcher =
+            FetcherBuilder::new(vec![meta(1), meta(2), meta(50)]).build();
+
+        fetcher.fetch_next_commit_nonces(&[pk1], 0).await.unwrap(); // pk1 = 2
+        fetcher.fetch_next_commit_nonces(&[pk2], 0).await.unwrap(); // pk2 = 3
+        fetcher.reset(ResetType::Specific(&[pk1]));
+
+        let r1 = fetcher.fetch_next_commit_nonces(&[pk1], 0).await.unwrap();
+        let r2 = fetcher.fetch_next_commit_nonces(&[pk2], 0).await.unwrap();
+        assert_eq!(r1[&pk1], 51); // re-fetched (50 + 1)
+        assert_eq!(r2[&pk2], 4); // still cached (3 + 1)
+    }
+
+    #[tokio::test]
+    async fn peek_does_not_increment() {
+        let pk = Pubkey::new_unique();
+        let fetcher = FetcherBuilder::new(vec![meta(7)]).build();
+
+        assert_eq!(fetcher.peek_commit_nonce(&pk).await, None);
+
+        fetcher.fetch_next_commit_nonces(&[pk], 0).await.unwrap(); // pk = 8
+        assert_eq!(fetcher.peek_commit_nonce(&pk).await, Some(8));
+        assert_eq!(fetcher.peek_commit_nonce(&pk).await, Some(8)); // unchanged
+
+        let r = fetcher.fetch_next_commit_nonces(&[pk], 0).await.unwrap();
+        assert_eq!(r[&pk], 9); // peek didn't change the value
+    }
+}
