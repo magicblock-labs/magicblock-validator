@@ -76,11 +76,11 @@ pub(crate) async fn handle_executable_sub_update<T, U, V, C>(
     ) {
         Ok(x) => x.into_loaded_program(),
         Err(err) => {
-            error!(pubkey = %pubkey, error = %err, "Failed to resolve program account into bank");
+            warn!(pubkey = %pubkey, error = %err, "Failed to resolve program account into bank");
             return;
         }
     };
     if let Err(err) = this.cloner.clone_program(loaded_program).await {
-        error!(pubkey = %pubkey, error = %err, "Failed to clone program into bank");
+        warn!(pubkey = %pubkey, error = %err, "Failed to clone program into bank");
     }
 }
