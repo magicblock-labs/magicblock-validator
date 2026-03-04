@@ -9,7 +9,11 @@ use magicblock_core::{intent::CommittedAccount, traits::MagicSys};
 use solana_instruction::error::InstructionError;
 use solana_pubkey::Pubkey;
 
-pub const COMMIT_LIMIT: u64 = 15;
+/// Maximum number of times an account may be committed before it must be
+/// undelegated. A plain commit at or beyond this limit fails with [`COMMIT_LIMIT_ERR`].
+pub const COMMIT_LIMIT: u64 = 10;
+/// [`InstructionError::Custom`] code returned when a commit is attempted on an
+/// account that has reached [`COMMIT_LIMIT`].
 pub const COMMIT_LIMIT_ERR: u32 = 0xA000_0000;
 pub(crate) const MISSING_COMMIT_NONCE_ERR: u32 = 0xA000_0001;
 
