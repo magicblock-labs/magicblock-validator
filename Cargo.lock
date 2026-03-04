@@ -3271,6 +3271,7 @@ dependencies = [
  "assert_matches",
  "async-trait",
  "bincode",
+ "borsh 1.6.0",
  "futures-util",
  "helius-laserstream",
  "lru 0.16.2",

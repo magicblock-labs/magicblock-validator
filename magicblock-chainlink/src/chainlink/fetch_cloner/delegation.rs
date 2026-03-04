@@ -73,7 +73,7 @@ fn parse_post_delegation_actions(
     delegation_record_pubkey: Pubkey,
     validator_keypair: Option<&Keypair>,
 ) -> ChainlinkResult<DelegationActions> {
-    let actions: PostDelegationActions = bincode::deserialize(actions_data)
+    let actions: PostDelegationActions = borsh::from_slice(actions_data)
         .map_err(|err| {
             ChainlinkError::InvalidDelegationActions(
                 delegation_record_pubkey,
@@ -219,7 +219,7 @@ where
 mod tests {
     use dlp::args::{
         EncryptedBuffer, MaybeEncryptedAccountMeta, MaybeEncryptedInstruction,
-        MaybeEncryptedIxData, PostDelegationActions,
+        MaybeEncryptedIxData, MaybeEncryptedPubkey, PostDelegationActions,
     };
     use solana_instruction::Instruction;
     use solana_program::pubkey::Pubkey;
@@ -241,7 +241,7 @@ mod tests {
 
         let mut data = vec![0; DelegationRecord::size_with_discriminator()];
         record.to_bytes_with_discriminator(&mut data).unwrap();
-        data.extend_from_slice(&bincode::serialize(&actions).unwrap());
+        data.extend_from_slice(&borsh::to_vec(&actions).unwrap());
         data
     }
 
@@ -316,7 +316,7 @@ mod tests {
             validator.pubkey(),
             PostDelegationActions {
                 signers: vec![signer, account],
-                non_signers: vec![MaybeEncryptedAccountMeta::Encrypted(
+                non_signers: vec![MaybeEncryptedPubkey::Encrypted(
                     EncryptedBuffer::new(encrypted_program_id),
                 )],
                 instructions: vec![MaybeEncryptedInstruction {
@@ -362,7 +362,7 @@ mod tests {
             validator.pubkey(),
             PostDelegationActions {
                 signers: vec![],
-                non_signers: vec![MaybeEncryptedAccountMeta::Encrypted(
+                non_signers: vec![MaybeEncryptedPubkey::Encrypted(
                     EncryptedBuffer::new(encrypted_program_id),
                 )],
                 instructions: vec![],
