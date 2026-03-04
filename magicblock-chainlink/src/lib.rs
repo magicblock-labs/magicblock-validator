@@ -5,8 +5,6 @@ pub mod cloner;
 pub mod remote_account_provider;
 pub mod submux;
 
-use std::ops::Add;
-
 pub use chainlink::*;
 pub use magicblock_metrics::metrics::AccountFetchOrigin;
 mod filters;

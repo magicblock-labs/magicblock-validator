@@ -38,8 +38,8 @@ pub fn ensure_started_validator(map: &mut HashMap<Pubkey, AccountSharedData>) {
         vault
     });
 
-    let stub = Arc::new(PersisterStub::default());
-    init_persister(stub);
+    let stub = Arc::new(MagicSysStub::default());
+    init_magic_sys(stub);
 
     validator::ensure_started_up();
 }
@@ -63,11 +63,11 @@ pub fn process_instruction(
     )
 }
 
-pub struct PersisterStub {
+pub struct MagicSysStub {
     id: u64,
 }
 
-impl Default for PersisterStub {
+impl Default for MagicSysStub {
     fn default() -> Self {
         static ID: AtomicU64 = AtomicU64::new(0);
 
@@ -77,13 +77,13 @@ impl Default for PersisterStub {
     }
 }
 
-impl fmt::Display for PersisterStub {
+impl fmt::Display for MagicSysStub {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "PersisterStub({})", self.id)
+        write!(f, "MagicSysStub({})", self.id)
     }
 }
 
-impl MagicSys for PersisterStub {
+impl MagicSys for MagicSysStub {
     fn persist(&self, id: u64, data: Vec<u8>) -> Result<(), Box<dyn Error>> {
         debug!("Persisting data for id '{}' with len {}", id, data.len());
         Ok(())
@@ -95,9 +95,8 @@ impl MagicSys for PersisterStub {
 
     fn validate_commits(
         &self,
-        commits: &[CommittedAccount],
+        _commits: &[CommittedAccount],
     ) -> Result<(), InstructionError> {
-        // TODO(edwin)
-        todo!()
+        Ok(())
     }
 }

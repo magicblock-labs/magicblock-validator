@@ -161,6 +161,7 @@ impl CacheTaskInfoFetcher {
         if pubkeys.is_empty() {
             return Ok(Vec::new());
         }
+        tokio::runtime::Handle::current();
 
         let pda_accounts: Vec<Pubkey> = pubkeys
             .iter()

@@ -1,6 +1,7 @@
 mod ephemeral_accounts;
 pub mod errors;
 mod magic_context;
+pub mod magic_sys;
 mod mutate_accounts;
 mod schedule_task;
 mod schedule_transactions;
@@ -12,8 +13,8 @@ pub mod test_utils;
 mod utils;
 pub mod validator;
 
+pub use magic_sys::init_magic_sys;
 pub use magicblock_magic_program_api::*;
-pub use mutate_accounts::*;
 pub use schedule_transactions::{
     process_scheduled_commit_sent, register_scheduled_commit_sent,
     transaction_scheduler::TransactionScheduler, SentCommit,

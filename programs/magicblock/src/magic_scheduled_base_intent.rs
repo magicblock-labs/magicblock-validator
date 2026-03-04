@@ -1,10 +1,8 @@
-use std::{cell::RefCell, collections::HashSet};
+use std::collections::HashSet;
 
 use magicblock_core::{
     intent::{CommittedAccount, CommittedAccountRef},
-    token_programs::{
-        try_remap_ata_to_eata, EATA_PROGRAM_ID, TOKEN_PROGRAM_ID,
-    },
+    token_programs::{EATA_PROGRAM_ID, TOKEN_PROGRAM_ID},
     Slot,
 };
 use magicblock_magic_program_api::args::{
@@ -13,7 +11,7 @@ use magicblock_magic_program_api::args::{
     UndelegateTypeArgs,
 };
 use serde::{Deserialize, Serialize};
-use solana_account::{Account, AccountSharedData, ReadableAccount};
+use solana_account::ReadableAccount;
 use solana_hash::Hash;
 use solana_log_collector::ic_msg;
 use solana_program_runtime::{

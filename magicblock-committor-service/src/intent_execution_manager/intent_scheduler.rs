@@ -1,6 +1,5 @@
 use std::collections::{hash_map::Entry, HashMap, VecDeque};
 
-use magicblock_core::intent::CommittedAccount;
 use magicblock_program::magic_scheduled_base_intent::ScheduledIntentBundle;
 use solana_pubkey::Pubkey;
 use thiserror::Error;

@@ -2,16 +2,19 @@ use std::{
     collections::HashMap,
     sync::{
         atomic::{AtomicU64, Ordering},
-        Arc, Mutex, RwLock,
+        Mutex,
     },
 };
 
 use lazy_static::lazy_static;
-use magicblock_core::traits::MagicSys;
 use solana_log_collector::ic_msg;
 use solana_program_runtime::invoke_context::InvokeContext;
 
-use crate::{errors::MagicBlockProgramError, validator};
+use crate::{
+    errors::MagicBlockProgramError,
+    magic_sys::{load_data, persist_data},
+    validator,
+};
 
 lazy_static! {
     /// In order to modify large data chunks we cannot include all the data as part of the
@@ -19,12 +22,6 @@ lazy_static! {
     /// Instead we register data here _before_ invoking the actual instruction and when it is
     /// processed it resolved that data from the key that we provide in its place.
     static ref DATA_MODS: Mutex<HashMap<u64, Vec<u8>>> = Mutex::default();
-
-    /// In order to support replaying transactions we need to persist the data that is
-    /// loaded from the [DATA_MODS]
-    /// During replay the [DATA_MODS] won't have the data for the particular id in which
-    /// case it is loaded via the persister instead.
-    static ref PERSISTER: RwLock<Option<Arc<dyn MagicSys >>> = RwLock::new(None);
 
     static ref DATA_MOD_ID: AtomicU64 = AtomicU64::new(0);
 
@@ -73,34 +70,6 @@ pub(crate) fn set_account_mod_data(data: Vec<u8>) -> u64 {
 
 pub(super) fn get_data(id: u64) -> Option<Vec<u8>> {
     DATA_MODS.lock().expect("DATA_MODS poisoned").remove(&id)
-}
-
-pub fn init_persister<T: MagicSys>(persister: Arc<T>) {
-    PERSISTER
-        .write()
-        .expect("PERSISTER poisoned")
-        .replace(persister);
-}
-
-fn load_data(id: u64) -> Result<Option<Vec<u8>>, Box<dyn std::error::Error>> {
-    PERSISTER
-        .read()
-        .expect("PERSISTER poisoned")
-        .as_ref()
-        .ok_or("AccountModPersister needs to be set on startup")?
-        .load(id)
-}
-
-fn persist_data(
-    id: u64,
-    data: Vec<u8>,
-) -> Result<(), Box<dyn std::error::Error>> {
-    PERSISTER
-        .read()
-        .expect("PERSISTER poisoned")
-        .as_ref()
-        .ok_or("AccounModPersister needs to be set on startup")?
-        .persist(id, data)
 }
 
 /// The resolved data including an indication about how it was resolved.
