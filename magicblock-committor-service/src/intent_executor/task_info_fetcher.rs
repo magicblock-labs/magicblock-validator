@@ -697,126 +697,94 @@ mod tests {
     use std::{collections::VecDeque, sync::Arc, time::Duration};
 
     use async_trait::async_trait;
-    use base64::{prelude::BASE64_STANDARD, Engine};
-    use dlp::state::DelegationMetadata;
-    use solana_account_decoder::{UiAccount, UiAccountData, UiAccountEncoding};
+    use solana_account::Account;
     use solana_pubkey::Pubkey;
-    use solana_rpc_client::{
-        nonblocking::rpc_client::RpcClient,
-        rpc_client::RpcClientConfig,
-        rpc_sender::{RpcSender, RpcTransportStats},
-    };
-    use solana_rpc_client_api::{
-        client_error::Result as ClientResult,
-        request::RpcRequest,
-        response::{Response, RpcResponseContext},
-    };
 
     use super::*;
 
     // ---- mock ----
 
-    struct TestSender {
-        calls: std::sync::Mutex<VecDeque<DelegationMetadata>>,
-        rpc_delay: Option<Duration>,
+    struct MockInfoFetcher {
+        nonces: std::sync::Mutex<VecDeque<u64>>,
+        delay: Option<Duration>,
     }
 
-    impl TestSender {
-        fn new(responses: Vec<DelegationMetadata>) -> Self {
+    impl MockInfoFetcher {
+        fn new(nonces: Vec<u64>) -> Self {
             Self {
-                calls: std::sync::Mutex::new(responses.into()),
-                rpc_delay: None,
+                nonces: std::sync::Mutex::new(nonces.into()),
+                delay: None,
             }
         }
 
         fn with_delay(mut self, delay: Duration) -> Self {
-            self.rpc_delay = Some(delay);
+            self.delay = Some(delay);
             self
         }
     }
 
     #[async_trait]
-    impl RpcSender for TestSender {
-        async fn send(
+    impl TaskInfoFetcher for MockInfoFetcher {
+        async fn fetch_next_commit_nonces(
             &self,
-            request: RpcRequest,
-            params: serde_json::Value,
-        ) -> ClientResult<serde_json::Value> {
-            if let Some(delay) = self.rpc_delay {
+            pubkeys: &[Pubkey],
+            min_context_slot: u64,
+        ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>> {
+            self.fetch_current_commit_nonces(pubkeys, min_context_slot)
+                .await
+        }
+
+        async fn fetch_current_commit_nonces(
+            &self,
+            pubkeys: &[Pubkey],
+            _: u64,
+        ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>> {
+            if let Some(delay) = self.delay {
                 tokio::time::sleep(delay).await;
             }
-            assert_eq!(request, RpcRequest::GetMultipleAccounts);
-            let n = params[0].as_array().map(|a| a.len()).unwrap_or(0);
-            let metas: Vec<DelegationMetadata> = {
-                let mut q = self.calls.lock().unwrap();
-                (0..n)
-                    .map(|_| {
-                        q.pop_front()
-                            .expect("unexpected RPC call: queue exhausted")
-                    })
-                    .collect()
-            };
-            let accounts: Vec<Option<UiAccount>> =
-                metas.iter().map(|m| Some(encode_meta(m))).collect();
-            Ok(serde_json::to_value(Response {
-                context: RpcResponseContext {
-                    slot: 1,
-                    api_version: None,
-                },
-                value: accounts,
-            })
-            .unwrap())
+            let mut q = self.nonces.lock().unwrap();
+            Ok(pubkeys
+                .iter()
+                .map(|pk| {
+                    let nonce =
+                        q.pop_front().expect("mock nonce queue exhausted");
+                    (*pk, nonce)
+                })
+                .collect())
         }
 
-        fn get_transport_stats(&self) -> RpcTransportStats {
-            RpcTransportStats::default()
+        async fn fetch_rent_reimbursements(
+            &self,
+            _: &[Pubkey],
+            _: u64,
+        ) -> TaskInfoFetcherResult<Vec<Pubkey>> {
+            unimplemented!()
         }
 
-        fn url(&self) -> String {
-            "test".to_string()
-        }
-    }
-
-    fn encode_meta(m: &DelegationMetadata) -> UiAccount {
-        let mut bytes = Vec::new();
-        m.to_bytes_with_discriminator(&mut bytes).unwrap();
-        UiAccount {
-            lamports: 1_000_000,
-            data: UiAccountData::Binary(
-                BASE64_STANDARD.encode(&bytes),
-                UiAccountEncoding::Base64,
-            ),
-            owner: dlp::id().to_string(),
-            executable: false,
-            rent_epoch: 0,
-            space: Some(bytes.len() as u64),
-        }
-    }
-
-    fn meta(nonce: u64) -> DelegationMetadata {
-        DelegationMetadata {
-            last_update_nonce: nonce,
-            is_undelegatable: false,
-            seeds: vec![],
-            rent_payer: Pubkey::default(),
+        async fn get_base_accounts(
+            &self,
+            _: &[Pubkey],
+            _: u64,
+        ) -> TaskInfoFetcherResult<HashMap<Pubkey, Account>> {
+            unimplemented!()
         }
     }
 
     struct FetcherBuilder {
-        sender: TestSender,
+        inner: MockInfoFetcher,
         capacity: Option<NonZeroUsize>,
     }
 
     impl FetcherBuilder {
-        fn new(responses: Vec<DelegationMetadata>) -> Self {
+        fn new(nonces: Vec<u64>) -> Self {
             Self {
-                sender: TestSender::new(responses),
+                inner: MockInfoFetcher::new(nonces),
                 capacity: None,
             }
         }
 
         fn rpc_delay(mut self, d: Duration) -> Self {
-            self.sender = self.sender.with_delay(d);
+            self.inner = self.inner.with_delay(d);
             self
         }
 
@@ -825,13 +793,12 @@ mod tests {
             self
         }
 
-        fn build(self) -> CacheTaskInfoFetcher {
-            let rpc = MagicblockRpcClient::new(Arc::new(
-                RpcClient::new_sender(self.sender, RpcClientConfig::default()),
-            ));
+        fn build(self) -> CacheTaskInfoFetcher<MockInfoFetcher> {
             match self.capacity {
-                Some(cap) => CacheTaskInfoFetcher::with_capacity(cap, rpc),
-                None => CacheTaskInfoFetcher::new(rpc),
+                Some(cap) => {
+                    CacheTaskInfoFetcher::with_capacity(cap, self.inner)
+                }
+                None => CacheTaskInfoFetcher::new(self.inner),
             }
         }
     }
@@ -841,7 +808,7 @@ mod tests {
     #[tokio::test]
     async fn cache_miss_then_hit() {
         let pk = Pubkey::new_unique();
-        let fetcher = FetcherBuilder::new(vec![meta(10)]).build();
+        let fetcher = FetcherBuilder::new(vec![10]).build();
 
         let r1 = fetcher.fetch_next_commit_nonces(&[pk], 0).await.unwrap();
         assert_eq!(r1[&pk], 11);
@@ -856,7 +823,7 @@ mod tests {
         let pk1 = Pubkey::new_unique();
         let pk2 = Pubkey::new_unique();
         // prime pk1 (nonce 5), then mixed call fetches only cold pk2 (nonce 20)
-        let fetcher = FetcherBuilder::new(vec![meta(5), meta(20)]).build();
+        let fetcher = FetcherBuilder::new(vec![5, 20]).build();
 
         fetcher.fetch_next_commit_nonces(&[pk1], 0).await.unwrap(); // pk1 = 6
         let r = fetcher
@@ -872,9 +839,7 @@ mod tests {
         let pk1 = Pubkey::new_unique();
         let pk2 = Pubkey::new_unique();
         // pk1 initial, pk2 evicts pk1, pk1 re-fetch after eviction
-        let fetcher = FetcherBuilder::new(vec![meta(1), meta(2), meta(10)])
-            .capacity(1)
-            .build();
+        let fetcher = FetcherBuilder::new(vec![1, 2, 10]).capacity(1).build();
 
         fetcher.fetch_next_commit_nonces(&[pk1], 0).await.unwrap(); // pk1 = 2
         fetcher.fetch_next_commit_nonces(&[pk2], 0).await.unwrap(); // pk2 = 3, pk1 evicted
@@ -886,7 +851,7 @@ mod tests {
     // barrier. Phase 2: fetch phase2_keys one-by-one for `iters` passes, then
     // fetch shared_b in chunks of 2.
     async fn run_worker(
-        fetcher: Arc<CacheTaskInfoFetcher>,
+        fetcher: Arc<CacheTaskInfoFetcher<MockInfoFetcher>>,
         barrier: Arc<tokio::sync::Barrier>,
         phase1_keys: Vec<Pubkey>,
         phase2_keys: Vec<Pubkey>,
@@ -931,7 +896,7 @@ mod tests {
                 excl[i].iter().chain(shared_a.iter()).cloned().collect()
             });
 
-        // Flat queue: each RPC call pops exactly N entries (N cold keys).
+        // Flat queue: each mock call pops exactly N entries (N cold keys).
         // Upper bounds:
         //   phase 1 loop:       SHARED_A × 1
         //   phase 2 excl+sa:    ITERS × PHASE2_KEYS × NUM_WORKERS × 1
@@ -940,11 +905,9 @@ mod tests {
         let total = SHARED_A
             + ITERS * PHASE2_KEYS * NUM_WORKERS
             + SHARED_B * NUM_WORKERS;
-        let responses: Vec<DelegationMetadata> =
-            (0..total).map(|_| meta(0)).collect();
 
         let fetcher = Arc::new(
-            FetcherBuilder::new(responses)
+            FetcherBuilder::new(vec![0; total])
                 .capacity(CAPACITY)
                 .rpc_delay(Duration::from_millis(2))
                 .build(),
@@ -1003,7 +966,7 @@ mod tests {
     #[tokio::test]
     async fn fetch_current_no_increment() {
         let pk = Pubkey::new_unique();
-        let fetcher = FetcherBuilder::new(vec![meta(10)]).build();
+        let fetcher = FetcherBuilder::new(vec![10]).build();
 
         let r1 = fetcher.fetch_current_commit_nonces(&[pk], 0).await.unwrap();
         assert_eq!(r1[&pk], 10); // stored as-is
@@ -1016,7 +979,7 @@ mod tests {
     #[tokio::test]
     async fn reset_all_forces_refetch() {
         let pk = Pubkey::new_unique();
-        let fetcher = FetcherBuilder::new(vec![meta(5), meta(99)]).build();
+        let fetcher = FetcherBuilder::new(vec![5, 99]).build();
 
         fetcher.fetch_next_commit_nonces(&[pk], 0).await.unwrap(); // pk = 6
         fetcher.reset(ResetType::All);
@@ -1030,8 +993,7 @@ mod tests {
         let pk1 = Pubkey::new_unique();
         let pk2 = Pubkey::new_unique();
         // pk1 initial, pk2 initial, pk1 after reset
-        let fetcher =
-            FetcherBuilder::new(vec![meta(1), meta(2), meta(50)]).build();
+        let fetcher = FetcherBuilder::new(vec![1, 2, 50]).build();
 
         fetcher.fetch_next_commit_nonces(&[pk1], 0).await.unwrap(); // pk1 = 2
         fetcher.fetch_next_commit_nonces(&[pk2], 0).await.unwrap(); // pk2 = 3
@@ -1046,7 +1008,7 @@ mod tests {
     #[tokio::test]
     async fn peek_does_not_increment() {
         let pk = Pubkey::new_unique();
-        let fetcher = FetcherBuilder::new(vec![meta(7)]).build();
+        let fetcher = FetcherBuilder::new(vec![7]).build();
 
         assert_eq!(fetcher.peek_commit_nonce(&pk).await, None);
 
