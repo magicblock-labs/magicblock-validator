@@ -51,8 +51,7 @@ use crate::{
         blacklisted_accounts::blacklisted_accounts,
     },
     cloner::{
-        errors::ClonerResult, AccountCloneRequest, Cloner,
-        DelegationActions,
+        errors::ClonerResult, AccountCloneRequest, Cloner, DelegationActions,
     },
     remote_account_provider::{
         program_account::get_loaderv3_get_program_data_address,
@@ -387,21 +386,21 @@ where
                         let account = if let Some(delegation_record) =
                             delegation_record
                         {
-                            let delegation_record_with_actions =
-                                match self.parse_delegation_record(
+                            let delegation_record_with_actions = match self
+                                .parse_delegation_record(
                                     delegation_record.data(),
                                     delegation_record_pubkey,
                                 ) {
-                                    Ok(x) => Some(x),
-                                    Err(err) => {
-                                        warn!(
-                                            pubkey = %pubkey,
-                                            error = %err,
-                                            "Failed to parse delegation record"
-                                        );
-                                        None
-                                    }
-                                };
+                                Ok(x) => Some(x),
+                                Err(err) => {
+                                    error!(
+                                        pubkey = %pubkey,
+                                        error = %err,
+                                        "Failed to parse delegation record"
+                                    );
+                                    None
+                                }
+                            };
 
                             // If the delegation record is valid we set the owner and delegation
                             // status on the account
@@ -459,11 +458,7 @@ where
                                 // If the delegation record is invalid we cannot clone the account
                                 // since something is corrupt and we wouldn't know what owner to
                                 // use, etc.
-                                (
-                                    None,
-                                    None,
-                                    DelegationActions::default(),
-                                )
+                                (None, None, DelegationActions::default())
                             }
                         } else {
                             // If no delegation record exists we must assume the account itself is
@@ -506,11 +501,7 @@ where
                 let (account, deleg_record) = self
                     .maybe_project_ata_from_subscription_update(pubkey, account)
                     .await;
-                (
-                    Some(account),
-                    deleg_record,
-                    DelegationActions::default(),
-                )
+                (Some(account), deleg_record, DelegationActions::default())
             }
         } else {
             // This should not happen since we call this method with sub updates which always hold
@@ -921,7 +912,9 @@ where
         // Ensure all accounts referenced by delegation actions exist and are
         // cloned before we execute those actions as part of account cloning.
         let action_dependencies =
-            pipeline::collect_delegation_action_dependencies(&accounts_to_clone);
+            pipeline::collect_delegation_action_dependencies(
+                &accounts_to_clone,
+            );
         let action_dependencies_to_fetch = action_dependencies
             .into_iter()
             .filter(|dependency| {
@@ -1096,10 +1089,11 @@ where
                 return RefreshDecision::YesAndMarkEmptyIfNotFound;
             }
 
-            let delegated_on_chain = deleg_record.as_ref().is_some_and(|dr| {
-                dr.0.authority.eq(&self.validator_pubkey)
-                    || dr.0.authority.eq(&Pubkey::default())
-            });
+            let delegated_on_chain =
+                deleg_record.as_ref().is_some_and(|(dr, _)| {
+                    dr.authority.eq(&self.validator_pubkey)
+                        || dr.authority.eq(&Pubkey::default())
+                });
             let deleg_record = deleg_record.map(|el| el.0);
             if !account_still_undelegating_on_chain(
                 pubkey,
