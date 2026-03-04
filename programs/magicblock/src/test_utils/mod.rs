@@ -14,6 +14,7 @@ use solana_account::AccountSharedData;
 use solana_instruction::{error::InstructionError, AccountMeta};
 use solana_log_collector::log::debug;
 use solana_program_runtime::invoke_context::mock_process_instruction;
+use solana_pubkey::Pubkey;
 use solana_sdk_ids::system_program;
 
 use self::magicblock_processor::Entrypoint;
@@ -93,10 +94,10 @@ impl MagicSys for MagicSysStub {
         Err("Loading from ledger not supported in tests".into())
     }
 
-    fn validate_commits(
+    fn fetch_current_commit_nonces(
         &self,
-        _commits: &[CommittedAccount],
-    ) -> Result<(), InstructionError> {
-        Ok(())
+        commits: &[CommittedAccount],
+    ) -> Result<HashMap<Pubkey, u64>, InstructionError> {
+        Ok(commits.iter().map(|c| (c.pubkey, 0)).collect())
     }
 }

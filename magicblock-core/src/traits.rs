@@ -1,17 +1,16 @@
-use std::error::Error;
+use std::{collections::HashMap, error::Error};
 
 use solana_program::instruction::InstructionError;
+use solana_pubkey::Pubkey;
 
 use crate::intent::CommittedAccount;
-
-pub const NONCE_LIMIT_ERR: u32 = 0xA000_0000;
 
 pub trait MagicSys: Sync + Send + 'static {
     fn persist(&self, id: u64, data: Vec<u8>) -> Result<(), Box<dyn Error>>;
     fn load(&self, id: u64) -> Result<Option<Vec<u8>>, Box<dyn Error>>;
 
-    fn validate_commits(
+    fn fetch_current_commit_nonces(
         &self,
-        pubkeys: &[CommittedAccount],
-    ) -> Result<(), InstructionError>;
+        commits: &[CommittedAccount],
+    ) -> Result<HashMap<Pubkey, u64>, InstructionError>;
 }

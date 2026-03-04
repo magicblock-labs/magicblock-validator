@@ -1,6 +1,5 @@
 use std::collections::HashSet;
 
-use magicblock_core::traits::NONCE_LIMIT_ERR;
 use magicblock_magic_program_api::args::MagicIntentBundleArgs;
 use solana_account::state_traits::StateMut;
 use solana_instruction::error::InstructionError;
@@ -13,8 +12,7 @@ use crate::{
     magic_scheduled_base_intent::{
         CommitType, ConstructionContext, ScheduledIntentBundle,
     },
-    magic_sys::validate_commits,
-    schedule_transactions::check_magic_context_id,
+    schedule_transactions::{check_commit_limits, check_magic_context_id},
     utils::{
         account_actions::mark_account_as_undelegated,
         accounts::{
@@ -159,15 +157,10 @@ pub(crate) fn process_schedule_intent_bundle(
         );
     }
 
-    validate_commits(&scheduled_intent.get_all_committed_accounts())
-        .inspect_err(|err| {
-            if err == &InstructionError::Custom(NONCE_LIMIT_ERR) {
-                ic_msg!(
-                    invoke_context,
-                    "ScheduleCommit ERR: commit nonce limit exceeded for one or more accounts"
-                );
-            }
-        })?;
+    if let Some(commit_accounts) = scheduled_intent.get_commit_intent_accounts()
+    {
+        check_commit_limits(commit_accounts, invoke_context)?;
+    }
 
     let action_sent_signature = scheduled_intent.sent_transaction.signatures[0];
 

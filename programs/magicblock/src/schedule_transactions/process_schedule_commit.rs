@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use magicblock_core::{intent::CommittedAccount, traits::NONCE_LIMIT_ERR};
+use magicblock_core::intent::CommittedAccount;
 // no direct token remap helpers needed here; handled in CommittedAccount builder
 use solana_account::{state_traits::StateMut, ReadableAccount};
 use solana_instruction::error::InstructionError;
@@ -13,8 +13,7 @@ use crate::{
         validate_commit_schedule_permissions, CommitAndUndelegate, CommitType,
         MagicBaseIntent, ScheduledIntentBundle, UndelegateType,
     },
-    magic_sys::validate_commits,
-    schedule_transactions,
+    schedule_transactions::{self, check_commit_limits},
     utils::{
         account_actions::mark_account_as_undelegated,
         accounts::{
@@ -234,14 +233,17 @@ pub(crate) fn process_schedule_commit(
         }
     }
 
-    validate_commits(&committed_accounts).inspect_err(|err| {
-        if err == &InstructionError::Custom(NONCE_LIMIT_ERR) {
-            ic_msg!(
-                invoke_context,
-                "ScheduleCommit ERR: commit nonce limit exceeded for one or more accounts"
-            );
-        }
-    })?;
+    // NOTE:
+    // We validate commit nonces only for plain commits
+    // If accounts are undelegated we don't validate
+    // It may result in failed undelegation due to insufficient balance
+    // But it is better than progibiting undelegation overall
+    // In case account is borked user shall reach out us
+    // 1. Account is topped up by user
+    // 2. Manual undelegation is triggered by us
+    if !opts.request_undelegation {
+        check_commit_limits(&committed_accounts, invoke_context)?;
+    }
 
     // NOTE: this is only protected by all the above checks however if the
     // instruction fails for other reasons detected afterward then the commit

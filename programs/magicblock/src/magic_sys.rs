@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     error::Error,
     sync::{Arc, RwLock},
 };
@@ -6,6 +7,11 @@ use std::{
 use lazy_static::lazy_static;
 use magicblock_core::{intent::CommittedAccount, traits::MagicSys};
 use solana_instruction::error::InstructionError;
+use solana_pubkey::Pubkey;
+
+pub(crate) const COMMIT_LIMIT: u64 = 400;
+pub(crate) const COMMIT_LIMIT_ERR: u32 = 0xA000_0000;
+pub(crate) const MISSING_COMMIT_NONCE_ERR: u32 = 0xA000_0001;
 
 lazy_static! {
     static ref MAGIC_SYS: RwLock<Option<Arc<dyn MagicSys>>> = RwLock::new(None);
@@ -42,13 +48,13 @@ pub(crate) fn persist_data(
         .persist(id, data)
 }
 
-pub(crate) fn validate_commits(
+pub(crate) fn fetch_current_commit_nonces(
     commits: &[CommittedAccount],
-) -> Result<(), InstructionError> {
+) -> Result<HashMap<Pubkey, u64>, InstructionError> {
     MAGIC_SYS
         .read()
         .expect(MAGIC_SYS_POISONED_MSG)
         .as_ref()
         .ok_or(InstructionError::UninitializedAccount)?
-        .validate_commits(commits)
+        .fetch_current_commit_nonces(commits)
 }

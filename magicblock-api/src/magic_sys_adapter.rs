@@ -1,15 +1,11 @@
-use std::{error::Error, sync::Arc};
+use std::{collections::HashMap, error::Error, sync::Arc};
 
 use magicblock_committor_service::{BaseIntentCommittor, CommittorService};
-use magicblock_core::{
-    intent::CommittedAccount,
-    traits::{MagicSys, NONCE_LIMIT_ERR},
-};
+use magicblock_core::{intent::CommittedAccount, traits::MagicSys};
 use magicblock_ledger::Ledger;
 use solana_instruction::error::InstructionError;
+use solana_pubkey::Pubkey;
 use tracing::{enabled, error, trace, Level};
-
-const NONCE_LIMIT: u64 = 400;
 
 #[derive(Clone)]
 pub struct MagicSysAdapter {
@@ -54,10 +50,10 @@ impl MagicSys for MagicSysAdapter {
         Ok(data)
     }
 
-    fn validate_commits(
+    fn fetch_current_commit_nonces(
         &self,
         commits: &[CommittedAccount],
-    ) -> Result<(), InstructionError> {
+    ) -> Result<HashMap<Pubkey, u64>, InstructionError> {
         let committor_service =
             if let Some(committor_service) = &self.committor_service {
                 Ok(committor_service)
@@ -75,7 +71,8 @@ impl MagicSys for MagicSysAdapter {
 
         let receiver = committor_service
             .fetch_current_commit_nonces(&pubkeys, min_context_slot);
-        let nonces_map = self.handle.block_on(receiver)
+        self.handle
+            .block_on(receiver)
             .inspect_err(|err| {
                 error!(error = ?err, "Failed to receive nonces from CommittorService")
             })
@@ -83,15 +80,6 @@ impl MagicSys for MagicSysAdapter {
             .inspect_err(|err| {
                 error!(error = ?err, "Failed to fetch current commit nonces")
             })
-            .map_err(|_| InstructionError::Custom(Self::FETCH_ERR))?;
-
-        for (pubkey, nonce) in nonces_map {
-            if nonce >= NONCE_LIMIT {
-                trace!("Limit of commits exceeded for: {}", pubkey);
-                return Err(InstructionError::Custom(NONCE_LIMIT_ERR));
-            }
-        }
-
-        Ok(())
+            .map_err(|_| InstructionError::Custom(Self::FETCH_ERR))
     }
 }
