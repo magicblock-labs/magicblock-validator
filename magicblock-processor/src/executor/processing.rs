@@ -3,8 +3,9 @@ use magicblock_core::{
     link::{
         accounts::{AccountWithSlot, LockedAccount},
         transactions::{
-            TransactionProcessingMode, TransactionSimulationResult,
-            TransactionStatus, TxnSimulationResultTx,
+            ProcessableTransaction, TransactionProcessingMode,
+            TransactionSimulationResult, TransactionStatus,
+            TxnSimulationResultTx,
         },
     },
     tls::ExecutionTlsStash,
@@ -261,13 +262,32 @@ impl super::TransactionExecutor {
         meta: TransactionStatusMeta,
     ) {
         let signature = *txn.signature();
+        let slot = txn.slot;
+        let index = txn.index;
+
+        let ProcessableTransaction {
+            transaction,
+            encoded,
+            ..
+        } = txn.txn;
+
+        // Use pre-encoded bytes or serialize on the spot
+        let encoded = encoded.unwrap_or_else(|| {
+            let versioned = transaction.to_versioned_transaction();
+            // SAFETY: we know this is a valid VersionedTransaction that can be serialized
+            bincode::serialize(&versioned)
+                .expect("VersionedTransaction serialization cannot fail")
+        });
+
+        let tx_account_locks = transaction.get_account_locks_unchecked();
 
         let result = self.ledger.write_transaction(
             signature,
-            txn.slot,
-            txn.index,
-            &txn,
-            // TODO(bmuddha): perf: remove clone with the new ledger
+            slot,
+            index,
+            tx_account_locks.writable,
+            tx_account_locks.readonly,
+            &encoded,
             meta.clone(),
         );
         if let Err(error) = result {
@@ -276,9 +296,9 @@ impl super::TransactionExecutor {
         }
 
         let status = TransactionStatus {
-            slot: txn.slot,
-            index: txn.index,
-            txn: txn.txn.transaction,
+            slot,
+            index,
+            txn: transaction,
             meta,
         };
 
