@@ -3052,6 +3052,7 @@ dependencies = [
  "anyhow",
  "borsh 1.6.0",
  "fd-lock",
+ "futures",
  "magic-domain-program",
  "magicblock-account-cloner",
  "magicblock-accounts",

@@ -17,9 +17,8 @@ use solana_sdk::{
 use test_kit::init_logger;
 use tracing::*;
 use utils::{
-    assert_is_instruction_error,
-    assert_one_committee_account_was_undelegated_on_chain,
-    assert_one_committee_was_committed, extract_transaction_error,
+    assert_account_was_undelegated_on_chain, assert_committee_was_committed,
+    assert_is_instruction_error, extract_transaction_error,
     get_context_with_delegated_committees,
 };
 
@@ -196,7 +195,11 @@ fn test_schedule_commit_and_undelegate_succeeds_at_commit_limit() {
 
         // verify via logs using a single-committee context view
         let res = verify::fetch_and_verify_commit_result_from_logs(ctx, sig);
-        assert_one_committee_was_committed(ctx, &res, true);
-        assert_one_committee_account_was_undelegated_on_chain(ctx);
+        assert_committee_was_committed(committee.1, &res, true);
+        assert_account_was_undelegated_on_chain(
+            ctx,
+            committee.1,
+            program_schedulecommit::id(),
+        );
     });
 }

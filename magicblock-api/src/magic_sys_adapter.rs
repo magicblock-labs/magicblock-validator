@@ -9,7 +9,6 @@ use tracing::{enabled, error, trace, Level};
 
 #[derive(Clone)]
 pub struct MagicSysAdapter {
-    handle: tokio::runtime::Handle,
     ledger: Arc<Ledger>,
     committor_service: Option<Arc<CommittorService>>,
 }
@@ -24,7 +23,6 @@ impl MagicSysAdapter {
         committor_service: Option<Arc<CommittorService>>,
     ) -> Self {
         Self {
-            handle: tokio::runtime::Handle::current(),
             ledger,
             committor_service,
         }
@@ -71,8 +69,11 @@ impl MagicSys for MagicSysAdapter {
 
         let receiver = committor_service
             .fetch_current_commit_nonces(&pubkeys, min_context_slot);
-        self.handle
-            .block_on(receiver)
+        // Tx execution is sync and runs on a tokio worker thread. handle.block_on
+        // would panic (nested runtime). futures::executor::block_on parks this
+        // thread independently of tokio — safe because the thread is already
+        // committed to this tx until execution completes.
+        futures::executor::block_on(receiver)
             .inspect_err(|err| {
                 error!(error = ?err, "Failed to receive nonces from CommittorService")
             })
