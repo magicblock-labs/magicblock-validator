@@ -21,8 +21,8 @@ use scc::{hash_map::Entry, HashMap};
 use solana_account::{AccountSharedData, ReadableAccount};
 use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
-use solana_signer::Signer;
 use solana_sdk_ids::system_program;
+use solana_signer::Signer;
 use tokio::{
     sync::{mpsc, oneshot},
     task,
@@ -502,7 +502,15 @@ where
                 let (account, deleg_record) = self
                     .maybe_project_ata_from_subscription_update(pubkey, account)
                     .await;
-                (Some(account), deleg_record, DelegationActions::default())
+                if let Some((deleg_record, actions)) = deleg_record {
+                    (
+                        Some(account),
+                        Some(deleg_record),
+                        actions.unwrap_or_default(),
+                    )
+                } else {
+                    (Some(account), None, DelegationActions::default())
+                }
             }
         } else {
             // This should not happen since we call this method with sub updates which always hold
@@ -576,7 +584,10 @@ where
         &self,
         ata_pubkey: Pubkey,
         ata_account: AccountSharedData,
-    ) -> (AccountSharedData, Option<DelegationRecord>) {
+    ) -> (
+        AccountSharedData,
+        Option<(DelegationRecord, Option<DelegationActions>)>,
+    ) {
         let Some(ata_info) = is_ata(&ata_pubkey, &ata_account) else {
             return (ata_account, None);
         };
@@ -635,16 +646,16 @@ where
         let Some(deleg_record) = deleg_record else {
             return (ata_account, None);
         };
-        let (deleg_record, _delegation_actions) = deleg_record;
+        let (deleg_record, delegation_actions) = deleg_record;
 
         if let Some(projected_ata) = self.maybe_project_delegated_ata_from_eata(
             &ata_account,
             &eata_account,
             &deleg_record,
         ) {
-            return (projected_ata, Some(deleg_record));
+            return (projected_ata, Some((deleg_record, delegation_actions)));
         }
-        (ata_account, Some(deleg_record))
+        (ata_account, Some((deleg_record, delegation_actions)))
     }
 
     fn maybe_project_delegated_ata_from_eata(
