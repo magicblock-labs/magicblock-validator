@@ -204,7 +204,7 @@ where
 
                         while let Some(result) = pending_tasks.try_join_next() {
                             if let Err(err) = result {
-                                error!(
+                                warn!(
                                     error = ?err,
                                     "Subscription update task panicked"
                                 );
@@ -463,7 +463,7 @@ where
                                 ) {
                                     Ok(x) => Some(x),
                                     Err(err) => {
-                                        error!(
+                                        warn!(
                                             pubkey = %pubkey,
                                             error = %err,
                                             "Failed to parse delegation record"
@@ -542,7 +542,7 @@ where
                     }
                     // In case of errors fetching the delegation record we cannot clone the account
                     Ok(Err(err)) => {
-                        error!(
+                        warn!(
                             pubkey = %pubkey,
                             error = ?err,
                             "Failed to fetch delegation record"
@@ -550,7 +550,7 @@ where
                         (None, None)
                     }
                     Err(err) => {
-                        error!(
+                        warn!(
                             pubkey = %pubkey,
                             error = ?err,
                             "Failed to fetch delegation record"
@@ -1241,7 +1241,7 @@ where
                     })
                 {
                     // The sender was dropped, likely due to an error in the other request
-                    error!(
+                    warn!(
                         "Failed to receive account from pending request: {err}"
                     );
                 }

@@ -485,7 +485,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                             RemoteAccountUpdateSource::Subscription,
                         ),
                         None => {
-                            error!(
+                            warn!(
                                 pubkey = %update.pubkey,
                                 "Account update could not be decoded"
                             );
@@ -531,7 +531,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                         if let Err(err) =
                             subscription_forwarder.send(forward_update).await
                         {
-                            error!(
+                            warn!(
                                 pubkey = %update.pubkey,
                                 error = ?err,
                                 "Failed to forward subscription update"
@@ -791,12 +791,12 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                         resolved_accounts.push(remote_account)
                     }
                     Err(err) => {
-                        error!(pubkey = %pubkey, error = %err, "Failed to fetch account");
+                        warn!(pubkey = %pubkey, error = %err, "Failed to fetch account");
                         errors.push((idx, err));
                     }
                 },
                 Err(err) => {
-                    error!(pubkey = %pubkey, stream_index = idx, error = ?err, total_pubkeys = pubkeys.len(), "Failed to resolve account (unexpected RecvError)");
+                    warn!(pubkey = %pubkey, stream_index = idx, error = ?err, total_pubkeys = pubkeys.len(), "Failed to resolve account (unexpected RecvError)");
                     errors.push((
                         idx,
                         RemoteAccountProviderError::RecvrError(err),
@@ -1025,7 +1025,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             // Helper to notify all pending requests of fetch failure
             let notify_error = |error_msg: &str| {
                 let mut fetching = fetching_accounts.lock().unwrap();
-                error!("{error_msg}");
+                warn!("{error_msg}");
                 inc_account_fetches_failed(pubkeys.len() as u64);
                 if let Some(program_ids) = &program_ids {
                     for program_id in program_ids {
