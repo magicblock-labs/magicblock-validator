@@ -25,7 +25,10 @@ pub const AUTHORITY_BALANCE: u64 = u64::MAX / 2;
 pub const COUNTER_PROGRAM_ID: Pubkey =
     Pubkey::from_str_const("2jQZbSfAfqT5nZHGrLpDG2vXuEGtTgZYnNy7AZEjMCYz");
 
-pub fn ensure_started_validator(map: &mut HashMap<Pubkey, AccountSharedData>) {
+pub fn ensure_started_validator(
+    map: &mut HashMap<Pubkey, AccountSharedData>,
+    nonce: Option<u64>,
+) {
     validator::generate_validator_authority_if_needed();
     let validator_authority_id = validator::validator_authority_id();
     map.entry(validator_authority_id).or_insert_with(|| {
@@ -39,7 +42,7 @@ pub fn ensure_started_validator(map: &mut HashMap<Pubkey, AccountSharedData>) {
         vault
     });
 
-    let stub = Arc::new(MagicSysStub::default());
+    let stub = Arc::new(MagicSysStub::with_nonce(nonce.unwrap_or(0)));
     init_magic_sys(stub);
 
     validator::ensure_started_up();
@@ -66,6 +69,7 @@ pub fn process_instruction(
 
 pub struct MagicSysStub {
     id: u64,
+    nonce: u64,
 }
 
 impl Default for MagicSysStub {
@@ -74,6 +78,16 @@ impl Default for MagicSysStub {
 
         Self {
             id: ID.fetch_add(1, Ordering::Relaxed),
+            nonce: 0,
+        }
+    }
+}
+
+impl MagicSysStub {
+    pub fn with_nonce(nonce: u64) -> Self {
+        Self {
+            nonce,
+            ..Self::default()
         }
     }
 }
@@ -98,6 +112,6 @@ impl MagicSys for MagicSysStub {
         &self,
         commits: &[CommittedAccount],
     ) -> Result<HashMap<Pubkey, u64>, InstructionError> {
-        Ok(commits.iter().map(|c| (c.pubkey, 0)).collect())
+        Ok(commits.iter().map(|c| (c.pubkey, self.nonce)).collect())
     }
 }
