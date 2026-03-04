@@ -281,7 +281,7 @@ where
                             })
                             .await
                         {
-                            error!(
+                            warn!(
                                 pubkey = %pubkey,
                                 error = %err,
                                 "Failed to clone account into bank"
@@ -294,7 +294,7 @@ where
                                 .clone_account(projected_ata_clone_request)
                                 .await
                             {
-                                error!(
+                                warn!(
                                     pubkey = %pubkey,
                                     error = %err,
                                     "Failed to clone projected ATA from delegated eATA update"
@@ -383,7 +383,7 @@ where
                                 ) {
                                     Ok(x) => Some(x),
                                     Err(err) => {
-                                        error!(
+                                        warn!(
                                             pubkey = %pubkey,
                                             error = %err,
                                             "Failed to parse delegation record"
@@ -462,7 +462,7 @@ where
                     }
                     // In case of errors fetching the delegation record we cannot clone the account
                     Ok(Err(err)) => {
-                        error!(
+                        warn!(
                             pubkey = %pubkey,
                             error = ?err,
                             "Failed to fetch delegation record"
@@ -470,7 +470,7 @@ where
                         (None, None)
                     }
                     Err(err) => {
-                        error!(
+                        warn!(
                             pubkey = %pubkey,
                             error = ?err,
                             "Failed to fetch delegation record"
@@ -1128,7 +1128,7 @@ where
                     })
                 {
                     // The sender was dropped, likely due to an error in the other request
-                    error!(
+                    warn!(
                         "Failed to receive account from pending request: {err}"
                     );
                 }

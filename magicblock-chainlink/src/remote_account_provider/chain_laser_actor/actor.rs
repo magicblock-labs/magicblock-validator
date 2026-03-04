@@ -401,7 +401,7 @@ impl<H: StreamHandle, S: StreamFactory<H>> ChainLaserActor<H, S> {
         let response = match result {
             Ok(()) => Ok(()),
             Err(e) => {
-                error!(
+                warn!(
                     pubkey = %pubkey,
                     error = ?e,
                     "Failed to subscribe to account"
@@ -496,7 +496,7 @@ impl<H: StreamHandle, S: StreamFactory<H>> ChainLaserActor<H, S> {
             self.spawn_fallen_behind_diagnostics(source);
         }
 
-        error!(
+        warn!(
             error = ?err,
             slots = ?self.slots,
             "Error in {} stream",
@@ -602,7 +602,7 @@ impl<H: StreamHandle, S: StreamFactory<H>> ChainLaserActor<H, S> {
         // coalesce signals
         let _ = abort_sender.try_send(()).inspect_err(|err| {
             if !matches!(err, mpsc::error::TrySendError::Full(_)) {
-                error!(
+                warn!(
                     error = ?err,
                     "Failed to signal connection issue"
                 );
@@ -722,7 +722,7 @@ impl<H: StreamHandle, S: StreamFactory<H>> ChainLaserActor<H, S> {
             .send(subscription_update)
             .await
             .unwrap_or_else(|_| {
-                error!(pubkey = %pubkey, "Failed to send subscription update");
+                warn!(pubkey = %pubkey, "Failed to send subscription update");
             });
     }
 }
