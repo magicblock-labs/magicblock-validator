@@ -3,7 +3,6 @@ use dlp::{
     pda::delegation_record_pda_from_delegated_account, state::DelegationRecord,
 };
 use dlp_api::decrypt::Decrypt;
-use dlp_api::encryption::KEY_LEN;
 use magicblock_accounts_db::traits::AccountsBank;
 use magicblock_core::token_programs::EATA_PROGRAM_ID;
 use magicblock_metrics::metrics;
@@ -11,6 +10,7 @@ use solana_account::ReadableAccount;
 use solana_keypair::Keypair;
 use solana_program::program_error::ProgramError;
 use solana_pubkey::Pubkey;
+use solana_signer::Signer;
 use tracing::*;
 
 use super::FetchCloner;
@@ -29,8 +29,7 @@ use crate::{
 pub(crate) fn parse_delegation_record(
     data: &[u8],
     delegation_record_pubkey: Pubkey,
-    validator_pubkey: Pubkey,
-    validator_keypair: Option<&Keypair>,
+    validator_keypair: &Keypair,
 ) -> ChainlinkResult<(DelegationRecord, Option<DelegationActions>)> {
     let delegation_record_size = DelegationRecord::size_with_discriminator();
     if data.len() < delegation_record_size {
@@ -52,7 +51,7 @@ pub(crate) fn parse_delegation_record(
     } else {
         // Actions for accounts delegated to other validators are not relevant
         // for this node and may be encrypted for a different recipient.
-        if record.authority != validator_pubkey
+        if record.authority != validator_keypair.pubkey()
             && record.authority != Pubkey::default()
         {
             return Ok((record, None));
@@ -71,7 +70,7 @@ pub(crate) fn parse_delegation_record(
 fn parse_post_delegation_actions(
     actions_data: &[u8],
     delegation_record_pubkey: Pubkey,
-    validator_keypair: Option<&Keypair>,
+    validator_keypair: &Keypair,
 ) -> ChainlinkResult<DelegationActions> {
     let actions: PostDelegationActions = borsh::from_slice(actions_data)
         .map_err(|err| {
@@ -81,11 +80,9 @@ fn parse_post_delegation_actions(
             )
         })?;
 
-    let instructions = match validator_keypair {
-        Some(keypair) => actions.decrypt_with_keypair(keypair),
-        None => actions.decrypt(&[0; KEY_LEN], &[0; KEY_LEN]),
-    }
-    .map_err(|err| {
+    let instructions = actions
+        .decrypt_with_keypair(validator_keypair)
+        .map_err(|err| {
         ChainlinkError::InvalidDelegationActions(
             delegation_record_pubkey,
             format!("Failed to parse/decrypt PostDelegationActions: {err}"),
@@ -251,17 +248,21 @@ mod tests {
         let program_id = Pubkey::new_unique();
         let account = Pubkey::new_unique();
 
-        let validator_pubkey = Pubkey::new_unique();
+        let validator = Keypair::new();
         let payload = serialize_record_with_actions(
-            validator_pubkey,
+            validator.pubkey(),
             PostDelegationActions {
                 signers: vec![signer, program_id, account],
                 non_signers: vec![],
                 instructions: vec![MaybeEncryptedInstruction {
                     program_id: 1,
                     accounts: vec![
-                        dlp::compact::AccountMeta::new_readonly(0, true),
-                        dlp::compact::AccountMeta::new(2, false),
+                        MaybeEncryptedAccountMeta::ClearText(
+                            dlp::compact::AccountMeta::new_readonly(0, true),
+                        ),
+                        MaybeEncryptedAccountMeta::ClearText(
+                            dlp::compact::AccountMeta::new(2, false),
+                        ),
                     ],
                     data: MaybeEncryptedIxData {
                         prefix: vec![7, 8, 9],
@@ -274,8 +275,7 @@ mod tests {
         let (_, actions) = parse_delegation_record(
             &payload,
             Pubkey::new_unique(),
-            validator_pubkey,
-            None,
+            &validator,
         )
         .unwrap();
 
@@ -322,8 +322,12 @@ mod tests {
                 instructions: vec![MaybeEncryptedInstruction {
                     program_id: 2,
                     accounts: vec![
-                        dlp::compact::AccountMeta::new_readonly(0, true),
-                        dlp::compact::AccountMeta::new(1, false),
+                        MaybeEncryptedAccountMeta::ClearText(
+                            dlp::compact::AccountMeta::new_readonly(0, true),
+                        ),
+                        MaybeEncryptedAccountMeta::ClearText(
+                            dlp::compact::AccountMeta::new(1, false),
+                        ),
                     ],
                     data: MaybeEncryptedIxData {
                         prefix: vec![1, 2],
@@ -336,8 +340,7 @@ mod tests {
         let (_, actions) = parse_delegation_record(
             &payload,
             Pubkey::new_unique(),
-            validator.pubkey(),
-            Some(&validator),
+            &validator,
         )
         .unwrap();
 
@@ -349,8 +352,9 @@ mod tests {
     }
 
     #[test]
-    fn fails_when_encrypted_actions_have_no_validator_keypair() {
+    fn fails_when_encrypted_actions_have_wrong_validator_keypair() {
         let validator = Keypair::new();
+        let wrong_validator = Keypair::new();
         let encrypted_program_id =
             dlp_api::encryption::encrypt_ed25519_recipient(
                 Pubkey::new_unique().as_array(),
@@ -372,8 +376,7 @@ mod tests {
         let err = parse_delegation_record(
             &payload,
             Pubkey::new_unique(),
-            validator.pubkey(),
-            None,
+            &wrong_validator,
         )
         .unwrap_err();
         assert!(matches!(

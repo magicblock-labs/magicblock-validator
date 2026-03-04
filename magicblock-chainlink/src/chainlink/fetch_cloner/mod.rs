@@ -21,6 +21,7 @@ use scc::{hash_map::Entry, HashMap};
 use solana_account::{AccountSharedData, ReadableAccount};
 use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
+use solana_signer::Signer;
 use solana_sdk_ids::system_program;
 use tokio::{
     sync::{mpsc, oneshot},
@@ -82,7 +83,7 @@ where
     accounts_bank: Arc<V>,
     cloner: Arc<C>,
     validator_pubkey: Pubkey,
-    validator_keypair: Option<Arc<Keypair>>,
+    validator_keypair: Arc<Keypair>,
 
     /// These are accounts that we should never clone into our validator.
     /// native programs, sysvars, native tokens, validator identity and faucet
@@ -105,12 +106,12 @@ where
         remote_account_provider: &Arc<RemoteAccountProvider<T, U>>,
         accounts_bank: &Arc<V>,
         cloner: &Arc<C>,
-        validator_pubkey: Pubkey,
-        validator_keypair: Option<Keypair>,
+        validator_keypair: Keypair,
         faucet_pubkey: Pubkey,
         subscription_updates_rx: mpsc::Receiver<ForwardedSubscriptionUpdate>,
         allowed_programs: Option<Vec<AllowedProgram>>,
     ) -> Arc<Self> {
+        let validator_pubkey = validator_keypair.pubkey();
         let blacklisted_accounts =
             blacklisted_accounts(&validator_pubkey, &faucet_pubkey);
         let allowed_programs = allowed_programs.map(|programs| {
@@ -121,7 +122,7 @@ where
             accounts_bank: accounts_bank.clone(),
             cloner: cloner.clone(),
             validator_pubkey,
-            validator_keypair: validator_keypair.map(Arc::new),
+            validator_keypair: Arc::new(validator_keypair),
             pending_requests: Arc::new(HashMap::new()),
             fetch_count: Arc::new(AtomicU64::new(0)),
             blacklisted_accounts,
@@ -681,8 +682,7 @@ where
         delegation::parse_delegation_record(
             data,
             delegation_record_pubkey,
-            self.validator_pubkey,
-            self.validator_keypair.as_deref(),
+            self.validator_keypair.as_ref(),
         )
     }
 

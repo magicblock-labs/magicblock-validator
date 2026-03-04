@@ -1,6 +1,8 @@
 use std::{collections::HashMap, sync::Arc};
 
 use solana_account::{Account, AccountSharedData, WritableAccount};
+use solana_keypair::Keypair;
+use solana_signer::Signer;
 use solana_sdk_ids::system_program;
 use tokio::sync::mpsc;
 
@@ -111,7 +113,7 @@ struct FetcherTestCtx {
 async fn setup<I>(
     accounts: I,
     current_slot: u64,
-    validator_pubkey: Pubkey,
+    validator_keypair: Keypair,
 ) -> FetcherTestCtx
 where
     I: IntoIterator<Item = (Pubkey, Account)>,
@@ -154,7 +156,7 @@ where
     let (fetch_cloner, subscription_tx) = init_fetch_cloner(
         remote_account_provider.clone(),
         &accounts_bank,
-        validator_pubkey,
+        validator_keypair,
         faucet_pubkey,
     );
 
@@ -175,7 +177,7 @@ fn init_fetch_cloner(
         RemoteAccountProvider<ChainRpcClientMock, ChainPubsubClientMock>,
     >,
     bank: &Arc<AccountsBankStub>,
-    validator_pubkey: Pubkey,
+    validator_keypair: Keypair,
     faucet_pubkey: Pubkey,
 ) -> TestFetchClonerResult {
     let (subscription_tx, subscription_rx) = mpsc::channel(100);
@@ -184,8 +186,7 @@ fn init_fetch_cloner(
         &remote_account_provider,
         bank,
         &cloner,
-        validator_pubkey,
-        None,
+        validator_keypair,
         faucet_pubkey,
         subscription_rx,
         None,
@@ -198,7 +199,8 @@ fn init_fetch_cloner(
 // -----------------
 #[tokio::test]
 async fn test_fetch_and_clone_single_non_delegated_account() {
-    let validator_pubkey = random_pubkey();
+    let validator_keypair = Keypair::new();
+    let validator_pubkey = validator_keypair.pubkey();
     let account_pubkey = random_pubkey();
     let account_owner = random_pubkey();
 
@@ -215,7 +217,7 @@ async fn test_fetch_and_clone_single_non_delegated_account() {
         accounts_bank,
         fetch_cloner,
         ..
-    } = setup([(account_pubkey, account.clone())], 100, validator_pubkey).await;
+    } = setup([(account_pubkey, account.clone())], 100, validator_keypair.insecure_clone()).await;
 
     let result = fetch_cloner
         .fetch_and_clone_accounts(
@@ -241,7 +243,8 @@ async fn test_fetch_and_clone_single_non_delegated_account() {
 
 #[tokio::test]
 async fn test_fetch_and_clone_single_non_existing_account() {
-    let validator_pubkey = random_pubkey();
+    let validator_keypair = Keypair::new();
+    let validator_pubkey = validator_keypair.pubkey();
     let non_existing_pubkey = random_pubkey();
 
     // Setup with no accounts (empty collection)
@@ -252,7 +255,7 @@ async fn test_fetch_and_clone_single_non_existing_account() {
     } = setup(
         std::iter::empty::<(Pubkey, Account)>(),
         100,
-        validator_pubkey,
+        validator_keypair.insecure_clone(),
     )
     .await;
 
@@ -279,7 +282,8 @@ async fn test_fetch_and_clone_single_non_existing_account() {
 #[tokio::test]
 async fn test_fetch_and_clone_single_delegated_account_with_valid_delegation_record(
 ) {
-    let validator_pubkey = random_pubkey();
+    let validator_keypair = Keypair::new();
+    let validator_pubkey = validator_keypair.pubkey();
     let account_pubkey = random_pubkey();
     let account_owner = random_pubkey();
     const CURRENT_SLOT: u64 = 100;
@@ -303,7 +307,7 @@ async fn test_fetch_and_clone_single_delegated_account_with_valid_delegation_rec
     } = setup(
         [(account_pubkey, account.clone())],
         CURRENT_SLOT,
-        validator_pubkey,
+        validator_keypair.insecure_clone(),
     )
     .await;
 
@@ -357,7 +361,8 @@ async fn test_fetch_and_clone_single_delegated_account_with_valid_delegation_rec
 #[tokio::test]
 async fn test_fetch_and_clone_single_delegated_account_with_different_authority(
 ) {
-    let validator_pubkey = random_pubkey();
+    let validator_keypair = Keypair::new();
+    let validator_pubkey = validator_keypair.pubkey();
     let different_authority = random_pubkey(); // Different authority
     let account_pubkey = random_pubkey();
     let account_owner = random_pubkey();
@@ -382,7 +387,7 @@ async fn test_fetch_and_clone_single_delegated_account_with_different_authority(
     } = setup(
         [(account_pubkey, account.clone())],
         CURRENT_SLOT,
-        validator_pubkey,
+        validator_keypair.insecure_clone(),
     )
     .await;
 
@@ -438,7 +443,8 @@ async fn test_fetch_and_clone_single_delegated_account_without_delegation_record
 ) {
     // In case the delegation record itself was subscribed to already and then we subscribe to
     // the account itself, then the subscription to the delegation record should not be removed
-    let validator_pubkey = random_pubkey();
+    let validator_keypair = Keypair::new();
+    let validator_pubkey = validator_keypair.pubkey();
     let account_pubkey = random_pubkey();
     let account_owner = random_pubkey();
 
@@ -463,7 +469,7 @@ async fn test_fetch_and_clone_single_delegated_account_without_delegation_record
     } = setup(
         [(account_pubkey, account.clone())],
         CURRENT_SLOT,
-        validator_pubkey,
+        validator_keypair.insecure_clone(),
     )
     .await;
 
@@ -528,7 +534,8 @@ async fn test_fetch_and_clone_single_delegated_account_without_delegation_record
 
 #[tokio::test]
 async fn test_fetch_and_clone_multiple_accounts_mixed_types() {
-    let validator_pubkey = random_pubkey();
+    let validator_keypair = Keypair::new();
+    let validator_pubkey = validator_keypair.pubkey();
     let account_owner = random_pubkey();
     const CURRENT_SLOT: u64 = 100;
 
@@ -574,7 +581,7 @@ async fn test_fetch_and_clone_multiple_accounts_mixed_types() {
         rpc_client,
         fetch_cloner,
         ..
-    } = setup(accounts, CURRENT_SLOT, validator_pubkey).await;
+    } = setup(accounts, CURRENT_SLOT, validator_keypair.insecure_clone()).await;
 
     // Add delegation record for the delegated account
     add_delegation_record_for(
@@ -641,7 +648,8 @@ async fn test_fetch_and_clone_multiple_accounts_mixed_types() {
 #[tokio::test]
 async fn test_fetch_and_clone_valid_delegated_account_and_account_with_invalid_delegation_record(
 ) {
-    let validator_pubkey = random_pubkey();
+    let validator_keypair = Keypair::new();
+    let validator_pubkey = validator_keypair.pubkey();
     let account_owner = random_pubkey();
     const CURRENT_SLOT: u64 = 100;
 
@@ -676,7 +684,7 @@ async fn test_fetch_and_clone_valid_delegated_account_and_account_with_invalid_d
         rpc_client,
         fetch_cloner,
         ..
-    } = setup(accounts, CURRENT_SLOT, validator_pubkey).await;
+    } = setup(accounts, CURRENT_SLOT, validator_keypair.insecure_clone()).await;
 
     // Add valid delegation record for first account
     add_delegation_record_for(
@@ -723,7 +731,8 @@ async fn test_fetch_and_clone_valid_delegated_account_and_account_with_invalid_d
 #[tokio::test]
 async fn test_deleg_record_stale() {
     init_logger();
-    let validator_pubkey = random_pubkey();
+    let validator_keypair = Keypair::new();
+    let validator_pubkey = validator_keypair.pubkey();
     let account_owner = random_pubkey();
     const CURRENT_SLOT: u64 = 100;
     const INITIAL_DELEG_RECORD_SLOT: u64 = CURRENT_SLOT - 10;
@@ -744,7 +753,7 @@ async fn test_deleg_record_stale() {
     } = setup(
         [(account_pubkey, account.clone())],
         CURRENT_SLOT,
-        validator_pubkey,
+        validator_keypair.insecure_clone(),
     )
     .await;
 
@@ -799,7 +808,8 @@ async fn test_deleg_record_stale() {
 #[tokio::test]
 async fn test_account_stale() {
     init_logger();
-    let validator_pubkey = random_pubkey();
+    let validator_keypair = Keypair::new();
+    let validator_pubkey = validator_keypair.pubkey();
     let account_owner = random_pubkey();
     const CURRENT_SLOT: u64 = 100;
     const INITIAL_ACC_SLOT: u64 = CURRENT_SLOT - 10;
@@ -820,7 +830,7 @@ async fn test_account_stale() {
     } = setup(
         [(account_pubkey, account.clone())],
         CURRENT_SLOT,
-        validator_pubkey,
+        validator_keypair.insecure_clone(),
     )
     .await;
 
@@ -875,7 +885,8 @@ async fn test_account_stale() {
 #[tokio::test]
 async fn test_delegation_record_unsub_race_condition_prevention() {
     init_logger();
-    let validator_pubkey = random_pubkey();
+    let validator_keypair = Keypair::new();
+    let validator_pubkey = validator_keypair.pubkey();
     let account_owner = random_pubkey();
     const CURRENT_SLOT: u64 = 100;
 
@@ -897,7 +908,7 @@ async fn test_delegation_record_unsub_race_condition_prevention() {
     } = setup(
         [(account_pubkey, account.clone())],
         CURRENT_SLOT,
-        validator_pubkey,
+        validator_keypair.insecure_clone(),
     )
     .await;
 
@@ -960,7 +971,8 @@ async fn test_delegation_record_unsub_race_condition_prevention() {
 #[tokio::test]
 async fn test_fetch_and_clone_with_dedup_concurrent_requests() {
     init_logger();
-    let validator_pubkey = random_pubkey();
+    let validator_keypair = Keypair::new();
+    let validator_pubkey = validator_keypair.pubkey();
     let account_owner = random_pubkey();
     const CURRENT_SLOT: u64 = 100;
 
@@ -980,7 +992,7 @@ async fn test_fetch_and_clone_with_dedup_concurrent_requests() {
     } = setup(
         [(account_pubkey, account.clone())],
         CURRENT_SLOT,
-        validator_pubkey,
+        validator_keypair.insecure_clone(),
     )
     .await;
 
@@ -1032,7 +1044,8 @@ async fn test_fetch_and_clone_with_dedup_concurrent_requests() {
 #[tokio::test]
 async fn test_undelegation_requested_subscription_behavior() {
     init_logger();
-    let validator_pubkey = random_pubkey();
+    let validator_keypair = Keypair::new();
+    let validator_pubkey = validator_keypair.pubkey();
     let account_owner = random_pubkey();
     const CURRENT_SLOT: u64 = 100;
 
@@ -1054,7 +1067,7 @@ async fn test_undelegation_requested_subscription_behavior() {
     } = setup(
         [(account_pubkey, account.clone())],
         CURRENT_SLOT,
-        validator_pubkey,
+        validator_keypair.insecure_clone(),
     )
     .await;
 
@@ -1102,7 +1115,8 @@ async fn test_undelegation_requested_subscription_behavior() {
 #[tokio::test]
 async fn test_delegated_authoritative_skip_unsubscribes_subscription() {
     init_logger();
-    let validator_pubkey = random_pubkey();
+    let validator_keypair = Keypair::new();
+    let validator_pubkey = validator_keypair.pubkey();
     let account_owner = random_pubkey();
     const CURRENT_SLOT: u64 = 100;
 
@@ -1125,7 +1139,7 @@ async fn test_delegated_authoritative_skip_unsubscribes_subscription() {
     } = setup(
         [(account_pubkey, delegated_account.clone())],
         CURRENT_SLOT,
-        validator_pubkey,
+        validator_keypair.insecure_clone(),
     )
     .await;
 
@@ -1213,7 +1227,8 @@ async fn test_delegated_authoritative_skip_unsubscribes_subscription() {
 #[tokio::test]
 async fn test_parallel_fetch_prevention_multiple_accounts() {
     init_logger();
-    let validator_pubkey = random_pubkey();
+    let validator_keypair = Keypair::new();
+    let validator_pubkey = validator_keypair.pubkey();
     let account_owner = random_pubkey();
     const CURRENT_SLOT: u64 = 100;
 
@@ -1256,7 +1271,7 @@ async fn test_parallel_fetch_prevention_multiple_accounts() {
         accounts_bank,
         fetch_cloner,
         ..
-    } = setup(accounts, CURRENT_SLOT, validator_pubkey).await;
+    } = setup(accounts, CURRENT_SLOT, validator_keypair.insecure_clone()).await;
 
     // Use shared FetchCloner to test deduplication across multiple accounts
     // Spawn multiple concurrent requests for overlapping sets of accounts
@@ -1327,7 +1342,8 @@ async fn test_parallel_fetch_prevention_multiple_accounts() {
 #[tokio::test]
 async fn test_fetch_with_some_acounts_marked_as_empty_if_not_found() {
     init_logger();
-    let validator_pubkey = random_pubkey();
+    let validator_keypair = Keypair::new();
+    let validator_pubkey = validator_keypair.pubkey();
     let account_owner = random_pubkey();
     const CURRENT_SLOT: u64 = 100;
 
@@ -1350,7 +1366,7 @@ async fn test_fetch_with_some_acounts_marked_as_empty_if_not_found() {
         fetch_cloner,
         remote_account_provider,
         ..
-    } = setup(accounts, CURRENT_SLOT, validator_pubkey).await;
+    } = setup(accounts, CURRENT_SLOT, validator_keypair.insecure_clone()).await;
 
     // Configure fetch_cloner to mark some accounts as empty if not found
     fetch_cloner
@@ -1403,7 +1419,8 @@ async fn test_fetch_with_some_acounts_marked_as_empty_if_not_found() {
 #[tokio::test]
 async fn test_confined_delegation_behavior() {
     init_logger();
-    let validator_pubkey = random_pubkey();
+    let validator_keypair = Keypair::new();
+    let validator_pubkey = validator_keypair.pubkey();
     let account_owner = random_pubkey();
     const CURRENT_SLOT: u64 = 100;
 
@@ -1438,7 +1455,7 @@ async fn test_confined_delegation_behavior() {
             (account2_pubkey, account2.clone()),
         ],
         CURRENT_SLOT,
-        validator_pubkey,
+        validator_keypair.insecure_clone(),
     )
     .await;
 
@@ -1499,7 +1516,8 @@ async fn test_confined_delegation_behavior() {
 #[tokio::test]
 async fn test_fetch_and_clone_undelegating_account_that_is_closed_on_chain() {
     init_logger();
-    let validator_pubkey = random_pubkey();
+    let validator_keypair = Keypair::new();
+    let validator_pubkey = validator_keypair.pubkey();
     let account_pubkey = random_pubkey();
     let account_owner = random_pubkey();
     const CURRENT_SLOT: u64 = 100;
@@ -1522,7 +1540,7 @@ async fn test_fetch_and_clone_undelegating_account_that_is_closed_on_chain() {
     } = setup(
         std::iter::empty::<(Pubkey, Account)>(),
         CURRENT_SLOT,
-        validator_pubkey,
+        validator_keypair.insecure_clone(),
     )
     .await;
 
@@ -1564,7 +1582,8 @@ async fn test_fetch_and_clone_undelegating_account_that_is_closed_on_chain() {
 #[tokio::test]
 async fn test_auto_airdrop_uses_non_stale_remote_slot_from_bank_account() {
     init_logger();
-    let validator_pubkey = random_pubkey();
+    let validator_keypair = Keypair::new();
+    let validator_pubkey = validator_keypair.pubkey();
     let payer_pubkey = random_pubkey();
     const CURRENT_SLOT: u64 = 100;
     const LOCAL_SLOT: u64 = 250;
@@ -1577,7 +1596,7 @@ async fn test_auto_airdrop_uses_non_stale_remote_slot_from_bank_account() {
     } = setup(
         std::iter::empty::<(Pubkey, Account)>(),
         CURRENT_SLOT,
-        validator_pubkey,
+        validator_keypair.insecure_clone(),
     )
     .await;
 
@@ -1602,7 +1621,8 @@ async fn test_auto_airdrop_uses_non_stale_remote_slot_from_bank_account() {
 #[tokio::test]
 async fn test_auto_airdrop_uses_chain_slot_when_account_not_in_bank() {
     init_logger();
-    let validator_pubkey = random_pubkey();
+    let validator_keypair = Keypair::new();
+    let validator_pubkey = validator_keypair.pubkey();
     let payer_pubkey = random_pubkey();
     const CURRENT_SLOT: u64 = 100;
     const AIRDROP_LAMPORTS: u64 = 1_000_000_000;
@@ -1614,7 +1634,7 @@ async fn test_auto_airdrop_uses_chain_slot_when_account_not_in_bank() {
     } = setup(
         std::iter::empty::<(Pubkey, Account)>(),
         CURRENT_SLOT,
-        validator_pubkey,
+        validator_keypair.insecure_clone(),
     )
     .await;
 
@@ -1638,7 +1658,8 @@ async fn test_auto_airdrop_uses_chain_slot_when_account_not_in_bank() {
 #[tokio::test]
 async fn test_allowed_programs_filters_programs() {
     init_logger();
-    let validator_pubkey = random_pubkey();
+    let validator_keypair = Keypair::new();
+    let validator_pubkey = validator_keypair.pubkey();
     let program_id_allowed = random_pubkey();
     let program_id_blocked = random_pubkey();
     const CURRENT_SLOT: u64 = 100;
@@ -1669,7 +1690,7 @@ async fn test_allowed_programs_filters_programs() {
         fetch_cloner: _fetch_cloner,
         remote_account_provider,
         ..
-    } = setup(setup_accounts.into_iter(), CURRENT_SLOT, validator_pubkey).await;
+    } = setup(setup_accounts.into_iter(), CURRENT_SLOT, validator_keypair.insecure_clone()).await;
 
     // Create FetchCloner with only one program allowed
     let (_subscription_tx, subscription_rx) = mpsc::channel(100);
@@ -1681,8 +1702,7 @@ async fn test_allowed_programs_filters_programs() {
         &remote_account_provider,
         &accounts_bank,
         &cloner,
-        validator_pubkey,
-        None,
+        validator_keypair.insecure_clone(),
         random_pubkey(),
         subscription_rx,
         allowed_programs,
@@ -1718,7 +1738,8 @@ async fn test_allowed_programs_filters_programs() {
 #[tokio::test]
 async fn test_allowed_programs_none_allows_all() {
     init_logger();
-    let validator_pubkey = random_pubkey();
+    let validator_keypair = Keypair::new();
+    let validator_pubkey = validator_keypair.pubkey();
     let program_id1 = random_pubkey();
     let program_id2 = random_pubkey();
     const CURRENT_SLOT: u64 = 100;
@@ -1741,7 +1762,7 @@ async fn test_allowed_programs_none_allows_all() {
         fetch_cloner: _fetch_cloner,
         remote_account_provider,
         ..
-    } = setup(setup_accounts.into_iter(), CURRENT_SLOT, validator_pubkey).await;
+    } = setup(setup_accounts.into_iter(), CURRENT_SLOT, validator_keypair.insecure_clone()).await;
 
     // Create FetchCloner with NO allowed_programs restriction (None)
     let (_subscription_tx, subscription_rx) = mpsc::channel(100);
@@ -1750,8 +1771,7 @@ async fn test_allowed_programs_none_allows_all() {
         &remote_account_provider,
         &accounts_bank,
         &cloner,
-        validator_pubkey,
-        None,
+        validator_keypair.insecure_clone(),
         random_pubkey(),
         subscription_rx,
         None, // No restriction
@@ -1785,7 +1805,8 @@ async fn test_allowed_programs_none_allows_all() {
 #[tokio::test]
 async fn test_allowed_programs_empty_allows_all() {
     init_logger();
-    let validator_pubkey = random_pubkey();
+    let validator_keypair = Keypair::new();
+    let validator_pubkey = validator_keypair.pubkey();
     let program_id1 = random_pubkey();
     let program_id2 = random_pubkey();
     const CURRENT_SLOT: u64 = 100;
@@ -1808,7 +1829,7 @@ async fn test_allowed_programs_empty_allows_all() {
         fetch_cloner: _fetch_cloner,
         remote_account_provider,
         ..
-    } = setup(setup_accounts.into_iter(), CURRENT_SLOT, validator_pubkey).await;
+    } = setup(setup_accounts.into_iter(), CURRENT_SLOT, validator_keypair.insecure_clone()).await;
 
     // Create FetchCloner with an EMPTY allowed_programs list
     let (_subscription_tx, subscription_rx) = mpsc::channel(100);
@@ -1818,8 +1839,7 @@ async fn test_allowed_programs_empty_allows_all() {
         &remote_account_provider,
         &accounts_bank,
         &cloner,
-        validator_pubkey,
-        None,
+        validator_keypair.insecure_clone(),
         random_pubkey(),
         subscription_rx,
         allowed_programs,
@@ -1857,7 +1877,8 @@ async fn test_allowed_programs_empty_allows_all() {
 #[tokio::test]
 async fn test_subscribe_to_original_owner_program_on_delegated_account_fetch() {
     init_logger();
-    let validator_pubkey = random_pubkey();
+    let validator_keypair = Keypair::new();
+    let validator_pubkey = validator_keypair.pubkey();
     let account_owner = random_pubkey();
     const CURRENT_SLOT: u64 = 100;
 
@@ -1879,7 +1900,7 @@ async fn test_subscribe_to_original_owner_program_on_delegated_account_fetch() {
     } = setup(
         [(account_pubkey, account.clone())],
         CURRENT_SLOT,
-        validator_pubkey,
+        validator_keypair.insecure_clone(),
     )
     .await;
 
@@ -1927,7 +1948,8 @@ async fn test_subscribe_to_original_owner_program_on_delegated_account_fetch() {
 #[tokio::test]
 async fn test_no_program_subscription_for_undelegated_account() {
     init_logger();
-    let validator_pubkey = random_pubkey();
+    let validator_keypair = Keypair::new();
+    let validator_pubkey = validator_keypair.pubkey();
     let account_owner = random_pubkey();
     const CURRENT_SLOT: u64 = 100;
 
@@ -1948,7 +1970,7 @@ async fn test_no_program_subscription_for_undelegated_account() {
     } = setup(
         [(account_pubkey, undelegated_account.clone())],
         CURRENT_SLOT,
-        validator_pubkey,
+        validator_keypair.insecure_clone(),
     )
     .await;
 
@@ -2063,7 +2085,8 @@ async fn send_subscription_update_and_get_subscribed_programs(
 async fn test_subscribe_to_original_owner_program_on_delegated_account_subscription_update(
 ) {
     init_logger();
-    let validator_pubkey = random_pubkey();
+    let validator_keypair = Keypair::new();
+    let validator_pubkey = validator_keypair.pubkey();
     let account_owner = random_pubkey();
     const CURRENT_SLOT: u64 = 100;
 
@@ -2085,7 +2108,7 @@ async fn test_subscribe_to_original_owner_program_on_delegated_account_subscript
     } = setup(
         [(account_pubkey, delegated_account.clone())],
         CURRENT_SLOT,
-        validator_pubkey,
+        validator_keypair.insecure_clone(),
     )
     .await;
 
@@ -2129,7 +2152,8 @@ async fn test_subscribe_to_original_owner_program_on_delegated_account_subscript
 async fn test_no_program_subscription_for_undelegated_account_subscription_update(
 ) {
     init_logger();
-    let validator_pubkey = random_pubkey();
+    let validator_keypair = Keypair::new();
+    let validator_pubkey = validator_keypair.pubkey();
     let account_owner = random_pubkey();
     const CURRENT_SLOT: u64 = 100;
 
@@ -2150,7 +2174,7 @@ async fn test_no_program_subscription_for_undelegated_account_subscription_updat
     } = setup(
         [(account_pubkey, undelegated_account.clone())],
         CURRENT_SLOT,
-        validator_pubkey,
+        validator_keypair.insecure_clone(),
     )
     .await;
 
@@ -2178,7 +2202,8 @@ async fn test_no_program_subscription_for_undelegated_account_subscription_updat
 async fn test_delegated_eata_subscription_update_clones_raw_eata_and_projects_ata(
 ) {
     init_logger();
-    let validator_pubkey = random_pubkey();
+    let validator_keypair = Keypair::new();
+    let validator_pubkey = validator_keypair.pubkey();
     let wallet_owner = random_pubkey();
     let mint = random_pubkey();
     const CURRENT_SLOT: u64 = 100;
@@ -2196,7 +2221,7 @@ async fn test_delegated_eata_subscription_update_clones_raw_eata_and_projects_at
     } = setup(
         [(eata_pubkey, eata_account.clone())],
         CURRENT_SLOT,
-        validator_pubkey,
+        validator_keypair.insecure_clone(),
     )
     .await;
 
@@ -2270,7 +2295,8 @@ async fn test_delegated_eata_subscription_update_clones_raw_eata_and_projects_at
 #[tokio::test]
 async fn test_delegated_eata_update_does_not_override_delegated_ata_in_bank() {
     init_logger();
-    let validator_pubkey = random_pubkey();
+    let validator_keypair = Keypair::new();
+    let validator_pubkey = validator_keypair.pubkey();
     let wallet_owner = random_pubkey();
     let mint = random_pubkey();
     const CURRENT_SLOT: u64 = 100;
@@ -2290,7 +2316,7 @@ async fn test_delegated_eata_update_does_not_override_delegated_ata_in_bank() {
     } = setup(
         [(eata_pubkey, eata_account.clone())],
         CURRENT_SLOT,
-        validator_pubkey,
+        validator_keypair.insecure_clone(),
     )
     .await;
 
