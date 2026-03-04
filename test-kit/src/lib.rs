@@ -369,7 +369,7 @@ impl ExecutionTestEnv {
         let ctx = ReplayContext {
             slot: 0,
             index: 0,
-            persist: false,
+            persist,
         };
         self.transaction_scheduler
             .replay(ctx, txn)
