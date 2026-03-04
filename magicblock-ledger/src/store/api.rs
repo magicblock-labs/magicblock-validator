@@ -912,35 +912,33 @@ impl Ledger {
     /// Writes a confirmed transaction pieced together from the provided inputs
     /// * `signature` - Signature of the transaction
     /// * `slot` - Slot at which the transaction was confirmed
-    /// * `transaction` - Transaction to be written, we take a SanititizedTransaction here
-    ///   since that is what we provide Geyser as well
+    /// * `writable_keys` - Writable account keys from the transaction
+    /// * `readonly_keys` - Readonly account keys from the transaction
+    /// * `encoded_transaction` - Bincode-serialized `VersionedTransaction`
     /// * `status` - status of the transaction
     pub fn write_transaction(
         &self,
         signature: Signature,
         slot: Slot,
         index: u32,
-        transaction: &SanitizedTransaction,
+        writable_keys: Vec<&Pubkey>,
+        readonly_keys: Vec<&Pubkey>,
+        encoded_transaction: &[u8],
         status: TransactionStatusMeta,
     ) -> LedgerResult<()> {
-        let tx_account_locks = transaction.get_account_locks_unchecked();
-
         // 1. Write Transaction Status
         self.write_transaction_status(
             slot,
             index,
             signature,
-            tx_account_locks.writable,
-            tx_account_locks.readonly,
+            writable_keys,
+            readonly_keys,
             status,
         )?;
 
-        // 2. Write Transaction
-        let versioned = transaction.to_versioned_transaction();
-        let transaction: generated::Transaction = versioned.into();
-
+        // 2. Write Transaction (raw bincode bytes)
         self.transaction_cf
-            .put_protobuf((signature, slot), &transaction)?;
+            .put_bytes((signature, slot), encoded_transaction)?;
         self.transaction_cf.try_increase_entry_counter(1);
 
         Ok(())
