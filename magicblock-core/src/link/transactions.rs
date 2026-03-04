@@ -75,10 +75,19 @@ pub struct ProcessableTransaction {
     pub encoded: Option<Vec<u8>>,
 }
 
+/// Specifies the position and persistence behavior for replaying a transaction.
+///
+/// During replication, transactions must be replayed at the same slot and index
+/// as they appeared on the primary to maintain ordering consistency.
 #[derive(Clone, Copy)]
-pub struct ReplayContext {
+pub struct ReplayPosition {
+    /// The slot in which the transaction was originally included.
     pub slot: Slot,
+    /// The transaction's index within that slot (0-based).
     pub index: u32,
+    /// Whether to persist the replay to the ledger and broadcast status.
+    /// - `true`: Record to ledger + broadcast (for replay from primary/replicator)
+    /// - `false`: No recording, no broadcast (for local ledger replay during startup)
     pub persist: bool,
 }
 
@@ -86,18 +95,17 @@ pub struct ReplayContext {
 ///
 /// Variants that require result notification carry a one-shot sender:
 /// - `Simulation` and `Execution` return results to the caller
-/// - `Replay` is fire-and-forget (no sender, just a persistence flag)
+/// - `Replay` is fire-and-forget (no sender, just position/persistence info)
 pub enum TransactionProcessingMode {
     /// Process the transaction as a simulation.
     Simulation(TxnSimulationResultTx),
     /// Process the transaction for standard execution.
     Execution(TxnExecutionResultTx),
-    /// Replay the transaction against the current state (fire-and-forget).
+    /// Replay the transaction at a specific slot/index position.
     ///
-    /// The `bool` flag controls ledger persistence:
-    /// - `true`: record to ledger and broadcast status (for replay from primary)
-    /// - `false`: no recording, no broadcast (for local ledger replay during startup)
-    Replay(ReplayContext),
+    /// The `ReplayPosition` specifies where to record the transaction in the ledger
+    /// and whether to persist/broadcast the result.
+    Replay(ReplayPosition),
 }
 
 /// The detailed outcome of a transaction simulation.
@@ -270,14 +278,15 @@ impl TransactionSchedulerHandle {
     /// once the transaction is queued, not after execution completes.
     ///
     /// # Arguments
-    /// * `persist` - If true, record the transaction to the ledger
+    /// * `position` - The slot/index at which to record the transaction, plus
+    ///   whether to persist to ledger and broadcast status
     /// * `txn` - The transaction to replay
     pub async fn replay(
         &self,
-        context: ReplayContext,
+        position: ReplayPosition,
         txn: impl SanitizeableTransaction,
     ) -> TransactionResult {
-        let mode = TransactionProcessingMode::Replay(context);
+        let mode = TransactionProcessingMode::Replay(position);
         let transaction = txn.sanitize(true)?;
         let txn = ProcessableTransaction {
             transaction,

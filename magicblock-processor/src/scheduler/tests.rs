@@ -8,7 +8,7 @@
 //! - Edge cases (empty transactions, duplicate accounts)
 
 use magicblock_core::link::transactions::{
-    ProcessableTransaction, ReplayContext, SanitizeableTransaction,
+    ProcessableTransaction, ReplayPosition, SanitizeableTransaction,
     TransactionProcessingMode,
 };
 use solana_keypair::Keypair;
@@ -62,9 +62,9 @@ fn mock_txn(accounts: &[(Pubkey, bool)]) -> TransactionWithId {
 /// Creates a mock replay transaction with the specified accounts.
 fn mock_replay_txn(
     accounts: &[(Pubkey, bool)],
-    ctx: ReplayContext,
+    position: ReplayPosition,
 ) -> TransactionWithId {
-    mock_txn_with_mode(accounts, TransactionProcessingMode::Replay(ctx))
+    mock_txn_with_mode(accounts, TransactionProcessingMode::Replay(position))
 }
 
 // =============================================================================
@@ -298,7 +298,7 @@ fn transaction_with_duplicate_accounts() {
 fn replica_mode_blocks_new_transactions_when_pending() {
     let mut c = ExecutionCoordinator::new(2);
     let acc = Pubkey::new_unique();
-    let ctx = ReplayContext {
+    let position = ReplayPosition {
         slot: 0,
         index: 0,
         persist: false,
@@ -307,14 +307,14 @@ fn replica_mode_blocks_new_transactions_when_pending() {
     // First transaction holds the lock on acc
     let e0 = c.get_ready_executor().unwrap();
     assert!(c
-        .try_schedule(e0, mock_replay_txn(&[(acc, true)], ctx))
+        .try_schedule(e0, mock_replay_txn(&[(acc, true)], position))
         .is_ok());
 
     // Second transaction is BLOCKED because it conflicts with e0's lock
     // This sets pending in Replica mode
     let e1 = c.get_ready_executor().unwrap();
     assert!(c
-        .try_schedule(e1, mock_replay_txn(&[(acc, true)], ctx))
+        .try_schedule(e1, mock_replay_txn(&[(acc, true)], position))
         .is_err());
 
     // is_ready should return false because pending is set
@@ -325,7 +325,7 @@ fn replica_mode_blocks_new_transactions_when_pending() {
 fn replica_mode_unblocks_when_pending_completes() {
     let mut c = ExecutionCoordinator::new(2);
     let acc = Pubkey::new_unique();
-    let ctx = ReplayContext {
+    let position = ReplayPosition {
         slot: 0,
         index: 0,
         persist: false,
@@ -334,13 +334,13 @@ fn replica_mode_unblocks_when_pending_completes() {
     // First transaction holds the lock
     let e0 = c.get_ready_executor().unwrap();
     assert!(c
-        .try_schedule(e0, mock_replay_txn(&[(acc, true)], ctx))
+        .try_schedule(e0, mock_replay_txn(&[(acc, true)], position))
         .is_ok());
 
     // Second transaction is blocked and sets pending
     let e1 = c.get_ready_executor().unwrap();
     assert!(c
-        .try_schedule(e1, mock_replay_txn(&[(acc, true)], ctx))
+        .try_schedule(e1, mock_replay_txn(&[(acc, true)], position))
         .is_err());
     assert!(!c.is_ready()); // pending is set
 

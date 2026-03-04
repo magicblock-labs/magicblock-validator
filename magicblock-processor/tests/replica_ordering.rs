@@ -9,7 +9,7 @@ use std::{
 };
 
 use guinea::GuineaInstruction;
-use magicblock_core::link::transactions::ReplayContext;
+use magicblock_core::link::transactions::ReplayPosition;
 use solana_account::ReadableAccount;
 use solana_program::{
     instruction::{AccountMeta, Instruction},
@@ -126,13 +126,13 @@ async fn submit_all_and_start(
 
     // Submit all transactions sequentially to preserve order
     for (i, tx) in txs.into_iter().enumerate() {
-        let ctx = ReplayContext {
+        let position = ReplayPosition {
             slot: env.accountsdb.slot(),
             index: i as u32,
             persist: true,
         };
         env.transaction_scheduler
-            .replay(ctx, tx)
+            .replay(position, tx)
             .await
             .expect("Failed to submit transaction");
     }
