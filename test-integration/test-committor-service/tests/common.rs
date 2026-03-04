@@ -131,6 +131,14 @@ impl TaskInfoFetcher for MockTaskInfoFetcher {
         Ok(pubkeys.iter().map(|pubkey| (*pubkey, 0)).collect())
     }
 
+    async fn fetch_current_commit_nonces(
+        &self,
+        pubkeys: &[Pubkey],
+        _: u64,
+    ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>> {
+        Ok(pubkeys.iter().map(|pubkey| (*pubkey, 0)).collect())
+    }
+
     async fn fetch_rent_reimbursements(
         &self,
         pubkeys: &[Pubkey],
@@ -139,7 +147,7 @@ impl TaskInfoFetcher for MockTaskInfoFetcher {
         Ok(pubkeys.to_vec())
     }
 
-    fn peek_commit_nonce(&self, _pubkey: &Pubkey) -> Option<u64> {
+    async fn peek_commit_nonce(&self, _pubkey: &Pubkey) -> Option<u64> {
         None
     }
 

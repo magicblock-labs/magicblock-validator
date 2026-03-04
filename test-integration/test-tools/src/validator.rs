@@ -39,7 +39,7 @@ pub fn start_magic_block_validator_with_config(
     let target_dir = std::env::var("CARGO_TARGET_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|_| workspace_dir.join("../target"));
-    
+
     let validator_bin = target_dir.join("debug/magicblock-validator");
 
     let mut command = if validator_bin.exists() {
@@ -48,20 +48,23 @@ pub fn start_magic_block_validator_with_config(
         cmd.arg(config_path);
         cmd
     } else {
-        eprintln!("Prebuilt validator not found at {:?}, falling back to cargo run", validator_bin);
+        eprintln!(
+            "Prebuilt validator not found at {:?}, falling back to cargo run",
+            validator_bin
+        );
         // Fallback for local development
         let mut cmd = process::Command::new("cargo");
         cmd.arg("run")
-           .arg("-p")
-           .arg("magicblock-validator")
-           .arg("--")
-           .arg(config_path);
+            .arg("-p")
+            .arg("magicblock-validator")
+            .arg("--")
+            .arg(config_path);
         cmd
     };
 
     let rust_log_style =
         std::env::var("RUST_LOG_STYLE").unwrap_or(log_suffix.to_string());
-    
+
     command
         .env("RUST_LOG_STYLE", rust_log_style)
         .env("MBV_VALIDATOR__KEYPAIR", keypair_base58.clone())

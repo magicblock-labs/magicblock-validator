@@ -86,19 +86,17 @@ pub fn config_to_args(
                 args.push(path.to_str().unwrap().to_string());
             }
             Err(e) => {
-                let abs_config_dir = fs::canonicalize(config_dir).unwrap_or(config_dir.to_path_buf());
+                let abs_config_dir = fs::canonicalize(config_dir)
+                    .unwrap_or(config_dir.to_path_buf());
                 eprintln!(
                     "Error: Failed to resolve program path.\n\
                      Config Dir: {:?}\n\
                      Relative Path: {:?}\n\
                      Resolution Attempt: {:?}\n\
                      OS Error: {:?}",
-                    abs_config_dir,
-                    program.path,
-                    full_path_to_resolve,
-                    e
+                    abs_config_dir, program.path, full_path_to_resolve, e
                 );
-                
+
                 // List directory contents to aid debugging in CI environments
                 if let Some(parent) = full_path_to_resolve.parent() {
                     eprintln!("Directory contents of {:?}:", parent);
@@ -112,7 +110,7 @@ pub fn config_to_args(
                         eprintln!(" (Unable to read directory)");
                     }
                 }
-                
+
                 panic!("Program file not found: {:?}", full_path_to_resolve);
             }
         }

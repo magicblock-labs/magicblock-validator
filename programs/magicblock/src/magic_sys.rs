@@ -9,8 +9,8 @@ use magicblock_core::{intent::CommittedAccount, traits::MagicSys};
 use solana_instruction::error::InstructionError;
 use solana_pubkey::Pubkey;
 
-pub(crate) const COMMIT_LIMIT: u64 = 400;
-pub(crate) const COMMIT_LIMIT_ERR: u32 = 0xA000_0000;
+pub const COMMIT_LIMIT: u64 = 400;
+pub const COMMIT_LIMIT_ERR: u32 = 0xA000_0000;
 pub(crate) const MISSING_COMMIT_NONCE_ERR: u32 = 0xA000_0001;
 
 lazy_static! {

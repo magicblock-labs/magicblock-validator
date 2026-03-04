@@ -12,9 +12,10 @@ use magicblock_committor_service::{
     service_ext::{BaseIntentCommittorExt, CommittorServiceExt},
     BaseIntentCommittor, CommittorService, ComputeBudgetConfig,
 };
+use magicblock_core::intent::CommittedAccount;
 use magicblock_program::magic_scheduled_base_intent::{
-    CommitAndUndelegate, CommitType, MagicBaseIntent,
-    MagicIntentBundle, ScheduledIntentBundle, UndelegateType,
+    CommitAndUndelegate, CommitType, MagicBaseIntent, MagicIntentBundle,
+    ScheduledIntentBundle, UndelegateType,
 };
 use magicblock_rpc_client::MagicblockRpcClient;
 use program_flexi_counter::state::FlexiCounter;
@@ -28,7 +29,6 @@ use solana_sdk::{
 use test_kit::init_logger;
 use tokio::task::JoinSet;
 use tracing::*;
-use magicblock_core::intent::CommittedAccount;
 use utils::transactions::tx_logs_contain;
 
 use self::utils::transactions::init_and_delegate_order_book_on_chain;
