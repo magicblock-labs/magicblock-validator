@@ -281,7 +281,7 @@ where
                     }
                 }
             } else {
-                // Already tumed out
+                // Already timed out
                 // Handle timeout and continue execution
                 single_stage_executor
                     .execute_callbacks(Err(ActionError::TimeoutError));
