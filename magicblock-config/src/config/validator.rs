@@ -22,10 +22,12 @@ pub struct ValidatorConfig {
 /// Defines the validator's role in a replication setup.
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub enum ReplicationMode {
-    /// Primary validator: accepts and executes client transactions.
-    Primary,
-    /// Replica validator: replays transactions from the primary at the given URL.
-    Replica(Url),
+    // Validator which doesn't participate in replication
+    Standalone,
+    /// Validator which participates in replication: acting as either a primary or replicator
+    StandBy(Url),
+    /// Validator which participates in replication only as replicator (no takeover)
+    ReplicatOnly(Url),
 }
 
 impl Default for ValidatorConfig {
@@ -35,7 +37,7 @@ impl Default for ValidatorConfig {
         Self {
             basefee: consts::DEFAULT_BASE_FEE,
             keypair: SerdeKeypair(keypair),
-            replication_mode: ReplicationMode::Primary,
+            replication_mode: ReplicationMode::Standalone,
         }
     }
 }
