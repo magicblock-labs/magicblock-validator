@@ -146,7 +146,7 @@ where
             .unsubscribe(&delegation_record_pubkey)
             .await
         {
-            error!(pubkey = %delegation_record_pubkey, error = %err, "Failed to unsubscribe from delegation record");
+            warn!(pubkey = %delegation_record_pubkey, error = %err, "Failed to unsubscribe from delegation record");
         }
     }
 

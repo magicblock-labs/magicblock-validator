@@ -756,7 +756,7 @@ impl ChainPubsubActor {
             match pubsub_connection.account_subscribe(&pubkey, config).await {
                 Ok(res) => res,
                 Err(err) => {
-                    error!(
+                    warn!(
                         error = ?err,
                         "Failed to verify connection via subscribe"
                     );
