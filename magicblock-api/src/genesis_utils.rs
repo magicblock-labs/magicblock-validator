@@ -15,7 +15,7 @@ use solana_rent::Rent;
 use solana_signer::Signer;
 
 // Default amount received by the validator
-const VALIDATOR_LAMPORTS: u64 = 42;
+const VALIDATOR_LAMPORTS: u64 = u64::MAX / 2;
 
 pub struct GenesisConfigInfo {
     pub genesis_config: GenesisConfig,
