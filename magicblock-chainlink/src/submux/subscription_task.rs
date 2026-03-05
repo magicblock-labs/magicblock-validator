@@ -1,6 +1,6 @@
 use std::{
-    sync::{atomic::AtomicU16, Arc},
-    time::Duration,
+    sync::{atomic::AtomicU16, Arc, Mutex, OnceLock},
+    time::{Duration, Instant},
 };
 
 use futures_util::stream::{FuturesUnordered, StreamExt};
@@ -14,6 +14,8 @@ use tracing::*;
 const SUBSCRIBE_TIMEOUT: Duration = Duration::from_millis(2_000);
 /// Timeout for each unsubscription attempt
 const UNSUBSCRIBE_TIMEOUT: Duration = Duration::from_millis(1_000);
+/// Minimum interval between alerts for total subscription failures
+const ALERT_ON_TOTAL_SUB_FAILURE_INTERVAL: Duration = Duration::from_mins(5);
 
 use crate::remote_account_provider::{
     chain_pubsub_client::{ChainPubsubClient, ReconnectableClient},
@@ -196,11 +198,15 @@ impl AccountSubscriptionTask {
                     required_confirmations,
                     successes,
                 );
-                let _ = tx.send(Err(
+                let err = Err(
                     RemoteAccountProviderError::AccountSubscriptionsTaskFailed(
                         msg,
                     ),
-                ));
+                );
+
+                maybe_alert(&err);
+
+                let _ = tx.send(err);
             } else if !errors.is_empty() {
                 // If at least one client returned an `OK` response we only log a warning for the
                 // ones that failed.
@@ -235,6 +241,26 @@ impl AccountSubscriptionTask {
                 "Orchestration task panicked or dropped channel".to_string(),
             ))
         })
+    }
+}
+
+/// Logs an error alert for total subscription failures, throttled to
+/// at most once per [ALERT_ON_TOTAL_SUB_FAILURE_INTERVAL].
+/// The first occurrence is always logged immediately.
+fn maybe_alert(err: &RemoteAccountProviderResult<()>) {
+    static LAST_ALERT: OnceLock<Mutex<Option<Instant>>> = OnceLock::new();
+    let last_alert = LAST_ALERT.get_or_init(|| Mutex::new(None));
+    let mut last = last_alert.lock().expect("last_alert mutex poisoned");
+    let should_alert = match *last {
+        None => true,
+        Some(t) => t.elapsed() >= ALERT_ON_TOTAL_SUB_FAILURE_INTERVAL,
+    };
+    if should_alert {
+        *last = Some(Instant::now());
+        error!(
+            err = ?err,
+            "Critical: failed to establish subscription"
+        );
     }
 }
 
