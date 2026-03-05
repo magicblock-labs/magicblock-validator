@@ -689,7 +689,8 @@ impl MagicValidator {
         // Switch scheduler to Primary mode after ledger replay completes.
         // Primary validators accept client transactions; Replica validators stay
         // in Replica mode to receive transactions from the primary.
-        if let ReplicationMode::Primary = self.config.validator.replication_mode
+        if let ReplicationMode::Standalone =
+            self.config.validator.replication_mode
         {
             self.mode_switcher.notify_one();
         }
