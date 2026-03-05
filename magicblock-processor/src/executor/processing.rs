@@ -92,7 +92,9 @@ impl super::TransactionExecutor {
         };
         // Record to ledger for Execution mode (persist is None) or Replay with persist=true
         if persist.unwrap_or(true) {
-            self.record_transaction(transaction, processed, balances);
+            if let Err(err) = self.record_transaction(transaction, processed, balances) {
+                error!(error = ?err, "Failed to record transaction to ledger");
+            }
         }
 
         ExecutionTlsStash::clear();
@@ -205,7 +207,7 @@ impl super::TransactionExecutor {
         txn: IndexedTransaction,
         result: ProcessedTransaction,
         balances: AccountsBalances,
-    ) {
+    ) -> Result<(), Box<dyn std::error::Error>> {
         let meta = match result {
             ProcessedTransaction::Executed(executed) => TransactionStatusMeta {
                 fee: executed.loaded_transaction.fee_details.total_fee(),
@@ -235,7 +237,7 @@ impl super::TransactionExecutor {
             },
         };
 
-        self.write_to_ledger(txn, meta);
+        self.write_to_ledger(txn, meta)
     }
 
     /// Writes a failed transaction (load or commit error) to the Ledger.
@@ -253,14 +255,16 @@ impl super::TransactionExecutor {
             log_messages: logs,
             ..Default::default()
         };
-        self.write_to_ledger(txn, meta);
+        if let Err(err) = self.write_to_ledger(txn, meta) {
+            error!(error = ?err, "Failed to record failed transaction to ledger");
+        }
     }
 
     fn write_to_ledger(
         &self,
         txn: IndexedTransaction,
         meta: TransactionStatusMeta,
-    ) {
+    ) -> Result<(), Box<dyn std::error::Error>> {
         let signature = *txn.signature();
         let slot = txn.slot;
         let index = txn.index;
@@ -272,12 +276,14 @@ impl super::TransactionExecutor {
         } = txn.txn;
 
         // Use pre-encoded bytes or serialize on the spot
-        let encoded = encoded.unwrap_or_else(|| {
-            let versioned = transaction.to_versioned_transaction();
-            // SAFETY: we know this is a valid VersionedTransaction that can be serialized
-            bincode::serialize(&versioned)
-                .expect("VersionedTransaction serialization cannot fail")
-        });
+        let encoded = match encoded {
+            Some(bytes) => bytes,
+            None => {
+                let versioned = transaction.to_versioned_transaction();
+                bincode::serialize(&versioned)
+                    .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?
+            }
+        };
 
         let tx_account_locks = transaction.get_account_locks_unchecked();
 
@@ -292,7 +298,7 @@ impl super::TransactionExecutor {
         );
         if let Err(error) = result {
             error!(error = ?error, "Failed to commit transaction to ledger");
-            return;
+            return Err(error.into());
         }
 
         let status = TransactionStatus {
@@ -304,6 +310,7 @@ impl super::TransactionExecutor {
 
         // Notify listeners
         let _ = self.transaction_tx.send(status);
+        Ok(())
     }
 
     /// Persists account changes to AccountsDb and notifies listeners.
