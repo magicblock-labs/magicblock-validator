@@ -27,18 +27,18 @@ use crate::{
 
 pub struct Initialized {
     /// Commit stage strategy
-    pub commit_strategy: TransactionStrategy,
+    commit_strategy: TransactionStrategy,
     /// Finalize stage strategy
-    pub finalize_strategy: TransactionStrategy,
+    finalize_strategy: TransactionStrategy,
 
     current_attempt: u8,
 }
 
 pub struct Committed {
     /// Signature of commit stage
-    pub commit_signature: Signature,
+    commit_signature: Signature,
     /// Finalize stage strategy
-    pub finalize_strategy: TransactionStrategy,
+    finalize_strategy: TransactionStrategy,
 
     current_attempt: u8,
 }
@@ -53,7 +53,7 @@ pub struct Finalized {
 pub struct TwoStageExecutor<'a, T, F, A, S: Sealed> {
     // TODO(edwin): remove this and replace with IntentClient
     pub(in crate::intent_executor) inner: &'a mut IntentExecutorImpl<T, F, A>,
-    pub state: S,
+    state: S,
 }
 
 impl<'a, T, F, A> TwoStageExecutor<'a, T, F, A, Initialized>
@@ -413,6 +413,12 @@ where
             inner: self.inner,
             state: finalized,
         }
+    }
+}
+
+impl<'a, T, F, A> TwoStageExecutor<'a, T, F, A, Finalized> {
+    pub fn result(self) -> Finalized {
+        self.state
     }
 }
 

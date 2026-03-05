@@ -411,10 +411,11 @@ where
         );
 
         let finalize_signature = finalize_res?;
-        let finalized_stage = finalize_executor.done(finalize_signature);
+        let finalized_stage =
+            finalize_executor.done(finalize_signature).result();
         Ok(ExecutionOutput::TwoStage {
-            commit_signature: finalized_stage.state.commit_signature,
-            finalize_signature: finalized_stage.state.finalize_signature,
+            commit_signature: finalized_stage.commit_signature,
+            finalize_signature: finalized_stage.finalize_signature,
         })
     }
 
