@@ -58,6 +58,7 @@ impl BufferTask {
         match task_type {
             BufferTaskType::Commit(task) => {
                 let data = task.committed_account.account.data.clone();
+                let buffer_account_size = data.len() as u64;
                 let chunks =
                     Chunks::from_data_length(data.len(), MAX_WRITE_CHUNK_SIZE);
 
@@ -66,6 +67,7 @@ impl BufferTask {
                     pubkey: task.committed_account.pubkey,
                     committed_data: data,
                     chunks,
+                    buffer_account_size,
                 })
             }
 
@@ -75,6 +77,12 @@ impl BufferTask {
                     &task.committed_account.account.data,
                 )
                 .to_vec();
+                
+                // Fix for #878: Track buffer_account_size separately from diff
+                // buffer_account_size = committed account size (for realloc instructions)
+                // committed_data = diff (for write instructions)
+                // This ensures realloc instructions are generated when account growth > 10KB
+                let buffer_account_size = task.committed_account.account.data.len();
                 let chunks =
                     Chunks::from_data_length(diff.len(), MAX_WRITE_CHUNK_SIZE);
 
@@ -83,6 +91,7 @@ impl BufferTask {
                     pubkey: task.committed_account.pubkey,
                     committed_data: diff,
                     chunks,
+                    buffer_account_size: buffer_account_size as u64,
                 })
             }
         }
