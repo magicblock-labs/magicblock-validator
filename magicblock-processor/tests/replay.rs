@@ -52,12 +52,17 @@ fn setup_replay_scenario_replica(
         status: Ok(()),
         ..Default::default()
     };
+    let versioned = sanitized.to_versioned_transaction();
+    let encoded = bincode::serialize(&versioned).unwrap();
+    let locks = sanitized.get_account_locks_unchecked();
     env.ledger
         .write_transaction(
             sig,
             env.ledger.latest_block().load().slot,
             0, // index
-            &sanitized,
+            locks.writable,
+            locks.readonly,
+            &encoded,
             meta,
         )
         .expect("Failed to write transaction to ledger");
