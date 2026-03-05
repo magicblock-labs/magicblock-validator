@@ -119,7 +119,7 @@ impl From<&TransactionStrategyExecutionError> for ActionError {
         if let TransactionStrategyExecutionError::ActionsError(err, signature) =
             value
         {
-            Self::ActionsError(err.clone(), signature.clone())
+            Self::ActionsError(err.clone(), *signature)
         } else {
             Self::IntentFailedError(value.to_string())
         }

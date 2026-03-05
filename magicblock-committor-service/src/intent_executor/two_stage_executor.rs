@@ -179,7 +179,7 @@ where
             }
             TransactionStrategyExecutionError::ActionsError(err, signature) => {
                 // Intent bundles allow for actions to be in commit stage
-                let action_error = Err(ActionError::ActionsError(err.clone(), signature.clone()));
+                let action_error = Err(ActionError::ActionsError(err.clone(), *signature));
                 let to_cleanup = handle_actions_error(self.inner, &mut self.state.commit_strategy, action_error);
                 Ok(ControlFlow::Continue(to_cleanup))
             }
@@ -247,7 +247,7 @@ where
     ) {
         let result = result.map_err(|err| err.into());
         let junk_strategy = handle_actions_error(
-            &self.inner,
+            self.inner,
             &mut self.state.commit_strategy,
             result.clone(),
         );
@@ -255,7 +255,7 @@ where
 
         if result.is_err() {
             let junk_strategy = handle_actions_error(
-                &self.inner,
+                self.inner,
                 &mut self.state.finalize_strategy,
                 result,
             );
@@ -377,7 +377,7 @@ where
             TransactionStrategyExecutionError::ActionsError(err, signature) => {
                 // Here we patch strategy for it to be retried in next iteration
                 // & we also record data that has to be cleaned up after patch
-                let action_error = Err(ActionError::ActionsError(err.clone(), signature.clone()));
+                let action_error = Err(ActionError::ActionsError(err.clone(), *signature));
                 let to_cleanup = handle_actions_error(self.inner, &mut self.state.finalize_strategy, action_error);
                 Ok(ControlFlow::Continue(to_cleanup))
             }

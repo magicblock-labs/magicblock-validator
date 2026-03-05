@@ -213,7 +213,7 @@ impl MagicValidator {
         let committor_service = Self::init_committor_service(
             &config,
             &dispatch.transaction_scheduler,
-            &ledger.latest_block(),
+            ledger.latest_block(),
         )
         .await?;
         log_timing("startup", "committor_service_init", step_start);

@@ -1,6 +1,7 @@
 use std::cell::RefCell;
 
-use solana_account::{AccountSharedData, WritableAccount};
+use solana_account::{AccountSharedData, ReadableAccount, WritableAccount};
+use solana_instruction::error::InstructionError;
 use solana_pubkey::Pubkey;
 
 use super::DELEGATION_PROGRAM_ID;
@@ -10,6 +11,30 @@ pub(crate) fn set_account_owner(
     pubkey: Pubkey,
 ) {
     acc.borrow_mut().set_owner(pubkey);
+}
+
+/// Charges `amount` lamports from a delegated payer to a recipient.
+///
+/// Returns `InvalidAccountData` if the payer is not delegated,
+/// `InsufficientFunds` if it cannot cover the fee.
+pub(crate) fn charge_delegated_payer(
+    payer: &RefCell<AccountSharedData>,
+    recipient: &RefCell<AccountSharedData>,
+    amount: u64,
+) -> Result<(), InstructionError> {
+    if !payer.borrow().delegated() {
+        return Err(InstructionError::InvalidAccountData);
+    }
+    let payer_lamports = payer.borrow().lamports();
+    if payer_lamports < amount {
+        return Err(InstructionError::InsufficientFunds);
+    }
+    payer.borrow_mut().set_lamports(payer_lamports - amount);
+    let recipient_lamports = recipient.borrow().lamports();
+    recipient
+        .borrow_mut()
+        .set_lamports(recipient_lamports + amount);
+    Ok(())
 }
 
 /// Sets proper account values during undelegation

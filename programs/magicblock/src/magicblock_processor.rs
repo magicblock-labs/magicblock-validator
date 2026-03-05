@@ -10,8 +10,9 @@ use crate::{
     process_scheduled_commit_sent,
     schedule_task::{process_cancel_task, process_schedule_task},
     schedule_transactions::{
-        process_accept_scheduled_commits, process_schedule_commit,
-        process_schedule_intent_bundle, ProcessScheduleCommitOptions,
+        process_accept_scheduled_commits, process_add_action_callback,
+        process_schedule_commit, process_schedule_intent_bundle,
+        ProcessScheduleCommitOptions,
     },
     toggle_executable_check::process_toggle_executable_check,
 };
@@ -117,6 +118,9 @@ declare_process_instruction!(
                 invoke_context,
                 transaction_context,
             ),
+            AddActionCallback(args) => {
+                process_add_action_callback(signers, invoke_context, args)
+            }
             Noop(_) => Ok(()),
         }
     }

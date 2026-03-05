@@ -4,7 +4,8 @@ use serde::{Deserialize, Serialize};
 use solana_program::pubkey::Pubkey;
 
 use crate::args::{
-    MagicBaseIntentArgs, MagicIntentBundleArgs, ScheduleTaskArgs,
+    AddActionCallbackArgs, MagicBaseIntentArgs, MagicIntentBundleArgs,
+    ScheduleTaskArgs,
 };
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
@@ -178,6 +179,19 @@ pub enum MagicBlockInstruction {
     /// - **1.** `[WRITE]` Ephemeral account to close
     /// - **2.** `[WRITE]` Vault account (source of rent refund)
     CloseEphemeralAccount,
+
+    /// Attaches a callback to a previously scheduled action in the latest intent.
+    ///
+    /// Must be called via CPI from the program that originally scheduled the
+    /// action. The caller's program ID is checked against the action's
+    /// `source_program` field for authorization.
+    ///
+    /// If the payer account is delegated, a callback fee is deducted from it.
+    ///
+    /// # Account references
+    /// - **0.**   `[WRITE, SIGNER]` Payer
+    /// - **1.**   `[WRITE]`         Magic Context account
+    AddActionCallback(AddActionCallbackArgs),
 
     /// Schedules the accounts provided at end of accounts Vec to be committed and finalized in a
     /// single DLP instruction.

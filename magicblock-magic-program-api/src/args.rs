@@ -158,6 +158,19 @@ impl<'a> From<&AccountInfo<'a>> for ShortAccountMeta {
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
+pub struct AddActionCallbackArgs {
+    /// Flat index of the action to attach the callback to, ordered as:
+    /// commit actions, commit_and_undelegate commit actions,
+    /// commit_and_undelegate undelegate actions, standalone actions.
+    pub action_index: u8,
+    pub destination_program: Pubkey,
+    pub discriminator: Vec<u8>,
+    pub payload: Vec<u8>,
+    pub compute_units: u32,
+    pub accounts: Vec<ShortAccountMeta>,
+}
+
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
 pub struct ScheduleTaskArgs {
     pub task_id: i64,
     pub execution_interval_millis: i64,

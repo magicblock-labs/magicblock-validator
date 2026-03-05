@@ -406,6 +406,28 @@ impl MagicIntentBundle {
 
         x || y || z
     }
+
+    pub fn get_action_mut(&mut self, index: usize) -> Option<&mut BaseAction> {
+        let mut offset = 0usize;
+
+        if let Some(commit) = self.commit.as_mut() {
+            let count = commit.action_count();
+            if index < offset + count {
+                return commit.get_action_mut(index - offset);
+            }
+            offset += count;
+        }
+
+        if let Some(cau) = self.commit_and_undelegate.as_mut() {
+            let count = cau.action_count();
+            if index < offset + count {
+                return cau.get_action_mut(index - offset);
+            }
+            offset += count;
+        }
+
+        self.standalone_actions.get_mut(index.checked_sub(offset)?)
+    }
 }
 
 impl MagicBaseIntent {
@@ -553,6 +575,19 @@ impl CommitAndUndelegate {
         };
 
         x || y
+    }
+
+    pub fn action_count(&self) -> usize {
+        self.commit_action.action_count()
+            + self.undelegate_action.action_count()
+    }
+
+    pub fn get_action_mut(&mut self, index: usize) -> Option<&mut BaseAction> {
+        let commit_count = self.commit_action.action_count();
+        if index < commit_count {
+            return self.commit_action.get_action_mut(index);
+        }
+        self.undelegate_action.get_action_mut(index - commit_count)
     }
 }
 
@@ -876,6 +911,21 @@ impl CommitType {
             false
         }
     }
+
+    pub fn action_count(&self) -> usize {
+        match self {
+            Self::Standalone(_) => 0,
+            Self::WithBaseActions { base_actions, .. } => base_actions.len(),
+        }
+    }
+
+    pub fn get_action_mut(&mut self, index: usize) -> Option<&mut BaseAction> {
+        if let Self::WithBaseActions { base_actions, .. } = self {
+            base_actions.get_mut(index)
+        } else {
+            None
+        }
+    }
 }
 
 /// No CommitedAccounts since it is only used with CommitAction.
@@ -886,6 +936,21 @@ pub enum UndelegateType {
 }
 
 impl UndelegateType {
+    pub fn action_count(&self) -> usize {
+        match self {
+            Self::Standalone => 0,
+            Self::WithBaseActions(actions) => actions.len(),
+        }
+    }
+
+    pub fn get_action_mut(&mut self, index: usize) -> Option<&mut BaseAction> {
+        if let Self::WithBaseActions(actions) = self {
+            actions.get_mut(index)
+        } else {
+            None
+        }
+    }
+
     pub fn try_from_args(
         args: UndelegateTypeArgs,
         context: &ConstructionContext<'_, '_>,
