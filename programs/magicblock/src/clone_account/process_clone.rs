@@ -63,7 +63,7 @@ pub(crate) fn process_clone_account(
     let current_lamports = account.borrow().lamports();
     let lamports_delta = fields.lamports as i64 - current_lamports as i64;
 
-    set_account_from_fields(account, &data, &fields);
+    set_account_from_fields(invoke_context, account, &data, &fields);
 
     adjust_authority_lamports(auth_acc, lamports_delta)?;
     Ok(())

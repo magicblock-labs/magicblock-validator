@@ -106,7 +106,11 @@ impl ChainlinkCloner {
         Ok(sig)
     }
 
-    fn sign_tx(&self, ixs: &[Instruction], blockhash: Hash) -> Transaction {
+    fn create_signed_tx(
+        &self,
+        ixs: &[Instruction],
+        blockhash: Hash,
+    ) -> Transaction {
         let kp = validator_authority();
         Transaction::new_signed_with_payer(
             ixs,
@@ -247,7 +251,7 @@ impl ChainlinkCloner {
         // let ixs = self.maybe_add_crank_commits_ix(request, clone_ix);
         let ixs = vec![clone_ix];
 
-        self.sign_tx(&ixs, blockhash)
+        self.create_signed_tx(&ixs, blockhash)
     }
 
     /// Builds crank commits instruction for periodic account commits.
@@ -292,11 +296,14 @@ impl ChainlinkCloner {
         let first_chunk = data[..MAX_INLINE_DATA_SIZE.min(data.len())].to_vec();
         let init_ix = Self::clone_init_ix(
             request.pubkey,
+            // we assume the cloned accounts do not have data field
+            // not exceeding the max solana limit, which is always true
+            // since the source of cloning is always base chain
             data.len() as u32,
             first_chunk,
             fields,
         );
-        txs.push(self.sign_tx(&[init_ix], blockhash));
+        txs.push(self.create_signed_tx(&[init_ix], blockhash));
 
         // Continue txs for remaining chunks
         let mut offset = MAX_INLINE_DATA_SIZE;
@@ -311,7 +318,7 @@ impl ChainlinkCloner {
                 chunk,
                 is_last,
             );
-            txs.push(self.sign_tx(&[continue_ix], blockhash));
+            txs.push(self.create_signed_tx(&[continue_ix], blockhash));
             offset = end;
         }
 
@@ -320,7 +327,7 @@ impl ChainlinkCloner {
 
     async fn send_cleanup(&self, pubkey: Pubkey) {
         let blockhash = self.block.load().blockhash;
-        let tx = self.sign_tx(&[Self::cleanup_ix(pubkey)], blockhash);
+        let tx = self.create_signed_tx(&[Self::cleanup_ix(pubkey)], blockhash);
         if let Err(e) = self.send_tx(tx).await {
             error!(pubkey = %pubkey, error = ?e, "Failed to cleanup partial clone");
         }
@@ -371,7 +378,7 @@ impl ChainlinkCloner {
                 buffer_fields,
             )];
             ixs.extend(finalize_ixs);
-            vec![self.sign_tx(&ixs, blockhash)]
+            vec![self.create_signed_tx(&ixs, blockhash)]
         } else {
             // Large: multi-transaction flow
             self.build_large_program_txs(
@@ -386,6 +393,12 @@ impl ChainlinkCloner {
 
     /// V1 programs are converted to V3 (upgradeable loader) format.
     /// Supports programs of any size via multi-transaction cloning.
+    ///
+    /// NOTE: we don't support modifying this kind of program once it was
+    /// deployed into our validator once.
+    /// By nature of being immutable on chain this should never happen.
+    /// Thus we avoid having to run the upgrade instruction and get
+    /// away with just directly modifying the program and program data accounts.
     fn build_v1_program_txs(
         &self,
         program: LoadedProgram,
@@ -532,7 +545,7 @@ impl ChainlinkCloner {
             first_chunk.to_vec(),
             fields,
         );
-        let mut txs = vec![self.sign_tx(&[init_ix], blockhash)];
+        let mut txs = vec![self.create_signed_tx(&[init_ix], blockhash)];
 
         // Middle chunks (all except last)
         let last_offset = (num_chunks - 1) * MAX_INLINE_DATA_SIZE;
@@ -546,7 +559,7 @@ impl ChainlinkCloner {
                 chunk.to_vec(),
                 false,
             );
-            txs.push(self.sign_tx(&[continue_ix], blockhash));
+            txs.push(self.create_signed_tx(&[continue_ix], blockhash));
         }
 
         // Last chunk with finalize instructions
@@ -558,7 +571,7 @@ impl ChainlinkCloner {
             true,
         )];
         ixs.extend(finalize_ixs);
-        txs.push(self.sign_tx(&ixs, blockhash));
+        txs.push(self.create_signed_tx(&ixs, blockhash));
 
         txs
     }
@@ -624,10 +637,12 @@ impl Cloner for ChainlinkCloner {
         // Large account: multi-tx with cleanup on failure
         let txs = self.build_large_account_txs(&request, blockhash);
 
-        let mut last_sig = Signature::default();
+        let mut last_sig = None;
         for tx in txs {
             match self.send_tx(tx).await {
-                Ok(sig) => last_sig = sig,
+                Ok(sig) => {
+                    last_sig.replace(sig);
+                }
                 Err(e) => {
                     self.send_cleanup(request.pubkey).await;
                     return Err(ClonerError::FailedToCloneRegularAccount(
@@ -638,7 +653,7 @@ impl Cloner for ChainlinkCloner {
             }
         }
 
-        Ok(last_sig)
+        Ok(last_sig.unwrap_or_default())
     }
 
     async fn clone_program(
@@ -663,10 +678,12 @@ impl Cloner for ChainlinkCloner {
         // Both V1 and V4 use buffer_pubkey for multi-tx cloning
         let buffer_pubkey = derive_buffer_pubkey(&program_id).0;
 
-        let mut last_sig = Signature::default();
+        let mut last_sig = None;
         for tx in txs {
             match self.send_tx(tx).await {
-                Ok(sig) => last_sig = sig,
+                Ok(sig) => {
+                    last_sig.replace(sig);
+                }
                 Err(e) => {
                     self.send_cleanup(buffer_pubkey).await;
                     return Err(ClonerError::FailedToCloneProgram(
@@ -685,6 +702,6 @@ impl Cloner for ChainlinkCloner {
             let _ = block_updated.recv().await;
         }
 
-        Ok(last_sig)
+        Ok(last_sig.unwrap_or_default())
     }
 }

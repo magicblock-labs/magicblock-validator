@@ -32,6 +32,8 @@ mod process_clone_init;
 mod process_finalize_buffer;
 mod process_finalize_v1_buffer;
 mod process_set_authority;
+#[cfg(test)]
+mod tests;
 
 use std::collections::HashSet;
 
