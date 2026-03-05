@@ -14,8 +14,11 @@ pub struct MagicSysAdapter {
 }
 
 impl MagicSysAdapter {
+    /// Returned when receiving the nonce result from the async channel fails.
     const RECV_ERR: u32 = 0xE000_0000;
+    /// Returned when the async fetch of current commit nonces fails.
     const FETCH_ERR: u32 = 0xE001_0000;
+    /// Returned when no committor service is configured.
     const NO_COMMITTOR_ERR: u32 = 0xE002_0000;
 
     pub fn new(
