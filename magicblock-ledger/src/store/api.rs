@@ -842,9 +842,16 @@ impl Ledger {
                         )
                     }
                     (Some(transaction), None) => {
-                        TransactionWithStatusMeta::MissingMetadata(
-                            transaction.into_legacy_transaction().unwrap(),
-                        )
+                        let legacy_tx = transaction
+                            .into_legacy_transaction()
+                            .ok_or_else(|| {
+                                LedgerError::TransactionConversionError(
+                                    "failed to convert versioned transaction to legacy: \
+                                     transaction is v0 (requires metadata)"
+                                        .to_string(),
+                                )
+                            })?;
+                        TransactionWithStatusMeta::MissingMetadata(legacy_tx)
                     }
                     (None, Some(_)) | (None, None) => {
                         return Ok(None);
