@@ -290,6 +290,85 @@ impl InstructionUtils {
     }
 
     // -----------------
+    // CloneAccount
+    // -----------------
+    #[cfg(test)]
+    pub fn clone_account_instruction(
+        pubkey: Pubkey,
+        data: Vec<u8>,
+        fields: magicblock_magic_program_api::instruction::AccountCloneFields,
+    ) -> Instruction {
+        Instruction::new_with_bincode(
+            crate::id(),
+            &MagicBlockInstruction::CloneAccount {
+                pubkey,
+                data,
+                fields,
+            },
+            vec![
+                AccountMeta::new(validator_authority_id(), true),
+                AccountMeta::new(pubkey, false),
+            ],
+        )
+    }
+
+    #[cfg(test)]
+    pub fn clone_account_init_instruction(
+        pubkey: Pubkey,
+        total_data_len: u32,
+        initial_data: Vec<u8>,
+        fields: magicblock_magic_program_api::instruction::AccountCloneFields,
+    ) -> Instruction {
+        Instruction::new_with_bincode(
+            crate::id(),
+            &MagicBlockInstruction::CloneAccountInit {
+                pubkey,
+                total_data_len,
+                initial_data,
+                fields,
+            },
+            vec![
+                AccountMeta::new(validator_authority_id(), true),
+                AccountMeta::new(pubkey, false),
+            ],
+        )
+    }
+
+    #[cfg(test)]
+    pub fn clone_account_continue_instruction(
+        pubkey: Pubkey,
+        offset: u32,
+        data: Vec<u8>,
+        is_last: bool,
+    ) -> Instruction {
+        Instruction::new_with_bincode(
+            crate::id(),
+            &MagicBlockInstruction::CloneAccountContinue {
+                pubkey,
+                offset,
+                data,
+                is_last,
+            },
+            vec![
+                AccountMeta::new(validator_authority_id(), true),
+                AccountMeta::new(pubkey, false),
+            ],
+        )
+    }
+
+    #[cfg(test)]
+    pub fn cleanup_partial_clone_instruction(pubkey: Pubkey) -> Instruction {
+        Instruction::new_with_bincode(
+            crate::id(),
+            &MagicBlockInstruction::CleanupPartialClone { pubkey },
+            vec![
+                AccountMeta::new(validator_authority_id(), true),
+                AccountMeta::new(pubkey, false),
+            ],
+        )
+    }
+
+    // -----------------
     // Utils
     // -----------------
     pub(crate) fn into_transaction(

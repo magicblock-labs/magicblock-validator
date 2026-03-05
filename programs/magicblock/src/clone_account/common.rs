@@ -195,10 +195,22 @@ pub fn minimum_balance(
 
 /// Sets account fields from AccountCloneFields and data.
 pub fn set_account_from_fields(
+    invoke_context: &InvokeContext,
     account: &RefCell<AccountSharedData>,
     data: &[u8],
     fields: &AccountCloneFields,
 ) {
+    ic_msg!(
+        invoke_context,
+        "account state: lamports={}, owner={}, executable={}, delegated={}, confined={}, remote_slot={}, data_len={}",
+        fields.lamports,
+        fields.owner,
+        fields.executable,
+        fields.delegated,
+        fields.confined,
+        fields.remote_slot,
+        data.len()
+    );
     let mut acc = account.borrow_mut();
     acc.set_lamports(fields.lamports);
     acc.set_owner(fields.owner);

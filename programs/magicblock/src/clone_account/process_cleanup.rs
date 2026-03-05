@@ -40,8 +40,6 @@ pub(crate) fn process_cleanup_partial_clone(
         return Err(MagicBlockProgramError::NoPendingClone.into());
     }
 
-    remove_pending_clone(&pubkey);
-
     let ctx = transaction_context.get_current_instruction_context()?;
     let auth_acc = transaction_context.get_account_at_index(
         ctx.get_index_of_instruction_account_in_transaction(0)?,
@@ -68,5 +66,6 @@ pub(crate) fn process_cleanup_partial_clone(
     close_buffer_account(account);
 
     adjust_authority_lamports(auth_acc, lamports_delta)?;
+    remove_pending_clone(&pubkey);
     Ok(())
 }

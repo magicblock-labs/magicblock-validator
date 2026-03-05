@@ -96,7 +96,7 @@ pub(crate) fn process_clone_account_init(
     let mut data = vec![0u8; total_data_len as usize];
     data[..initial_data.len()].copy_from_slice(&initial_data);
 
-    set_account_from_fields(account, &data, &fields);
+    set_account_from_fields(invoke_context, account, &data, &fields);
 
     adjust_authority_lamports(auth_acc, lamports_delta)?;
     add_pending_clone(pubkey);
