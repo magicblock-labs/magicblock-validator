@@ -313,7 +313,7 @@ where
             }) if !committed_pubkeys.is_empty() => err,
             res => {
             single_stage_executor.execute_callbacks(res.as_ref().map(|_| ()));
-                let transaction_strategy = single_stage_executor.transaction_strategy;
+                let transaction_strategy = single_stage_executor.consume_strategy();
                 self.junk.push(transaction_strategy);
                 return res;
             }
@@ -322,7 +322,7 @@ where
         // With actions, we can't predict num of CPIs
         // If we get here we will try to switch from Single stage to Two Stage commit
         // Note that this not necessarily will pass at the end due to the same reason
-        let strategy = single_stage_executor.transaction_strategy;
+        let strategy = single_stage_executor.consume_strategy();
         let (commit_strategy, finalize_strategy, cleanup) =
             self.handle_cpi_limit_error(strategy);
         self.junk.push(cleanup);

@@ -28,7 +28,7 @@ pub struct SingleStageExecutor<'a, T, F, A> {
     current_attempt: u8,
     // TODO(edwin): remove this and replace with IntentClient
     pub(in crate::intent_executor) inner: &'a mut IntentExecutorImpl<T, F, A>,
-    pub transaction_strategy: TransactionStrategy,
+    transaction_strategy: TransactionStrategy,
 }
 
 impl<'a, T, F, A> SingleStageExecutor<'a, T, F, A>
@@ -140,6 +140,10 @@ where
         let junk_strategy =
             self.handle_actions_error(result.map_err(|err| err.into()));
         self.inner.junk.push(junk_strategy);
+    }
+
+    pub fn consume_strategy(self) -> TransactionStrategy {
+        self.transaction_strategy
     }
 
     /// Patch the current `transaction_strategy` in response to a recoverable
