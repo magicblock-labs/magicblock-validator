@@ -121,6 +121,8 @@ pub struct ChainLaserActor<H: StreamHandle, S: StreamFactory<H>> {
     /// RPC client for diagnostics (e.g., fetching slot when
     /// falling behind)
     rpc_client: ChainRpcClientImpl,
+    /// Duration for the time-based optimization interval
+    optimization_interval_duration: Duration,
 }
 
 impl ChainLaserActor<super::StreamHandleImpl, super::StreamFactoryImpl> {
@@ -226,6 +228,9 @@ impl<H: StreamHandle, S: StreamFactory<H>> ChainLaserActor<H, S> {
         );
         let shared_subscriptions = Arc::clone(stream_manager.subscriptions());
 
+        let optimization_interval_duration = Duration::from_secs(
+            grpc_config.max_time_without_optimization_secs.max(10),
+        );
         let me = Self {
             stream_manager,
             messages_receiver,
@@ -235,6 +240,7 @@ impl<H: StreamHandle, S: StreamFactory<H>> ChainLaserActor<H, S> {
             slots,
             client_id: client_id.to_string(),
             rpc_client,
+            optimization_interval_duration,
         };
 
         (
@@ -254,6 +260,14 @@ impl<H: StreamHandle, S: StreamFactory<H>> ChainLaserActor<H, S> {
 
     #[instrument(skip(self), fields(client_id = %self.client_id))]
     pub async fn run(mut self) {
+        let mut optimization_interval =
+            tokio::time::interval(self.optimization_interval_duration);
+        optimization_interval
+            .set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        // The first tick completes immediately; consume it so
+        // the timer starts counting from now.
+        optimization_interval.tick().await;
+
         loop {
             tokio::select! {
                 msg = self.messages_receiver.recv() => {
@@ -264,6 +278,9 @@ impl<H: StreamHandle, S: StreamFactory<H>> ChainLaserActor<H, S> {
                             }
                         }
                         None => break,
+                    }
+                    if self.stream_manager.take_optimized_flag() {
+                        optimization_interval.reset();
                     }
                 },
                 update = self.stream_manager.next_update(), if self.stream_manager.has_any_subscriptions() => {
@@ -284,6 +301,24 @@ impl<H: StreamHandle, S: StreamFactory<H>> ChainLaserActor<H, S> {
                             )
                             .await;
                         }
+                    }
+                },
+                _ = optimization_interval.tick() => {
+                    if self.stream_manager.has_unoptimized_streams() {
+                        if let Err(err) = self
+                            .stream_manager
+                            .optimize(&self.commitment)
+                            .await
+                        {
+                            warn!(
+                                client_id = %self.client_id,
+                                ?err,
+                                "Time-based optimization failed"
+                            );
+                        }
+                    }
+                    if self.stream_manager.take_optimized_flag() {
+                        optimization_interval.reset();
                     }
                 },
             }
@@ -366,7 +401,7 @@ impl<H: StreamHandle, S: StreamFactory<H>> ChainLaserActor<H, S> {
         let response = match result {
             Ok(()) => Ok(()),
             Err(e) => {
-                error!(
+                warn!(
                     pubkey = %pubkey,
                     error = ?e,
                     "Failed to subscribe to account"
@@ -461,7 +496,7 @@ impl<H: StreamHandle, S: StreamFactory<H>> ChainLaserActor<H, S> {
             self.spawn_fallen_behind_diagnostics(source);
         }
 
-        error!(
+        warn!(
             error = ?err,
             slots = ?self.slots,
             "Error in {} stream",
@@ -567,7 +602,7 @@ impl<H: StreamHandle, S: StreamFactory<H>> ChainLaserActor<H, S> {
         // coalesce signals
         let _ = abort_sender.try_send(()).inspect_err(|err| {
             if !matches!(err, mpsc::error::TrySendError::Full(_)) {
-                error!(
+                warn!(
                     error = ?err,
                     "Failed to signal connection issue"
                 );
@@ -687,7 +722,7 @@ impl<H: StreamHandle, S: StreamFactory<H>> ChainLaserActor<H, S> {
             .send(subscription_update)
             .await
             .unwrap_or_else(|_| {
-                error!(pubkey = %pubkey, "Failed to send subscription update");
+                warn!(pubkey = %pubkey, "Failed to send subscription update");
             });
     }
 }

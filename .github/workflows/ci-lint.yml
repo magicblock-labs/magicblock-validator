@@ -1,0 +1,38 @@
+name: Run CI - Lint
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+on:
+  push:
+    branches: [master, dev]
+  pull_request:
+    types: [opened, reopened, synchronize, ready_for_review]
+
+jobs:
+  run_make_ci_lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout this magicblock-validator
+        uses: actions/checkout@v2
+        with:
+          path: magicblock-validator
+
+      - uses: ./magicblock-validator/.github/actions/setup-build-env
+        with:
+          build_cache_key_name: "magicblock-validator-ci-lint-v002"
+          rust_toolchain_release: "1.91.1"
+          github_access_token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - run: make ci-lint
+        shell: bash
+        working-directory: magicblock-validator
+
+      - name: Run ci-lint in test-integration
+        run: |
+          cd test-integration
+          make ci-lint
+        shell: bash
+        working-directory: magicblock-validator

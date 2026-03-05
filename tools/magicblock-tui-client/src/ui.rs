@@ -2,12 +2,12 @@ use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, Paragraph, Tabs},
+    widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Tabs},
     Frame,
 };
 use tracing::Level;
 
-use crate::state::{Tab, TuiState, ViewMode};
+use crate::state::{Tab, TuiState, ViewMode, MAX_DETAIL_ACCOUNTS};
 
 const CYAN: Color = Color::Cyan;
 const GREEN: Color = Color::Green;
@@ -89,11 +89,13 @@ fn render_tick_bar(filled: usize, total: usize) -> Line<'static> {
 
 fn render_tabs(frame: &mut Frame, area: Rect, state: &TuiState) {
     let tx_count = state.transactions.len();
-    let titles = vec![
-        format!("Transactions ({})", tx_count),
-        "Logs".to_string(),
-        "Config".to_string(),
-    ];
+    let filtered_tx_count = state.filtered_transactions_len();
+    let tx_title = if state.tx_filter_query().is_empty() {
+        format!("Transactions ({})", tx_count)
+    } else {
+        format!("Transactions ({}/{})", filtered_tx_count, tx_count)
+    };
+    let titles = vec![tx_title, "Logs".to_string(), "Config".to_string()];
 
     let selected = match state.active_tab {
         Tab::Transactions => 0,
@@ -162,62 +164,97 @@ fn render_logs(frame: &mut Frame, area: Rect, state: &TuiState) {
 }
 
 fn render_transactions(frame: &mut Frame, area: Rect, state: &TuiState) {
-    let visible_count = area.height.saturating_sub(2) as usize;
+    let tx_chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(1), Constraint::Min(0)])
+        .split(area);
 
-    let items: Vec<ListItem> = state
-        .transactions
-        .iter()
-        .enumerate()
-        .skip(state.tx_scroll)
-        .take(visible_count)
-        .map(|(idx, tx)| {
-            let timestamp = tx.timestamp.format("%H:%M:%S%.3f");
-            let status_color =
-                if tx.success { Color::Green } else { Color::Red };
-            let status_char = if tx.success { "✓" } else { "✗" };
-            let is_selected = idx == state.selected_tx;
+    let filter_text = if state.tx_filter_query().is_empty() {
+        "<type to filter by signature or account pubkey>"
+    } else {
+        state.tx_filter_query()
+    };
+    let filter_color = if state.tx_filter_query().is_empty() {
+        DARK_GRAY
+    } else {
+        CYAN
+    };
+    let filter_line = Line::from(vec![
+        Span::styled("Filter: ", Style::default().fg(DARK_GRAY)),
+        Span::styled(filter_text, Style::default().fg(filter_color)),
+    ]);
+    frame.render_widget(Paragraph::new(filter_line), tx_chunks[0]);
 
-            let line = Line::from(vec![
-                Span::styled(
-                    if is_selected { "▶ " } else { "  " },
-                    Style::default().fg(CYAN),
-                ),
-                Span::styled(
-                    format!("{} ", timestamp),
-                    Style::default().fg(if is_selected {
-                        WHITE
-                    } else {
-                        DARK_GRAY
-                    }),
-                ),
-                Span::styled(status_char, Style::default().fg(status_color)),
-                Span::raw(" "),
-                Span::styled(
-                    format!("Slot {} ", tx.slot),
-                    Style::default().fg(if is_selected {
-                        WHITE
-                    } else {
-                        DARK_GRAY
-                    }),
-                ),
-                Span::styled(
-                    &tx.signature,
-                    Style::default().fg(if is_selected { CYAN } else { WHITE }),
-                ),
-            ]);
+    let visible_count = tx_chunks[1].height.saturating_sub(1) as usize;
+    let filtered_transactions = state.filtered_transactions();
 
-            let style = if is_selected {
-                Style::default().bg(Color::Rgb(30, 30, 40))
-            } else {
-                Style::default()
-            };
+    let items: Vec<ListItem> = if filtered_transactions.is_empty() {
+        vec![ListItem::new(Line::from(Span::styled(
+            "No transactions match the current filter",
+            Style::default().fg(DARK_GRAY),
+        )))]
+    } else {
+        filtered_transactions
+            .iter()
+            .enumerate()
+            .skip(state.tx_scroll)
+            .take(visible_count)
+            .map(|(idx, tx)| {
+                let timestamp = tx.timestamp.format("%H:%M:%S%.3f");
+                let status_color =
+                    if tx.success { Color::Green } else { Color::Red };
+                let status_char = if tx.success { "✓" } else { "✗" };
+                let is_selected = idx == state.selected_tx;
 
-            ListItem::new(line).style(style)
-        })
-        .collect();
+                let line = Line::from(vec![
+                    Span::styled(
+                        if is_selected { "▶ " } else { "  " },
+                        Style::default().fg(CYAN),
+                    ),
+                    Span::styled(
+                        format!("{} ", timestamp),
+                        Style::default().fg(if is_selected {
+                            WHITE
+                        } else {
+                            DARK_GRAY
+                        }),
+                    ),
+                    Span::styled(
+                        status_char,
+                        Style::default().fg(status_color),
+                    ),
+                    Span::raw(" "),
+                    Span::styled(
+                        format!("Slot {} ", tx.slot),
+                        Style::default().fg(if is_selected {
+                            WHITE
+                        } else {
+                            DARK_GRAY
+                        }),
+                    ),
+                    Span::styled(
+                        &tx.signature,
+                        Style::default().fg(if is_selected {
+                            CYAN
+                        } else {
+                            WHITE
+                        }),
+                    ),
+                ]);
+
+                let style = if is_selected {
+                    Style::default().bg(Color::Rgb(30, 30, 40))
+                } else {
+                    Style::default()
+                };
+
+                ListItem::new(line).style(style)
+            })
+            .collect()
+    };
 
     let list = List::new(items).block(Block::default().borders(Borders::NONE));
-    frame.render_widget(list, area);
+    frame.render_widget(list, tx_chunks[1]);
 }
 
 fn render_config(frame: &mut Frame, area: Rect, state: &TuiState) {
@@ -303,6 +340,12 @@ fn render_footer(frame: &mut Frame, area: Rect, state: &TuiState) {
             Span::styled(" tabs │ ", Style::default().fg(DARK_GRAY)),
             Span::styled("(↑↓)", Style::default().fg(WHITE)),
             Span::styled(" select │ ", Style::default().fg(DARK_GRAY)),
+            Span::styled("(Type)", Style::default().fg(WHITE)),
+            Span::styled(" filter │ ", Style::default().fg(DARK_GRAY)),
+            Span::styled("(Backspace)", Style::default().fg(WHITE)),
+            Span::styled(" erase │ ", Style::default().fg(DARK_GRAY)),
+            Span::styled("(Ctrl+U)", Style::default().fg(WHITE)),
+            Span::styled(" clear │ ", Style::default().fg(DARK_GRAY)),
             Span::styled("(Enter)", Style::default().fg(WHITE)),
             Span::styled(" details", Style::default().fg(DARK_GRAY)),
         ])
@@ -347,9 +390,9 @@ fn render_tx_detail_popup(frame: &mut Frame, state: &TuiState) {
     let popup_y = area.height.saturating_sub(popup_height) / 2;
     let popup_area = Rect::new(popup_x, popup_y, popup_width, popup_height);
 
-    let clear =
-        Block::default().style(Style::default().bg(Color::Rgb(20, 20, 30)));
-    frame.render_widget(clear, popup_area);
+    // Hard-clear the popup rectangle to avoid stale characters from the
+    // underlying panes when detail lines are shorter than the available width.
+    frame.render_widget(Clear, popup_area);
 
     let status_color = if detail.success {
         Color::Green
@@ -357,39 +400,49 @@ fn render_tx_detail_popup(frame: &mut Frame, state: &TuiState) {
         Color::Red
     };
     let status_text = if detail.success { "Success" } else { "Failed" };
+    let inner_width = popup_width.saturating_sub(2) as usize;
+    let label_style = Style::default().fg(DARK_GRAY);
 
     let mut lines = vec![
-        Line::from(vec![
-            Span::styled("Signature: ", Style::default().fg(DARK_GRAY)),
-            Span::styled(&detail.signature, Style::default().fg(CYAN)),
-        ]),
+        detail_field_line(
+            "Signature: ",
+            &detail.signature,
+            Style::default().fg(CYAN),
+            inner_width,
+        ),
         Line::from(""),
-        Line::from(vec![
-            Span::styled("Slot:      ", Style::default().fg(DARK_GRAY)),
-            Span::styled(detail.slot.to_string(), Style::default().fg(WHITE)),
-        ]),
-        Line::from(vec![
-            Span::styled("Status:    ", Style::default().fg(DARK_GRAY)),
-            Span::styled(status_text, Style::default().fg(status_color)),
-        ]),
-        Line::from(vec![
-            Span::styled("Fee:       ", Style::default().fg(DARK_GRAY)),
-            Span::styled(
-                format!("{} lamports", detail.fee),
-                Style::default().fg(WHITE),
-            ),
-        ]),
+        detail_field_line(
+            "Slot:      ",
+            &detail.slot.to_string(),
+            Style::default().fg(WHITE),
+            inner_width,
+        ),
+        detail_field_line(
+            "Status:    ",
+            status_text,
+            Style::default().fg(status_color),
+            inner_width,
+        ),
+        detail_field_line(
+            "Fee:       ",
+            &format!("{} lamports", detail.fee),
+            Style::default().fg(WHITE),
+            inner_width,
+        ),
     ];
 
     if let Some(cu) = detail.compute_units {
-        lines.push(Line::from(vec![
-            Span::styled("Compute:   ", Style::default().fg(DARK_GRAY)),
-            Span::styled(format!("{} units", cu), Style::default().fg(WHITE)),
-        ]));
+        lines.push(detail_field_line(
+            "Compute:   ",
+            &format!("{} units", cu),
+            Style::default().fg(WHITE),
+            inner_width,
+        ));
     }
 
     lines.push(Line::from(""));
-    let explorer_style = if detail.explorer_selected {
+    let explorer_selected = detail.selected_account.is_none();
+    let explorer_style = if explorer_selected {
         Style::default()
             .fg(CYAN)
             .add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
@@ -398,25 +451,29 @@ fn render_tx_detail_popup(frame: &mut Frame, state: &TuiState) {
             .fg(Color::Blue)
             .add_modifier(Modifier::UNDERLINED)
     };
+    let explorer_prefix =
+        if explorer_selected { "▶ " } else { "  " }.to_string();
+    let explorer_label = "Explorer:  ".to_string();
+    let explorer_value = truncate_with_ellipsis(
+        &detail.explorer_url,
+        inner_width
+            .saturating_sub(explorer_prefix.chars().count())
+            .saturating_sub(explorer_label.chars().count()),
+    );
     lines.push(Line::from(vec![
-        Span::styled(
-            if detail.explorer_selected {
-                "▶ "
-            } else {
-                "  "
-            },
-            Style::default().fg(CYAN),
-        ),
-        Span::styled("Explorer:  ", Style::default().fg(DARK_GRAY)),
-        Span::styled(&detail.explorer_url, explorer_style),
+        Span::styled(explorer_prefix, Style::default().fg(CYAN)),
+        Span::styled(explorer_label, label_style),
+        Span::styled(explorer_value, explorer_style),
     ]));
 
     if let Some(err) = &detail.error {
         lines.push(Line::from(""));
-        lines.push(Line::from(vec![
-            Span::styled("Error:     ", Style::default().fg(DARK_GRAY)),
-            Span::styled(err, Style::default().fg(Color::Red)),
-        ]));
+        lines.push(detail_field_line(
+            "Error:     ",
+            err,
+            Style::default().fg(Color::Red),
+            inner_width,
+        ));
     }
 
     if !detail.accounts.is_empty() {
@@ -425,18 +482,44 @@ fn render_tx_detail_popup(frame: &mut Frame, state: &TuiState) {
             "Accounts:",
             Style::default().fg(DARK_GRAY).add_modifier(Modifier::BOLD),
         )));
-        for (i, acc) in detail.accounts.iter().take(10).enumerate() {
+        for (i, acc) in
+            detail.accounts.iter().take(MAX_DETAIL_ACCOUNTS).enumerate()
+        {
+            let is_selected = detail.selected_account == Some(i);
+            let prefix = if is_selected {
+                format!("▶ [{}] ", i)
+            } else {
+                format!("  [{}] ", i)
+            };
+            let truncated = truncate_with_ellipsis(
+                acc,
+                inner_width.saturating_sub(prefix.chars().count()),
+            );
             lines.push(Line::from(vec![
                 Span::styled(
-                    format!("  [{:2}] ", i),
-                    Style::default().fg(DARK_GRAY),
+                    prefix,
+                    if is_selected {
+                        Style::default().fg(CYAN)
+                    } else {
+                        label_style
+                    },
                 ),
-                Span::styled(acc, Style::default().fg(WHITE)),
+                Span::styled(
+                    truncated,
+                    if is_selected {
+                        Style::default().fg(CYAN).add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::default().fg(WHITE)
+                    },
+                ),
             ]));
         }
-        if detail.accounts.len() > 10 {
+        if detail.accounts.len() > MAX_DETAIL_ACCOUNTS {
             lines.push(Line::from(Span::styled(
-                format!("  ... and {} more", detail.accounts.len() - 10),
+                format!(
+                    "  ... and {} more",
+                    detail.accounts.len() - MAX_DETAIL_ACCOUNTS
+                ),
                 Style::default().fg(DARK_GRAY),
             )));
         }
@@ -450,21 +533,8 @@ fn render_tx_detail_popup(frame: &mut Frame, state: &TuiState) {
         )));
         let max_logs = (popup_height as usize).saturating_sub(lines.len() + 4);
         for log in detail.logs.iter().take(max_logs) {
-            let max_chars = (popup_width as usize).saturating_sub(4);
-            let truncated = if log.chars().count() > max_chars {
-                if max_chars > 3 {
-                    let truncate_at = log
-                        .char_indices()
-                        .nth(max_chars - 3)
-                        .map(|(i, _)| i)
-                        .unwrap_or(log.len());
-                    format!("{}...", &log[..truncate_at])
-                } else {
-                    "...".to_string()
-                }
-            } else {
-                log.clone()
-            };
+            let truncated =
+                truncate_with_ellipsis(log, inner_width.saturating_sub(2));
             lines.push(Line::from(Span::styled(
                 format!("  {}", truncated),
                 Style::default().fg(Color::Rgb(150, 150, 150)),
@@ -490,4 +560,77 @@ fn render_tx_detail_popup(frame: &mut Frame, state: &TuiState) {
 
     let paragraph = Paragraph::new(lines).block(block);
     frame.render_widget(paragraph, popup_area);
+}
+
+fn detail_field_line(
+    label: &str,
+    value: &str,
+    value_style: Style,
+    inner_width: usize,
+) -> Line<'static> {
+    let label_owned = label.to_string();
+    let value_owned = truncate_with_ellipsis(
+        value,
+        inner_width.saturating_sub(label_owned.chars().count()),
+    );
+    Line::from(vec![
+        Span::styled(label_owned, Style::default().fg(DARK_GRAY)),
+        Span::styled(value_owned, value_style),
+    ])
+}
+
+fn truncate_with_ellipsis(value: &str, max_chars: usize) -> String {
+    if max_chars == 0 {
+        return String::new();
+    }
+
+    let sanitized: String = value
+        .chars()
+        .map(|ch| match ch {
+            '\r' | '\n' | '\t' => ' ',
+            _ => ch,
+        })
+        .collect();
+
+    if sanitized.chars().count() <= max_chars {
+        return sanitized;
+    }
+
+    if max_chars <= 3 {
+        return ".".repeat(max_chars);
+    }
+
+    let truncate_at = sanitized
+        .char_indices()
+        .nth(max_chars - 3)
+        .map(|(idx, _)| idx)
+        .unwrap_or(sanitized.len());
+    format!("{}...", &sanitized[..truncate_at])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::truncate_with_ellipsis;
+
+    #[test]
+    fn truncate_with_ellipsis_replaces_newlines() {
+        assert_eq!(
+            truncate_with_ellipsis("line1\nline2", 20),
+            "line1 line2".to_string()
+        );
+    }
+
+    #[test]
+    fn truncate_with_ellipsis_shortens_overflow() {
+        assert_eq!(
+            truncate_with_ellipsis("abcdefghijklmnopqrstuvwxyz", 10),
+            "abcdefg...".to_string()
+        );
+    }
+
+    #[test]
+    fn truncate_with_ellipsis_handles_tiny_widths() {
+        assert_eq!(truncate_with_ellipsis("abcdef", 3), "...".to_string());
+        assert_eq!(truncate_with_ellipsis("abcdef", 2), "..".to_string());
+    }
 }

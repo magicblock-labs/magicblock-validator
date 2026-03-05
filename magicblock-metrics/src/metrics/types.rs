@@ -1,5 +1,7 @@
 use std::fmt;
 
+use solana_signature::Signature;
+
 // -----------------
 // Outcome
 // -----------------
@@ -73,7 +75,7 @@ pub enum AccountCommit<'a> {
 pub enum AccountFetchOrigin {
     GetMultipleAccounts,
     GetAccount,
-    SendTransaction,
+    SendTransaction(Signature),
     ProjectAta,
 }
 
@@ -83,8 +85,15 @@ impl AccountFetchOrigin {
         match self {
             GetMultipleAccounts => "get_multiple_accounts",
             GetAccount => "get_account",
-            SendTransaction => "send_transaction",
+            SendTransaction(_) => "send_transaction",
             ProjectAta => "project_ata",
+        }
+    }
+
+    pub fn signature(&self) -> Option<&Signature> {
+        match self {
+            Self::SendTransaction(sig) => Some(sig),
+            _ => None,
         }
     }
 }

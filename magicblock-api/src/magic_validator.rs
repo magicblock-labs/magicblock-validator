@@ -15,7 +15,7 @@ use magicblock_accounts::{
     scheduled_commits_processor::ScheduledCommitsProcessorImpl,
     ScheduledCommitsProcessor,
 };
-use magicblock_accounts_db::AccountsDb;
+use magicblock_accounts_db::{traits::AccountsBank, AccountsDb};
 use magicblock_aperture::{
     initialize_aperture,
     state::{NodeContext, SharedState},
@@ -169,6 +169,9 @@ impl MagicValidator {
             AccountsDb::new(&config.accountsdb, &config.storage, last_slot)?;
         log_timing("startup", "accountsdb_init", step_start);
         for (pubkey, account) in genesis_config.accounts {
+            if accountsdb.get_account(&pubkey).is_some() {
+                continue;
+            }
             let _ = accountsdb.insert_account(&pubkey, &account.into());
         }
 
@@ -436,7 +439,7 @@ impl MagicValidator {
         let accounts_bank = accountsdb.clone();
         let mut chainlink_config =
             ChainlinkConfig::default_with_lifecycle_mode(
-                config.lifecycle.clone(),
+                LifecycleMode::Ephemeral,
             )
             .with_remove_confined_accounts(
                 config.chainlink.remove_confined_accounts,
