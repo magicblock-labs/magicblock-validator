@@ -235,12 +235,7 @@ pub(crate) fn process_schedule_commit(
 
     // NOTE:
     // We validate commit nonces only for plain commits
-    // If accounts are undelegated we don't validate
-    // It may result in failed undelegation due to insufficient balance
-    // But it is better than prohibiting undelegation overall
-    // In case account is borked user shall reach out us
-    // 1. Account is topped up by user
-    // 2. Manual undelegation is triggered by us
+    // If accounts are undelegated we don't want to fail
     if !opts.request_undelegation {
         check_commit_limits(&committed_accounts, invoke_context)?;
     }

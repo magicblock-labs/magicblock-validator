@@ -55,6 +55,9 @@ impl MagicSys for MagicSysAdapter {
         &self,
         commits: &[CommittedAccount],
     ) -> Result<HashMap<Pubkey, u64>, InstructionError> {
+        if commits.is_empty() {
+            return Ok(HashMap::new());
+        }
         let committor_service =
             if let Some(committor_service) = &self.committor_service {
                 Ok(committor_service)
