@@ -92,7 +92,9 @@ impl super::TransactionExecutor {
         };
         // Record to ledger for Execution mode (persist is None) or Replay with persist=true
         if persist.unwrap_or(true) {
-            if let Err(err) = self.record_transaction(transaction, processed, balances) {
+            if let Err(err) =
+                self.record_transaction(transaction, processed, balances)
+            {
                 error!(error = ?err, "Failed to record transaction to ledger");
             }
         }
