@@ -4,10 +4,12 @@
 //! - Lock semantics (write/write, write/read, read/write contention)
 //! - FIFO ordering within blocked queues
 //! - Executor pool management
+//! - Coordination modes (Primary/Replica)
 //! - Edge cases (empty transactions, duplicate accounts)
 
 use magicblock_core::link::transactions::{
-    ProcessableTransaction, SanitizeableTransaction, TransactionProcessingMode,
+    ProcessableTransaction, ReplayPosition, SanitizeableTransaction,
+    TransactionProcessingMode,
 };
 use solana_keypair::Keypair;
 use solana_program::{
@@ -20,12 +22,11 @@ use solana_transaction::Transaction;
 
 use super::coordinator::{ExecutionCoordinator, TransactionWithId};
 
-/// Creates a mock transaction with the specified accounts.
-///
-/// # Arguments
-///
-/// * `accounts` - Slice of `(Pubkey, is_writable)` tuples
-fn mock_txn(accounts: &[(Pubkey, bool)]) -> TransactionWithId {
+/// Creates a mock transaction with the specified accounts and processing mode.
+fn mock_txn_with_mode(
+    accounts: &[(Pubkey, bool)],
+    mode: TransactionProcessingMode,
+) -> TransactionWithId {
     let payer = Keypair::new();
     let instructions: Vec<Instruction> = accounts
         .iter()
@@ -48,9 +49,22 @@ fn mock_txn(accounts: &[(Pubkey, bool)]) -> TransactionWithId {
 
     TransactionWithId::new(ProcessableTransaction {
         transaction: transaction.sanitize(false).unwrap(),
-        mode: TransactionProcessingMode::Execution(None),
+        mode,
         encoded: None,
     })
+}
+
+/// Creates a mock execution transaction with the specified accounts.
+fn mock_txn(accounts: &[(Pubkey, bool)]) -> TransactionWithId {
+    mock_txn_with_mode(accounts, TransactionProcessingMode::Execution(None))
+}
+
+/// Creates a mock replay transaction with the specified accounts.
+fn mock_replay_txn(
+    accounts: &[(Pubkey, bool)],
+    position: ReplayPosition,
+) -> TransactionWithId {
+    mock_txn_with_mode(accounts, TransactionProcessingMode::Replay(position))
 }
 
 // =============================================================================
@@ -143,6 +157,8 @@ fn partial_locks_released_on_failure() {
 #[test]
 fn blocked_transactions_dequeued_in_fifo_order() {
     let mut c = ExecutionCoordinator::new(4);
+    // Switch to primary mode for tests that need multiple blocked transactions
+    c.switch_to_primary_mode();
     let acc = Pubkey::new_unique();
 
     let e0 = c.get_ready_executor().unwrap();
@@ -272,4 +288,69 @@ fn transaction_with_duplicate_accounts() {
     assert!(c
         .try_schedule(e, mock_txn(&[(acc, true), (acc, true)]))
         .is_ok());
+}
+
+// =============================================================================
+// Coordination Modes
+// =============================================================================
+
+#[test]
+fn replica_mode_blocks_new_transactions_when_pending() {
+    let mut c = ExecutionCoordinator::new(2);
+    let acc = Pubkey::new_unique();
+    let position = ReplayPosition {
+        slot: 0,
+        index: 0,
+        persist: false,
+    };
+
+    // First transaction holds the lock on acc
+    let e0 = c.get_ready_executor().unwrap();
+    assert!(c
+        .try_schedule(e0, mock_replay_txn(&[(acc, true)], position))
+        .is_ok());
+
+    // Second transaction is BLOCKED because it conflicts with e0's lock
+    // This sets pending in Replica mode
+    let e1 = c.get_ready_executor().unwrap();
+    assert!(c
+        .try_schedule(e1, mock_replay_txn(&[(acc, true)], position))
+        .is_err());
+
+    // is_ready should return false because pending is set
+    assert!(!c.is_ready());
+}
+
+#[test]
+fn replica_mode_unblocks_when_pending_completes() {
+    let mut c = ExecutionCoordinator::new(2);
+    let acc = Pubkey::new_unique();
+    let position = ReplayPosition {
+        slot: 0,
+        index: 0,
+        persist: false,
+    };
+
+    // First transaction holds the lock
+    let e0 = c.get_ready_executor().unwrap();
+    assert!(c
+        .try_schedule(e0, mock_replay_txn(&[(acc, true)], position))
+        .is_ok());
+
+    // Second transaction is blocked and sets pending
+    let e1 = c.get_ready_executor().unwrap();
+    assert!(c
+        .try_schedule(e1, mock_replay_txn(&[(acc, true)], position))
+        .is_err());
+    assert!(!c.is_ready()); // pending is set
+
+    // Complete e0's transaction (unlock accounts)
+    c.unlock_accounts(e0);
+
+    // Get the blocked transaction from the queue
+    let blocked = c.next_blocked_transaction(e0);
+    assert!(blocked.is_some());
+
+    // Now is_ready should be true again (pending cleared)
+    assert!(c.is_ready());
 }

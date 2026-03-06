@@ -3,8 +3,9 @@ use magicblock_core::{
     link::{
         accounts::{AccountWithSlot, LockedAccount},
         transactions::{
+            ProcessableTransaction, TransactionProcessingMode,
             TransactionSimulationResult, TransactionStatus,
-            TxnExecutionResultTx, TxnSimulationResultTx,
+            TxnSimulationResultTx,
         },
     },
     tls::ExecutionTlsStash,
@@ -28,48 +29,74 @@ use solana_transaction_status::{
 };
 use tracing::*;
 
+use crate::executor::IndexedTransaction;
+
 impl super::TransactionExecutor {
     /// Executes a transaction and conditionally commits its results.
+    ///
+    /// # Arguments
+    /// * `transaction` - The transaction to execute
+    /// * `tx` - Channel to send the execution result (None for replay)
+    /// * `persist` - Controls persistence behavior:
+    ///   - `None`: Execution mode - notify subscribers, record to ledger, process tasks
+    ///   - `Some(true)`: Replay with persist - record to ledger, no notifications
+    ///   - `Some(false)`: Replay without persist - no side effects
     pub(super) fn execute(
         &self,
-        transaction: [SanitizedTransaction; 1],
-        tx: TxnExecutionResultTx,
-        is_replay: bool,
+        mut transaction: IndexedTransaction,
+        persist: Option<bool>,
     ) {
         TRANSACTION_COUNT.inc();
-        let (result, balances) = self.process(&transaction);
-        let [txn] = transaction;
+        let (result, balances) = {
+            let txn = [transaction.txn.transaction];
+            let result = self.process(&txn);
+            let [txn] = txn;
+            transaction.txn.transaction = txn;
+            result
+        };
 
         // 1. Handle Loading/Processing Failures
         let processed = match result {
             Ok(processed) => processed,
             Err(err) => {
-                return self.handle_failure(txn, err, None, tx);
+                return self.handle_failure(transaction, err, None);
             }
         };
 
         // 2. Commit Account State (DB Update)
         // Note: Failed transactions still pay fees, so we attempt commit even on execution failure.
-        let fee_payer = *txn.fee_payer();
-        if let Err(err) = self.commit_accounts(fee_payer, &processed, is_replay)
-        {
+        let fee_payer = *transaction.fee_payer();
+        // Only send account updates for Execution mode (persist is None)
+        let notify = persist.is_none();
+        if let Err(err) = self.commit_accounts(fee_payer, &processed, notify) {
             return self.handle_failure(
-                txn,
+                transaction,
                 TransactionError::CommitCancelled,
                 Some(vec![err.to_string()]),
-                tx,
             );
         }
 
         let status = processed.status();
 
         // 3. Post-Processing (Tasks & Ledger)
-        if status.is_ok() && !is_replay {
+        // Only process scheduled tasks for successful transactions in Execution mode
+        if status.is_ok() && persist.is_none() {
             self.process_scheduled_tasks();
         }
-
-        if !is_replay {
-            self.record_transaction(txn, processed, balances);
+        let tx = if let TransactionProcessingMode::Execution(ref mut tx) =
+            transaction.txn.mode
+        {
+            tx.take()
+        } else {
+            None
+        };
+        // Record to ledger for Execution mode (persist is None) or Replay with persist=true
+        if persist.unwrap_or(true) {
+            if let Err(err) =
+                self.record_transaction(transaction, processed, balances)
+            {
+                error!(error = ?err, "Failed to record transaction to ledger");
+            }
         }
 
         ExecutionTlsStash::clear();
@@ -151,20 +178,21 @@ impl super::TransactionExecutor {
     /// Common handler for transaction failures (load error or commit error).
     fn handle_failure(
         &self,
-        txn: SanitizedTransaction,
+        mut txn: IndexedTransaction,
         err: TransactionError,
         logs: Option<Vec<String>>,
-        tx: TxnExecutionResultTx,
     ) {
         FAILED_TRANSACTIONS_COUNT.inc();
-        self.record_failure(txn, Err(err.clone()), logs);
 
         // Even on failure, ensure stash is clear (though likely empty if load failed).
         ExecutionTlsStash::clear();
 
-        if let Some(tx) = tx {
-            let _ = tx.send(Err(err));
+        if let TransactionProcessingMode::Execution(ref mut tx) = txn.txn.mode {
+            if let Some(tx) = tx.take() {
+                let _ = tx.send(Err(err.clone()));
+            }
         }
+        self.record_failure(txn, Err(err), logs);
     }
 
     fn process_scheduled_tasks(&self) {
@@ -178,10 +206,10 @@ impl super::TransactionExecutor {
     /// Writes a fully processed transaction to the Ledger.
     fn record_transaction(
         &self,
-        txn: SanitizedTransaction,
+        txn: IndexedTransaction,
         result: ProcessedTransaction,
         balances: AccountsBalances,
-    ) {
+    ) -> Result<(), Box<dyn std::error::Error>> {
         let meta = match result {
             ProcessedTransaction::Executed(executed) => TransactionStatusMeta {
                 fee: executed.loaded_transaction.fee_details.total_fee(),
@@ -211,13 +239,13 @@ impl super::TransactionExecutor {
             },
         };
 
-        self.write_to_ledger(txn, meta);
+        self.write_to_ledger(txn, meta)
     }
 
     /// Writes a failed transaction (load or commit error) to the Ledger.
     fn record_failure(
         &self,
-        txn: SanitizedTransaction,
+        txn: IndexedTransaction,
         status: TransactionResult<()>,
         logs: Option<Vec<String>>,
     ) {
@@ -229,38 +257,62 @@ impl super::TransactionExecutor {
             log_messages: logs,
             ..Default::default()
         };
-        self.write_to_ledger(txn, meta);
+        if let Err(err) = self.write_to_ledger(txn, meta) {
+            error!(error = ?err, "Failed to record failed transaction to ledger");
+        }
     }
 
     fn write_to_ledger(
         &self,
-        txn: SanitizedTransaction,
+        txn: IndexedTransaction,
         meta: TransactionStatusMeta,
-    ) {
+    ) -> Result<(), Box<dyn std::error::Error>> {
         let signature = *txn.signature();
-        let index = match self.ledger.write_transaction(
-            signature,
-            self.processor.slot,
-            &txn,
-            // TODO(bmuddha): perf: remove clone with the new ledger
-            meta.clone(),
-        ) {
-            Ok(i) => i,
-            Err(error) => {
-                error!(error = ?error, "Failed to commit transaction to ledger");
-                return;
+        let slot = txn.slot;
+        let index = txn.index;
+
+        let ProcessableTransaction {
+            transaction,
+            encoded,
+            ..
+        } = txn.txn;
+
+        // Use pre-encoded bytes or serialize on the spot
+        let encoded = match encoded {
+            Some(bytes) => bytes,
+            None => {
+                let versioned = transaction.to_versioned_transaction();
+                bincode::serialize(&versioned)
+                    .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?
             }
         };
 
-        let status = TransactionStatus {
-            slot: self.processor.slot,
+        let tx_account_locks = transaction.get_account_locks_unchecked();
+
+        let result = self.ledger.write_transaction(
+            signature,
+            slot,
             index,
-            txn,
+            tx_account_locks.writable,
+            tx_account_locks.readonly,
+            &encoded,
+            meta.clone(),
+        );
+        if let Err(error) = result {
+            error!(error = ?error, "Failed to commit transaction to ledger");
+            return Err(error.into());
+        }
+
+        let status = TransactionStatus {
+            slot,
+            index,
+            txn: transaction,
             meta,
         };
 
         // Notify listeners
         let _ = self.transaction_tx.send(status);
+        Ok(())
     }
 
     /// Persists account changes to AccountsDb and notifies listeners.
@@ -268,7 +320,7 @@ impl super::TransactionExecutor {
         &self,
         fee_payer: Pubkey,
         result: &ProcessedTransaction,
-        is_replay: bool,
+        notify: bool,
     ) -> AccountsDbResult<()> {
         let succeeded = result.status().is_ok();
         let accounts = match result {
@@ -293,10 +345,9 @@ impl super::TransactionExecutor {
                     &fo.rollback_accounts
                 {
                     // Temporary slice construction to match expected type
-                    // This is slightly inefficient but safe; the vector here is tiny (1 item)
                     return self.insert_and_notify(
                         &[(fee_payer, fee_payer_account.clone())],
-                        is_replay,
+                        notify,
                         false,
                     );
                 }
@@ -309,13 +360,13 @@ impl super::TransactionExecutor {
             .map(|(_, acc)| acc.privileged())
             .unwrap_or(false);
 
-        self.insert_and_notify(accounts, is_replay, privileged)
+        self.insert_and_notify(accounts, notify, privileged)
     }
 
     fn insert_and_notify(
         &self,
         accounts: &[(Pubkey, solana_account::AccountSharedData)],
-        is_replay: bool,
+        notify: bool,
         privileged: bool,
     ) -> AccountsDbResult<()> {
         // Filter: Persist only dirty or privileged accounts
@@ -325,7 +376,7 @@ impl super::TransactionExecutor {
 
         self.accountsdb.insert_batch(to_commit)?;
 
-        if is_replay {
+        if !notify {
             return Ok(());
         }
 

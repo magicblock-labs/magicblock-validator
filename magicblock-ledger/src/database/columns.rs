@@ -73,7 +73,7 @@ pub struct Blockhash;
 ///       together from them
 ///
 /// * index type: `(`[`Signature`]`, `[`Slot`])`
-/// * value type: [`generated::Transaction`]
+/// * value type: `Vec<u8>` (bincode-serialized `VersionedTransaction`)
 pub struct Transaction;
 
 /// The transaction memos column
@@ -508,8 +508,8 @@ impl ColumnName for Transaction {
     const NAME: &'static str = CONFIRMED_TRANSACTION_CF;
 }
 
-impl ProtobufColumn for Transaction {
-    type Type = generated::Transaction;
+impl TypedColumn for Transaction {
+    type Type = Vec<u8>;
 }
 
 // Even though it is deprecated it is needed to implement iter_current_index_filtered
