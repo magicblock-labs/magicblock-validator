@@ -1,9 +1,9 @@
 use std::{collections::HashMap, sync::Arc};
 
 use async_trait::async_trait;
+use magicblock_core::intent::CommittedAccount;
 use magicblock_program::magic_scheduled_base_intent::{
-    BaseAction, CommitType, CommittedAccount, ScheduledIntentBundle,
-    UndelegateType,
+    BaseAction, CommitType, ScheduledIntentBundle, UndelegateType,
 };
 use solana_account::Account;
 use solana_pubkey::Pubkey;
@@ -106,7 +106,7 @@ impl TaskBuilderImpl {
             .collect::<Vec<_>>();
 
         task_info_fetcher
-            .fetch_next_commit_ids(&committed_pubkeys, min_context_slot)
+            .fetch_next_commit_nonces(&committed_pubkeys, min_context_slot)
             .await
     }
 

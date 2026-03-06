@@ -17,7 +17,8 @@ use magicblock_committor_service::{
     intent_executor::{
         error::{IntentExecutorError, TransactionStrategyExecutionError},
         task_info_fetcher::{
-            CacheTaskInfoFetcher, TaskInfoFetcher, TaskInfoFetcherError,
+            CacheTaskInfoFetcher, RpcTaskInfoFetcher, TaskInfoFetcher,
+            TaskInfoFetcherError,
         },
         ExecutionOutput, IntentExecutionResult, IntentExecutor,
         IntentExecutorImpl,
@@ -29,11 +30,12 @@ use magicblock_committor_service::{
     },
     transaction_preparator::TransactionPreparatorImpl,
 };
+use magicblock_core::intent::CommittedAccount;
 use magicblock_program::{
     args::ShortAccountMeta,
     magic_scheduled_base_intent::{
-        BaseAction, CommitAndUndelegate, CommitType, CommittedAccount,
-        MagicBaseIntent, ProgramArgs, ScheduledIntentBundle, UndelegateType,
+        BaseAction, CommitAndUndelegate, CommitType, MagicBaseIntent,
+        ProgramArgs, ScheduledIntentBundle, UndelegateType,
     },
     validator::validator_authority_id,
 };
@@ -74,9 +76,9 @@ const ACTOR_ESCROW_INDEX: u8 = 1;
 
 struct TestEnv {
     fixture: TestFixture,
-    task_info_fetcher: Arc<CacheTaskInfoFetcher>,
+    task_info_fetcher: Arc<CacheTaskInfoFetcher<RpcTaskInfoFetcher>>,
     intent_executor:
-        IntentExecutorImpl<TransactionPreparatorImpl, CacheTaskInfoFetcher>,
+        IntentExecutorImpl<TransactionPreparatorImpl, RpcTaskInfoFetcher>,
     pre_test_tablemania_state: HashMap<Pubkey, usize>,
 }
 
@@ -88,8 +90,9 @@ impl TestEnv {
             .await;
 
         let transaction_preparator = fixture.create_transaction_preparator();
-        let task_info_fetcher =
-            Arc::new(CacheTaskInfoFetcher::new(fixture.rpc_client.clone()));
+        let task_info_fetcher = Arc::new(CacheTaskInfoFetcher::new(
+            RpcTaskInfoFetcher::new(fixture.rpc_client.clone()),
+        ));
 
         let tm = &fixture.table_mania;
         let mut pre_test_tablemania_state = HashMap::new();
@@ -137,7 +140,7 @@ async fn test_commit_id_error_parsing() {
 
     // Invalidate ids before execution
     task_info_fetcher
-        .fetch_next_commit_ids(
+        .fetch_next_commit_nonces(
             &intent.get_undelegate_intent_pubkeys().unwrap(),
             remote_slot,
         )
@@ -444,7 +447,7 @@ async fn test_commit_id_error_recovery() {
 
     // Invalidate commit nonce cache
     let res = task_info_fetcher
-        .fetch_next_commit_ids(&[committed_account.pubkey], remote_slot)
+        .fetch_next_commit_nonces(&[committed_account.pubkey], remote_slot)
         .await;
     assert!(res.is_ok());
     assert!(res.unwrap().contains_key(&committed_account.pubkey));
@@ -475,15 +478,14 @@ async fn test_commit_id_error_recovery() {
 
     // Cleanup succeeds
     assert!(intent_executor.cleanup().await.is_ok());
-    let commit_ids_by_pk: HashMap<_, _> = [&committed_account]
-        .iter()
-        .map(|el| {
-            (
-                el.pubkey,
-                task_info_fetcher.peek_commit_id(&el.pubkey).unwrap(),
-            )
-        })
-        .collect();
+    let mut commit_ids_by_pk = HashMap::new();
+    for el in [&committed_account].iter() {
+        let nonce = task_info_fetcher
+            .peek_commit_nonce(&el.pubkey)
+            .await
+            .unwrap();
+        commit_ids_by_pk.insert(el.pubkey, nonce);
+    }
 
     verify(
         &fixture.table_mania,
@@ -645,7 +647,7 @@ async fn test_commit_id_and_action_errors_recovery() {
 
     // Invalidate commit nonce cache
     let res = task_info_fetcher
-        .fetch_next_commit_ids(&[committed_account.pubkey], remote_slot)
+        .fetch_next_commit_nonces(&[committed_account.pubkey], remote_slot)
         .await;
     assert!(res.is_ok());
     assert!(res.unwrap().contains_key(&committed_account.pubkey));
@@ -772,15 +774,14 @@ async fn test_cpi_limits_error_recovery() {
 
     // Cleanup after intent
     assert!(intent_executor.cleanup().await.is_ok());
-    let commit_ids_by_pk: HashMap<_, _> = committed_accounts
-        .iter()
-        .map(|el| {
-            (
-                el.pubkey,
-                task_info_fetcher.peek_commit_id(&el.pubkey).unwrap(),
-            )
-        })
-        .collect();
+    let mut commit_ids_by_pk = HashMap::new();
+    for el in committed_accounts.iter() {
+        let nonce = task_info_fetcher
+            .peek_commit_nonce(&el.pubkey)
+            .await
+            .unwrap();
+        commit_ids_by_pk.insert(el.pubkey, nonce);
+    }
 
     verify(
         &fixture.table_mania,
@@ -851,7 +852,7 @@ async fn test_commit_id_actions_cpi_limit_errors_recovery() {
     // Force CommitIDError by invalidating the commit-nonce cache before running
     let pubkeys: Vec<_> = committed_accounts.iter().map(|c| c.pubkey).collect();
     let mut invalidated_keys = task_info_fetcher
-        .fetch_next_commit_ids(&pubkeys, Default::default())
+        .fetch_next_commit_nonces(&pubkeys, Default::default())
         .await
         .unwrap();
 
@@ -907,15 +908,14 @@ async fn test_commit_id_actions_cpi_limit_errors_recovery() {
 
     // Cleanup after intent
     assert!(intent_executor.cleanup().await.is_ok());
-    let commit_ids_by_pk: HashMap<_, _> = committed_accounts
-        .iter()
-        .map(|el| {
-            (
-                el.pubkey,
-                task_info_fetcher.peek_commit_id(&el.pubkey).unwrap(),
-            )
-        })
-        .collect();
+    let mut commit_ids_by_pk = HashMap::new();
+    for el in committed_accounts.iter() {
+        let nonce = task_info_fetcher
+            .peek_commit_nonce(&el.pubkey)
+            .await
+            .unwrap();
+        commit_ids_by_pk.insert(el.pubkey, nonce);
+    }
     verify(
         &fixture.table_mania,
         fixture.rpc_client.get_inner(),
@@ -1239,7 +1239,7 @@ fn create_scheduled_intent(
 
 async fn single_flow_transaction_strategy(
     authority: &Pubkey,
-    task_info_fetcher: &Arc<CacheTaskInfoFetcher>,
+    task_info_fetcher: &Arc<CacheTaskInfoFetcher<RpcTaskInfoFetcher>>,
     intent: &ScheduledIntentBundle,
 ) -> TransactionStrategy {
     let mut tasks = TaskBuilderImpl::commit_tasks(

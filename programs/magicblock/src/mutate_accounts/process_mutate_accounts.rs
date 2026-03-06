@@ -366,7 +366,7 @@ mod tests {
             map.insert(mod_key, AccountSharedData::new(100, 0, &mod_key));
             map
         };
-        ensure_started_validator(&mut account_data);
+        ensure_started_validator(&mut account_data, None);
 
         let modification = AccountModification {
             pubkey: mod_key,
@@ -450,7 +450,7 @@ mod tests {
             map.insert(mod_key2, AccountSharedData::new(200, 0, &mod_key2));
             map
         };
-        ensure_started_validator(&mut account_data);
+        ensure_started_validator(&mut account_data, None);
 
         let ix = InstructionUtils::modify_accounts_instruction(
             vec![
@@ -545,7 +545,7 @@ mod tests {
             map.insert(mod_key, delegated_account);
             map
         };
-        ensure_started_validator(&mut account_data);
+        ensure_started_validator(&mut account_data, None);
 
         let ix = InstructionUtils::modify_accounts_instruction(
             vec![AccountModification {
@@ -588,7 +588,7 @@ mod tests {
             map.insert(mod_key, undelegating_account);
             map
         };
-        ensure_started_validator(&mut account_data);
+        ensure_started_validator(&mut account_data, None);
 
         let ix = InstructionUtils::modify_accounts_instruction(
             vec![AccountModification {
@@ -656,7 +656,7 @@ mod tests {
             map.insert(mod_key4, AccountSharedData::new(400, 0, &mod_key4));
             map
         };
-        ensure_started_validator(&mut account_data);
+        ensure_started_validator(&mut account_data, None);
 
         let ix = InstructionUtils::modify_accounts_instruction(
             vec![
@@ -796,7 +796,7 @@ mod tests {
             map.insert(mod_key, AccountSharedData::new(100, 0, &mod_key));
             map
         };
-        ensure_started_validator(&mut account_data);
+        ensure_started_validator(&mut account_data, None);
 
         let ix = InstructionUtils::modify_accounts_instruction(
             vec![AccountModification {
@@ -840,7 +840,7 @@ mod tests {
             map.insert(mod_key, account);
             map
         };
-        ensure_started_validator(&mut account_data);
+        ensure_started_validator(&mut account_data, None);
 
         let ix = InstructionUtils::modify_accounts_instruction(
             vec![AccountModification {
@@ -881,7 +881,7 @@ mod tests {
             map.insert(mod_key, account);
             map
         };
-        ensure_started_validator(&mut account_data);
+        ensure_started_validator(&mut account_data, None);
 
         let ix = InstructionUtils::modify_accounts_instruction(
             vec![AccountModification {

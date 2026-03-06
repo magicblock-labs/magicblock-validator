@@ -12,7 +12,7 @@ use crate::{
     magic_scheduled_base_intent::{
         CommitType, ConstructionContext, ScheduledIntentBundle,
     },
-    schedule_transactions::check_magic_context_id,
+    schedule_transactions::{check_commit_limits, check_magic_context_id},
     utils::{
         account_actions::mark_account_as_undelegated,
         accounts::{
@@ -155,6 +155,11 @@ pub(crate) fn process_schedule_intent_bundle(
             "Scheduling undelegation for accounts: {}",
             undelegated_pubkeys.join(", ")
         );
+    }
+
+    if let Some(commit_accounts) = scheduled_intent.get_commit_intent_accounts()
+    {
+        check_commit_limits(commit_accounts, invoke_context)?;
     }
 
     let action_sent_signature = scheduled_intent.sent_transaction.signatures[0];

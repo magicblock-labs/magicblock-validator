@@ -305,7 +305,7 @@ mod tests {
 
         let mut account_data = HashMap::new();
 
-        ensure_started_validator(&mut account_data);
+        ensure_started_validator(&mut account_data, None);
 
         let mut ix = InstructionUtils::scheduled_commit_sent_instruction(
             &crate::id(),
@@ -342,7 +342,7 @@ mod tests {
             );
             map
         };
-        ensure_started_validator(&mut account_data);
+        ensure_started_validator(&mut account_data, None);
 
         let ix = InstructionUtils::scheduled_commit_sent_instruction(
             &crate::id(),
@@ -377,7 +377,7 @@ mod tests {
             );
             map
         };
-        ensure_started_validator(&mut account_data);
+        ensure_started_validator(&mut account_data, None);
 
         let ix = InstructionUtils::scheduled_commit_sent_instruction(
             &fake_program.pubkey(),
@@ -406,7 +406,7 @@ mod tests {
 
         let mut account_data = HashMap::new();
 
-        ensure_started_validator(&mut account_data);
+        ensure_started_validator(&mut account_data, None);
 
         let ix = InstructionUtils::scheduled_commit_sent_instruction(
             &crate::id(),

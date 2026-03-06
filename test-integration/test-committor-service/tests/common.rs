@@ -1,27 +1,16 @@
-use std::{
-    collections::HashMap,
-    sync::{
-        atomic::{AtomicU64, Ordering},
-        Arc,
-    },
+use std::sync::{
+    atomic::{AtomicU64, Ordering},
+    Arc,
 };
 
-use async_trait::async_trait;
 use magicblock_committor_service::{
-    intent_executor::{
-        task_info_fetcher::{
-            ResetType, TaskInfoFetcher, TaskInfoFetcherError,
-            TaskInfoFetcherResult,
-        },
-        IntentExecutorImpl,
-    },
     tasks::commit_task::{CommitDelivery, CommitTask},
     transaction_preparator::{
         delivery_preparator::DeliveryPreparator, TransactionPreparatorImpl,
     },
     ComputeBudgetConfig,
 };
-use magicblock_program::magic_scheduled_base_intent::CommittedAccount;
+use magicblock_core::intent::CommittedAccount;
 use magicblock_rpc_client::MagicblockRpcClient;
 use magicblock_table_mania::{GarbageCollectorConfig, TableMania};
 use solana_account::Account;
@@ -97,72 +86,6 @@ impl TestFixture {
             self.table_mania.clone(),
             self.compute_budget_config.clone(),
         )
-    }
-
-    #[allow(dead_code)]
-    pub fn create_intent_executor(
-        &self,
-    ) -> IntentExecutorImpl<TransactionPreparatorImpl, MockTaskInfoFetcher>
-    {
-        let transaction_preparator = self.create_transaction_preparator();
-
-        IntentExecutorImpl::new(
-            self.rpc_client.clone(),
-            transaction_preparator,
-            self.create_task_info_fetcher(),
-        )
-    }
-
-    #[allow(dead_code)]
-    pub fn create_task_info_fetcher(&self) -> Arc<MockTaskInfoFetcher> {
-        Arc::new(MockTaskInfoFetcher(self.rpc_client.clone()))
-    }
-}
-
-pub struct MockTaskInfoFetcher(MagicblockRpcClient);
-
-#[async_trait]
-impl TaskInfoFetcher for MockTaskInfoFetcher {
-    async fn fetch_next_commit_ids(
-        &self,
-        pubkeys: &[Pubkey],
-        _: u64,
-    ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>> {
-        Ok(pubkeys.iter().map(|pubkey| (*pubkey, 0)).collect())
-    }
-
-    async fn fetch_rent_reimbursements(
-        &self,
-        pubkeys: &[Pubkey],
-        _: u64,
-    ) -> TaskInfoFetcherResult<Vec<Pubkey>> {
-        Ok(pubkeys.to_vec())
-    }
-
-    fn peek_commit_id(&self, _pubkey: &Pubkey) -> Option<u64> {
-        None
-    }
-
-    fn reset(&self, _: ResetType) {}
-
-    async fn get_base_accounts(
-        &self,
-        pubkeys: &[Pubkey],
-        _: u64,
-    ) -> TaskInfoFetcherResult<HashMap<Pubkey, Account>> {
-        self.0
-            .get_multiple_accounts(pubkeys, None)
-            .await
-            .map_err(|err| {
-                TaskInfoFetcherError::MagicBlockRpcClientError(Box::new(err))
-            })
-            .map(|accounts| {
-                pubkeys
-                    .iter()
-                    .zip(accounts)
-                    .filter_map(|(key, value)| value.map(|value| (*key, value)))
-                    .collect()
-            })
     }
 }
 

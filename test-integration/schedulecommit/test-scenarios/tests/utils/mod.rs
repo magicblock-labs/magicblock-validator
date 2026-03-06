@@ -37,16 +37,14 @@ pub fn get_context_with_delegated_committees(
 // -----------------
 // Asserts
 // -----------------
-#[allow(dead_code)] // used in 02_commit_and_undelegate.rs
-pub fn assert_one_committee_was_committed<T>(
-    ctx: &ScheduleCommitTestContext,
+#[allow(dead_code)]
+pub fn assert_committee_was_committed<T>(
+    pda: Pubkey,
     res: &ScheduledCommitResult<T>,
     is_single_stage: bool,
 ) where
     T: std::fmt::Debug + borsh::BorshDeserialize + PartialEq + Eq,
 {
-    let pda = ctx.committees[0].1;
-
     assert_eq!(res.included.len(), 1, "includes 1 pda");
     assert_eq!(res.excluded.len(), 0, "excludes 0 pdas");
 
@@ -62,6 +60,17 @@ pub fn assert_one_committee_was_committed<T>(
         "should have {} on chain sig",
         sig_len
     );
+}
+
+#[allow(dead_code)] // used in 02_commit_and_undelegate.rs
+pub fn assert_one_committee_was_committed<T>(
+    ctx: &ScheduleCommitTestContext,
+    res: &ScheduledCommitResult<T>,
+    is_single_stage: bool,
+) where
+    T: std::fmt::Debug + borsh::BorshDeserialize + PartialEq + Eq,
+{
+    assert_committee_was_committed(ctx.committees[0].1, res, is_single_stage);
 }
 
 #[allow(dead_code)] // used in 02_commit_and_undelegate.rs

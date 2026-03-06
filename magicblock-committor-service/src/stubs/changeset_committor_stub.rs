@@ -190,6 +190,22 @@ impl BaseIntentCommittor for ChangesetCommittorStub {
         rx
     }
 
+    fn fetch_current_commit_nonces(
+        &self,
+        pubkeys: &[Pubkey],
+        _min_context_slot: u64,
+    ) -> oneshot::Receiver<CommittorServiceResult<HashMap<Pubkey, u64>>> {
+        let (tx, rx) = oneshot::channel();
+        let nonces = pubkeys.iter().map(|p| (*p, 0u64)).collect();
+        tx.send(Ok(nonces)).unwrap_or_else(|_| {
+            tracing::error!(
+                message_type = "FetchCurrentCommitNonces",
+                "Failed to send response"
+            );
+        });
+        rx
+    }
+
     fn stop(&self) {
         self.cancellation_token.cancel();
     }
