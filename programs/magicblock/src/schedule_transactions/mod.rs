@@ -7,6 +7,8 @@ mod process_schedule_intent_bundle;
 mod process_scheduled_commit_sent;
 pub(crate) mod transaction_scheduler;
 
+use std::sync::Arc;
+
 use magicblock_magic_program_api::MAGIC_CONTEXT_PUBKEY;
 pub(crate) use process_accept_scheduled_commits::*;
 pub(crate) use process_add_action_callback::process_add_action_callback;
@@ -15,6 +17,7 @@ pub(crate) use process_schedule_intent_bundle::process_schedule_intent_bundle;
 pub use process_scheduled_commit_sent::{
     process_scheduled_commit_sent, register_scheduled_commit_sent, SentCommit,
 };
+use solana_clock::Clock;
 use solana_instruction::error::InstructionError;
 use solana_log_collector::ic_msg;
 use solana_program_runtime::invoke_context::InvokeContext;
@@ -63,6 +66,18 @@ fn get_parent_program_id(
     .owner();
 
     Ok(Some(owner))
+}
+
+pub(crate) fn get_clock(
+    invoke_context: &mut InvokeContext,
+) -> Result<Arc<Clock>, InstructionError> {
+    invoke_context
+        .get_sysvar_cache()
+        .get_clock()
+        .map_err(|err| {
+            ic_msg!(invoke_context, "Failed to get clock sysvar: {}", err);
+            InstructionError::UnsupportedSysvar
+        })
 }
 
 pub fn check_magic_context_id(

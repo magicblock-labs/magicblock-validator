@@ -10,8 +10,8 @@ use solana_pubkey::Pubkey;
 use crate::{
     magic_scheduled_base_intent::BaseActionCallback,
     schedule_transactions::{
-        check_magic_context_id, get_parent_program_id, MAGIC_CONTEXT_IDX,
-        PAYER_IDX,
+        check_magic_context_id, get_clock, get_parent_program_id,
+        MAGIC_CONTEXT_IDX, PAYER_IDX,
     },
     utils::{
         account_actions::charge_delegated_payer,
@@ -31,9 +31,22 @@ pub(crate) fn process_add_action_callback(
     check_magic_context_id(invoke_context, MAGIC_CONTEXT_IDX)?;
 
     let transaction_context = &invoke_context.transaction_context.clone();
+    let ix_ctx = transaction_context.get_current_instruction_context()?;
+    // Assert MagicBlock program
+    ix_ctx
+        .find_index_of_program_account(transaction_context, &crate::id())
+        .ok_or_else(|| {
+            ic_msg!(
+                invoke_context,
+                "Schedule ERR: Magic program account not found"
+            );
+            InstructionError::UnsupportedProgramId
+        })?;
 
     let payer_pubkey =
         get_instruction_pubkey_with_idx(transaction_context, PAYER_IDX)?;
+    let payer_acc =
+        get_instruction_account_with_idx(transaction_context, PAYER_IDX)?;
     if !signers.contains(payer_pubkey) {
         ic_msg!(
             invoke_context,
@@ -43,16 +56,10 @@ pub(crate) fn process_add_action_callback(
         return Err(InstructionError::MissingRequiredSignature);
     }
 
-    let parent_program_id =
-        get_parent_program_id(transaction_context, invoke_context)?;
-
-    let payer_acc =
-        get_instruction_account_with_idx(transaction_context, PAYER_IDX)?;
     let context_acc = get_instruction_account_with_idx(
         transaction_context,
         MAGIC_CONTEXT_IDX,
     )?;
-
     charge_delegated_payer(payer_acc, context_acc, CALLBACK_FEE_LAMPORTS)?;
 
     let context_data = &mut context_acc.borrow_mut();
@@ -87,14 +94,43 @@ pub(crate) fn process_add_action_callback(
             InstructionError::InvalidInstructionData
         })?;
 
-    if action.source_program != parent_program_id {
+    // Validate if the caller has right to set callback
+    if action.callback.is_some() {
         ic_msg!(
             invoke_context,
-            "AddActionCallback ERR: CPI caller {:?} does not match action source_program {:?}",
-            parent_program_id,
-            action.source_program
+            "AddActionCallback ERR: callback already set for action at index {}",
+            args.action_index
         );
         return Err(InstructionError::InvalidAccountData);
+    }
+    let Some(source_program) = action.source_program else {
+        ic_msg!(
+            invoke_context,
+            "AddActionCallback ERR: callbacks requires intent scheduled via ScheduleIntentBundle"
+        );
+        return Err(InstructionError::InvalidAccountData);
+    };
+    let clock = get_clock(invoke_context)?;
+    let parent_program_id =
+        get_parent_program_id(transaction_context, invoke_context)?;
+    if Some(source_program) != parent_program_id {
+        ic_msg!(
+            invoke_context,
+            "AddActionCallback ERR: CPI caller {:?} does not match action source_program {}",
+            parent_program_id,
+            source_program
+        );
+        return Err(InstructionError::InvalidAccountData);
+    }
+    if latest_intent.slot != clock.slot
+        || latest_intent.blockhash
+            != invoke_context.environment_config.blockhash
+    {
+        ic_msg!(
+            invoke_context,
+            "AddActionCallback ERR: intent was scheduled in a different slot or blockhash"
+        );
+        return Err(InstructionError::InvalidInstructionData);
     }
 
     action.callback = Some(BaseActionCallback {

@@ -12,8 +12,8 @@ use crate::{
         CommitType, ConstructionContext, ScheduledIntentBundle,
     },
     schedule_transactions::{
-        check_magic_context_id, get_parent_program_id, ACCOUNTS_OFFSET,
-        MAGIC_CONTEXT_IDX, PAYER_IDX,
+        check_magic_context_id, get_clock, get_parent_program_id,
+        ACCOUNTS_OFFSET, MAGIC_CONTEXT_IDX, PAYER_IDX,
     },
     utils::{
         account_actions::mark_account_as_undelegated,
@@ -79,16 +79,7 @@ pub(crate) fn process_schedule_intent_bundle(
     let parent_program_id =
         get_parent_program_id(transaction_context, invoke_context)?;
 
-    // It appears that in builtin programs `Clock::get` doesn't work as expected, thus
-    // we have to get it directly from the sysvar cache.
-    let clock =
-        invoke_context
-            .get_sysvar_cache()
-            .get_clock()
-            .map_err(|err| {
-                ic_msg!(invoke_context, "Failed to get clock sysvar: {}", err);
-                InstructionError::UnsupportedSysvar
-            })?;
+    let clock = get_clock(invoke_context)?;
 
     // NOTE: this is only protected by all the above checks however if the
     // instruction fails for other reasons detected afterward then the commit
