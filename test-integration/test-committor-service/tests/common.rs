@@ -98,29 +98,6 @@ impl TestFixture {
             self.compute_budget_config.clone(),
         )
     }
-
-    #[allow(dead_code)]
-    pub fn create_intent_executor(
-        &self,
-    ) -> IntentExecutorImpl<TransactionPreparatorImpl, MockTaskInfoFetcher>
-    {
-        let transaction_preparator = self.create_transaction_preparator();
-
-        IntentExecutorImpl::new(
-            self.rpc_client.clone(),
-            transaction_preparator,
-            self.create_task_info_fetcher(),
-        )
-    }
-
-    #[allow(dead_code)]
-    pub fn create_task_info_fetcher(
-        &self,
-    ) -> Arc<CacheTaskInfoFetcher<MockTaskInfoFetcher>> {
-        Arc::new(CacheTaskInfoFetcher::new(MockTaskInfoFetcher(
-            self.rpc_client.clone(),
-        )))
-    }
 }
 
 pub struct MockTaskInfoFetcher(MagicblockRpcClient);

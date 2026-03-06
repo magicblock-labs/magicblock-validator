@@ -1,8 +1,9 @@
-use std::{collections::HashMap, error::Error, sync::Arc};
+use std::{collections::HashMap, error::Error, sync::Arc, time::Duration};
 
-use magicblock_committor_service::{BaseIntentCommittor, CommittorService};
+use magicblock_committor_service::CommittorService;
 use magicblock_core::{intent::CommittedAccount, traits::MagicSys};
 use magicblock_ledger::Ledger;
+use magicblock_metrics::metrics;
 use solana_instruction::error::InstructionError;
 use solana_pubkey::Pubkey;
 use tracing::{enabled, error, trace, Level};
@@ -14,12 +15,16 @@ pub struct MagicSysAdapter {
 }
 
 impl MagicSysAdapter {
-    /// Returned when receiving the nonce result from the async channel fails.
+    /// Returned when the sync channel is disconnected (sender dropped).
     const RECV_ERR: u32 = 0xE000_0000;
-    /// Returned when the async fetch of current commit nonces fails.
-    const FETCH_ERR: u32 = 0xE001_0000;
+    /// Returned when waiting for the nonce fetch times out.
+    const TIMEOUT_ERR: u32 = 0xE000_0001;
+    /// Returned when the fetch of current commit nonces fails.
+    const FETCH_ERR: u32 = 0xE000_0002;
     /// Returned when no committor service is configured.
-    const NO_COMMITTOR_ERR: u32 = 0xE002_0000;
+    const NO_COMMITTOR_ERR: u32 = 0xE000_0003;
+
+    const FETCH_TIMEOUT: Duration = Duration::from_secs(30);
 
     pub fn new(
         ledger: Arc<Ledger>,
@@ -73,17 +78,21 @@ impl MagicSys for MagicSysAdapter {
         let pubkeys: Vec<_> =
             commits.iter().map(|account| account.pubkey).collect();
 
+        let _timer = metrics::start_fetch_commit_nonces_wait_timer();
         let receiver = committor_service
-            .fetch_current_commit_nonces(&pubkeys, min_context_slot);
-        // Tx execution is sync and runs on a tokio worker thread. handle.block_on
-        // would panic (nested runtime). futures::executor::block_on parks this
-        // thread independently of tokio — safe because the thread is already
-        // committed to this tx until execution completes.
-        futures::executor::block_on(receiver)
-            .inspect_err(|err| {
-                error!(error = ?err, "Failed to receive nonces from CommittorService")
-            })
-            .map_err(|_| InstructionError::Custom(Self::RECV_ERR))?
+            .fetch_current_commit_nonces_sync(&pubkeys, min_context_slot);
+        receiver
+            .recv_timeout(Self::FETCH_TIMEOUT)
+            .map_err(|err| match err {
+                std::sync::mpsc::RecvTimeoutError::Timeout => {
+                    error!("Timed out waiting for commit nonces from CommittorService");
+                    InstructionError::Custom(Self::TIMEOUT_ERR)
+                }
+                std::sync::mpsc::RecvTimeoutError::Disconnected => {
+                    error!("CommittorService channel disconnected while waiting for commit nonces");
+                    InstructionError::Custom(Self::RECV_ERR)
+                }
+            })?
             .inspect_err(|err| {
                 error!(error = ?err, "Failed to fetch current commit nonces")
             })

@@ -89,6 +89,13 @@ pub enum CommittorMessage {
         pubkeys: Vec<Pubkey>,
         min_context_slot: u64,
     },
+    FetchCurrentCommitNoncesSync {
+        respond_to: std::sync::mpsc::Sender<
+            CommittorServiceResult<HashMap<Pubkey, u64>>,
+        >,
+        pubkeys: Vec<Pubkey>,
+        min_context_slot: u64,
+    },
 }
 
 // -----------------
@@ -251,6 +258,23 @@ impl CommittorActor {
                     }
                 });
             }
+            FetchCurrentCommitNoncesSync {
+                respond_to,
+                pubkeys,
+                min_context_slot,
+            } => {
+                let processor = self.processor.clone();
+                tokio::spawn(async move {
+                    let result = processor
+                        .fetch_current_commit_nonces(&pubkeys, min_context_slot)
+                        .await;
+                    if let Err(err) = respond_to
+                        .send(result.map_err(CommittorServiceError::from))
+                    {
+                        error!(message_type = "FetchCurrentCommitNoncesSync", error = ?err, "Failed to send response");
+                    }
+                });
+            }
         }
     }
 
@@ -349,6 +373,21 @@ impl CommittorService {
     pub fn get_lookup_tables(&self) -> oneshot::Receiver<LookupTables> {
         let (tx, rx) = oneshot::channel();
         self.try_send(CommittorMessage::GetLookupTables { respond_to: tx });
+        rx
+    }
+
+    pub fn fetch_current_commit_nonces_sync(
+        &self,
+        pubkeys: &[Pubkey],
+        min_context_slot: u64,
+    ) -> std::sync::mpsc::Receiver<CommittorServiceResult<HashMap<Pubkey, u64>>>
+    {
+        let (tx, rx) = std::sync::mpsc::channel();
+        self.try_send(CommittorMessage::FetchCurrentCommitNoncesSync {
+            respond_to: tx,
+            pubkeys: pubkeys.to_vec(),
+            min_context_slot,
+        });
         rx
     }
 

@@ -356,6 +356,10 @@ impl<'a> Drop for CacheInnerGuard<'a> {
                 inner.retiring.remove(&pubkey);
             }
         }
+
+        metrics::set_task_info_fetcher_retiring_count(
+            inner.retiring.len() as i64
+        );
     }
 }
 
@@ -464,7 +468,7 @@ impl<T: TaskInfoFetcher> CacheTaskInfoFetcher<T> {
                             // Safety
                             // assume that is true:
                             // That means that value was active & retiring at the same time
-                            // This is impossible as per logic above, contradiction. чтд.
+                            // This is impossible as per logic above, contradiction. Q.E.D.
                             debug_assert!(
                                 false,
                                 "Just evicted value can't be in retiring"
@@ -476,6 +480,9 @@ impl<T: TaskInfoFetcher> CacheTaskInfoFetcher<T> {
 
                 nonce_locks.push((pubkey, lock));
             }
+            metrics::set_task_info_fetcher_retiring_count(
+                inner.retiring.len() as i64
+            );
         }
 
         CacheInnerGuard {

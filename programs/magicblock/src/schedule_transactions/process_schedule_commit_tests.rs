@@ -256,19 +256,14 @@ mod tests {
     // ---------- Helpers for ATA/eATA remapping tests ----------
     // Use shared SPL/ATA/eATA constants and helpers
     // Reuse test helper to create proper SPL ATA account data
-    use std::sync::Mutex;
-
     use magicblock_chainlink::testing::eatas::create_ata_account;
     use magicblock_core::token_programs::{derive_ata, derive_eata};
+    use serial_test::serial;
     use solana_seed_derivable::SeedDerivable;
     use test_kit::init_logger;
 
     use super::*;
     use crate::utils::instruction_utils::InstructionUtils;
-
-    // Prevents race conditions between parallel tests that share the global
-    // static MagicSys stub.
-    static TEST_LOCK: Mutex<()> = Mutex::new(());
 
     fn make_delegated_spl_ata_account(
         owner: &Pubkey,
@@ -281,9 +276,9 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_schedule_commit_single_account_success() {
         init_logger!();
-        let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let payer =
             Keypair::from_seed(b"schedule_commit_single_account_success")
                 .unwrap();
@@ -367,9 +362,9 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_schedule_commit_single_account_and_request_undelegate_success() {
         init_logger!();
-        let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let payer =
             Keypair::from_seed(b"single_account_with_undelegate_success")
                 .unwrap();
@@ -454,9 +449,9 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_schedule_commit_remaps_delegated_ata_to_eata() {
         init_logger!();
-        let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
 
         let payer =
             Keypair::from_seed(b"schedule_commit_remap_ata_to_eata").unwrap();
@@ -536,9 +531,9 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_schedule_commit_and_undelegate_remaps_delegated_ata_to_eata() {
         init_logger!();
-        let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
 
         let payer =
             Keypair::from_seed(b"schedule_commit_undelegate_remap_ata_eata")
@@ -621,9 +616,9 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_schedule_commit_three_accounts_success() {
         init_logger!();
-        let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
 
         let payer =
             Keypair::from_seed(b"schedule_commit_three_accounts_success")
@@ -735,8 +730,8 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_schedule_commit_three_accounts_and_request_undelegate_success() {
-        let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let payer = Keypair::from_seed(
             b"three_accounts_and_request_undelegate_success",
         )
@@ -888,9 +883,9 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_schedule_commit_no_pdas_provided_to_ix() {
         init_logger!();
-        let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
 
         let payer =
             Keypair::from_seed(b"schedule_commit_no_pdas_provided_to_ix")
@@ -924,9 +919,9 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_schedule_commit_undelegate_with_readonly() {
         init_logger!();
-        let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
 
         let payer =
             Keypair::from_seed(b"schedule_commit_undelegate_with_readonly")
@@ -968,9 +963,9 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_schedule_commit_with_non_delegated_account() {
         init_logger!();
-        let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
 
         let payer =
             Keypair::from_seed(b"schedule_commit_with_non_delegated_account")
@@ -1008,10 +1003,10 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_schedule_commit_three_accounts_second_not_owned_by_program_and_not_signer(
     ) {
         init_logger!();
-        let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
 
         let payer =
             Keypair::from_seed(b"three_accounts_last_not_owned_by_program")
@@ -1057,9 +1052,9 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_schedule_commit_with_confined_account() {
         init_logger!();
-        let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
 
         let payer =
             Keypair::from_seed(b"schedule_commit_with_confined_account")
@@ -1101,9 +1096,9 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_schedule_commit_fails_when_commit_limit_exceeded() {
         init_logger!();
-        let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
 
         let payer =
             Keypair::from_seed(b"schedule_commit_limit_exceeded____").unwrap();
@@ -1137,10 +1132,10 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_schedule_commit_and_undelegate_succeeds_when_commit_limit_exceeded()
     {
         init_logger!();
-        let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
 
         let payer =
             Keypair::from_seed(b"undelegate_succeeds_limit_exceeded").unwrap();
@@ -1174,9 +1169,9 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_schedule_commit_three_accounts_one_confined() {
         init_logger!();
-        let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
 
         let payer =
             Keypair::from_seed(b"three_accounts_one_confined_______").unwrap();

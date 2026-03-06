@@ -39,6 +39,7 @@ thiserror = { workspace = true }
 test-kit = { workspace = true }
 assert_matches = { workspace = true }
 rand = { workspace = true }
+serial_test = { workspace = true }
 solana-signature = { workspace = true }
 solana-signer = { workspace = true }
 magicblock-chainlink = { workspace = true, features = ["dev-context"] }
