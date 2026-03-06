@@ -10,8 +10,10 @@ use solana_sdk_ids::system_program;
 use solana_transaction_context::TransactionContext;
 
 use crate::{
+    clone_account::{
+        is_ephemeral, validate_not_delegated, validate_remote_slot,
+    },
     errors::MagicBlockProgramError,
-    mutate_accounts::account_mod_data::resolve_account_mod_data,
     validator::validator_authority_id,
 };
 
@@ -99,7 +101,6 @@ pub(crate) fn process_mutate_accounts(
     let mut lamports_to_debit: i128 = 0;
 
     // 2. Apply account modifications
-    let mut memory_data_mods = Vec::new();
     for idx in 0..account_mods_len {
         // NOTE: first account is the MagicBlock authority, account mods start at second account
         let account_idx = (idx + 1) as u16;
@@ -107,9 +108,9 @@ pub(crate) fn process_mutate_accounts(
             .get_index_of_instruction_account_in_transaction(account_idx)?;
         let account = transaction_context
             .get_account_at_index(account_transaction_index)?;
-        // we do not allow for account modification if the
-        // account is ephemeral (i.e. exists locally on ER)
-        if account.borrow().ephemeral() {
+
+        // Skip ephemeral accounts (exist locally on ER only)
+        if is_ephemeral(account) {
             let key = transaction_context
                 .get_key_of_account_at_index(account_transaction_index)?;
             account_mods.remove(key);
@@ -120,6 +121,7 @@ pub(crate) fn process_mutate_accounts(
             );
             continue;
         }
+
         let account_key = transaction_context
             .get_key_of_account_at_index(account_transaction_index)?;
 
@@ -135,51 +137,26 @@ pub(crate) fn process_mutate_accounts(
         ic_msg!(
             invoke_context,
             "MutateAccounts: modifying '{}'.",
-            account_key,
+            account_key
         );
 
-        // If provided log the extra message to give more context to the user, i.e.
-        // why an account is not cloned as delegated, etc.
+        // If provided log the extra message to give more context to the user
         if let Some(ref msg) = message {
             ic_msg!(invoke_context, "MutateAccounts: {}", msg);
         }
 
-        let (is_delegated, is_undelegating) = {
-            let account_ref = account.borrow();
-            (account_ref.delegated(), account_ref.undelegating())
-        };
-        if is_delegated && !is_undelegating {
-            ic_msg!(
-                invoke_context,
-                "MutateAccounts: account {} is delegated and not undelegating; mutation is forbidden",
-                account_key
-            );
-            return Err(
-                MagicBlockProgramError::AccountIsDelegatedAndNotUndelegating
-                    .into(),
-            );
-        }
-
-        let current_remote_slot = account.borrow().remote_slot();
-        if let Some(incoming_remote_slot) = modification.remote_slot {
-            if incoming_remote_slot < current_remote_slot {
-                ic_msg!(
-                    invoke_context,
-                    "MutateAccounts: account {} incoming remote_slot {} is older than current remote_slot {}; mutation is forbidden",
-                    account_key,
-                    incoming_remote_slot,
-                    current_remote_slot
-                );
-                return Err(
-                    MagicBlockProgramError::IncomingRemoteSlotIsOlderThanCurrentRemoteSlot
-                        .into(),
-                );
-            }
-        }
+        // Validate account is mutable
+        validate_not_delegated(account, account_key, invoke_context)?;
+        validate_remote_slot(
+            account,
+            account_key,
+            modification.remote_slot,
+            invoke_context,
+        )?;
 
         // While an account is undelegating and the delegation is not completed,
         // we will never clone/mutate it. Thus we can safely untoggle this flag
-        // here.
+        // here AFTER validation passes.
         account.borrow_mut().set_undelegating(false);
 
         if let Some(lamports) = modification.lamports {
@@ -209,46 +186,13 @@ pub(crate) fn process_mutate_accounts(
             );
             account.borrow_mut().set_executable(executable);
         }
-        if let Some(data_key) = modification.data_key.take() {
-            let resolved_data = resolve_account_mod_data(
-                data_key,
+        if let Some(data) = modification.data.take() {
+            ic_msg!(
                 invoke_context,
-            ).inspect_err(|err| {
-                ic_msg!(
-                    invoke_context,
-                    "MutateAccounts: an error occurred when resolving account mod data for the provided key {}. Error: {:?}",
-                    data_key,
-                    err
-                );
-            })?;
-            if let Some(data) = resolved_data.data() {
-                ic_msg!(
-                    invoke_context,
-                    "MutateAccounts: resolved data from id {}",
-                    resolved_data.id()
-                );
-                ic_msg!(
-                    invoke_context,
-                    "MutateAccounts: setting data to len {}",
-                    data.len()
-                );
-                account.borrow_mut().set_data_from_slice(data);
-            } else {
-                ic_msg!(
-                        invoke_context,
-                        "MutateAccounts: account data for the provided key {} is missing",
-                        data_key
-                    );
-                return Err(MagicBlockProgramError::AccountDataMissing.into());
-            }
-
-            // We track resolved data mods in order to persist them at the end
-            // of the transaction.
-            // NOTE: that during ledger replay all mods came from storage, so we
-            // don't persist them again.
-            if resolved_data.is_from_memory() {
-                memory_data_mods.push(resolved_data);
-            }
+                "MutateAccounts: setting data to len {}",
+                data.len()
+            );
+            account.borrow_mut().set_data_from_slice(&data);
         }
         if let Some(delegated) = modification.delegated {
             ic_msg!(
@@ -297,7 +241,7 @@ pub(crate) fn process_mutate_accounts(
                 .map_err(|err| {
                     ic_msg!(
                         invoke_context,
-                        "MutateAccounts: too much lamports in authority to credit: {}",
+                        "MutateAccounts: too many lamports in authority to credit: {}",
                         err
                     );
                     err
@@ -314,22 +258,6 @@ pub(crate) fn process_mutate_accounts(
                 InstructionError::ArithmeticOverflow
             })?,
         );
-    }
-
-    // Now it is super unlikely for the transaction to fail since all checks passed.
-    // The only option would be if another instruction runs after it which at this point
-    // is impossible since we create/send them from inside of our validator.
-    // Thus we can persist the applied data mods to make them available for ledger replay.
-    for resolved_data in memory_data_mods {
-        resolved_data
-            .persist(invoke_context)
-            .inspect_err(|err| {
-                ic_msg!(
-                    invoke_context,
-                    "MutateAccounts: an error occurred when persisting account mod data. Error: {:?}",
-                    err
-                );
-            })?;
     }
 
     Ok(())
@@ -569,8 +497,7 @@ mod tests {
             ix.data.as_slice(),
             transaction_accounts,
             ix.accounts,
-            Err(MagicBlockProgramError::AccountIsDelegatedAndNotUndelegating
-                .into()),
+            Err(MagicBlockProgramError::AccountIsDelegated.into()),
         );
     }
 
@@ -865,7 +792,7 @@ mod tests {
             ix.data.as_slice(),
             transaction_accounts,
             ix.accounts,
-            Err(MagicBlockProgramError::IncomingRemoteSlotIsOlderThanCurrentRemoteSlot.into()),
+            Err(MagicBlockProgramError::OutOfOrderUpdate.into()),
         );
     }
 
@@ -909,9 +836,9 @@ mod tests {
             Ok(()),
         );
 
-        let _account_authority = accounts.drain(0..1).next().unwrap();
-        let modified_account = accounts.drain(0..1).next().unwrap();
-        assert_eq!(modified_account.lamports(), 200);
-        assert_eq!(modified_account.remote_slot(), 100);
+        accounts.remove(0); // authority
+        let account = accounts.remove(0);
+        assert_eq!(account.lamports(), 200);
+        assert_eq!(account.remote_slot(), 100);
     }
 }

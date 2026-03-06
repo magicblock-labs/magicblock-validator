@@ -87,9 +87,6 @@ lazy_static::lazy_static! {
     static ref LEDGER_PERF_SAMPLES_GAUGE: IntGauge = IntGauge::new(
         "ledger_perf_samples_gauge", "Ledger Perf Samples Gauge",
     ).unwrap();
-    static ref LEDGER_ACCOUNT_MOD_DATA_GAUGE: IntGauge = IntGauge::new(
-        "ledger_account_mod_data_gauge", "Ledger Account Mod Data Gauge",
-    ).unwrap();
     pub static ref LEDGER_COLUMNS_COUNT_DURATION_SECONDS: Histogram = Histogram::with_opts(
         HistogramOpts::new(
             "ledger_columns_count_duration_seconds",
@@ -535,7 +532,6 @@ pub(crate) fn register() {
         register!(LEDGER_TRANSACTIONS_GAUGE);
         register!(LEDGER_TRANSACTION_MEMOS_GAUGE);
         register!(LEDGER_PERF_SAMPLES_GAUGE);
-        register!(LEDGER_ACCOUNT_MOD_DATA_GAUGE);
         register!(LEDGER_COLUMNS_COUNT_DURATION_SECONDS);
         register!(LEDGER_TRUNCATOR_COMPACTION_SECONDS);
         register!(LEDGER_TRUNCATOR_DELETE_SECONDS);
@@ -646,10 +642,6 @@ pub fn set_ledger_transaction_memos_count(count: i64) {
 
 pub fn set_ledger_perf_samples_count(count: i64) {
     LEDGER_PERF_SAMPLES_GAUGE.set(count);
-}
-
-pub fn set_ledger_account_mod_data_count(count: i64) {
-    LEDGER_ACCOUNT_MOD_DATA_GAUGE.set(count);
 }
 
 pub fn observe_columns_count_duration<F, T>(f: F) -> T
