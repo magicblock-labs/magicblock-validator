@@ -2,7 +2,9 @@
 
 use std::collections::HashMap;
 
-use magicblock_magic_program_api::instruction::AccountCloneFields;
+use magicblock_magic_program_api::instruction::{
+    AccountCloneFields, MagicBlockInstruction,
+};
 use solana_account::{AccountSharedData, ReadableAccount};
 use solana_instruction::{error::InstructionError, AccountMeta};
 use test_kit::init_logger;
@@ -55,6 +57,38 @@ fn tx_accounts(
 // -----------------
 // CloneAccount
 // -----------------
+
+#[test]
+fn test_rejects_wrong_signer_pubkey() {
+    init_logger!();
+    let pubkey = Pubkey::new_unique();
+    let wrong_signer = Pubkey::new_unique();
+    let mut accounts = setup_with_account(pubkey, 100, 0);
+    // Add wrong signer account
+    accounts
+        .insert(wrong_signer, AccountSharedData::new(1000, 0, &wrong_signer));
+
+    // Build instruction with WRONG pubkey as signer (not validator authority)
+    let ix = solana_instruction::Instruction::new_with_bincode(
+        crate::id(),
+        &MagicBlockInstruction::CloneAccount {
+            pubkey,
+            data: vec![],
+            fields: clone_fields(200, 0),
+        },
+        vec![
+            AccountMeta::new(wrong_signer, true), // wrong signer!
+            AccountMeta::new(pubkey, false),
+        ],
+    );
+
+    process_instruction(
+        &ix.data,
+        tx_accounts(accounts, &ix.accounts),
+        ix.accounts,
+        Err(InstructionError::MissingRequiredSignature),
+    );
+}
 
 #[test]
 fn test_clone_account_basic() {
@@ -135,6 +169,30 @@ fn test_clone_account_rejects_delegated_account() {
         tx_accounts(accounts, &ix.accounts),
         ix.accounts,
         Err(MagicBlockProgramError::AccountIsDelegated.into()),
+    );
+}
+
+#[test]
+fn test_clone_account_rejects_ephemeral_account() {
+    init_logger!();
+    let pubkey = Pubkey::new_unique();
+    let mut account = AccountSharedData::new(100, 0, &pubkey);
+    account.set_ephemeral(true);
+    let mut accounts = HashMap::new();
+    accounts.insert(pubkey, account);
+    ensure_started_validator(&mut accounts);
+
+    let ix = InstructionUtils::clone_account_instruction(
+        pubkey,
+        vec![],
+        clone_fields(200, 0),
+    );
+
+    process_instruction(
+        &ix.data,
+        tx_accounts(accounts, &ix.accounts),
+        ix.accounts,
+        Err(MagicBlockProgramError::AccountIsEphemeral.into()),
     );
 }
 

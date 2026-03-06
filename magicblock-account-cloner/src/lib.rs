@@ -121,7 +121,7 @@ impl ChainlinkCloner {
     }
 
     // -----------------
-    // Instruction Builders
+    // Instruction Builders (delegates to InstructionUtils)
     // -----------------
 
     fn clone_ix(
@@ -129,15 +129,7 @@ impl ChainlinkCloner {
         data: Vec<u8>,
         fields: AccountCloneFields,
     ) -> Instruction {
-        Instruction::new_with_bincode(
-            magicblock_program::ID,
-            &MagicBlockInstruction::CloneAccount {
-                pubkey,
-                data,
-                fields,
-            },
-            clone_account_metas(pubkey),
-        )
+        InstructionUtils::clone_account_instruction(pubkey, data, fields)
     }
 
     fn clone_init_ix(
@@ -146,15 +138,11 @@ impl ChainlinkCloner {
         initial_data: Vec<u8>,
         fields: AccountCloneFields,
     ) -> Instruction {
-        Instruction::new_with_bincode(
-            magicblock_program::ID,
-            &MagicBlockInstruction::CloneAccountInit {
-                pubkey,
-                total_data_len: total_len,
-                initial_data,
-                fields,
-            },
-            clone_account_metas(pubkey),
+        InstructionUtils::clone_account_init_instruction(
+            pubkey,
+            total_len,
+            initial_data,
+            fields,
         )
     }
 
@@ -164,24 +152,13 @@ impl ChainlinkCloner {
         data: Vec<u8>,
         is_last: bool,
     ) -> Instruction {
-        Instruction::new_with_bincode(
-            magicblock_program::ID,
-            &MagicBlockInstruction::CloneAccountContinue {
-                pubkey,
-                offset,
-                data,
-                is_last,
-            },
-            clone_account_metas(pubkey),
+        InstructionUtils::clone_account_continue_instruction(
+            pubkey, offset, data, is_last,
         )
     }
 
     fn cleanup_ix(pubkey: Pubkey) -> Instruction {
-        Instruction::new_with_bincode(
-            magicblock_program::ID,
-            &MagicBlockInstruction::CleanupPartialClone { pubkey },
-            clone_account_metas(pubkey),
-        )
+        InstructionUtils::cleanup_partial_clone_instruction(pubkey)
     }
 
     fn finalize_program_ix(
@@ -189,26 +166,15 @@ impl ChainlinkCloner {
         buffer: Pubkey,
         remote_slot: u64,
     ) -> Instruction {
-        Instruction::new_with_bincode(
-            magicblock_program::ID,
-            &MagicBlockInstruction::FinalizeProgramFromBuffer { remote_slot },
-            vec![
-                AccountMeta::new_readonly(validator_authority_id(), true),
-                AccountMeta::new(program, false),
-                AccountMeta::new(buffer, false),
-            ],
+        InstructionUtils::finalize_program_from_buffer_instruction(
+            program,
+            buffer,
+            remote_slot,
         )
     }
 
     fn set_authority_ix(program: Pubkey, authority: Pubkey) -> Instruction {
-        Instruction::new_with_bincode(
-            magicblock_program::ID,
-            &MagicBlockInstruction::SetProgramAuthority { authority },
-            vec![
-                AccountMeta::new_readonly(validator_authority_id(), true),
-                AccountMeta::new(program, false),
-            ],
-        )
+        InstructionUtils::set_program_authority_instruction(program, authority)
     }
 
     // -----------------
@@ -423,7 +389,7 @@ impl ChainlinkCloner {
             InstructionUtils::disable_executable_check_instruction(
                 &validator_authority_id(),
             ),
-            Self::finalize_v1_program_ix(
+            InstructionUtils::finalize_v1_program_from_buffer_instruction(
                 program_id,
                 program_data_addr,
                 buffer_pubkey,
@@ -443,29 +409,6 @@ impl ChainlinkCloner {
         );
 
         Ok(Some(txs))
-    }
-
-    /// Builds finalize instruction for V1 programs (creates V3 accounts from buffer).
-    fn finalize_v1_program_ix(
-        program: Pubkey,
-        program_data: Pubkey,
-        buffer: Pubkey,
-        remote_slot: u64,
-        authority: Pubkey,
-    ) -> Instruction {
-        Instruction::new_with_bincode(
-            magicblock_program::ID,
-            &MagicBlockInstruction::FinalizeV1ProgramFromBuffer {
-                remote_slot,
-                authority,
-            },
-            vec![
-                AccountMeta::new_readonly(validator_authority_id(), true),
-                AccountMeta::new(program, false),
-                AccountMeta::new(program_data, false),
-                AccountMeta::new(buffer, false),
-            ],
-        )
     }
 
     /// V2/V3/V4 programs use LoaderV4 with proper deploy flow.
@@ -600,13 +543,6 @@ impl ChainlinkCloner {
 }
 
 /// Shared account metas for clone instructions.
-fn clone_account_metas(pubkey: Pubkey) -> Vec<AccountMeta> {
-    vec![
-        AccountMeta::new(validator_authority_id(), true),
-        AccountMeta::new(pubkey, false),
-    ]
-}
-
 #[async_trait]
 impl Cloner for ChainlinkCloner {
     async fn clone_account(
