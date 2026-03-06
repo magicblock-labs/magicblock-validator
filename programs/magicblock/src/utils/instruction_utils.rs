@@ -292,7 +292,6 @@ impl InstructionUtils {
     // -----------------
     // CloneAccount
     // -----------------
-    #[cfg(test)]
     pub fn clone_account_instruction(
         pubkey: Pubkey,
         data: Vec<u8>,
@@ -312,7 +311,6 @@ impl InstructionUtils {
         )
     }
 
-    #[cfg(test)]
     pub fn clone_account_init_instruction(
         pubkey: Pubkey,
         total_data_len: u32,
@@ -334,7 +332,6 @@ impl InstructionUtils {
         )
     }
 
-    #[cfg(test)]
     pub fn clone_account_continue_instruction(
         pubkey: Pubkey,
         offset: u32,
@@ -356,7 +353,6 @@ impl InstructionUtils {
         )
     }
 
-    #[cfg(test)]
     pub fn cleanup_partial_clone_instruction(pubkey: Pubkey) -> Instruction {
         Instruction::new_with_bincode(
             crate::id(),
@@ -364,6 +360,61 @@ impl InstructionUtils {
             vec![
                 AccountMeta::new(validator_authority_id(), true),
                 AccountMeta::new(pubkey, false),
+            ],
+        )
+    }
+
+    // -----------------
+    // Program Cloning
+    // -----------------
+    pub fn finalize_program_from_buffer_instruction(
+        program: Pubkey,
+        buffer: Pubkey,
+        remote_slot: u64,
+    ) -> Instruction {
+        Instruction::new_with_bincode(
+            crate::id(),
+            &MagicBlockInstruction::FinalizeProgramFromBuffer { remote_slot },
+            vec![
+                AccountMeta::new_readonly(validator_authority_id(), true),
+                AccountMeta::new(program, false),
+                AccountMeta::new(buffer, false),
+            ],
+        )
+    }
+
+    pub fn finalize_v1_program_from_buffer_instruction(
+        program: Pubkey,
+        program_data: Pubkey,
+        buffer: Pubkey,
+        remote_slot: u64,
+        authority: Pubkey,
+    ) -> Instruction {
+        Instruction::new_with_bincode(
+            crate::id(),
+            &MagicBlockInstruction::FinalizeV1ProgramFromBuffer {
+                remote_slot,
+                authority,
+            },
+            vec![
+                AccountMeta::new_readonly(validator_authority_id(), true),
+                AccountMeta::new(program, false),
+                AccountMeta::new(program_data, false),
+                AccountMeta::new(buffer, false),
+            ],
+        )
+    }
+
+    pub fn set_program_authority_instruction(
+        program: Pubkey,
+        authority: Pubkey,
+    ) -> Instruction {
+        Instruction::new_with_bincode(
+            crate::id(),
+            &MagicBlockInstruction::SetProgramAuthority { authority },
+            vec![
+                AccountMeta::new_readonly(validator_authority_id(), true),
+                AccountMeta::new(program, false),
             ],
         )
     }
