@@ -715,6 +715,10 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         let fetch_start_slot =
             fetch_start_slot.unwrap_or_else(|| self.chain_slot.load());
 
+        // Track which pubkeys we created new entries for (Vacant)
+        // so we can roll them back if setup_subscriptions fails.
+        let mut newly_inserted = Vec::new();
+
         {
             let mut fetching = self.fetching_accounts.lock().unwrap();
             for &pubkey in pubkeys {
@@ -725,6 +729,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                     }
                     Entry::Vacant(entry) => {
                         entry.insert((fetch_start_slot, vec![sender]));
+                        newly_inserted.push(pubkey);
                     }
                 }
                 subscription_overrides.push((pubkey, receiver));
@@ -732,7 +737,36 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         }
 
         // Setup subscriptions first (to catch updates during fetch)
-        self.setup_subscriptions(&subscription_overrides).await?;
+        if let Err(err) =
+            self.setup_subscriptions(&subscription_overrides).await
+        {
+            // Rollback fetching_accounts entries we created to prevent
+            // accounts being stuck as pending indefinitely. We only
+            // remove entries we created (Vacant); entries that already
+            // existed (Occupied) belong to other callers whose fetch
+            // will clean them up.
+            let mut fetching = self
+                .fetching_accounts
+                .lock()
+                .expect("fetching_accounts lock poisoned");
+            for pubkey in &newly_inserted {
+                if let Some((_, senders)) = fetching.remove(pubkey) {
+                    for sender in senders {
+                        let _ = sender.send(Err(
+                            RemoteAccountProviderError::AccountSubscriptionsTaskFailed(
+                                format!(
+                                    "{}: subscription setup failed, rolling back",
+                                    pubkey
+                                ),
+                            ),
+                        ));
+                    }
+                }
+            }
+            // Receivers in subscription_overrides are dropped here,
+            // closing any pending channels
+            return Err(err);
+        }
 
         // Start the fetch
         let min_context_slot = fetch_start_slot;
@@ -809,10 +843,46 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                 .join(", ");
             trace!(pubkeys = pubkeys, "Subscribing to accounts");
         }
-        for (pubkey, _) in subscribe_and_fetch.iter() {
-            // Register the subscription for the pubkey (handles LRU cache and eviction first)
-            self.subscribe(pubkey).await?;
+        // Send all subscription requests in parallel (non-fail-fast)
+        // We use join_all instead of try_join_all to ensure ALL
+        // subscribe attempts complete, even if some fail. This
+        // prevents resource leaks in fetching_accounts and ensures
+        // all oneshot receivers get a response (either success or
+        // error).
+        let subscription_results = join_all(
+            subscribe_and_fetch
+                .iter()
+                .map(|(pubkey, _)| self.subscribe(pubkey)),
+        )
+        .await;
+
+        // Collect errors and log each individual failure
+        let mut errors = Vec::new();
+        for (result, (pubkey, _)) in
+            subscription_results.iter().zip(subscribe_and_fetch.iter())
+        {
+            if let Err(err) = result {
+                error!(
+                    pubkey = %pubkey, err = ?err,
+                    "Failed to subscribe to account"
+                );
+                errors.push(format!("{}: {}", pubkey, err));
+            }
         }
+
+        // Fail if ANY subscription failed
+        if !errors.is_empty() {
+            return Err(
+                RemoteAccountProviderError::AccountSubscriptionsTaskFailed(
+                    format!(
+                        "{} subscription(s) failed: [{}]",
+                        errors.len(),
+                        errors.join(", ")
+                    ),
+                ),
+            );
+        }
+
         Ok(())
     }
 
