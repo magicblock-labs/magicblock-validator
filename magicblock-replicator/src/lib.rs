@@ -4,8 +4,8 @@
 
 pub mod connection;
 pub mod error;
+pub mod nats;
 pub mod proto;
-pub mod tcp;
 
 #[cfg(test)]
 mod tests;
