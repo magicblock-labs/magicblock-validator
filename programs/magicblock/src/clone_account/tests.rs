@@ -35,7 +35,7 @@ fn setup_with_account(
     account.set_remote_slot(remote_slot);
     let mut map = HashMap::new();
     map.insert(pubkey, account);
-    ensure_started_validator(&mut map);
+    ensure_started_validator(&mut map, None);
     map
 }
 
@@ -156,7 +156,7 @@ fn test_clone_account_rejects_delegated_account() {
     account.set_delegated(true);
     let mut accounts = HashMap::new();
     accounts.insert(pubkey, account);
-    ensure_started_validator(&mut accounts);
+    ensure_started_validator(&mut accounts, None);
 
     let ix = InstructionUtils::clone_account_instruction(
         pubkey,
@@ -180,7 +180,7 @@ fn test_clone_account_rejects_ephemeral_account() {
     account.set_ephemeral(true);
     let mut accounts = HashMap::new();
     accounts.insert(pubkey, account);
-    ensure_started_validator(&mut accounts);
+    ensure_started_validator(&mut accounts, None);
 
     let ix = InstructionUtils::clone_account_instruction(
         pubkey,
@@ -257,7 +257,7 @@ fn test_clone_continue_writes_at_offset() {
     account.set_remote_slot(50);
     let mut accounts = HashMap::new();
     accounts.insert(pubkey, account);
-    ensure_started_validator(&mut accounts);
+    ensure_started_validator(&mut accounts, None);
 
     add_pending_clone(pubkey);
 
@@ -288,7 +288,7 @@ fn test_clone_continue_completes_clone() {
     account.set_remote_slot(50);
     let mut accounts = HashMap::new();
     accounts.insert(pubkey, account);
-    ensure_started_validator(&mut accounts);
+    ensure_started_validator(&mut accounts, None);
 
     add_pending_clone(pubkey);
 
