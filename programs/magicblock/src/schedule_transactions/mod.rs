@@ -39,8 +39,10 @@ pub(crate) fn check_commit_limits(
         if nonce >= COMMIT_LIMIT {
             ic_msg!(
                 invoke_context,
-                "ScheduleCommit ERR: commit limit exceeded for account {}, only undelegation is allowed",
-                account.pubkey
+                "ScheduleCommit ERR: commit limit exceeded for account {}: current commit nonce {} reached the limit of {}. Plain commits are blocked; to resolve this, schedule commit-and-undelegate with a delegated account as the payer",
+                account.pubkey,
+                nonce,
+                COMMIT_LIMIT
             );
             limit_exceeded = true;
         }

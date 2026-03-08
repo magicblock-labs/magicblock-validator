@@ -20,7 +20,10 @@ use crate::{
     magic_scheduled_base_intent::ScheduledIntentBundle,
     magic_sys::COMMIT_LIMIT,
     schedule_transactions::transaction_scheduler::TransactionScheduler,
-    test_utils::{ensure_started_validator, process_instruction},
+    test_utils::{
+        ensure_started_validator, process_instruction,
+        process_instruction_with_logs,
+    },
     utils::DELEGATION_PROGRAM_ID,
 };
 
@@ -1128,6 +1131,51 @@ mod tests {
             transaction_accounts,
             ix.accounts,
             Err(InstructionError::Custom(crate::magic_sys::COMMIT_LIMIT_ERR)),
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn test_schedule_commit_logs_commit_limit_resolution() {
+        init_logger!();
+
+        let payer =
+            Keypair::from_seed(b"schedule_commit_limit_log_msg___").unwrap();
+        let program = Pubkey::new_unique();
+        let committee = Pubkey::new_unique();
+
+        let (mut account_data, mut transaction_accounts) =
+            prepare_transaction_with_single_committee(
+                &payer, program, committee,
+            );
+
+        ensure_started_validator(&mut account_data, Some(COMMIT_LIMIT));
+
+        let ix = InstructionUtils::schedule_commit_instruction(
+            &payer.pubkey(),
+            vec![committee],
+        );
+        extend_transaction_accounts_from_ix(
+            &ix,
+            &mut account_data,
+            &mut transaction_accounts,
+        );
+
+        let (_, logs) = process_instruction_with_logs(
+            ix.data.as_slice(),
+            transaction_accounts,
+            ix.accounts,
+            Err(InstructionError::Custom(crate::magic_sys::COMMIT_LIMIT_ERR)),
+        );
+
+        let expected_log = format!(
+            "ScheduleCommit ERR: commit limit exceeded for account {}: current commit nonce {} reached the limit of {}. Plain commits are blocked; to resolve this, schedule commit-and-undelegate with a delegated account as the payer",
+            committee, COMMIT_LIMIT, COMMIT_LIMIT
+        );
+        assert!(
+            logs.iter().any(|log| log == &expected_log),
+            "expected commit-limit log not found in {:?}",
+            logs
         );
     }
 
