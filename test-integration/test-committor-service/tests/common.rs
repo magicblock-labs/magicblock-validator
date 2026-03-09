@@ -1,6 +1,9 @@
-use std::sync::{
-    atomic::{AtomicU64, Ordering},
-    Arc, Mutex,
+use std::{
+    collections::HashMap,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc, Mutex,
+    },
 };
 
 use async_trait::async_trait;
@@ -8,7 +11,7 @@ use magicblock_committor_service::{
     actions_callback_executor::{ActionResult, ActionsCallbackExecutor},
     intent_executor::{
         task_info_fetcher::{
-            ResetType, TaskInfoFetcher, TaskInfoFetcherError,
+            CacheTaskInfoFetcher, TaskInfoFetcher, TaskInfoFetcherError,
             TaskInfoFetcherResult,
         },
         IntentExecutorImpl,
@@ -43,6 +46,7 @@ pub async fn create_test_client() -> MagicblockRpcClient {
 pub struct TestFixture {
     pub rpc_client: MagicblockRpcClient,
     pub table_mania: TableMania,
+    #[allow(dead_code)]
     pub authority: Keypair,
     pub compute_budget_config: ComputeBudgetConfig,
 }
@@ -118,18 +122,25 @@ impl TestFixture {
     }
 
     #[allow(dead_code)]
-    pub fn create_task_info_fetcher(&self) -> Arc<MockTaskInfoFetcher> {
-        Arc::new(MockTaskInfoFetcher(self.rpc_client.clone()))
+    pub fn create_task_info_fetcher(
+        &self,
+    ) -> Arc<CacheTaskInfoFetcher<MockTaskInfoFetcher>> {
+        Arc::new(CacheTaskInfoFetcher::new(MockTaskInfoFetcher(
+            self.rpc_client.clone(),
+        )))
     }
 }
 
+type CallbackCalls = Vec<(Vec<BaseActionCallback>, ActionResult)>;
+
 #[derive(Clone, Default)]
 pub struct MockActionsCallbackExecutor {
-    pub calls: Arc<Mutex<Vec<(Vec<BaseActionCallback>, ActionResult)>>>,
+    pub calls: Arc<Mutex<CallbackCalls>>,
 }
 
 impl MockActionsCallbackExecutor {
-    pub fn calls(&self) -> Vec<(Vec<BaseActionCallback>, ActionResult)> {
+    #[allow(dead_code)]
+    pub fn calls(&self) -> CallbackCalls {
         self.calls.lock().unwrap().clone()
     }
 }
@@ -148,7 +159,15 @@ pub struct MockTaskInfoFetcher(MagicblockRpcClient);
 
 #[async_trait]
 impl TaskInfoFetcher for MockTaskInfoFetcher {
-    async fn fetch_next_commit_ids(
+    async fn fetch_next_commit_nonces(
+        &self,
+        pubkeys: &[Pubkey],
+        _: u64,
+    ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>> {
+        Ok(pubkeys.iter().map(|pubkey| (*pubkey, 0)).collect())
+    }
+
+    async fn fetch_current_commit_nonces(
         &self,
         pubkeys: &[Pubkey],
         _: u64,
@@ -163,12 +182,6 @@ impl TaskInfoFetcher for MockTaskInfoFetcher {
     ) -> TaskInfoFetcherResult<Vec<Pubkey>> {
         Ok(pubkeys.to_vec())
     }
-
-    fn peek_commit_id(&self, _pubkey: &Pubkey) -> Option<u64> {
-        None
-    }
-
-    fn reset(&self, _: ResetType) {}
 
     async fn get_base_accounts(
         &self,

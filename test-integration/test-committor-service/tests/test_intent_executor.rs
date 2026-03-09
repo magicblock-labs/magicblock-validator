@@ -1217,8 +1217,9 @@ async fn test_action_callback_fired_on_timeout() {
 
     // Build executor with zero timeout so actions time out before execution
     let callback_executor = MockActionsCallbackExecutor::default();
-    let task_info_fetcher =
-        Arc::new(CacheTaskInfoFetcher::new(fixture.rpc_client.clone()));
+    let task_info_fetcher = Arc::new(CacheTaskInfoFetcher::new(
+        RpcTaskInfoFetcher::new(fixture.rpc_client.clone()),
+    ));
     let mut intent_executor = IntentExecutorImpl::new(
         fixture.rpc_client.clone(),
         fixture.create_transaction_preparator(),
