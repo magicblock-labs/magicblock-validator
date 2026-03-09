@@ -1,6 +1,6 @@
 use std::collections::VecDeque;
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Local, Utc};
 use tracing::Level;
 
 use crate::utils::url_encode;
@@ -104,8 +104,29 @@ pub struct TransactionEntry {
     pub signature: String,
     pub slot: u64,
     pub success: bool,
-    pub timestamp: DateTime<Utc>,
+    pub timestamp: DateTime<Local>,
     pub accounts: Vec<String>,
+}
+
+#[derive(Clone, Debug)]
+pub struct TransactionAccount {
+    pub pubkey: String,
+    pub is_signer: bool,
+    pub is_writable: bool,
+}
+
+impl TransactionAccount {
+    pub fn new(
+        pubkey: impl Into<String>,
+        is_signer: bool,
+        is_writable: bool,
+    ) -> Self {
+        Self {
+            pubkey: pubkey.into(),
+            is_signer,
+            is_writable,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -116,7 +137,7 @@ pub struct TransactionDetail {
     pub fee: u64,
     pub compute_units: Option<u64>,
     pub logs: Vec<String>,
-    pub accounts: Vec<String>,
+    pub accounts: Vec<TransactionAccount>,
     pub error: Option<String>,
     pub explorer_url: String,
     pub selected_account: Option<usize>,
@@ -161,7 +182,7 @@ impl TransactionDetail {
     pub fn selected_account_address(&self) -> Option<&str> {
         self.selected_account
             .and_then(|idx| self.accounts.get(idx))
-            .map(String::as_str)
+            .map(|account| account.pubkey.as_str())
     }
 }
 
@@ -475,7 +496,7 @@ fn contains_ignore_ascii_case(haystack: &str, needle: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use chrono::Utc;
+    use chrono::Local;
 
     use super::{TransactionEntry, TuiConfig, TuiState};
 
@@ -507,7 +528,7 @@ mod tests {
             signature: signature.to_string(),
             slot: 1,
             success: true,
-            timestamp: Utc::now(),
+            timestamp: Local::now(),
             accounts: accounts.into_iter().map(ToString::to_string).collect(),
         }
     }

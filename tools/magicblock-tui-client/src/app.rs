@@ -4,7 +4,7 @@ use std::{
     time::Duration,
 };
 
-use chrono::Utc;
+use chrono::Local;
 use crossterm::{
     cursor,
     event::Event,
@@ -33,7 +33,8 @@ use tracing::Level;
 use crate::{
     events::{handle_event, poll_event, EventAction},
     state::{
-        LogEntry, TransactionDetail, TransactionEntry, TuiConfig, TuiState,
+        LogEntry, TransactionAccount, TransactionDetail, TransactionEntry,
+        TuiConfig, TuiState,
     },
     ui,
     utils::url_encode,
@@ -532,7 +533,37 @@ struct TransactionData {
 #[derive(Debug, Deserialize)]
 struct TransactionMessage {
     #[serde(rename = "accountKeys")]
-    account_keys: Vec<String>,
+    account_keys: Vec<TransactionAccountKey>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum TransactionAccountKey {
+    Raw(String),
+    Parsed(ParsedTransactionAccountKey),
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ParsedTransactionAccountKey {
+    pubkey: String,
+    #[serde(default)]
+    signer: bool,
+    #[serde(default)]
+    writable: bool,
+}
+
+impl TransactionAccountKey {
+    fn into_transaction_account(self) -> TransactionAccount {
+        match self {
+            Self::Raw(pubkey) => TransactionAccount::new(pubkey, false, false),
+            Self::Parsed(account) => TransactionAccount::new(
+                account.pubkey,
+                account.signer,
+                account.writable,
+            ),
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -665,7 +696,7 @@ async fn fetch_transaction_detail(
         "params": [
             signature,
             {
-                "encoding": "json",
+                "encoding": "jsonParsed",
                 "maxSupportedTransactionVersion": 255
             }
         ]
@@ -696,7 +727,13 @@ async fn fetch_transaction_detail(
     let success = meta.map(|m| m.err.is_none()).unwrap_or(true);
     let error = meta.and_then(|m| m.err.as_ref()).map(|e| format!("{}", e));
 
-    let accounts = tx.transaction.message.account_keys;
+    let accounts = tx
+        .transaction
+        .message
+        .account_keys
+        .into_iter()
+        .map(TransactionAccountKey::into_transaction_account)
+        .collect::<Vec<_>>();
     let selected_account = if accounts.is_empty() { None } else { Some(0) };
 
     Ok(TransactionDetail {
@@ -808,7 +845,7 @@ async fn fetch_block_transactions(
         return Ok(None);
     };
 
-    let timestamp = Utc::now();
+    let timestamp = Local::now();
     let entries = block
         .transactions
         .into_iter()

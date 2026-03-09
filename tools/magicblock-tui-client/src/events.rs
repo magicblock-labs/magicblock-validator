@@ -210,7 +210,10 @@ mod tests {
     use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 
     use super::{handle_event, EventAction};
-    use crate::state::{Tab, TransactionDetail, TuiConfig, TuiState, ViewMode};
+    use crate::state::{
+        Tab, TransactionAccount, TransactionDetail, TuiConfig, TuiState,
+        ViewMode,
+    };
 
     fn config() -> TuiConfig {
         TuiConfig {
@@ -230,6 +233,10 @@ mod tests {
 
     fn ctrl_c() -> Event {
         Event::Key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL))
+    }
+
+    fn account(pubkey: &str) -> TransactionAccount {
+        TransactionAccount::new(pubkey, false, false)
     }
 
     #[test]
@@ -276,7 +283,7 @@ mod tests {
             fee: 0,
             compute_units: None,
             logs: vec![],
-            accounts: vec!["11111111111111111111111111111111".to_string()],
+            accounts: vec![account("11111111111111111111111111111111")],
             error: None,
             explorer_url: "https://explorer.solana.com/tx/sig".to_string(),
             selected_account: Some(0),
@@ -310,7 +317,7 @@ mod tests {
             fee: 0,
             compute_units: None,
             logs: vec![],
-            accounts: vec!["acc-1".to_string(), "acc-2".to_string()],
+            accounts: vec![account("acc-1"), account("acc-2")],
             error: None,
             explorer_url: "https://explorer.solana.com/tx/sig".to_string(),
             selected_account: Some(0),
