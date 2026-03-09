@@ -207,6 +207,15 @@ impl<CC: BaseIntentCommittor> BaseIntentCommittor for CommittorServiceExt<CC> {
         self.inner.get_transaction(signature)
     }
 
+    fn fetch_current_commit_nonces(
+        &self,
+        pubkeys: &[Pubkey],
+        min_context_slot: u64,
+    ) -> oneshot::Receiver<CommittorServiceResult<HashMap<Pubkey, u64>>> {
+        self.inner
+            .fetch_current_commit_nonces(pubkeys, min_context_slot)
+    }
+
     fn stop(&self) {
         self.inner.stop();
     }

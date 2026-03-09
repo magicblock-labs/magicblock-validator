@@ -5,7 +5,7 @@ use dlp::{
     AccountSizeClass,
 };
 use magicblock_committor_program::Chunks;
-use magicblock_program::magic_scheduled_base_intent::CommittedAccount;
+use magicblock_core::intent::CommittedAccount;
 use solana_account::{Account, ReadableAccount};
 use solana_instruction::Instruction;
 use solana_pubkey::Pubkey;

@@ -6,8 +6,8 @@ use magicblock_table_mania::TableMania;
 use crate::{
     actions_callback_executor::ActionsCallbackExecutor,
     intent_executor::{
-        task_info_fetcher::CacheTaskInfoFetcher, IntentExecutor,
-        IntentExecutorImpl,
+        task_info_fetcher::{CacheTaskInfoFetcher, RpcTaskInfoFetcher},
+        IntentExecutor, IntentExecutorImpl,
     },
     transaction_preparator::TransactionPreparatorImpl,
     ComputeBudgetConfig,
@@ -24,7 +24,7 @@ pub struct IntentExecutorFactoryImpl<A> {
     pub rpc_client: MagicblockRpcClient,
     pub table_mania: TableMania,
     pub compute_budget_config: ComputeBudgetConfig,
-    pub commit_id_tracker: Arc<CacheTaskInfoFetcher>,
+    pub task_info_fetcher: Arc<CacheTaskInfoFetcher<RpcTaskInfoFetcher>>,
     pub actions_callback_executor: A,
     pub actions_timeout: Duration,
 }
@@ -33,7 +33,7 @@ impl<A: ActionsCallbackExecutor> IntentExecutorFactory
     for IntentExecutorFactoryImpl<A>
 {
     type Executor =
-        IntentExecutorImpl<TransactionPreparatorImpl, CacheTaskInfoFetcher, A>;
+        IntentExecutorImpl<TransactionPreparatorImpl, RpcTaskInfoFetcher, A>;
 
     fn create_instance(&self) -> Self::Executor {
         let transaction_preparator = TransactionPreparatorImpl::new(
@@ -41,10 +41,10 @@ impl<A: ActionsCallbackExecutor> IntentExecutorFactory
             self.table_mania.clone(),
             self.compute_budget_config.clone(),
         );
-        IntentExecutorImpl::new(
+        Self::Executor::new(
             self.rpc_client.clone(),
             transaction_preparator,
-            self.commit_id_tracker.clone(),
+            self.task_info_fetcher.clone(),
             self.actions_callback_executor.clone(),
             self.actions_timeout,
         )

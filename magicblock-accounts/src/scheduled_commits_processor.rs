@@ -19,6 +19,7 @@ use magicblock_committor_service::{
     intent_executor::ExecutionOutput, BaseIntentCommittor, CommittorService,
 };
 use magicblock_core::link::transactions::TransactionSchedulerHandle;
+use magicblock_metrics::metrics;
 use magicblock_program::{
     magic_scheduled_base_intent::ScheduledIntentBundle,
     register_scheduled_commit_sent, SentCommit, TransactionScheduler,
@@ -275,6 +276,7 @@ impl ScheduledCommitsProcessor for ScheduledCommitsProcessorImpl {
         if intent_bundles.is_empty() {
             return Ok(());
         }
+        metrics::inc_committor_intents_count_by(intent_bundles.len() as u64);
 
         // Add metas for intent we schedule
         let pubkeys_being_undelegated = {

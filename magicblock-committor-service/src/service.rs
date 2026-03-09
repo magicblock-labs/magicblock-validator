@@ -1,4 +1,4 @@
-use std::{path::Path, sync::Arc, time::Instant};
+use std::{collections::HashMap, path::Path, sync::Arc, time::Instant};
 
 use magicblock_program::magic_scheduled_base_intent::ScheduledIntentBundle;
 use solana_keypair::Keypair;
@@ -20,7 +20,7 @@ use crate::{
     actions_callback_executor::ActionsCallbackExecutor,
     committor_processor::CommittorProcessor,
     config::ChainConfig,
-    error::CommittorServiceResult,
+    error::{CommittorServiceError, CommittorServiceResult},
     intent_execution_manager::BroadcastedIntentExecutionResult,
     persist::{CommitStatusRow, MessageSignatures},
     pubkeys_provider::{provide_committee_pubkeys, provide_common_pubkeys},
@@ -83,6 +83,19 @@ pub enum CommittorMessage {
         respond_to: oneshot::Sender<
             broadcast::Receiver<BroadcastedIntentExecutionResult>,
         >,
+    },
+    FetchCurrentCommitNonces {
+        respond_to:
+            oneshot::Sender<CommittorServiceResult<HashMap<Pubkey, u64>>>,
+        pubkeys: Vec<Pubkey>,
+        min_context_slot: u64,
+    },
+    FetchCurrentCommitNoncesSync {
+        respond_to: std::sync::mpsc::Sender<
+            CommittorServiceResult<HashMap<Pubkey, u64>>,
+        >,
+        pubkeys: Vec<Pubkey>,
+        min_context_slot: u64,
     },
 }
 
@@ -231,6 +244,40 @@ impl CommittorActor {
                     error!(message_type = "SubscribeForResults", error = ?err, "Failed to send response");
                 }
             }
+            FetchCurrentCommitNonces {
+                respond_to,
+                pubkeys,
+                min_context_slot,
+            } => {
+                let processor = self.processor.clone();
+                tokio::spawn(async move {
+                    let result = processor
+                        .fetch_current_commit_nonces(&pubkeys, min_context_slot)
+                        .await;
+                    if let Err(err) = respond_to
+                        .send(result.map_err(CommittorServiceError::from))
+                    {
+                        error!(message_type = "FetchCurrentCommitNonces", error = ?err, "Failed to send response");
+                    }
+                });
+            }
+            FetchCurrentCommitNoncesSync {
+                respond_to,
+                pubkeys,
+                min_context_slot,
+            } => {
+                let processor = self.processor.clone();
+                tokio::spawn(async move {
+                    let result = processor
+                        .fetch_current_commit_nonces(&pubkeys, min_context_slot)
+                        .await;
+                    if let Err(err) = respond_to
+                        .send(result.map_err(CommittorServiceError::from))
+                    {
+                        error!(message_type = "FetchCurrentCommitNoncesSync", error = ?err, "Failed to send response");
+                    }
+                });
+            }
         }
     }
 
@@ -334,6 +381,21 @@ impl CommittorService {
         rx
     }
 
+    pub fn fetch_current_commit_nonces_sync(
+        &self,
+        pubkeys: &[Pubkey],
+        min_context_slot: u64,
+    ) -> std::sync::mpsc::Receiver<CommittorServiceResult<HashMap<Pubkey, u64>>>
+    {
+        let (tx, rx) = std::sync::mpsc::channel();
+        self.try_send(CommittorMessage::FetchCurrentCommitNoncesSync {
+            respond_to: tx,
+            pubkeys: pubkeys.to_vec(),
+            min_context_slot,
+        });
+        rx
+    }
+
     fn try_send(&self, msg: CommittorMessage) {
         if let Err(e) = self.sender.try_send(msg) {
             match e {
@@ -429,6 +491,21 @@ impl BaseIntentCommittor for CommittorService {
         rx
     }
 
+    fn fetch_current_commit_nonces(
+        &self,
+        pubkeys: &[Pubkey],
+        min_context_slot: u64,
+    ) -> oneshot::Receiver<CommittorServiceResult<HashMap<Pubkey, u64>>> {
+        let (tx, rx) = oneshot::channel();
+        self.try_send(CommittorMessage::FetchCurrentCommitNonces {
+            respond_to: tx,
+            pubkeys: pubkeys.to_vec(),
+            min_context_slot,
+        });
+
+        rx
+    }
+
     fn stop(&self) {
         self.cancel_token.cancel();
     }
@@ -476,6 +553,12 @@ pub trait BaseIntentCommittor: Send + Sync + 'static {
     ) -> oneshot::Receiver<
         CommittorServiceResult<EncodedConfirmedTransactionWithStatusMeta>,
     >;
+
+    fn fetch_current_commit_nonces(
+        &self,
+        pubkeys: &[Pubkey],
+        min_context_slot: u64,
+    ) -> oneshot::Receiver<CommittorServiceResult<HashMap<Pubkey, u64>>>;
 
     /// Stops Committor service
     fn stop(&self);

@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 
+use magicblock_core::intent::CommittedAccount;
 // no direct token remap helpers needed here; handled in CommittedAccount builder
 use solana_account::{state_traits::StateMut, ReadableAccount};
 use solana_instruction::error::InstructionError;
@@ -10,10 +11,9 @@ use solana_pubkey::Pubkey;
 use crate::{
     magic_scheduled_base_intent::{
         validate_commit_schedule_permissions, CommitAndUndelegate, CommitType,
-        CommittedAccount, MagicBaseIntent, ScheduledIntentBundle,
-        UndelegateType,
+        MagicBaseIntent, ScheduledIntentBundle, UndelegateType,
     },
-    schedule_transactions,
+    schedule_transactions::{self, check_commit_limits},
     utils::{
         account_actions::mark_account_as_undelegated,
         accounts::{
@@ -231,6 +231,13 @@ pub(crate) fn process_schedule_commit(
                 acc_pubkey
             );
         }
+    }
+
+    // NOTE:
+    // We validate commit nonces only for plain commits
+    // If accounts are undelegated we don't want to fail
+    if !opts.request_undelegation {
+        check_commit_limits(&committed_accounts, invoke_context)?;
     }
 
     // NOTE: this is only protected by all the above checks however if the

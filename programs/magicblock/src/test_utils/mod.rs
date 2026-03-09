@@ -8,12 +8,13 @@ use std::{
     },
 };
 
-use magicblock_core::traits::PersistsAccountModData;
+use magicblock_core::{intent::CommittedAccount, traits::MagicSys};
 use magicblock_magic_program_api::{id, EPHEMERAL_VAULT_PUBKEY};
 use solana_account::AccountSharedData;
 use solana_instruction::{error::InstructionError, AccountMeta};
 use solana_log_collector::log::debug;
 use solana_program_runtime::invoke_context::mock_process_instruction;
+use solana_pubkey::Pubkey;
 use solana_sdk_ids::system_program;
 
 use self::magicblock_processor::Entrypoint;
@@ -24,7 +25,10 @@ pub const AUTHORITY_BALANCE: u64 = u64::MAX / 2;
 pub const COUNTER_PROGRAM_ID: Pubkey =
     Pubkey::from_str_const("2jQZbSfAfqT5nZHGrLpDG2vXuEGtTgZYnNy7AZEjMCYz");
 
-pub fn ensure_started_validator(map: &mut HashMap<Pubkey, AccountSharedData>) {
+pub fn ensure_started_validator(
+    map: &mut HashMap<Pubkey, AccountSharedData>,
+    nonce: Option<u64>,
+) {
     validator::generate_validator_authority_if_needed();
     let validator_authority_id = validator::validator_authority_id();
     map.entry(validator_authority_id).or_insert_with(|| {
@@ -38,8 +42,8 @@ pub fn ensure_started_validator(map: &mut HashMap<Pubkey, AccountSharedData>) {
         vault
     });
 
-    let stub = Arc::new(PersisterStub::default());
-    init_persister(stub);
+    let stub = Arc::new(MagicSysStub::with_nonce(nonce.unwrap_or(0)));
+    init_magic_sys(stub);
 
     validator::ensure_started_up();
 }
@@ -63,27 +67,38 @@ pub fn process_instruction(
     )
 }
 
-pub struct PersisterStub {
+pub struct MagicSysStub {
     id: u64,
+    nonce: u64,
 }
 
-impl Default for PersisterStub {
+impl Default for MagicSysStub {
     fn default() -> Self {
         static ID: AtomicU64 = AtomicU64::new(0);
 
         Self {
             id: ID.fetch_add(1, Ordering::Relaxed),
+            nonce: 0,
         }
     }
 }
 
-impl fmt::Display for PersisterStub {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "PersisterStub({})", self.id)
+impl MagicSysStub {
+    pub fn with_nonce(nonce: u64) -> Self {
+        Self {
+            nonce,
+            ..Self::default()
+        }
     }
 }
 
-impl PersistsAccountModData for PersisterStub {
+impl fmt::Display for MagicSysStub {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "MagicSysStub({})", self.id)
+    }
+}
+
+impl MagicSys for MagicSysStub {
     fn persist(&self, id: u64, data: Vec<u8>) -> Result<(), Box<dyn Error>> {
         debug!("Persisting data for id '{}' with len {}", id, data.len());
         Ok(())
@@ -91,5 +106,12 @@ impl PersistsAccountModData for PersisterStub {
 
     fn load(&self, _id: u64) -> Result<Option<Vec<u8>>, Box<dyn Error>> {
         Err("Loading from ledger not supported in tests".into())
+    }
+
+    fn fetch_current_commit_nonces(
+        &self,
+        commits: &[CommittedAccount],
+    ) -> Result<HashMap<Pubkey, u64>, InstructionError> {
+        Ok(commits.iter().map(|c| (c.pubkey, self.nonce)).collect())
     }
 }

@@ -57,6 +57,7 @@ tokio-util = { workspace = true }
 
 [dev-dependencies]
 solana-signature = { workspace = true, features = ["rand"] }
+serde_json = { workspace = true }
 lazy_static = { workspace = true }
 rand = { workspace = true }
 tempfile = { workspace = true }

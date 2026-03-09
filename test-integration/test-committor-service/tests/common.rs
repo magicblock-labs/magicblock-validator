@@ -1,14 +1,9 @@
-use std::{
-    collections::HashMap,
-    sync::{
-        atomic::{AtomicU64, Ordering},
-        Arc,
-    },
+use std::sync::{
+    atomic::{AtomicU64, Ordering},
+    Arc, Mutex,
 };
 
 use async_trait::async_trait;
-use std::sync::Mutex;
-
 use magicblock_committor_service::{
     actions_callback_executor::{ActionResult, ActionsCallbackExecutor},
     intent_executor::{
@@ -24,9 +19,8 @@ use magicblock_committor_service::{
     },
     ComputeBudgetConfig, DEFAULT_ACTIONS_TIMEOUT,
 };
-use magicblock_program::magic_scheduled_base_intent::{
-    BaseActionCallback, CommittedAccount,
-};
+use magicblock_core::intent::CommittedAccount;
+use magicblock_program::magic_scheduled_base_intent::BaseActionCallback;
 use magicblock_rpc_client::MagicblockRpcClient;
 use magicblock_table_mania::{GarbageCollectorConfig, TableMania};
 use solana_account::Account;

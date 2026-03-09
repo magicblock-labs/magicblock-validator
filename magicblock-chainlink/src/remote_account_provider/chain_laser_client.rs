@@ -53,6 +53,9 @@ pub struct ChainLaserClientImpl {
     subscriptions: SharedSubscriptions,
     /// Client identifier
     client_id: String,
+    /// Whether this client implementation supports backfilling historical data for accounts that
+    /// were updated before a subscription is made.
+    supports_backfill: bool,
 }
 
 impl ChainLaserClientImpl {
@@ -67,6 +70,7 @@ impl ChainLaserClientImpl {
         rpc_client: ChainRpcClientImpl,
         grpc_config: &GrpcConfig,
     ) -> Self {
+        let supports_backfill = slots.supports_backfill;
         let (actor, messages, updates, subscriptions) =
             ChainLaserActor::new_from_url(
                 pubsub_url,
@@ -83,6 +87,7 @@ impl ChainLaserClientImpl {
             messages,
             subscriptions,
             client_id,
+            supports_backfill,
         };
         tokio::spawn(actor.run());
         client
@@ -187,7 +192,10 @@ impl ChainPubsubClient for ChainLaserClientImpl {
     }
 
     fn subs_immediately(&self) -> bool {
-        false
+        // Even if the subscription is not made immediately, for a back filling gRPC service we
+        // are sure to not miss a subscription which is equivalent to the behavior when
+        // subscribing immediately.
+        self.supports_backfill
     }
 
     fn id(&self) -> &str {

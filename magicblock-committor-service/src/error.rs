@@ -3,7 +3,10 @@ use solana_signature::Signature;
 use solana_transaction_error::TransactionError;
 use thiserror::Error;
 
-use crate::intent_execution_manager::IntentExecutionManagerError;
+use crate::{
+    intent_execution_manager::IntentExecutionManagerError,
+    intent_executor::task_info_fetcher::TaskInfoFetcherError,
+};
 
 pub type CommittorServiceResult<T, E = CommittorServiceError> = Result<T, E>;
 
@@ -25,6 +28,9 @@ pub enum CommittorServiceError {
 
     #[error("IntentExecutionManagerError: {0} ({0:?})")]
     IntentExecutionManagerError(#[from] IntentExecutionManagerError),
+
+    #[error("TaskInfoFetcherError: {0} ({0:?})")]
+    TaskInfoFetcherError(#[from] TaskInfoFetcherError),
 
     #[error(
         "Failed send and confirm transaction to {0} on chain: {1} ({1:?})"

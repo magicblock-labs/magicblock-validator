@@ -430,8 +430,9 @@ pub type TaskStrategistResult<T, E = TaskStrategistError> = Result<T, E>;
 mod tests {
     use std::{collections::HashMap, sync::Arc};
 
+    use magicblock_core::intent::CommittedAccount;
     use magicblock_program::magic_scheduled_base_intent::{
-        BaseAction, CommittedAccount, ProgramArgs,
+        BaseAction, ProgramArgs,
     };
     use solana_account::Account;
     use solana_program::system_program;
@@ -442,7 +443,7 @@ mod tests {
     use crate::{
         intent_execution_manager::intent_scheduler::create_test_intent,
         intent_executor::task_info_fetcher::{
-            ResetType, TaskInfoFetcher, TaskInfoFetcherResult,
+            TaskInfoFetcher, TaskInfoFetcherResult,
         },
         persist::IntentPersisterImpl,
         tasks::{
@@ -460,7 +461,15 @@ mod tests {
 
     #[async_trait::async_trait]
     impl TaskInfoFetcher for MockInfoFetcher {
-        async fn fetch_next_commit_ids(
+        async fn fetch_next_commit_nonces(
+            &self,
+            pubkeys: &[Pubkey],
+            _: u64,
+        ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>> {
+            Ok(pubkeys.iter().map(|pubkey| (*pubkey, 0)).collect())
+        }
+
+        async fn fetch_current_commit_nonces(
             &self,
             pubkeys: &[Pubkey],
             _: u64,
@@ -475,12 +484,6 @@ mod tests {
         ) -> TaskInfoFetcherResult<Vec<Pubkey>> {
             Ok(pubkeys.iter().map(|_| Pubkey::new_unique()).collect())
         }
-
-        fn peek_commit_id(&self, _pubkey: &Pubkey) -> Option<u64> {
-            Some(0)
-        }
-
-        fn reset(&self, _: ResetType) {}
 
         async fn get_base_accounts(
             &self,

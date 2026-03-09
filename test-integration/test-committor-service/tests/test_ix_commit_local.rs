@@ -12,9 +12,10 @@ use magicblock_committor_service::{
     service_ext::{BaseIntentCommittorExt, CommittorServiceExt},
     BaseIntentCommittor, CommittorService, ComputeBudgetConfig,
 };
+use magicblock_core::intent::CommittedAccount;
 use magicblock_program::magic_scheduled_base_intent::{
-    CommitAndUndelegate, CommitType, CommittedAccount, MagicBaseIntent,
-    MagicIntentBundle, ScheduledIntentBundle, UndelegateType,
+    CommitAndUndelegate, CommitType, MagicBaseIntent, MagicIntentBundle,
+    ScheduledIntentBundle, UndelegateType,
 };
 use magicblock_rpc_client::MagicblockRpcClient;
 use program_flexi_counter::state::FlexiCounter;

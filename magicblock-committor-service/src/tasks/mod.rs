@@ -17,9 +17,10 @@ use magicblock_committor_program::{
     },
     pdas, ChangesetChunks, Chunks,
 };
+use magicblock_core::intent::CommittedAccount;
 use magicblock_metrics::metrics::LabelValue;
 use magicblock_program::magic_scheduled_base_intent::{
-    BaseAction, BaseActionCallback, CommittedAccount,
+    BaseAction, BaseActionCallback,
 };
 use solana_account::Account;
 use solana_instruction::{AccountMeta, Instruction};
@@ -531,6 +532,7 @@ impl CleanupTask {
 #[cfg(test)]
 mod serialization_safety_test {
 
+    use magicblock_core::intent::CommittedAccount;
     use magicblock_program::{
         args::ShortAccountMeta, magic_scheduled_base_intent::ProgramArgs,
     };
