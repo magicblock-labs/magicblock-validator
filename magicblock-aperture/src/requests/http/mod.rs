@@ -183,6 +183,7 @@ impl HttpDispatcher {
         sigverify: bool,
         replace_blockhash: bool,
     ) -> RpcResult<WithEncoded<SanitizedTransaction>> {
+        // parse the string as bincode serialized bytes
         let encoded = match encoding {
             UiTransactionEncoding::Base58 => {
                 bs58::decode(txn).into_vec().map_err(RpcError::parse_error)
