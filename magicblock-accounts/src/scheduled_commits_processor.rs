@@ -18,9 +18,10 @@ use magicblock_committor_service::{
     intent_execution_manager::BroadcastedIntentExecutionResult,
     intent_executor::ExecutionOutput, BaseIntentCommittor, CommittorService,
 };
-use magicblock_metrics::metrics;
 use magicblock_core::link::transactions::{
     with_encoded, TransactionSchedulerHandle,
+};
+use magicblock_metrics::metrics;
 use magicblock_program::{
     magic_scheduled_base_intent::ScheduledIntentBundle,
     register_scheduled_commit_sent, SentCommit, TransactionScheduler,
