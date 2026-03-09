@@ -1,8 +1,8 @@
 lifecycle = "ephemeral"
-remotes = ["http://0.0.0.0:8899", "ws://0.0.0.0:8900"]
+remotes = ["http://0.0.0.0:7799", "ws://0.0.0.0:7800"]
 
 [aperture]
-listen = "0.0.0.0:7799"
+listen = "0.0.0.0:8899"
 
 [commit]
 compute-unit-price = 1_000_000
