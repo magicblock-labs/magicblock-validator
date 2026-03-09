@@ -54,7 +54,23 @@ pub fn process_instruction(
     instruction_accounts: Vec<AccountMeta>,
     expected_result: Result<(), InstructionError>,
 ) -> Vec<AccountSharedData> {
-    mock_process_instruction(
+    process_instruction_with_logs(
+        instruction_data,
+        transaction_accounts,
+        instruction_accounts,
+        expected_result,
+    )
+    .0
+}
+
+pub fn process_instruction_with_logs(
+    instruction_data: &[u8],
+    transaction_accounts: Vec<(Pubkey, AccountSharedData)>,
+    instruction_accounts: Vec<AccountMeta>,
+    expected_result: Result<(), InstructionError>,
+) -> (Vec<AccountSharedData>, Vec<String>) {
+    let mut logs = Vec::new();
+    let accounts = mock_process_instruction(
         &crate::id(),
         Vec::new(),
         instruction_data,
@@ -63,8 +79,17 @@ pub fn process_instruction(
         expected_result,
         Entrypoint::vm,
         |_invoke_context| {},
-        |_invoke_context| {},
-    )
+        |invoke_context| {
+            logs = invoke_context
+                .get_log_collector()
+                .map(|collector| {
+                    collector.borrow().get_recorded_content().to_vec()
+                })
+                .unwrap_or_default();
+        },
+    );
+
+    (accounts, logs)
 }
 
 pub struct MagicSysStub {
