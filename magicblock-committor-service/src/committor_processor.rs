@@ -21,9 +21,12 @@ use crate::{
     intent_execution_manager::{
         db::DummyDB, BroadcastedIntentExecutionResult, IntentExecutionManager,
     },
-    intent_executor::task_info_fetcher::{
-        CacheTaskInfoFetcher, RpcTaskInfoFetcher, TaskInfoFetcher,
-        TaskInfoFetcherResult,
+    intent_executor::{
+        intent_executor_factory::ExecutorConfig,
+        task_info_fetcher::{
+            CacheTaskInfoFetcher, RpcTaskInfoFetcher, TaskInfoFetcher,
+            TaskInfoFetcherResult,
+        },
     },
     persist::{
         CommitStatusRow, IntentPersister, IntentPersisterImpl,
@@ -78,9 +81,13 @@ impl CommittorProcessor {
             task_info_fetcher.clone(),
             Some(persister.clone()),
             table_mania.clone(),
-            chain_config.compute_budget_config.clone(),
+            ExecutorConfig {
+                compute_budget_config: chain_config
+                    .compute_budget_config
+                    .clone(),
+                actions_timeout: chain_config.actions_timeout,
+            },
             actions_callback_executor,
-            chain_config.actions_timeout,
         );
 
         Ok(Self {

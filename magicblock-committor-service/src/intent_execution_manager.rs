@@ -2,7 +2,7 @@ pub(crate) mod db;
 mod intent_execution_engine;
 pub mod intent_scheduler;
 
-use std::{sync::Arc, time::Duration};
+use std::sync::Arc;
 
 pub use intent_execution_engine::BroadcastedIntentExecutionResult;
 use magicblock_program::magic_scheduled_base_intent::ScheduledIntentBundle;
@@ -17,11 +17,10 @@ use crate::{
         intent_execution_engine::{IntentExecutionEngine, ResultSubscriber},
     },
     intent_executor::{
-        intent_executor_factory::IntentExecutorFactoryImpl,
+        intent_executor_factory::{ExecutorConfig, IntentExecutorFactoryImpl},
         task_info_fetcher::{CacheTaskInfoFetcher, RpcTaskInfoFetcher},
     },
     persist::IntentPersister,
-    ComputeBudgetConfig,
 };
 
 pub struct IntentExecutionManager<D: DB> {
@@ -37,19 +36,17 @@ impl<D: DB> IntentExecutionManager<D> {
         task_info_fetcher: Arc<CacheTaskInfoFetcher<RpcTaskInfoFetcher>>,
         intent_persister: Option<P>,
         table_mania: TableMania,
-        compute_budget_config: ComputeBudgetConfig,
+        executor_config: ExecutorConfig,
         actions_callback_executor: A,
-        actions_timeout: Duration,
     ) -> Self {
         let db = Arc::new(db);
 
         let executor_factory = IntentExecutorFactoryImpl {
             rpc_client,
             table_mania,
-            compute_budget_config,
+            executor_config,
             task_info_fetcher,
             actions_callback_executor,
-            actions_timeout,
         };
 
         let (sender, receiver) = mpsc::channel(1000);
