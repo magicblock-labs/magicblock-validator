@@ -298,22 +298,36 @@ impl AccountsDb {
     }
 
     /// Spawns a background thread to take a snapshot.
+    /// The snapshot is created in two phases:
+    /// 1. Create snapshot directory (with write lock held)
+    /// 2. Archive directory to tar.gz and register (lock released)
     fn trigger_background_snapshot(self: &Arc<Self>, slot: u64) {
         let this = self.clone();
 
         thread::spawn(move || {
-            // Acquire write lock to ensure consistent state capture
+            // Phase 1: Create snapshot directory (with write lock)
             let write_guard = this.write_lock.write();
             this.flush();
-
-            // Capture the active memory map region for the snapshot
             let used_storage = this.storage.active_segment();
 
-            let _ = this.snapshot_manager.create_snapshot(
+            let snapshot_dir = this.snapshot_manager.create_snapshot_dir(
                 slot,
                 used_storage,
-                write_guard,
+                write_guard, // Lock released when this returns
             );
+
+            // Phase 2: Archive directory (no lock needed)
+            match snapshot_dir {
+                Ok(dir) => {
+                    // Take our time to archive - lock is released
+                    if let Err(e) =
+                        this.snapshot_manager.archive_and_register(&dir)
+                    {
+                        error!(error = ?e, "Failed to archive snapshot");
+                    }
+                }
+                Err(e) => error!(error = ?e, "Snapshot creation failed"),
+            }
         });
     }
 
@@ -374,6 +388,34 @@ impl AccountsDb {
 
     pub fn write_lock(&self) -> GlobalSyncLock {
         self.write_lock.clone()
+    }
+
+    /// Inserts an external snapshot archive received over the network.
+    ///
+    /// If the snapshot slot is newer than the current DB slot, immediately
+    /// fast-forwards to it (bringing state forward in time).
+    ///
+    /// Returns `true` if fast-forward was performed, `false` if just registered.
+    pub fn insert_external_snapshot(
+        &mut self,
+        slot: u64,
+        archive_bytes: &[u8],
+    ) -> AccountsDbResult<bool> {
+        let current_slot = self.slot();
+        let fast_forwarded = self.snapshot_manager.insert_external_snapshot(
+            slot,
+            archive_bytes,
+            current_slot,
+        )?;
+
+        if fast_forwarded {
+            // Reload components to reflect new state
+            let path = self.snapshot_manager.database_path();
+            self.storage.reload(path)?;
+            self.index.reload(path)?;
+        }
+
+        Ok(fast_forwarded)
     }
 
     /// Computes a deterministic checksum of all active accounts.

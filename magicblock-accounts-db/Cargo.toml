@@ -13,6 +13,10 @@ memmap2 = "0.9"
 lmdb = { package = "lmdb-rkv", version = "0.14" }       # more up to date fork of lmdb bindings by mozilla, still ancient though :(
 reflink = { package = "reflink-copy", version = "0.1" }
 
+# archival
+tar = "0.4"
+flate2 = "1.0"
+
 # solana
 solana-pubkey = { workspace = true }
 solana-account = { workspace = true }
