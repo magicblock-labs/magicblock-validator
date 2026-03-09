@@ -10,7 +10,7 @@ use crate::{
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EventAction {
     None,
-    FetchTransaction(String),
+    FetchTransaction { rpc_url: String, signature: String },
     OpenUrl(String),
 }
 
@@ -50,9 +50,12 @@ fn handle_key(
             KeyCode::Enter => {
                 if let Some(detail) = &state.tx_detail {
                     let url = match detail.selected_account_address() {
-                        Some(account) => {
-                            build_account_explorer_url(&state.rpc_url, account)
-                        }
+                        Some(account) => build_account_explorer_url(
+                            state
+                                .active_transaction_rpc_url()
+                                .unwrap_or(&state.rpc_url),
+                            account,
+                        ),
                         None => detail.explorer_url.clone(),
                     };
                     state.close_tx_detail();
@@ -98,7 +101,7 @@ fn handle_key(
         return EventAction::None;
     }
 
-    if state.active_tab == Tab::Transactions {
+    if state.is_transaction_tab() {
         match key {
             KeyEvent {
                 code: KeyCode::Backspace,
@@ -135,27 +138,34 @@ fn handle_key(
     match key.code {
         KeyCode::Char('q') => state.should_quit = true,
         KeyCode::Enter => {
-            if state.active_tab == Tab::Transactions {
-                if let Some(tx) = state.selected_transaction() {
-                    return EventAction::FetchTransaction(tx.signature.clone());
+            if state.is_transaction_tab() {
+                if let (Some(tx), Some(rpc_url)) = (
+                    state.selected_transaction(),
+                    state.active_transaction_rpc_url(),
+                ) {
+                    return EventAction::FetchTransaction {
+                        rpc_url: rpc_url.to_string(),
+                        signature: tx.signature.clone(),
+                    };
                 }
             }
         }
         KeyCode::Left | KeyCode::Char('h') => {
-            state.active_tab = state.active_tab.prev();
+            state.prev_tab();
         }
         KeyCode::Right | KeyCode::Char('l') => {
-            state.active_tab = state.active_tab.next();
+            state.next_tab();
         }
         KeyCode::Tab => {
-            state.active_tab = state.active_tab.next();
+            state.next_tab();
         }
         KeyCode::BackTab => {
-            state.active_tab = state.active_tab.prev();
+            state.prev_tab();
         }
-        KeyCode::Char('1') => state.active_tab = Tab::Transactions,
-        KeyCode::Char('2') => state.active_tab = Tab::Logs,
-        KeyCode::Char('3') => state.active_tab = Tab::Config,
+        KeyCode::Char('1') => state.select_tab_by_shortcut(1),
+        KeyCode::Char('2') => state.select_tab_by_shortcut(2),
+        KeyCode::Char('3') => state.select_tab_by_shortcut(3),
+        KeyCode::Char('4') => state.select_tab_by_shortcut(4),
         KeyCode::Up | KeyCode::Char('k') => state.scroll_up(),
         KeyCode::Down | KeyCode::Char('j') => state.scroll_down(visible_height),
         KeyCode::PageUp => {
@@ -170,9 +180,8 @@ fn handle_key(
         }
         KeyCode::Home => match state.active_tab {
             Tab::Logs => state.log_scroll = 0,
-            Tab::Transactions => {
-                state.tx_scroll = 0;
-                state.selected_tx = 0;
+            Tab::Transactions | Tab::RemoteTransactions => {
+                state.scroll_transactions_home();
             }
             Tab::Config => {}
         },
@@ -181,13 +190,8 @@ fn handle_key(
                 state.log_scroll =
                     state.logs.len().saturating_sub(visible_height);
             }
-            Tab::Transactions => {
-                let filtered_len = state.filtered_transactions_len();
-                if filtered_len > 0 {
-                    state.selected_tx = filtered_len - 1;
-                    state.tx_scroll =
-                        filtered_len.saturating_sub(visible_height);
-                }
+            Tab::Transactions | Tab::RemoteTransactions => {
+                state.scroll_transactions_end(visible_height);
             }
             Tab::Config => {}
         },

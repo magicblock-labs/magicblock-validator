@@ -8,7 +8,8 @@ use ratatui::{
 use tracing::Level;
 
 use crate::state::{
-    Tab, TransactionAccount, TuiState, ViewMode, MAX_DETAIL_ACCOUNTS,
+    Tab, TransactionAccount, TransactionSource, TuiState, ViewMode,
+    MAX_DETAIL_ACCOUNTS,
 };
 
 const CYAN: Color = Color::Cyan;
@@ -90,19 +91,54 @@ fn render_tick_bar(filled: usize, total: usize) -> Line<'static> {
 }
 
 fn render_tabs(frame: &mut Frame, area: Rect, state: &TuiState) {
-    let tx_count = state.transactions.len();
-    let filtered_tx_count = state.filtered_transactions_len();
-    let tx_title = if state.tx_filter_query().is_empty() {
-        format!("Transactions ({})", tx_count)
+    let local_tx_count = state.transaction_count(TransactionSource::Local);
+    let local_filtered_tx_count =
+        state.filtered_transactions_len_for(TransactionSource::Local);
+    let tx_title = if state
+        .tx_filter_query_for(TransactionSource::Local)
+        .is_empty()
+    {
+        format!("Transactions ({})", local_tx_count)
     } else {
-        format!("Transactions ({}/{})", filtered_tx_count, tx_count)
+        format!(
+            "Transactions ({}/{})",
+            local_filtered_tx_count, local_tx_count
+        )
     };
-    let titles = vec![tx_title, "Logs".to_string(), "Config".to_string()];
+    let remote_tx_title = if state.has_remote_transactions() {
+        let remote_tx_count =
+            state.transaction_count(TransactionSource::Remote);
+        let remote_filtered_tx_count =
+            state.filtered_transactions_len_for(TransactionSource::Remote);
+        if state
+            .tx_filter_query_for(TransactionSource::Remote)
+            .is_empty()
+        {
+            format!("Remote Transactions ({})", remote_tx_count)
+        } else {
+            format!(
+                "Remote Transactions ({}/{})",
+                remote_filtered_tx_count, remote_tx_count
+            )
+        }
+    } else {
+        String::new()
+    };
+    let mut titles = vec![tx_title];
+    if state.has_remote_transactions() {
+        titles.push(remote_tx_title);
+    }
+    titles.push("Logs".to_string());
+    titles.push("Config".to_string());
 
-    let selected = match state.active_tab {
-        Tab::Transactions => 0,
-        Tab::Logs => 1,
-        Tab::Config => 2,
+    let selected = match (state.active_tab, state.has_remote_transactions()) {
+        (Tab::Transactions, _) => 0,
+        (Tab::RemoteTransactions, true) => 1,
+        (Tab::Logs, true) => 2,
+        (Tab::Config, true) => 3,
+        (Tab::Logs, false) => 1,
+        (Tab::Config, false) => 2,
+        (Tab::RemoteTransactions, false) => 0,
     };
 
     let tabs = Tabs::new(titles)
@@ -120,7 +156,9 @@ fn render_tabs(frame: &mut Frame, area: Rect, state: &TuiState) {
 fn render_content(frame: &mut Frame, area: Rect, state: &TuiState) {
     match state.active_tab {
         Tab::Logs => render_logs(frame, area, state),
-        Tab::Transactions => render_transactions(frame, area, state),
+        Tab::Transactions | Tab::RemoteTransactions => {
+            render_transactions(frame, area, state)
+        }
         Tab::Config => render_config(frame, area, state),
     }
 }
@@ -199,14 +237,14 @@ fn render_transactions(frame: &mut Frame, area: Rect, state: &TuiState) {
         filtered_transactions
             .iter()
             .enumerate()
-            .skip(state.tx_scroll)
+            .skip(state.active_transaction_scroll())
             .take(visible_count)
             .map(|(idx, tx)| {
                 let timestamp = tx.timestamp.format("%H:%M:%S%.3f");
                 let status_color =
                     if tx.success { Color::Green } else { Color::Red };
                 let status_char = if tx.success { "✓" } else { "✗" };
-                let is_selected = idx == state.selected_tx;
+                let is_selected = idx == state.active_transaction_selected();
 
                 let line = Line::from(vec![
                     Span::styled(
@@ -334,7 +372,7 @@ fn render_footer(frame: &mut Frame, area: Rect, state: &TuiState) {
             Span::styled("(Enter)", Style::default().fg(WHITE)),
             Span::styled(" open in browser", Style::default().fg(DARK_GRAY)),
         ])
-    } else if state.active_tab == Tab::Transactions {
+    } else if state.is_transaction_tab() {
         Line::from(vec![
             Span::styled("(Esc)", Style::default().fg(WHITE)),
             Span::styled(" quit │ ", Style::default().fg(DARK_GRAY)),

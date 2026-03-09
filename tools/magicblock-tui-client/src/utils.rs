@@ -3,3 +3,74 @@ use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
 pub fn url_encode(s: &str) -> String {
     utf8_percent_encode(s, NON_ALPHANUMERIC).to_string()
 }
+
+pub fn is_localhost_url(url: &str) -> bool {
+    reqwest::Url::parse(url)
+        .ok()
+        .and_then(|url| {
+            url.host_str().map(|host| {
+                host.trim_start_matches('[')
+                    .trim_end_matches(']')
+                    .to_ascii_lowercase()
+            })
+        })
+        .is_some_and(|host| {
+            matches!(
+                host.as_str(),
+                "localhost" | "127.0.0.1" | "0.0.0.0" | "::1"
+            )
+        })
+}
+
+pub fn websocket_url_from_rpc_url(url: &str) -> Option<String> {
+    let mut url = reqwest::Url::parse(url).ok()?;
+    let port = url.port_or_known_default();
+    match url.scheme() {
+        "http" => {
+            url.set_scheme("ws").ok()?;
+            if let Some(port) = port {
+                url.set_port(Some(port.saturating_add(1))).ok()?;
+            }
+        }
+        "https" => {
+            url.set_scheme("wss").ok()?;
+            if let Some(port) = port {
+                url.set_port(Some(port.saturating_add(1))).ok()?;
+            }
+        }
+        "ws" | "wss" => {}
+        _ => return None,
+    }
+    Some(url.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{is_localhost_url, websocket_url_from_rpc_url};
+
+    #[test]
+    fn localhost_detection_handles_loopback_hosts() {
+        assert!(is_localhost_url("http://localhost:8899"));
+        assert!(is_localhost_url("http://127.0.0.1:8899"));
+        assert!(is_localhost_url("http://0.0.0.0:8899"));
+        assert!(is_localhost_url("http://[::1]:8899"));
+        assert!(!is_localhost_url("https://api.devnet.solana.com"));
+    }
+
+    #[test]
+    fn websocket_url_is_derived_from_rpc_url() {
+        assert_eq!(
+            websocket_url_from_rpc_url("http://localhost:8899").as_deref(),
+            Some("ws://localhost:8900/")
+        );
+        assert_eq!(
+            websocket_url_from_rpc_url("https://localhost:443").as_deref(),
+            Some("wss://localhost:444/")
+        );
+        assert_eq!(
+            websocket_url_from_rpc_url("ws://localhost:8900").as_deref(),
+            Some("ws://localhost:8900/")
+        );
+        assert_eq!(websocket_url_from_rpc_url("ftp://localhost"), None);
+    }
+}
