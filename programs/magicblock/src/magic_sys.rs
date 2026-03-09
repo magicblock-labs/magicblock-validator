@@ -31,7 +31,7 @@ pub fn init_magic_sys<T: MagicSys>(magic_sys: Arc<T>) {
         .replace(magic_sys);
 }
 
-pub(crate) fn load_data(id: u64) -> Result<Option<Vec<u8>>, Box<dyn Error>> {
+pub fn load_data(id: u64) -> Result<Option<Vec<u8>>, Box<dyn Error>> {
     MAGIC_SYS
         .read()
         .expect(MAGIC_SYS_POISONED_MSG)
@@ -40,10 +40,7 @@ pub(crate) fn load_data(id: u64) -> Result<Option<Vec<u8>>, Box<dyn Error>> {
         .load(id)
 }
 
-pub(crate) fn persist_data(
-    id: u64,
-    data: Vec<u8>,
-) -> Result<(), Box<dyn Error>> {
+pub fn persist_data(id: u64, data: Vec<u8>) -> Result<(), Box<dyn Error>> {
     MAGIC_SYS
         .read()
         .expect(MAGIC_SYS_POISONED_MSG)

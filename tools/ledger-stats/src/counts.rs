@@ -43,10 +43,6 @@ pub(crate) fn print_counts(ledger: &Ledger) {
         .count_perf_samples()
         .expect("Failed to count perf samples")
         .to_formatted_string(&Locale::en);
-    let account_mod_data_count = ledger
-        .count_account_mod_data()
-        .expect("Failed to count account mod datas")
-        .to_formatted_string(&Locale::en);
 
     let table = Table::new("{:<}  {:>}")
         .with_row(Row::new().with_cell("Column").with_cell("Count"))
@@ -89,11 +85,6 @@ pub(crate) fn print_counts(ledger: &Ledger) {
             Row::new()
                 .with_cell("SlotSignatures")
                 .with_cell(slot_signatures_count),
-        )
-        .with_row(
-            Row::new()
-                .with_cell("AccountModDatas")
-                .with_cell(account_mod_data_count),
         )
         .with_row(
             Row::new()

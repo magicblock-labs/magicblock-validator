@@ -3763,6 +3763,8 @@ dependencies = [
  "solana-hash",
  "solana-instruction",
  "solana-keypair",
+ "solana-loader-v3-interface 3.0.0",
+ "solana-loader-v4-interface",
  "solana-log-collector",
  "solana-program-runtime",
  "solana-pubkey",
