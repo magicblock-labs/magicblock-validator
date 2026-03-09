@@ -1,7 +1,7 @@
+use core::fmt;
 use std::{
     collections::HashMap,
     error::Error,
-    fmt,
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc,
