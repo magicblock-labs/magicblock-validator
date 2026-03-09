@@ -6,6 +6,7 @@ use ephemeral_rollups_sdk::{
     },
     ActionArgs, ShortAccountMeta,
 };
+use ephemeral_rollups_sdk::ephem::FoldableIntentBuilder;
 use solana_program::{
     account_info::{next_account_info, next_account_infos, AccountInfo},
     entrypoint::ProgramResult,
@@ -243,7 +244,7 @@ pub fn process_create_intent_bundle(
         builder = builder
             .commit(commit_only_counters)
             .add_post_commit_actions(call_handlers)
-            .fold();
+            .fold_builder();
     }
 
     // Build CommitAndUndelegate intent
@@ -315,7 +316,7 @@ pub fn process_create_intent_bundle(
             .commit_and_undelegate(undelegate_counters)
             .add_post_commit_actions(commit_handlers)
             .add_post_undelegate_actions(undelegate_handlers)
-            .fold();
+            .fold_builder();
     }
 
     // Build and invoke the intent bundle

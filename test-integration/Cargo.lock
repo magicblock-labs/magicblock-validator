@@ -1699,8 +1699,8 @@ dependencies = [
 
 [[package]]
 name = "ephemeral-rollups-sdk"
-version = "0.8.5"
-source = "git+https://github.com/magicblock-labs/ephemeral-rollups-sdk.git?rev=d6a81e25a80d78fea9adf3fb1342df9bc9b87ba6#d6a81e25a80d78fea9adf3fb1342df9bc9b87ba6"
+version = "0.8.6"
+source = "git+https://github.com/magicblock-labs/ephemeral-rollups-sdk.git?rev=34d6dd96a#34d6dd96a20755c1ed66cfb6212adc2838e1591c"
 dependencies = [
  "base64ct",
  "borsh 0.10.4",
@@ -1708,9 +1708,10 @@ dependencies = [
  "ephemeral-rollups-sdk-attribute-commit",
  "ephemeral-rollups-sdk-attribute-delegate",
  "ephemeral-rollups-sdk-attribute-ephemeral",
+ "ephemeral-rollups-sdk-attribute-ephemeral-accounts",
  "getrandom 0.2.16",
  "magicblock-delegation-program 1.1.3 (registry+https://github.com/rust-lang/crates.io-index)",
- "magicblock-magic-program-api 0.8.0",
+ "magicblock-magic-program-api 0.8.2 (git+https://github.com/magicblock-labs/magicblock-validator.git?rev=355d8f2)",
  "solana-account",
  "solana-account-info",
  "solana-cpi",
@@ -1724,8 +1725,8 @@ dependencies = [
 
 [[package]]
 name = "ephemeral-rollups-sdk-attribute-action"
-version = "0.8.5"
-source = "git+https://github.com/magicblock-labs/ephemeral-rollups-sdk.git?rev=d6a81e25a80d78fea9adf3fb1342df9bc9b87ba6#d6a81e25a80d78fea9adf3fb1342df9bc9b87ba6"
+version = "0.8.6"
+source = "git+https://github.com/magicblock-labs/ephemeral-rollups-sdk.git?rev=34d6dd96a#34d6dd96a20755c1ed66cfb6212adc2838e1591c"
 dependencies = [
  "quote",
  "syn 1.0.109",
@@ -1733,8 +1734,8 @@ dependencies = [
 
 [[package]]
 name = "ephemeral-rollups-sdk-attribute-commit"
-version = "0.8.5"
-source = "git+https://github.com/magicblock-labs/ephemeral-rollups-sdk.git?rev=d6a81e25a80d78fea9adf3fb1342df9bc9b87ba6#d6a81e25a80d78fea9adf3fb1342df9bc9b87ba6"
+version = "0.8.6"
+source = "git+https://github.com/magicblock-labs/ephemeral-rollups-sdk.git?rev=34d6dd96a#34d6dd96a20755c1ed66cfb6212adc2838e1591c"
 dependencies = [
  "quote",
  "syn 1.0.109",
@@ -1742,8 +1743,8 @@ dependencies = [
 
 [[package]]
 name = "ephemeral-rollups-sdk-attribute-delegate"
-version = "0.8.5"
-source = "git+https://github.com/magicblock-labs/ephemeral-rollups-sdk.git?rev=d6a81e25a80d78fea9adf3fb1342df9bc9b87ba6#d6a81e25a80d78fea9adf3fb1342df9bc9b87ba6"
+version = "0.8.6"
+source = "git+https://github.com/magicblock-labs/ephemeral-rollups-sdk.git?rev=34d6dd96a#34d6dd96a20755c1ed66cfb6212adc2838e1591c"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1752,8 +1753,18 @@ dependencies = [
 
 [[package]]
 name = "ephemeral-rollups-sdk-attribute-ephemeral"
-version = "0.8.5"
-source = "git+https://github.com/magicblock-labs/ephemeral-rollups-sdk.git?rev=d6a81e25a80d78fea9adf3fb1342df9bc9b87ba6#d6a81e25a80d78fea9adf3fb1342df9bc9b87ba6"
+version = "0.8.6"
+source = "git+https://github.com/magicblock-labs/ephemeral-rollups-sdk.git?rev=34d6dd96a#34d6dd96a20755c1ed66cfb6212adc2838e1591c"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 1.0.109",
+]
+
+[[package]]
+name = "ephemeral-rollups-sdk-attribute-ephemeral-accounts"
+version = "0.8.6"
+source = "git+https://github.com/magicblock-labs/ephemeral-rollups-sdk.git?rev=34d6dd96a#34d6dd96a20755c1ed66cfb6212adc2838e1591c"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3677,8 +3688,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-magic-program-api"
-version = "0.8.0"
-source = "git+https://github.com/magicblock-labs/magicblock-validator.git?branch=snawaz%2Fschedule-commit-finalize#a281d23937ac6b95e6b6ab4ef6af7089946b002e"
+version = "0.8.2"
 dependencies = [
  "bincode",
  "serde",
@@ -3688,6 +3698,7 @@ dependencies = [
 [[package]]
 name = "magicblock-magic-program-api"
 version = "0.8.2"
+source = "git+https://github.com/magicblock-labs/magicblock-validator.git?rev=355d8f2#355d8f22e2d351bd95dec085fcffcb283b2a14da"
 dependencies = [
  "bincode",
  "serde",
