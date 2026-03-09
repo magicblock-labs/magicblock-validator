@@ -65,8 +65,10 @@ pub struct TransactionScheduler {
     latest_block: LatestBlock,
     /// Global shutdown signal
     shutdown: CancellationToken,
-    /// Notifies scheduler to switch from Replica to Primary mode after ledger replay.
+    /// Notifies scheduler to switch from StartingUp to Primary or Replica mode.
     mode_switcher: Arc<Notify>,
+    /// Whether this is a Standalone validator (True) or StandBy/ReplicatOnly (False).
+    is_standalone: bool,
     slot: Slot,
     index: u32,
 }
@@ -110,6 +112,7 @@ impl TransactionScheduler {
             accountsdb: state.accountsdb,
             shutdown: state.shutdown,
             mode_switcher: state.mode_switcher,
+            is_standalone: state.is_standalone,
             slot: state.ledger.latest_block().load().slot,
             index: 0,
         }
@@ -143,7 +146,11 @@ impl TransactionScheduler {
                 Ok(()) = block_produced.recv() => self.transition_to_new_slot(),
                 Some(executor) = self.ready_rx.recv() => self.handle_ready_executor(executor),
                 _ = self.mode_switcher.notified() => {
-                    self.coordinator.switch_to_primary_mode();
+                    if self.is_standalone {
+                        self.coordinator.switch_to_primary_mode_globally();
+                    } else {
+                        self.coordinator.switch_to_replica_mode_globally();
+                    }
                 }
                 Some(txn) = self.transactions_rx.recv(), if self.coordinator.is_ready() => {
                     self.handle_new_transaction(txn);

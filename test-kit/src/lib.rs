@@ -173,6 +173,7 @@ impl ExecutionTestEnv {
             is_auto_airdrop_lamports_enabled: false,
             shutdown: Default::default(),
             mode_switcher: mode_switcher.clone(),
+            is_standalone: primary_mode,
         };
 
         // Start/Defer the transaction processing backend.

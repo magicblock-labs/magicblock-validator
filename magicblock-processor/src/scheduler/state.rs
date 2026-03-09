@@ -55,9 +55,12 @@ pub struct TransactionSchedulerState {
     // === Configuration ===
     pub is_auto_airdrop_lamports_enabled: bool,
     pub shutdown: CancellationToken,
-    /// Notifies scheduler to switch from Replica to Primary mode.
-    /// Call `notify_one()` before spawning for tests that need Primary mode immediately.
+    /// Notifies scheduler to switch from StartingUp to Primary or Replica mode.
+    /// Call `notify_one()` before spawning for tests that need a mode transition.
     pub mode_switcher: Arc<Notify>,
+    /// Whether this is a Standalone validator (True) or StandBy/ReplicatOnly (False).
+    /// Used to determine the target mode (Primary for Standalone, Replica for others).
+    pub is_standalone: bool,
 }
 
 impl TransactionSchedulerState {

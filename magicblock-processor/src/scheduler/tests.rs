@@ -354,3 +354,119 @@ fn replica_mode_unblocks_when_pending_completes() {
     // Now is_ready should be true again (pending cleared)
     assert!(c.is_ready());
 }
+
+#[test]
+fn starting_up_mode_rejects_execution_transactions() {
+    let c = ExecutionCoordinator::new(1);
+
+    // StartingUp mode should reject Execution transactions
+    assert!(!c.is_transaction_allowed(&TransactionProcessingMode::Execution(None)));
+    // But allow Replay
+    assert!(c.is_transaction_allowed(&TransactionProcessingMode::Replay(
+        ReplayPosition {
+            slot: 0,
+            index: 0,
+            persist: false,
+        }
+    )));
+}
+
+#[test]
+fn starting_up_mode_allows_replay_transactions() {
+    let c = ExecutionCoordinator::new(1);
+
+    // StartingUp mode should allow Replay transactions
+    assert!(c.is_transaction_allowed(&TransactionProcessingMode::Replay(
+        ReplayPosition {
+            slot: 0,
+            index: 0,
+            persist: false,
+        }
+    )));
+}
+
+#[test]
+fn starting_up_to_primary_mode_switch() {
+    let mut c = ExecutionCoordinator::new(1);
+
+    // Start in StartingUp, should reject Execution
+    assert!(!c.is_transaction_allowed(&TransactionProcessingMode::Execution(None)));
+
+    // Switch to Primary
+    c.switch_to_primary_mode();
+
+    // Now should allow Execution
+    assert!(c.is_transaction_allowed(&TransactionProcessingMode::Execution(None)));
+    // But reject Replay
+    assert!(!c.is_transaction_allowed(&TransactionProcessingMode::Replay(
+        ReplayPosition {
+            slot: 0,
+            index: 0,
+            persist: false,
+        }
+    )));
+}
+
+#[test]
+fn starting_up_to_replica_mode_switch() {
+    let mut c = ExecutionCoordinator::new(1);
+
+    // Start in StartingUp, should allow Replay
+    assert!(c.is_transaction_allowed(&TransactionProcessingMode::Replay(
+        ReplayPosition {
+            slot: 0,
+            index: 0,
+            persist: false,
+        }
+    )));
+
+    // Switch to Replica
+    c.switch_to_replica_mode();
+
+    // Should still allow Replay
+    assert!(c.is_transaction_allowed(&TransactionProcessingMode::Replay(
+        ReplayPosition {
+            slot: 0,
+            index: 0,
+            persist: false,
+        }
+    )));
+    // But reject Execution
+    assert!(!c.is_transaction_allowed(&TransactionProcessingMode::Execution(None)));
+}
+
+#[test]
+fn starting_up_blocks_new_transactions_when_pending() {
+    let mut c = ExecutionCoordinator::new(2);
+    let acc = Pubkey::new_unique();
+    let position = ReplayPosition {
+        slot: 0,
+        index: 0,
+        persist: false,
+    };
+
+    // First transaction holds the lock
+    let e0 = c.get_ready_executor().unwrap();
+    assert!(c
+        .try_schedule(e0, mock_replay_txn(&[(acc, true)], position))
+        .is_ok());
+
+    // Second transaction is blocked and sets pending
+    let e1 = c.get_ready_executor().unwrap();
+    assert!(c
+        .try_schedule(e1, mock_replay_txn(&[(acc, true)], position))
+        .is_err());
+
+    // In StartingUp mode, is_ready should be false (pending is set)
+    assert!(!c.is_ready());
+
+    // Complete e0's transaction (unlock accounts)
+    c.unlock_accounts(e0);
+
+    // Get the blocked transaction from the queue
+    let blocked = c.next_blocked_transaction(e0);
+    assert!(blocked.is_some());
+
+    // Now is_ready should be true again (pending cleared)
+    assert!(c.is_ready());
+}

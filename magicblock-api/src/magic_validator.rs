@@ -255,8 +255,13 @@ impl MagicValidator {
         validator::init_validator_authority(identity_keypair);
         let base_fee = config.validator.basefee;
 
-        // Mode switcher for transitioning from Replica to Primary mode after ledger replay
+        // Mode switcher for transitioning from StartingUp to Primary or Replica mode
+        // after ledger replay
         let mode_switcher = Arc::new(Notify::new());
+        let is_standalone = matches!(
+            config.validator.replication_mode,
+            ReplicationMode::Standalone
+        );
         let txn_scheduler_state = TransactionSchedulerState {
             accountsdb: accountsdb.clone(),
             ledger: ledger.clone(),
@@ -271,6 +276,7 @@ impl MagicValidator {
                 > 0,
             shutdown: token.clone(),
             mode_switcher: mode_switcher.clone(),
+            is_standalone,
         };
         TRANSACTION_COUNT.inc_by(ledger.count_transactions()? as u64);
         // Faucet keypair is only used for airdrops, which are not allowed in
@@ -692,14 +698,11 @@ impl MagicValidator {
         let step_start = Instant::now();
         self.maybe_process_ledger().await?;
 
-        // Switch scheduler to Primary mode after ledger replay completes.
-        // Primary validators accept client transactions; Replica validators stay
-        // in Replica mode to receive transactions from the primary.
-        if let ReplicationMode::Standalone =
-            self.config.validator.replication_mode
-        {
-            self.mode_switcher.notify_one();
-        }
+        // Notify the scheduler that ledger replay is complete.
+        // The scheduler uses is_standalone to determine the target mode:
+        // - Standalone validators transition to Primary mode
+        // - StandBy/ReplicatOnly validators transition to Replica mode
+        self.mode_switcher.notify_one();
 
         log_timing("startup", "maybe_process_ledger", step_start);
 
@@ -777,7 +780,6 @@ impl MagicValidator {
             }
         });
 
-        validator::finished_starting_up();
         Ok(())
     }
 

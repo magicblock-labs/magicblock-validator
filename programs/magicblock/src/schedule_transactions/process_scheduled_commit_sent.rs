@@ -13,6 +13,8 @@ use solana_pubkey::Pubkey;
 use solana_signature::Signature;
 use solana_transaction_context::TransactionContext;
 
+use magicblock_core::coordination_mode;
+
 use crate::{
     errors::custom_error_codes,
     utils::accounts::get_instruction_pubkey_with_idx, validator,
@@ -111,10 +113,12 @@ pub fn process_scheduled_commit_sent(
     transaction_context: &TransactionContext,
     commit_id: u64,
 ) -> Result<(), InstructionError> {
-    if validator::is_starting_up() {
+    let mode = coordination_mode::CoordinationMode::current();
+    if !mode.should_schedule_intents() {
         ic_msg!(
             invoke_context,
-            "ScheduleCommitSent: validator is starting up, this instruction is skipped"
+            "ScheduleCommitSent: skipped (mode={:?})",
+            mode
         );
         return Ok(());
     }
