@@ -1169,7 +1169,7 @@ mod tests {
         );
 
         let expected_log = format!(
-            "ScheduleCommit ERR: commit limit exceeded for account {}: current commit nonce {} reached the limit of {}. Plain commits are blocked; to resolve this, schedule commit-and-undelegate with a delegated account as the payer",
+            "ScheduleCommit ERR: sponsored commit limit exceeded for account {}: current commit nonce {} reached the limit of {}. Undelegate and re-delegate the account or use a delegated account as the payer",
             committee, COMMIT_LIMIT, COMMIT_LIMIT
         );
         assert!(
