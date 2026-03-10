@@ -241,6 +241,15 @@ impl TransactionPaneState {
             self.selected_transaction().map(|tx| tx.signature.clone());
         let selected_tx_before = self.selected_tx;
         let tx_scroll_before = self.tx_scroll;
+
+        if let Some(existing_idx) = self
+            .transactions
+            .iter()
+            .position(|tx| tx.signature == entry.signature)
+        {
+            self.transactions.remove(existing_idx);
+        }
+
         self.transactions.push_front(entry);
 
         if had_transactions && !anchored_to_latest {
@@ -871,6 +880,29 @@ mod tests {
         assert!(state.selected_transaction().is_none());
         assert_eq!(state.active_transaction_selected(), 0);
         assert_eq!(state.active_transaction_scroll(), 0);
+    }
+
+    #[test]
+    fn pushing_same_signature_updates_existing_transaction() {
+        let mut state = TuiState::new(config());
+        state.push_transaction(TransactionSource::Local, tx("sig-aaa"));
+        state.push_transaction(
+            TransactionSource::Local,
+            tx_with_accounts(
+                "sig-aaa",
+                vec!["Updated1111111111111111111111111111111111"],
+            ),
+        );
+
+        assert_eq!(state.transaction_count(TransactionSource::Local), 1);
+        let selected = state
+            .selected_transaction()
+            .expect("selected transaction should exist");
+        assert_eq!(selected.signature, "sig-aaa");
+        assert_eq!(
+            selected.accounts,
+            vec!["Updated1111111111111111111111111111111111".to_string()]
+        );
     }
 
     #[test]

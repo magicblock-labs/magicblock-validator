@@ -42,7 +42,7 @@ use crate::{
 
 type Term = Terminal<CrosstermBackend<Stdout>>;
 const VOTE_PROGRAM_ID: &str = "Vote111111111111111111111111111111111111111";
-const BLOCK_FEED_CONFIRMATION_LAG_SLOTS: u64 = 2;
+const BLOCK_FEED_CONFIRMATION_LAG_SLOTS: u64 = 0;
 const INITIAL_TRANSACTION_BACKFILL_SLOTS: u64 = 64;
 const BLOCK_FEED_RETRY_INTERVAL: Duration = Duration::from_millis(500);
 
@@ -413,10 +413,23 @@ fn spawn_block_transaction_feed(
                     });
 
                     if next_slot_to_fetch.is_none() {
-                        next_slot_to_fetch = Some(backfill_start_slot(target_slot));
+                        next_slot_to_fetch =
+                            Some(backfill_start_slot(target_slot));
                     }
                 }
-                _ = tokio::time::sleep(BLOCK_FEED_RETRY_INTERVAL) => {}
+                _ = tokio::time::sleep(BLOCK_FEED_RETRY_INTERVAL) => {
+                    if let Ok(slot) = get_confirmed_slot(&client, &rpc_url).await {
+                        latest_target_slot = Some(match latest_target_slot {
+                            Some(current) => current.max(slot),
+                            None => slot,
+                        });
+
+                        if next_slot_to_fetch.is_none() {
+                            next_slot_to_fetch =
+                                Some(backfill_start_slot(slot));
+                        }
+                    }
+                }
             }
         }
     });
@@ -454,6 +467,16 @@ fn spawn_logs_subscription(
                                                 let signature = update.value.signature.clone();
                                                 let success = update.value.err.is_none();
                                                 let slot = update.context.slot;
+                                                let _ = event_tx.send(AppEvent::Transaction(
+                                                    TransactionSource::Local,
+                                                    TransactionEntry {
+                                                        signature: signature.clone(),
+                                                        slot,
+                                                        success,
+                                                        timestamp: Local::now(),
+                                                        accounts: vec![],
+                                                    },
+                                                ));
 
                                                 let level = if success { Level::INFO } else { Level::ERROR };
                                                 let summary = if success {
@@ -1289,11 +1312,10 @@ mod tests {
     }
 
     #[test]
-    fn live_feed_target_slot_stays_two_slots_behind_tip() {
+    fn live_feed_target_slot_tracks_latest_slot() {
         assert_eq!(live_feed_target_slot(0), 0);
-        assert_eq!(live_feed_target_slot(1), 0);
-        assert_eq!(live_feed_target_slot(2), 0);
-        assert_eq!(live_feed_target_slot(42), 40);
+        assert_eq!(live_feed_target_slot(1), 1);
+        assert_eq!(live_feed_target_slot(42), 42);
     }
 
     #[test]
