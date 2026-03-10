@@ -42,6 +42,9 @@ use crate::{
 
 type Term = Terminal<CrosstermBackend<Stdout>>;
 const VOTE_PROGRAM_ID: &str = "Vote111111111111111111111111111111111111111";
+const BLOCK_FEED_CONFIRMATION_LAG_SLOTS: u64 = 2;
+const INITIAL_TRANSACTION_BACKFILL_SLOTS: u64 = 64;
+const BLOCK_FEED_RETRY_INTERVAL: Duration = Duration::from_millis(500);
 
 #[derive(Debug)]
 enum AppEvent {
@@ -337,8 +340,12 @@ fn spawn_block_transaction_feed(
 ) {
     tokio::spawn(async move {
         let client = reqwest::Client::new();
-        let mut latest_target_slot: Option<u64> = None;
-        let mut next_slot_to_fetch: Option<u64> = None;
+        let mut latest_target_slot = initialize_transaction_backfill(
+            &client, &rpc_url, log_target, &event_tx,
+        )
+        .await;
+        let mut next_slot_to_fetch =
+            latest_target_slot.map(backfill_start_slot);
 
         let _ = event_tx.send(AppEvent::Log(LogEntry::new(
             Level::INFO,
@@ -347,6 +354,50 @@ fn spawn_block_transaction_feed(
         )));
 
         while !cancel.is_cancelled() {
+            while let (Some(next_slot), Some(latest_slot)) =
+                (next_slot_to_fetch, latest_target_slot)
+            {
+                if next_slot > latest_slot || cancel.is_cancelled() {
+                    break;
+                }
+
+                let should_advance = match fetch_block_transactions_with_retry(
+                    &client,
+                    &rpc_url,
+                    next_slot,
+                    source == TransactionSource::Remote,
+                )
+                .await
+                {
+                    Ok((BlockFetchOutcome::Entries, entries)) => {
+                        for entry in entries {
+                            let _ = event_tx
+                                .send(AppEvent::Transaction(source, entry));
+                        }
+                        true
+                    }
+                    Ok((BlockFetchOutcome::SkipSlot, _)) => true,
+                    Ok((BlockFetchOutcome::RetryLater, _)) => false,
+                    Err(err) => {
+                        let _ = event_tx.send(AppEvent::Log(LogEntry::new(
+                            Level::WARN,
+                            log_target.to_string(),
+                            format!(
+                                "getBlock slot {} failed: {}",
+                                next_slot, err
+                            ),
+                        )));
+                        false
+                    }
+                };
+
+                if should_advance {
+                    next_slot_to_fetch = Some(next_slot.saturating_add(1));
+                } else {
+                    break;
+                }
+            }
+
             tokio::select! {
                 _ = cancel.cancelled() => break,
                 maybe_slot = slot_rx.recv() => {
@@ -355,59 +406,17 @@ fn spawn_block_transaction_feed(
                         None => break,
                     };
 
-                    // Stay behind the latest slot to reduce transient `null` blocks.
-                    let target_slot = slot.saturating_sub(2);
+                    let target_slot = live_feed_target_slot(slot);
                     latest_target_slot = Some(match latest_target_slot {
                         Some(current) => current.max(target_slot),
                         None => target_slot,
                     });
 
                     if next_slot_to_fetch.is_none() {
-                        next_slot_to_fetch = Some(target_slot);
-                    }
-
-                    while let (Some(next_slot), Some(latest_slot)) =
-                        (next_slot_to_fetch, latest_target_slot)
-                    {
-                        if next_slot > latest_slot || cancel.is_cancelled() {
-                            break;
-                        }
-
-                        let should_advance = match fetch_block_transactions_with_retry(
-                            &client,
-                            &rpc_url,
-                            next_slot,
-                            source == TransactionSource::Remote,
-                        )
-                        .await
-                        {
-                            Ok(Some(entries)) => {
-                                for entry in entries {
-                                    let _ = event_tx.send(AppEvent::Transaction(source, entry));
-                                }
-                                true
-                            }
-                            Ok(None) => true,
-                            Err(err) => {
-                                let _ = event_tx.send(AppEvent::Log(LogEntry::new(
-                                    Level::WARN,
-                                    log_target.to_string(),
-                                    format!(
-                                        "getBlock slot {} failed: {}",
-                                        next_slot, err
-                                    ),
-                                )));
-                                false
-                            }
-                        };
-
-                        if should_advance {
-                            next_slot_to_fetch = Some(next_slot.saturating_add(1));
-                        } else {
-                            break;
-                        }
+                        next_slot_to_fetch = Some(backfill_start_slot(target_slot));
                     }
                 }
+                _ = tokio::time::sleep(BLOCK_FEED_RETRY_INTERVAL) => {}
             }
         }
     });
@@ -617,6 +626,51 @@ struct EpochInfoResponse {
     slots_in_epoch: u64,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum BlockFetchOutcome {
+    Entries,
+    RetryLater,
+    SkipSlot,
+}
+
+fn live_feed_target_slot(slot: u64) -> u64 {
+    slot.saturating_sub(BLOCK_FEED_CONFIRMATION_LAG_SLOTS)
+}
+
+fn backfill_start_slot(latest_slot: u64) -> u64 {
+    latest_slot.saturating_sub(INITIAL_TRANSACTION_BACKFILL_SLOTS)
+}
+
+async fn initialize_transaction_backfill(
+    client: &reqwest::Client,
+    rpc_url: &str,
+    log_target: &str,
+    event_tx: &UnboundedSender<AppEvent>,
+) -> Option<u64> {
+    match get_confirmed_slot(client, rpc_url).await {
+        Ok(slot) => {
+            let _ = event_tx.send(AppEvent::Log(LogEntry::new(
+                Level::INFO,
+                log_target.to_string(),
+                format!(
+                    "Backfilling recent transactions from slot {} to {}",
+                    backfill_start_slot(slot),
+                    slot
+                ),
+            )));
+            Some(slot)
+        }
+        Err(err) => {
+            let _ = event_tx.send(AppEvent::Log(LogEntry::new(
+                Level::WARN,
+                log_target.to_string(),
+                format!("Failed to initialize transaction backfill: {}", err),
+            )));
+            None
+        }
+    }
+}
+
 async fn get_identity(
     client: &reqwest::Client,
     rpc_url: &str,
@@ -718,6 +772,41 @@ async fn get_epoch_info(
         .ok_or_else(|| "missing result".to_string())
 }
 
+async fn get_confirmed_slot(
+    client: &reqwest::Client,
+    rpc_url: &str,
+) -> Result<u64, String> {
+    let request_body = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "getSlot",
+        "params": [{
+            "commitment": "confirmed"
+        }]
+    });
+
+    let response = client
+        .post(rpc_url)
+        .timeout(Duration::from_secs(5))
+        .json(&request_body)
+        .send()
+        .await
+        .map_err(|e| format!("HTTP error: {}", e))?;
+
+    let rpc_response: RpcResponse<u64> = response
+        .json()
+        .await
+        .map_err(|e| format!("Parse error: {}", e))?;
+
+    if let Some(err) = rpc_response.error {
+        return Err(err.message);
+    }
+
+    rpc_response
+        .result
+        .ok_or_else(|| "missing result".to_string())
+}
+
 async fn fetch_transaction_detail(
     client: &reqwest::Client,
     rpc_url: &str,
@@ -788,7 +877,7 @@ fn build_transaction_detail_request(signature: &str) -> serde_json::Value {
             signature,
             {
                 "encoding": "json",
-                "commitment": "processed",
+                "commitment": "confirmed",
                 "maxSupportedTransactionVersion": 255
             }
         ]
@@ -821,7 +910,7 @@ async fn fetch_block_transactions_with_retry(
     rpc_url: &str,
     slot: u64,
     exclude_vote_transactions: bool,
-) -> Result<Option<Vec<TransactionEntry>>, String> {
+) -> Result<(BlockFetchOutcome, Vec<TransactionEntry>), String> {
     const MAX_ATTEMPTS: usize = 4;
 
     for attempt in 0..MAX_ATTEMPTS {
@@ -833,10 +922,15 @@ async fn fetch_block_transactions_with_retry(
         )
         .await
         {
-            Ok(Some(entries)) => return Ok(Some(entries)),
-            Ok(None) => {
+            Ok((BlockFetchOutcome::Entries, entries)) => {
+                return Ok((BlockFetchOutcome::Entries, entries));
+            }
+            Ok((BlockFetchOutcome::SkipSlot, _)) => {
+                return Ok((BlockFetchOutcome::SkipSlot, Vec::new()));
+            }
+            Ok((BlockFetchOutcome::RetryLater, _)) => {
                 if attempt + 1 == MAX_ATTEMPTS {
-                    return Ok(None);
+                    return Ok((BlockFetchOutcome::RetryLater, Vec::new()));
                 }
             }
             Err(err) => {
@@ -849,7 +943,7 @@ async fn fetch_block_transactions_with_retry(
         tokio::time::sleep(Duration::from_millis(120)).await;
     }
 
-    Ok(None)
+    Ok((BlockFetchOutcome::RetryLater, Vec::new()))
 }
 
 async fn fetch_block_transactions(
@@ -857,7 +951,7 @@ async fn fetch_block_transactions(
     rpc_url: &str,
     slot: u64,
     exclude_vote_transactions: bool,
-) -> Result<Option<Vec<TransactionEntry>>, String> {
+) -> Result<(BlockFetchOutcome, Vec<TransactionEntry>), String> {
     let request_body = serde_json::json!({
         "jsonrpc": "2.0",
         "id": 1,
@@ -888,14 +982,17 @@ async fn fetch_block_transactions(
         .map_err(|e| format!("Parse error: {}", e))?;
 
     if let Some(err) = rpc_response.error {
-        if is_non_fatal_block_error(err.code) {
-            return Ok(None);
+        if is_retryable_block_error(err.code) {
+            return Ok((BlockFetchOutcome::RetryLater, Vec::new()));
+        }
+        if is_skippable_block_error(err.code) {
+            return Ok((BlockFetchOutcome::SkipSlot, Vec::new()));
         }
         return Err(format!("{} (code {})", err.message, err.code));
     }
 
     let Some(block) = rpc_response.result else {
-        return Ok(None);
+        return Ok((BlockFetchOutcome::RetryLater, Vec::new()));
     };
 
     let timestamp = Local::now();
@@ -934,7 +1031,7 @@ async fn fetch_block_transactions(
         })
         .collect();
 
-    Ok(Some(entries))
+    Ok((BlockFetchOutcome::Entries, entries))
 }
 
 fn build_transaction_accounts(
@@ -1025,12 +1122,18 @@ fn resolve_account_key<'a>(
         .map(String::as_str)
 }
 
-fn is_non_fatal_block_error(code: i64) -> bool {
+fn is_retryable_block_error(code: i64) -> bool {
     matches!(
         code,
         JSON_RPC_SERVER_ERROR_BLOCK_NOT_AVAILABLE
             | JSON_RPC_SERVER_ERROR_BLOCK_STATUS_NOT_AVAILABLE_YET
-            | JSON_RPC_SERVER_ERROR_SLOT_SKIPPED
+    )
+}
+
+fn is_skippable_block_error(code: i64) -> bool {
+    matches!(
+        code,
+        JSON_RPC_SERVER_ERROR_SLOT_SKIPPED
             | JSON_RPC_SERVER_ERROR_LONG_TERM_STORAGE_SLOT_SKIPPED
             | JSON_RPC_SERVER_ERROR_BLOCK_CLEANED_UP
             | JSON_RPC_SERVER_ERROR_TRANSACTION_HISTORY_NOT_AVAILABLE
@@ -1076,11 +1179,20 @@ fn open_url_in_browser(url: &str) -> std::io::Result<()> {
 
 #[cfg(test)]
 mod tests {
+    use solana_rpc_client_api::custom_error::{
+        JSON_RPC_SERVER_ERROR_BLOCK_NOT_AVAILABLE,
+        JSON_RPC_SERVER_ERROR_BLOCK_STATUS_NOT_AVAILABLE_YET,
+        JSON_RPC_SERVER_ERROR_LONG_TERM_STORAGE_SLOT_SKIPPED,
+        JSON_RPC_SERVER_ERROR_SLOT_SKIPPED,
+        JSON_RPC_SERVER_ERROR_TRANSACTION_HISTORY_NOT_AVAILABLE,
+    };
+
     use super::{
-        build_transaction_accounts, build_transaction_detail_request,
-        is_vote_transaction, BlockTransactionMessage, CompiledInstruction,
-        LoadedAddresses, TransactionMessage, TransactionMessageHeader,
-        VOTE_PROGRAM_ID,
+        backfill_start_slot, build_transaction_accounts,
+        build_transaction_detail_request, is_retryable_block_error,
+        is_skippable_block_error, is_vote_transaction, live_feed_target_slot,
+        BlockTransactionMessage, CompiledInstruction, LoadedAddresses,
+        TransactionMessage, TransactionMessageHeader, VOTE_PROGRAM_ID,
     };
 
     #[test]
@@ -1166,13 +1278,48 @@ mod tests {
     }
 
     #[test]
-    fn transaction_detail_request_uses_processed_commitment() {
+    fn transaction_detail_request_uses_confirmed_commitment() {
         let request = build_transaction_detail_request("sig");
 
         assert_eq!(request["method"], "getTransaction");
         assert_eq!(request["params"][0], "sig");
         assert_eq!(request["params"][1]["encoding"], "json");
-        assert_eq!(request["params"][1]["commitment"], "processed");
+        assert_eq!(request["params"][1]["commitment"], "confirmed");
         assert_eq!(request["params"][1]["maxSupportedTransactionVersion"], 255);
+    }
+
+    #[test]
+    fn live_feed_target_slot_stays_two_slots_behind_tip() {
+        assert_eq!(live_feed_target_slot(0), 0);
+        assert_eq!(live_feed_target_slot(1), 0);
+        assert_eq!(live_feed_target_slot(2), 0);
+        assert_eq!(live_feed_target_slot(42), 40);
+    }
+
+    #[test]
+    fn backfill_start_slot_limits_recent_history_window() {
+        assert_eq!(backfill_start_slot(12), 0);
+        assert_eq!(backfill_start_slot(64), 0);
+        assert_eq!(backfill_start_slot(96), 32);
+    }
+
+    #[test]
+    fn block_errors_are_classified_by_retryability() {
+        assert!(is_retryable_block_error(
+            JSON_RPC_SERVER_ERROR_BLOCK_NOT_AVAILABLE
+        ));
+        assert!(is_retryable_block_error(
+            JSON_RPC_SERVER_ERROR_BLOCK_STATUS_NOT_AVAILABLE_YET
+        ));
+        assert!(is_skippable_block_error(JSON_RPC_SERVER_ERROR_SLOT_SKIPPED));
+        assert!(is_skippable_block_error(
+            JSON_RPC_SERVER_ERROR_LONG_TERM_STORAGE_SLOT_SKIPPED
+        ));
+        assert!(is_skippable_block_error(
+            JSON_RPC_SERVER_ERROR_TRANSACTION_HISTORY_NOT_AVAILABLE
+        ));
+        assert!(!is_skippable_block_error(
+            JSON_RPC_SERVER_ERROR_BLOCK_NOT_AVAILABLE
+        ));
     }
 }
