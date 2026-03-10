@@ -55,7 +55,10 @@ use magicblock_metrics::{metrics::TRANSACTION_COUNT, MetricsService};
 use magicblock_processor::{
     build_svm_env,
     loader::load_upgradeable_programs,
-    scheduler::{state::TransactionSchedulerState, TransactionScheduler},
+    scheduler::{
+        state::{SchedulerMode, TransactionSchedulerState},
+        TransactionScheduler,
+    },
 };
 use magicblock_program::{
     init_magic_sys,
@@ -76,7 +79,10 @@ use solana_native_token::LAMPORTS_PER_SOL;
 use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_signer::Signer;
-use tokio::{runtime::Builder, sync::Notify};
+use tokio::{
+    runtime::Builder,
+    sync::mpsc::{channel, Sender},
+};
 use tokio_util::sync::CancellationToken;
 use tracing::*;
 
@@ -126,7 +132,7 @@ pub struct MagicValidator {
     claim_fees_task: ClaimFeesTask,
     task_scheduler: Option<TaskSchedulerService>,
     transaction_execution: thread::JoinHandle<()>,
-    mode_switcher: Arc<Notify>,
+    mode_tx: Sender<SchedulerMode>,
 }
 
 impl MagicValidator {
@@ -256,7 +262,7 @@ impl MagicValidator {
         let base_fee = config.validator.basefee;
 
         // Mode switcher for transitioning from Replica to Primary mode after ledger replay
-        let mode_switcher = Arc::new(Notify::new());
+        let (mode_tx, mode_rx) = channel(1);
         let txn_scheduler_state = TransactionSchedulerState {
             accountsdb: accountsdb.clone(),
             ledger: ledger.clone(),
@@ -270,7 +276,7 @@ impl MagicValidator {
                 .auto_airdrop_lamports
                 > 0,
             shutdown: token.clone(),
-            mode_switcher: mode_switcher.clone(),
+            mode_rx,
         };
         TRANSACTION_COUNT.inc_by(ledger.count_transactions()? as u64);
         // Faucet keypair is only used for airdrops, which are not allowed in
@@ -374,7 +380,7 @@ impl MagicValidator {
             block_udpate_tx: validator_channels.block_update,
             task_scheduler: Some(task_scheduler),
             transaction_execution,
-            mode_switcher,
+            mode_tx,
         })
     }
 
@@ -698,7 +704,8 @@ impl MagicValidator {
         if let ReplicationMode::Standalone =
             self.config.validator.replication_mode
         {
-            self.mode_switcher.notify_one();
+            // Ignore send errors: scheduler may have shut down.
+            let _ = self.mode_tx.send(SchedulerMode::Primary).await;
         }
 
         log_timing("startup", "maybe_process_ledger", step_start);

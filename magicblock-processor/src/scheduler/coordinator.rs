@@ -31,7 +31,7 @@ use tracing::{error, warn};
 use super::locks::{
     next_transaction_id, ExecutorId, LocksCache, TransactionId,
 };
-use crate::scheduler::locks::RcLock;
+use crate::scheduler::{locks::RcLock, state::SchedulerMode};
 
 /// Maximum blocked transactions per executor before rejecting new ones (Primary mode).
 const BLOCKED_TXN_MULTIPLIER: usize = 2;
@@ -222,21 +222,31 @@ impl ExecutionCoordinator {
         txn
     }
 
-    /// Switches from Replica to Primary mode.
+    /// Transitions to the specified execution mode.
     ///
-    /// Called after ledger replay completes on Primary validators.
-    /// No-op if already in Primary mode.
-    pub(super) fn switch_to_primary_mode(&mut self) {
-        if let CoordinationMode::Primary(_) = self.mode {
-            warn!("Tried to switch to primary mode more than once");
-            return;
+    /// No-op if already in the target mode (logs a warning).
+    pub(super) fn transition_to(&mut self, mode: SchedulerMode) {
+        match mode {
+            SchedulerMode::Primary => {
+                if let CoordinationMode::Primary(_) = self.mode {
+                    warn!("Already in primary mode");
+                    return;
+                }
+                let mode = PrimaryMode {
+                    blocked_txn_count: 0,
+                    max_blocked_txn: self.blocked_transactions.len()
+                        * BLOCKED_TXN_MULTIPLIER,
+                };
+                self.mode = CoordinationMode::Primary(mode);
+            }
+            SchedulerMode::Replica => {
+                if let CoordinationMode::Replica(_) = self.mode {
+                    warn!("Already in replica mode");
+                    return;
+                }
+                self.mode = CoordinationMode::Replica(Default::default());
+            }
         }
-        let mode = PrimaryMode {
-            blocked_txn_count: 0,
-            max_blocked_txn: self.blocked_transactions.len()
-                * BLOCKED_TXN_MULTIPLIER,
-        };
-        self.mode = CoordinationMode::Primary(mode);
     }
 
     /// Checks if a transaction mode is compatible with the current coordination mode.

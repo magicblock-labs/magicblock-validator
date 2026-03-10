@@ -20,7 +20,10 @@ use solana_pubkey::Pubkey;
 use solana_signer::Signer;
 use solana_transaction::Transaction;
 
-use super::coordinator::{ExecutionCoordinator, TransactionWithId};
+use super::{
+    coordinator::{ExecutionCoordinator, TransactionWithId},
+    state::SchedulerMode,
+};
 
 /// Creates a mock transaction with the specified accounts and processing mode.
 fn mock_txn_with_mode(
@@ -158,7 +161,7 @@ fn partial_locks_released_on_failure() {
 fn blocked_transactions_dequeued_in_fifo_order() {
     let mut c = ExecutionCoordinator::new(4);
     // Switch to primary mode for tests that need multiple blocked transactions
-    c.switch_to_primary_mode();
+    c.transition_to(SchedulerMode::Primary);
     let acc = Pubkey::new_unique();
 
     let e0 = c.get_ready_executor().unwrap();

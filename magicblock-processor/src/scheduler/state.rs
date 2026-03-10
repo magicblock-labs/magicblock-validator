@@ -31,7 +31,7 @@ use solana_program_runtime::{
 };
 use solana_pubkey::Pubkey;
 use solana_svm::transaction_processor::TransactionProcessingEnvironment;
-use tokio::sync::Notify;
+use tokio::sync::mpsc::Receiver;
 use tokio_util::sync::CancellationToken;
 
 use crate::{executor::SimpleForkGraph, syscalls::SyscallMatmulI8};
@@ -55,9 +55,9 @@ pub struct TransactionSchedulerState {
     // === Configuration ===
     pub is_auto_airdrop_lamports_enabled: bool,
     pub shutdown: CancellationToken,
-    /// Notifies scheduler to switch from Replica to Primary mode.
-    /// Call `notify_one()` before spawning for tests that need Primary mode immediately.
-    pub mode_switcher: Arc<Notify>,
+    /// Channel for switching scheduler execution mode at runtime.
+    /// Send `SchedulerMode::Primary` after ledger replay to begin processing client transactions.
+    pub mode_rx: Receiver<SchedulerMode>,
 }
 
 impl TransactionSchedulerState {
@@ -145,4 +145,16 @@ impl TransactionSchedulerState {
             let _ = self.accountsdb.insert_account(id, &account);
         }
     }
+}
+
+/// Scheduler execution mode command.
+///
+/// Send via channel to transition the scheduler between modes.
+/// See [`CoordinationMode`](super::coordinator::CoordinationMode) for internal state.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SchedulerMode {
+    /// Accept client transactions with concurrent execution.
+    Primary,
+    /// Replay transactions with strict ordering.
+    Replica,
 }
