@@ -10,7 +10,8 @@ use magicblock_accounts_db::{traits::AccountsBank, AccountsDb};
 use magicblock_core::link::{
     accounts::AccountUpdateTx,
     transactions::{
-        ScheduledTasksTx, TransactionStatusTx, TransactionToProcessRx,
+        ScheduledTasksTx, SchedulerMode, TransactionStatusTx,
+        TransactionToProcessRx,
     },
 };
 use magicblock_ledger::Ledger;
@@ -144,16 +145,4 @@ impl TransactionSchedulerState {
             let _ = self.accountsdb.insert_account(id, &account);
         }
     }
-}
-
-/// Scheduler execution mode command.
-///
-/// Send via channel to transition the scheduler between modes.
-/// See [`CoordinationMode`](super::coordinator::CoordinationMode) for internal state.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum SchedulerMode {
-    /// Accept client transactions with concurrent execution.
-    Primary,
-    /// Replay transactions with strict ordering.
-    Replica,
 }

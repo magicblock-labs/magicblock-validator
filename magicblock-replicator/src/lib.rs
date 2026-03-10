@@ -1,14 +1,24 @@
-//! State replication protocol for streaming transactions from primary to standby nodes.
+//! State replication protocol for streaming validator events via NATS JetStream.
 //!
-//! Messages are length-prefixed (4B LE) + bincode payload.
+//! # Architecture
+//!
+//! The replicator enables primary-standby state replication using NATS JetStream:
+//!
+//! - **Producer**: Primary node publishes transactions, blocks, and superblocks
+//! - **Consumer**: Standby nodes consume events to maintain synchronized state
+//! - **Snapshots**: Periodic AccountsDb snapshots enable fast standby recovery
+//!
+//! # Wire Format
+//!
+//! Messages are serialized with bincode (4-byte discriminator + payload).
 
-pub mod connection;
 pub mod error;
 pub mod nats;
 pub mod proto;
+pub mod service;
 
 #[cfg(test)]
 mod tests;
 
 pub use error::{Error, Result};
-pub use proto::{Message, PROTOCOL_VERSION};
+pub use proto::Message;

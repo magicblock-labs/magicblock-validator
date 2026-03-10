@@ -14,8 +14,9 @@ use magicblock_core::{
         blocks::{BlockMeta, BlockUpdate, BlockUpdateTx},
         link,
         transactions::{
-            ReplayPosition, SanitizeableTransaction, TransactionResult,
-            TransactionSchedulerHandle, TransactionSimulationResult,
+            ReplayPosition, SanitizeableTransaction, SchedulerMode,
+            TransactionResult, TransactionSchedulerHandle,
+            TransactionSimulationResult,
         },
         DispatchEndpoints,
     },
@@ -25,10 +26,7 @@ use magicblock_ledger::Ledger;
 use magicblock_processor::{
     build_svm_env,
     loader::load_upgradeable_programs,
-    scheduler::{
-        state::{SchedulerMode, TransactionSchedulerState},
-        TransactionScheduler,
-    },
+    scheduler::{state::TransactionSchedulerState, TransactionScheduler},
 };
 use solana_account::AccountSharedData;
 pub use solana_instruction::*;
