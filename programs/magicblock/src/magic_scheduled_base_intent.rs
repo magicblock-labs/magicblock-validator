@@ -32,7 +32,7 @@ use crate::{
 };
 
 /// Commits that are covered by User's dlp PDAs
-const ACTUAL_COMMIT_LIMIT: u64 = 25;
+pub(crate) const ACTUAL_COMMIT_LIMIT: u64 = 25;
 /// Fixed fee per commit (charged for each commit after the first).
 /// https://github.com/magicblock-labs/delegation-program/blob/main/src/consts.rs#L11
 pub const COMMIT_FEE_LAMPORTS: u64 = 100_000;
@@ -947,4 +947,166 @@ fn calculate_actions_fee(actions: &[BaseAction]) -> u64 {
         )
     });
     micro_lamports.div_ceil(MICRO_LAMPORTS_PER_LAMPORT)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use magicblock_core::intent::CommittedAccount;
+    use solana_account::Account;
+    use solana_instruction::error::InstructionError;
+    use solana_pubkey::Pubkey;
+
+    use super::*;
+    use crate::magic_sys::MISSING_COMMIT_NONCE_ERR;
+
+    fn make_committed_account(pubkey: Pubkey) -> CommittedAccount {
+        CommittedAccount {
+            pubkey,
+            account: Account::default(),
+            remote_slot: 0,
+        }
+    }
+
+    fn make_base_action(compute_units: u32) -> BaseAction {
+        BaseAction {
+            compute_units,
+            destination_program: Pubkey::new_unique(),
+            source_program: None,
+            escrow_authority: Pubkey::new_unique(),
+            data_per_program: ProgramArgs {
+                escrow_index: 0,
+                data: vec![],
+            },
+            account_metas_per_program: vec![],
+        }
+    }
+
+    // ---- calculate_commit_fee ----
+
+    #[test]
+    fn test_commit_fee_at_limit_is_zero() {
+        let pk = Pubkey::new_unique();
+        let nonces = HashMap::from([(pk, ACTUAL_COMMIT_LIMIT)]);
+        let fee = calculate_commit_fee(&[make_committed_account(pk)], &nonces)
+            .unwrap();
+        assert_eq!(fee, 0);
+    }
+
+    #[test]
+    fn test_commit_fee_above_limit_charges_per_account() {
+        let pk1 = Pubkey::new_unique();
+        let pk2 = Pubkey::new_unique();
+        let nonces = HashMap::from([
+            (pk1, ACTUAL_COMMIT_LIMIT + 1),
+            (pk2, ACTUAL_COMMIT_LIMIT + 1),
+        ]);
+        let fee = calculate_commit_fee(
+            &[make_committed_account(pk1), make_committed_account(pk2)],
+            &nonces,
+        )
+        .unwrap();
+        assert_eq!(fee, COMMIT_FEE_LAMPORTS * 2);
+    }
+
+    #[test]
+    fn test_commit_fee_mixed_accounts() {
+        let pk_below = Pubkey::new_unique();
+        let pk_above = Pubkey::new_unique();
+        let nonces = HashMap::from([
+            (pk_below, ACTUAL_COMMIT_LIMIT),
+            (pk_above, ACTUAL_COMMIT_LIMIT + 1),
+        ]);
+        let fee = calculate_commit_fee(
+            &[
+                make_committed_account(pk_below),
+                make_committed_account(pk_above),
+            ],
+            &nonces,
+        )
+        .unwrap();
+        assert_eq!(fee, COMMIT_FEE_LAMPORTS);
+    }
+
+    #[test]
+    fn test_commit_fee_missing_nonce_errors() {
+        let pk = Pubkey::new_unique();
+        let err = calculate_commit_fee(
+            &[make_committed_account(pk)],
+            &HashMap::new(),
+        )
+        .unwrap_err();
+        assert_eq!(err, InstructionError::Custom(MISSING_COMMIT_NONCE_ERR));
+    }
+
+    /// two actions of 200_000 CUs each → 20_000 lamports
+    #[test]
+    fn test_actions_fee_multiple_actions() {
+        assert_eq!(
+            calculate_actions_fee(&[
+                make_base_action(200_000),
+                make_base_action(200_000)
+            ]),
+            20_000
+        );
+    }
+
+    // ---- ScheduledIntentBundle::calculate_fee ----
+
+    #[test]
+    fn test_scheduled_intent_bundle_fee_mixed_commit_and_cau() {
+        use solana_hash::Hash;
+        use solana_transaction::Transaction;
+
+        // commit WithBaseActions: pk1 above limit (charged), pk2 at limit (free)
+        let pk1 = Pubkey::new_unique();
+        let pk2 = Pubkey::new_unique();
+        // cau commit: pk3 above limit (charged); undelegate has actions too
+        let pk3 = Pubkey::new_unique();
+
+        let bundle = ScheduledIntentBundle {
+            id: 0,
+            slot: 0,
+            blockhash: Hash::default(),
+            sent_transaction: Transaction::default(),
+            payer: Pubkey::new_unique(),
+            intent_bundle: MagicIntentBundle {
+                commit: Some(CommitType::WithBaseActions {
+                    committed_accounts: vec![
+                        make_committed_account(pk1),
+                        make_committed_account(pk2),
+                    ],
+                    base_actions: vec![make_base_action(200_000)],
+                }),
+                commit_and_undelegate: Some(CommitAndUndelegate {
+                    commit_action: CommitType::Standalone(vec![
+                        make_committed_account(pk3),
+                    ]),
+                    undelegate_action: UndelegateType::WithBaseActions(vec![
+                        make_base_action(100_000),
+                    ]),
+                }),
+                standalone_actions: vec![make_base_action(50_000)],
+            },
+        };
+
+        let nonces = HashMap::from([
+            (pk1, ACTUAL_COMMIT_LIMIT + 1), // charged
+            (pk2, ACTUAL_COMMIT_LIMIT),     // not charged
+            (pk3, ACTUAL_COMMIT_LIMIT + 1), // charged
+        ]);
+
+        let fee = bundle.calculate_fee(&nonces).unwrap();
+
+        // commit: pk1 (100_000) + action 200k CUs (10_000) = 110_000
+        // cau:    pk3 (100_000) + undelegate action 100k CUs (5_000) = 105_000
+        // standalone: action 50k CUs (2_500)
+        let expected = COMMIT_FEE_LAMPORTS       // pk1
+            + 10_000                             // 200k CU action
+            + COMMIT_FEE_LAMPORTS               // pk3
+            + 5_000                              // 100k CU undelegate action
+            + 2_500; // 50k CU standalone action
+        assert_eq!(fee, expected);
+    }
 }

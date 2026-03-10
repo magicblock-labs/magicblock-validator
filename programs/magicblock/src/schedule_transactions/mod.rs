@@ -16,7 +16,7 @@ pub(crate) use process_schedule_intent_bundle::process_schedule_intent_bundle;
 pub use process_scheduled_commit_sent::{
     process_scheduled_commit_sent, register_scheduled_commit_sent, SentCommit,
 };
-use solana_account::{AccountSharedData, ReadableAccount};
+use solana_account::AccountSharedData;
 use solana_instruction::error::InstructionError;
 use solana_log_collector::ic_msg;
 use solana_program_runtime::invoke_context::InvokeContext;
@@ -83,7 +83,13 @@ pub fn check_magic_context_id(
 }
 
 pub(crate) fn magic_fee_vault_pubkey() -> Pubkey {
-    todo!()
+    // TODO(edwin): finalize the PDA
+    let validator_authority = crate::validator::validator_authority_id();
+    Pubkey::find_program_address(
+        &[validator_authority.as_ref(), b"magic_fee_vault"],
+        &crate::utils::DELEGATION_PROGRAM_ID,
+    )
+    .0
 }
 
 /// Returns the fee vault account if the payer at `payer_idx` is delegated,

@@ -27,7 +27,7 @@ pub const COUNTER_PROGRAM_ID: Pubkey =
 
 pub fn ensure_started_validator(
     map: &mut HashMap<Pubkey, AccountSharedData>,
-    nonce: Option<u64>,
+    nonces: Option<StubNonces>,
 ) {
     validator::generate_validator_authority_if_needed();
     let validator_authority_id = validator::validator_authority_id();
@@ -42,7 +42,13 @@ pub fn ensure_started_validator(
         vault
     });
 
-    let stub = Arc::new(MagicSysStub::with_nonce(nonce.unwrap_or(0)));
+    let stub = Arc::new(match nonces {
+        None => MagicSysStub::default(),
+        Some(n) => MagicSysStub {
+            nonces: n,
+            ..MagicSysStub::default()
+        },
+    });
     init_magic_sys(stub);
 
     validator::ensure_started_up();
@@ -92,18 +98,22 @@ pub fn process_instruction_with_logs(
     (accounts, logs)
 }
 
+pub enum StubNonces {
+    Global(u64),
+    PerAccount(HashMap<Pubkey, u64>),
+}
+
 pub struct MagicSysStub {
     id: u64,
-    nonce: u64,
+    nonces: StubNonces,
 }
 
 impl Default for MagicSysStub {
     fn default() -> Self {
         static ID: AtomicU64 = AtomicU64::new(0);
-
         Self {
             id: ID.fetch_add(1, Ordering::Relaxed),
-            nonce: 0,
+            nonces: StubNonces::Global(0),
         }
     }
 }
@@ -111,7 +121,14 @@ impl Default for MagicSysStub {
 impl MagicSysStub {
     pub fn with_nonce(nonce: u64) -> Self {
         Self {
-            nonce,
+            nonces: StubNonces::Global(nonce),
+            ..Self::default()
+        }
+    }
+
+    pub fn with_per_account_nonces(nonces: HashMap<Pubkey, u64>) -> Self {
+        Self {
+            nonces: StubNonces::PerAccount(nonces),
             ..Self::default()
         }
     }
@@ -137,6 +154,20 @@ impl MagicSys for MagicSysStub {
         &self,
         commits: &[CommittedAccount],
     ) -> Result<HashMap<Pubkey, u64>, InstructionError> {
-        Ok(commits.iter().map(|c| (c.pubkey, self.nonce)).collect())
+        match &self.nonces {
+            StubNonces::Global(nonce) => {
+                Ok(commits.iter().map(|c| (c.pubkey, *nonce)).collect())
+            }
+            StubNonces::PerAccount(nonces) => commits
+                .iter()
+                .map(|c| {
+                    nonces.get(&c.pubkey).copied().map(|n| (c.pubkey, n)).ok_or(
+                        InstructionError::Custom(
+                            crate::magic_sys::MISSING_COMMIT_NONCE_ERR,
+                        ),
+                    )
+                })
+                .collect(),
+        }
     }
 }

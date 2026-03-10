@@ -17,12 +17,16 @@ use solana_signer::Signer;
 
 use crate::{
     magic_context::MagicContext,
-    magic_scheduled_base_intent::ScheduledIntentBundle,
+    magic_scheduled_base_intent::{
+        ScheduledIntentBundle, ACTUAL_COMMIT_LIMIT, COMMIT_FEE_LAMPORTS,
+    },
     magic_sys::COMMIT_LIMIT,
-    schedule_transactions::transaction_scheduler::TransactionScheduler,
+    schedule_transactions::{
+        magic_fee_vault_pubkey, transaction_scheduler::TransactionScheduler,
+    },
     test_utils::{
         ensure_started_validator, process_instruction,
-        process_instruction_with_logs,
+        process_instruction_with_logs, StubNonces,
     },
     utils::DELEGATION_PROGRAM_ID,
 };
@@ -1114,7 +1118,10 @@ mod tests {
             );
 
         // Override stub to return nonce at the commit limit
-        ensure_started_validator(&mut account_data, Some(COMMIT_LIMIT));
+        ensure_started_validator(
+            &mut account_data,
+            Some(StubNonces::Global(COMMIT_LIMIT)),
+        );
 
         let ix = InstructionUtils::schedule_commit_instruction(
             &payer.pubkey(),
@@ -1149,7 +1156,10 @@ mod tests {
                 &payer, program, committee,
             );
 
-        ensure_started_validator(&mut account_data, Some(COMMIT_LIMIT));
+        ensure_started_validator(
+            &mut account_data,
+            Some(StubNonces::Global(COMMIT_LIMIT)),
+        );
 
         let ix = InstructionUtils::schedule_commit_instruction(
             &payer.pubkey(),
@@ -1196,7 +1206,10 @@ mod tests {
             );
 
         // Override stub to return nonce at the commit limit
-        ensure_started_validator(&mut account_data, Some(COMMIT_LIMIT));
+        ensure_started_validator(
+            &mut account_data,
+            Some(StubNonces::Global(COMMIT_LIMIT)),
+        );
 
         let ix = InstructionUtils::schedule_commit_and_undelegate_instruction(
             &payer.pubkey(),
@@ -1268,6 +1281,226 @@ mod tests {
             transaction_accounts,
             ix.accounts,
             Err(InstructionError::InvalidAccountData),
+        );
+    }
+
+    /// Helper: builds transaction accounts for a delegated-payer commit.
+    /// Payer is delegated+writable; fee vault is delegated+writable.
+    fn prepare_delegated_payer_transaction(
+        payer: &Keypair,
+        program: Pubkey,
+        committees: &[Pubkey],
+        nonces: StubNonces,
+    ) -> (
+        HashMap<Pubkey, AccountSharedData>,
+        Vec<(Pubkey, AccountSharedData)>,
+    ) {
+        let fee_vault_pubkey = magic_fee_vault_pubkey();
+
+        let mut account_data = {
+            let mut map = HashMap::new();
+
+            let mut payer_acc =
+                AccountSharedData::new(1_000_000, 0, &system_program::id());
+            payer_acc.set_delegated(true);
+            map.insert(payer.pubkey(), payer_acc);
+
+            map.insert(
+                MAGIC_CONTEXT_PUBKEY,
+                AccountSharedData::new(
+                    u64::MAX,
+                    MagicContext::SIZE,
+                    &crate::id(),
+                ),
+            );
+
+            let mut vault_acc =
+                AccountSharedData::new(0, 0, &system_program::id());
+            vault_acc.set_delegated(true);
+            map.insert(fee_vault_pubkey, vault_acc);
+
+            for committee in committees {
+                let mut acc = AccountSharedData::new(0, 0, &program);
+                acc.set_delegated(true);
+                map.insert(*committee, acc);
+            }
+
+            map
+        };
+
+        ensure_started_validator(&mut account_data, Some(nonces));
+
+        let transaction_accounts = vec![(
+            clock::id(),
+            create_account_shared_data_for_test(&get_clock()),
+        )];
+
+        (account_data, transaction_accounts)
+    }
+
+    #[test]
+    #[serial]
+    fn test_schedule_commit_delegated_payer_charges_fee_vault() {
+        init_logger!();
+        let payer =
+            Keypair::from_seed(b"delegated_payer_charges_fee_vault").unwrap();
+        let program = Pubkey::new_unique();
+        let committee = Pubkey::new_unique();
+
+        let nonce = ACTUAL_COMMIT_LIMIT + 1;
+        let (mut account_data, mut transaction_accounts) =
+            prepare_delegated_payer_transaction(
+                &payer,
+                program,
+                &[committee],
+                StubNonces::Global(nonce),
+            );
+
+        let ix =
+            InstructionUtils::schedule_commit_with_delegated_payer_instruction(
+                &payer.pubkey(),
+                vec![committee],
+            );
+        extend_transaction_accounts_from_ix(
+            &ix,
+            &mut account_data,
+            &mut transaction_accounts,
+        );
+
+        let accounts = process_instruction(
+            ix.data.as_slice(),
+            transaction_accounts,
+            ix.accounts,
+            Ok(()),
+        );
+
+        // Fee vault must have received exactly COMMIT_FEE_LAMPORTS
+        let vault = accounts
+            .iter()
+            .find(|a| a.lamports() == COMMIT_FEE_LAMPORTS)
+            .expect("fee vault should have COMMIT_FEE_LAMPORTS");
+
+        assert_eq!(vault.lamports(), COMMIT_FEE_LAMPORTS);
+
+        // Payer must have been debited
+        let payer_acc = accounts
+            .iter()
+            .find(|a| {
+                a.lamports() == 1_000_000 - COMMIT_FEE_LAMPORTS && a.delegated()
+            })
+            .expect("payer should have been debited");
+        assert_eq!(payer_acc.lamports(), 1_000_000 - COMMIT_FEE_LAMPORTS);
+    }
+
+    #[test]
+    #[serial]
+    fn test_schedule_commit_delegated_payer_only_charges_above_limit() {
+        init_logger!();
+        let payer =
+            Keypair::from_seed(b"delegated_payer_only_above_limit_").unwrap();
+        let program = Pubkey::new_unique();
+        let committee_above = Pubkey::new_unique(); // nonce > limit → charged
+        let committee_at = Pubkey::new_unique(); // nonce == limit → free
+
+        let mut per_account = HashMap::new();
+        per_account.insert(committee_above, ACTUAL_COMMIT_LIMIT + 1);
+        per_account.insert(committee_at, ACTUAL_COMMIT_LIMIT);
+
+        let (mut account_data, mut transaction_accounts) =
+            prepare_delegated_payer_transaction(
+                &payer,
+                program,
+                &[committee_above, committee_at],
+                StubNonces::PerAccount(per_account),
+            );
+
+        let ix =
+            InstructionUtils::schedule_commit_with_delegated_payer_instruction(
+                &payer.pubkey(),
+                vec![committee_above, committee_at],
+            );
+        extend_transaction_accounts_from_ix(
+            &ix,
+            &mut account_data,
+            &mut transaction_accounts,
+        );
+
+        let accounts = process_instruction(
+            ix.data.as_slice(),
+            transaction_accounts,
+            ix.accounts,
+            Ok(()),
+        );
+
+        // Only committee_above is charged → vault receives exactly one fee
+        let vault = accounts
+            .iter()
+            .find(|a| a.lamports() == COMMIT_FEE_LAMPORTS)
+            .expect("fee vault should have COMMIT_FEE_LAMPORTS");
+        assert_eq!(vault.lamports(), COMMIT_FEE_LAMPORTS);
+
+        // Payer debited by exactly one fee
+        assert!(accounts
+            .iter()
+            .any(|a| a.lamports() == 1_000_000 - COMMIT_FEE_LAMPORTS
+                && a.delegated()));
+    }
+
+    #[test]
+    #[serial]
+    fn test_schedule_commit_delegated_payer_without_vault_errors() {
+        init_logger!();
+        let payer =
+            Keypair::from_seed(b"delegated_payer_no_vault_________").unwrap();
+        let program = Pubkey::new_unique();
+        let committee = Pubkey::new_unique();
+
+        // Build account map with a delegated payer but NO fee vault entry
+        let mut account_data = {
+            let mut map = HashMap::new();
+            let mut payer_acc =
+                AccountSharedData::new(1_000_000, 0, &system_program::id());
+            payer_acc.set_delegated(true);
+            map.insert(payer.pubkey(), payer_acc);
+            map.insert(
+                MAGIC_CONTEXT_PUBKEY,
+                AccountSharedData::new(
+                    u64::MAX,
+                    MagicContext::SIZE,
+                    &crate::id(),
+                ),
+            );
+            let mut acc = AccountSharedData::new(0, 0, &program);
+            acc.set_delegated(true);
+            map.insert(committee, acc);
+            map
+        };
+        ensure_started_validator(
+            &mut account_data,
+            Some(StubNonces::Global(0)),
+        );
+
+        let mut transaction_accounts = vec![(
+            clock::id(),
+            create_account_shared_data_for_test(&get_clock()),
+        )];
+
+        // Use the plain schedule_commit_instruction — no vault account included
+        let ix = InstructionUtils::schedule_commit_instruction(
+            &payer.pubkey(),
+            vec![committee],
+        );
+        extend_transaction_accounts_from_ix(
+            &ix,
+            &mut account_data,
+            &mut transaction_accounts,
+        );
+
+        process_instruction(
+            ix.data.as_slice(),
+            transaction_accounts,
+            ix.accounts,
+            Err(InstructionError::MissingAccount),
         );
     }
 }

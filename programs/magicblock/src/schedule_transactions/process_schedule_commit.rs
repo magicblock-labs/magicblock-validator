@@ -62,16 +62,6 @@ pub(crate) fn process_schedule_commit(
             InstructionError::UnsupportedProgramId
         })?;
 
-    // Assert enough accounts
-    if ix_accs_len <= COMMITTEES_START {
-        ic_msg!(
-            invoke_context,
-            "ScheduleCommit ERR: not enough accounts to schedule commit ({}), need payer, signing program an account for each pubkey to be committed",
-            ix_accs_len
-        );
-        return Err(InstructionError::NotEnoughAccountKeys);
-    }
-
     // Assert Payer is signer
     let payer_pubkey =
         get_instruction_pubkey_with_idx(transaction_context, PAYER_IDX)?;
@@ -97,6 +87,16 @@ pub(crate) fn process_schedule_commit(
     } else {
         COMMITTEES_START
     };
+
+    // Assert enough accounts
+    if ix_accs_len <= committees_start {
+        ic_msg!(
+            invoke_context,
+            "ScheduleCommit ERR: not enough accounts to schedule commit ({}), need payer, signing program an account for each pubkey to be committed",
+            ix_accs_len
+        );
+        return Err(InstructionError::NotEnoughAccountKeys);
+    }
 
     //
     // Get the program_id of the parent instruction that invoked this one via CPI
