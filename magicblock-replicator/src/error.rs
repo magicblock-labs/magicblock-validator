@@ -2,21 +2,38 @@
 
 use std::fmt::{Debug, Display};
 
+use magicblock_ledger::errors::LedgerError;
+
 /// Replication operation errors.
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
+    /// NATS message broker error.
     #[error("message broker error: {0}")]
     Nats(async_nats::Error),
+
+    /// Connection was closed unexpectedly.
     #[error("connection closed")]
     ConnectionClosed,
-    #[error("IO error: {0}")]
+
+    /// I/O operation failed.
+    #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
+
+    /// Serialization or deserialization failed.
     #[error("serialization error: {0}")]
     SerDe(#[from] bincode::Error),
-    #[error("internal replication error: {0}")]
+
+    /// Ledger access error.
+    #[error("ledger access error: {0}")]
+    Ledger(#[from] LedgerError),
+
+    /// Internal protocol violation or malformed data.
+    #[error("internal error: {0}")]
     Internal(&'static str),
 }
 
+// async_nats::Error is actually async_nats::error::Error<K> where K is the error kind.
+// We need this generic impl to convert all variants.
 impl<K> From<async_nats::error::Error<K>> for Error
 where
     K: Display + Debug + Clone + PartialEq + Sync + Send + 'static,
@@ -26,4 +43,5 @@ where
     }
 }
 
+/// Convenience alias for `Result<T, Error>`.
 pub type Result<T> = std::result::Result<T, Error>;
