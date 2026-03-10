@@ -94,11 +94,8 @@ fn normalize_failed_transaction_balance_arrays(value: &mut json::Value) {
 
 fn json_value_as_u64(value: &json::Value) -> Option<u64> {
     value
-        .as_str()
-        .map(str::to_owned)
-        .unwrap_or_else(|| value.to_string())
-        .parse()
-        .ok()
+        .as_u64()
+        .or_else(|| value.as_str().and_then(|s| s.parse().ok()))
 }
 
 fn sanitize_nan_strings(value: &mut json::Value) {
@@ -292,5 +289,39 @@ mod tests {
         normalize_failed_transaction_balance_arrays(&mut value);
 
         assert_eq!(value["meta"]["postBalances"], json::json!([]));
+    }
+
+    #[test]
+    fn normalize_failed_transaction_balance_arrays_handles_fee_exceeding_balance(
+    ) {
+        let mut value = json::json!({
+            "meta": {
+                "err": "SomeError",
+                "fee": 15000,
+                "preBalances": [10000, 20000],
+                "postBalances": []
+            }
+        });
+
+        normalize_failed_transaction_balance_arrays(&mut value);
+
+        assert_eq!(value["meta"]["postBalances"][0], 0);
+        assert_eq!(value["meta"]["postBalances"][1], 20000);
+    }
+
+    #[test]
+    fn normalize_failed_transaction_balance_arrays_handles_missing_fee() {
+        let mut value = json::json!({
+            "meta": {
+                "err": "SomeError",
+                "preBalances": [10000, 20000],
+                "postBalances": []
+            }
+        });
+
+        normalize_failed_transaction_balance_arrays(&mut value);
+
+        assert_eq!(value["meta"]["postBalances"][0], 10000);
+        assert_eq!(value["meta"]["postBalances"][1], 20000);
     }
 }

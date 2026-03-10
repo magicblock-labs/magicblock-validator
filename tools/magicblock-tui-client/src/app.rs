@@ -56,6 +56,7 @@ pub async fn run_tui(config: TuiConfig) -> io::Result<()> {
     setup_panic_hook();
     let mut terminal = init_terminal()?;
     let mut state = TuiState::new(config.clone());
+    let local_ws_url = config.ws_url.replace("0.0.0.0", "localhost");
     let client = reqwest::Client::new();
     if let Ok(epoch_info) = get_epoch_info(&client, &config.rpc_url).await {
         if epoch_info.slots_in_epoch > 0 {
@@ -66,7 +67,7 @@ pub async fn run_tui(config: TuiConfig) -> io::Result<()> {
     let (event_tx, event_rx) = mpsc::unbounded_channel();
     let (slot_tx, slot_rx) = mpsc::unbounded_channel();
     spawn_slot_subscription(
-        config.ws_url.clone(),
+        local_ws_url.clone(),
         "slot_subscribe",
         true,
         event_tx.clone(),
@@ -112,11 +113,7 @@ pub async fn run_tui(config: TuiConfig) -> io::Result<()> {
             )));
         }
     }
-    spawn_logs_subscription(
-        config.ws_url.clone(),
-        event_tx.clone(),
-        cancel.clone(),
-    );
+    spawn_logs_subscription(local_ws_url, event_tx.clone(), cancel.clone());
 
     let result = run_event_loop(
         &mut terminal,

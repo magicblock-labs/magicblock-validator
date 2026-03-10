@@ -7,19 +7,14 @@ pub fn url_encode(s: &str) -> String {
 pub fn is_localhost_url(url: &str) -> bool {
     reqwest::Url::parse(url)
         .ok()
-        .and_then(|url| {
-            url.host_str().map(|host| {
-                host.trim_start_matches('[')
-                    .trim_end_matches(']')
-                    .to_ascii_lowercase()
-            })
-        })
-        .is_some_and(|host| {
-            matches!(
-                host.as_str(),
-                "localhost" | "127.0.0.1" | "0.0.0.0" | "::1"
-            )
-        })
+        .is_some_and(|url| is_loopback_host(&url))
+}
+
+pub fn is_localhost_http_url(url: &str) -> bool {
+    is_localhost_url(url)
+        && reqwest::Url::parse(url)
+            .ok()
+            .is_some_and(|url| matches!(url.scheme(), "http" | "https"))
 }
 
 pub fn websocket_url_from_rpc_url(url: &str) -> Option<String> {
@@ -44,9 +39,26 @@ pub fn websocket_url_from_rpc_url(url: &str) -> Option<String> {
     Some(url.to_string())
 }
 
+fn is_loopback_host(url: &reqwest::Url) -> bool {
+    url.host_str()
+        .map(|host| {
+            host.trim_start_matches('[')
+                .trim_end_matches(']')
+                .to_ascii_lowercase()
+        })
+        .is_some_and(|host| {
+            matches!(
+                host.as_str(),
+                "localhost" | "127.0.0.1" | "0.0.0.0" | "::1"
+            )
+        })
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{is_localhost_url, websocket_url_from_rpc_url};
+    use super::{
+        is_localhost_http_url, is_localhost_url, websocket_url_from_rpc_url,
+    };
 
     #[test]
     fn localhost_detection_handles_loopback_hosts() {
@@ -55,6 +67,14 @@ mod tests {
         assert!(is_localhost_url("http://0.0.0.0:8899"));
         assert!(is_localhost_url("http://[::1]:8899"));
         assert!(!is_localhost_url("https://api.devnet.solana.com"));
+    }
+
+    #[test]
+    fn localhost_http_detection_rejects_non_http_schemes() {
+        assert!(is_localhost_http_url("http://localhost:8899"));
+        assert!(is_localhost_http_url("https://127.0.0.1:8899"));
+        assert!(!is_localhost_http_url("ws://127.0.0.1:8900"));
+        assert!(!is_localhost_http_url("ftp://localhost"));
     }
 
     #[test]

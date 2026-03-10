@@ -3,7 +3,7 @@ use std::collections::VecDeque;
 use chrono::{DateTime, Local, Utc};
 use tracing::Level;
 
-use crate::utils::{is_localhost_url, url_encode};
+use crate::utils::{is_localhost_http_url, url_encode};
 
 #[derive(Clone)]
 pub struct TuiConfig {
@@ -466,7 +466,7 @@ impl TuiState {
         let explorer_url = format!(
             "https://explorer.solana.com/?cluster=custom&customUrl={encoded_rpc}"
         );
-        let remote_rpc_url = is_localhost_url(&remote_rpc_for_explorer)
+        let remote_rpc_url = is_localhost_http_url(&remote_rpc_for_explorer)
             .then_some(remote_rpc_for_explorer);
         let max_transactions = 500;
 
@@ -755,6 +755,13 @@ mod tests {
         }
     }
 
+    fn remote_localhost_ws_config() -> TuiConfig {
+        TuiConfig {
+            remote_rpc_url: "ws://127.0.0.1:8900".to_string(),
+            ..config()
+        }
+    }
+
     fn tx(signature: &str) -> TransactionEntry {
         tx_with_accounts(signature, vec![])
     }
@@ -873,6 +880,9 @@ mod tests {
 
         let remote_state = TuiState::new(remote_localhost_config());
         assert!(remote_state.has_remote_transactions());
+
+        let ws_remote_state = TuiState::new(remote_localhost_ws_config());
+        assert!(!ws_remote_state.has_remote_transactions());
     }
 
     #[test]
