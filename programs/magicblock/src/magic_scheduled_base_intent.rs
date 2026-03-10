@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use magicblock_core::{
     intent::{CommittedAccount, CommittedAccountRef},
@@ -23,12 +23,22 @@ use solana_transaction::Transaction;
 
 use crate::{
     instruction_utils::InstructionUtils,
+    magic_sys::MISSING_COMMIT_NONCE_ERR,
     utils::accounts::{
         get_instruction_account_with_idx, get_instruction_pubkey_with_idx,
         get_writable_with_idx,
     },
     validator::validator_authority_id,
 };
+
+/// Commits that are covered by User's dlp PDAs
+const ACTUAL_COMMIT_LIMIT: u64 = 25;
+/// Fixed fee per commit (charged for each commit after the first).
+/// https://github.com/magicblock-labs/delegation-program/blob/main/src/consts.rs#L11
+pub const COMMIT_FEE_LAMPORTS: u64 = 100_000;
+/// Price per compute unit for a BaseAction executed on Solana base chain,
+/// denominated in micro-lamports per CU (mirrors Solana's priority fee model).
+pub const COMPUTE_UNIT_PRICE_MICRO_LAMPORTS: u64 = 50_000;
 
 /// Context necessary for construction of Schedule Action
 pub struct ConstructionContext<'a, 'ic> {
@@ -92,6 +102,18 @@ impl ScheduledIntentBundle {
             payer: *payer_pubkey,
             sent_transaction: intent_bundle_sent_transaction,
             intent_bundle,
+        })
+    }
+
+    /// Calculates fee for intent
+    pub fn calculate_fee(
+        &self,
+        commit_nonces: &HashMap<Pubkey, u64>,
+    ) -> Result<u64, InstructionError> {
+        const SCHEDULING_FEE: u64 = 0;
+
+        Ok({
+            SCHEDULING_FEE + self.intent_bundle.calculate_fee(commit_nonces)?
         })
     }
 
@@ -292,6 +314,21 @@ impl MagicIntentBundle {
         }
 
         Ok(())
+    }
+
+    pub fn calculate_fee(
+        &self,
+        commit_nonces: &HashMap<Pubkey, u64>,
+    ) -> Result<u64, InstructionError> {
+        let mut fee = 0;
+        if let Some(ref commit) = self.commit {
+            fee += commit.calculate_fee(commit_nonces)?;
+        }
+        if let Some(ref cau) = self.commit_and_undelegate {
+            fee += cau.calculate_fee(commit_nonces)?;
+        }
+        fee += calculate_actions_fee(&self.standalone_actions);
+        Ok(fee)
     }
 
     pub fn has_undelegate_intent(&self) -> bool {
@@ -500,6 +537,16 @@ impl CommitAndUndelegate {
                 Err(InstructionError::ReadonlyDataModified)
             }
         })
+    }
+
+    pub fn calculate_fee(
+        &self,
+        commit_nonces: &HashMap<Pubkey, u64>,
+    ) -> Result<u64, InstructionError> {
+        let mut fee = 0;
+        fee += self.commit_action.calculate_fee(commit_nonces)?;
+        fee += self.undelegate_action.calculate_fee(commit_nonces)?;
+        Ok(fee)
     }
 
     pub fn get_committed_accounts(&self) -> &Vec<CommittedAccount> {
@@ -729,6 +776,28 @@ impl CommitType {
         }
     }
 
+    /// Calculate fee commits
+    pub fn calculate_fee(
+        &self,
+        commit_nonces: &HashMap<Pubkey, u64>,
+    ) -> Result<u64, InstructionError> {
+        let mut fee = 0;
+        match self {
+            CommitType::Standalone(ref committed_accounts) => {
+                fee += calculate_commit_fee(committed_accounts, commit_nonces)?;
+            }
+            CommitType::WithBaseActions {
+                committed_accounts,
+                base_actions,
+            } => {
+                fee += calculate_commit_fee(committed_accounts, commit_nonces)?;
+                fee += calculate_actions_fee(base_actions);
+            }
+        }
+
+        Ok(fee)
+    }
+
     pub fn get_committed_accounts(&self) -> &Vec<CommittedAccount> {
         match self {
             Self::Standalone(committed_accounts) => committed_accounts,
@@ -791,6 +860,18 @@ impl UndelegateType {
             }
         }
     }
+
+    pub fn calculate_fee(
+        &self,
+        _commit_nonces: &HashMap<Pubkey, u64>,
+    ) -> Result<u64, InstructionError> {
+        match self {
+            UndelegateType::Standalone => Ok(0),
+            UndelegateType::WithBaseActions(actions) => {
+                Ok(calculate_actions_fee(actions))
+            }
+        }
+    }
 }
 
 /// Validate that a committee account has a permission to be committed.
@@ -839,4 +920,31 @@ pub(crate) fn validate_commit_schedule_permissions(
     } else {
         Ok(())
     }
+}
+
+pub(crate) fn calculate_commit_fee(
+    accounts: &[CommittedAccount],
+    commit_nonces: &HashMap<Pubkey, u64>,
+) -> Result<u64, InstructionError> {
+    accounts.iter().try_fold(0u64, |fee, account| {
+        if let Some(nonce) = commit_nonces.get(&account.pubkey) {
+            if nonce > &ACTUAL_COMMIT_LIMIT {
+                Ok(fee + COMMIT_FEE_LAMPORTS)
+            } else {
+                Ok(fee)
+            }
+        } else {
+            Err(InstructionError::Custom(MISSING_COMMIT_NONCE_ERR))
+        }
+    })
+}
+
+fn calculate_actions_fee(actions: &[BaseAction]) -> u64 {
+    const MICRO_LAMPORTS_PER_LAMPORT: u64 = 1_000_000;
+    let micro_lamports = actions.iter().fold(0u64, |acc, action| {
+        acc.saturating_add(
+            action.compute_units as u64 * COMPUTE_UNIT_PRICE_MICRO_LAMPORTS,
+        )
+    });
+    micro_lamports.div_ceil(MICRO_LAMPORTS_PER_LAMPORT)
 }
