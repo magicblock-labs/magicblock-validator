@@ -750,16 +750,40 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                 .lock()
                 .expect("fetching_accounts lock poisoned");
             for pubkey in &newly_inserted {
-                if let Some((_, senders)) = fetching.remove(pubkey) {
-                    for sender in senders {
-                        let _ = sender.send(Err(
-                            RemoteAccountProviderError::AccountSubscriptionsTaskFailed(
-                                format!(
-                                    "{}: subscription setup failed, rolling back",
-                                    pubkey
-                                ),
+                let make_err = || {
+                    Err(
+                        RemoteAccountProviderError::AccountSubscriptionsTaskFailed(
+                            format!(
+                                "{}: subscription setup failed, \
+                                 rolling back",
+                                pubkey
                             ),
-                        ));
+                        ),
+                    )
+                };
+                match fetching.entry(*pubkey) {
+                    Entry::Occupied(mut occ) => {
+                        let (_, senders) = occ.get_mut();
+                        if senders.len() <= 1 {
+                            // Only our sender — remove the whole
+                            // entry.
+                            let (_, senders) = occ.remove();
+                            for sender in senders {
+                                let _ = sender.send(make_err());
+                            }
+                        } else {
+                            // Another caller appended its sender
+                            // after we released the lock. Remove
+                            // only the first sender (ours) and
+                            // leave the entry for the other
+                            // caller's fetch to complete.
+                            let our_sender = senders.remove(0);
+                            let _ = our_sender.send(make_err());
+                        }
+                    }
+                    Entry::Vacant(_) => {
+                        // Already removed by someone else, nothing
+                        // to do.
                     }
                 }
             }
