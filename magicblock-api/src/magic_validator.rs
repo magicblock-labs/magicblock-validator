@@ -725,7 +725,12 @@ impl MagicValidator {
         } else {
             TargetMode::Replica
         };
-        let _ = self.mode_switch_tx.try_send(target);
+        self.mode_switch_tx.try_send(target).map_err(|e| {
+            ApiError::FailedToSendModeSwitch(format!(
+                "Failed to send target mode {target:?} to scheduler: \
+                 {e}"
+            ))
+        })?;
 
         // Now we are ready to start all services and are ready to accept transactions
         if let Some(frequency) = self
