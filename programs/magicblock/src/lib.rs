@@ -1,3 +1,4 @@
+mod clone_account;
 mod ephemeral_accounts;
 pub mod errors;
 mod magic_context;

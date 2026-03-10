@@ -293,7 +293,6 @@ where
             crate::database::columns::Blocktime::NAME
                 | crate::database::columns::Blockhash::NAME
                 | crate::database::columns::PerfSamples::NAME
-                | crate::database::columns::AccountModDatas::NAME
         )
     }
 
