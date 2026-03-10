@@ -14,7 +14,7 @@ use magicblock_accounts_db::traits::AccountsBank;
 use magicblock_config::config::AllowedProgram;
 use magicblock_core::token_programs::{
     is_ata, try_derive_ata_address_and_bump, try_derive_eata_address_and_bump,
-    MaybeIntoAta, EATA_PROGRAM_ID,
+    MaybeIntoAta,
 };
 use magicblock_metrics::metrics::{self, AccountFetchOrigin};
 use scc::{hash_map::Entry, HashMap};
@@ -408,6 +408,7 @@ where
                                 }
 
                                 self.apply_delegation_record_to_account(
+                                    pubkey,
                                     &mut account,
                                     &delegation_record,
                                 );
@@ -494,7 +495,7 @@ where
 
     fn maybe_build_projected_ata_clone_request_from_eata_sub_update(
         &self,
-        _eata_pubkey: Pubkey,
+        eata_pubkey: Pubkey,
         eata_account: &AccountSharedData,
         deleg_record: Option<&DelegationRecord>,
     ) -> Option<AccountCloneRequest> {
@@ -503,26 +504,11 @@ where
         if deleg_record.authority != self.validator_pubkey {
             return None;
         }
-        if deleg_record.owner != EATA_PROGRAM_ID {
-            return None;
-        }
-
-        let data = eata_account.data();
-        if data.len() < 64 {
-            return None;
-        }
-        let wallet_owner = match data[0..32].try_into() {
-            Ok(bytes) => Pubkey::new_from_array(bytes),
-            Err(_) => {
-                return None;
-            }
-        };
-        let mint = match data[32..64].try_into() {
-            Ok(bytes) => Pubkey::new_from_array(bytes),
-            Err(_) => {
-                return None;
-            }
-        };
+        let (wallet_owner, mint) = delegation::parse_raw_eata_pda(
+            &eata_pubkey,
+            eata_account.data(),
+            deleg_record.owner,
+        )?;
         let (ata_pubkey, _) =
             try_derive_ata_address_and_bump(&wallet_owner, &mint)?;
 
@@ -665,11 +651,13 @@ where
     /// Returns commit frequency if account is delegated to us
     fn apply_delegation_record_to_account(
         &self,
+        account_pubkey: Pubkey,
         account: &mut ResolvedAccountSharedData,
         delegation_record: &DelegationRecord,
     ) -> Option<u64> {
         delegation::apply_delegation_record_to_account(
             self,
+            account_pubkey,
             account,
             delegation_record,
         )

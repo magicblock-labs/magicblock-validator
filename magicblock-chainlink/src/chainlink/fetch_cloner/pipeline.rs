@@ -331,6 +331,7 @@ where
                     this.get_delegated_to_other(&delegation_record);
 
                 let commit_freq = this.apply_delegation_record_to_account(
+                    pubkey,
                     &mut account,
                     &delegation_record,
                 );
