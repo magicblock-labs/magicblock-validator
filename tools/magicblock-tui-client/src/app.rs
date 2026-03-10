@@ -723,18 +723,7 @@ async fn fetch_transaction_detail(
     rpc_url: &str,
     signature: &str,
 ) -> Result<TransactionDetail, String> {
-    let request_body = serde_json::json!({
-        "jsonrpc": "2.0",
-        "id": 1,
-        "method": "getTransaction",
-        "params": [
-            signature,
-            {
-                "encoding": "json",
-                "maxSupportedTransactionVersion": 255
-            }
-        ]
-    });
+    let request_body = build_transaction_detail_request(signature);
 
     let response = client
         .post(rpc_url)
@@ -787,6 +776,22 @@ async fn fetch_transaction_detail(
         rpc_url: rpc_url.to_string(),
         explorer_url: build_explorer_url(rpc_url, signature),
         selected_account,
+    })
+}
+
+fn build_transaction_detail_request(signature: &str) -> serde_json::Value {
+    serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "getTransaction",
+        "params": [
+            signature,
+            {
+                "encoding": "json",
+                "commitment": "processed",
+                "maxSupportedTransactionVersion": 255
+            }
+        ]
     })
 }
 
@@ -1072,9 +1077,10 @@ fn open_url_in_browser(url: &str) -> std::io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_transaction_accounts, is_vote_transaction,
-        BlockTransactionMessage, CompiledInstruction, LoadedAddresses,
-        TransactionMessage, TransactionMessageHeader, VOTE_PROGRAM_ID,
+        build_transaction_accounts, build_transaction_detail_request,
+        is_vote_transaction, BlockTransactionMessage, CompiledInstruction,
+        LoadedAddresses, TransactionMessage, TransactionMessageHeader,
+        VOTE_PROGRAM_ID,
     };
 
     #[test]
@@ -1157,5 +1163,16 @@ mod tests {
             }],
         };
         assert!(!is_vote_transaction(&non_vote, None));
+    }
+
+    #[test]
+    fn transaction_detail_request_uses_processed_commitment() {
+        let request = build_transaction_detail_request("sig");
+
+        assert_eq!(request["method"], "getTransaction");
+        assert_eq!(request["params"][0], "sig");
+        assert_eq!(request["params"][1]["encoding"], "json");
+        assert_eq!(request["params"][1]["commitment"], "processed");
+        assert_eq!(request["params"][1]["maxSupportedTransactionVersion"], 255);
     }
 }
