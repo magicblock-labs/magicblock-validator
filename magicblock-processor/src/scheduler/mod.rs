@@ -15,8 +15,12 @@ use std::{
 use coordinator::{ExecutionCoordinator, TransactionWithId};
 use locks::{ExecutorId, MAX_SVM_EXECUTORS};
 use magicblock_accounts_db::{traits::AccountsBank, AccountsDb};
-use magicblock_core::link::transactions::{
-    ProcessableTransaction, TransactionToProcessRx,
+use magicblock_core::{
+    link::transactions::{
+        ProcessableTransaction, TransactionProcessingMode,
+        TransactionToProcessRx,
+    },
+    Slot,
 };
 use magicblock_ledger::LatestBlock;
 use solana_account::{from_account, to_account};
@@ -31,7 +35,10 @@ use tokio::{
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, instrument, warn};
 
-use crate::executor::{SimpleForkGraph, TransactionExecutor};
+use crate::{
+    executor::{IndexedTransaction, SimpleForkGraph, TransactionExecutor},
+    scheduler::state::SchedulerMode,
+};
 
 // Capacity of 1 ensures executor processes one transaction at a time
 const EXECUTOR_QUEUE_CAPACITY: usize = 1;
@@ -40,22 +47,28 @@ const EXECUTOR_QUEUE_CAPACITY: usize = 1;
 ///
 /// Runs in a dedicated thread with a single-threaded Tokio runtime.
 pub struct TransactionScheduler {
-    /// Manages executor pool and account locking
+    /// Manages executor pool, account locking, and coordination mode
     coordinator: ExecutionCoordinator,
     /// Incoming transaction queue from global processor
     transactions_rx: TransactionToProcessRx,
     /// Executor readiness notifications (workers signal when idle)
     ready_rx: Receiver<ExecutorId>,
     /// Sender channels to each executor worker
-    executors: Vec<Sender<ProcessableTransaction>>,
+    executors: Vec<Sender<IndexedTransaction>>,
     /// Shared BPF program cache
     program_cache: Arc<RwLock<ProgramCache<SimpleForkGraph>>>,
     /// Accounts database (for sysvar updates on slot transition)
     accountsdb: Arc<AccountsDb>,
     /// Latest block metadata (slot, clock, blockhash)
     latest_block: LatestBlock,
-    /// Global shutdown signal
+    /// Global shutdown signal.
     shutdown: CancellationToken,
+    /// Receiver for mode transition commands.
+    mode_rx: Receiver<SchedulerMode>,
+    /// Current active slot (unfinalized block).
+    slot: Slot,
+    /// Transaction index within the current block being assembled.
+    index: u32,
 }
 
 impl TransactionScheduler {
@@ -96,6 +109,9 @@ impl TransactionScheduler {
             program_cache,
             accountsdb: state.accountsdb,
             shutdown: state.shutdown,
+            mode_rx: state.mode_rx,
+            slot: state.ledger.latest_block().load().slot,
+            index: 0,
         }
     }
 
@@ -113,8 +129,11 @@ impl TransactionScheduler {
 
     /// Main event loop: processes executor readiness, new transactions, and slot transitions.
     ///
-    /// Uses `biased` select to prioritize ready workers over incoming transactions,
-    /// ensuring the pipeline stays full.
+    /// Uses `biased` select to prioritize in this order:
+    /// 1. Slot transitions
+    /// 2. Executor readiness
+    /// 3. Mode switches (before transactions to avoid race condition)
+    /// 4. New transactions
     #[instrument(skip(self))]
     async fn run(mut self) {
         let mut block_produced = self.latest_block.subscribe();
@@ -123,6 +142,9 @@ impl TransactionScheduler {
                 biased;
                 Ok(()) = block_produced.recv() => self.transition_to_new_slot(),
                 Some(executor) = self.ready_rx.recv() => self.handle_ready_executor(executor),
+                Some(mode) = self.mode_rx.recv() => {
+                    self.coordinator.transition_to(mode);
+                }
                 Some(txn) = self.transactions_rx.recv(), if self.coordinator.is_ready() => {
                     self.handle_new_transaction(txn);
                 }
@@ -143,6 +165,10 @@ impl TransactionScheduler {
     }
 
     fn handle_new_transaction(&mut self, txn: ProcessableTransaction) {
+        if !self.coordinator.is_transaction_allowed(&txn.mode) {
+            warn!("Dropping transaction due to mode incompatibility");
+            return;
+        }
         // SAFETY:
         // the caller ensured that executor was ready before invoking this
         // method so the get_ready_executor should always return Some here
@@ -183,6 +209,16 @@ impl TransactionScheduler {
             Ok(txn) => txn,
             Err(blocker) => return Some(blocker),
         };
+        let (slot, index) =
+            if let TransactionProcessingMode::Replay(ctx) = txn.mode {
+                (ctx.slot, ctx.index)
+            } else {
+                let index = self.index;
+                self.index += 1;
+                (self.slot, index)
+            };
+
+        let txn = IndexedTransaction { slot, index, txn };
 
         let _ = self.executors[executor as usize].try_send(txn).inspect_err(
             |e| error!(executor, error = ?e, "Executor channel send failed"),
@@ -190,9 +226,11 @@ impl TransactionScheduler {
         None
     }
 
-    fn transition_to_new_slot(&self) {
+    fn transition_to_new_slot(&mut self) {
         let block = self.latest_block.load();
         let mut cache = self.program_cache.write().unwrap();
+        self.slot = block.slot;
+        self.index = 0;
 
         // Prune stale programs and re-root to new slot
         cache.prune(block.slot, 0);
