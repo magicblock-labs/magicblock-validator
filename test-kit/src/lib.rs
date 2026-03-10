@@ -179,7 +179,9 @@ impl ExecutionTestEnv {
 
         // Pre-send the target mode so the scheduler picks it up once running.
         if primary_mode {
-            let _ = this.mode_switch_tx.try_send(TargetMode::Primary);
+            this.mode_switch_tx
+                .try_send(TargetMode::Primary)
+                .expect("failed to pre-send target mode to mode_switch_tx");
         }
 
         // Start/Defer the transaction processing backend.
@@ -207,7 +209,9 @@ impl ExecutionTestEnv {
     /// After this call, the scheduler will accept execution transactions
     /// in addition to replay transactions.
     pub fn switch_to_primary_mode(&self) {
-        let _ = self.mode_switch_tx.try_send(TargetMode::Primary);
+        self.mode_switch_tx
+            .try_send(TargetMode::Primary)
+            .expect("failed to send target mode to mode_switch_tx");
     }
 
     /// Creates a new account with the specified properties.
