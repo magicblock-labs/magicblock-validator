@@ -168,6 +168,36 @@ where
     }
 }
 
+fn create_non_raw_eata_owned_account(
+    pubkey: Pubkey,
+    data_len: usize,
+) -> (Account, Pubkey, Pubkey) {
+    let (wallet_owner, mint) = loop {
+        let wallet_owner = random_pubkey();
+        let mint = random_pubkey();
+        if derive_eata(&wallet_owner, &mint) != pubkey {
+            break (wallet_owner, mint);
+        }
+    };
+
+    let mut data = vec![0u8; data_len.max(72)];
+    data[0..32].copy_from_slice(wallet_owner.as_ref());
+    data[32..64].copy_from_slice(mint.as_ref());
+    data[64..72].copy_from_slice(&777u64.to_le_bytes());
+
+    (
+        Account {
+            lamports: 1_000_000,
+            data,
+            owner: dlp::id(),
+            executable: false,
+            rent_epoch: 0,
+        },
+        wallet_owner,
+        mint,
+    )
+}
+
 /// Helper function to initialize FetchCloner for tests with subscription updates
 /// Returns (FetchCloner, subscription_sender) for simulating subscription updates in tests
 fn init_fetch_cloner(
@@ -2167,6 +2197,133 @@ async fn test_no_program_subscription_for_undelegated_account_subscription_updat
         subscribed_programs.is_empty(),
         "Should have no program subscriptions for undelegated account subscription update, got: {:?}",
         subscribed_programs
+    );
+}
+
+#[tokio::test]
+async fn test_fetch_and_clone_non_raw_eata_owned_account_as_delegated() {
+    init_logger();
+    let validator_pubkey = random_pubkey();
+    let account_pubkey = random_pubkey();
+    const CURRENT_SLOT: u64 = 100;
+    const DATA_LEN: usize = 9728;
+
+    let (account, wallet_owner, mint) =
+        create_non_raw_eata_owned_account(account_pubkey, DATA_LEN);
+    let ata_pubkey = derive_ata(&wallet_owner, &mint);
+
+    let FetcherTestCtx {
+        accounts_bank,
+        fetch_cloner,
+        rpc_client,
+        ..
+    } = setup(
+        [(account_pubkey, account.clone())],
+        CURRENT_SLOT,
+        validator_pubkey,
+    )
+    .await;
+
+    add_delegation_record_for(
+        &rpc_client,
+        account_pubkey,
+        validator_pubkey,
+        EATA_PROGRAM_ID,
+    );
+
+    fetch_cloner
+        .fetch_and_clone_accounts(
+            &[account_pubkey],
+            None,
+            None,
+            AccountFetchOrigin::GetAccount,
+            None,
+        )
+        .await
+        .expect("Failed to fetch and clone delegated EATA-owned account");
+
+    let cloned_account = accounts_bank
+        .get_account(&account_pubkey)
+        .expect("account should be cloned");
+    assert_eq!(*cloned_account.owner(), EATA_PROGRAM_ID);
+    assert!(cloned_account.delegated());
+    assert!(!cloned_account.confined());
+    assert_eq!(cloned_account.remote_slot(), CURRENT_SLOT);
+    assert_eq!(cloned_account.data().len(), DATA_LEN);
+    assert!(
+        accounts_bank.get_account(&ata_pubkey).is_none(),
+        "non-raw EATA-owned account must not project an ATA clone"
+    );
+}
+
+#[tokio::test]
+async fn test_non_raw_eata_owned_account_subscription_update_stays_delegated() {
+    init_logger();
+    let validator_pubkey = random_pubkey();
+    let account_pubkey = random_pubkey();
+    const CURRENT_SLOT: u64 = 100;
+    const DATA_LEN: usize = 9728;
+
+    let (account, wallet_owner, mint) =
+        create_non_raw_eata_owned_account(account_pubkey, DATA_LEN);
+    let ata_pubkey = derive_ata(&wallet_owner, &mint);
+
+    let FetcherTestCtx {
+        accounts_bank,
+        rpc_client,
+        subscription_tx,
+        ..
+    } = setup(
+        [(account_pubkey, account.clone())],
+        CURRENT_SLOT,
+        validator_pubkey,
+    )
+    .await;
+
+    add_delegation_record_for(
+        &rpc_client,
+        account_pubkey,
+        validator_pubkey,
+        EATA_PROGRAM_ID,
+    );
+
+    use crate::remote_account_provider::{
+        RemoteAccount, RemoteAccountUpdateSource,
+    };
+
+    subscription_tx
+        .send(ForwardedSubscriptionUpdate {
+            pubkey: account_pubkey,
+            account: RemoteAccount::from_fresh_account(
+                account,
+                CURRENT_SLOT,
+                RemoteAccountUpdateSource::Subscription,
+            ),
+        })
+        .await
+        .unwrap();
+
+    const POLL_INTERVAL: std::time::Duration = Duration::from_millis(10);
+    const TIMEOUT: std::time::Duration = Duration::from_millis(500);
+    tokio::time::timeout(TIMEOUT, async {
+        while accounts_bank.get_account(&account_pubkey).is_none() {
+            tokio::time::sleep(POLL_INTERVAL).await;
+        }
+    })
+    .await
+    .expect("timed out waiting for delegated EATA-owned subscription update");
+
+    let cloned_account = accounts_bank
+        .get_account(&account_pubkey)
+        .expect("account should be cloned from subscription update");
+    assert_eq!(*cloned_account.owner(), EATA_PROGRAM_ID);
+    assert!(cloned_account.delegated());
+    assert!(!cloned_account.confined());
+    assert_eq!(cloned_account.remote_slot(), CURRENT_SLOT);
+    assert_eq!(cloned_account.data().len(), DATA_LEN);
+    assert!(
+        accounts_bank.get_account(&ata_pubkey).is_none(),
+        "non-raw EATA-owned account subscription update must not project an ATA clone"
     );
 }
 
