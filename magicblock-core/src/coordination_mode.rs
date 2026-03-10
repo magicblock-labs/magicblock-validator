@@ -93,6 +93,14 @@ pub fn switch_to_primary_mode() {
     }
 }
 
+/// Resets the process-global coordination mode back to `StartingUp`
+/// so tests do not leak state between each other.
+#[cfg(test)]
+pub(crate) fn reset_coordination_mode_for_tests() {
+    COORDINATION_MODE
+        .store(CoordinationMode::StartingUp as u8, Ordering::Release);
+}
+
 /// Transitions from `StartingUp` to `Replica`.
 /// No-op if already in Replica mode.
 pub fn switch_to_replica_mode() {
