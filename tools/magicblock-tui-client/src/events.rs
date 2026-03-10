@@ -99,6 +99,15 @@ fn handle_key(
     }
 
     if state.is_transaction_tab() {
+        if key.modifiers.contains(KeyModifiers::ALT) {
+            if let KeyCode::Char(ch) = key.code {
+                if let Some(shortcut) = digit_shortcut(ch) {
+                    state.select_tab_by_shortcut(shortcut);
+                    return EventAction::None;
+                }
+            }
+        }
+
         match key {
             KeyEvent {
                 code: KeyCode::Backspace,
@@ -125,10 +134,6 @@ fn handle_key(
             } if !modifiers.contains(KeyModifiers::CONTROL)
                 && !modifiers.contains(KeyModifiers::ALT) =>
             {
-                if let Some(shortcut) = digit_shortcut(ch) {
-                    state.select_tab_by_shortcut(shortcut);
-                    return EventAction::None;
-                }
                 state.append_tx_filter_char(ch);
                 return EventAction::None;
             }
@@ -423,7 +428,7 @@ mod tests {
     }
 
     #[test]
-    fn digit_shortcuts_switch_tabs_from_transaction_tabs() {
+    fn digits_are_available_in_transaction_filter() {
         let mut state = TuiState::new(TuiConfig {
             remote_rpc_url: "http://127.0.0.1:8898".to_string(),
             ..config()
@@ -433,6 +438,24 @@ mod tests {
         let _ = handle_event(
             &mut state,
             Event::Key(KeyEvent::new(KeyCode::Char('2'), KeyModifiers::NONE)),
+            10,
+        );
+
+        assert_eq!(state.active_tab, Tab::Transactions);
+        assert_eq!(state.tx_filter_query(), "2");
+    }
+
+    #[test]
+    fn alt_digit_shortcuts_switch_tabs_from_transaction_tabs() {
+        let mut state = TuiState::new(TuiConfig {
+            remote_rpc_url: "http://127.0.0.1:8898".to_string(),
+            ..config()
+        });
+        state.active_tab = Tab::Transactions;
+
+        let _ = handle_event(
+            &mut state,
+            Event::Key(KeyEvent::new(KeyCode::Char('2'), KeyModifiers::ALT)),
             10,
         );
 
