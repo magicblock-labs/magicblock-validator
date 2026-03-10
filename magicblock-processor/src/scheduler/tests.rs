@@ -360,7 +360,9 @@ fn starting_up_mode_rejects_execution_transactions() {
     let c = ExecutionCoordinator::new(1);
 
     // StartingUp mode should reject Execution transactions
-    assert!(!c.is_transaction_allowed(&TransactionProcessingMode::Execution(None)));
+    assert!(
+        !c.is_transaction_allowed(&TransactionProcessingMode::Execution(None))
+    );
     // But allow Replay
     assert!(c.is_transaction_allowed(&TransactionProcessingMode::Replay(
         ReplayPosition {
@@ -390,21 +392,27 @@ fn starting_up_to_primary_mode_switch() {
     let mut c = ExecutionCoordinator::new(1);
 
     // Start in StartingUp, should reject Execution
-    assert!(!c.is_transaction_allowed(&TransactionProcessingMode::Execution(None)));
+    assert!(
+        !c.is_transaction_allowed(&TransactionProcessingMode::Execution(None))
+    );
 
     // Switch to Primary
     c.switch_to_primary_mode();
 
     // Now should allow Execution
-    assert!(c.is_transaction_allowed(&TransactionProcessingMode::Execution(None)));
+    assert!(
+        c.is_transaction_allowed(&TransactionProcessingMode::Execution(None))
+    );
     // But reject Replay
-    assert!(!c.is_transaction_allowed(&TransactionProcessingMode::Replay(
-        ReplayPosition {
-            slot: 0,
-            index: 0,
-            persist: false,
-        }
-    )));
+    assert!(
+        !c.is_transaction_allowed(&TransactionProcessingMode::Replay(
+            ReplayPosition {
+                slot: 0,
+                index: 0,
+                persist: false,
+            }
+        ))
+    );
 }
 
 #[test]
@@ -432,7 +440,9 @@ fn starting_up_to_replica_mode_switch() {
         }
     )));
     // But reject Execution
-    assert!(!c.is_transaction_allowed(&TransactionProcessingMode::Execution(None)));
+    assert!(
+        !c.is_transaction_allowed(&TransactionProcessingMode::Execution(None))
+    );
 }
 
 #[test]

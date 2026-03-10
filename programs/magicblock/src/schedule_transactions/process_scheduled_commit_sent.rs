@@ -4,6 +4,7 @@ use std::{
 };
 
 use lazy_static::lazy_static;
+use magicblock_core::coordination_mode;
 use solana_clock::Slot;
 use solana_hash::Hash;
 use solana_instruction::error::InstructionError;
@@ -12,8 +13,6 @@ use solana_program_runtime::invoke_context::InvokeContext;
 use solana_pubkey::Pubkey;
 use solana_signature::Signature;
 use solana_transaction_context::TransactionContext;
-
-use magicblock_core::coordination_mode;
 
 use crate::{
     errors::custom_error_codes,

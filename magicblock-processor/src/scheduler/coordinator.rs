@@ -252,11 +252,9 @@ impl ExecutionCoordinator {
         match &self.mode {
             CoordinationMode::Replica(_) => {
                 warn!("Tried to switch to replica mode more than once");
-                return;
             }
             CoordinationMode::Primary(_) => {
                 warn!("Cannot switch from primary to replica mode");
-                return;
             }
             CoordinationMode::StartingUp(r) => {
                 self.mode = CoordinationMode::Replica(ReplicaMode {
