@@ -272,7 +272,7 @@ where
         // we don't already hold a newer version of the account in our bank
         let out_of_order_slot =
             self.accounts_bank.get_account(&pubkey).and_then(|in_bank| {
-                if in_bank.remote_slot() > account.remote_slot() {
+                if in_bank.remote_slot() >= account.remote_slot() {
                     Some(in_bank.remote_slot())
                 } else {
                     None
