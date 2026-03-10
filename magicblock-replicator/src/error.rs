@@ -13,6 +13,8 @@ pub enum Error {
     Io(#[from] std::io::Error),
     #[error("serialization error: {0}")]
     SerDe(#[from] bincode::Error),
+    #[error("internal replication error: {0}")]
+    Internal(&'static str),
 }
 
 impl<K> From<async_nats::error::Error<K>> for Error
