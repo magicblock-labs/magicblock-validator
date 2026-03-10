@@ -519,6 +519,16 @@ lazy_static::lazy_static! {
             &["client_id"],
         )
         .unwrap();
+
+    static ref GRPC_TOTAL_STREAMS_GAUGE: IntGaugeVec =
+        IntGaugeVec::new(
+            Opts::new(
+                "grpc_total_streams_gauge",
+                "Total number of GRPC streams including current stream and program stream",
+            ),
+            &["client_id"],
+        )
+        .unwrap();
 }
 
 pub(crate) fn register() {
@@ -600,6 +610,7 @@ pub(crate) fn register() {
         register!(PUBSUB_CLIENT_CONNECTIONS_GAUGE);
         register!(GRPC_OPTIMIZED_STREAMS_GAUGE);
         register!(GRPC_UNOPTIMIZED_STREAMS_GAUGE);
+        register!(GRPC_TOTAL_STREAMS_GAUGE);
     });
 }
 
@@ -924,6 +935,12 @@ pub fn set_grpc_optimized_streams_gauge(client_id: &str, count: usize) {
 
 pub fn set_grpc_unoptimized_streams_gauge(client_id: &str, count: usize) {
     GRPC_UNOPTIMIZED_STREAMS_GAUGE
+        .with_label_values(&[client_id])
+        .set(count as i64);
+}
+
+pub fn set_grpc_total_streams_gauge(client_id: &str, count: usize) {
+    GRPC_TOTAL_STREAMS_GAUGE
         .with_label_values(&[client_id])
         .set(count as i64);
 }
