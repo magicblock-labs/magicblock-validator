@@ -56,10 +56,7 @@ use magicblock_processor::{
     build_svm_env,
     loader::load_upgradeable_programs,
     scheduler::{
-        state::{
-            mode_switch_channel, ModeSwitchTx, TargetMode,
-            TransactionSchedulerState,
-        },
+        state::{SchedulerMode, TransactionSchedulerState},
         TransactionScheduler,
     },
 };
@@ -82,7 +79,10 @@ use solana_native_token::LAMPORTS_PER_SOL;
 use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_signer::Signer;
-use tokio::runtime::Builder;
+use tokio::{
+    runtime::Builder,
+    sync::mpsc::{channel, Sender},
+};
 use tokio_util::sync::CancellationToken;
 use tracing::*;
 
@@ -132,7 +132,7 @@ pub struct MagicValidator {
     claim_fees_task: ClaimFeesTask,
     task_scheduler: Option<TaskSchedulerService>,
     transaction_execution: thread::JoinHandle<()>,
-    mode_switch_tx: ModeSwitchTx,
+    mode_tx: Sender<SchedulerMode>,
     is_standalone: bool,
 }
 
@@ -264,7 +264,7 @@ impl MagicValidator {
 
         // Mode switch channel for transitioning from StartingUp to Primary
         // or Replica mode after ledger replay
-        let (mode_switch_tx, mode_switch_rx) = mode_switch_channel();
+        let (mode_tx, mode_rx) = channel(1);
         let is_standalone = matches!(
             config.validator.replication_mode,
             ReplicationMode::Standalone
@@ -282,7 +282,7 @@ impl MagicValidator {
                 .auto_airdrop_lamports
                 > 0,
             shutdown: token.clone(),
-            mode_switch_rx,
+            mode_rx,
         };
         TRANSACTION_COUNT.inc_by(ledger.count_transactions()? as u64);
         // Faucet keypair is only used for airdrops, which are not allowed in
@@ -386,7 +386,7 @@ impl MagicValidator {
             block_udpate_tx: validator_channels.block_update,
             task_scheduler: Some(task_scheduler),
             transaction_execution,
-            mode_switch_tx,
+            mode_tx,
             is_standalone,
         })
     }
@@ -721,11 +721,11 @@ impl MagicValidator {
         // - Standalone validators transition to Primary mode
         // - StandBy/ReplicatOnly validators transition to Replica mode
         let target = if self.is_standalone {
-            TargetMode::Primary
+            SchedulerMode::Primary
         } else {
-            TargetMode::Replica
+            SchedulerMode::Replica
         };
-        self.mode_switch_tx.try_send(target).map_err(|e| {
+        self.mode_tx.try_send(target).map_err(|e| {
             ApiError::FailedToSendModeSwitch(format!(
                 "Failed to send target mode {target:?} to scheduler: \
                  {e}"

@@ -7,7 +7,10 @@ use ratatui::{
 };
 use tracing::Level;
 
-use crate::state::{Tab, TuiState, ViewMode, MAX_DETAIL_ACCOUNTS};
+use crate::state::{
+    Tab, TransactionAccount, TransactionSource, TuiState, ViewMode,
+    MAX_DETAIL_ACCOUNTS,
+};
 
 const CYAN: Color = Color::Cyan;
 const GREEN: Color = Color::Green;
@@ -88,19 +91,54 @@ fn render_tick_bar(filled: usize, total: usize) -> Line<'static> {
 }
 
 fn render_tabs(frame: &mut Frame, area: Rect, state: &TuiState) {
-    let tx_count = state.transactions.len();
-    let filtered_tx_count = state.filtered_transactions_len();
-    let tx_title = if state.tx_filter_query().is_empty() {
-        format!("Transactions ({})", tx_count)
+    let local_tx_count = state.transaction_count(TransactionSource::Local);
+    let local_filtered_tx_count =
+        state.filtered_transactions_len_for(TransactionSource::Local);
+    let tx_title = if state
+        .tx_filter_query_for(TransactionSource::Local)
+        .is_empty()
+    {
+        format!("Transactions ({})", local_tx_count)
     } else {
-        format!("Transactions ({}/{})", filtered_tx_count, tx_count)
+        format!(
+            "Transactions ({}/{})",
+            local_filtered_tx_count, local_tx_count
+        )
     };
-    let titles = vec![tx_title, "Logs".to_string(), "Config".to_string()];
+    let remote_tx_title = if state.has_remote_transactions() {
+        let remote_tx_count =
+            state.transaction_count(TransactionSource::Remote);
+        let remote_filtered_tx_count =
+            state.filtered_transactions_len_for(TransactionSource::Remote);
+        if state
+            .tx_filter_query_for(TransactionSource::Remote)
+            .is_empty()
+        {
+            format!("Remote Transactions ({})", remote_tx_count)
+        } else {
+            format!(
+                "Remote Transactions ({}/{})",
+                remote_filtered_tx_count, remote_tx_count
+            )
+        }
+    } else {
+        String::new()
+    };
+    let mut titles = vec![tx_title];
+    if state.has_remote_transactions() {
+        titles.push(remote_tx_title);
+    }
+    titles.push("Logs".to_string());
+    titles.push("Config".to_string());
 
-    let selected = match state.active_tab {
-        Tab::Transactions => 0,
-        Tab::Logs => 1,
-        Tab::Config => 2,
+    let selected = match (state.active_tab, state.has_remote_transactions()) {
+        (Tab::Transactions, _) => 0,
+        (Tab::RemoteTransactions, true) => 1,
+        (Tab::Logs, true) => 2,
+        (Tab::Config, true) => 3,
+        (Tab::Logs, false) => 1,
+        (Tab::Config, false) => 2,
+        (Tab::RemoteTransactions, false) => 0,
     };
 
     let tabs = Tabs::new(titles)
@@ -118,7 +156,9 @@ fn render_tabs(frame: &mut Frame, area: Rect, state: &TuiState) {
 fn render_content(frame: &mut Frame, area: Rect, state: &TuiState) {
     match state.active_tab {
         Tab::Logs => render_logs(frame, area, state),
-        Tab::Transactions => render_transactions(frame, area, state),
+        Tab::Transactions | Tab::RemoteTransactions => {
+            render_transactions(frame, area, state)
+        }
         Tab::Config => render_config(frame, area, state),
     }
 }
@@ -197,14 +237,14 @@ fn render_transactions(frame: &mut Frame, area: Rect, state: &TuiState) {
         filtered_transactions
             .iter()
             .enumerate()
-            .skip(state.tx_scroll)
+            .skip(state.active_transaction_scroll())
             .take(visible_count)
             .map(|(idx, tx)| {
                 let timestamp = tx.timestamp.format("%H:%M:%S%.3f");
                 let status_color =
                     if tx.success { Color::Green } else { Color::Red };
                 let status_char = if tx.success { "✓" } else { "✗" };
-                let is_selected = idx == state.selected_tx;
+                let is_selected = idx == state.active_transaction_selected();
 
                 let line = Line::from(vec![
                     Span::styled(
@@ -332,7 +372,7 @@ fn render_footer(frame: &mut Frame, area: Rect, state: &TuiState) {
             Span::styled("(Enter)", Style::default().fg(WHITE)),
             Span::styled(" open in browser", Style::default().fg(DARK_GRAY)),
         ])
-    } else if state.active_tab == Tab::Transactions {
+    } else if state.is_transaction_tab() {
         Line::from(vec![
             Span::styled("(Esc)", Style::default().fg(WHITE)),
             Span::styled(" quit │ ", Style::default().fg(DARK_GRAY)),
@@ -485,34 +525,12 @@ fn render_tx_detail_popup(frame: &mut Frame, state: &TuiState) {
         for (i, acc) in
             detail.accounts.iter().take(MAX_DETAIL_ACCOUNTS).enumerate()
         {
-            let is_selected = detail.selected_account == Some(i);
-            let prefix = if is_selected {
-                format!("▶ [{}] ", i)
-            } else {
-                format!("  [{}] ", i)
-            };
-            let truncated = truncate_with_ellipsis(
+            lines.push(detail_account_line(
+                i,
                 acc,
-                inner_width.saturating_sub(prefix.chars().count()),
-            );
-            lines.push(Line::from(vec![
-                Span::styled(
-                    prefix,
-                    if is_selected {
-                        Style::default().fg(CYAN)
-                    } else {
-                        label_style
-                    },
-                ),
-                Span::styled(
-                    truncated,
-                    if is_selected {
-                        Style::default().fg(CYAN).add_modifier(Modifier::BOLD)
-                    } else {
-                        Style::default().fg(WHITE)
-                    },
-                ),
-            ]));
+                detail.selected_account == Some(i),
+                inner_width,
+            ));
         }
         if detail.accounts.len() > MAX_DETAIL_ACCOUNTS {
             lines.push(Line::from(Span::styled(
@@ -579,6 +597,65 @@ fn detail_field_line(
     ])
 }
 
+fn detail_account_line(
+    index: usize,
+    account: &TransactionAccount,
+    is_selected: bool,
+    inner_width: usize,
+) -> Line<'static> {
+    let prefix = if is_selected {
+        format!("▶ [{}] ", index)
+    } else {
+        format!("  [{}] ", index)
+    };
+    let marker_gap = 2;
+    let marker_width = 3;
+    let right_margin = 2;
+    let pubkey_width = inner_width
+        .saturating_sub(prefix.chars().count())
+        .saturating_sub(marker_gap + marker_width + right_margin);
+    let pubkey = pad_to_width(
+        truncate_with_ellipsis(&account.pubkey, pubkey_width),
+        pubkey_width,
+    );
+    let prefix_style = if is_selected {
+        Style::default().fg(CYAN)
+    } else {
+        Style::default().fg(DARK_GRAY)
+    };
+    let pubkey_style = if is_selected {
+        Style::default().fg(CYAN).add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(WHITE)
+    };
+    let active_flag_style = if is_selected {
+        Style::default().fg(CYAN).add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(GREEN).add_modifier(Modifier::BOLD)
+    };
+
+    Line::from(vec![
+        Span::styled(prefix, prefix_style),
+        Span::styled(pubkey, pubkey_style),
+        Span::raw("  "),
+        Span::styled(
+            if account.is_signer { "S" } else { " " },
+            active_flag_style,
+        ),
+        Span::raw(" "),
+        Span::styled(
+            if account.is_writable { "W" } else { " " },
+            active_flag_style,
+        ),
+        Span::raw(" ".repeat(right_margin)),
+    ])
+}
+
+fn pad_to_width(value: String, width: usize) -> String {
+    let padding = width.saturating_sub(value.chars().count());
+    format!("{}{}", value, " ".repeat(padding))
+}
+
 fn truncate_with_ellipsis(value: &str, max_chars: usize) -> String {
     if max_chars == 0 {
         return String::new();
@@ -610,7 +687,8 @@ fn truncate_with_ellipsis(value: &str, max_chars: usize) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::truncate_with_ellipsis;
+    use super::{detail_account_line, truncate_with_ellipsis};
+    use crate::state::TransactionAccount;
 
     #[test]
     fn truncate_with_ellipsis_replaces_newlines() {
@@ -632,5 +710,29 @@ mod tests {
     fn truncate_with_ellipsis_handles_tiny_widths() {
         assert_eq!(truncate_with_ellipsis("abcdef", 3), "...".to_string());
         assert_eq!(truncate_with_ellipsis("abcdef", 2), "..".to_string());
+    }
+
+    #[test]
+    fn detail_account_line_aligns_signer_and_writable_markers() {
+        let short = TransactionAccount::new("short", true, true);
+        let long = TransactionAccount::new(
+            "11111111111111111111111111111111",
+            true,
+            true,
+        );
+
+        let short_line: String = detail_account_line(0, &short, false, 48)
+            .spans
+            .into_iter()
+            .map(|span| span.content.into_owned())
+            .collect();
+        let long_line: String = detail_account_line(1, &long, false, 48)
+            .spans
+            .into_iter()
+            .map(|span| span.content.into_owned())
+            .collect();
+
+        assert_eq!(short_line.find('S'), long_line.find('S'));
+        assert_eq!(short_line.find('W'), long_line.find('W'));
     }
 }

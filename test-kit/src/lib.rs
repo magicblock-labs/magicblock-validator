@@ -26,10 +26,7 @@ use magicblock_processor::{
     build_svm_env,
     loader::load_upgradeable_programs,
     scheduler::{
-        state::{
-            mode_switch_channel, ModeSwitchTx, TargetMode,
-            TransactionSchedulerState,
-        },
+        state::{SchedulerMode, TransactionSchedulerState},
         TransactionScheduler,
     },
 };
@@ -44,6 +41,7 @@ pub use solana_signer::Signer;
 use solana_transaction::Transaction;
 use solana_transaction_status_client_types::TransactionStatusMeta;
 use tempfile::TempDir;
+use tokio::sync::mpsc::Sender;
 use tracing::{error, instrument};
 
 /// A simulated validator backend for integration tests.
@@ -71,8 +69,8 @@ pub struct ExecutionTestEnv {
     pub blocks_tx: BlockUpdateTx,
     /// Transaction execution scheduler/backend for deferred launch
     pub scheduler: Option<TransactionScheduler>,
-    /// Sender for transitioning from Replica to Primary mode
-    mode_switch_tx: ModeSwitchTx,
+    /// Sender for transitioning from StartingUp to Primary/Replica mode
+    mode_tx: Sender<SchedulerMode>,
 }
 
 impl Default for ExecutionTestEnv {
@@ -141,7 +139,7 @@ impl ExecutionTestEnv {
         let environment = build_svm_env(&accountsdb, blockhash, fee);
         let payers = (0..executors).map(|_| Keypair::new()).collect();
 
-        let (mode_switch_tx, mode_switch_rx) = mode_switch_channel();
+        let (mode_tx, mode_rx) = tokio::sync::mpsc::channel(1);
 
         let mut this = Self {
             payer_index: AtomicUsize::new(0),
@@ -153,7 +151,7 @@ impl ExecutionTestEnv {
             dispatch,
             blocks_tx: validator_channels.block_update,
             scheduler: None,
-            mode_switch_tx,
+            mode_tx,
         };
         this.advance_slot(); // Move to slot 1 to ensure a non-genesis state.
 
@@ -174,14 +172,14 @@ impl ExecutionTestEnv {
             environment,
             is_auto_airdrop_lamports_enabled: false,
             shutdown: Default::default(),
-            mode_switch_rx,
+            mode_rx,
         };
 
         // Pre-send the target mode so the scheduler picks it up once running.
         if primary_mode {
-            this.mode_switch_tx
-                .try_send(TargetMode::Primary)
-                .expect("failed to pre-send target mode to mode_switch_tx");
+            this.mode_tx
+                .try_send(SchedulerMode::Primary)
+                .expect("failed to pre-send target mode to mode_tx");
         }
 
         // Start/Defer the transaction processing backend.
@@ -204,14 +202,14 @@ impl ExecutionTestEnv {
         }
     }
 
-    /// Switches the scheduler from Replica to Primary mode.
+    /// Switches the scheduler from StartingUp to Primary mode.
     ///
     /// After this call, the scheduler will accept execution transactions
     /// in addition to replay transactions.
     pub fn switch_to_primary_mode(&self) {
-        self.mode_switch_tx
-            .try_send(TargetMode::Primary)
-            .expect("failed to send target mode to mode_switch_tx");
+        self.mode_tx
+            .try_send(SchedulerMode::Primary)
+            .expect("failed to send target mode to mode_tx");
     }
 
     /// Creates a new account with the specified properties.

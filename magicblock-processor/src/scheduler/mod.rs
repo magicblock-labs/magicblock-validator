@@ -27,7 +27,7 @@ use solana_account::{from_account, to_account};
 use solana_program::slot_hashes::SlotHashes;
 use solana_program_runtime::loaded_programs::ProgramCache;
 use solana_sdk_ids::sysvar::{clock, slot_hashes};
-use state::{ModeSwitchRx, TargetMode, TransactionSchedulerState};
+use state::{SchedulerMode, TransactionSchedulerState};
 use tokio::{
     runtime::Builder,
     sync::mpsc::{channel, Receiver, Sender},
@@ -60,10 +60,10 @@ pub struct TransactionScheduler {
     accountsdb: Arc<AccountsDb>,
     /// Latest block metadata (slot, clock, blockhash)
     latest_block: LatestBlock,
-    /// Global shutdown signal
+    /// Global shutdown signal.
     shutdown: CancellationToken,
     /// Receives the target mode (Primary or Replica) when startup completes.
-    mode_switch_rx: ModeSwitchRx,
+    mode_rx: Receiver<SchedulerMode>,
     slot: Slot,
     index: u32,
 }
@@ -106,7 +106,7 @@ impl TransactionScheduler {
             program_cache,
             accountsdb: state.accountsdb,
             shutdown: state.shutdown,
-            mode_switch_rx: state.mode_switch_rx,
+            mode_rx: state.mode_rx,
             slot: state.ledger.latest_block().load().slot,
             index: 0,
         }
@@ -139,12 +139,12 @@ impl TransactionScheduler {
                 biased;
                 Ok(()) = block_produced.recv() => self.transition_to_new_slot(),
                 Some(executor) = self.ready_rx.recv() => self.handle_ready_executor(executor),
-                Some(target) = self.mode_switch_rx.recv() => {
-                    match target {
-                        TargetMode::Primary => {
+                Some(mode) = self.mode_rx.recv() => {
+                    match mode {
+                        SchedulerMode::Primary => {
                             self.coordinator.switch_to_primary_mode_globally();
                         }
-                        TargetMode::Replica => {
+                        SchedulerMode::Replica => {
                             self.coordinator.switch_to_replica_mode_globally();
                         }
                     }

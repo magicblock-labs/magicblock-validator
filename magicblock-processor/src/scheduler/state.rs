@@ -31,28 +31,8 @@ use solana_program_runtime::{
 };
 use solana_pubkey::Pubkey;
 use solana_svm::transaction_processor::TransactionProcessingEnvironment;
-use tokio::sync::mpsc;
+use tokio::sync::mpsc::Receiver;
 use tokio_util::sync::CancellationToken;
-
-/// The target coordination mode the scheduler should transition to
-/// after startup (ledger replay) completes.
-#[derive(Debug, Clone, Copy)]
-pub enum TargetMode {
-    /// Standalone validators transition to Primary mode.
-    Primary,
-    /// StandBy/ReplicatOnly validators transition to Replica mode.
-    Replica,
-}
-
-/// Sender half of the mode-switch channel.
-pub type ModeSwitchTx = mpsc::Sender<TargetMode>;
-/// Receiver half of the mode-switch channel.
-pub type ModeSwitchRx = mpsc::Receiver<TargetMode>;
-
-/// Creates a mode-switch channel pair (capacity 1).
-pub fn mode_switch_channel() -> (ModeSwitchTx, ModeSwitchRx) {
-    mpsc::channel(1)
-}
 
 use crate::{executor::SimpleForkGraph, syscalls::SyscallMatmulI8};
 
@@ -76,7 +56,7 @@ pub struct TransactionSchedulerState {
     pub is_auto_airdrop_lamports_enabled: bool,
     pub shutdown: CancellationToken,
     /// Receives the target mode (Primary or Replica) when startup completes.
-    pub mode_switch_rx: ModeSwitchRx,
+    pub mode_rx: Receiver<SchedulerMode>,
 }
 
 impl TransactionSchedulerState {
@@ -164,4 +144,16 @@ impl TransactionSchedulerState {
             let _ = self.accountsdb.insert_account(id, &account);
         }
     }
+}
+
+/// Scheduler execution mode command.
+///
+/// Send via channel to transition the scheduler between modes.
+/// See [`CoordinationMode`](super::coordinator::CoordinationMode) for internal state.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SchedulerMode {
+    /// Accept client transactions with concurrent execution.
+    Primary,
+    /// Replay transactions with strict ordering.
+    Replica,
 }
