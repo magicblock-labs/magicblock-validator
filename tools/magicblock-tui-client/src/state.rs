@@ -159,6 +159,7 @@ pub struct TransactionDetail {
     pub rpc_url: String,
     pub explorer_url: String,
     pub selected_account: Option<usize>,
+    pub detail_scroll: usize,
 }
 
 pub const MAX_DETAIL_ACCOUNTS: usize = 10;
@@ -201,6 +202,30 @@ impl TransactionDetail {
         self.selected_account
             .and_then(|idx| self.accounts.get(idx))
             .map(|account| account.pubkey.as_str())
+    }
+
+    pub fn scroll_content_page_up(&mut self, page_size: usize) {
+        self.detail_scroll =
+            self.detail_scroll.saturating_sub(page_size.max(1));
+    }
+
+    pub fn scroll_content_page_down(
+        &mut self,
+        page_size: usize,
+        max_scroll: usize,
+    ) {
+        self.detail_scroll = self
+            .detail_scroll
+            .saturating_add(page_size.max(1))
+            .min(max_scroll);
+    }
+
+    pub fn scroll_content_home(&mut self) {
+        self.detail_scroll = 0;
+    }
+
+    pub fn scroll_content_end(&mut self, max_scroll: usize) {
+        self.detail_scroll = max_scroll;
     }
 }
 
@@ -670,6 +695,7 @@ impl TuiState {
 
     pub fn show_tx_detail(&mut self, mut detail: TransactionDetail) {
         detail.clamp_selection();
+        detail.detail_scroll = 0;
         self.tx_detail = Some(detail);
         self.view_mode = ViewMode::Detail;
     }

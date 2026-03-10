@@ -196,15 +196,16 @@ async fn run_event_loop(
             break;
         }
 
-        let visible_height = terminal
-            .size()
-            .map(|rect| rect.height.saturating_sub(9) as usize)
-            .unwrap_or(0);
-
         if let Some(event) = poll_event(poll_timeout) {
             let is_resize = matches!(event, Event::Resize(_, _));
+            let terminal_area = terminal
+                .size()
+                .map(|size| {
+                    ratatui::layout::Rect::new(0, 0, size.width, size.height)
+                })
+                .unwrap_or_default();
 
-            let action = handle_event(state, event, visible_height);
+            let action = handle_event(state, event, terminal_area);
             match action {
                 EventAction::FetchTransaction { rpc_url, signature } => {
                     let client = rpc_client.clone();
@@ -888,6 +889,7 @@ async fn fetch_transaction_detail(
         rpc_url: rpc_url.to_string(),
         explorer_url: build_explorer_url(rpc_url, signature),
         selected_account,
+        detail_scroll: 0,
     })
 }
 
@@ -925,6 +927,7 @@ fn build_failed_tx_detail(
         rpc_url: rpc_url.to_string(),
         explorer_url,
         selected_account: None,
+        detail_scroll: 0,
     }
 }
 
