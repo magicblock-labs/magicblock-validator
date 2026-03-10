@@ -156,6 +156,7 @@ pub struct TransactionDetail {
     pub logs: Vec<String>,
     pub accounts: Vec<TransactionAccount>,
     pub error: Option<String>,
+    pub rpc_url: String,
     pub explorer_url: String,
     pub selected_account: Option<usize>,
 }
@@ -282,6 +283,7 @@ impl TransactionPaneState {
     }
 
     fn scroll_down(&mut self, visible_height: usize) {
+        let visible_height = visible_height.max(1);
         let tx_count = self.filtered_transactions_len();
         if tx_count > 0 {
             self.selected_tx = (self.selected_tx + 1).min(tx_count - 1);
@@ -297,6 +299,7 @@ impl TransactionPaneState {
     }
 
     fn scroll_end(&mut self, visible_height: usize) {
+        let visible_height = visible_height.max(1);
         let filtered_len = self.filtered_transactions_len();
         if filtered_len > 0 {
             self.selected_tx = filtered_len - 1;

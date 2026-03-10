@@ -24,17 +24,17 @@ pub fn is_localhost_url(url: &str) -> bool {
 
 pub fn websocket_url_from_rpc_url(url: &str) -> Option<String> {
     let mut url = reqwest::Url::parse(url).ok()?;
-    let port = url.port_or_known_default();
+    let explicit_port = url.port();
     match url.scheme() {
         "http" => {
             url.set_scheme("ws").ok()?;
-            if let Some(port) = port {
+            if let Some(port) = explicit_port {
                 url.set_port(Some(port.saturating_add(1))).ok()?;
             }
         }
         "https" => {
             url.set_scheme("wss").ok()?;
-            if let Some(port) = port {
+            if let Some(port) = explicit_port {
                 url.set_port(Some(port.saturating_add(1))).ok()?;
             }
         }
@@ -64,8 +64,12 @@ mod tests {
             Some("ws://localhost:8900/")
         );
         assert_eq!(
-            websocket_url_from_rpc_url("https://localhost:443").as_deref(),
-            Some("wss://localhost:444/")
+            websocket_url_from_rpc_url("https://localhost:8443").as_deref(),
+            Some("wss://localhost:8444/")
+        );
+        assert_eq!(
+            websocket_url_from_rpc_url("https://localhost").as_deref(),
+            Some("wss://localhost/")
         );
         assert_eq!(
             websocket_url_from_rpc_url("ws://localhost:8900").as_deref(),

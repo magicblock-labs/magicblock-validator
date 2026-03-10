@@ -787,6 +787,7 @@ async fn fetch_transaction_detail(
             .unwrap_or_default(),
         accounts,
         error,
+        rpc_url: rpc_url.to_string(),
         explorer_url: build_explorer_url(rpc_url, signature),
         selected_account,
     })
@@ -807,6 +808,7 @@ fn build_failed_tx_detail(
         logs: vec![],
         accounts: vec![],
         error: Some(error),
+        rpc_url: rpc_url.to_string(),
         explorer_url,
         selected_account: None,
     }

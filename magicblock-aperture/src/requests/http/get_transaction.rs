@@ -124,9 +124,18 @@ fn sanitize_nan_strings_for_key(
     }
 
     if let Some(s) = value.as_str() {
-        if parent_key.is_some_and(is_numeric_json_field) && is_nan_string(s) {
-            *value = "0".into();
+        if let Some(key) = parent_key.filter(|key| is_numeric_json_field(key)) {
+            if is_nan_string(s) {
+                *value = nan_replacement_for_field(key);
+            }
         }
+    }
+}
+
+fn nan_replacement_for_field(key: &str) -> json::Value {
+    match key {
+        "amount" | "uiAmountString" => "0".into(),
+        _ => 0.into(),
     }
 }
 
@@ -215,22 +224,22 @@ mod tests {
         assert_eq!(
             value["transaction"]["message"]["instructions"][0]["parsed"]
                 ["info"]["lamports"],
-            "0"
+            0
         );
         assert_eq!(
             value["transaction"]["message"]["instructions"][0]["parsed"]
                 ["info"]["microLamports"],
-            "0"
+            0
         );
         assert_eq!(
             value["transaction"]["message"]["instructions"][0]["parsed"]
                 ["info"]["recentSlot"],
-            "0"
+            0
         );
         assert_eq!(
             value["transaction"]["message"]["instructions"][0]["parsed"]
                 ["info"]["uiAmount"],
-            "0"
+            0
         );
         assert_eq!(
             value["transaction"]["message"]["instructions"][0]["parsed"]
@@ -242,9 +251,9 @@ mod tests {
                 ["info"]["note"],
             "nan"
         );
-        assert_eq!(value["transaction"]["message"]["extra"]["rentEpoch"], "0");
-        assert_eq!(value["transaction"]["message"]["extra"]["space"], "0");
-        assert_eq!(value["transaction"]["message"]["extra"]["timestamp"], "0");
+        assert_eq!(value["transaction"]["message"]["extra"]["rentEpoch"], 0);
+        assert_eq!(value["transaction"]["message"]["extra"]["space"], 0);
+        assert_eq!(value["transaction"]["message"]["extra"]["timestamp"], 0);
         assert_eq!(
             value["transaction"]["message"]["extra"]["description"],
             "nan"

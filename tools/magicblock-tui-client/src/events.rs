@@ -50,12 +50,9 @@ fn handle_key(
             KeyCode::Enter => {
                 if let Some(detail) = &state.tx_detail {
                     let url = match detail.selected_account_address() {
-                        Some(account) => build_account_explorer_url(
-                            state
-                                .active_transaction_rpc_url()
-                                .unwrap_or(&state.rpc_url),
-                            account,
-                        ),
+                        Some(account) => {
+                            build_account_explorer_url(&detail.rpc_url, account)
+                        }
                         None => detail.explorer_url.clone(),
                     };
                     state.close_tx_detail();
@@ -128,6 +125,10 @@ fn handle_key(
             } if !modifiers.contains(KeyModifiers::CONTROL)
                 && !modifiers.contains(KeyModifiers::ALT) =>
             {
+                if let Some(shortcut) = digit_shortcut(ch) {
+                    state.select_tab_by_shortcut(shortcut);
+                    return EventAction::None;
+                }
                 state.append_tx_filter_char(ch);
                 return EventAction::None;
             }
@@ -201,6 +202,16 @@ fn handle_key(
     EventAction::None
 }
 
+fn digit_shortcut(ch: char) -> Option<u8> {
+    match ch {
+        '1' => Some(1),
+        '2' => Some(2),
+        '3' => Some(3),
+        '4' => Some(4),
+        _ => None,
+    }
+}
+
 fn build_account_explorer_url(rpc_url: &str, account: &str) -> String {
     let encoded_rpc = url_encode(rpc_url);
     format!(
@@ -255,6 +266,7 @@ mod tests {
             logs: vec![],
             accounts: vec![],
             error: None,
+            rpc_url: "http://127.0.0.1:8899".to_string(),
             explorer_url: "https://example.com".to_string(),
             selected_account: None,
         });
@@ -289,6 +301,7 @@ mod tests {
             logs: vec![],
             accounts: vec![account("11111111111111111111111111111111")],
             error: None,
+            rpc_url: "http://127.0.0.1:8898".to_string(),
             explorer_url: "https://explorer.solana.com/tx/sig".to_string(),
             selected_account: Some(0),
         });
@@ -304,6 +317,8 @@ mod tests {
                 assert!(
                     url.contains("/address/11111111111111111111111111111111")
                 );
+                assert!(url
+                    .contains("customUrl=http%3A%2F%2F127%2E0%2E0%2E1%3A8898"));
             }
             other => panic!("expected OpenUrl action, got {:?}", other),
         }
@@ -323,6 +338,7 @@ mod tests {
             logs: vec![],
             accounts: vec![account("acc-1"), account("acc-2")],
             error: None,
+            rpc_url: "http://127.0.0.1:8899".to_string(),
             explorer_url: "https://explorer.solana.com/tx/sig".to_string(),
             selected_account: Some(0),
         });
@@ -403,6 +419,24 @@ mod tests {
             )),
             10,
         );
+        assert_eq!(state.tx_filter_query(), "");
+    }
+
+    #[test]
+    fn digit_shortcuts_switch_tabs_from_transaction_tabs() {
+        let mut state = TuiState::new(TuiConfig {
+            remote_rpc_url: "http://127.0.0.1:8898".to_string(),
+            ..config()
+        });
+        state.active_tab = Tab::Transactions;
+
+        let _ = handle_event(
+            &mut state,
+            Event::Key(KeyEvent::new(KeyCode::Char('2'), KeyModifiers::NONE)),
+            10,
+        );
+
+        assert_eq!(state.active_tab, Tab::RemoteTransactions);
         assert_eq!(state.tx_filter_query(), "");
     }
 }
