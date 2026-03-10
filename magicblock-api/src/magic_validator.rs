@@ -55,7 +55,13 @@ use magicblock_metrics::{metrics::TRANSACTION_COUNT, MetricsService};
 use magicblock_processor::{
     build_svm_env,
     loader::load_upgradeable_programs,
-    scheduler::{state::TransactionSchedulerState, TransactionScheduler},
+    scheduler::{
+        state::{
+            mode_switch_channel, ModeSwitchTx, TargetMode,
+            TransactionSchedulerState,
+        },
+        TransactionScheduler,
+    },
 };
 use magicblock_program::{
     init_magic_sys,
@@ -76,7 +82,7 @@ use solana_native_token::LAMPORTS_PER_SOL;
 use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_signer::Signer;
-use tokio::{runtime::Builder, sync::Notify};
+use tokio::runtime::Builder;
 use tokio_util::sync::CancellationToken;
 use tracing::*;
 
@@ -126,7 +132,8 @@ pub struct MagicValidator {
     claim_fees_task: ClaimFeesTask,
     task_scheduler: Option<TaskSchedulerService>,
     transaction_execution: thread::JoinHandle<()>,
-    mode_switcher: Arc<Notify>,
+    mode_switch_tx: ModeSwitchTx,
+    is_standalone: bool,
 }
 
 impl MagicValidator {
@@ -255,9 +262,9 @@ impl MagicValidator {
         validator::init_validator_authority(identity_keypair);
         let base_fee = config.validator.basefee;
 
-        // Mode switcher for transitioning from StartingUp to Primary or Replica mode
-        // after ledger replay
-        let mode_switcher = Arc::new(Notify::new());
+        // Mode switch channel for transitioning from StartingUp to Primary
+        // or Replica mode after ledger replay
+        let (mode_switch_tx, mode_switch_rx) = mode_switch_channel();
         let is_standalone = matches!(
             config.validator.replication_mode,
             ReplicationMode::Standalone
@@ -275,8 +282,7 @@ impl MagicValidator {
                 .auto_airdrop_lamports
                 > 0,
             shutdown: token.clone(),
-            mode_switcher: mode_switcher.clone(),
-            is_standalone,
+            mode_switch_rx,
         };
         TRANSACTION_COUNT.inc_by(ledger.count_transactions()? as u64);
         // Faucet keypair is only used for airdrops, which are not allowed in
@@ -380,7 +386,8 @@ impl MagicValidator {
             block_udpate_tx: validator_channels.block_update,
             task_scheduler: Some(task_scheduler),
             transaction_execution,
-            mode_switcher,
+            mode_switch_tx,
+            is_standalone,
         })
     }
 
@@ -709,12 +716,16 @@ impl MagicValidator {
         }
 
         // Notify the scheduler that ledger replay and bank cleanup is complete.
-        // The scheduler uses is_standalone to determine the target mode:
+        // The message carries the target mode so the scheduler transitions to
+        // the correct coordination mode:
         // - Standalone validators transition to Primary mode
         // - StandBy/ReplicatOnly validators transition to Replica mode
-        // This is called last to ensure StartingUp->running transition happens
-        // after all startup cleanup is complete.
-        self.mode_switcher.notify_one();
+        let target = if self.is_standalone {
+            TargetMode::Primary
+        } else {
+            TargetMode::Replica
+        };
+        let _ = self.mode_switch_tx.try_send(target);
 
         // Now we are ready to start all services and are ready to accept transactions
         if let Some(frequency) = self

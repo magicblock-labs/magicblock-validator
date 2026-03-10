@@ -27,13 +27,10 @@ use solana_account::{from_account, to_account};
 use solana_program::slot_hashes::SlotHashes;
 use solana_program_runtime::loaded_programs::ProgramCache;
 use solana_sdk_ids::sysvar::{clock, slot_hashes};
-use state::TransactionSchedulerState;
+use state::{ModeSwitchRx, TargetMode, TransactionSchedulerState};
 use tokio::{
     runtime::Builder,
-    sync::{
-        mpsc::{channel, Receiver, Sender},
-        Notify,
-    },
+    sync::mpsc::{channel, Receiver, Sender},
 };
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, instrument, warn};
@@ -65,10 +62,8 @@ pub struct TransactionScheduler {
     latest_block: LatestBlock,
     /// Global shutdown signal
     shutdown: CancellationToken,
-    /// Notifies scheduler to switch from StartingUp to Primary or Replica mode.
-    mode_switcher: Arc<Notify>,
-    /// Whether this is a Standalone validator (True) or StandBy/ReplicatOnly (False).
-    is_standalone: bool,
+    /// Receives the target mode (Primary or Replica) when startup completes.
+    mode_switch_rx: ModeSwitchRx,
     slot: Slot,
     index: u32,
 }
@@ -111,8 +106,7 @@ impl TransactionScheduler {
             program_cache,
             accountsdb: state.accountsdb,
             shutdown: state.shutdown,
-            mode_switcher: state.mode_switcher,
-            is_standalone: state.is_standalone,
+            mode_switch_rx: state.mode_switch_rx,
             slot: state.ledger.latest_block().load().slot,
             index: 0,
         }
@@ -145,11 +139,14 @@ impl TransactionScheduler {
                 biased;
                 Ok(()) = block_produced.recv() => self.transition_to_new_slot(),
                 Some(executor) = self.ready_rx.recv() => self.handle_ready_executor(executor),
-                _ = self.mode_switcher.notified() => {
-                    if self.is_standalone {
-                        self.coordinator.switch_to_primary_mode_globally();
-                    } else {
-                        self.coordinator.switch_to_replica_mode_globally();
+                Some(target) = self.mode_switch_rx.recv() => {
+                    match target {
+                        TargetMode::Primary => {
+                            self.coordinator.switch_to_primary_mode_globally();
+                        }
+                        TargetMode::Replica => {
+                            self.coordinator.switch_to_replica_mode_globally();
+                        }
                     }
                 }
                 Some(txn) = self.transactions_rx.recv(), if self.coordinator.is_ready() => {

@@ -31,8 +31,28 @@ use solana_program_runtime::{
 };
 use solana_pubkey::Pubkey;
 use solana_svm::transaction_processor::TransactionProcessingEnvironment;
-use tokio::sync::Notify;
+use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
+
+/// The target coordination mode the scheduler should transition to
+/// after startup (ledger replay) completes.
+#[derive(Debug, Clone, Copy)]
+pub enum TargetMode {
+    /// Standalone validators transition to Primary mode.
+    Primary,
+    /// StandBy/ReplicatOnly validators transition to Replica mode.
+    Replica,
+}
+
+/// Sender half of the mode-switch channel.
+pub type ModeSwitchTx = mpsc::Sender<TargetMode>;
+/// Receiver half of the mode-switch channel.
+pub type ModeSwitchRx = mpsc::Receiver<TargetMode>;
+
+/// Creates a mode-switch channel pair (capacity 1).
+pub fn mode_switch_channel() -> (ModeSwitchTx, ModeSwitchRx) {
+    mpsc::channel(1)
+}
 
 use crate::{executor::SimpleForkGraph, syscalls::SyscallMatmulI8};
 
@@ -55,12 +75,8 @@ pub struct TransactionSchedulerState {
     // === Configuration ===
     pub is_auto_airdrop_lamports_enabled: bool,
     pub shutdown: CancellationToken,
-    /// Notifies scheduler to switch from StartingUp to Primary or Replica mode.
-    /// Call `notify_one()` before spawning for tests that need a mode transition.
-    pub mode_switcher: Arc<Notify>,
-    /// Whether this is a Standalone validator (True) or StandBy/ReplicatOnly (False).
-    /// Used to determine the target mode (Primary for Standalone, Replica for others).
-    pub is_standalone: bool,
+    /// Receives the target mode (Primary or Replica) when startup completes.
+    pub mode_switch_rx: ModeSwitchRx,
 }
 
 impl TransactionSchedulerState {

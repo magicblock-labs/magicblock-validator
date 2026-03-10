@@ -25,7 +25,13 @@ use magicblock_ledger::Ledger;
 use magicblock_processor::{
     build_svm_env,
     loader::load_upgradeable_programs,
-    scheduler::{state::TransactionSchedulerState, TransactionScheduler},
+    scheduler::{
+        state::{
+            mode_switch_channel, ModeSwitchTx, TargetMode,
+            TransactionSchedulerState,
+        },
+        TransactionScheduler,
+    },
 };
 use solana_account::AccountSharedData;
 pub use solana_instruction::*;
@@ -38,7 +44,6 @@ pub use solana_signer::Signer;
 use solana_transaction::Transaction;
 use solana_transaction_status_client_types::TransactionStatusMeta;
 use tempfile::TempDir;
-use tokio::sync::Notify;
 use tracing::{error, instrument};
 
 /// A simulated validator backend for integration tests.
@@ -66,8 +71,8 @@ pub struct ExecutionTestEnv {
     pub blocks_tx: BlockUpdateTx,
     /// Transaction execution scheduler/backend for deferred launch
     pub scheduler: Option<TransactionScheduler>,
-    /// Mode switcher for transitioning from Replica to Primary mode
-    mode_switcher: Arc<Notify>,
+    /// Sender for transitioning from Replica to Primary mode
+    mode_switch_tx: ModeSwitchTx,
 }
 
 impl Default for ExecutionTestEnv {
@@ -136,10 +141,7 @@ impl ExecutionTestEnv {
         let environment = build_svm_env(&accountsdb, blockhash, fee);
         let payers = (0..executors).map(|_| Keypair::new()).collect();
 
-        let mode_switcher = Arc::new(Notify::new());
-        if primary_mode {
-            mode_switcher.notify_one();
-        }
+        let (mode_switch_tx, mode_switch_rx) = mode_switch_channel();
 
         let mut this = Self {
             payer_index: AtomicUsize::new(0),
@@ -151,7 +153,7 @@ impl ExecutionTestEnv {
             dispatch,
             blocks_tx: validator_channels.block_update,
             scheduler: None,
-            mode_switcher: mode_switcher.clone(),
+            mode_switch_tx,
         };
         this.advance_slot(); // Move to slot 1 to ensure a non-genesis state.
 
@@ -172,9 +174,13 @@ impl ExecutionTestEnv {
             environment,
             is_auto_airdrop_lamports_enabled: false,
             shutdown: Default::default(),
-            mode_switcher: mode_switcher.clone(),
-            is_standalone: primary_mode,
+            mode_switch_rx,
         };
+
+        // Pre-send the target mode so the scheduler picks it up once running.
+        if primary_mode {
+            let _ = this.mode_switch_tx.try_send(TargetMode::Primary);
+        }
 
         // Start/Defer the transaction processing backend.
         let scheduler = TransactionScheduler::new(executors, scheduler_state);
@@ -201,7 +207,7 @@ impl ExecutionTestEnv {
     /// After this call, the scheduler will accept execution transactions
     /// in addition to replay transactions.
     pub fn switch_to_primary_mode(&self) {
-        self.mode_switcher.notify_one();
+        let _ = self.mode_switch_tx.try_send(TargetMode::Primary);
     }
 
     /// Creates a new account with the specified properties.
