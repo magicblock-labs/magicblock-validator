@@ -880,22 +880,38 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         )
         .await;
 
-        // Collect errors and log each individual failure
+        // Collect errors and successes
         let mut errors = Vec::new();
+        let mut succeeded = Vec::new();
         for (result, (pubkey, _)) in
             subscription_results.iter().zip(subscribe_and_fetch.iter())
         {
-            if let Err(err) = result {
-                error!(
-                    pubkey = %pubkey, err = ?err,
-                    "Failed to subscribe to account"
-                );
-                errors.push(format!("{}: {}", pubkey, err));
+            match result {
+                Err(err) => {
+                    error!(
+                        pubkey = %pubkey, err = ?err,
+                        "Failed to subscribe to account"
+                    );
+                    errors.push(format!("{}: {}", pubkey, err));
+                }
+                Ok(()) => {
+                    succeeded.push(*pubkey);
+                }
             }
         }
 
-        // Fail if ANY subscription failed
+        // If ANY subscription failed, unsubscribe the ones that
+        // succeeded to avoid leaking orphan subscriptions.
         if !errors.is_empty() {
+            for pubkey in &succeeded {
+                if let Err(unsub_err) = self.unsubscribe(pubkey).await {
+                    warn!(
+                        pubkey = %pubkey, err = ?unsub_err,
+                        "Failed to unsubscribe after partial \
+                         subscription failure"
+                    );
+                }
+            }
             return Err(
                 RemoteAccountProviderError::AccountSubscriptionsTaskFailed(
                     format!(
