@@ -321,3 +321,14 @@ impl TransactionSchedulerHandle {
         rx.await.map_err(|_| TransactionError::ClusterMaintenance)
     }
 }
+
+/// Scheduler execution mode (used in mode switching).
+///
+/// Send via channel to transition the scheduler between modes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SchedulerMode {
+    /// Accept client transactions with concurrent execution.
+    Primary,
+    /// Replay transactions with strict ordering.
+    Replica,
+}

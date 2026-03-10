@@ -1,80 +1,88 @@
 //! Protocol message types for replication.
 //!
-//! Wire format: 4-byte LE length prefix + bincode payload.
-//! Bincode encodes enum variant index as implicit type tag.
+//! # Wire Format
+//!
+//! The enum variant index serves as an implicit type tag.
 
+use async_nats::Subject;
+use magicblock_core::Slot;
 use serde::{Deserialize, Serialize};
 use solana_hash::Hash;
-use solana_keypair::Keypair;
-use solana_pubkey::Pubkey;
-use solana_signature::Signature;
-use solana_signer::Signer;
 use solana_transaction::versioned::VersionedTransaction;
 
-pub type Slot = u64;
+use crate::nats::Subjects;
+
+/// Ordinal position of a transaction within a slot.
 pub type TxIndex = u32;
 
-pub const PROTOCOL_VERSION: u32 = 1;
-
-/// Top-level replication message.
+/// Top-level replication message envelope.
+///
+/// Variant order is part of the wire format - reordering breaks compatibility.
 #[derive(Deserialize, Serialize, Clone, Debug)]
 pub enum Message {
+    /// Transaction executed at a specific slot position.
     Transaction(Transaction),
+    /// Slot boundary with blockhash for confirmation.
     Block(Block),
+    /// Periodic checkpoint for state verification.
     SuperBlock(SuperBlock),
-    Failover(FailoverSignal),
 }
 
-/// Slot boundary marker with blockhash.
-#[derive(Deserialize, Serialize, Clone, Debug)]
-pub struct Block {
-    pub slot: Slot,
-    pub hash: Hash,
-    pub timestamp: i64,
+impl Message {
+    pub(crate) fn subject(&self) -> Subject {
+        match self {
+            Self::Transaction(_) => Subjects::transaction(),
+            Self::Block(_) => Subjects::block(),
+            Self::SuperBlock(_) => Subjects::superblock(),
+        }
+    }
+
+    pub(crate) fn slot_and_index(&self) -> (Slot, TxIndex) {
+        match self {
+            Self::Transaction(txn) => (txn.slot, txn.index),
+            Self::Block(block) => (block.slot, 0),
+            Self::SuperBlock(superblock) => (superblock.slot, 0),
+        }
+    }
 }
 
-/// Transaction with slot and ordinal position.
+/// Transaction with slot context for ordered replay.
 #[derive(Deserialize, Serialize, Clone, Debug)]
 pub struct Transaction {
+    /// Slot where the transaction was executed.
     pub slot: Slot,
+    /// Ordinal position within the slot.
     pub index: TxIndex,
     /// Bincode-encoded `VersionedTransaction`.
     pub payload: Vec<u8>,
 }
 
-/// Periodic checkpoint for state verification.
+/// Slot boundary marker with blockhash.
+#[derive(Deserialize, Serialize, Clone, Debug)]
+pub struct Block {
+    /// Slot number.
+    pub slot: Slot,
+    /// Blockhash for this slot.
+    pub hash: Hash,
+    /// Unix timestamp (seconds).
+    pub timestamp: i64,
+}
+
+/// Periodic checkpoint for state verification and catch-up.
 #[derive(Deserialize, Serialize, Clone, Debug)]
 pub struct SuperBlock {
+    pub slot: Slot,
+    /// Total blocks processed.
     pub blocks: u64,
+    /// Total transactions processed.
     pub transactions: u64,
+    /// Rolling checksum for verification.
     pub checksum: u64,
 }
 
-/// Primary -> Standby: signal controlled failover.
-#[derive(Deserialize, Serialize, Clone, Debug)]
-pub struct FailoverSignal {
-    pub slot: Slot,
-    signature: Signature,
-}
-
 impl Transaction {
-    /// Deserializes the inner transaction.
+    /// Deserializes the inner `VersionedTransaction`.
     pub fn decode(&self) -> bincode::Result<VersionedTransaction> {
         bincode::deserialize(&self.payload)
-    }
-}
-
-impl FailoverSignal {
-    pub fn new(slot: Slot, keypair: &Keypair) -> Self {
-        Self {
-            slot,
-            signature: keypair.sign_message(&slot.to_le_bytes()),
-        }
-    }
-
-    /// Verifies signal against expected identity.
-    pub fn verify(&self, identity: Pubkey) -> bool {
-        self.signature
-            .verify(identity.as_array(), &self.slot.to_le_bytes())
     }
 }
