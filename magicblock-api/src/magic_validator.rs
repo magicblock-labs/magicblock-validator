@@ -698,12 +698,6 @@ impl MagicValidator {
         let step_start = Instant::now();
         self.maybe_process_ledger().await?;
 
-        // Notify the scheduler that ledger replay is complete.
-        // The scheduler uses is_standalone to determine the target mode:
-        // - Standalone validators transition to Primary mode
-        // - StandBy/ReplicatOnly validators transition to Replica mode
-        self.mode_switcher.notify_one();
-
         log_timing("startup", "maybe_process_ledger", step_start);
 
         // Ledger replay has completed, we can now clean non-delegated accounts
@@ -713,6 +707,14 @@ impl MagicValidator {
             self.chainlink.reset_accounts_bank()?;
             log_timing("startup", "reset_accounts_bank", step_start);
         }
+
+        // Notify the scheduler that ledger replay and bank cleanup is complete.
+        // The scheduler uses is_standalone to determine the target mode:
+        // - Standalone validators transition to Primary mode
+        // - StandBy/ReplicatOnly validators transition to Replica mode
+        // This is called last to ensure StartingUp->running transition happens
+        // after all startup cleanup is complete.
+        self.mode_switcher.notify_one();
 
         // Now we are ready to start all services and are ready to accept transactions
         if let Some(frequency) = self
