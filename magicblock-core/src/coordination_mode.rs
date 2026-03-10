@@ -64,33 +64,63 @@ pub fn should_schedule_intents() -> bool {
 /// Transitions from `StartingUp` to `Primary`.
 /// No-op if already in Primary mode (happens in tests that start in Primary).
 pub fn switch_to_primary_mode() {
-    let current = COORDINATION_MODE.load(Ordering::Acquire);
-    if current == CoordinationMode::Primary as u8 {
-        return;
+    let target = CoordinationMode::Primary as u8;
+    let mut current = COORDINATION_MODE.load(Ordering::Acquire);
+    loop {
+        if current == target {
+            return;
+        }
+        match COORDINATION_MODE.compare_exchange(
+            CoordinationMode::StartingUp as u8,
+            target,
+            Ordering::Release,
+            Ordering::Acquire,
+        ) {
+            Ok(_) => return,
+            Err(actual) => {
+                if actual == target {
+                    return;
+                }
+                assert_eq!(
+                    actual,
+                    CoordinationMode::StartingUp as u8,
+                    "switch_to_primary_mode: expected StartingUp, got {:?}",
+                    CoordinationMode::from_u8(actual)
+                );
+                current = actual;
+            }
+        }
     }
-    let prev = COORDINATION_MODE
-        .swap(CoordinationMode::Primary as u8, Ordering::Release);
-    assert_eq!(
-        prev,
-        CoordinationMode::StartingUp as u8,
-        "switch_to_primary_mode: expected StartingUp, got {:?}",
-        CoordinationMode::from_u8(prev)
-    );
 }
 
 /// Transitions from `StartingUp` to `Replica`.
 /// No-op if already in Replica mode.
 pub fn switch_to_replica_mode() {
-    let current = COORDINATION_MODE.load(Ordering::Acquire);
-    if current == CoordinationMode::Replica as u8 {
-        return;
+    let target = CoordinationMode::Replica as u8;
+    let mut current = COORDINATION_MODE.load(Ordering::Acquire);
+    loop {
+        if current == target {
+            return;
+        }
+        match COORDINATION_MODE.compare_exchange(
+            CoordinationMode::StartingUp as u8,
+            target,
+            Ordering::Release,
+            Ordering::Acquire,
+        ) {
+            Ok(_) => return,
+            Err(actual) => {
+                if actual == target {
+                    return;
+                }
+                assert_eq!(
+                    actual,
+                    CoordinationMode::StartingUp as u8,
+                    "switch_to_replica_mode: expected StartingUp, got {:?}",
+                    CoordinationMode::from_u8(actual)
+                );
+                current = actual;
+            }
+        }
     }
-    let prev = COORDINATION_MODE
-        .swap(CoordinationMode::Replica as u8, Ordering::Release);
-    assert_eq!(
-        prev,
-        CoordinationMode::StartingUp as u8,
-        "switch_to_replica_mode: expected StartingUp, got {:?}",
-        CoordinationMode::from_u8(prev)
-    );
 }
