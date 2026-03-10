@@ -1,9 +1,11 @@
 use std::time::Duration;
 
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
+use ratatui::layout::Rect;
 
 use crate::{
     state::{Tab, TuiState, ViewMode},
+    ui::detail_popup_viewport_for_terminal,
     utils::url_encode,
 };
 
@@ -25,10 +27,10 @@ pub fn poll_event(timeout: Duration) -> Option<Event> {
 pub fn handle_event(
     state: &mut TuiState,
     event: Event,
-    visible_height: usize,
+    terminal_area: Rect,
 ) -> EventAction {
     if let Event::Key(key) = event {
-        handle_key(state, key, visible_height)
+        handle_key(state, key, terminal_area)
     } else {
         EventAction::None
     }
@@ -37,8 +39,10 @@ pub fn handle_event(
 fn handle_key(
     state: &mut TuiState,
     key: KeyEvent,
-    visible_height: usize,
+    terminal_area: Rect,
 ) -> EventAction {
+    let visible_height = terminal_area.height.saturating_sub(9) as usize;
+
     if state.view_mode == ViewMode::Detail {
         match key.code {
             KeyCode::Esc | KeyCode::Char('q') => state.close_tx_detail(),
@@ -68,6 +72,32 @@ fn handle_key(
             KeyCode::Down | KeyCode::Char('j') => {
                 if let Some(detail) = &mut state.tx_detail {
                     detail.move_selection_down();
+                }
+            }
+            KeyCode::PageUp => {
+                if let Some(detail) = &mut state.tx_detail {
+                    let page_size =
+                        detail_popup_page_size(detail, terminal_area);
+                    detail.scroll_content_page_up(page_size);
+                }
+            }
+            KeyCode::PageDown => {
+                if let Some(detail) = &mut state.tx_detail {
+                    let (page_size, max_scroll) =
+                        detail_popup_scroll_metrics(detail, terminal_area);
+                    detail.scroll_content_page_down(page_size, max_scroll);
+                }
+            }
+            KeyCode::Home => {
+                if let Some(detail) = &mut state.tx_detail {
+                    detail.scroll_content_home();
+                }
+            }
+            KeyCode::End => {
+                if let Some(detail) = &mut state.tx_detail {
+                    let (_, max_scroll) =
+                        detail_popup_scroll_metrics(detail, terminal_area);
+                    detail.scroll_content_end(max_scroll);
                 }
             }
             _ => {}
@@ -225,9 +255,28 @@ fn build_account_explorer_url(rpc_url: &str, account: &str) -> String {
     )
 }
 
+fn detail_popup_page_size(
+    detail: &crate::state::TransactionDetail,
+    area: Rect,
+) -> usize {
+    detail_popup_viewport_for_terminal(detail, area.width, area.height)
+        .map(|viewport| viewport.inner_height.max(1))
+        .unwrap_or(1)
+}
+
+fn detail_popup_scroll_metrics(
+    detail: &crate::state::TransactionDetail,
+    area: Rect,
+) -> (usize, usize) {
+    detail_popup_viewport_for_terminal(detail, area.width, area.height)
+        .map(|viewport| (viewport.inner_height.max(1), viewport.max_scroll))
+        .unwrap_or((1, 0))
+}
+
 #[cfg(test)]
 mod tests {
     use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
+    use ratatui::layout::Rect;
 
     use super::{handle_event, EventAction};
     use crate::state::{
@@ -255,6 +304,10 @@ mod tests {
         Event::Key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL))
     }
 
+    fn terminal_area() -> Rect {
+        Rect::new(0, 0, 120, 19)
+    }
+
     fn account(pubkey: &str) -> TransactionAccount {
         TransactionAccount::new(pubkey, false, false)
     }
@@ -274,9 +327,10 @@ mod tests {
             rpc_url: "http://127.0.0.1:8899".to_string(),
             explorer_url: "https://example.com".to_string(),
             selected_account: None,
+            detail_scroll: 0,
         });
 
-        let action = handle_event(&mut state, ctrl_c(), 10);
+        let action = handle_event(&mut state, ctrl_c(), terminal_area());
 
         assert_eq!(action, EventAction::None);
         assert!(matches!(state.view_mode, ViewMode::List));
@@ -289,7 +343,7 @@ mod tests {
         let mut state = TuiState::new(config());
         assert!(matches!(state.view_mode, ViewMode::List));
 
-        let _ = handle_event(&mut state, ctrl_c(), 10);
+        let _ = handle_event(&mut state, ctrl_c(), terminal_area());
 
         assert!(state.should_quit);
     }
@@ -309,12 +363,13 @@ mod tests {
             rpc_url: "http://127.0.0.1:8898".to_string(),
             explorer_url: "https://explorer.solana.com/tx/sig".to_string(),
             selected_account: Some(0),
+            detail_scroll: 0,
         });
 
         let action = handle_event(
             &mut state,
             Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
-            10,
+            terminal_area(),
         );
 
         match action {
@@ -346,12 +401,13 @@ mod tests {
             rpc_url: "http://127.0.0.1:8899".to_string(),
             explorer_url: "https://explorer.solana.com/tx/sig".to_string(),
             selected_account: Some(0),
+            detail_scroll: 0,
         });
 
         let _ = handle_event(
             &mut state,
             Event::Key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE)),
-            10,
+            terminal_area(),
         );
         assert_eq!(
             state.tx_detail.as_ref().and_then(|d| d.selected_account),
@@ -361,7 +417,7 @@ mod tests {
         let _ = handle_event(
             &mut state,
             Event::Key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE)),
-            10,
+            terminal_area(),
         );
         assert_eq!(
             state.tx_detail.as_ref().and_then(|d| d.selected_account),
@@ -371,7 +427,7 @@ mod tests {
         let _ = handle_event(
             &mut state,
             Event::Key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE)),
-            10,
+            terminal_area(),
         );
         assert_eq!(
             state.tx_detail.as_ref().and_then(|d| d.selected_account),
@@ -387,7 +443,7 @@ mod tests {
         let _ = handle_event(
             &mut state,
             Event::Key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE)),
-            10,
+            terminal_area(),
         );
 
         assert_eq!(state.tx_filter_query(), "q");
@@ -402,17 +458,17 @@ mod tests {
         let _ = handle_event(
             &mut state,
             Event::Key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE)),
-            10,
+            terminal_area(),
         );
         let _ = handle_event(
             &mut state,
             Event::Key(KeyEvent::new(KeyCode::Char('b'), KeyModifiers::NONE)),
-            10,
+            terminal_area(),
         );
         let _ = handle_event(
             &mut state,
             Event::Key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE)),
-            10,
+            terminal_area(),
         );
         assert_eq!(state.tx_filter_query(), "a");
 
@@ -422,7 +478,7 @@ mod tests {
                 KeyCode::Char('u'),
                 KeyModifiers::CONTROL,
             )),
-            10,
+            terminal_area(),
         );
         assert_eq!(state.tx_filter_query(), "");
     }
@@ -438,7 +494,7 @@ mod tests {
         let _ = handle_event(
             &mut state,
             Event::Key(KeyEvent::new(KeyCode::Char('2'), KeyModifiers::NONE)),
-            10,
+            terminal_area(),
         );
 
         assert_eq!(state.active_tab, Tab::Transactions);
@@ -456,10 +512,59 @@ mod tests {
         let _ = handle_event(
             &mut state,
             Event::Key(KeyEvent::new(KeyCode::Char('2'), KeyModifiers::ALT)),
-            10,
+            terminal_area(),
         );
 
         assert_eq!(state.active_tab, Tab::RemoteTransactions);
         assert_eq!(state.tx_filter_query(), "");
+    }
+
+    #[test]
+    fn page_down_scrolls_detail_popup_logs() {
+        let mut state = TuiState::new(config());
+        state.show_tx_detail(TransactionDetail {
+            signature: "sig".to_string(),
+            slot: 1,
+            success: true,
+            fee: 0,
+            compute_units: None,
+            logs: vec!["x".repeat(180); 12],
+            accounts: vec![],
+            error: None,
+            rpc_url: "http://127.0.0.1:8899".to_string(),
+            explorer_url: "https://explorer.solana.com/tx/sig".to_string(),
+            selected_account: None,
+            detail_scroll: 0,
+        });
+
+        let _ = handle_event(
+            &mut state,
+            Event::Key(KeyEvent::new(KeyCode::PageDown, KeyModifiers::NONE)),
+            terminal_area(),
+        );
+
+        assert!(
+            state
+                .tx_detail
+                .as_ref()
+                .map(|d| d.detail_scroll)
+                .unwrap_or(0)
+                > 0
+        );
+
+        let _ = handle_event(
+            &mut state,
+            Event::Key(KeyEvent::new(KeyCode::Home, KeyModifiers::NONE)),
+            terminal_area(),
+        );
+
+        assert_eq!(
+            state
+                .tx_detail
+                .as_ref()
+                .map(|d| d.detail_scroll)
+                .unwrap_or(1),
+            0
+        );
     }
 }
