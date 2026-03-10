@@ -18,8 +18,12 @@ use solana_signer::Signer;
 use crate::{
     magic_context::MagicContext,
     magic_scheduled_base_intent::ScheduledIntentBundle,
+    magic_sys::COMMIT_LIMIT,
     schedule_transactions::transaction_scheduler::TransactionScheduler,
-    test_utils::{ensure_started_validator, process_instruction},
+    test_utils::{
+        ensure_started_validator, process_instruction,
+        process_instruction_with_logs,
+    },
     utils::DELEGATION_PROGRAM_ID,
 };
 
@@ -63,7 +67,7 @@ fn prepare_transaction_with_single_committee(
         map.insert(committee, committee_account);
         map
     };
-    ensure_started_validator(&mut account_data);
+    ensure_started_validator(&mut account_data, None);
 
     let transaction_accounts: Vec<(Pubkey, AccountSharedData)> = vec![(
         clock::id(),
@@ -122,7 +126,7 @@ fn prepare_transaction_with_three_committees(
         }
         map
     };
-    ensure_started_validator(&mut accounts_data);
+    ensure_started_validator(&mut accounts_data, None);
 
     let transaction_accounts: Vec<(Pubkey, AccountSharedData)> = vec![(
         clock::id(),
@@ -257,6 +261,7 @@ mod tests {
     // Reuse test helper to create proper SPL ATA account data
     use magicblock_chainlink::testing::eatas::create_ata_account;
     use magicblock_core::token_programs::{derive_ata, derive_eata};
+    use serial_test::serial;
     use solana_seed_derivable::SeedDerivable;
     use test_kit::init_logger;
 
@@ -274,6 +279,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_schedule_commit_single_account_success() {
         init_logger!();
         let payer =
@@ -359,6 +365,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_schedule_commit_single_account_and_request_undelegate_success() {
         init_logger!();
         let payer =
@@ -445,6 +452,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_schedule_commit_remaps_delegated_ata_to_eata() {
         init_logger!();
 
@@ -526,6 +534,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_schedule_commit_and_undelegate_remaps_delegated_ata_to_eata() {
         init_logger!();
 
@@ -610,6 +619,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_schedule_commit_three_accounts_success() {
         init_logger!();
 
@@ -723,6 +733,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_schedule_commit_three_accounts_and_request_undelegate_success() {
         let payer = Keypair::from_seed(
             b"three_accounts_and_request_undelegate_success",
@@ -875,6 +886,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_schedule_commit_no_pdas_provided_to_ix() {
         init_logger!();
 
@@ -910,6 +922,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_schedule_commit_undelegate_with_readonly() {
         init_logger!();
 
@@ -953,6 +966,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_schedule_commit_with_non_delegated_account() {
         init_logger!();
 
@@ -992,6 +1006,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_schedule_commit_three_accounts_second_not_owned_by_program_and_not_signer(
     ) {
         init_logger!();
@@ -1040,6 +1055,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_schedule_commit_with_confined_account() {
         init_logger!();
 
@@ -1083,6 +1099,125 @@ mod tests {
     }
 
     #[test]
+    #[serial]
+    fn test_schedule_commit_fails_when_commit_limit_exceeded() {
+        init_logger!();
+
+        let payer =
+            Keypair::from_seed(b"schedule_commit_limit_exceeded____").unwrap();
+        let program = Pubkey::new_unique();
+        let committee = Pubkey::new_unique();
+
+        let (mut account_data, mut transaction_accounts) =
+            prepare_transaction_with_single_committee(
+                &payer, program, committee,
+            );
+
+        // Override stub to return nonce at the commit limit
+        ensure_started_validator(&mut account_data, Some(COMMIT_LIMIT));
+
+        let ix = InstructionUtils::schedule_commit_instruction(
+            &payer.pubkey(),
+            vec![committee],
+        );
+        extend_transaction_accounts_from_ix(
+            &ix,
+            &mut account_data,
+            &mut transaction_accounts,
+        );
+
+        process_instruction(
+            ix.data.as_slice(),
+            transaction_accounts,
+            ix.accounts,
+            Err(InstructionError::Custom(crate::magic_sys::COMMIT_LIMIT_ERR)),
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn test_schedule_commit_logs_commit_limit_resolution() {
+        init_logger!();
+
+        let payer =
+            Keypair::from_seed(b"schedule_commit_limit_log_msg___").unwrap();
+        let program = Pubkey::new_unique();
+        let committee = Pubkey::new_unique();
+
+        let (mut account_data, mut transaction_accounts) =
+            prepare_transaction_with_single_committee(
+                &payer, program, committee,
+            );
+
+        ensure_started_validator(&mut account_data, Some(COMMIT_LIMIT));
+
+        let ix = InstructionUtils::schedule_commit_instruction(
+            &payer.pubkey(),
+            vec![committee],
+        );
+        extend_transaction_accounts_from_ix(
+            &ix,
+            &mut account_data,
+            &mut transaction_accounts,
+        );
+
+        let (_, logs) = process_instruction_with_logs(
+            ix.data.as_slice(),
+            transaction_accounts,
+            ix.accounts,
+            Err(InstructionError::Custom(crate::magic_sys::COMMIT_LIMIT_ERR)),
+        );
+
+        let expected_log = format!(
+            "ScheduleCommit ERR: sponsored commit limit exceeded for account {}: current commit nonce {} reached the limit of {}. Undelegate and re-delegate the account or use a delegated account as the payer",
+            committee, COMMIT_LIMIT, COMMIT_LIMIT
+        );
+        assert!(
+            logs.iter().any(|log| log == &expected_log),
+            "expected commit-limit log not found in {:?}",
+            logs
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn test_schedule_commit_and_undelegate_succeeds_when_commit_limit_exceeded()
+    {
+        init_logger!();
+
+        let payer =
+            Keypair::from_seed(b"undelegate_succeeds_limit_exceeded").unwrap();
+        let program = Pubkey::new_unique();
+        let committee = Pubkey::new_unique();
+
+        let (mut account_data, mut transaction_accounts) =
+            prepare_transaction_with_single_committee(
+                &payer, program, committee,
+            );
+
+        // Override stub to return nonce at the commit limit
+        ensure_started_validator(&mut account_data, Some(COMMIT_LIMIT));
+
+        let ix = InstructionUtils::schedule_commit_and_undelegate_instruction(
+            &payer.pubkey(),
+            vec![committee],
+        );
+        extend_transaction_accounts_from_ix(
+            &ix,
+            &mut account_data,
+            &mut transaction_accounts,
+        );
+
+        process_instruction(
+            ix.data.as_slice(),
+            transaction_accounts,
+            ix.accounts,
+            Ok(()),
+        );
+    }
+
+    #[test]
+    #[serial]
     fn test_schedule_commit_three_accounts_one_confined() {
         init_logger!();
 

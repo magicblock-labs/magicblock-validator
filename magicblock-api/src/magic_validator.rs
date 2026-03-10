@@ -57,7 +57,7 @@ use magicblock_processor::{
     scheduler::{state::TransactionSchedulerState, TransactionScheduler},
 };
 use magicblock_program::{
-    init_persister,
+    init_magic_sys,
     validator::{self, validator_authority},
     TransactionScheduler as ActionTransactionScheduler,
 };
@@ -91,6 +91,7 @@ use crate::{
         self, read_validator_keypair_from_ledger, validator_keypair_path,
         write_validator_keypair_to_ledger,
     },
+    magic_sys_adapter::MagicSysAdapter,
     slot::advance_slot_and_update_ledger,
     tickers::{init_slot_ticker, init_system_metrics_ticker},
 };
@@ -212,6 +213,10 @@ impl MagicValidator {
         let step_start = Instant::now();
         let committor_service = Self::init_committor_service(&config).await?;
         log_timing("startup", "committor_service_init", step_start);
+        init_magic_sys(Arc::new(MagicSysAdapter::new(
+            committor_service.clone(),
+        )));
+
         let step_start = Instant::now();
         let chainlink = Arc::new(
             Self::init_chainlink(
@@ -426,7 +431,6 @@ impl MagicValidator {
             committor_service,
             config.chainlink.clone(),
             transaction_scheduler.clone(),
-            accountsdb.clone(),
             latest_block.clone(),
         );
         let cloner = Arc::new(cloner);
@@ -477,7 +481,6 @@ impl MagicValidator {
     ) -> ApiResult<(Arc<Ledger>, Slot)> {
         let (ledger, last_slot) = ledger::init(storage, ledger_config)?;
         let ledger_shared = Arc::new(ledger);
-        init_persister(ledger_shared.clone());
         Ok((ledger_shared, last_slot))
     }
 

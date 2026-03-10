@@ -87,9 +87,6 @@ lazy_static::lazy_static! {
     static ref LEDGER_PERF_SAMPLES_GAUGE: IntGauge = IntGauge::new(
         "ledger_perf_samples_gauge", "Ledger Perf Samples Gauge",
     ).unwrap();
-    static ref LEDGER_ACCOUNT_MOD_DATA_GAUGE: IntGauge = IntGauge::new(
-        "ledger_account_mod_data_gauge", "Ledger Account Mod Data Gauge",
-    ).unwrap();
     pub static ref LEDGER_COLUMNS_COUNT_DURATION_SECONDS: Histogram = Histogram::with_opts(
         HistogramOpts::new(
             "ledger_columns_count_duration_seconds",
@@ -393,6 +390,11 @@ lazy_static::lazy_static! {
         "task_info_fetcher_a_count", "Get mupltiple account count"
     ).unwrap();
 
+    static ref TASK_INFO_FETCHER_RETIRING_GAUGE: IntGauge = IntGauge::new(
+        "task_info_fetcher_retiring_gauge",
+        "Number of pubkeys currently in the retiring map of CacheTaskInfoFetcher"
+    ).unwrap();
+
     static ref TABLE_MANIA_A_COUNT: IntCounter =  IntCounter::new(
         "table_mania_a_count", "Get mupltiple account count"
     ).unwrap();
@@ -421,6 +423,14 @@ lazy_static::lazy_static! {
         .buckets(
             vec![1.0, 3.0, 5.0, 10.0, 15.0, 17.0, 20.0]
         ),
+    ).unwrap();
+
+    static ref COMMITTOR_FETCH_COMMIT_NONCES_WAIT_TIME: Histogram = Histogram::with_opts(
+        HistogramOpts::new(
+            "committor_fetch_commit_nonces_wait_time_second",
+            "Time in seconds spent waiting for fetch_current_commit_nonces response"
+        )
+        .buckets(vec![0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 20.0, 30.0]),
     ).unwrap();
 
     // -----------------
@@ -535,7 +545,6 @@ pub(crate) fn register() {
         register!(LEDGER_TRANSACTIONS_GAUGE);
         register!(LEDGER_TRANSACTION_MEMOS_GAUGE);
         register!(LEDGER_PERF_SAMPLES_GAUGE);
-        register!(LEDGER_ACCOUNT_MOD_DATA_GAUGE);
         register!(LEDGER_COLUMNS_COUNT_DURATION_SECONDS);
         register!(LEDGER_TRUNCATOR_COMPACTION_SECONDS);
         register!(LEDGER_TRUNCATOR_DELETE_SECONDS);
@@ -557,6 +566,7 @@ pub(crate) fn register() {
         register!(COMMITTOR_INTENT_CU_USAGE);
         register!(COMMITTOR_INTENT_TASK_PREPARATION_TIME);
         register!(COMMITTOR_INTENT_ALT_PREPARATION_TIME);
+        register!(COMMITTOR_FETCH_COMMIT_NONCES_WAIT_TIME);
         register!(ENSURE_ACCOUNTS_TIME);
         register!(RPC_REQUEST_HANDLING_TIME);
         register!(TRANSACTION_PROCESSING_TIME);
@@ -577,6 +587,7 @@ pub(crate) fn register() {
         register!(MAX_LOCK_CONTENTION_QUEUE_SIZE);
         register!(REMOTE_ACCOUNT_PROVIDER_A_COUNT);
         register!(TASK_INFO_FETCHER_A_COUNT);
+        register!(TASK_INFO_FETCHER_RETIRING_GAUGE);
         register!(TABLE_MANIA_A_COUNT);
         register!(TABLE_MANIA_CLOSED_A_COUNT);
         register!(CONNECTED_PUBSUB_CLIENTS_GAUGE);
@@ -646,10 +657,6 @@ pub fn set_ledger_transaction_memos_count(count: i64) {
 
 pub fn set_ledger_perf_samples_count(count: i64) {
     LEDGER_PERF_SAMPLES_GAUGE.set(count);
-}
-
-pub fn set_ledger_account_mod_data_count(count: i64) {
-    LEDGER_ACCOUNT_MOD_DATA_GAUGE.set(count);
 }
 
 pub fn observe_columns_count_duration<F, T>(f: F) -> T
@@ -759,6 +766,10 @@ pub fn observe_committor_intent_alt_preparation_time() -> HistogramTimer {
     COMMITTOR_INTENT_ALT_PREPARATION_TIME.start_timer()
 }
 
+pub fn start_fetch_commit_nonces_wait_timer() -> HistogramTimer {
+    COMMITTOR_FETCH_COMMIT_NONCES_WAIT_TIME.start_timer()
+}
+
 pub fn inc_account_fetches_success(count: u64) {
     ACCOUNT_FETCHES_SUCCESS_COUNT.inc_by(count);
 }
@@ -841,6 +852,10 @@ pub fn inc_remote_account_provider_a_count() {
 
 pub fn inc_task_info_fetcher_a_count() {
     TASK_INFO_FETCHER_A_COUNT.inc()
+}
+
+pub fn set_task_info_fetcher_retiring_count(count: i64) {
+    TASK_INFO_FETCHER_RETIRING_GAUGE.set(count);
 }
 
 pub fn inc_table_mania_a_count() {

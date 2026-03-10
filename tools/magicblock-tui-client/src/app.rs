@@ -4,7 +4,7 @@ use std::{
     time::Duration,
 };
 
-use chrono::Utc;
+use chrono::Local;
 use crossterm::{
     cursor,
     event::Event,
@@ -33,18 +33,20 @@ use tracing::Level;
 use crate::{
     events::{handle_event, poll_event, EventAction},
     state::{
-        LogEntry, TransactionDetail, TransactionEntry, TuiConfig, TuiState,
+        LogEntry, TransactionAccount, TransactionDetail, TransactionEntry,
+        TransactionSource, TuiConfig, TuiState,
     },
     ui,
-    utils::url_encode,
+    utils::{url_encode, websocket_url_from_rpc_url},
 };
 
 type Term = Terminal<CrosstermBackend<Stdout>>;
+const VOTE_PROGRAM_ID: &str = "Vote111111111111111111111111111111111111111";
 
 #[derive(Debug)]
 enum AppEvent {
     Slot(u64),
-    Transaction(TransactionEntry),
+    Transaction(TransactionSource, TransactionEntry),
     TransactionDetail(TransactionDetail),
     Log(LogEntry),
 }
@@ -54,6 +56,7 @@ pub async fn run_tui(config: TuiConfig) -> io::Result<()> {
     setup_panic_hook();
     let mut terminal = init_terminal()?;
     let mut state = TuiState::new(config.clone());
+    let local_ws_url = config.ws_url.replace("0.0.0.0", "localhost");
     let client = reqwest::Client::new();
     if let Ok(epoch_info) = get_epoch_info(&client, &config.rpc_url).await {
         if epoch_info.slots_in_epoch > 0 {
@@ -64,22 +67,53 @@ pub async fn run_tui(config: TuiConfig) -> io::Result<()> {
     let (event_tx, event_rx) = mpsc::unbounded_channel();
     let (slot_tx, slot_rx) = mpsc::unbounded_channel();
     spawn_slot_subscription(
-        config.ws_url.clone(),
+        local_ws_url.clone(),
+        "slot_subscribe",
+        true,
         event_tx.clone(),
-        slot_tx,
+        vec![slot_tx],
         cancel.clone(),
     );
     spawn_block_transaction_feed(
-        config.rpc_url.clone(),
+        state.rpc_url.clone(),
+        TransactionSource::Local,
+        "tx_feed",
         slot_rx,
         event_tx.clone(),
         cancel.clone(),
     );
-    spawn_logs_subscription(
-        config.ws_url.clone(),
-        event_tx.clone(),
-        cancel.clone(),
-    );
+    if let Some(remote_rpc_url) = state.remote_rpc_url.clone() {
+        let (remote_slot_tx, remote_slot_rx) = mpsc::unbounded_channel();
+        if let Some(remote_ws_url) = websocket_url_from_rpc_url(&remote_rpc_url)
+        {
+            spawn_slot_subscription(
+                remote_ws_url,
+                "remote_slot_subscribe",
+                false,
+                event_tx.clone(),
+                vec![remote_slot_tx],
+                cancel.clone(),
+            );
+            spawn_block_transaction_feed(
+                remote_rpc_url,
+                TransactionSource::Remote,
+                "remote_tx_feed",
+                remote_slot_rx,
+                event_tx.clone(),
+                cancel.clone(),
+            );
+        } else {
+            let _ = event_tx.send(AppEvent::Log(LogEntry::new(
+                Level::WARN,
+                "remote_slot_subscribe".to_string(),
+                format!(
+                    "Could not derive websocket endpoint from remote RPC {}",
+                    remote_rpc_url
+                ),
+            )));
+        }
+    }
+    spawn_logs_subscription(local_ws_url, event_tx.clone(), cancel.clone());
 
     let result = run_event_loop(
         &mut terminal,
@@ -169,21 +203,20 @@ async fn run_event_loop(
 
             let action = handle_event(state, event, visible_height);
             match action {
-                EventAction::FetchTransaction(sig) => {
-                    let rpc_url = state.rpc_url.clone();
+                EventAction::FetchTransaction { rpc_url, signature } => {
                     let client = rpc_client.clone();
                     let event_tx = event_tx.clone();
 
                     tokio::spawn(async move {
                         let detail = match fetch_transaction_detail(
-                            &client, &rpc_url, &sig,
+                            &client, &rpc_url, &signature,
                         )
                         .await
                         {
                             Ok(detail) => detail,
                             Err(e) => build_failed_tx_detail(
                                 &rpc_url,
-                                sig,
+                                signature,
                                 format!("Failed to fetch: {}", e),
                             ),
                         };
@@ -206,7 +239,9 @@ async fn run_event_loop(
         while let Ok(event) = event_rx.try_recv() {
             match event {
                 AppEvent::Slot(slot) => state.update_slot(slot),
-                AppEvent::Transaction(tx) => state.push_transaction(tx),
+                AppEvent::Transaction(source, tx) => {
+                    state.push_transaction(source, tx)
+                }
                 AppEvent::TransactionDetail(detail) => {
                     state.show_tx_detail(detail)
                 }
@@ -227,8 +262,10 @@ async fn run_event_loop(
 
 fn spawn_slot_subscription(
     ws_url: String,
+    log_target: &'static str,
+    forward_slot_to_state: bool,
     event_tx: UnboundedSender<AppEvent>,
-    slot_tx: UnboundedSender<u64>,
+    slot_txs: Vec<UnboundedSender<u64>>,
     cancel: CancellationToken,
 ) {
     tokio::spawn(async move {
@@ -237,7 +274,7 @@ fn spawn_slot_subscription(
                 Ok(client) => {
                     let _ = event_tx.send(AppEvent::Log(LogEntry::new(
                         Level::INFO,
-                        "slot_subscribe".to_string(),
+                        log_target.to_string(),
                         format!("Connected to {}", ws_url),
                     )));
 
@@ -250,8 +287,12 @@ fn spawn_slot_subscription(
                                         match item {
                                             Some(update) => {
                                                 let slot = update.slot;
-                                                let _ = event_tx.send(AppEvent::Slot(slot));
-                                                let _ = slot_tx.send(slot);
+                                                if forward_slot_to_state {
+                                                    let _ = event_tx.send(AppEvent::Slot(slot));
+                                                }
+                                                for slot_tx in &slot_txs {
+                                                    let _ = slot_tx.send(slot);
+                                                }
                                             }
                                             None => break,
                                         }
@@ -264,7 +305,7 @@ fn spawn_slot_subscription(
                             let _ =
                                 event_tx.send(AppEvent::Log(LogEntry::new(
                                     Level::ERROR,
-                                    "slot_subscribe".to_string(),
+                                    log_target.to_string(),
                                     format!("Subscription failed: {}", err),
                                 )));
                         }
@@ -273,7 +314,7 @@ fn spawn_slot_subscription(
                 Err(err) => {
                     let _ = event_tx.send(AppEvent::Log(LogEntry::new(
                         Level::ERROR,
-                        "slot_subscribe".to_string(),
+                        log_target.to_string(),
                         format!("Connection failed: {}", err),
                     )));
                 }
@@ -288,6 +329,8 @@ fn spawn_slot_subscription(
 
 fn spawn_block_transaction_feed(
     rpc_url: String,
+    source: TransactionSource,
+    log_target: &'static str,
     mut slot_rx: UnboundedReceiver<u64>,
     event_tx: UnboundedSender<AppEvent>,
     cancel: CancellationToken,
@@ -299,7 +342,7 @@ fn spawn_block_transaction_feed(
 
         let _ = event_tx.send(AppEvent::Log(LogEntry::new(
             Level::INFO,
-            "tx_feed".to_string(),
+            log_target.to_string(),
             format!("Using getBlock transaction feed on {}", rpc_url),
         )));
 
@@ -334,12 +377,13 @@ fn spawn_block_transaction_feed(
                             &client,
                             &rpc_url,
                             next_slot,
+                            source == TransactionSource::Remote,
                         )
                         .await
                         {
                             Ok(Some(entries)) => {
                                 for entry in entries {
-                                    let _ = event_tx.send(AppEvent::Transaction(entry));
+                                    let _ = event_tx.send(AppEvent::Transaction(source, entry));
                                 }
                                 true
                             }
@@ -347,7 +391,7 @@ fn spawn_block_transaction_feed(
                             Err(err) => {
                                 let _ = event_tx.send(AppEvent::Log(LogEntry::new(
                                     Level::WARN,
-                                    "tx_feed".to_string(),
+                                    log_target.to_string(),
                                     format!(
                                         "getBlock slot {} failed: {}",
                                         next_slot, err
@@ -497,6 +541,8 @@ struct BlockTransaction {
 struct BlockTransactionMessage {
     #[serde(default, rename = "accountKeys")]
     account_keys: Vec<String>,
+    #[serde(default)]
+    instructions: Vec<CompiledInstruction>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -506,7 +552,7 @@ struct BlockTransactionMeta {
     loaded_addresses: Option<LoadedAddresses>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 struct LoadedAddresses {
     #[serde(default)]
     writable: Vec<String>,
@@ -515,6 +561,12 @@ struct LoadedAddresses {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CompiledInstruction {
+    program_id_index: usize,
+}
+
+#[derive(Debug, Deserialize, Clone)]
 struct TransactionMeta {
     fee: u64,
     err: Option<serde_json::Value>,
@@ -522,6 +574,8 @@ struct TransactionMeta {
     log_messages: Option<Vec<String>>,
     #[serde(rename = "computeUnitsConsumed")]
     compute_units_consumed: Option<u64>,
+    #[serde(rename = "loadedAddresses")]
+    loaded_addresses: Option<LoadedAddresses>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -530,9 +584,20 @@ struct TransactionData {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct TransactionMessage {
+    #[serde(default)]
+    header: TransactionMessageHeader,
     #[serde(rename = "accountKeys")]
     account_keys: Vec<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TransactionMessageHeader {
+    num_required_signatures: usize,
+    num_readonly_signed_accounts: usize,
+    num_readonly_unsigned_accounts: usize,
 }
 
 #[derive(Debug, Deserialize)]
@@ -658,18 +723,7 @@ async fn fetch_transaction_detail(
     rpc_url: &str,
     signature: &str,
 ) -> Result<TransactionDetail, String> {
-    let request_body = serde_json::json!({
-        "jsonrpc": "2.0",
-        "id": 1,
-        "method": "getTransaction",
-        "params": [
-            signature,
-            {
-                "encoding": "json",
-                "maxSupportedTransactionVersion": 255
-            }
-        ]
-    });
+    let request_body = build_transaction_detail_request(signature);
 
     let response = client
         .post(rpc_url)
@@ -691,27 +745,53 @@ async fn fetch_transaction_detail(
     let tx = rpc_response
         .result
         .ok_or_else(|| "Transaction not found".to_string())?;
-
-    let meta = tx.meta.as_ref();
-    let success = meta.map(|m| m.err.is_none()).unwrap_or(true);
-    let error = meta.and_then(|m| m.err.as_ref()).map(|e| format!("{}", e));
-
-    let accounts = tx.transaction.message.account_keys;
+    let TransactionResponse {
+        slot,
+        meta,
+        transaction,
+    } = tx;
+    let success = meta.as_ref().map(|m| m.err.is_none()).unwrap_or(true);
+    let error = meta
+        .as_ref()
+        .and_then(|m| m.err.as_ref())
+        .map(|e| format!("{}", e));
+    let accounts = build_transaction_accounts(
+        transaction.message,
+        meta.as_ref().and_then(|m| m.loaded_addresses.clone()),
+    );
     let selected_account = if accounts.is_empty() { None } else { Some(0) };
 
     Ok(TransactionDetail {
         signature: signature.to_string(),
-        slot: tx.slot,
+        slot,
         success,
-        fee: meta.map(|m| m.fee).unwrap_or(0),
-        compute_units: meta.and_then(|m| m.compute_units_consumed),
+        fee: meta.as_ref().map(|m| m.fee).unwrap_or(0),
+        compute_units: meta.as_ref().and_then(|m| m.compute_units_consumed),
         logs: meta
+            .as_ref()
             .and_then(|m| m.log_messages.clone())
             .unwrap_or_default(),
         accounts,
         error,
+        rpc_url: rpc_url.to_string(),
         explorer_url: build_explorer_url(rpc_url, signature),
         selected_account,
+    })
+}
+
+fn build_transaction_detail_request(signature: &str) -> serde_json::Value {
+    serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "getTransaction",
+        "params": [
+            signature,
+            {
+                "encoding": "json",
+                "commitment": "processed",
+                "maxSupportedTransactionVersion": 255
+            }
+        ]
     })
 }
 
@@ -730,6 +810,7 @@ fn build_failed_tx_detail(
         logs: vec![],
         accounts: vec![],
         error: Some(error),
+        rpc_url: rpc_url.to_string(),
         explorer_url,
         selected_account: None,
     }
@@ -739,11 +820,19 @@ async fn fetch_block_transactions_with_retry(
     client: &reqwest::Client,
     rpc_url: &str,
     slot: u64,
+    exclude_vote_transactions: bool,
 ) -> Result<Option<Vec<TransactionEntry>>, String> {
     const MAX_ATTEMPTS: usize = 4;
 
     for attempt in 0..MAX_ATTEMPTS {
-        match fetch_block_transactions(client, rpc_url, slot).await {
+        match fetch_block_transactions(
+            client,
+            rpc_url,
+            slot,
+            exclude_vote_transactions,
+        )
+        .await
+        {
             Ok(Some(entries)) => return Ok(Some(entries)),
             Ok(None) => {
                 if attempt + 1 == MAX_ATTEMPTS {
@@ -767,6 +856,7 @@ async fn fetch_block_transactions(
     client: &reqwest::Client,
     rpc_url: &str,
     slot: u64,
+    exclude_vote_transactions: bool,
 ) -> Result<Option<Vec<TransactionEntry>>, String> {
     let request_body = serde_json::json!({
         "jsonrpc": "2.0",
@@ -808,12 +898,23 @@ async fn fetch_block_transactions(
         return Ok(None);
     };
 
-    let timestamp = Utc::now();
+    let timestamp = Local::now();
     let entries = block
         .transactions
         .into_iter()
         .filter_map(|tx| {
             let signature = tx.transaction.signatures.into_iter().next()?;
+            let should_exclude = exclude_vote_transactions
+                && is_vote_transaction(
+                    &tx.transaction.message,
+                    tx.meta
+                        .as_ref()
+                        .and_then(|meta| meta.loaded_addresses.as_ref()),
+                );
+            if should_exclude {
+                return None;
+            }
+
             let mut accounts = tx.transaction.message.account_keys;
             let success =
                 tx.meta.as_ref().map(|m| m.err.is_none()).unwrap_or(true);
@@ -834,6 +935,94 @@ async fn fetch_block_transactions(
         .collect();
 
     Ok(Some(entries))
+}
+
+fn build_transaction_accounts(
+    message: TransactionMessage,
+    loaded_addresses: Option<LoadedAddresses>,
+) -> Vec<TransactionAccount> {
+    let TransactionMessage {
+        header,
+        account_keys,
+    } = message;
+    let required_signatures = header.num_required_signatures;
+    let signed_writable_cutoff =
+        required_signatures.saturating_sub(header.num_readonly_signed_accounts);
+    let unsigned_writable_cutoff = account_keys
+        .len()
+        .saturating_sub(header.num_readonly_unsigned_accounts);
+
+    let mut accounts = Vec::with_capacity(
+        account_keys.len()
+            + loaded_addresses
+                .as_ref()
+                .map(|loaded| loaded.writable.len() + loaded.readonly.len())
+                .unwrap_or(0),
+    );
+
+    for (index, pubkey) in account_keys.into_iter().enumerate() {
+        let is_signer = index < required_signatures;
+        let is_writable = if is_signer {
+            index < signed_writable_cutoff
+        } else {
+            index < unsigned_writable_cutoff
+        };
+        accounts.push(TransactionAccount::new(pubkey, is_signer, is_writable));
+    }
+
+    if let Some(loaded_addresses) = loaded_addresses {
+        accounts.extend(
+            loaded_addresses
+                .writable
+                .into_iter()
+                .map(|pubkey| TransactionAccount::new(pubkey, false, true)),
+        );
+        accounts.extend(
+            loaded_addresses
+                .readonly
+                .into_iter()
+                .map(|pubkey| TransactionAccount::new(pubkey, false, false)),
+        );
+    }
+
+    accounts
+}
+
+fn is_vote_transaction(
+    message: &BlockTransactionMessage,
+    loaded_addresses: Option<&LoadedAddresses>,
+) -> bool {
+    message.instructions.iter().any(|instruction| {
+        resolve_account_key(
+            &message.account_keys,
+            loaded_addresses,
+            instruction.program_id_index,
+        )
+        .is_some_and(|program_id| program_id == VOTE_PROGRAM_ID)
+    })
+}
+
+fn resolve_account_key<'a>(
+    account_keys: &'a [String],
+    loaded_addresses: Option<&'a LoadedAddresses>,
+    index: usize,
+) -> Option<&'a str> {
+    if let Some(pubkey) = account_keys.get(index) {
+        return Some(pubkey.as_str());
+    }
+
+    let loaded_addresses = loaded_addresses?;
+    let loaded_index = index.checked_sub(account_keys.len())?;
+    if let Some(pubkey) = loaded_addresses.writable.get(loaded_index) {
+        return Some(pubkey.as_str());
+    }
+
+    let readonly_index =
+        loaded_index.checked_sub(loaded_addresses.writable.len())?;
+    loaded_addresses
+        .readonly
+        .get(readonly_index)
+        .map(String::as_str)
 }
 
 fn is_non_fatal_block_error(code: i64) -> bool {
@@ -883,4 +1072,107 @@ fn open_url_in_browser(url: &str) -> std::io::Result<()> {
         ));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        build_transaction_accounts, build_transaction_detail_request,
+        is_vote_transaction, BlockTransactionMessage, CompiledInstruction,
+        LoadedAddresses, TransactionMessage, TransactionMessageHeader,
+        VOTE_PROGRAM_ID,
+    };
+
+    #[test]
+    fn build_transaction_accounts_marks_static_and_loaded_keys() {
+        let accounts = build_transaction_accounts(
+            TransactionMessage {
+                header: TransactionMessageHeader {
+                    num_required_signatures: 2,
+                    num_readonly_signed_accounts: 1,
+                    num_readonly_unsigned_accounts: 1,
+                },
+                account_keys: vec![
+                    "signer-w".to_string(),
+                    "signer-ro".to_string(),
+                    "unsigned-w".to_string(),
+                    "unsigned-ro".to_string(),
+                ],
+            },
+            Some(LoadedAddresses {
+                writable: vec!["lookup-w".to_string()],
+                readonly: vec!["lookup-ro".to_string()],
+            }),
+        );
+
+        assert_eq!(accounts.len(), 6);
+        assert_eq!(accounts[0].pubkey, "signer-w");
+        assert!(accounts[0].is_signer);
+        assert!(accounts[0].is_writable);
+        assert_eq!(accounts[1].pubkey, "signer-ro");
+        assert!(accounts[1].is_signer);
+        assert!(!accounts[1].is_writable);
+        assert_eq!(accounts[2].pubkey, "unsigned-w");
+        assert!(!accounts[2].is_signer);
+        assert!(accounts[2].is_writable);
+        assert_eq!(accounts[3].pubkey, "unsigned-ro");
+        assert!(!accounts[3].is_signer);
+        assert!(!accounts[3].is_writable);
+        assert_eq!(accounts[4].pubkey, "lookup-w");
+        assert!(!accounts[4].is_signer);
+        assert!(accounts[4].is_writable);
+        assert_eq!(accounts[5].pubkey, "lookup-ro");
+        assert!(!accounts[5].is_signer);
+        assert!(!accounts[5].is_writable);
+    }
+
+    #[test]
+    fn vote_detection_checks_static_and_loaded_program_ids() {
+        let static_vote = BlockTransactionMessage {
+            account_keys: vec![
+                "payer".to_string(),
+                VOTE_PROGRAM_ID.to_string(),
+            ],
+            instructions: vec![CompiledInstruction {
+                program_id_index: 1,
+            }],
+        };
+        assert!(is_vote_transaction(&static_vote, None));
+
+        let loaded_vote = BlockTransactionMessage {
+            account_keys: vec!["payer".to_string()],
+            instructions: vec![CompiledInstruction {
+                program_id_index: 1,
+            }],
+        };
+        assert!(is_vote_transaction(
+            &loaded_vote,
+            Some(&LoadedAddresses {
+                writable: vec![VOTE_PROGRAM_ID.to_string()],
+                readonly: vec![],
+            }),
+        ));
+
+        let non_vote = BlockTransactionMessage {
+            account_keys: vec![
+                "payer".to_string(),
+                "11111111111111111111111111111111".to_string(),
+            ],
+            instructions: vec![CompiledInstruction {
+                program_id_index: 1,
+            }],
+        };
+        assert!(!is_vote_transaction(&non_vote, None));
+    }
+
+    #[test]
+    fn transaction_detail_request_uses_processed_commitment() {
+        let request = build_transaction_detail_request("sig");
+
+        assert_eq!(request["method"], "getTransaction");
+        assert_eq!(request["params"][0], "sig");
+        assert_eq!(request["params"][1]["encoding"], "json");
+        assert_eq!(request["params"][1]["commitment"], "processed");
+        assert_eq!(request["params"][1]["maxSupportedTransactionVersion"], 255);
+    }
 }

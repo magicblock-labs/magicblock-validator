@@ -3,9 +3,8 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use magicblock_program::magic_scheduled_base_intent::{
-    CommittedAccount, ScheduledIntentBundle,
-};
+use magicblock_core::intent::CommittedAccount;
+use magicblock_program::magic_scheduled_base_intent::ScheduledIntentBundle;
 use solana_pubkey::Pubkey;
 
 use super::{
@@ -436,9 +435,9 @@ impl<T: IntentPersister> IntentPersister for Option<T> {
 
 #[cfg(test)]
 mod tests {
+    use magicblock_core::intent::CommittedAccount;
     use magicblock_program::magic_scheduled_base_intent::{
-        CommitAndUndelegate, CommitType, CommittedAccount, MagicIntentBundle,
-        UndelegateType,
+        CommitAndUndelegate, CommitType, MagicIntentBundle, UndelegateType,
     };
     use solana_account::Account;
     use solana_hash::Hash;

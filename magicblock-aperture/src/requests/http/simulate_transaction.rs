@@ -43,7 +43,7 @@ impl HttpDispatcher {
             .inspect_err(|err| {
                 debug!(error = ?err, "Failed to prepare transaction to simulate")
             })?;
-        self.ensure_transaction_accounts(&transaction).await?;
+        self.ensure_transaction_accounts(&transaction.txn).await?;
 
         let replacement_blockhash = config
             .replace_recent_blockhash
@@ -52,7 +52,7 @@ impl HttpDispatcher {
         // Submit the transaction to the scheduler for simulation.
         let result = self
             .transactions_scheduler
-            .simulate(transaction)
+            .simulate(transaction.txn)
             .await
             .map_err(RpcError::transaction_simulation)?;
 

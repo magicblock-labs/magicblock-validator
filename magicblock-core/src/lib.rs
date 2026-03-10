@@ -18,4 +18,5 @@ pub mod tls;
 pub mod token_programs;
 pub mod traits;
 
+pub mod intent;
 pub mod logger;

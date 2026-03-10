@@ -10,7 +10,7 @@ use crate::{
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EventAction {
     None,
-    FetchTransaction(String),
+    FetchTransaction { rpc_url: String, signature: String },
     OpenUrl(String),
 }
 
@@ -51,7 +51,7 @@ fn handle_key(
                 if let Some(detail) = &state.tx_detail {
                     let url = match detail.selected_account_address() {
                         Some(account) => {
-                            build_account_explorer_url(&state.rpc_url, account)
+                            build_account_explorer_url(&detail.rpc_url, account)
                         }
                         None => detail.explorer_url.clone(),
                     };
@@ -98,7 +98,16 @@ fn handle_key(
         return EventAction::None;
     }
 
-    if state.active_tab == Tab::Transactions {
+    if state.is_transaction_tab() {
+        if key.modifiers.contains(KeyModifiers::ALT) {
+            if let KeyCode::Char(ch) = key.code {
+                if let Some(shortcut) = digit_shortcut(ch) {
+                    state.select_tab_by_shortcut(shortcut);
+                    return EventAction::None;
+                }
+            }
+        }
+
         match key {
             KeyEvent {
                 code: KeyCode::Backspace,
@@ -135,27 +144,34 @@ fn handle_key(
     match key.code {
         KeyCode::Char('q') => state.should_quit = true,
         KeyCode::Enter => {
-            if state.active_tab == Tab::Transactions {
-                if let Some(tx) = state.selected_transaction() {
-                    return EventAction::FetchTransaction(tx.signature.clone());
+            if state.is_transaction_tab() {
+                if let (Some(tx), Some(rpc_url)) = (
+                    state.selected_transaction(),
+                    state.active_transaction_rpc_url(),
+                ) {
+                    return EventAction::FetchTransaction {
+                        rpc_url: rpc_url.to_string(),
+                        signature: tx.signature.clone(),
+                    };
                 }
             }
         }
         KeyCode::Left | KeyCode::Char('h') => {
-            state.active_tab = state.active_tab.prev();
+            state.prev_tab();
         }
         KeyCode::Right | KeyCode::Char('l') => {
-            state.active_tab = state.active_tab.next();
+            state.next_tab();
         }
         KeyCode::Tab => {
-            state.active_tab = state.active_tab.next();
+            state.next_tab();
         }
         KeyCode::BackTab => {
-            state.active_tab = state.active_tab.prev();
+            state.prev_tab();
         }
-        KeyCode::Char('1') => state.active_tab = Tab::Transactions,
-        KeyCode::Char('2') => state.active_tab = Tab::Logs,
-        KeyCode::Char('3') => state.active_tab = Tab::Config,
+        KeyCode::Char('1') => state.select_tab_by_shortcut(1),
+        KeyCode::Char('2') => state.select_tab_by_shortcut(2),
+        KeyCode::Char('3') => state.select_tab_by_shortcut(3),
+        KeyCode::Char('4') => state.select_tab_by_shortcut(4),
         KeyCode::Up | KeyCode::Char('k') => state.scroll_up(),
         KeyCode::Down | KeyCode::Char('j') => state.scroll_down(visible_height),
         KeyCode::PageUp => {
@@ -170,9 +186,8 @@ fn handle_key(
         }
         KeyCode::Home => match state.active_tab {
             Tab::Logs => state.log_scroll = 0,
-            Tab::Transactions => {
-                state.tx_scroll = 0;
-                state.selected_tx = 0;
+            Tab::Transactions | Tab::RemoteTransactions => {
+                state.scroll_transactions_home();
             }
             Tab::Config => {}
         },
@@ -181,13 +196,8 @@ fn handle_key(
                 state.log_scroll =
                     state.logs.len().saturating_sub(visible_height);
             }
-            Tab::Transactions => {
-                let filtered_len = state.filtered_transactions_len();
-                if filtered_len > 0 {
-                    state.selected_tx = filtered_len - 1;
-                    state.tx_scroll =
-                        filtered_len.saturating_sub(visible_height);
-                }
+            Tab::Transactions | Tab::RemoteTransactions => {
+                state.scroll_transactions_end(visible_height);
             }
             Tab::Config => {}
         },
@@ -195,6 +205,16 @@ fn handle_key(
     }
 
     EventAction::None
+}
+
+fn digit_shortcut(ch: char) -> Option<u8> {
+    match ch {
+        '1' => Some(1),
+        '2' => Some(2),
+        '3' => Some(3),
+        '4' => Some(4),
+        _ => None,
+    }
 }
 
 fn build_account_explorer_url(rpc_url: &str, account: &str) -> String {
@@ -210,7 +230,10 @@ mod tests {
     use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 
     use super::{handle_event, EventAction};
-    use crate::state::{Tab, TransactionDetail, TuiConfig, TuiState, ViewMode};
+    use crate::state::{
+        Tab, TransactionAccount, TransactionDetail, TuiConfig, TuiState,
+        ViewMode,
+    };
 
     fn config() -> TuiConfig {
         TuiConfig {
@@ -232,6 +255,10 @@ mod tests {
         Event::Key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL))
     }
 
+    fn account(pubkey: &str) -> TransactionAccount {
+        TransactionAccount::new(pubkey, false, false)
+    }
+
     #[test]
     fn ctrl_c_closes_detail_view() {
         let mut state = TuiState::new(config());
@@ -244,6 +271,7 @@ mod tests {
             logs: vec![],
             accounts: vec![],
             error: None,
+            rpc_url: "http://127.0.0.1:8899".to_string(),
             explorer_url: "https://example.com".to_string(),
             selected_account: None,
         });
@@ -276,8 +304,9 @@ mod tests {
             fee: 0,
             compute_units: None,
             logs: vec![],
-            accounts: vec!["11111111111111111111111111111111".to_string()],
+            accounts: vec![account("11111111111111111111111111111111")],
             error: None,
+            rpc_url: "http://127.0.0.1:8898".to_string(),
             explorer_url: "https://explorer.solana.com/tx/sig".to_string(),
             selected_account: Some(0),
         });
@@ -293,6 +322,8 @@ mod tests {
                 assert!(
                     url.contains("/address/11111111111111111111111111111111")
                 );
+                assert!(url
+                    .contains("customUrl=http%3A%2F%2F127%2E0%2E0%2E1%3A8898"));
             }
             other => panic!("expected OpenUrl action, got {:?}", other),
         }
@@ -310,8 +341,9 @@ mod tests {
             fee: 0,
             compute_units: None,
             logs: vec![],
-            accounts: vec!["acc-1".to_string(), "acc-2".to_string()],
+            accounts: vec![account("acc-1"), account("acc-2")],
             error: None,
+            rpc_url: "http://127.0.0.1:8899".to_string(),
             explorer_url: "https://explorer.solana.com/tx/sig".to_string(),
             selected_account: Some(0),
         });
@@ -392,6 +424,42 @@ mod tests {
             )),
             10,
         );
+        assert_eq!(state.tx_filter_query(), "");
+    }
+
+    #[test]
+    fn digits_are_available_in_transaction_filter() {
+        let mut state = TuiState::new(TuiConfig {
+            remote_rpc_url: "http://127.0.0.1:8898".to_string(),
+            ..config()
+        });
+        state.active_tab = Tab::Transactions;
+
+        let _ = handle_event(
+            &mut state,
+            Event::Key(KeyEvent::new(KeyCode::Char('2'), KeyModifiers::NONE)),
+            10,
+        );
+
+        assert_eq!(state.active_tab, Tab::Transactions);
+        assert_eq!(state.tx_filter_query(), "2");
+    }
+
+    #[test]
+    fn alt_digit_shortcuts_switch_tabs_from_transaction_tabs() {
+        let mut state = TuiState::new(TuiConfig {
+            remote_rpc_url: "http://127.0.0.1:8898".to_string(),
+            ..config()
+        });
+        state.active_tab = Tab::Transactions;
+
+        let _ = handle_event(
+            &mut state,
+            Event::Key(KeyEvent::new(KeyCode::Char('2'), KeyModifiers::ALT)),
+            10,
+        );
+
+        assert_eq!(state.active_tab, Tab::RemoteTransactions);
         assert_eq!(state.tx_filter_query(), "");
     }
 }
