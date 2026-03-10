@@ -1,15 +1,19 @@
 use std::{
     cmp::Ordering,
+    ops::Deref,
     sync::{Arc, RwLock},
 };
 
 use magicblock_accounts_db::{AccountsDb, GlobalSyncLock};
-use magicblock_core::link::{
-    accounts::AccountUpdateTx,
-    transactions::{
-        ScheduledTasksTx, TransactionProcessingMode, TransactionStatusTx,
-        TransactionToProcessRx,
+use magicblock_core::{
+    link::{
+        accounts::AccountUpdateTx,
+        transactions::{
+            ProcessableTransaction, ScheduledTasksTx,
+            TransactionProcessingMode, TransactionStatusTx,
+        },
     },
+    Slot,
 };
 use magicblock_ledger::{LatestBlock, LatestBlockInner, Ledger};
 use parking_lot::RwLockReadGuard;
@@ -21,13 +25,30 @@ use solana_svm::transaction_processor::{
     ExecutionRecordingConfig, TransactionBatchProcessor,
     TransactionProcessingConfig, TransactionProcessingEnvironment,
 };
-use tokio::{runtime::Builder, sync::mpsc::Sender};
+use solana_transaction::sanitized::SanitizedTransaction;
+use tokio::{
+    runtime::Builder,
+    sync::mpsc::{Receiver, Sender},
+};
 use tracing::{info, instrument};
 
 use crate::{
     builtins::BUILTINS,
     scheduler::{locks::ExecutorId, state::TransactionSchedulerState},
 };
+
+pub(crate) struct IndexedTransaction {
+    pub(crate) slot: Slot,
+    pub(crate) index: u32,
+    pub(crate) txn: ProcessableTransaction,
+}
+
+impl Deref for IndexedTransaction {
+    type Target = SanitizedTransaction;
+    fn deref(&self) -> &Self::Target {
+        &self.txn.transaction
+    }
+}
 
 /// A dedicated, single-threaded worker responsible for processing transactions.
 pub(super) struct TransactionExecutor {
@@ -45,7 +66,7 @@ pub(super) struct TransactionExecutor {
     environment: TransactionProcessingEnvironment<'static>,
 
     // Channels
-    rx: TransactionToProcessRx,
+    rx: Receiver<IndexedTransaction>,
     transaction_tx: TransactionStatusTx,
     accounts_tx: AccountUpdateTx,
     tasks_tx: ScheduledTasksTx,
@@ -59,7 +80,7 @@ impl TransactionExecutor {
     pub(super) fn new(
         id: ExecutorId,
         state: &TransactionSchedulerState,
-        rx: TransactionToProcessRx,
+        rx: Receiver<IndexedTransaction>,
         ready_tx: Sender<ExecutorId>,
         programs_cache: Arc<RwLock<ProgramCache<SimpleForkGraph>>>,
     ) -> Self {
@@ -140,16 +161,16 @@ impl TransactionExecutor {
             tokio::select! {
                 biased;
                 txn = self.rx.recv() => {
-                    let Some(txn) = txn else { break };
-                    match txn.mode {
-                        TransactionProcessingMode::Execution(tx) => {
-                            self.execute([txn.transaction], tx, false);
+                    let Some(transaction) = txn else { break };
+                    match transaction.txn.mode {
+                        TransactionProcessingMode::Execution(_) => {
+                            self.execute(transaction, None);
                         }
                         TransactionProcessingMode::Simulation(tx) => {
-                            self.simulate([txn.transaction], tx);
+                            self.simulate([transaction.txn.transaction], tx);
                         }
-                        TransactionProcessingMode::Replay(tx) => {
-                            self.execute([txn.transaction], Some(tx), true);
+                        TransactionProcessingMode::Replay(ctx) => {
+                            self.execute(transaction, Some(ctx.persist));
                         }
                     }
                     let _ = self.ready_tx.try_send(self.id);
