@@ -3,8 +3,8 @@ use std::{collections::HashMap, sync::Arc};
 use async_trait::async_trait;
 use magicblock_core::intent::CommittedAccount;
 use magicblock_program::magic_scheduled_base_intent::{
-    BaseAction, CommitAndUndelegate, CommitType, CommittedAccount,
-    ScheduledIntentBundle, UndelegateType,
+    BaseAction, CommitAndUndelegate, CommitType, ScheduledIntentBundle,
+    UndelegateType,
 };
 use solana_account::Account;
 use solana_pubkey::Pubkey;
@@ -18,8 +18,8 @@ use crate::{
     persist::IntentPersister,
     tasks::{
         commit_task::{CommitDelivery, CommitTask},
-        BaseActionTask, BaseActionTaskV1, BaseActionTaskV2, BaseTask,
-        BaseTaskImpl, CommitFinalizeTask, FinalizeTask, UndelegateTask,
+        BaseActionTask, BaseActionTaskV1, BaseActionTaskV2, BaseTaskImpl,
+        CommitFinalizeTask, FinalizeTask, UndelegateTask,
     },
 };
 
@@ -134,7 +134,7 @@ impl TaskBuilderImpl {
         allow_undelegation: bool,
         account: CommittedAccount,
         base_account: Option<Account>,
-    ) -> ArgsTask {
+    ) -> CommitFinalizeTask {
         let base_account =
             if account.account.data.len() > COMMIT_STATE_SIZE_THRESHOLD {
                 base_account
@@ -142,13 +142,18 @@ impl TaskBuilderImpl {
                 None
             };
 
-        ArgsTaskType::CommitFinalize(CommitFinalizeTask {
+        let delivery_details = if let Some(base_account) = base_account {
+            CommitDelivery::DiffInArgs { base_account }
+        } else {
+            CommitDelivery::StateInArgs
+        };
+
+        CommitFinalizeTask {
             commit_id,
             allow_undelegation,
             committed_account: account,
-            base_account,
-        })
-        .into()
+            delivery: delivery_details,
+        }
     }
 }
 
@@ -239,11 +244,11 @@ impl TasksBuilder for TaskBuilderImpl {
                     });
                 let base_account = base_accounts.remove(&account.pubkey);
 
-                  if finalize {
-                     Self::create_commit_finalize_task(commit_id, allow_undelegation, account.clone(), base_account)
+                 if finalize {
+                     Self::create_commit_finalize_task(commit_id, allow_undelegation, account.clone(), base_account).into()
                  } else {
-                     Self::create_commit_task(commit_id, allow_undelegation, account.clone(), base_account)
-                 }.into()
+                     Self::create_commit_task(commit_id, allow_undelegation, account.clone(), base_account).into()
+                 }
             },
         );
         tasks.extend(commit_tasks_iter);
@@ -301,7 +306,7 @@ impl TasksBuilder for TaskBuilderImpl {
         async fn create_undelegate_tasks<C: TaskInfoFetcher>(
             commit_and_undelegate: &CommitAndUndelegate,
             info_fetcher: &Arc<C>,
-        ) -> TaskBuilderResult<Vec<Box<dyn BaseTask>>> {
+        ) -> TaskBuilderResult<Vec<BaseTaskImpl>> {
             // Get rent reimbursments for undelegated accounts
             let accounts = commit_and_undelegate.get_committed_accounts();
             let mut min_context_slot = 0;

@@ -10,13 +10,12 @@ use magicblock_committor_program::{
     },
     pdas, ChangesetChunks, Chunks,
 };
-use magicblock_core::intent::CommittedAccount;
 use magicblock_metrics::metrics::LabelValue;
 use magicblock_program::magic_scheduled_base_intent::BaseAction;
-use solana_account::Account;
 use solana_instruction::{AccountMeta, Instruction};
 use solana_pubkey::Pubkey;
 
+pub mod commit_finalize_task;
 pub mod commit_task;
 pub mod task_builder;
 pub mod task_strategist;
@@ -24,6 +23,7 @@ pub mod utils;
 
 pub use task_builder::TaskBuilderImpl;
 
+use crate::tasks::commit_finalize_task::CommitFinalizeTask;
 use crate::tasks::commit_task::CommitTask;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -44,6 +44,7 @@ pub enum TaskStrategy {
 #[derive(Clone, Debug)]
 pub enum BaseTaskImpl {
     Commit(CommitTask),
+    CommitFinalize(CommitFinalizeTask),
     Finalize(FinalizeTask),
     Undelegate(UndelegateTask),
     BaseAction(BaseActionTask),
@@ -57,6 +58,7 @@ impl BaseTask for BaseTaskImpl {
     fn instruction(&self, validator: &Pubkey) -> Instruction {
         match self {
             Self::Commit(value) => value.instruction(validator),
+            Self::CommitFinalize(value) => value.instruction(validator),
             Self::Finalize(value) => value.instruction(validator),
             Self::Undelegate(value) => value.instruction(validator),
             Self::BaseAction(value) => value.instruction(validator),
@@ -73,6 +75,7 @@ impl BaseTask for BaseTaskImpl {
     fn compute_units(&self) -> u32 {
         match self {
             Self::Commit(value) => value.compute_units(),
+            Self::CommitFinalize(value) => value.compute_units(),
             Self::BaseAction(value) => value.compute_units(),
             Self::Finalize(_) => 70_000,
             Self::Undelegate(_) => 70_000,
@@ -82,6 +85,7 @@ impl BaseTask for BaseTaskImpl {
     fn accounts_size_budget(&self) -> u32 {
         match self {
             Self::Commit(value) => value.accounts_size_budget(),
+            Self::CommitFinalize(value) => value.accounts_size_budget(),
             Self::BaseAction(value) => value.accounts_size_budget(),
             Self::Finalize(_) => {
                 dlp_api::instruction_builder::finalize_size_budget(
@@ -114,6 +118,13 @@ impl LabelValue for BaseTaskImpl {
                     "buffer_commit"
                 } else {
                     "args_commit"
+                }
+            }
+            Self::CommitFinalize(task) => {
+                if task.is_buffer() {
+                    "buffer_commit_finalize"
+                } else {
+                    "args_commit_finalize"
                 }
             }
             Self::Finalize(_) => "args_finalize",
@@ -153,22 +164,6 @@ pub trait BaseTask: Send + Sync + Clone {
 
     /// Returns the max accounts-data-size that can be used with SetLoadedAccountsDataSizeLimit
     fn accounts_size_budget(&self) -> u32;
-}
-
-#[derive(Clone, Debug)]
-pub struct CommitDiffTask {
-    pub commit_id: u64,
-    pub allow_undelegation: bool,
-    pub committed_account: CommittedAccount,
-    pub base_account: Account,
-}
-
-#[derive(Clone, Debug)]
-pub struct CommitFinalizeTask {
-    pub commit_id: u64,
-    pub allow_undelegation: bool,
-    pub base_account: Option<Account>, // None implies commit-full-bytes else commit-diff
-    pub committed_account: CommittedAccount,
 }
 
 #[derive(Clone, Debug)]
