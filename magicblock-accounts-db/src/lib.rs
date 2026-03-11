@@ -1,10 +1,4 @@
-use std::{
-    fs,
-    hash::Hasher,
-    path::{Path, PathBuf},
-    sync::Arc,
-    thread::{self, JoinHandle},
-};
+use std::{fs, hash::Hasher, path::Path, sync::Arc, thread};
 
 use error::{AccountsDbError, LogErr};
 use index::{
@@ -12,7 +6,7 @@ use index::{
 };
 use lmdb::{RwTransaction, Transaction};
 use magicblock_config::config::AccountsDbConfig;
-use parking_lot::RwLock;
+use parking_lot::{RwLock, RwLockWriteGuard};
 use solana_account::{
     cow::AccountBorrowed, AccountSharedData, ReadableAccount,
 };
@@ -283,45 +277,45 @@ impl AccountsDb {
         self.storage.slot()
     }
 
-    /// Updates the current slot
+    /// Updates the current slot.
     #[inline(always)]
     pub fn set_slot(self: &Arc<Self>, slot: u64) {
         self.storage.update_slot(slot);
     }
 
-    /// Spawns a background thread to take a snapshot.
+    /// Takes a database snapshot for the given slot.
+    ///
     /// The snapshot is created in two phases:
-    /// 1. Create snapshot directory (with write lock held)
-    /// 2. Archive directory to tar.gz and register (lock released)
-    pub fn take_snapshot(
-        self: &Arc<Self>,
-        slot: u64,
-    ) -> JoinHandle<AccountsDbSnapshotResult> {
+    /// 1. **Synchronous**: Flush data, compute checksum, create snapshot directory
+    ///    (with write lock held to ensure consistency)
+    /// 2. **Background**: Archive directory to tar.gz and register
+    ///
+    /// Returns the state checksum computed at snapshot time.
+    /// The checksum can be used to verify state consistency across nodes.
+    pub fn take_snapshot(self: &Arc<Self>, slot: u64) -> u64 {
         let this = self.clone();
 
+        // Phase 1: Create snapshot directory (with write lock)
+        let locked = this.write_lock.write();
+        this.flush();
+        // SAFETY:
+        // we have acquired the write lock above
+        let checksum = unsafe { this.checksum() };
+        let used_storage = this.storage.active_segment();
+
+        let snapshot_dir = this
+            .snapshot_manager
+            .create_snapshot_dir(slot, used_storage);
+        drop(locked);
         thread::spawn(move || {
-            // Phase 1: Create snapshot directory (with write lock)
-            let locked = this.write_lock.write();
-            this.flush();
-            // SAFETY:
-            // we have acquired the write lock above
-            let checksum = unsafe { this.checksum() };
-            let used_storage = this.storage.active_segment();
-
-            let snapshot_dir = this.snapshot_manager.create_snapshot_dir(
-                slot,
-                used_storage,
-                locked, // Lock released when this returns
-            );
-
             // Phase 2: Archive directory (no lock needed)
-            let archive = snapshot_dir
+            let _ = snapshot_dir
                 .and_then(|dir| {
                     this.snapshot_manager.archive_and_register(&dir)
                 })
                 .log_err(|| "failed to create accountsdb snapshot");
-            AccountsDbSnapshotResult { checksum, archive }
-        })
+        });
+        checksum
     }
 
     /// Ensures the database state is at most `slot`.
@@ -431,6 +425,15 @@ impl AccountsDb {
         }
         hasher.finish()
     }
+
+    /// Acquires exclusive write access to the database.
+    ///
+    /// The returned guard blocks all other write operations while held.
+    /// Use this when you need to ensure the database state doesn't change
+    /// during operations like checksum computation.
+    pub fn lock_database(&self) -> RwLockWriteGuard<'_, ()> {
+        self.write_lock.write()
+    }
 }
 
 impl AccountsBank for AccountsDb {
@@ -527,14 +530,6 @@ impl AccountsDb {
     pub fn snapshot_exists(&self, slot: u64) -> bool {
         self.snapshot_manager.snapshot_exists(slot)
     }
-}
-
-/// Result of a snapshot operation spawned via [`AccountsDb::take_snapshot`].
-pub struct AccountsDbSnapshotResult {
-    /// State checksum computed at snapshot time.
-    pub checksum: u64,
-    /// Path to the created archive, or error if archiving failed.
-    pub archive: AccountsDbResult<PathBuf>,
 }
 
 pub mod error;

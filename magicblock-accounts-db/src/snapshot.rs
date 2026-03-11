@@ -8,7 +8,7 @@ use std::{
 };
 
 use flate2::{read::GzDecoder, write::GzEncoder, Compression};
-use parking_lot::{Mutex, RwLockWriteGuard};
+use parking_lot::Mutex;
 use tar::{Archive, Builder};
 use tracing::{error, info, warn};
 
@@ -48,12 +48,10 @@ impl SnapshotStrategy {
         src: &Path,
         dst: &Path,
         memory_state: Vec<u8>,
-        lock: RwLockWriteGuard<()>,
     ) -> io::Result<()> {
         match self {
             Self::Reflink => fs_backend::reflink_dir(src, dst),
             Self::LegacyCopy => {
-                drop(lock); // Release lock before slow I/O
                 fs_backend::deep_copy_dir(src, dst, &memory_state)
             }
         }
@@ -106,7 +104,6 @@ impl SnapshotManager {
         &self,
         slot: u64,
         active_mem: &[u8],
-        lock: RwLockWriteGuard<()>,
     ) -> AccountsDbResult<PathBuf> {
         self.prune_registry();
 
@@ -117,29 +114,42 @@ impl SnapshotManager {
                 .unwrap_or_default();
 
         self.strategy
-            .execute(&self.db_path, &snap_path, memory_capture, lock)
+            .execute(&self.db_path, &snap_path, memory_capture)
             .log_err(|| "Snapshot failed")?;
 
         Ok(snap_path)
     }
 
     /// Archives the snapshot directory to `.tar.gz` and removes the directory.
+    ///
+    /// Uses atomic write: writes to `.tmp` first, then renames to final path.
     pub fn archive_and_register(
         &self,
         snapshot_dir: &Path,
     ) -> AccountsDbResult<PathBuf> {
         let archive_path = snapshot_dir.with_extension(ARCHIVE_EXT);
+        let tmp_path = archive_path.with_extension("tmp");
 
         info!(archive_path = %archive_path.display(), "Archiving snapshot");
 
-        let file = File::create(&archive_path).log_err(|| {
-            format!("Failed to create archive at {}", archive_path.display())
+        // Write to temporary file first
+        let file = File::create(&tmp_path).log_err(|| {
+            format!("Failed to create temp archive at {}", tmp_path.display())
         })?;
         let enc = GzEncoder::new(file, Compression::fast());
         let mut tar = Builder::new(enc);
         tar.append_dir_all(".", snapshot_dir)
             .log_err(|| "Failed to append directory to tar")?;
         tar.finish().log_err(|| "Failed to finalize tar archive")?;
+
+        // Atomically rename to final path
+        fs::rename(&tmp_path, &archive_path).log_err(|| {
+            format!(
+                "Failed to rename {} to {}",
+                tmp_path.display(),
+                archive_path.display()
+            )
+        })?;
 
         fs::remove_dir_all(snapshot_dir).log_err(|| {
             format!(
@@ -175,14 +185,24 @@ impl SnapshotManager {
 
         info!(slot, "Inserting external snapshot");
 
-        // Write archive to disk
-        let mut file = File::create(&archive_path).log_err(|| {
-            format!("Failed to create archive at {}", archive_path.display())
+        // Write to temporary file first, then atomically rename
+        let tmp_path = archive_path.with_extension("tmp");
+        let mut file = File::create(&tmp_path).log_err(|| {
+            format!("Failed to create temp archive at {}", tmp_path.display())
         })?;
         file.write_all(archive_bytes)
             .log_err(|| "Failed to write archive bytes")?;
         file.sync_all()
             .log_err(|| "Failed to sync archive to disk")?;
+        drop(file);
+
+        fs::rename(&tmp_path, &archive_path).log_err(|| {
+            format!(
+                "Failed to rename {} to {}",
+                tmp_path.display(),
+                archive_path.display()
+            )
+        })?;
 
         // Fast-forward if snapshot is newer than current state
         if slot > current_slot {
