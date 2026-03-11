@@ -1,98 +1,94 @@
-//! Replication service for primary-standby state synchronization.
+//! Primary-standby state synchronization via NATS JetStream.
 //!
 //! # Architecture
 //!
 //! ```text
-//!                    ┌─────────────┐
-//!                    │   Service   │
-//!                    └──────┬──────┘
-//!              ┌────────────┴────────────┐
-//!              ▼                         ▼
-//!        ┌─────────┐               ┌─────────┐
-//!        │ Primary │               │ Standby │
-//!        └────┬────┘               └────┬────┘
-//!             │                         │
-//!   ┌─────────┴─────────┐     ┌─────────┴─────────┐
-//!   │ Publish events    │     │ Consume events    │
-//!   │ Upload snapshots  │     │ Apply to state    │
-//!   │ Refresh lock      │     │ Verify checksums  │
-//!   └───────────────────┘     └───────────────────┘
+//!         ┌─────────────┐
+//!         │   Service   │
+//!         └──────┬──────┘
+//!       ┌─────────┴─────────┐
+//!       ▼                   ▼
+//!  ┌─────────┐       ┌─────────┐
+//!  │ Primary │ ←────→│ Standby │
+//!  └────┬────┘       └────┬────┘
+//!       │                 │
+//!   ┌───┴───┐         ┌───┴───┐
+//!   │Publish│         │Consume│
+//!   │Upload │         │Apply  │
+//!   │Refresh│         │Verify │
+//!   └───────┘         └───────┘
 //! ```
-//!
-//! # Role Transitions
-//!
-//! - **Primary → Standby**: Lock lost (refresh failed)
-//! - **Standby → Primary**: Leader lock available (current primary crashed)
 
-use std::sync::Arc;
-use std::time::Duration;
+use std::{
+    sync::Arc,
+    thread::JoinHandle,
+    time::{Duration, Instant},
+};
 
+use async_nats::Message as NatsMessage;
+use futures::StreamExt;
 use magicblock_accounts_db::AccountsDb;
-use magicblock_core::link::transactions::{SchedulerMode, TransactionSchedulerHandle};
-use magicblock_core::Slot;
+use magicblock_core::{
+    link::transactions::{
+        ReplayPosition, SchedulerMode, TransactionSchedulerHandle, WithEncoded,
+    },
+    Slot,
+};
 use magicblock_ledger::Ledger;
-use tokio::sync::mpsc::Receiver;
-use tokio::time::interval;
-use tracing::{info, warn};
+use solana_transaction::versioned::VersionedTransaction;
+use tokio::{
+    fs::File,
+    runtime::Builder,
+    sync::mpsc::{Receiver, Sender},
+    time::interval,
+};
+use tracing::{error, info, warn};
 
-use crate::nats::{Broker, Consumer, Producer, Snapshot};
-use crate::proto::{Block, SuperBlock, TxIndex};
-use crate::{Message, Result};
-
-/// Re-export for crate users.
 pub use crate::nats::Snapshot as AccountsDbSnapshot;
+use crate::{
+    nats::{Broker, Consumer, Producer},
+    proto::{Block, SuperBlock, TxIndex},
+    watcher::SnapshotWatcher,
+    Message, Result,
+};
 
 // =============================================================================
-// Configuration
+// Constants
 // =============================================================================
 
-/// Interval between leader lock refreshes.
 const LOCK_REFRESH_INTERVAL: Duration = Duration::from_secs(1);
-
-/// Maximum time without seeing leader activity before attempting takeover.
 const LEADER_TIMEOUT: Duration = Duration::from_secs(10);
-
-/// Interval between snapshot uploads.
-const SNAPSHOT_INTERVAL: Duration = Duration::from_secs(60);
-
-/// Retry delay for consumer creation.
 const CONSUMER_RETRY_DELAY: Duration = Duration::from_secs(1);
 
 // =============================================================================
 // Context
 // =============================================================================
 
-/// Shared state accessible from both primary and standby roles.
-///
-/// Contains all references needed for replication operations:
-/// - State stores (accountsdb, ledger)
-/// - Communication (broker, scheduler)
-/// - Position tracking (slot, index)
+/// Shared state for both roles.
 pub struct Context {
-    /// Unique node identifier used for leader election.
+    /// Node identifier for leader election.
     pub id: String,
-    /// NATS broker for publishing/consuming events and snapshots.
+    /// NATS broker.
     pub broker: Broker,
-    /// Channel to switch scheduler between primary/replica mode.
-    pub mode_tx: tokio::sync::mpsc::Sender<SchedulerMode>,
-    /// Accounts database for snapshot creation and state application.
+    /// Scheduler mode channel.
+    pub mode_tx: Sender<SchedulerMode>,
+    /// Accounts database.
     pub accountsdb: Arc<AccountsDb>,
-    /// Ledger for transaction and block storage.
+    /// Transaction ledger.
     pub ledger: Arc<Ledger>,
-    /// Transaction scheduler for executing replayed transactions.
+    /// Transaction scheduler.
     pub scheduler: TransactionSchedulerHandle,
-    /// Current slot position in the replicated stream.
+    /// Current position.
     pub slot: Slot,
-    /// Current transaction index within the slot.
     pub index: TxIndex,
 }
 
 impl Context {
-    /// Creates context, initializing position from ledger.
+    /// Creates context from ledger state.
     pub async fn new(
         id: String,
         broker: Broker,
-        mode_tx: tokio::sync::mpsc::Sender<SchedulerMode>,
+        mode_tx: Sender<SchedulerMode>,
         accountsdb: Arc<AccountsDb>,
         ledger: Arc<Ledger>,
         scheduler: TransactionSchedulerHandle,
@@ -101,8 +97,7 @@ impl Context {
             .get_latest_transaction_position()?
             .unwrap_or_default();
 
-        info!(%id, slot, index, "created replication context");
-
+        info!(%id, slot, index, "context initialized");
         Ok(Self {
             id,
             broker,
@@ -115,61 +110,87 @@ impl Context {
         })
     }
 
-    /// Updates position after processing a message.
-    pub fn update_position(&mut self, slot: Slot, index: TxIndex) {
+    /// Updates position.
+    fn advance(&mut self, slot: Slot, index: TxIndex) {
         self.slot = slot;
         self.index = index;
     }
 
-    // =========================================================================
-    // Standby Operations
-    // =========================================================================
-
-    /// Writes a block to the ledger.
-    pub async fn write_block(&self, _block: &Block) -> Result<()> {
-        // TODO: Implement ledger block writing.
-        // self.ledger.write_block(block)?;
+    /// Writes block to ledger.
+    async fn write_block(&self, block: &Block) -> Result<()> {
+        self.ledger
+            .write_block(block.slot, block.timestamp, block.hash)?;
         Ok(())
     }
 
-    /// Verifies superblock checksum against local accountsdb.
-    ///
-    /// Returns `true` if state matches, `false` if divergence detected.
-    pub fn verify_checksum(&self, _superblock: &SuperBlock) -> Result<bool> {
-        // TODO: Implement checksum verification.
-        // let local_hash = self.accountsdb.compute_hash();
-        // Ok(local_hash == superblock.checksum)
-        Ok(true)
+    /// Verifies superblock checksum.
+    fn verify_checksum(&self, sb: &SuperBlock) -> Result<()> {
+        let _lock = self.accountsdb.lock_database();
+        // SAFETY: Lock acquired above ensures no concurrent modifications
+        // during checksum computation.
+        let checksum = unsafe { self.accountsdb.checksum() };
+        if checksum == sb.checksum {
+            Ok(())
+        } else {
+            Err(crate::Error::Internal("accountsdb state mismatch"))
+        }
     }
 
-    /// Applies a snapshot to restore accountsdb state.
-    pub async fn apply_snapshot(&self, _snapshot: &Snapshot) -> Result<()> {
-        // TODO: Implement snapshot application.
-        // self.accountsdb.restore(&snapshot.data)?;
-        // Update position to snapshot's seqno for correct replay start.
-        Ok(())
+    /// Creates a snapshot watcher for the database directory.
+    fn create_snapshot_watcher(&self) -> Result<SnapshotWatcher> {
+        SnapshotWatcher::new(self.accountsdb.database_directory())
     }
 
-    /// Switches scheduler to replica mode for transaction replay.
-    pub async fn enter_replica_mode(&self) {
+    /// Attempts to acquire producer lock for primary role.
+    async fn try_acquire_producer(&self) -> Option<Producer> {
+        let mut producer = self.broker.create_producer(&self.id).await.ok()?;
+        producer.acquire().await.ok()?.then_some(producer)
+    }
+
+    /// Switches to replica mode.
+    async fn enter_replica_mode(&self) {
         let _ = self.mode_tx.send(SchedulerMode::Replica).await;
     }
 
-    // =========================================================================
-    // Primary Operations
-    // =========================================================================
-
-    /// Uploads current accountsdb snapshot to the broker.
-    pub async fn upload_snapshot(&self) -> Result<()> {
-        // TODO: Get snapshot file from accountsdb and upload.
-        // let file = self.accountsdb.snapshot_file().await?;
-        // self.broker.put_snapshot(self.slot, file).await
-        Ok(())
+    /// Switches to primary mode.
+    async fn enter_primary_mode(&self) {
+        let _ = self.mode_tx.send(SchedulerMode::Primary).await;
     }
 
-    /// Switches scheduler to primary mode.
-    pub async fn enter_primary_mode(&self) {
-        let _ = self.mode_tx.send(SchedulerMode::Primary).await;
+    /// Uploads snapshot.
+    async fn upload_snapshot(&self, file: File, slot: Slot) -> Result<()> {
+        self.broker.put_snapshot(slot, file).await
+    }
+
+    /// Creates consumer with retry.
+    async fn create_consumer(
+        &self,
+        start_seq: Option<u64>,
+    ) -> Result<Consumer> {
+        loop {
+            match self.broker.create_consumer(&self.id, start_seq).await {
+                Ok(c) => return Ok(c),
+                Err(e) => {
+                    warn!(%e, "consumer creation failed, retrying");
+                    tokio::time::sleep(CONSUMER_RETRY_DELAY).await;
+                }
+            }
+        }
+    }
+
+    /// Transitions to standby.
+    async fn into_standby(
+        self,
+        messages: Receiver<Message>,
+    ) -> Result<Standby> {
+        let consumer = Box::new(self.create_consumer(None).await?);
+        self.enter_replica_mode().await;
+        Ok(Standby {
+            ctx: self,
+            consumer,
+            messages,
+            last_activity: Instant::now(),
+        })
     }
 }
 
@@ -177,51 +198,71 @@ impl Context {
 // Service
 // =============================================================================
 
-/// Replication service that runs as either primary or standby.
-///
-/// Automatically selects role based on leader lock availability.
-/// Transitions between roles as conditions change.
+/// Replication service with automatic role transitions.
 pub enum Service {
-    /// Primary role: publishes events, holds leader lock.
     Primary(Primary),
-    /// Standby role: consumes events from stream.
     Standby(Standby),
 }
 
 impl Service {
-    /// Creates a new replication service.
-    ///
-    /// Attempts to acquire the leader lock first. If successful, runs as
-    /// primary; otherwise, falls back to standby mode.
+    /// Creates service, attempting primary role first.
     pub async fn new(
         id: String,
         broker: Broker,
-        mode_tx: tokio::sync::mpsc::Sender<SchedulerMode>,
+        mode_tx: Sender<SchedulerMode>,
         accountsdb: Arc<AccountsDb>,
         ledger: Arc<Ledger>,
         scheduler: TransactionSchedulerHandle,
-        rx: Receiver<Message>,
+        messages: Receiver<Message>,
     ) -> Result<Self> {
-        let ctx = Context::new(id, broker, mode_tx, accountsdb, ledger, scheduler).await?;
+        let ctx =
+            Context::new(id, broker, mode_tx, accountsdb, ledger, scheduler)
+                .await?;
 
-        // Attempt to acquire leader lock.
-        let mut producer = ctx.broker.create_producer(&ctx.id).await?;
-        if producer.acquire().await? {
-            ctx.enter_primary_mode().await;
-            return Ok(Self::Primary(Primary { ctx, producer, rx }));
-        }
+        // Try to become primary.
+        let Some(producer) = ctx.try_acquire_producer().await else {
+            return Ok(Self::Standby(ctx.into_standby(messages).await?));
+        };
 
-        // Fall back to standby.
-        let standby = ctx.into_standby().await?;
-        Ok(Self::Standby(standby))
+        ctx.enter_primary_mode().await;
+        let snapshots = ctx.create_snapshot_watcher()?;
+        Ok(Self::Primary(Primary {
+            ctx,
+            producer,
+            messages,
+            snapshots,
+        }))
     }
 
-    /// Runs the service in its assigned role.
+    /// Runs service with automatic role transitions.
     pub async fn run(self) {
-        match self {
-            Service::Primary(p) => p.run().await,
-            Service::Standby(s) => s.run().await,
+        let mut state = self;
+        loop {
+            state = match state {
+                Service::Primary(p) => match p.run().await {
+                    Some(s) => Service::Standby(s),
+                    None => return,
+                },
+                Service::Standby(s) => match s.run().await {
+                    Some(p) => Service::Primary(p),
+                    None => return,
+                },
+            };
         }
+    }
+
+    /// Spawns the service in a dedicated OS thread with a single-threaded runtime.
+    ///
+    /// Returns a `JoinHandle` that can be used to wait for the service to complete.
+    pub fn spawn(self) -> JoinHandle<()> {
+        std::thread::spawn(move || {
+            let runtime = Builder::new_current_thread()
+                .thread_name("replication-service")
+                .build()
+                .expect("Failed to build replication service runtime");
+
+            runtime.block_on(tokio::task::unconstrained(self.run()));
+        })
     }
 }
 
@@ -229,73 +270,68 @@ impl Service {
 // Primary
 // =============================================================================
 
-/// Primary node: publishes events and holds the leader lock.
-///
-/// Responsibilities:
-/// - Forward incoming validator events to the stream
-/// - Periodically upload accountsdb snapshots
-/// - Maintain leadership via lock refresh
+/// Primary node: publishes events and holds leader lock.
 pub struct Primary {
     ctx: Context,
     producer: Producer,
-    rx: Receiver<Message>,
+    messages: Receiver<Message>,
+    snapshots: SnapshotWatcher,
 }
 
 impl Primary {
-    /// Main loop: publish events, upload snapshots, maintain lock.
-    async fn run(mut self) {
+    /// Runs until leadership lost, returns standby on demotion.
+    async fn run(mut self) -> Option<Standby> {
         let mut lock_tick = interval(LOCK_REFRESH_INTERVAL);
-        let mut snapshot_tick = interval(SNAPSHOT_INTERVAL);
 
         loop {
             tokio::select! {
-                // Forward incoming messages to the stream.
-                Some(msg) = self.rx.recv() => {
+                Some(msg) = self.messages.recv() => {
                     self.publish(msg).await;
                 }
 
-                // Periodically refresh the leader lock.
                 _ = lock_tick.tick() => {
-                    if !self.refresh_lock().await {
-                        info!("lost leadership, demoting to standby");
-                        return;
+                    let held = match self.producer.refresh().await {
+                        Ok(h) => h,
+                        Err(e) => {
+                            warn!(%e, "lock refresh failed");
+                            false
+                        }
+                    };
+                    if !held {
+                        info!("lost leadership, demoting");
+                        return self.ctx.into_standby(self.messages).await
+                            .inspect_err(|e| error!(%e, "demotion failed"))
+                            .ok();
                     }
                 }
 
-                // Periodically upload snapshots.
-                _ = snapshot_tick.tick() => {
-                    self.upload_snapshot().await;
+                Some((file, slot)) = self.snapshots.recv() => {
+                    if let Err(e) = self.ctx.upload_snapshot(file, slot).await {
+                        warn!(%e, "snapshot upload failed");
+                    }
                 }
             }
         }
     }
 
-    /// Publishes a message to the stream.
     async fn publish(&mut self, msg: Message) {
-        let Ok(payload) = bincode::serialize(&msg) else { return };
+        let payload = match bincode::serialize(&msg) {
+            Ok(p) => p,
+            Err(e) => {
+                warn!(%e, "serialization failed");
+                return;
+            }
+        };
         let subject = msg.subject();
         let (slot, index) = msg.slot_and_index();
+        let ack = matches!(msg, Message::SuperBlock(_));
 
-        if self.ctx.broker.publish(subject, payload.into()).await.is_ok() {
-            self.ctx.update_position(slot, index);
-        }
-    }
-
-    /// Refreshes the leader lock. Returns `false` if lost.
-    async fn refresh_lock(&mut self) -> bool {
-        match self.producer.refresh().await {
-            Ok(held) => held,
-            Err(e) => {
-                warn!(%e, "failed to refresh leader lock");
-                false
-            }
-        }
-    }
-
-    /// Uploads a snapshot of current state.
-    async fn upload_snapshot(&self) {
-        if let Err(e) = self.ctx.upload_snapshot().await {
-            warn!(%e, "failed to upload snapshot");
+        if let Err(e) =
+            self.ctx.broker.publish(subject, payload.into(), ack).await
+        {
+            warn!(%e, slot, index, "publish failed");
+        } else {
+            self.ctx.advance(slot, index);
         }
     }
 }
@@ -304,167 +340,118 @@ impl Primary {
 // Standby
 // =============================================================================
 
-/// Standby node: consumes events and applies them to local state.
-///
-/// Responsibilities:
-/// - Consume events from the stream
-/// - Apply transactions via scheduler
-/// - Write blocks to ledger
-/// - Verify superblock checksums
-/// - Watch for leader failure (heartbeat timeout)
-/// - Attempt takeover when leader fails
+/// Standby node: consumes events and watches for leader failure.
 pub struct Standby {
     ctx: Context,
-    #[allow(dead_code)]
-    consumer: Consumer,
-    /// Tracks last time we saw activity from the leader.
-    last_leader_activity: tokio::time::Instant,
+    consumer: Box<Consumer>,
+    messages: Receiver<Message>,
+    last_activity: Instant,
 }
 
 impl Standby {
-    /// Main loop: consume events, apply state, watch for leader failure.
-    async fn run(mut self) {
-        let mut leader_timeout_check = interval(Duration::from_secs(1));
+    /// Runs until leadership acquired, returns primary on promotion.
+    async fn run(mut self) -> Option<Primary> {
+        let mut timeout_check = interval(Duration::from_secs(1));
+        let Ok(mut stream) = self.consumer.messages().await else {
+            error!("failed to get message stream");
+            return None;
+        };
 
         loop {
             tokio::select! {
-                // TODO: Consume messages from the stream.
-                // This will be implemented when Consumer has a receive method.
-                // For now, we just watch for leader timeout.
+                Some(result) = stream.next() => {
+                    match result {
+                        Ok(msg) => {
+                            self.process(&msg).await;
+                            self.last_activity = Instant::now();
+                        }
+                        Err(e) => warn!(%e, "stream error"),
+                    }
+                }
 
-                _ = leader_timeout_check.tick() => {
-                    if self.last_leader_activity.elapsed() > LEADER_TIMEOUT
-                        && self.attempt_takeover().await
-                    {
-                        return;
+                _ = timeout_check.tick(), if self.last_activity.elapsed() > LEADER_TIMEOUT => {
+                    if let Some(producer) = self.try_acquire_lock().await {
+                        info!("acquired leadership, promoting");
+                        self.ctx.enter_primary_mode().await;
+                        let snapshots = match self.ctx.create_snapshot_watcher() {
+                            Ok(s) => s,
+                            Err(e) => { error!(%e, "FATAL: snapshot watcher failed"); return None }
+                        };
+                        return Some(Primary { ctx: self.ctx, producer, messages: self.messages, snapshots });
                     }
                 }
             }
         }
     }
 
-    /// Updates leader activity timestamp (called when receiving events).
-    fn record_leader_activity(&mut self) {
-        self.last_leader_activity = tokio::time::Instant::now();
-    }
-
-    /// Attempts to acquire leadership.
-    ///
-    /// Returns `true` if successful and we should exit (caller should restart).
-    async fn attempt_takeover(&mut self) -> bool {
-        info!("leader timeout, attempting takeover");
-
-        let mut producer = match self.ctx.broker.create_producer(&self.ctx.id).await {
-            Ok(p) => p,
+    async fn process(&mut self, msg: &NatsMessage) {
+        let message = match bincode::deserialize::<Message>(&msg.payload) {
+            Ok(m) => m,
             Err(e) => {
-                warn!(%e, "failed to create producer for takeover");
-                return false;
+                warn!(%e, "deserialization failed");
+                return;
+            }
+        };
+        let (slot, index) = message.slot_and_index();
+
+        // Skip duplicates.
+        let obsolete = self.ctx.slot == slot && self.ctx.index >= index;
+        if self.ctx.slot > slot || obsolete {
+            return;
+        }
+
+        let result = match message {
+            Message::Transaction(tx) => {
+                self.replay_tx(tx.slot, tx.index, tx.payload).await
+            }
+            Message::Block(block) => self.ctx.write_block(&block).await,
+            Message::SuperBlock(sb) => {
+                self.ctx.verify_checksum(&sb).inspect_err(|error|
+                    error!(slot, %error, "accountsdb state has diverged")
+                )
             }
         };
 
+        if let Err(error) = result {
+            warn!(slot, index, %error, "message precessing error");
+            return;
+        }
+        self.ctx.advance(slot, index);
+    }
+
+    async fn replay_tx(
+        &self,
+        slot: Slot,
+        index: TxIndex,
+        encoded: Vec<u8>,
+    ) -> Result<()> {
+        let pos = ReplayPosition {
+            slot,
+            index,
+            persist: true,
+        };
+        let txn: VersionedTransaction = bincode::deserialize(&encoded)?;
+        let txn = WithEncoded { txn, encoded };
+        self.ctx.scheduler.replay(pos, txn).await?;
+        Ok(())
+    }
+
+    async fn try_acquire_lock(&mut self) -> Option<Producer> {
+        let Ok(mut producer) =
+            self.ctx.broker.create_producer(&self.ctx.id).await
+        else {
+            return None;
+        };
         match producer.acquire().await {
-            Ok(true) => {
-                info!("successfully acquired leadership");
-                self.ctx.enter_primary_mode().await;
-                // Exit this run loop; caller should restart as Primary.
-                true
-            }
+            Ok(true) => Some(producer),
             Ok(false) => {
-                info!("another node acquired leadership first");
-                self.record_leader_activity();
-                false
+                self.last_activity = Instant::now();
+                None
             }
             Err(e) => {
-                warn!(%e, "failed to acquire leadership");
-                false
+                warn!(%e, "lock acquisition failed");
+                None
             }
         }
-    }
-
-    // =========================================================================
-    // Event Processing (scaffolding for future implementation)
-    // =========================================================================
-
-    /// Processes an incoming transaction message.
-    #[allow(dead_code)]
-    async fn process_transaction(&mut self, _slot: Slot, _index: TxIndex, _payload: &[u8]) -> Result<()> {
-        // TODO:
-        // 1. Deserialize transaction
-        // 2. Submit to scheduler for execution
-        // 3. Update position
-        self.record_leader_activity();
-        Ok(())
-    }
-
-    /// Processes an incoming block message.
-    #[allow(dead_code)]
-    async fn process_block(&mut self, block: &Block) -> Result<()> {
-        // TODO:
-        // 1. Write block to ledger
-        // 2. Update slot position
-        self.ctx.write_block(block).await?;
-        self.record_leader_activity();
-        Ok(())
-    }
-
-    /// Processes an incoming superblock message.
-    #[allow(dead_code)]
-    async fn process_superblock(&mut self, superblock: &SuperBlock) -> Result<()> {
-        // TODO:
-        // 1. Verify checksum against local state
-        // 2. If mismatch, may need to request snapshot
-        if !self.ctx.verify_checksum(superblock)? {
-            warn!(
-                slot = superblock.slot,
-                "superblock checksum mismatch - state divergence detected"
-            );
-            // TODO: Request snapshot or enter recovery mode
-        }
-        self.record_leader_activity();
-        Ok(())
-    }
-}
-
-// =============================================================================
-// Context -> Role Transitions
-// =============================================================================
-
-impl Context {
-    /// Transitions to standby role by creating a consumer.
-    pub async fn into_standby(self) -> Result<Standby> {
-        let consumer = self.create_consumer_with_retry(None).await?;
-        self.enter_replica_mode().await;
-
-        Ok(Standby {
-            consumer,
-            last_leader_activity: tokio::time::Instant::now(),
-            ctx: self,
-        })
-    }
-
-    /// Creates a consumer with retry on failure.
-    async fn create_consumer_with_retry(&self, start_seq: Option<u64>) -> Result<Consumer> {
-        loop {
-            match self.broker.create_consumer(&self.id, start_seq).await {
-                Ok(c) => return Ok(c),
-                Err(e) => {
-                    warn!(%e, "failed to create consumer; retrying");
-                    tokio::time::sleep(CONSUMER_RETRY_DELAY).await;
-                }
-            }
-        }
-    }
-
-    /// Attempts to recover from a snapshot before starting consumer.
-    #[allow(dead_code)]
-    pub async fn recover_from_snapshot(&self) -> Result<Option<Snapshot>> {
-        let Some(snapshot) = self.broker.get_snapshot().await? else {
-            info!("no snapshot available for recovery");
-            return Ok(None);
-        };
-
-        info!(slot = snapshot.slot, seqno = snapshot.seqno, "retrieved snapshot");
-        self.apply_snapshot(&snapshot).await?;
-        Ok(Some(snapshot))
     }
 }

@@ -32,7 +32,6 @@ fn variant_order_stability() {
         (
             Message::SuperBlock(SuperBlock {
                 slot: 0,
-                blocks: 0,
                 transactions: 0,
                 checksum: 0,
             }),
@@ -42,7 +41,9 @@ fn variant_order_stability() {
 
     for (msg, expected_idx) in cases {
         let encoded = bincode::serialize(&msg).unwrap();
-        let actual_idx = u32::from_le_bytes([encoded[0], encoded[1], encoded[2], encoded[3]]);
+        let actual_idx = u32::from_le_bytes([
+            encoded[0], encoded[1], encoded[2], encoded[3],
+        ]);
         assert_eq!(
             actual_idx, expected_idx,
             "variant index changed - this breaks wire compatibility!"
@@ -65,7 +66,6 @@ fn message_roundtrip() {
         }),
         Message::SuperBlock(SuperBlock {
             slot: 99999,
-            blocks: 1000,
             transactions: 50000,
             checksum: 0xDEADBEEF,
         }),

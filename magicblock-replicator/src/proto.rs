@@ -15,6 +15,11 @@ use crate::nats::Subjects;
 /// Ordinal position of a transaction within a slot.
 pub type TxIndex = u32;
 
+/// Sentinel index for block boundary markers.
+pub const BLOCK_INDEX: TxIndex = TxIndex::MAX - 1;
+/// Sentinel index for superblock checkpoint markers.
+pub const SUPERBLOCK_INDEX: TxIndex = TxIndex::MAX;
+
 /// Top-level replication message envelope.
 ///
 /// Variant order is part of the wire format - reordering breaks compatibility.
@@ -40,8 +45,8 @@ impl Message {
     pub(crate) fn slot_and_index(&self) -> (Slot, TxIndex) {
         match self {
             Self::Transaction(txn) => (txn.slot, txn.index),
-            Self::Block(block) => (block.slot, 0),
-            Self::SuperBlock(superblock) => (superblock.slot, 0),
+            Self::Block(block) => (block.slot, BLOCK_INDEX),
+            Self::SuperBlock(superblock) => (superblock.slot, SUPERBLOCK_INDEX),
         }
     }
 }
@@ -72,8 +77,6 @@ pub struct Block {
 #[derive(Deserialize, Serialize, Clone, Debug)]
 pub struct SuperBlock {
     pub slot: Slot,
-    /// Total blocks processed.
-    pub blocks: u64,
     /// Total transactions processed.
     pub transactions: u64,
     /// Rolling checksum for verification.
