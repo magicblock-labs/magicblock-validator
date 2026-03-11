@@ -84,6 +84,7 @@ pub fn process_instruction<'a>(
                 modify_accounts: false,
                 undelegate: false,
                 commit_payer: false,
+                has_magic_vault: false,
             },
         ),
     }
@@ -122,6 +123,7 @@ fn process_sibling_schedule_cpis(
             *payer.key,
             *magic_program.key,
             *magic_context.key,
+            None,
             players,
             &pdas,
         );
@@ -136,18 +138,19 @@ fn process_sibling_schedule_cpis(
 
     {
         // 2. CPI into the schedule commit directly
-        let mut account_infos =
-            account_infos.clone().into_iter().collect::<Vec<_>>();
-        account_infos.extend(pda_infos.iter());
-
+        let committees = pda_infos.iter().collect::<Vec<_>>();
         let direct_ix = create_schedule_commit_ix(
             payer,
-            &account_infos,
+            &committees,
             magic_context,
             magic_program,
             None,
             false,
         );
+
+        let mut account_infos =
+            account_infos.clone().into_iter().collect::<Vec<_>>();
+        account_infos.extend(pda_infos.iter());
         invoke(
             &direct_ix,
             &account_infos.into_iter().cloned().collect::<Vec<_>>(),

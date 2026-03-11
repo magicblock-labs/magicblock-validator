@@ -45,7 +45,6 @@ use magicblock_core::{
     },
     Slot,
 };
-use magicblock_delegation_program as dlp;
 use magicblock_ledger::{
     blockstore_processor::process_ledger,
     ledger_truncator::{LedgerTruncator, DEFAULT_TRUNCATION_TIME_INTERVAL},
@@ -772,6 +771,9 @@ impl MagicValidator {
                     "ensure_magic_fee_vault_on_chain",
                     step_start,
                 );
+
+                // Without magic fee vault being properly set up
+                // transactions scheduling commits will fail
                 if let Err(err) = result {
                     error!(error = ?err, "Magic fee vault setup failed");
                     error!("Exiting process");

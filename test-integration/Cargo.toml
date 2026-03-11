@@ -60,7 +60,7 @@ magic-domain-program = { git = "https://github.com/magicblock-labs/magic-domain-
   "modular-sdk",
 ] }
 magicblock_magic_program_api = { package = "magicblock-magic-program-api", path = "../magicblock-magic-program-api" }
-magicblock-delegation-program = { git = "https://github.com/magicblock-labs/delegation-program.git", rev = "979ebd693", features = [
+magicblock-delegation-program = { git = "https://github.com/magicblock-labs/delegation-program.git", rev = "cd494df91", features = [
   "no-entrypoint",
 ] }
 magicblock-program = { path = "../programs/magicblock" }
