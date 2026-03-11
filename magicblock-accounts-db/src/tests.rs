@@ -763,11 +763,17 @@ impl TestEnv {
         self.adb.set_slot(target_slot);
     }
 
-    /// Takes a snapshot and waits for it to complete.
-    fn take_snapshot_and_wait(&self, slot: u64) {
-        let handle = self.adb.take_snapshot(slot);
-        handle.join().expect("Snapshot thread panicked");
+    /// Takes a snapshot and waits for archiving to complete.
+    fn take_snapshot_and_wait(&self, slot: u64) -> u64 {
+        let checksum = self.adb.take_snapshot(slot);
+        // Wait for background archiving to complete
+        let mut retries = 0;
+        while !self.adb.snapshot_exists(slot) && retries < 200 {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            retries += 1;
+        }
         assert!(self.adb.snapshot_exists(slot), "Snapshot should exist");
+        checksum
     }
 
     fn restore_to_slot(mut self, slot: u64) -> Self {
