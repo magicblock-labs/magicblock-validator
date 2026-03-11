@@ -1,4 +1,10 @@
-use std::{fs, hash::Hasher, path::Path, sync::Arc, thread};
+use std::{
+    fs,
+    hash::Hasher,
+    path::{Path, PathBuf},
+    sync::Arc,
+    thread::{self, JoinHandle},
+};
 
 use error::{AccountsDbError, LogErr};
 use index::{
@@ -43,8 +49,6 @@ pub struct AccountsDb {
     /// Note: Reads are generally wait-free/lock-free via mmap,
     /// unless they require index cursor stability.
     write_lock: GlobalSyncLock,
-    /// Configured interval (in slots) for creating snapshots.
-    snapshot_frequency: u64,
 }
 
 impl AccountsDb {
@@ -77,18 +81,11 @@ impl AccountsDb {
             SnapshotManager::new(db_dir.clone(), config.max_snapshots as usize)
                 .log_err(|| "Failed to initialize snapshot manager")?;
 
-        if config.snapshot_frequency == 0 {
-            return Err(AccountsDbError::Internal(
-                "Snapshot frequency cannot be zero".to_string(),
-            ));
-        }
-
         let mut this = Self {
             storage,
             index,
             snapshot_manager,
             write_lock: GlobalSyncLock::default(),
-            snapshot_frequency: config.snapshot_frequency,
         };
 
         // Recover state if the requested slot is older than our current state
@@ -99,10 +96,7 @@ impl AccountsDb {
 
     /// Opens an existing database (helper for tooling/tests).
     pub fn open(directory: &Path) -> AccountsDbResult<Self> {
-        let config = AccountsDbConfig {
-            snapshot_frequency: u64::MAX,
-            ..Default::default()
-        };
+        let config = AccountsDbConfig::default();
         Self::new(&config, directory, 0)
     }
 
@@ -151,6 +145,8 @@ impl AccountsDb {
         count: usize,
     ) {
         for acc in accounts.take(count) {
+            // SAFETY:
+            // we are rolling back committed accounts
             unsafe { acc.1.rollback() };
         }
     }
@@ -287,48 +283,45 @@ impl AccountsDb {
         self.storage.slot()
     }
 
-    /// Updates the current slot. Triggers a background snapshot if the schedule matches.
+    /// Updates the current slot
     #[inline(always)]
     pub fn set_slot(self: &Arc<Self>, slot: u64) {
         self.storage.update_slot(slot);
-
-        if slot > 0 && slot.is_multiple_of(self.snapshot_frequency) {
-            self.trigger_background_snapshot(slot);
-        }
     }
 
     /// Spawns a background thread to take a snapshot.
     /// The snapshot is created in two phases:
     /// 1. Create snapshot directory (with write lock held)
     /// 2. Archive directory to tar.gz and register (lock released)
-    fn trigger_background_snapshot(self: &Arc<Self>, slot: u64) {
+    pub fn take_snapshot(
+        self: &Arc<Self>,
+        slot: u64,
+    ) -> JoinHandle<AccountsDbSnapshotResult> {
         let this = self.clone();
 
         thread::spawn(move || {
             // Phase 1: Create snapshot directory (with write lock)
-            let write_guard = this.write_lock.write();
+            let locked = this.write_lock.write();
             this.flush();
+            // SAFETY:
+            // we have acquired the write lock above
+            let checksum = unsafe { this.checksum() };
             let used_storage = this.storage.active_segment();
 
             let snapshot_dir = this.snapshot_manager.create_snapshot_dir(
                 slot,
                 used_storage,
-                write_guard, // Lock released when this returns
+                locked, // Lock released when this returns
             );
 
             // Phase 2: Archive directory (no lock needed)
-            match snapshot_dir {
-                Ok(dir) => {
-                    // Take our time to archive - lock is released
-                    if let Err(e) =
-                        this.snapshot_manager.archive_and_register(&dir)
-                    {
-                        error!(error = ?e, "Failed to archive snapshot");
-                    }
-                }
-                Err(e) => error!(error = ?e, "Snapshot creation failed"),
-            }
-        });
+            let archive = snapshot_dir
+                .and_then(|dir| {
+                    this.snapshot_manager.archive_and_register(&dir)
+                })
+                .log_err(|| "failed to create accountsdb snapshot");
+            AccountsDbSnapshotResult { checksum, archive }
+        })
     }
 
     /// Ensures the database state is at most `slot`.
@@ -424,9 +417,10 @@ impl AccountsDb {
     /// pubkey and serialized account data using xxHash3. Returns a 64-bit hash
     /// suitable for verifying state consistency across nodes.
     ///
-    /// Acquires the write lock to ensure a consistent snapshot of the state.
-    pub fn checksum(&self) -> u64 {
-        let _locked = self.write_lock.write();
+    /// # Safety
+    /// the caller must acquire the write lock on accountsdb, so that
+    /// the state doesn't change during checksum computation
+    pub unsafe fn checksum(&self) -> u64 {
         let mut hasher = xxhash3_64::Hasher::new();
         for (pubkey, acc) in self.iter_all() {
             let Some(borrowed) = acc.as_borrowed() else {
@@ -533,6 +527,14 @@ impl AccountsDb {
     pub fn snapshot_exists(&self, slot: u64) -> bool {
         self.snapshot_manager.snapshot_exists(slot)
     }
+}
+
+/// Result of a snapshot operation spawned via [`AccountsDb::take_snapshot`].
+pub struct AccountsDbSnapshotResult {
+    /// State checksum computed at snapshot time.
+    pub checksum: u64,
+    /// Path to the created archive, or error if archiving failed.
+    pub archive: AccountsDbResult<PathBuf>,
 }
 
 pub mod error;
