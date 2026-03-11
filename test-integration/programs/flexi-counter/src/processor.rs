@@ -349,6 +349,7 @@ fn process_add_and_schedule_commit(
             vec![counter_pda_info],
             magic_context_info,
             magic_program_info,
+            None,
         )?;
     } else {
         commit_accounts(
@@ -356,6 +357,7 @@ fn process_add_and_schedule_commit(
             vec![counter_pda_info],
             magic_context_info,
             magic_program_info,
+            None,
         )?;
     }
     Ok(())

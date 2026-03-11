@@ -463,6 +463,7 @@ pub fn process_schedulecommit_for_orderbook(
         vec![order_book_account],
         magic_context,
         magic_program,
+        None,
     )?;
 
     Ok(())
@@ -579,9 +580,10 @@ pub fn process_schedulecommit_cpi(
             committees,
             magic_context,
             magic_program,
+            None,
         )?;
     } else {
-        commit_accounts(payer, committees, magic_context, magic_program)?;
+        commit_accounts(payer, committees, magic_context, magic_program, None)?;
     }
 
     Ok(())
@@ -666,6 +668,7 @@ fn process_schedulecommit_and_undelegation_cpi_with_mod_after(
         remaining.iter().collect::<Vec<_>>(),
         magic_context,
         magic_program,
+        None,
     )?;
 
     // Then try to modify them
@@ -751,6 +754,7 @@ fn process_schedulecommit_and_undelegation_cpi_twice(
         remaining.iter().collect::<Vec<_>>(),
         magic_context,
         magic_program,
+        None,
     )?;
 
     // All accounts that will be passed to the CPI
