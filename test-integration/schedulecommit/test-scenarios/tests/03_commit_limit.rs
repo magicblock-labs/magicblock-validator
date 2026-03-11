@@ -2,9 +2,12 @@ use std::sync::OnceLock;
 
 use integration_test_tools::run_test;
 use magicblock_program::magic_sys::{COMMIT_LIMIT, COMMIT_LIMIT_ERR};
-use program_schedulecommit::api::{
-    schedule_commit_and_undelegate_cpi_instruction,
-    schedule_commit_cpi_instruction, UserSeeds,
+use program_schedulecommit::{
+    api::{
+        schedule_commit_and_undelegate_cpi_instruction,
+        schedule_commit_cpi_instruction, UserSeeds,
+    },
+    ScheduleCommitType,
 };
 use schedulecommit_client::{
     verify, ScheduleCommitTestContext, ScheduleCommitTestContextFields,
@@ -68,6 +71,7 @@ fn get_prepared() -> &'static ScheduleCommitTestContext {
                 magicblock_magic_program_api::MAGIC_CONTEXT_PUBKEY,
                 &players,
                 &pdas,
+                ScheduleCommitType::Commit,
             );
             let blockhash = ephem_client.get_latest_blockhash().unwrap();
             let tx = Transaction::new_signed_with_payer(
@@ -125,6 +129,7 @@ fn test_schedule_commit_fails_at_commit_limit() {
             magicblock_magic_program_api::MAGIC_CONTEXT_PUBKEY,
             &[committee.0.pubkey()],
             &[committee.1],
+            ScheduleCommitType::Commit,
         );
         let blockhash = ephem_client.get_latest_blockhash().unwrap();
         let tx = Transaction::new_signed_with_payer(
