@@ -16,6 +16,7 @@ pub mod error;
 pub mod nats;
 pub mod proto;
 pub mod service;
+pub mod watcher;
 
 #[cfg(test)]
 mod tests;

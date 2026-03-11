@@ -7,21 +7,24 @@
 //! - [`Consumer`]: Event subscriber for standby replay
 //! - [`Snapshot`]: AccountsDb snapshot with positioning metadata
 
-use std::collections::HashMap;
-use std::time::Duration;
+use std::{collections::HashMap, time::Duration};
 
-use async_nats::jetstream::{
-    consumer::{pull, AckPolicy, DeliverPolicy, PullConsumer},
-    kv::{self, CreateErrorKind, Store, UpdateErrorKind},
-    object_store::{self, GetErrorKind, ObjectMetadata},
-    stream::{self, Compression},
-    Context, ContextBuilder,
+use async_nats::{
+    jetstream::{
+        consumer::{
+            pull::{Config as PullConfig, Stream as MessageStream},
+            AckPolicy, DeliverPolicy, PullConsumer,
+        },
+        kv::{self, CreateErrorKind, Store, UpdateErrorKind},
+        object_store::{self, GetErrorKind, ObjectMetadata},
+        stream::{self, Compression},
+        Context, ContextBuilder,
+    },
+    ConnectOptions, Event, ServerAddr, Subject,
 };
-use async_nats::{ConnectOptions, Event, ServerAddr, Subject};
 use bytes::Bytes;
 use magicblock_core::Slot;
-use tokio::fs::File;
-use tokio::io::AsyncReadExt;
+use tokio::{fs::File, io::AsyncReadExt};
 use tracing::{debug, error, info, instrument, warn};
 use url::Url;
 
@@ -31,23 +34,22 @@ use crate::{Error, Result};
 // Configuration
 // =============================================================================
 
+/// Resource names and configuration constants.
 mod cfg {
     use std::time::Duration;
 
-    // Resource names
     pub const STREAM: &str = "EVENTS";
     pub const SNAPSHOTS: &str = "SNAPSHOTS";
     pub const PRODUCER_LOCK: &str = "PRODUCER";
     pub const LOCK_KEY: &str = "lock";
     pub const SNAPSHOT_NAME: &str = "accountsdb";
 
-    // Metadata keys
     pub const META_SLOT: &str = "slot";
     pub const META_SEQNO: &str = "seqno";
 
-    // Size limits
-    pub const STREAM_BYTES: i64 = 256 * 1024 * 1024 * 1024; // 256 GB
-    pub const SNAPSHOT_BYTES: i64 = 512 * 1024 * 1024 * 1024; // 512 GB
+    // Size limits (256 GB stream, 512 GB snapshots)
+    pub const STREAM_BYTES: i64 = 256 * 1024 * 1024 * 1024;
+    pub const SNAPSHOT_BYTES: i64 = 512 * 1024 * 1024 * 1024;
 
     // Timeouts
     pub const TTL_STREAM: Duration = Duration::from_secs(24 * 60 * 60);
@@ -56,13 +58,14 @@ mod cfg {
     pub const API_TIMEOUT: Duration = Duration::from_secs(2);
     pub const DUP_WINDOW: Duration = Duration::from_secs(30);
 
-    // Reconnect backoff
+    // Reconnect backoff (exponential: 100ms base, 5s max)
     pub const RECONNECT_BASE_MS: u64 = 100;
     pub const RECONNECT_MAX_MS: u64 = 5000;
 
     // Backpressure
     pub const MAX_ACK_PENDING: i64 = 512;
     pub const MAX_ACK_INFLIGHT: usize = 2048;
+    pub const BATCH_SIZE: usize = 512;
 }
 
 // =============================================================================
@@ -70,22 +73,38 @@ mod cfg {
 // =============================================================================
 
 /// NATS subjects for event types.
+///
+/// Provides both string constants for stream configuration and typed subjects
+/// for publishing.
 pub struct Subjects;
 
 impl Subjects {
-    /// Subject for transaction events.
+    pub const TRANSACTION: &'static str = "event.transaction";
+    pub const BLOCK: &'static str = "event.block";
+    pub const SUPERBLOCK: &'static str = "event.superblock";
+
+    /// All subjects for stream configuration.
+    pub const fn all() -> [&'static str; 3] {
+        [Self::TRANSACTION, Self::BLOCK, Self::SUPERBLOCK]
+    }
+
+    const fn from(s: &'static str) -> Subject {
+        Subject::from_static(s)
+    }
+
+    /// Typed subject for transaction events.
     pub fn transaction() -> Subject {
-        Subject::from_static("event.transaction")
+        Self::from(Self::TRANSACTION)
     }
 
-    /// Subject for block boundary events.
+    /// Typed subject for block events.
     pub fn block() -> Subject {
-        Subject::from_static("event.block")
+        Self::from(Self::BLOCK)
     }
 
-    /// Subject for superblock checkpoint events.
+    /// Typed subject for superblock events.
     pub fn superblock() -> Subject {
-        Subject::from_static("event.superblock")
+        Self::from(Self::SUPERBLOCK)
     }
 }
 
@@ -94,12 +113,10 @@ impl Subjects {
 // =============================================================================
 
 /// NATS JetStream connection with initialized streams and buckets.
-///
-/// The broker handles:
-/// - Event stream (`EVENTS`) for transaction/block/superblock messages
-/// - Object store (`SNAPSHOTS`) for AccountsDb snapshots
-/// - KV bucket (`PRODUCER`) for leader election
-pub struct Broker(Context);
+pub struct Broker {
+    ctx: Context,
+    seqno: u64,
+}
 
 impl Broker {
     /// Connects to NATS and initializes all JetStream resources.
@@ -126,13 +143,13 @@ impl Broker {
             .connect(addr)
             .await?;
 
-        let js = ContextBuilder::new()
+        let ctx = ContextBuilder::new()
             .timeout(cfg::API_TIMEOUT)
             .max_ack_inflight(cfg::MAX_ACK_INFLIGHT)
             .backpressure_on_inflight(true)
             .build(client);
 
-        let broker = Self(js);
+        let broker = Self { ctx, seqno: 0 };
         broker.init_resources().await?;
         Ok(broker)
     }
@@ -140,15 +157,11 @@ impl Broker {
     /// Initializes streams, object stores, and KV buckets.
     async fn init_resources(&self) -> Result<()> {
         let info = self
-            .0
+            .ctx
             .create_or_update_stream(stream::Config {
                 name: cfg::STREAM.into(),
                 max_bytes: cfg::STREAM_BYTES,
-                subjects: vec![
-                    "event.transaction".into(),
-                    "event.block".into(),
-                    "event.superblock".into(),
-                ],
+                subjects: Subjects::all().into_iter().map(Into::into).collect(),
                 max_age: cfg::TTL_STREAM,
                 duplicate_window: cfg::DUP_WINDOW,
                 description: Some("Magicblock validator events".into()),
@@ -159,7 +172,7 @@ impl Broker {
 
         info!(stream = %info.config.name, messages = info.state.messages, "JetStream initialized");
 
-        self.0
+        self.ctx
             .create_object_store(object_store::Config {
                 bucket: cfg::SNAPSHOTS.into(),
                 description: Some("AccountsDb snapshots".into()),
@@ -168,7 +181,7 @@ impl Broker {
             })
             .await?;
 
-        self.0
+        self.ctx
             .create_key_value(kv::Config {
                 bucket: cfg::PRODUCER_LOCK.into(),
                 description: "Producer leader election".into(),
@@ -181,20 +194,24 @@ impl Broker {
     }
 
     /// Publishes a serialized message to the stream.
+    ///
+    /// If `ack` is true, waits for server acknowledgment and updates internal seqno.
     pub async fn publish(
-        &self,
+        &mut self,
         subject: Subject,
         payload: Bytes,
+        ack: bool,
     ) -> Result<()> {
-        self.0.publish(subject, payload).await?;
+        let f = self.ctx.publish(subject, payload).await?;
+        if ack {
+            self.seqno = f.await?.sequence;
+        }
         Ok(())
     }
 
     /// Retrieves the latest snapshot, if one exists.
-    ///
-    /// Returns `None` if no snapshot has been uploaded yet.
     pub async fn get_snapshot(&self) -> Result<Option<Snapshot>> {
-        let store = self.0.get_object_store(cfg::SNAPSHOTS).await?;
+        let store = self.ctx.get_object_store(cfg::SNAPSHOTS).await?;
 
         let mut object = match store.get(cfg::SNAPSHOT_NAME).await {
             Ok(obj) => obj,
@@ -221,9 +238,9 @@ impl Broker {
     /// allowing standbys to resume replay from the correct position.
     #[instrument(skip(self, file))]
     pub async fn put_snapshot(&self, slot: Slot, mut file: File) -> Result<()> {
-        let store = self.0.get_object_store(cfg::SNAPSHOTS).await?;
-        let mut stream = self.0.get_stream(cfg::STREAM).await?;
-        let seqno = stream.info().await?.state.last_sequence;
+        let store = self.ctx.get_object_store(cfg::SNAPSHOTS).await?;
+        // Next seqno (snapshot captures state after last published message)
+        let seqno = self.seqno + 1;
 
         let meta = ObjectMetadata {
             name: cfg::SNAPSHOT_NAME.into(),
@@ -231,7 +248,7 @@ impl Broker {
             ..Default::default()
         };
 
-        // Background upload to avoid blocking.
+        // Background upload to avoid blocking
         tokio::spawn(async move {
             if let Err(e) = store.put(meta, &mut file).await {
                 error!(%e, "snapshot upload failed");
@@ -247,12 +264,12 @@ impl Broker {
         id: &str,
         start_seq: Option<u64>,
     ) -> Result<Consumer> {
-        Consumer::new(id, &self.0, start_seq).await
+        Consumer::new(id, &self.ctx, start_seq).await
     }
 
     /// Creates a producer for publishing events.
     pub async fn create_producer(&self, id: &str) -> Result<Producer> {
-        Producer::new(id, &self.0).await
+        Producer::new(id, &self.ctx).await
     }
 }
 
@@ -278,28 +295,21 @@ struct SnapshotMeta {
 }
 
 impl SnapshotMeta {
-    /// Parses metadata from object info headers.
+    /// Parses required metadata fields from object info.
     fn parse(info: &object_store::ObjectInfo) -> Result<Self> {
-        let slot = info
-            .metadata
-            .get(cfg::META_SLOT)
-            .and_then(|v| v.parse().ok())
-            .ok_or_else(|| {
-                Error::Internal("missing 'slot' in snapshot metadata")
-            })?;
+        let get_parsed =
+            |key: &str| info.metadata.get(key).and_then(|v| v.parse().ok());
 
-        let seqno = info
-            .metadata
-            .get(cfg::META_SEQNO)
-            .and_then(|v| v.parse().ok())
-            .ok_or_else(|| {
-                Error::Internal("missing 'seqno' in snapshot metadata")
-            })?;
+        let slot = get_parsed(cfg::META_SLOT).ok_or_else(|| {
+            Error::Internal("missing 'slot' in snapshot metadata")
+        })?;
+        let seqno = get_parsed(cfg::META_SEQNO).ok_or_else(|| {
+            Error::Internal("missing 'seqno' in snapshot metadata")
+        })?;
 
         Ok(Self { slot, seqno })
     }
 
-    /// Converts to HashMap for ObjectMetadata.
     fn into_headers(self) -> HashMap<String, String> {
         HashMap::from([
             (cfg::META_SLOT.into(), self.slot.to_string()),
@@ -317,7 +327,6 @@ impl SnapshotMeta {
 /// Supports resuming from a specific sequence number for catch-up replay
 /// after recovering from a snapshot.
 pub struct Consumer {
-    #[allow(dead_code)]
     inner: PullConsumer,
 }
 
@@ -331,7 +340,7 @@ impl Consumer {
 
         let deliver_policy = match start_seq {
             Some(seq) => {
-                // Delete and recreate to change start position.
+                // Delete and recreate to change start position
                 stream.delete_consumer(id).await.ok();
                 DeliverPolicy::ByStartSequence {
                     start_sequence: seq,
@@ -343,7 +352,7 @@ impl Consumer {
         let inner = stream
             .get_or_create_consumer(
                 id,
-                pull::Config {
+                PullConfig {
                     durable_name: Some(id.into()),
                     ack_policy: AckPolicy::All,
                     ack_wait: cfg::ACK_WAIT,
@@ -355,6 +364,19 @@ impl Consumer {
             .await?;
 
         Ok(Self { inner })
+    }
+
+    /// Returns a stream of messages from the consumer.
+    ///
+    /// Use this in a `tokio::select!` loop to process messages as they arrive.
+    /// Messages are fetched in batches for efficiency.
+    pub async fn messages(&self) -> Result<MessageStream> {
+        self.inner
+            .stream()
+            .max_messages_per_batch(cfg::BATCH_SIZE)
+            .messages()
+            .await
+            .map_err(Into::into)
     }
 }
 
@@ -368,18 +390,15 @@ impl Consumer {
 /// primary publishes events. The lock has a TTL and must be refreshed
 /// periodically to maintain leadership.
 pub struct Producer {
-    /// KV store for the lock.
-    lock: Store,
-    /// Producer identity (node ID).
+    lock: Box<Store>,
     id: Bytes,
-    /// Current lock revision for CAS updates.
     revision: u64,
 }
 
 impl Producer {
     async fn new(id: &str, js: &Context) -> Result<Self> {
         Ok(Self {
-            lock: js.get_key_value(cfg::PRODUCER_LOCK).await?,
+            lock: Box::new(js.get_key_value(cfg::PRODUCER_LOCK).await?),
             id: id.to_owned().into_bytes().into(),
             revision: 0,
         })

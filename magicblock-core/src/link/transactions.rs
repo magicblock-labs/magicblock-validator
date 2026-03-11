@@ -287,11 +287,11 @@ impl TransactionSchedulerHandle {
         txn: impl SanitizeableTransaction,
     ) -> TransactionResult {
         let mode = TransactionProcessingMode::Replay(position);
-        let transaction = txn.sanitize(true)?;
+        let (transaction, encoded) = txn.sanitize_with_encoded(true)?;
         let txn = ProcessableTransaction {
             transaction,
             mode,
-            encoded: None,
+            encoded,
         };
         self.0
             .send(txn)

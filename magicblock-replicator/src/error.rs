@@ -3,6 +3,7 @@
 use std::fmt::{Debug, Display};
 
 use magicblock_ledger::errors::LedgerError;
+use solana_transaction_error::TransactionError;
 
 /// Replication operation errors.
 #[derive(thiserror::Error, Debug)]
@@ -10,10 +11,6 @@ pub enum Error {
     /// NATS message broker error.
     #[error("message broker error: {0}")]
     Nats(async_nats::Error),
-
-    /// Connection was closed unexpectedly.
-    #[error("connection closed")]
-    ConnectionClosed,
 
     /// I/O operation failed.
     #[error("I/O error: {0}")]
@@ -27,9 +24,17 @@ pub enum Error {
     #[error("ledger access error: {0}")]
     Ledger(#[from] LedgerError),
 
+    /// Transaction execution error.
+    #[error("transaction execution error: {0}")]
+    Transaction(#[from] TransactionError),
+
     /// Internal protocol violation or malformed data.
     #[error("internal error: {0}")]
     Internal(&'static str),
+
+    /// File system watcher error.
+    #[error("watcher error: {0}")]
+    Watcher(#[from] notify::Error),
 }
 
 // async_nats::Error is actually async_nats::error::Error<K> where K is the error kind.
