@@ -30,6 +30,12 @@ pub enum ApiError {
     #[error("Validator '{0}' is insufficiently funded on chain. Minimum is ({1} SOL)")]
     ValidatorInsufficientlyFunded(Pubkey, u64),
 
+    #[error("Failed to initialize magic fee vault for validator '{0}': {1}")]
+    FailedToInitMagicFeeVault(Pubkey, String),
+
+    #[error("Failed to delegate magic fee vault for validator '{0}': {1}")]
+    FailedToDelegateMagicFeeVault(Pubkey, String),
+
     #[error("CommittorServiceError")]
     CommittorServiceError(
         Box<magicblock_committor_service::error::CommittorServiceError>,

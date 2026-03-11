@@ -3080,6 +3080,7 @@ dependencies = [
  "magicblock-committor-service",
  "magicblock-config",
  "magicblock-core",
+ "magicblock-delegation-program",
  "magicblock-ledger",
  "magicblock-magic-program-api",
  "magicblock-metrics",
@@ -3288,7 +3289,7 @@ dependencies = [
 [[package]]
 name = "magicblock-delegation-program"
 version = "1.1.3"
-source = "git+https://github.com/magicblock-labs/delegation-program.git?rev=979ebd693#979ebd6930781df25ef0c087c78f37324ffb8231"
+source = "git+https://github.com/magicblock-labs/delegation-program.git?rev=cd494df9#cd494df91e0155f5ac921b49589e57ef7d368e09"
 dependencies = [
  "bincode",
  "borsh 1.6.0",

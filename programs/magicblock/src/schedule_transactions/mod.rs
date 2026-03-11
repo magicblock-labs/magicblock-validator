@@ -83,10 +83,9 @@ pub fn check_magic_context_id(
 }
 
 pub(crate) fn magic_fee_vault_pubkey() -> Pubkey {
-    // TODO(edwin): finalize the PDA
     let validator_authority = crate::validator::validator_authority_id();
     Pubkey::find_program_address(
-        &[validator_authority.as_ref(), b"magic-fee-vault"],
+        &[b"magic-fee-vault", validator_authority.as_ref()],
         &crate::utils::DELEGATION_PROGRAM_ID,
     )
     .0
