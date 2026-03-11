@@ -1,10 +1,4 @@
-use std::{
-    fs,
-    hash::Hasher,
-    path::{Path, PathBuf},
-    sync::Arc,
-    thread::{self, JoinHandle},
-};
+use std::{fs, hash::Hasher, path::Path, sync::Arc, thread};
 
 use error::{AccountsDbError, LogErr};
 use index::{
@@ -542,14 +536,6 @@ impl AccountsDb {
     pub fn snapshot_exists(&self, slot: u64) -> bool {
         self.snapshot_manager.snapshot_exists(slot)
     }
-}
-
-/// Result of a snapshot operation spawned via [`AccountsDb::take_snapshot`].
-pub struct AccountsDbSnapshotResult {
-    /// State checksum computed at snapshot time.
-    pub checksum: u64,
-    /// Path to the created archive, or error if archiving failed.
-    pub archive: AccountsDbResult<PathBuf>,
 }
 
 pub mod error;
