@@ -279,7 +279,7 @@ impl AccountsDb {
 
     /// Updates the current slot.
     #[inline(always)]
-    pub fn set_slot(self: &Arc<Self>, slot: u64) {
+    pub fn set_slot(&self, slot: u64) {
         self.storage.update_slot(slot);
     }
 
