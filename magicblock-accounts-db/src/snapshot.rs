@@ -127,7 +127,7 @@ impl SnapshotManager {
     pub fn archive_and_register(
         &self,
         snapshot_dir: &Path,
-    ) -> AccountsDbResult<()> {
+    ) -> AccountsDbResult<PathBuf> {
         let archive_path = snapshot_dir.with_extension(ARCHIVE_EXT);
 
         info!(archive_path = %archive_path.display(), "Archiving snapshot");
@@ -148,8 +148,8 @@ impl SnapshotManager {
             )
         })?;
 
-        self.register_archive(archive_path);
-        Ok(())
+        self.register_archive(archive_path.clone());
+        Ok(archive_path)
     }
 
     /// Inserts an external snapshot archive received from network.
