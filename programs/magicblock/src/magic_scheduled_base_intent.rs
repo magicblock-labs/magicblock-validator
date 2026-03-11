@@ -928,7 +928,7 @@ pub(crate) fn calculate_commit_fee(
 ) -> Result<u64, InstructionError> {
     accounts.iter().try_fold(0u64, |fee, account| {
         if let Some(nonce) = commit_nonces.get(&account.pubkey) {
-            if nonce > &ACTUAL_COMMIT_LIMIT {
+            if *nonce + 1 > ACTUAL_COMMIT_LIMIT {
                 Ok(fee + COMMIT_FEE_LAMPORTS)
             } else {
                 Ok(fee)
@@ -988,7 +988,9 @@ mod tests {
     #[test]
     fn test_commit_fee_at_limit_is_zero() {
         let pk = Pubkey::new_unique();
-        let nonces = HashMap::from([(pk, ACTUAL_COMMIT_LIMIT)]);
+        // nonce is commits done so far; nonce+1 is the next commit number.
+        // ACTUAL_COMMIT_LIMIT - 1 means the next commit is exactly at the limit → free.
+        let nonces = HashMap::from([(pk, ACTUAL_COMMIT_LIMIT - 1)]);
         let fee = calculate_commit_fee(&[make_committed_account(pk)], &nonces)
             .unwrap();
         assert_eq!(fee, 0);
@@ -1015,8 +1017,8 @@ mod tests {
         let pk_below = Pubkey::new_unique();
         let pk_above = Pubkey::new_unique();
         let nonces = HashMap::from([
-            (pk_below, ACTUAL_COMMIT_LIMIT),
-            (pk_above, ACTUAL_COMMIT_LIMIT + 1),
+            (pk_below, ACTUAL_COMMIT_LIMIT - 1), // next commit is exactly at limit → free
+            (pk_above, ACTUAL_COMMIT_LIMIT), // next commit exceeds limit → charged
         ]);
         let fee = calculate_commit_fee(
             &[
@@ -1092,9 +1094,9 @@ mod tests {
         };
 
         let nonces = HashMap::from([
-            (pk1, ACTUAL_COMMIT_LIMIT + 1), // charged
-            (pk2, ACTUAL_COMMIT_LIMIT),     // not charged
-            (pk3, ACTUAL_COMMIT_LIMIT + 1), // charged
+            (pk1, ACTUAL_COMMIT_LIMIT), // next commit exceeds limit → charged
+            (pk2, ACTUAL_COMMIT_LIMIT - 1), // next commit is exactly at limit → free
+            (pk3, ACTUAL_COMMIT_LIMIT), // next commit exceeds limit → charged
         ]);
 
         let fee = bundle.calculate_fee(&nonces).unwrap();

@@ -5885,6 +5885,7 @@ dependencies = [
  "program-schedulecommit",
  "rand 0.8.5",
  "schedulecommit-client",
+ "serial_test",
  "solana-program",
  "solana-rpc-client",
  "solana-rpc-client-api",

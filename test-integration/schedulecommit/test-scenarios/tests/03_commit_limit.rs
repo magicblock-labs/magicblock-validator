@@ -15,6 +15,7 @@ use program_schedulecommit::{
 use schedulecommit_client::{
     verify, ScheduleCommitTestContext, ScheduleCommitTestContextFields,
 };
+use serial_test::serial;
 use solana_rpc_client::rpc_client::SerializableTransaction;
 use solana_rpc_client_api::config::RpcSendTransactionConfig;
 use solana_sdk::{
@@ -113,7 +114,7 @@ fn test_schedule_commit_fails_at_commit_limit() {
     run_test!({
         let ctx = get_prepared();
         let ScheduleCommitTestContextFields {
-            payer_ephem: payer,
+            payer_chain: payer,
             committees,
             commitment,
             ephem_client,
@@ -161,7 +162,7 @@ fn test_schedule_commit_and_undelegate_succeeds_at_commit_limit() {
     run_test!({
         let ctx = get_prepared();
         let ScheduleCommitTestContextFields {
-            payer_ephem: payer,
+            payer_chain: payer,
             committees,
             commitment,
             ephem_client,
@@ -306,6 +307,7 @@ fn get_vault_prepared() -> &'static ScheduleCommitTestContext {
 
 /// A delegated payer without the required fee vault must receive MissingAccount.
 #[test]
+#[serial]
 fn test_payer_delegated_vault_absent_error() {
     run_test!({
         let ctx = get_vault_prepared();
@@ -362,6 +364,7 @@ fn test_payer_delegated_vault_absent_error() {
 /// Commits a fresh account with the vault present while within ACTUAL_COMMIT_LIMIT;
 /// the payer's ephemeral balance must remain unchanged.
 #[test]
+#[serial]
 fn test_no_fee_charged_within_actual_commit_limit() {
     run_test!({
         let ctx = get_vault_prepared();
@@ -428,6 +431,7 @@ fn test_no_fee_charged_within_actual_commit_limit() {
 /// After ACTUAL_COMMIT_LIMIT commits, the next one must deduct COMMIT_FEE_LAMPORTS
 /// from the payer and credit the same amount to the fee vault.
 #[test]
+#[serial]
 fn test_fee_charged_and_vault_credited_after_actual_commit_limit() {
     run_test!({
         let ctx = get_vault_prepared();
@@ -512,6 +516,7 @@ fn test_fee_charged_and_vault_credited_after_actual_commit_limit() {
 /// Commits a committee via MagicIntentBundleBuilder with vault and a post-commit
 /// UpdateOrderBook action; verifies the commit is included in the scheduled bundle.
 #[test]
+#[serial]
 fn test_schedule_commit_with_vault_and_order_book_action() {
     run_test!({
         let ctx = get_vault_prepared();
