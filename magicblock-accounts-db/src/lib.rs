@@ -1,4 +1,10 @@
-use std::{fs, hash::Hasher, path::Path, sync::Arc, thread};
+use std::{
+    fs,
+    hash::Hasher,
+    path::{Path, PathBuf},
+    sync::Arc,
+    thread::{self, JoinHandle},
+};
 
 use error::{AccountsDbError, LogErr};
 use index::{
@@ -278,7 +284,6 @@ impl AccountsDb {
     }
 
     /// Updates the current slot.
-    #[inline(always)]
     pub fn set_slot(&self, slot: u64) {
         self.storage.update_slot(slot);
     }
@@ -537,6 +542,14 @@ impl AccountsDb {
     pub fn snapshot_exists(&self, slot: u64) -> bool {
         self.snapshot_manager.snapshot_exists(slot)
     }
+}
+
+/// Result of a snapshot operation spawned via [`AccountsDb::take_snapshot`].
+pub struct AccountsDbSnapshotResult {
+    /// State checksum computed at snapshot time.
+    pub checksum: u64,
+    /// Path to the created archive, or error if archiving failed.
+    pub archive: AccountsDbResult<PathBuf>,
 }
 
 pub mod error;

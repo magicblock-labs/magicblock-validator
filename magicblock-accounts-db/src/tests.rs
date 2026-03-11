@@ -234,7 +234,7 @@ fn test_take_snapshot() {
         .database_path()
         .parent()
         .unwrap()
-        .join(format!("snapshot-{:0>12}.tar.gz", env.snapshot_frequency));
+        .join(format!("snapshot-{:0>12}.tar.gz", SNAPSHOT_SLOT));
     assert!(archive_path.exists(), "Archive file should exist");
     assert!(
         archive_path.is_file(),
@@ -319,73 +319,6 @@ fn test_external_snapshot_fast_forward() {
     assert_eq!(restored.unwrap().lamports(), LAMPORTS);
 }
 
-/// Verifies that orphan snapshot directories are cleaned up on startup.
-#[test]
-fn test_orphan_directory_cleanup() {
-    let (adb, temp_dir) = TestEnv::init_raw_db();
-
-    // Create an orphan directory (simulating interrupted archiving)
-    let orphan_dir = temp_dir.path().join("accountsdb/snapshot-000000000512");
-    std::fs::create_dir_all(&orphan_dir).unwrap();
-    std::fs::write(orphan_dir.join("test.txt"), "orphan data").unwrap();
-
-    // Drop and reopen - orphan should be cleaned up
-    drop(adb);
-    let config = AccountsDbConfig::default();
-    let _adb = AccountsDb::new(&config, temp_dir.path(), 0).unwrap();
-
-    assert!(
-        !orphan_dir.exists(),
-        "Orphan directory should be cleaned up on startup"
-    );
-}
-
-/// Verifies external snapshot fast-forward when snapshot is newer than current state.
-#[test]
-fn test_external_snapshot_fast_forward() {
-    let env = TestEnv::new();
-
-    // Create an account and take a local snapshot
-    let acc = env.create_and_insert_account();
-    let snapshot_slot = env.snapshot_frequency;
-    env.advance_slot(snapshot_slot);
-
-    // Read the archive bytes
-    let archive_path = env
-        .snapshot_manager
-        .database_path()
-        .parent()
-        .unwrap()
-        .join(format!("snapshot-{:0>12}.tar.gz", snapshot_slot));
-    let archive_bytes =
-        std::fs::read(&archive_path).expect("Failed to read archive");
-    let pubkey = acc.pubkey;
-
-    // Drop current DB and create new one at slot 0
-    drop(env);
-    let temp_dir = tempfile::tempdir().unwrap();
-    let config = AccountsDbConfig {
-        reset: true,
-        ..Default::default()
-    };
-    let mut new_db = AccountsDb::new(&config, temp_dir.path(), 0).unwrap();
-    assert_eq!(new_db.slot(), 0, "New DB should start at slot 0");
-
-    // Insert external snapshot (snapshot slot > current slot 0, should fast-forward)
-    let fast_forwarded = new_db
-        .insert_external_snapshot(snapshot_slot, &archive_bytes)
-        .unwrap();
-    assert!(fast_forwarded, "Should fast-forward when snapshot is newer");
-
-    // Verify the account exists immediately after fast-forward
-    let restored = new_db.get_account(&pubkey);
-    assert!(
-        restored.is_some(),
-        "Account should exist after fast-forward"
-    );
-    assert_eq!(restored.unwrap().lamports(), LAMPORTS);
-}
-
 /// Verifies external snapshot registration without fast-forward when current state is newer.
 #[test]
 fn test_external_snapshot_no_fast_forward() {
@@ -393,8 +326,8 @@ fn test_external_snapshot_no_fast_forward() {
 
     // Create an account and take a local snapshot
     let acc = env.create_and_insert_account();
-    let snapshot_slot = env.snapshot_frequency;
-    env.advance_slot(snapshot_slot);
+    env.set_slot(SNAPSHOT_SLOT);
+    env.take_snapshot_and_wait(SNAPSHOT_SLOT);
 
     // Read the archive bytes
     let archive_path = env
@@ -402,7 +335,7 @@ fn test_external_snapshot_no_fast_forward() {
         .database_path()
         .parent()
         .unwrap()
-        .join(format!("snapshot-{:0>12}.tar.gz", snapshot_slot));
+        .join(format!("snapshot-{:0>12}.tar.gz", SNAPSHOT_SLOT));
     let archive_bytes =
         std::fs::read(&archive_path).expect("Failed to read archive");
     let pubkey = acc.pubkey;
@@ -416,14 +349,14 @@ fn test_external_snapshot_no_fast_forward() {
     };
     let new_db =
         Arc::new(AccountsDb::new(&config, temp_dir.path(), 0).unwrap());
-    new_db.set_slot(snapshot_slot + 1000); // Advance past snapshot slot
+    new_db.set_slot(SNAPSHOT_SLOT + 1000); // Advance past snapshot slot
 
     // Unwrap Arc to get mutable access
     let mut new_db = Arc::try_unwrap(new_db).unwrap();
 
     // Insert external snapshot (current slot > snapshot slot, no fast-forward)
     let fast_forwarded = new_db
-        .insert_external_snapshot(snapshot_slot, &archive_bytes)
+        .insert_external_snapshot(SNAPSHOT_SLOT, &archive_bytes)
         .unwrap();
     assert!(
         !fast_forwarded,
@@ -438,7 +371,7 @@ fn test_external_snapshot_no_fast_forward() {
     );
 
     // Now restore explicitly
-    new_db.restore_state_if_needed(snapshot_slot).unwrap();
+    new_db.restore_state_if_needed(SNAPSHOT_SLOT).unwrap();
 
     // Now the account should exist
     let restored = new_db.get_account(&pubkey);
