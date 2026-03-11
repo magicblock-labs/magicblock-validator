@@ -267,6 +267,8 @@ impl BaseActionTaskV1 {
                 is_signer: false,
             })
             .collect();
+
+        #[allow(deprecated)]
         dlp::instruction_builder::call_handler(
             *validator,
             action.destination_program,
