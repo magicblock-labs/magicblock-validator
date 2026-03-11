@@ -105,8 +105,6 @@ impl SnapshotManager {
         slot: u64,
         active_mem: &[u8],
     ) -> AccountsDbResult<PathBuf> {
-        self.prune_registry();
-
         let snap_path = self.slot_to_dir_path(slot);
         let memory_capture =
             matches!(self.strategy, SnapshotStrategy::LegacyCopy)
@@ -116,6 +114,7 @@ impl SnapshotManager {
         self.strategy
             .execute(&self.db_path, &snap_path, memory_capture)
             .log_err(|| "Snapshot failed")?;
+        self.prune_registry();
 
         Ok(snap_path)
     }
