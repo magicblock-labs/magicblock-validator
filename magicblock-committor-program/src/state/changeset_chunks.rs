@@ -60,8 +60,8 @@ impl<'chunks> ChangesetChunks<'chunks> {
     fn assert_sizes(&self, data: &[u8]) {
         let chunks_len = self.chunks.count() * self.chunk_size as usize;
         assert!(
-            data.len() < chunks_len,
-            "data.len() ({}) >= chunks_len ({})",
+            data.len() <= chunks_len,
+            "data.len() ({}) > chunks_len ({})",
             data.len(),
             chunks_len
         );
