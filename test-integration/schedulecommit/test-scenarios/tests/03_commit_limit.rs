@@ -11,7 +11,8 @@ use program_schedulecommit::{
         schedule_commit_cpi_with_vault_instruction,
         schedule_commit_with_vault_and_order_book_instruction, UserSeeds,
     },
-    ScheduleCommitCpiWithVaultArgs, ScheduleCommitWithOrderBookArgs,
+    ScheduleCommitCpiWithVaultArgs, ScheduleCommitType,
+    ScheduleCommitWithOrderBookArgs,
 };
 use schedulecommit_client::{
     verify, ScheduleCommitTestContext, ScheduleCommitTestContextFields,
@@ -71,6 +72,7 @@ fn get_prepared() -> &'static ScheduleCommitTestContext {
                 None,
                 &players,
                 &pdas,
+                ScheduleCommitType::Commit,
             );
             let blockhash = ephem_client.get_latest_blockhash().unwrap();
             let tx = Transaction::new_signed_with_payer(
@@ -129,6 +131,7 @@ fn test_schedule_commit_fails_at_commit_limit() {
             None,
             &[committee.0.pubkey()],
             &[committee.1],
+            ScheduleCommitType::Commit,
         );
         let blockhash = ephem_client.get_latest_blockhash().unwrap();
         let tx = Transaction::new_signed_with_payer(

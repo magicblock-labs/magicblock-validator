@@ -23,8 +23,9 @@ pub mod utils;
 
 pub use task_builder::TaskBuilderImpl;
 
-use crate::tasks::commit_finalize_task::CommitFinalizeTask;
-use crate::tasks::commit_task::CommitTask;
+use crate::tasks::{
+    commit_finalize_task::CommitFinalizeTask, commit_task::CommitTask,
+};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum TaskType {
