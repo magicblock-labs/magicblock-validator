@@ -518,6 +518,11 @@ fn test_fee_charged_and_vault_credited_after_actual_commit_limit() {
 #[test]
 #[serial]
 fn test_schedule_commit_with_vault_and_order_book_action() {
+    // action fee: compute_units(50_000) * COMPUTE_UNIT_PRICE_MICRO_LAMPORTS(50_000)
+    //             = 2_500_000_000 micro-lamports → ceil / 1_000_000 = 2_500 lamports
+    const ACTION_FEE_LAMPORTS: u64 = 2_500;
+    const TOTAL_FEE_LAMPORTS: u64 = COMMIT_FEE_LAMPORTS + ACTION_FEE_LAMPORTS;
+
     run_test!({
         let ctx = get_vault_prepared();
         let ScheduleCommitTestContextFields {
@@ -530,9 +535,15 @@ fn test_schedule_commit_with_vault_and_order_book_action() {
             ..
         } = ctx.fields();
 
-        // Re-use the over-limit committee; the fee is charged but that does not
-        // affect the correctness of the action execution path.
         let committee = &committees[IDX_OVER_LIMIT];
+        let magic_fee_vault =
+            dlp::pda::magic_fee_vault_pda_from_validator(validator_identity);
+
+        let payer_balance_before =
+            ctx.fetch_ephem_account_balance(&payer.pubkey()).unwrap();
+        let vault_balance_before = ctx
+            .fetch_ephem_account_balance(&magic_fee_vault)
+            .unwrap_or(0);
 
         // Derive and lazily init the order book PDA on chain.
         let (order_book_pda, _) = Pubkey::find_program_address(
@@ -593,10 +604,34 @@ fn test_schedule_commit_with_vault_and_order_book_action() {
         let res = verify::fetch_and_verify_commit_result_from_logs(ctx, sig);
         assert_committee_was_committed(committee.1, &res, true);
 
-        info!(
-            "Commit with vault+order_book action scheduled: {}. \
-             UpdateOrderBook will be executed on chain by the committor.",
-            sig
+        // Verify that both the commit fee and the action fee were charged.
+        let payer_balance_after =
+            ctx.fetch_ephem_account_balance(&payer.pubkey()).unwrap();
+        let vault_balance_after = ctx
+            .fetch_ephem_account_balance(&magic_fee_vault)
+            .unwrap_or(0);
+
+        assert_eq!(
+            payer_balance_after,
+            payer_balance_before - TOTAL_FEE_LAMPORTS,
+            "Payer should be charged {} lamports (commit={} + action={}) \
+             (before={}, after={})",
+            TOTAL_FEE_LAMPORTS,
+            COMMIT_FEE_LAMPORTS,
+            ACTION_FEE_LAMPORTS,
+            payer_balance_before,
+            payer_balance_after
+        );
+        assert_eq!(
+            vault_balance_after,
+            vault_balance_before + TOTAL_FEE_LAMPORTS,
+            "Vault should be credited {} lamports (commit={} + action={}) \
+             (before={}, after={})",
+            TOTAL_FEE_LAMPORTS,
+            COMMIT_FEE_LAMPORTS,
+            ACTION_FEE_LAMPORTS,
+            vault_balance_before,
+            vault_balance_after
         );
     });
 }
