@@ -557,8 +557,7 @@ impl MagicValidator {
         // replaying so transactions are verified against that key.
         // Save the prior override so we can restore it after replay
         // (e.g. a replication-mode override may already be active).
-        let prior_override =
-            validator::validator_authority_override();
+        let prior_override = validator::validator_authority_override();
         if let Some(ref pk) = self.config.ledger.replay_authority_override {
             validator::set_validator_authority_override(pk.0);
         }
@@ -583,9 +582,7 @@ impl MagicValidator {
         // Restore the prior authority override now that replay is done.
         if self.config.ledger.replay_authority_override.is_some() {
             match prior_override {
-                Some(pk) => {
-                    validator::set_validator_authority_override(pk)
-                }
+                Some(pk) => validator::set_validator_authority_override(pk),
                 None => validator::unset_validator_authority_override(),
             }
         }
