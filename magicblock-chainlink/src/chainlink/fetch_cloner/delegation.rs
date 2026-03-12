@@ -406,15 +406,13 @@ mod tests {
             },
         );
 
-        let err = parse_delegation_record(
+        let (_record, actions) = parse_delegation_record(
             &payload,
             Pubkey::new_unique(),
             &wrong_validator,
         )
-        .unwrap_err();
-        assert!(matches!(
-            err,
-            ChainlinkError::InvalidDelegationActions(_, _)
-        ));
+        .unwrap();
+
+        assert!(actions.is_none());
     }
 }
