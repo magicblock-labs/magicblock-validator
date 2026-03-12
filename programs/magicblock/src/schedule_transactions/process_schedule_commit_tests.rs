@@ -1508,8 +1508,8 @@ mod tests {
         let committee_at = Pubkey::new_unique(); // nonce == limit → free
 
         let mut per_account = HashMap::new();
-        per_account.insert(committee_above, ACTUAL_COMMIT_LIMIT + 1);
-        per_account.insert(committee_at, ACTUAL_COMMIT_LIMIT);
+        per_account.insert(committee_above, ACTUAL_COMMIT_LIMIT);
+        per_account.insert(committee_at, ACTUAL_COMMIT_LIMIT - 1);
 
         let (mut account_data, mut transaction_accounts) =
             prepare_delegated_payer_transaction(
