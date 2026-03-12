@@ -594,6 +594,7 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
                 .await?;
             self.stream_map.insert(StreamKey::Program, stream);
             self.program_sub = Some((subscribed_programs, handle));
+            self.update_stream_metrics_with_extra(0);
         }
 
         Ok(())
@@ -608,6 +609,7 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
     pub fn clear_program_subscriptions(&mut self) {
         self.stream_map.remove(&StreamKey::Program);
         self.program_sub = None;
+        self.update_stream_metrics_with_extra(0);
     }
 
     /// Build a `SubscribeRequest` for the given program IDs.
