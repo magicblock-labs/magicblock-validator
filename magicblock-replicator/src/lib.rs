@@ -22,4 +22,4 @@ pub mod watcher;
 mod tests;
 
 pub use error::{Error, Result};
-pub use proto::Message;
+pub use proto::{Message, TransactionIndex};
