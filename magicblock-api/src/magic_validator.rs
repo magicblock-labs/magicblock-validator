@@ -260,6 +260,13 @@ impl MagicValidator {
         log_timing("startup", "load_programs", step_start);
 
         validator::init_validator_authority(identity_keypair);
+        match &config.validator.replication_mode {
+            ReplicationMode::StandBy(_, pk)
+            | ReplicationMode::ReplicatOnly(_, pk) => {
+                validator::set_validator_authority_override(pk.0);
+            }
+            ReplicationMode::Standalone => {}
+        }
         let base_fee = config.validator.basefee;
 
         // Mode switch channel for transitioning from StartingUp to Primary
