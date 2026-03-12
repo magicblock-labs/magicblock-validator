@@ -12,7 +12,7 @@ use solana_pubkey::Pubkey;
 use solana_transaction_context::TransactionContext;
 
 use crate::{
-    errors::MagicBlockProgramError, validator::validator_authority_id,
+    errors::MagicBlockProgramError, validator::effective_validator_authority_id,
 };
 
 /// Converts a LoaderV4State reference to a byte slice.
@@ -37,11 +37,15 @@ pub fn validate_authority(
     signers: &HashSet<Pubkey>,
     invoke_context: &InvokeContext,
 ) -> Result<(), InstructionError> {
-    let auth = validator_authority_id();
+    let auth = effective_validator_authority_id();
     if signers.contains(&auth) {
         return Ok(());
     }
-    ic_msg!(invoke_context, "Validator authority not in signers",);
+    ic_msg!(
+        invoke_context,
+        "Validator authority {} not in signers",
+        auth
+    );
     Err(InstructionError::MissingRequiredSignature)
 }
 

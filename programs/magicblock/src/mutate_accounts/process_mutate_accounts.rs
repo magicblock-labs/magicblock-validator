@@ -14,7 +14,7 @@ use crate::{
         is_ephemeral, validate_not_delegated, validate_remote_slot,
     },
     errors::MagicBlockProgramError,
-    validator::validator_authority_id,
+    validator::effective_validator_authority_id,
 };
 
 pub(crate) fn process_mutate_accounts(
@@ -35,7 +35,7 @@ pub(crate) fn process_mutate_accounts(
     // 1. Checks
     let validator_authority_acc = {
         // 1.1. MagicBlock authority must sign
-        let validator_authority_id = validator_authority_id();
+        let validator_authority_id = effective_validator_authority_id();
         if !signers.contains(&validator_authority_id) {
             ic_msg!(
                 invoke_context,
