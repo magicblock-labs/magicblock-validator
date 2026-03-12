@@ -22,8 +22,9 @@
 
 use std::{cmp::Ordering, collections::BinaryHeap};
 
-use magicblock_core::link::transactions::{
-    ProcessableTransaction, TransactionProcessingMode,
+use magicblock_core::{
+    coordination_mode,
+    link::transactions::{ProcessableTransaction, TransactionProcessingMode},
 };
 use magicblock_metrics::metrics::MAX_LOCK_CONTENTION_QUEUE_SIZE;
 use tracing::{error, warn};
@@ -271,7 +272,7 @@ impl ExecutionCoordinator {
     /// Coordinates both the local scheduler and global validator state.
     pub(super) fn switch_to_primary_mode_globally(&mut self) {
         self.switch_to_primary_mode();
-        magicblock_core::coordination_mode::switch_to_primary_mode();
+        coordination_mode::switch_to_primary_mode();
     }
 
     /// Transitions from StartingUp to Replica mode (scheduler + global state).
@@ -280,7 +281,7 @@ impl ExecutionCoordinator {
     /// Coordinates both the local scheduler and global validator state.
     pub(super) fn switch_to_replica_mode_globally(&mut self) {
         self.switch_to_replica_mode();
-        magicblock_core::coordination_mode::switch_to_replica_mode();
+        coordination_mode::switch_to_replica_mode();
     }
 
     /// Checks if a transaction mode is compatible with the current coordination mode.
