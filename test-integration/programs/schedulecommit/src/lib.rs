@@ -763,7 +763,7 @@ pub fn process_schedulecommit_with_vault_and_order_book_cpi(
             },
             compute_units: 50_000,
             escrow_authority: payer.clone(),
-            destination_program: crate::id(),
+            destination_program: id(),
             accounts: vec![ShortAccountMeta {
                 pubkey: *order_book.key,
                 is_writable: true,

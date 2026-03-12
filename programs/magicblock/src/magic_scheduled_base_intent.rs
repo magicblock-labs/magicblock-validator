@@ -33,7 +33,7 @@ use crate::{
 
 /// Commits that are covered by User's dlp PDAs
 pub(crate) const ACTUAL_COMMIT_LIMIT: u64 = 25;
-/// Fixed fee per commit (charged for each commit after the first).
+/// Fixed fee per commit.
 /// https://github.com/magicblock-labs/delegation-program/blob/main/src/consts.rs#L11
 pub const COMMIT_FEE_LAMPORTS: u64 = 100_000;
 /// Price per compute unit for a BaseAction executed on Solana base chain,
