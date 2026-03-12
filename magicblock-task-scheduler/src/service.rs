@@ -43,6 +43,8 @@ pub struct TaskSchedulerService {
     task_queue: DelayQueue<DbTask>,
     /// Map of task IDs to their corresponding keys in the task queue
     task_queue_keys: HashMap<i64, Key>,
+    /// In-memory count of consecutive execution failures per task.
+    task_retry_counts: HashMap<i64, u32>,
     /// Counter used to make each transaction unique
     tx_counter: AtomicU64,
     /// Token used to cancel the task scheduler
@@ -57,6 +59,8 @@ enum ProcessingOutcome {
     Success,
     Recoverable(Box<TaskSchedulerError>),
 }
+
+pub const TASK_EXECUTION_RETRY_LIMIT: u32 = 100;
 
 // SAFETY: TaskSchedulerService is moved into a single Tokio task in `start()` and never cloned.
 // It runs exclusively on that task's thread. All fields (SchedulerDatabase, TransactionSchedulerHandle,
@@ -96,6 +100,7 @@ impl TaskSchedulerService {
             block,
             task_queue: DelayQueue::new(),
             task_queue_keys: HashMap::new(),
+            task_retry_counts: HashMap::new(),
             tx_counter: AtomicU64::default(),
             token,
             min_interval: config.min_interval,
@@ -222,6 +227,7 @@ impl TaskSchedulerService {
         }
 
         self.remove_task_from_queue(cancel_request.task_id);
+        self.task_retry_counts.remove(&cancel_request.task_id);
 
         // Remove task from database
         self.unregister_task(cancel_request.task_id).await?;
@@ -231,6 +237,7 @@ impl TaskSchedulerService {
 
     async fn execute_task(&mut self, task: &DbTask) -> TaskSchedulerResult<()> {
         let sig = self.process_transaction(task.instructions.clone()).await?;
+        self.task_retry_counts.remove(&task.id);
 
         // TODO(Dodecahedr0x): we don't get any output directly at this point
         // we would have to fetch the transaction via its signature to see
@@ -278,6 +285,7 @@ impl TaskSchedulerService {
         }
 
         self.db.insert_task(&task).await?;
+        self.task_retry_counts.remove(&task.id);
         self.task_queue
             .insert(task.clone(), Duration::from_millis(0));
         debug!("Registered task {} from context", task.id);
@@ -303,6 +311,10 @@ impl TaskSchedulerService {
                     self.task_queue_keys.remove(&task.id);
                     if let Err(e) = self.execute_task(task).await {
                         error!("Failed to execute task {}: {}", task.id, e);
+
+                        if self.retry_task_execution(task) {
+                            continue;
+                        }
 
                         // If any instruction fails, the task is cancelled
                         self.db.remove_task(task.id).await?;
@@ -336,6 +348,29 @@ impl TaskSchedulerService {
         if let Some(key) = self.task_queue_keys.remove(&task_id) {
             self.task_queue.remove(&key);
         }
+    }
+
+    fn retry_task_execution(&mut self, task: &DbTask) -> bool {
+        let retries = self.task_retry_counts.entry(task.id).or_default();
+        *retries += 1;
+
+        if *retries <= TASK_EXECUTION_RETRY_LIMIT {
+            warn!(
+                task_id = task.id,
+                retry_attempt = *retries,
+                retry_limit = TASK_EXECUTION_RETRY_LIMIT,
+                "Task execution failed, scheduling retry"
+            );
+            let key = self.task_queue.insert(
+                task.clone(),
+                Duration::from_millis(task.execution_interval_millis as u64),
+            );
+            self.task_queue_keys.insert(task.id, key);
+            return true;
+        }
+
+        self.task_retry_counts.remove(&task.id);
+        false
     }
 
     async fn process_transaction(
@@ -397,6 +432,7 @@ mod tests {
             block: LatestBlock::default(),
             task_queue: DelayQueue::new(),
             task_queue_keys: HashMap::new(),
+            task_retry_counts: HashMap::new(),
             tx_counter: AtomicU64::default(),
             token: CancellationToken::new(),
             min_interval: Duration::from_millis(1000),
@@ -478,6 +514,7 @@ mod tests {
             block: LatestBlock::default(),
             task_queue: DelayQueue::new(),
             task_queue_keys: HashMap::new(),
+            task_retry_counts: HashMap::new(),
             tx_counter: AtomicU64::default(),
             token: CancellationToken::new(),
             min_interval: Duration::from_millis(1000),

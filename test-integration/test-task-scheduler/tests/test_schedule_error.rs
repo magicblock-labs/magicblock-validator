@@ -1,6 +1,8 @@
 use cleanass::{assert, assert_eq};
 use integration_test_tools::{expect, validator::cleanup};
-use magicblock_task_scheduler::SchedulerDatabase;
+use magicblock_task_scheduler::{
+    SchedulerDatabase, TASK_EXECUTION_RETRY_LIMIT,
+};
 use program_flexi_counter::{
     instruction::{create_cancel_task_ix, create_schedule_task_ix},
     state::FlexiCounter,
@@ -9,7 +11,9 @@ use solana_sdk::{
     native_token::LAMPORTS_PER_SOL, signature::Keypair, signer::Signer,
     transaction::Transaction,
 };
-use test_task_scheduler::{create_delegated_counter, setup_validator};
+use test_task_scheduler::{
+    create_delegated_counter, setup_validator, TASK_SCHEDULER_TICK_MILLIS,
+};
 use tokio::runtime::Runtime;
 
 // Test that a task with an error is unscheduled
@@ -33,7 +37,7 @@ fn test_schedule_error() {
 
     // Schedule a task
     let task_id = 2;
-    let execution_interval_millis = 100;
+    let execution_interval_millis = 10;
     let iterations = 3;
     let sig = expect!(
         ctx.send_transaction_ephem_with_preflight(
@@ -64,12 +68,11 @@ fn test_schedule_error() {
         validator
     );
 
-    // Wait for the task to be scheduled and executed
-    expect!(ctx.wait_for_delta_slot_ephem(10), validator);
-
-    // Check that the task was scheduled in the database
     let db = expect!(SchedulerDatabase::new(db_path), validator);
     let runtime = expect!(Runtime::new(), validator);
+
+    // The task should still be scheduled while retries remain.
+    expect!(ctx.wait_for_delta_slot_ephem(5), validator);
 
     let failed_scheduling =
         expect!(runtime.block_on(db.get_failed_schedulings()), validator);
@@ -80,6 +83,39 @@ fn test_schedule_error() {
         "failed_scheduling: {:?}",
         failed_scheduling,
     );
+
+    let failed_tasks =
+        expect!(runtime.block_on(db.get_failed_tasks()), validator);
+    assert_eq!(
+        failed_tasks.len(),
+        0,
+        cleanup(&mut validator),
+        "failed_tasks: {:?}",
+        failed_tasks,
+    );
+
+    let tasks = expect!(runtime.block_on(db.get_task_ids()), validator);
+    assert_eq!(
+        tasks.len(),
+        1,
+        cleanup(&mut validator),
+        "tasks: {:?}",
+        tasks
+    );
+
+    assert!(
+        expect!(runtime.block_on(db.get_task(task_id)), validator).is_some(),
+        cleanup(&mut validator)
+    );
+
+    // Wait long enough for all retries to be exhausted.
+    let retry_window_slots = ((TASK_EXECUTION_RETRY_LIMIT as u64
+        * execution_interval_millis as u64)
+        + TASK_SCHEDULER_TICK_MILLIS
+        - 1)
+        / TASK_SCHEDULER_TICK_MILLIS
+        + 20;
+    expect!(ctx.wait_for_delta_slot_ephem(retry_window_slots), validator);
 
     let failed_tasks =
         expect!(runtime.block_on(db.get_failed_tasks()), validator);
