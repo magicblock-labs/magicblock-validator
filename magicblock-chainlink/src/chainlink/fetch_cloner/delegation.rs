@@ -2,7 +2,7 @@ use dlp::{
     pda::delegation_record_pda_from_delegated_account, state::DelegationRecord,
 };
 use magicblock_accounts_db::traits::AccountsBank;
-use magicblock_core::token_programs::EATA_PROGRAM_ID;
+use magicblock_core::token_programs::{derive_eata, EATA_PROGRAM_ID};
 use magicblock_metrics::metrics;
 use solana_account::ReadableAccount;
 use solana_pubkey::Pubkey;
@@ -34,6 +34,7 @@ pub(crate) fn parse_delegation_record(
 
 pub(crate) fn apply_delegation_record_to_account<T, U, V, C>(
     this: &FetchCloner<T, U, V, C>,
+    account_pubkey: Pubkey,
     account: &mut ResolvedAccountSharedData,
     delegation_record: &DelegationRecord,
 ) -> Option<u64>
@@ -46,22 +47,43 @@ where
     let is_confined = delegation_record.authority.eq(&Pubkey::default());
     let is_delegated_to_us =
         delegation_record.authority.eq(&this.validator_pubkey) || is_confined;
+    let is_raw_eata = parse_raw_eata_pda(
+        &account_pubkey,
+        account.data(),
+        delegation_record.owner,
+    )
+    .is_some();
 
     // Always update owner and confined flags
     account
         .set_owner(delegation_record.owner)
         .set_confined(is_confined);
 
-    if is_delegated_to_us && delegation_record.owner != EATA_PROGRAM_ID {
+    if is_delegated_to_us && !is_raw_eata {
         account.set_delegated(true);
-    } else if !is_delegated_to_us {
+    } else {
         account.set_delegated(false);
     }
-    if is_delegated_to_us {
+    if is_delegated_to_us && !is_raw_eata {
         Some(delegation_record.commit_frequency_ms)
     } else {
         None
     }
+}
+
+pub(crate) fn parse_raw_eata_pda(
+    account_pubkey: &Pubkey,
+    data: &[u8],
+    owner_program: Pubkey,
+) -> Option<(Pubkey, Pubkey)> {
+    if owner_program != EATA_PROGRAM_ID || data.len() < 72 {
+        return None;
+    }
+
+    let wallet_owner = Pubkey::new_from_array(data[0..32].try_into().ok()?);
+    let mint = Pubkey::new_from_array(data[32..64].try_into().ok()?);
+    (derive_eata(&wallet_owner, &mint) == *account_pubkey)
+        .then_some((wallet_owner, mint))
 }
 
 pub(crate) fn get_delegated_to_other<T, U, V, C>(

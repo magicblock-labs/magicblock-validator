@@ -42,7 +42,7 @@ use crate::{
 
 type Term = Terminal<CrosstermBackend<Stdout>>;
 const VOTE_PROGRAM_ID: &str = "Vote111111111111111111111111111111111111111";
-const BLOCK_FEED_CONFIRMATION_LAG_SLOTS: u64 = 2;
+const BLOCK_FEED_CONFIRMATION_LAG_SLOTS: u64 = 0;
 const INITIAL_TRANSACTION_BACKFILL_SLOTS: u64 = 64;
 const BLOCK_FEED_RETRY_INTERVAL: Duration = Duration::from_millis(500);
 
@@ -196,15 +196,16 @@ async fn run_event_loop(
             break;
         }
 
-        let visible_height = terminal
-            .size()
-            .map(|rect| rect.height.saturating_sub(9) as usize)
-            .unwrap_or(0);
-
         if let Some(event) = poll_event(poll_timeout) {
             let is_resize = matches!(event, Event::Resize(_, _));
+            let terminal_area = terminal
+                .size()
+                .map(|size| {
+                    ratatui::layout::Rect::new(0, 0, size.width, size.height)
+                })
+                .unwrap_or_default();
 
-            let action = handle_event(state, event, visible_height);
+            let action = handle_event(state, event, terminal_area);
             match action {
                 EventAction::FetchTransaction { rpc_url, signature } => {
                     let client = rpc_client.clone();
@@ -413,10 +414,23 @@ fn spawn_block_transaction_feed(
                     });
 
                     if next_slot_to_fetch.is_none() {
-                        next_slot_to_fetch = Some(backfill_start_slot(target_slot));
+                        next_slot_to_fetch =
+                            Some(backfill_start_slot(target_slot));
                     }
                 }
-                _ = tokio::time::sleep(BLOCK_FEED_RETRY_INTERVAL) => {}
+                _ = tokio::time::sleep(BLOCK_FEED_RETRY_INTERVAL) => {
+                    if let Ok(slot) = get_confirmed_slot(&client, &rpc_url).await {
+                        latest_target_slot = Some(match latest_target_slot {
+                            Some(current) => current.max(slot),
+                            None => slot,
+                        });
+
+                        if next_slot_to_fetch.is_none() {
+                            next_slot_to_fetch =
+                                Some(backfill_start_slot(slot));
+                        }
+                    }
+                }
             }
         }
     });
@@ -454,6 +468,16 @@ fn spawn_logs_subscription(
                                                 let signature = update.value.signature.clone();
                                                 let success = update.value.err.is_none();
                                                 let slot = update.context.slot;
+                                                let _ = event_tx.send(AppEvent::Transaction(
+                                                    TransactionSource::Local,
+                                                    TransactionEntry {
+                                                        signature: signature.clone(),
+                                                        slot,
+                                                        success,
+                                                        timestamp: Local::now(),
+                                                        accounts: vec![],
+                                                    },
+                                                ));
 
                                                 let level = if success { Level::INFO } else { Level::ERROR };
                                                 let summary = if success {
@@ -865,6 +889,7 @@ async fn fetch_transaction_detail(
         rpc_url: rpc_url.to_string(),
         explorer_url: build_explorer_url(rpc_url, signature),
         selected_account,
+        detail_scroll: 0,
     })
 }
 
@@ -902,6 +927,7 @@ fn build_failed_tx_detail(
         rpc_url: rpc_url.to_string(),
         explorer_url,
         selected_account: None,
+        detail_scroll: 0,
     }
 }
 
@@ -1289,11 +1315,10 @@ mod tests {
     }
 
     #[test]
-    fn live_feed_target_slot_stays_two_slots_behind_tip() {
+    fn live_feed_target_slot_tracks_latest_slot() {
         assert_eq!(live_feed_target_slot(0), 0);
-        assert_eq!(live_feed_target_slot(1), 0);
-        assert_eq!(live_feed_target_slot(2), 0);
-        assert_eq!(live_feed_target_slot(42), 40);
+        assert_eq!(live_feed_target_slot(1), 1);
+        assert_eq!(live_feed_target_slot(42), 42);
     }
 
     #[test]
