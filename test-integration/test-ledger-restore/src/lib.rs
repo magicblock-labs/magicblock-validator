@@ -186,6 +186,125 @@ pub fn setup_validator_with_local_remote_and_resume_strategy(
     (default_tmpdir_config, validator, ctx)
 }
 
+/// Like `setup_offline_validator` but uses a new validator authority
+/// and sets `replay_authority_override` for ledger replay.
+pub fn setup_offline_validator_with_authority_override(
+    ledger_path: &Path,
+    programs: Option<Vec<LoadableProgram>>,
+    millis_per_slot: Option<u64>,
+    reset_ledger: bool,
+    replay_authority_override: Pubkey,
+) -> (TempDir, Child, IntegrationTestContext) {
+    let accountsdb_config = AccountsDbConfig {
+        snapshot_frequency: SNAPSHOT_FREQUENCY,
+        ..Default::default()
+    };
+
+    let validator_config = ValidatorConfig::default();
+    let programs = resolve_programs(programs);
+
+    let config = ValidatorParams {
+        ledger: LedgerConfig {
+            reset: reset_ledger,
+            verify_keypair: false,
+            replay_authority_override: Some(SerdePubkey(
+                replay_authority_override,
+            )),
+            block_time: millis_per_slot
+                .map(Duration::from_millis)
+                .unwrap_or_else(|| {
+                    Duration::from_millis(DEFAULT_LEDGER_BLOCK_TIME_MS)
+                }),
+            ..Default::default()
+        },
+        accountsdb: accountsdb_config.clone(),
+        programs,
+        validator: validator_config,
+        lifecycle: LifecycleMode::Offline,
+        storage: StorageDirectory(ledger_path.to_path_buf()),
+        ..Default::default()
+    };
+    let (default_tmpdir_config, Some(mut validator), port) =
+        start_magicblock_validator_with_config_struct(
+            config,
+            &LoadedAccounts::new_with_new_validator_authority(),
+        )
+    else {
+        panic!("validator should set up correctly");
+    };
+
+    let ctx = expect!(
+        IntegrationTestContext::try_new_with_ephem_port(port),
+        validator
+    );
+    (default_tmpdir_config, validator, ctx)
+}
+
+/// Like `setup_validator_with_local_remote` but uses a new validator
+/// authority and sets `replay_authority_override` for ledger replay.
+pub fn setup_validator_with_local_remote_and_authority_override(
+    ledger_path: &Path,
+    programs: Option<Vec<LoadableProgram>>,
+    reset_ledger: bool,
+    replay_authority_override: Pubkey,
+) -> (TempDir, Child, IntegrationTestContext) {
+    let accountsdb_config = AccountsDbConfig {
+        snapshot_frequency: SNAPSHOT_FREQUENCY,
+        reset: reset_ledger,
+        ..Default::default()
+    };
+
+    let programs = resolve_programs(programs);
+    let loaded_accounts = LoadedAccounts::new_with_new_validator_authority();
+
+    let config = ValidatorParams {
+        ledger: LedgerConfig {
+            reset: reset_ledger,
+            verify_keypair: false,
+            replay_authority_override: Some(SerdePubkey(
+                replay_authority_override,
+            )),
+            ..Default::default()
+        },
+        accountsdb: accountsdb_config.clone(),
+        programs,
+        task_scheduler: TaskSchedulerConfig {
+            reset: reset_ledger,
+            ..Default::default()
+        },
+        lifecycle: LifecycleMode::Ephemeral,
+        remotes: vec![
+            Remote::from_str(IntegrationTestContext::url_chain()).unwrap(),
+            Remote::from_str(IntegrationTestContext::ws_url_chain()).unwrap(),
+        ],
+        storage: StorageDirectory(ledger_path.to_path_buf()),
+        ..Default::default()
+    };
+    // Fund the NEW validator authority on chain
+    {
+        let chain_only_ctx =
+            IntegrationTestContext::try_new_chain_only().unwrap();
+        chain_only_ctx
+            .airdrop_chain(
+                &loaded_accounts.validator_authority(),
+                20 * LAMPORTS_PER_SOL,
+            )
+            .unwrap();
+    }
+
+    let (default_tmpdir_config, Some(mut validator), port) =
+        start_magicblock_validator_with_config_struct(config, &loaded_accounts)
+    else {
+        panic!("validator should set up correctly");
+    };
+
+    let ctx = expect!(
+        IntegrationTestContext::try_new_with_ephem_port(port),
+        validator
+    );
+    (default_tmpdir_config, validator, ctx)
+}
+
 // -----------------
 // Transactions and Account Updates
 // -----------------
