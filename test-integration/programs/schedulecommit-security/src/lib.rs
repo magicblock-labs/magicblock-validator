@@ -2,7 +2,7 @@ use borsh::{BorshDeserialize, BorshSerialize};
 use ephemeral_rollups_sdk::ephem::create_schedule_commit_ix;
 use program_schedulecommit::{
     api::schedule_commit_cpi_instruction, process_schedulecommit_cpi,
-    ProcessSchedulecommitCpiArgs,
+    ProcessSchedulecommitCpiArgs, ScheduleCommitType,
 };
 use solana_program::{
     account_info::{next_account_info, AccountInfo},
@@ -82,9 +82,9 @@ pub fn process_instruction<'a>(
             &players,
             ProcessSchedulecommitCpiArgs {
                 modify_accounts: false,
-                undelegate: false,
                 commit_payer: false,
             },
+            ScheduleCommitType::Commit,
         ),
     }
 }
@@ -124,6 +124,7 @@ fn process_sibling_schedule_cpis(
             *magic_context.key,
             players,
             &pdas,
+            ScheduleCommitType::Commit,
         );
         let mut account_infos = account_infos
             .clone()
