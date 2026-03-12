@@ -555,6 +555,10 @@ impl MagicValidator {
         }
         // If a replay authority override is configured, set it before
         // replaying so transactions are verified against that key.
+        // Save the prior override so we can restore it after replay
+        // (e.g. a replication-mode override may already be active).
+        let prior_override =
+            validator::validator_authority_override();
         if let Some(ref pk) = self.config.ledger.replay_authority_override {
             validator::set_validator_authority_override(pk.0);
         }
@@ -576,9 +580,14 @@ impl MagicValidator {
         log_timing("startup", "ledger_replay", step_start);
         self.accountsdb.set_slot(slot_to_continue_at);
 
-        // Unset the replay authority override now that replay is done.
+        // Restore the prior authority override now that replay is done.
         if self.config.ledger.replay_authority_override.is_some() {
-            validator::unset_validator_authority_override();
+            match prior_override {
+                Some(pk) => {
+                    validator::set_validator_authority_override(pk)
+                }
+                None => validator::unset_validator_authority_override(),
+            }
         }
 
         // The transactions to schedule and accept account commits re-run when we
