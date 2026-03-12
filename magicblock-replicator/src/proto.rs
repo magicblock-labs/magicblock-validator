@@ -13,12 +13,15 @@ use solana_transaction::versioned::VersionedTransaction;
 use crate::nats::Subjects;
 
 /// Ordinal position of a transaction within a slot.
-pub type TxIndex = u32;
+pub type TransactionIndex = u32;
 
-/// Sentinel index for block boundary markers.
-pub const BLOCK_INDEX: TxIndex = TxIndex::MAX - 1;
-/// Sentinel index for superblock checkpoint markers.
-pub const SUPERBLOCK_INDEX: TxIndex = TxIndex::MAX;
+/// Index for block boundary markers (TransactionIndex::MAX - 1).
+/// Used to identify Block messages in slot/index comparisons.
+pub const BLOCK_INDEX: TransactionIndex = TransactionIndex::MAX - 1;
+
+/// Index for superblock checkpoint markers (TransactionIndex::MAX).
+/// Used to identify SuperBlock messages in slot/index comparisons.
+pub const SUPERBLOCK_INDEX: TransactionIndex = TransactionIndex::MAX;
 
 /// Top-level replication message envelope.
 ///
@@ -42,9 +45,9 @@ impl Message {
         }
     }
 
-    pub(crate) fn slot_and_index(&self) -> (Slot, TxIndex) {
+    pub(crate) fn slot_and_index(&self) -> (Slot, TransactionIndex) {
         match self {
-            Self::Transaction(txn) => (txn.slot, txn.index),
+            Self::Transaction(tx) => (tx.slot, tx.index),
             Self::Block(block) => (block.slot, BLOCK_INDEX),
             Self::SuperBlock(superblock) => (superblock.slot, SUPERBLOCK_INDEX),
         }
@@ -57,7 +60,7 @@ pub struct Transaction {
     /// Slot where the transaction was executed.
     pub slot: Slot,
     /// Ordinal position within the slot.
-    pub index: TxIndex,
+    pub index: TransactionIndex,
     /// Bincode-encoded `VersionedTransaction`.
     pub payload: Vec<u8>,
 }
@@ -77,8 +80,6 @@ pub struct Block {
 #[derive(Deserialize, Serialize, Clone, Debug)]
 pub struct SuperBlock {
     pub slot: Slot,
-    /// Total transactions processed.
-    pub transactions: u64,
     /// Rolling checksum for verification.
     pub checksum: u64,
 }

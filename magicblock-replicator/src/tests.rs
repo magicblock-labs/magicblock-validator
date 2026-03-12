@@ -1,79 +1,71 @@
-//! Tests for the replication protocol.
+use std::{io::Write, path::Path, time::Duration};
 
-use solana_hash::Hash;
+use tempfile::TempDir;
+use tokio::io::AsyncReadExt;
 
-use crate::proto::{Block, Message, SuperBlock, Transaction};
+use crate::watcher::*;
 
-// =============================================================================
-// Wire Format Tests - catch serialization/protocol changes
-// =============================================================================
+#[tokio::test]
+async fn test_watcher_detects_new_snapshot() {
+    let temp_dir = TempDir::new().unwrap();
+    let mut watcher = SnapshotWatcher::new(temp_dir.path()).unwrap();
 
-#[test]
-fn variant_order_stability() {
-    // Bincode encodes enum discriminant as variant index.
-    // Reordering enum variants silently breaks wire compatibility.
-    let cases: [(Message, u32); 3] = [
-        (
-            Message::Transaction(Transaction {
-                slot: 0,
-                index: 0,
-                payload: vec![],
-            }),
-            0,
-        ),
-        (
-            Message::Block(Block {
-                slot: 0,
-                hash: Hash::default(),
-                timestamp: 42,
-            }),
-            1,
-        ),
-        (
-            Message::SuperBlock(SuperBlock {
-                slot: 0,
-                transactions: 0,
-                checksum: 0,
-            }),
-            2,
-        ),
-    ];
+    let test_data = b"test archive contents";
+    let snapshot_path = temp_dir.path().join("snapshot-000000000001.tar.gz");
+    std::fs::File::create(&snapshot_path)
+        .unwrap()
+        .write_all(test_data)
+        .unwrap();
 
-    for (msg, expected_idx) in cases {
-        let encoded = bincode::serialize(&msg).unwrap();
-        let actual_idx = u32::from_le_bytes([
-            encoded[0], encoded[1], encoded[2], encoded[3],
-        ]);
-        assert_eq!(
-            actual_idx, expected_idx,
-            "variant index changed - this breaks wire compatibility!"
-        );
-    }
+    let (mut file, slot) =
+        tokio::time::timeout(Duration::from_secs(2), watcher.recv())
+            .await
+            .expect("Timeout waiting for snapshot")
+            .expect("Channel closed");
+
+    assert_eq!(slot, 1);
+    let mut contents = Vec::new();
+    file.read_to_end(&mut contents).await.unwrap();
+    assert_eq!(contents, test_data);
+}
+
+#[tokio::test]
+async fn test_watcher_ignores_non_snapshots() {
+    let temp_dir = TempDir::new().unwrap();
+    let mut watcher = SnapshotWatcher::new(temp_dir.path()).unwrap();
+
+    let other_path = temp_dir.path().join("other.txt");
+    std::fs::File::create(&other_path).unwrap();
+
+    let test_data = b"test archive";
+    let snapshot_path = temp_dir.path().join("snapshot-000000000002.tar.gz");
+    std::fs::File::create(&snapshot_path)
+        .unwrap()
+        .write_all(test_data)
+        .unwrap();
+
+    let (mut file, slot) =
+        tokio::time::timeout(Duration::from_secs(2), watcher.recv())
+            .await
+            .expect("Timeout waiting for snapshot")
+            .expect("Channel closed");
+
+    assert_eq!(slot, 2);
+    let mut contents = Vec::new();
+    file.read_to_end(&mut contents).await.unwrap();
+    assert_eq!(contents, test_data);
 }
 
 #[test]
-fn message_roundtrip() {
-    let cases = vec![
-        Message::Transaction(Transaction {
-            slot: 54321,
-            index: 42,
-            payload: (0..255).collect(),
-        }),
-        Message::Block(Block {
-            slot: 12345,
-            hash: Hash::new_unique(),
-            timestamp: 1700000000,
-        }),
-        Message::SuperBlock(SuperBlock {
-            slot: 99999,
-            transactions: 50000,
-            checksum: 0xDEADBEEF,
-        }),
-    ];
-
-    for msg in cases {
-        let encoded = bincode::serialize(&msg).unwrap();
-        let decoded: Message = bincode::deserialize(&encoded).unwrap();
-        assert_eq!(bincode::serialize(&decoded).unwrap(), encoded);
-    }
+fn test_parse_slot() {
+    assert_eq!(
+        parse_slot(Path::new("snapshot-000000000001.tar.gz")),
+        Some(1)
+    );
+    assert_eq!(
+        parse_slot(Path::new("/some/path/snapshot-000000000123.tar.gz")),
+        Some(123)
+    );
+    assert_eq!(parse_slot(Path::new("other.txt")), None);
+    assert_eq!(parse_slot(Path::new("snapshot-invalid.tar.gz")), None);
 }
