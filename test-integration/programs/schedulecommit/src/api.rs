@@ -219,7 +219,7 @@ pub fn schedule_commit_cpi_with_vault_instruction(
         AccountMeta::new(magic_context_id, false),
         AccountMeta::new_readonly(magic_program_id, false),
     ];
-    if args.has_vault {
+    if args.has_magic_vault {
         account_metas.push(AccountMeta {
             pubkey: dlp::pda::magic_fee_vault_pda_from_validator(&validator),
             is_writable: true,

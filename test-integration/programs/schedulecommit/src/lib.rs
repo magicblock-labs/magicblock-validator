@@ -84,7 +84,7 @@ pub struct ScheduleCommitCpiWithVaultArgs {
     pub players: Vec<Pubkey>,
     /// If true, the accounts will be undelegated after the commit
     pub undelegate: bool,
-    pub has_vault: bool,
+    pub has_magic_vault: bool,
 }
 
 #[derive(BorshSerialize, BorshDeserialize, Debug, Clone)]
@@ -664,7 +664,7 @@ pub fn process_schedulecommit_with_vault_cpi(
     let payer = next_account_info(accounts_iter)?;
     let magic_context = next_account_info(accounts_iter)?;
     let magic_program = next_account_info(accounts_iter)?;
-    let magic_fee_vault = if args.has_vault {
+    let magic_fee_vault = if args.has_magic_vault {
         Some(next_account_info(accounts_iter)?)
     } else {
         None
@@ -682,13 +682,6 @@ pub fn process_schedulecommit_with_vault_cpi(
         );
         return Err(ProgramError::InvalidArgument);
     }
-
-    // Then request the PDA accounts to be committed
-    let mut account_infos = vec![payer, magic_context];
-    if let Some(magic_fee_vault) = magic_fee_vault {
-        account_infos.push(magic_fee_vault);
-    }
-    account_infos.extend(remaining.iter());
 
     // Collect committees
     let committees = remaining.iter().collect::<Vec<_>>();

@@ -15,5 +15,3 @@ magicblock-delegation-program = { workspace = true }
 solana-rpc-client-api = { workspace = true }
 solana-sdk = { workspace = true }
 integration-test-tools = { workspace = true }
-[dependencies]
-log = "0.4.29"

@@ -274,7 +274,7 @@ mod tests {
     use test_kit::init_logger;
 
     use super::*;
-    use crate::utils::instruction_utils::InstructionUtils;
+    use crate::{utils::instruction_utils::InstructionUtils, validator};
 
     fn make_delegated_spl_ata_account(
         owner: &Pubkey,
@@ -1400,6 +1400,7 @@ mod tests {
         HashMap<Pubkey, AccountSharedData>,
         Vec<(Pubkey, AccountSharedData)>,
     ) {
+        validator::generate_validator_authority_if_needed();
         let fee_vault_pubkey = magic_fee_vault_pubkey();
 
         let mut account_data = {
@@ -1452,7 +1453,7 @@ mod tests {
         let program = Pubkey::new_unique();
         let committee = Pubkey::new_unique();
 
-        let nonce = ACTUAL_COMMIT_LIMIT + 1;
+        let nonce = ACTUAL_COMMIT_LIMIT;
         let (mut account_data, mut transaction_accounts) =
             prepare_delegated_payer_transaction(
                 &payer,
@@ -1480,21 +1481,18 @@ mod tests {
         );
 
         // Fee vault must have received exactly COMMIT_FEE_LAMPORTS
-        let vault = accounts
+        accounts
             .iter()
             .find(|a| a.lamports() == COMMIT_FEE_LAMPORTS)
             .expect("fee vault should have COMMIT_FEE_LAMPORTS");
 
-        assert_eq!(vault.lamports(), COMMIT_FEE_LAMPORTS);
-
         // Payer must have been debited
-        let payer_acc = accounts
+        accounts
             .iter()
             .find(|a| {
                 a.lamports() == 1_000_000 - COMMIT_FEE_LAMPORTS && a.delegated()
             })
             .expect("payer should have been debited");
-        assert_eq!(payer_acc.lamports(), 1_000_000 - COMMIT_FEE_LAMPORTS);
     }
 
     #[test]
@@ -1504,8 +1502,8 @@ mod tests {
         let payer =
             Keypair::from_seed(b"delegated_payer_only_above_limit_").unwrap();
         let program = Pubkey::new_unique();
-        let committee_above = Pubkey::new_unique(); // nonce > limit → charged
-        let committee_at = Pubkey::new_unique(); // nonce == limit → free
+        let committee_above = Pubkey::new_unique(); // nonce == limit → charged
+        let committee_at = Pubkey::new_unique(); // nonce < limit → free
 
         let mut per_account = HashMap::new();
         per_account.insert(committee_above, ACTUAL_COMMIT_LIMIT);

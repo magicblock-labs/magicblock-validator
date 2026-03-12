@@ -260,7 +260,7 @@ fn get_vault_prepared() -> &'static ScheduleCommitTestContext {
                 ScheduleCommitCpiWithVaultArgs {
                     players: vec![player],
                     undelegate: false,
-                    has_vault: true,
+                    has_magic_vault: true,
                 },
             );
             let blockhash = ephem_client.get_latest_blockhash().unwrap();
@@ -330,7 +330,7 @@ fn test_payer_delegated_vault_absent_error() {
             ScheduleCommitCpiWithVaultArgs {
                 players: vec![committee.0.pubkey()],
                 undelegate: false,
-                has_vault: false,
+                has_magic_vault: false,
             },
         );
 
@@ -391,7 +391,7 @@ fn test_no_fee_charged_within_actual_commit_limit() {
             ScheduleCommitCpiWithVaultArgs {
                 players: vec![committee.0.pubkey()],
                 undelegate: false,
-                has_vault: true,
+                has_magic_vault: true,
             },
         );
 
@@ -463,7 +463,7 @@ fn test_fee_charged_and_vault_credited_after_actual_commit_limit() {
             ScheduleCommitCpiWithVaultArgs {
                 players: vec![committee.0.pubkey()],
                 undelegate: false,
-                has_vault: true,
+                has_magic_vault: true,
             },
         );
 

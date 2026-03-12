@@ -928,7 +928,7 @@ pub(crate) fn calculate_commit_fee(
 ) -> Result<u64, InstructionError> {
     accounts.iter().try_fold(0u64, |fee, account| {
         if let Some(nonce) = commit_nonces.get(&account.pubkey) {
-            if *nonce + 1 > ACTUAL_COMMIT_LIMIT {
+            if nonce >= &ACTUAL_COMMIT_LIMIT {
                 Ok(fee + COMMIT_FEE_LAMPORTS)
             } else {
                 Ok(fee)
