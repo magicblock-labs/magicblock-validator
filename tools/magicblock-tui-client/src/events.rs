@@ -1,16 +1,18 @@
 use std::time::Duration;
 
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
+use ratatui::layout::Rect;
 
 use crate::{
     state::{Tab, TuiState, ViewMode},
+    ui::detail_popup_viewport_for_terminal,
     utils::url_encode,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EventAction {
     None,
-    FetchTransaction(String),
+    FetchTransaction { rpc_url: String, signature: String },
     OpenUrl(String),
 }
 
@@ -25,10 +27,10 @@ pub fn poll_event(timeout: Duration) -> Option<Event> {
 pub fn handle_event(
     state: &mut TuiState,
     event: Event,
-    visible_height: usize,
+    terminal_area: Rect,
 ) -> EventAction {
     if let Event::Key(key) = event {
-        handle_key(state, key, visible_height)
+        handle_key(state, key, terminal_area)
     } else {
         EventAction::None
     }
@@ -37,8 +39,10 @@ pub fn handle_event(
 fn handle_key(
     state: &mut TuiState,
     key: KeyEvent,
-    visible_height: usize,
+    terminal_area: Rect,
 ) -> EventAction {
+    let visible_height = terminal_area.height.saturating_sub(9) as usize;
+
     if state.view_mode == ViewMode::Detail {
         match key.code {
             KeyCode::Esc | KeyCode::Char('q') => state.close_tx_detail(),
@@ -51,7 +55,7 @@ fn handle_key(
                 if let Some(detail) = &state.tx_detail {
                     let url = match detail.selected_account_address() {
                         Some(account) => {
-                            build_account_explorer_url(&state.rpc_url, account)
+                            build_account_explorer_url(&detail.rpc_url, account)
                         }
                         None => detail.explorer_url.clone(),
                     };
@@ -68,6 +72,32 @@ fn handle_key(
             KeyCode::Down | KeyCode::Char('j') => {
                 if let Some(detail) = &mut state.tx_detail {
                     detail.move_selection_down();
+                }
+            }
+            KeyCode::PageUp => {
+                if let Some(detail) = &mut state.tx_detail {
+                    let page_size =
+                        detail_popup_page_size(detail, terminal_area);
+                    detail.scroll_content_page_up(page_size);
+                }
+            }
+            KeyCode::PageDown => {
+                if let Some(detail) = &mut state.tx_detail {
+                    let (page_size, max_scroll) =
+                        detail_popup_scroll_metrics(detail, terminal_area);
+                    detail.scroll_content_page_down(page_size, max_scroll);
+                }
+            }
+            KeyCode::Home => {
+                if let Some(detail) = &mut state.tx_detail {
+                    detail.scroll_content_home();
+                }
+            }
+            KeyCode::End => {
+                if let Some(detail) = &mut state.tx_detail {
+                    let (_, max_scroll) =
+                        detail_popup_scroll_metrics(detail, terminal_area);
+                    detail.scroll_content_end(max_scroll);
                 }
             }
             _ => {}
@@ -98,7 +128,16 @@ fn handle_key(
         return EventAction::None;
     }
 
-    if state.active_tab == Tab::Transactions {
+    if state.is_transaction_tab() {
+        if key.modifiers.contains(KeyModifiers::ALT) {
+            if let KeyCode::Char(ch) = key.code {
+                if let Some(shortcut) = digit_shortcut(ch) {
+                    state.select_tab_by_shortcut(shortcut);
+                    return EventAction::None;
+                }
+            }
+        }
+
         match key {
             KeyEvent {
                 code: KeyCode::Backspace,
@@ -135,27 +174,34 @@ fn handle_key(
     match key.code {
         KeyCode::Char('q') => state.should_quit = true,
         KeyCode::Enter => {
-            if state.active_tab == Tab::Transactions {
-                if let Some(tx) = state.selected_transaction() {
-                    return EventAction::FetchTransaction(tx.signature.clone());
+            if state.is_transaction_tab() {
+                if let (Some(tx), Some(rpc_url)) = (
+                    state.selected_transaction(),
+                    state.active_transaction_rpc_url(),
+                ) {
+                    return EventAction::FetchTransaction {
+                        rpc_url: rpc_url.to_string(),
+                        signature: tx.signature.clone(),
+                    };
                 }
             }
         }
         KeyCode::Left | KeyCode::Char('h') => {
-            state.active_tab = state.active_tab.prev();
+            state.prev_tab();
         }
         KeyCode::Right | KeyCode::Char('l') => {
-            state.active_tab = state.active_tab.next();
+            state.next_tab();
         }
         KeyCode::Tab => {
-            state.active_tab = state.active_tab.next();
+            state.next_tab();
         }
         KeyCode::BackTab => {
-            state.active_tab = state.active_tab.prev();
+            state.prev_tab();
         }
-        KeyCode::Char('1') => state.active_tab = Tab::Transactions,
-        KeyCode::Char('2') => state.active_tab = Tab::Logs,
-        KeyCode::Char('3') => state.active_tab = Tab::Config,
+        KeyCode::Char('1') => state.select_tab_by_shortcut(1),
+        KeyCode::Char('2') => state.select_tab_by_shortcut(2),
+        KeyCode::Char('3') => state.select_tab_by_shortcut(3),
+        KeyCode::Char('4') => state.select_tab_by_shortcut(4),
         KeyCode::Up | KeyCode::Char('k') => state.scroll_up(),
         KeyCode::Down | KeyCode::Char('j') => state.scroll_down(visible_height),
         KeyCode::PageUp => {
@@ -170,9 +216,8 @@ fn handle_key(
         }
         KeyCode::Home => match state.active_tab {
             Tab::Logs => state.log_scroll = 0,
-            Tab::Transactions => {
-                state.tx_scroll = 0;
-                state.selected_tx = 0;
+            Tab::Transactions | Tab::RemoteTransactions => {
+                state.scroll_transactions_home();
             }
             Tab::Config => {}
         },
@@ -181,13 +226,8 @@ fn handle_key(
                 state.log_scroll =
                     state.logs.len().saturating_sub(visible_height);
             }
-            Tab::Transactions => {
-                let filtered_len = state.filtered_transactions_len();
-                if filtered_len > 0 {
-                    state.selected_tx = filtered_len - 1;
-                    state.tx_scroll =
-                        filtered_len.saturating_sub(visible_height);
-                }
+            Tab::Transactions | Tab::RemoteTransactions => {
+                state.scroll_transactions_end(visible_height);
             }
             Tab::Config => {}
         },
@@ -195,6 +235,16 @@ fn handle_key(
     }
 
     EventAction::None
+}
+
+fn digit_shortcut(ch: char) -> Option<u8> {
+    match ch {
+        '1' => Some(1),
+        '2' => Some(2),
+        '3' => Some(3),
+        '4' => Some(4),
+        _ => None,
+    }
 }
 
 fn build_account_explorer_url(rpc_url: &str, account: &str) -> String {
@@ -205,12 +255,34 @@ fn build_account_explorer_url(rpc_url: &str, account: &str) -> String {
     )
 }
 
+fn detail_popup_page_size(
+    detail: &crate::state::TransactionDetail,
+    area: Rect,
+) -> usize {
+    detail_popup_viewport_for_terminal(detail, area.width, area.height)
+        .map(|viewport| viewport.inner_height.max(1))
+        .unwrap_or(1)
+}
+
+fn detail_popup_scroll_metrics(
+    detail: &crate::state::TransactionDetail,
+    area: Rect,
+) -> (usize, usize) {
+    detail_popup_viewport_for_terminal(detail, area.width, area.height)
+        .map(|viewport| (viewport.inner_height.max(1), viewport.max_scroll))
+        .unwrap_or((1, 0))
+}
+
 #[cfg(test)]
 mod tests {
     use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
+    use ratatui::layout::Rect;
 
     use super::{handle_event, EventAction};
-    use crate::state::{Tab, TransactionDetail, TuiConfig, TuiState, ViewMode};
+    use crate::state::{
+        Tab, TransactionAccount, TransactionDetail, TuiConfig, TuiState,
+        ViewMode,
+    };
 
     fn config() -> TuiConfig {
         TuiConfig {
@@ -232,6 +304,14 @@ mod tests {
         Event::Key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL))
     }
 
+    fn terminal_area() -> Rect {
+        Rect::new(0, 0, 120, 19)
+    }
+
+    fn account(pubkey: &str) -> TransactionAccount {
+        TransactionAccount::new(pubkey, false, false)
+    }
+
     #[test]
     fn ctrl_c_closes_detail_view() {
         let mut state = TuiState::new(config());
@@ -244,11 +324,13 @@ mod tests {
             logs: vec![],
             accounts: vec![],
             error: None,
+            rpc_url: "http://127.0.0.1:8899".to_string(),
             explorer_url: "https://example.com".to_string(),
             selected_account: None,
+            detail_scroll: 0,
         });
 
-        let action = handle_event(&mut state, ctrl_c(), 10);
+        let action = handle_event(&mut state, ctrl_c(), terminal_area());
 
         assert_eq!(action, EventAction::None);
         assert!(matches!(state.view_mode, ViewMode::List));
@@ -261,7 +343,7 @@ mod tests {
         let mut state = TuiState::new(config());
         assert!(matches!(state.view_mode, ViewMode::List));
 
-        let _ = handle_event(&mut state, ctrl_c(), 10);
+        let _ = handle_event(&mut state, ctrl_c(), terminal_area());
 
         assert!(state.should_quit);
     }
@@ -276,16 +358,18 @@ mod tests {
             fee: 0,
             compute_units: None,
             logs: vec![],
-            accounts: vec!["11111111111111111111111111111111".to_string()],
+            accounts: vec![account("11111111111111111111111111111111")],
             error: None,
+            rpc_url: "http://127.0.0.1:8898".to_string(),
             explorer_url: "https://explorer.solana.com/tx/sig".to_string(),
             selected_account: Some(0),
+            detail_scroll: 0,
         });
 
         let action = handle_event(
             &mut state,
             Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
-            10,
+            terminal_area(),
         );
 
         match action {
@@ -293,6 +377,8 @@ mod tests {
                 assert!(
                     url.contains("/address/11111111111111111111111111111111")
                 );
+                assert!(url
+                    .contains("customUrl=http%3A%2F%2F127%2E0%2E0%2E1%3A8898"));
             }
             other => panic!("expected OpenUrl action, got {:?}", other),
         }
@@ -310,16 +396,18 @@ mod tests {
             fee: 0,
             compute_units: None,
             logs: vec![],
-            accounts: vec!["acc-1".to_string(), "acc-2".to_string()],
+            accounts: vec![account("acc-1"), account("acc-2")],
             error: None,
+            rpc_url: "http://127.0.0.1:8899".to_string(),
             explorer_url: "https://explorer.solana.com/tx/sig".to_string(),
             selected_account: Some(0),
+            detail_scroll: 0,
         });
 
         let _ = handle_event(
             &mut state,
             Event::Key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE)),
-            10,
+            terminal_area(),
         );
         assert_eq!(
             state.tx_detail.as_ref().and_then(|d| d.selected_account),
@@ -329,7 +417,7 @@ mod tests {
         let _ = handle_event(
             &mut state,
             Event::Key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE)),
-            10,
+            terminal_area(),
         );
         assert_eq!(
             state.tx_detail.as_ref().and_then(|d| d.selected_account),
@@ -339,7 +427,7 @@ mod tests {
         let _ = handle_event(
             &mut state,
             Event::Key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE)),
-            10,
+            terminal_area(),
         );
         assert_eq!(
             state.tx_detail.as_ref().and_then(|d| d.selected_account),
@@ -355,7 +443,7 @@ mod tests {
         let _ = handle_event(
             &mut state,
             Event::Key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE)),
-            10,
+            terminal_area(),
         );
 
         assert_eq!(state.tx_filter_query(), "q");
@@ -370,17 +458,17 @@ mod tests {
         let _ = handle_event(
             &mut state,
             Event::Key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE)),
-            10,
+            terminal_area(),
         );
         let _ = handle_event(
             &mut state,
             Event::Key(KeyEvent::new(KeyCode::Char('b'), KeyModifiers::NONE)),
-            10,
+            terminal_area(),
         );
         let _ = handle_event(
             &mut state,
             Event::Key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE)),
-            10,
+            terminal_area(),
         );
         assert_eq!(state.tx_filter_query(), "a");
 
@@ -390,8 +478,93 @@ mod tests {
                 KeyCode::Char('u'),
                 KeyModifiers::CONTROL,
             )),
-            10,
+            terminal_area(),
         );
         assert_eq!(state.tx_filter_query(), "");
+    }
+
+    #[test]
+    fn digits_are_available_in_transaction_filter() {
+        let mut state = TuiState::new(TuiConfig {
+            remote_rpc_url: "http://127.0.0.1:8898".to_string(),
+            ..config()
+        });
+        state.active_tab = Tab::Transactions;
+
+        let _ = handle_event(
+            &mut state,
+            Event::Key(KeyEvent::new(KeyCode::Char('2'), KeyModifiers::NONE)),
+            terminal_area(),
+        );
+
+        assert_eq!(state.active_tab, Tab::Transactions);
+        assert_eq!(state.tx_filter_query(), "2");
+    }
+
+    #[test]
+    fn alt_digit_shortcuts_switch_tabs_from_transaction_tabs() {
+        let mut state = TuiState::new(TuiConfig {
+            remote_rpc_url: "http://127.0.0.1:8898".to_string(),
+            ..config()
+        });
+        state.active_tab = Tab::Transactions;
+
+        let _ = handle_event(
+            &mut state,
+            Event::Key(KeyEvent::new(KeyCode::Char('2'), KeyModifiers::ALT)),
+            terminal_area(),
+        );
+
+        assert_eq!(state.active_tab, Tab::RemoteTransactions);
+        assert_eq!(state.tx_filter_query(), "");
+    }
+
+    #[test]
+    fn page_down_scrolls_detail_popup_logs() {
+        let mut state = TuiState::new(config());
+        state.show_tx_detail(TransactionDetail {
+            signature: "sig".to_string(),
+            slot: 1,
+            success: true,
+            fee: 0,
+            compute_units: None,
+            logs: vec!["x".repeat(180); 12],
+            accounts: vec![],
+            error: None,
+            rpc_url: "http://127.0.0.1:8899".to_string(),
+            explorer_url: "https://explorer.solana.com/tx/sig".to_string(),
+            selected_account: None,
+            detail_scroll: 0,
+        });
+
+        let _ = handle_event(
+            &mut state,
+            Event::Key(KeyEvent::new(KeyCode::PageDown, KeyModifiers::NONE)),
+            terminal_area(),
+        );
+
+        assert!(
+            state
+                .tx_detail
+                .as_ref()
+                .map(|d| d.detail_scroll)
+                .unwrap_or(0)
+                > 0
+        );
+
+        let _ = handle_event(
+            &mut state,
+            Event::Key(KeyEvent::new(KeyCode::Home, KeyModifiers::NONE)),
+            terminal_area(),
+        );
+
+        assert_eq!(
+            state
+                .tx_detail
+                .as_ref()
+                .map(|d| d.detail_scroll)
+                .unwrap_or(1),
+            0
+        );
     }
 }

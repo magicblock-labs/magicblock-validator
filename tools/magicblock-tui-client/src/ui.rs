@@ -2,17 +2,30 @@ use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Tabs},
+    widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Tabs, Wrap},
     Frame,
 };
 use tracing::Level;
 
-use crate::state::{Tab, TuiState, ViewMode, MAX_DETAIL_ACCOUNTS};
+use crate::state::{
+    Tab, TransactionAccount, TransactionDetail, TransactionSource, TuiState,
+    ViewMode, MAX_DETAIL_ACCOUNTS,
+};
 
 const CYAN: Color = Color::Cyan;
 const GREEN: Color = Color::Green;
 const DARK_GRAY: Color = Color::DarkGray;
 const WHITE: Color = Color::White;
+const MIN_DETAIL_POPUP_WIDTH: u16 = 20;
+const MIN_DETAIL_POPUP_HEIGHT: u16 = 8;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct DetailPopupViewport {
+    pub popup_area: Rect,
+    pub inner_width: usize,
+    pub inner_height: usize,
+    pub max_scroll: usize,
+}
 
 pub fn render(frame: &mut Frame, state: &TuiState) {
     let chunks = Layout::default()
@@ -88,19 +101,54 @@ fn render_tick_bar(filled: usize, total: usize) -> Line<'static> {
 }
 
 fn render_tabs(frame: &mut Frame, area: Rect, state: &TuiState) {
-    let tx_count = state.transactions.len();
-    let filtered_tx_count = state.filtered_transactions_len();
-    let tx_title = if state.tx_filter_query().is_empty() {
-        format!("Transactions ({})", tx_count)
+    let local_tx_count = state.transaction_count(TransactionSource::Local);
+    let local_filtered_tx_count =
+        state.filtered_transactions_len_for(TransactionSource::Local);
+    let tx_title = if state
+        .tx_filter_query_for(TransactionSource::Local)
+        .is_empty()
+    {
+        format!("Transactions ({})", local_tx_count)
     } else {
-        format!("Transactions ({}/{})", filtered_tx_count, tx_count)
+        format!(
+            "Transactions ({}/{})",
+            local_filtered_tx_count, local_tx_count
+        )
     };
-    let titles = vec![tx_title, "Logs".to_string(), "Config".to_string()];
+    let remote_tx_title = if state.has_remote_transactions() {
+        let remote_tx_count =
+            state.transaction_count(TransactionSource::Remote);
+        let remote_filtered_tx_count =
+            state.filtered_transactions_len_for(TransactionSource::Remote);
+        if state
+            .tx_filter_query_for(TransactionSource::Remote)
+            .is_empty()
+        {
+            format!("Remote Transactions ({})", remote_tx_count)
+        } else {
+            format!(
+                "Remote Transactions ({}/{})",
+                remote_filtered_tx_count, remote_tx_count
+            )
+        }
+    } else {
+        String::new()
+    };
+    let mut titles = vec![tx_title];
+    if state.has_remote_transactions() {
+        titles.push(remote_tx_title);
+    }
+    titles.push("Logs".to_string());
+    titles.push("Config".to_string());
 
-    let selected = match state.active_tab {
-        Tab::Transactions => 0,
-        Tab::Logs => 1,
-        Tab::Config => 2,
+    let selected = match (state.active_tab, state.has_remote_transactions()) {
+        (Tab::Transactions, _) => 0,
+        (Tab::RemoteTransactions, true) => 1,
+        (Tab::Logs, true) => 2,
+        (Tab::Config, true) => 3,
+        (Tab::Logs, false) => 1,
+        (Tab::Config, false) => 2,
+        (Tab::RemoteTransactions, false) => 0,
     };
 
     let tabs = Tabs::new(titles)
@@ -118,7 +166,9 @@ fn render_tabs(frame: &mut Frame, area: Rect, state: &TuiState) {
 fn render_content(frame: &mut Frame, area: Rect, state: &TuiState) {
     match state.active_tab {
         Tab::Logs => render_logs(frame, area, state),
-        Tab::Transactions => render_transactions(frame, area, state),
+        Tab::Transactions | Tab::RemoteTransactions => {
+            render_transactions(frame, area, state)
+        }
         Tab::Config => render_config(frame, area, state),
     }
 }
@@ -197,14 +247,14 @@ fn render_transactions(frame: &mut Frame, area: Rect, state: &TuiState) {
         filtered_transactions
             .iter()
             .enumerate()
-            .skip(state.tx_scroll)
+            .skip(state.active_transaction_scroll())
             .take(visible_count)
             .map(|(idx, tx)| {
                 let timestamp = tx.timestamp.format("%H:%M:%S%.3f");
                 let status_color =
                     if tx.success { Color::Green } else { Color::Red };
                 let status_char = if tx.success { "✓" } else { "✗" };
-                let is_selected = idx == state.selected_tx;
+                let is_selected = idx == state.active_transaction_selected();
 
                 let line = Line::from(vec![
                     Span::styled(
@@ -329,10 +379,12 @@ fn render_footer(frame: &mut Frame, area: Rect, state: &TuiState) {
             Span::styled(" close │ ", Style::default().fg(DARK_GRAY)),
             Span::styled("(↑↓)", Style::default().fg(WHITE)),
             Span::styled(" select │ ", Style::default().fg(DARK_GRAY)),
+            Span::styled("(PgUp/PgDn)", Style::default().fg(WHITE)),
+            Span::styled(" scroll │ ", Style::default().fg(DARK_GRAY)),
             Span::styled("(Enter)", Style::default().fg(WHITE)),
             Span::styled(" open in browser", Style::default().fg(DARK_GRAY)),
         ])
-    } else if state.active_tab == Tab::Transactions {
+    } else if state.is_transaction_tab() {
         Line::from(vec![
             Span::styled("(Esc)", Style::default().fg(WHITE)),
             Span::styled(" quit │ ", Style::default().fg(DARK_GRAY)),
@@ -372,35 +424,88 @@ fn render_tx_detail_popup(frame: &mut Frame, state: &TuiState) {
         return;
     };
 
-    const MIN_POPUP_WIDTH: u16 = 20;
-    const MIN_POPUP_HEIGHT: u16 = 8;
-
-    let area = frame.area();
-    if area.width < MIN_POPUP_WIDTH || area.height < MIN_POPUP_HEIGHT {
+    let Some(viewport) = detail_popup_viewport(detail, frame.area()) else {
         return;
+    };
+
+    // Hard-clear the popup rectangle to avoid stale characters from the
+    // underlying panes when detail lines are shorter than the available width.
+    frame.render_widget(Clear, viewport.popup_area);
+
+    let block = Block::default()
+        .title(" Transaction Details ")
+        .title_style(Style::default().fg(CYAN).add_modifier(Modifier::BOLD))
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(CYAN))
+        .style(Style::default().bg(Color::Rgb(20, 20, 30)));
+
+    let paragraph =
+        Paragraph::new(build_tx_detail_lines(detail, viewport.inner_width))
+            .block(block)
+            .wrap(Wrap { trim: false })
+            .scroll((
+                detail
+                    .detail_scroll
+                    .min(viewport.max_scroll)
+                    .min(u16::MAX as usize) as u16,
+                0,
+            ));
+    frame.render_widget(paragraph, viewport.popup_area);
+}
+
+pub(crate) fn detail_popup_viewport_for_terminal(
+    detail: &TransactionDetail,
+    terminal_width: u16,
+    terminal_height: u16,
+) -> Option<DetailPopupViewport> {
+    detail_popup_viewport(
+        detail,
+        Rect::new(0, 0, terminal_width, terminal_height),
+    )
+}
+
+fn detail_popup_viewport(
+    detail: &TransactionDetail,
+    area: Rect,
+) -> Option<DetailPopupViewport> {
+    if area.width < MIN_DETAIL_POPUP_WIDTH
+        || area.height < MIN_DETAIL_POPUP_HEIGHT
+    {
+        return None;
     }
 
     let popup_width = ((area.width * 80) / 100)
-        .max(MIN_POPUP_WIDTH)
+        .max(MIN_DETAIL_POPUP_WIDTH)
         .min(area.width);
     let popup_height = ((area.height * 80) / 100)
-        .max(MIN_POPUP_HEIGHT)
+        .max(MIN_DETAIL_POPUP_HEIGHT)
         .min(area.height);
     let popup_x = area.width.saturating_sub(popup_width) / 2;
     let popup_y = area.height.saturating_sub(popup_height) / 2;
     let popup_area = Rect::new(popup_x, popup_y, popup_width, popup_height);
+    let inner_width = popup_width.saturating_sub(2) as usize;
+    let inner_height = popup_height.saturating_sub(2) as usize;
+    let lines = build_tx_detail_lines(detail, inner_width);
+    let max_scroll = detail_scroll_max(&lines, inner_width, inner_height);
 
-    // Hard-clear the popup rectangle to avoid stale characters from the
-    // underlying panes when detail lines are shorter than the available width.
-    frame.render_widget(Clear, popup_area);
+    Some(DetailPopupViewport {
+        popup_area,
+        inner_width,
+        inner_height,
+        max_scroll,
+    })
+}
 
+fn build_tx_detail_lines(
+    detail: &TransactionDetail,
+    inner_width: usize,
+) -> Vec<Line<'static>> {
     let status_color = if detail.success {
         Color::Green
     } else {
         Color::Red
     };
     let status_text = if detail.success { "Success" } else { "Failed" };
-    let inner_width = popup_width.saturating_sub(2) as usize;
     let label_style = Style::default().fg(DARK_GRAY);
 
     let mut lines = vec![
@@ -408,26 +513,22 @@ fn render_tx_detail_popup(frame: &mut Frame, state: &TuiState) {
             "Signature: ",
             &detail.signature,
             Style::default().fg(CYAN),
-            inner_width,
         ),
         Line::from(""),
         detail_field_line(
             "Slot:      ",
             &detail.slot.to_string(),
             Style::default().fg(WHITE),
-            inner_width,
         ),
         detail_field_line(
             "Status:    ",
             status_text,
             Style::default().fg(status_color),
-            inner_width,
         ),
         detail_field_line(
             "Fee:       ",
             &format!("{} lamports", detail.fee),
             Style::default().fg(WHITE),
-            inner_width,
         ),
     ];
 
@@ -436,7 +537,6 @@ fn render_tx_detail_popup(frame: &mut Frame, state: &TuiState) {
             "Compute:   ",
             &format!("{} units", cu),
             Style::default().fg(WHITE),
-            inner_width,
         ));
     }
 
@@ -454,16 +554,13 @@ fn render_tx_detail_popup(frame: &mut Frame, state: &TuiState) {
     let explorer_prefix =
         if explorer_selected { "▶ " } else { "  " }.to_string();
     let explorer_label = "Explorer:  ".to_string();
-    let explorer_value = truncate_with_ellipsis(
-        &detail.explorer_url,
-        inner_width
-            .saturating_sub(explorer_prefix.chars().count())
-            .saturating_sub(explorer_label.chars().count()),
-    );
     lines.push(Line::from(vec![
         Span::styled(explorer_prefix, Style::default().fg(CYAN)),
         Span::styled(explorer_label, label_style),
-        Span::styled(explorer_value, explorer_style),
+        Span::styled(
+            compact_explorer_url(&detail.explorer_url),
+            explorer_style,
+        ),
     ]));
 
     if let Some(err) = &detail.error {
@@ -472,7 +569,6 @@ fn render_tx_detail_popup(frame: &mut Frame, state: &TuiState) {
             "Error:     ",
             err,
             Style::default().fg(Color::Red),
-            inner_width,
         ));
     }
 
@@ -485,34 +581,12 @@ fn render_tx_detail_popup(frame: &mut Frame, state: &TuiState) {
         for (i, acc) in
             detail.accounts.iter().take(MAX_DETAIL_ACCOUNTS).enumerate()
         {
-            let is_selected = detail.selected_account == Some(i);
-            let prefix = if is_selected {
-                format!("▶ [{}] ", i)
-            } else {
-                format!("  [{}] ", i)
-            };
-            let truncated = truncate_with_ellipsis(
+            lines.push(detail_account_line(
+                i,
                 acc,
-                inner_width.saturating_sub(prefix.chars().count()),
-            );
-            lines.push(Line::from(vec![
-                Span::styled(
-                    prefix,
-                    if is_selected {
-                        Style::default().fg(CYAN)
-                    } else {
-                        label_style
-                    },
-                ),
-                Span::styled(
-                    truncated,
-                    if is_selected {
-                        Style::default().fg(CYAN).add_modifier(Modifier::BOLD)
-                    } else {
-                        Style::default().fg(WHITE)
-                    },
-                ),
-            ]));
+                detail.selected_account == Some(i),
+                inner_width,
+            ));
         }
         if detail.accounts.len() > MAX_DETAIL_ACCOUNTS {
             lines.push(Line::from(Span::styled(
@@ -531,52 +605,156 @@ fn render_tx_detail_popup(frame: &mut Frame, state: &TuiState) {
             "Logs:",
             Style::default().fg(DARK_GRAY).add_modifier(Modifier::BOLD),
         )));
-        let max_logs = (popup_height as usize).saturating_sub(lines.len() + 4);
-        for log in detail.logs.iter().take(max_logs) {
-            let truncated =
-                truncate_with_ellipsis(log, inner_width.saturating_sub(2));
+        for log in &detail.logs {
             lines.push(Line::from(Span::styled(
-                format!("  {}", truncated),
+                format!("  {}", sanitize_inline(log)),
                 Style::default().fg(Color::Rgb(150, 150, 150)),
-            )));
-        }
-        if detail.logs.len() > max_logs {
-            lines.push(Line::from(Span::styled(
-                format!(
-                    "  ... and {} more lines",
-                    detail.logs.len() - max_logs
-                ),
-                Style::default().fg(DARK_GRAY),
             )));
         }
     }
 
-    let block = Block::default()
-        .title(" Transaction Details ")
-        .title_style(Style::default().fg(CYAN).add_modifier(Modifier::BOLD))
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(CYAN))
-        .style(Style::default().bg(Color::Rgb(20, 20, 30)));
+    lines
+}
 
-    let paragraph = Paragraph::new(lines).block(block);
-    frame.render_widget(paragraph, popup_area);
+fn detail_scroll_max(
+    lines: &[Line<'_>],
+    inner_width: usize,
+    inner_height: usize,
+) -> usize {
+    total_wrapped_height(lines, inner_width).saturating_sub(inner_height.max(1))
+}
+
+fn total_wrapped_height(lines: &[Line<'_>], inner_width: usize) -> usize {
+    lines
+        .iter()
+        .map(|line| wrapped_line_height(line, inner_width))
+        .sum()
+}
+
+fn wrapped_line_height(line: &Line<'_>, inner_width: usize) -> usize {
+    let text = line
+        .spans
+        .iter()
+        .map(|span| span.content.as_ref())
+        .collect::<String>();
+    wrapped_text_height(&text, inner_width)
+}
+
+fn wrapped_text_height(text: &str, inner_width: usize) -> usize {
+    let inner_width = inner_width.max(1);
+    text.split('\n')
+        .map(|segment| {
+            let char_count = segment.chars().count();
+            char_count.max(1).div_ceil(inner_width)
+        })
+        .sum()
 }
 
 fn detail_field_line(
     label: &str,
     value: &str,
     value_style: Style,
+) -> Line<'static> {
+    Line::from(vec![
+        Span::styled(label.to_string(), Style::default().fg(DARK_GRAY)),
+        Span::styled(sanitize_inline(value), value_style),
+    ])
+}
+
+fn detail_account_line(
+    index: usize,
+    account: &TransactionAccount,
+    is_selected: bool,
     inner_width: usize,
 ) -> Line<'static> {
-    let label_owned = label.to_string();
-    let value_owned = truncate_with_ellipsis(
-        value,
-        inner_width.saturating_sub(label_owned.chars().count()),
+    let prefix = if is_selected {
+        format!("▶ [{}] ", index)
+    } else {
+        format!("  [{}] ", index)
+    };
+    let marker_gap = 2;
+    let marker_width = 3;
+    let right_margin = 2;
+    let pubkey_width = inner_width
+        .saturating_sub(prefix.chars().count())
+        .saturating_sub(marker_gap + marker_width + right_margin);
+    let pubkey = pad_to_width(
+        truncate_with_ellipsis(&account.pubkey, pubkey_width),
+        pubkey_width,
     );
+    let prefix_style = if is_selected {
+        Style::default().fg(CYAN)
+    } else {
+        Style::default().fg(DARK_GRAY)
+    };
+    let pubkey_style = if is_selected {
+        Style::default().fg(CYAN).add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(WHITE)
+    };
+    let active_flag_style = if is_selected {
+        Style::default().fg(CYAN).add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(GREEN).add_modifier(Modifier::BOLD)
+    };
+
     Line::from(vec![
-        Span::styled(label_owned, Style::default().fg(DARK_GRAY)),
-        Span::styled(value_owned, value_style),
+        Span::styled(prefix, prefix_style),
+        Span::styled(pubkey, pubkey_style),
+        Span::raw("  "),
+        Span::styled(
+            if account.is_signer { "S" } else { " " },
+            active_flag_style,
+        ),
+        Span::raw(" "),
+        Span::styled(
+            if account.is_writable { "W" } else { " " },
+            active_flag_style,
+        ),
+        Span::raw(" ".repeat(right_margin)),
     ])
+}
+
+fn pad_to_width(value: String, width: usize) -> String {
+    let padding = width.saturating_sub(value.chars().count());
+    format!("{}{}", value, " ".repeat(padding))
+}
+
+fn sanitize_inline(value: &str) -> String {
+    value
+        .chars()
+        .map(|ch| match ch {
+            '\r' | '\n' | '\t' => ' ',
+            _ => ch,
+        })
+        .collect()
+}
+
+fn compact_explorer_url(url: &str) -> String {
+    let sanitized = sanitize_inline(url);
+    let visible = sanitized
+        .split_once('?')
+        .map(|(base, _)| base)
+        .unwrap_or(&sanitized);
+
+    match visible.rsplit_once('/') {
+        Some((prefix, tail)) if tail.chars().count() > 16 => format!(
+            "{}/{}.....{}",
+            prefix,
+            first_chars(tail, 8),
+            last_chars(tail, 8)
+        ),
+        _ => visible.to_string(),
+    }
+}
+
+fn first_chars(value: &str, count: usize) -> String {
+    value.chars().take(count).collect()
+}
+
+fn last_chars(value: &str, count: usize) -> String {
+    let chars: Vec<char> = value.chars().collect();
+    chars[chars.len().saturating_sub(count)..].iter().collect()
 }
 
 fn truncate_with_ellipsis(value: &str, max_chars: usize) -> String {
@@ -584,13 +762,7 @@ fn truncate_with_ellipsis(value: &str, max_chars: usize) -> String {
         return String::new();
     }
 
-    let sanitized: String = value
-        .chars()
-        .map(|ch| match ch {
-            '\r' | '\n' | '\t' => ' ',
-            _ => ch,
-        })
-        .collect();
+    let sanitized = sanitize_inline(value);
 
     if sanitized.chars().count() <= max_chars {
         return sanitized;
@@ -610,7 +782,11 @@ fn truncate_with_ellipsis(value: &str, max_chars: usize) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::truncate_with_ellipsis;
+    use super::{
+        compact_explorer_url, detail_account_line,
+        detail_popup_viewport_for_terminal, truncate_with_ellipsis,
+    };
+    use crate::state::{TransactionAccount, TransactionDetail};
 
     #[test]
     fn truncate_with_ellipsis_replaces_newlines() {
@@ -632,5 +808,63 @@ mod tests {
     fn truncate_with_ellipsis_handles_tiny_widths() {
         assert_eq!(truncate_with_ellipsis("abcdef", 3), "...".to_string());
         assert_eq!(truncate_with_ellipsis("abcdef", 2), "..".to_string());
+    }
+
+    #[test]
+    fn compact_explorer_url_drops_query_and_shortens_signature() {
+        assert_eq!(
+            compact_explorer_url(
+                "https://explorer.solana.com/tx/z1szQZcd1234567890ABCDEFGH?cluster=custom&customUrl=http://127.0.0.1:7799"
+            ),
+            "https://explorer.solana.com/tx/z1szQZcd.....ABCDEFGH"
+                .to_string()
+        );
+    }
+
+    #[test]
+    fn detail_account_line_aligns_signer_and_writable_markers() {
+        let short = TransactionAccount::new("short", true, true);
+        let long = TransactionAccount::new(
+            "11111111111111111111111111111111",
+            true,
+            true,
+        );
+
+        let short_line: String = detail_account_line(0, &short, false, 48)
+            .spans
+            .into_iter()
+            .map(|span| span.content.into_owned())
+            .collect();
+        let long_line: String = detail_account_line(1, &long, false, 48)
+            .spans
+            .into_iter()
+            .map(|span| span.content.into_owned())
+            .collect();
+
+        assert_eq!(short_line.find('S'), long_line.find('S'));
+        assert_eq!(short_line.find('W'), long_line.find('W'));
+    }
+
+    #[test]
+    fn detail_popup_reports_scroll_for_wrapped_logs() {
+        let detail = TransactionDetail {
+            signature: "sig".to_string(),
+            slot: 1,
+            success: true,
+            fee: 0,
+            compute_units: None,
+            logs: vec!["x".repeat(160); 12],
+            accounts: vec![],
+            error: None,
+            rpc_url: "http://127.0.0.1:7799".to_string(),
+            explorer_url: "https://explorer.solana.com/tx/sig".to_string(),
+            selected_account: None,
+            detail_scroll: 0,
+        };
+
+        let viewport =
+            detail_popup_viewport_for_terminal(&detail, 120, 19).unwrap();
+
+        assert!(viewport.max_scroll > 0);
     }
 }

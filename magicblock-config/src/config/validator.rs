@@ -1,6 +1,7 @@
 // src/config/validator.rs
 use serde::{Deserialize, Serialize};
 use solana_keypair::Keypair;
+use url::Url;
 
 use crate::{consts, types::SerdeKeypair};
 
@@ -13,6 +14,20 @@ pub struct ValidatorConfig {
 
     /// The validator's identity keypair, encoded in Base58.
     pub keypair: SerdeKeypair,
+
+    /// Replication role: Primary accepts client transactions, Replica replays from Primary.
+    pub replication_mode: ReplicationMode,
+}
+
+/// Defines the validator's role in a replication setup.
+#[derive(Deserialize, Serialize, Debug, Clone)]
+pub enum ReplicationMode {
+    // Validator which doesn't participate in replication
+    Standalone,
+    /// Validator which participates in replication: acting as either a primary or replicator
+    StandBy(Url),
+    /// Validator which participates in replication only as replicator (no takeover)
+    ReplicatOnly(Url),
 }
 
 impl Default for ValidatorConfig {
@@ -22,6 +37,7 @@ impl Default for ValidatorConfig {
         Self {
             basefee: consts::DEFAULT_BASE_FEE,
             keypair: SerdeKeypair(keypair),
+            replication_mode: ReplicationMode::Standalone,
         }
     }
 }
