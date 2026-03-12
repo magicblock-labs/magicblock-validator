@@ -676,8 +676,32 @@ where
     V: AccountsBank,
     C: Cloner,
 {
-    let mut join_set = JoinSet::new();
-    for request in accounts_to_clone {
+    // 1) Clone programs first so post-delegation action instructions can load
+    // their program accounts when action txs are sent during account cloning.
+    let mut program_join_set = JoinSet::new();
+    for acc in loaded_programs {
+        if !this.is_program_allowed(&acc.program_id) {
+            debug!(program_id = %acc.program_id, "Skipping clone of program");
+            continue;
+        }
+        let cloner = this.cloner.clone();
+        program_join_set.spawn(async move { cloner.clone_program(acc).await });
+    }
+    program_join_set
+        .join_all()
+        .await
+        .into_iter()
+        .collect::<ClonerResult<Vec<_>>>()?;
+
+    // 2) Clone accounts without post-delegation actions first so all action
+    // dependencies are materialized in the bank before action tx execution.
+    let (accounts_with_actions, accounts_without_actions): (Vec<_>, Vec<_>) =
+        accounts_to_clone
+            .into_iter()
+            .partition(|request| !request.delegation_actions.is_empty());
+
+    let mut accounts_join_set = JoinSet::new();
+    for request in accounts_without_actions {
         if tracing::enabled!(tracing::Level::TRACE) {
             trace!(
                 pubkey = %request.pubkey,
@@ -688,19 +712,32 @@ where
         };
 
         let cloner = this.cloner.clone();
-        join_set.spawn(async move { cloner.clone_account(request).await });
+        accounts_join_set
+            .spawn(async move { cloner.clone_account(request).await });
     }
+    accounts_join_set
+        .join_all()
+        .await
+        .into_iter()
+        .collect::<ClonerResult<Vec<_>>>()?;
 
-    for acc in loaded_programs {
-        if !this.is_program_allowed(&acc.program_id) {
-            debug!(program_id = %acc.program_id, "Skipping clone of program");
-            continue;
-        }
+    // 3) Finally clone accounts that carry post-delegation actions.
+    let mut action_accounts_join_set = JoinSet::new();
+    for request in accounts_with_actions {
+        if tracing::enabled!(tracing::Level::TRACE) {
+            trace!(
+                pubkey = %request.pubkey,
+                slot = request.account.remote_slot(),
+                owner = %request.account.owner(),
+                "Cloning account with delegation actions"
+            );
+        };
+
         let cloner = this.cloner.clone();
-        join_set.spawn(async move { cloner.clone_program(acc).await });
+        action_accounts_join_set
+            .spawn(async move { cloner.clone_account(request).await });
     }
-
-    join_set
+    action_accounts_join_set
         .join_all()
         .await
         .into_iter()

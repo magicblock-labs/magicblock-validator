@@ -10,7 +10,7 @@ use integration_test_tools::{
     loaded_accounts::DLP_TEST_AUTHORITY_BYTES, IntegrationTestContext,
 };
 use solana_sdk::{
-    pubkey::Pubkey, signature::Keypair, signer::Signer, system_instruction,
+    signature::Keypair, signer::Signer, system_instruction,
     transaction::Transaction,
 };
 use spl_token::{
@@ -38,10 +38,6 @@ fn token_balance_ephem(
         .get_token_account_balance(&account.pubkey())
         .ok()
         .and_then(|balance| balance.amount.parse::<u64>().ok())
-}
-
-fn account_exists_ephem(ctx: &IntegrationTestContext, pubkey: &Pubkey) -> bool {
-    ctx.try_ephem_client().unwrap().get_account(pubkey).is_ok()
 }
 
 #[test]
@@ -207,11 +203,6 @@ fn test_post_delegation_action_executes_spl_token_transfer_100() {
         )
         .unwrap();
     assert!(confirmed);
-
-    // assert!(
-    //     account_exists_ephem(&ctx, &spl_token::id()),
-    //     "spl-token program is missing on ephem; actions using spl-token cannot execute"
-    // );
 
     // Trigger delegated account clone; this is where post-delegation actions
     // are executed on ephem.
