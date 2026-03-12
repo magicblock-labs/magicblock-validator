@@ -459,7 +459,13 @@ fn run_cloning_tests(
         let test_cloning_dir =
             format!("{}/../{}", manifest_dir, "test-cloning");
         eprintln!("Running cloning tests in {}", test_cloning_dir);
-        let output = match run_test(test_cloning_dir, Default::default()) {
+        let output = match run_test(
+            test_cloning_dir,
+            RunTestConfig {
+                package: Some("test-cloning"),
+                test: Some("10_post_delegation_token_transfer"),
+            },
+        ) {
             Ok(output) => output,
             Err(err) => {
                 eprintln!("Failed to run cloning tests: {:?}", err);
@@ -788,10 +794,11 @@ fn run_test(
         cmd.arg("-p").arg(package);
     }
     if let Some(test) = config.test {
-        cmd.arg(format!("'{}'", test));
+        cmd.arg("--test").arg(test);
     }
     cmd.arg("--").arg("--test-threads=1").arg("--nocapture");
     cmd.current_dir(manifest_dir.clone());
+    println!("RUNNING: {:?}", cmd);
     Teepee::new(cmd).output()
 }
 

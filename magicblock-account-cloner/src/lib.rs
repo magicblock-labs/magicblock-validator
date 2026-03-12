@@ -112,6 +112,7 @@ impl ChainlinkCloner {
         &self,
         tx: SanitizedTransaction,
     ) -> ClonerResult<()> {
+        error!("send_sanitized_tx: {:?}", tx);
         self.tx_scheduler.execute(tx).await?;
         Ok(())
     }
@@ -556,6 +557,7 @@ impl ChainlinkCloner {
         actions: &DelegationActions,
         recent_blockhash: Hash,
     ) -> ClonerResult<Option<()>> {
+        error!("send_actions_tx: {:?}", actions);
         if actions.is_empty() {
             return Ok(None);
         }
@@ -567,7 +569,13 @@ impl ChainlinkCloner {
 
         let sanitized_tx = tx.sanitize(false)?;
 
-        Ok(Some(self.send_sanitized_tx(sanitized_tx).await?))
+        Ok(Some(
+            self.send_sanitized_tx(sanitized_tx)
+                .await
+                .inspect_err(|v| {
+                    error!("send_sanitized_tx  inspect_err: {:?}", v);
+                })?,
+        ))
     }
 }
 

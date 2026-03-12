@@ -1008,6 +1008,11 @@ where
             })
             .collect::<Vec<_>>();
 
+        error!(
+            "action_dependencies_to_fetch: {:#?}",
+            action_dependencies_to_fetch
+        );
+
         if !action_dependencies_to_fetch.is_empty() {
             if tracing::enabled!(tracing::Level::TRACE) {
                 trace!(

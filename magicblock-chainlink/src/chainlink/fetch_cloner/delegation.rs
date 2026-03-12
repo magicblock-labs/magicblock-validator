@@ -66,6 +66,7 @@ pub(crate) fn parse_delegation_record(
             delegation_record_pubkey,
             validator_keypair,
         )?;
+
         Ok((record, Some(actions)))
     }
 }
