@@ -159,6 +159,7 @@ pub struct TransactionDetail {
     pub rpc_url: String,
     pub explorer_url: String,
     pub selected_account: Option<usize>,
+    pub detail_scroll: usize,
 }
 
 pub const MAX_DETAIL_ACCOUNTS: usize = 10;
@@ -202,6 +203,30 @@ impl TransactionDetail {
             .and_then(|idx| self.accounts.get(idx))
             .map(|account| account.pubkey.as_str())
     }
+
+    pub fn scroll_content_page_up(&mut self, page_size: usize) {
+        self.detail_scroll =
+            self.detail_scroll.saturating_sub(page_size.max(1));
+    }
+
+    pub fn scroll_content_page_down(
+        &mut self,
+        page_size: usize,
+        max_scroll: usize,
+    ) {
+        self.detail_scroll = self
+            .detail_scroll
+            .saturating_add(page_size.max(1))
+            .min(max_scroll);
+    }
+
+    pub fn scroll_content_home(&mut self) {
+        self.detail_scroll = 0;
+    }
+
+    pub fn scroll_content_end(&mut self, max_scroll: usize) {
+        self.detail_scroll = max_scroll;
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Default)]
@@ -241,6 +266,15 @@ impl TransactionPaneState {
             self.selected_transaction().map(|tx| tx.signature.clone());
         let selected_tx_before = self.selected_tx;
         let tx_scroll_before = self.tx_scroll;
+
+        if let Some(existing_idx) = self
+            .transactions
+            .iter()
+            .position(|tx| tx.signature == entry.signature)
+        {
+            self.transactions.remove(existing_idx);
+        }
+
         self.transactions.push_front(entry);
 
         if had_transactions && !anchored_to_latest {
@@ -661,6 +695,7 @@ impl TuiState {
 
     pub fn show_tx_detail(&mut self, mut detail: TransactionDetail) {
         detail.clamp_selection();
+        detail.detail_scroll = 0;
         self.tx_detail = Some(detail);
         self.view_mode = ViewMode::Detail;
     }
@@ -871,6 +906,29 @@ mod tests {
         assert!(state.selected_transaction().is_none());
         assert_eq!(state.active_transaction_selected(), 0);
         assert_eq!(state.active_transaction_scroll(), 0);
+    }
+
+    #[test]
+    fn pushing_same_signature_updates_existing_transaction() {
+        let mut state = TuiState::new(config());
+        state.push_transaction(TransactionSource::Local, tx("sig-aaa"));
+        state.push_transaction(
+            TransactionSource::Local,
+            tx_with_accounts(
+                "sig-aaa",
+                vec!["Updated1111111111111111111111111111111111"],
+            ),
+        );
+
+        assert_eq!(state.transaction_count(TransactionSource::Local), 1);
+        let selected = state
+            .selected_transaction()
+            .expect("selected transaction should exist");
+        assert_eq!(selected.signature, "sig-aaa");
+        assert_eq!(
+            selected.accounts,
+            vec!["Updated1111111111111111111111111111111111".to_string()]
+        );
     }
 
     #[test]

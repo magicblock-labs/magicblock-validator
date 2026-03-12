@@ -24,6 +24,7 @@ use crate::{
 
 const PAYER_IDX: u16 = 0;
 const MAGIC_CONTEXT_IDX: u16 = PAYER_IDX + 1;
+#[cfg(test)]
 const ACCOUNTS_OFFSET: usize = MAGIC_CONTEXT_IDX as usize + 1;
 
 pub(crate) fn process_schedule_intent_bundle(
@@ -47,17 +48,6 @@ pub(crate) fn process_schedule_intent_bundle(
             );
             InstructionError::UnsupportedProgramId
         })?;
-
-    // Assert enough accounts
-    let ix_accs_len = ix_ctx.get_number_of_instruction_accounts() as usize;
-    if ix_accs_len <= ACCOUNTS_OFFSET {
-        ic_msg!(
-            invoke_context,
-            "ScheduleCommit ERR: not enough accounts to schedule commit ({}), need payer, signing program an account for each pubkey to be committed",
-            ix_accs_len
-        );
-        return Err(InstructionError::NotEnoughAccountKeys);
-    }
 
     // Assert Payer is signer
     let payer_pubkey =
@@ -202,6 +192,14 @@ fn get_parent_program_id(
     _: &mut InvokeContext,
 ) -> Result<Option<Pubkey>, InstructionError> {
     use solana_account::ReadableAccount;
+    let ix_ctx = transaction_context.get_current_instruction_context()?;
+
+    // Action-only bundles may legitimately contain only payer + magic context.
+    // In unit tests we cannot recover CPI frames, so use a stable placeholder
+    // instead of failing before we can exercise the scheduling logic.
+    if ix_ctx.get_number_of_instruction_accounts() as usize <= ACCOUNTS_OFFSET {
+        return Ok(Some(crate::id()));
+    }
 
     use crate::utils::accounts::get_instruction_account_with_idx;
 

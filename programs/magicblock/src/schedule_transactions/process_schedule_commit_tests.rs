@@ -2,7 +2,11 @@ use std::collections::HashMap;
 
 use assert_matches::assert_matches;
 use magicblock_magic_program_api::{
-    instruction::MagicBlockInstruction, MAGIC_CONTEXT_PUBKEY,
+    args::{
+        ActionArgs, BaseActionArgs, MagicIntentBundleArgs, ShortAccountMeta,
+    },
+    instruction::MagicBlockInstruction,
+    MAGIC_CONTEXT_PUBKEY,
 };
 use solana_account::{
     create_account_shared_data_for_test, AccountSharedData, ReadableAccount,
@@ -362,6 +366,107 @@ mod tests {
         }
         let committed_account = processed_scheduled.last().unwrap();
         assert_eq!(*committed_account.owner(), program);
+    }
+
+    #[test]
+    #[serial]
+    fn test_schedule_intent_bundle_action_only_with_two_accounts() {
+        init_logger!();
+
+        let payer = Keypair::from_seed(
+            b"schedule_intent_bundle_action_only_two_accounts",
+        )
+        .unwrap();
+        let action_account = Pubkey::new_unique();
+        let destination_program = Pubkey::new_unique();
+
+        let mut accounts_data = {
+            let mut map = HashMap::new();
+            map.insert(
+                payer.pubkey(),
+                AccountSharedData::new(
+                    REQUIRED_TX_COST,
+                    0,
+                    &system_program::id(),
+                ),
+            );
+            map.insert(
+                MAGIC_CONTEXT_PUBKEY,
+                AccountSharedData::new(
+                    u64::MAX,
+                    MagicContext::SIZE,
+                    &crate::id(),
+                ),
+            );
+            map
+        };
+        ensure_started_validator(&mut accounts_data, None);
+
+        let mut transaction_accounts: Vec<(Pubkey, AccountSharedData)> =
+            vec![(
+                clock::id(),
+                create_account_shared_data_for_test(&get_clock()),
+            )];
+
+        let args = MagicIntentBundleArgs {
+            commit: None,
+            commit_and_undelegate: None,
+            commit_finalize: None,
+            commit_finalize_and_undelegate: None,
+            standalone_actions: vec![BaseActionArgs {
+                args: ActionArgs::new(vec![1, 2, 3]).with_escrow_index(0),
+                compute_units: 100_000,
+                escrow_authority: 0,
+                destination_program,
+                accounts: vec![ShortAccountMeta {
+                    pubkey: action_account,
+                    is_writable: true,
+                }],
+            }],
+        };
+        let ix = Instruction::new_with_bincode(
+            crate::id(),
+            &MagicBlockInstruction::ScheduleIntentBundle(args),
+            vec![
+                AccountMeta::new(payer.pubkey(), true),
+                AccountMeta::new(MAGIC_CONTEXT_PUBKEY, false),
+            ],
+        );
+
+        extend_transaction_accounts_from_ix(
+            &ix,
+            &mut accounts_data,
+            &mut transaction_accounts,
+        );
+
+        let processed_scheduled = process_instruction(
+            ix.data.as_slice(),
+            transaction_accounts,
+            ix.accounts,
+            Ok(()),
+        );
+
+        let magic_context_acc = assert_non_accepted_actions(
+            &processed_scheduled,
+            &payer.pubkey(),
+            1,
+        );
+        let magic_context =
+            bincode::deserialize::<MagicContext>(magic_context_acc.data())
+                .unwrap();
+        let scheduled = &magic_context.scheduled_base_intents[0];
+        let actions = scheduled.standalone_actions();
+
+        assert!(scheduled.get_all_committed_pubkeys().is_empty());
+        assert_eq!(actions.len(), 1);
+        assert_eq!(actions[0].escrow_authority, payer.pubkey());
+        assert_eq!(actions[0].destination_program, destination_program);
+        assert_eq!(actions[0].account_metas_per_program.len(), 1);
+        assert_eq!(
+            actions[0].account_metas_per_program[0].pubkey,
+            action_account
+        );
+        assert!(actions[0].source_program.is_some());
     }
 
     #[test]
