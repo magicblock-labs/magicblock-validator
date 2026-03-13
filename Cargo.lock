@@ -3407,6 +3407,7 @@ dependencies = [
  "magicblock-metrics",
  "magicblock-processor",
  "magicblock-program",
+ "magicblock-replicator",
  "magicblock-task-scheduler",
  "magicblock-validator-admin",
  "num_cpus",

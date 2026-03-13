@@ -42,3 +42,12 @@ impl Default for ValidatorConfig {
         }
     }
 }
+
+impl ReplicationMode {
+    pub fn remote(&self) -> Option<Url> {
+        match self {
+            Self::Standalone => None,
+            Self::StandBy(u) | Self::ReplicatOnly(u) => Some(u.clone()),
+        }
+    }
+}

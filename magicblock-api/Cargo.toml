@@ -28,6 +28,7 @@ magicblock-magic-program-api = { workspace = true }
 magicblock-metrics = { workspace = true }
 magicblock-processor = { workspace = true }
 magicblock-program = { workspace = true }
+magicblock-replicator = { workspace = true }
 magicblock-task-scheduler = { workspace = true }
 magicblock-validator-admin = { workspace = true }
 
