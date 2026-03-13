@@ -12,6 +12,7 @@ schedulecommit-client = { workspace = true }
 magicblock-core = { workspace = true }
 magicblock-program = { workspace = true }
 magicblock_magic_program_api = { workspace = true }
+magicblock-delegation-program = { workspace = true }
 solana-program = { workspace = true }
 solana-rpc-client = { workspace = true }
 solana-rpc-client-api = { workspace = true }
@@ -19,3 +20,4 @@ solana-sdk = { workspace = true }
 test-kit = { workspace = true }
 rand = { workspace = true }
 borsh = { workspace = true }
+serial_test = { workspace = true }

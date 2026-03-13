@@ -10,7 +10,8 @@ use solana_program::{
 
 use crate::{
     BookUpdate, DelegateCpiArgs, DelegateOrderBookArgs, ScheduleCommitCpiArgs,
-    ScheduleCommitInstruction,
+    ScheduleCommitCpiWithVaultArgs, ScheduleCommitInstruction,
+    ScheduleCommitWithOrderBookArgs,
 };
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
@@ -178,6 +179,7 @@ pub fn schedule_commit_cpi_instruction(
     payer: Pubkey,
     magic_program_id: Pubkey,
     magic_context_id: Pubkey,
+    magic_fee_vault: Option<Pubkey>,
     players: &[Pubkey],
     committees: &[Pubkey],
 ) -> Instruction {
@@ -185,6 +187,7 @@ pub fn schedule_commit_cpi_instruction(
         payer,
         magic_program_id,
         magic_context_id,
+        magic_fee_vault,
         players,
         committees,
         ScheduleCommitCpiInstructionImplArgs {
@@ -192,6 +195,81 @@ pub fn schedule_commit_cpi_instruction(
             commit_payer: false,
         },
     )
+}
+
+/// Creates an instruction that calls the _legit_ program which owns
+/// the PDAs to be commited via CPI into the MagicBlock program.
+/// It provides the following account metas to the invoked program:
+///
+/// - `[WRITE, SIGNER]` Payer
+/// - `[WRITE]` MagicBlock Context
+/// - `[]` MagicBlock Program
+/// - `[WRITE]` MagicBlock fee vault
+pub fn schedule_commit_cpi_with_vault_instruction(
+    payer: Pubkey,
+    validator: Pubkey,
+    magic_program_id: Pubkey,
+    magic_context_id: Pubkey,
+    committees: &[Pubkey],
+    args: ScheduleCommitCpiWithVaultArgs,
+) -> Instruction {
+    let program_id = crate::id();
+    let mut account_metas = vec![
+        AccountMeta::new(payer, true),
+        AccountMeta::new(magic_context_id, false),
+        AccountMeta::new_readonly(magic_program_id, false),
+    ];
+    if args.has_magic_vault {
+        account_metas.push(AccountMeta {
+            pubkey: dlp::pda::magic_fee_vault_pda_from_validator(&validator),
+            is_writable: true,
+            is_signer: false,
+        })
+    }
+    for committee in committees {
+        account_metas.push(AccountMeta::new(*committee, false));
+    }
+
+    let ix = ScheduleCommitInstruction::ScheduleCommitWithVaultCpi(args);
+    Instruction::new_with_borsh(program_id, &ix, account_metas)
+}
+
+/// Creates an instruction that uses [`MagicIntentBundleBuilder`] to schedule a commit
+/// with a fee vault and optionally a post-commit UpdateOrderBook action.
+///
+/// Account layout:
+/// - `[WRITE, SIGNER]` Payer (delegated ephemeral balance)
+/// - `[WRITE]`         MagicBlock context
+/// - `[]`              MagicBlock program
+/// - `[WRITE]`         MagicBlock fee vault
+/// - `[]`              OrderBook account (on chain; not delegated on ER)
+/// - `[WRITE]` x n     PDA accounts to be committed
+pub fn schedule_commit_with_vault_and_order_book_instruction(
+    payer: Pubkey,
+    validator: Pubkey,
+    magic_program_id: Pubkey,
+    magic_context_id: Pubkey,
+    order_book: Pubkey,
+    committees: &[Pubkey],
+    args: ScheduleCommitWithOrderBookArgs,
+) -> Instruction {
+    let program_id = crate::id();
+    let magic_fee_vault =
+        dlp::pda::magic_fee_vault_pda_from_validator(&validator);
+    let mut account_metas = vec![
+        AccountMeta::new(payer, true),
+        AccountMeta::new(magic_context_id, false),
+        AccountMeta::new_readonly(magic_program_id, false),
+        AccountMeta::new(magic_fee_vault, false),
+        AccountMeta::new_readonly(order_book, false),
+    ];
+    for committee in committees {
+        account_metas.push(AccountMeta::new(*committee, false));
+    }
+
+    let ix =
+        ScheduleCommitInstruction::ScheduleCommitWithVaultAndOrderBookCpi(args);
+    Instruction::new_with_borsh(program_id, &ix, account_metas)
 }
 
 pub fn update_order_book_instruction(
@@ -237,6 +315,7 @@ pub fn schedule_commit_with_payer_cpi_instruction(
     payer: Pubkey,
     magic_program_id: Pubkey,
     magic_context_id: Pubkey,
+    magic_fee_vault: Option<Pubkey>,
     players: &[Pubkey],
     committees: &[Pubkey],
 ) -> Instruction {
@@ -244,6 +323,7 @@ pub fn schedule_commit_with_payer_cpi_instruction(
         payer,
         magic_program_id,
         magic_context_id,
+        magic_fee_vault,
         players,
         committees,
         ScheduleCommitCpiInstructionImplArgs {
@@ -257,6 +337,7 @@ pub fn schedule_commit_and_undelegate_cpi_instruction(
     payer: Pubkey,
     magic_program_id: Pubkey,
     magic_context_id: Pubkey,
+    magic_fee_vault: Option<Pubkey>,
     players: &[Pubkey],
     committees: &[Pubkey],
 ) -> Instruction {
@@ -264,6 +345,7 @@ pub fn schedule_commit_and_undelegate_cpi_instruction(
         payer,
         magic_program_id,
         magic_context_id,
+        magic_fee_vault,
         players,
         committees,
         ScheduleCommitCpiInstructionImplArgs {
@@ -282,16 +364,22 @@ fn schedule_commit_cpi_instruction_impl(
     payer: Pubkey,
     magic_program_id: Pubkey,
     magic_context_id: Pubkey,
+    magic_fee_vault: Option<Pubkey>,
     players: &[Pubkey],
     committees: &[Pubkey],
     args: ScheduleCommitCpiInstructionImplArgs,
 ) -> Instruction {
     let program_id = crate::id();
+
     let mut account_metas = vec![
         AccountMeta::new(payer, true),
         AccountMeta::new(magic_context_id, false),
         AccountMeta::new_readonly(magic_program_id, false),
     ];
+    if let Some(magic_fee_vault) = magic_fee_vault {
+        account_metas.push(AccountMeta::new(magic_fee_vault, false));
+    }
+
     for committee in committees {
         account_metas.push(AccountMeta::new(*committee, false));
     }
@@ -301,6 +389,7 @@ fn schedule_commit_cpi_instruction_impl(
         modify_accounts: true,
         undelegate: args.undelegate,
         commit_payer: args.commit_payer,
+        has_magic_vault: magic_fee_vault.is_some(),
     };
     let ix = ScheduleCommitInstruction::ScheduleCommitCpi(cpi_args);
     Instruction::new_with_borsh(program_id, &ix, account_metas)

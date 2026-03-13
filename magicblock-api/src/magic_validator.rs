@@ -666,6 +666,97 @@ impl MagicValidator {
         }
     }
 
+    async fn ensure_magic_fee_vault_on_chain(rpc_url: String) -> ApiResult<()> {
+        let validator_keypair = validator_authority();
+        let validator_pubkey = validator_keypair.pubkey();
+        let vault_pubkey =
+            dlp::pda::magic_fee_vault_pda_from_validator(&validator_pubkey);
+        let delegation_record_pubkey =
+            dlp::pda::delegation_record_pda_from_delegated_account(
+                &vault_pubkey,
+            );
+
+        let rpc = RpcClient::new_with_commitment(
+            rpc_url,
+            CommitmentConfig::confirmed(),
+        );
+
+        let accounts = rpc
+            .get_multiple_accounts(&[vault_pubkey, delegation_record_pubkey])
+            .await
+            .map_err(|err| {
+                ApiError::FailedToInitMagicFeeVault(
+                    validator_pubkey,
+                    err.to_string(),
+                )
+            })?;
+
+        let vault_exists = accounts[0].is_some();
+        let delegation_record_exists = accounts[1].is_some();
+
+        if !vault_exists {
+            info!(%validator_pubkey, "Magic fee vault absent, initializing");
+            let ix = dlp::instruction_builder::init_magic_fee_vault(
+                validator_pubkey,
+                validator_pubkey,
+            );
+            let blockhash =
+                rpc.get_latest_blockhash().await.map_err(|err| {
+                    ApiError::FailedToInitMagicFeeVault(
+                        validator_pubkey,
+                        err.to_string(),
+                    )
+                })?;
+            let tx = solana_transaction::Transaction::new_signed_with_payer(
+                &[ix],
+                Some(&validator_pubkey),
+                &[&validator_keypair],
+                blockhash,
+            );
+            rpc.send_and_confirm_transaction(&tx).await.map_err(|err| {
+                ApiError::FailedToInitMagicFeeVault(
+                    validator_pubkey,
+                    err.to_string(),
+                )
+            })?;
+            info!(%validator_pubkey, "Magic fee vault initialized");
+        } else {
+            info!(%validator_pubkey, "Magic fee vault already exists, skipping init");
+        }
+
+        if !delegation_record_exists {
+            info!(%validator_pubkey, "Magic fee vault not delegated, delegating");
+            let ix = dlp::instruction_builder::delegate_magic_fee_vault(
+                validator_pubkey,
+                validator_pubkey,
+            );
+            let blockhash =
+                rpc.get_latest_blockhash().await.map_err(|err| {
+                    ApiError::FailedToDelegateMagicFeeVault(
+                        validator_pubkey,
+                        err.to_string(),
+                    )
+                })?;
+            let tx = solana_transaction::Transaction::new_signed_with_payer(
+                &[ix],
+                Some(&validator_pubkey),
+                &[&validator_keypair],
+                blockhash,
+            );
+            rpc.send_and_confirm_transaction(&tx).await.map_err(|err| {
+                ApiError::FailedToDelegateMagicFeeVault(
+                    validator_pubkey,
+                    err.to_string(),
+                )
+            })?;
+            info!(%validator_pubkey, "Magic fee vault delegated");
+        } else {
+            info!(%validator_pubkey, "Magic fee vault already delegated, skipping");
+        }
+
+        Ok(())
+    }
+
     #[instrument(skip(self))]
     pub async fn start(&mut self) -> ApiResult<()> {
         if matches!(self.config.lifecycle, LifecycleMode::Ephemeral) {
@@ -676,7 +767,8 @@ impl MagicValidator {
             tokio::spawn(async move {
                 let step_start = Instant::now();
                 let result = MagicValidator::ensure_validator_funded_on_chain(
-                    rpc_url, identity,
+                    rpc_url.clone(),
+                    identity,
                 )
                 .await;
                 log_timing(
@@ -686,6 +778,24 @@ impl MagicValidator {
                 );
                 if let Err(err) = result {
                     error!(error = ?err, "Validator balance check failed");
+                    error!("Exiting process");
+                    std::process::exit(1);
+                }
+
+                let step_start = Instant::now();
+                let result =
+                    MagicValidator::ensure_magic_fee_vault_on_chain(rpc_url)
+                        .await;
+                log_timing(
+                    "startup_background",
+                    "ensure_magic_fee_vault_on_chain",
+                    step_start,
+                );
+
+                // Without magic fee vault being properly set up
+                // transactions scheduling commits will fail
+                if let Err(err) = result {
+                    error!(error = ?err, "Magic fee vault setup failed");
                     error!("Exiting process");
                     std::process::exit(1);
                 }
