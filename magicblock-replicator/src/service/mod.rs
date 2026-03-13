@@ -27,8 +27,9 @@ use std::{sync::Arc, thread::JoinHandle, time::Duration};
 
 pub use context::ReplicationContext;
 use magicblock_accounts_db::AccountsDb;
-use magicblock_core::link::transactions::{
-    SchedulerMode, TransactionSchedulerHandle,
+use magicblock_core::link::{
+    replication::Message,
+    transactions::{SchedulerMode, TransactionSchedulerHandle},
 };
 use magicblock_ledger::Ledger;
 pub use primary::Primary;
@@ -38,7 +39,7 @@ use tokio::{
     sync::mpsc::{Receiver, Sender},
 };
 
-use crate::{nats::Broker, Message, Result};
+use crate::{nats::Broker, Result};
 
 // =============================================================================
 // Constants

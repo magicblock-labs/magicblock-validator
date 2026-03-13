@@ -1,11 +1,15 @@
 //! Primary node: publishes events and holds leader lock.
 
+use magicblock_core::link::replication::Message;
 use tokio::sync::mpsc::Receiver;
 use tracing::{error, info, instrument, warn};
 
 use super::{ReplicationContext, LOCK_REFRESH_INTERVAL};
 use crate::{
-    nats::Producer, service::Standby, watcher::SnapshotWatcher, Message, Result,
+    nats::{Producer, Subjects},
+    service::Standby,
+    watcher::SnapshotWatcher,
+    Result,
 };
 
 /// Primary node: publishes events and holds leader lock.
@@ -79,7 +83,7 @@ impl Primary {
                 return Ok(());
             }
         };
-        let subject = msg.subject();
+        let subject = Subjects::from_message(&msg);
         let (slot, index) = msg.slot_and_index();
         let ack = matches!(msg, Message::SuperBlock(_));
 
