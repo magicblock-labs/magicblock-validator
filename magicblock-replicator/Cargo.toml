@@ -15,6 +15,7 @@ futures = { workspace = true }
 magicblock-accounts-db = { workspace = true }
 magicblock-core = { workspace = true }
 magicblock-ledger = { workspace = true }
+machineid-rs = { workspace = true }
 notify = { version = "8.0", features = ["macos_kqueue"] }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = [

@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use machineid_rs::IdBuilder;
 use magicblock_accounts_db::AccountsDb;
 use magicblock_core::{
     link::transactions::{SchedulerMode, TransactionSchedulerHandle},
@@ -17,9 +18,9 @@ use tracing::info;
 use super::{Primary, Standby, CONSUMER_RETRY_DELAY};
 use crate::{
     nats::{Broker, Consumer, LockWatcher, Producer},
-    proto::TransactionIndex,
+    proto::{self, TransactionIndex},
     watcher::SnapshotWatcher,
-    Message, Result,
+    Error, Message, Result,
 };
 
 /// Shared state for both primary and standby roles.
@@ -44,13 +45,17 @@ pub struct ReplicationContext {
 impl ReplicationContext {
     /// Creates context from ledger state.
     pub async fn new(
-        id: String,
         broker: Broker,
         mode_tx: Sender<SchedulerMode>,
         accountsdb: Arc<AccountsDb>,
         ledger: Arc<Ledger>,
         scheduler: TransactionSchedulerHandle,
     ) -> Result<Self> {
+        let id = IdBuilder::new(machineid_rs::Encryption::SHA256)
+            .add_component(machineid_rs::HWIDComponent::SystemID)
+            .build("magicblock")
+            .map_err(|e| Error::Internal(e.to_string()))?;
+
         let (slot, index) = ledger
             .get_latest_transaction_position()?
             .unwrap_or_default();
@@ -75,14 +80,14 @@ impl ReplicationContext {
     }
 
     /// Writes block to ledger.
-    pub async fn write_block(&self, block: &crate::proto::Block) -> Result<()> {
+    pub async fn write_block(&self, block: &proto::Block) -> Result<()> {
         self.ledger
             .write_block(block.slot, block.timestamp, block.hash)?;
         Ok(())
     }
 
     /// Verifies superblock checksum.
-    pub fn verify_checksum(&self, sb: &crate::proto::SuperBlock) -> Result<()> {
+    pub fn verify_checksum(&self, sb: &proto::SuperBlock) -> Result<()> {
         let _lock = self.accountsdb.lock_database();
         // SAFETY: Lock acquired above ensures no concurrent modifications
         // during checksum computation.
@@ -90,7 +95,11 @@ impl ReplicationContext {
         if checksum == sb.checksum {
             Ok(())
         } else {
-            Err(crate::Error::Internal("accountsdb state mismatch"))
+            let msg = format!(
+                "accountsdb state mismatch at {}, expected {checksum}, got {}",
+                sb.slot, sb.checksum
+            );
+            Err(Error::Internal(msg))
         }
     }
 
