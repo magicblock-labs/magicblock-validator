@@ -434,6 +434,10 @@ impl AccountsDb {
     pub fn lock_database(&self) -> RwLockWriteGuard<'_, ()> {
         self.write_lock.write()
     }
+
+    pub fn database_directory(&self) -> &Path {
+        self.snapshot_manager.database_path()
+    }
 }
 
 impl AccountsBank for AccountsDb {
