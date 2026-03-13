@@ -63,7 +63,7 @@ pub(crate) fn process_schedule_commit(
     if ix_accs_len <= COMMITTEES_START {
         ic_msg!(
             invoke_context,
-            "ScheduleCommit ERR: not enough accounts to schedule commit ({}), need payer, signing program an account for each pubkey to be committed",
+            "ScheduleCommit ERR: not enough accounts ({}); expected payer, magic context, and at least one account to commit",
             ix_accs_len
         );
         return Err(InstructionError::NotEnoughAccountKeys);

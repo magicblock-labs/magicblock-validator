@@ -2,15 +2,13 @@ use std::{collections::HashMap, error::Error, sync::Arc, time::Duration};
 
 use magicblock_committor_service::CommittorService;
 use magicblock_core::{intent::CommittedAccount, traits::MagicSys};
-use magicblock_ledger::Ledger;
 use magicblock_metrics::metrics;
 use solana_instruction::error::InstructionError;
 use solana_pubkey::Pubkey;
-use tracing::{enabled, error, trace, Level};
+use tracing::{error, trace};
 
 #[derive(Clone)]
 pub struct MagicSysAdapter {
-    ledger: Arc<Ledger>,
     committor_service: Option<Arc<CommittorService>>,
 }
 
@@ -26,34 +24,19 @@ impl MagicSysAdapter {
 
     const FETCH_TIMEOUT: Duration = Duration::from_secs(30);
 
-    pub fn new(
-        ledger: Arc<Ledger>,
-        committor_service: Option<Arc<CommittorService>>,
-    ) -> Self {
-        Self {
-            ledger,
-            committor_service,
-        }
+    pub fn new(committor_service: Option<Arc<CommittorService>>) -> Self {
+        Self { committor_service }
     }
 }
 
 impl MagicSys for MagicSysAdapter {
     fn persist(&self, id: u64, data: Vec<u8>) -> Result<(), Box<dyn Error>> {
         trace!(id, data_len = data.len(), "Persisting data");
-        self.ledger.write_account_mod_data(id, &data.into())?;
         Ok(())
     }
 
-    fn load(&self, id: u64) -> Result<Option<Vec<u8>>, Box<dyn Error>> {
-        let data = self.ledger.read_account_mod_data(id)?.map(|x| x.data);
-        if enabled!(Level::TRACE) {
-            if let Some(data) = &data {
-                trace!(id, data_len = data.len(), "Loading data");
-            } else {
-                trace!(id, found = false, "Loading data");
-            }
-        }
-        Ok(data)
+    fn load(&self, _id: u64) -> Result<Option<Vec<u8>>, Box<dyn Error>> {
+        Ok(None)
     }
 
     fn fetch_current_commit_nonces(

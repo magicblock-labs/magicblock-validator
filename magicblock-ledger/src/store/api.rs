@@ -3,7 +3,7 @@ use std::{
     fmt, fs,
     path::{Path, PathBuf},
     sync::{
-        atomic::{AtomicI64, AtomicU32, Ordering},
+        atomic::{AtomicI64, Ordering},
         Arc, RwLock,
     },
 };
@@ -15,31 +15,28 @@ use magicblock_metrics::metrics::{
     HistogramTimer,
 };
 use rocksdb::{Direction as IteratorDirection, FlushOptions};
-use scc::HashCache;
 use solana_clock::{Slot, UnixTimestamp};
 use solana_hash::{Hash, HASH_BYTES};
 use solana_measure::measure::Measure;
 use solana_pubkey::Pubkey;
 use solana_signature::Signature;
-use solana_storage_proto::convert::generated::{self, ConfirmedTransaction};
-use solana_transaction::{
-    sanitized::SanitizedTransaction, versioned::VersionedTransaction,
-};
+use solana_storage_proto::convert::generated;
+use solana_transaction::versioned::VersionedTransaction;
 use solana_transaction_status::{
     ConfirmedTransactionStatusWithSignature,
     ConfirmedTransactionWithStatusMeta, TransactionStatusMeta,
-    VersionedConfirmedBlock, VersionedTransactionWithStatusMeta,
+    TransactionWithStatusMeta, VersionedConfirmedBlock,
+    VersionedTransactionWithStatusMeta,
 };
 use tracing::*;
 
 use crate::{
-    conversions::transaction,
     database::{
         columns::{self as cf, Column, ColumnName, DIRTY_COUNT},
         db::Database,
         iterator::IteratorMode,
         ledger_column::{try_increase_entry_counter, LedgerColumn},
-        meta::{AccountModData, AddressSignatureMeta, PerfSample},
+        meta::{AddressSignatureMeta, PerfSample},
         options::LedgerOptions,
     },
     errors::{LedgerError, LedgerResult},
@@ -67,7 +64,6 @@ pub struct Ledger {
     transaction_cf: LedgerColumn<cf::Transaction>,
     transaction_memos_cf: LedgerColumn<cf::TransactionMemos>,
     perf_samples_cf: LedgerColumn<cf::PerfSamples>,
-    account_mod_datas_cf: LedgerColumn<cf::AccountModDatas>,
 
     transaction_successful_status_count: AtomicI64,
     transaction_failed_status_count: AtomicI64,
@@ -75,7 +71,6 @@ pub struct Ledger {
     lowest_cleanup_slot: RwLock<Slot>,
     rpc_api_metrics: LedgerRpcApiMetrics,
     latest_block: LatestBlock,
-    block_txn_indexes: HashCache<Slot, AtomicU32>,
 }
 
 impl fmt::Display for Ledger {
@@ -143,8 +138,6 @@ impl Ledger {
         let transaction_memos_cf = db.column();
         let perf_samples_cf = db.column();
 
-        let account_mod_datas_cf = db.column();
-
         let db = Arc::new(db);
 
         // NOTE: left out max root
@@ -165,7 +158,6 @@ impl Ledger {
             transaction_cf,
             transaction_memos_cf,
             perf_samples_cf,
-            account_mod_datas_cf,
 
             transaction_successful_status_count: AtomicI64::new(DIRTY_COUNT),
             transaction_failed_status_count: AtomicI64::new(DIRTY_COUNT),
@@ -173,7 +165,6 @@ impl Ledger {
             lowest_cleanup_slot: RwLock::<Slot>::default(),
             rpc_api_metrics: LedgerRpcApiMetrics::default(),
             latest_block,
-            block_txn_indexes: HashCache::default(),
         };
         let (slot, blockhash) = ledger.get_max_blockhash()?;
         let time = ledger.get_block_time(slot)?.unwrap_or_default();
@@ -196,7 +187,6 @@ impl Ledger {
         self.transaction_cf.submit_rocksdb_cf_metrics();
         self.transaction_memos_cf.submit_rocksdb_cf_metrics();
         self.perf_samples_cf.submit_rocksdb_cf_metrics();
-        self.account_mod_datas_cf.submit_rocksdb_cf_metrics();
     }
 
     // -----------------
@@ -319,6 +309,56 @@ impl Ledger {
         Ok((slot, hash))
     }
 
+    /// Returns the highest transaction index for a given slot.
+    ///
+    /// Uses a reverse iterator from `(slot, u32::MAX)` to find the first
+    /// (highest) index in O(1) time.
+    ///
+    /// Returns `None` if no transactions exist in the slot.
+    pub fn get_highest_transaction_index_for_slot(
+        &self,
+        slot: Slot,
+    ) -> LedgerResult<Option<u32>> {
+        let mut iter = self.slot_signatures_cf.iter(IteratorMode::From(
+            (slot, u32::MAX),
+            IteratorDirection::Reverse,
+        ))?;
+
+        match iter.next() {
+            Some(((tx_slot, tx_index), _)) if tx_slot == slot => {
+                Ok(Some(tx_index))
+            }
+            _ => Ok(None),
+        }
+    }
+
+    /// Returns the position (slot, index) of the most recent transaction.
+    ///
+    /// This is useful for resuming replication from the last known position.
+    /// Returns `None` if no transactions exist in the ledger.
+    pub fn get_latest_transaction_position(
+        &self,
+    ) -> LedgerResult<Option<(Slot, u32)>> {
+        let (latest_slot, _) = self.get_max_blockhash()?;
+
+        // Try to find the highest index in the latest slot
+        if let Some(index) =
+            self.get_highest_transaction_index_for_slot(latest_slot)?
+        {
+            return Ok(Some((latest_slot, index)));
+        }
+
+        // If the latest slot has no transactions, check previous slots
+        // by iterating backwards through slot_signatures_cf
+        let mut iter = self.slot_signatures_cf.iter(IteratorMode::End)?;
+
+        if let Some(((slot, index), _)) = iter.next() {
+            Ok(Some((slot, index)))
+        } else {
+            Ok(None)
+        }
+    }
+
     // -----------------
     // Block
     // -----------------
@@ -338,7 +378,6 @@ impl Ledger {
         self.blockhash_cf.put(slot, &blockhash)?;
         self.blockhash_cf.try_increase_entry_counter(1);
         self.latest_block.store(slot, blockhash, timestamp);
-        let _ = self.block_txn_indexes.put(slot, AtomicU32::new(0));
         Ok(())
     }
 
@@ -377,9 +416,7 @@ impl Ledger {
                 .into_iter()
                 .map(|tx_signature| {
                     let transaction = self
-                        .transaction_cf
-                        .get_protobuf((tx_signature, slot))?
-                        .map(VersionedTransaction::from)
+                        .read_transaction((tx_signature, slot))?
                         .ok_or(LedgerError::TransactionNotFound)?;
                     let meta = self
                         .transaction_status_cf
@@ -793,23 +830,56 @@ impl Ledger {
         match self
             .get_confirmed_transaction(signature, highest_confirmed_slot)?
         {
-            Some((slot, tx)) => {
+            Some((slot, transaction, meta)) => {
                 let block_time = self.get_block_time(slot)?;
-                let tx = transaction::from_generated_confirmed_transaction(
-                    slot, tx, block_time,
-                );
-                Ok(Some(tx))
+                let tx_with_meta = match (transaction, meta) {
+                    (Some(transaction), Some(meta)) => {
+                        TransactionWithStatusMeta::Complete(
+                            VersionedTransactionWithStatusMeta {
+                                transaction,
+                                meta,
+                            },
+                        )
+                    }
+                    (Some(transaction), None) => {
+                        let legacy_tx = transaction
+                            .into_legacy_transaction()
+                            .ok_or_else(|| {
+                                LedgerError::TransactionConversionError(
+                                    "failed to convert versioned transaction to legacy: \
+                                     transaction is v0 (requires metadata)"
+                                        .to_string(),
+                                )
+                            })?;
+                        TransactionWithStatusMeta::MissingMetadata(legacy_tx)
+                    }
+                    (None, Some(_)) | (None, None) => {
+                        return Ok(None);
+                    }
+                };
+                Ok(Some(ConfirmedTransactionWithStatusMeta {
+                    slot,
+                    block_time,
+                    tx_with_meta,
+                }))
             }
             None => Ok(None),
         }
     }
 
     /// Returns a confirmed transaction and the slot at which it was confirmed
+    #[allow(clippy::type_complexity)]
     fn get_confirmed_transaction(
         &self,
         signature: Signature,
         highest_confirmed_slot: Slot,
-    ) -> LedgerResult<Option<(Slot, ConfirmedTransaction)>> {
+    ) -> LedgerResult<
+        Option<(
+            Slot,
+            Option<VersionedTransaction>,
+            Option<TransactionStatusMeta>,
+        )>,
+    > {
         self.rpc_api_metrics
             .num_get_complete_transaction
             .fetch_add(1, Ordering::Relaxed);
@@ -837,15 +907,11 @@ impl Ledger {
                         if slot <= highest_confirmed_slot
                             && tx_signature == signature
                         {
-                            let slot_and_tx = self
-                                .transaction_cf
-                                .get_protobuf((tx_signature, slot))?
-                                .map(|tx| (slot, tx));
-                            if let Some((slot, tx)) = slot_and_tx {
-                                (slot, Some(tx), None)
-                            } else {
-                                // We have a slot, but couldn't resolve a proper transaction
-                                return Ok(None);
+                            let transaction =
+                                self.read_transaction((tx_signature, slot))?;
+                            match transaction {
+                                Some(tx) => (slot, Some(tx), None),
+                                None => return Ok(None),
                             }
                         } else {
                             return Ok(None);
@@ -859,59 +925,85 @@ impl Ledger {
             }
         };
 
-        Ok(Some((
-            slot,
-            ConfirmedTransaction {
-                transaction,
-                meta: meta.map(|x| x.into()),
-            },
-        )))
+        Ok(Some((slot, transaction, meta)))
     }
 
     /// Writes a confirmed transaction pieced together from the provided inputs
     /// * `signature` - Signature of the transaction
     /// * `slot` - Slot at which the transaction was confirmed
-    /// * `transaction` - Transaction to be written, we take a SanititizedTransaction here
-    ///   since that is what we provide Geyser as well
+    /// * `writable_keys` - Writable account keys from the transaction
+    /// * `readonly_keys` - Readonly account keys from the transaction
+    /// * `encoded_transaction` - Bincode-serialized `VersionedTransaction`
     /// * `status` - status of the transaction
+    #[allow(clippy::too_many_arguments)]
     pub fn write_transaction(
         &self,
         signature: Signature,
         slot: Slot,
-        transaction: &SanitizedTransaction,
+        index: u32,
+        writable_keys: Vec<&Pubkey>,
+        readonly_keys: Vec<&Pubkey>,
+        encoded_transaction: &[u8],
         status: TransactionStatusMeta,
-    ) -> LedgerResult<u32> {
-        let tx_account_locks = transaction.get_account_locks_unchecked();
-
+    ) -> LedgerResult<()> {
         // 1. Write Transaction Status
-        let index = self.write_transaction_status(
+        self.write_transaction_status(
             slot,
+            index,
             signature,
-            tx_account_locks.writable,
-            tx_account_locks.readonly,
+            writable_keys,
+            readonly_keys,
             status,
         )?;
 
-        // 2. Write Transaction
-        let versioned = transaction.to_versioned_transaction();
-        let transaction: generated::Transaction = versioned.into();
-
+        // 2. Write Transaction (raw bincode bytes)
         self.transaction_cf
-            .put_protobuf((signature, slot), &transaction)?;
+            .put_bytes((signature, slot), encoded_transaction)?;
         self.transaction_cf.try_increase_entry_counter(1);
 
-        Ok(index)
+        Ok(())
     }
 
     pub fn read_transaction(
         &self,
         index: (Signature, Slot),
-    ) -> LedgerResult<Option<generated::Transaction>> {
+    ) -> LedgerResult<Option<VersionedTransaction>> {
         let result = {
             let (_lock, _) = self.ensure_lowest_cleanup_slot();
-            self.transaction_cf.get_protobuf(index)
+            self.transaction_cf.get_bytes(index)
         }?;
-        Ok(result)
+        match result {
+            Some(bytes) => {
+                let tx: VersionedTransaction = deserialize(&bytes)?;
+                Ok(Some(tx))
+            }
+            None => Ok(None),
+        }
+    }
+
+    /// Verifies the signature of a transaction stored in the ledger.
+    ///
+    /// Returns:
+    /// - `None` if no transaction with that signature exists
+    /// - `Some(true)` if the transaction exists and its signature is valid
+    /// - `Some(false)` if the transaction exists but its signature is
+    ///   invalid
+    pub fn verify_transaction_signature(
+        &self,
+        signature: &Signature,
+    ) -> LedgerResult<Option<bool>> {
+        let slot = match self.get_transaction_status(*signature, u64::MAX)? {
+            Some((slot, _meta)) => slot,
+            None => return Ok(None),
+        };
+
+        let transaction = match self.read_transaction((*signature, slot))? {
+            Some(tx) => tx,
+            None => return Ok(None),
+        };
+
+        let is_valid = transaction.verify_and_hash_message().is_ok();
+        Ok(Some(is_valid))
     }
 
     pub fn count_transactions(&self) -> LedgerResult<i64> {
@@ -1007,35 +1099,28 @@ impl Ledger {
     fn write_transaction_status(
         &self,
         slot: Slot,
+        index: u32,
         signature: Signature,
         writable_keys: Vec<&Pubkey>,
         readonly_keys: Vec<&Pubkey>,
         status: TransactionStatusMeta,
-    ) -> LedgerResult<u32> {
-        let transaction_slot_index = self
-            .block_txn_indexes
-            .entry(slot)
-            .or_default()
-            .1
-            .fetch_add(1, Ordering::Relaxed);
-
+    ) -> LedgerResult<()> {
         for address in writable_keys {
             self.address_signatures_cf.put(
-                (*address, slot, transaction_slot_index, signature),
+                (*address, slot, index, signature),
                 &AddressSignatureMeta { writeable: true },
             )?;
             self.address_signatures_cf.try_increase_entry_counter(1);
         }
         for address in readonly_keys {
             self.address_signatures_cf.put(
-                (*address, slot, transaction_slot_index, signature),
+                (*address, slot, index, signature),
                 &AddressSignatureMeta { writeable: false },
             )?;
             self.address_signatures_cf.try_increase_entry_counter(1);
         }
 
-        self.slot_signatures_cf
-            .put((slot, transaction_slot_index), &signature)?;
+        self.slot_signatures_cf.put((slot, index), &signature)?;
         self.slot_signatures_cf.try_increase_entry_counter(1);
 
         let status = status.into();
@@ -1054,8 +1139,7 @@ impl Ledger {
                 1,
             );
         }
-
-        Ok(transaction_slot_index)
+        Ok(())
     }
 
     /// Returns an iterator over all transaction statuses.
@@ -1187,30 +1271,6 @@ impl Ledger {
         self.perf_samples_cf.count_column_using_cache()
     }
 
-    // -----------------
-    // AccountModDatas
-    // -----------------
-    pub fn write_account_mod_data(
-        &self,
-        id: u64,
-        data: &AccountModData,
-    ) -> LedgerResult<()> {
-        self.account_mod_datas_cf.put(id, data)?;
-        self.account_mod_datas_cf.try_increase_entry_counter(1);
-        Ok(())
-    }
-
-    pub fn read_account_mod_data(
-        &self,
-        id: u64,
-    ) -> LedgerResult<Option<AccountModData>> {
-        self.account_mod_datas_cf.get(id)
-    }
-
-    pub fn count_account_mod_data(&self) -> LedgerResult<i64> {
-        self.account_mod_datas_cf.count_column_using_cache()
-    }
-
     pub fn read_slot_signature(
         &self,
         index: (Slot, u32),
@@ -1272,7 +1332,6 @@ impl Ledger {
             self.transaction_cf.handle(),
             self.transaction_memos_cf.handle(),
             self.perf_samples_cf.handle(),
-            self.account_mod_datas_cf.handle(),
         ];
 
         self.db
@@ -1344,7 +1403,6 @@ impl_has_column!(Blockhash, blockhash_cf);
 impl_has_column!(Transaction, transaction_cf);
 impl_has_column!(TransactionMemos, transaction_memos_cf);
 impl_has_column!(PerfSamples, perf_samples_cf);
-impl_has_column!(AccountModDatas, account_mod_datas_cf);
 
 struct MeasureGuard {
     measure: Measure,
@@ -1374,6 +1432,7 @@ mod tests {
     use solana_pubkey::Pubkey;
     use solana_signature::Signature;
     use solana_signer::Signer;
+    use solana_transaction::sanitized::SanitizedTransaction;
     use solana_transaction_context::TransactionReturnData;
     use solana_transaction_error::{TransactionError, TransactionResult};
     use solana_transaction_status::{
@@ -1566,6 +1625,7 @@ mod tests {
             assert!(store
                 .write_transaction_status(
                     slot,
+                    0,
                     signature,
                     keys_as_ref!(writable_keys),
                     keys_as_ref!(readonly_keys),
@@ -1590,6 +1650,7 @@ mod tests {
             assert!(store
                 .write_transaction_status(
                     slot,
+                    0,
                     signature,
                     keys_as_ref!(writable_keys),
                     keys_as_ref!(readonly_keys),
@@ -1627,6 +1688,7 @@ mod tests {
         assert!(store
             .write_transaction_status(
                 slot_uno,
+                0,
                 sig_uno,
                 keys_as_ref!(writable_keys),
                 keys_as_ref!(readonly_keys),
@@ -1656,6 +1718,7 @@ mod tests {
         assert!(store
             .write_transaction_status(
                 slot_dos,
+                0,
                 sig_dos,
                 keys_as_ref!(writable_keys),
                 keys_as_ref!(readonly_keys),
@@ -1720,11 +1783,17 @@ mod tests {
             .is_none());
 
         // 1. Write first transaction and block time for relevant slot
+        let versioned_uno = sanitized_uno.to_versioned_transaction();
+        let encoded_uno = serialize(&versioned_uno).unwrap();
+        let locks_uno = sanitized_uno.get_account_locks_unchecked();
         assert!(store
             .write_transaction(
                 sig_uno,
                 slot_uno,
-                &sanitized_uno,
+                0,
+                locks_uno.writable,
+                locks_uno.readonly,
+                &encoded_uno,
                 tx_uno.tx_with_meta.get_status_meta().unwrap(),
             )
             .is_ok());
@@ -1746,11 +1815,17 @@ mod tests {
             .is_none());
 
         // 2. Write second transaction and block time for relevant slot
+        let versioned_dos = sanitized_dos.to_versioned_transaction();
+        let encoded_dos = serialize(&versioned_dos).unwrap();
+        let locks_dos = sanitized_dos.get_account_locks_unchecked();
         assert!(store
             .write_transaction(
                 sig_dos,
                 slot_dos,
-                &sanitized_dos,
+                0,
+                locks_dos.writable,
+                locks_dos.readonly,
+                &encoded_dos,
                 tx_dos.tx_with_meta.get_status_meta().unwrap(),
             )
             .is_ok());
@@ -1786,6 +1861,7 @@ mod tests {
             assert!(store
                 .write_transaction_status(
                     slot_uno,
+                    0,
                     signature_uno,
                     keys_as_ref!(writable_keys),
                     keys_as_ref!(readonly_keys),
@@ -1810,6 +1886,7 @@ mod tests {
             assert!(store
                 .write_transaction_status(
                     slot_dos,
+                    0,
                     signature_dos,
                     keys_as_ref!(writable_keys),
                     keys_as_ref!(readonly_keys),
@@ -1827,6 +1904,7 @@ mod tests {
             assert!(store
                 .write_transaction_status(
                     slot_dos,
+                    1,
                     signature_dos_2,
                     keys_as_ref!(writable_keys),
                     keys_as_ref!(readonly_keys),
@@ -1854,6 +1932,7 @@ mod tests {
             assert!(store
                 .write_transaction_status(
                     slot_tres,
+                    0,
                     signature_tres,
                     keys_as_ref!(writable_keys),
                     keys_as_ref!(readonly_keys),
@@ -1875,6 +1954,7 @@ mod tests {
             assert!(store
                 .write_transaction_status(
                     slot_cuatro,
+                    0,
                     signature_cuatro,
                     keys_as_ref!(writable_keys),
                     keys_as_ref!(readonly_keys),
@@ -1896,6 +1976,7 @@ mod tests {
             assert!(store
                 .write_transaction_status(
                     slot_cinco,
+                    1,
                     signature_cinco,
                     keys_as_ref!(writable_keys),
                     keys_as_ref!(readonly_keys),
@@ -1919,6 +2000,7 @@ mod tests {
             assert!(store
                 .write_transaction_status(
                     slot_seis,
+                    0,
                     signature_seis,
                     keys_as_ref!(writable_keys),
                     keys_as_ref!(readonly_keys),
@@ -2153,6 +2235,7 @@ mod tests {
         let sig8 = Signature::new_unique();
 
         let mut current_slot = 0;
+        let mut current_index = 0;
         let read_uno = {
             let (meta, writable_keys, readonly_keys) =
                 create_transaction_status_meta(5);
@@ -2172,16 +2255,19 @@ mod tests {
             ] {
                 if *slot != current_slot {
                     current_slot = *slot;
+                    current_index = 0;
                 }
                 assert!(store
                     .write_transaction_status(
                         *slot,
+                        current_index,
                         *signature,
                         keys_as_ref!(writable_keys.clone()),
                         keys_as_ref!(readonly_keys.clone()),
                         meta.clone(),
                     )
                     .is_ok());
+                current_index += 1;
             }
 
             read_uno
@@ -2385,11 +2471,17 @@ mod tests {
 
         // 1. Write transactions and block time + memo for relevant slot
         {
+            let versioned_uno = sanitized_uno.to_versioned_transaction();
+            let encoded_uno = serialize(&versioned_uno).unwrap();
+            let locks_uno = sanitized_uno.get_account_locks_unchecked();
             assert!(store
                 .write_transaction(
                     sig_uno,
                     slot_uno,
-                    &sanitized_uno,
+                    0,
+                    locks_uno.writable,
+                    locks_uno.readonly,
+                    &encoded_uno,
                     tx_uno.tx_with_meta.get_status_meta().unwrap(),
                 )
                 .is_ok());
@@ -2408,11 +2500,17 @@ mod tests {
         }
 
         {
+            let versioned_dos = sanitized_dos.to_versioned_transaction();
+            let encoded_dos = serialize(&versioned_dos).unwrap();
+            let locks_dos = sanitized_dos.get_account_locks_unchecked();
             assert!(store
                 .write_transaction(
                     sig_dos,
                     slot_dos,
-                    &sanitized_dos,
+                    0,
+                    locks_dos.writable,
+                    locks_dos.readonly,
+                    &encoded_dos,
                     tx_dos.tx_with_meta.get_status_meta().unwrap(),
                 )
                 .is_ok());
@@ -2468,5 +2566,123 @@ mod tests {
                 .infos[0];
             assert_eq!(sig_info_dos.memo, Some("Test Dos Memo".to_string()));
         }
+    }
+
+    #[test]
+    fn test_verify_transaction_signature() {
+        init_logger!();
+        let ledger_path = get_tmp_ledger_path_auto_delete!();
+        let store = Ledger::open(ledger_path.path()).unwrap();
+
+        // Create a properly signed transaction
+        let from_keypair = Keypair::new();
+        let to = Pubkey::new_unique();
+        let blockhash = Hash::new_unique();
+        let tx = solana_system_transaction::transfer(
+            &from_keypair,
+            &to,
+            42,
+            blockhash,
+        );
+        let versioned_tx = VersionedTransaction::from(tx);
+        let signature = versioned_tx.signatures[0];
+        let slot = 10u64;
+
+        // Encode and write the transaction to the ledger
+        let encoded = serialize(&versioned_tx).unwrap();
+        let (meta, _, _) = create_transaction_status_meta(5);
+        let writable_keys = versioned_tx.message.static_account_keys()[..1]
+            .iter()
+            .collect();
+        let readonly_keys = versioned_tx.message.static_account_keys()[1..]
+            .iter()
+            .collect();
+        store
+            .write_transaction(
+                signature,
+                slot,
+                0,
+                writable_keys,
+                readonly_keys,
+                &encoded,
+                meta,
+            )
+            .unwrap();
+        store.write_block(slot, 100, Hash::new_unique()).unwrap();
+
+        // Verify a properly signed transaction returns Some(true)
+        let result = store.verify_transaction_signature(&signature).unwrap();
+        assert_eq!(result, Some(true));
+
+        // Verify a non-existent signature returns None
+        let random_sig = Signature::new_unique();
+        let result = store.verify_transaction_signature(&random_sig).unwrap();
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_verify_transaction_signature_not_found() {
+        init_logger!();
+        let ledger_path = get_tmp_ledger_path_auto_delete!();
+        let store = Ledger::open(ledger_path.path()).unwrap();
+
+        // Query an empty ledger — no transaction exists
+        let sig = Signature::new_unique();
+        let result = store.verify_transaction_signature(&sig).unwrap();
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_verify_transaction_signature_invalid() {
+        init_logger!();
+        let ledger_path = get_tmp_ledger_path_auto_delete!();
+        let store = Ledger::open(ledger_path.path()).unwrap();
+
+        // Build a transaction with a bogus signature (not matching keypair)
+        let from_keypair = Keypair::new();
+        let to = Pubkey::new_unique();
+        let blockhash = Hash::new_unique();
+        let tx = solana_system_transaction::transfer(
+            &from_keypair,
+            &to,
+            42,
+            blockhash,
+        );
+        let mut versioned_tx = VersionedTransaction::from(tx);
+
+        // Corrupt the signature so verification will fail
+        let real_sig = versioned_tx.signatures[0];
+        versioned_tx.signatures[0] = Signature::new_unique();
+        let bad_sig = versioned_tx.signatures[0];
+
+        let encoded = serialize(&versioned_tx).unwrap();
+        let (meta, _, _) = create_transaction_status_meta(5);
+        let writable_keys = versioned_tx.message.static_account_keys()[..1]
+            .iter()
+            .collect();
+        let readonly_keys = versioned_tx.message.static_account_keys()[1..]
+            .iter()
+            .collect();
+        let slot = 10u64;
+        store
+            .write_transaction(
+                bad_sig,
+                slot,
+                0,
+                writable_keys,
+                readonly_keys,
+                &encoded,
+                meta,
+            )
+            .unwrap();
+        store.write_block(slot, 100, Hash::new_unique()).unwrap();
+
+        // The corrupted signature should fail verification
+        let result = store.verify_transaction_signature(&bad_sig).unwrap();
+        assert_eq!(result, Some(false));
+
+        // The original valid signature is not in the ledger
+        let result = store.verify_transaction_signature(&real_sig).unwrap();
+        assert_eq!(result, None);
     }
 }

@@ -1,5 +1,6 @@
 use flume::{Receiver as MpmcReceiver, Sender as MpmcSender};
 use magicblock_magic_program_api::args::TaskRequest;
+use serde::Serialize;
 use solana_program::message::{
     inner_instruction::InnerInstructionsList, SimpleAddressLoader,
 };
@@ -69,17 +70,42 @@ pub struct TransactionStatus {
 pub struct ProcessableTransaction {
     pub transaction: SanitizedTransaction,
     pub mode: TransactionProcessingMode,
+    /// Pre-encoded bincode bytes for the transaction.
+    /// Used by the replicator to avoid redundant serialization.
+    pub encoded: Option<Vec<u8>>,
+}
+
+/// Specifies the position and persistence behavior for replaying a transaction.
+///
+/// During replication, transactions must be replayed at the same slot and index
+/// as they appeared on the primary to maintain ordering consistency.
+#[derive(Clone, Copy)]
+pub struct ReplayPosition {
+    /// The slot in which the transaction was originally included.
+    pub slot: Slot,
+    /// The transaction's index within that slot (0-based).
+    pub index: u32,
+    /// Whether to persist the replay to the ledger and broadcast status.
+    /// - `true`: Record to ledger + broadcast (for replay from primary/replicator)
+    /// - `false`: No recording, no broadcast (for local ledger replay during startup)
+    pub persist: bool,
 }
 
 /// An enum that specifies how a transaction should be processed by the scheduler.
-/// Each variant also carries the one-shot sender to return the result to the original caller.
+///
+/// Variants that require result notification carry a one-shot sender:
+/// - `Simulation` and `Execution` return results to the caller
+/// - `Replay` is fire-and-forget (no sender, just position/persistence info)
 pub enum TransactionProcessingMode {
     /// Process the transaction as a simulation.
     Simulation(TxnSimulationResultTx),
     /// Process the transaction for standard execution.
     Execution(TxnExecutionResultTx),
-    /// Replay the transaction against the current state without persistence to the ledger.
-    Replay(TxnReplayResultTx),
+    /// Replay the transaction at a specific slot/index position.
+    ///
+    /// The `ReplayPosition` specifies where to record the transaction in the ledger
+    /// and whether to persist/broadcast the result.
+    Replay(ReplayPosition),
 }
 
 /// The detailed outcome of a transaction simulation.
@@ -115,6 +141,57 @@ pub trait SanitizeableTransaction {
         self,
         verify: bool,
     ) -> Result<SanitizedTransaction, TransactionError>;
+
+    /// Sanitizes the transaction and optionally provides pre-encoded bincode bytes.
+    ///
+    /// Default implementation delegates to `sanitize()` and returns `None` for encoded bytes.
+    /// Override this method when you have pre-encoded bytes (e.g., from the wire) to avoid
+    /// redundant serialization.
+    fn sanitize_with_encoded(
+        self,
+        verify: bool,
+    ) -> Result<(SanitizedTransaction, Option<Vec<u8>>), TransactionError>
+    where
+        Self: Sized,
+    {
+        let txn = self.sanitize(verify)?;
+        Ok((txn, None))
+    }
+}
+
+/// Wraps a transaction with its pre-encoded bincode representation.
+/// Use for internally-constructed transactions that need encoded bytes.
+pub struct WithEncoded<T> {
+    pub txn: T,
+    pub encoded: Vec<u8>,
+}
+
+impl<T: SanitizeableTransaction> SanitizeableTransaction for WithEncoded<T> {
+    fn sanitize(
+        self,
+        verify: bool,
+    ) -> Result<SanitizedTransaction, TransactionError> {
+        self.txn.sanitize(verify)
+    }
+
+    fn sanitize_with_encoded(
+        self,
+        verify: bool,
+    ) -> Result<(SanitizedTransaction, Option<Vec<u8>>), TransactionError> {
+        let txn = self.txn.sanitize(verify)?;
+        Ok((txn, Some(self.encoded)))
+    }
+}
+
+/// Encodes a transaction to bincode and wraps it with its encoded form.
+/// Use for internally-constructed transactions that need the encoded bytes.
+pub fn with_encoded<T>(txn: T) -> Result<WithEncoded<T>, TransactionError>
+where
+    T: Serialize,
+{
+    let encoded = bincode::serialize(&txn)
+        .map_err(|_| TransactionError::SanitizeFailure)?;
+    Ok(WithEncoded { txn, encoded })
 }
 
 impl SanitizeableTransaction for SanitizedTransaction {
@@ -162,9 +239,13 @@ impl TransactionSchedulerHandle {
         &self,
         txn: impl SanitizeableTransaction,
     ) -> TransactionResult {
-        let transaction = txn.sanitize(true)?;
+        let (transaction, encoded) = txn.sanitize_with_encoded(true)?;
         let mode = TransactionProcessingMode::Execution(None);
-        let txn = ProcessableTransaction { transaction, mode };
+        let txn = ProcessableTransaction {
+            transaction,
+            mode,
+            encoded,
+        };
         let r = self.0.send(txn).await;
         r.map_err(|_| TransactionError::ClusterMaintenance)
     }
@@ -191,14 +272,31 @@ impl TransactionSchedulerHandle {
         self.send(txn, mode).await
     }
 
-    /// Submits a transaction to be replayed against the
-    /// current accountsdb state and awaits the result.
+    /// Submits a transaction to be replayed against the current accountsdb state.
+    ///
+    /// Unlike `execute()`, this method is fire-and-forget: it returns success
+    /// once the transaction is queued, not after execution completes.
+    ///
+    /// # Arguments
+    /// * `position` - The slot/index at which to record the transaction, plus
+    ///   whether to persist to ledger and broadcast status
+    /// * `txn` - The transaction to replay
     pub async fn replay(
         &self,
+        position: ReplayPosition,
         txn: impl SanitizeableTransaction,
     ) -> TransactionResult {
-        let mode = TransactionProcessingMode::Replay;
-        self.send(txn, mode).await?
+        let mode = TransactionProcessingMode::Replay(position);
+        let transaction = txn.sanitize(true)?;
+        let txn = ProcessableTransaction {
+            transaction,
+            mode,
+            encoded: None,
+        };
+        self.0
+            .send(txn)
+            .await
+            .map_err(|_| TransactionError::ClusterMaintenance)
     }
 
     /// A private helper that handles the common logic of sanitizing, sending a
@@ -208,10 +306,14 @@ impl TransactionSchedulerHandle {
         txn: impl SanitizeableTransaction,
         mode: fn(oneshot::Sender<R>) -> TransactionProcessingMode,
     ) -> Result<R, TransactionError> {
-        let transaction = txn.sanitize(true)?;
+        let (transaction, encoded) = txn.sanitize_with_encoded(true)?;
         let (tx, rx) = oneshot::channel();
         let mode = mode(tx);
-        let txn = ProcessableTransaction { transaction, mode };
+        let txn = ProcessableTransaction {
+            transaction,
+            mode,
+            encoded,
+        };
         self.0
             .send(txn)
             .await

@@ -35,6 +35,7 @@ use crate::{
 
 pub(crate) const PAYER_IDX: u16 = 0;
 pub(crate) const MAGIC_CONTEXT_IDX: u16 = PAYER_IDX + 1;
+#[cfg(test)]
 pub(crate) const ACCOUNTS_OFFSET: usize = MAGIC_CONTEXT_IDX as usize + 1;
 
 #[cfg(not(test))]
@@ -120,8 +121,10 @@ pub(crate) fn check_commit_limits(
         if nonce >= COMMIT_LIMIT {
             ic_msg!(
                 invoke_context,
-                "ScheduleCommit ERR: commit limit exceeded for account {}, only undelegation is allowed",
-                account.pubkey
+                "ScheduleCommit ERR: sponsored commit limit exceeded for account {}: current commit nonce {} reached the limit of {}. Undelegate and re-delegate the account or use a delegated account as the payer",
+                account.pubkey,
+                nonce,
+                COMMIT_LIMIT
             );
             limit_exceeded = true;
         }

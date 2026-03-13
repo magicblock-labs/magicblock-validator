@@ -13,7 +13,7 @@ use crate::{
     },
     schedule_transactions::{
         check_commit_limits, check_magic_context_id, get_clock,
-        get_parent_program_id, ACCOUNTS_OFFSET, MAGIC_CONTEXT_IDX, PAYER_IDX,
+        get_parent_program_id, MAGIC_CONTEXT_IDX, PAYER_IDX,
     },
     utils::{
         account_actions::mark_account_as_undelegated,
@@ -45,17 +45,6 @@ pub(crate) fn process_schedule_intent_bundle(
             );
             InstructionError::UnsupportedProgramId
         })?;
-
-    // Assert enough accounts
-    let ix_accs_len = ix_ctx.get_number_of_instruction_accounts() as usize;
-    if ix_accs_len <= ACCOUNTS_OFFSET {
-        ic_msg!(
-            invoke_context,
-            "ScheduleCommit ERR: not enough accounts to schedule commit ({}), need payer, signing program an account for each pubkey to be committed",
-            ix_accs_len
-        );
-        return Err(InstructionError::NotEnoughAccountKeys);
-    }
 
     // Assert Payer is signer
     let payer_pubkey =

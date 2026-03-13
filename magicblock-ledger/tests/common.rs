@@ -19,6 +19,7 @@ pub fn setup() -> Ledger {
 pub fn write_dummy_transaction(
     ledger: &Ledger,
     slot: Slot,
+    index: u32,
 ) -> (Hash, Signature) {
     let from = Keypair::new();
     let to = Pubkey::new_unique();
@@ -28,8 +29,19 @@ pub fn write_dummy_transaction(
     let transaction = SanitizedTransaction::from_transaction_for_tests(tx);
     let status = TransactionStatusMeta::default();
     let message_hash = *transaction.message_hash();
+    let versioned = transaction.to_versioned_transaction();
+    let encoded = bincode::serialize(&versioned).unwrap();
+    let locks = transaction.get_account_locks_unchecked();
     ledger
-        .write_transaction(signature, slot, &transaction, status)
+        .write_transaction(
+            signature,
+            slot,
+            index,
+            locks.writable,
+            locks.readonly,
+            &encoded,
+            status,
+        )
         .expect("failed to write dummy transaction");
 
     (message_hash, signature)
