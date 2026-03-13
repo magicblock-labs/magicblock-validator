@@ -3498,6 +3498,8 @@ dependencies = [
  "magicblock-ledger",
  "magicblock-program",
  "rusqlite",
+ "solana-commitment-config",
+ "solana-hash",
  "solana-instruction",
  "solana-message",
  "solana-pubkey",

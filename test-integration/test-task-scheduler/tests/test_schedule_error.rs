@@ -1,7 +1,7 @@
 use cleanass::{assert, assert_eq};
 use integration_test_tools::{expect, validator::cleanup};
 use magicblock_task_scheduler::{
-    SchedulerDatabase, TASK_EXECUTION_RETRY_LIMIT,
+    service::TASK_EXECUTION_RETRY_LIMIT, SchedulerDatabase,
 };
 use program_flexi_counter::{
     instruction::{create_cancel_task_ix, create_schedule_task_ix},
@@ -109,11 +109,9 @@ fn test_schedule_error() {
     );
 
     // Wait long enough for all retries to be exhausted.
-    let retry_window_slots = ((TASK_EXECUTION_RETRY_LIMIT as u64
+    let retry_window_slots = (TASK_EXECUTION_RETRY_LIMIT as u64
         * execution_interval_millis as u64)
-        + TASK_SCHEDULER_TICK_MILLIS
-        - 1)
-        / TASK_SCHEDULER_TICK_MILLIS
+        .div_ceil(TASK_SCHEDULER_TICK_MILLIS)
         + 20;
     expect!(ctx.wait_for_delta_slot_ephem(retry_window_slots), validator);
 

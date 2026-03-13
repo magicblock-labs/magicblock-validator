@@ -4,4 +4,4 @@ pub mod service;
 
 pub use db::SchedulerDatabase;
 pub use errors::TaskSchedulerError;
-pub use service::{TaskSchedulerService, TASK_EXECUTION_RETRY_LIMIT};
+pub use service::TaskSchedulerService;
