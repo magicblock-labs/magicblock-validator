@@ -5,8 +5,11 @@ use std::sync::Arc;
 use machineid_rs::IdBuilder;
 use magicblock_accounts_db::AccountsDb;
 use magicblock_core::{
-    link::transactions::{SchedulerMode, TransactionSchedulerHandle},
-    Slot,
+    link::{
+        replication::{Block, Message, SuperBlock},
+        transactions::{SchedulerMode, TransactionSchedulerHandle},
+    },
+    Slot, TransactionIndex,
 };
 use magicblock_ledger::Ledger;
 use tokio::{
@@ -18,9 +21,8 @@ use tracing::info;
 use super::{Primary, Standby, CONSUMER_RETRY_DELAY};
 use crate::{
     nats::{Broker, Consumer, LockWatcher, Producer},
-    proto::{self, TransactionIndex},
     watcher::SnapshotWatcher,
-    Error, Message, Result,
+    Error, Result,
 };
 
 /// Shared state for both primary and standby roles.
@@ -39,6 +41,7 @@ pub struct ReplicationContext {
     pub scheduler: TransactionSchedulerHandle,
     /// Current position.
     pub slot: Slot,
+    /// Position of the last transaction within slot
     pub index: TransactionIndex,
 }
 
@@ -80,14 +83,14 @@ impl ReplicationContext {
     }
 
     /// Writes block to ledger.
-    pub async fn write_block(&self, block: &proto::Block) -> Result<()> {
+    pub async fn write_block(&self, block: &Block) -> Result<()> {
         self.ledger
             .write_block(block.slot, block.timestamp, block.hash)?;
         Ok(())
     }
 
     /// Verifies superblock checksum.
-    pub fn verify_checksum(&self, sb: &proto::SuperBlock) -> Result<()> {
+    pub fn verify_checksum(&self, sb: &SuperBlock) -> Result<()> {
         let _lock = self.accountsdb.lock_database();
         // SAFETY: Lock acquired above ensures no concurrent modifications
         // during checksum computation.

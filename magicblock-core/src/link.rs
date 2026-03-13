@@ -1,13 +1,16 @@
 use accounts::{AccountUpdateRx, AccountUpdateTx};
 use blocks::{BlockUpdateRx, BlockUpdateTx};
-use tokio::sync::mpsc;
+use tokio::sync::mpsc::{self, Receiver, Sender};
 use transactions::{
     ScheduledTasksRx, ScheduledTasksTx, TransactionSchedulerHandle,
     TransactionStatusRx, TransactionStatusTx, TransactionToProcessRx,
 };
 
+use crate::link::replication::Message;
+
 pub mod accounts;
 pub mod blocks;
+pub mod replication;
 pub mod transactions;
 
 /// The bounded capacity for MPSC channels that require backpressure.
@@ -29,6 +32,8 @@ pub struct DispatchEndpoints {
     pub block_update: BlockUpdateRx,
     /// Receives scheduled (crank) tasks from transactions executor.
     pub tasks_service: Option<ScheduledTasksRx>,
+    /// Receives replication events from the transaction scheduler.
+    pub replication_messages: Option<Receiver<Message>>,
 }
 
 /// A collection of channel endpoints for the **validator's internal core**.
@@ -47,6 +52,8 @@ pub struct ValidatorChannelEndpoints {
     pub block_update: BlockUpdateTx,
     /// Sends scheduled (crank) tasks to tasks service from transactions executor.
     pub tasks_service: ScheduledTasksTx,
+    /// Sends replication events to the replication service.
+    pub replication_messages: Sender<Message>,
 }
 
 /// Creates and connects the full set of communication channels between the dispatch
@@ -66,6 +73,7 @@ pub fn link() -> (DispatchEndpoints, ValidatorChannelEndpoints) {
 
     // Bounded channels for command queues where applying backpressure is important.
     let (txn_to_process_tx, txn_to_process_rx) = mpsc::channel(LINK_CAPACITY);
+    let (replication_tx, replication_rx) = mpsc::channel(LINK_CAPACITY);
 
     // Bundle the respective channel ends for the dispatch side.
     let dispatch = DispatchEndpoints {
@@ -74,6 +82,7 @@ pub fn link() -> (DispatchEndpoints, ValidatorChannelEndpoints) {
         account_update: account_update_rx,
         block_update: block_update_rx,
         tasks_service: Some(tasks_rx),
+        replication_messages: Some(replication_rx),
     };
 
     // Bundle the corresponding channel ends for the validator's internal core.
@@ -83,6 +92,7 @@ pub fn link() -> (DispatchEndpoints, ValidatorChannelEndpoints) {
         account_update: account_update_tx,
         block_update: block_update_tx,
         tasks_service: tasks_tx,
+        replication_messages: replication_tx,
     };
 
     (dispatch, validator)
