@@ -41,3 +41,14 @@ impl Default for ValidatorConfig {
         }
     }
 }
+
+impl ReplicationMode {
+    /// Returns the remote URL if this node participates in replication.
+    /// Returns `None` for `Standalone` mode.
+    pub fn remote(&self) -> Option<Url> {
+        match self {
+            Self::Standalone => None,
+            Self::StandBy(u) | Self::ReplicatOnly(u) => Some(u.clone()),
+        }
+    }
+}

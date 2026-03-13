@@ -4,9 +4,9 @@ use std::time::{Duration, Instant};
 
 use async_nats::Message as NatsMessage;
 use futures::StreamExt;
-use magicblock_core::{
-    link::transactions::{ReplayPosition, WithEncoded},
-    Slot,
+use magicblock_core::link::{
+    replication::{Message, Transaction},
+    transactions::{ReplayPosition, WithEncoded},
 };
 use solana_transaction::versioned::VersionedTransaction;
 use tokio::sync::mpsc::Receiver;
@@ -15,9 +15,8 @@ use tracing::{error, info, warn};
 use super::{ReplicationContext, LEADER_TIMEOUT};
 use crate::{
     nats::{Consumer, LockWatcher},
-    proto::TransactionIndex,
     service::Primary,
-    Message, Result,
+    Result,
 };
 
 /// Standby node: consumes events and watches for leader failure.
@@ -46,13 +45,22 @@ impl Standby {
         }
     }
 
-    /// Runs until leadership acquired, returns primary on promotion.
-    pub async fn run(mut self) -> Result<Primary> {
+    /// Runs until leadership acquired or shutdown.
+    /// Returns `Some(Primary)` on promotion, `None` on shutdown.
+    pub async fn run(mut self) -> Result<Option<Primary>> {
         let mut timeout_check = tokio::time::interval(Duration::from_secs(1));
         let mut stream = self.consumer.messages().await;
 
         loop {
             tokio::select! {
+                biased;
+                _ = self.watcher.wait_for_expiry() => {
+                    info!("leader lock expired, attempting takeover");
+                    if let Ok(Some(producer)) = self.ctx.try_acquire_producer().await {
+                        info!("acquired leadership, promoting");
+                        return self.ctx.into_primary(producer, self.messages).await.map(Some);
+                    }
+                }
                 result = stream.next() => {
                     let Some(result) = result else {
                         stream = self.consumer.messages().await;
@@ -66,20 +74,15 @@ impl Standby {
                         Err(e) => warn!(%e, "message consumption stream error"),
                     }
                 }
-
-                _ = self.watcher.wait_for_expiry() => {
-                    info!("leader lock expired, attempting takeover");
-                    if let Ok(Some(producer)) = self.ctx.try_acquire_producer().await {
-                        info!("acquired leadership, promoting");
-                        return self.ctx.into_primary(producer, self.messages).await;
-                    }
-                }
-
                 _ = timeout_check.tick(), if self.last_activity.elapsed() > LEADER_TIMEOUT => {
                     if let Ok(Some(producer)) = self.ctx.try_acquire_producer().await {
                         info!("acquired leadership via timeout, promoting");
-                        return self.ctx.into_primary(producer, self.messages).await;
+                        return self.ctx.into_primary(producer, self.messages).await.map(Some);
                     }
+                }
+                _ = self.ctx.cancel.cancelled() => {
+                    info!("shutdown received, terminating standby mode");
+                    return Ok(None);
                 }
             }
         }
@@ -102,8 +105,8 @@ impl Standby {
         }
 
         let result = match message {
-            Message::Transaction(tx) => {
-                self.replay_tx(tx.slot, tx.index, tx.payload).await
+            Message::Transaction(txn) => {
+                self.replay_tx(txn).await
             }
             Message::Block(block) => self.ctx.write_block(&block).await,
             Message::SuperBlock(sb) => {
@@ -120,20 +123,16 @@ impl Standby {
         self.ctx.update_position(slot, index);
     }
 
-    async fn replay_tx(
-        &self,
-        slot: Slot,
-        index: TransactionIndex,
-        encoded: Vec<u8>,
-    ) -> Result<()> {
+    async fn replay_tx(&self, msg: Transaction) -> Result<()> {
         let pos = ReplayPosition {
-            slot,
-            index,
+            slot: msg.slot,
+            index: msg.index,
             persist: true,
         };
-        let tx: VersionedTransaction = bincode::deserialize(&encoded)?;
-        let tx = WithEncoded { txn: tx, encoded };
-        self.ctx.scheduler.replay(pos, tx).await?;
+        let encoded = msg.payload;
+        let txn: VersionedTransaction = bincode::deserialize(&encoded)?;
+        let txn = WithEncoded { txn, encoded };
+        self.ctx.scheduler.replay(pos, txn).await?;
         Ok(())
     }
 }

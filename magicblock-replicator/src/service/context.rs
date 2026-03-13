@@ -5,22 +5,25 @@ use std::sync::Arc;
 use machineid_rs::IdBuilder;
 use magicblock_accounts_db::AccountsDb;
 use magicblock_core::{
-    link::transactions::{SchedulerMode, TransactionSchedulerHandle},
-    Slot,
+    link::{
+        replication::{Block, Message, SuperBlock},
+        transactions::{SchedulerMode, TransactionSchedulerHandle},
+    },
+    Slot, TransactionIndex,
 };
 use magicblock_ledger::Ledger;
 use tokio::{
     fs::File,
     sync::mpsc::{Receiver, Sender},
 };
+use tokio_util::sync::CancellationToken;
 use tracing::info;
 
 use super::{Primary, Standby, CONSUMER_RETRY_DELAY};
 use crate::{
     nats::{Broker, Consumer, LockWatcher, Producer},
-    proto::{self, TransactionIndex},
     watcher::SnapshotWatcher,
-    Error, Message, Result,
+    Error, Result,
 };
 
 /// Shared state for both primary and standby roles.
@@ -29,6 +32,8 @@ pub struct ReplicationContext {
     pub id: String,
     /// NATS broker.
     pub broker: Broker,
+    /// Global shutdown signal
+    pub cancel: CancellationToken,
     /// Scheduler mode channel.
     pub mode_tx: Sender<SchedulerMode>,
     /// Accounts database.
@@ -39,6 +44,7 @@ pub struct ReplicationContext {
     pub scheduler: TransactionSchedulerHandle,
     /// Current position.
     pub slot: Slot,
+    /// Position of the last transaction within slot
     pub index: TransactionIndex,
 }
 
@@ -50,6 +56,7 @@ impl ReplicationContext {
         accountsdb: Arc<AccountsDb>,
         ledger: Arc<Ledger>,
         scheduler: TransactionSchedulerHandle,
+        cancel: CancellationToken,
     ) -> Result<Self> {
         let id = IdBuilder::new(machineid_rs::Encryption::SHA256)
             .add_component(machineid_rs::HWIDComponent::SystemID)
@@ -64,6 +71,7 @@ impl ReplicationContext {
         Ok(Self {
             id,
             broker,
+            cancel,
             mode_tx,
             accountsdb,
             ledger,
@@ -80,14 +88,14 @@ impl ReplicationContext {
     }
 
     /// Writes block to ledger.
-    pub async fn write_block(&self, block: &proto::Block) -> Result<()> {
+    pub async fn write_block(&self, block: &Block) -> Result<()> {
         self.ledger
             .write_block(block.slot, block.timestamp, block.hash)?;
         Ok(())
     }
 
     /// Verifies superblock checksum.
-    pub fn verify_checksum(&self, sb: &proto::SuperBlock) -> Result<()> {
+    pub fn verify_checksum(&self, sb: &SuperBlock) -> Result<()> {
         let _lock = self.accountsdb.lock_database();
         // SAFETY: Lock acquired above ensures no concurrent modifications
         // during checksum computation.
@@ -132,16 +140,25 @@ impl ReplicationContext {
         self.broker.put_snapshot(slot, file).await
     }
 
-    /// Creates consumer with retry.
-    pub async fn create_consumer(&self, reset: bool) -> Consumer {
+    /// Creates consumer with retry, respecting shutdown signal.
+    /// Returns `None` if shutdown is triggered during creation.
+    pub async fn create_consumer(&self, reset: bool) -> Option<Consumer> {
         loop {
-            match self.broker.create_consumer(&self.id, reset).await {
-                Ok(c) => return c,
-                Err(e) => {
-                    tracing::warn!(%e, "consumer creation failed, retrying");
-                    tokio::time::sleep(CONSUMER_RETRY_DELAY).await;
+            tokio::select! {
+                result = self.broker.create_consumer(&self.id, reset) => {
+                    match result {
+                        Ok(c) => return Some(c),
+                        Err(e) => {
+                            tracing::warn!(%e, "consumer creation failed, retrying");
+                        }
+                    }
+                }
+                _ = self.cancel.cancelled() => {
+                    tracing::info!("shutdown during consumer creation");
+                    return None;
                 }
             }
+            tokio::time::sleep(CONSUMER_RETRY_DELAY).await;
         }
     }
 
@@ -157,6 +174,7 @@ impl ReplicationContext {
     }
 
     /// Transitions to standby role.
+    /// Returns `None` if shutdown is triggered during consumer creation.
     /// reset parameter controls where in the stream the consumption starts:
     /// true - the last known position that we know
     /// false - the last known position that message broker tracks for us
@@ -164,10 +182,17 @@ impl ReplicationContext {
         self,
         messages: Receiver<Message>,
         reset: bool,
-    ) -> Result<Standby> {
-        let consumer = Box::new(self.create_consumer(reset).await);
+    ) -> Result<Option<Standby>> {
+        let Some(consumer) = self.create_consumer(reset).await else {
+            return Ok(None);
+        };
         let watcher = LockWatcher::new(&self.broker).await;
         self.enter_replica_mode().await;
-        Ok(Standby::new(self, consumer, messages, watcher))
+        Ok(Some(Standby::new(
+            self,
+            Box::new(consumer),
+            messages,
+            watcher,
+        )))
     }
 }
