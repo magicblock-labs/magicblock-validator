@@ -27,7 +27,7 @@ use solana_account::{from_account, to_account};
 use solana_program::slot_hashes::SlotHashes;
 use solana_program_runtime::loaded_programs::ProgramCache;
 use solana_sdk_ids::sysvar::{clock, slot_hashes};
-use state::TransactionSchedulerState;
+use state::{SchedulerMode, TransactionSchedulerState};
 use tokio::{
     runtime::Builder,
     sync::mpsc::{channel, Receiver, Sender},
@@ -35,9 +35,8 @@ use tokio::{
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, instrument, warn};
 
-use crate::{
-    executor::{IndexedTransaction, SimpleForkGraph, TransactionExecutor},
-    scheduler::state::SchedulerMode,
+use crate::executor::{
+    IndexedTransaction, SimpleForkGraph, TransactionExecutor,
 };
 
 // Capacity of 1 ensures executor processes one transaction at a time
@@ -63,11 +62,9 @@ pub struct TransactionScheduler {
     latest_block: LatestBlock,
     /// Global shutdown signal.
     shutdown: CancellationToken,
-    /// Receiver for mode transition commands.
+    /// Receives mode transition commands (Primary or Replica) at runtime.
     mode_rx: Receiver<SchedulerMode>,
-    /// Current active slot (unfinalized block).
     slot: Slot,
-    /// Transaction index within the current block being assembled.
     index: u32,
 }
 
@@ -143,7 +140,14 @@ impl TransactionScheduler {
                 Ok(()) = block_produced.recv() => self.transition_to_new_slot(),
                 Some(executor) = self.ready_rx.recv() => self.handle_ready_executor(executor),
                 Some(mode) = self.mode_rx.recv() => {
-                    self.coordinator.transition_to(mode);
+                    match mode {
+                        SchedulerMode::Primary => {
+                            self.coordinator.switch_to_primary_mode_globally();
+                        }
+                        SchedulerMode::Replica => {
+                            self.coordinator.switch_to_replica_mode_globally();
+                        }
+                    }
                 }
                 Some(txn) = self.transactions_rx.recv(), if self.coordinator.is_ready() => {
                     self.handle_new_transaction(txn);

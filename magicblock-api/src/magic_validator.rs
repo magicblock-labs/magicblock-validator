@@ -133,6 +133,7 @@ pub struct MagicValidator {
     task_scheduler: Option<TaskSchedulerService>,
     transaction_execution: thread::JoinHandle<()>,
     mode_tx: Sender<SchedulerMode>,
+    is_standalone: bool,
 }
 
 impl MagicValidator {
@@ -261,8 +262,13 @@ impl MagicValidator {
         validator::init_validator_authority(identity_keypair);
         let base_fee = config.validator.basefee;
 
-        // Mode switcher for transitioning from Replica to Primary mode after ledger replay
+        // Mode switch channel for transitioning from StartingUp to Primary
+        // or Replica mode after ledger replay
         let (mode_tx, mode_rx) = channel(1);
+        let is_standalone = matches!(
+            config.validator.replication_mode,
+            ReplicationMode::Standalone
+        );
         let txn_scheduler_state = TransactionSchedulerState {
             accountsdb: accountsdb.clone(),
             ledger: ledger.clone(),
@@ -381,6 +387,7 @@ impl MagicValidator {
             task_scheduler: Some(task_scheduler),
             transaction_execution,
             mode_tx,
+            is_standalone,
         })
     }
 
@@ -808,16 +815,6 @@ impl MagicValidator {
         let step_start = Instant::now();
         self.maybe_process_ledger().await?;
 
-        // Switch scheduler to Primary mode after ledger replay completes.
-        // Primary validators accept client transactions; Replica validators stay
-        // in Replica mode to receive transactions from the primary.
-        if let ReplicationMode::Standalone =
-            self.config.validator.replication_mode
-        {
-            // Ignore send errors: scheduler may have shut down.
-            let _ = self.mode_tx.send(SchedulerMode::Primary).await;
-        }
-
         log_timing("startup", "maybe_process_ledger", step_start);
 
         // Ledger replay has completed, we can now clean non-delegated accounts
@@ -827,6 +824,23 @@ impl MagicValidator {
             self.chainlink.reset_accounts_bank()?;
             log_timing("startup", "reset_accounts_bank", step_start);
         }
+
+        // Notify the scheduler that ledger replay and bank cleanup is complete.
+        // The message carries the target mode so the scheduler transitions to
+        // the correct coordination mode:
+        // - Standalone validators transition to Primary mode
+        // - StandBy/ReplicatOnly validators transition to Replica mode
+        let target = if self.is_standalone {
+            SchedulerMode::Primary
+        } else {
+            SchedulerMode::Replica
+        };
+        self.mode_tx.try_send(target).map_err(|e| {
+            ApiError::FailedToSendModeSwitch(format!(
+                "Failed to send target mode {target:?} to scheduler: \
+                 {e}"
+            ))
+        })?;
 
         // Now we are ready to start all services and are ready to accept transactions
         if let Some(frequency) = self
@@ -894,7 +908,6 @@ impl MagicValidator {
             }
         });
 
-        validator::finished_starting_up();
         Ok(())
     }
 

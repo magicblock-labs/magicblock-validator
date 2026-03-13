@@ -51,7 +51,8 @@ pub fn ensure_started_validator(
     });
     init_magic_sys(stub);
 
-    validator::ensure_started_up();
+    // Ensure validator is in Primary mode (ledger replay complete)
+    magicblock_core::coordination_mode::switch_to_primary_mode();
 }
 
 pub fn process_instruction(

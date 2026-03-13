@@ -44,6 +44,9 @@ pub enum ApiError {
     #[error("Failed to load programs into bank: {0}")]
     FailedToLoadProgramsIntoBank(String),
 
+    #[error("Failed to send mode switch to scheduler: {0}")]
+    FailedToSendModeSwitch(String),
+
     #[error("Failed to initialize JSON RPC service: {0}")]
     FailedToInitJsonRpcService(String),
 
