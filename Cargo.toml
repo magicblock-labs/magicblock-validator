@@ -118,6 +118,8 @@ magicblock-tui-client = { path = "./tools/magicblock-tui-client" }
 magicblock-validator-admin = { path = "./magicblock-validator-admin" }
 magicblock-version = { path = "./magicblock-version" }
 
+machineid-rs = "1.2"
+
 num-derive = "0.4"
 num-format = "0.4.4"
 num-traits = "0.2"

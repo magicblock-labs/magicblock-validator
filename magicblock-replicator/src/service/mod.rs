@@ -61,7 +61,6 @@ pub enum Service {
 impl Service {
     /// Creates service, attempting primary role first.
     pub async fn new(
-        id: String,
         broker: Broker,
         mode_tx: Sender<SchedulerMode>,
         accountsdb: Arc<AccountsDb>,
@@ -70,7 +69,7 @@ impl Service {
         messages: Receiver<Message>,
     ) -> crate::Result<Self> {
         let ctx = ReplicationContext::new(
-            id, broker, mode_tx, accountsdb, ledger, scheduler,
+            broker, mode_tx, accountsdb, ledger, scheduler,
         )
         .await?;
 

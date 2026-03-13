@@ -6,7 +6,7 @@ use async_nats::jetstream::object_store;
 use magicblock_core::Slot;
 
 use super::cfg;
-use crate::Result;
+use crate::{Error, Result};
 
 /// AccountsDb snapshot with positioning metadata.
 #[derive(Debug)]
@@ -32,10 +32,10 @@ impl SnapshotMeta {
             |key: &str| info.metadata.get(key).and_then(|v| v.parse().ok());
 
         let slot = get_parsed(cfg::META_SLOT).ok_or_else(|| {
-            crate::Error::Internal("missing 'slot' in snapshot metadata")
+            Error::Internal("missing 'slot' in snapshot metadata".into())
         })?;
         let sequence = get_parsed(cfg::META_SEQUENCE).ok_or_else(|| {
-            crate::Error::Internal("missing 'sequence' in snapshot metadata")
+            Error::Internal("missing 'sequence' in snapshot metadata".into())
         })?;
 
         Ok(Self { slot, sequence })

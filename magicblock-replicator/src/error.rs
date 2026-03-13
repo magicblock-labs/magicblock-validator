@@ -30,7 +30,7 @@ pub enum Error {
 
     /// Internal protocol violation or malformed data.
     #[error("internal error: {0}")]
-    Internal(&'static str),
+    Internal(String),
 
     /// File system watcher error.
     #[error("watcher error: {0}")]
