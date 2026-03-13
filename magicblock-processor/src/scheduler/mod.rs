@@ -62,7 +62,7 @@ pub struct TransactionScheduler {
     latest_block: LatestBlock,
     /// Global shutdown signal.
     shutdown: CancellationToken,
-    /// Receives the target mode (Primary or Replica) when startup completes.
+    /// Receives mode transition commands (Primary or Replica) at runtime.
     mode_rx: Receiver<SchedulerMode>,
     slot: Slot,
     index: u32,

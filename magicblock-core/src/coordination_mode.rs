@@ -1,7 +1,5 @@
 use std::sync::atomic::{AtomicU8, Ordering};
 
-use tracing::error;
-
 /// Global coordination mode accessible from any crate.
 ///
 /// Stored as an atomic u8 for lock-free reads from program
@@ -67,77 +65,20 @@ pub fn should_schedule_intents() -> bool {
 
 /// Transitions to `Primary` from `StartingUp` or `Replica`.
 /// No-op if already in Primary mode.
-/// Logs error and returns if called from any other state.
 pub fn switch_to_primary_mode() {
     let target = CoordinationMode::Primary as u8;
-    let mut current = COORDINATION_MODE.load(Ordering::Acquire);
-    loop {
-        if current == target {
-            return;
-        }
-        // Accept transitions from StartingUp or Replica
-        let mode = CoordinationMode::from_u8(current);
-        if !matches!(
-            mode,
-            CoordinationMode::StartingUp | CoordinationMode::Replica
-        ) {
-            error!(
-                mode = ?mode,
-                "invalid transition to switch to primary mode",
-            );
-            return;
-        }
-        match COORDINATION_MODE.compare_exchange(
-            current,
-            target,
-            Ordering::Release,
-            Ordering::Acquire,
-        ) {
-            Ok(_) => return,
-            Err(actual) => {
-                if actual == target {
-                    return;
-                }
-                current = actual;
-            }
-        }
+    let current = COORDINATION_MODE.load(Ordering::Acquire);
+    if current != target {
+        COORDINATION_MODE.store(target, Ordering::Release);
     }
 }
 
 /// Transitions to `Replica` from `StartingUp` or `Primary`.
 /// No-op if already in Replica mode.
-/// Logs error and returns if called from any other state (e.g., from `Replica`).
 pub fn switch_to_replica_mode() {
     let target = CoordinationMode::Replica as u8;
-    let mut current = COORDINATION_MODE.load(Ordering::Acquire);
-    loop {
-        if current == target {
-            return;
-        }
-        // Accept transitions from StartingUp or Primary
-        match CoordinationMode::from_u8(current) {
-            CoordinationMode::StartingUp | CoordinationMode::Primary => {}
-            mode => {
-                error!(
-                    "switch_to_replica_mode: invalid transition from {:?}",
-                    mode
-                );
-                return;
-            }
-        }
-        match COORDINATION_MODE.compare_exchange(
-            current,
-            target,
-            Ordering::Release,
-            Ordering::Acquire,
-        ) {
-            Ok(_) => return,
-            Err(actual) => {
-                if actual == target {
-                    return;
-                }
-                current = actual;
-            }
-        }
+    let current = COORDINATION_MODE.load(Ordering::Acquire);
+    if current != target {
+        COORDINATION_MODE.store(target, Ordering::Release);
     }
 }

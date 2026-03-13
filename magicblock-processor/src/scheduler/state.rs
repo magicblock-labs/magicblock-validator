@@ -55,7 +55,7 @@ pub struct TransactionSchedulerState {
     // === Configuration ===
     pub is_auto_airdrop_lamports_enabled: bool,
     pub shutdown: CancellationToken,
-    /// Receives the target mode (Primary or Replica) when startup completes.
+    /// Receives mode transition commands (Primary or Replica) at runtime.
     pub mode_rx: Receiver<SchedulerMode>,
 }
 
