@@ -17,7 +17,7 @@ use tokio::sync::{
 };
 
 use super::blocks::BlockHash;
-use crate::Slot;
+use crate::{Slot, TransactionIndex};
 
 /// The receiver end of the multi-producer, multi-consumer
 /// channel for communicating final transaction statuses.
@@ -62,7 +62,7 @@ pub struct TransactionStatus {
     pub slot: Slot,
     pub txn: SanitizedTransaction,
     pub meta: TransactionStatusMeta,
-    pub index: u32,
+    pub index: TransactionIndex,
 }
 
 /// An internal message that bundles a sanitized transaction with its requested processing mode.
@@ -84,7 +84,7 @@ pub struct ReplayPosition {
     /// The slot in which the transaction was originally included.
     pub slot: Slot,
     /// The transaction's index within that slot (0-based).
-    pub index: u32,
+    pub index: TransactionIndex,
     /// Whether to persist the replay to the ledger and broadcast status.
     /// - `true`: Record to ledger + broadcast (for replay from primary/replicator)
     /// - `false`: No recording, no broadcast (for local ledger replay during startup)
