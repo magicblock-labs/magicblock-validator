@@ -112,6 +112,7 @@ magicblock-magic-program-api = { path = "./magicblock-magic-program-api" }
 magicblock-metrics = { path = "./magicblock-metrics" }
 magicblock-processor = { path = "./magicblock-processor" }
 magicblock-program = { path = "./programs/magicblock" }
+magicblock-replicator = { path = "./magicblock-replicator" }
 magicblock-rpc-client = { path = "./magicblock-rpc-client" }
 magicblock-services = { path = "./magicblock-services" }
 magicblock-table-mania = { path = "./magicblock-table-mania" }
