@@ -15,8 +15,6 @@ pub struct Snapshot {
     pub data: Vec<u8>,
     /// Slot at which the snapshot was taken.
     pub slot: Slot,
-    /// Stream sequence for replay start position.
-    pub sequence: u64,
 }
 
 /// Metadata stored with each snapshot object.

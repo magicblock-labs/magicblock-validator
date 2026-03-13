@@ -59,13 +59,13 @@ impl Broker {
             .backpressure_on_inflight(true)
             .build(client);
 
-        let broker = Self { ctx, sequence: 0 };
+        let mut broker = Self { ctx, sequence: 0 };
         broker.init_resources().await?;
         Ok(broker)
     }
 
     /// Initializes streams, object stores, and KV buckets.
-    async fn init_resources(&self) -> Result<()> {
+    async fn init_resources(&mut self) -> Result<()> {
         let info = self
             .ctx
             .create_or_update_stream(stream::Config {
@@ -100,6 +100,8 @@ impl Broker {
             })
             .await?;
 
+        self.sequence = info.state.first_sequence;
+
         Ok(())
     }
 
@@ -120,7 +122,7 @@ impl Broker {
     }
 
     /// Retrieves the latest snapshot, if one exists.
-    pub async fn get_snapshot(&self) -> Result<Option<Snapshot>> {
+    pub async fn get_snapshot(&mut self) -> Result<Option<Snapshot>> {
         let store = self.ctx.get_object_store(cfg::SNAPSHOTS).await?;
 
         let mut object = match store.get(cfg::SNAPSHOT_NAME).await {
@@ -134,11 +136,11 @@ impl Broker {
 
         let mut data = Vec::with_capacity(info.size);
         object.read_to_end(&mut data).await?;
+        self.sequence = meta.sequence;
 
         Ok(Some(Snapshot {
             data,
             slot: meta.slot,
-            sequence: meta.sequence,
         }))
     }
 
@@ -172,9 +174,9 @@ impl Broker {
     pub async fn create_consumer(
         &self,
         id: &str,
-        start_seq: Option<u64>,
+        reset: bool,
     ) -> Result<Consumer> {
-        Consumer::new(id, &self.ctx, start_seq).await
+        Consumer::new(id, self, reset).await
     }
 
     /// Creates a producer for publishing events.
