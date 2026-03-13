@@ -217,7 +217,7 @@ impl TransactionExecutor {
         };
         self.environment.blockhash = block.blockhash;
         self.processor.slot = block.slot;
-        self.set_sysvars(&block);
+        self.set_sysvars(block);
     }
 
     /// Updates cache and persists slot hashes.
