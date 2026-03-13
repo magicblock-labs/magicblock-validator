@@ -23,9 +23,7 @@ magicblock-committor-program = { workspace = true, features = [
   "no-entrypoint",
 ] }
 magicblock-core = { workspace = true }
-magicblock-delegation-program = { workspace = true, features = [
-  "no-entrypoint",
-] }
+dlp-api = { workspace = true }
 magicblock-metrics = { workspace = true }
 magicblock-program = { workspace = true }
 magicblock-rpc-client = { workspace = true }
