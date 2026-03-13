@@ -18,6 +18,7 @@ use async_nats::Subject;
 pub use broker::Broker;
 pub use consumer::Consumer;
 pub use lock_watcher::LockWatcher;
+use magicblock_core::link::replication::Message;
 pub use producer::Producer;
 pub use snapshot::Snapshot;
 
@@ -96,5 +97,13 @@ impl Subjects {
     /// Typed subject for superblock events.
     pub fn superblock() -> Subject {
         Self::from(Self::SUPERBLOCK)
+    }
+
+    pub(crate) fn from_message(msg: &Message) -> Subject {
+        match msg {
+            Message::Transaction(_) => Subjects::transaction(),
+            Message::Block(_) => Subjects::block(),
+            Message::SuperBlock(_) => Subjects::superblock(),
+        }
     }
 }
