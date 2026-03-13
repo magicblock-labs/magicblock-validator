@@ -15,16 +15,11 @@ use magicblock_program::{
 };
 use solana_commitment_config::CommitmentConfig;
 use solana_hash::Hash;
-use solana_instruction::Instruction;
 use solana_message::Message;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_signature::Signature;
 use solana_transaction::Transaction;
-use tokio::{
-    select,
-    task::JoinHandle,
-    time::{sleep, Duration},
-};
+use tokio::{select, task::JoinHandle, time::Duration};
 use tokio_util::{
     sync::CancellationToken,
     time::{delay_queue::Key, DelayQueue},
@@ -35,6 +30,14 @@ use crate::{
     db::{DbTask, SchedulerDatabase},
     errors::{TaskSchedulerError, TaskSchedulerResult},
 };
+
+struct PendingExecution {
+    tx: Transaction,
+    signature: Signature,
+    blockhash: Hash,
+    execution_started_at: i64,
+    retry_attempt: u32,
+}
 
 pub struct TaskSchedulerService {
     /// Database for persisting tasks
@@ -49,6 +52,8 @@ pub struct TaskSchedulerService {
     task_queue: DelayQueue<DbTask>,
     /// Map of task IDs to their corresponding keys in the task queue
     task_queue_keys: HashMap<i64, Key>,
+    /// Retry state for tasks whose current execution is still in flight
+    pending_executions: HashMap<i64, PendingExecution>,
     /// Counter used to make each transaction unique
     tx_counter: AtomicU64,
     /// Token used to cancel the task scheduler
@@ -62,6 +67,16 @@ pub struct TaskSchedulerService {
 enum ProcessingOutcome {
     Success,
     Recoverable(Box<TaskSchedulerError>),
+}
+
+enum TaskExecutionResult {
+    Success {
+        execution_started_at: i64,
+        signature: Signature,
+    },
+    Retry {
+        delay: Duration,
+    },
 }
 
 pub const TASK_EXECUTION_RETRY_LIMIT: u32 = 100;
@@ -104,6 +119,7 @@ impl TaskSchedulerService {
             block,
             task_queue: DelayQueue::new(),
             task_queue_keys: HashMap::new(),
+            pending_executions: HashMap::new(),
             tx_counter: AtomicU64::default(),
             token,
             min_interval: config.min_interval,
@@ -237,46 +253,75 @@ impl TaskSchedulerService {
         Ok(())
     }
 
-    async fn execute_task(&mut self, task: &DbTask) -> TaskSchedulerResult<()> {
-        let execution_started_at = chrono::Utc::now().timestamp_millis();
-        let sig = self
-            .process_transaction(
-                task.instructions.clone(),
-                Duration::from_millis(task.execution_interval_millis as u64),
-            )
-            .await?;
-
-        // TODO(Dodecahedr0x): we don't get any output directly at this point
-        // we would have to fetch the transaction via its signature to see
-        // if it succeeded or failed.
-        // However that should not happen here, but on a separate task
-        // If any instruction fails, the task is cancelled
-        debug!("Executed task {} with signature {}", task.id, sig);
-
-        self.db
-            .update_task_after_execution(task.id, execution_started_at)
-            .await?;
-
-        if task.executions_left > 1 {
-            // Reschedule the task
-            let current_time = chrono::Utc::now().timestamp_millis();
-            let new_task = DbTask {
-                executions_left: task.executions_left - 1,
-                last_execution_millis: execution_started_at,
-                ..task.clone()
-            };
-            let key = self.task_queue.insert(
-                new_task,
-                next_execution_delay(
-                    execution_started_at,
-                    task.execution_interval_millis,
-                    current_time,
-                ),
-            );
-            self.task_queue_keys.insert(task.id, key);
+    async fn execute_task(
+        &mut self,
+        task: &DbTask,
+    ) -> TaskSchedulerResult<TaskExecutionResult> {
+        if !self.pending_executions.contains_key(&task.id) {
+            let execution = self.prepare_execution(task);
+            self.pending_executions.insert(task.id, execution);
         }
 
-        Ok(())
+        let retry_delay =
+            Duration::from_millis(task.execution_interval_millis as u64);
+        let send_result = {
+            let execution = self
+                .pending_executions
+                .get(&task.id)
+                .expect("pending execution was initialized");
+            self.rpc_client.send_transaction(&execution.tx).await
+        };
+
+        match send_result {
+            Ok(signature) => {
+                let execution = self
+                    .pending_executions
+                    .remove(&task.id)
+                    .expect("pending execution exists on success");
+                Ok(TaskExecutionResult::Success {
+                    execution_started_at: execution.execution_started_at,
+                    signature,
+                })
+            }
+            Err(err) => {
+                let (signature, blockhash, retry_attempt) = {
+                    let execution = self
+                        .pending_executions
+                        .get(&task.id)
+                        .expect("pending execution exists on retry");
+                    (
+                        execution.signature,
+                        execution.blockhash,
+                        execution.retry_attempt,
+                    )
+                };
+
+                if retry_attempt == TASK_EXECUTION_RETRY_LIMIT {
+                    self.pending_executions.remove(&task.id);
+                    return Err(Box::new(err).into());
+                }
+
+                if !self.is_blockhash_valid(&blockhash).await {
+                    self.pending_executions.remove(&task.id);
+                    return Err(Box::new(err).into());
+                }
+
+                warn!(
+                    error = ?err,
+                    %signature,
+                    retry_attempt,
+                    retry_limit = TASK_EXECUTION_RETRY_LIMIT,
+                    "Failed to send scheduled task transaction, requeueing retry"
+                );
+                if let Some(execution) =
+                    self.pending_executions.get_mut(&task.id)
+                {
+                    execution.retry_attempt += 1;
+                }
+
+                Ok(TaskExecutionResult::Retry { delay: retry_delay })
+            }
+        }
     }
 
     pub async fn register_task(
@@ -296,6 +341,7 @@ impl TaskSchedulerService {
             }
         }
 
+        self.pending_executions.remove(&task.id);
         self.db.insert_task(&task).await?;
         self.task_queue
             .insert(task.clone(), Duration::from_millis(0));
@@ -318,14 +364,59 @@ impl TaskSchedulerService {
         loop {
             select! {
                 Some(task) = self.task_queue.next() => {
-                    let task = task.get_ref();
-                    self.task_queue_keys.remove(&task.id);
-                    if let Err(e) = self.execute_task(task).await {
-                        error!("Failed to execute task {}: {}", task.id, e);
+                    let task = task.into_inner();
+                    let task_id = task.id;
+                    self.task_queue_keys.remove(&task_id);
+                    match self.execute_task(&task).await {
+                        Ok(TaskExecutionResult::Success {
+                            execution_started_at,
+                            signature,
+                        }) => {
+                            // TODO(Dodecahedr0x): we don't get any output directly at this point
+                            // we would have to fetch the transaction via its signature to see
+                            // if it succeeded or failed.
+                            // However that should not happen here, but on a separate task
+                            // If any instruction fails, the task is cancelled
+                            debug!("Executed task {} with signature {}", task.id, signature);
 
-                        // If any instruction fails, the task is cancelled
-                        self.db.remove_task(task.id).await?;
-                        self.db.insert_failed_task(task.id, format!("{:?}", e)).await?;
+                            self.db
+                                .update_task_after_execution(task.id, execution_started_at)
+                                .await?;
+
+                            if task.executions_left > 1 {
+                                // Reschedule the task at the original cadence, without adding retry drift.
+                                let current_time = chrono::Utc::now().timestamp_millis();
+                                let execution_interval_millis =
+                                    task.execution_interval_millis;
+                                let new_task = DbTask {
+                                    executions_left: task.executions_left - 1,
+                                    last_execution_millis: execution_started_at,
+                                    ..task
+                                };
+                                let task_id = new_task.id;
+                                let key = self.task_queue.insert(
+                                    new_task,
+                                    next_execution_delay(
+                                        execution_started_at,
+                                        execution_interval_millis,
+                                        current_time,
+                                    ),
+                                );
+                                self.task_queue_keys.insert(task_id, key);
+                            }
+                        }
+                        Ok(TaskExecutionResult::Retry { delay }) => {
+                            let key = self.task_queue.insert(task, delay);
+                            self.task_queue_keys.insert(task_id, key);
+                        }
+                        Err(e) => {
+                            error!("Failed to execute task {}: {}", task_id, e);
+
+                            // If any instruction fails, the task is cancelled
+                            self.pending_executions.remove(&task_id);
+                            self.db.remove_task(task_id).await?;
+                            self.db.insert_failed_task(task_id, format!("{:?}", e)).await?;
+                        }
                     }
                 }
                 Some(task) = self.scheduled_tasks.recv() => {
@@ -355,13 +446,10 @@ impl TaskSchedulerService {
         if let Some(key) = self.task_queue_keys.remove(&task_id) {
             self.task_queue.remove(&key);
         }
+        self.pending_executions.remove(&task_id);
     }
 
-    async fn process_transaction(
-        &self,
-        instructions: Vec<Instruction>,
-        retry_delay: Duration,
-    ) -> TaskSchedulerResult<Signature> {
+    fn prepare_execution(&self, task: &DbTask) -> PendingExecution {
         let blockhash = self.block.load().blockhash;
         // Execute unsigned transactions
         // We prepend a noop instruction to make each transaction unique.
@@ -373,39 +461,19 @@ impl TaskSchedulerService {
             Message::new(
                 &[noop_instruction]
                     .into_iter()
-                    .chain(instructions)
+                    .chain(task.instructions.iter().cloned())
                     .collect::<Vec<_>>(),
                 Some(&validator_authority_id()),
             ),
             blockhash,
         );
-        let signature = tx.signatures[0];
-
-        for retry_attempt in 1..=TASK_EXECUTION_RETRY_LIMIT {
-            match self.rpc_client.send_transaction(&tx).await {
-                Ok(sig) => return Ok(sig),
-                Err(err) => {
-                    if retry_attempt == TASK_EXECUTION_RETRY_LIMIT {
-                        return Err(Box::new(err).into());
-                    }
-
-                    if !self.is_blockhash_valid(&blockhash).await {
-                        return Err(Box::new(err).into());
-                    }
-
-                    warn!(
-                        error = ?err,
-                        %signature,
-                        retry_attempt,
-                        retry_limit = TASK_EXECUTION_RETRY_LIMIT,
-                        "Failed to send scheduled task transaction, retrying same signature"
-                    );
-                    sleep(retry_delay).await;
-                }
-            }
+        PendingExecution {
+            signature: tx.signatures[0],
+            tx,
+            blockhash,
+            execution_started_at: chrono::Utc::now().timestamp_millis(),
+            retry_attempt: 1,
         }
-
-        unreachable!("retry loop should return on success or failure")
     }
 
     async fn is_blockhash_valid(&self, blockhash: &Hash) -> bool {
@@ -468,6 +536,7 @@ mod tests {
             block: LatestBlock::default(),
             task_queue: DelayQueue::new(),
             task_queue_keys: HashMap::new(),
+            pending_executions: HashMap::new(),
             tx_counter: AtomicU64::default(),
             token: CancellationToken::new(),
             min_interval: Duration::from_millis(1000),
@@ -549,6 +618,7 @@ mod tests {
             block: LatestBlock::default(),
             task_queue: DelayQueue::new(),
             task_queue_keys: HashMap::new(),
+            pending_executions: HashMap::new(),
             tx_counter: AtomicU64::default(),
             token: CancellationToken::new(),
             min_interval: Duration::from_millis(1000),
@@ -581,5 +651,60 @@ mod tests {
 
         let delay = next_execution_delay(1_000, 100, 1_150);
         assert_eq!(delay, Duration::ZERO);
+    }
+
+    #[tokio::test]
+    async fn test_execute_task_requeues_retry_without_sleeping() {
+        magicblock_core::logger::init_for_tests();
+        generate_validator_authority_if_needed();
+
+        let (_tx, rx) = mpsc::unbounded_channel();
+        let db = SchedulerDatabase::new(":memory:").unwrap();
+        let mut service = TaskSchedulerService {
+            db,
+            rpc_client: RpcClient::new("http://127.0.0.1:65535".to_string()),
+            block: LatestBlock::default(),
+            task_queue: DelayQueue::new(),
+            task_queue_keys: HashMap::new(),
+            pending_executions: HashMap::new(),
+            tx_counter: AtomicU64::default(),
+            token: CancellationToken::new(),
+            min_interval: Duration::from_millis(1000),
+            slot_interval: Duration::from_millis(1000),
+            scheduled_tasks: rx,
+        };
+
+        let task = DbTask {
+            id: 1,
+            authority: Pubkey::new_unique(),
+            execution_interval_millis: 30_000,
+            executions_left: 1,
+            last_execution_millis: 0,
+            instructions: vec![],
+        };
+
+        let result =
+            timeout(Duration::from_secs(1), service.execute_task(&task))
+                .await
+                .expect("retry path should not sleep inline")
+                .unwrap();
+
+        match result {
+            TaskExecutionResult::Retry { delay } => {
+                assert_eq!(delay, Duration::from_secs(30));
+                assert_eq!(
+                    service
+                        .pending_executions
+                        .get(&task.id)
+                        .as_ref()
+                        .unwrap()
+                        .retry_attempt,
+                    2
+                );
+            }
+            TaskExecutionResult::Success { .. } => {
+                panic!("task should have been requeued for retry");
+            }
+        }
     }
 }
