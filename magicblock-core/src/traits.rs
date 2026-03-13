@@ -1,4 +1,4 @@
-use std::{collections::HashMap, error::Error};
+use std::collections::HashMap;
 
 use solana_clock::Clock;
 use solana_hash::Hash;
@@ -10,9 +10,6 @@ use crate::{intent::CommittedAccount, Slot};
 /// Trait that provides access to system calls implemented outside of SVM,
 /// accessible in magic-program.
 pub trait MagicSys: Sync + Send + 'static {
-    fn persist(&self, id: u64, data: Vec<u8>) -> Result<(), Box<dyn Error>>;
-    fn load(&self, id: u64) -> Result<Option<Vec<u8>>, Box<dyn Error>>;
-
     fn fetch_current_commit_nonces(
         &self,
         commits: &[CommittedAccount],

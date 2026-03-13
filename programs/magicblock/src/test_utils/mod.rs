@@ -1,7 +1,6 @@
 use core::fmt;
 use std::{
     collections::HashMap,
-    error::Error,
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc,
@@ -12,7 +11,6 @@ use magicblock_core::{intent::CommittedAccount, traits::MagicSys};
 use magicblock_magic_program_api::{id, EPHEMERAL_VAULT_PUBKEY};
 use solana_account::AccountSharedData;
 use solana_instruction::{error::InstructionError, AccountMeta};
-use solana_log_collector::log::debug;
 use solana_program_runtime::invoke_context::mock_process_instruction;
 use solana_pubkey::Pubkey;
 use solana_sdk_ids::system_program;
@@ -124,15 +122,6 @@ impl fmt::Display for MagicSysStub {
 }
 
 impl MagicSys for MagicSysStub {
-    fn persist(&self, id: u64, data: Vec<u8>) -> Result<(), Box<dyn Error>> {
-        debug!("Persisting data for id '{}' with len {}", id, data.len());
-        Ok(())
-    }
-
-    fn load(&self, _id: u64) -> Result<Option<Vec<u8>>, Box<dyn Error>> {
-        Err("Loading from ledger not supported in tests".into())
-    }
-
     fn fetch_current_commit_nonces(
         &self,
         commits: &[CommittedAccount],
