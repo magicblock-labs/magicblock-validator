@@ -45,13 +45,22 @@ impl Standby {
         }
     }
 
-    /// Runs until leadership acquired, returns primary on promotion.
-    pub async fn run(mut self) -> Result<Primary> {
+    /// Runs until leadership acquired or shutdown.
+    /// Returns `Some(Primary)` on promotion, `None` on shutdown.
+    pub async fn run(mut self) -> Result<Option<Primary>> {
         let mut timeout_check = tokio::time::interval(Duration::from_secs(1));
         let mut stream = self.consumer.messages().await;
 
         loop {
             tokio::select! {
+                biased;
+                _ = self.watcher.wait_for_expiry() => {
+                    info!("leader lock expired, attempting takeover");
+                    if let Ok(Some(producer)) = self.ctx.try_acquire_producer().await {
+                        info!("acquired leadership, promoting");
+                        return self.ctx.into_primary(producer, self.messages).await.map(Some);
+                    }
+                }
                 result = stream.next() => {
                     let Some(result) = result else {
                         stream = self.consumer.messages().await;
@@ -65,20 +74,15 @@ impl Standby {
                         Err(e) => warn!(%e, "message consumption stream error"),
                     }
                 }
-
-                _ = self.watcher.wait_for_expiry() => {
-                    info!("leader lock expired, attempting takeover");
-                    if let Ok(Some(producer)) = self.ctx.try_acquire_producer().await {
-                        info!("acquired leadership, promoting");
-                        return self.ctx.into_primary(producer, self.messages).await;
-                    }
-                }
-
                 _ = timeout_check.tick(), if self.last_activity.elapsed() > LEADER_TIMEOUT => {
                     if let Ok(Some(producer)) = self.ctx.try_acquire_producer().await {
                         info!("acquired leadership via timeout, promoting");
-                        return self.ctx.into_primary(producer, self.messages).await;
+                        return self.ctx.into_primary(producer, self.messages).await.map(Some);
                     }
+                }
+                _ = self.ctx.cancel.cancelled() => {
+                    info!("shutdown received, terminating standby mode");
+                    return Ok(None);
                 }
             }
         }

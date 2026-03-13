@@ -38,6 +38,7 @@ use tokio::{
     runtime::Builder,
     sync::mpsc::{Receiver, Sender},
 };
+use tokio_util::sync::CancellationToken;
 
 use crate::{nats::Broker, Result};
 
@@ -61,6 +62,7 @@ pub enum Service {
 
 impl Service {
     /// Creates service, attempting primary role first.
+    #[allow(clippy::too_many_arguments)]
     pub async fn new(
         broker: Broker,
         mode_tx: Sender<SchedulerMode>,
@@ -68,21 +70,26 @@ impl Service {
         ledger: Arc<Ledger>,
         scheduler: TransactionSchedulerHandle,
         messages: Receiver<Message>,
+        cancel: CancellationToken,
         reset: bool,
-    ) -> crate::Result<Self> {
+    ) -> crate::Result<Option<Self>> {
         let ctx = ReplicationContext::new(
-            broker, mode_tx, accountsdb, ledger, scheduler,
+            broker, mode_tx, accountsdb, ledger, scheduler, cancel,
         )
         .await?;
 
         // Try to become primary.
         match ctx.try_acquire_producer().await? {
-            Some(producer) => {
-                Ok(Self::Primary(ctx.into_primary(producer, messages).await?))
-            }
+            Some(producer) => Ok(Some(Self::Primary(
+                ctx.into_primary(producer, messages).await?,
+            ))),
             None => {
-                let standby = ctx.into_standby(messages, reset).await?;
-                Ok(Self::Standby(standby))
+                let Some(standby) = ctx.into_standby(messages, reset).await?
+                else {
+                    // Shutdown during consumer creation
+                    return Ok(None);
+                };
+                Ok(Some(Self::Standby(standby)))
             }
         }
     }
@@ -91,13 +98,13 @@ impl Service {
     pub async fn run(mut self) -> Result<()> {
         loop {
             self = match self {
-                Service::Primary(p) => Service::Standby(p.run().await?),
-                Service::Standby(s) => match s.run().await {
-                    Ok(p) => Service::Primary(p),
-                    Err(error) => {
-                        tracing::error!(%error, "unrecoverable replication failure");
-                        return Err(error);
-                    }
+                Service::Primary(p) => match p.run().await? {
+                    Some(s) => Service::Standby(s),
+                    None => return Ok(()),
+                },
+                Service::Standby(s) => match s.run().await? {
+                    Some(p) => Service::Primary(p),
+                    None => return Ok(()),
                 },
             };
         }

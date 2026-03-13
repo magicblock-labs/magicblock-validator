@@ -36,22 +36,15 @@ impl Primary {
         }
     }
 
-    /// Runs until leadership lost, returns standby on demotion.
+    /// Runs until leadership lost or shutdown.
+    /// Returns `Some(Standby)` on demotion, `None` on shutdown.
     #[instrument(skip(self))]
-    pub async fn run(mut self) -> Result<Standby> {
+    pub async fn run(mut self) -> Result<Option<Standby>> {
         let mut lock_tick = tokio::time::interval(LOCK_REFRESH_INTERVAL);
 
         loop {
             tokio::select! {
-                Some(msg) = self.messages.recv() => {
-                    if let Err(error) = self.publish(msg).await {
-                        // publish should not easily fail, if that happens, it means
-                        // the message broker has become unrecoverably unreacheable
-                        warn!(%error, "failed to publish the message");
-                        return self.ctx.into_standby(self.messages, true).await;
-                    }
-                }
-
+                biased;
                 _ = lock_tick.tick() => {
                     let held = match self.producer.refresh().await {
                         Ok(h) => h,
@@ -65,11 +58,22 @@ impl Primary {
                         return self.ctx.into_standby(self.messages, true).await;
                     }
                 }
-
+                Some(msg) = self.messages.recv() => {
+                    if let Err(error) = self.publish(msg).await {
+                        // publish should not easily fail, if that happens, it means
+                        // the message broker has become unrecoverably unreacheable
+                        warn!(%error, "failed to publish the message");
+                        return self.ctx.into_standby(self.messages, true).await;
+                    }
+                }
                 Some((file, slot)) = self.snapshots.recv() => {
                     if let Err(e) = self.ctx.upload_snapshot(file, slot).await {
                         warn!(%e, "snapshot upload failed");
                     }
+                }
+                _ = self.ctx.cancel.cancelled() => {
+                    info!("shutdown received, terminating primary mode");
+                    return Ok(None);
                 }
             }
         }
