@@ -462,8 +462,8 @@ fn run_cloning_tests(
         let output = match run_test(
             test_cloning_dir,
             RunTestConfig {
-                package: None, // Some("test-cloning"),
-                test: None,    // Some("10_post_delegation_token_transfer"),
+                package: Some("test-cloning"),
+                test: Some("10_post_delegation_token_transfer"),
             },
         ) {
             Ok(output) => output,

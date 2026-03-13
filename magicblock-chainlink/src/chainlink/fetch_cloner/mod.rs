@@ -1049,7 +1049,7 @@ where
                 plain,
                 owned_by_deleg,
                 programs,
-                atas,
+                atas: _,
             } = pipeline::classify_remote_accounts(
                 action_dep_accs,
                 &action_dependencies_to_fetch,
@@ -1058,11 +1058,6 @@ where
             if !not_found.is_empty() {
                 return Err(ChainlinkError::MissingDelegationActionAccounts(
                     not_found.iter().map(|(pubkey, _)| *pubkey).collect(),
-                ));
-            }
-            if !atas.is_empty() {
-                return Err(ChainlinkError::MissingDelegationActionAccounts(
-                    atas.iter().map(|(pubkey, _, _, _)| *pubkey).collect(),
                 ));
             }
 

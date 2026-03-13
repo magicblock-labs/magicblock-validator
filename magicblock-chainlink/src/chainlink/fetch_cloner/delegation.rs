@@ -26,9 +26,8 @@ use crate::{
     },
 };
 
-/// Parses a delegation record from account data bytes.
-/// Returns the parsed DelegationRecord, or {InvalidDelegationRecord, InvalidDelegationActions} error
-/// if parsing fails.
+/// Parses a delegation record from account data bytes. Returns the parsed DelegationRecord
+/// or {InvalidDelegationRecord, InvalidDelegationActions} error if parsing fails.
 pub(crate) fn parse_delegation_record(
     data: &[u8],
     delegation_record_pubkey: Pubkey,
@@ -54,9 +53,7 @@ pub(crate) fn parse_delegation_record(
     } else {
         // Actions for accounts delegated to other validators are not relevant
         // for this node and may be encrypted for a different recipient.
-        if record.authority != validator_keypair.pubkey()
-            && record.authority != Pubkey::default()
-        {
+        if record.authority != validator_keypair.pubkey() {
             return Ok((record, None));
         }
 
@@ -244,7 +241,7 @@ mod tests {
         EncryptedBuffer, MaybeEncryptedAccountMeta, MaybeEncryptedInstruction,
         MaybeEncryptedIxData, MaybeEncryptedPubkey, PostDelegationActions,
     };
-    use solana_instruction::Instruction;
+    use solana_instruction::{AccountMeta, Instruction};
     use solana_program::pubkey::Pubkey;
     use solana_signer::Signer;
 
@@ -311,16 +308,17 @@ mod tests {
                 .unwrap();
 
         let actions: Vec<Instruction> = actions.unwrap().into();
-        assert_eq!(actions.len(), 1);
-        assert_eq!(actions[0].program_id, program_id);
-        assert_eq!(actions[0].accounts.len(), 2);
-        assert_eq!(actions[0].accounts[0].pubkey, signer);
-        assert!(actions[0].accounts[0].is_signer);
-        assert!(!actions[0].accounts[0].is_writable);
-        assert_eq!(actions[0].accounts[1].pubkey, account);
-        assert!(!actions[0].accounts[1].is_signer);
-        assert!(actions[0].accounts[1].is_writable);
-        assert_eq!(actions[0].data, vec![7, 8, 9]);
+        assert_eq!(
+            actions,
+            vec![Instruction {
+                program_id,
+                accounts: vec![
+                    AccountMeta::new_readonly(signer, true),
+                    AccountMeta::new(account, false),
+                ],
+                data: vec![7, 8, 9],
+            }]
+        );
     }
 
     #[test]
@@ -377,10 +375,17 @@ mod tests {
                 .unwrap();
 
         let actions: Vec<Instruction> = actions.unwrap().into();
-        assert_eq!(actions[0].program_id, program_id);
-        assert_eq!(actions[0].accounts[0].pubkey, signer);
-        assert_eq!(actions[0].accounts[1].pubkey, account);
-        assert_eq!(actions[0].data, vec![1, 2, 3, 4, 5]);
+        assert_eq!(
+            actions,
+            vec![Instruction {
+                program_id,
+                accounts: vec![
+                    AccountMeta::new_readonly(signer, true),
+                    AccountMeta::new(account, false),
+                ],
+                data: vec![1, 2, 3, 4, 5],
+            }]
+        );
     }
 
     #[test]

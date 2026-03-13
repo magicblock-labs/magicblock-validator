@@ -186,9 +186,6 @@ where
                     delegation::get_delegated_to_other(this, &deleg_record);
                 commit_frequency_ms = Some(deleg_record.commit_frequency_ms);
 
-                // CHECKPOINT: should this be inside the if-block below?
-                actions = delegation_actions;
-
                 if let Some(projected_ata) = this
                     .maybe_project_delegated_ata_from_eata(
                         input.ata_account.account_shared_data(),
@@ -197,6 +194,7 @@ where
                     )
                 {
                     account_to_clone = projected_ata;
+                    actions = delegation_actions;
                 }
             }
         }
