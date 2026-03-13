@@ -44,7 +44,7 @@ impl Primary {
                         // publish should not easily fail, if that happens, it means
                         // the message broker has become unrecoverably unreacheable
                         warn!(%error, "failed to publish the message");
-                        return self.ctx.into_standby(self.messages).await;
+                        return self.ctx.into_standby(self.messages, true).await;
                     }
                 }
 
@@ -58,7 +58,7 @@ impl Primary {
                     };
                     if !held {
                         info!("lost leadership, demoting");
-                        return self.ctx.into_standby(self.messages).await;
+                        return self.ctx.into_standby(self.messages, true).await;
                     }
                 }
 
