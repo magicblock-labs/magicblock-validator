@@ -23,3 +23,4 @@ mod tests;
 
 pub use error::{Error, Result};
 pub use proto::{Message, TransactionIndex};
+pub use service::Service as ReplicationService;
