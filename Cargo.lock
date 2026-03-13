@@ -3407,6 +3407,7 @@ dependencies = [
  "magicblock-metrics",
  "magicblock-processor",
  "magicblock-program",
+ "magicblock-replicator",
  "magicblock-services",
  "magicblock-task-scheduler",
  "magicblock-validator-admin",
@@ -3790,7 +3791,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-replicator"
-version = "0.8.5"
+version = "0.8.6"
 dependencies = [
  "async-nats",
  "bincode",

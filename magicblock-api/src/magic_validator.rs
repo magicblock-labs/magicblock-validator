@@ -64,6 +64,7 @@ use magicblock_program::{
     validator::{self, validator_authority},
     TransactionScheduler as ActionTransactionScheduler,
 };
+use magicblock_replicator::{nats::Broker, ReplicationService};
 use magicblock_services::actions_callback_service::ActionsCallbackService;
 use magicblock_task_scheduler::{SchedulerDatabase, TaskSchedulerService};
 use magicblock_validator_admin::claim_fees::ClaimFeesTask;
@@ -176,6 +177,33 @@ impl MagicValidator {
         let step_start = Instant::now();
         let accountsdb =
             AccountsDb::new(&config.accountsdb, &config.storage, last_slot)?;
+        let replicator =
+            if let Some(url) = config.validator.replication_mode.remote() {
+                let broker = Broker::connect(url).await?;
+                if accountsdb.slot() == 0 {
+                    if let Some(snapshot) = broker.get_snapshot().await? {
+                        accountsdb.insert_external_snapshot(
+                            snapshot.slot,
+                            &snapshot.data,
+                        )?;
+                    }
+                }
+                let replicator = ReplicationService::new(
+                    "someid".into(),
+                    broker,
+                    mode_tx,
+                    accountsdb,
+                    ledger,
+                    scheduler,
+                    messages,
+                )
+                .await?;
+                Some(replicator)
+            } else {
+                None
+            };
+        // we are starting fresh in replication mode,
+        // try to fetch accountsdb snapshot from remote
         log_timing("startup", "accountsdb_init", step_start);
         for (pubkey, account) in genesis_config.accounts {
             if accountsdb.get_account(&pubkey).is_some() {
