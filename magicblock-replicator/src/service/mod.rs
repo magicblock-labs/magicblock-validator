@@ -67,6 +67,7 @@ impl Service {
         ledger: Arc<Ledger>,
         scheduler: TransactionSchedulerHandle,
         messages: Receiver<Message>,
+        reset: bool,
     ) -> crate::Result<Self> {
         let ctx = ReplicationContext::new(
             broker, mode_tx, accountsdb, ledger, scheduler,
@@ -78,7 +79,10 @@ impl Service {
             Some(producer) => {
                 Ok(Self::Primary(ctx.into_primary(producer, messages).await?))
             }
-            None => Ok(Self::Standby(ctx.into_standby(messages).await?)),
+            None => {
+                let standby = ctx.into_standby(messages, reset).await?;
+                Ok(Self::Standby(standby))
+            }
         }
     }
 

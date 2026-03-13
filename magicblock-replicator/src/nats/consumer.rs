@@ -1,16 +1,13 @@
 //! Pull-based consumer for receiving replicated events.
 
-use async_nats::jetstream::{
-    consumer::{
-        pull::{Config as PullConfig, Stream as MessageStream},
-        AckPolicy, DeliverPolicy, PullConsumer,
-    },
-    Context,
+use async_nats::jetstream::consumer::{
+    pull::{Config as PullConfig, Stream as MessageStream},
+    AckPolicy, DeliverPolicy, PullConsumer,
 };
 use tracing::warn;
 
 use super::cfg;
-use crate::Result;
+use crate::{nats::Broker, Result};
 
 /// Pull-based consumer for receiving replicated events.
 ///
@@ -23,22 +20,21 @@ pub struct Consumer {
 impl Consumer {
     pub(crate) async fn new(
         id: &str,
-        js: &Context,
-        start_seq: Option<u64>,
+        broker: &Broker,
+        reset: bool,
     ) -> Result<Self> {
-        let stream = js.get_stream(cfg::STREAM).await?;
+        let stream = broker.ctx.get_stream(cfg::STREAM).await?;
 
-        let deliver_policy = match start_seq {
-            Some(seq) => {
-                // Delete and recreate to change start position
-                if let Err(error) = stream.delete_consumer(id).await {
-                    warn!(%error, "error removing consumer");
-                }
-                DeliverPolicy::ByStartSequence {
-                    start_sequence: seq,
-                }
+        let deliver_policy = if reset {
+            // Delete and recreate to change start position
+            if let Err(error) = stream.delete_consumer(id).await {
+                warn!(%error, "error removing consumer");
             }
-            None => DeliverPolicy::All,
+            DeliverPolicy::ByStartSequence {
+                start_sequence: broker.sequence,
+            }
+        } else {
+            DeliverPolicy::All
         };
 
         let inner = stream

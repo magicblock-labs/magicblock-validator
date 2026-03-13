@@ -133,9 +133,9 @@ impl ReplicationContext {
     }
 
     /// Creates consumer with retry.
-    pub async fn create_consumer(&self, start_seq: Option<u64>) -> Consumer {
+    pub async fn create_consumer(&self, reset: bool) -> Consumer {
         loop {
-            match self.broker.create_consumer(&self.id, start_seq).await {
+            match self.broker.create_consumer(&self.id, reset).await {
                 Ok(c) => return c,
                 Err(e) => {
                     tracing::warn!(%e, "consumer creation failed, retrying");
@@ -157,11 +157,15 @@ impl ReplicationContext {
     }
 
     /// Transitions to standby role.
+    /// reset parameter controls where in the stream the consumption starts:
+    /// true - the last known position that we know
+    /// false - the last known position that message broker tracks for us
     pub async fn into_standby(
         self,
         messages: Receiver<Message>,
+        reset: bool,
     ) -> Result<Standby> {
-        let consumer = Box::new(self.create_consumer(None).await);
+        let consumer = Box::new(self.create_consumer(reset).await);
         let watcher = LockWatcher::new(&self.broker).await;
         self.enter_replica_mode().await;
         Ok(Standby::new(self, consumer, messages, watcher))
