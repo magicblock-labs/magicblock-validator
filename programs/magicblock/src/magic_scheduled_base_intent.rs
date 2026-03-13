@@ -27,7 +27,7 @@ use crate::{
         get_instruction_account_with_idx, get_instruction_pubkey_with_idx,
         get_writable_with_idx,
     },
-    validator::validator_authority_id,
+    validator::effective_validator_authority_id,
 };
 
 /// Context necessary for construction of Schedule Action
@@ -810,7 +810,7 @@ pub(crate) fn validate_commit_schedule_permissions(
     parent_program_id: Option<&Pubkey>,
     signers: &HashSet<Pubkey>,
 ) -> Result<(), InstructionError> {
-    let validator_id = validator_authority_id();
+    let validator_id = effective_validator_authority_id();
     let is_eata_token_program_call = parent_program_id
         == Some(&EATA_PROGRAM_ID)
         && committee_owner == &TOKEN_PROGRAM_ID;

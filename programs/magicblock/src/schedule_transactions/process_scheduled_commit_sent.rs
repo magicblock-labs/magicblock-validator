@@ -16,7 +16,8 @@ use solana_transaction_context::TransactionContext;
 
 use crate::{
     errors::custom_error_codes,
-    utils::accounts::get_instruction_pubkey_with_idx, validator,
+    utils::accounts::get_instruction_pubkey_with_idx,
+    validator::effective_validator_authority_id,
 };
 
 /// Error code returned when an intent execution failed.
@@ -140,7 +141,7 @@ pub fn process_scheduled_commit_sent(
     // Assert validator identity matches
     let validator_pubkey =
         get_instruction_pubkey_with_idx(transaction_context, VALIDATOR_IDX)?;
-    let validator_authority_id = validator::validator_authority_id();
+    let validator_authority_id = effective_validator_authority_id();
     if validator_pubkey != &validator_authority_id {
         ic_msg!(
             invoke_context,

@@ -7,7 +7,7 @@ use solana_program_runtime::invoke_context::InvokeContext;
 
 use crate::{
     utils::accounts::get_instruction_pubkey_with_idx,
-    validator::validator_authority_id,
+    validator::effective_validator_authority_id,
 };
 
 /// Enables or disables the executable flag checks for the provided `invoke_context`.
@@ -25,7 +25,7 @@ pub(crate) fn process_toggle_executable_check(
         invoke_context.transaction_context,
         VALIDATOR_AUTHORITY_IDX,
     )?;
-    let validator_auth = validator_authority_id();
+    let validator_auth = effective_validator_authority_id();
     if !provided_validator_auth.eq(&validator_auth) {
         ic_msg!(
              invoke_context,
