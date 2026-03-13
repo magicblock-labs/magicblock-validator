@@ -62,6 +62,12 @@ pub(super) struct ExecutionCoordinator {
 }
 
 /// Coordination mode determining how transactions are scheduled.
+///
+/// Valid Transitions:
+///   StartingUp → Primary    [Standalone validators, after replay]
+///   StartingUp → Replica    [Replica validators, after replay]
+///   Primary → Replica       [Failover: primary to replica]
+///   Replica → Primary       [Failover: replica takeover becomes primary]
 pub(super) enum CoordinationMode {
     /// Ledger replay phase. No validator signer required, no side effects,
     /// strict ordering (same constraints as Replica).
@@ -228,9 +234,10 @@ impl ExecutionCoordinator {
         txn
     }
 
-    /// Switches from StartingUp or Replica to Primary mode.
+    /// Switches to Primary mode from StartingUp or Replica.
     ///
-    /// Called after ledger replay completes on Primary validators.
+    /// Called after ledger replay completes on Primary validators, or during
+    /// failover when a replica takes over as primary.
     /// No-op if already in Primary mode.
     pub(super) fn switch_to_primary_mode(&mut self) {
         if let CoordinationMode::Primary(_) = self.mode {
@@ -245,9 +252,10 @@ impl ExecutionCoordinator {
         self.mode = CoordinationMode::Primary(mode);
     }
 
-    /// Switches from StartingUp to Replica mode.
+    /// Switches to Replica mode from StartingUp or Primary.
     ///
-    /// Called after ledger replay completes on Replica validators.
+    /// Called after ledger replay completes on Replica validators, or during
+    /// failover when a primary needs to step down to replica.
     /// No-op if already in Replica mode.
     pub(super) fn switch_to_replica_mode(&mut self) {
         match &self.mode {
@@ -266,18 +274,20 @@ impl ExecutionCoordinator {
         }
     }
 
-    /// Transitions from StartingUp to Primary mode (scheduler + global state).
+    /// Transitions to Primary mode (scheduler + global state).
     ///
-    /// Called when ledger replay completes on Standalone validators.
+    /// Called when ledger replay completes on Standalone validators, or during
+    /// failover when a replica takes over as primary.
     /// Coordinates both the local scheduler and global validator state.
     pub(super) fn switch_to_primary_mode_globally(&mut self) {
         self.switch_to_primary_mode();
         coordination_mode::switch_to_primary_mode();
     }
 
-    /// Transitions from StartingUp to Replica mode (scheduler + global state).
+    /// Transitions to Replica mode (scheduler + global state).
     ///
-    /// Called when ledger replay completes on Replica validators.
+    /// Called when ledger replay completes on Replica validators, or during
+    /// failover when a primary needs to step down to replica.
     /// Coordinates both the local scheduler and global validator state.
     pub(super) fn switch_to_replica_mode_globally(&mut self) {
         self.switch_to_replica_mode();
