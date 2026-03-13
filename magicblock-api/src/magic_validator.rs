@@ -217,17 +217,17 @@ impl MagicValidator {
                 let messages_rx = dispatch.replication_messages.take().expect(
                     "replication channel should always exist after init",
                 );
-                let replicator = ReplicationService::new(
+                ReplicationService::new(
                     broker,
                     mode_tx.clone(),
                     accountsdb.clone(),
                     ledger.clone(),
                     dispatch.transaction_scheduler.clone(),
                     messages_rx,
+                    token.clone(),
                     is_fresh_start,
                 )
-                .await?;
-                Some(replicator)
+                .await?
             } else {
                 None
             };
