@@ -1,14 +1,17 @@
 use std::{
-    collections::HashSet,
+    collections::{HashMap as StdHashMap, HashSet},
     sync::{
         atomic::{AtomicU64, Ordering},
-        Arc,
+        Arc, Mutex,
     },
     time::Duration,
 };
 
 use dlp_api::dlp::{
-    pda::delegation_record_pda_from_delegated_account, state::DelegationRecord,
+    pda::delegation_record_pda_from_delegated_account,
+    state::{
+        CommitRecord, DelegationMetadata, DelegationRecord, ProgramConfig,
+    },
 };
 use magicblock_accounts_db::traits::AccountsBank;
 use magicblock_config::config::AllowedProgram;
@@ -84,6 +87,9 @@ where
     validator_pubkey: Pubkey,
     validator_keypair: Arc<Keypair>,
 
+    /// delegation_record_pubkey -> delegated_account_pubkey
+    pending_delegation_records: Arc<Mutex<StdHashMap<Pubkey, Pubkey>>>,
+
     /// These are accounts that we should never clone into our validator.
     /// native programs, sysvars, native tokens, validator identity and faucet
     blacklisted_accounts: HashSet<Pubkey>,
@@ -112,6 +118,9 @@ where
             cloner: self.cloner.clone(),
             validator_pubkey: self.validator_pubkey,
             validator_keypair: Arc::clone(&self.validator_keypair),
+            pending_delegation_records: Arc::clone(
+                &self.pending_delegation_records,
+            ),
             blacklisted_accounts: self.blacklisted_accounts.clone(),
             allowed_programs: self.allowed_programs.clone(),
         }
@@ -147,6 +156,7 @@ where
             cloner: cloner.clone(),
             validator_pubkey,
             validator_keypair: Arc::new(validator_keypair),
+            pending_delegation_records: Arc::new(Mutex::new(StdHashMap::new())),
             pending_requests: Arc::new(HashMap::new()),
             fetch_count: Arc::new(AtomicU64::new(0)),
             blacklisted_accounts,
@@ -266,6 +276,45 @@ where
         pubkey: Pubkey,
         update: ForwardedSubscriptionUpdate,
     ) {
+        if update.account.is_owned_by_delegation_program() {
+            let maybe_delegated_pubkey = self
+                .pending_delegation_records
+                .lock()
+                .expect("pending_delegation_records lock poisoned")
+                .get(&pubkey)
+                .copied();
+            if let Some(delegated_pubkey) = maybe_delegated_pubkey {
+                trace!(
+                    delegation_record = %pubkey,
+                    delegated_account = %delegated_pubkey,
+                    "Delegation record update received; re-fetching delegated account"
+                );
+                if let Err(err) = self
+                    .fetch_and_clone_accounts(
+                        &[delegated_pubkey],
+                        None,
+                        None,
+                        AccountFetchOrigin::GetAccount,
+                        None,
+                    )
+                    .await
+                {
+                    warn!(
+                        delegation_record = %pubkey,
+                        delegated_account = %delegated_pubkey,
+                        error = %err,
+                        "Failed to re-fetch delegated account after delegation record update"
+                    );
+                } else {
+                    self.pending_delegation_records
+                        .lock()
+                        .expect("pending_delegation_records lock poisoned")
+                        .remove(&pubkey);
+                }
+                return;
+            }
+        }
+
         let (resolved_account, deleg_record, delegation_actions) = self
             .resolve_account_to_clone_from_forwarded_sub_with_unsubscribe(
                 update,
@@ -459,15 +508,17 @@ where
                         // We need to remove subs for the delegation record and the account
                         // if it is delegated to us
                         let mut subs_to_remove = HashSet::new();
-
-                        // Always unsubscribe from delegation record if it was a new subscription
-                        if !was_delegation_record_subscribed {
-                            subs_to_remove.insert(delegation_record_pubkey);
-                        }
+                        let mut keep_delegation_record_sub = false;
 
                         let account = if let Some(delegation_record) =
                             delegation_record
                         {
+                            self.pending_delegation_records
+                                .lock()
+                                .expect(
+                                    "pending_delegation_records lock poisoned",
+                                )
+                                .remove(&delegation_record_pubkey);
                             let delegation_record_with_actions = match self
                                 .parse_delegation_record(
                                     delegation_record.data(),
@@ -544,14 +595,33 @@ where
                                 (None, None, DelegationActions::default())
                             }
                         } else {
-                            // If no delegation record exists we must assume the account itself is
-                            // a delegation record or metadata
+                            // If this update is for a delegated account before its record exists,
+                            // remember the expected record PDA so a subsequent record update can
+                            // re-trigger delegated-account cloning through the normal path.
+                            if !is_dlp_internal_account(account.data()) {
+                                self.pending_delegation_records
+                                    .lock()
+                                    .expect("pending_delegation_records lock poisoned")
+                                    .insert(delegation_record_pubkey, pubkey);
+                                keep_delegation_record_sub = true;
+                            }
+                            // If no delegation record exists we assume this account is either a
+                            // still-unresolved delegated account or a delegation internal account.
                             (
                                 Some(account.into_account_shared_data()),
                                 None,
                                 DelegationActions::default(),
                             )
                         };
+
+                        // Always unsubscribe from delegation record if it was a new subscription,
+                        // except when we intentionally keep it to await the record update and
+                        // re-trigger delegated-account fetch.
+                        if !was_delegation_record_subscribed
+                            && !keep_delegation_record_sub
+                        {
+                            subs_to_remove.insert(delegation_record_pubkey);
+                        }
 
                         if !subs_to_remove.is_empty() {
                             cancel_subs(
@@ -1652,6 +1722,13 @@ where
             .await?;
         Ok(())
     }
+}
+
+fn is_dlp_internal_account(data: &[u8]) -> bool {
+    DelegationRecord::try_from_bytes_with_discriminator(data).is_ok()
+        || DelegationMetadata::try_from_bytes_with_discriminator(data).is_ok()
+        || CommitRecord::try_from_bytes_with_discriminator(data).is_ok()
+        || ProgramConfig::try_from_bytes_with_discriminator(data).is_ok()
 }
 
 // -----------------
