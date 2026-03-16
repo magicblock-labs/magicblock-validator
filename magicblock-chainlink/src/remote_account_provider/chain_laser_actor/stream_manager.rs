@@ -406,8 +406,18 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
             );
             return Ok(());
         }
-        self.optimizing = true;
+        {
+            self.optimizing = true;
+            let result = self.optimize_inner(commitment).await;
+            self.optimizing = false;
+            result
+        }
+    }
 
+    async fn optimize_inner(
+        &mut self,
+        commitment: &CommitmentLevel,
+    ) -> RemoteAccountProviderResult<()> {
         // Remove all account streams from the map but keep them
         // alive until the new optimized streams are created to
         // avoid a gap without any active streams (race condition).
@@ -454,7 +464,8 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
         self.current_new_subs.clear();
         self.current_new_handle = None;
 
-        // Record the spike: new streams + previous streams still alive.
+        // Record the spike: new streams + previous streams still
+        // alive.
         self.update_stream_metrics_with_extra(prev_stream_count);
 
         self.optimized_since_last_check = true;
@@ -467,7 +478,6 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
 
         self.update_stream_metrics();
 
-        self.optimizing = false;
         Ok(())
     }
 
