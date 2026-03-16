@@ -30,6 +30,10 @@ pub struct MockStreamFactory {
     /// side becomes the returned stream, and the tx side is stored
     /// here so the test can drive updates.
     stream_senders: Arc<Mutex<Vec<Arc<mpsc::UnboundedSender<LaserResult>>>>>,
+
+    /// If set to `true`, the next call to `subscribe()` will fail with
+    /// a test error.
+    fail_next_subscribe: Arc<Mutex<bool>>,
 }
 
 impl MockStreamFactory {
@@ -39,6 +43,7 @@ impl MockStreamFactory {
             captured_requests: Arc::new(Mutex::new(Vec::new())),
             handle_requests: Arc::new(Mutex::new(Vec::new())),
             stream_senders: Arc::new(Mutex::new(Vec::new())),
+            fail_next_subscribe: Arc::new(Mutex::new(false)),
         }
     }
 
@@ -81,6 +86,11 @@ impl MockStreamFactory {
             senders.remove(idx);
         }
     }
+
+    /// Make the next call to `subscribe()` fail with a test error
+    pub fn fail_next_subscribe(&self) {
+        *self.fail_next_subscribe.lock().unwrap() = true;
+    }
 }
 
 impl Default for MockStreamFactory {
@@ -114,6 +124,24 @@ impl StreamFactory<MockStreamHandle> for MockStreamFactory {
         request: SubscribeRequest,
     ) -> RemoteAccountProviderResult<LaserStreamWithHandle<MockStreamHandle>>
     {
+        // Check if we should fail this subscribe call
+        let should_fail = {
+            let mut fail = self.fail_next_subscribe.lock().unwrap();
+            let result = *fail;
+            if result {
+                *fail = false; // Reset after consuming
+            }
+            result
+        };
+
+        if should_fail {
+            return Err(
+                crate::remote_account_provider::RemoteAccountProviderError::Other(
+                    "mock subscribe failure".to_string(),
+                ),
+            );
+        }
+
         // Record the initial subscribe request
         self.captured_requests.lock().unwrap().push(request.clone());
 

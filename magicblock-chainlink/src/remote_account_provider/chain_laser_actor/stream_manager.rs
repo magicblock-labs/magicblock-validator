@@ -406,7 +406,22 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
             );
             return Ok(());
         }
+
+        // Guard to ensure optimizing flag is reset on all exit paths
+        struct OptimizingGuard<'a> {
+            optimizing: &'a mut bool,
+        }
+
+        impl<'a> Drop for OptimizingGuard<'a> {
+            fn drop(&mut self) {
+                *self.optimizing = false;
+            }
+        }
+
         self.optimizing = true;
+        let _guard = OptimizingGuard {
+            optimizing: &mut self.optimizing,
+        };
 
         // Remove all account streams from the map but keep them
         // alive until the new optimized streams are created to
@@ -467,7 +482,7 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
 
         self.update_stream_metrics();
 
-        self.optimizing = false;
+        // Note: self.optimizing is automatically reset to false by the OptimizingGuard
         Ok(())
     }
 
@@ -1780,5 +1795,56 @@ mod tests {
 
         // When a stream is closed, next_update returns None
         assert!(result.is_none());
+    }
+
+    // -------------------------------------------------------------
+    // 13. Optimizing Flag Reset on Error
+    // -------------------------------------------------------------
+
+    #[tokio::test]
+    async fn test_optimize_resets_flag_on_error() {
+        let (mut mgr, factory) = create_manager();
+        subscribe_n(&mut mgr, 15).await;
+
+        // Make the factory fail on the next subscribe call (which
+        // happens during optimize when creating new streams)
+        factory.fail_next_subscribe();
+
+        // Attempt to optimize - this should fail
+        let result = mgr.optimize(&COMMITMENT).await;
+        assert!(result.is_err(), "optimize should fail");
+
+        // The optimizing flag should be reset to false despite the error
+        assert!(
+            !mgr.optimizing,
+            "optimizing flag should be reset after error"
+        );
+
+        // Verify we can call optimize again (not blocked by stuck flag)
+        let result = mgr.optimize(&COMMITMENT).await;
+        assert!(result.is_ok(), "second optimize should succeed");
+    }
+
+    #[tokio::test]
+    async fn test_optimize_concurrent_call_protection() {
+        let (mut mgr, _factory) = create_manager();
+        subscribe_n(&mut mgr, 15).await;
+
+        // Manually set optimizing flag to simulate concurrent call
+        mgr.optimizing = true;
+
+        // optimize should detect the flag and return early
+        let result = mgr.optimize(&COMMITMENT).await;
+        assert!(result.is_ok(), "optimize should succeed (early return)");
+
+        // No actual optimization should have occurred
+        assert_eq!(mgr.optimized_old_stream_count(), 0);
+        assert!(mgr.unoptimized_old_stream_count() > 0);
+
+        // Reset and verify normal operation
+        mgr.optimizing = false;
+        let result = mgr.optimize(&COMMITMENT).await;
+        assert!(result.is_ok());
+        assert!(mgr.optimized_old_stream_count() > 0);
     }
 }
