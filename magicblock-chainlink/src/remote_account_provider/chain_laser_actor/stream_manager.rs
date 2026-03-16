@@ -8,7 +8,7 @@ use magicblock_config::config::GrpcConfig;
 use magicblock_metrics::metrics;
 use solana_pubkey::Pubkey;
 use tokio_stream::StreamMap;
-use tracing::warn;
+use tracing::{trace, warn};
 
 use super::{
     write_with_retry, LaserResult, LaserStream, LaserStreamWithHandle,
