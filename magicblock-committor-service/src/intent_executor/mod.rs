@@ -13,7 +13,9 @@ use std::{
 
 use async_trait::async_trait;
 use futures_util::future::{join, try_join_all};
-use magicblock_core::traits::ActionsCallbackScheduler;
+use magicblock_core::traits::{
+    ActionsCallbackScheduler, CallbackScheduleError,
+};
 use magicblock_metrics::metrics;
 use magicblock_program::{
     magic_scheduled_base_intent::ScheduledIntentBundle,
@@ -32,7 +34,7 @@ use solana_message::VersionedMessage;
 use solana_pubkey::Pubkey;
 use solana_rpc_client_api::config::RpcTransactionConfig;
 use solana_signature::Signature;
-use solana_signer::{Signer, SignerError};
+use solana_signer::Signer;
 use solana_transaction::versioned::VersionedTransaction;
 use tokio::time::timeout;
 use tracing::{info, trace, warn};
@@ -96,7 +98,7 @@ pub struct IntentExecutionResult {
     /// Errors patched along the way
     pub patched_errors: Vec<TransactionStrategyExecutionError>,
     /// Callbacks result
-    pub callbacks_report: Vec<Result<Signature, SignerError>>,
+    pub callbacks_report: Vec<Result<Signature, CallbackScheduleError>>,
 }
 
 #[async_trait]
@@ -129,14 +131,14 @@ pub struct IntentExecutorImpl<T, F, A> {
     /// Errors we patched trying to recover intent
     pub patched_errors: Vec<TransactionStrategyExecutionError>,
     /// Report of scheduled callbacks
-    pub callbacks_report: Vec<Result<Signature, SignerError>>,
+    pub callbacks_report: Vec<Result<Signature, CallbackScheduleError>>,
 }
 
 impl<T, F, A> IntentExecutorImpl<T, F, A>
 where
     T: TransactionPreparator,
     F: TaskInfoFetcher,
-    A: ActionsCallbackScheduler<ScheduleError = SignerError>,
+    A: ActionsCallbackScheduler,
 {
     pub fn new(
         rpc_client: MagicblockRpcClient,
@@ -882,7 +884,7 @@ impl<T, C, A> IntentExecutor for IntentExecutorImpl<T, C, A>
 where
     T: TransactionPreparator,
     C: TaskInfoFetcher,
-    A: ActionsCallbackScheduler<ScheduleError = SignerError>,
+    A: ActionsCallbackScheduler,
 {
     /// Executes Message on Base layer
     /// Returns `ExecutionOutput` or an `Error`

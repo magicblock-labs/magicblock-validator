@@ -2,7 +2,10 @@ use std::sync::Arc;
 
 use magicblock_core::{
     intent::BaseActionCallback,
-    traits::{ActionResult, ActionsCallbackScheduler, LatestBlockProvider},
+    traits::{
+        ActionResult, ActionsCallbackScheduler, CallbackScheduleError,
+        LatestBlockProvider,
+    },
 };
 use magicblock_magic_program_api::response::MagicResponse;
 use solana_instruction::{AccountMeta, Instruction};
@@ -13,7 +16,7 @@ use solana_rpc_client::{
     nonblocking::rpc_client::RpcClient, rpc_client::SerializableTransaction,
 };
 use solana_signature::Signature;
-use solana_signer::{Signer, SignerError};
+use solana_signer::Signer;
 use solana_transaction::versioned::VersionedTransaction;
 use tracing::error;
 
@@ -50,7 +53,7 @@ impl<L: LatestBlockProvider> ActionsCallbackService<L> {
         &self,
         callbacks: Vec<BaseActionCallback>,
         result: ActionResult,
-    ) -> Vec<Result<VersionedTransaction, SignerError>> {
+    ) -> Vec<Result<VersionedTransaction, CallbackScheduleError>> {
         let authority_pubkey = self.authority.pubkey();
         let blockhash = self.latest_block.blockhash();
         let result: Result<(), String> = result.map_err(|e| e.to_string());
@@ -62,7 +65,7 @@ impl<L: LatestBlockProvider> ActionsCallbackService<L> {
                     callback,
                     &authority_pubkey,
                     result.clone(),
-                );
+                )?;
                 let message = Message::new_with_blockhash(
                     &[ix],
                     Some(&authority_pubkey),
@@ -72,6 +75,7 @@ impl<L: LatestBlockProvider> ActionsCallbackService<L> {
                     VersionedMessage::Legacy(message),
                     &[&self.authority],
                 )
+                .map_err(|e| CallbackScheduleError::SigningError(e.to_string()))
             })
             .collect()
     }
@@ -80,7 +84,7 @@ impl<L: LatestBlockProvider> ActionsCallbackService<L> {
         callback: BaseActionCallback,
         authority: &Pubkey,
         result: Result<(), String>,
-    ) -> Instruction {
+    ) -> Result<Instruction, CallbackScheduleError> {
         let response = MagicResponse {
             ok: result.is_ok(),
             data: callback.payload,
@@ -89,7 +93,7 @@ impl<L: LatestBlockProvider> ActionsCallbackService<L> {
         let mut data = callback.discriminator;
         data.extend(
             bincode::serialize(&response)
-                .expect("MagicResponse serialization is infallible"),
+                .map_err(CallbackScheduleError::SerializationError)?,
         );
         let account_metas =
             std::iter::once(AccountMeta::new_readonly(*authority, true))
@@ -108,24 +112,22 @@ impl<L: LatestBlockProvider> ActionsCallbackService<L> {
                     },
                 ))
                 .collect();
-        Instruction::new_with_bytes(
+        Ok(Instruction::new_with_bytes(
             callback.destination_program,
             &data,
             account_metas,
-        )
+        ))
     }
 }
 
 impl<L: LatestBlockProvider> ActionsCallbackScheduler
     for ActionsCallbackService<L>
 {
-    type ScheduleError = SignerError;
-
     fn schedule(
         &self,
         callbacks: Vec<BaseActionCallback>,
         result: ActionResult,
-    ) -> Vec<Result<Signature, SignerError>> {
+    ) -> Vec<Result<Signature, CallbackScheduleError>> {
         let transactions_result = self.build_transactions(callbacks, result);
 
         let mut valid_transactions = vec![];

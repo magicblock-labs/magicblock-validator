@@ -9,7 +9,6 @@ use magicblock_core::traits::ActionsCallbackScheduler;
 use magicblock_program::magic_scheduled_base_intent::ScheduledIntentBundle;
 use magicblock_rpc_client::MagicblockRpcClient;
 use magicblock_table_mania::TableMania;
-use solana_signer::SignerError;
 use tokio::sync::{broadcast, mpsc, mpsc::error::TrySendError};
 
 use crate::{
@@ -41,7 +40,7 @@ impl<D: DB> IntentExecutionManager<D> {
         actions_callback_executor: A,
     ) -> Self
     where
-        A: ActionsCallbackScheduler<ScheduleError = SignerError>,
+        A: ActionsCallbackScheduler,
         P: IntentPersister,
     {
         let db = Arc::new(db);

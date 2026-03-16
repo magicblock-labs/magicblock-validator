@@ -31,14 +31,41 @@ pub trait LatestBlockProvider: Send + Sync + Clone + 'static {
 }
 
 pub trait ActionsCallbackScheduler: Send + Sync + Clone + 'static {
-    type ScheduleError;
-
-    /// Executes actions callbacks
+    /// Schedules callback txs.
+    /// Returns signature or construction error per callback.
     fn schedule(
         &self,
         callbacks: Vec<BaseActionCallback>,
         result: ActionResult,
-    ) -> Vec<Result<Signature, Self::ScheduleError>>;
+    ) -> Vec<Result<Signature, CallbackScheduleError>>;
+}
+
+#[derive(Debug)]
+pub enum CallbackScheduleError {
+    SerializationError(bincode::Error),
+    SigningError(String),
+}
+
+impl fmt::Display for CallbackScheduleError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::SerializationError(err) => {
+                write!(f, "Callback serialization failed: {err}")
+            }
+            Self::SigningError(msg) => {
+                write!(f, "Callback signing failed: {msg}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for CallbackScheduleError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::SerializationError(err) => Some(err),
+            Self::SigningError(_) => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]

@@ -32,7 +32,7 @@ use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_sdk::{
     commitment_config::CommitmentConfig, signature::Keypair, signer::Signer,
 };
-use magicblock_core::traits::ActionsCallbackExecutor;
+use magicblock_core::traits::{ActionsCallbackScheduler, CallbackScheduleError};
 
 // Helper function to create a test RPC client
 pub async fn create_test_client() -> MagicblockRpcClient {
@@ -146,14 +146,12 @@ impl MockActionsCallbackExecutor {
     }
 }
 
-impl ActionsCallbackExecutor for MockActionsCallbackExecutor {
-    type ScheduleError = ();
-
-    fn execute(
+impl ActionsCallbackScheduler for MockActionsCallbackExecutor {
+    fn schedule(
         &self,
         callbacks: Vec<BaseActionCallback>,
         result: ActionResult,
-    ) -> Vec<Result<solana_signature::Signature, ()>> {
+    ) -> Vec<Result<solana_signature::Signature, CallbackScheduleError>> {
         self.calls.lock().unwrap().push((callbacks, result));
         vec![]
     }

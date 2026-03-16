@@ -260,10 +260,6 @@ impl ScheduledCommitsProcessorImpl {
             .iter()
             .map(|r| match r {
                 Ok(sig) => {
-                    info!(
-                        "Callback scheduled: {}. signature: {}",
-                        intent_id, sig
-                    );
                     format!("OK: {sig}")
                 }
                 Err(err) => {

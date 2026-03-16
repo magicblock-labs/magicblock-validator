@@ -3,7 +3,6 @@ use std::{mem, ops::ControlFlow};
 use magicblock_core::traits::ActionsCallbackScheduler;
 use solana_pubkey::Pubkey;
 use solana_signature::Signature;
-use solana_signer::SignerError;
 use tracing::{error, instrument, warn};
 
 use crate::{
@@ -60,7 +59,7 @@ impl<'a, T, F, A> TwoStageExecutor<'a, T, F, A, Initialized>
 where
     T: TransactionPreparator,
     F: TaskInfoFetcher,
-    A: ActionsCallbackScheduler<ScheduleError = SignerError>,
+    A: ActionsCallbackScheduler,
 {
     const RECURSION_CEILING: u8 = 10;
 
@@ -283,7 +282,7 @@ impl<'a, T, F, A> TwoStageExecutor<'a, T, F, A, Committed>
 where
     T: TransactionPreparator,
     F: TaskInfoFetcher,
-    A: ActionsCallbackScheduler<ScheduleError = SignerError>,
+    A: ActionsCallbackScheduler,
 {
     const RECURSION_CEILING: u8 = 10;
 
@@ -432,7 +431,7 @@ fn handle_actions_result<T, F, A>(
 where
     T: TransactionPreparator,
     F: TaskInfoFetcher,
-    A: ActionsCallbackScheduler<ScheduleError = SignerError>,
+    A: ActionsCallbackScheduler,
 {
     let mut removed_actions = inner.remove_actions(transaction_strategy);
     let callbacks = removed_actions.extract_action_callbacks();

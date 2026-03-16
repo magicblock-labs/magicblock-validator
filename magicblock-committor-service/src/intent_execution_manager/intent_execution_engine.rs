@@ -5,10 +5,10 @@ use std::{
 };
 
 use futures_util::{stream::FuturesUnordered, StreamExt};
+use magicblock_core::traits::CallbackScheduleError;
 use magicblock_metrics::metrics;
 use magicblock_program::magic_scheduled_base_intent::ScheduledIntentBundle;
 use solana_signature::Signature;
-use solana_signer::SignerError;
 use tokio::{
     sync::{
         broadcast, mpsc, mpsc::error::TryRecvError, OwnedSemaphorePermit,
@@ -46,7 +46,7 @@ pub struct BroadcastedIntentExecutionResult {
     pub inner: Result<ExecutionOutput, Arc<IntentExecutorError>>,
     pub id: u64,
     pub patched_errors: Arc<PatchedErrors>,
-    pub callbacks_report: Vec<Result<Signature, Arc<SignerError>>>,
+    pub callbacks_report: Vec<Result<Signature, Arc<CallbackScheduleError>>>,
 }
 
 impl BroadcastedIntentExecutionResult {

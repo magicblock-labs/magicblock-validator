@@ -3,7 +3,6 @@ use std::ops::ControlFlow;
 use magicblock_core::traits::ActionsCallbackScheduler;
 use solana_pubkey::Pubkey;
 use solana_signature::Signature;
-use solana_signer::SignerError;
 use tracing::{error, instrument};
 
 use crate::{
@@ -35,7 +34,7 @@ impl<'a, T, F, A> SingleStageExecutor<'a, T, F, A>
 where
     T: TransactionPreparator,
     F: TaskInfoFetcher,
-    A: ActionsCallbackScheduler<ScheduleError = SignerError>,
+    A: ActionsCallbackScheduler,
 {
     pub fn new(
         executor: &'a mut IntentExecutorImpl<T, F, A>,

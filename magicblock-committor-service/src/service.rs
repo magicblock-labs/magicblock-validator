@@ -5,7 +5,6 @@ use magicblock_program::magic_scheduled_base_intent::ScheduledIntentBundle;
 use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
 use solana_signature::Signature;
-use solana_signer::SignerError;
 use solana_transaction_status_client_types::EncodedConfirmedTransactionWithStatusMeta;
 use tokio::{
     select,
@@ -118,7 +117,7 @@ impl CommittorActor {
     ) -> CommittorServiceResult<Self>
     where
         P: AsRef<Path>,
-        A: ActionsCallbackScheduler<ScheduleError = SignerError>,
+        A: ActionsCallbackScheduler,
     {
         let processor = Arc::new(CommittorProcessor::try_new(
             authority,
@@ -321,7 +320,7 @@ impl CommittorService {
     ) -> CommittorServiceResult<Self>
     where
         P: AsRef<Path>,
-        A: ActionsCallbackScheduler<ScheduleError = SignerError>,
+        A: ActionsCallbackScheduler,
     {
         debug!("Starting committor service");
         let (sender, receiver) = mpsc::channel(1_000);

@@ -11,7 +11,7 @@ use magicblock_table_mania::{GarbageCollectorConfig, TableMania};
 use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
-use solana_signer::{Signer, SignerError};
+use solana_signer::Signer;
 use tokio::sync::broadcast;
 use tracing::{error, instrument};
 
@@ -52,7 +52,7 @@ impl CommittorProcessor {
     ) -> CommittorServiceResult<Self>
     where
         P: AsRef<Path>,
-        A: ActionsCallbackScheduler<ScheduleError = SignerError>,
+        A: ActionsCallbackScheduler,
     {
         let rpc_client = RpcClient::new_with_commitment(
             chain_config.rpc_uri.to_string(),
