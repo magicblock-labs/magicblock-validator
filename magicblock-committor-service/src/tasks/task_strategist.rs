@@ -1,6 +1,6 @@
 use std::collections::BinaryHeap;
 
-use magicblock_program::magic_scheduled_base_intent::BaseActionCallback;
+use magicblock_core::intent::BaseActionCallback;
 use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
 use solana_signer::{Signer, SignerError};

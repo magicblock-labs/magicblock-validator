@@ -5,13 +5,14 @@ pub mod intent_scheduler;
 use std::sync::Arc;
 
 pub use intent_execution_engine::BroadcastedIntentExecutionResult;
+use magicblock_core::traits::ActionsCallbackExecutor;
 use magicblock_program::magic_scheduled_base_intent::ScheduledIntentBundle;
 use magicblock_rpc_client::MagicblockRpcClient;
 use magicblock_table_mania::TableMania;
+use solana_signer::SignerError;
 use tokio::sync::{broadcast, mpsc, mpsc::error::TrySendError};
 
 use crate::{
-    actions_callback_executor::ActionsCallbackExecutor,
     intent_execution_manager::{
         db::DB,
         intent_execution_engine::{IntentExecutionEngine, ResultSubscriber},
@@ -30,7 +31,7 @@ pub struct IntentExecutionManager<D: DB> {
 }
 
 impl<D: DB> IntentExecutionManager<D> {
-    pub fn new<P: IntentPersister, A: ActionsCallbackExecutor>(
+    pub fn new<P, A>(
         rpc_client: MagicblockRpcClient,
         db: D,
         task_info_fetcher: Arc<CacheTaskInfoFetcher<RpcTaskInfoFetcher>>,
@@ -38,7 +39,11 @@ impl<D: DB> IntentExecutionManager<D> {
         table_mania: TableMania,
         executor_config: ExecutorConfig,
         actions_callback_executor: A,
-    ) -> Self {
+    ) -> Self
+    where
+        A: ActionsCallbackExecutor<ScheduleError = SignerError>,
+        P: IntentPersister,
+    {
         let db = Arc::new(db);
 
         let executor_factory = IntentExecutorFactoryImpl {

@@ -255,6 +255,27 @@ impl ScheduledCommitsProcessorImpl {
             })
             .collect();
 
+        let callbacks_report = result
+            .callbacks_report
+            .iter()
+            .map(|r| match r {
+                Ok(sig) => {
+                    info!(
+                        "Callback scheduled: {}. signature: {}",
+                        intent_id, sig
+                    );
+                    format!("OK: {sig}")
+                }
+                Err(err) => {
+                    error!(
+                        "Callback failed to schedule: {}. error: {}",
+                        intent_id, err
+                    );
+                    format!("ERR: {err}")
+                }
+            })
+            .collect();
+
         SentCommit {
             message_id: intent_id,
             slot: intent_meta.slot,
@@ -266,6 +287,7 @@ impl ScheduledCommitsProcessorImpl {
             requested_undelegation: intent_meta.requested_undelegation,
             error_message,
             patched_errors,
+            callbacks_report,
         }
     }
 }

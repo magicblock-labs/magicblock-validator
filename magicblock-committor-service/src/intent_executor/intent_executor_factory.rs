@@ -1,10 +1,11 @@
 use std::{sync::Arc, time::Duration};
 
+use magicblock_core::traits::ActionsCallbackExecutor;
 use magicblock_rpc_client::MagicblockRpcClient;
 use magicblock_table_mania::TableMania;
+use solana_signer::SignerError;
 
 use crate::{
-    actions_callback_executor::ActionsCallbackExecutor,
     intent_executor::{
         task_info_fetcher::{CacheTaskInfoFetcher, RpcTaskInfoFetcher},
         IntentExecutor, IntentExecutorImpl,
@@ -33,8 +34,9 @@ pub struct IntentExecutorFactoryImpl<A> {
     pub actions_callback_executor: A,
 }
 
-impl<A: ActionsCallbackExecutor> IntentExecutorFactory
-    for IntentExecutorFactoryImpl<A>
+impl<A> IntentExecutorFactory for IntentExecutorFactoryImpl<A>
+where
+    A: ActionsCallbackExecutor<ScheduleError = SignerError>,
 {
     type Executor =
         IntentExecutorImpl<TransactionPreparatorImpl, RpcTaskInfoFetcher, A>;

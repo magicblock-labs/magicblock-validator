@@ -4,18 +4,18 @@ use std::{
     sync::Arc,
 };
 
+use magicblock_core::traits::ActionsCallbackExecutor;
 use magicblock_program::magic_scheduled_base_intent::ScheduledIntentBundle;
 use magicblock_rpc_client::MagicblockRpcClient;
 use magicblock_table_mania::{GarbageCollectorConfig, TableMania};
 use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
-use solana_signer::Signer;
+use solana_signer::{Signer, SignerError};
 use tokio::sync::broadcast;
 use tracing::{error, instrument};
 
 use crate::{
-    actions_callback_executor::ActionsCallbackExecutor,
     config::ChainConfig,
     error::CommittorServiceResult,
     intent_execution_manager::{
@@ -44,14 +44,15 @@ pub(crate) struct CommittorProcessor {
 }
 
 impl CommittorProcessor {
-    pub fn try_new<P>(
+    pub fn try_new<P, A>(
         authority: Keypair,
         persist_file: P,
         chain_config: ChainConfig,
-        actions_callback_executor: impl ActionsCallbackExecutor,
+        actions_callback_executor: A,
     ) -> CommittorServiceResult<Self>
     where
         P: AsRef<Path>,
+        A: ActionsCallbackExecutor<ScheduleError = SignerError>,
     {
         let rpc_client = RpcClient::new_with_commitment(
             chain_config.rpc_uri.to_string(),

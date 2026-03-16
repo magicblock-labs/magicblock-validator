@@ -3067,6 +3067,7 @@ dependencies = [
  "magicblock-metrics",
  "magicblock-processor",
  "magicblock-program",
+ "magicblock-services",
  "magicblock-task-scheduler",
  "magicblock-validator-admin",
  "num_cpus",
@@ -3456,6 +3457,24 @@ dependencies = [
  "solana-signature",
  "solana-transaction-error",
  "solana-transaction-status-client-types",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "magicblock-services"
+version = "0.8.3"
+dependencies = [
+ "magicblock-core",
+ "solana-instruction",
+ "solana-keypair",
+ "solana-message",
+ "solana-pubkey",
+ "solana-rpc-client",
+ "solana-signature",
+ "solana-signer",
+ "solana-transaction",
  "thiserror 1.0.69",
  "tokio",
  "tracing",

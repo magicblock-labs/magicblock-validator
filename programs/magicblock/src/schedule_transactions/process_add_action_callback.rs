@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 
+use magicblock_core::intent::BaseActionCallback;
 use magicblock_magic_program_api::args::AddActionCallbackArgs;
 use solana_account::state_traits::StateMut;
 use solana_instruction::error::InstructionError;
@@ -8,7 +9,6 @@ use solana_program_runtime::invoke_context::InvokeContext;
 use solana_pubkey::Pubkey;
 
 use crate::{
-    magic_scheduled_base_intent::BaseActionCallback,
     schedule_transactions::{
         check_magic_context_id, get_clock, get_parent_program_id,
         MAGIC_CONTEXT_IDX, PAYER_IDX,

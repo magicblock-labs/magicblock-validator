@@ -30,8 +30,8 @@ use magicblock_chainlink::{
     Chainlink,
 };
 use magicblock_committor_service::{
-    config::ChainConfig, ActionsCallbackExecutorImpl, BaseIntentCommittor,
-    CommittorService, ComputeBudgetConfig, DEFAULT_ACTIONS_TIMEOUT,
+    config::ChainConfig, BaseIntentCommittor, CommittorService,
+    ComputeBudgetConfig, DEFAULT_ACTIONS_TIMEOUT,
 };
 use magicblock_config::{
     config::{
@@ -65,6 +65,7 @@ use magicblock_program::{
     validator::{self, validator_authority},
     TransactionScheduler as ActionTransactionScheduler,
 };
+use magicblock_services::actions_callback_service::ActionsCallbackService;
 use magicblock_task_scheduler::{SchedulerDatabase, TaskSchedulerService};
 use magicblock_validator_admin::claim_fees::ClaimFeesTask;
 use mdp::state::{
@@ -219,12 +220,9 @@ impl MagicValidator {
         let (mut dispatch, validator_channels) = link();
 
         let step_start = Instant::now();
-        let committor_service = Self::init_committor_service(
-            &config,
-            &dispatch.transaction_scheduler,
-            ledger.latest_block(),
-        )
-        .await?;
+        let committor_service =
+            Self::init_committor_service(&config, ledger.latest_block())
+                .await?;
         log_timing("startup", "committor_service_init", step_start);
         init_magic_sys(Arc::new(MagicSysAdapter::new(
             committor_service.clone(),
@@ -389,18 +387,18 @@ impl MagicValidator {
         })
     }
 
-    #[instrument(skip(config, transaction_scheduler, latest_block))]
+    #[instrument(skip(config, latest_block))]
     async fn init_committor_service(
         config: &ValidatorParams,
-        transaction_scheduler: &TransactionSchedulerHandle,
         latest_block: &LatestBlock,
     ) -> ApiResult<Option<Arc<CommittorService>>> {
         let committor_persist_path =
             config.storage.join("committor_service.sqlite");
         debug!(path = %committor_persist_path.display(), "Initializing committor service");
         // TODO(thlorenz): when we support lifecycle modes again, only start it when needed
-        let actions_callback_executor = ActionsCallbackExecutorImpl::new(
-            transaction_scheduler.clone(),
+        let actions_callback_executor = ActionsCallbackService::new(
+            Arc::new(RpcClient::new(config.aperture.listen.http())),
+            config.validator.keypair.insecure_clone(),
             latest_block.clone(),
         );
         let committor_service = Some(Arc::new(CommittorService::try_start(

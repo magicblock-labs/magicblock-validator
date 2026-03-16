@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
 use magicblock_core::{
-    intent::{CommittedAccount, CommittedAccountRef},
+    intent::{BaseActionCallback, CommittedAccount, CommittedAccountRef},
     token_programs::{EATA_PROGRAM_ID, TOKEN_PROGRAM_ID},
     Slot,
 };
@@ -609,16 +609,6 @@ impl From<&ActionArgs> for ProgramArgs {
     fn from(value: &ActionArgs) -> Self {
         value.clone().into()
     }
-}
-
-/// A callback that is execution with result of BaseAction
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct BaseActionCallback {
-    pub destination_program: Pubkey,
-    pub discriminator: Vec<u8>,
-    pub payload: Vec<u8>, // TODO(edwin): remove/keep?
-    pub compute_units: u32,
-    pub account_metas_per_program: Vec<ShortAccountMeta>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

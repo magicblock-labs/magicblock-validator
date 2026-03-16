@@ -13,6 +13,7 @@ use std::{
 
 use async_trait::async_trait;
 use futures_util::future::{join, try_join_all};
+use magicblock_core::traits::ActionsCallbackExecutor;
 use magicblock_metrics::metrics;
 use magicblock_program::{
     magic_scheduled_base_intent::ScheduledIntentBundle,
@@ -31,13 +32,13 @@ use solana_message::VersionedMessage;
 use solana_pubkey::Pubkey;
 use solana_rpc_client_api::config::RpcTransactionConfig;
 use solana_signature::Signature;
-use solana_signer::Signer;
+use solana_signer::{Signer, SignerError};
 use solana_transaction::versioned::VersionedTransaction;
 use tokio::time::timeout;
 use tracing::{info, trace, warn};
 
 use crate::{
-    actions_callback_executor::{ActionError, ActionsCallbackExecutor},
+    actions_callback_executor::ActionError,
     intent_executor::{
         error::{
             IntentExecutorError, IntentExecutorResult,
@@ -94,6 +95,8 @@ pub struct IntentExecutionResult {
     pub inner: IntentExecutorResult<ExecutionOutput>,
     /// Errors patched along the way
     pub patched_errors: Vec<TransactionStrategyExecutionError>,
+    /// Callbacks result
+    pub callbacks_report: Vec<Result<Signature, SignerError>>,
 }
 
 #[async_trait]
@@ -125,13 +128,15 @@ pub struct IntentExecutorImpl<T, F, A> {
     pub junk: Vec<TransactionStrategy>,
     /// Errors we patched trying to recover intent
     pub patched_errors: Vec<TransactionStrategyExecutionError>,
+    /// Report of scheduled callbacks
+    pub callbacks_report: Vec<Result<Signature, SignerError>>,
 }
 
 impl<T, F, A> IntentExecutorImpl<T, F, A>
 where
     T: TransactionPreparator,
     F: TaskInfoFetcher,
-    A: ActionsCallbackExecutor,
+    A: ActionsCallbackExecutor<ScheduleError = SignerError>,
 {
     pub fn new(
         rpc_client: MagicblockRpcClient,
@@ -152,6 +157,7 @@ where
             started_at: Instant::now(),
             junk: vec![],
             patched_errors: vec![],
+            callbacks_report: vec![],
         }
     }
 
@@ -876,7 +882,7 @@ impl<T, C, A> IntentExecutor for IntentExecutorImpl<T, C, A>
 where
     T: TransactionPreparator,
     C: TaskInfoFetcher,
-    A: ActionsCallbackExecutor,
+    A: ActionsCallbackExecutor<ScheduleError = SignerError>,
 {
     /// Executes Message on Base layer
     /// Returns `ExecutionOutput` or an `Error`
@@ -914,6 +920,7 @@ where
         IntentExecutionResult {
             inner: result,
             patched_errors: mem::take(&mut self.patched_errors),
+            callbacks_report: mem::take(&mut self.callbacks_report),
         }
     }
 

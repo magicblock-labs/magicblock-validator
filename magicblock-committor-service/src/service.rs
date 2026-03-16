@@ -1,9 +1,11 @@
 use std::{collections::HashMap, path::Path, sync::Arc, time::Instant};
 
+use magicblock_core::traits::ActionsCallbackExecutor;
 use magicblock_program::magic_scheduled_base_intent::ScheduledIntentBundle;
 use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
 use solana_signature::Signature;
+use solana_signer::SignerError;
 use solana_transaction_status_client_types::EncodedConfirmedTransactionWithStatusMeta;
 use tokio::{
     select,
@@ -17,7 +19,6 @@ use tokio_util::sync::{CancellationToken, WaitForCancellationFutureOwned};
 use tracing::*;
 
 use crate::{
-    actions_callback_executor::ActionsCallbackExecutor,
     committor_processor::CommittorProcessor,
     config::ChainConfig,
     error::{CommittorServiceError, CommittorServiceResult},
@@ -108,15 +109,16 @@ struct CommittorActor {
 }
 
 impl CommittorActor {
-    pub fn try_new<P>(
+    pub fn try_new<P, A>(
         receiver: mpsc::Receiver<CommittorMessage>,
         authority: Keypair,
         persist_file: P,
         chain_config: ChainConfig,
-        actions_callback_executor: impl ActionsCallbackExecutor,
+        actions_callback_executor: A,
     ) -> CommittorServiceResult<Self>
     where
         P: AsRef<Path>,
+        A: ActionsCallbackExecutor<ScheduleError = SignerError>,
     {
         let processor = Arc::new(CommittorProcessor::try_new(
             authority,
@@ -311,14 +313,15 @@ pub struct CommittorService {
 }
 
 impl CommittorService {
-    pub fn try_start<P>(
+    pub fn try_start<P, A>(
         authority: Keypair,
         persist_file: P,
         chain_config: ChainConfig,
-        actions_callback_executor: impl ActionsCallbackExecutor,
+        actions_callback_executor: A,
     ) -> CommittorServiceResult<Self>
     where
         P: AsRef<Path>,
+        A: ActionsCallbackExecutor<ScheduleError = SignerError>,
     {
         debug!("Starting committor service");
         let (sender, receiver) = mpsc::channel(1_000);

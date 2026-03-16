@@ -1,13 +1,13 @@
 use std::{mem, ops::ControlFlow};
 
+use magicblock_core::traits::ActionsCallbackExecutor;
 use solana_pubkey::Pubkey;
 use solana_signature::Signature;
+use solana_signer::SignerError;
 use tracing::{error, instrument, warn};
 
 use crate::{
-    actions_callback_executor::{
-        ActionError, ActionResult, ActionsCallbackExecutor,
-    },
+    actions_callback_executor::{ActionError, ActionResult},
     intent_executor::{
         error::{
             IntentExecutorError, IntentExecutorResult,
@@ -60,7 +60,7 @@ impl<'a, T, F, A> TwoStageExecutor<'a, T, F, A, Initialized>
 where
     T: TransactionPreparator,
     F: TaskInfoFetcher,
-    A: ActionsCallbackExecutor,
+    A: ActionsCallbackExecutor<ScheduleError = SignerError>,
 {
     const RECURSION_CEILING: u8 = 10;
 
@@ -180,7 +180,7 @@ where
             TransactionStrategyExecutionError::ActionsError(err, signature) => {
                 // Intent bundles allow for actions to be in commit stage
                 let action_error = Err(ActionError::ActionsError(err.clone(), *signature));
-                let to_cleanup = handle_actions_error(self.inner, &mut self.state.commit_strategy, action_error);
+                let to_cleanup = handle_actions_result(self.inner, &mut self.state.commit_strategy, action_error);
                 Ok(ControlFlow::Continue(to_cleanup))
             }
             TransactionStrategyExecutionError::UndelegationError(_, _) => {
@@ -246,7 +246,7 @@ where
         result: Result<(), impl Into<ActionError>>,
     ) {
         let result = result.map_err(|err| err.into());
-        let junk_strategy = handle_actions_error(
+        let junk_strategy = handle_actions_result(
             self.inner,
             &mut self.state.commit_strategy,
             result.clone(),
@@ -254,7 +254,7 @@ where
         self.inner.junk.push(junk_strategy);
 
         if result.is_err() {
-            let junk_strategy = handle_actions_error(
+            let junk_strategy = handle_actions_result(
                 self.inner,
                 &mut self.state.finalize_strategy,
                 result,
@@ -283,7 +283,7 @@ impl<'a, T, F, A> TwoStageExecutor<'a, T, F, A, Committed>
 where
     T: TransactionPreparator,
     F: TaskInfoFetcher,
-    A: ActionsCallbackExecutor,
+    A: ActionsCallbackExecutor<ScheduleError = SignerError>,
 {
     const RECURSION_CEILING: u8 = 10;
 
@@ -345,7 +345,7 @@ where
         &mut self,
         result: Result<(), impl Into<ActionError>>,
     ) {
-        let junk_strategy = handle_actions_error(
+        let junk_strategy = handle_actions_result(
             self.inner,
             &mut self.state.finalize_strategy,
             result.map_err(|err| err.into()),
@@ -378,7 +378,7 @@ where
                 // Here we patch strategy for it to be retried in next iteration
                 // & we also record data that has to be cleaned up after patch
                 let action_error = Err(ActionError::ActionsError(err.clone(), *signature));
-                let to_cleanup = handle_actions_error(self.inner, &mut self.state.finalize_strategy, action_error);
+                let to_cleanup = handle_actions_result(self.inner, &mut self.state.finalize_strategy, action_error);
                 Ok(ControlFlow::Continue(to_cleanup))
             }
             TransactionStrategyExecutionError::UndelegationError(_, _) => {
@@ -424,20 +424,21 @@ impl<'a, T, F, A> TwoStageExecutor<'a, T, F, A, Finalized> {
 
 /// Removes actions from strategy and if they contained callbacks executes them
 /// Returns removed strategy
-fn handle_actions_error<T, F, A>(
-    inner: &IntentExecutorImpl<T, F, A>,
+fn handle_actions_result<T, F, A>(
+    inner: &mut IntentExecutorImpl<T, F, A>,
     transaction_strategy: &mut TransactionStrategy,
     result: ActionResult,
 ) -> TransactionStrategy
 where
     T: TransactionPreparator,
     F: TaskInfoFetcher,
-    A: ActionsCallbackExecutor,
+    A: ActionsCallbackExecutor<ScheduleError = SignerError>,
 {
     let mut removed_actions = inner.remove_actions(transaction_strategy);
     let callbacks = removed_actions.extract_action_callbacks();
     if !callbacks.is_empty() {
-        inner.actions_callback_executor.execute(callbacks, result);
+        let result = inner.actions_callback_executor.execute(callbacks, result);
+        inner.callbacks_report.extend(result);
     }
 
     removed_actions

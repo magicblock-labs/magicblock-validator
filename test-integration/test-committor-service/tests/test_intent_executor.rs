@@ -32,11 +32,11 @@ use magicblock_committor_service::{
     transaction_preparator::TransactionPreparatorImpl,
     DEFAULT_ACTIONS_TIMEOUT,
 };
-use magicblock_core::intent::CommittedAccount;
+use magicblock_core::intent::{BaseActionCallback, CommittedAccount};
 use magicblock_program::{
     args::ShortAccountMeta,
     magic_scheduled_base_intent::{
-        BaseAction, BaseActionCallback, CommitAndUndelegate, CommitType,
+        BaseAction, CommitAndUndelegate, CommitType,
         MagicBaseIntent, ProgramArgs, ScheduledIntentBundle, UndelegateType,
     },
     validator::validator_authority_id,

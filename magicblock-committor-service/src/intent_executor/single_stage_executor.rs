@@ -1,13 +1,13 @@
 use std::ops::ControlFlow;
 
+use magicblock_core::traits::ActionsCallbackExecutor;
 use solana_pubkey::Pubkey;
 use solana_signature::Signature;
+use solana_signer::SignerError;
 use tracing::{error, instrument};
 
 use crate::{
-    actions_callback_executor::{
-        ActionError, ActionResult, ActionsCallbackExecutor,
-    },
+    actions_callback_executor::{ActionError, ActionResult},
     intent_executor::{
         error::{
             IntentExecutorError, IntentExecutorResult,
@@ -35,7 +35,7 @@ impl<'a, T, F, A> SingleStageExecutor<'a, T, F, A>
 where
     T: TransactionPreparator,
     F: TaskInfoFetcher,
-    A: ActionsCallbackExecutor,
+    A: ActionsCallbackExecutor<ScheduleError = SignerError>,
 {
     pub fn new(
         executor: &'a mut IntentExecutorImpl<T, F, A>,
@@ -117,7 +117,7 @@ where
 
     /// Removes actions from strategy and if they contained callbacks executes them
     /// Returns removed strategy
-    fn handle_actions_error(
+    fn handle_actions_result(
         &mut self,
         result: ActionResult,
     ) -> TransactionStrategy {
@@ -125,9 +125,11 @@ where
             self.inner.remove_actions(&mut self.transaction_strategy);
         let callbacks = removed_actions.extract_action_callbacks();
         if !callbacks.is_empty() {
-            self.inner
+            let callbacks_results = self
+                .inner
                 .actions_callback_executor
                 .execute(callbacks, result);
+            self.inner.callbacks_report.extend(callbacks_results);
         }
 
         removed_actions
@@ -138,7 +140,7 @@ where
         result: Result<(), impl Into<ActionError>>,
     ) {
         let junk_strategy =
-            self.handle_actions_error(result.map_err(|err| err.into()));
+            self.handle_actions_result(result.map_err(|err| err.into()));
         self.inner.junk.push(junk_strategy);
     }
 
@@ -168,7 +170,7 @@ where
                 // // Here we patch strategy for it to be retried in next iteration
                 // // & we also record data that has to be cleaned up after patch
                 let action_error = Err(ActionError::ActionsError(err.clone(), *signature));
-                let to_cleanup = self.handle_actions_error(action_error);
+                let to_cleanup = self.handle_actions_result(action_error);
                 Ok(ControlFlow::Continue(to_cleanup))
             }
             TransactionStrategyExecutionError::CommitIDError(_, _) => {

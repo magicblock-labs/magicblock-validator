@@ -8,7 +8,7 @@ use std::{
 
 use async_trait::async_trait;
 use magicblock_committor_service::{
-    actions_callback_executor::{ActionResult, ActionsCallbackExecutor},
+    actions_callback_executor::ActionResult,
     intent_executor::{
         task_info_fetcher::{
             CacheTaskInfoFetcher, TaskInfoFetcher, TaskInfoFetcherError,
@@ -23,7 +23,7 @@ use magicblock_committor_service::{
     ComputeBudgetConfig, DEFAULT_ACTIONS_TIMEOUT,
 };
 use magicblock_core::intent::CommittedAccount;
-use magicblock_program::magic_scheduled_base_intent::BaseActionCallback;
+use magicblock_core::intent::BaseActionCallback;
 use magicblock_rpc_client::MagicblockRpcClient;
 use magicblock_table_mania::{GarbageCollectorConfig, TableMania};
 use solana_account::Account;
@@ -32,6 +32,7 @@ use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_sdk::{
     commitment_config::CommitmentConfig, signature::Keypair, signer::Signer,
 };
+use magicblock_core::traits::ActionsCallbackExecutor;
 
 // Helper function to create a test RPC client
 pub async fn create_test_client() -> MagicblockRpcClient {
@@ -146,12 +147,15 @@ impl MockActionsCallbackExecutor {
 }
 
 impl ActionsCallbackExecutor for MockActionsCallbackExecutor {
+    type ScheduleError = ();
+
     fn execute(
         &self,
         callbacks: Vec<BaseActionCallback>,
         result: ActionResult,
-    ) {
+    ) -> Vec<Result<solana_signature::Signature, ()>> {
         self.calls.lock().unwrap().push((callbacks, result));
+        vec![]
     }
 }
 
