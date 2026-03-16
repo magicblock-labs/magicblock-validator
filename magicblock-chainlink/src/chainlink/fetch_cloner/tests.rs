@@ -1230,8 +1230,9 @@ async fn test_delegated_authoritative_skip_unsubscribes_subscription() {
         .await
         .unwrap();
 
-    const POLL_INTERVAL: std::time::Duration = Duration::from_millis(10);
-    const TIMEOUT: std::time::Duration = Duration::from_millis(500);
+    const POLL_INTERVAL: std::time::Duration =
+        std::time::Duration::from_millis(10);
+    const TIMEOUT: std::time::Duration = std::time::Duration::from_millis(500);
     tokio::time::timeout(TIMEOUT, async {
         loop {
             if !remote_account_provider.is_watching(&account_pubkey) {
@@ -1252,6 +1253,78 @@ async fn test_delegated_authoritative_skip_unsubscribes_subscription() {
         delegated_account,
         CURRENT_SLOT,
         account_owner
+    );
+}
+
+#[tokio::test]
+async fn test_same_slot_subscription_update_replaces_empty_placeholder() {
+    init_logger();
+    let validator_keypair = Keypair::new();
+    let account_pubkey = random_pubkey();
+    const CURRENT_SLOT: u64 = 100;
+    const UPDATED_LAMPORTS: u64 = 1_000_000;
+
+    let FetcherTestCtx {
+        accounts_bank,
+        subscription_tx,
+        ..
+    } = setup(
+        std::iter::empty::<(Pubkey, Account)>(),
+        CURRENT_SLOT,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+
+    let mut placeholder = AccountSharedData::new(0, 0, &system_program::id());
+    placeholder.set_remote_slot(CURRENT_SLOT);
+    accounts_bank.insert(account_pubkey, placeholder);
+
+    use crate::remote_account_provider::{
+        RemoteAccount, RemoteAccountUpdateSource,
+    };
+    let updated_account = Account {
+        lamports: UPDATED_LAMPORTS,
+        data: vec![],
+        owner: system_program::id(),
+        executable: false,
+        rent_epoch: 0,
+    };
+    subscription_tx
+        .send(ForwardedSubscriptionUpdate {
+            pubkey: account_pubkey,
+            account: RemoteAccount::from_fresh_account(
+                updated_account.clone(),
+                CURRENT_SLOT,
+                RemoteAccountUpdateSource::Subscription,
+            ),
+        })
+        .await
+        .unwrap();
+
+    const POLL_INTERVAL: std::time::Duration = Duration::from_millis(10);
+    const TIMEOUT: std::time::Duration = Duration::from_millis(500);
+    tokio::time::timeout(TIMEOUT, async {
+        loop {
+            let Some(account) = accounts_bank.get_account(&account_pubkey)
+            else {
+                tokio::time::sleep(POLL_INTERVAL).await;
+                continue;
+            };
+            if account.lamports() == UPDATED_LAMPORTS {
+                break;
+            }
+            tokio::time::sleep(POLL_INTERVAL).await;
+        }
+    })
+    .await
+    .expect("timed out waiting for same-slot subscription update");
+
+    assert_cloned_undelegated_account!(
+        accounts_bank,
+        account_pubkey,
+        updated_account,
+        CURRENT_SLOT,
+        system_program::id()
     );
 }
 
