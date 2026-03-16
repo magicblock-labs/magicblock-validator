@@ -5,7 +5,7 @@ pub mod intent_scheduler;
 use std::sync::Arc;
 
 pub use intent_execution_engine::BroadcastedIntentExecutionResult;
-use magicblock_core::traits::ActionsCallbackExecutor;
+use magicblock_core::traits::ActionsCallbackScheduler;
 use magicblock_program::magic_scheduled_base_intent::ScheduledIntentBundle;
 use magicblock_rpc_client::MagicblockRpcClient;
 use magicblock_table_mania::TableMania;
@@ -41,7 +41,7 @@ impl<D: DB> IntentExecutionManager<D> {
         actions_callback_executor: A,
     ) -> Self
     where
-        A: ActionsCallbackExecutor<ScheduleError = SignerError>,
+        A: ActionsCallbackScheduler<ScheduleError = SignerError>,
         P: IntentPersister,
     {
         let db = Arc::new(db);

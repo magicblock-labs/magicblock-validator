@@ -30,11 +30,11 @@ pub trait LatestBlockProvider: Send + Sync + Clone + 'static {
     fn clock(&self) -> Clock;
 }
 
-pub trait ActionsCallbackExecutor: Send + Sync + Clone + 'static {
+pub trait ActionsCallbackScheduler: Send + Sync + Clone + 'static {
     type ScheduleError;
 
     /// Executes actions callbacks
-    fn execute(
+    fn schedule(
         &self,
         callbacks: Vec<BaseActionCallback>,
         result: ActionResult,

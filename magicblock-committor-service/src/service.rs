@@ -1,6 +1,6 @@
 use std::{collections::HashMap, path::Path, sync::Arc, time::Instant};
 
-use magicblock_core::traits::ActionsCallbackExecutor;
+use magicblock_core::traits::ActionsCallbackScheduler;
 use magicblock_program::magic_scheduled_base_intent::ScheduledIntentBundle;
 use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
@@ -118,7 +118,7 @@ impl CommittorActor {
     ) -> CommittorServiceResult<Self>
     where
         P: AsRef<Path>,
-        A: ActionsCallbackExecutor<ScheduleError = SignerError>,
+        A: ActionsCallbackScheduler<ScheduleError = SignerError>,
     {
         let processor = Arc::new(CommittorProcessor::try_new(
             authority,
@@ -321,7 +321,7 @@ impl CommittorService {
     ) -> CommittorServiceResult<Self>
     where
         P: AsRef<Path>,
-        A: ActionsCallbackExecutor<ScheduleError = SignerError>,
+        A: ActionsCallbackScheduler<ScheduleError = SignerError>,
     {
         debug!("Starting committor service");
         let (sender, receiver) = mpsc::channel(1_000);

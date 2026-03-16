@@ -287,6 +287,7 @@ mod tests {
             requested_undelegation: false,
             error_message: None,
             patched_errors: vec![],
+            callbacks_report: vec![],
         }
     }
 

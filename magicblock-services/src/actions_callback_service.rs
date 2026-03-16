@@ -2,8 +2,9 @@ use std::sync::Arc;
 
 use magicblock_core::{
     intent::BaseActionCallback,
-    traits::{ActionResult, ActionsCallbackExecutor, LatestBlockProvider},
+    traits::{ActionResult, ActionsCallbackScheduler, LatestBlockProvider},
 };
+use magicblock_magic_program_api::response::MagicResponse;
 use solana_instruction::{AccountMeta, Instruction};
 use solana_keypair::Keypair;
 use solana_message::{Message, VersionedMessage};
@@ -52,7 +53,7 @@ impl<L: LatestBlockProvider> ActionsCallbackService<L> {
     ) -> Vec<Result<VersionedTransaction, SignerError>> {
         let authority_pubkey = self.authority.pubkey();
         let blockhash = self.latest_block.blockhash();
-        let succeeded = result.is_ok();
+        let result: Result<(), String> = result.map_err(|e| e.to_string());
 
         callbacks
             .into_iter()
@@ -60,7 +61,7 @@ impl<L: LatestBlockProvider> ActionsCallbackService<L> {
                 let ix = Self::build_instruction(
                     callback,
                     &authority_pubkey,
-                    succeeded,
+                    result.clone(),
                 );
                 let message = Message::new_with_blockhash(
                     &[ix],
@@ -78,11 +79,18 @@ impl<L: LatestBlockProvider> ActionsCallbackService<L> {
     fn build_instruction(
         callback: BaseActionCallback,
         authority: &Pubkey,
-        succeeded: bool,
+        result: Result<(), String>,
     ) -> Instruction {
+        let response = MagicResponse {
+            ok: result.is_ok(),
+            data: callback.payload,
+            error: result.err().unwrap_or_default(),
+        };
         let mut data = callback.discriminator;
-        data.push(succeeded as u8);
-        data.extend(callback.payload);
+        data.extend(
+            bincode::serialize(&response)
+                .expect("MagicResponse serialization is infallible"),
+        );
         let account_metas =
             std::iter::once(AccountMeta::new_readonly(*authority, true))
                 .chain(callback.account_metas_per_program.into_iter().map(
@@ -108,26 +116,25 @@ impl<L: LatestBlockProvider> ActionsCallbackService<L> {
     }
 }
 
-impl<L: LatestBlockProvider> ActionsCallbackExecutor
+impl<L: LatestBlockProvider> ActionsCallbackScheduler
     for ActionsCallbackService<L>
 {
     type ScheduleError = SignerError;
 
-    fn execute(
+    fn schedule(
         &self,
         callbacks: Vec<BaseActionCallback>,
         result: ActionResult,
     ) -> Vec<Result<Signature, SignerError>> {
         let transactions_result = self.build_transactions(callbacks, result);
 
-        // Compile result and txs to execute
         let mut valid_transactions = vec![];
-        let result = transactions_result
+        let signatures = transactions_result
             .into_iter()
             .map(|el| match el {
-                Ok(value) => {
-                    let signature = *value.get_signature();
-                    valid_transactions.push(value);
+                Ok(tx) => {
+                    let signature = *tx.get_signature();
+                    valid_transactions.push(tx);
                     Ok(signature)
                 }
                 Err(err) => Err(err),
@@ -148,12 +155,6 @@ impl<L: LatestBlockProvider> ActionsCallbackExecutor
             });
         }
 
-        result
+        signatures
     }
-}
-
-#[derive(Debug, thiserror::Error)]
-pub enum ActionCallbackScheduleError {
-    #[error("Signing failed: {0}")]
-    SigningError(#[from] SignerError),
 }

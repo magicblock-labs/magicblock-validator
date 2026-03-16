@@ -3466,7 +3466,9 @@ dependencies = [
 name = "magicblock-services"
 version = "0.8.3"
 dependencies = [
+ "bincode",
  "magicblock-core",
+ "magicblock-magic-program-api",
  "solana-instruction",
  "solana-keypair",
  "solana-message",

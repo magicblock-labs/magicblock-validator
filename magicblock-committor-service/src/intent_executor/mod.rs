@@ -13,7 +13,7 @@ use std::{
 
 use async_trait::async_trait;
 use futures_util::future::{join, try_join_all};
-use magicblock_core::traits::ActionsCallbackExecutor;
+use magicblock_core::traits::ActionsCallbackScheduler;
 use magicblock_metrics::metrics;
 use magicblock_program::{
     magic_scheduled_base_intent::ScheduledIntentBundle,
@@ -136,7 +136,7 @@ impl<T, F, A> IntentExecutorImpl<T, F, A>
 where
     T: TransactionPreparator,
     F: TaskInfoFetcher,
-    A: ActionsCallbackExecutor<ScheduleError = SignerError>,
+    A: ActionsCallbackScheduler<ScheduleError = SignerError>,
 {
     pub fn new(
         rpc_client: MagicblockRpcClient,
@@ -882,7 +882,7 @@ impl<T, C, A> IntentExecutor for IntentExecutorImpl<T, C, A>
 where
     T: TransactionPreparator,
     C: TaskInfoFetcher,
-    A: ActionsCallbackExecutor<ScheduleError = SignerError>,
+    A: ActionsCallbackScheduler<ScheduleError = SignerError>,
 {
     /// Executes Message on Base layer
     /// Returns `ExecutionOutput` or an `Error`

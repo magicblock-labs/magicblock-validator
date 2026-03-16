@@ -1,6 +1,6 @@
 use std::ops::ControlFlow;
 
-use magicblock_core::traits::ActionsCallbackExecutor;
+use magicblock_core::traits::ActionsCallbackScheduler;
 use solana_pubkey::Pubkey;
 use solana_signature::Signature;
 use solana_signer::SignerError;
@@ -35,7 +35,7 @@ impl<'a, T, F, A> SingleStageExecutor<'a, T, F, A>
 where
     T: TransactionPreparator,
     F: TaskInfoFetcher,
-    A: ActionsCallbackExecutor<ScheduleError = SignerError>,
+    A: ActionsCallbackScheduler<ScheduleError = SignerError>,
 {
     pub fn new(
         executor: &'a mut IntentExecutorImpl<T, F, A>,
@@ -128,7 +128,7 @@ where
             let callbacks_results = self
                 .inner
                 .actions_callback_executor
-                .execute(callbacks, result);
+                .schedule(callbacks, result);
             self.inner.callbacks_report.extend(callbacks_results);
         }
 

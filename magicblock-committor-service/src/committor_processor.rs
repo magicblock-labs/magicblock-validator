@@ -4,7 +4,7 @@ use std::{
     sync::Arc,
 };
 
-use magicblock_core::traits::ActionsCallbackExecutor;
+use magicblock_core::traits::ActionsCallbackScheduler;
 use magicblock_program::magic_scheduled_base_intent::ScheduledIntentBundle;
 use magicblock_rpc_client::MagicblockRpcClient;
 use magicblock_table_mania::{GarbageCollectorConfig, TableMania};
@@ -52,7 +52,7 @@ impl CommittorProcessor {
     ) -> CommittorServiceResult<Self>
     where
         P: AsRef<Path>,
-        A: ActionsCallbackExecutor<ScheduleError = SignerError>,
+        A: ActionsCallbackScheduler<ScheduleError = SignerError>,
     {
         let rpc_client = RpcClient::new_with_commitment(
             chain_config.rpc_uri.to_string(),
