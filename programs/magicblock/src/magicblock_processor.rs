@@ -128,6 +128,7 @@ declare_process_instruction!(
                 pubkey,
                 data,
                 fields,
+                actions_tx_sig,
             } => process_clone_account(
                 &signers,
                 invoke_context,
@@ -135,12 +136,14 @@ declare_process_instruction!(
                 pubkey,
                 data,
                 fields,
+                actions_tx_sig,
             ),
             CloneAccountInit {
                 pubkey,
                 total_data_len,
                 initial_data,
                 fields,
+                actions_tx_sig,
             } => process_clone_account_init(
                 &signers,
                 invoke_context,
@@ -149,6 +152,7 @@ declare_process_instruction!(
                 total_data_len,
                 initial_data,
                 fields,
+                actions_tx_sig,
             ),
             CloneAccountContinue {
                 pubkey,
