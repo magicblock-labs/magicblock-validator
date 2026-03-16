@@ -62,7 +62,8 @@ pub mod mock {
             // NOTE: that the validator will also have to set flip the delegated flag like
             //       we do here.
             //       See programs/magicblock/src/schedule_transactions/process_schedule_commit.rs :172
-            self.set_owner(pubkey, dlp::id()).undelegate(pubkey);
+            self.set_owner(pubkey, dlp_api::dlp::id())
+                .undelegate(pubkey);
         }
 
         pub fn set_undelegating(

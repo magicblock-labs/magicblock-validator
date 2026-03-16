@@ -792,7 +792,7 @@ async fn ix_commit_local(
             let expected_owner = if is_undelegate {
                 program_flexi_counter::id()
             } else {
-                dlp::id()
+                dlp_api::dlp::id()
             };
 
             let lamports = account.account.lamports;

@@ -24,8 +24,10 @@ use magicblock_chainlink::{
 };
 use magicblock_config::config::{ChainLinkConfig, LifecycleMode};
 use solana_account::{Account, AccountSharedData};
+use solana_keypair::Keypair;
 use solana_program::{clock::Slot, sysvar::clock};
 use solana_pubkey::Pubkey;
+use solana_signer::Signer;
 use tokio::sync::mpsc;
 use tracing::*;
 
@@ -64,7 +66,8 @@ impl TestContext {
         let lifecycle_mode = LifecycleMode::Ephemeral;
         let bank = Arc::<AccountsBankStub>::default();
         let cloner = Arc::new(ClonerStub::new(bank.clone()));
-        let validator_pubkey = Pubkey::new_unique();
+        let validator_keypair = Keypair::new();
+        let validator_pubkey = validator_keypair.pubkey();
         let faucet_pubkey = Pubkey::new_unique();
         let (fetch_cloner, remote_account_provider) = {
             let (tx, rx) = tokio::sync::mpsc::channel(100);
@@ -95,7 +98,7 @@ impl TestContext {
                             &provider,
                             &bank,
                             &cloner,
-                            validator_pubkey,
+                            validator_keypair.insecure_clone(),
                             faucet_pubkey,
                             rx,
                             None,
@@ -245,7 +248,9 @@ impl TestContext {
             self.rpc_client.get_slot(),
         );
         let delegation_record_pubkey =
-            dlp::pda::delegation_record_pda_from_delegated_account(pubkey);
+            dlp_api::dlp::pda::delegation_record_pda_from_delegated_account(
+                pubkey,
+            );
         self.rpc_client.remove_account(&delegation_record_pubkey);
         let updated = self
             .send_and_receive_account_update(
@@ -276,7 +281,8 @@ impl TestContext {
 
         // Update account to be delegated on chain and send a sub update
         let acc = self.rpc_client.get_account_at_slot(pubkey).unwrap();
-        let delegated_acc = account_shared_with_owner(&acc.account, dlp::id());
+        let delegated_acc =
+            account_shared_with_owner(&acc.account, dlp_api::dlp::id());
         let updated = self
             .send_and_receive_account_update(
                 *pubkey,

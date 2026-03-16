@@ -225,7 +225,7 @@ pub fn create_commit_task(data: &[u8]) -> CommitTask {
             account: Account {
                 lamports: 1000,
                 data: data.to_vec(),
-                owner: dlp::id(),
+                owner: dlp_api::dlp::id(),
                 executable: false,
                 rent_epoch: 0,
             },
@@ -252,7 +252,7 @@ pub fn create_committed_account(data: &[u8]) -> CommittedAccount {
         account: Account {
             lamports: 1000,
             data: data.to_vec(),
-            owner: dlp::id(),
+            owner: dlp_api::dlp::id(),
             executable: false,
             rent_epoch: 0,
         },

@@ -22,8 +22,9 @@
 
 use std::{cmp::Ordering, collections::BinaryHeap};
 
-use magicblock_core::link::transactions::{
-    ProcessableTransaction, TransactionProcessingMode,
+use magicblock_core::{
+    coordination_mode,
+    link::transactions::{ProcessableTransaction, TransactionProcessingMode},
 };
 use magicblock_metrics::metrics::MAX_LOCK_CONTENTION_QUEUE_SIZE;
 use tracing::{error, warn};
@@ -31,7 +32,7 @@ use tracing::{error, warn};
 use super::locks::{
     next_transaction_id, ExecutorId, LocksCache, TransactionId,
 };
-use crate::scheduler::{locks::RcLock, state::SchedulerMode};
+use crate::scheduler::locks::RcLock;
 
 /// Maximum blocked transactions per executor before rejecting new ones (Primary mode).
 const BLOCKED_TXN_MULTIPLIER: usize = 2;
@@ -61,7 +62,16 @@ pub(super) struct ExecutionCoordinator {
 }
 
 /// Coordination mode determining how transactions are scheduled.
+///
+/// Valid Transitions:
+///   StartingUp → Primary    [Standalone validators, after replay]
+///   StartingUp → Replica    [Replica validators, after replay]
+///   Primary → Replica       [Failover: primary to replica]
+///   Replica → Primary       [Failover: replica takeover becomes primary]
 pub(super) enum CoordinationMode {
+    /// Ledger replay phase. No validator signer required, no side effects,
+    /// strict ordering (same constraints as Replica).
+    StartingUp(ReplicaMode),
     /// Primary mode: accepts client transactions, allows concurrent execution.
     Primary(PrimaryMode),
     /// Replica mode: replays transactions, enforces strict ordering.
@@ -91,6 +101,7 @@ impl CoordinationMode {
     /// Returns true if the scheduler is ready to accept new transactions.
     fn is_ready(&self) -> bool {
         match self {
+            Self::StartingUp(m) => m.pending.is_none(),
             // Primary: ready if we haven't hit the blocked transaction limit
             Self::Primary(m) => m.blocked_txn_count < m.max_blocked_txn,
             // Replica: ready only if no transaction is pending (strict ordering)
@@ -100,9 +111,10 @@ impl CoordinationMode {
 }
 
 impl ExecutionCoordinator {
-    /// Creates a new coordinator starting in Replica mode.
+    /// Creates a new coordinator starting in StartingUp mode.
     ///
-    /// Starts in Replica mode to allow ledger replay before switching to Primary.
+    /// Starts in StartingUp mode to allow ledger replay before switching to Primary
+    /// or Replica.
     pub(super) fn new(count: usize) -> Self {
         Self {
             blocked_transactions: (0..count)
@@ -111,7 +123,7 @@ impl ExecutionCoordinator {
             acquired_locks: (0..count).map(|_| Vec::new()).collect(),
             ready_executors: (0..count as u32).collect(),
             locks: LocksCache::default(),
-            mode: CoordinationMode::Replica(ReplicaMode::default()),
+            mode: CoordinationMode::StartingUp(ReplicaMode::default()),
         }
     }
 
@@ -183,8 +195,8 @@ impl ExecutionCoordinator {
         txn: TransactionWithId,
     ) {
         match &mut self.mode {
-            CoordinationMode::Replica(r) => {
-                // In Replica mode, track the pending transaction ID.
+            CoordinationMode::StartingUp(r) | CoordinationMode::Replica(r) => {
+                // In StartingUp/Replica mode, track the pending transaction ID.
                 // The debug_assert ensures we don't queue when one is already pending
                 // (enforced by is_ready() returning false when pending.is_some()).
                 debug_assert!(r.pending.is_none());
@@ -208,7 +220,7 @@ impl ExecutionCoordinator {
     ) -> Option<TransactionWithId> {
         let txn = self.blocked_transactions[executor as usize].pop();
         match &mut self.mode {
-            CoordinationMode::Replica(r) => {
+            CoordinationMode::StartingUp(r) | CoordinationMode::Replica(r) => {
                 // Clear pending if this was the pending transaction.
                 if r.pending == txn.as_ref().map(|txn| txn.id) {
                     r.pending.take();
@@ -222,35 +234,69 @@ impl ExecutionCoordinator {
         txn
     }
 
-    /// Transitions to the specified execution mode.
+    /// Switches to Primary mode from StartingUp or Replica.
     ///
-    /// No-op if already in the target mode (logs a warning).
-    pub(super) fn transition_to(&mut self, mode: SchedulerMode) {
-        match mode {
-            SchedulerMode::Primary => {
-                if let CoordinationMode::Primary(_) = self.mode {
-                    warn!("Already in primary mode");
-                    return;
-                }
-                let mode = PrimaryMode {
-                    blocked_txn_count: 0,
-                    max_blocked_txn: self.blocked_transactions.len()
-                        * BLOCKED_TXN_MULTIPLIER,
-                };
-                self.mode = CoordinationMode::Primary(mode);
+    /// Called after ledger replay completes on Primary validators, or during
+    /// failover when a replica takes over as primary.
+    /// No-op if already in Primary mode.
+    pub(super) fn switch_to_primary_mode(&mut self) {
+        if let CoordinationMode::Primary(_) = self.mode {
+            warn!("Tried to switch to primary mode more than once");
+            return;
+        }
+        let mode = PrimaryMode {
+            blocked_txn_count: 0,
+            max_blocked_txn: self.blocked_transactions.len()
+                * BLOCKED_TXN_MULTIPLIER,
+        };
+        self.mode = CoordinationMode::Primary(mode);
+    }
+
+    /// Switches to Replica mode from StartingUp or Primary.
+    ///
+    /// Called after ledger replay completes on Replica validators, or during
+    /// failover when a primary needs to step down to replica.
+    /// No-op if already in Replica mode.
+    pub(super) fn switch_to_replica_mode(&mut self) {
+        match &self.mode {
+            CoordinationMode::Replica(_) => {
+                warn!("Tried to switch to replica mode more than once");
             }
-            SchedulerMode::Replica => {
-                if let CoordinationMode::Replica(_) = self.mode {
-                    warn!("Already in replica mode");
-                    return;
-                }
-                self.mode = CoordinationMode::Replica(Default::default());
+            CoordinationMode::Primary(_) => {
+                self.mode =
+                    CoordinationMode::Replica(ReplicaMode { pending: None });
+            }
+            CoordinationMode::StartingUp(r) => {
+                self.mode = CoordinationMode::Replica(ReplicaMode {
+                    pending: r.pending,
+                });
             }
         }
     }
 
+    /// Transitions to Primary mode (scheduler + global state).
+    ///
+    /// Called when ledger replay completes on Standalone validators, or during
+    /// failover when a replica takes over as primary.
+    /// Coordinates both the local scheduler and global validator state.
+    pub(super) fn switch_to_primary_mode_globally(&mut self) {
+        self.switch_to_primary_mode();
+        coordination_mode::switch_to_primary_mode();
+    }
+
+    /// Transitions to Replica mode (scheduler + global state).
+    ///
+    /// Called when ledger replay completes on Replica validators, or during
+    /// failover when a primary needs to step down to replica.
+    /// Coordinates both the local scheduler and global validator state.
+    pub(super) fn switch_to_replica_mode_globally(&mut self) {
+        self.switch_to_replica_mode();
+        coordination_mode::switch_to_replica_mode();
+    }
+
     /// Checks if a transaction mode is compatible with the current coordination mode.
     ///
+    /// - StartingUp mode: rejects Execution transactions (same as Replica)
     /// - Primary mode: rejects Replay transactions (only client Execution allowed)
     /// - Replica mode: rejects Execution transactions (only Replay allowed)
     /// - Simulations are allowed in all modes
@@ -262,7 +308,9 @@ impl ExecutionCoordinator {
         use TransactionProcessingMode::*;
         let mode_mismatch = matches!(
             (&self.mode, mode),
-            (Primary(_), Replay(_)) | (Replica(_), Execution(_))
+            (Primary(_), Replay(_))
+                | (StartingUp(_), Execution(_))
+                | (Replica(_), Execution(_))
         );
         !mode_mismatch
     }

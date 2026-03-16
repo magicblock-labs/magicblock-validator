@@ -43,7 +43,8 @@ pub fn ensure_started_validator(
     let stub = Arc::new(MagicSysStub::with_nonce(nonce.unwrap_or(0)));
     init_magic_sys(stub);
 
-    validator::ensure_started_up();
+    // Ensure validator is in Primary mode (ledger replay complete)
+    magicblock_core::coordination_mode::switch_to_primary_mode();
 }
 
 pub fn process_instruction(

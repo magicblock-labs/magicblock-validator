@@ -1,11 +1,4 @@
-use dlp::{
-    args::CallHandlerArgs,
-    instruction_builder::{
-        call_handler_size_budget, call_handler_v2_size_budget,
-        finalize_size_budget, undelegate_size_budget,
-    },
-    AccountSizeClass,
-};
+use dlp_api::dlp::{args::CallHandlerArgs, AccountSizeClass};
 use magicblock_committor_program::{
     instruction_builder::{
         close_buffer::{create_close_ix, CreateCloseIxArgs},
@@ -57,7 +50,7 @@ pub enum BaseTaskImpl {
 
 impl BaseTask for BaseTaskImpl {
     fn program_id(&self) -> Pubkey {
-        dlp::id()
+        dlp_api::dlp::id()
     }
 
     fn instruction(&self, validator: &Pubkey) -> Instruction {
@@ -89,9 +82,15 @@ impl BaseTask for BaseTaskImpl {
         match self {
             Self::Commit(value) => value.accounts_size_budget(),
             Self::BaseAction(value) => value.accounts_size_budget(),
-            Self::Finalize(_) => finalize_size_budget(AccountSizeClass::Huge),
+            Self::Finalize(_) => {
+                dlp_api::instruction_builder::finalize_size_budget(
+                    AccountSizeClass::Huge,
+                )
+            }
             Self::Undelegate(_) => {
-                undelegate_size_budget(AccountSizeClass::Huge)
+                dlp_api::instruction_builder::undelegate_size_budget(
+                    AccountSizeClass::Huge,
+                )
             }
         }
     }
@@ -172,7 +171,7 @@ pub struct UndelegateTask {
 
 impl UndelegateTask {
     pub fn instruction(&self, validator: &Pubkey) -> Instruction {
-        dlp::instruction_builder::undelegate(
+        dlp_api::instruction_builder::undelegate(
             *validator,
             self.delegated_account,
             self.owner_program,
@@ -194,7 +193,10 @@ pub struct FinalizeTask {
 
 impl FinalizeTask {
     pub fn instruction(&self, validator: &Pubkey) -> Instruction {
-        dlp::instruction_builder::finalize(*validator, self.delegated_account)
+        dlp_api::instruction_builder::finalize(
+            *validator,
+            self.delegated_account,
+        )
     }
 }
 
@@ -251,15 +253,19 @@ impl BaseActionTask {
             * AccountSizeClass::Small.size_budget();
 
         match self {
-            Self::V1(_) => call_handler_size_budget(
-                AccountSizeClass::Medium,
-                other_accounts_budget,
-            ),
-            Self::V2(_) => call_handler_v2_size_budget(
-                AccountSizeClass::Medium,
-                AccountSizeClass::Medium,
-                other_accounts_budget,
-            ),
+            Self::V1(_) => {
+                dlp_api::instruction_builder::call_handler_size_budget(
+                    AccountSizeClass::Medium,
+                    other_accounts_budget,
+                )
+            }
+            Self::V2(_) => {
+                dlp_api::instruction_builder::call_handler_v2_size_budget(
+                    AccountSizeClass::Medium,
+                    AccountSizeClass::Medium,
+                    other_accounts_budget,
+                )
+            }
         }
     }
 }
@@ -281,7 +287,9 @@ impl BaseActionTaskV1 {
                 is_signer: false,
             })
             .collect();
-        dlp::instruction_builder::call_handler(
+
+        #[allow(deprecated)]
+        dlp_api::instruction_builder::call_handler(
             *validator,
             action.destination_program,
             action.escrow_authority,
@@ -342,7 +350,7 @@ pub struct BaseActionTaskV2 {
 impl BaseActionTaskV2 {
     pub fn instruction(&self, validator: &Pubkey) -> Instruction {
         let action = &self.action;
-        dlp::instruction_builder::call_handler_v2(
+        dlp_api::instruction_builder::call_handler_v2(
             *validator,
             action.destination_program,
             self.source_program,

@@ -4,6 +4,7 @@ use std::{
 };
 
 use lazy_static::lazy_static;
+use magicblock_core::coordination_mode;
 use solana_clock::Slot;
 use solana_hash::Hash;
 use solana_instruction::error::InstructionError;
@@ -114,10 +115,12 @@ pub fn process_scheduled_commit_sent(
     transaction_context: &TransactionContext,
     commit_id: u64,
 ) -> Result<(), InstructionError> {
-    if validator::is_starting_up() {
+    let mode = coordination_mode::CoordinationMode::current();
+    if !mode.should_schedule_intents() {
         ic_msg!(
             invoke_context,
-            "ScheduleCommitSent: validator is starting up, this instruction is skipped"
+            "ScheduleCommitSent: skipped (mode={:?})",
+            mode
         );
         return Ok(());
     }
