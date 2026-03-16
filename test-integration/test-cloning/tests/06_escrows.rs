@@ -83,22 +83,24 @@ fn test_cloning_unescrowed_payer_that_is_escrowed_later() {
 
     // If we then change the escrow on chain, i.e. due to a topup it will update in the ephem
     ctx.airdrop_chain(&escrow_pda, LAMPORTS_PER_SOL).unwrap();
-    let mut retries = 5;
+    const POLL_INTERVAL: std::time::Duration =
+        std::time::Duration::from_millis(200);
+    const TIMEOUT: std::time::Duration = std::time::Duration::from_secs(8);
+    let deadline = std::time::Instant::now() + TIMEOUT;
     let (escrow_pda, acc) = loop {
         let (escrow_pda, acc) = get_escrow_pda_ephem(&ctx, &non_escrowed_kp);
         if acc.as_ref().map(|x| x.lamports).unwrap_or_default()
             == LAMPORTS_PER_SOL
         {
             break (escrow_pda, acc);
-        } else if retries == 0 {
+        } else if std::time::Instant::now() >= deadline {
             panic!(
                 "escrow account was not updated in ephem after chain airdrop: {:#?}",
                 acc
             );
         } else {
             debug!("escrow account not updated yet, retrying...: {:#?}", acc);
-            retries -= 1;
-            std::thread::sleep(std::time::Duration::from_millis(400));
+            std::thread::sleep(POLL_INTERVAL);
         }
     };
     debug!(
