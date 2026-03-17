@@ -98,6 +98,20 @@ impl ChainLaserClientImpl {
         pubkeys: HashSet<Pubkey>,
         retries: Option<usize>,
     ) -> RemoteAccountProviderResult<()> {
+        // Map clock::ID to SLOT_SUBSCRIPTION_DUMMY, matching the
+        // single-subscribe path so GRPC clients never create a real
+        // clock account subscription.
+        let pubkeys: HashSet<Pubkey> = pubkeys
+            .into_iter()
+            .map(|pk| {
+                if pk == clock::ID {
+                    SLOT_SUBSCRIPTION_DUMMY
+                } else {
+                    pk
+                }
+            })
+            .collect();
+
         let (tx, rx) = oneshot::channel();
         self.send_msg(ChainPubsubActorMessage::AccountSubscribeMultiple {
             pubkeys,
