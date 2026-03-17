@@ -101,6 +101,10 @@ pub fn start_test_validator_with_config(
             "protocol-fees-vault.json".to_string(),
         ),
         (
+            loaded_accounts.magic_fee_vault().to_string(),
+            "magic-fee-vault.json".to_string(),
+        ),
+        (
             "9yXjZTevvMp1XgZSZEaziPRgFiXtAQChpnP2oX9eCpvt".to_string(),
             "non-delegated-cloneable-account1.json".to_string(),
         ),

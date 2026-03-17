@@ -51,7 +51,7 @@ fn test_committing_one_account() {
         );
 
         let ScheduleCommitTestContextFields {
-            payer_ephem: payer,
+            payer_chain: payer,
             committees,
             commitment,
             ephem_client,
@@ -64,6 +64,7 @@ fn test_committing_one_account() {
             payer.pubkey(),
             magicblock_magic_program_api::id(),
             magicblock_magic_program_api::MAGIC_CONTEXT_PUBKEY,
+            None,
             &committees
                 .iter()
                 .map(|(player, _)| player.pubkey())
@@ -107,7 +108,7 @@ fn test_committing_two_accounts() {
         );
 
         let ScheduleCommitTestContextFields {
-            payer_ephem: payer,
+            payer_chain: payer,
             committees,
             commitment,
             ephem_client,
@@ -118,6 +119,7 @@ fn test_committing_two_accounts() {
             payer.pubkey(),
             magicblock_magic_program_api::id(),
             magicblock_magic_program_api::MAGIC_CONTEXT_PUBKEY,
+            None,
             &committees
                 .iter()
                 .map(|(player, _)| player.pubkey())
@@ -321,6 +323,7 @@ fn schedule_commit_cpi_illegal_owner(
         modify_accounts: false,
         undelegate: is_undelegate,
         commit_payer: true,
+        has_magic_vault: false,
     };
     let ix = ScheduleCommitInstruction::ScheduleCommitCpi(cpi_args);
     Instruction::new_with_borsh(program_id, &ix, account_metas)

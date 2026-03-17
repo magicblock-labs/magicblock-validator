@@ -11,8 +11,9 @@ use crate::{
     magic_scheduled_base_intent::{
         CommitType, ConstructionContext, ScheduledIntentBundle,
     },
+    magic_sys::fetch_current_commit_nonces,
     schedule_transactions::{
-        check_commit_limits, check_magic_context_id, get_clock,
+        check_magic_context_id, get_clock,
         get_parent_program_id, MAGIC_CONTEXT_IDX, PAYER_IDX,
     },
     utils::{
@@ -20,9 +21,11 @@ use crate::{
         accounts::{
             get_instruction_account_with_idx, get_instruction_pubkey_with_idx,
         },
+        charge_delegated_payer,
     },
     MagicContext,
 };
+use crate::schedule_transactions::{check_commit_limits, try_get_fee_vault};
 
 pub(crate) fn process_schedule_intent_bundle(
     signers: HashSet<Pubkey>,
@@ -57,6 +60,14 @@ pub(crate) fn process_schedule_intent_bundle(
         );
         return Err(InstructionError::MissingRequiredSignature);
     }
+    let payer_account =
+        get_instruction_account_with_idx(transaction_context, PAYER_IDX)?;
+    let magic_fee_vault = try_get_fee_vault(
+        transaction_context,
+        invoke_context,
+        PAYER_IDX,
+        MAGIC_CONTEXT_IDX + 1,
+    )?;
 
     //
     // Get the program_id of the parent instruction that invoked this one via CPI
@@ -135,7 +146,13 @@ pub(crate) fn process_schedule_intent_bundle(
         );
     }
 
-    if let Some(commit_accounts) = scheduled_intent.get_commit_intent_accounts()
+    if let Some(magic_fee_vault) = magic_fee_vault {
+        let chargable_accounts = scheduled_intent.get_all_committed_accounts();
+        let nonces = fetch_current_commit_nonces(&chargable_accounts)?;
+        let fee = scheduled_intent.calculate_fee(&nonces)?;
+        charge_delegated_payer(payer_account, magic_fee_vault, fee)?;
+    } else if let Some(commit_accounts) =
+        scheduled_intent.get_commit_intent_accounts()
     {
         check_commit_limits(commit_accounts, invoke_context)?;
     }

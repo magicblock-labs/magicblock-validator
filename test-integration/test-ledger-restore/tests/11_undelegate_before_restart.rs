@@ -156,7 +156,7 @@ fn update_counter_between_restarts(payer: &Keypair) -> Child {
     //         payer.pubkey()
     //     );
 
-    let ix = create_add_and_schedule_commit_ix(payer.pubkey(), 3, true);
+    let ix = create_add_and_schedule_commit_ix(payer.pubkey(), 3, true, None);
     let sig = confirm_tx_with_payer_ephem(ix, payer, &ctx, &mut validator);
     debug!("✅ Added 3 and scheduled commit to counter {counter_pda} with undelegation");
 

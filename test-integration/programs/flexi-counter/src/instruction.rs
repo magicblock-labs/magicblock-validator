@@ -114,7 +114,11 @@ pub enum FlexiCounterInstruction {
     /// 1. `[write]`  The counter PDA account that will be updated.
     /// 2. `[]`       MagicContext (used to record scheduled commit)
     /// 3. `[]`       MagicBlock Program (used to schedule commit)
-    AddAndScheduleCommit { count: u8, undelegate: bool },
+    AddAndScheduleCommit {
+        count: u8,
+        undelegate: bool,
+        has_magic_vault: bool,
+    },
 
     /// Updates the first FlexiCounter by adding the count found in the
     /// second FlexiCounter created by another payer
@@ -375,18 +379,28 @@ pub fn create_add_and_schedule_commit_ix(
     payer: Pubkey,
     count: u8,
     undelegate: bool,
+    magic_fee_vault: Option<Pubkey>,
 ) -> Instruction {
     let program_id = &crate::id();
     let (pda, _) = FlexiCounter::pda(&payer);
-    let accounts = vec![
+    let mut accounts = vec![
         AccountMeta::new(payer, true),
         AccountMeta::new(pda, false),
         AccountMeta::new(MAGIC_CONTEXT_ID, false),
         AccountMeta::new_readonly(MAGIC_PROGRAM_ID, false),
     ];
+    let has_magic_vault = magic_fee_vault.is_some();
+    if let Some(magic_fee_vault) = magic_fee_vault {
+        accounts.push(AccountMeta::new(magic_fee_vault, false));
+    }
+
     Instruction::new_with_borsh(
         *program_id,
-        &FlexiCounterInstruction::AddAndScheduleCommit { count, undelegate },
+        &FlexiCounterInstruction::AddAndScheduleCommit {
+            count,
+            undelegate,
+            has_magic_vault,
+        },
         accounts,
     )
 }

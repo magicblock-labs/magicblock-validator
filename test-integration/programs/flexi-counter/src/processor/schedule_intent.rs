@@ -139,6 +139,7 @@ pub fn process_create_intent(
         payer: escrow_authorities[0].clone(),
         magic_context: magic_context.clone(),
         magic_program: magic_program.clone(),
+        magic_fee_vault: None,
         magic_action,
     }
     .build_and_invoke()
