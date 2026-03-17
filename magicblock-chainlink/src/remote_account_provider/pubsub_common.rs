@@ -1,4 +1,4 @@
-use std::fmt;
+use std::{collections::HashSet, fmt};
 
 use solana_account::Account;
 use solana_account_decoder::UiAccount;
@@ -78,6 +78,11 @@ pub struct AccountSubscription {
 pub enum ChainPubsubActorMessage {
     AccountSubscribe {
         pubkey: Pubkey,
+        retries: Option<usize>,
+        response: oneshot::Sender<RemoteAccountProviderResult<()>>,
+    },
+    AccountSubscribeMultiple {
+        pubkeys: HashSet<Pubkey>,
         retries: Option<usize>,
         response: oneshot::Sender<RemoteAccountProviderResult<()>>,
     },

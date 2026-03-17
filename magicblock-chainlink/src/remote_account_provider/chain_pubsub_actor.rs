@@ -387,6 +387,18 @@ impl ChainPubsubActor {
                 .await;
                 let _ = response.send(result);
             }
+            ChainPubsubActorMessage::AccountSubscribeMultiple {
+                response,
+                ..
+            } => {
+                // Websockets don't support batch subscriptions (via a single call)
+                // thus we return an error here since the client should never call this
+                let _ = response.send(Err(
+                    RemoteAccountProviderError::UnsupportedActorMessage(
+                        "AccountSubscribeMultiple".to_string(),
+                    ),
+                ));
+            }
             ChainPubsubActorMessage::Shutdown { response } => {
                 Self::shutdown(
                     client_id,

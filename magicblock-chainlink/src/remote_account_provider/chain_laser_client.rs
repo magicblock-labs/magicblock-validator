@@ -93,6 +93,24 @@ impl ChainLaserClientImpl {
         client
     }
 
+    async fn subscribe_multiple(
+        &self,
+        pubkeys: HashSet<Pubkey>,
+        retries: Option<usize>,
+    ) -> RemoteAccountProviderResult<()> {
+        let (tx, rx) = oneshot::channel();
+        self.send_msg(
+            ChainPubsubActorMessage::AccountSubscribeMultiple {
+                pubkeys,
+                retries,
+                response: tx,
+            },
+        )
+        .await?;
+
+        rx.await?
+    }
+
     #[instrument(skip(self, msg), fields(client_id = %self.client_id))]
     async fn send_msg(
         &self,
@@ -219,11 +237,7 @@ impl ReconnectableClient for ChainLaserClientImpl {
         &self,
         pubkeys: HashSet<Pubkey>,
     ) -> RemoteAccountProviderResult<()> {
-        // NOTE: The laser implementation subscribes periodically to requested accounts
-        // thus we don't need to throttle the speed at which we resubscribe here.
-        for pubkey in pubkeys {
-            self.subscribe(pubkey, None).await?;
-        }
+        self.subscribe_multiple(pubkeys, None).await?;
         Ok(())
     }
 }
