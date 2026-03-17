@@ -5,6 +5,7 @@ use std::{
         Arc,
     },
     thread,
+    time::Duration,
 };
 
 pub use guinea;
@@ -42,6 +43,7 @@ use tempfile::TempDir;
 use tokio::sync::mpsc::Sender;
 use tracing::{error, instrument};
 
+pub const BLOCK_TIME: Duration = Duration::from_millis(50);
 /// A simulated validator backend for integration tests.
 ///
 /// This struct encapsulates all the core components of a validator, including
@@ -171,6 +173,7 @@ impl ExecutionTestEnv {
             environment,
             is_auto_airdrop_lamports_enabled: false,
             shutdown: Default::default(),
+            block_time: BLOCK_TIME,
             mode_rx,
             pause_permit: validator_channels.pause_permit,
         };

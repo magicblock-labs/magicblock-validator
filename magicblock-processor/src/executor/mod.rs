@@ -204,13 +204,15 @@ impl TransactionExecutor {
     }
 
     fn transition_to_slot(&mut self, slot: Slot) {
-        let Some(block) = self.block_history.get(&slot) else {
+        // transactions execute in the latest finalized block + 1
+        let prev_slot = slot.saturating_sub(1);
+        let Some(block) = self.block_history.get(&prev_slot) else {
             // should never happen in practice
             warn!(slot, "tried to transition to slot which wasn't registered");
             return;
         };
         self.environment.blockhash = block.blockhash;
-        self.processor.slot = block.slot;
+        self.processor.slot = slot;
         self.set_sysvars(block);
     }
 
