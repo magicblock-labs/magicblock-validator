@@ -14,6 +14,7 @@
   "bin": {
     "ephemeral-validator": "ephemeralValidator.js",
     "mb-test-validator": "mbTestValidator.js",
+    "query-filtering-service": "queryFilteringService.js",
     "rpc-router": "rpcRouter.js",
     "vrf-oracle": "vrfOracle.js"
   },
@@ -34,6 +35,10 @@
     "@magicblock-labs/ephemeral-validator-darwin-x64": "0.8.3",
     "@magicblock-labs/ephemeral-validator-linux-arm64": "0.8.3",
     "@magicblock-labs/ephemeral-validator-linux-x64": "0.8.3",
+    "@magicblock-labs/query-filtering-service-darwin-arm64": "0.1.0",
+    "@magicblock-labs/query-filtering-service-darwin-x64": "0.1.0",
+    "@magicblock-labs/query-filtering-service-linux-arm64": "0.1.0",
+    "@magicblock-labs/query-filtering-service-linux-x64": "0.1.0",
     "@magicblock-labs/vrf-oracle-linux-x64": "0.2.3",
     "@magicblock-labs/vrf-oracle-linux-arm64": "0.2.3",
     "@magicblock-labs/vrf-oracle-darwin-x64": "0.2.3",

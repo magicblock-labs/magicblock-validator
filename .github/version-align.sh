@@ -31,6 +31,7 @@ echo "Checking latest NPM versions for vrf-oracle and rpc-router..."
 # Get latest versions from NPM
 vrf_latest=$(npm view @magicblock-labs/vrf-oracle-linux-x64 version 2>/dev/null || echo "")
 router_latest=$(npm view @magicblock-labs/rpc-router-linux-x64 version 2>/dev/null || echo "")
+query_filtering_service_latest=$(npm view @magicblock-labs/query-filtering-service-linux-x64 version 2>/dev/null || echo "")
 
 if [ -n "$vrf_latest" ]; then
     echo "Updating vrf-oracle dependencies to version: $vrf_latest"
@@ -44,6 +45,13 @@ if [ -n "$router_latest" ]; then
     jq --arg version "$router_latest" '.optionalDependencies |= with_entries(if (.key | contains("rpc-router")) then .value = $version else . end)' packages/npm-package/package.json > temp.json && mv temp.json packages/npm-package/package.json
 else
     echo "Warning: Could not fetch latest rpc-router version from NPM"
+fi
+
+if [ -n "$private_validator_latest" ]; then
+    echo "Updating query-filtering-service dependencies to version: $query_filtering_service_latest"
+    jq --arg version "$query_filtering_service_latest" '.optionalDependencies |= with_entries(if (.key | contains("query-filtering-service")) then .value = $version else . end)' packages/npm-package/package.json > temp.json && mv temp.json packages/npm-package/package.json
+else
+    echo "Warning: Could not fetch latest query-filtering-service version from NPM"
 fi
 
 # Check if the any changes have been made to the specified files, if running with --check
