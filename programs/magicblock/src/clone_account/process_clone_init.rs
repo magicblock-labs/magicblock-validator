@@ -27,6 +27,7 @@ use crate::errors::MagicBlockProgramError;
 /// 4. Registers pubkey in `PENDING_CLONES`
 ///
 /// Must be followed by `CloneAccountContinue` instructions until `is_last=true`.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn process_clone_account_init(
     signers: &HashSet<Pubkey>,
     invoke_context: &InvokeContext,
@@ -35,6 +36,7 @@ pub(crate) fn process_clone_account_init(
     total_data_len: u32,
     initial_data: Vec<u8>,
     fields: AccountCloneFields,
+    actions_tx_sig: Option<String>,
 ) -> Result<(), InstructionError> {
     validate_authority(signers, invoke_context)?;
 
@@ -88,6 +90,13 @@ pub(crate) fn process_clone_account_init(
         total_data_len,
         initial_data.len()
     );
+    if let Some(actions_tx_sig) = actions_tx_sig {
+        ic_msg!(
+            invoke_context,
+            "CloneAccountInit: actions_tx_sig={}",
+            actions_tx_sig
+        );
+    }
 
     let current_lamports = account.borrow().lamports();
     let lamports_delta = fields.lamports as i64 - current_lamports as i64;
