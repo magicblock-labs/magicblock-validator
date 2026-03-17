@@ -1758,7 +1758,7 @@ dependencies = [
 [[package]]
 name = "ephemeral-rollups-sdk"
 version = "0.8.8"
-source = "git+https://github.com/magicblock-labs/ephemeral-rollups-sdk.git?rev=dbe9427e#dbe9427e434fd760b9d52fd5397252ccdf162d4d"
+source = "git+https://github.com/magicblock-labs/ephemeral-rollups-sdk.git?rev=5106a0c1#5106a0c17c8855ffe1da7ca42bccf2f25b3dc0be"
 dependencies = [
  "base64ct",
  "bincode",
@@ -1785,7 +1785,7 @@ dependencies = [
 [[package]]
 name = "ephemeral-rollups-sdk-attribute-action"
 version = "0.8.8"
-source = "git+https://github.com/magicblock-labs/ephemeral-rollups-sdk.git?rev=dbe9427e#dbe9427e434fd760b9d52fd5397252ccdf162d4d"
+source = "git+https://github.com/magicblock-labs/ephemeral-rollups-sdk.git?rev=5106a0c1#5106a0c17c8855ffe1da7ca42bccf2f25b3dc0be"
 dependencies = [
  "quote",
  "syn 1.0.109",
@@ -1794,7 +1794,7 @@ dependencies = [
 [[package]]
 name = "ephemeral-rollups-sdk-attribute-commit"
 version = "0.8.8"
-source = "git+https://github.com/magicblock-labs/ephemeral-rollups-sdk.git?rev=dbe9427e#dbe9427e434fd760b9d52fd5397252ccdf162d4d"
+source = "git+https://github.com/magicblock-labs/ephemeral-rollups-sdk.git?rev=5106a0c1#5106a0c17c8855ffe1da7ca42bccf2f25b3dc0be"
 dependencies = [
  "quote",
  "syn 1.0.109",
@@ -1803,7 +1803,7 @@ dependencies = [
 [[package]]
 name = "ephemeral-rollups-sdk-attribute-delegate"
 version = "0.8.8"
-source = "git+https://github.com/magicblock-labs/ephemeral-rollups-sdk.git?rev=dbe9427e#dbe9427e434fd760b9d52fd5397252ccdf162d4d"
+source = "git+https://github.com/magicblock-labs/ephemeral-rollups-sdk.git?rev=5106a0c1#5106a0c17c8855ffe1da7ca42bccf2f25b3dc0be"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1813,7 +1813,7 @@ dependencies = [
 [[package]]
 name = "ephemeral-rollups-sdk-attribute-ephemeral"
 version = "0.8.8"
-source = "git+https://github.com/magicblock-labs/ephemeral-rollups-sdk.git?rev=dbe9427e#dbe9427e434fd760b9d52fd5397252ccdf162d4d"
+source = "git+https://github.com/magicblock-labs/ephemeral-rollups-sdk.git?rev=5106a0c1#5106a0c17c8855ffe1da7ca42bccf2f25b3dc0be"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1823,7 +1823,7 @@ dependencies = [
 [[package]]
 name = "ephemeral-rollups-sdk-attribute-ephemeral-accounts"
 version = "0.8.8"
-source = "git+https://github.com/magicblock-labs/ephemeral-rollups-sdk.git?rev=dbe9427e#dbe9427e434fd760b9d52fd5397252ccdf162d4d"
+source = "git+https://github.com/magicblock-labs/ephemeral-rollups-sdk.git?rev=5106a0c1#5106a0c17c8855ffe1da7ca42bccf2f25b3dc0be"
 dependencies = [
  "proc-macro2",
  "quote",
