@@ -832,6 +832,7 @@ mod tests {
                             None,
                         ),
                     ],
+                    callbacks_report: vec![],
                 }
             } else {
                 IntentExecutionResult {
@@ -840,6 +841,7 @@ mod tests {
                         finalize_signature: Signature::default(),
                     }),
                     patched_errors: vec![],
+                    callbacks_report: vec![],
                 }
             };
 

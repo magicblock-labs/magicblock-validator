@@ -13,8 +13,8 @@ use crate::{
     },
     magic_sys::fetch_current_commit_nonces,
     schedule_transactions::{
-        check_magic_context_id, get_clock,
-        get_parent_program_id, MAGIC_CONTEXT_IDX, PAYER_IDX,
+        check_commit_limits, check_magic_context_id, get_clock,
+        get_parent_program_id, try_get_fee_vault, MAGIC_CONTEXT_IDX, PAYER_IDX,
     },
     utils::{
         account_actions::mark_account_as_undelegated,
@@ -25,7 +25,6 @@ use crate::{
     },
     MagicContext,
 };
-use crate::schedule_transactions::{check_commit_limits, try_get_fee_vault};
 
 pub(crate) fn process_schedule_intent_bundle(
     signers: HashSet<Pubkey>,

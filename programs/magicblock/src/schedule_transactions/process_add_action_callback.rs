@@ -11,7 +11,7 @@ use solana_pubkey::Pubkey;
 use crate::{
     schedule_transactions::{
         check_magic_context_id, get_clock, get_parent_program_id,
-        MAGIC_CONTEXT_IDX, PAYER_IDX,
+        try_get_fee_vault, MAGIC_CONTEXT_IDX, PAYER_IDX,
     },
     utils::{
         account_actions::charge_delegated_payer,
@@ -21,6 +21,7 @@ use crate::{
     },
     MagicContext,
 };
+
 const CALLBACK_FEE_LAMPORTS: u64 = 5_000;
 
 pub(crate) fn process_add_action_callback(
@@ -28,6 +29,9 @@ pub(crate) fn process_add_action_callback(
     invoke_context: &mut InvokeContext,
     args: AddActionCallbackArgs,
 ) -> Result<(), InstructionError> {
+    // This function requires vault to be present
+    const MAGIC_FEE_VAULT_IDX: u16 = MAGIC_CONTEXT_IDX + 1;
+
     check_magic_context_id(invoke_context, MAGIC_CONTEXT_IDX)?;
 
     let transaction_context = &invoke_context.transaction_context.clone();
@@ -60,7 +64,21 @@ pub(crate) fn process_add_action_callback(
         transaction_context,
         MAGIC_CONTEXT_IDX,
     )?;
-    // charge_delegated_payer(payer_acc, context_acc, CALLBACK_FEE_LAMPORTS)?;
+    let magic_fee_vault = try_get_fee_vault(
+        transaction_context,
+        invoke_context,
+        PAYER_IDX,
+        MAGIC_FEE_VAULT_IDX
+    )?.ok_or(InstructionError::MissingAccount)
+    .inspect_err(|_| {
+        ic_msg!(
+            invoke_context,
+            "AddActionCallback ERR: magic fee vault account required to be passed"
+        );
+    })?;
+
+    // Charge User for callback
+    charge_delegated_payer(payer_acc, magic_fee_vault, CALLBACK_FEE_LAMPORTS)?;
 
     let context_data = &mut context_acc.borrow_mut();
     let mut context =

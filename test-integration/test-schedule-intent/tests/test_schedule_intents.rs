@@ -814,6 +814,7 @@ fn schedule_transfer_intent(
     let ix = create_transfer_intent_ix(
         payer.pubkey(),
         destination,
+        ctx.ephem_validator_identity.unwrap(),
         amount,
         fail,
         100_000,

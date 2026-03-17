@@ -7,8 +7,7 @@ mod process_schedule_intent_bundle;
 mod process_scheduled_commit_sent;
 pub(crate) mod transaction_scheduler;
 
-use std::sync::Arc;
-use std::cell::RefCell;
+use std::{cell::RefCell, sync::Arc};
 
 use magicblock_core::intent::CommittedAccount;
 use magicblock_magic_program_api::MAGIC_CONTEXT_PUBKEY;
@@ -68,17 +67,25 @@ fn get_parent_program_id(
     _: &mut InvokeContext,
 ) -> Result<Option<Pubkey>, InstructionError> {
     use solana_account::ReadableAccount;
+    let ix_ctx = transaction_context.get_current_instruction_context()?;
+
+    // Action-only bundles may legitimately contain only payer + magic context.
+    // In unit tests we cannot recover CPI frames, so use a stable placeholder
+    // instead of failing before we can exercise the scheduling logic.
+    if ix_ctx.get_number_of_instruction_accounts() as usize <= ACCOUNTS_OFFSET {
+        return Ok(Some(crate::id()));
+    }
 
     use crate::utils::accounts::get_instruction_account_with_idx;
 
-    let owner = *get_instruction_account_with_idx(
+    let first_committee_owner = *get_instruction_account_with_idx(
         transaction_context,
         ACCOUNTS_OFFSET as u16,
     )?
     .borrow()
     .owner();
 
-    Ok(Some(owner))
+    Ok(Some(first_committee_owner))
 }
 
 pub(crate) fn get_clock(

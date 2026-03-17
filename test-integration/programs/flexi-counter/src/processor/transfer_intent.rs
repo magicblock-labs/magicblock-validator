@@ -7,12 +7,8 @@ use ephemeral_rollups_sdk::{
     ActionArgs, ShortAccountMeta,
 };
 use solana_program::{
-    account_info::{next_account_info, AccountInfo},
-    entrypoint::ProgramResult,
-    msg,
-    program::invoke,
-    program_error::ProgramError,
-    system_instruction,
+    account_info::AccountInfo, entrypoint::ProgramResult, msg, program::invoke,
+    program_error::ProgramError, system_instruction,
 };
 
 use crate::{
@@ -41,7 +37,8 @@ use crate::{
 /// 2. [write]         destination (receives lamports on success)
 /// 3. []              system program
 /// 4. [write]         magic context
-/// 5. []              magic program
+/// 5. []              magic
+/// 6. [write]         magic fee vault
 pub fn process_create_transfer_intent(
     accounts: &[AccountInfo],
     amount: u64,
@@ -50,21 +47,15 @@ pub fn process_create_transfer_intent(
 ) -> ProgramResult {
     msg!("CreateTransferIntent: amount={}, fail={}", amount, fail);
 
-    if accounts.len() != 6 {
+    let [payer, counter_pda, destination, system_program, magic_context, magic_program, magic_fee_vault] =
+        accounts
+    else {
         msg!(
-            "CreateTransferIntent: expected 6 accounts, got {}",
+            "CreateTransferIntent: expected 7 accounts, got {}",
             accounts.len()
         );
         return Err(ProgramError::NotEnoughAccountKeys);
-    }
-
-    let account_info_iter = &mut accounts.iter();
-    let payer = next_account_info(account_info_iter)?;
-    let counter_pda = next_account_info(account_info_iter)?;
-    let destination = next_account_info(account_info_iter)?;
-    let system_program = next_account_info(account_info_iter)?;
-    let magic_context = next_account_info(account_info_iter)?;
-    let magic_program = next_account_info(account_info_iter)?;
+    };
 
     // Pre-payment: move `amount` lamports from payer to counter PDA on ER.
     // These are committed to Base and serve as the refund reserve on failure.
@@ -120,6 +111,7 @@ pub fn process_create_transfer_intent(
         magic_context.clone(),
         magic_program.clone(),
     )
+    .magic_fee_vault(magic_fee_vault.clone())
     .commit(&[counter_pda.clone()])
     .add_post_commit_action_with_callback(call_handler, callback)
     .build_and_invoke()

@@ -1095,6 +1095,7 @@ mod tests {
                 data: vec![],
             },
             account_metas_per_program: vec![],
+            callback: None,
         }
     }
 

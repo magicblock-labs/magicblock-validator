@@ -2,6 +2,7 @@ use borsh::{BorshDeserialize, BorshSerialize};
 use ephemeral_rollups_sdk::{
     consts::{MAGIC_CONTEXT_ID, MAGIC_PROGRAM_ID},
     delegate_args::{DelegateAccountMetas, DelegateAccounts},
+    dlp_api::dlp,
 };
 use solana_program::{
     instruction::{AccountMeta, Instruction},
@@ -235,6 +236,7 @@ pub enum FlexiCounterInstruction {
     /// 3. []              system program
     /// 4. [write]         magic context
     /// 5. []              magic program
+    /// 6. [write]         magic fee vault
     CreateTransferIntent {
         amount: u64,
         fail: bool,
@@ -546,6 +548,7 @@ pub fn create_cancel_task_ix(payer: Pubkey, task_id: i64) -> Instruction {
 pub fn create_transfer_intent_ix(
     payer: Pubkey,
     destination: Pubkey,
+    validator: Pubkey,
     amount: u64,
     fail: bool,
     compute_units: u32,
@@ -559,6 +562,10 @@ pub fn create_transfer_intent_ix(
         AccountMeta::new_readonly(system_program::id(), false),
         AccountMeta::new(MAGIC_CONTEXT_ID, false),
         AccountMeta::new_readonly(MAGIC_PROGRAM_ID, false),
+        AccountMeta::new(
+            dlp::pda::magic_fee_vault_pda_from_validator(&validator),
+            false,
+        ),
     ];
     Instruction::new_with_borsh(
         *program_id,
