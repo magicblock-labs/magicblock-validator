@@ -1,4 +1,7 @@
-use dlp_api::dlp::args::{DelegateArgs, DelegateEphemeralBalanceArgs};
+use dlp_api::{
+    dlp,
+    dlp::args::{DelegateArgs, DelegateEphemeralBalanceArgs},
+};
 use ephemeral_rollups_sdk::delegate_args::{
     DelegateAccountMetas, DelegateAccounts,
 };

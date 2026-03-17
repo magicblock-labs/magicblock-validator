@@ -8,6 +8,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use dlp_api::dlp;
 use magicblock_account_cloner::{
     map_committor_request_result, ChainlinkCloner,
 };
@@ -696,7 +697,7 @@ impl MagicValidator {
 
         if !vault_exists {
             info!(%validator_pubkey, "Magic fee vault absent, initializing");
-            let ix = dlp::instruction_builder::init_magic_fee_vault(
+            let ix = dlp_api::instruction_builder::init_magic_fee_vault(
                 validator_pubkey,
                 validator_pubkey,
             );
@@ -726,7 +727,7 @@ impl MagicValidator {
 
         if !delegation_record_exists {
             info!(%validator_pubkey, "Magic fee vault not delegated, delegating");
-            let ix = dlp::instruction_builder::delegate_magic_fee_vault(
+            let ix = dlp_api::instruction_builder::delegate_magic_fee_vault(
                 validator_pubkey,
                 validator_pubkey,
             );

@@ -1,5 +1,6 @@
 use std::sync::OnceLock;
 
+use dlp_api::dlp;
 use integration_test_tools::run_test;
 use magicblock_program::magic_sys::{COMMIT_LIMIT, COMMIT_LIMIT_ERR};
 use program_schedulecommit::{
@@ -29,7 +30,6 @@ use utils::{
     assert_is_instruction_error, extract_transaction_error,
     get_context_with_delegated_committees,
 };
-
 mod utils;
 
 // ---------------------------------------------------------------------------

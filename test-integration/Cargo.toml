@@ -36,7 +36,7 @@ chrono = "0.4"
 cleanass = "0.0.1"
 color-backtrace = { version = "0.7" }
 ctrlc = "3.4.7"
-ephemeral-rollups-sdk = { git = "https://github.com/magicblock-labs/ephemeral-rollups-sdk.git", rev = "1cc725abd2", default-features = false, features = [
+ephemeral-rollups-sdk = { git = "https://github.com/magicblock-labs/ephemeral-rollups-sdk.git", rev = "b78caec", default-features = false, features = [
   "modular-sdk",
 ] }
 futures = "0.3.31"
@@ -60,7 +60,7 @@ magic-domain-program = { git = "https://github.com/magicblock-labs/magic-domain-
   "modular-sdk",
 ] }
 magicblock_magic_program_api = { package = "magicblock-magic-program-api", path = "../magicblock-magic-program-api" }
-dlp-api = { git = "https://github.com/magicblock-labs/delegation-program.git", rev = "abf340536e88740c290b2b3af4e3d1ff38240f63", package = "magicblock-delegation-program-api", default-features = false }
+dlp-api = { git = "https://github.com/magicblock-labs/delegation-program.git", rev = "293e9222", package = "magicblock-delegation-program-api", default-features = false }
 magicblock-program = { path = "../programs/magicblock" }
 magicblock-rpc-client = { path = "../magicblock-rpc-client" }
 magicblock-table-mania = { path = "../magicblock-table-mania" }
