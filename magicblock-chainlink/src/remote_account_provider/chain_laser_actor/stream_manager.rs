@@ -181,6 +181,12 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
     /// a fresh one is created. If unoptimized old handles exceed
     /// [StreamManagerConfig::max_old_unoptimized], optimization
     /// is triggered.
+    ///
+    /// Large batches that exceed `max_subs_in_old_optimized` are
+    /// automatically chunked so that no single stream carries
+    /// more accounts than optimization would allow. Each chunk
+    /// goes through the normal subscribe → promote → optimize
+    /// cycle independently.
     pub async fn account_subscribe(
         &mut self,
         pubkeys: &[Pubkey],
@@ -201,13 +207,41 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
             return Ok(());
         }
 
+        // Chunk large batches at the optimized stream limit so
+        // that no single current-new stream exceeds what a single
+        // optimized stream would hold. Each chunk goes through
+        // the normal subscribe → promote → optimize cycle.
+        let chunk_size = self.config.max_subs_in_old_optimized;
+        if new_pks.len() > chunk_size {
+            for chunk in new_pks.chunks(chunk_size) {
+                self.account_subscribe_batch(
+                    chunk, commitment, from_slot,
+                )
+                .await?;
+            }
+            return Ok(());
+        }
+
+        self.account_subscribe_batch(&new_pks, commitment, from_slot)
+            .await
+    }
+
+    /// Subscribe a single batch of new pubkeys (already filtered
+    /// for duplicates). The batch must not exceed
+    /// `max_subs_in_old_optimized`.
+    async fn account_subscribe_batch(
+        &mut self,
+        new_pks: &[Pubkey],
+        commitment: &CommitmentLevel,
+        from_slot: Option<u64>,
+    ) -> RemoteAccountProviderResult<()> {
         // Update the current-new stream with the full
         // current_new_subs filter (either create new if doesn't
         // exist, or update existing via write).
         // We tentatively add new_pks to current_new_subs so the
         // request includes them, but only persist into subscriptions
         // after the stream update succeeds.
-        for pk in &new_pks {
+        for pk in new_pks {
             self.current_new_subs.insert(*pk);
         }
 
@@ -228,7 +262,7 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
 
         // Revert tentative current_new_subs additions if the stream update failed
         if result.is_err() {
-            for pk in &new_pks {
+            for pk in new_pks {
                 self.current_new_subs.remove(pk);
             }
             result?;
@@ -237,7 +271,7 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
         // Update active subscriptions with new pubkeys only after stream update
         {
             let mut subs = self.subscriptions.write();
-            for pk in &new_pks {
+            for pk in new_pks {
                 subs.insert(*pk);
             }
         }
@@ -1742,6 +1776,82 @@ mod tests {
         assert_eq!(source, StreamUpdateSource::Program);
         assert!(update.is_err());
     }
+
+    // ---------------------------------------------------------
+    // 13. Large Batch Chunking
+    // ---------------------------------------------------------
+
+    #[tokio::test]
+    async fn test_large_batch_chunked_at_max_subs_in_old_optimized() {
+        // max_subs_in_old_optimized = 10, so a batch of 25 is
+        // split into [10, 10, 5].
+        let (mut mgr, _factory) = create_manager();
+        let pks = make_pubkeys(25);
+
+        mgr.account_subscribe(&pks, &COMMITMENT, None)
+            .await
+            .unwrap();
+
+        // All 25 pubkeys are subscribed.
+        assert_subscriptions_eq(&mgr, &pks);
+
+        // The two chunks of 10 each exceed max_subs_in_new (5)
+        // → promoted. The last chunk of 5 stays as current-new
+        // (5 is not > 5).
+        // 2 promotions, max_old_unoptimized = 3, so
+        // optimization is NOT triggered (2 is not > 3).
+        assert_eq!(mgr.unoptimized_old_stream_count(), 2);
+        assert_eq!(mgr.optimized_old_stream_count(), 0);
+        assert_eq!(mgr.current_new_sub_count(), 5);
+    }
+
+    #[tokio::test]
+    async fn test_large_batch_triggers_optimization() {
+        // max_subs_in_old_optimized = 10, max_old_unoptimized = 3.
+        // A batch of 40 → chunks [10, 10, 10, 10].
+        // Each chunk of 10 > max_subs_in_new (5) → promoted.
+        // After 4th promotion (4 > 3) → optimization fires.
+        let (mut mgr, _factory) = create_manager();
+        let pks = make_pubkeys(40);
+
+        mgr.account_subscribe(&pks, &COMMITMENT, None)
+            .await
+            .unwrap();
+
+        assert_subscriptions_eq(&mgr, &pks);
+
+        // After optimization: unoptimized cleared, optimized
+        // rebuilt from all subscriptions.
+        assert_eq!(mgr.unoptimized_old_stream_count(), 0);
+        let total_subs = mgr.subscriptions().read().len();
+        let expected_optimized = total_subs.div_ceil(10);
+        assert_eq!(
+            mgr.optimized_old_stream_count(),
+            expected_optimized,
+        );
+    }
+
+    #[tokio::test]
+    async fn test_batch_within_optimized_limit_not_chunked() {
+        // A batch of 10 (== max_subs_in_old_optimized) should
+        // NOT be chunked — it goes into a single current-new
+        // stream and gets promoted normally.
+        let (mut mgr, _factory) = create_manager();
+        let pks = make_pubkeys(10);
+
+        mgr.account_subscribe(&pks, &COMMITMENT, None)
+            .await
+            .unwrap();
+
+        assert_subscriptions_eq(&mgr, &pks);
+        // 10 > 5 (max_subs_in_new) → promoted to 1 unoptimized.
+        assert_eq!(mgr.unoptimized_old_stream_count(), 1);
+        assert_eq!(mgr.current_new_sub_count(), 0);
+    }
+
+    // ---------------------------------------------------------
+    // 14. Stream Updates
+    // ---------------------------------------------------------
 
     #[tokio::test]
     async fn test_stream_closure_propagates_as_stream_end() {
