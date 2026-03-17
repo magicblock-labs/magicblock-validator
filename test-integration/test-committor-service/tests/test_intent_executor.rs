@@ -10,7 +10,9 @@ use std::{
 };
 
 use borsh::to_vec;
-use dlp::{args::CommitStateArgs, pda::ephemeral_balance_pda_from_payer};
+use dlp_api::dlp::{
+    args::CommitStateArgs, pda::ephemeral_balance_pda_from_payer,
+};
 use futures::future::join_all;
 use magicblock_committor_program::pdas;
 use magicblock_committor_service::{
@@ -171,7 +173,7 @@ async fn test_commit_id_error_parsing() {
             TransactionError::InstructionError(
                 _,
                 InstructionError::Custom(
-                    0xc, // dlp::DlpError::NonceOutOfOrder: commit id/nonce is out of order
+                    0xc, // dlp_api::dlp::DlpError::NonceOutOfOrder: commit id/nonce is out of order
                 )
             ),
             _
@@ -955,7 +957,7 @@ async fn test_commit_unfinalized_account_recovery() {
     // This simulates finalization stage failure
     {
         let commit_allow_undelegation_ix =
-            dlp::instruction_builder::commit_state(
+            dlp_api::instruction_builder::commit_state(
                 fixture.authority.pubkey(),
                 pda,
                 account.owner,
@@ -1037,7 +1039,7 @@ async fn test_commit_unfinalized_account_recovery_two_stage() {
     // This simulates finalization stage failure
     {
         let commit_allow_undelegation_ix =
-            dlp::instruction_builder::commit_state(
+            dlp_api::instruction_builder::commit_state(
                 fixture.authority.pubkey(),
                 counters[0].1,
                 counters[0].2.owner,
@@ -1169,7 +1171,7 @@ async fn setup_payer_with_keypair(
 
     sleep(Duration::from_secs(1));
     // Create actor escrow
-    let ix = dlp::instruction_builder::top_up_ephemeral_balance(
+    let ix = dlp_api::instruction_builder::top_up_ephemeral_balance(
         payer.pubkey(),
         payer.pubkey(),
         Some(LAMPORTS_PER_SOL / 2),

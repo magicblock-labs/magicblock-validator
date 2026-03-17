@@ -55,8 +55,7 @@ pub struct TransactionSchedulerState {
     // === Configuration ===
     pub is_auto_airdrop_lamports_enabled: bool,
     pub shutdown: CancellationToken,
-    /// Channel for switching scheduler execution mode at runtime.
-    /// Send `SchedulerMode::Primary` after ledger replay to begin processing client transactions.
+    /// Receives mode transition commands (Primary or Replica) at runtime.
     pub mode_rx: Receiver<SchedulerMode>,
 }
 

@@ -75,6 +75,7 @@ fn test_rejects_wrong_signer_pubkey() {
             pubkey,
             data: vec![],
             fields: clone_fields(200, 0),
+            actions_tx_sig: None,
         },
         vec![
             AccountMeta::new(wrong_signer, true), // wrong signer!
@@ -108,6 +109,7 @@ fn test_clone_account_basic() {
         pubkey,
         vec![1, 2, 3],
         fields,
+        None,
     );
 
     let mut result = process_instruction(
@@ -138,6 +140,7 @@ fn test_clone_account_rejects_stale_slot() {
         pubkey,
         vec![],
         clone_fields(200, 50), // slot 50 < current 100
+        None,
     );
 
     process_instruction(
@@ -162,6 +165,7 @@ fn test_clone_account_rejects_delegated_account() {
         pubkey,
         vec![],
         clone_fields(200, 0),
+        None,
     );
 
     process_instruction(
@@ -186,6 +190,7 @@ fn test_clone_account_rejects_ephemeral_account() {
         pubkey,
         vec![],
         clone_fields(200, 0),
+        None,
     );
 
     process_instruction(
@@ -206,6 +211,7 @@ fn test_clone_account_adjusts_authority_lamports() {
         pubkey,
         vec![],
         clone_fields(300, 0),
+        None,
     );
     let mut result = process_instruction(
         &ix.data,
@@ -233,6 +239,7 @@ fn test_clone_init_allocates_buffer() {
         10,
         vec![1, 2, 3, 4],
         clone_fields(1000, 50),
+        None,
     );
     let mut result = process_instruction(
         &ix.data,
@@ -324,6 +331,7 @@ fn test_clone_init_rejects_double_init() {
         10,
         vec![],
         clone_fields(100, 0),
+        None,
     );
     process_instruction(
         &ix.data,
@@ -344,6 +352,7 @@ fn test_clone_init_rejects_oversized_initial_data() {
         5,
         vec![1, 2, 3, 4, 5, 6],
         clone_fields(100, 0),
+        None,
     );
     process_instruction(
         &ix.data,

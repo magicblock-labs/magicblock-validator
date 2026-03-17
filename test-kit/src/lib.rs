@@ -69,7 +69,7 @@ pub struct ExecutionTestEnv {
     pub blocks_tx: BlockUpdateTx,
     /// Transaction execution scheduler/backend for deferred launch
     pub scheduler: Option<TransactionScheduler>,
-    /// Channel sender for switching scheduler mode.
+    /// Sender for transitioning from StartingUp to Primary/Replica mode
     mode_tx: Sender<SchedulerMode>,
 }
 
@@ -140,9 +140,6 @@ impl ExecutionTestEnv {
         let payers = (0..executors).map(|_| Keypair::new()).collect();
 
         let (mode_tx, mode_rx) = tokio::sync::mpsc::channel(1);
-        if primary_mode {
-            let _ = mode_tx.try_send(SchedulerMode::Primary);
-        }
 
         let mut this = Self {
             payer_index: AtomicUsize::new(0),
@@ -154,7 +151,7 @@ impl ExecutionTestEnv {
             dispatch,
             blocks_tx: validator_channels.block_update,
             scheduler: None,
-            mode_tx: mode_tx.clone(),
+            mode_tx,
         };
         this.advance_slot(); // Move to slot 1 to ensure a non-genesis state.
 
@@ -178,6 +175,13 @@ impl ExecutionTestEnv {
             mode_rx,
         };
 
+        // Pre-send the target mode so the scheduler picks it up once running.
+        if primary_mode {
+            this.mode_tx
+                .try_send(SchedulerMode::Primary)
+                .expect("failed to pre-send target mode to mode_tx");
+        }
+
         // Start/Defer the transaction processing backend.
         let scheduler = TransactionScheduler::new(executors, scheduler_state);
         if defer_startup {
@@ -198,12 +202,14 @@ impl ExecutionTestEnv {
         }
     }
 
-    /// Switches the scheduler to Primary mode.
+    /// Switches the scheduler from StartingUp to Primary mode.
     ///
     /// After this call, the scheduler will accept execution transactions
     /// in addition to replay transactions.
     pub fn switch_to_primary_mode(&self) {
-        let _ = self.mode_tx.try_send(SchedulerMode::Primary);
+        self.mode_tx
+            .try_send(SchedulerMode::Primary)
+            .expect("failed to send target mode to mode_tx");
     }
 
     /// Creates a new account with the specified properties.

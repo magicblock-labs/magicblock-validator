@@ -15,6 +15,7 @@ use solana_hash::Hash;
 use solana_instruction::{AccountMeta, Instruction};
 use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
+use solana_signature::Signature;
 use solana_signer::Signer;
 use solana_transaction::Transaction;
 
@@ -317,6 +318,7 @@ impl InstructionUtils {
         pubkey: Pubkey,
         data: Vec<u8>,
         fields: magicblock_magic_program_api::instruction::AccountCloneFields,
+        actions_tx_sig: Option<Signature>,
     ) -> Instruction {
         Instruction::new_with_bincode(
             crate::id(),
@@ -324,6 +326,7 @@ impl InstructionUtils {
                 pubkey,
                 data,
                 fields,
+                actions_tx_sig: actions_tx_sig.map(|sig| sig.to_string()),
             },
             vec![
                 AccountMeta::new(validator_authority_id(), true),
@@ -337,6 +340,7 @@ impl InstructionUtils {
         total_data_len: u32,
         initial_data: Vec<u8>,
         fields: magicblock_magic_program_api::instruction::AccountCloneFields,
+        actions_tx_sig: Option<Signature>,
     ) -> Instruction {
         Instruction::new_with_bincode(
             crate::id(),
@@ -345,6 +349,7 @@ impl InstructionUtils {
                 total_data_len,
                 initial_data,
                 fields,
+                actions_tx_sig: actions_tx_sig.map(|sig| sig.to_string()),
             },
             vec![
                 AccountMeta::new(validator_authority_id(), true),

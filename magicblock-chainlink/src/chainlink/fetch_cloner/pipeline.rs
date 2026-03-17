@@ -1,6 +1,6 @@
 use std::{collections::HashSet, sync::atomic::Ordering};
 
-use dlp::pda::delegation_record_pda_from_delegated_account;
+use dlp_api::dlp::pda::delegation_record_pda_from_delegated_account;
 use magicblock_accounts_db::traits::AccountsBank;
 use magicblock_core::token_programs::is_ata;
 use magicblock_metrics::metrics::AccountFetchOrigin;
@@ -19,7 +19,9 @@ use super::{
 };
 use crate::{
     chainlink::errors::{ChainlinkError, ChainlinkResult},
-    cloner::{errors::ClonerResult, AccountCloneRequest, Cloner},
+    cloner::{
+        errors::ClonerResult, AccountCloneRequest, Cloner, DelegationActions,
+    },
     remote_account_provider::{
         program_account::{
             get_loaderv3_get_program_data_address, ProgramAccountResolver,
@@ -57,6 +59,21 @@ where
         .collect();
 
     ExistingSubs { existing_subs }
+}
+
+pub(crate) fn collect_delegation_action_dependencies(
+    accounts_to_clone: &[AccountCloneRequest],
+) -> HashSet<Pubkey> {
+    let mut dependencies = HashSet::new();
+    for request in accounts_to_clone {
+        for instruction in request.delegation_actions.iter() {
+            dependencies.insert(instruction.program_id);
+            for account_meta in &instruction.accounts {
+                dependencies.insert(account_meta.pubkey);
+            }
+        }
+    }
+    dependencies
 }
 
 /// Classifies fetched remote accounts into categories
@@ -117,7 +134,7 @@ fn classify_single_account(
                 ResolvedAccount::Fresh(account_shared_data) => {
                     let slot = account_shared_data.remote_slot();
 
-                    if account_shared_data.owner().eq(&dlp::id()) {
+                    if account_shared_data.owner().eq(&dlp_api::dlp::id()) {
                         // Account owned by delegation program
                         owned_by_deleg.push((
                             pubkey,
@@ -143,6 +160,7 @@ fn classify_single_account(
                             pubkey,
                             account: account_shared_data,
                             commit_frequency_ms: None,
+                            delegation_actions: DelegationActions::default(),
                             delegated_to_other: None,
                         });
                     }
@@ -292,20 +310,17 @@ where
             record_subs.push(delegation_record_pubkey);
 
             // If the account is delegated we set the owner and delegation state
-            let (commit_frequency_ms, delegated_to_other) = if let Some(
-                delegation_record_data,
-            ) =
-                delegation_record
-            {
-                // NOTE: failing here is fine when resolving all accounts for a transaction
-                // since if something is off we better not run it anyways
-                // However we may consider a different behavior when user is getting
-                // multiple accounts.
-                let delegation_record =
-                    match FetchCloner::<T, U, V, C>::parse_delegation_record(
-                        delegation_record_data.data(),
-                        delegation_record_pubkey,
-                    ) {
+            let (commit_frequency_ms, delegated_to_other, delegation_actions) =
+                if let Some(delegation_record_data) = delegation_record {
+                    // NOTE: failing here is fine when resolving all accounts for a transaction
+                    // since if something is off we better not run it anyways
+                    // However we may consider a different behavior when user is getting
+                    // multiple accounts.
+                    let (delegation_record, delegation_actions) = match this
+                        .parse_delegation_record(
+                            delegation_record_data.data(),
+                            delegation_record_pubkey,
+                        ) {
                         Ok(x) => x,
                         Err(err) => {
                             // Cancel all new subs since we won't clone any accounts
@@ -325,31 +340,38 @@ where
                         }
                     };
 
-                trace!(pubkey = %pubkey, "Delegation record found");
+                    trace!(pubkey = %pubkey, "Delegation record found");
 
-                let delegated_to_other =
-                    this.get_delegated_to_other(&delegation_record);
+                    let delegated_to_other =
+                        this.get_delegated_to_other(&delegation_record);
 
-                let commit_freq = this.apply_delegation_record_to_account(
-                    pubkey,
-                    &mut account,
-                    &delegation_record,
-                );
+                    let commit_freq = this.apply_delegation_record_to_account(
+                        pubkey,
+                        &mut account,
+                        &delegation_record,
+                    );
 
-                // Collect unique owner programs to subscribe concurrently after the loop
-                if account.delegated() {
-                    owner_programs_to_subscribe.insert(delegation_record.owner);
-                }
+                    // Collect unique owner programs to subscribe concurrently after the loop
+                    if account.delegated() {
+                        owner_programs_to_subscribe
+                            .insert(delegation_record.owner);
+                    }
 
-                (commit_freq, delegated_to_other)
-            } else {
-                missing_delegation_record.push((pubkey, account.remote_slot()));
-                (None, None)
-            };
+                    (
+                        commit_freq,
+                        delegated_to_other,
+                        delegation_actions.unwrap_or_default(),
+                    )
+                } else {
+                    missing_delegation_record
+                        .push((pubkey, account.remote_slot()));
+                    (None, None, DelegationActions::default())
+                };
             accounts_to_clone.push(AccountCloneRequest {
                 pubkey,
                 account: account.into_account_shared_data(),
                 commit_frequency_ms,
+                delegation_actions,
                 delegated_to_other,
             });
         }
@@ -654,8 +676,32 @@ where
     V: AccountsBank,
     C: Cloner,
 {
-    let mut join_set = JoinSet::new();
-    for request in accounts_to_clone {
+    // 1) Clone programs first so post-delegation action instructions can load
+    // their program accounts when action txs are sent during account cloning.
+    let mut program_join_set = JoinSet::new();
+    for acc in loaded_programs {
+        if !this.is_program_allowed(&acc.program_id) {
+            debug!(program_id = %acc.program_id, "Skipping clone of program");
+            continue;
+        }
+        let cloner = this.cloner.clone();
+        program_join_set.spawn(async move { cloner.clone_program(acc).await });
+    }
+    program_join_set
+        .join_all()
+        .await
+        .into_iter()
+        .collect::<ClonerResult<Vec<_>>>()?;
+
+    // 2) Clone accounts without post-delegation actions first so all action
+    // dependencies are materialized in the bank before action tx execution.
+    let (accounts_with_actions, accounts_without_actions): (Vec<_>, Vec<_>) =
+        accounts_to_clone
+            .into_iter()
+            .partition(|request| !request.delegation_actions.is_empty());
+
+    let mut accounts_join_set = JoinSet::new();
+    for request in accounts_without_actions {
         if tracing::enabled!(tracing::Level::TRACE) {
             trace!(
                 pubkey = %request.pubkey,
@@ -666,19 +712,32 @@ where
         };
 
         let cloner = this.cloner.clone();
-        join_set.spawn(async move { cloner.clone_account(request).await });
+        accounts_join_set
+            .spawn(async move { cloner.clone_account(request).await });
     }
+    accounts_join_set
+        .join_all()
+        .await
+        .into_iter()
+        .collect::<ClonerResult<Vec<_>>>()?;
 
-    for acc in loaded_programs {
-        if !this.is_program_allowed(&acc.program_id) {
-            debug!(program_id = %acc.program_id, "Skipping clone of program");
-            continue;
-        }
+    // 3) Finally clone accounts that carry post-delegation actions.
+    let mut action_accounts_join_set = JoinSet::new();
+    for request in accounts_with_actions {
+        if tracing::enabled!(tracing::Level::TRACE) {
+            trace!(
+                pubkey = %request.pubkey,
+                slot = request.account.remote_slot(),
+                owner = %request.account.owner(),
+                "Cloning account with delegation actions"
+            );
+        };
+
         let cloner = this.cloner.clone();
-        join_set.spawn(async move { cloner.clone_program(acc).await });
+        action_accounts_join_set
+            .spawn(async move { cloner.clone_account(request).await });
     }
-
-    join_set
+    action_accounts_join_set
         .join_all()
         .await
         .into_iter()

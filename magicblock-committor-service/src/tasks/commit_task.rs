@@ -1,8 +1,6 @@
-use dlp::{
+use dlp_api::dlp::{
     args::{CommitDiffArgs, CommitStateArgs, CommitStateFromBufferArgs},
-    compute_diff,
-    instruction_builder::{commit_diff_size_budget, commit_size_budget},
-    AccountSizeClass,
+    compute_diff, AccountSizeClass,
 };
 use magicblock_committor_program::Chunks;
 use magicblock_core::intent::CommittedAccount;
@@ -65,7 +63,7 @@ impl CommitTask {
             data: self.committed_account.account.data.clone(),
             allow_undelegation: self.allow_undelegation,
         };
-        dlp::instruction_builder::commit_state(
+        dlp_api::instruction_builder::commit_state(
             *validator,
             self.committed_account.pubkey,
             self.committed_account.account.owner,
@@ -81,7 +79,7 @@ impl CommitTask {
                 &self.committed_account.pubkey,
                 &self.commit_id.to_le_bytes(),
             );
-        dlp::instruction_builder::commit_state_from_buffer(
+        dlp_api::instruction_builder::commit_state_from_buffer(
             *validator,
             self.committed_account.pubkey,
             self.committed_account.account.owner,
@@ -110,7 +108,7 @@ impl CommitTask {
             .to_vec(),
             allow_undelegation: self.allow_undelegation,
         };
-        dlp::instruction_builder::commit_diff(
+        dlp_api::instruction_builder::commit_diff(
             *validator,
             self.committed_account.pubkey,
             self.committed_account.account.owner,
@@ -126,7 +124,7 @@ impl CommitTask {
                 &self.committed_account.pubkey,
                 &self.commit_id.to_le_bytes(),
             );
-        dlp::instruction_builder::commit_diff_from_buffer(
+        dlp_api::instruction_builder::commit_diff_from_buffer(
             *validator,
             self.committed_account.pubkey,
             self.committed_account.account.owner,
@@ -231,7 +229,7 @@ impl CommitTask {
 
 impl BaseTask for CommitTask {
     fn program_id(&self) -> Pubkey {
-        dlp::id()
+        dlp_api::dlp::id()
     }
 
     fn instruction(&self, validator: &Pubkey) -> Instruction {
@@ -283,18 +281,24 @@ impl BaseTask for CommitTask {
     fn accounts_size_budget(&self) -> u32 {
         match &self.delivery_details {
             CommitDelivery::StateInArgs => {
-                commit_size_budget(AccountSizeClass::Dynamic(
-                    self.committed_account.account.data.len() as u32,
-                ))
+                dlp_api::instruction_builder::commit_size_budget(
+                    AccountSizeClass::Dynamic(
+                        self.committed_account.account.data.len() as u32,
+                    ),
+                )
             }
             CommitDelivery::StateInBuffer { .. }
             | CommitDelivery::DiffInBuffer { .. } => {
-                commit_size_budget(AccountSizeClass::Huge)
+                dlp_api::instruction_builder::commit_size_budget(
+                    AccountSizeClass::Huge,
+                )
             }
             CommitDelivery::DiffInArgs { .. } => {
-                commit_diff_size_budget(AccountSizeClass::Dynamic(
-                    self.committed_account.account.data.len() as u32,
-                ))
+                dlp_api::instruction_builder::commit_diff_size_budget(
+                    AccountSizeClass::Dynamic(
+                        self.committed_account.account.data.len() as u32,
+                    ),
+                )
             }
         }
     }

@@ -203,6 +203,7 @@ pub enum MagicBlockInstruction {
         pubkey: Pubkey,
         data: Vec<u8>,
         fields: AccountCloneFields,
+        actions_tx_sig: Option<String>,
     },
 
     /// Initialize a multi-transaction clone for a large account.
@@ -217,6 +218,7 @@ pub enum MagicBlockInstruction {
         total_data_len: u32,
         initial_data: Vec<u8>,
         fields: AccountCloneFields,
+        actions_tx_sig: Option<String>,
     },
 
     /// Continue a multi-transaction clone with the next data chunk.

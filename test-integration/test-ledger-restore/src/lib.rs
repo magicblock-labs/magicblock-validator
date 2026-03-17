@@ -224,11 +224,11 @@ pub fn init_and_delegate_counter_and_payer(
         cleanup(validator)
     );
     let owner = fetch_counter_owner_chain(&payer.pubkey(), validator);
-    assert_eq!(owner, dlp::id(), cleanup(validator));
+    assert_eq!(owner, dlp_api::dlp::id(), cleanup(validator));
 
     let payer_chain =
         expect!(ctx.fetch_chain_account(payer.pubkey()), validator);
-    assert_eq!(payer_chain.owner, dlp::id(), cleanup(validator));
+    assert_eq!(payer_chain.owner, dlp_api::dlp::id(), cleanup(validator));
     assert!(payer_chain.lamports > LAMPORTS_PER_SOL, cleanup(validator));
 
     debug!(
