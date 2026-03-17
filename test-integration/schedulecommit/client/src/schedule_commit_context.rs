@@ -344,6 +344,10 @@ impl ScheduleCommitTestContext {
                 .unwrap(),
         }
     }
+
+    pub fn ephem_validator_identity(&self) -> &Option<Pubkey> {
+        &self.common_ctx.ephem_validator_identity
+    }
 }
 
 // -----------------
