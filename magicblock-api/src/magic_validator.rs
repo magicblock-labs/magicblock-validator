@@ -332,6 +332,7 @@ impl MagicValidator {
                 .chainlink
                 .auto_airdrop_lamports
                 > 0,
+            block_time: config.ledger.block_time,
             shutdown: token.clone(),
             mode_rx,
             pause_permit: validator_channels.pause_permit,

@@ -10,8 +10,10 @@
 use std::{
     sync::{Arc, RwLock},
     thread::JoinHandle,
+    time::{SystemTime, UNIX_EPOCH},
 };
 
+use blake3::Hasher;
 use coordinator::{ExecutionCoordinator, TransactionWithId};
 use locks::{ExecutorId, MAX_SVM_EXECUTORS};
 use magicblock_accounts_db::{traits::AccountsBank, AccountsDb};
@@ -25,9 +27,9 @@ use magicblock_core::{
     },
     Slot,
 };
-use magicblock_ledger::LatestBlock;
+use magicblock_ledger::{LatestBlock, LatestBlockInner, Ledger};
 use solana_account::{from_account, to_account};
-use solana_program::slot_hashes::SlotHashes;
+use solana_program::{clock::Clock, slot_hashes::SlotHashes};
 use solana_program_runtime::loaded_programs::ProgramCache;
 use solana_sdk_ids::sysvar::{clock, slot_hashes};
 use state::TransactionSchedulerState;
@@ -37,6 +39,7 @@ use tokio::{
         mpsc::{channel, Receiver, Sender},
         OwnedSemaphorePermit, Semaphore,
     },
+    time::{interval, Interval},
 };
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, instrument, warn};
@@ -64,6 +67,8 @@ pub struct TransactionScheduler {
     program_cache: Arc<RwLock<ProgramCache<SimpleForkGraph>>>,
     /// Accounts database (for sysvar updates on slot transition)
     accountsdb: Arc<AccountsDb>,
+    /// Global transactions ledger
+    ledger: Arc<Ledger>,
     /// Latest block metadata (slot, clock, blockhash)
     latest_block: LatestBlock,
     /// Global shutdown signal.
@@ -75,6 +80,10 @@ pub struct TransactionScheduler {
     /// Semaphore for coordinating exclusive DB access with external callers.
     /// Scheduler acquires permit when scheduling, releases when idle.
     pause_permit: Arc<Semaphore>,
+    /// Streaming blockhash state
+    hasher: Hasher,
+    /// Time interval between consecutive slots
+    slot_ticker: Interval,
     /// Current Slot that scheduler is operating on (clock value)
     slot: Slot,
     /// Current transaction index included into the block under assembly
@@ -110,19 +119,27 @@ impl TransactionScheduler {
             executors.push(transactions_tx);
         }
 
+        let hasher = Hasher::new();
+        let slot_ticker = interval(state.block_time);
+        let latest_block = state.ledger.latest_block().clone();
+        let slot = latest_block.load().slot;
+
         Self {
             coordinator: ExecutionCoordinator::new(count),
             transactions_rx: state.txn_to_process_rx,
             ready_rx,
             executors,
-            latest_block: state.ledger.latest_block().clone(),
+            latest_block,
+            ledger: state.ledger,
             program_cache,
             accountsdb: state.accountsdb,
             shutdown: state.shutdown,
             mode_rx: state.mode_rx,
             replication_tx: state.replication_tx,
             pause_permit: state.pause_permit,
-            slot: state.ledger.latest_block().load().slot,
+            hasher,
+            slot_ticker,
+            slot,
             index: 0,
         }
     }
@@ -153,10 +170,21 @@ impl TransactionScheduler {
         // Holds the scheduling permit while transactions are being processed.
         // Released when idle so external callers can acquire exclusive access.
         let mut scheduling_permit = None;
+        // drain the first tick, which is instantaneous
+        self.slot_ticker.tick().await;
         loop {
             tokio::select! {
                 biased;
-                Ok(()) = block_produced.recv() => self.transition_to_new_slot(),
+                Ok(()) = block_produced.recv() => {
+                    if !self.coordinator.is_primary() {
+                        self.transition_to_new_slot().await;
+                    }
+                }
+                _ = self.slot_ticker.tick() => {
+                    if self.coordinator.is_primary() {
+                        self.transition_to_new_slot().await;
+                    }
+                }
                 Some(executor) = self.ready_rx.recv() => {
                     self.handle_ready_executor(executor).await;
                     // Release permit when idle: no active work, safe for external access
@@ -262,15 +290,18 @@ impl TransactionScheduler {
                 self.index += 1;
                 (self.slot, index)
             };
+        let is_execution =
+            matches!(txn.mode, TransactionProcessingMode::Execution(_));
+
+        if is_execution {
+            self.hasher.update(txn.transaction.signature().as_ref());
+        }
 
         let msg = txn
             .encoded
             .as_ref()
             .cloned()
-            .filter(|_| {
-                matches!(txn.mode, TransactionProcessingMode::Execution(_))
-                    && self.coordinator.should_replicate()
-            })
+            .filter(|_| is_execution && self.coordinator.is_primary())
             .map(|payload| {
                 Message::Transaction(replication::Transaction {
                     index,
@@ -285,16 +316,72 @@ impl TransactionScheduler {
         ).is_ok();
         if let Some(msg) = msg.filter(|_| sent) {
             let _ = self.replication_tx.send(msg).await.inspect_err(
-                |error| error!(executor, %error, "Replication channel send failed"),
+                |error| error!(executor, %error, "Replication send failed for transaction"),
             );
         }
         None
     }
 
-    fn transition_to_new_slot(&mut self) {
-        let block = self.latest_block.load();
+    async fn transition_to_new_slot(&mut self) {
+        // In primary mode the scheduler acts as clock (slot source)
+        // In other modes it lets replication service to set the pace
+        let block = if self.coordinator.is_primary() {
+            let blockhash = *self.hasher.finalize().as_bytes();
+            // NOTE:
+            // As we have a single node network, we have no
+            // option but to use the time from host machine
+            let unix_timestamp = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                // NOTE: since we can tick very frequently, a lot
+                // of blocks might have identical timestamps
+                .as_secs() as i64;
+            let clock = Clock {
+                slot: self.slot + 1,
+                unix_timestamp,
+                ..Default::default()
+            };
+            let block = LatestBlockInner {
+                slot: self.slot,
+                blockhash: blockhash.into(),
+                clock,
+            };
+            let msg = Message::Block(replication::Block {
+                slot: block.slot,
+                hash: block.blockhash,
+                timestamp: block.clock.unix_timestamp,
+            });
+            let _ = self.replication_tx.send(msg).await.inspect_err(
+                |error| error!(%error, "Replication send failed for block"),
+            );
+            let _ = self
+                .ledger
+                .write_block(
+                    block.slot,
+                    block.clock.unix_timestamp,
+                    block.blockhash,
+                )
+                .inspect_err(|error| {
+                    error!(%error, "failed to write block to the ledger")
+                });
+            self.accountsdb.set_slot(block.slot);
+            block
+        } else {
+            let block = &*self.latest_block.load();
+            if block.blockhash.as_ref() != self.hasher.finalize().as_bytes() {
+                error!(
+                    slot = block.slot,
+                    "replication blockhash has diverged from local"
+                )
+            }
+            LatestBlockInner::clone(block)
+        };
+        self.hasher.reset();
+        self.hasher.update(block.blockhash.as_ref());
+
         let mut cache = self.program_cache.write().unwrap();
-        self.slot = block.slot;
+        // advance the current slot (unfinished block)
+        self.slot = block.clock.slot;
         self.index = 0;
 
         // Prune stale programs and re-root to new slot

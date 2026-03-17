@@ -3723,6 +3723,7 @@ name = "magicblock-processor"
 version = "0.8.3"
 dependencies = [
  "bincode",
+ "blake3",
  "guinea",
  "magicblock-accounts-db",
  "magicblock-core",
