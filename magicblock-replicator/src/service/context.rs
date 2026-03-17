@@ -186,7 +186,10 @@ impl ReplicationContext {
         let Some(consumer) = self.create_consumer(reset).await else {
             return Ok(None);
         };
-        let watcher = LockWatcher::new(&self.broker).await;
+        let Some(watcher) = LockWatcher::new(&self.broker, &self.cancel).await
+        else {
+            return Ok(None);
+        };
         self.enter_replica_mode().await;
         Ok(Some(Standby::new(
             self,

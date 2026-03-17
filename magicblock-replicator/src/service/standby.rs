@@ -49,7 +49,10 @@ impl Standby {
     /// Returns `Some(Primary)` on promotion, `None` on shutdown.
     pub async fn run(mut self) -> Result<Option<Primary>> {
         let mut timeout_check = tokio::time::interval(Duration::from_secs(1));
-        let mut stream = self.consumer.messages().await;
+        let Some(mut stream) = self.consumer.messages(&self.ctx.cancel).await
+        else {
+            return Ok(None);
+        };
 
         loop {
             tokio::select! {
@@ -63,8 +66,12 @@ impl Standby {
                 }
                 result = stream.next() => {
                     let Some(result) = result else {
-                        stream = self.consumer.messages().await;
-                        continue;
+                        if let Some(s) = self.consumer.messages(&self.ctx.cancel).await {
+                            stream = s;
+                            continue;
+                        } else {
+                            return Ok(None);
+                        };
                     };
                     match result {
                         Ok(msg) => {
