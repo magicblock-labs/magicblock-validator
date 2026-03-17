@@ -186,8 +186,8 @@ impl TransactionExecutor {
                     }
                     let _ = self.ready_tx.try_send(self.id);
                 }
-                _ = block_updated.recv() => {
-                    self.register_new_block();
+                Ok(latest) = block_updated.recv() => {
+                    self.register_new_block(latest);
                 }
                 else => break,
             }
@@ -195,8 +195,7 @@ impl TransactionExecutor {
         info!("Executor terminated");
     }
 
-    fn register_new_block(&mut self) {
-        let block = LatestBlockInner::clone(&*self.block.load());
+    fn register_new_block(&mut self, block: LatestBlockInner) {
         while self.block_history.len() >= BLOCK_HISTORY_SIZE {
             self.block_history.pop_first();
         }

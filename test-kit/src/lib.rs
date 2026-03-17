@@ -12,7 +12,6 @@ pub use guinea;
 use magicblock_accounts_db::{traits::AccountsBank, AccountsDb};
 use magicblock_core::{
     link::{
-        blocks::{BlockMeta, BlockUpdate, BlockUpdateTx},
         link,
         transactions::{
             ReplayPosition, SanitizeableTransaction, SchedulerMode,
@@ -65,8 +64,6 @@ pub struct ExecutionTestEnv {
     pub dir: TempDir,
     /// The "client-side" channel endpoints for listening to validator events.
     pub dispatch: DispatchEndpoints,
-    /// The "server-side" channel endpoint for broadcasting new block updates.
-    pub blocks_tx: BlockUpdateTx,
     /// Transaction execution scheduler/backend for deferred launch
     pub scheduler: Option<TransactionScheduler>,
     /// Sender for transitioning from StartingUp to Primary/Replica mode
@@ -149,7 +146,6 @@ impl ExecutionTestEnv {
             transaction_scheduler: dispatch.transaction_scheduler.clone(),
             dir,
             dispatch,
-            blocks_tx: validator_channels.block_update,
             scheduler: None,
             mode_tx,
         };
@@ -213,6 +209,40 @@ impl ExecutionTestEnv {
         self.mode_tx
             .try_send(SchedulerMode::Primary)
             .expect("failed to send target mode to mode_tx");
+    }
+
+    /// Waits for the scheduler to be ready and in primary mode.
+    ///
+    /// This is achieved by waiting for the slot to advance, which indicates
+    /// the scheduler has processed the mode switch and is running.
+    pub async fn wait_for_scheduler_ready(&self) {
+        let initial_slot = self.ledger.latest_block().load().slot;
+        let start = std::time::Instant::now();
+        loop {
+            let current_slot = self.ledger.latest_block().load().slot;
+            if current_slot > initial_slot {
+                break;
+            }
+            if start.elapsed() > std::time::Duration::from_secs(5) {
+                panic!(
+                    "Timed out waiting for scheduler to be ready: slot {current_slot}"
+                );
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+        }
+    }
+
+    /// Waits for the scheduler to start and be ready to process transactions.
+    ///
+    /// This is a simpler version that just yields to allow the scheduler time to start.
+    /// Use this for tests that don't need to wait for slot advancement (e.g., replay tests).
+    pub async fn yield_to_scheduler(&self) {
+        // Give the scheduler time to start and process any pending mode switches
+        for _ in 0..10 {
+            tokio::task::yield_now().await;
+        }
+        // Small additional delay to ensure the scheduler is in its select! loop
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
     }
 
     /// Creates a new account with the specified properties.
@@ -284,12 +314,6 @@ impl ExecutionTestEnv {
             .write_block(slot, time, hash)
             .expect("failed to write new block to the ledger");
         self.accountsdb.set_slot(slot);
-
-        // Notify the system that a new block was produced.
-        let _ = self.blocks_tx.send(BlockUpdate {
-            hash,
-            meta: BlockMeta { slot, time },
-        });
 
         // Yield to allow other tasks (like the executor) to process the slot change.
         thread::yield_now();
