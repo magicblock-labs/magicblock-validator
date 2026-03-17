@@ -33,8 +33,6 @@ pub struct DispatchEndpoints {
     pub transaction_scheduler: TransactionSchedulerHandle,
     /// Receives notifications about account state changes from the executor.
     pub account_update: AccountUpdateRx,
-    /// Receives notifications when a new block is produced.
-    pub block_update: BlockUpdateRx,
     /// Receives scheduled (crank) tasks from transactions executor.
     pub tasks_service: Option<ScheduledTasksRx>,
     /// Receives replication events from the transaction scheduler.
@@ -53,8 +51,6 @@ pub struct ValidatorChannelEndpoints {
     pub transaction_to_process: TransactionToProcessRx,
     /// Sends notifications about account state changes to the pool of EventProccessor workers.
     pub account_update: AccountUpdateTx,
-    /// Sends notifications when a new block is produced to the pool of EventProcessor workers.
-    pub block_update: BlockUpdateTx,
     /// Sends scheduled (crank) tasks to tasks service from transactions executor.
     pub tasks_service: ScheduledTasksTx,
     /// Sends replication events to the replication service.
@@ -75,7 +71,6 @@ pub fn link() -> (DispatchEndpoints, ValidatorChannelEndpoints) {
     // Unbounded channels for high-throughput multicast where backpressure is not desired.
     let (transaction_status_tx, transaction_status_rx) = flume::unbounded();
     let (account_update_tx, account_update_rx) = flume::unbounded();
-    let (block_update_tx, block_update_rx) = flume::unbounded();
     let (tasks_tx, tasks_rx) = mpsc::unbounded_channel();
 
     // Bounded channels for command queues where applying backpressure is important.
@@ -94,7 +89,6 @@ pub fn link() -> (DispatchEndpoints, ValidatorChannelEndpoints) {
         transaction_scheduler,
         transaction_status: transaction_status_rx,
         account_update: account_update_rx,
-        block_update: block_update_rx,
         tasks_service: Some(tasks_rx),
         replication_messages: Some(replication_rx),
     };
@@ -104,7 +98,6 @@ pub fn link() -> (DispatchEndpoints, ValidatorChannelEndpoints) {
         transaction_to_process: txn_to_process_rx,
         transaction_status: transaction_status_tx,
         account_update: account_update_tx,
-        block_update: block_update_tx,
         tasks_service: tasks_tx,
         replication_messages: replication_tx,
         pause_permit,
