@@ -139,8 +139,14 @@ impl ChainlinkCloner {
         pubkey: Pubkey,
         data: Vec<u8>,
         fields: AccountCloneFields,
+        actions_tx_sig: Option<Signature>,
     ) -> Instruction {
-        InstructionUtils::clone_account_instruction(pubkey, data, fields)
+        InstructionUtils::clone_account_instruction(
+            pubkey,
+            data,
+            fields,
+            actions_tx_sig,
+        )
     }
 
     fn clone_init_ix(
@@ -148,12 +154,14 @@ impl ChainlinkCloner {
         total_len: u32,
         initial_data: Vec<u8>,
         fields: AccountCloneFields,
+        actions_tx_sig: Option<Signature>,
     ) -> Instruction {
         InstructionUtils::clone_account_init_instruction(
             pubkey,
             total_len,
             initial_data,
             fields,
+            actions_tx_sig,
         )
     }
 
@@ -210,12 +218,14 @@ impl ChainlinkCloner {
         &self,
         request: &AccountCloneRequest,
         blockhash: Hash,
+        actions_tx_sig: Option<Signature>,
     ) -> Transaction {
         let fields = Self::clone_fields(request);
         let clone_ix = Self::clone_ix(
             request.pubkey,
             request.account.data().to_vec(),
             fields,
+            actions_tx_sig,
         );
 
         // TODO(#625): Re-enable frequency commits when proper limits are in place:
@@ -263,6 +273,7 @@ impl ChainlinkCloner {
         &self,
         request: &AccountCloneRequest,
         blockhash: Hash,
+        actions_tx_sig: Option<Signature>,
     ) -> Vec<Transaction> {
         let data = request.account.data();
         let fields = Self::clone_fields(request);
@@ -278,6 +289,7 @@ impl ChainlinkCloner {
             data.len() as u32,
             first_chunk,
             fields,
+            actions_tx_sig,
         );
         txs.push(self.create_signed_tx(&[init_ix], blockhash));
 
@@ -352,6 +364,7 @@ impl ChainlinkCloner {
                 buffer_pubkey,
                 program_data,
                 buffer_fields,
+                None,
             )];
             ixs.extend(finalize_ixs);
             vec![self.create_signed_tx(&ixs, blockhash)]
@@ -497,6 +510,7 @@ impl ChainlinkCloner {
             total_len,
             first_chunk.to_vec(),
             fields,
+            None,
         );
         let mut txs = vec![self.create_signed_tx(&[init_ix], blockhash)];
 
@@ -553,27 +567,41 @@ impl ChainlinkCloner {
 
     async fn send_actions_tx(
         &self,
-        actions: &DelegationActions,
-        recent_blockhash: Hash,
+        actions_tx: Option<SanitizedTransaction>,
     ) -> ClonerResult<Option<()>> {
-        if actions.is_empty() {
+        let Some(sanitized_tx) = actions_tx else {
             return Ok(None);
-        }
-        let mut tx = Transaction::new_with_payer(
-            &actions.clone().into_iter().collect::<Vec<_>>(),
-            Some(&validator_authority_id()),
-        );
-        tx.partial_sign(&[&validator_authority()], recent_blockhash);
-
-        let sanitized_tx = tx.sanitize(false)?;
+        };
+        let action_tx_sig = *sanitized_tx.signature();
 
         Ok(Some(
             self.send_sanitized_tx(sanitized_tx)
                 .await
                 .inspect_err(|err| {
-                    error!("send_sanitized_tx failed to execute actions, with error: {:?}", err);
+                    error!(
+                        tx_sig = %action_tx_sig,
+                        error = ?err,
+                        "Failed to execute post-delegation actions transaction"
+                    );
                 })?,
         ))
+    }
+
+    fn create_actions_tx(
+        &self,
+        actions: &DelegationActions,
+        recent_blockhash: Hash,
+    ) -> ClonerResult<Option<SanitizedTransaction>> {
+        if actions.is_empty() {
+            return Ok(None);
+        }
+
+        let mut tx = Transaction::new_with_payer(
+            actions,
+            Some(&validator_authority_id()),
+        );
+        tx.partial_sign(&[&validator_authority()], recent_blockhash);
+        Ok(Some(tx.sanitize(false)?))
     }
 }
 
@@ -586,6 +614,9 @@ impl Cloner for ChainlinkCloner {
     ) -> ClonerResult<Signature> {
         let blockhash = self.block.load().blockhash;
         let data_len = request.account.data().len();
+        let actions_tx =
+            self.create_actions_tx(&request.delegation_actions, blockhash)?;
+        let actions_tx_sig = actions_tx.as_ref().map(|tx| *tx.signature());
 
         if request.account.delegated() {
             self.maybe_prepare_lookup_tables(
@@ -596,7 +627,11 @@ impl Cloner for ChainlinkCloner {
 
         // Small account: single tx
         if data_len <= MAX_INLINE_DATA_SIZE {
-            let tx = self.build_small_account_tx(&request, blockhash);
+            let tx = self.build_small_account_tx(
+                &request,
+                blockhash,
+                actions_tx_sig,
+            );
 
             let signature = self.send_tx(tx).await.map_err(|err| {
                 ClonerError::FailedToCloneRegularAccount(
@@ -605,14 +640,14 @@ impl Cloner for ChainlinkCloner {
                 )
             })?;
 
-            self.send_actions_tx(&request.delegation_actions, blockhash)
-                .await?;
+            self.send_actions_tx(actions_tx).await?;
 
             return Ok(signature);
         }
 
         // Large account: multi-tx with cleanup on failure
-        let txs = self.build_large_account_txs(&request, blockhash);
+        let txs =
+            self.build_large_account_txs(&request, blockhash, actions_tx_sig);
 
         let mut last_sig = None;
         for tx in txs {
@@ -630,8 +665,7 @@ impl Cloner for ChainlinkCloner {
             }
         }
 
-        self.send_actions_tx(&request.delegation_actions, blockhash)
-            .await?;
+        self.send_actions_tx(actions_tx).await?;
 
         Ok(last_sig.unwrap_or_default())
     }
