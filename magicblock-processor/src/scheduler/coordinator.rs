@@ -316,7 +316,7 @@ impl ExecutionCoordinator {
     }
 
     /// Check whether the node is acting as an event source for replication
-    pub(super) fn should_replicate(&self) -> bool {
+    pub(super) fn is_primary(&self) -> bool {
         matches!(self.mode, CoordinationMode::Primary(_))
     }
 
