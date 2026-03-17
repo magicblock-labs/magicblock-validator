@@ -60,7 +60,7 @@ pub(crate) fn process_add_action_callback(
         transaction_context,
         MAGIC_CONTEXT_IDX,
     )?;
-    charge_delegated_payer(payer_acc, context_acc, CALLBACK_FEE_LAMPORTS)?;
+    // charge_delegated_payer(payer_acc, context_acc, CALLBACK_FEE_LAMPORTS)?;
 
     let context_data = &mut context_acc.borrow_mut();
     let mut context =

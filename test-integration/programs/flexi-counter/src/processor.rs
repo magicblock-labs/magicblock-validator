@@ -1,5 +1,7 @@
 mod call_handler;
+pub(crate) mod callback;
 mod schedule_intent;
+mod transfer_intent;
 
 use borsh::{to_vec, BorshDeserialize};
 use ephemeral_rollups_sdk::{
@@ -35,9 +37,14 @@ use crate::{
         call_handler::{
             process_commit_action_handler, process_undelegate_action_handler,
         },
+        callback::{
+            process_transfer_action_handler, process_transfer_callback,
+            TRANSFER_CALLBACK_DISCRIMINATOR,
+        },
         schedule_intent::{
             process_create_intent, process_create_intent_bundle,
         },
+        transfer_intent::process_create_transfer_intent,
     },
     state::{FlexiCounter, FAIL_UNDELEGATION_CODE, FAIL_UNDELEGATION_LABEL},
     utils::assert_keys_equal,
@@ -54,6 +61,10 @@ pub fn process(
 
         if disc == EXTERNAL_UNDELEGATE_DISCRIMINATOR {
             return process_undelegate_request(accounts, data);
+        }
+
+        if disc == TRANSFER_CALLBACK_DISCRIMINATOR {
+            return process_transfer_callback(accounts, data);
         }
     }
 
@@ -108,6 +119,19 @@ pub fn process(
             counter_diffs,
             compute_units,
         ),
+        CreateTransferIntent {
+            amount,
+            fail,
+            compute_units,
+        } => process_create_transfer_intent(
+            accounts,
+            amount,
+            fail,
+            compute_units,
+        ),
+        TransferActionHandler { amount, fail } => {
+            process_transfer_action_handler(accounts, amount, fail)
+        }
     }?;
     Ok(())
 }

@@ -33,7 +33,7 @@ pub(crate) fn charge_delegated_payer(
     let recipient_lamports = recipient.borrow().lamports();
     recipient
         .borrow_mut()
-        .set_lamports(recipient_lamports + amount);
+        .set_lamports(recipient_lamports.saturating_add(amount));
     Ok(())
 }
 

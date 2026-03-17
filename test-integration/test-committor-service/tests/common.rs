@@ -22,17 +22,20 @@ use magicblock_committor_service::{
     },
     ComputeBudgetConfig, DEFAULT_ACTIONS_TIMEOUT,
 };
-use magicblock_core::intent::CommittedAccount;
-use magicblock_core::intent::BaseActionCallback;
+use magicblock_core::{
+    intent::{BaseActionCallback, CommittedAccount},
+    traits::{ActionsCallbackScheduler, CallbackScheduleError},
+};
 use magicblock_rpc_client::MagicblockRpcClient;
 use magicblock_table_mania::{GarbageCollectorConfig, TableMania};
 use solana_account::Account;
 use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_sdk::{
-    commitment_config::CommitmentConfig, signature::Keypair, signer::Signer,
+    commitment_config::CommitmentConfig,
+    signature::{Keypair, Signature},
+    signer::Signer,
 };
-use magicblock_core::traits::{ActionsCallbackScheduler, CallbackScheduleError};
 
 // Helper function to create a test RPC client
 pub async fn create_test_client() -> MagicblockRpcClient {
@@ -151,9 +154,13 @@ impl ActionsCallbackScheduler for MockActionsCallbackExecutor {
         &self,
         callbacks: Vec<BaseActionCallback>,
         result: ActionResult,
-    ) -> Vec<Result<solana_signature::Signature, CallbackScheduleError>> {
+    ) -> Vec<Result<Signature, CallbackScheduleError>> {
+        let signatures = callbacks
+            .iter()
+            .map(|_| Ok(Signature::new_unique()))
+            .collect();
         self.calls.lock().unwrap().push((callbacks, result));
-        vec![]
+        signatures
     }
 }
 

@@ -218,6 +218,36 @@ pub enum FlexiCounterInstruction {
         counter_diffs: Vec<i64>,
         compute_units: u32,
     },
+
+    /// Deducts `amount` lamports from the delegated payer into the counter PDA
+    /// on ER, then schedules a CommitAndUndelegate intent with a post-commit
+    /// transfer action.  If `fail` is true the action intentionally errors so
+    /// the callback exercises the refund path.
+    ///
+    /// Accounts:
+    /// 0. [signer, write] payer (delegated counter owner)
+    /// 1. [write]         counter PDA
+    /// 2. [write]         destination (receives lamports on action success)
+    /// 3. []              system program
+    /// 4. [write]         magic context
+    /// 5. []              magic program
+    CreateTransferIntent {
+        amount: u64,
+        fail: bool,
+        compute_units: u32,
+    },
+
+    /// Post-commit base-layer action: transfers `amount` lamports from the
+    /// payer's escrow to `destination`, or returns `TRANSFER_FAIL_CODE` when
+    /// `fail` is set.
+    ///
+    /// Accounts (dispatched by magic program):
+    /// 0. [write] destination
+    /// 1. []      system program
+    /// 2. []      source program (auto)
+    /// 3. []      escrow authority (auto)
+    /// 4. [signer, write] escrow account (auto)
+    TransferActionHandler { amount: u64, fail: bool },
 }
 
 pub fn create_init_ix(payer: Pubkey, label: String) -> Instruction {
@@ -492,6 +522,37 @@ pub fn create_cancel_task_ix(payer: Pubkey, task_id: i64) -> Instruction {
     Instruction::new_with_borsh(
         *program_id,
         &FlexiCounterInstruction::Cancel(CancelArgs { task_id }),
+        accounts,
+    )
+}
+
+/// Creates a `CreateTransferIntent` instruction.
+///
+/// The payer's counter PDA is derived from `payer`.
+pub fn create_transfer_intent_ix(
+    payer: Pubkey,
+    destination: Pubkey,
+    amount: u64,
+    fail: bool,
+    compute_units: u32,
+) -> Instruction {
+    let program_id = &crate::id();
+    let (counter_pda, _) = FlexiCounter::pda(&payer);
+    let accounts = vec![
+        AccountMeta::new(payer, true),
+        AccountMeta::new(counter_pda, false),
+        AccountMeta::new_readonly(destination, false),
+        AccountMeta::new_readonly(system_program::id(), false),
+        AccountMeta::new(MAGIC_CONTEXT_ID, false),
+        AccountMeta::new_readonly(MAGIC_PROGRAM_ID, false),
+    ];
+    Instruction::new_with_borsh(
+        *program_id,
+        &FlexiCounterInstruction::CreateTransferIntent {
+            amount,
+            fail,
+            compute_units,
+        },
         accounts,
     )
 }

@@ -233,6 +233,7 @@ impl BaseIntentCommittorExt for ChangesetCommittorStub {
                     finalize_signature: Signature::new_unique(),
                 }),
                 patched_errors: Arc::new(vec![]),
+                callbacks_report: vec![],
             })
             .collect::<Vec<_>>();
 

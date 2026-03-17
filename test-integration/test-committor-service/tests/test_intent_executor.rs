@@ -38,8 +38,8 @@ use magicblock_core::intent::{BaseActionCallback, CommittedAccount};
 use magicblock_program::{
     args::ShortAccountMeta,
     magic_scheduled_base_intent::{
-        BaseAction, CommitAndUndelegate, CommitType,
-        MagicBaseIntent, ProgramArgs, ScheduledIntentBundle, UndelegateType,
+        BaseAction, CommitAndUndelegate, CommitType, MagicBaseIntent,
+        ProgramArgs, ScheduledIntentBundle, UndelegateType,
     },
     validator::validator_authority_id,
 };
@@ -477,6 +477,7 @@ async fn test_commit_id_error_recovery() {
     let IntentExecutionResult {
         inner: res,
         patched_errors,
+        callbacks_report,
     } = res;
 
     assert!(
@@ -486,6 +487,7 @@ async fn test_commit_id_error_recovery() {
         patched_errors
     );
     assert!(matches!(res.unwrap(), ExecutionOutput::SingleStage(_)));
+    assert!(callbacks_report.is_empty());
 
     assert_eq!(patched_errors.len(), 1, "Only 1 patch expected");
     let commit_id_error = patched_errors.into_iter().next().unwrap();
@@ -550,10 +552,12 @@ async fn test_undelegation_error_recovery() {
     let IntentExecutionResult {
         inner: res,
         patched_errors,
+        callbacks_report,
     } = res;
 
     assert!(res.is_ok());
     assert!(matches!(res.unwrap(), ExecutionOutput::SingleStage(_)));
+    assert!(callbacks_report.is_empty());
     assert_eq!(patched_errors.len(), 1, "Only 1 patch expected");
 
     // Assert errors patched
@@ -615,10 +619,13 @@ async fn test_action_error_recovery() {
     let IntentExecutionResult {
         inner: res,
         patched_errors,
+        callbacks_report,
     } = res;
 
     assert!(res.is_ok());
     assert!(matches!(res.unwrap(), ExecutionOutput::SingleStage(_)));
+    assert_eq!(callbacks_report.len(), 1, "1 callback from failing action");
+    assert!(callbacks_report[0].is_ok(), "mock returns Ok(sig)");
     assert_eq!(patched_errors.len(), 1, "Only 1 patch expected");
 
     // Assert errors patched
@@ -691,10 +698,13 @@ async fn test_commit_id_and_action_errors_recovery() {
     let IntentExecutionResult {
         inner: res,
         patched_errors,
+        callbacks_report,
     } = res;
 
     assert!(res.is_ok());
     assert!(matches!(res.unwrap(), ExecutionOutput::SingleStage(_)));
+    assert_eq!(callbacks_report.len(), 1, "1 callback from failing action");
+    assert!(callbacks_report[0].is_ok(), "mock returns Ok(sig)");
     assert_eq!(patched_errors.len(), 2, "Only 2 patches expected");
 
     // Assert errors patched
@@ -1171,6 +1181,8 @@ async fn test_action_callback_fired_on_failure() {
         .await;
 
     assert!(res.inner.is_ok());
+    assert_eq!(res.callbacks_report.len(), 1, "1 callback scheduled");
+    assert!(res.callbacks_report[0].is_ok(), "mock returns Ok(sig)");
 
     let calls = callback_executor.calls();
     assert_eq!(calls.len(), 1);
@@ -1237,6 +1249,8 @@ async fn test_action_callback_fired_on_timeout() {
 
     assert!(res.inner.is_ok());
     assert!(res.patched_errors.is_empty());
+    assert_eq!(res.callbacks_report.len(), 1, "1 callback scheduled");
+    assert!(res.callbacks_report[0].is_ok(), "mock returns Ok(sig)");
 
     let calls = callback_executor.calls();
     assert_eq!(calls.len(), 1);
