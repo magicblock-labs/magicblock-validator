@@ -446,11 +446,7 @@ impl<H: StreamHandle, S: StreamFactory<H>> ChainLaserActor<H, S> {
         let from_slot = self.compute_from_slot();
         let result = self
             .stream_manager
-            .account_subscribe(
-                &new_pubkeys,
-                &self.commitment,
-                from_slot,
-            )
+            .account_subscribe(&new_pubkeys, &self.commitment, from_slot)
             .await;
 
         let response = match result {

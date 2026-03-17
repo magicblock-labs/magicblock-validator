@@ -99,13 +99,11 @@ impl ChainLaserClientImpl {
         retries: Option<usize>,
     ) -> RemoteAccountProviderResult<()> {
         let (tx, rx) = oneshot::channel();
-        self.send_msg(
-            ChainPubsubActorMessage::AccountSubscribeMultiple {
-                pubkeys,
-                retries,
-                response: tx,
-            },
-        )
+        self.send_msg(ChainPubsubActorMessage::AccountSubscribeMultiple {
+            pubkeys,
+            retries,
+            response: tx,
+        })
         .await?;
 
         rx.await?

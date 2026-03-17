@@ -209,15 +209,30 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
 
         // Chunk large batches at the optimized stream limit so
         // that no single current-new stream exceeds what a single
-        // optimized stream would hold. Each chunk goes through
-        // the normal subscribe → promote → optimize cycle.
-        let chunk_size = self.config.max_subs_in_old_optimized;
-        if new_pks.len() > chunk_size {
-            for chunk in new_pks.chunks(chunk_size) {
-                self.account_subscribe_batch(
-                    chunk, commitment, from_slot,
-                )
-                .await?;
+        // optimized stream would hold. The first chunk is sized to
+        // account for any existing current_new_subs so the combined
+        // count never exceeds the limit. Subsequent chunks use the
+        // full limit (since promotion clears current_new_subs).
+        let max = self.config.max_subs_in_old_optimized;
+        let remaining_capacity =
+            max.saturating_sub(self.current_new_subs.len());
+
+        if new_pks.len() > remaining_capacity {
+            let (first, rest) = if remaining_capacity > 0 {
+                new_pks.split_at(remaining_capacity)
+            } else {
+                // No remaining capacity — force a promotion by
+                // sending an empty-ish batch that will still
+                // trigger the promote path, then chunk the rest.
+                ([].as_slice(), new_pks.as_slice())
+            };
+            if !first.is_empty() {
+                self.account_subscribe_batch(first, commitment, from_slot)
+                    .await?;
+            }
+            for chunk in rest.chunks(max) {
+                self.account_subscribe_batch(chunk, commitment, from_slot)
+                    .await?;
             }
             return Ok(());
         }
@@ -1825,10 +1840,7 @@ mod tests {
         assert_eq!(mgr.unoptimized_old_stream_count(), 0);
         let total_subs = mgr.subscriptions().read().len();
         let expected_optimized = total_subs.div_ceil(10);
-        assert_eq!(
-            mgr.optimized_old_stream_count(),
-            expected_optimized,
-        );
+        assert_eq!(mgr.optimized_old_stream_count(), expected_optimized,);
     }
 
     #[tokio::test]
@@ -1847,6 +1859,52 @@ mod tests {
         // 10 > 5 (max_subs_in_new) → promoted to 1 unoptimized.
         assert_eq!(mgr.unoptimized_old_stream_count(), 1);
         assert_eq!(mgr.current_new_sub_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_chunking_accounts_for_existing_current_new_subs() {
+        // Seeding current_new_subs with some entries
+        // and then subscribing a larger batch must never produce a
+        // single CurrentNew request that exceeds
+        // max_subs_in_old_optimized (10).
+        let (mut mgr, factory) = create_manager();
+
+        // Seed current_new_subs with 5 pubkeys (below
+        // max_subs_in_new so no promotion yet).
+        let seed = make_pubkeys(5);
+        mgr.account_subscribe(&seed, &COMMITMENT, None)
+            .await
+            .unwrap();
+        assert_eq!(mgr.current_new_sub_count(), 5);
+
+        // Now subscribe 80 more. The first chunk must be
+        // sized at remaining_capacity = 10 - 5 = 5.
+        let batch = make_pubkeys(80);
+        mgr.account_subscribe(&batch, &COMMITMENT, None)
+            .await
+            .unwrap();
+
+        let max = test_config().max_subs_in_old_optimized;
+
+        // Every request sent via subscribe() or handle.write()
+        // must have at most `max` pubkeys.
+        for req in factory.handle_requests() {
+            let n = account_pubkeys_from_request(&req).len();
+            assert!(n <= max, "request has {n} pubkeys, exceeds limit {max}",);
+        }
+        for req in factory.captured_requests() {
+            let n = account_pubkeys_from_request(&req).len();
+            assert!(
+                n <= max,
+                "captured request has {n} pubkeys, exceeds \
+                 limit {max}",
+            );
+        }
+
+        // All 85 pubkeys are subscribed.
+        let all: Vec<Pubkey> =
+            seed.iter().chain(batch.iter()).copied().collect();
+        assert_subscriptions_eq(&mgr, &all);
     }
 
     // ---------------------------------------------------------
