@@ -23,9 +23,9 @@
 The task scheduler can be configured via the validator configuration:
 
 ```toml
-[task_scheduler]
+[task-scheduler]
 reset = false
-millis_per_tick = 100
+min-interval = "10ms"
 ```
 
 ## Security Considerations
