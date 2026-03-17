@@ -174,7 +174,10 @@ pub fn setup_validator_with_local_remote_and_resume_strategy(
             .unwrap();
 
         // Init fees vault for validator
-        init_validator_fees_vault(&chain_only_ctx, &config.validator.keypair);
+        init_validator_fees_vault(
+            &chain_only_ctx,
+            loaded_accounts.validator_authority_keypair(),
+        );
     }
 
     let (default_tmpdir_config, Some(mut validator), port) =
