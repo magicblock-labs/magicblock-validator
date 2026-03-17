@@ -1,5 +1,6 @@
 //! Protocol message types for replication.
 
+use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 use solana_hash::Hash;
 use solana_transaction::versioned::VersionedTransaction;
@@ -47,7 +48,7 @@ pub struct Transaction {
     /// Ordinal position within the slot.
     pub index: TransactionIndex,
     /// Bincode-encoded `VersionedTransaction`.
-    pub payload: Vec<u8>,
+    pub payload: Bytes,
 }
 
 /// Slot boundary marker with blockhash.

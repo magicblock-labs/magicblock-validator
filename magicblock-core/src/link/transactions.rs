@@ -1,3 +1,4 @@
+use bytes::Bytes;
 use flume::{Receiver as MpmcReceiver, Sender as MpmcSender};
 use magicblock_magic_program_api::args::TaskRequest;
 use serde::Serialize;
@@ -9,7 +10,7 @@ use solana_transaction::{
     Transaction,
 };
 use solana_transaction_context::TransactionReturnData;
-use solana_transaction_error::TransactionError;
+use solana_transaction_error::{TransactionError, TransactionResult};
 use solana_transaction_status_client_types::TransactionStatusMeta;
 use tokio::sync::{
     mpsc::{Receiver, Sender, UnboundedReceiver, UnboundedSender},
@@ -44,15 +45,13 @@ pub type ScheduledTasksTx = UnboundedSender<TaskRequest>;
 #[derive(Clone)]
 pub struct TransactionSchedulerHandle(pub(super) TransactionToProcessTx);
 
-/// The standard result of a transaction execution, indicating success or a `TransactionError`.
-pub type TransactionResult = solana_transaction_error::TransactionResult<()>;
 /// The sender half of a one-shot channel used to return the result of a transaction simulation.
 pub type TxnSimulationResultTx = oneshot::Sender<TransactionSimulationResult>;
 /// An optional sender half of a one-shot channel for returning a transaction execution result.
 /// `None` is used for "fire-and-forget" scheduling.
-pub type TxnExecutionResultTx = Option<oneshot::Sender<TransactionResult>>;
+pub type TxnExecutionResultTx = Option<oneshot::Sender<TransactionResult<()>>>;
 /// The sender half of a one-shot channel used to return the result of a transaction replay.
-pub type TxnReplayResultTx = oneshot::Sender<TransactionResult>;
+pub type TxnReplayResultTx = oneshot::Sender<TransactionResult<()>>;
 
 /// Contains the final, committed status of an executed
 /// transaction, including its result and metadata.
@@ -72,7 +71,7 @@ pub struct ProcessableTransaction {
     pub mode: TransactionProcessingMode,
     /// Pre-encoded bincode bytes for the transaction.
     /// Used by the replicator to avoid redundant serialization.
-    pub encoded: Option<Vec<u8>>,
+    pub encoded: Option<Bytes>,
 }
 
 /// Specifies the position and persistence behavior for replaying a transaction.
@@ -112,7 +111,7 @@ pub enum TransactionProcessingMode {
 /// Contains extra information not available in a standard
 /// execution, like compute units and return data.
 pub struct TransactionSimulationResult {
-    pub result: TransactionResult,
+    pub result: TransactionResult<()>,
     pub logs: Option<Vec<String>>,
     pub units_consumed: u64,
     pub return_data: Option<TransactionReturnData>,
@@ -150,7 +149,7 @@ pub trait SanitizeableTransaction {
     fn sanitize_with_encoded(
         self,
         verify: bool,
-    ) -> Result<(SanitizedTransaction, Option<Vec<u8>>), TransactionError>
+    ) -> TransactionResult<(SanitizedTransaction, Option<Bytes>)>
     where
         Self: Sized,
     {
@@ -163,7 +162,7 @@ pub trait SanitizeableTransaction {
 /// Use for internally-constructed transactions that need encoded bytes.
 pub struct WithEncoded<T> {
     pub txn: T,
-    pub encoded: Vec<u8>,
+    pub encoded: Bytes,
 }
 
 impl<T: SanitizeableTransaction> SanitizeableTransaction for WithEncoded<T> {
@@ -177,7 +176,7 @@ impl<T: SanitizeableTransaction> SanitizeableTransaction for WithEncoded<T> {
     fn sanitize_with_encoded(
         self,
         verify: bool,
-    ) -> Result<(SanitizedTransaction, Option<Vec<u8>>), TransactionError> {
+    ) -> TransactionResult<(SanitizedTransaction, Option<Bytes>)> {
         let txn = self.txn.sanitize(verify)?;
         Ok((txn, Some(self.encoded)))
     }
@@ -190,7 +189,8 @@ where
     T: Serialize,
 {
     let encoded = bincode::serialize(&txn)
-        .map_err(|_| TransactionError::SanitizeFailure)?;
+        .map_err(|_| TransactionError::SanitizeFailure)?
+        .into();
     Ok(WithEncoded { txn, encoded })
 }
 
@@ -238,7 +238,7 @@ impl TransactionSchedulerHandle {
     pub async fn schedule(
         &self,
         txn: impl SanitizeableTransaction,
-    ) -> TransactionResult {
+    ) -> TransactionResult<()> {
         let (transaction, encoded) = txn.sanitize_with_encoded(true)?;
         let mode = TransactionProcessingMode::Execution(None);
         let txn = ProcessableTransaction {
@@ -258,7 +258,7 @@ impl TransactionSchedulerHandle {
     pub async fn execute(
         &self,
         txn: impl SanitizeableTransaction,
-    ) -> TransactionResult {
+    ) -> TransactionResult<()> {
         let mode = |tx| TransactionProcessingMode::Execution(Some(tx));
         self.send(txn, mode).await?
     }
@@ -267,7 +267,7 @@ impl TransactionSchedulerHandle {
     pub async fn simulate(
         &self,
         txn: impl SanitizeableTransaction,
-    ) -> Result<TransactionSimulationResult, TransactionError> {
+    ) -> TransactionResult<TransactionSimulationResult> {
         let mode = TransactionProcessingMode::Simulation;
         self.send(txn, mode).await
     }
@@ -285,7 +285,7 @@ impl TransactionSchedulerHandle {
         &self,
         position: ReplayPosition,
         txn: impl SanitizeableTransaction,
-    ) -> TransactionResult {
+    ) -> TransactionResult<()> {
         let mode = TransactionProcessingMode::Replay(position);
         let (transaction, encoded) = txn.sanitize_with_encoded(true)?;
         let txn = ProcessableTransaction {
@@ -305,7 +305,7 @@ impl TransactionSchedulerHandle {
         &self,
         txn: impl SanitizeableTransaction,
         mode: fn(oneshot::Sender<R>) -> TransactionProcessingMode,
-    ) -> Result<R, TransactionError> {
+    ) -> TransactionResult<R> {
         let (transaction, encoded) = txn.sanitize_with_encoded(true)?;
         let (tx, rx) = oneshot::channel();
         let mode = mode(tx);

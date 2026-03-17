@@ -314,6 +314,11 @@ impl ExecutionCoordinator {
         );
         !mode_mismatch
     }
+
+    /// Check whether the node is acting as an event source for replication
+    pub(super) fn should_replicate(&self) -> bool {
+        matches!(self.mode, CoordinationMode::Primary(_))
+    }
 }
 
 /// Transaction wrapped with a monotonic ID for FIFO queue ordering.

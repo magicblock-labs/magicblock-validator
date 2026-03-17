@@ -13,6 +13,7 @@ console-subscriber = { workspace = true, optional = true }
 tokio = { workspace = true, features = ["sync"] }
 flume = { workspace = true }
 bincode = { workspace = true }
+bytes = { workspace = true }
 
 serde = { workspace = true, features = ["derive"] }
 solana-account = { workspace = true }
