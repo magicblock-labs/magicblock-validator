@@ -71,9 +71,16 @@ pub fn process(
         AddError { count } => process_add_error(accounts, count),
         Mul { multiplier } => process_mul(accounts, multiplier),
         Delegate(args) => process_delegate(accounts, &args),
-        AddAndScheduleCommit { count, undelegate } => {
-            process_add_and_schedule_commit(accounts, count, undelegate)
-        }
+        AddAndScheduleCommit {
+            count,
+            undelegate,
+            has_magic_vault,
+        } => process_add_and_schedule_commit(
+            accounts,
+            count,
+            undelegate,
+            has_magic_vault,
+        ),
         AddCounter => process_add_counter(accounts),
         CreateIntent {
             num_committees,
@@ -326,6 +333,7 @@ fn process_add_and_schedule_commit(
     accounts: &[AccountInfo],
     count: u8,
     undelegate: bool,
+    has_magic_vault: bool,
 ) -> ProgramResult {
     msg!(
         "Add {} and schedule commit undelegate: {}",
@@ -338,6 +346,11 @@ fn process_add_and_schedule_commit(
     let counter_pda_info = next_account_info(account_info_iter)?;
     let magic_context_info = next_account_info(account_info_iter)?;
     let magic_program_info = next_account_info(account_info_iter)?;
+    let magic_fee_vault = if has_magic_vault {
+        Some(next_account_info(account_info_iter)?)
+    } else {
+        None
+    };
 
     // Perform the add operation
     add(payer_info, counter_pda_info, count)?;
@@ -349,7 +362,7 @@ fn process_add_and_schedule_commit(
             vec![counter_pda_info],
             magic_context_info,
             magic_program_info,
-            None,
+            magic_fee_vault,
         )?;
     } else {
         commit_accounts(
@@ -357,7 +370,7 @@ fn process_add_and_schedule_commit(
             vec![counter_pda_info],
             magic_context_info,
             magic_program_info,
-            None,
+            magic_fee_vault,
         )?;
     }
     Ok(())
