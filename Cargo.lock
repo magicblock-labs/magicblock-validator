@@ -3588,6 +3588,7 @@ name = "magicblock-core"
 version = "0.8.3"
 dependencies = [
  "bincode",
+ "bytes",
  "flume",
  "magicblock-magic-program-api",
  "serde",
@@ -9138,6 +9139,7 @@ dependencies = [
  "solana-signature",
  "solana-signer",
  "solana-transaction",
+ "solana-transaction-error",
  "solana-transaction-status-client-types",
  "tempfile",
  "tokio",

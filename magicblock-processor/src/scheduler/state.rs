@@ -9,6 +9,7 @@ use std::sync::{Arc, OnceLock, RwLock};
 use magicblock_accounts_db::{traits::AccountsBank, AccountsDb};
 use magicblock_core::link::{
     accounts::AccountUpdateTx,
+    replication::Message,
     transactions::{
         ScheduledTasksTx, SchedulerMode, TransactionStatusTx,
         TransactionToProcessRx,
@@ -32,7 +33,7 @@ use solana_program_runtime::{
 };
 use solana_pubkey::Pubkey;
 use solana_svm::transaction_processor::TransactionProcessingEnvironment;
-use tokio::sync::mpsc::Receiver;
+use tokio::sync::mpsc::{Receiver, Sender};
 use tokio_util::sync::CancellationToken;
 
 use crate::{executor::SimpleForkGraph, syscalls::SyscallMatmulI8};
@@ -52,6 +53,7 @@ pub struct TransactionSchedulerState {
     pub account_update_tx: AccountUpdateTx,
     pub transaction_status_tx: TransactionStatusTx,
     pub tasks_tx: ScheduledTasksTx,
+    pub replication_tx: Sender<Message>,
 
     // === Configuration ===
     pub is_auto_airdrop_lamports_enabled: bool,

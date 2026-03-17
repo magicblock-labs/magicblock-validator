@@ -284,6 +284,7 @@ impl super::TransactionExecutor {
                 let versioned = transaction.to_versioned_transaction();
                 bincode::serialize(&versioned)
                     .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?
+                    .into()
             }
         };
 
