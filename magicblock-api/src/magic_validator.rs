@@ -348,6 +348,7 @@ impl MagicValidator {
             account_update_tx: validator_channels.account_update,
             environment: build_svm_env(&accountsdb, latest_block.blockhash, 0),
             tasks_tx: validator_channels.tasks_service,
+            replication_tx: validator_channels.replication_messages,
             is_auto_airdrop_lamports_enabled: config
                 .chainlink
                 .auto_airdrop_lamports
