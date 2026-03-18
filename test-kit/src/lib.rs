@@ -43,6 +43,7 @@ use tokio::sync::mpsc::Sender;
 use tracing::{error, instrument};
 
 pub const BLOCK_TIME: Duration = Duration::from_millis(50);
+pub const SUPERBLOCK_SIZE: u64 = 72000;
 /// A simulated validator backend for integration tests.
 ///
 /// This struct encapsulates all the core components of a validator, including
@@ -169,9 +170,10 @@ impl ExecutionTestEnv {
             environment,
             is_auto_airdrop_lamports_enabled: false,
             shutdown: Default::default(),
-            block_time: BLOCK_TIME,
             mode_rx,
             pause_permit: validator_channels.pause_permit,
+            block_time: BLOCK_TIME,
+            superblock_size: SUPERBLOCK_SIZE,
         };
 
         // Pre-send the target mode so the scheduler picks it up once running.

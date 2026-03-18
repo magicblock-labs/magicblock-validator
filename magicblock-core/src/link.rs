@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
 use accounts::{AccountUpdateRx, AccountUpdateTx};
-use blocks::{BlockUpdateRx, BlockUpdateTx};
 use tokio::sync::{
     mpsc::{self, Receiver, Sender},
     Semaphore,

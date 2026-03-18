@@ -347,6 +347,7 @@ impl MagicValidator {
                 .auto_airdrop_lamports
                 > 0,
             block_time: config.ledger.block_time,
+            superblock_size: config.ledger.superblock_size,
             shutdown: token.clone(),
             mode_rx,
             pause_permit: validator_channels.pause_permit,
