@@ -28,7 +28,7 @@ fn main() -> Result<(), figment::Error> {
     let config = ValidatorParams::try_new(args)?;
 
     println!("Validator Mode: {:?}", config.lifecycle);
-    println!("Listening on: {}", config.listen);
+    println!("Listening on: {}", config.aperture.listen);
 
     Ok(())
 }
