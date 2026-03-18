@@ -28,6 +28,9 @@ pub(crate) fn charge_delegated_payer(
     if !fee_vault.borrow().delegated() {
         return Err(InstructionError::IllegalOwner);
     }
+    if fee == 0 {
+        return Ok(());
+    }
 
     let new_payer_lamports = payer
         .borrow()

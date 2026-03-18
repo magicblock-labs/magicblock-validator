@@ -511,13 +511,20 @@ fn test_intent_bundle_undelegate_only() {
 /// `destination` on Base. The callback is a no-op.
 #[test]
 fn test_transfer_intent_success() {
+    // Cross-chain transfer amount
+    // Also min rent for destination account as well
+    const AMOUNT: u64 = 890_880;
+    // Fees charged from payer
+    const BASE_ACTION_FEE: u64 = 5000;
+    const CALLBACK_FEE: u64 = 5000;
+    const CHARGED_AMOUNT: u64 = AMOUNT + BASE_ACTION_FEE + CALLBACK_FEE;
+
     init_logger!();
 
     let ctx = IntegrationTestContext::try_new().unwrap();
     let payer = setup_payer(&ctx);
     let chain_payer = setup_payer(&ctx);
     let destination = Keypair::new();
-    const AMOUNT: u64 = 890_880; // Min rent for destination account as well
 
     init_counter(&ctx, &payer);
     delegate_counter(&ctx, &payer);
@@ -537,20 +544,26 @@ fn test_transfer_intent_success() {
     // Payer got deducted
     let payer_balance_after =
         ctx.fetch_ephem_account_balance(&payer.pubkey()).unwrap();
-    assert_eq!(payer_balance_after + AMOUNT, payer_balance_before);
+    assert_eq!(payer_balance_after + CHARGED_AMOUNT, payer_balance_before);
 }
 
 /// When the action intentionally fails the callback refunds `amount` lamports
 /// from the counter PDA back to the payer on Base.
 #[test]
 fn test_transfer_intent_failure_refunds_payer() {
+    // Cross-chain transfer amount
+    // Also min rent for destination account as well
+    const AMOUNT: u64 = 890_880;
+    // Fees charged from payer
+    const BASE_ACTION_FEE: u64 = 5000;
+    const CALLBACK_FEE: u64 = 5000;
+
     init_logger!();
 
     let ctx = IntegrationTestContext::try_new().unwrap();
     let payer = setup_payer(&ctx);
     let payer_chain = setup_payer(&ctx);
     let destination = Keypair::new();
-    const AMOUNT: u64 = 890_880; // Min rent for destination account as well
 
     init_counter(&ctx, &payer);
     delegate_counter(&ctx, &payer);
@@ -570,7 +583,10 @@ fn test_transfer_intent_failure_refunds_payer() {
     // Payer was refunded exactly AMOUNT on Base by the callback.
     let payer_balance_after =
         ctx.fetch_ephem_account_balance(&payer.pubkey()).unwrap();
-    assert_eq!(payer_balance_after, payer_balance_before);
+    assert_eq!(
+        payer_balance_after + BASE_ACTION_FEE + CALLBACK_FEE,
+        payer_balance_before
+    );
 }
 
 fn setup_payer(ctx: &IntegrationTestContext) -> Keypair {
