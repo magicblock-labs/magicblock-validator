@@ -55,7 +55,7 @@ use locks::{ExecutorId, MAX_SVM_EXECUTORS};
 use magicblock_accounts_db::{traits::AccountsBank, AccountsDb};
 use magicblock_core::{
     link::{
-        replication::{self, Message},
+        replication::{self, Message, SuperBlock},
         transactions::{
             ProcessableTransaction, SchedulerMode, TransactionProcessingMode,
             TransactionToProcessRx,
@@ -120,6 +120,8 @@ pub struct TransactionScheduler {
     hasher: Hasher,
     /// Time interval between consecutive slots
     slot_ticker: Interval,
+    /// Number of slots to elapse, before we perform snapshot/checksum operations
+    superblock_size: u64,
     /// Current Slot that scheduler is operating on (clock value)
     slot: Slot,
     /// Current transaction index included into the block under assembly
@@ -173,6 +175,7 @@ impl TransactionScheduler {
             mode_rx: state.mode_rx,
             replication_tx: state.replication_tx,
             pause_permit: state.pause_permit,
+            superblock_size: state.superblock_size,
             hasher,
             slot_ticker,
             slot,
@@ -218,7 +221,8 @@ impl TransactionScheduler {
                 }
                 _ = self.slot_ticker.tick() => {
                     if self.coordinator.is_primary() {
-                        self.transition_to_new_slot(None).await;
+                        let slot = self.transition_to_new_slot(None).await;
+                        self.handle_superblock(slot).await;
                     }
                 }
                 Some(executor) = self.ready_rx.recv() => {
@@ -256,10 +260,27 @@ impl TransactionScheduler {
     ///
     /// This is a fire-and-forget operation - failures are logged but don't
     /// block the scheduler.
-    async fn send_replication(&self, msg: Message, context: &'static str) {
+    async fn send_replication(&self, msg: Message) {
+        let kind = msg.kind();
         if let Err(error) = self.replication_tx.send(msg).await {
-            error!(%error, context, slot = self.slot, index = self.index, "replication send failed");
+            error!(
+                %error,
+                kind,
+                slot = self.slot,
+                index = self.index,
+                "replication send failed"
+            );
         }
+    }
+
+    async fn handle_superblock(&self, slot: Slot) {
+        if !slot.is_multiple_of(self.superblock_size) {
+            return;
+        }
+
+        let checksum = self.accountsdb.take_snapshot(slot);
+        let msg = Message::SuperBlock(SuperBlock { slot, checksum });
+        self.send_replication(msg).await;
     }
 
     async fn handle_ready_executor(&mut self, executor: ExecutorId) {
@@ -362,7 +383,7 @@ impl TransactionScheduler {
             |error| error!(executor, %error, "Executor channel send failed"),
         ).is_ok();
         if let Some(msg) = msg.filter(|_| sent) {
-            self.send_replication(msg, "transaction").await;
+            self.send_replication(msg).await;
         }
         None
     }
@@ -374,10 +395,11 @@ impl TransactionScheduler {
     async fn transition_to_new_slot(
         &mut self,
         block: Option<LatestBlockInner>,
-    ) {
+    ) -> u64 {
         let block = self.prepare_block(block).await;
         self.finalize_block(&block).await;
         self.update_sysvars(&block);
+        block.slot
     }
 
     /// Prepares the block for the current slot.
@@ -423,7 +445,7 @@ impl TransactionScheduler {
             hash: block.blockhash,
             timestamp: block.clock.unix_timestamp,
         });
-        self.send_replication(msg, "block").await;
+        self.send_replication(msg).await;
         block
     }
 
