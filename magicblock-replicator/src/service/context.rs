@@ -99,10 +99,9 @@ impl ReplicationContext {
     }
 
     /// Verifies superblock checksum.
-    pub fn verify_checksum(&self, sb: &SuperBlock) -> Result<()> {
-        let _lock = self.accountsdb.lock_database();
-        // SAFETY: Lock acquired above ensures no concurrent modifications
-        // during checksum computation.
+    pub async fn verify_checksum(&self, sb: &SuperBlock) -> Result<()> {
+        let _guard = self.scheduler.wait_for_idle().await;
+        // SAFETY: Scheduler is paused, no concurrent modifications during checksum.
         let checksum = unsafe { self.accountsdb.checksum() };
         if checksum == sb.checksum {
             Ok(())

@@ -172,6 +172,7 @@ impl ExecutionTestEnv {
             is_auto_airdrop_lamports_enabled: false,
             shutdown: Default::default(),
             mode_rx,
+            pause_permit: validator_channels.pause_permit,
         };
 
         // Pre-send the target mode so the scheduler picks it up once running.
