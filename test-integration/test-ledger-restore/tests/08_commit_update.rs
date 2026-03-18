@@ -83,7 +83,8 @@ fn write(ledger_path: &Path, payer: &Keypair) -> (Child, u64) {
     {
         wait_for_ledger_persist(&ctx, &mut validator);
 
-        let ix = create_add_and_schedule_commit_ix(payer.pubkey(), 4, false);
+        let ix =
+            create_add_and_schedule_commit_ix(payer.pubkey(), 4, false, None);
         let sig = confirm_tx_with_payer_ephem(ix, payer, &ctx, &mut validator);
 
         let res = ctx
