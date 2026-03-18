@@ -136,6 +136,7 @@ impl Service {
     pub fn spawn(self) -> JoinHandle<Result<()>> {
         std::thread::spawn(move || {
             let runtime = Builder::new_current_thread()
+                .enable_all()
                 .thread_name("replication-service")
                 .build()
                 .expect("Failed to build replication service runtime");
