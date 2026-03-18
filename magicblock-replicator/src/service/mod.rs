@@ -61,7 +61,10 @@ pub enum Service {
 }
 
 impl Service {
-    /// Creates service, attempting primary role first.
+    /// Creates service, attempting primary role first if allowed.
+    ///
+    /// When `can_promote` is false (ReplicaOnly mode), skips lock acquisition
+    /// and goes directly to standby mode.
     #[allow(clippy::too_many_arguments)]
     pub async fn new(
         broker: Broker,
@@ -72,25 +75,42 @@ impl Service {
         messages: Receiver<Message>,
         cancel: CancellationToken,
         reset: bool,
+        can_promote: bool,
     ) -> crate::Result<Option<Self>> {
         let ctx = ReplicationContext::new(
-            broker, mode_tx, accountsdb, ledger, scheduler, cancel,
+            broker,
+            mode_tx,
+            accountsdb,
+            ledger,
+            scheduler,
+            cancel,
+            can_promote,
         )
         .await?;
 
-        // Try to become primary.
-        match ctx.try_acquire_producer().await? {
-            Some(producer) => Ok(Some(Self::Primary(
-                ctx.into_primary(producer, messages).await?,
-            ))),
-            None => {
-                let Some(standby) = ctx.into_standby(messages, reset).await?
-                else {
-                    // Shutdown during consumer creation
-                    return Ok(None);
-                };
-                Ok(Some(Self::Standby(standby)))
+        // Try to become primary only if promotion is allowed.
+        if can_promote {
+            match ctx.try_acquire_producer().await? {
+                Some(producer) => Ok(Some(Self::Primary(
+                    ctx.into_primary(producer, messages).await?,
+                ))),
+                None => {
+                    let Some(standby) =
+                        ctx.into_standby(messages, reset).await?
+                    else {
+                        // Shutdown during consumer creation
+                        return Ok(None);
+                    };
+                    Ok(Some(Self::Standby(standby)))
+                }
             }
+        } else {
+            // ReplicaOnly mode: skip lock acquisition, go directly to standby
+            let Some(standby) = ctx.into_standby(messages, reset).await? else {
+                // Shutdown during consumer creation
+                return Ok(None);
+            };
+            Ok(Some(Self::Standby(standby)))
         }
     }
 

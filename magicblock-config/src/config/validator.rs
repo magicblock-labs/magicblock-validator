@@ -28,7 +28,7 @@ pub enum ReplicationMode {
     /// Validator which participates in replication: acting as either a primary or replicator
     StandBy(Url),
     /// Validator which participates in replication only as replicator (no takeover)
-    ReplicatOnly(Url),
+    ReplicaOnly(Url),
 }
 
 impl Default for ValidatorConfig {
@@ -49,7 +49,7 @@ impl ReplicationMode {
     pub fn remote(&self) -> Option<Url> {
         match self {
             Self::Standalone => None,
-            Self::StandBy(u) | Self::ReplicatOnly(u) => Some(u.clone()),
+            Self::StandBy(u) | Self::ReplicaOnly(u) => Some(u.clone()),
         }
     }
 }

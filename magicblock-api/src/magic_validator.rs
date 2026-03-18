@@ -217,6 +217,11 @@ impl MagicValidator {
                 let messages_rx = dispatch.replication_messages.take().expect(
                     "replication channel should always exist after init",
                 );
+                // ReplicaOnly mode cannot promote to primary
+                let can_promote = matches!(
+                    config.validator.replication_mode,
+                    ReplicationMode::StandBy(_)
+                );
                 ReplicationService::new(
                     broker,
                     mode_tx.clone(),
@@ -226,6 +231,7 @@ impl MagicValidator {
                     messages_rx,
                     token.clone(),
                     is_fresh_start,
+                    can_promote,
                 )
                 .await?
             } else {
@@ -876,7 +882,7 @@ impl MagicValidator {
         // The message carries the target mode so the scheduler transitions to
         // the correct coordination mode:
         // - Standalone validators transition to Primary mode
-        // - StandBy/ReplicatOnly validators transition to Replica mode
+        // - StandBy/ReplicaOnly validators transition to Replica mode
         if self.is_standalone {
             self.mode_tx
                 .send(SchedulerMode::Primary)

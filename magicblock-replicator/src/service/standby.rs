@@ -26,6 +26,7 @@ pub struct Standby {
     messages: Receiver<Message>,
     watcher: LockWatcher,
     last_activity: Instant,
+    can_promote: bool,
 }
 
 impl Standby {
@@ -36,12 +37,14 @@ impl Standby {
         messages: Receiver<Message>,
         watcher: LockWatcher,
     ) -> Self {
+        let can_promote = ctx.can_promote;
         Self {
             ctx,
             consumer,
             messages,
             watcher,
             last_activity: Instant::now(),
+            can_promote,
         }
     }
 
@@ -58,10 +61,14 @@ impl Standby {
             tokio::select! {
                 biased;
                 _ = self.watcher.wait_for_expiry() => {
-                    info!("leader lock expired, attempting takeover");
-                    if let Ok(Some(producer)) = self.ctx.try_acquire_producer().await {
-                        info!("acquired leadership, promoting");
-                        return self.ctx.into_primary(producer, self.messages).await.map(Some);
+                    if self.can_promote {
+                        info!("leader lock expired, attempting takeover");
+                        if let Ok(Some(producer)) = self.ctx.try_acquire_producer().await {
+                            info!("acquired leadership, promoting");
+                            return self.ctx.into_primary(producer, self.messages).await.map(Some);
+                        }
+                    } else {
+                        warn!("leader lock expired, but takeover disabled (ReplicaOnly mode)");
                     }
                 }
                 result = stream.next() => {
@@ -82,9 +89,13 @@ impl Standby {
                     }
                 }
                 _ = timeout_check.tick(), if self.last_activity.elapsed() > LEADER_TIMEOUT => {
-                    if let Ok(Some(producer)) = self.ctx.try_acquire_producer().await {
-                        info!("acquired leadership via timeout, promoting");
-                        return self.ctx.into_primary(producer, self.messages).await.map(Some);
+                    if self.can_promote {
+                        if let Ok(Some(producer)) = self.ctx.try_acquire_producer().await {
+                            info!("acquired leadership via timeout, promoting");
+                            return self.ctx.into_primary(producer, self.messages).await.map(Some);
+                        }
+                    } else {
+                        warn!("leader timeout reached, but takeover disabled (ReplicaOnly mode)");
                     }
                 }
                 _ = self.ctx.cancel.cancelled() => {
