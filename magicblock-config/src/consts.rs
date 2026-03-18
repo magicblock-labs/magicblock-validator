@@ -54,6 +54,9 @@ pub const DEFAULT_LEDGER_BLOCK_TIME_MS: u64 = 50;
 /// Default ledger size (100 GB)
 pub const DEFAULT_LEDGER_SIZE: u64 = 100 * 1024 * 1024 * 1024;
 
+/// Default superblock size (72K ~ 1 hour with 50ms block time)
+pub const DEFAULT_SUPEBLOCK_SIZE: u64 = 3600 * 20;
+
 /// Metrics Defaults
 /// Default address for the metrics endpoint (Prometheus format)
 pub const DEFAULT_METRICS_ADDR: &str = "0.0.0.0:9000";

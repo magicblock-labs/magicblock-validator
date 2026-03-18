@@ -67,6 +67,7 @@ pub struct TransactionSchedulerState {
     pub is_auto_airdrop_lamports_enabled: bool,
     pub shutdown: CancellationToken,
     pub block_time: Duration,
+    pub superblock_size: u64,
 
     /// Receives mode transition commands (Primary or Replica) at runtime.
     pub mode_rx: Receiver<SchedulerMode>,
