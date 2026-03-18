@@ -26,10 +26,10 @@ use crate::{
 /// Flow:
 /// 1. ER:   `payer → counter_pda` (pre-payment via system CPI)
 /// 2. Base: commit action tries to transfer `amount` from escrow → `destination`
-///          (returns `TRANSFER_FAIL_CODE` instead if `fail == true`)
+///    (returns `TRANSFER_FAIL_CODE` instead if `fail == true`)
 /// 3. Base: callback (fired after undelegation) receives `MagicResponse`:
-///          - `ok == true`  → no-op, deal closed
-///          - `ok == false` → counter_pda refunds `amount` back to `payer`
+///   - `ok == true`  → no-op, deal closed
+///   - `ok == false` → counter_pda refunds `amount` back to `payer`
 ///
 /// Accounts:
 /// 0. [signer, write] payer (delegated counter owner)
@@ -104,15 +104,13 @@ pub fn process_create_transfer_intent(
         ],
     };
 
-    // CommitAndUndelegate so that counter_pda is owned by the flexi-counter
-    // program again by the time the callback fires, enabling the lamport refund.
     MagicIntentBundleBuilder::new(
         payer.clone(),
         magic_context.clone(),
         magic_program.clone(),
     )
     .magic_fee_vault(magic_fee_vault.clone())
-    .commit(&[counter_pda.clone()])
+    .commit(std::slice::from_ref(counter_pda))
     .add_post_commit_action_with_callback(call_handler, callback)
     .build_and_invoke()
 }

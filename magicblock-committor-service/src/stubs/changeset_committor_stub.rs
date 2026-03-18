@@ -5,7 +5,9 @@ use std::{
 };
 
 use async_trait::async_trait;
-use magicblock_program::magic_scheduled_base_intent::ScheduledIntentBundle;
+use magicblock_program::magic_scheduled_base_intent::{
+    CommitType, ScheduledIntentBundle, UndelegateType,
+};
 use solana_account::Account;
 use solana_pubkey::Pubkey;
 use solana_signature::Signature;
@@ -226,19 +228,67 @@ impl BaseIntentCommittorExt for ChangesetCommittorStub {
             .await??;
         let res = intent_bundles
             .into_iter()
-            .map(|message| BroadcastedIntentExecutionResult {
-                id: message.id,
-                inner: Ok(ExecutionOutput::TwoStage {
-                    commit_signature: Signature::new_unique(),
-                    finalize_signature: Signature::new_unique(),
-                }),
-                patched_errors: Arc::new(vec![]),
-                callbacks_report: vec![],
+            .map(|message| {
+                let callbacks_report = (0..count_bundle_callbacks(&message))
+                    .map(|_| Ok(Signature::new_unique()))
+                    .collect();
+                BroadcastedIntentExecutionResult {
+                    id: message.id,
+                    inner: Ok(ExecutionOutput::TwoStage {
+                        commit_signature: Signature::new_unique(),
+                        finalize_signature: Signature::new_unique(),
+                    }),
+                    patched_errors: Arc::new(vec![]),
+                    callbacks_report,
+                }
             })
             .collect::<Vec<_>>();
 
         Ok(res)
     }
+}
+
+fn count_bundle_callbacks(bundle: &ScheduledIntentBundle) -> usize {
+    let ib = &bundle.intent_bundle;
+
+    let from_commit = ib
+        .commit
+        .as_ref()
+        .map(|ct| match ct {
+            CommitType::Standalone(_) => 0,
+            CommitType::WithBaseActions { base_actions, .. } => {
+                base_actions.iter().filter(|a| a.callback.is_some()).count()
+            }
+        })
+        .unwrap_or(0);
+
+    let from_cau = ib
+        .commit_and_undelegate
+        .as_ref()
+        .map(|cau| {
+            let from_commit_action = match &cau.commit_action {
+                CommitType::Standalone(_) => 0,
+                CommitType::WithBaseActions { base_actions, .. } => {
+                    base_actions.iter().filter(|a| a.callback.is_some()).count()
+                }
+            };
+            let from_undelegate = match &cau.undelegate_action {
+                UndelegateType::Standalone => 0,
+                UndelegateType::WithBaseActions(actions) => {
+                    actions.iter().filter(|a| a.callback.is_some()).count()
+                }
+            };
+            from_commit_action + from_undelegate
+        })
+        .unwrap_or(0);
+
+    let from_standalone = ib
+        .standalone_actions
+        .iter()
+        .filter(|a| a.callback.is_some())
+        .count();
+
+    from_commit + from_cau + from_standalone
 }
 
 fn now() -> u64 {

@@ -531,7 +531,7 @@ fn test_transfer_intent_success() {
     ctx.delegate_account(&chain_payer, &payer).unwrap();
 
     let payer_balance_before =
-        ctx.fetch_chain_account_balance(&payer.pubkey()).unwrap();
+        ctx.fetch_ephem_account_balance(&payer.pubkey()).unwrap();
 
     schedule_transfer_intent(&ctx, &payer, destination.pubkey(), AMOUNT, false);
 
@@ -570,7 +570,7 @@ fn test_transfer_intent_failure_refunds_payer() {
     ctx.delegate_account(&payer_chain, &payer).unwrap();
 
     let payer_balance_before =
-        ctx.fetch_chain_account_balance(&payer.pubkey()).unwrap();
+        ctx.fetch_ephem_account_balance(&payer.pubkey()).unwrap();
 
     schedule_transfer_intent(&ctx, &payer, destination.pubkey(), AMOUNT, true);
 

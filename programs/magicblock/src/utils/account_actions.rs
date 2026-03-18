@@ -30,10 +30,12 @@ pub(crate) fn charge_delegated_payer(
         return Err(InstructionError::InsufficientFunds);
     }
     payer.borrow_mut().set_lamports(payer_lamports - amount);
-    let recipient_lamports = recipient.borrow().lamports();
-    recipient
-        .borrow_mut()
-        .set_lamports(recipient_lamports.saturating_add(amount));
+    let recipient_lamports = recipient
+        .borrow()
+        .lamports()
+        .checked_add(amount)
+        .ok_or(InstructionError::ArithmeticOverflow)?;
+    recipient.borrow_mut().set_lamports(recipient_lamports);
     Ok(())
 }
 

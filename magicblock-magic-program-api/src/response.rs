@@ -7,6 +7,6 @@ pub struct MagicResponse {
     /// Present even in case of an error
     pub data: Vec<u8>,
     /// Reason for callback execution with ok = false
-    /// TimoutError/ActionError
+    /// TimeoutError/ActionError
     pub error: String,
 }

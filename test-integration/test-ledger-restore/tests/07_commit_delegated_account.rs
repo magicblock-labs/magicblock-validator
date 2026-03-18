@@ -97,7 +97,7 @@ fn write(ledger_path: &Path) -> (Child, u64, Keypair) {
 
         let validator_identity =
             expect!(ctx.ephem_validator_identity.ok_or(()), validator);
-        let megic_fee_vault =
+        let magic_fee_vault =
             dlp_api::dlp::pda::magic_fee_vault_pda_from_validator(
                 &validator_identity,
             );
@@ -105,7 +105,7 @@ fn write(ledger_path: &Path) -> (Child, u64, Keypair) {
             payer.pubkey(),
             4,
             false,
-            Some(megic_fee_vault),
+            Some(magic_fee_vault),
         );
         let sig = confirm_tx_with_payer_ephem(ix, &payer, &ctx, &mut validator);
 

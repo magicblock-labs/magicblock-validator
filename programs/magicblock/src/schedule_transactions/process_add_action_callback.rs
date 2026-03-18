@@ -100,6 +100,16 @@ pub(crate) fn process_add_action_callback(
             InstructionError::InvalidAccountData
         })?;
 
+    if latest_intent.payer != *payer_pubkey {
+        ic_msg!(
+            invoke_context,
+            "AddActionCallback ERR: payer {} does not match intent payer {}",
+            payer_pubkey,
+            latest_intent.payer
+        );
+        return Err(InstructionError::InvalidAccountData);
+    }
+
     let action = latest_intent
         .intent_bundle
         .get_action_mut(args.action_index as usize)
