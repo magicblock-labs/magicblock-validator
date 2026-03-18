@@ -17,7 +17,6 @@ use magicblock_core::{
     Slot,
 };
 use magicblock_ledger::{LatestBlock, LatestBlockInner, Ledger};
-use parking_lot::RwLockReadGuard;
 use solana_program::slot_hashes::SlotHashes;
 use solana_program_runtime::loaded_programs::{
     BlockRelation, ForkGraph, ProgramCache, ProgramCacheEntry,
@@ -163,8 +162,6 @@ impl TransactionExecutor {
     #[allow(clippy::await_holding_lock)]
     #[instrument(skip(self), fields(executor_id = self.id))]
     async fn run(mut self) {
-        let sync = self.accountsdb.write_lock();
-        let mut guard = sync.read();
         let mut block_updated = self.block.subscribe();
 
         loop {
@@ -189,11 +186,7 @@ impl TransactionExecutor {
                     let _ = self.ready_tx.try_send(self.id);
                 }
                 _ = block_updated.recv() => {
-                    // Unlock to allow global ops (snapshots), then
-                    // register the new block for future transactions
-                    RwLockReadGuard::unlock_fair(guard);
                     self.register_new_block();
-                    guard = sync.read();
                 }
                 else => break,
             }

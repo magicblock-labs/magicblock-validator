@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use bytes::Bytes;
 use flume::{Receiver as MpmcReceiver, Sender as MpmcSender};
 use magicblock_magic_program_api::args::TaskRequest;
@@ -14,7 +16,7 @@ use solana_transaction_error::{TransactionError, TransactionResult};
 use solana_transaction_status_client_types::TransactionStatusMeta;
 use tokio::sync::{
     mpsc::{Receiver, Sender, UnboundedReceiver, UnboundedSender},
-    oneshot,
+    oneshot, OwnedSemaphorePermit, Semaphore,
 };
 
 use super::blocks::BlockHash;
@@ -43,7 +45,12 @@ pub type ScheduledTasksTx = UnboundedSender<TaskRequest>;
 /// This is the primary entry point for all transaction-related
 /// operations like execution, simulation, and replay.
 #[derive(Clone)]
-pub struct TransactionSchedulerHandle(pub(super) TransactionToProcessTx);
+pub struct TransactionSchedulerHandle {
+    pub(super) tx: TransactionToProcessTx,
+    /// Semaphore for coordinating exclusive access with the scheduler.
+    /// See [`Self::wait_for_idle`] for usage.
+    pub(super) pause_permit: Arc<Semaphore>,
+}
 
 /// The sender half of a one-shot channel used to return the result of a transaction simulation.
 pub type TxnSimulationResultTx = oneshot::Sender<TransactionSimulationResult>;
@@ -246,7 +253,7 @@ impl TransactionSchedulerHandle {
             mode,
             encoded,
         };
-        let r = self.0.send(txn).await;
+        let r = self.tx.send(txn).await;
         r.map_err(|_| TransactionError::ClusterMaintenance)
     }
 
@@ -293,7 +300,7 @@ impl TransactionSchedulerHandle {
             mode,
             encoded,
         };
-        self.0
+        self.tx
             .send(txn)
             .await
             .map_err(|_| TransactionError::ClusterMaintenance)
@@ -314,11 +321,28 @@ impl TransactionSchedulerHandle {
             mode,
             encoded,
         };
-        self.0
+        self.tx
             .send(txn)
             .await
             .map_err(|_| TransactionError::ClusterMaintenance)?;
         rx.await.map_err(|_| TransactionError::ClusterMaintenance)
+    }
+
+    /// Waits for the scheduler to become idle and returns a permit that keeps it paused.
+    ///
+    /// This acquires the scheduling semaphore, blocking until the scheduler releases it
+    /// (which happens when all executors finish their current work and there are no
+    /// pending transactions). While holding the permit, the scheduler will not accept
+    /// or process new transactions.
+    ///
+    /// Use this to perform operations that require exclusive access to `AccountsDb`,
+    /// such as computing checksums or taking snapshots.
+    pub async fn wait_for_idle(&self) -> OwnedSemaphorePermit {
+        self.pause_permit
+            .clone()
+            .acquire_owned()
+            .await
+            .expect("scheduler semaphore can never be closed")
     }
 }
 

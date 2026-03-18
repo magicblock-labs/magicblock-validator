@@ -1,6 +1,11 @@
+use std::sync::Arc;
+
 use accounts::{AccountUpdateRx, AccountUpdateTx};
 use blocks::{BlockUpdateRx, BlockUpdateTx};
-use tokio::sync::mpsc::{self, Receiver, Sender};
+use tokio::sync::{
+    mpsc::{self, Receiver, Sender},
+    Semaphore,
+};
 use transactions::{
     ScheduledTasksRx, ScheduledTasksTx, TransactionSchedulerHandle,
     TransactionStatusRx, TransactionStatusTx, TransactionToProcessRx,
@@ -54,6 +59,8 @@ pub struct ValidatorChannelEndpoints {
     pub tasks_service: ScheduledTasksTx,
     /// Sends replication events to the replication service.
     pub replication_messages: Sender<Message>,
+    /// Semaphore used to pause scheduling for exclusive DB access (e.g., checksums).
+    pub pause_permit: Arc<Semaphore>,
 }
 
 /// Creates and connects the full set of communication channels between the dispatch
@@ -74,10 +81,17 @@ pub fn link() -> (DispatchEndpoints, ValidatorChannelEndpoints) {
     // Bounded channels for command queues where applying backpressure is important.
     let (txn_to_process_tx, txn_to_process_rx) = mpsc::channel(LINK_CAPACITY);
     let (replication_tx, replication_rx) = mpsc::channel(LINK_CAPACITY);
+    // Semaphore(1) coordinates exclusive access: scheduler holds permit during
+    // active scheduling, releases when idle; external callers acquire to pause.
+    let pause_permit = Arc::new(Semaphore::new(1));
+    let transaction_scheduler = TransactionSchedulerHandle {
+        tx: txn_to_process_tx,
+        pause_permit: pause_permit.clone(),
+    };
 
     // Bundle the respective channel ends for the dispatch side.
     let dispatch = DispatchEndpoints {
-        transaction_scheduler: TransactionSchedulerHandle(txn_to_process_tx),
+        transaction_scheduler,
         transaction_status: transaction_status_rx,
         account_update: account_update_rx,
         block_update: block_update_rx,
@@ -93,6 +107,7 @@ pub fn link() -> (DispatchEndpoints, ValidatorChannelEndpoints) {
         block_update: block_update_tx,
         tasks_service: tasks_tx,
         replication_messages: replication_tx,
+        pause_permit,
     };
 
     (dispatch, validator)
