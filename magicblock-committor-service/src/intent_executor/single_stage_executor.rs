@@ -166,8 +166,8 @@ where
 
         match err {
             TransactionStrategyExecutionError::ActionsError(err, signature) => {
-                // // Here we patch strategy for it to be retried in next iteration
-                // // & we also record data that has to be cleaned up after patch
+                // Here we patch strategy for it to be retried in next iteration
+                // & we also record data that has to be cleaned up after patch
                 let action_error = Err(ActionError::ActionsError(err.clone(), *signature));
                 let to_cleanup = self.handle_actions_result(action_error);
                 Ok(ControlFlow::Continue(to_cleanup))

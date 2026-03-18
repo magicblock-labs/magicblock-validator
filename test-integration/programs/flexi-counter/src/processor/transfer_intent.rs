@@ -27,7 +27,7 @@ use crate::{
 /// 1. ER:   `payer → counter_pda` (pre-payment via system CPI)
 /// 2. Base: commit action tries to transfer `amount` from escrow → `destination`
 ///    (returns `TRANSFER_FAIL_CODE` instead if `fail == true`)
-/// 3. Base: callback (fired after undelegation) receives `MagicResponse`:
+/// 3. Base: callback receives `MagicResponse`:
 ///   - `ok == true`  → no-op, deal closed
 ///   - `ok == false` → counter_pda refunds `amount` back to `payer`
 ///

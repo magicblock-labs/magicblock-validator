@@ -17,11 +17,12 @@ use crate::{
         get_parent_program_id, try_get_fee_vault, MAGIC_CONTEXT_IDX, PAYER_IDX,
     },
     utils::{
-        account_actions::mark_account_as_undelegated,
+        account_actions::{
+            charge_delegated_payer, mark_account_as_undelegated,
+        },
         accounts::{
             get_instruction_account_with_idx, get_instruction_pubkey_with_idx,
         },
-        charge_delegated_payer,
     },
     MagicContext,
 };

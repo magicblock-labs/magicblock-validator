@@ -262,7 +262,7 @@ where
         }
     }
 
-    /// Transactions to next executor state
+    /// Transitions to next executor state
     pub fn done(
         self,
         commit_signature: Signature,
@@ -400,6 +400,7 @@ where
         }
     }
 
+    /// Transitions to next executor state
     pub fn done(
         self,
         finalize_signature: Signature,
