@@ -357,12 +357,11 @@ where
                             .insert(delegation_record.owner);
                     }
 
-                    let delegation_actions =
-                        if account.delegated() {
-                            delegation_actions.unwrap_or_default()
-                        } else {
-                            DelegationActions::default()
-                        };
+                    let delegation_actions = if account.delegated() {
+                        delegation_actions.unwrap_or_default()
+                    } else {
+                        DelegationActions::default()
+                    };
 
                     (commit_freq, delegated_to_other, delegation_actions)
                 } else {
@@ -702,9 +701,6 @@ where
         accounts_to_clone
             .into_iter()
             .partition(|request| !request.delegation_actions.is_empty());
-
-    println!("ACCOUNTS WITH ACTIONS: {:?}", accounts_with_actions.iter().map(|a| a.pubkey.to_string()).collect::<Vec<_>>());
-    println!("ACCOUNTS WITHOUT ACTIONS: {:?}", accounts_without_actions.iter().map(|a| a.pubkey.to_string()).collect::<Vec<_>>());
 
     let mut accounts_join_set = JoinSet::new();
     for request in accounts_without_actions {
