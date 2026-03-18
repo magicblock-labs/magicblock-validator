@@ -28,12 +28,10 @@ pub struct ValidatorConfig {
 pub enum ReplicationMode {
     // Validator which doesn't participate in replication
     Standalone,
-    /// Validator which participates in replication: acting as either a primary or replicator.
-    /// The `SerdePubkey` is the primary validator's pubkey used for authority signature verification.
-    StandBy(Url, SerdePubkey),
-    /// Validator which participates in replication only as replicator (no takeover).
-    /// The `SerdePubkey` is the primary validator's pubkey used for authority signature verification.
-    ReplicateOnly(Url, SerdePubkey),
+    /// Validator which participates in replication: acting as either a primary or replicator
+    StandBy(Url),
+    /// Validator which participates in replication only as replicator (no takeover)
+    ReplicaOnly(Url),
 }
 
 impl Default for ValidatorConfig {
@@ -54,7 +52,7 @@ impl ReplicationMode {
     pub fn remote(&self) -> Option<Url> {
         match self {
             Self::Standalone => None,
-            Self::StandBy(u) | Self::ReplicatOnly(u) => Some(u.clone()),
+            Self::StandBy(u) | Self::ReplicaOnly(u) => Some(u.clone()),
         }
     }
 }

@@ -46,6 +46,8 @@ pub struct ReplicationContext {
     pub slot: Slot,
     /// Position of the last transaction within slot
     pub index: TransactionIndex,
+    /// Whether this node can promote from standby to primary.
+    pub can_promote: bool,
 }
 
 impl ReplicationContext {
@@ -57,6 +59,7 @@ impl ReplicationContext {
         ledger: Arc<Ledger>,
         scheduler: TransactionSchedulerHandle,
         cancel: CancellationToken,
+        can_promote: bool,
     ) -> Result<Self> {
         let id = IdBuilder::new(machineid_rs::Encryption::SHA256)
             .add_component(machineid_rs::HWIDComponent::SystemID)
@@ -67,7 +70,7 @@ impl ReplicationContext {
             .get_latest_transaction_position()?
             .unwrap_or_default();
 
-        info!(%id, slot, index, "context initialized");
+        info!(%id, slot, index, can_promote, "context initialized");
         Ok(Self {
             id,
             broker,
@@ -78,6 +81,7 @@ impl ReplicationContext {
             scheduler,
             slot,
             index,
+            can_promote,
         })
     }
 
