@@ -77,7 +77,7 @@ storage = "/data/ledger"
 basefee = 500
 keypair = "9Vo7Tb..."
 
-[accounts-db]
+[accountsdb]
 database-size = 104857600 # 100MB
 block-size = "block256"
 ```
