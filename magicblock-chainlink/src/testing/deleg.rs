@@ -1,4 +1,9 @@
 #[cfg(any(test, feature = "dev-context"))]
+use dlp_api::dlp::args::{
+    EncryptedBuffer, MaybeEncryptedInstruction, MaybeEncryptedIxData,
+    PostDelegationActions,
+};
+#[cfg(any(test, feature = "dev-context"))]
 use dlp_api::dlp::pda::delegation_record_pda_from_delegated_account;
 #[cfg(any(test, feature = "dev-context"))]
 use dlp_api::dlp::state::DelegationRecord;
@@ -39,6 +44,50 @@ pub fn add_delegation_record_for(
         Account {
             owner: dlp_api::dlp::id(),
             data: delegation_record_to_vec(&deleg_record),
+            ..Default::default()
+        },
+    );
+    deleg_record_pubkey
+}
+
+#[cfg(any(test, feature = "dev-context"))]
+pub fn add_delegation_record_with_actions_for(
+    rpc_client: &ChainRpcClientMock,
+    pubkey: Pubkey,
+    authority: Pubkey,
+    owner: Pubkey,
+    program_id: Pubkey,
+) -> Pubkey {
+    let deleg_record_pubkey =
+        delegation_record_pda_from_delegated_account(&pubkey);
+    let deleg_record = DelegationRecord {
+        authority,
+        owner,
+        delegation_slot: 1,
+        lamports: 1_000,
+        commit_frequency_ms: 2_000,
+    };
+    let mut data = delegation_record_to_vec(&deleg_record);
+    let actions = PostDelegationActions {
+        inserted_signers: 0,
+        inserted_non_signers: 0,
+        signers: vec![*program_id.as_array()],
+        non_signers: vec![],
+        instructions: vec![MaybeEncryptedInstruction {
+            program_id: 0,
+            accounts: vec![],
+            data: MaybeEncryptedIxData {
+                prefix: vec![1],
+                suffix: EncryptedBuffer::default(),
+            },
+        }],
+    };
+    data.extend_from_slice(&borsh::to_vec(&actions).unwrap());
+    rpc_client.add_account(
+        deleg_record_pubkey,
+        Account {
+            owner: dlp_api::dlp::id(),
+            data,
             ..Default::default()
         },
     );
