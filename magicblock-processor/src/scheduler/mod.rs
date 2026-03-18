@@ -126,6 +126,7 @@ impl TransactionScheduler {
             // Single-threaded runtime avoids scheduler contention with other async tasks
             let runtime = Builder::new_current_thread()
                 .thread_name("transaction-scheduler")
+                .enable_all()
                 .build()
                 .expect("Failed to build single-threaded Tokio runtime");
             runtime.block_on(tokio::task::unconstrained(self.run()));
