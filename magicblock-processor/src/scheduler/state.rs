@@ -33,7 +33,10 @@ use solana_program_runtime::{
 };
 use solana_pubkey::Pubkey;
 use solana_svm::transaction_processor::TransactionProcessingEnvironment;
-use tokio::sync::mpsc::{Receiver, Sender};
+use tokio::sync::{
+    mpsc::{Receiver, Sender},
+    Semaphore,
+};
 use tokio_util::sync::CancellationToken;
 
 use crate::{executor::SimpleForkGraph, syscalls::SyscallMatmulI8};
@@ -54,6 +57,8 @@ pub struct TransactionSchedulerState {
     pub transaction_status_tx: TransactionStatusTx,
     pub tasks_tx: ScheduledTasksTx,
     pub replication_tx: Sender<Message>,
+    /// Semaphore for pausing scheduling during exclusive DB access.
+    pub pause_permit: Arc<Semaphore>,
 
     // === Configuration ===
     pub is_auto_airdrop_lamports_enabled: bool,

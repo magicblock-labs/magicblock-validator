@@ -128,7 +128,7 @@ impl Standby {
             }
             Message::Block(block) => self.ctx.write_block(&block).await,
             Message::SuperBlock(sb) => {
-                self.ctx.verify_checksum(&sb).inspect_err(|error|
+                self.ctx.verify_checksum(&sb).await.inspect_err(|error|
                     error!(slot, %error, "accountsdb state has diverged")
                 )
             }

@@ -361,6 +361,7 @@ impl MagicValidator {
                 > 0,
             shutdown: token.clone(),
             mode_rx,
+            pause_permit: validator_channels.pause_permit,
         };
         TRANSACTION_COUNT.inc_by(ledger.count_transactions()? as u64);
         // Faucet keypair is only used for airdrops, which are not allowed in
