@@ -12,6 +12,7 @@ use magicblock_metrics::metrics::{
     inc_account_subscription_account_updates_count,
     inc_per_program_account_updates_count,
     inc_program_subscription_account_updates_count,
+    inc_pubsub_unsubscribe_timeout_count,
 };
 use solana_account_decoder_client_types::UiAccountEncoding;
 use solana_commitment_config::CommitmentConfig;
@@ -557,6 +558,9 @@ impl ChainPubsubActor {
                 .is_err()
             {
                 warn!(timeout_ms = 2000, "Unsubscribe timed out");
+                inc_pubsub_unsubscribe_timeout_count(
+                    &client_id, "account",
+                );
             }
             subs.lock()
                 .expect("subscriptions lock poisoned")
@@ -720,6 +724,9 @@ impl ChainPubsubActor {
                 .is_err()
             {
                 warn!(timeout_ms = 2000, "Unsubscribe timed out for program");
+                inc_pubsub_unsubscribe_timeout_count(
+                    &client_id, "program",
+                );
             }
             program_subs
                 .lock()
