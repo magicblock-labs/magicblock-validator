@@ -91,13 +91,12 @@ pub(crate) fn magic_fee_vault_pubkey() -> Pubkey {
     .0
 }
 
-/// Returns the fee vault account if the payer at `payer_idx` is delegated,
-/// validating that the account at `fee_vault_idx` is the expected vault,
-/// delegated, and writable. Returns `None` if the payer is not delegated.
+/// Returns the fee vault account if the payer at `payer_idx` uses the
+/// fee-vault path, validating that the account at `fee_vault_idx` is the
+/// expected vault, delegated, and writable. Returns `None` otherwise.
 ///
-/// Writability is checked eagerly: a delegated payer opts into the fee-charging
-/// path, so a non-writable vault would cause a confusing failure at charge time
-/// rather than a clear error upfront.
+/// Writability is checked eagerly: a payer on the fee-charging path would
+/// otherwise fail later with a less clear error.
 pub(crate) fn try_get_fee_vault<'a>(
     transaction_context: &'a TransactionContext,
     invoke_context: &InvokeContext,
@@ -106,7 +105,11 @@ pub(crate) fn try_get_fee_vault<'a>(
 ) -> Result<Option<&'a RefCell<AccountSharedData>>, InstructionError> {
     let payer_account =
         get_instruction_account_with_idx(transaction_context, payer_idx)?;
-    if !payer_account.borrow().delegated() {
+    let payer_requires_fee_vault = {
+        let payer = payer_account.borrow();
+        payer.delegated() && !payer.confined()
+    };
+    if !payer_requires_fee_vault {
         return Ok(None);
     }
 
