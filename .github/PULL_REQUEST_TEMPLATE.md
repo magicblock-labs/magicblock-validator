@@ -1,6 +1,5 @@
 <!--
-PR title must match:
-  type(scope): summary
+PR title must match: type(scope): summary
 Types: feat|fix|docs|chore|refactor|test|perf|ci|build
 Examples:
   fix: avoid panic on empty slot
@@ -8,16 +7,14 @@ Examples:
 -->
 
 ## Summary
--
+<!-- One sentence. Link to issue if applicable. -->
 
-## Compatibility
-- [ ] No breaking changes
-- [ ] Config change (describe):
-- [ ] Migration needed (describe):
 
-## Testing
-- [ ] tests (or explain)
+## Breaking Changes
+- [ ] None
+- [ ] Yes — migration path described below
 
-## Checklist
-- [ ] docs updated (if needed)
-- [ ] closes #
+
+## Test Plan
+<!-- How you verified this works. e.g., "unit tests", "ran locally against testnet", "existing tests pass" -->
+

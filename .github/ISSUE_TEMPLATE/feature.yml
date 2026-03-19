@@ -4,13 +4,17 @@ title: "feat: "
 labels: ["enhancement"]
 body:
   - type: textarea
-    id: request
+    id: problem
     attributes:
-      label: Request
-      description: Problem + proposal + acceptance criteria (keep it short).
-      placeholder: |
-        Problem:
-        Proposal:
-        Acceptance criteria:
+      label: Problem
+      description: What pain point does this solve? Why is it needed?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed Solution
+      description: How should this work?
     validations:
       required: true
