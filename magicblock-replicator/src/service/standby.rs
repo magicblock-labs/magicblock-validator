@@ -94,6 +94,7 @@ impl Standby {
                 _ = timeout_check.tick(), if self.last_activity.elapsed() > LEADER_TIMEOUT => {
                     if !self.can_promote {
                         warn!("leader timeout reached, but takeover disabled (ReplicaOnly mode)");
+                        continue;
                     }
                     if let Ok(Some(producer)) = self.ctx.try_acquire_producer().await {
                         info!("acquired leadership via timeout, promoting");

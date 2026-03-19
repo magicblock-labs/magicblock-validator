@@ -64,6 +64,7 @@ use magicblock_core::{
     Slot,
 };
 use magicblock_ledger::{LatestBlock, LatestBlockInner, Ledger};
+use magicblock_metrics::metrics;
 use solana_account::{from_account, to_account};
 use solana_program::{clock::Clock, hash::Hash, slot_hashes::SlotHashes};
 use solana_program_runtime::loaded_programs::ProgramCache;
@@ -162,6 +163,7 @@ impl TransactionScheduler {
         let hasher = Hasher::new();
         let slot_ticker = interval(state.block_time);
         let latest_block = state.ledger.latest_block().clone();
+        hasher.update(latest_block.load().blockhash);
         let slot = latest_block.load().slot;
 
         Self {
@@ -211,8 +213,6 @@ impl TransactionScheduler {
         // Holds the scheduling permit while transactions are being processed.
         // Released when idle so external callers can acquire exclusive access.
         let mut scheduling_permit = None;
-        // drain the first tick, which is instantaneous
-        self.slot_ticker.tick().await;
         loop {
             tokio::select! {
                 biased;
@@ -409,6 +409,7 @@ impl TransactionScheduler {
         let block = self.prepare_block(block).await;
         self.finalize_block(&block).await;
         self.update_sysvars(&block);
+        metrics::set_slot(block.slot);
         block.slot
     }
 

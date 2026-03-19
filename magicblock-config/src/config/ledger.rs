@@ -43,7 +43,7 @@ impl Default for LedgerConfig {
                 consts::DEFAULT_LEDGER_BLOCK_TIME_MS,
             ),
 
-            superblock_size: consts::DEFAULT_SUPEBLOCK_SIZE,
+            superblock_size: consts::DEFAULT_SUPERBLOCK_SIZE,
             reset: false,
             verify_keypair: true,
             size: consts::DEFAULT_LEDGER_SIZE,

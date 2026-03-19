@@ -5,6 +5,6 @@ use tokio::sync::broadcast;
 pub type BlockHash = Hash;
 
 /// A receiver for block update notifications.
-/// The notification payload is empty; consumers should load the latest block
-/// from the ledger when notified.
+/// Typically instantiated as `BlockUpdateRx<LatestBlockInner>` where the payload
+/// contains the latest block data (slot, blockhash, timestamp).
 pub type BlockUpdateRx<T> = broadcast::Receiver<T>;
