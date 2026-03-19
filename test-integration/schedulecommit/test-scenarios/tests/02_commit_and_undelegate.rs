@@ -58,7 +58,7 @@ fn commit_and_undelegate_one_account(
         UserSeeds::MagicScheduleCommit,
     );
     let ScheduleCommitTestContextFields {
-        payer_ephem: payer,
+        payer_chain: payer,
         committees,
         commitment,
         ephem_client,
@@ -81,6 +81,7 @@ fn commit_and_undelegate_one_account(
             payer.pubkey(),
             magicblock_magic_program_api::id(),
             magicblock_magic_program_api::MAGIC_CONTEXT_PUBKEY,
+            None,
             &committees
                 .iter()
                 .map(|(player, _)| player.pubkey())
@@ -119,7 +120,7 @@ fn commit_and_undelegate_order_book_account(
 ) {
     let ctx = get_context_with_delegated_committees(1, UserSeeds::OrderBook);
     let ScheduleCommitTestContextFields {
-        payer_ephem,
+        payer_chain: payer,
         committees,
         commitment,
         ephem_client,
@@ -129,13 +130,9 @@ fn commit_and_undelegate_order_book_account(
     assert_eq!(committees.len(), 1);
 
     let ixs = [
-        update_order_book_instruction(
-            payer_ephem.pubkey(),
-            committees[0].1,
-            update,
-        ),
+        update_order_book_instruction(payer.pubkey(), committees[0].1, update),
         schedule_commit_diff_instruction_for_order_book(
-            payer_ephem.pubkey(),
+            payer.pubkey(),
             committees[0].1,
             magicblock_magic_program_api::id(),
             magicblock_magic_program_api::MAGIC_CONTEXT_PUBKEY,
@@ -145,8 +142,8 @@ fn commit_and_undelegate_order_book_account(
     let ephem_blockhash = ephem_client.get_latest_blockhash().unwrap();
     let tx = Transaction::new_signed_with_payer(
         &ixs,
-        Some(&payer_ephem.pubkey()),
-        &[&payer_ephem],
+        Some(&payer.pubkey()),
+        &[&payer],
         ephem_blockhash,
     );
 
@@ -178,7 +175,7 @@ fn commit_and_undelegate_two_accounts(
         UserSeeds::MagicScheduleCommit,
     );
     let ScheduleCommitTestContextFields {
-        payer_ephem: payer,
+        payer_chain: payer,
         committees,
         commitment,
         ephem_client,
@@ -201,6 +198,7 @@ fn commit_and_undelegate_two_accounts(
             payer.pubkey(),
             magicblock_magic_program_api::id(),
             magicblock_magic_program_api::MAGIC_CONTEXT_PUBKEY,
+            None,
             &committees
                 .iter()
                 .map(|(player, _)| player.pubkey())
@@ -241,7 +239,7 @@ fn commit_and_undelegate_two_accounts_twice() -> (
         UserSeeds::MagicScheduleCommit,
     );
     let ScheduleCommitTestContextFields {
-        payer_ephem: payer,
+        payer_chain: payer,
         committees,
         commitment,
         ephem_client,
@@ -743,7 +741,7 @@ fn test_committing_after_failed_undelegation() {
             UserSeeds::MagicScheduleCommit,
         );
         let ScheduleCommitTestContextFields {
-            payer_ephem: payer,
+            payer_chain: payer,
             committees,
             commitment,
             ephem_client,
@@ -799,6 +797,7 @@ fn test_committing_after_failed_undelegation() {
                 payer.pubkey(),
                 magicblock_magic_program_api::id(),
                 magicblock_magic_program_api::MAGIC_CONTEXT_PUBKEY,
+                None,
                 &committees
                     .iter()
                     .map(|(player, _)| player.pubkey())

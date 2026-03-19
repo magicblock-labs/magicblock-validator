@@ -357,11 +357,13 @@ where
                             .insert(delegation_record.owner);
                     }
 
-                    (
-                        commit_freq,
-                        delegated_to_other,
-                        delegation_actions.unwrap_or_default(),
-                    )
+                    let delegation_actions = if account.delegated() {
+                        delegation_actions.unwrap_or_default()
+                    } else {
+                        DelegationActions::default()
+                    };
+
+                    (commit_freq, delegated_to_other, delegation_actions)
                 } else {
                     missing_delegation_record
                         .push((pubkey, account.remote_slot()));

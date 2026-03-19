@@ -1,12 +1,16 @@
 use std::ops::Deref;
 
-use borsh::{BorshDeserialize, BorshSerialize};
+use borsh::{to_vec, BorshDeserialize, BorshSerialize};
 use ephemeral_rollups_sdk::{
     consts::EXTERNAL_UNDELEGATE_DISCRIMINATOR,
     cpi::{
         delegate_account, undelegate_account, DelegateAccounts, DelegateConfig,
     },
-    ephem::{commit_accounts, commit_and_undelegate_accounts},
+    ephem::{
+        commit_accounts, commit_and_undelegate_accounts, CallHandler,
+        MagicIntentBundleBuilder,
+    },
+    ActionArgs, ShortAccountMeta,
 };
 use magicblock_magic_program_api::instruction::MagicBlockInstruction;
 use solana_program::{
@@ -70,6 +74,25 @@ pub struct ScheduleCommitCpiArgs {
     pub undelegate: bool,
     /// If true, also commit the payer account
     pub commit_payer: bool,
+    /// If true, accounts also have magic vault passed
+    pub has_magic_vault: bool,
+}
+
+#[derive(BorshSerialize, BorshDeserialize, Debug, Clone)]
+pub struct ScheduleCommitCpiWithVaultArgs {
+    /// Pubkeys of players from which PDAs were derived
+    pub players: Vec<Pubkey>,
+    /// If true, the accounts will be undelegated after the commit
+    pub undelegate: bool,
+    pub has_magic_vault: bool,
+}
+
+#[derive(BorshSerialize, BorshDeserialize, Debug, Clone)]
+pub struct ScheduleCommitWithOrderBookArgs {
+    /// Pubkeys of players from which PDAs were derived
+    pub players: Vec<Pubkey>,
+    /// If true, a post-commit UpdateOrderBook action is included in the intent bundle
+    pub with_actions: bool,
 }
 
 #[derive(BorshSerialize, BorshDeserialize, Debug, Clone)]
@@ -97,6 +120,14 @@ pub enum ScheduleCommitInstruction {
     /// - **2**    `[]`              MagicBlock Program (used to schedule commit)
     /// - **3..n** `[]`              PDA accounts to be committed
     ScheduleCommitCpi(ScheduleCommitCpiArgs),
+
+    /// # Account references
+    /// - **0.**   `[WRITE, SIGNER]` Payer funding the commit
+    /// - **1**    `[]`              MagicContext (used to record scheduled commit)
+    /// - **2**    `[]`              MagicBlock Program (used to schedule commit)
+    /// - **?**    `[WRITE]`         MagicBlock fee vault (optional)
+    /// - **?..n** `[]`              PDA accounts to be committed
+    ScheduleCommitWithVaultCpi(ScheduleCommitCpiWithVaultArgs),
 
     /// Same instruction input like [ScheduleCommitInstruction::ScheduleCommitCpi].
     /// Behavior differs that it will modify the accounts after it
@@ -158,6 +189,18 @@ pub enum ScheduleCommitInstruction {
 
     /// ScheduleCommitDiffCpi
     ScheduleCommitForOrderBook,
+
+    /// Commit accounts via MagicIntentBundleBuilder with fee vault and a
+    /// post-commit UpdateOrderBook action.
+    ///
+    /// # Account references
+    /// - **0.**   `[WRITE, SIGNER]` Payer (delegated ephemeral balance)
+    /// - **1.**   `[WRITE]`         MagicBlock context
+    /// - **2.**   `[]`              MagicBlock program
+    /// - **3.**   `[WRITE]`         MagicBlock fee vault
+    /// - **4.**   `[WRITE]`         OrderBook account (post-commit action target)
+    /// - **5..n** `[WRITE]`         PDA accounts to be committed
+    ScheduleCommitWithVaultAndOrderBookCpi(ScheduleCommitWithOrderBookArgs),
 }
 
 pub fn process_instruction<'a>(
@@ -194,8 +237,12 @@ pub fn process_instruction<'a>(
                 modify_accounts: args.modify_accounts,
                 undelegate: args.undelegate,
                 commit_payer: args.commit_payer,
+                has_magic_vault: args.has_magic_vault,
             },
         ),
+        ScheduleCommitWithVaultCpi(args) => {
+            process_schedulecommit_with_vault_cpi(accounts, &args)
+        }
         ScheduleCommitAndUndelegateCpiModAfter(players) => {
             process_schedulecommit_and_undelegation_cpi_with_mod_after(
                 accounts, &players,
@@ -216,6 +263,11 @@ pub fn process_instruction<'a>(
         UpdateOrderBook(args) => process_update_order_book(accounts, args),
         ScheduleCommitForOrderBook => {
             process_schedulecommit_for_orderbook(accounts)
+        }
+        ScheduleCommitWithVaultAndOrderBookCpi(args) => {
+            process_schedulecommit_with_vault_and_order_book_cpi(
+                accounts, &args,
+            )
         }
     }
 }
@@ -463,6 +515,7 @@ pub fn process_schedulecommit_for_orderbook(
         vec![order_book_account],
         magic_context,
         magic_program,
+        None,
     )?;
 
     Ok(())
@@ -512,6 +565,7 @@ pub struct ProcessSchedulecommitCpiArgs {
     pub modify_accounts: bool,
     pub undelegate: bool,
     pub commit_payer: bool,
+    pub has_magic_vault: bool,
 }
 
 // -----------------
@@ -528,6 +582,11 @@ pub fn process_schedulecommit_cpi(
     let payer = next_account_info(accounts_iter)?;
     let magic_context = next_account_info(accounts_iter)?;
     let magic_program = next_account_info(accounts_iter)?;
+    let magic_fee_vault = if args.has_magic_vault {
+        Some(next_account_info(accounts_iter)?)
+    } else {
+        None
+    };
     let mut remaining = vec![];
     for info in accounts_iter.by_ref() {
         remaining.push(info.clone());
@@ -579,12 +638,141 @@ pub fn process_schedulecommit_cpi(
             committees,
             magic_context,
             magic_program,
+            magic_fee_vault,
         )?;
     } else {
-        commit_accounts(payer, committees, magic_context, magic_program)?;
+        commit_accounts(
+            payer,
+            committees,
+            magic_context,
+            magic_program,
+            magic_fee_vault,
+        )?;
     }
 
     Ok(())
+}
+
+pub fn process_schedulecommit_with_vault_cpi(
+    accounts: &[AccountInfo],
+    args: &ScheduleCommitCpiWithVaultArgs,
+) -> Result<(), ProgramError> {
+    msg!("Processing schedulecommit_cpi instruction");
+
+    let player_pubkeys = args.players.as_slice();
+    let accounts_iter = &mut accounts.iter();
+    let payer = next_account_info(accounts_iter)?;
+    let magic_context = next_account_info(accounts_iter)?;
+    let magic_program = next_account_info(accounts_iter)?;
+    let magic_fee_vault = if args.has_magic_vault {
+        Some(next_account_info(accounts_iter)?)
+    } else {
+        None
+    };
+    let mut remaining = vec![];
+    for info in accounts_iter.by_ref() {
+        remaining.push(info.clone());
+    }
+
+    if remaining.len() != player_pubkeys.len() {
+        msg!(
+            "ERROR: player_pubkeys.len() != committes.len() | {} != {}",
+            player_pubkeys.len(),
+            remaining.len()
+        );
+        return Err(ProgramError::InvalidArgument);
+    }
+
+    // Collect committees
+    let committees = remaining.iter().collect::<Vec<_>>();
+    msg!(
+        "Committees are {:?}",
+        committees.iter().map(|x| x.key).collect::<Vec<_>>()
+    );
+
+    if args.undelegate {
+        commit_and_undelegate_accounts(
+            payer,
+            committees,
+            magic_context,
+            magic_program,
+            magic_fee_vault,
+        )?;
+    } else {
+        commit_accounts(
+            payer,
+            committees,
+            magic_context,
+            magic_program,
+            magic_fee_vault,
+        )?;
+    }
+
+    Ok(())
+}
+
+pub fn process_schedulecommit_with_vault_and_order_book_cpi(
+    accounts: &[AccountInfo],
+    args: &ScheduleCommitWithOrderBookArgs,
+) -> Result<(), ProgramError> {
+    msg!("Processing schedulecommit_with_vault_and_order_book_cpi instruction");
+
+    let accounts_iter = &mut accounts.iter();
+    let payer = next_account_info(accounts_iter)?;
+    let magic_context = next_account_info(accounts_iter)?;
+    let magic_program = next_account_info(accounts_iter)?;
+    let magic_fee_vault = next_account_info(accounts_iter)?;
+    let order_book = next_account_info(accounts_iter)?;
+
+    let committees: Vec<AccountInfo> = accounts_iter.cloned().collect();
+
+    if committees.len() != args.players.len() {
+        msg!(
+            "ERROR: players.len() != committees.len() | {} != {}",
+            args.players.len(),
+            committees.len()
+        );
+        return Err(ProgramError::InvalidArgument);
+    }
+
+    let mut builder = MagicIntentBundleBuilder::new(
+        payer.clone(),
+        magic_context.clone(),
+        magic_program.clone(),
+    )
+    .magic_fee_vault(magic_fee_vault.clone())
+    .commit(&committees);
+
+    if args.with_actions {
+        // Build the UpdateOrderBook instruction data with one hardcoded bid
+        let update_ix_data =
+            to_vec(&ScheduleCommitInstruction::UpdateOrderBook(BookUpdate {
+                bids: vec![OrderLevel {
+                    price: 100,
+                    size: 10,
+                }],
+                asks: vec![],
+            }))
+            .map_err(|_| ProgramError::InvalidInstructionData)?;
+
+        // Post-commit action: call UpdateOrderBook on the order book account
+        let call_handler = CallHandler {
+            args: ActionArgs {
+                data: update_ix_data,
+                escrow_index: 1, // payer/escrow_authority inserted at index 1
+            },
+            compute_units: 50_000,
+            escrow_authority: payer.clone(),
+            destination_program: id(),
+            accounts: vec![ShortAccountMeta {
+                pubkey: *order_book.key,
+                is_writable: true,
+            }],
+        };
+        builder = builder.add_post_commit_actions([call_handler]);
+    }
+
+    builder.build_and_invoke()
 }
 
 fn process_increase_count(accounts: &[AccountInfo]) -> ProgramResult {
@@ -666,6 +854,7 @@ fn process_schedulecommit_and_undelegation_cpi_with_mod_after(
         remaining.iter().collect::<Vec<_>>(),
         magic_context,
         magic_program,
+        None,
     )?;
 
     // Then try to modify them
@@ -751,6 +940,7 @@ fn process_schedulecommit_and_undelegation_cpi_twice(
         remaining.iter().collect::<Vec<_>>(),
         magic_context,
         magic_program,
+        None,
     )?;
 
     // All accounts that will be passed to the CPI
