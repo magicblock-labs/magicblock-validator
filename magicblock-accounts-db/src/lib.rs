@@ -383,12 +383,19 @@ impl AccountsDb {
     /// fast-forwards to it (bringing state forward in time).
     ///
     /// Returns `true` if fast-forward was performed, `false` if just registered.
+    /// NOTE:
+    /// This method is only ever used to initialize accountsdb from external source
+    /// It's not used to overwrite existing instance
     pub fn insert_external_snapshot(
         &mut self,
         slot: u64,
         archive_bytes: &[u8],
     ) -> AccountsDbResult<bool> {
         let current_slot = self.slot();
+        // we do not overwrite accountsdb which already has been initialized
+        if current_slot > 0 {
+            return Ok(false);
+        }
         let fast_forwarded = self.snapshot_manager.insert_external_snapshot(
             slot,
             archive_bytes,
