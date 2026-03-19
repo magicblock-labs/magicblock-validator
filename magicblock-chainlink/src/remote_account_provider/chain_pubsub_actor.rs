@@ -77,6 +77,12 @@ pub struct ChainPubsubActor {
     abort_sender: mpsc::Sender<()>,
 }
 
+impl Drop for ChainPubsubActor {
+    fn drop(&mut self) {
+        self.shutdown_token.cancel();
+    }
+}
+
 impl ChainPubsubActor {
     pub async fn new_from_url(
         pubsub_url: &str,
