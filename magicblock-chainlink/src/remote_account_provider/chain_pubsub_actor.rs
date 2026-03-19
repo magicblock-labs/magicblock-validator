@@ -543,10 +543,9 @@ impl ChainPubsubActor {
                                 is_connected.clone(),
                                 &format!("Subscription ended for {pubkey}")
                             );
-                            // Return early - abort_and_signal_connection_issue cancels all
-                            // subscriptions, triggering cleanup via the cancellation path
-                            // above. No need to run unsubscribe/cleanup here.
-                            return;
+                            // Break to run the unsubscribe timeout + map-cleanup
+                            // block below (mirrors program subscription behavior)
+                            break;
                         }
                     }
                 }
