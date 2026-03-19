@@ -691,7 +691,7 @@ impl TestEnv {
 
     /// Takes a snapshot and waits for archiving to complete.
     fn take_snapshot_and_wait(&self, slot: u64) -> u64 {
-        let checksum = self.adb.take_snapshot(slot);
+        let checksum = unsafe { self.adb.take_snapshot(slot) };
         // Wait for background archiving to complete
         let mut retries = 0;
         while !self.adb.snapshot_exists(slot) && retries < 200 {
