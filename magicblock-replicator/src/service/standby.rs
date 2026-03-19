@@ -61,14 +61,17 @@ impl Standby {
             tokio::select! {
                 biased;
                 _ = self.watcher.wait_for_expiry() => {
-                    if self.can_promote {
-                        info!("leader lock expired, attempting takeover");
-                        if let Ok(Some(producer)) = self.ctx.try_acquire_producer().await {
-                            info!("acquired leadership, promoting");
-                            return self.ctx.into_primary(producer, self.messages).await.map(Some);
-                        }
-                    } else {
+                    if self.has_pending().await {
+                        continue;
+                    }
+                    if !self.can_promote {
                         warn!("leader lock expired, but takeover disabled (ReplicaOnly mode)");
+                        continue
+                    }
+                    info!("leader lock expired, attempting takeover");
+                    if let Ok(Some(producer)) = self.ctx.try_acquire_producer().await {
+                        info!("acquired leadership, promoting");
+                        return self.ctx.into_primary(producer, self.messages).await.map(Some);
                     }
                 }
                 result = stream.next() => {
@@ -89,13 +92,12 @@ impl Standby {
                     }
                 }
                 _ = timeout_check.tick(), if self.last_activity.elapsed() > LEADER_TIMEOUT => {
-                    if self.can_promote {
-                        if let Ok(Some(producer)) = self.ctx.try_acquire_producer().await {
-                            info!("acquired leadership via timeout, promoting");
-                            return self.ctx.into_primary(producer, self.messages).await.map(Some);
-                        }
-                    } else {
+                    if !self.can_promote {
                         warn!("leader timeout reached, but takeover disabled (ReplicaOnly mode)");
+                    }
+                    if let Ok(Some(producer)) = self.ctx.try_acquire_producer().await {
+                        info!("acquired leadership via timeout, promoting");
+                        return self.ctx.into_primary(producer, self.messages).await.map(Some);
                     }
                 }
                 _ = self.ctx.cancel.cancelled() => {
@@ -143,6 +145,15 @@ impl Standby {
             return;
         }
         self.ctx.update_position(slot, index);
+    }
+
+    /// Check whether consumer has any undelivered messages in the stream
+    async fn has_pending(&mut self) -> bool {
+        self.consumer
+            .pending(&self.ctx.cancel)
+            .await
+            .map(|pending| pending != 0)
+            .unwrap_or_default()
     }
 
     async fn replay_tx(&self, msg: Transaction) -> Result<()> {
