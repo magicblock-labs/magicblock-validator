@@ -111,6 +111,7 @@ pub fn process_create_transfer_intent(
     )
     .magic_fee_vault(magic_fee_vault.clone())
     .commit(std::slice::from_ref(counter_pda))
-    .add_post_commit_action_with_callback(call_handler, callback)
+    .add_post_commit_action(call_handler)
+    .then(callback)
     .build_and_invoke()
 }
