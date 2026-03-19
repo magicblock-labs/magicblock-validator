@@ -14,7 +14,7 @@ use std::{
 use async_trait::async_trait;
 use futures_util::future::{join, try_join_all};
 use magicblock_core::traits::{
-    ActionsCallbackScheduler, CallbackScheduleError,
+    ActionError, ActionsCallbackScheduler, CallbackScheduleError,
 };
 use magicblock_metrics::metrics;
 use magicblock_program::{
@@ -40,7 +40,6 @@ use tokio::time::timeout;
 use tracing::{info, trace, warn};
 
 use crate::{
-    actions_callback_executor::ActionError,
     intent_executor::{
         error::{
             IntentExecutorError, IntentExecutorResult,
@@ -364,7 +363,7 @@ where
         let mut executor =
             TwoStageExecutor::new(self, commit_strategy, finalize_strategy);
 
-        let commit_res = if has_commit_callbacks {
+        let commit_signature = if has_commit_callbacks {
             if let Some(time_left) = time_left() {
                 let fut = executor.commit(committed_pubkeys, persister);
                 match timeout(time_left, fut).await {
@@ -385,12 +384,10 @@ where
             }
         } else {
             executor.commit(committed_pubkeys, persister).await
-        };
-        executor.execute_callbacks(commit_res.as_ref().map(|_| ()));
-        let commit_signature = commit_res?;
+        }?;
 
         let mut finalize_executor = executor.done(commit_signature);
-        let finalize_res = if has_finalize_callbacks {
+        let finalize_signature = if has_finalize_callbacks {
             if let Some(time_left) = time_left() {
                 let execute_fut = finalize_executor.finalize(persister);
                 match timeout(time_left, execute_fut).await {
@@ -413,12 +410,8 @@ where
             }
         } else {
             finalize_executor.finalize(persister).await
-        };
-        finalize_executor.execute_callbacks(
-            finalize_res.as_ref().map(|_| ()).map_err(ActionError::from),
-        );
+        }?;
 
-        let finalize_signature = finalize_res?;
         let finalized_stage =
             finalize_executor.done(finalize_signature).result();
         Ok(ExecutionOutput::TwoStage {

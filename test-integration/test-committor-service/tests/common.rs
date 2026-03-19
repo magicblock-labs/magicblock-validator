@@ -8,7 +8,6 @@ use std::{
 
 use async_trait::async_trait;
 use magicblock_committor_service::{
-    actions_callback_executor::ActionResult,
     intent_executor::{
         task_info_fetcher::{
             CacheTaskInfoFetcher, TaskInfoFetcher, TaskInfoFetcherError,
@@ -36,6 +35,7 @@ use solana_sdk::{
     signature::{Keypair, Signature},
     signer::Signer,
 };
+use magicblock_core::traits::ActionResult;
 
 // Helper function to create a test RPC client
 pub async fn create_test_client() -> MagicblockRpcClient {

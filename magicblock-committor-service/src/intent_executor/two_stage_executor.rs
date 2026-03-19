@@ -1,12 +1,13 @@
 use std::{mem, ops::ControlFlow};
 
-use magicblock_core::traits::ActionsCallbackScheduler;
+use magicblock_core::traits::{
+    ActionError, ActionResult, ActionsCallbackScheduler,
+};
 use solana_pubkey::Pubkey;
 use solana_signature::Signature;
 use tracing::{error, instrument, warn};
 
 use crate::{
-    actions_callback_executor::{ActionError, ActionResult},
     intent_executor::{
         error::{
             IntentExecutorError, IntentExecutorResult,
@@ -123,7 +124,7 @@ where
             }
         };
 
-        // Even if failed - dump commit into junk
+        self.execute_callbacks(commit_result.as_ref().map(|_| ()));
         self.inner
             .junk
             .push(mem::take(&mut self.state.commit_strategy));
@@ -244,7 +245,7 @@ where
         &mut self,
         result: Result<(), impl Into<ActionError>>,
     ) {
-        let result = result.map_err(|err| err.into());
+        let result = result.map(|_| ()).map_err(|err| err.into());
         let junk_strategy = handle_actions_result(
             self.inner,
             &mut self.state.commit_strategy,
@@ -327,6 +328,7 @@ where
         };
 
         // Even if failed - dump finalize into junk
+        self.execute_callbacks(finalize_result.as_ref().map(|_| ()));
         self.inner
             .junk
             .push(mem::take(&mut self.state.finalize_strategy));

@@ -1,3 +1,4 @@
+use magicblock_core::traits::ActionError;
 use magicblock_metrics::metrics;
 use magicblock_rpc_client::{
     utils::TransactionErrorMapper, MagicBlockRpcClientError,
@@ -355,6 +356,30 @@ impl From<TaskStrategistError> for IntentExecutorError {
         match value {
             TaskStrategistError::FailedToFitError => Self::FailedToFitError,
             TaskStrategistError::SignerError(err) => Self::SignerError(err),
+        }
+    }
+}
+
+impl From<&TransactionStrategyExecutionError> for ActionError {
+    fn from(value: &TransactionStrategyExecutionError) -> Self {
+        if let TransactionStrategyExecutionError::ActionsError(err, signature) =
+            value
+        {
+            Self::ActionsError(err.clone(), *signature)
+        } else {
+            Self::IntentFailedError(value.to_string())
+        }
+    }
+}
+
+impl From<&IntentExecutorError> for ActionError {
+    fn from(value: &IntentExecutorError) -> Self {
+        match value {
+            IntentExecutorError::FailedToCommitError { err, .. }
+            | IntentExecutorError::FailedToFinalizeError { err, .. } => {
+                err.into()
+            }
+            err => ActionError::IntentFailedError(err.to_string()),
         }
     }
 }

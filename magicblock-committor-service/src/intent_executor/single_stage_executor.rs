@@ -1,12 +1,13 @@
 use std::ops::ControlFlow;
 
-use magicblock_core::traits::ActionsCallbackScheduler;
+use magicblock_core::traits::{
+    ActionError, ActionResult, ActionsCallbackScheduler,
+};
 use solana_pubkey::Pubkey;
 use solana_signature::Signature;
 use tracing::{error, instrument};
 
 use crate::{
-    actions_callback_executor::{ActionError, ActionResult},
     intent_executor::{
         error::{
             IntentExecutorError, IntentExecutorResult,
