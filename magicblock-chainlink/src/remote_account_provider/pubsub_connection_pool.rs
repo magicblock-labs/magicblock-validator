@@ -288,6 +288,66 @@ impl<T: PubsubConnection> PubSubConnectionPool<T> {
             })
         })
     }
+
+    /// Removes connections with zero active subscriptions, keeping at
+    /// least one connection alive. Returns the number pruned.
+    pub fn prune_idle(&self) -> usize {
+        // 1. Snapshot all connections via iter under Guard (clone each)
+        let guard = Guard::new();
+        let all: Vec<PooledConnection<T>> =
+            self.connections.iter(&guard).map(|c| c.clone()).collect();
+        drop(guard);
+
+        // 2. Partition into active and idle
+        let (active, idle): (Vec<_>, Vec<_>) = all
+            .into_iter()
+            .partition(|c| c.sub_count.load(Ordering::SeqCst) > 0);
+
+        // 3. Nothing to prune
+        if idle.is_empty() {
+            return 0;
+        }
+
+        // 4. Drain the queue
+        while self.connections.pop().is_some() {}
+
+        // 5. Re-push active connections (keep at least one idle
+        //    if no active)
+        if active.is_empty() {
+            if let Some(kept) = idle.first() {
+                self.connections.push(kept.clone());
+            }
+        } else {
+            for conn in &active {
+                self.connections.push(conn.clone());
+            }
+        }
+
+        // 6. Compute pruned count and update metrics
+        let pruned = if active.is_empty() {
+            idle.len().saturating_sub(1)
+        } else {
+            idle.len()
+        };
+
+        if pruned > 0 {
+            let remaining = self.connections.len();
+            metrics::set_pubsub_client_connections_count(
+                &self.client_id,
+                remaining,
+            );
+            metrics::inc_pubsub_idle_connections_pruned_count(
+                &self.client_id,
+                pruned as u64,
+            );
+            trace!(
+                pruned,
+                remaining,
+                "Pruned idle pooled connections"
+            );
+        }
+        pruned
+    }
 }
 
 #[cfg(test)]

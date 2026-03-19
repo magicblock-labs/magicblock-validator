@@ -775,6 +775,11 @@ impl ChainPubsubActor {
 
         // 5. We are now connected again
         is_connected.store(true, Ordering::SeqCst);
+
+        // 6. Prune any idle connections left over from before the
+        //    disruption
+        pubsub_connection.prune_idle();
+
         Ok(())
     }
 
