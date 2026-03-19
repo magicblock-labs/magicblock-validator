@@ -291,14 +291,21 @@ impl<T: PubsubConnection> PubSubConnectionPool<T> {
 
     /// Removes connections with zero active subscriptions, keeping at
     /// least one connection alive. Returns the number pruned.
-    pub fn prune_idle(&self) -> usize {
-        // 1. Snapshot all connections via iter under Guard (clone each)
-        let guard = Guard::new();
-        let all: Vec<PooledConnection<T>> =
-            self.connections.iter(&guard).cloned().collect();
-        drop(guard);
+    pub async fn prune_idle(&self) -> usize {
+        // Hold the same mutex used by find_or_create_connection so that
+        // no concurrent reservation/creation can race with the
+        // drain-and-rebuild below.
+        let _guard = self.new_connection_guard.lock().await;
 
-        // 2. Partition into active and idle
+        // 1. Snapshot all connections under EBR guard (clone each)
+        let ebr_guard = Guard::new();
+        let all: Vec<PooledConnection<T>> =
+            self.connections.iter(&ebr_guard).cloned().collect();
+        drop(ebr_guard);
+
+        // 2. Re-check sub_count under the lock to avoid removing a
+        //    connection that was reserved between a prior snapshot and
+        //    acquiring the mutex.
         let (active, idle): (Vec<_>, Vec<_>) = all
             .into_iter()
             .partition(|c| c.sub_count.load(Ordering::SeqCst) > 0);

@@ -774,7 +774,7 @@ impl ChainPubsubActor {
 
         // 6. Prune any idle connections left over from before the
         //    disruption
-        pubsub_connection.prune_idle();
+        pubsub_connection.prune_idle().await;
 
         Ok(())
     }
