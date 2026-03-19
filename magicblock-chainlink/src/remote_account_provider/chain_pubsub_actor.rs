@@ -521,9 +521,10 @@ impl ChainPubsubActor {
                                     &client_id,
                                 );
                             }
-                            let _ = subscription_updates_sender.send(update).await.inspect_err(|err| {
-                                error!(error = ?err, "Failed to send subscription update");
-                            });
+                            if subscription_updates_sender.send(update).await.is_err() {
+                                warn!(pubkey = %pubkey, "Downstream receiver dropped; stopping subscription listener");
+                                break;
+                            }
                         } else {
                             static SIGNAL_CONNECTION_COUNT: AtomicU16 =
                                 AtomicU16::new(0);
@@ -683,11 +684,10 @@ impl ChainPubsubActor {
                                             &client_id,
                                         );
                                     }
-                                    let _ = subscription_updates_sender.send(sub_update)
-                                        .await
-                                        .inspect_err(|err| {
-                                            error!(error = ?err, pubkey = %acc_pubkey, "Failed to send program subscription update");
-                                        });
+                                    if subscription_updates_sender.send(sub_update).await.is_err() {
+                                        warn!(program_id = %program_pubkey, "Downstream receiver dropped; stopping program subscription listener");
+                                        break;
+                                    }
                                 }
                             }
                         } else {
