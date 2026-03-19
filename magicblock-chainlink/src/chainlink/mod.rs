@@ -124,7 +124,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
         let validator_pubkey = validator_keypair.pubkey();
         // Extract accounts provider and create fetch cloner while connecting
         // the subscription channel
-        let (tx, rx) = tokio::sync::mpsc::channel(100);
+        let (tx, rx) = tokio::sync::mpsc::channel(5_000);
         let account_provider = RemoteAccountProvider::try_from_urls_and_config(
             endpoints,
             commitment,
