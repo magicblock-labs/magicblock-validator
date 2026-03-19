@@ -51,6 +51,19 @@ pub struct PubSubConnectionPool<T: PubsubConnection> {
     client_id: String,
 }
 
+/// Guard that decrements a subscription count when dropped, ensuring the
+/// pool's capacity accounting stays correct even if the unsubscribe
+/// future is cancelled or timed out.
+struct SubCountGuard(Option<Arc<AtomicUsize>>);
+
+impl Drop for SubCountGuard {
+    fn drop(&mut self) {
+        if let Some(sub_count) = self.0.take() {
+            sub_count.fetch_sub(1, Ordering::SeqCst);
+        }
+    }
+}
+
 impl<T: PubsubConnection> PubSubConnectionPool<T> {
     /// Creates a new pool with a single initial connection.
     pub async fn new(
@@ -261,6 +274,8 @@ impl<T: PubsubConnection> PubSubConnectionPool<T> {
 
     /// Wraps a raw unsubscribe function to also decrement the sub counter for the
     /// connection on which it was made.
+    /// The decrement is guaranteed even if the future is dropped (e.g. by a
+    /// timeout) because it runs in a `Drop` guard.
     fn wrap_unsub(
         &self,
         raw_unsub: UnsubscribeFn,
@@ -268,8 +283,8 @@ impl<T: PubsubConnection> PubSubConnectionPool<T> {
     ) -> UnsubscribeFn {
         Box::new(move || {
             Box::pin(async move {
+                let _guard = SubCountGuard(Some(sub_count));
                 raw_unsub().await;
-                sub_count.fetch_sub(1, Ordering::SeqCst);
             })
         })
     }
