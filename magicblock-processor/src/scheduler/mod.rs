@@ -142,6 +142,7 @@ impl TransactionScheduler {
         let program_cache = state.prepare_programs_cache();
         state.prepare_sysvars();
 
+        let execution_permits = Arc::new(Semaphore::new(count));
         for id in 0..count {
             let (transactions_tx, transactions_rx) =
                 channel(EXECUTOR_QUEUE_CAPACITY);
@@ -150,6 +151,7 @@ impl TransactionScheduler {
                 &state,
                 transactions_rx,
                 ready_tx.clone(),
+                execution_permits.clone(),
                 program_cache.clone(),
             );
             executor.populate_builtins();
@@ -163,7 +165,7 @@ impl TransactionScheduler {
         let slot = latest_block.load().slot;
 
         Self {
-            coordinator: ExecutionCoordinator::new(count),
+            coordinator: ExecutionCoordinator::new(count, execution_permits),
             transactions_rx: state.txn_to_process_rx,
             ready_rx,
             executors,
@@ -278,7 +280,12 @@ impl TransactionScheduler {
             return;
         }
 
-        let checksum = self.accountsdb.take_snapshot(slot);
+        // Make sure all executors are idle (no state transitions are happening)
+        let _guard = self.coordinator.wait_for_idle().await;
+        let Ok(checksum) = self.accountsdb.take_snapshot(slot) else {
+            error!("failed to create accountsdb snapshot");
+            return;
+        };
         let msg = Message::SuperBlock(SuperBlock { slot, checksum });
         self.send_replication(msg).await;
     }

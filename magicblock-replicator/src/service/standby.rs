@@ -116,10 +116,14 @@ impl Standby {
         };
         let (slot, index) = message.slot_and_index();
 
+        let current_slot = self.ctx.slot;
         // Skip duplicates.
-        let obsolete = self.ctx.slot == slot && self.ctx.index >= index;
-        if self.ctx.slot > slot || obsolete {
+        let obsolete = current_slot == slot && self.ctx.index >= index;
+        if current_slot > slot || obsolete {
             return;
+        }
+        if slot.saturating_sub(self.ctx.slot) > 1 {
+            error!(slot, current_slot, "slot sequence has been skipped");
         }
 
         let result = match message {
