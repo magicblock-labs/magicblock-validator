@@ -1049,7 +1049,7 @@ where
                 plain,
                 owned_by_deleg,
                 programs,
-                atas: _,
+                atas,
             } = pipeline::classify_remote_accounts(
                 action_dep_accs,
                 &action_dependencies_to_fetch,
@@ -1104,7 +1104,17 @@ where
             new_subs.extend(action_dep_program_data_subs.iter().copied());
             program_data_subs.extend(action_dep_program_data_subs);
 
+            let action_dep_ata_accounts =
+                ata_projection::resolve_ata_with_eata_projection(
+                    self,
+                    atas,
+                    min_context_slot,
+                    fetch_origin,
+                )
+                .await;
+
             accounts_to_clone.extend(action_dep_accounts_to_clone);
+            accounts_to_clone.extend(action_dep_ata_accounts);
             loaded_programs.extend(action_dep_loaded_programs);
             all_requested_pubkeys.extend(action_dependencies_to_fetch);
         }
