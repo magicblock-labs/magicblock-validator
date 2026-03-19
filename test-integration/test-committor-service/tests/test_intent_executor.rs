@@ -34,7 +34,10 @@ use magicblock_committor_service::{
     transaction_preparator::TransactionPreparatorImpl,
     DEFAULT_ACTIONS_TIMEOUT,
 };
-use magicblock_core::intent::{BaseActionCallback, CommittedAccount};
+use magicblock_core::{
+    intent::{BaseActionCallback, CommittedAccount},
+    traits::ActionError,
+};
 use magicblock_program::{
     args::ShortAccountMeta,
     magic_scheduled_base_intent::{
@@ -61,7 +64,7 @@ use solana_sdk::{
     signature::{Keypair, Signer},
     transaction::{Transaction, TransactionError},
 };
-use magicblock_core::traits::ActionError;
+
 use crate::{
     common::{MockActionsCallbackExecutor, TestFixture},
     utils::{
@@ -1297,14 +1300,12 @@ async fn test_callbacks_fired_in_two_stage() {
     // commit-stage action: goes into standalone_actions → commit strategy
     let commit_base_action =
         succeeding_commit_action(payer.pubkey(), counter_pubkey);
-    let expected_commit_callback =
-        commit_base_action.callback.clone().unwrap();
+    let expected_commit_callback = commit_base_action.callback.clone().unwrap();
 
     // finalize-stage action: goes into UndelegateType::WithBaseActions → finalize strategy
     let undelegate_action =
         succeeding_undelegate_action(payer.pubkey(), counter_pubkey);
-    let UndelegateType::WithBaseActions(ref actions) = undelegate_action
-    else {
+    let UndelegateType::WithBaseActions(ref actions) = undelegate_action else {
         panic!("expected base actions");
     };
     let expected_finalize_callback = actions[0].callback.clone().unwrap();
@@ -1312,7 +1313,7 @@ async fn test_callbacks_fired_in_two_stage() {
     let intent = create_scheduled_intent_from_bundle(MagicIntentBundle {
         commit_and_undelegate: Some(CommitAndUndelegate {
             commit_action: CommitType::Standalone(vec![
-                committed_account.clone(),
+                committed_account.clone()
             ]),
             undelegate_action,
         }),
@@ -1365,7 +1366,6 @@ async fn test_callbacks_fired_in_two_stage() {
     assert!(calls[1].1.is_ok());
 }
 
-
 /// Builds a [`TwoStageExecutor`] directly from an intent by constructing the
 /// commit and finalize strategies independently, without going through
 /// `execute_inner` or any CPI-limit recovery path.
@@ -1390,8 +1390,8 @@ async fn create_two_stage_executor<'a>(
         intent,
         &None::<IntentPersisterImpl>,
     )
-        .await
-        .unwrap();
+    .await
+    .unwrap();
     let finalize_tasks =
         TaskBuilderImpl::finalize_tasks(task_info_fetcher, intent)
             .await
@@ -1401,13 +1401,13 @@ async fn create_two_stage_executor<'a>(
         authority,
         &None::<IntentPersisterImpl>,
     )
-        .unwrap();
+    .unwrap();
     let finalize_strategy = TaskStrategist::build_strategy(
         finalize_tasks,
         authority,
         &None::<IntentPersisterImpl>,
     )
-        .unwrap();
+    .unwrap();
     TwoStageExecutor::new(inner, commit_strategy, finalize_strategy)
 }
 
@@ -1417,9 +1417,7 @@ fn succeeding_commit_action(
 ) -> BaseAction {
     const PRIZE: u64 = 900_000;
 
-    let data = FlexiCounterInstruction::CommitActionHandler {
-        amount: PRIZE,
-    };
+    let data = FlexiCounterInstruction::CommitActionHandler { amount: PRIZE };
     let transfer_destination = Pubkey::new_unique();
     let account_metas = vec![
         ShortAccountMeta {

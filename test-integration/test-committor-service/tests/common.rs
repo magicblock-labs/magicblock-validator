@@ -23,7 +23,7 @@ use magicblock_committor_service::{
 };
 use magicblock_core::{
     intent::{BaseActionCallback, CommittedAccount},
-    traits::{ActionsCallbackScheduler, CallbackScheduleError},
+    traits::{ActionResult, ActionsCallbackScheduler, CallbackScheduleError},
 };
 use magicblock_rpc_client::MagicblockRpcClient;
 use magicblock_table_mania::{GarbageCollectorConfig, TableMania};
@@ -35,7 +35,6 @@ use solana_sdk::{
     signature::{Keypair, Signature},
     signer::Signer,
 };
-use magicblock_core::traits::ActionResult;
 
 // Helper function to create a test RPC client
 pub async fn create_test_client() -> MagicblockRpcClient {
