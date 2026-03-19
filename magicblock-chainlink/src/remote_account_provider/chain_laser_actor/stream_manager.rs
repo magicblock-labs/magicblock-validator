@@ -8,7 +8,7 @@ use magicblock_config::config::GrpcConfig;
 use magicblock_metrics::metrics;
 use solana_pubkey::Pubkey;
 use tokio_stream::StreamMap;
-use tracing::warn;
+use tracing::{trace, warn};
 
 use super::{
     write_with_retry, LaserResult, LaserStream, LaserStreamWithHandle,
@@ -141,6 +141,12 @@ pub struct StreamManager<S: StreamHandle, SF: StreamFactory<S>> {
     /// Consumed by [Self::take_optimized_flag] so the actor can
     /// reset its time-based optimization interval.
     optimized_since_last_check: bool,
+
+    /// Defensive guard against re-entrant [Self::optimize] calls.
+    /// Today re-entry is impossible (`&mut self` + single
+    /// `tokio::select!` loop), but the flag protects against future
+    /// refactors that might introduce concurrency.
+    optimizing: bool,
 }
 
 #[allow(unused)]
@@ -164,6 +170,7 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
             chain_slot,
             client_id,
             optimized_since_last_check: false,
+            optimizing: false,
         };
         mgr.update_stream_metrics();
         mgr
@@ -354,6 +361,7 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
             self.stream_map.remove(&StreamKey::OptimizedOld(i));
         }
         self.optimized_old_handles.clear();
+        self.optimizing = false;
         self.update_stream_metrics();
     }
 
@@ -440,6 +448,25 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
         &mut self,
         commitment: &CommitmentLevel,
     ) -> RemoteAccountProviderResult<()> {
+        if self.optimizing {
+            trace!(
+                client_id = self.client_id,
+                "optimize() called while already optimizing, skipping"
+            );
+            return Ok(());
+        }
+        {
+            self.optimizing = true;
+            let result = self.optimize_inner(commitment).await;
+            self.optimizing = false;
+            result
+        }
+    }
+
+    async fn optimize_inner(
+        &mut self,
+        commitment: &CommitmentLevel,
+    ) -> RemoteAccountProviderResult<()> {
         // Remove all account streams from the map but keep them
         // alive until the new optimized streams are created to
         // avoid a gap without any active streams (race condition).
@@ -486,7 +513,8 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
         self.current_new_subs.clear();
         self.current_new_handle = None;
 
-        // Record the spike: new streams + previous streams still alive.
+        // Record the spike: new streams + previous streams still
+        // alive.
         self.update_stream_metrics_with_extra(prev_stream_count);
 
         self.optimized_since_last_check = true;
