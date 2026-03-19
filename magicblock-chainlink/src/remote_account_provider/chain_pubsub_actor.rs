@@ -521,9 +521,17 @@ impl ChainPubsubActor {
                                     &client_id,
                                 );
                             }
-                            if subscription_updates_sender.send(update).await.is_err() {
-                                warn!(pubkey = %pubkey, "Downstream receiver dropped; stopping subscription listener");
-                                break;
+                            tokio::select! {
+                                result = subscription_updates_sender.send(update) => {
+                                    if result.is_err() {
+                                        warn!(pubkey = %pubkey, "Downstream receiver dropped; stopping subscription listener");
+                                        break;
+                                    }
+                                }
+                                _ = cancellation_token.cancelled() => {
+                                    trace!("Subscription was cancelled while sending update");
+                                    break;
+                                }
                             }
                         } else {
                             static SIGNAL_CONNECTION_COUNT: AtomicU16 =
@@ -684,9 +692,17 @@ impl ChainPubsubActor {
                                             &client_id,
                                         );
                                     }
-                                    if subscription_updates_sender.send(sub_update).await.is_err() {
-                                        warn!(program_id = %program_pubkey, "Downstream receiver dropped; stopping program subscription listener");
-                                        break;
+                                    tokio::select! {
+                                        result = subscription_updates_sender.send(sub_update) => {
+                                            if result.is_err() {
+                                                warn!(program_id = %program_pubkey, "Downstream receiver dropped; stopping program subscription listener");
+                                                break;
+                                            }
+                                        }
+                                        _ = cancellation_token.cancelled() => {
+                                            trace!("Program subscription was cancelled while sending update");
+                                            break;
+                                        }
                                     }
                                 }
                             }
