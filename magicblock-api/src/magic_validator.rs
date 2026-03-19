@@ -950,12 +950,6 @@ impl MagicValidator {
             }
             log_timing("shutdown", "unregister_validator_on_chain", step_start);
         }
-        // we have two memory mapped databases,
-        // flush them to disk before exitting
-        let step_start = Instant::now();
-        self.accountsdb.flush();
-        log_timing("shutdown", "accountsdb_flush", step_start);
-
         let step_start = Instant::now();
         if let Err(err) = self.ledger.shutdown(true) {
             error!(error = ?err, "Failed to shutdown ledger");
