@@ -191,14 +191,36 @@ async fn test_get_blocks() {
         .expect("get_blocks request failed");
     // Should return a contiguous range from start to end
     assert!(!blocks.is_empty(), "should return at least one block");
-    assert!(
-        blocks.first().copied().unwrap_or(0) >= start,
-        "first block should be >= start"
-    );
-    assert!(
-        blocks.last().copied().unwrap_or(0) <= end,
-        "last block should be <= end"
-    );
+
+    // Verify each slot is within bounds [start, end]
+    for &slot in &blocks {
+        assert!(
+            slot >= start,
+            "slot {slot} should be >= start {start}"
+        );
+        assert!(
+            slot <= end,
+            "slot {slot} should be <= end {end}"
+        );
+    }
+
+    // Verify slots are strictly increasing and contiguous
+    for i in 1..blocks.len() {
+        let prev = blocks[i - 1];
+        let curr = blocks[i];
+        assert!(
+            curr > prev,
+            "slots should be strictly increasing: {prev} -> {curr}"
+        );
+        assert_eq!(
+            curr,
+            prev + 1,
+            "slots should be contiguous: expected {} after {}, got {}",
+            prev + 1,
+            prev,
+            curr
+        );
+    }
 }
 
 /// Verifies `get_block_time` returns a valid Unix timestamp for a slot.
@@ -250,4 +272,22 @@ async fn test_get_blocks_with_limit() {
         start_slot,
         "first block should be start_slot"
     );
+
+    // Verify slots are strictly increasing and contiguous
+    for i in 1..blocks.len() {
+        let prev = blocks[i - 1];
+        let curr = blocks[i];
+        assert!(
+            curr > prev,
+            "slots should be strictly increasing: {prev} -> {curr}"
+        );
+        assert_eq!(
+            curr,
+            prev + 1,
+            "slots should be contiguous: expected {} after {}, got {}",
+            prev + 1,
+            prev,
+            curr
+        );
+    }
 }

@@ -35,8 +35,8 @@ const SECONDS_1_9: [f64; 9] = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0];
 lazy_static::lazy_static! {
     pub (crate) static ref REGISTRY: Registry = Registry::new_custom(Some("mbv".to_string()), None).unwrap();
 
-    static ref SLOT_COUNT: IntCounter = IntCounter::new(
-        "slot_count", "Slot Count",
+    static ref SLOT_GAUGE: IntGauge = IntGauge::new(
+        "slot_gauge", "Validator slot"
     ).unwrap();
 
     // Needs to be a gauge so we can set it directly
@@ -541,7 +541,7 @@ pub(crate) fn register() {
                     .expect("collector can't be registered");
             };
         }
-        register!(SLOT_COUNT);
+        register!(SLOT_GAUGE);
         register!(CHAIN_SLOT_GAUGE);
         register!(CACHED_CLONE_OUTPUTS_COUNT);
         register!(LEDGER_SIZE_GAUGE);
@@ -614,8 +614,8 @@ pub(crate) fn register() {
     });
 }
 
-pub fn inc_slot() {
-    SLOT_COUNT.inc();
+pub fn set_slot(slot: u64) {
+    SLOT_GAUGE.set(slot as i64);
 }
 
 pub fn set_chain_slot(value: u64) {
