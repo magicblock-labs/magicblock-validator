@@ -233,6 +233,9 @@ impl SnapshotManager {
     }
 
     /// Validates that bytes represent a valid gzip tar archive.
+    /// NOTE:
+    /// we only validate that the archive is valid,
+    /// not the contents of accountsdb, which is not possible at the moment
     fn validate_archive(bytes: &[u8]) -> AccountsDbResult<()> {
         let cursor = Cursor::new(bytes);
         let dec = GzDecoder::new(cursor);
