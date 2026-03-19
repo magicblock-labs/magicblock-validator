@@ -190,7 +190,7 @@ reset = false
 block-time = "400ms"
 
 # The number of slots included in a superblock.
-# accountsdb checksum/snapshot takes at superblock boundary
+# accountsdb checksum/snapshot is taken at superblock boundary
 # 
 # Default: 72000
 # Env: MBV_LEDGER__SUPERBLOCK_SIZE
