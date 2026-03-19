@@ -558,9 +558,7 @@ impl ChainPubsubActor {
                 .is_err()
             {
                 warn!(timeout_ms = 2000, "Unsubscribe timed out");
-                inc_pubsub_unsubscribe_timeout_count(
-                    &client_id, "account",
-                );
+                inc_pubsub_unsubscribe_timeout_count(&client_id, "account");
             }
             subs.lock()
                 .expect("subscriptions lock poisoned")
@@ -724,9 +722,7 @@ impl ChainPubsubActor {
                 .is_err()
             {
                 warn!(timeout_ms = 2000, "Unsubscribe timed out for program");
-                inc_pubsub_unsubscribe_timeout_count(
-                    &client_id, "program",
-                );
+                inc_pubsub_unsubscribe_timeout_count(&client_id, "program");
             }
             program_subs
                 .lock()

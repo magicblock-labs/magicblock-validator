@@ -949,19 +949,13 @@ pub fn set_pubsub_client_connections_count(client_id: &str, count: usize) {
         .set(count as i64);
 }
 
-pub fn inc_pubsub_unsubscribe_timeout_count(
-    client_id: &str,
-    scope: &str,
-) {
+pub fn inc_pubsub_unsubscribe_timeout_count(client_id: &str, scope: &str) {
     PUBSUB_UNSUBSCRIBE_TIMEOUT_COUNT
         .with_label_values(&[client_id, scope])
         .inc();
 }
 
-pub fn inc_pubsub_idle_connections_pruned_count(
-    client_id: &str,
-    count: u64,
-) {
+pub fn inc_pubsub_idle_connections_pruned_count(client_id: &str, count: u64) {
     PUBSUB_IDLE_CONNECTIONS_PRUNED_COUNT
         .with_label_values(&[client_id])
         .inc_by(count);

@@ -295,7 +295,7 @@ impl<T: PubsubConnection> PubSubConnectionPool<T> {
         // 1. Snapshot all connections via iter under Guard (clone each)
         let guard = Guard::new();
         let all: Vec<PooledConnection<T>> =
-            self.connections.iter(&guard).map(|c| c.clone()).collect();
+            self.connections.iter(&guard).cloned().collect();
         drop(guard);
 
         // 2. Partition into active and idle
@@ -340,11 +340,7 @@ impl<T: PubsubConnection> PubSubConnectionPool<T> {
                 &self.client_id,
                 pruned as u64,
             );
-            trace!(
-                pruned,
-                remaining,
-                "Pruned idle pooled connections"
-            );
+            trace!(pruned, remaining, "Pruned idle pooled connections");
         }
         pruned
     }
