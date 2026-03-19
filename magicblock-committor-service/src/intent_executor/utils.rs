@@ -1,0 +1,152 @@
+use solana_pubkey::Pubkey;
+
+use crate::{
+    intent_executor::task_info_fetcher::{
+        CacheTaskInfoFetcher, ResetType, TaskInfoFetcher,
+    },
+    tasks::{
+        task_builder::TaskBuilderError,
+        task_strategist::{TaskStrategist, TransactionStrategy},
+        BaseTaskImpl,
+    },
+};
+
+/// Handles out of sync commit id error, fixes current strategy
+/// Returns strategy to be cleaned up
+/// TODO(edwin): TransactionStrategy -> CleanuoStrategy or something, naming it confusing for something that is cleaned up
+pub(in crate::intent_executor) async fn handle_commit_id_error<
+    T: TaskInfoFetcher,
+>(
+    authority: &Pubkey,
+    task_info_fetcher: &CacheTaskInfoFetcher<T>,
+    committed_pubkeys: &[Pubkey],
+    strategy: &mut TransactionStrategy,
+) -> Result<TransactionStrategy, TaskBuilderError> {
+    let commit_tasks: Vec<_> = strategy
+        .optimized_tasks
+        .iter_mut()
+        .filter_map(|task| {
+            if let BaseTaskImpl::Commit(commit_task) = task {
+                Some(commit_task)
+            } else {
+                None
+            }
+        })
+        .collect();
+    let min_context_slot = commit_tasks
+        .iter()
+        .map(|task| task.committed_account.remote_slot)
+        .max()
+        .unwrap_or_default();
+
+    // We reset TaskInfoFetcher for all committed accounts
+    // We re-fetch them to fix out of sync tasks
+    task_info_fetcher.reset(ResetType::Specific(committed_pubkeys));
+    let commit_ids = task_info_fetcher
+        .fetch_next_commit_nonces(committed_pubkeys, min_context_slot)
+        .await
+        .map_err(TaskBuilderError::CommitTasksBuildError)?;
+
+    // Here we find the broken tasks and reset them
+    // Broken tasks are prepared incorrectly so they have to be cleaned up
+    let mut to_cleanup = Vec::new();
+    for task in commit_tasks {
+        let Some(commit_id) = commit_ids.get(&task.committed_account.pubkey)
+        else {
+            continue;
+        };
+        if commit_id == &task.commit_id {
+            continue;
+        }
+
+        // Handle invalid tasks
+        to_cleanup.push(BaseTaskImpl::Commit(task.clone()));
+        task.reset_commit_id(*commit_id);
+    }
+
+    let old_alts = strategy.dummy_revaluate_alts(&authority);
+    Ok(TransactionStrategy {
+        optimized_tasks: to_cleanup,
+        lookup_tables_keys: old_alts,
+    })
+}
+
+/// Handle CPI limit error, splits single strategy flow into 2
+/// Returns Commit stage strategy, Finalize stage strategy and strategy to clean up
+pub(in crate::intent_executor) fn handle_cpi_limit_error(
+    authority: &Pubkey,
+    strategy: TransactionStrategy,
+) -> (
+    TransactionStrategy,
+    TransactionStrategy,
+    TransactionStrategy,
+) {
+    // We encountered error "Max instruction trace length exceeded"
+    // All the tasks a prepared to be executed at this point
+    // We attempt Two stages commit flow, need to split tasks up
+    let (commit_stage_tasks, finalize_stage_tasks): (Vec<_>, Vec<_>) = strategy
+        .optimized_tasks
+        .into_iter()
+        .partition(|el| matches!(el, BaseTaskImpl::Commit(_)));
+
+    let commit_alt_pubkeys = if strategy.lookup_tables_keys.is_empty() {
+        vec![]
+    } else {
+        TaskStrategist::collect_lookup_table_keys(
+            authority,
+            &commit_stage_tasks,
+        )
+    };
+    let commit_strategy = TransactionStrategy {
+        optimized_tasks: commit_stage_tasks,
+        lookup_tables_keys: commit_alt_pubkeys,
+    };
+
+    let finalize_alt_pubkeys = if strategy.lookup_tables_keys.is_empty() {
+        vec![]
+    } else {
+        TaskStrategist::collect_lookup_table_keys(
+            authority,
+            &finalize_stage_tasks,
+        )
+    };
+    let finalize_strategy = TransactionStrategy {
+        optimized_tasks: finalize_stage_tasks,
+        lookup_tables_keys: finalize_alt_pubkeys,
+    };
+
+    // We clean up only ALTs
+    let to_cleanup = TransactionStrategy {
+        optimized_tasks: vec![],
+        lookup_tables_keys: strategy.lookup_tables_keys,
+    };
+
+    (commit_strategy, finalize_strategy, to_cleanup)
+}
+
+/// Handles undelegation error, stripping away actions
+/// Returns [`TransactionStrategy`] to be cleaned up
+pub(in crate::intent_executor) fn handle_undelegation_error(
+    authority: &Pubkey,
+    strategy: &mut TransactionStrategy,
+) -> TransactionStrategy {
+    let position = strategy
+        .optimized_tasks
+        .iter()
+        .position(|el| matches!(el, BaseTaskImpl::Undelegate(_)));
+
+    if let Some(position) = position {
+        // Remove everything after undelegation including post undelegation actions
+        let removed_task = strategy.optimized_tasks.drain(position..).collect();
+        let old_alts = strategy.dummy_revaluate_alts(&authority);
+        TransactionStrategy {
+            optimized_tasks: removed_task,
+            lookup_tables_keys: old_alts,
+        }
+    } else {
+        TransactionStrategy {
+            optimized_tasks: vec![],
+            lookup_tables_keys: vec![],
+        }
+    }
+}
