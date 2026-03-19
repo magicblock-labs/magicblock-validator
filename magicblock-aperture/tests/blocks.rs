@@ -194,14 +194,8 @@ async fn test_get_blocks() {
 
     // Verify each slot is within bounds [start, end]
     for &slot in &blocks {
-        assert!(
-            slot >= start,
-            "slot {slot} should be >= start {start}"
-        );
-        assert!(
-            slot <= end,
-            "slot {slot} should be <= end {end}"
-        );
+        assert!(slot >= start, "slot {slot} should be >= start {start}");
+        assert!(slot <= end, "slot {slot} should be <= end {end}");
     }
 
     // Verify slots are strictly increasing and contiguous
