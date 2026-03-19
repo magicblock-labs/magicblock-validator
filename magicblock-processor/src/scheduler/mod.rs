@@ -282,7 +282,10 @@ impl TransactionScheduler {
 
         // Make sure all executors are idle (no state transitions are happening)
         let _guard = self.coordinator.wait_for_idle().await;
-        let Ok(checksum) = self.accountsdb.take_snapshot(slot) else {
+        // SAFETY:
+        // we have made sure that no state transitions are in progress via _guard
+        let Ok(checksum) = (unsafe { self.accountsdb.take_snapshot(slot) })
+        else {
             error!("failed to create accountsdb snapshot");
             return;
         };
