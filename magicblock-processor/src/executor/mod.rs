@@ -28,7 +28,10 @@ use solana_svm::transaction_processor::{
 use solana_transaction::sanitized::SanitizedTransaction;
 use tokio::{
     runtime::Builder,
-    sync::mpsc::{Receiver, Sender},
+    sync::{
+        mpsc::{Receiver, Sender},
+        Semaphore,
+    },
 };
 use tracing::{info, instrument, warn};
 
@@ -61,6 +64,7 @@ pub(super) struct TransactionExecutor {
     ledger: Arc<Ledger>,
     block: LatestBlock,
     block_history: BTreeMap<Slot, LatestBlockInner>,
+    execution_permits: Arc<Semaphore>,
 
     // SVM Components
     processor: TransactionBatchProcessor<SimpleForkGraph>,
@@ -84,6 +88,7 @@ impl TransactionExecutor {
         state: &TransactionSchedulerState,
         rx: Receiver<IndexedTransaction>,
         ready_tx: Sender<ExecutorId>,
+        execution_permits: Arc<Semaphore>,
         programs_cache: Arc<RwLock<ProgramCache<SimpleForkGraph>>>,
     ) -> Self {
         let slot = state.accountsdb.slot();
@@ -119,6 +124,7 @@ impl TransactionExecutor {
             config,
             block: block.clone(),
             environment: state.environment.clone(),
+            execution_permits,
             rx,
             ready_tx,
             accounts_tx: state.account_update_tx.clone(),
@@ -173,6 +179,7 @@ impl TransactionExecutor {
                     if transaction.slot != self.processor.slot {
                         self.transition_to_slot(transaction.slot);
                     }
+                    let _permit = self.execution_permits.acquire().await;
                     match transaction.txn.mode {
                         TransactionProcessingMode::Execution(_) => {
                             self.execute(transaction, None);
