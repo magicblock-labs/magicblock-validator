@@ -281,12 +281,15 @@ impl AccountsDb {
     ///
     /// Returns the state checksum computed at snapshot time.
     /// The checksum can be used to verify state consistency across nodes.
-    pub fn take_snapshot(&self, slot: u64) -> AccountsDbResult<u64> {
+    ///
+    ///
+    /// # Safety
+    /// the caller must ensure that no state transitions are taking
+    /// place concurrently when this operation is in progress
+    pub unsafe fn take_snapshot(&self, slot: u64) -> AccountsDbResult<u64> {
         // Create snapshot directory (potential deep copy)
         self.flush();
-        // SAFETY:
-        // we have acquired the write lock above
-        let checksum = unsafe { self.checksum() };
+        let checksum = self.checksum();
         let used_storage = self.storage.active_segment();
 
         let manager = self.snapshot_manager.clone();
