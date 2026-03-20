@@ -1,10 +1,11 @@
 use std::{
     cmp::Ordering,
+    collections::BTreeMap,
     ops::Deref,
     sync::{Arc, RwLock},
 };
 
-use magicblock_accounts_db::{AccountsDb, GlobalSyncLock};
+use magicblock_accounts_db::AccountsDb;
 use magicblock_core::{
     link::{
         accounts::AccountUpdateTx,
@@ -30,12 +31,14 @@ use tokio::{
     runtime::Builder,
     sync::mpsc::{Receiver, Sender},
 };
-use tracing::{info, instrument};
+use tracing::{info, instrument, warn};
 
 use crate::{
     builtins::BUILTINS,
     scheduler::{locks::ExecutorId, state::TransactionSchedulerState},
 };
+
+const BLOCK_HISTORY_SIZE: usize = 32;
 
 pub(crate) struct IndexedTransaction {
     pub(crate) slot: Slot,
@@ -58,7 +61,7 @@ pub(super) struct TransactionExecutor {
     accountsdb: Arc<AccountsDb>,
     ledger: Arc<Ledger>,
     block: LatestBlock,
-    sync: GlobalSyncLock,
+    block_history: BTreeMap<Slot, LatestBlockInner>,
 
     // SVM Components
     processor: TransactionBatchProcessor<SimpleForkGraph>,
@@ -102,14 +105,19 @@ impl TransactionExecutor {
             ..Default::default()
         });
 
+        let block = state.ledger.latest_block();
+        let initial_block = LatestBlockInner::clone(&*block.load());
+
+        let mut block_history = BTreeMap::new();
+        block_history.insert(initial_block.slot, initial_block.clone());
+
         let this = Self {
             id,
-            sync: state.accountsdb.write_lock(),
             processor,
             accountsdb: state.accountsdb.clone(),
             ledger: state.ledger.clone(),
             config,
-            block: state.ledger.latest_block().clone(),
+            block: block.clone(),
             environment: state.environment.clone(),
             rx,
             ready_tx,
@@ -118,6 +126,7 @@ impl TransactionExecutor {
             tasks_tx: state.tasks_tx.clone(),
             is_auto_airdrop_lamports_enabled: state
                 .is_auto_airdrop_lamports_enabled,
+            block_history,
         };
 
         this.processor.fill_missing_sysvar_cache_entries(&this);
@@ -154,7 +163,8 @@ impl TransactionExecutor {
     #[allow(clippy::await_holding_lock)]
     #[instrument(skip(self), fields(executor_id = self.id))]
     async fn run(mut self) {
-        let mut guard = self.sync.read();
+        let sync = self.accountsdb.write_lock();
+        let mut guard = sync.read();
         let mut block_updated = self.block.subscribe();
 
         loop {
@@ -162,6 +172,9 @@ impl TransactionExecutor {
                 biased;
                 txn = self.rx.recv() => {
                     let Some(transaction) = txn else { break };
+                    if transaction.slot != self.processor.slot {
+                        self.transition_to_slot(transaction.slot);
+                    }
                     match transaction.txn.mode {
                         TransactionProcessingMode::Execution(_) => {
                             self.execute(transaction, None);
@@ -176,10 +189,11 @@ impl TransactionExecutor {
                     let _ = self.ready_tx.try_send(self.id);
                 }
                 _ = block_updated.recv() => {
-                    // Unlock to allow global ops (snapshots), then update slot
+                    // Unlock to allow global ops (snapshots), then
+                    // register the new block for future transactions
                     RwLockReadGuard::unlock_fair(guard);
-                    self.transition_to_new_slot();
-                    guard = self.sync.read();
+                    self.register_new_block();
+                    guard = sync.read();
                 }
                 else => break,
             }
@@ -187,11 +201,23 @@ impl TransactionExecutor {
         info!("Executor terminated");
     }
 
-    fn transition_to_new_slot(&mut self) {
-        let block = self.block.load();
+    fn register_new_block(&mut self) {
+        let block = LatestBlockInner::clone(&*self.block.load());
+        while self.block_history.len() >= BLOCK_HISTORY_SIZE {
+            self.block_history.pop_first();
+        }
+        self.block_history.insert(block.slot, block);
+    }
+
+    fn transition_to_slot(&mut self, slot: Slot) {
+        let Some(block) = self.block_history.get(&slot) else {
+            // should never happen in practice
+            warn!(slot, "tried to transition to slot which wasn't registered");
+            return;
+        };
         self.environment.blockhash = block.blockhash;
         self.processor.slot = block.slot;
-        self.set_sysvars(&block);
+        self.set_sysvars(block);
     }
 
     /// Updates cache and persists slot hashes.
