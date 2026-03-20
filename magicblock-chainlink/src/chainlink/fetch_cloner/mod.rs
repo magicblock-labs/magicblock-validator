@@ -314,6 +314,18 @@ where
                 return;
             }
         }
+        if update.account.is_owned_by_delegation_program()
+            && update
+                .account
+                .fresh_account()
+                .is_some_and(|account| is_dlp_internal_account(account.data()))
+        {
+            trace!(
+                pubkey = %pubkey,
+                "Ignoring DLP internal account update"
+            );
+            return;
+        }
 
         let (resolved_account, deleg_record, delegation_actions) = self
             .resolve_account_to_clone_from_forwarded_sub_with_unsubscribe(
@@ -402,6 +414,47 @@ where
                 &account,
                 deleg_record.as_ref(),
             );
+        if self.accounts_bank.get_account(&pubkey).is_none()
+            && delegated_to_other.is_some()
+        {
+            trace!(
+                pubkey = %pubkey,
+                delegated_to_other = ?delegated_to_other,
+                "Ignoring auto-discovery update for account delegated to another validator"
+            );
+            return;
+        }
+        if !delegation_actions.is_empty()
+            && projected_ata_clone_request.is_none()
+        {
+            trace!(
+                pubkey = %pubkey,
+                slot = account.remote_slot(),
+                "Re-fetching delegated account through full pipeline to materialize action dependencies"
+            );
+            if let Err(err) = self
+                .fetch_and_clone_accounts(
+                    &[pubkey],
+                    None,
+                    Some(account.remote_slot()),
+                    AccountFetchOrigin::GetAccount,
+                    None,
+                )
+                .await
+            {
+                warn!(
+                    pubkey = %pubkey,
+                    error = %err,
+                    "Failed to re-fetch delegated account with action dependencies"
+                );
+            }
+            return;
+        }
+        let delegation_actions = if projected_ata_clone_request.is_some() {
+            DelegationActions::default()
+        } else {
+            delegation_actions
+        };
 
         // Once we clone an account that is delegated to us we no
         // longer need to receive updates for it from chain.
@@ -432,13 +485,20 @@ where
         } else if let Some(projected_ata_clone_request) =
             projected_ata_clone_request
         {
-            if let Err(err) =
-                self.cloner.clone_account(projected_ata_clone_request).await
+            if let Err(err) = self
+                .fetch_and_clone_accounts_with_dedup(
+                    &[projected_ata_clone_request.pubkey],
+                    None,
+                    Some(projected_ata_clone_request.account.remote_slot()),
+                    AccountFetchOrigin::ProjectAta,
+                    None,
+                )
+                .await
             {
                 error!(
                     pubkey = %pubkey,
                     error = %err,
-                    "Failed to clone projected ATA from delegated eATA update"
+                    "Failed to auto-trigger ATA clone from delegated eATA update"
                 );
             }
         }
@@ -1077,11 +1137,6 @@ where
                         .any(|program| program.program_id.eq(dependency))
             })
             .collect::<Vec<_>>();
-
-        error!(
-            "action_dependencies_to_fetch: {:#?}",
-            action_dependencies_to_fetch
-        );
 
         if !action_dependencies_to_fetch.is_empty() {
             if tracing::enabled!(tracing::Level::TRACE) {

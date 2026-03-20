@@ -734,7 +734,10 @@ impl<H: StreamHandle, S: StreamFactory<H>> ChainLaserActor<H, S> {
             );
         }
 
-        if !self.stream_manager.is_subscribed(&pubkey) {
+        let should_forward = self.stream_manager.is_subscribed(&pubkey)
+            || matches!(source, AccountUpdateSource::Program)
+                && owner.eq(&dlp_api::dlp::id());
+        if !should_forward {
             return;
         }
 
@@ -775,9 +778,6 @@ impl<H: StreamHandle, S: StreamFactory<H>> ChainLaserActor<H, S> {
     }
 }
 
-// -----------------
-// Helpers
-// -----------------
 fn grpc_commitment_from_solana(
     commitment: SolanaCommitmentLevel,
 ) -> CommitmentLevel {
@@ -802,5 +802,165 @@ fn is_fallen_behind_error(err: &LaserstreamError) -> bool {
                     .contains("fallen behind")
         }
         _ => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::AtomicU64;
+
+    use dlp_api::dlp::state::DelegationRecord;
+    use helius_laserstream::grpc::{
+        subscribe_update::UpdateOneof, SubscribeUpdate, SubscribeUpdateAccount,
+        SubscribeUpdateAccountInfo,
+    };
+    use solana_commitment_config::CommitmentConfig;
+    use tokio::time::{timeout, Duration};
+
+    use super::*;
+    use crate::remote_account_provider::{
+        chain_laser_actor::mock::MockStreamFactory,
+        chain_rpc_client::ChainRpcClientImpl,
+    };
+
+    fn test_slots() -> Slots {
+        Slots {
+            chain_slot: ChainSlot::new(Arc::new(AtomicU64::new(0))),
+            supports_backfill: false,
+        }
+    }
+
+    fn test_rpc_client() -> ChainRpcClientImpl {
+        ChainRpcClientImpl::new_from_url(
+            "http://127.0.0.1:8899",
+            CommitmentConfig::processed(),
+        )
+    }
+
+    fn account_update(
+        pubkey: Pubkey,
+        owner: Pubkey,
+        data: Vec<u8>,
+    ) -> SubscribeUpdate {
+        SubscribeUpdate {
+            filters: vec![],
+            update_oneof: Some(UpdateOneof::Account(SubscribeUpdateAccount {
+                account: Some(SubscribeUpdateAccountInfo {
+                    pubkey: pubkey.to_bytes().to_vec(),
+                    lamports: 1,
+                    owner: owner.to_bytes().to_vec(),
+                    executable: false,
+                    rent_epoch: 0,
+                    data,
+                    write_version: 0,
+                    txn_signature: None,
+                }),
+                slot: 42,
+                is_startup: false,
+            })),
+            created_at: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn forwards_non_internal_dlp_program_updates_without_direct_sub() {
+        let factory = MockStreamFactory::new();
+        let (abort_tx, _abort_rx) = mpsc::channel(1);
+        let (actor, msg_tx, mut updates_rx, _) =
+            ChainLaserActor::with_stream_factory(
+                "test",
+                factory.clone(),
+                SolanaCommitmentLevel::Processed,
+                abort_tx,
+                test_slots(),
+                test_rpc_client(),
+                &GrpcConfig::default(),
+            );
+        let actor_task = tokio::spawn(actor.run());
+
+        let (response_tx, response_rx) = oneshot::channel();
+        msg_tx
+            .send(ChainPubsubActorMessage::ProgramSubscribe {
+                pubkey: dlp_api::dlp::id(),
+                response: response_tx,
+            })
+            .await
+            .unwrap();
+        response_rx.await.unwrap().unwrap();
+
+        let delegated_account = Pubkey::new_unique();
+        factory.push_update_to_stream(
+            0,
+            Ok(account_update(
+                delegated_account,
+                dlp_api::dlp::id(),
+                vec![1, 2, 3, 4],
+            )),
+        );
+
+        let update = timeout(Duration::from_millis(200), updates_rx.recv())
+            .await
+            .expect("timed out waiting for forwarded update")
+            .expect("subscription update channel closed");
+        assert_eq!(update.pubkey, delegated_account);
+
+        actor_task.abort();
+    }
+
+    #[tokio::test]
+    async fn forwards_internal_dlp_program_updates_without_direct_sub() {
+        let factory = MockStreamFactory::new();
+        let (abort_tx, _abort_rx) = mpsc::channel(1);
+        let (actor, msg_tx, mut updates_rx, _) =
+            ChainLaserActor::with_stream_factory(
+                "test",
+                factory.clone(),
+                SolanaCommitmentLevel::Processed,
+                abort_tx,
+                test_slots(),
+                test_rpc_client(),
+                &GrpcConfig::default(),
+            );
+        let actor_task = tokio::spawn(actor.run());
+
+        let (response_tx, response_rx) = oneshot::channel();
+        msg_tx
+            .send(ChainPubsubActorMessage::ProgramSubscribe {
+                pubkey: dlp_api::dlp::id(),
+                response: response_tx,
+            })
+            .await
+            .unwrap();
+        response_rx.await.unwrap().unwrap();
+
+        let mut record_data =
+            vec![0u8; DelegationRecord::size_with_discriminator()];
+        let record_pubkey = Pubkey::new_unique();
+        DelegationRecord {
+            authority: Pubkey::new_unique(),
+            owner: Pubkey::new_unique(),
+            delegation_slot: 1,
+            lamports: 1,
+            commit_frequency_ms: 1000,
+        }
+        .to_bytes_with_discriminator(&mut record_data)
+        .unwrap();
+
+        factory.push_update_to_stream(
+            0,
+            Ok(account_update(
+                record_pubkey,
+                dlp_api::dlp::id(),
+                record_data,
+            )),
+        );
+
+        let update = timeout(Duration::from_millis(200), updates_rx.recv())
+            .await
+            .expect("timed out waiting for forwarded update")
+            .expect("subscription update channel closed");
+        assert_eq!(update.pubkey, record_pubkey);
+
+        actor_task.abort();
     }
 }
