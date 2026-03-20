@@ -1,4 +1,4 @@
-use std::{future::Future, time::Duration};
+use std::time::Duration;
 
 use async_trait::async_trait;
 use magicblock_core::traits::{
@@ -16,9 +16,7 @@ use crate::{
         intent_execution_client::IntentExecutionClient,
         single_stage_executor::SingleStageExecutor,
         task_info_fetcher::{CacheTaskInfoFetcher, ResetType, TaskInfoFetcher},
-        two_stage_executor::{
-            Committed, Finalized, Initialized, TwoStageExecutor,
-        },
+        two_stage_executor::{Committed, Initialized, TwoStageExecutor},
         ExecutionOutput,
     },
     persist::IntentPersister,
@@ -226,7 +224,6 @@ pub(in crate::intent_executor) async fn execute_with_timeout<
     }
 
     executor.execute(persister).await
-
 }
 
 #[async_trait]
@@ -241,14 +238,14 @@ pub(in crate::intent_executor) trait StageExecutor {
     fn execute_callbacks(&mut self, result: ActionResult);
 }
 
-pub(in crate::intent_executor) struct SingleExecutor<'a, 'e, A, T, F> {
+pub(in crate::intent_executor) struct SingleStage<'a, 'e, A, T, F> {
     pub(in crate::intent_executor) inner: &'a mut SingleStageExecutor<'e, F, A>,
     pub(in crate::intent_executor) transaction_preparator: &'a T,
     pub(in crate::intent_executor) committed_pubkeys: &'a [Pubkey],
 }
 
 #[async_trait]
-impl<'a, 'e, A, T, F> StageExecutor for SingleExecutor<'a, 'e, A, T, F>
+impl<'a, 'e, A, T, F> StageExecutor for SingleStage<'a, 'e, A, T, F>
 where
     A: ActionsCallbackScheduler,
     T: TransactionPreparator,
@@ -278,7 +275,7 @@ where
     }
 }
 
-pub(in crate::intent_executor) struct CommitExecutor<'a, 'e, A, T, F> {
+pub(in crate::intent_executor) struct CommitStage<'a, 'e, A, T, F> {
     pub(in crate::intent_executor) inner:
         &'a mut TwoStageExecutor<'e, A, Initialized>,
     pub(in crate::intent_executor) transaction_preparator: &'a T,
@@ -288,7 +285,7 @@ pub(in crate::intent_executor) struct CommitExecutor<'a, 'e, A, T, F> {
 }
 
 #[async_trait]
-impl<'a, 'e, A, T, F> StageExecutor for CommitExecutor<'a, 'e, A, T, F>
+impl<'a, 'e, A, T, F> StageExecutor for CommitStage<'a, 'e, A, T, F>
 where
     A: ActionsCallbackScheduler,
     T: TransactionPreparator,
@@ -319,14 +316,14 @@ where
     }
 }
 
-pub(in crate::intent_executor) struct FinalizeExecutor<'a, 'e, A, T> {
+pub(in crate::intent_executor) struct FinalizeStage<'a, 'e, A, T> {
     pub(in crate::intent_executor) inner:
         &'a mut TwoStageExecutor<'e, A, Committed>,
     pub(in crate::intent_executor) transaction_preparator: &'a T,
 }
 
 #[async_trait]
-impl<'a, 'e, A, T> StageExecutor for FinalizeExecutor<'a, 'e, A, T>
+impl<'a, 'e, A, T> StageExecutor for FinalizeStage<'a, 'e, A, T>
 where
     A: ActionsCallbackScheduler,
     T: TransactionPreparator,

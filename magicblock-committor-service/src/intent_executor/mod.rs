@@ -14,7 +14,7 @@ use std::{
 use async_trait::async_trait;
 use futures_util::future::{join, try_join_all};
 use magicblock_core::traits::{
-    ActionError, ActionsCallbackScheduler, CallbackScheduleError,
+    ActionsCallbackScheduler, CallbackScheduleError,
 };
 use magicblock_metrics::metrics;
 use magicblock_program::{
@@ -26,8 +26,7 @@ use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
 use solana_signature::Signature;
 use solana_signer::Signer;
-use tokio::time::timeout;
-use tracing::{info, trace};
+use tracing::trace;
 
 use crate::{
     intent_executor::{
@@ -40,8 +39,8 @@ use crate::{
         task_info_fetcher::{CacheTaskInfoFetcher, ResetType, TaskInfoFetcher},
         two_stage_executor::TwoStageExecutor,
         utils::{
-            execute_with_timeout, handle_cpi_limit_error, CommitExecutor,
-            FinalizeExecutor, SingleExecutor,
+            execute_with_timeout, handle_cpi_limit_error, CommitStage,
+            FinalizeStage, SingleStage,
         },
     },
     persist::{CommitStatus, CommitStatusSignatures, IntentPersister},
@@ -306,7 +305,7 @@ where
         );
         let res = execute_with_timeout(
             self.time_left(),
-            SingleExecutor {
+            SingleStage {
                 inner: &mut single_stage_executor,
                 transaction_preparator: &self.transaction_preparator,
                 committed_pubkeys: &committed_pubkeys,
@@ -377,7 +376,7 @@ where
 
         let commit_signature = execute_with_timeout(
             self.time_left(),
-            CommitExecutor {
+            CommitStage {
                 inner: &mut executor,
                 transaction_preparator: &self.transaction_preparator,
                 task_info_fetcher: &self.task_info_fetcher,
@@ -390,7 +389,7 @@ where
         let mut finalize_executor = executor.done(commit_signature);
         let finalize_signature = execute_with_timeout(
             self.time_left(),
-            FinalizeExecutor {
+            FinalizeStage {
                 inner: &mut finalize_executor,
                 transaction_preparator: &self.transaction_preparator,
             },
