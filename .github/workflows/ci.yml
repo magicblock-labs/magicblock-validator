@@ -12,15 +12,12 @@ env:
   RUSTUP_HOME: /opt/rustup
   CARGO_TERM_COLOR: always
   CARGO_REGISTRIES_CRATES_IO_PROTOCOL: sparse
+  PATH: /opt/cargo/bin:/root/.local/share/solana/install/active_release/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 jobs:
   # ── Format ─────────────────────────────────────────────────────────
   fmt:
     runs-on: self-hosted
     steps:
-      - name: Setup PATH
-        run: |
-          echo "/opt/cargo/bin" >> "$GITHUB_PATH"
-          echo "/root/.local/share/solana/install/active_release/bin" >> "$GITHUB_PATH"
       - uses: actions/checkout@v5
         with:
           submodules: recursive
@@ -45,10 +42,6 @@ jobs:
     env:
       RUSTFLAGS: -C link-arg=-fuse-ld=mold
     steps:
-      - name: Setup PATH
-        run: |
-          echo "/opt/cargo/bin" >> "$GITHUB_PATH"
-          echo "/root/.local/share/solana/install/active_release/bin" >> "$GITHUB_PATH"
       - uses: actions/checkout@v5
         with:
           submodules: recursive
@@ -73,10 +66,6 @@ jobs:
     env:
       RUSTFLAGS: -C link-arg=-fuse-ld=mold
     steps:
-      - name: Setup PATH
-        run: |
-          echo "/opt/cargo/bin" >> "$GITHUB_PATH"
-          echo "/root/.local/share/solana/install/active_release/bin" >> "$GITHUB_PATH"
       - uses: actions/checkout@v5
         with:
           submodules: recursive
@@ -97,10 +86,6 @@ jobs:
     env:
       RUSTFLAGS: -C link-arg=-fuse-ld=mold
     steps:
-      - name: Setup PATH
-        run: |
-          echo "/opt/cargo/bin" >> "$GITHUB_PATH"
-          echo "/root/.local/share/solana/install/active_release/bin" >> "$GITHUB_PATH"
       - uses: actions/checkout@v5
         with:
           submodules: recursive
@@ -141,10 +126,6 @@ jobs:
     env:
       RUSTFLAGS: -C link-arg=-fuse-ld=mold
     steps:
-      - name: Setup PATH
-        run: |
-          echo "/opt/cargo/bin" >> "$GITHUB_PATH"
-          echo "/root/.local/share/solana/install/active_release/bin" >> "$GITHUB_PATH"
       - uses: actions/checkout@v5
         with:
           submodules: recursive
