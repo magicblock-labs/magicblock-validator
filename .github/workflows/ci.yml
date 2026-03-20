@@ -1,24 +1,30 @@
 name: CI
-
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
   cancel-in-progress: true
-
 on:
   push:
     branches: [master, dev, chore/self-hosted-ci]
   pull_request:
     types: [opened, reopened, synchronize]
-
+env:
+  CARGO_HOME: /opt/cargo
+  RUSTUP_HOME: /opt/rustup
+  CARGO_TERM_COLOR: always
+  CARGO_REGISTRIES_CRATES_IO_PROTOCOL: sparse
 jobs:
   # ── Format ─────────────────────────────────────────────────────────
   fmt:
     runs-on: self-hosted
     steps:
+      - name: Setup PATH
+        run: |
+          echo "/opt/cargo/bin" >> "$GITHUB_PATH"
+          echo "/root/.local/share/solana/install/active_release/bin" >> "$GITHUB_PATH"
       - uses: actions/checkout@v5
         with:
           submodules: recursive
-
+          token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: "magicblock-validator-ci-fmt-v001"
@@ -27,25 +33,26 @@ jobs:
             test-integration -> target
           cache-all-crates: true
           cache-on-failure: true
-
       - name: Format check
         run: make ci-fmt
-
       - name: Format check (test-integration)
         run: |
           cd test-integration
           make ci-fmt
-
   # ── Lint ────────────────────────────────────────────────────────────
   lint:
     runs-on: self-hosted
     env:
       RUSTFLAGS: -C link-arg=-fuse-ld=mold
     steps:
+      - name: Setup PATH
+        run: |
+          echo "/opt/cargo/bin" >> "$GITHUB_PATH"
+          echo "/root/.local/share/solana/install/active_release/bin" >> "$GITHUB_PATH"
       - uses: actions/checkout@v5
         with:
           submodules: recursive
-
+          token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: "magicblock-validator-ci-lint-v002"
@@ -54,25 +61,26 @@ jobs:
             test-integration -> target
           cache-all-crates: true
           cache-on-failure: true
-
       - name: Lint
         run: make ci-lint
-
       - name: Lint (test-integration)
         run: |
           cd test-integration
           make ci-lint
-
   # ── Unit Tests ──────────────────────────────────────────────────────
   unit-tests:
     runs-on: self-hosted
     env:
       RUSTFLAGS: -C link-arg=-fuse-ld=mold
     steps:
+      - name: Setup PATH
+        run: |
+          echo "/opt/cargo/bin" >> "$GITHUB_PATH"
+          echo "/root/.local/share/solana/install/active_release/bin" >> "$GITHUB_PATH"
       - uses: actions/checkout@v5
         with:
           submodules: recursive
-
+          token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: "magicblock-validator-ci-test-unit-v001"
@@ -81,20 +89,22 @@ jobs:
             test-integration -> target
           cache-all-crates: true
           cache-on-failure: true
-
       - name: Unit tests
         run: make ci-test-unit
-
   # ── Build (for integration tests) ──────────────────────────────────
   build:
     runs-on: self-hosted
     env:
       RUSTFLAGS: -C link-arg=-fuse-ld=mold
     steps:
+      - name: Setup PATH
+        run: |
+          echo "/opt/cargo/bin" >> "$GITHUB_PATH"
+          echo "/root/.local/share/solana/install/active_release/bin" >> "$GITHUB_PATH"
       - uses: actions/checkout@v5
         with:
           submodules: recursive
-
+          token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: "magicblock-validator-ci-test-integration-${{ github.ref_name }}-${{ hashFiles('Cargo.lock') }}"
@@ -104,12 +114,10 @@ jobs:
           cache-targets: true
           cache-all-crates: true
           cache-on-failure: true
-
       - name: Build project and test programs
         run: |
           cargo build --locked
           make -C test-integration programs
-
   # ── Integration Tests ───────────────────────────────────────────────
   integration-tests:
     needs: build
@@ -133,10 +141,14 @@ jobs:
     env:
       RUSTFLAGS: -C link-arg=-fuse-ld=mold
     steps:
+      - name: Setup PATH
+        run: |
+          echo "/opt/cargo/bin" >> "$GITHUB_PATH"
+          echo "/root/.local/share/solana/install/active_release/bin" >> "$GITHUB_PATH"
       - uses: actions/checkout@v5
         with:
           submodules: recursive
-
+          token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: "magicblock-validator-ci-test-integration-${{ github.ref_name }}-${{ hashFiles('Cargo.lock') }}"
@@ -147,12 +159,10 @@ jobs:
           cache-all-crates: true
           cache-on-failure: true
           save-if: false
-
       - name: Run integration test
         env:
           RUN_TESTS: ${{ matrix.test }}
         run: make ci-test-integration
-
   # ── Status Gate ─────────────────────────────────────────────────────
   ci-status:
     if: always()
