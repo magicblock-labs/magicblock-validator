@@ -72,6 +72,9 @@ impl Primary {
                     }
                 }
                 _ = self.ctx.cancel.cancelled() => {
+                    if let Err(error) = self.producer.release().await {
+                        warn!(%error, "failed to release producer lock");
+                    }
                     info!("shutdown received, terminating primary mode");
                     return Ok(None);
                 }
