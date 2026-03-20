@@ -1,0 +1,177 @@
+name: CI
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+on:
+  push:
+    branches: [master, dev, chore/self-hosted-ci]
+  pull_request:
+    types: [opened, reopened, synchronize]
+
+jobs:
+  # ── Format ─────────────────────────────────────────────────────────
+  fmt:
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "magicblock-validator-ci-fmt-v001"
+          workspaces: |
+            . -> target
+            test-integration -> target
+          cache-all-crates: true
+          cache-on-failure: true
+
+      - name: Format check
+        run: make ci-fmt
+
+      - name: Format check (test-integration)
+        run: |
+          cd test-integration
+          make ci-fmt
+
+  # ── Lint ────────────────────────────────────────────────────────────
+  lint:
+    runs-on: self-hosted
+    env:
+      RUSTFLAGS: -C link-arg=-fuse-ld=mold
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "magicblock-validator-ci-lint-v002"
+          workspaces: |
+            . -> target
+            test-integration -> target
+          cache-all-crates: true
+          cache-on-failure: true
+
+      - name: Lint
+        run: make ci-lint
+
+      - name: Lint (test-integration)
+        run: |
+          cd test-integration
+          make ci-lint
+
+  # ── Unit Tests ──────────────────────────────────────────────────────
+  unit-tests:
+    runs-on: self-hosted
+    env:
+      RUSTFLAGS: -C link-arg=-fuse-ld=mold
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "magicblock-validator-ci-test-unit-v001"
+          workspaces: |
+            . -> target
+            test-integration -> target
+          cache-all-crates: true
+          cache-on-failure: true
+
+      - name: Unit tests
+        run: make ci-test-unit
+
+  # ── Build (for integration tests) ──────────────────────────────────
+  build:
+    runs-on: self-hosted
+    env:
+      RUSTFLAGS: -C link-arg=-fuse-ld=mold
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "magicblock-validator-ci-test-integration-${{ github.ref_name }}-${{ hashFiles('Cargo.lock') }}"
+          workspaces: |
+            . -> target
+            test-integration -> target
+          cache-targets: true
+          cache-all-crates: true
+          cache-on-failure: true
+
+      - name: Build project and test programs
+        run: |
+          cargo build --locked
+          make -C test-integration programs
+
+  # ── Integration Tests ───────────────────────────────────────────────
+  integration-tests:
+    needs: build
+    runs-on: self-hosted
+    strategy:
+      fail-fast: false
+      matrix:
+        test:
+          - schedulecommit
+          - chainlink
+          - cloning
+          - restore_ledger
+          - magicblock_api
+          - config
+          - table_mania
+          - committor
+          - pubsub
+          - schedule_intents
+          - task-scheduler
+    name: "Integration: ${{ matrix.test }}"
+    env:
+      RUSTFLAGS: -C link-arg=-fuse-ld=mold
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "magicblock-validator-ci-test-integration-${{ github.ref_name }}-${{ hashFiles('Cargo.lock') }}"
+          workspaces: |
+            . -> target
+            test-integration -> target
+          cache-targets: true
+          cache-all-crates: true
+          cache-on-failure: true
+          save-if: false
+
+      - name: Run integration test
+        env:
+          RUN_TESTS: ${{ matrix.test }}
+        run: make ci-test-integration
+
+  # ── Status Gate ─────────────────────────────────────────────────────
+  ci-status:
+    if: always()
+    needs: [fmt, lint, unit-tests, build, integration-tests]
+    runs-on: self-hosted
+    steps:
+      - name: Verify pipeline
+        run: |
+          results=(
+            "${{ needs.fmt.result }}"
+            "${{ needs.lint.result }}"
+            "${{ needs.unit-tests.result }}"
+            "${{ needs.build.result }}"
+            "${{ needs.integration-tests.result }}"
+          )
+          for r in "${results[@]}"; do
+            if [[ "$r" != "success" ]]; then
+              echo "::error::CI failed"
+              exit 1
+            fi
+          done
+          echo "All checks passed."
