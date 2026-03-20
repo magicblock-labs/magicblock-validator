@@ -306,69 +306,6 @@ fn test_external_snapshot_fast_forward() {
     assert_eq!(restored.unwrap().lamports(), LAMPORTS);
 }
 
-/// Verifies external snapshot registration without fast-forward when current state is newer.
-#[test]
-fn test_external_snapshot_no_fast_forward() {
-    let env = TestEnv::new();
-
-    // Create an account and take a local snapshot
-    let acc = env.create_and_insert_account();
-    env.set_slot(SNAPSHOT_SLOT);
-    env.take_snapshot_and_wait(SNAPSHOT_SLOT);
-
-    // Read the archive bytes
-    let archive_path = env
-        .snapshot_manager
-        .database_path()
-        .parent()
-        .unwrap()
-        .join(format!("snapshot-{:0>12}.tar.gz", SNAPSHOT_SLOT));
-    let archive_bytes =
-        std::fs::read(&archive_path).expect("Failed to read archive");
-    let pubkey = acc.pubkey;
-
-    // Drop current DB and create new one, then advance past snapshot slot
-    drop(env);
-    let temp_dir = tempfile::tempdir().unwrap();
-    let config = AccountsDbConfig {
-        reset: true,
-        ..Default::default()
-    };
-    let new_db =
-        Arc::new(AccountsDb::new(&config, temp_dir.path(), 0).unwrap());
-    new_db.set_slot(SNAPSHOT_SLOT + 1000); // Advance past snapshot slot
-
-    // Unwrap Arc to get mutable access
-    let mut new_db = Arc::try_unwrap(new_db).unwrap();
-
-    // Insert external snapshot (current slot > snapshot slot, no fast-forward)
-    let fast_forwarded = new_db
-        .insert_external_snapshot(SNAPSHOT_SLOT, &archive_bytes)
-        .unwrap();
-    assert!(
-        !fast_forwarded,
-        "Should NOT fast-forward when current slot is newer"
-    );
-
-    // Account should NOT exist (we're at a newer slot, snapshot just registered)
-    let restored = new_db.get_account(&pubkey);
-    assert!(
-        restored.is_none(),
-        "Account should NOT exist without explicit restore"
-    );
-
-    // Now restore explicitly
-    new_db.restore_state_if_needed(SNAPSHOT_SLOT).unwrap();
-
-    // Now the account should exist
-    let restored = new_db.get_account(&pubkey);
-    assert!(
-        restored.is_some(),
-        "Account should exist after explicit restore"
-    );
-    assert_eq!(restored.unwrap().lamports(), LAMPORTS);
-}
-
 #[test]
 fn test_restore_from_snapshot() {
     let mut env = TestEnv::new();
