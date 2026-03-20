@@ -24,11 +24,7 @@ use crate::{
         },
         ExecutionOutput,
     },
-    persist::IntentPersister,
-    tasks::{task_strategist::TransactionStrategy, BaseTaskImpl},
-    transaction_preparator::{
-        error::TransactionPreparatorError, TransactionPreparator,
-    },
+    tasks::BaseTaskImpl,
 };
 
 #[derive(Clone)]
@@ -41,38 +37,7 @@ impl IntentExecutionClient {
         IntentExecutionClient { rpc_client }
     }
 
-    pub async fn prepare_and_execute_strategy<P, T>(
-        &self,
-        authority: &Keypair,
-        transaction_preparator: &T,
-        transaction_strategy: &mut TransactionStrategy,
-        persister: &Option<P>,
-    ) -> IntentExecutorResult<
-        IntentExecutorResult<Signature, TransactionStrategyExecutionError>,
-        TransactionPreparatorError,
-    >
-    where
-        T: TransactionPreparator,
-        P: IntentPersister,
-    {
-        // Prepare message
-        let prepared_message = transaction_preparator
-            .prepare_for_strategy(&authority, transaction_strategy, persister)
-            .await?;
-
-        // Execute strategy
-        let execution_result = self
-            .execute_message_with_retries(
-                authority,
-                prepared_message,
-                &transaction_strategy.optimized_tasks,
-            )
-            .await;
-
-        Ok(execution_result)
-    }
-
-    async fn execute_message_with_retries(
+    pub(in crate::intent_executor) async fn execute_message_with_retries(
         &self,
         authority: &Keypair,
         prepared_message: VersionedMessage,

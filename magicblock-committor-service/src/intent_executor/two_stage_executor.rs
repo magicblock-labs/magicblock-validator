@@ -18,7 +18,10 @@ use crate::{
         intent_execution_client::IntentExecutionClient,
         task_info_fetcher::{CacheTaskInfoFetcher, TaskInfoFetcher},
         two_stage_executor::sealed::Sealed,
-        utils::{handle_commit_id_error, handle_undelegation_error},
+        utils::{
+            handle_commit_id_error, handle_undelegation_error,
+            prepare_and_execute_strategy,
+        },
         IntentExecutionReport,
     },
     persist::{IntentPersister, IntentPersisterImpl},
@@ -115,16 +118,15 @@ where
             self.state.current_attempt += 1;
 
             // Prepare & execute message
-            let execution_result = self
-                .intent_client
-                .prepare_and_execute_strategy(
-                    &self.authority,
-                    transaction_preparator,
-                    &mut self.state.commit_strategy,
-                    persister,
-                )
-                .await
-                .map_err(IntentExecutorError::FailedCommitPreparationError)?;
+            let execution_result = prepare_and_execute_strategy(
+                &self.intent_client,
+                &self.authority,
+                transaction_preparator,
+                &mut self.state.commit_strategy,
+                persister,
+            )
+            .await
+            .map_err(IntentExecutorError::FailedCommitPreparationError)?;
             let execution_err = match execution_result {
                 Ok(value) => break Ok(value),
                 Err(err) => err,
@@ -220,7 +222,7 @@ where
                 let to_cleanup = handle_actions_result(
                     &self.authority.pubkey(),
                     &self.callback_scheduler,
-                    &mut self.execution_report,
+                    self.execution_report,
                     &mut self.state.commit_strategy,
                     action_error
                 );
@@ -260,22 +262,22 @@ where
             delegated_account: task.committed_account.pubkey,
         }
         .into();
-        self.intent_client
-            .prepare_and_execute_strategy(
-                &self.authority,
-                transaction_preparator,
-                &mut TransactionStrategy {
-                    optimized_tasks: vec![finalize_task],
-                    lookup_tables_keys: vec![],
-                },
-                &None::<IntentPersisterImpl>,
-            )
-            .await
-            .map_err(IntentExecutorError::FailedCommitPreparationError)?
-            .map_err(|err| IntentExecutorError::FailedToCommitError {
-                err,
-                signature: *failed_signature,
-            })?;
+        prepare_and_execute_strategy(
+            &self.intent_client,
+            &self.authority,
+            transaction_preparator,
+            &mut TransactionStrategy {
+                optimized_tasks: vec![finalize_task],
+                lookup_tables_keys: vec![],
+            },
+            &None::<IntentPersisterImpl>,
+        )
+        .await
+        .map_err(IntentExecutorError::FailedCommitPreparationError)?
+        .map_err(|err| IntentExecutorError::FailedToCommitError {
+            err,
+            signature: *failed_signature,
+        })?;
 
         Ok(ControlFlow::Continue(TransactionStrategy {
             optimized_tasks: vec![],
@@ -295,7 +297,7 @@ where
         let junk_strategy = handle_actions_result(
             &self.authority.pubkey(),
             &self.callback_scheduler,
-            &mut self.execution_report,
+            self.execution_report,
             &mut self.state.commit_strategy,
             result.clone(),
         );
@@ -305,7 +307,7 @@ where
             let junk_strategy = handle_actions_result(
                 &self.authority.pubkey(),
                 &self.callback_scheduler,
-                &mut self.execution_report,
+                self.execution_report,
                 &mut self.state.finalize_strategy,
                 result,
             );
@@ -355,16 +357,15 @@ where
             self.state.current_attempt += 1;
 
             // Prepare & execute message
-            let execution_result = self
-                .intent_client
-                .prepare_and_execute_strategy(
-                    &self.authority,
-                    transaction_preparator,
-                    &mut self.state.finalize_strategy,
-                    persister,
-                )
-                .await
-                .map_err(IntentExecutorError::FailedFinalizePreparationError)?;
+            let execution_result = prepare_and_execute_strategy(
+                &self.intent_client,
+                &self.authority,
+                transaction_preparator,
+                &mut self.state.finalize_strategy,
+                persister,
+            )
+            .await
+            .map_err(IntentExecutorError::FailedFinalizePreparationError)?;
             let execution_err = match execution_result {
                 Ok(value) => break Ok(value),
                 Err(err) => err,
@@ -409,7 +410,7 @@ where
         let junk_strategy = handle_actions_result(
             &self.authority.pubkey(),
             &self.callback_scheduler,
-            &mut self.execution_report,
+            self.execution_report,
             &mut self.state.finalize_strategy,
             result.map_err(|err| err.into()),
         );
@@ -444,7 +445,7 @@ where
                 let to_cleanup = handle_actions_result(
                     &self.authority.pubkey(),
                     &self.callback_scheduler,
-                    &mut self.execution_report,
+                    self.execution_report,
                     &mut self.state.finalize_strategy,
                     action_error
                 );
@@ -471,27 +472,11 @@ where
     }
 
     /// Transitions to next executor state
-    pub fn done(
-        self,
-        finalize_signature: Signature,
-    ) -> TwoStageExecutor<'a, A, Finalized> {
-        let finalized = Finalized {
+    pub fn done(self, finalize_signature: Signature) -> Finalized {
+        Finalized {
             commit_signature: self.state.commit_signature,
             finalize_signature,
-        };
-        TwoStageExecutor {
-            authority: self.authority,
-            intent_client: self.intent_client,
-            callback_scheduler: self.callback_scheduler,
-            execution_report: self.execution_report,
-            state: finalized,
         }
-    }
-}
-
-impl<'a, A> TwoStageExecutor<'a, A, Finalized> {
-    pub fn result(self) -> Finalized {
-        self.state
     }
 }
 
@@ -505,7 +490,7 @@ fn handle_actions_result<A>(
 where
     A: ActionsCallbackScheduler,
 {
-    let mut removed_actions = transaction_strategy.remove_actions(&authority);
+    let mut removed_actions = transaction_strategy.remove_actions(authority);
     let callbacks = removed_actions.extract_action_callbacks();
     if !callbacks.is_empty() {
         let result = callback_scheduler.schedule(callbacks, result);

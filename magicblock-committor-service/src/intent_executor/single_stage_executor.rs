@@ -17,7 +17,10 @@ use crate::{
         },
         intent_execution_client::IntentExecutionClient,
         task_info_fetcher::{CacheTaskInfoFetcher, TaskInfoFetcher},
-        utils::{handle_commit_id_error, handle_undelegation_error},
+        utils::{
+            handle_commit_id_error, handle_undelegation_error,
+            prepare_and_execute_strategy,
+        },
         ExecutionOutput, IntentExecutionReport,
     },
     persist::{IntentPersister, IntentPersisterImpl},
@@ -83,16 +86,15 @@ where
             self.current_attempt += 1;
 
             // Prepare & execute message
-            let execution_result = self
-                .intent_client
-                .prepare_and_execute_strategy(
-                    &self.authority,
-                    transaction_preparator,
-                    &mut self.transaction_strategy,
-                    persister,
-                )
-                .await
-                .map_err(IntentExecutorError::FailedFinalizePreparationError)?;
+            let execution_result = prepare_and_execute_strategy(
+                &self.intent_client,
+                &self.authority,
+                transaction_preparator,
+                &mut self.transaction_strategy,
+                persister,
+            )
+            .await
+            .map_err(IntentExecutorError::FailedFinalizePreparationError)?;
 
             // Process error: Ok - return, Err - handle further
             let execution_err = match execution_result {
@@ -270,23 +272,23 @@ where
             delegated_account: task.committed_account.pubkey,
         }
         .into();
-        self.intent_client
-            .prepare_and_execute_strategy(
-                &self.authority,
-                transaction_preparator,
-                &mut TransactionStrategy {
-                    optimized_tasks: vec![finalize_task],
-                    lookup_tables_keys: vec![],
-                },
-                &None::<IntentPersisterImpl>,
-            )
-            .await
-            .map_err(IntentExecutorError::FailedFinalizePreparationError)?
-            .map_err(|err| IntentExecutorError::FailedToFinalizeError {
-                err,
-                commit_signature: None,
-                finalize_signature: *failed_signature,
-            })?;
+        prepare_and_execute_strategy(
+            &self.intent_client,
+            &self.authority,
+            transaction_preparator,
+            &mut TransactionStrategy {
+                optimized_tasks: vec![finalize_task],
+                lookup_tables_keys: vec![],
+            },
+            &None::<IntentPersisterImpl>,
+        )
+        .await
+        .map_err(IntentExecutorError::FailedFinalizePreparationError)?
+        .map_err(|err| IntentExecutorError::FailedToFinalizeError {
+            err,
+            commit_signature: None,
+            finalize_signature: *failed_signature,
+        })?;
 
         Ok(ControlFlow::Continue(TransactionStrategy {
             optimized_tasks: vec![],

@@ -4,10 +4,9 @@ pub(crate) mod intent_executor_factory;
 pub mod single_stage_executor;
 pub mod task_info_fetcher;
 pub mod two_stage_executor;
-mod utils;
+pub mod utils;
 
 use std::{
-    mem,
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -105,6 +104,7 @@ pub trait IntentExecutor: Send + Sync + 'static {
     async fn cleanup(self) -> Result<(), BufferExecutionError>;
 }
 
+#[derive(Default)]
 pub struct IntentExecutionReport {
     /// Junk that needs to be cleaned up
     junk: Vec<TransactionStrategy>,
@@ -115,14 +115,6 @@ pub struct IntentExecutionReport {
 }
 
 impl IntentExecutionReport {
-    pub fn new() -> Self {
-        Self {
-            junk: vec![],
-            patched_errors: vec![],
-            callbacks_report: vec![],
-        }
-    }
-
     pub fn dispose(&mut self, value: TransactionStrategy) {
         self.junk.push(value);
     }
@@ -132,6 +124,10 @@ impl IntentExecutionReport {
         value: TransactionStrategyExecutionError,
     ) {
         self.patched_errors.push(value);
+    }
+
+    pub fn patched_errors(&self) -> &Vec<TransactionStrategyExecutionError> {
+        &self.patched_errors
     }
 
     pub fn add_callback_report(
@@ -153,8 +149,8 @@ pub struct IntentExecutorImpl<T, F, A> {
 
     /// Intent execution started at
     pub started_at: Instant,
-    /// Execution report
-    intent_execution_report: IntentExecutionReport,
+    /// Junk that needs to be cleaned up
+    junk: Vec<TransactionStrategy>,
 }
 
 impl<T, F, A> IntentExecutorImpl<T, F, A>
@@ -181,13 +177,14 @@ where
             actions_timeout,
 
             started_at: Instant::now(),
-            intent_execution_report: IntentExecutionReport::new(),
+            junk: vec![],
         }
     }
 
     async fn execute_inner<P: IntentPersister>(
         &mut self,
         intent_bundle: ScheduledIntentBundle,
+        execution_report: &mut IntentExecutionReport,
         persister: &Option<P>,
     ) -> IntentExecutorResult<ExecutionOutput> {
         if intent_bundle.is_empty() {
@@ -222,7 +219,12 @@ where
                 persister,
             )?;
             return self
-                .single_stage_execution_flow(intent_bundle, strategy, persister)
+                .single_stage_execution_flow(
+                    intent_bundle,
+                    strategy,
+                    execution_report,
+                    persister,
+                )
                 .await;
         };
 
@@ -255,6 +257,7 @@ where
                 self.single_stage_execution_flow(
                     intent_bundle,
                     strategy,
+                    execution_report,
                     persister,
                 )
                 .await
@@ -268,6 +271,7 @@ where
                     &all_committed_pubkeys,
                     commit_stage,
                     finalize_stage,
+                    execution_report,
                     persister,
                 )
                 .await
@@ -275,19 +279,21 @@ where
         }
     }
 
+    fn time_left(
+        started_at: &Instant,
+        actions_timeout: Duration,
+    ) -> Option<Duration> {
+        actions_timeout.checked_sub(started_at.elapsed())
+    }
+
     /// Starting execution from single stage
     pub async fn single_stage_execution_flow<P: IntentPersister>(
         &mut self,
         base_intent: ScheduledIntentBundle,
         transaction_strategy: TransactionStrategy,
+        execution_report: &mut IntentExecutionReport,
         persister: &Option<P>,
     ) -> IntentExecutorResult<ExecutionOutput> {
-        let started_at = self.started_at;
-        let actions_timeout = self.actions_timeout;
-        let time_left = || -> Option<Duration> {
-            actions_timeout.checked_sub(started_at.elapsed())
-        };
-
         let has_callbacks = transaction_strategy.has_actions_callbacks();
         let committed_pubkeys = base_intent.get_all_committed_pubkeys();
 
@@ -297,10 +303,12 @@ where
             self.task_info_fetcher.clone(),
             transaction_strategy,
             self.actions_callback_executor.clone(),
-            &mut self.intent_execution_report,
+            execution_report,
         );
         let res = if has_callbacks {
-            if let Some(time_left) = time_left() {
+            if let Some(time_left) =
+                Self::time_left(&self.started_at, self.actions_timeout)
+            {
                 let execute_fut = single_stage_executor.execute(
                     &committed_pubkeys,
                     &self.transaction_preparator,
@@ -365,7 +373,7 @@ where
             res => {
             single_stage_executor.execute_callbacks(res.as_ref().map(|_| ()));
                 let transaction_strategy = single_stage_executor.consume_strategy();
-                self.intent_execution_report.dispose(transaction_strategy);
+                execution_report.dispose(transaction_strategy);
                 return res;
             }
         };
@@ -376,14 +384,14 @@ where
         let strategy = single_stage_executor.consume_strategy();
         let (commit_strategy, finalize_strategy, cleanup) =
             handle_cpi_limit_error(&self.authority.pubkey(), strategy);
-        self.intent_execution_report.dispose(cleanup);
-        self.intent_execution_report
-            .add_patched_error(execution_err);
+        execution_report.dispose(cleanup);
+        execution_report.add_patched_error(execution_err);
 
         self.two_stage_execution_flow(
             &committed_pubkeys,
             commit_strategy,
             finalize_strategy,
+            execution_report,
             persister,
         )
         .await
@@ -394,14 +402,9 @@ where
         committed_pubkeys: &[Pubkey],
         commit_strategy: TransactionStrategy,
         finalize_strategy: TransactionStrategy,
+        execution_report: &mut IntentExecutionReport,
         persister: &Option<P>,
     ) -> IntentExecutorResult<ExecutionOutput> {
-        let started_at = self.started_at;
-        let actions_timeout = self.actions_timeout;
-        let time_left = || -> Option<Duration> {
-            actions_timeout.checked_sub(started_at.elapsed())
-        };
-
         let has_commit_callbacks = commit_strategy.has_actions_callbacks();
         let mut has_finalize_callbacks =
             finalize_strategy.has_actions_callbacks();
@@ -411,11 +414,13 @@ where
             finalize_strategy,
             self.intent_client.clone(),
             self.actions_callback_executor.clone(),
-            &mut self.intent_execution_report,
+            execution_report,
         );
 
         let commit_signature = if has_commit_callbacks {
-            if let Some(time_left) = time_left() {
+            if let Some(time_left) =
+                Self::time_left(&self.started_at, self.actions_timeout)
+            {
                 let fut = executor.commit(
                     committed_pubkeys,
                     &self.transaction_preparator,
@@ -465,7 +470,9 @@ where
 
         let mut finalize_executor = executor.done(commit_signature);
         let finalize_signature = if has_finalize_callbacks {
-            if let Some(time_left) = time_left() {
+            if let Some(time_left) =
+                Self::time_left(&self.started_at, self.actions_timeout)
+            {
                 let execute_fut = finalize_executor
                     .finalize(&self.transaction_preparator, persister);
                 match timeout(time_left, execute_fut).await {
@@ -496,8 +503,7 @@ where
                 .await
         }?;
 
-        let finalized_stage =
-            finalize_executor.done(finalize_signature).result();
+        let finalized_stage = finalize_executor.done(finalize_signature);
         Ok(ExecutionOutput::TwoStage {
             commit_signature: finalized_stage.commit_signature,
             finalize_signature: finalized_stage.finalize_signature,
@@ -633,7 +639,10 @@ where
         let is_undelegate = base_intent.has_undelegate_intent();
         let pubkeys = base_intent.get_all_committed_pubkeys();
 
-        let result = self.execute_inner(base_intent, &persister).await;
+        let mut execution_report = IntentExecutionReport::default();
+        let result = self
+            .execute_inner(base_intent, &mut execution_report, &persister)
+            .await;
         if !pubkeys.is_empty() {
             // Reset TaskInfoFetcher, as cache could become invalid
             // NOTE: if undelegation was removed - we still reset
@@ -655,27 +664,23 @@ where
             });
         });
 
+        self.junk = execution_report.junk;
         IntentExecutionResult {
             inner: result,
-            patched_errors: mem::take(
-                &mut self.intent_execution_report.patched_errors,
-            ),
-            callbacks_report: mem::take(
-                &mut self.intent_execution_report.callbacks_report,
-            ),
+            patched_errors: execution_report.patched_errors,
+            callbacks_report: execution_report.callbacks_report,
         }
     }
 
     /// Cleanup after intent using junk
     async fn cleanup(mut self) -> Result<(), BufferExecutionError> {
-        let cleanup_futs =
-            self.intent_execution_report.junk.iter().map(|to_cleanup| {
-                self.transaction_preparator.cleanup_for_strategy(
-                    &self.authority,
-                    &to_cleanup.optimized_tasks,
-                    &to_cleanup.lookup_tables_keys,
-                )
-            });
+        let cleanup_futs = self.junk.iter().map(|to_cleanup| {
+            self.transaction_preparator.cleanup_for_strategy(
+                &self.authority,
+                &to_cleanup.optimized_tasks,
+                &to_cleanup.lookup_tables_keys,
+            )
+        });
 
         try_join_all(cleanup_futs).await.map(|_| ())
     }

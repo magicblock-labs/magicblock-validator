@@ -1,15 +1,52 @@
+use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
+use solana_signature::Signature;
 
 use crate::{
-    intent_executor::task_info_fetcher::{
-        CacheTaskInfoFetcher, ResetType, TaskInfoFetcher,
+    intent_executor::{
+        error::{IntentExecutorResult, TransactionStrategyExecutionError},
+        intent_execution_client::IntentExecutionClient,
+        task_info_fetcher::{CacheTaskInfoFetcher, ResetType, TaskInfoFetcher},
     },
+    persist::IntentPersister,
     tasks::{
         task_builder::TaskBuilderError,
         task_strategist::{TaskStrategist, TransactionStrategy},
         BaseTaskImpl,
     },
+    transaction_preparator::{
+        error::TransactionPreparatorError, TransactionPreparator,
+    },
 };
+
+pub async fn prepare_and_execute_strategy<P, T>(
+    client: &IntentExecutionClient,
+    authority: &Keypair,
+    transaction_preparator: &T,
+    transaction_strategy: &mut TransactionStrategy,
+    persister: &Option<P>,
+) -> IntentExecutorResult<
+    IntentExecutorResult<Signature, TransactionStrategyExecutionError>,
+    TransactionPreparatorError,
+>
+where
+    T: TransactionPreparator,
+    P: IntentPersister,
+{
+    let prepared_message = transaction_preparator
+        .prepare_for_strategy(authority, transaction_strategy, persister)
+        .await?;
+
+    let execution_result = client
+        .execute_message_with_retries(
+            authority,
+            prepared_message,
+            &transaction_strategy.optimized_tasks,
+        )
+        .await;
+
+    Ok(execution_result)
+}
 
 /// Handles out of sync commit id error, fixes current strategy
 /// Returns strategy to be cleaned up
@@ -64,7 +101,7 @@ pub(in crate::intent_executor) async fn handle_commit_id_error<
         task.reset_commit_id(*commit_id);
     }
 
-    let old_alts = strategy.dummy_revaluate_alts(&authority);
+    let old_alts = strategy.dummy_revaluate_alts(authority);
     Ok(TransactionStrategy {
         optimized_tasks: to_cleanup,
         lookup_tables_keys: old_alts,
@@ -138,7 +175,7 @@ pub(in crate::intent_executor) fn handle_undelegation_error(
     if let Some(position) = position {
         // Remove everything after undelegation including post undelegation actions
         let removed_task = strategy.optimized_tasks.drain(position..).collect();
-        let old_alts = strategy.dummy_revaluate_alts(&authority);
+        let old_alts = strategy.dummy_revaluate_alts(authority);
         TransactionStrategy {
             optimized_tasks: removed_task,
             lookup_tables_keys: old_alts,
