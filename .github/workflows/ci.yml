@@ -7,12 +7,6 @@ on:
     branches: [master, dev, chore/self-hosted-ci]
   pull_request:
     types: [opened, reopened, synchronize]
-env:
-  CARGO_HOME: /opt/cargo
-  RUSTUP_HOME: /opt/rustup
-  CARGO_TERM_COLOR: always
-  CARGO_REGISTRIES_CRATES_IO_PROTOCOL: sparse
-  PATH: /opt/cargo/bin:/root/.local/share/solana/install/active_release/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 jobs:
   # ── Format ─────────────────────────────────────────────────────────
   fmt:
