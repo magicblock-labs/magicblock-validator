@@ -77,6 +77,12 @@ pub struct ChainPubsubActor {
     abort_sender: mpsc::Sender<()>,
 }
 
+impl Drop for ChainPubsubActor {
+    fn drop(&mut self) {
+        self.shutdown_token.cancel();
+    }
+}
+
 impl ChainPubsubActor {
     pub async fn new_from_url(
         pubsub_url: &str,
@@ -533,9 +539,18 @@ impl ChainPubsubActor {
                                     &client_id,
                                 );
                             }
-                            let _ = subscription_updates_sender.send(update).await.inspect_err(|err| {
-                                error!(error = ?err, "Failed to send subscription update");
-                            });
+                            tokio::select! {
+                                result = subscription_updates_sender.send(update) => {
+                                    if result.is_err() {
+                                        warn!(pubkey = %pubkey, "Downstream receiver dropped; stopping subscription listener");
+                                        break;
+                                    }
+                                }
+                                _ = cancellation_token.cancelled() => {
+                                    trace!("Subscription was cancelled while sending update");
+                                    break;
+                                }
+                            }
                         } else {
                             static SIGNAL_CONNECTION_COUNT: AtomicU16 =
                                 AtomicU16::new(0);
@@ -695,11 +710,18 @@ impl ChainPubsubActor {
                                             &client_id,
                                         );
                                     }
-                                    let _ = subscription_updates_sender.send(sub_update)
-                                        .await
-                                        .inspect_err(|err| {
-                                            error!(error = ?err, pubkey = %acc_pubkey, "Failed to send program subscription update");
-                                        });
+                                    tokio::select! {
+                                        result = subscription_updates_sender.send(sub_update) => {
+                                            if result.is_err() {
+                                                warn!(program_id = %program_pubkey, "Downstream receiver dropped; stopping program subscription listener");
+                                                break;
+                                            }
+                                        }
+                                        _ = cancellation_token.cancelled() => {
+                                            trace!("Program subscription was cancelled while sending update");
+                                            break;
+                                        }
+                                    }
                                 }
                             }
                         } else {
