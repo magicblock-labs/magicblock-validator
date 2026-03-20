@@ -160,10 +160,10 @@ impl TransactionScheduler {
             executors.push(transactions_tx);
         }
 
-        let hasher = Hasher::new();
+        let mut hasher = Hasher::new();
         let slot_ticker = interval(state.block_time);
         let latest_block = state.ledger.latest_block().clone();
-        hasher.update(latest_block.load().blockhash);
+        hasher.update(latest_block.load().blockhash.as_ref());
         let slot = latest_block.load().slot;
 
         Self {
