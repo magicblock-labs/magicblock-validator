@@ -43,7 +43,6 @@ use magicblock_config::{
 };
 use magicblock_core::{
     link::{
-        blocks::BlockUpdateTx,
         link,
         transactions::{SchedulerMode, TransactionSchedulerHandle},
     },
@@ -100,7 +99,6 @@ use crate::{
         write_validator_keypair_to_ledger,
     },
     magic_sys_adapter::MagicSysAdapter,
-    slot::advance_slot_and_update_ledger,
     tickers::{init_slot_ticker, init_system_metrics_ticker},
 };
 
@@ -129,7 +127,6 @@ pub struct MagicValidator {
     rpc_handle: thread::JoinHandle<()>,
     identity: Pubkey,
     transaction_scheduler: TransactionSchedulerHandle,
-    block_udpate_tx: BlockUpdateTx,
     _metrics: (MetricsService, tokio::task::JoinHandle<()>),
     claim_fees_task: ClaimFeesTask,
     task_scheduler: Option<TaskSchedulerService>,
@@ -332,6 +329,8 @@ impl MagicValidator {
                 .chainlink
                 .auto_airdrop_lamports
                 > 0,
+            block_time: config.ledger.block_time,
+            superblock_size: config.ledger.superblock_size,
             shutdown: token.clone(),
             mode_rx,
             pause_permit: validator_channels.pause_permit,
@@ -436,7 +435,6 @@ impl MagicValidator {
             rpc_handle,
             identity: validator_pubkey,
             transaction_scheduler: dispatch.transaction_scheduler,
-            block_udpate_tx: validator_channels.block_update,
             task_scheduler: Some(task_scheduler),
             transaction_execution,
             replication_handle: None,
@@ -615,7 +613,6 @@ impl MagicValidator {
         )
         .await?;
         log_timing("startup", "ledger_replay", step_start);
-        self.accountsdb.set_slot(slot_to_continue_at);
 
         // The transactions to schedule and accept account commits re-run when we
         // process the ledger, however we do not want to re-commit them.
@@ -629,20 +626,6 @@ impl MagicValidator {
             committed_count = scheduled_commits,
             "Cleared scheduled commits"
         );
-
-        // We want the next transaction either due to hydrating of cloned accounts or
-        // user request to be processed in the next slot such that it doesn't become
-        // part of the last block found in the existing ledger which would be incorrect.
-        let step_start = Instant::now();
-        let (update_ledger_result, _) = advance_slot_and_update_ledger(
-            &self.accountsdb,
-            &self.ledger,
-            &self.block_udpate_tx,
-        );
-        if let Err(err) = update_ledger_result {
-            return Err(err.into());
-        }
-        log_timing("startup", "advance_slot_after_replay", step_start);
 
         tracing::Span::current().record("ledger_slot", slot_to_continue_at);
         info!("Ledger processing complete");
@@ -915,10 +898,9 @@ impl MagicValidator {
         self.slot_ticker = Some(init_slot_ticker(
             self.accountsdb.clone(),
             &self.scheduled_commits_processor,
-            self.ledger.clone(),
+            self.ledger.latest_block().clone(),
             self.config.ledger.block_time,
             self.transaction_scheduler.clone(),
-            self.block_udpate_tx.clone(),
             self.exit.clone(),
         ));
         log_timing("startup", "slot_ticker_start", step_start);

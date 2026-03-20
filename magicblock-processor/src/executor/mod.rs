@@ -28,7 +28,10 @@ use solana_svm::transaction_processor::{
 use solana_transaction::sanitized::SanitizedTransaction;
 use tokio::{
     runtime::Builder,
-    sync::mpsc::{Receiver, Sender},
+    sync::{
+        mpsc::{Receiver, Sender},
+        Semaphore,
+    },
 };
 use tracing::{info, instrument, warn};
 
@@ -61,6 +64,7 @@ pub(super) struct TransactionExecutor {
     ledger: Arc<Ledger>,
     block: LatestBlock,
     block_history: BTreeMap<Slot, LatestBlockInner>,
+    execution_permits: Arc<Semaphore>,
 
     // SVM Components
     processor: TransactionBatchProcessor<SimpleForkGraph>,
@@ -84,6 +88,7 @@ impl TransactionExecutor {
         state: &TransactionSchedulerState,
         rx: Receiver<IndexedTransaction>,
         ready_tx: Sender<ExecutorId>,
+        execution_permits: Arc<Semaphore>,
         programs_cache: Arc<RwLock<ProgramCache<SimpleForkGraph>>>,
     ) -> Self {
         let slot = state.accountsdb.slot();
@@ -118,6 +123,7 @@ impl TransactionExecutor {
             config,
             block: block.clone(),
             environment: state.environment.clone(),
+            execution_permits,
             rx,
             ready_tx,
             accounts_tx: state.account_update_tx.clone(),
@@ -172,6 +178,7 @@ impl TransactionExecutor {
                     if transaction.slot != self.processor.slot {
                         self.transition_to_slot(transaction.slot);
                     }
+                    let _permit = self.execution_permits.acquire().await;
                     match transaction.txn.mode {
                         TransactionProcessingMode::Execution(_) => {
                             self.execute(transaction, None);
@@ -185,8 +192,8 @@ impl TransactionExecutor {
                     }
                     let _ = self.ready_tx.try_send(self.id);
                 }
-                _ = block_updated.recv() => {
-                    self.register_new_block();
+                Ok(latest) = block_updated.recv() => {
+                    self.register_new_block(latest);
                 }
                 else => break,
             }
@@ -194,8 +201,7 @@ impl TransactionExecutor {
         info!("Executor terminated");
     }
 
-    fn register_new_block(&mut self) {
-        let block = LatestBlockInner::clone(&*self.block.load());
+    fn register_new_block(&mut self, block: LatestBlockInner) {
         while self.block_history.len() >= BLOCK_HISTORY_SIZE {
             self.block_history.pop_first();
         }
@@ -203,13 +209,15 @@ impl TransactionExecutor {
     }
 
     fn transition_to_slot(&mut self, slot: Slot) {
-        let Some(block) = self.block_history.get(&slot) else {
+        // transactions execute in the latest finalized block + 1
+        let prev_slot = slot.saturating_sub(1);
+        let Some(block) = self.block_history.get(&prev_slot) else {
             // should never happen in practice
             warn!(slot, "tried to transition to slot which wasn't registered");
             return;
         };
         self.environment.blockhash = block.blockhash;
-        self.processor.slot = block.slot;
+        self.processor.slot = slot;
         self.set_sysvars(block);
     }
 

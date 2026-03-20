@@ -398,7 +398,6 @@ async fn test_get_signatures_for_address() {
 async fn test_get_signatures_for_address_pagination() {
     let env = RpcTestEnv::new().await;
     let mut signatures = Vec::new();
-    env.advance_slots(1);
     for _ in 0..5 {
         signatures.push(env.execute_transaction().await);
     }
@@ -442,13 +441,20 @@ async fn test_get_signatures_for_address_pagination() {
 async fn test_get_transaction() {
     // Test successful transaction
     let env = RpcTestEnv::new().await;
+    let initial_slot = env.latest_slot();
     let success_sig = env.execute_transaction().await;
     let transaction = env
         .rpc
         .get_transaction(&success_sig, UiTransactionEncoding::Base64)
         .await
         .expect("getTransaction request failed");
-    assert_eq!(transaction.slot, env.latest_slot());
+    // Transaction should be in a slot >= initial_slot (scheduler may have advanced)
+    assert!(
+        transaction.slot >= initial_slot,
+        "transaction slot {} should be >= initial slot {}",
+        transaction.slot,
+        initial_slot
+    );
     assert_eq!(transaction.transaction.meta.unwrap().err, None);
 
     // Test failed transaction
@@ -459,7 +465,8 @@ async fn test_get_transaction() {
         .schedule(failing_tx)
         .await
         .unwrap();
-    tokio::time::sleep(Duration::from_millis(10)).await;
+    // Wait longer for the transaction to be processed with auto-advancement
+    tokio::time::sleep(Duration::from_millis(100)).await;
     let transaction = env
         .rpc
         .get_transaction(&fail_sig, UiTransactionEncoding::Base64)
