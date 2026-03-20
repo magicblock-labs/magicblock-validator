@@ -43,7 +43,9 @@ use magicblock_config::{
 };
 use magicblock_core::{
     link::{
-        blocks::BlockUpdateTx, link, transactions::TransactionSchedulerHandle,
+        blocks::BlockUpdateTx,
+        link,
+        transactions::{SchedulerMode, TransactionSchedulerHandle},
     },
     Slot,
 };
@@ -56,10 +58,7 @@ use magicblock_metrics::{metrics::TRANSACTION_COUNT, MetricsService};
 use magicblock_processor::{
     build_svm_env,
     loader::load_upgradeable_programs,
-    scheduler::{
-        state::{SchedulerMode, TransactionSchedulerState},
-        TransactionScheduler,
-    },
+    scheduler::{state::TransactionSchedulerState, TransactionScheduler},
 };
 use magicblock_program::{
     init_magic_sys,
