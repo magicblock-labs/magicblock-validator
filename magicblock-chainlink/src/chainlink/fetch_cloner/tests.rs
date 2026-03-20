@@ -2364,6 +2364,66 @@ async fn test_non_raw_eata_owned_account_subscription_update_stays_delegated() {
 }
 
 #[tokio::test]
+async fn test_discovered_dlp_owned_account_delegated_elsewhere_is_ignored() {
+    init_logger();
+    let validator_keypair = Keypair::new();
+    let account_owner = random_pubkey();
+    let other_validator = random_pubkey();
+    let account_pubkey = random_pubkey();
+    const CURRENT_SLOT: u64 = 100;
+
+    let delegated_account = Account {
+        lamports: 1_000_000,
+        data: vec![1, 2, 3, 4],
+        owner: dlp_api::dlp::id(),
+        executable: false,
+        rent_epoch: 0,
+    };
+
+    let FetcherTestCtx {
+        accounts_bank,
+        rpc_client,
+        subscription_tx,
+        ..
+    } = setup(
+        [(account_pubkey, delegated_account.clone())],
+        CURRENT_SLOT,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+
+    add_delegation_record_for(
+        &rpc_client,
+        account_pubkey,
+        other_validator,
+        account_owner,
+    );
+
+    use crate::remote_account_provider::{
+        RemoteAccount, RemoteAccountUpdateSource,
+    };
+
+    subscription_tx
+        .send(ForwardedSubscriptionUpdate {
+            pubkey: account_pubkey,
+            account: RemoteAccount::from_fresh_account(
+                delegated_account,
+                CURRENT_SLOT,
+                RemoteAccountUpdateSource::Subscription,
+            ),
+        })
+        .await
+        .unwrap();
+
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    assert!(
+        accounts_bank.get_account(&account_pubkey).is_none(),
+        "subscription auto-discovery should ignore accounts delegated to another validator"
+    );
+}
+
+#[tokio::test]
 async fn test_delegated_eata_subscription_update_clones_raw_eata_and_projects_ata(
 ) {
     init_logger();
@@ -2376,6 +2436,7 @@ async fn test_delegated_eata_subscription_update_clones_raw_eata_and_projects_at
 
     let eata_pubkey = derive_eata(&wallet_owner, &mint);
     let ata_pubkey = derive_ata(&wallet_owner, &mint);
+    let ata_account = create_ata_account(&wallet_owner, &mint);
     let eata_account = create_eata_account(&wallet_owner, &mint, AMOUNT, true);
 
     let FetcherTestCtx {
@@ -2384,7 +2445,10 @@ async fn test_delegated_eata_subscription_update_clones_raw_eata_and_projects_at
         subscription_tx,
         ..
     } = setup(
-        [(eata_pubkey, eata_account.clone())],
+        [
+            (ata_pubkey, ata_account),
+            (eata_pubkey, eata_account.clone()),
+        ],
         CURRENT_SLOT,
         validator_keypair.insecure_clone(),
     )

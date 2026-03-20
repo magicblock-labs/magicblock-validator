@@ -266,6 +266,13 @@ where
         pubkey: Pubkey,
         update: ForwardedSubscriptionUpdate,
     ) {
+        if self
+            .maybe_greedily_clone_discovered_delegated_account(pubkey, &update)
+            .await
+        {
+            return;
+        }
+
         let (resolved_account, deleg_record, delegation_actions) = self
             .resolve_account_to_clone_from_forwarded_sub_with_unsubscribe(
                 update,
@@ -393,6 +400,81 @@ where
                 );
             }
         }
+    }
+
+    async fn maybe_greedily_clone_discovered_delegated_account(
+        &self,
+        pubkey: Pubkey,
+        update: &ForwardedSubscriptionUpdate,
+    ) -> bool {
+        if self.accounts_bank.get_account(&pubkey).is_some() {
+            return false;
+        }
+
+        let Some(account) = update.account.fresh_account() else {
+            return false;
+        };
+
+        if !account.owner().eq(&dlp_api::dlp::id()) {
+            return false;
+        }
+
+        let Some((deleg_record, _)) = self
+            .fetch_and_parse_delegation_record(
+                pubkey,
+                account.remote_slot(),
+                AccountFetchOrigin::GetAccount,
+            )
+            .await
+        else {
+            trace!(
+                pubkey = %pubkey,
+                slot = account.remote_slot(),
+                "Ignoring discovered DLP-owned update without delegation to this validator"
+            );
+            return true;
+        };
+
+        if deleg_record.authority != self.validator_pubkey {
+            trace!(
+                pubkey = %pubkey,
+                authority = %deleg_record.authority,
+                "Ignoring discovered DLP-owned update delegated elsewhere"
+            );
+            return true;
+        }
+
+        let mut pubkeys_to_clone = vec![pubkey];
+        if let Some((wallet_owner, mint)) = delegation::parse_raw_eata_pda(
+            &pubkey,
+            account.data(),
+            deleg_record.owner,
+        ) {
+            if let Some((ata_pubkey, _)) =
+                try_derive_ata_address_and_bump(&wallet_owner, &mint)
+            {
+                pubkeys_to_clone.push(ata_pubkey);
+            }
+        }
+
+        if let Err(err) = self
+            .fetch_and_clone_accounts_with_dedup(
+                &pubkeys_to_clone,
+                None,
+                Some(account.remote_slot()),
+                AccountFetchOrigin::GetAccount,
+                None,
+            )
+            .await
+        {
+            warn!(
+                pubkey = %pubkey,
+                error = %err,
+                "Failed to greedily clone discovered delegated account"
+            );
+        }
+
+        true
     }
 
     async fn handle_executable_sub_update(

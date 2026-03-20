@@ -1,5 +1,8 @@
 use std::{collections::HashSet, fmt};
 
+use dlp_api::dlp::state::{
+    CommitRecord, DelegationMetadata, DelegationRecord, ProgramConfig,
+};
 use solana_account::Account;
 use solana_account_decoder::UiAccount;
 use solana_clock::Slot;
@@ -58,6 +61,13 @@ impl From<(Pubkey, RpcResponse<UiAccount>)> for SubscriptionUpdate {
             account,
         }
     }
+}
+
+pub(crate) fn is_internal_dlp_account_data(data: &[u8]) -> bool {
+    DelegationRecord::try_from_bytes_with_discriminator(data).is_ok()
+        || DelegationMetadata::try_from_bytes_with_discriminator(data).is_ok()
+        || CommitRecord::try_from_bytes_with_discriminator(data).is_ok()
+        || ProgramConfig::try_from_bytes_with_discriminator(data).is_ok()
 }
 
 impl fmt::Display for SubscriptionUpdate {

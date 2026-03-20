@@ -36,9 +36,9 @@ use super::{
 };
 use crate::remote_account_provider::{
     pubsub_common::{
-        AccountSubscription, ChainPubsubActorMessage, PubsubClientConfig,
-        SubscriptionUpdate, MESSAGE_CHANNEL_SIZE,
-        SUBSCRIPTION_UPDATE_CHANNEL_SIZE,
+        is_internal_dlp_account_data, AccountSubscription,
+        ChainPubsubActorMessage, PubsubClientConfig, SubscriptionUpdate,
+        MESSAGE_CHANNEL_SIZE, SUBSCRIPTION_UPDATE_CHANNEL_SIZE,
     },
     pubsub_connection::PubsubConnectionImpl,
     DEFAULT_SUBSCRIPTION_RETRIES,
@@ -698,13 +698,30 @@ impl ChainPubsubActor {
                                     &program_pubkey.to_string(),
                                 );
 
-                                if subs.lock().expect("subscriptions lock poisoned").contains_key(&acc_pubkey) {
-                                    let ui_account = rpc_response.value.account;
-                                    let rpc_response = RpcResponse {
-                                        context: rpc_response.context,
-                                        value: ui_account,
-                                    };
-                                    let sub_update = SubscriptionUpdate::from((acc_pubkey, rpc_response));
+                                let is_directly_subscribed = subs
+                                    .lock()
+                                    .expect("subscriptions lock poisoned")
+                                    .contains_key(&acc_pubkey);
+                                let ui_account = rpc_response.value.account;
+                                let rpc_response = RpcResponse {
+                                    context: rpc_response.context,
+                                    value: ui_account,
+                                };
+                                let sub_update = SubscriptionUpdate::from((
+                                    acc_pubkey,
+                                    rpc_response,
+                                ));
+                                let should_forward = is_directly_subscribed
+                                    || program_pubkey.eq(&dlp_api::dlp::id())
+                                        && sub_update.account.as_ref().is_some_and(
+                                            |account| {
+                                                !is_internal_dlp_account_data(
+                                                    &account.data,
+                                                )
+                                            },
+                                        );
+
+                                if should_forward {
                                     if acc_pubkey != clock::ID {
                                         inc_program_subscription_account_updates_count(
                                             &client_id,
