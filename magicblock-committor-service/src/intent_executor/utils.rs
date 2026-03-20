@@ -1,12 +1,25 @@
+use std::{future::Future, time::Duration};
+
+use async_trait::async_trait;
+use magicblock_core::traits::{
+    ActionError, ActionResult, ActionsCallbackScheduler,
+};
 use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
 use solana_signature::Signature;
+use tokio::time::timeout;
+use tracing::info;
 
 use crate::{
     intent_executor::{
         error::{IntentExecutorResult, TransactionStrategyExecutionError},
         intent_execution_client::IntentExecutionClient,
+        single_stage_executor::SingleStageExecutor,
         task_info_fetcher::{CacheTaskInfoFetcher, ResetType, TaskInfoFetcher},
+        two_stage_executor::{
+            Committed, Finalized, Initialized, TwoStageExecutor,
+        },
+        ExecutionOutput,
     },
     persist::IntentPersister,
     tasks::{
@@ -185,5 +198,155 @@ pub(in crate::intent_executor) fn handle_undelegation_error(
             optimized_tasks: vec![],
             lookup_tables_keys: vec![],
         }
+    }
+}
+
+pub(in crate::intent_executor) async fn execute_with_timeout<
+    R,
+    P: IntentPersister,
+>(
+    time_left: Option<Duration>,
+    mut executor: impl StageExecutor<Output = R>,
+    persister: &Option<P>,
+) -> IntentExecutorResult<R> {
+    if executor.has_callbacks() {
+        if let Some(time_left) = time_left {
+            match timeout(time_left, executor.execute(persister)).await {
+                Ok(res) => return res,
+                Err(_) => {
+                    info!("Intent execution timed out, cleaning up actions");
+                    executor.execute_callbacks(Err(ActionError::TimeoutError));
+                }
+            }
+        } else {
+            // Already timed out
+            // Handle timeout and continue execution
+            executor.execute_callbacks(Err(ActionError::TimeoutError));
+        }
+    }
+
+    executor.execute(persister).await
+
+}
+
+#[async_trait]
+pub(in crate::intent_executor) trait StageExecutor {
+    type Output;
+
+    fn has_callbacks(&self) -> bool;
+    async fn execute<P: IntentPersister>(
+        &mut self,
+        persister: &Option<P>,
+    ) -> IntentExecutorResult<Self::Output>;
+    fn execute_callbacks(&mut self, result: ActionResult);
+}
+
+pub(in crate::intent_executor) struct SingleExecutor<'a, 'e, A, T, F> {
+    pub(in crate::intent_executor) inner: &'a mut SingleStageExecutor<'e, F, A>,
+    pub(in crate::intent_executor) transaction_preparator: &'a T,
+    pub(in crate::intent_executor) committed_pubkeys: &'a [Pubkey],
+}
+
+#[async_trait]
+impl<'a, 'e, A, T, F> StageExecutor for SingleExecutor<'a, 'e, A, T, F>
+where
+    A: ActionsCallbackScheduler,
+    T: TransactionPreparator,
+    F: TaskInfoFetcher,
+{
+    type Output = ExecutionOutput;
+
+    fn has_callbacks(&self) -> bool {
+        self.inner.has_callbacks()
+    }
+
+    async fn execute<P: IntentPersister>(
+        &mut self,
+        persister: &Option<P>,
+    ) -> IntentExecutorResult<Self::Output> {
+        self.inner
+            .execute(
+                self.committed_pubkeys,
+                self.transaction_preparator,
+                persister,
+            )
+            .await
+    }
+
+    fn execute_callbacks(&mut self, result: ActionResult) {
+        self.inner.execute_callbacks(result)
+    }
+}
+
+pub(in crate::intent_executor) struct CommitExecutor<'a, 'e, A, T, F> {
+    pub(in crate::intent_executor) inner:
+        &'a mut TwoStageExecutor<'e, A, Initialized>,
+    pub(in crate::intent_executor) transaction_preparator: &'a T,
+    pub(in crate::intent_executor) task_info_fetcher:
+        &'a CacheTaskInfoFetcher<F>,
+    pub(in crate::intent_executor) committed_pubkeys: &'a [Pubkey],
+}
+
+#[async_trait]
+impl<'a, 'e, A, T, F> StageExecutor for CommitExecutor<'a, 'e, A, T, F>
+where
+    A: ActionsCallbackScheduler,
+    T: TransactionPreparator,
+    F: TaskInfoFetcher,
+{
+    type Output = Signature;
+
+    fn has_callbacks(&self) -> bool {
+        self.inner.has_callbacks()
+    }
+
+    async fn execute<P: IntentPersister>(
+        &mut self,
+        persister: &Option<P>,
+    ) -> IntentExecutorResult<Self::Output> {
+        self.inner
+            .commit(
+                self.committed_pubkeys,
+                self.transaction_preparator,
+                self.task_info_fetcher,
+                persister,
+            )
+            .await
+    }
+
+    fn execute_callbacks(&mut self, result: ActionResult) {
+        self.inner.execute_callbacks(result)
+    }
+}
+
+pub(in crate::intent_executor) struct FinalizeExecutor<'a, 'e, A, T> {
+    pub(in crate::intent_executor) inner:
+        &'a mut TwoStageExecutor<'e, A, Committed>,
+    pub(in crate::intent_executor) transaction_preparator: &'a T,
+}
+
+#[async_trait]
+impl<'a, 'e, A, T> StageExecutor for FinalizeExecutor<'a, 'e, A, T>
+where
+    A: ActionsCallbackScheduler,
+    T: TransactionPreparator,
+{
+    type Output = Signature;
+
+    fn has_callbacks(&self) -> bool {
+        self.inner.has_callbacks()
+    }
+
+    async fn execute<P: IntentPersister>(
+        &mut self,
+        persister: &Option<P>,
+    ) -> IntentExecutorResult<Self::Output> {
+        self.inner
+            .finalize(self.transaction_preparator, persister)
+            .await
+    }
+
+    fn execute_callbacks(&mut self, result: ActionResult) {
+        self.inner.execute_callbacks(result)
     }
 }

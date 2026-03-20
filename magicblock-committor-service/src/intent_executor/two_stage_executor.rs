@@ -285,6 +285,11 @@ where
         }))
     }
 
+    pub fn has_callbacks(&self) -> bool {
+        self.state.commit_strategy.has_actions_callbacks()
+            || self.state.finalize_strategy.has_actions_callbacks()
+    }
+
     /// On `Err`: removes actions from both commit and finalize strategies and
     /// executes all their callbacks with the error.
     /// On `Ok`: removes actions only from commit strategy and executes their
@@ -399,6 +404,10 @@ where
                 Some(self.state.commit_signature),
             )
         })
+    }
+
+    pub fn has_callbacks(&self) -> bool {
+        self.state.finalize_strategy.has_actions_callbacks()
     }
 
     /// Removes actions from finalize strateg

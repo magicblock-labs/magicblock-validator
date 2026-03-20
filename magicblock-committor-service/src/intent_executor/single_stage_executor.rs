@@ -162,6 +162,10 @@ where
         removed_actions
     }
 
+    pub fn has_callbacks(&self) -> bool {
+        self.transaction_strategy.has_actions_callbacks()
+    }
+
     pub fn execute_callbacks(
         &mut self,
         result: Result<(), impl Into<ActionError>>,

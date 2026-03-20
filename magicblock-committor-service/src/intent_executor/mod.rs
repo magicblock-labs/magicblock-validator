@@ -39,7 +39,10 @@ use crate::{
         single_stage_executor::SingleStageExecutor,
         task_info_fetcher::{CacheTaskInfoFetcher, ResetType, TaskInfoFetcher},
         two_stage_executor::TwoStageExecutor,
-        utils::handle_cpi_limit_error,
+        utils::{
+            execute_with_timeout, handle_cpi_limit_error, CommitExecutor,
+            FinalizeExecutor, SingleExecutor,
+        },
     },
     persist::{CommitStatus, CommitStatusSignatures, IntentPersister},
     tasks::{
@@ -279,11 +282,8 @@ where
         }
     }
 
-    fn time_left(
-        started_at: &Instant,
-        actions_timeout: Duration,
-    ) -> Option<Duration> {
-        actions_timeout.checked_sub(started_at.elapsed())
+    fn time_left(&self) -> Option<Duration> {
+        self.actions_timeout.checked_sub(self.started_at.elapsed())
     }
 
     /// Starting execution from single stage
@@ -294,7 +294,6 @@ where
         execution_report: &mut IntentExecutionReport,
         persister: &Option<P>,
     ) -> IntentExecutorResult<ExecutionOutput> {
-        let has_callbacks = transaction_strategy.has_actions_callbacks();
         let committed_pubkeys = base_intent.get_all_committed_pubkeys();
 
         let mut single_stage_executor = SingleStageExecutor::new(
@@ -305,54 +304,16 @@ where
             self.actions_callback_executor.clone(),
             execution_report,
         );
-        let res = if has_callbacks {
-            if let Some(time_left) =
-                Self::time_left(&self.started_at, self.actions_timeout)
-            {
-                let execute_fut = single_stage_executor.execute(
-                    &committed_pubkeys,
-                    &self.transaction_preparator,
-                    persister,
-                );
-                match timeout(time_left, execute_fut).await {
-                    Ok(res) => res,
-                    Err(_) => {
-                        info!(
-                            "Intent execution timed out, cleaning up actions"
-                        );
-                        single_stage_executor
-                            .execute_callbacks(Err(ActionError::TimeoutError));
-                        single_stage_executor
-                            .execute(
-                                &committed_pubkeys,
-                                &self.transaction_preparator,
-                                persister,
-                            )
-                            .await
-                    }
-                }
-            } else {
-                // Already timed out
-                // Handle timeout and continue execution
-                single_stage_executor
-                    .execute_callbacks(Err(ActionError::TimeoutError));
-                single_stage_executor
-                    .execute(
-                        &committed_pubkeys,
-                        &self.transaction_preparator,
-                        persister,
-                    )
-                    .await
-            }
-        } else {
-            single_stage_executor
-                .execute(
-                    &committed_pubkeys,
-                    &self.transaction_preparator,
-                    persister,
-                )
-                .await
-        };
+        let res = execute_with_timeout(
+            self.time_left(),
+            SingleExecutor {
+                inner: &mut single_stage_executor,
+                transaction_preparator: &self.transaction_preparator,
+                committed_pubkeys: &committed_pubkeys,
+            },
+            persister,
+        )
+        .await;
 
         // Here we continue only IF the error is a limit-type execution error
         // We can recover that Error by splitting execution
@@ -405,9 +366,6 @@ where
         execution_report: &mut IntentExecutionReport,
         persister: &Option<P>,
     ) -> IntentExecutorResult<ExecutionOutput> {
-        let has_commit_callbacks = commit_strategy.has_actions_callbacks();
-        let mut has_finalize_callbacks =
-            finalize_strategy.has_actions_callbacks();
         let mut executor = TwoStageExecutor::new(
             self.authority.insecure_clone(),
             commit_strategy,
@@ -417,91 +375,28 @@ where
             execution_report,
         );
 
-        let commit_signature = if has_commit_callbacks {
-            if let Some(time_left) =
-                Self::time_left(&self.started_at, self.actions_timeout)
-            {
-                let fut = executor.commit(
-                    committed_pubkeys,
-                    &self.transaction_preparator,
-                    &self.task_info_fetcher,
-                    persister,
-                );
-                match timeout(time_left, fut).await {
-                    Ok(res) => res,
-                    Err(_) => {
-                        // Timeout triggers all callbacks
-                        has_finalize_callbacks = false;
-                        executor
-                            .execute_callbacks(Err(ActionError::TimeoutError));
-                        executor
-                            .commit(
-                                committed_pubkeys,
-                                &self.transaction_preparator,
-                                &self.task_info_fetcher,
-                                persister,
-                            )
-                            .await
-                    }
-                }
-            } else {
-                // Timeout triggers all callbacks
-                has_finalize_callbacks = false;
-                executor.execute_callbacks(Err(ActionError::TimeoutError));
-                executor
-                    .commit(
-                        committed_pubkeys,
-                        &self.transaction_preparator,
-                        &self.task_info_fetcher,
-                        persister,
-                    )
-                    .await
-            }
-        } else {
-            executor
-                .commit(
-                    committed_pubkeys,
-                    &self.transaction_preparator,
-                    &self.task_info_fetcher,
-                    persister,
-                )
-                .await
-        }?;
+        let commit_signature = execute_with_timeout(
+            self.time_left(),
+            CommitExecutor {
+                inner: &mut executor,
+                transaction_preparator: &self.transaction_preparator,
+                task_info_fetcher: &self.task_info_fetcher,
+                committed_pubkeys,
+            },
+            persister,
+        )
+        .await?;
 
         let mut finalize_executor = executor.done(commit_signature);
-        let finalize_signature = if has_finalize_callbacks {
-            if let Some(time_left) =
-                Self::time_left(&self.started_at, self.actions_timeout)
-            {
-                let execute_fut = finalize_executor
-                    .finalize(&self.transaction_preparator, persister);
-                match timeout(time_left, execute_fut).await {
-                    Ok(res) => res,
-                    Err(_) => {
-                        info!(
-                            "Intent execution timed out, cleaning up actions"
-                        );
-                        finalize_executor
-                            .execute_callbacks(Err(ActionError::TimeoutError));
-                        finalize_executor
-                            .finalize(&self.transaction_preparator, persister)
-                            .await
-                    }
-                }
-            } else {
-                // Already timed out
-                // Handle timeout and continue execution
-                finalize_executor
-                    .execute_callbacks(Err(ActionError::TimeoutError));
-                finalize_executor
-                    .finalize(&self.transaction_preparator, persister)
-                    .await
-            }
-        } else {
-            finalize_executor
-                .finalize(&self.transaction_preparator, persister)
-                .await
-        }?;
+        let finalize_signature = execute_with_timeout(
+            self.time_left(),
+            FinalizeExecutor {
+                inner: &mut finalize_executor,
+                transaction_preparator: &self.transaction_preparator,
+            },
+            persister,
+        )
+        .await?;
 
         let finalized_stage = finalize_executor.done(finalize_signature);
         Ok(ExecutionOutput::TwoStage {
