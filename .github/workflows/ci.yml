@@ -93,10 +93,12 @@ jobs:
           cache-targets: true
           cache-all-crates: true
           cache-on-failure: true
-      - name: Build project and test programs
-        run: |
-          cargo build --locked
-          make -C test-integration programs
+      - name: Build project
+        run: cargo build --locked
+      - name: Build SBF programs
+        env:
+          RUSTFLAGS: ""
+        run: make -C test-integration programs
   # ── Integration Tests ───────────────────────────────────────────────
   integration-tests:
     needs: build
