@@ -31,3 +31,5 @@ magicblock-test-storage/
 
 # AI related
 **/CLAUDE.md
+config.json
+config.toml
