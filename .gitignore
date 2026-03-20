@@ -33,3 +33,7 @@ _integration_test_bins/
 # AI related
 **/CLAUDE.md
 .claude/
+
+# Local configs
+config.json
+config.toml
