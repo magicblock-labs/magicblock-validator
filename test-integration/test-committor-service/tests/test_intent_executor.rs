@@ -12,7 +12,7 @@ use borsh::to_vec;
 use dlp_api::dlp::{
     args::CommitStateArgs, pda::ephemeral_balance_pda_from_payer,
 };
-use futures::future::join_all;
+use futures::future::{join_all, try_join_all};
 use magicblock_committor_program::pdas;
 use magicblock_committor_service::{
     intent_executor::{
@@ -32,7 +32,9 @@ use magicblock_committor_service::{
         task_builder::{TaskBuilderError, TaskBuilderImpl, TasksBuilder},
         task_strategist::{TaskStrategist, TransactionStrategy},
     },
-    transaction_preparator::TransactionPreparatorImpl,
+    transaction_preparator::{
+        TransactionPreparator, TransactionPreparatorImpl,
+    },
     DEFAULT_ACTIONS_TIMEOUT,
 };
 use magicblock_core::{
@@ -827,7 +829,16 @@ async fn test_cpi_limits_error_recovery() {
     ));
 
     // Cleanup after intent
-    assert!(intent_executor.cleanup().await.is_ok());
+    let transaction_preparator = fixture.create_transaction_preparator();
+    let cleanup_futs = execution_report.junk().iter().map(|to_cleanup| {
+        transaction_preparator.cleanup_for_strategy(
+            &fixture.authority,
+            &to_cleanup.optimized_tasks,
+            &to_cleanup.lookup_tables_keys,
+        )
+    });
+    assert!(try_join_all(cleanup_futs).await.is_ok());
+
     let mut commit_ids_by_pk = HashMap::new();
     for el in committed_accounts.iter() {
         let nonce = task_info_fetcher
@@ -965,7 +976,15 @@ async fn test_commit_id_actions_cpi_limit_errors_recovery() {
     ));
 
     // Cleanup after intent
-    assert!(intent_executor.cleanup().await.is_ok());
+    let transaction_preparator = fixture.create_transaction_preparator();
+    let cleanup_futs = execution_report.junk().iter().map(|to_cleanup| {
+        transaction_preparator.cleanup_for_strategy(
+            &fixture.authority,
+            &to_cleanup.optimized_tasks,
+            &to_cleanup.lookup_tables_keys,
+        )
+    });
+    assert!(try_join_all(cleanup_futs).await.is_ok());
     let mut commit_ids_by_pk = HashMap::new();
     for el in committed_accounts.iter() {
         let nonce = task_info_fetcher

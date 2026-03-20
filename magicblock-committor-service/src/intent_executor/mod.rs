@@ -138,6 +138,10 @@ impl IntentExecutionReport {
     ) {
         self.callbacks_report.extend(values);
     }
+
+    pub fn junk(&self) -> &Vec<TransactionStrategy> {
+        &self.junk
+    }
 }
 
 pub struct IntentExecutorImpl<T, F, A> {
