@@ -22,6 +22,7 @@ jobs:
           workspaces: |
             . -> target
             test-integration -> target
+          cache-targets: true
           cache-all-crates: true
           cache-on-failure: true
       - name: Format check
@@ -46,6 +47,7 @@ jobs:
           workspaces: |
             . -> target
             test-integration -> target
+          cache-targets: true
           cache-all-crates: true
           cache-on-failure: true
       - name: Lint
@@ -70,6 +72,7 @@ jobs:
           workspaces: |
             . -> target
             test-integration -> target
+          cache-targets: true
           cache-all-crates: true
           cache-on-failure: true
       - name: Unit tests
@@ -119,8 +122,6 @@ jobs:
           - schedule_intents
           - task-scheduler
     name: "Integration: ${{ matrix.test }}"
-    env:
-      RUSTFLAGS: -C link-arg=-fuse-ld=mold
     steps:
       - uses: actions/checkout@v5
         with:
