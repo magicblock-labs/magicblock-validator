@@ -65,6 +65,7 @@ use magicblock_program::{
     validator::{self, validator_authority},
     TransactionScheduler as ActionTransactionScheduler,
 };
+use magicblock_replicator::{nats::Broker, ReplicationService};
 use magicblock_task_scheduler::{SchedulerDatabase, TaskSchedulerService};
 use magicblock_validator_admin::claim_fees::ClaimFeesTask;
 use mdp::state::{
@@ -122,6 +123,7 @@ pub struct MagicValidator {
     ledger_truncator: LedgerTruncator,
     slot_ticker: Option<tokio::task::JoinHandle<()>>,
     committor_service: Option<Arc<CommittorService>>,
+    replication_service: Option<ReplicationService>,
     scheduled_commits_processor: Option<Arc<ScheduledCommitsProcessorImpl>>,
     chainlink: Arc<ChainlinkImpl>,
     rpc_handle: thread::JoinHandle<()>,
@@ -132,6 +134,8 @@ pub struct MagicValidator {
     claim_fees_task: ClaimFeesTask,
     task_scheduler: Option<TaskSchedulerService>,
     transaction_execution: thread::JoinHandle<()>,
+    replication_handle:
+        Option<thread::JoinHandle<magicblock_replicator::Result<()>>>,
     mode_tx: Sender<SchedulerMode>,
     is_standalone: bool,
 }
@@ -174,8 +178,65 @@ impl MagicValidator {
 
         let latest_block = ledger.latest_block().load();
         let step_start = Instant::now();
-        let accountsdb =
+        let mut accountsdb =
             AccountsDb::new(&config.accountsdb, &config.storage, last_slot)?;
+
+        // Mode switch channel for transitioning from StartingUp to Primary
+        // or Replica mode after ledger replay
+        let (mode_tx, mode_rx) = channel(1);
+        let is_standalone = matches!(
+            config.validator.replication_mode,
+            ReplicationMode::Standalone
+        );
+
+        // Connect to replication broker if configured.
+        // Returns (broker, is_fresh_start) where is_fresh_start indicates
+        // whether accountsdb was empty and may need a snapshot.
+        let broker =
+            if let Some(url) = config.validator.replication_mode.remote() {
+                let mut broker = Broker::connect(url).await?;
+                let is_fresh_start = accountsdb.slot() == 0;
+                // Fetch snapshot from primary if starting fresh
+                if is_fresh_start {
+                    if let Some(snapshot) = broker.get_snapshot().await? {
+                        accountsdb.insert_external_snapshot(
+                            snapshot.slot,
+                            &snapshot.data,
+                        )?;
+                    }
+                }
+                Some((broker, is_fresh_start))
+            } else {
+                None
+            };
+        let accountsdb = Arc::new(accountsdb);
+        let (mut dispatch, validator_channels) = link();
+
+        let replication_service =
+            if let Some((broker, is_fresh_start)) = broker {
+                let messages_rx = dispatch.replication_messages.take().expect(
+                    "replication channel should always exist after init",
+                );
+                // ReplicaOnly mode cannot promote to primary
+                let can_promote = matches!(
+                    config.validator.replication_mode,
+                    ReplicationMode::StandBy(_)
+                );
+                ReplicationService::new(
+                    broker,
+                    mode_tx.clone(),
+                    accountsdb.clone(),
+                    ledger.clone(),
+                    dispatch.transaction_scheduler.clone(),
+                    messages_rx,
+                    token.clone(),
+                    is_fresh_start,
+                    can_promote,
+                )
+                .await?
+            } else {
+                None
+            };
         log_timing("startup", "accountsdb_init", step_start);
         for (pubkey, account) in genesis_config.accounts {
             if accountsdb.get_account(&pubkey).is_some() {
@@ -198,8 +259,6 @@ impl MagicValidator {
         let faucet_keypair =
             funded_faucet(&accountsdb, ledger.ledger_path().as_path())?;
 
-        let accountsdb = Arc::new(accountsdb);
-
         let step_start = Instant::now();
         let metrics_service = magicblock_metrics::try_start_metrics_service(
             config.metrics.address.0,
@@ -216,8 +275,6 @@ impl MagicValidator {
             token.clone(),
         );
         log_timing("startup", "system_metrics_ticker_start", step_start);
-
-        let (mut dispatch, validator_channels) = link();
 
         let step_start = Instant::now();
         let committor_service = Self::init_committor_service(&config).await?;
@@ -262,13 +319,6 @@ impl MagicValidator {
         validator::init_validator_authority(identity_keypair);
         let base_fee = config.validator.basefee;
 
-        // Mode switch channel for transitioning from StartingUp to Primary
-        // or Replica mode after ledger replay
-        let (mode_tx, mode_rx) = channel(1);
-        let is_standalone = matches!(
-            config.validator.replication_mode,
-            ReplicationMode::Standalone
-        );
         let txn_scheduler_state = TransactionSchedulerState {
             accountsdb: accountsdb.clone(),
             ledger: ledger.clone(),
@@ -277,12 +327,14 @@ impl MagicValidator {
             account_update_tx: validator_channels.account_update,
             environment: build_svm_env(&accountsdb, latest_block.blockhash, 0),
             tasks_tx: validator_channels.tasks_service,
+            replication_tx: validator_channels.replication_messages,
             is_auto_airdrop_lamports_enabled: config
                 .chainlink
                 .auto_airdrop_lamports
                 > 0,
             shutdown: token.clone(),
             mode_rx,
+            pause_permit: validator_channels.pause_permit,
         };
         TRANSACTION_COUNT.inc_by(ledger.count_transactions()? as u64);
         // Faucet keypair is only used for airdrops, which are not allowed in
@@ -374,6 +426,7 @@ impl MagicValidator {
             // NOTE: set during [Self::start]
             slot_ticker: None,
             committor_service,
+            replication_service,
             scheduled_commits_processor,
             chainlink,
             token,
@@ -386,6 +439,7 @@ impl MagicValidator {
             block_udpate_tx: validator_channels.block_update,
             task_scheduler: Some(task_scheduler),
             transaction_execution,
+            replication_handle: None,
             mode_tx,
             is_standalone,
         })
@@ -829,18 +883,19 @@ impl MagicValidator {
         // The message carries the target mode so the scheduler transitions to
         // the correct coordination mode:
         // - Standalone validators transition to Primary mode
-        // - StandBy/ReplicatOnly validators transition to Replica mode
-        let target = if self.is_standalone {
-            SchedulerMode::Primary
-        } else {
-            SchedulerMode::Replica
-        };
-        self.mode_tx.try_send(target).map_err(|e| {
-            ApiError::FailedToSendModeSwitch(format!(
-                "Failed to send target mode {target:?} to scheduler: \
-                 {e}"
-            ))
-        })?;
+        // - StandBy/ReplicaOnly validators transition to Replica mode
+        if self.is_standalone {
+            self.mode_tx
+                .send(SchedulerMode::Primary)
+                .await
+                .map_err(|e| {
+                    ApiError::FailedToSendModeSwitch(format!(
+                        "Failed to send primary mode to scheduler: {e}"
+                    ))
+                })?;
+        } else if let Some(replicator) = self.replication_service.take() {
+            self.replication_handle.replace(replicator.spawn());
+        }
 
         // Now we are ready to start all services and are ready to accept transactions
         if let Some(frequency) = self
@@ -975,6 +1030,11 @@ impl MagicValidator {
         log_timing("shutdown", "ledger_truncator_join", step_start);
         let step_start = Instant::now();
         let _ = self.transaction_execution.join();
+        if let Some(handle) = self.replication_handle {
+            if let Ok(Err(error)) = handle.join() {
+                error!(%error, "replication service experienced catastrophic failure");
+            }
+        }
         log_timing("shutdown", "transaction_execution_join", step_start);
 
         log_timing("shutdown", "stop_total", stop_start);

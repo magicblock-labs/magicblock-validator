@@ -28,7 +28,7 @@ pub enum ReplicationMode {
     /// Validator which participates in replication: acting as either a primary or replicator
     StandBy(Url),
     /// Validator which participates in replication only as replicator (no takeover)
-    ReplicatOnly(Url),
+    ReplicaOnly(Url),
 }
 
 impl Default for ValidatorConfig {
@@ -39,6 +39,17 @@ impl Default for ValidatorConfig {
             basefee: consts::DEFAULT_BASE_FEE,
             keypair: SerdeKeypair(keypair),
             replication_mode: ReplicationMode::Standalone,
+        }
+    }
+}
+
+impl ReplicationMode {
+    /// Returns the remote URL if this node participates in replication.
+    /// Returns `None` for `Standalone` mode.
+    pub fn remote(&self) -> Option<Url> {
+        match self {
+            Self::Standalone => None,
+            Self::StandBy(u) | Self::ReplicaOnly(u) => Some(u.clone()),
         }
     }
 }

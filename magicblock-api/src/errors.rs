@@ -107,6 +107,9 @@ pub enum ApiError {
     FailedToSanitizeTransaction(
         #[from] solana_transaction_error::TransactionError,
     ),
+
+    #[error("Replication service failed: {0}")]
+    Replication(#[from] magicblock_replicator::Error),
 }
 
 impl From<magicblock_accounts::errors::AccountsError> for ApiError {

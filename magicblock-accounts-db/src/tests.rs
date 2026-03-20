@@ -572,12 +572,6 @@ fn test_checksum_deterministic_across_dbs() {
         db2.insert_account(&pubkey, &account).unwrap();
     }
 
-    // Acquire write locks before computing checksums
-    let lock1 = db1.write_lock();
-    let lock2 = db2.write_lock();
-    let _guard1 = lock1.write();
-    let _guard2 = lock2.write();
-
     assert_eq!(
         unsafe { db1.checksum() },
         unsafe { db2.checksum() },
@@ -597,17 +591,13 @@ fn test_checksum_detects_state_change() {
         })
         .collect();
 
-    let lock = env.write_lock();
-    let _guard = lock.write();
     let original_checksum = unsafe { env.checksum() };
-    drop(_guard);
 
     // Modify a single account's data
     accounts[5].1.data_as_mut_slice()[0] ^= 0xFF;
     env.insert_account(&accounts[5].0, &accounts[5].1).unwrap();
 
     {
-        let _guard = lock.write();
         assert_ne!(
             unsafe { env.checksum() },
             original_checksum,
@@ -621,7 +611,6 @@ fn test_checksum_detects_state_change() {
         .unwrap();
 
     {
-        let _guard = lock.write();
         assert_ne!(
             unsafe { env.checksum() },
             original_checksum,
@@ -702,7 +691,7 @@ impl TestEnv {
 
     /// Takes a snapshot and waits for archiving to complete.
     fn take_snapshot_and_wait(&self, slot: u64) -> u64 {
-        let checksum = self.adb.take_snapshot(slot);
+        let checksum = unsafe { self.adb.take_snapshot(slot) };
         // Wait for background archiving to complete
         let mut retries = 0;
         while !self.adb.snapshot_exists(slot) && retries < 200 {
@@ -710,7 +699,7 @@ impl TestEnv {
             retries += 1;
         }
         assert!(self.adb.snapshot_exists(slot), "Snapshot should exist");
-        checksum
+        checksum.expect("failed to take accountsdb snapshot")
     }
 
     fn restore_to_slot(mut self, slot: u64) -> Self {
