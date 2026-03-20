@@ -18,7 +18,7 @@ jobs:
           token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: "magicblock-validator-ci-fmt-v001"
+          shared-key: "magicblock-validator-ci-fmt-v002"
           workspaces: |
             . -> target
             test-integration -> target
@@ -42,7 +42,7 @@ jobs:
           token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: "magicblock-validator-ci-lint-v002"
+          shared-key: "magicblock-validator-ci-lint-v003"
           workspaces: |
             . -> target
             test-integration -> target
@@ -66,7 +66,7 @@ jobs:
           token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: "magicblock-validator-ci-test-unit-v001"
+          shared-key: "magicblock-validator-ci-test-unit-v002"
           workspaces: |
             . -> target
             test-integration -> target
