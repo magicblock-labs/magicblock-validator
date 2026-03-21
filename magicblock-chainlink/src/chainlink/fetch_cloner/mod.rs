@@ -386,6 +386,22 @@ where
             self.unsubscribe_from_delegated_account(pubkey).await;
         }
 
+        if let Err(err) = self
+            .ensure_delegation_action_dependencies(
+                pubkey,
+                account.remote_slot(),
+                &delegation_actions,
+            )
+            .await
+        {
+            error!(
+                pubkey = %pubkey,
+                error = %err,
+                "Failed to ensure delegation action dependencies for subscription update"
+            );
+            return;
+        }
+
         if account.executable() {
             self.handle_executable_sub_update(pubkey, account).await;
         } else if let Err(err) = self
@@ -417,6 +433,42 @@ where
                 );
             }
         }
+    }
+
+    async fn ensure_delegation_action_dependencies(
+        &self,
+        pubkey: Pubkey,
+        remote_slot: u64,
+        delegation_actions: &DelegationActions,
+    ) -> ChainlinkResult<()> {
+        if delegation_actions.is_empty() {
+            return Ok(());
+        }
+
+        let dependencies = delegation_actions
+            .iter()
+            .flat_map(|instruction| {
+                std::iter::once(instruction.program_id)
+                    .chain(instruction.accounts.iter().map(|meta| meta.pubkey))
+            })
+            .filter(|dependency| dependency != &pubkey)
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .collect::<Vec<_>>();
+
+        if dependencies.is_empty() {
+            return Ok(());
+        }
+
+        self.fetch_and_clone_accounts_with_dedup(
+            &dependencies,
+            None,
+            Some(remote_slot),
+            AccountFetchOrigin::GetAccount,
+            None,
+        )
+        .await
+        .map(|_| ())
     }
 
     async fn maybe_greedily_clone_discovered_delegated_account(
