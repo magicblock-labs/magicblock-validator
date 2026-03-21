@@ -2364,6 +2364,69 @@ async fn test_non_raw_eata_owned_account_subscription_update_stays_delegated() {
 }
 
 #[tokio::test]
+async fn test_discovered_dlp_owned_account_without_delegation_record_falls_back(
+) {
+    init_logger();
+    let validator_keypair = Keypair::new();
+    let account_pubkey = random_pubkey();
+    const CURRENT_SLOT: u64 = 100;
+
+    let dlp_owned_account = Account {
+        lamports: 1_000_000,
+        data: vec![1, 2, 3, 4],
+        owner: dlp_api::dlp::id(),
+        executable: false,
+        rent_epoch: 0,
+    };
+
+    let FetcherTestCtx {
+        accounts_bank,
+        subscription_tx,
+        ..
+    } = setup(
+        [(account_pubkey, dlp_owned_account.clone())],
+        CURRENT_SLOT,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+
+    use crate::remote_account_provider::{
+        RemoteAccount, RemoteAccountUpdateSource,
+    };
+
+    subscription_tx
+        .send(ForwardedSubscriptionUpdate {
+            pubkey: account_pubkey,
+            account: RemoteAccount::from_fresh_account(
+                dlp_owned_account,
+                CURRENT_SLOT,
+                RemoteAccountUpdateSource::Subscription,
+            ),
+        })
+        .await
+        .unwrap();
+
+    const POLL_INTERVAL: std::time::Duration = Duration::from_millis(10);
+    const TIMEOUT: std::time::Duration = Duration::from_millis(200);
+    tokio::time::timeout(TIMEOUT, async {
+        while accounts_bank.get_account(&account_pubkey).is_none() {
+            tokio::time::sleep(POLL_INTERVAL).await;
+        }
+    })
+    .await
+    .expect(
+        "timed out waiting for fallback clone of discovered DLP-owned account",
+    );
+
+    let cloned_account = accounts_bank
+        .get_account(&account_pubkey)
+        .expect("account should be cloned by fallback subscription path");
+    assert_eq!(*cloned_account.owner(), dlp_api::dlp::id());
+    assert!(!cloned_account.delegated());
+    assert_eq!(cloned_account.remote_slot(), CURRENT_SLOT);
+}
+
+#[tokio::test]
 async fn test_discovered_dlp_owned_account_delegated_elsewhere_is_ignored() {
     init_logger();
     let validator_keypair = Keypair::new();
@@ -2432,6 +2495,78 @@ async fn test_discovered_dlp_owned_account_delegated_elsewhere_is_ignored() {
         !cloned,
         "subscription auto-discovery should ignore accounts delegated to another validator"
     );
+}
+
+#[tokio::test]
+async fn test_out_of_order_delegated_eata_subscription_update_still_projects_ata(
+) {
+    init_logger();
+    let validator_keypair = Keypair::new();
+    let validator_pubkey = validator_keypair.pubkey();
+    let wallet_owner = random_pubkey();
+    let mint = random_pubkey();
+    const CURRENT_SLOT: u64 = 100;
+    const AMOUNT: u64 = 777;
+
+    let eata_pubkey = derive_eata(&wallet_owner, &mint);
+    let ata_pubkey = derive_ata(&wallet_owner, &mint);
+    let eata_account = create_eata_account(&wallet_owner, &mint, AMOUNT, true);
+
+    let FetcherTestCtx {
+        accounts_bank,
+        rpc_client,
+        subscription_tx,
+        ..
+    } = setup(
+        [(eata_pubkey, eata_account.clone())],
+        CURRENT_SLOT,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+
+    add_delegation_record_for(
+        &rpc_client,
+        eata_pubkey,
+        validator_pubkey,
+        EATA_PROGRAM_ID,
+    );
+
+    let mut in_bank_eata = AccountSharedData::from(eata_account.clone());
+    in_bank_eata.set_owner(EATA_PROGRAM_ID);
+    in_bank_eata.set_remote_slot(CURRENT_SLOT);
+    accounts_bank.insert(eata_pubkey, in_bank_eata);
+
+    use crate::remote_account_provider::{
+        RemoteAccount, RemoteAccountUpdateSource,
+    };
+
+    subscription_tx
+        .send(ForwardedSubscriptionUpdate {
+            pubkey: eata_pubkey,
+            account: RemoteAccount::from_fresh_account(
+                eata_account,
+                CURRENT_SLOT,
+                RemoteAccountUpdateSource::Subscription,
+            ),
+        })
+        .await
+        .unwrap();
+
+    const POLL_INTERVAL: std::time::Duration = Duration::from_millis(10);
+    const TIMEOUT: std::time::Duration = Duration::from_millis(500);
+    tokio::time::timeout(TIMEOUT, async {
+        while accounts_bank.get_account(&ata_pubkey).is_none() {
+            tokio::time::sleep(POLL_INTERVAL).await;
+        }
+    })
+    .await
+    .expect("timed out waiting for ATA projection from out-of-order delegated eATA update");
+
+    let projected_ata = accounts_bank
+        .get_account(&ata_pubkey)
+        .expect("ATA should still be projected from delegated eATA update");
+    assert!(projected_ata.delegated());
+    assert_eq!(projected_ata.remote_slot(), CURRENT_SLOT);
 }
 
 #[tokio::test]

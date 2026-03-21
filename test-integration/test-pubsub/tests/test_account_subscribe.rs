@@ -6,7 +6,18 @@ use test_pubsub::PubSubEnv;
 
 macro_rules! expect_account_lamports_update {
     ($rx:expr, $expected:expr, $($allowed_stale:expr),* $(,)?) => {{
+        const MAX_ATTEMPTS: usize = 50;
+        let mut attempts = 0;
+        let mut last_seen_lamports = None;
         loop {
+            attempts += 1;
+            assert!(
+                attempts <= MAX_ATTEMPTS,
+                "exceeded {} attempts waiting for lamports={}, last seen {:?}",
+                MAX_ATTEMPTS,
+                $expected,
+                last_seen_lamports,
+            );
             let update = tokio::time::timeout(
                 Duration::from_millis(100),
                 $rx.next(),
@@ -14,6 +25,7 @@ macro_rules! expect_account_lamports_update {
             .await
             .expect("timeout waiting for account update")
             .expect("failed to receive account update after balance change");
+            last_seen_lamports = Some(update.value.lamports);
 
             if update.value.lamports == $expected {
                 break update;

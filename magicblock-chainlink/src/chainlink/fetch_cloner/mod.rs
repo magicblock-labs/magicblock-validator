@@ -281,6 +281,12 @@ where
         let Some(account) = resolved_account else {
             return;
         };
+        let projected_ata_clone_request = self
+            .maybe_build_projected_ata_clone_request_from_eata_sub_update(
+                pubkey,
+                &account,
+                deleg_record.as_ref(),
+            );
 
         // Ensure that the subscription update isn't out of order, i.e.
         // we don't already hold a newer version of the account in our bank
@@ -294,6 +300,23 @@ where
             });
         if let Some(in_bank_slot) = out_of_order_slot {
             let update_slot = account.remote_slot();
+            if in_bank_slot == update_slot {
+                if let Some(projected_ata_clone_request) =
+                    projected_ata_clone_request
+                {
+                    if let Err(err) = self
+                        .cloner
+                        .clone_account(projected_ata_clone_request)
+                        .await
+                    {
+                        warn!(
+                            pubkey = %pubkey,
+                            error = %err,
+                            "Failed to clone projected ATA from out-of-order delegated eATA update"
+                        );
+                    }
+                }
+            }
             trace!(
                 pubkey = %pubkey,
                 bank_slot = in_bank_slot,
@@ -354,12 +377,6 @@ where
         let delegated_to_other = deleg_record
             .as_ref()
             .and_then(|dr| self.get_delegated_to_other(dr));
-        let projected_ata_clone_request = self
-            .maybe_build_projected_ata_clone_request_from_eata_sub_update(
-                pubkey,
-                &account,
-                deleg_record.as_ref(),
-            );
 
         // Once we clone an account that is delegated to us we no
         // longer need to receive updates for it from chain.
@@ -430,9 +447,9 @@ where
             trace!(
                 pubkey = %pubkey,
                 slot = account.remote_slot(),
-                "Ignoring discovered DLP-owned update without delegation to this validator"
+                "Greedy discovery could not resolve delegation record; falling back"
             );
-            return true;
+            return false;
         };
 
         let is_delegated_to_us = deleg_record.authority
