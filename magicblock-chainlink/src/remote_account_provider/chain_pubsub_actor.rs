@@ -698,10 +698,17 @@ impl ChainPubsubActor {
                                     &program_pubkey.to_string(),
                                 );
 
-                                let is_directly_subscribed = subs
-                                    .lock()
-                                    .expect("subscriptions lock poisoned")
-                                    .contains_key(&acc_pubkey);
+                                let is_directly_subscribed = match subs.lock() {
+                                    Ok(subs) => subs.contains_key(&acc_pubkey),
+                                    Err(err) => {
+                                        warn!(
+                                            error = ?err,
+                                            pubkey = %acc_pubkey,
+                                            "Failed to inspect direct subscriptions"
+                                        );
+                                        false
+                                    }
+                                };
                                 let ui_account = rpc_response.value.account;
                                 let rpc_response = RpcResponse {
                                     context: rpc_response.context,

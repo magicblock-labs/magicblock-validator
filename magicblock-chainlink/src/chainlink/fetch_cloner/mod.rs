@@ -435,7 +435,10 @@ where
             return true;
         };
 
-        if deleg_record.authority != self.validator_pubkey {
+        let is_delegated_to_us = deleg_record.authority
+            == self.validator_pubkey
+            || deleg_record.authority == Pubkey::default();
+        if !is_delegated_to_us {
             trace!(
                 pubkey = %pubkey,
                 authority = %deleg_record.authority,
@@ -457,7 +460,7 @@ where
             }
         }
 
-        if let Err(err) = self
+        match self
             .fetch_and_clone_accounts_with_dedup(
                 &pubkeys_to_clone,
                 None,
@@ -467,14 +470,57 @@ where
             )
             .await
         {
-            warn!(
-                pubkey = %pubkey,
-                error = %err,
-                "Failed to greedily clone discovered delegated account"
-            );
+            Ok(result)
+                if result
+                    .not_found_on_chain
+                    .iter()
+                    .all(|(missing_pubkey, _)| missing_pubkey != &pubkey)
+                    && result.missing_delegation_record.iter().all(
+                        |(missing_pubkey, _)| missing_pubkey != &pubkey,
+                    ) =>
+            {
+                if let Some(projected_ata_clone_request) = self
+                    .maybe_build_projected_ata_clone_request_from_eata_sub_update(
+                        pubkey,
+                        &account,
+                        Some(&deleg_record),
+                    )
+                {
+                    if let Err(err) = self
+                        .cloner
+                        .clone_account(projected_ata_clone_request)
+                        .await
+                    {
+                        warn!(
+                            pubkey = %pubkey,
+                            error = %err,
+                            "Failed to clone projected ATA from greedily discovered delegated eATA"
+                        );
+                        false
+                    } else {
+                        true
+                    }
+                } else {
+                    true
+                }
+            }
+            Ok(result) => {
+                trace!(
+                    pubkey = %pubkey,
+                    ?result,
+                    "Greedy clone incomplete; falling back"
+                );
+                false
+            }
+            Err(err) => {
+                warn!(
+                    pubkey = %pubkey,
+                    error = %err,
+                    "Failed to greedily clone discovered delegated account"
+                );
+                false
+            }
         }
-
-        true
     }
 
     async fn handle_executable_sub_update(

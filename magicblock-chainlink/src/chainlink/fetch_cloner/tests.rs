@@ -2436,7 +2436,6 @@ async fn test_delegated_eata_subscription_update_clones_raw_eata_and_projects_at
 
     let eata_pubkey = derive_eata(&wallet_owner, &mint);
     let ata_pubkey = derive_ata(&wallet_owner, &mint);
-    let ata_account = create_ata_account(&wallet_owner, &mint);
     let eata_account = create_eata_account(&wallet_owner, &mint, AMOUNT, true);
 
     let FetcherTestCtx {
@@ -2445,10 +2444,7 @@ async fn test_delegated_eata_subscription_update_clones_raw_eata_and_projects_at
         subscription_tx,
         ..
     } = setup(
-        [
-            (ata_pubkey, ata_account),
-            (eata_pubkey, eata_account.clone()),
-        ],
+        [(eata_pubkey, eata_account.clone())],
         CURRENT_SLOT,
         validator_keypair.insecure_clone(),
     )
