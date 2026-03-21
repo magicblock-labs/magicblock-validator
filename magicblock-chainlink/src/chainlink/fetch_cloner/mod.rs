@@ -378,14 +378,6 @@ where
             .as_ref()
             .and_then(|dr| self.get_delegated_to_other(dr));
 
-        // Once we clone an account that is delegated to us we no
-        // longer need to receive updates for it from chain.
-        // The subscription will be turned back on once the committor
-        // service schedules a commit for it that includes undelegation.
-        if account.delegated() {
-            self.unsubscribe_from_delegated_account(pubkey).await;
-        }
-
         if let Err(err) = self
             .ensure_delegation_action_dependencies(
                 pubkey,
@@ -400,6 +392,14 @@ where
                 "Failed to ensure delegation action dependencies for subscription update"
             );
             return;
+        }
+
+        // Once we clone an account that is delegated to us we no
+        // longer need to receive updates for it from chain.
+        // The subscription will be turned back on once the committor
+        // service schedules a commit for it that includes undelegation.
+        if account.delegated() {
+            self.unsubscribe_from_delegated_account(pubkey).await;
         }
 
         if account.executable() {
@@ -682,8 +682,8 @@ where
                         companion_pubkey: delegation_record_pubkey,
                         companion_account: delegation_record,
                     })) => {
-                        // We need to remove subs for the delegation record and the account
-                        // if it is delegated to us
+                        // We may need to remove temporary subscriptions created
+                        // while resolving this update.
                         let mut subs_to_remove = HashSet::new();
 
                         // Always unsubscribe from delegation record if it was a new subscription
@@ -735,13 +735,10 @@ where
                                     &delegation_record,
                                 );
 
-                                // For accounts delegated to us, always unsubscribe from the delegated account
-                                // and subscribe to the original owner program for undelegation update resilience
+                                // For accounts delegated to us, subscribe to the original owner
+                                // program for undelegation update resilience.
                                 if account.delegated() {
-                                    subs_to_remove.insert(pubkey);
-
-                                    // Subscribe to the original owner program for undelegation update resilience
-                                    // Fire-and-forget to avoid blocking subscription updates
+                                    // Fire-and-forget to avoid blocking subscription updates.
                                     let provider =
                                         self.remote_account_provider.clone();
                                     let owner = delegation_record.owner;

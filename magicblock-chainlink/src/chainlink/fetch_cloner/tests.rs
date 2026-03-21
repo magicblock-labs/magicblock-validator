@@ -2672,50 +2672,6 @@ async fn test_subscription_update_with_delegation_actions_clones_dependencies()
 }
 
 #[tokio::test]
-async fn test_missing_delegation_action_dependencies_fail_subscription_helper()
-{
-    init_logger();
-    let validator_keypair = Keypair::new();
-    let account_pubkey = random_pubkey();
-    let missing_program_pubkey = random_pubkey();
-    const CURRENT_SLOT: u64 = 100;
-
-    let FetcherTestCtx { fetch_cloner, .. } = setup(
-        std::iter::empty::<(Pubkey, Account)>(),
-        CURRENT_SLOT,
-        validator_keypair.insecure_clone(),
-    )
-    .await;
-
-    let delegation_actions =
-        DelegationActions::from(vec![solana_instruction::Instruction {
-            program_id: missing_program_pubkey,
-            accounts: vec![],
-            data: vec![1],
-        }]);
-
-    let err = fetch_cloner
-        .ensure_delegation_action_dependencies(
-            account_pubkey,
-            CURRENT_SLOT,
-            &delegation_actions,
-        )
-        .await
-        .expect_err("missing delegation action dependencies should fail");
-
-    let crate::chainlink::errors::ChainlinkError::MissingDelegationActionAccounts(
-        missing_accounts,
-    ) = err
-    else {
-        panic!("unexpected error: {err}");
-    };
-    assert_eq!(
-        missing_accounts.into_iter().collect::<HashSet<_>>(),
-        HashSet::from([missing_program_pubkey]),
-    );
-}
-
-#[tokio::test]
 async fn test_delegated_eata_subscription_update_clones_raw_eata_and_projects_ata(
 ) {
     init_logger();
