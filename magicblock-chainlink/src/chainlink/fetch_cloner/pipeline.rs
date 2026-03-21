@@ -242,6 +242,9 @@ where
         } else {
             *account_slot
         };
+
+        // CHECKPOINT: just because the account with pubkey is owned by DLP (owned_by_deleg), it
+        // must be "delegated" account? How about if it is a DLP internal account?
         fetch_with_delegation_record_join_set.spawn(
             this.task_to_fetch_with_delegation_record(
                 *pubkey,
@@ -357,6 +360,8 @@ where
                             .insert(delegation_record.owner);
                     }
 
+                    // CHECKPOINT: if account.delegated() == false, dooes it not imply this case too
+                    // should be added to `missing_delegation_record` ?
                     let delegation_actions = if account.delegated() {
                         delegation_actions.unwrap_or_default()
                     } else {

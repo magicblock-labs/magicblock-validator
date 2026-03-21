@@ -1305,6 +1305,7 @@ where
                 &action_dependencies_to_fetch,
             );
 
+            // CHECKPOINT: why this?
             if !not_found.is_empty() {
                 return Err(ChainlinkError::MissingDelegationActionAccounts(
                     not_found.iter().map(|(pubkey, _)| *pubkey).collect(),
@@ -1326,6 +1327,10 @@ where
             )
             .await?;
 
+            // CHECKPOINT: This enforces a strict policy for normal-path action dependencies:
+            // if a dependency is DLP-owned but lacks delegation-record companion, we fail.
+            // This may reject valid future DLP-internal account types unless we classify
+            // those explicitly via dlp_api (instead of treating all such cases as fatal).
             if !action_dep_missing_delegation_record.is_empty() {
                 return Err(ChainlinkError::MissingDelegationActionAccounts(
                     action_dep_missing_delegation_record
@@ -1407,6 +1412,8 @@ where
         in_bank: &AccountSharedData,
         fetch_origin: AccountFetchOrigin,
     ) -> RefreshDecision {
+        // CHECKPOINT: does it handle this race: say if it is undelegating == true,
+        // and then enters if-block, and by the time it executes, the undelegation is completed?
         if in_bank.undelegating() {
             debug!(
                 pubkey = %pubkey,
@@ -1696,6 +1703,11 @@ where
         )
     }
 
+    /// CHECKPOINT: companion could be any of these:
+    ///     - delegation record (of delegated account)
+    ///     - program data (of program)
+    ///     - eata (of ata)
+    /// anything else?
     fn task_to_fetch_with_companion(
         &self,
         pubkey: Pubkey,
@@ -1741,13 +1753,13 @@ where
                         ))),
                     }
                 })
-                .and_then(|(acc, deleg)| {
+                .and_then(|(acc, companion)| {
                     Self::resolve_account_with_companion(
                         &bank,
                         pubkey,
                         companion_pubkey,
                         acc,
-                        deleg,
+                        companion,
                     )
                 })
         })
@@ -1787,7 +1799,7 @@ where
                 }
             }
             (Found(acc), Found(comp)) => {
-                // Found the delegation record, we include it so that the caller can
+                // Found the companion (delegation record or program data) , we include it so that the caller can
                 // use it to add metadata to the account and use it for decision making
                 let Some(comp_account) =
                     comp.account.resolved_account_shared_data(bank)
