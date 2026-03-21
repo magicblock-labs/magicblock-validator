@@ -479,7 +479,20 @@ where
                         |(missing_pubkey, _)| missing_pubkey != &pubkey,
                     ) =>
             {
-                if let Some(projected_ata_clone_request) = self
+                let bank_slot = self
+                    .accounts_bank
+                    .get_account(&pubkey)
+                    .map(|in_bank| in_bank.remote_slot());
+                if bank_slot.is_none_or(|slot| slot < account.remote_slot()) {
+                    trace!(
+                        pubkey = %pubkey,
+                        bank_slot,
+                        update_slot = account.remote_slot(),
+                        ?result,
+                        "Greedy clone did not materialize a fresh enough account; falling back"
+                    );
+                    false
+                } else if let Some(projected_ata_clone_request) = self
                     .maybe_build_projected_ata_clone_request_from_eata_sub_update(
                         pubkey,
                         &account,
@@ -975,6 +988,11 @@ where
         self.fetch_count
             .fetch_add(pubkeys.len() as u64, Ordering::Relaxed);
 
+        // Keep the main account fetch aligned with the freshest observed slot.
+        let min_context_slot = slot.map(|subscription_slot| {
+            subscription_slot.max(self.remote_account_provider.chain_slot())
+        });
+
         let accs = self
             .remote_account_provider
             .try_get_multi(
@@ -982,7 +1000,7 @@ where
                 mark_empty_if_not_found,
                 fetch_origin,
                 program_ids,
-                None,
+                min_context_slot,
             )
             .await?;
 
@@ -1057,11 +1075,6 @@ where
                     .collect::<Vec<_>>()
             );
         }
-
-        // Calculate min context slot: use the greater of subscription slot or last chain slot
-        let min_context_slot = slot.map(|subscription_slot| {
-            subscription_slot.max(self.remote_account_provider.chain_slot())
-        });
 
         // For potentially delegated accounts we update the owner and delegation state first
         let ResolvedDelegatedAccounts {

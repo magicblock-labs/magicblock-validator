@@ -140,15 +140,23 @@ async fn ixtest_feepayer_delegated_to_us() {
     debug!("cloned accounts: {}", ctx.cloner.dump_account_keys(false));
 
     let (escrow_pda, _) = ctx.escrow_pdas(&counter_pda);
+    let assert_escrow_state = || {
+        if ctx.cloner.get_account(&escrow_pda).is_some() {
+            assert_cloned_as_empty_placeholder!(&ctx.cloner, &[escrow_pda]);
+            assert_subscribed!(ctx.chainlink, &[&escrow_pda]);
+        } else {
+            assert_not_cloned!(&ctx.cloner, &[&escrow_pda]);
+            assert_not_subscribed!(ctx.chainlink, &[&escrow_pda]);
+        }
+    };
 
     assert_cloned_as_delegated!(&ctx.cloner, &[counter_pda]);
-    assert_cloned_as_empty_placeholder!(&ctx.cloner, &[escrow_pda]);
-    assert_subscribed!(ctx.chainlink, &[&escrow_pda]);
+    assert_escrow_state();
     assert_not_subscribed!(ctx.chainlink, &[&counter_pda]);
 
-    // Initially the counter_pda is not in the bank, thus we optimistically
-    // try to clone its escrow and fail to find it, however we clone it as
-    // an empty placeholder. Thus it is not included as not found on chain
+    // Greedy DLP discovery can clone the delegated fee payer before this call runs.
+    // In that case we do not probe its escrow PDA here; otherwise we still clone
+    // the escrow as an empty placeholder.
     assert!(res.pubkeys_not_found_on_chain().is_empty());
 
     // 2. Send the second transaction with the counter_pda (it is now already in the bank)
@@ -162,8 +170,7 @@ async fn ixtest_feepayer_delegated_to_us() {
     debug!("cloned accounts: {}", ctx.cloner.dump_account_keys(false));
 
     assert_cloned_as_delegated!(&ctx.cloner, &[counter_pda]);
-    assert_cloned_as_empty_placeholder!(&ctx.cloner, &[escrow_pda]);
-    assert_subscribed!(ctx.chainlink, &[&escrow_pda]);
+    assert_escrow_state();
     assert_not_subscribed!(ctx.chainlink, &[&counter_pda]);
 
     assert!(res.pubkeys_not_found_on_chain().is_empty());

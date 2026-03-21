@@ -2415,10 +2415,21 @@ async fn test_discovered_dlp_owned_account_delegated_elsewhere_is_ignored() {
         .await
         .unwrap();
 
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    const POLL_INTERVAL: std::time::Duration = Duration::from_millis(10);
+    const TIMEOUT: std::time::Duration = Duration::from_millis(200);
+    let cloned = tokio::time::timeout(TIMEOUT, async {
+        loop {
+            if accounts_bank.get_account(&account_pubkey).is_some() {
+                return true;
+            }
+            tokio::time::sleep(POLL_INTERVAL).await;
+        }
+    })
+    .await
+    .unwrap_or(false);
 
     assert!(
-        accounts_bank.get_account(&account_pubkey).is_none(),
+        !cloned,
         "subscription auto-discovery should ignore accounts delegated to another validator"
     );
 }
