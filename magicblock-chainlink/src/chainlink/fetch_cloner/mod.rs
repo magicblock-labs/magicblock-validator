@@ -460,15 +460,31 @@ where
             return Ok(());
         }
 
-        self.fetch_and_clone_accounts_with_dedup(
-            &dependencies,
-            None,
-            Some(remote_slot),
-            AccountFetchOrigin::GetAccount,
-            None,
-        )
-        .await
-        .map(|_| ())
+        let result = self
+            .fetch_and_clone_accounts_with_dedup(
+                &dependencies,
+                None,
+                Some(remote_slot),
+                AccountFetchOrigin::GetAccount,
+                None,
+            )
+            .await?;
+        if result.is_ok() {
+            return Ok(());
+        }
+
+        let missing_accounts = result
+            .pubkeys_not_found_on_chain()
+            .into_iter()
+            .chain(result.pubkeys_missing_delegation_record())
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .collect::<Vec<_>>();
+        let mut missing_accounts = missing_accounts;
+        missing_accounts.sort_unstable();
+        Err(ChainlinkError::MissingDelegationActionAccounts(
+            missing_accounts,
+        ))
     }
 
     async fn maybe_greedily_clone_discovered_delegated_account(
@@ -1217,11 +1233,6 @@ where
                         .any(|program| program.program_id.eq(dependency))
             })
             .collect::<Vec<_>>();
-
-        error!(
-            "action_dependencies_to_fetch: {:#?}",
-            action_dependencies_to_fetch
-        );
 
         if !action_dependencies_to_fetch.is_empty() {
             if tracing::enabled!(tracing::Level::TRACE) {
