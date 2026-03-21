@@ -315,15 +315,14 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
             .collect::<Vec<_>>();
         let feepayer = tx.message().fee_payer();
 
+        let balance_pda = ephemeral_balance_pda_from_payer(feepayer, 0);
+
         // Determine if we need to clone the escrow account for the feepayer
-        let clone_escrow = self
-            .accounts_bank
-            .get_account(feepayer)
-            .is_none_or(|a| !a.delegated());
+        let clone_escrow =
+            self.accounts_bank.get_account(&balance_pda).is_none();
 
         // If cloning escrow, add the balance PDA
         if clone_escrow {
-            let balance_pda = ephemeral_balance_pda_from_payer(feepayer, 0);
             trace!(
                 balance_pda = %balance_pda,
                 feepayer = %feepayer,
