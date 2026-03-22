@@ -112,3 +112,4 @@ solana-storage-proto = { path = "../storage-proto" }
 # same reason as above
 rocksdb = { git = "https://github.com/magicblock-labs/rust-rocksdb.git", rev = "6d975197" }
 solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "3ff1b2ea" }
+libsodium-rs = { git = "https://github.com/jedisct1/libsodium-rs.git", rev = "0397a6c5785233f9f2ac91f3eedc3cceb74e0060" }
