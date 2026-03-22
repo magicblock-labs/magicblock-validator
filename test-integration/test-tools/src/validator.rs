@@ -228,8 +228,7 @@ pub fn start_magicblock_validator_with_config_struct(
     loaded_chain_accounts: &LoadedAccounts,
 ) -> (TempDir, Option<process::Child>, u16) {
     let rpc_port = resolve_port(config.aperture.listen.ip(), &[]);
-    let metrics_port =
-        resolve_port(config.metrics.address.ip(), &[rpc_port]);
+    let metrics_port = resolve_port(config.metrics.address.ip(), &[rpc_port]);
 
     let mut config = config.clone();
     config.aperture.listen =
@@ -271,8 +270,7 @@ pub fn start_magicblock_validator_with_config_struct_and_temp_dir(
     temp_dir: PathBuf,
 ) -> (TempDir, Option<process::Child>, u16) {
     let rpc_port = resolve_port(config.aperture.listen.ip(), &[]);
-    let metrics_port =
-        resolve_port(config.metrics.address.ip(), &[rpc_port]);
+    let metrics_port = resolve_port(config.metrics.address.ip(), &[rpc_port]);
 
     let mut config = config.clone();
     config.aperture.listen =
