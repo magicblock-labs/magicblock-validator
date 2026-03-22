@@ -532,17 +532,18 @@ where
             return true;
         }
 
-        let mut pubkeys_to_clone = vec![pubkey];
-        if let Some((wallet_owner, mint)) = delegation::parse_raw_eata_pda(
+        let greedy_ata_pubkey = delegation::parse_raw_eata_pda(
             &pubkey,
             account.data(),
             deleg_record.owner,
-        ) {
-            if let Some((ata_pubkey, _)) =
-                try_derive_ata_address_and_bump(&wallet_owner, &mint)
-            {
-                pubkeys_to_clone.push(ata_pubkey);
-            }
+        )
+        .and_then(|(wallet_owner, mint)| {
+            try_derive_ata_address_and_bump(&wallet_owner, &mint)
+                .map(|(ata_pubkey, _)| ata_pubkey)
+        });
+        let mut pubkeys_to_clone = vec![pubkey];
+        if let Some(ata_pubkey) = greedy_ata_pubkey {
+            pubkeys_to_clone.push(ata_pubkey);
         }
 
         match self
@@ -584,6 +585,8 @@ where
                         Some(&deleg_record),
                     )
                 {
+                    let projected_ata_pubkey =
+                        projected_ata_clone_request.pubkey;
                     if let Err(err) = self
                         .cloner
                         .clone_account(projected_ata_clone_request)
@@ -596,9 +599,38 @@ where
                         );
                         false
                     } else {
+                        trace!(
+                            pubkey = %pubkey,
+                            ata_pubkey = %projected_ata_pubkey,
+                            slot = account.remote_slot(),
+                            "Greedily cloned delegated account"
+                        );
                         true
                     }
                 } else {
+                    let cloned_ata_pubkey =
+                        greedy_ata_pubkey.filter(|ata_pubkey| {
+                            self.accounts_bank
+                                .get_account(ata_pubkey)
+                                .is_some_and(|account_in_bank| {
+                                    account_in_bank.remote_slot()
+                                        >= account.remote_slot()
+                                })
+                        });
+                    if let Some(ata_pubkey) = cloned_ata_pubkey {
+                        trace!(
+                            pubkey = %pubkey,
+                            ata_pubkey = %ata_pubkey,
+                            slot = account.remote_slot(),
+                            "Greedily cloned delegated account"
+                        );
+                    } else {
+                        trace!(
+                            pubkey = %pubkey,
+                            slot = account.remote_slot(),
+                            "Greedily cloned delegated account"
+                        );
+                    }
                     true
                 }
             }
