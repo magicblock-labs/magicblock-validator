@@ -146,9 +146,8 @@ async fn ixtest_feepayer_delegated_to_us() {
     assert_subscribed!(ctx.chainlink, &[&escrow_pda]);
     assert_not_subscribed!(ctx.chainlink, &[&counter_pda]);
 
-    // Initially the counter_pda is not in the bank, thus we optimistically
-    // try to clone its escrow and fail to find it, however we clone it as
-    // an empty placeholder. Thus it is not included as not found on chain
+    // Even if the delegated fee payer was discovered before this call, we still
+    // bootstrap its escrow PDA if it is missing locally.
     assert!(res.pubkeys_not_found_on_chain().is_empty());
 
     // 2. Send the second transaction with the counter_pda (it is now already in the bank)

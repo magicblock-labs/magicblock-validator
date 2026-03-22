@@ -1,5 +1,8 @@
 use std::{collections::HashSet, fmt};
 
+use dlp_api::dlp::state::{
+    CommitRecord, DelegationMetadata, DelegationRecord, ProgramConfig,
+};
 use solana_account::Account;
 use solana_account_decoder::UiAccount;
 use solana_clock::Slot;
@@ -57,6 +60,64 @@ impl From<(Pubkey, RpcResponse<UiAccount>)> for SubscriptionUpdate {
             slot: rpc_response.context.slot,
             account,
         }
+    }
+}
+
+pub(crate) fn is_internal_dlp_account_data(data: &[u8]) -> bool {
+    let is_delegation_record = data.len()
+        >= DelegationRecord::size_with_discriminator()
+        && DelegationRecord::try_from_bytes_with_discriminator(
+            &data[..DelegationRecord::size_with_discriminator()],
+        )
+        .is_ok();
+
+    is_delegation_record
+        || DelegationMetadata::try_from_bytes_with_discriminator(data).is_ok()
+        || CommitRecord::try_from_bytes_with_discriminator(data).is_ok()
+        || ProgramConfig::try_from_bytes_with_discriminator(data).is_ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use dlp_api::dlp::{
+        args::{
+            EncryptedBuffer, MaybeEncryptedInstruction, MaybeEncryptedIxData,
+            PostDelegationActions,
+        },
+        state::DelegationRecord,
+    };
+    use solana_pubkey::Pubkey;
+
+    use super::is_internal_dlp_account_data;
+
+    #[test]
+    fn delegation_record_with_post_delegation_actions_is_internal() {
+        let deleg_record = DelegationRecord {
+            authority: Pubkey::new_unique(),
+            owner: Pubkey::new_unique(),
+            delegation_slot: 1,
+            lamports: 1_000,
+            commit_frequency_ms: 2_000,
+        };
+        let mut data = vec![0; DelegationRecord::size_with_discriminator()];
+        deleg_record.to_bytes_with_discriminator(&mut data).unwrap();
+        let actions = PostDelegationActions {
+            inserted_signers: 0,
+            inserted_non_signers: 0,
+            signers: vec![*Pubkey::new_unique().as_array()],
+            non_signers: vec![],
+            instructions: vec![MaybeEncryptedInstruction {
+                program_id: 0,
+                accounts: vec![],
+                data: MaybeEncryptedIxData {
+                    prefix: vec![1],
+                    suffix: EncryptedBuffer::default(),
+                },
+            }],
+        };
+        data.extend_from_slice(&borsh::to_vec(&actions).unwrap());
+
+        assert!(is_internal_dlp_account_data(&data));
     }
 }
 
