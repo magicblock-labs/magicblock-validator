@@ -4,7 +4,7 @@ use program_flexi_counter::{
     delegation_program_id,
     instruction::{
         create_add_ix, create_delegate_ix, create_init_ix,
-        create_intent_bundle_ix, create_intent_ix,
+        create_intent_bundle_ix, create_intent_ix, create_transfer_intent_ix,
     },
     state::FlexiCounter,
 };
@@ -507,6 +507,88 @@ fn test_intent_bundle_undelegate_only() {
     );
 }
 
+/// On success the action transfers `amount` lamports from the escrow to
+/// `destination` on Base. The callback is a no-op.
+#[test]
+fn test_transfer_intent_success() {
+    // Cross-chain transfer amount
+    // Also min rent for destination account as well
+    const AMOUNT: u64 = 890_880;
+    // Fees charged from payer
+    const BASE_ACTION_FEE: u64 = 5000;
+    const CALLBACK_FEE: u64 = 5000;
+    const CHARGED_AMOUNT: u64 = AMOUNT + BASE_ACTION_FEE + CALLBACK_FEE;
+
+    init_logger!();
+
+    let ctx = IntegrationTestContext::try_new().unwrap();
+    let payer = setup_payer(&ctx);
+    let chain_payer = setup_payer(&ctx);
+    let destination = Keypair::new();
+
+    init_counter(&ctx, &payer);
+    delegate_counter(&ctx, &payer);
+    ctx.delegate_account(&chain_payer, &payer).unwrap();
+
+    let payer_balance_before =
+        ctx.fetch_ephem_account_balance(&payer.pubkey()).unwrap();
+
+    schedule_transfer_intent(&ctx, &payer, destination.pubkey(), AMOUNT, false);
+
+    // Destination received the lamports from the escrow.
+    let dest_balance = ctx
+        .fetch_chain_account_balance(&destination.pubkey())
+        .unwrap();
+    assert_eq!(dest_balance, AMOUNT);
+
+    // Payer got deducted
+    let payer_balance_after =
+        ctx.fetch_ephem_account_balance(&payer.pubkey()).unwrap();
+    assert_eq!(payer_balance_after + CHARGED_AMOUNT, payer_balance_before);
+}
+
+/// When the action intentionally fails the callback refunds `amount` lamports
+/// from the counter PDA back to the payer on Base.
+#[test]
+fn test_transfer_intent_failure_refunds_payer() {
+    // Cross-chain transfer amount
+    // Also min rent for destination account as well
+    const AMOUNT: u64 = 890_880;
+    // Fees charged from payer
+    const BASE_ACTION_FEE: u64 = 5000;
+    const CALLBACK_FEE: u64 = 5000;
+
+    init_logger!();
+
+    let ctx = IntegrationTestContext::try_new().unwrap();
+    let payer = setup_payer(&ctx);
+    let payer_chain = setup_payer(&ctx);
+    let destination = Keypair::new();
+
+    init_counter(&ctx, &payer);
+    delegate_counter(&ctx, &payer);
+    ctx.delegate_account(&payer_chain, &payer).unwrap();
+
+    let payer_balance_before =
+        ctx.fetch_ephem_account_balance(&payer.pubkey()).unwrap();
+
+    schedule_transfer_intent(&ctx, &payer, destination.pubkey(), AMOUNT, true);
+
+    // Nothing reached the destination.
+    let dest_balance = ctx
+        .fetch_chain_account_balance(&destination.pubkey())
+        .unwrap_or(0);
+    assert_eq!(dest_balance, 0);
+
+    // Payer was refunded exactly AMOUNT on Base by the callback.
+    let payer_balance_after =
+        ctx.fetch_ephem_account_balance(&payer.pubkey()).unwrap();
+    assert_eq!(
+        payer_balance_after + BASE_ACTION_FEE + CALLBACK_FEE,
+        payer_balance_before
+    );
+}
+
 fn setup_payer(ctx: &IntegrationTestContext) -> Keypair {
     // Airdrop to payer on chain
     let payer = Keypair::new();
@@ -734,6 +816,38 @@ fn schedule_intent_bundle(
     let expected_balance = (commit_only_payers.len() as u64 * 1_000_000)
         + (undelegate_payers.len() as u64 * 2 * 1_000_000);
     assert_eq!(transfer_destination_balance, expected_balance);
+}
+
+fn schedule_transfer_intent(
+    ctx: &IntegrationTestContext,
+    payer: &Keypair,
+    destination: Pubkey,
+    amount: u64,
+    fail: bool,
+) {
+    ctx.wait_for_next_slot_ephem().unwrap();
+
+    let ix = create_transfer_intent_ix(
+        payer.pubkey(),
+        destination,
+        ctx.ephem_validator_identity.unwrap(),
+        amount,
+        fail,
+        100_000,
+    );
+
+    let mut tx = Transaction::new_with_payer(&[ix], Some(&payer.pubkey()));
+    let (sig, confirmed) = ctx
+        .send_and_confirm_transaction_ephem(&mut tx, &[payer])
+        .unwrap();
+    assert!(confirmed);
+
+    let commit_result = ctx
+        .fetch_schedule_commit_result::<FlexiCounter>(sig)
+        .unwrap();
+    commit_result
+        .confirm_commit_transactions_on_chain(ctx)
+        .unwrap();
 }
 
 fn verify_undelegation_in_ephem_via_owner(

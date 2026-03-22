@@ -35,6 +35,7 @@ pub struct SentCommit {
     pub requested_undelegation: bool,
     pub error_message: Option<String>,
     pub patched_errors: Vec<String>,
+    pub callbacks_report: Vec<String>,
 }
 
 /// This is a printable version of the SentCommit struct.
@@ -51,6 +52,7 @@ struct SentCommitPrintable {
     requested_undelegation: bool,
     error_message: Option<String>,
     patched_errors: Vec<String>,
+    callbacks_report: Vec<String>,
 }
 
 impl From<SentCommit> for SentCommitPrintable {
@@ -80,6 +82,7 @@ impl From<SentCommit> for SentCommitPrintable {
             requested_undelegation: commit.requested_undelegation,
             error_message: commit.error_message,
             patched_errors: commit.patched_errors,
+            callbacks_report: commit.callbacks_report,
         }
     }
 }
@@ -234,6 +237,15 @@ pub fn process_scheduled_commit_sent(
         );
     }
 
+    for (idx, report) in commit.callbacks_report.iter().enumerate() {
+        ic_msg!(
+            invoke_context,
+            "ScheduledCommitSent callback[{}]: {}",
+            idx,
+            report
+        );
+    }
+
     if let Some(error_message) = commit.error_message {
         ic_msg!(
             invoke_context,
@@ -278,6 +290,7 @@ mod tests {
             requested_undelegation: false,
             error_message: None,
             patched_errors: vec![],
+            callbacks_report: vec![],
         }
     }
 

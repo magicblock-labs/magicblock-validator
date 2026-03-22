@@ -4,10 +4,18 @@ pub mod single_stage_executor;
 pub mod task_info_fetcher;
 pub mod two_stage_executor;
 
-use std::{mem, ops::ControlFlow, sync::Arc, time::Duration};
+use std::{
+    mem,
+    ops::ControlFlow,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 use async_trait::async_trait;
 use futures_util::future::{join, try_join_all};
+use magicblock_core::traits::{
+    ActionError, ActionsCallbackScheduler, CallbackScheduleError,
+};
 use magicblock_metrics::metrics;
 use magicblock_program::{
     magic_scheduled_base_intent::ScheduledIntentBundle,
@@ -28,7 +36,8 @@ use solana_rpc_client_api::config::RpcTransactionConfig;
 use solana_signature::Signature;
 use solana_signer::Signer;
 use solana_transaction::versioned::VersionedTransaction;
-use tracing::{trace, warn};
+use tokio::time::timeout;
+use tracing::{info, trace, warn};
 
 use crate::{
     intent_executor::{
@@ -87,6 +96,8 @@ pub struct IntentExecutionResult {
     pub inner: IntentExecutorResult<ExecutionOutput>,
     /// Errors patched along the way
     pub patched_errors: Vec<TransactionStrategyExecutionError>,
+    /// Callbacks result
+    pub callbacks_report: Vec<Result<Signature, CallbackScheduleError>>,
 }
 
 #[async_trait]
@@ -103,27 +114,37 @@ pub trait IntentExecutor: Send + Sync + 'static {
     async fn cleanup(self) -> Result<(), BufferExecutionError>;
 }
 
-pub struct IntentExecutorImpl<T, F> {
+pub struct IntentExecutorImpl<T, F, A> {
     authority: Keypair,
     rpc_client: MagicblockRpcClient,
     transaction_preparator: T,
     task_info_fetcher: Arc<CacheTaskInfoFetcher<F>>,
+    actions_callback_executor: A,
+    /// Timeout for Intent's actions
+    actions_timeout: Duration,
 
+    /// Intent execution started at
+    pub started_at: Instant,
     /// Junk that needs to be cleaned up
     pub junk: Vec<TransactionStrategy>,
     /// Errors we patched trying to recover intent
     pub patched_errors: Vec<TransactionStrategyExecutionError>,
+    /// Report of scheduled callbacks
+    pub callbacks_report: Vec<Result<Signature, CallbackScheduleError>>,
 }
 
-impl<T, F> IntentExecutorImpl<T, F>
+impl<T, F, A> IntentExecutorImpl<T, F, A>
 where
     T: TransactionPreparator,
     F: TaskInfoFetcher,
+    A: ActionsCallbackScheduler,
 {
     pub fn new(
         rpc_client: MagicblockRpcClient,
         transaction_preparator: T,
         task_info_fetcher: Arc<CacheTaskInfoFetcher<F>>,
+        actions_callback_executor: A,
+        actions_timeout: Duration,
     ) -> Self {
         let authority = validator_authority();
         Self {
@@ -131,8 +152,13 @@ where
             rpc_client,
             transaction_preparator,
             task_info_fetcher,
+            actions_callback_executor,
+            actions_timeout,
+
+            started_at: Instant::now(),
             junk: vec![],
             patched_errors: vec![],
+            callbacks_report: vec![],
         }
     }
 
@@ -144,7 +170,6 @@ where
         if intent_bundle.is_empty() {
             return Err(IntentExecutorError::EmptyIntentError);
         }
-
         let all_committed_pubkeys = intent_bundle.get_all_committed_pubkeys();
 
         // Update tasks status to Pending
@@ -234,19 +259,53 @@ where
         transaction_strategy: TransactionStrategy,
         persister: &Option<P>,
     ) -> IntentExecutorResult<ExecutionOutput> {
+        let started_at = self.started_at;
+        let actions_timeout = self.actions_timeout;
+        let time_left = || -> Option<Duration> {
+            actions_timeout.checked_sub(started_at.elapsed())
+        };
+
+        let has_callbacks = transaction_strategy.has_actions_callbacks();
+        let committed_pubkeys = base_intent.get_all_committed_pubkeys();
+
         let mut single_stage_executor =
             SingleStageExecutor::new(self, transaction_strategy);
-
-        let committed_pubkeys = base_intent.get_all_committed_pubkeys();
-        let res = single_stage_executor
-            .execute(&committed_pubkeys, persister)
-            .await;
+        let res = if has_callbacks {
+            if let Some(time_left) = time_left() {
+                let execute_fut = single_stage_executor
+                    .execute(&committed_pubkeys, persister);
+                match timeout(time_left, execute_fut).await {
+                    Ok(res) => res,
+                    Err(_) => {
+                        info!(
+                            "Intent execution timed out, cleaning up actions"
+                        );
+                        single_stage_executor
+                            .execute_callbacks(Err(ActionError::TimeoutError));
+                        single_stage_executor
+                            .execute(&committed_pubkeys, persister)
+                            .await
+                    }
+                }
+            } else {
+                // Already timed out
+                // Handle timeout and continue execution
+                single_stage_executor
+                    .execute_callbacks(Err(ActionError::TimeoutError));
+                single_stage_executor
+                    .execute(&committed_pubkeys, persister)
+                    .await
+            }
+        } else {
+            single_stage_executor
+                .execute(&committed_pubkeys, persister)
+                .await
+        };
 
         // Here we continue only IF the error is a limit-type execution error
         // We can recover that Error by splitting execution
         // in 2 stages - commit & finalize
         // Otherwise we return error
-        let transaction_strategy = single_stage_executor.transaction_strategy;
         let execution_err = match res {
             Err(IntentExecutorError::FailedToFinalizeError {
                 err:
@@ -260,6 +319,8 @@ where
                 finalize_signature: _,
             }) if !committed_pubkeys.is_empty() => err,
             res => {
+            single_stage_executor.execute_callbacks(res.as_ref().map(|_| ()));
+                let transaction_strategy = single_stage_executor.consume_strategy();
                 self.junk.push(transaction_strategy);
                 return res;
             }
@@ -268,8 +329,9 @@ where
         // With actions, we can't predict num of CPIs
         // If we get here we will try to switch from Single stage to Two Stage commit
         // Note that this not necessarily will pass at the end due to the same reason
+        let strategy = single_stage_executor.consume_strategy();
         let (commit_strategy, finalize_strategy, cleanup) =
-            self.handle_cpi_limit_error(transaction_strategy);
+            self.handle_cpi_limit_error(strategy);
         self.junk.push(cleanup);
         self.patched_errors.push(execution_err);
 
@@ -289,16 +351,72 @@ where
         finalize_strategy: TransactionStrategy,
         persister: &Option<P>,
     ) -> IntentExecutorResult<ExecutionOutput> {
-        let finalized_stage =
-            TwoStageExecutor::new(self, commit_strategy, finalize_strategy)
-                .commit(committed_pubkeys, persister)
-                .await?
-                .finalize(persister)
-                .await?;
+        let started_at = self.started_at;
+        let actions_timeout = self.actions_timeout;
+        let time_left = || -> Option<Duration> {
+            actions_timeout.checked_sub(started_at.elapsed())
+        };
 
+        let has_commit_callbacks = commit_strategy.has_actions_callbacks();
+        let mut has_finalize_callbacks =
+            finalize_strategy.has_actions_callbacks();
+        let mut executor =
+            TwoStageExecutor::new(self, commit_strategy, finalize_strategy);
+
+        let commit_signature = if has_commit_callbacks {
+            if let Some(time_left) = time_left() {
+                let fut = executor.commit(committed_pubkeys, persister);
+                match timeout(time_left, fut).await {
+                    Ok(res) => res,
+                    Err(_) => {
+                        // Timeout triggers all callbacks
+                        has_finalize_callbacks = false;
+                        executor
+                            .execute_callbacks(Err(ActionError::TimeoutError));
+                        executor.commit(committed_pubkeys, persister).await
+                    }
+                }
+            } else {
+                // Timeout triggers all callbacks
+                has_finalize_callbacks = false;
+                executor.execute_callbacks(Err(ActionError::TimeoutError));
+                executor.commit(committed_pubkeys, persister).await
+            }
+        } else {
+            executor.commit(committed_pubkeys, persister).await
+        }?;
+
+        let mut finalize_executor = executor.done(commit_signature);
+        let finalize_signature = if has_finalize_callbacks {
+            if let Some(time_left) = time_left() {
+                let execute_fut = finalize_executor.finalize(persister);
+                match timeout(time_left, execute_fut).await {
+                    Ok(res) => res,
+                    Err(_) => {
+                        info!(
+                            "Intent execution timed out, cleaning up actions"
+                        );
+                        finalize_executor
+                            .execute_callbacks(Err(ActionError::TimeoutError));
+                        finalize_executor.finalize(persister).await
+                    }
+                }
+            } else {
+                // Already timed out
+                // Handle timeout and continue execution
+                finalize_executor
+                    .execute_callbacks(Err(ActionError::TimeoutError));
+                finalize_executor.finalize(persister).await
+            }
+        } else {
+            finalize_executor.finalize(persister).await
+        }?;
+
+        let finalized_stage =
+            finalize_executor.done(finalize_signature).result();
         Ok(ExecutionOutput::TwoStage {
-            commit_signature: finalized_stage.state.commit_signature,
-            finalize_signature: finalized_stage.state.finalize_signature,
+            commit_signature: finalized_stage.commit_signature,
+            finalize_signature: finalized_stage.finalize_signature,
         })
     }
 
@@ -364,7 +482,8 @@ where
 
     /// Handles actions error, stripping away actions
     /// Returns [`TransactionStrategy`] to be cleaned up
-    fn handle_actions_error(
+    // TODO(edwin): move to TransactionStrategy
+    fn remove_actions(
         &self,
         strategy: &mut TransactionStrategy,
     ) -> TransactionStrategy {
@@ -754,10 +873,11 @@ where
 }
 
 #[async_trait]
-impl<T, C> IntentExecutor for IntentExecutorImpl<T, C>
+impl<T, C, A> IntentExecutor for IntentExecutorImpl<T, C, A>
 where
     T: TransactionPreparator,
     C: TaskInfoFetcher,
+    A: ActionsCallbackScheduler,
 {
     /// Executes Message on Base layer
     /// Returns `ExecutionOutput` or an `Error`
@@ -766,6 +886,7 @@ where
         base_intent: ScheduledIntentBundle,
         persister: Option<P>,
     ) -> IntentExecutionResult {
+        self.started_at = Instant::now();
         let message_id = base_intent.id;
         let is_undelegate = base_intent.has_undelegate_intent();
         let pubkeys = base_intent.get_all_committed_pubkeys();
@@ -794,6 +915,7 @@ where
         IntentExecutionResult {
             inner: result,
             patched_errors: mem::take(&mut self.patched_errors),
+            callbacks_report: mem::take(&mut self.callbacks_report),
         }
     }
 

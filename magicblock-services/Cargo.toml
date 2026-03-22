@@ -1,0 +1,25 @@
+[package]
+name = "magicblock-services"
+version.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+license.workspace = true
+edition.workspace = true
+description = "Services that run on top of the MagicBlock validator and communicate via RPC"
+
+[dependencies]
+bincode = { workspace = true }
+magicblock-core = { workspace = true }
+magicblock-magic-program-api = { workspace = true }
+thiserror = { workspace = true }
+solana-instruction = { workspace = true }
+solana-keypair = { workspace = true }
+solana-message = { workspace = true }
+solana-pubkey = { workspace = true }
+solana-rpc-client = { workspace = true }
+solana-signature = { workspace = true }
+solana-signer = { workspace = true }
+solana-transaction = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }

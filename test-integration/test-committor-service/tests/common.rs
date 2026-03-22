@@ -1,23 +1,39 @@
-use std::sync::{
-    atomic::{AtomicU64, Ordering},
-    Arc,
+use std::{
+    collections::HashMap,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc, Mutex,
+    },
 };
 
+use async_trait::async_trait;
 use magicblock_committor_service::{
+    intent_executor::{
+        task_info_fetcher::{
+            CacheTaskInfoFetcher, TaskInfoFetcher, TaskInfoFetcherError,
+            TaskInfoFetcherResult,
+        },
+        IntentExecutorImpl,
+    },
     tasks::commit_task::{CommitDelivery, CommitTask},
     transaction_preparator::{
         delivery_preparator::DeliveryPreparator, TransactionPreparatorImpl,
     },
-    ComputeBudgetConfig,
+    ComputeBudgetConfig, DEFAULT_ACTIONS_TIMEOUT,
 };
-use magicblock_core::intent::CommittedAccount;
+use magicblock_core::{
+    intent::{BaseActionCallback, CommittedAccount},
+    traits::{ActionResult, ActionsCallbackScheduler, CallbackScheduleError},
+};
 use magicblock_rpc_client::MagicblockRpcClient;
 use magicblock_table_mania::{GarbageCollectorConfig, TableMania};
 use solana_account::Account;
 use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_sdk::{
-    commitment_config::CommitmentConfig, signature::Keypair, signer::Signer,
+    commitment_config::CommitmentConfig,
+    signature::{Keypair, Signature},
+    signer::Signer,
 };
 
 // Helper function to create a test RPC client
@@ -33,6 +49,7 @@ pub async fn create_test_client() -> MagicblockRpcClient {
 pub struct TestFixture {
     pub rpc_client: MagicblockRpcClient,
     pub table_mania: TableMania,
+    #[allow(dead_code)]
     pub authority: Keypair,
     pub compute_budget_config: ComputeBudgetConfig,
 }
@@ -86,6 +103,112 @@ impl TestFixture {
             self.table_mania.clone(),
             self.compute_budget_config.clone(),
         )
+    }
+
+    #[allow(dead_code)]
+    pub fn create_intent_executor(
+        &self,
+    ) -> IntentExecutorImpl<
+        TransactionPreparatorImpl,
+        MockTaskInfoFetcher,
+        MockActionsCallbackExecutor,
+    > {
+        let transaction_preparator = self.create_transaction_preparator();
+
+        IntentExecutorImpl::new(
+            self.rpc_client.clone(),
+            transaction_preparator,
+            self.create_task_info_fetcher(),
+            MockActionsCallbackExecutor::default(),
+            DEFAULT_ACTIONS_TIMEOUT,
+        )
+    }
+
+    #[allow(dead_code)]
+    pub fn create_task_info_fetcher(
+        &self,
+    ) -> Arc<CacheTaskInfoFetcher<MockTaskInfoFetcher>> {
+        Arc::new(CacheTaskInfoFetcher::new(MockTaskInfoFetcher(
+            self.rpc_client.clone(),
+        )))
+    }
+}
+
+type CallbackCalls = Vec<(Vec<BaseActionCallback>, ActionResult)>;
+
+#[derive(Clone, Default)]
+pub struct MockActionsCallbackExecutor {
+    pub calls: Arc<Mutex<CallbackCalls>>,
+}
+
+impl MockActionsCallbackExecutor {
+    #[allow(dead_code)]
+    pub fn calls(&self) -> CallbackCalls {
+        self.calls.lock().unwrap().clone()
+    }
+}
+
+impl ActionsCallbackScheduler for MockActionsCallbackExecutor {
+    fn schedule(
+        &self,
+        callbacks: Vec<BaseActionCallback>,
+        result: ActionResult,
+    ) -> Vec<Result<Signature, CallbackScheduleError>> {
+        let signatures = callbacks
+            .iter()
+            .map(|_| Ok(Signature::new_unique()))
+            .collect();
+        self.calls.lock().unwrap().push((callbacks, result));
+        signatures
+    }
+}
+
+pub struct MockTaskInfoFetcher(MagicblockRpcClient);
+
+#[async_trait]
+impl TaskInfoFetcher for MockTaskInfoFetcher {
+    async fn fetch_next_commit_nonces(
+        &self,
+        pubkeys: &[Pubkey],
+        _: u64,
+    ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>> {
+        Ok(pubkeys.iter().map(|pubkey| (*pubkey, 0)).collect())
+    }
+
+    async fn fetch_current_commit_nonces(
+        &self,
+        pubkeys: &[Pubkey],
+        _: u64,
+    ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>> {
+        Ok(pubkeys.iter().map(|pubkey| (*pubkey, 0)).collect())
+    }
+
+    async fn fetch_rent_reimbursements(
+        &self,
+        pubkeys: &[Pubkey],
+        _: u64,
+    ) -> TaskInfoFetcherResult<Vec<Pubkey>> {
+        Ok(pubkeys.to_vec())
+    }
+
+    async fn get_base_accounts(
+        &self,
+        pubkeys: &[Pubkey],
+        _: u64,
+    ) -> TaskInfoFetcherResult<HashMap<Pubkey, Account>> {
+        self.0
+            .get_multiple_accounts(pubkeys, None)
+            .await
+            .map_err(|err| {
+                TaskInfoFetcherError::MagicBlockRpcClientError(Box::new(err))
+            })
+            .map(|accounts| {
+                pubkeys
+                    .iter()
+                    .zip(accounts)
+                    .filter_map(|(key, value)| value.map(|value| (*key, value)))
+                    .collect()
+            })
     }
 }
 
