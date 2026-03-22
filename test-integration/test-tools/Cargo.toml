@@ -8,6 +8,7 @@ anyhow = { workspace = true }
 borsh = { workspace = true }
 color-backtrace = { workspace = true }
 tracing = { workspace = true }
+rand = { workspace = true }
 rayon = { workspace = true }
 serde = { workspace = true }
 ureq = { workspace = true }

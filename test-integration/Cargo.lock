@@ -2984,6 +2984,7 @@ dependencies = [
  "magicblock-config",
  "magicblock-core",
  "magicblock-delegation-program-api 0.1.0 (git+https://github.com/magicblock-labs/delegation-program.git?rev=293e9222)",
+ "rand 0.8.5",
  "rayon",
  "serde",
  "solana-pubkey 2.2.1",
