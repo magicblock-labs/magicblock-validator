@@ -93,7 +93,7 @@ You can override any configuration value using environment variables with the `M
 # Example: Run as an ephemeral validator syncing from Mainnet
 MBV_LIFECYCLE=ephemeral \
 MBV_APERTURE__LISTEN=0.0.0.0:8899 \
-cargo run -p magicblock-validator --release config.example.toml
+cargo run -p magicblock-validator --release -- config.example.toml
 
 ```
 
