@@ -1,4 +1,5 @@
 use std::{
+    collections::HashSet,
     fmt,
     sync::{
         atomic::{AtomicU16, AtomicU64, Ordering},
@@ -34,8 +35,8 @@ use crate::remote_account_provider::{
     chain_rpc_client::{ChainRpcClient, ChainRpcClientImpl},
     chain_slot::ChainSlot,
     pubsub_common::{
-        ChainPubsubActorMessage, MESSAGE_CHANNEL_SIZE,
-        SUBSCRIPTION_UPDATE_CHANNEL_SIZE,
+        is_internal_dlp_account_data, ChainPubsubActorMessage,
+        MESSAGE_CHANNEL_SIZE, SUBSCRIPTION_UPDATE_CHANNEL_SIZE,
     },
     RemoteAccountProviderError, RemoteAccountProviderResult,
     SubscriptionUpdate,
@@ -334,6 +335,12 @@ impl<H: StreamHandle, S: StreamFactory<H>> ChainLaserActor<H, S> {
                 self.add_sub(pubkey, response).await;
                 false
             }
+            AccountSubscribeMultiple {
+                pubkeys, response, ..
+            } => {
+                self.add_subs(pubkeys, response).await;
+                false
+            }
             AccountUnsubscribe { pubkey, response } => {
                 self.remove_sub(&pubkey, response);
                 false
@@ -414,6 +421,47 @@ impl<H: StreamHandle, S: StreamFactory<H>> ChainLaserActor<H, S> {
                 pubkey = %pubkey,
                 "Failed to send subscribe response"
             );
+        });
+    }
+
+    /// Subscribes to multiple pubkeys at once by forwarding
+    /// to the stream manager. Filters out already-subscribed keys.
+    async fn add_subs(
+        &mut self,
+        pubkeys: HashSet<Pubkey>,
+        sub_response: oneshot::Sender<RemoteAccountProviderResult<()>>,
+    ) {
+        let new_pubkeys: Vec<Pubkey> = pubkeys
+            .into_iter()
+            .filter(|pk| !self.stream_manager.is_subscribed(pk))
+            .collect();
+
+        if new_pubkeys.is_empty() {
+            sub_response.send(Ok(())).unwrap_or_else(|_| {
+                warn!("Failed to send already subscribed response");
+            });
+            return;
+        }
+
+        let from_slot = self.compute_from_slot();
+        let result = self
+            .stream_manager
+            .account_subscribe(&new_pubkeys, &self.commitment, from_slot)
+            .await;
+
+        let response = match result {
+            Ok(()) => Ok(()),
+            Err(e) => {
+                warn!(
+                    count = new_pubkeys.len(),
+                    error = ?e,
+                    "Failed to subscribe to accounts"
+                );
+                Err(e)
+            }
+        };
+        sub_response.send(response).unwrap_or_else(|_| {
+            warn!("Failed to send subscribe_multiple response");
         });
     }
 
@@ -686,7 +734,11 @@ impl<H: StreamHandle, S: StreamFactory<H>> ChainLaserActor<H, S> {
             );
         }
 
-        if !self.stream_manager.is_subscribed(&pubkey) {
+        let should_forward = self.stream_manager.is_subscribed(&pubkey)
+            || matches!(source, AccountUpdateSource::Program)
+                && owner.eq(&dlp_api::dlp::id())
+                && !is_internal_dlp_account_data(&account.data);
+        if !should_forward {
             return;
         }
 
