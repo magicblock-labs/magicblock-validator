@@ -27,6 +27,7 @@ use crate::{
 #[derive(Default)]
 pub(crate) struct ProcessScheduleCommitOptions {
     pub request_undelegation: bool,
+    pub compressed: bool,
 }
 
 pub(crate) fn process_schedule_commit(
@@ -34,22 +35,13 @@ pub(crate) fn process_schedule_commit(
     invoke_context: &mut InvokeContext,
     opts: ProcessScheduleCommitOptions,
 ) -> Result<(), InstructionError> {
-    schedule_commit(signers, invoke_context, opts, false)
-}
-
-pub(crate) fn process_schedule_compressed_commit(
-    signers: HashSet<Pubkey>,
-    invoke_context: &mut InvokeContext,
-    opts: ProcessScheduleCommitOptions,
-) -> Result<(), InstructionError> {
-    schedule_commit(signers, invoke_context, opts, true)
+    schedule_commit(signers, invoke_context, opts)
 }
 
 fn schedule_commit(
     signers: HashSet<Pubkey>,
     invoke_context: &mut InvokeContext,
     opts: ProcessScheduleCommitOptions,
-    compressed: bool,
 ) -> Result<(), InstructionError> {
     const PAYER_IDX: u16 = 0;
     const MAGIC_CONTEXT_IDX: u16 = PAYER_IDX + 1;
@@ -268,7 +260,7 @@ fn schedule_commit(
         InstructionUtils::scheduled_commit_sent(intent_id, blockhash);
     let commit_sent_sig = action_sent_transaction.signatures[0];
 
-    let base_intent = match (opts.request_undelegation, compressed) {
+    let base_intent = match (opts.request_undelegation, opts.compressed) {
         (true, true) => MagicBaseIntent::CompressedCommitAndUndelegate(
             CommitAndUndelegate {
                 commit_action: CommitType::Standalone(committed_accounts),
