@@ -1,13 +1,9 @@
 use std::{collections::HashSet, sync::atomic::Ordering};
 
-use borsh::BorshDeserialize;
-use compressed_delegation_client::CompressedDelegationRecord;
-use dlp::{
-    pda::delegation_record_pda_from_delegated_account, state::DelegationRecord,
-};
+use dlp::pda::delegation_record_pda_from_delegated_account;
 use magicblock_core::{token_programs::is_ata, traits::AccountsBank};
 use magicblock_metrics::metrics::AccountFetchOrigin;
-use solana_account::{AccountSharedData, ReadableAccount, WritableAccount};
+use solana_account::{AccountSharedData, ReadableAccount};
 use solana_pubkey::Pubkey;
 use tokio::task::JoinSet;
 use tracing::*;

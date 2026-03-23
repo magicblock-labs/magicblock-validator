@@ -43,11 +43,10 @@ impl<D: DB> IntentExecutionManager<D> {
 
         let commit_id_tracker = Arc::new(CacheTaskInfoFetcher::new(
             rpc_client.clone(),
-            photon_client.clone(),
+            photon_client,
         ));
         let executor_factory = IntentExecutorFactoryImpl {
             rpc_client,
-            photon_client,
             table_mania,
             compute_budget_config,
             commit_id_tracker,

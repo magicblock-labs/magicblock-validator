@@ -1,7 +1,6 @@
 use std::{collections::HashSet, ops::ControlFlow, sync::Arc, time::Duration};
 
 use futures_util::future::{join, join_all, try_join_all};
-use light_client::indexer::{photon_indexer::PhotonIndexer, IndexerRpcConfig};
 use magicblock_committor_program::{
     instruction_chunks::chunk_realloc_ixs, Chunks,
 };
@@ -29,13 +28,14 @@ use solana_transaction_error::TransactionError;
 use tracing::{error, info};
 
 use crate::{
-    intent_executor::CommitSlotFn,
+    intent_executor::{
+        task_info_fetcher::{TaskInfoFetcher, TaskInfoFetcherError},
+        CommitSlotFn,
+    },
     persist::{CommitStatus, IntentPersister},
     tasks::{
-        task_builder::{get_compressed_data, TaskBuilderError},
-        task_strategist::TransactionStrategy,
-        BaseTask, BaseTaskError, BufferPreparationTask, CleanupTask,
-        PreparationState, PreparationTask,
+        task_strategist::TransactionStrategy, BaseTask, BaseTaskError,
+        BufferPreparationTask, CleanupTask, PreparationState, PreparationTask,
     },
     utils::persist_status_update,
     ComputeBudgetConfig,
@@ -61,12 +61,16 @@ impl DeliveryPreparator {
     }
 
     /// Prepares buffers and necessary pieces for optimized TX
-    pub async fn prepare_for_delivery<'a, P: IntentPersister>(
+    pub async fn prepare_for_delivery<
+        'a,
+        P: IntentPersister,
+        C: TaskInfoFetcher,
+    >(
         &self,
         authority: &Keypair,
         strategy: &mut TransactionStrategy,
         persister: &Option<P>,
-        photon_client: &Arc<PhotonIndexer>,
+        info_fetcher: &Arc<C>,
         commit_slot_fn: Option<CommitSlotFn<'a>>,
     ) -> DeliveryPreparatorResult<Vec<AddressLookupTableAccount>> {
         let preparation_futures =
@@ -81,7 +85,7 @@ impl DeliveryPreparator {
                         authority,
                         task,
                         persister,
-                        photon_client,
+                        info_fetcher,
                         commit_slot_fn_clone,
                     )
                     .await
@@ -107,12 +111,12 @@ impl DeliveryPreparator {
     }
 
     /// Prepares necessary parts for TX if needed, otherwise returns immediately
-    pub async fn prepare_task<'a, P: IntentPersister>(
+    pub async fn prepare_task<'a, P: IntentPersister, C: TaskInfoFetcher>(
         &self,
         authority: &Keypair,
         task: &mut dyn BaseTask,
         persister: &Option<P>,
-        photon_client: &Arc<PhotonIndexer>,
+        info_fetcher: &Arc<C>,
         commit_slot_fn: Option<CommitSlotFn<'a>>,
     ) -> DeliveryPreparatorResult<(), InternalError> {
         let PreparationState::Required(preparation_task) =
@@ -171,28 +175,14 @@ impl DeliveryPreparator {
                 } else {
                     None
                 };
-                let photon_config = commit_slot.map(|slot| IndexerRpcConfig {
-                    slot,
-                    ..Default::default()
-                });
 
                 let delegated_account = task
                     .delegated_account()
                     .ok_or(InternalError::DelegatedAccountNotFound)?;
 
-                let compressed_data = get_compressed_data(
-                    &delegated_account,
-                    photon_client,
-                    photon_config,
-                )
-                .await
-                .map_err(|e| {
-                    error!(
-                        "Failed to get compressed data for delegated_account={} commit_slot={:?}: {:?}",
-                        delegated_account, commit_slot, e
-                    );
-                    InternalError::TaskBuilderError(e)
-                })?;
+                let compressed_data = info_fetcher
+                    .get_compressed_data(&delegated_account, commit_slot)
+                    .await?;
                 task.set_compressed_data(compressed_data);
             }
         }
@@ -202,12 +192,16 @@ impl DeliveryPreparator {
 
     /// Runs `prepare_task` and, if the buffer was already initialized,
     /// performs cleanup and retries once.
-    pub async fn prepare_task_handling_errors<'a, P: IntentPersister>(
+    pub async fn prepare_task_handling_errors<
+        'a,
+        P: IntentPersister,
+        C: TaskInfoFetcher,
+    >(
         &self,
         authority: &Keypair,
         task: &mut Box<dyn BaseTask>,
         persister: &Option<P>,
-        photon_client: &Arc<PhotonIndexer>,
+        info_fetcher: &Arc<C>,
         commit_slot_fn: Option<CommitSlotFn<'a>>,
     ) -> Result<(), InternalError> {
         let res = self
@@ -215,7 +209,7 @@ impl DeliveryPreparator {
                 authority,
                 task.as_mut(),
                 persister,
-                photon_client,
+                info_fetcher,
                 commit_slot_fn.clone(),
             )
             .await;
@@ -252,7 +246,7 @@ impl DeliveryPreparator {
             authority,
             task.as_mut(),
             persister,
-            photon_client,
+            info_fetcher,
             commit_slot_fn,
         )
         .await
@@ -630,8 +624,8 @@ pub enum InternalError {
     DelegatedAccountNotFound,
     #[error("PhotonClientNotFound")]
     PhotonClientNotFound,
-    #[error("TaskBuilderError: {0}")]
-    TaskBuilderError(#[from] TaskBuilderError),
+    #[error("TaskInfoFetcherError: {0}")]
+    TaskInfoFetcherError(#[from] TaskInfoFetcherError),
     #[error("BufferExecutionError: {0}")]
     BufferExecutionError(#[from] BufferExecutionError),
     #[error("BaseTaskError: {0}")]

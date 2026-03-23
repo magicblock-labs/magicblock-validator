@@ -2,17 +2,9 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures_util::{stream::FuturesUnordered, TryStreamExt};
-use light_client::indexer::{
-    photon_indexer::PhotonIndexer, Indexer, IndexerError, IndexerRpcConfig,
+use light_sdk::instruction::{
+    account_meta::CompressedAccountMeta, ValidityProof,
 };
-use light_sdk::{
-    error::LightSdkError,
-    instruction::{
-        account_meta::CompressedAccountMeta, PackedAccounts,
-        SystemAccountMetaConfig, ValidityProof,
-    },
-};
-use magicblock_core::compression::derive_cda_from_pda;
 use magicblock_program::magic_scheduled_base_intent::{
     CommitType, CommittedAccount, MagicBaseIntent, ScheduledBaseIntent,
     UndelegateType,
@@ -50,17 +42,15 @@ pub struct CompressedData {
 pub trait TasksBuilder {
     // Creates tasks for commit stage
     async fn commit_tasks<C: TaskInfoFetcher, P: IntentPersister>(
-        commit_id_fetcher: &Arc<C>,
+        info_fetcher: &Arc<C>,
         base_intent: &ScheduledBaseIntent,
         persister: &Option<P>,
-        photon_client: &Arc<PhotonIndexer>,
     ) -> TaskBuilderResult<Vec<Box<dyn BaseTask>>>;
 
     // Create tasks for finalize stage
     async fn finalize_tasks<C: TaskInfoFetcher>(
         info_fetcher: &Arc<C>,
         base_intent: &ScheduledBaseIntent,
-        photon_client: &Arc<PhotonIndexer>,
     ) -> TaskBuilderResult<Vec<Box<dyn BaseTask>>>;
 }
 
@@ -112,10 +102,9 @@ impl TaskBuilderImpl {
 impl TasksBuilder for TaskBuilderImpl {
     /// Returns [`Task`]s for Commit stage
     async fn commit_tasks<C: TaskInfoFetcher, P: IntentPersister>(
-        commit_id_fetcher: &Arc<C>,
+        info_fetcher: &Arc<C>,
         base_intent: &ScheduledBaseIntent,
         persister: &Option<P>,
-        photon_client: &Arc<PhotonIndexer>,
     ) -> TaskBuilderResult<Vec<Box<dyn BaseTask>>> {
         let (accounts, allow_undelegation, compressed) =
             match &base_intent.base_intent {
@@ -166,12 +155,12 @@ impl TasksBuilder for TaskBuilderImpl {
                 .collect::<Vec<_>>();
 
             tokio::join!(
-                commit_id_fetcher.fetch_next_commit_ids(
+                info_fetcher.fetch_next_commit_ids(
                     &committed_pubkeys,
                     min_context_slot,
                     compressed
                 ),
-                commit_id_fetcher.get_base_accounts(
+                info_fetcher.get_base_accounts(
                     diffable_pubkeys.as_slice(),
                     min_context_slot
                 )
@@ -208,12 +197,9 @@ impl TasksBuilder for TaskBuilderImpl {
                     )?;
                     let account_clone = account.clone();
                     Ok(async move {
-                        let compressed_data = get_compressed_data(
-                            &account_clone.pubkey,
-                            photon_client,
-                            None,
-                        )
-                        .await?;
+                        let compressed_data = info_fetcher
+                            .get_compressed_data(&account_clone.pubkey, None)
+                            .await?;
                         let task = ArgsTaskType::CompressedCommit(
                             CompressedCommitTask {
                                 commit_id,
@@ -262,7 +248,6 @@ impl TasksBuilder for TaskBuilderImpl {
     async fn finalize_tasks<C: TaskInfoFetcher>(
         info_fetcher: &Arc<C>,
         base_intent: &ScheduledBaseIntent,
-        photon_client: &Arc<PhotonIndexer>,
     ) -> TaskBuilderResult<Vec<Box<dyn BaseTask>>> {
         // Helper to create a finalize task
         fn finalize_task(
@@ -310,10 +295,10 @@ impl TasksBuilder for TaskBuilderImpl {
         }
 
         // Helper to get compressed data
-        async fn get_compressed_data_for_accounts(
+        async fn get_compressed_data_for_accounts<C: TaskInfoFetcher>(
+            info_fetcher: &Arc<C>,
             is_compressed: bool,
             committed_accounts: &[CommittedAccount],
-            photon_client: &Arc<PhotonIndexer>,
         ) -> TaskBuilderResult<Vec<Option<CompressedData>>> {
             if is_compressed {
                 committed_accounts
@@ -322,12 +307,9 @@ impl TasksBuilder for TaskBuilderImpl {
                         let pubkey = account.pubkey;
                         async move {
                             Ok(Some(
-                                get_compressed_data(
-                                    &pubkey,
-                                    photon_client,
-                                    None,
-                                )
-                                .await?,
+                                info_fetcher
+                                    .get_compressed_data(&pubkey, None)
+                                    .await?,
                             ))
                         }
                     })
@@ -340,9 +322,9 @@ impl TasksBuilder for TaskBuilderImpl {
         }
 
         // Helper to process commit types
-        async fn process_commit(
+        async fn process_commit<C: TaskInfoFetcher>(
+            info_fetcher: &Arc<C>,
             commit: &CommitType,
-            photon_client: &Arc<PhotonIndexer>,
             is_compressed: bool,
         ) -> TaskBuilderResult<Vec<Box<dyn BaseTask>>> {
             match commit {
@@ -351,9 +333,9 @@ impl TasksBuilder for TaskBuilderImpl {
                         .iter()
                         .zip(
                             get_compressed_data_for_accounts(
+                                info_fetcher,
                                 is_compressed,
                                 committed_accounts,
-                                photon_client,
                             )
                             .await?,
                         )
@@ -371,9 +353,9 @@ impl TasksBuilder for TaskBuilderImpl {
                         .iter()
                         .zip(
                             get_compressed_data_for_accounts(
+                                info_fetcher,
                                 is_compressed,
                                 committed_accounts,
-                                photon_client,
                             )
                             .await?,
                         )
@@ -399,12 +381,12 @@ impl TasksBuilder for TaskBuilderImpl {
             MagicBaseIntent::BaseActions(_) => Ok(vec![]),
             MagicBaseIntent::Commit(commit)
             | MagicBaseIntent::CompressedCommit(commit) => {
-                Ok(process_commit(commit, photon_client, is_compressed).await?)
+                Ok(process_commit(info_fetcher, commit, is_compressed).await?)
             }
             MagicBaseIntent::CommitAndUndelegate(t) => {
                 let mut tasks = process_commit(
+                    info_fetcher,
                     &t.commit_action,
-                    photon_client,
                     is_compressed,
                 )
                 .await?;
@@ -451,8 +433,8 @@ impl TasksBuilder for TaskBuilderImpl {
             }
             MagicBaseIntent::CompressedCommitAndUndelegate(t) => {
                 let mut tasks = process_commit(
+                    info_fetcher,
                     &t.commit_action,
-                    photon_client,
                     is_compressed,
                 )
                 .await?;
@@ -494,22 +476,12 @@ pub enum TaskBuilderError {
     CommitTasksBuildError(#[source] TaskInfoFetcherError),
     #[error("FinalizedTasksBuildError: {0}")]
     FinalizedTasksBuildError(#[source] TaskInfoFetcherError),
-    #[error("CompressedDataFetchError: {0}")]
-    CompressedDataFetchError(#[source] IndexerError),
-    #[error("LightSdkError: {0}")]
-    LightSdkError(#[source] LightSdkError),
-    #[error("MissingStateTrees")]
-    MissingStateTrees,
-    #[error("MissingAddress")]
-    MissingAddress,
-    #[error("MissingCompressedData")]
-    MissingCompressedData,
-    #[error("Photon client not found")]
-    PhotonClientNotFound,
     #[error("TaskStrategistError: {0}")]
     TaskStrategistError(#[from] TaskStrategistError),
     #[error("MissingCommitId: {0}")]
     MissingCommitId(Pubkey),
+    #[error("TaskInfoFetcherError: {0}")]
+    TaskInfoFetcherError(#[from] TaskInfoFetcherError),
 }
 
 impl TaskBuilderError {
@@ -517,74 +489,11 @@ impl TaskBuilderError {
         match self {
             Self::CommitTasksBuildError(err) => err.signature(),
             Self::FinalizedTasksBuildError(err) => err.signature(),
-            Self::CompressedDataFetchError(_) => None,
-            Self::LightSdkError(_) => None,
-            Self::MissingStateTrees => None,
-            Self::MissingAddress => None,
-            Self::MissingCompressedData => None,
-            Self::PhotonClientNotFound => None,
             Self::TaskStrategistError(_) => None,
             Self::MissingCommitId(_) => None,
+            Self::TaskInfoFetcherError(err) => err.signature(),
         }
     }
 }
 
 pub type TaskBuilderResult<T, E = TaskBuilderError> = Result<T, E>;
-
-pub(crate) async fn get_compressed_data(
-    pubkey: &Pubkey,
-    photon_client: &PhotonIndexer,
-    photon_config: Option<IndexerRpcConfig>,
-) -> Result<CompressedData, TaskBuilderError> {
-    let cda = derive_cda_from_pda(pubkey);
-    let compressed_delegation_record = photon_client
-        .get_compressed_account(cda.to_bytes(), photon_config.clone())
-        .await
-        .map_err(TaskBuilderError::CompressedDataFetchError)?
-        .value;
-    let proof_result = photon_client
-        .get_validity_proof(
-            vec![compressed_delegation_record.hash],
-            vec![],
-            photon_config,
-        )
-        .await
-        .map_err(TaskBuilderError::CompressedDataFetchError)?
-        .value;
-
-    let system_account_meta_config =
-        SystemAccountMetaConfig::new(compressed_delegation_client::ID);
-    let mut remaining_accounts = PackedAccounts::default();
-    remaining_accounts
-        .add_system_accounts_v2(system_account_meta_config)
-        .map_err(TaskBuilderError::LightSdkError)?;
-    let packed_tree_accounts = proof_result
-        .pack_tree_infos(&mut remaining_accounts)
-        .state_trees
-        .ok_or(TaskBuilderError::MissingStateTrees)?;
-
-    let tree_info = packed_tree_accounts
-        .packed_tree_infos
-        .first()
-        .copied()
-        .ok_or(TaskBuilderError::MissingStateTrees)?;
-
-    let account_meta = CompressedAccountMeta {
-        tree_info,
-        address: compressed_delegation_record
-            .address
-            .ok_or(TaskBuilderError::MissingAddress)?,
-        output_state_tree_index: packed_tree_accounts.output_tree_index,
-    };
-
-    Ok(CompressedData {
-        hash: compressed_delegation_record.hash,
-        compressed_delegation_record_bytes: compressed_delegation_record
-            .data
-            .ok_or(TaskBuilderError::MissingCompressedData)?
-            .data,
-        remaining_accounts: remaining_accounts.to_account_metas().0,
-        account_meta,
-        proof: proof_result.proof,
-    })
-}

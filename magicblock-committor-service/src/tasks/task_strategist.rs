@@ -414,7 +414,6 @@ pub type TaskStrategistResult<T, E = TaskStrategistError> = Result<T, E>;
 mod tests {
     use std::{collections::HashMap, sync::Arc};
 
-    use light_client::indexer::photon_indexer::PhotonIndexer;
     use magicblock_program::magic_scheduled_base_intent::{
         BaseAction, CommittedAccount, ProgramArgs,
     };
@@ -439,10 +438,6 @@ mod tests {
         },
         test_utils,
     };
-
-    pub fn new_photon_client() -> Arc<PhotonIndexer> {
-        Arc::new(PhotonIndexer::new("".to_string(), None))
-    }
 
     struct MockInfoFetcher;
 
@@ -476,6 +471,14 @@ mod tests {
             _pubkeys: &[Pubkey],
             _: u64,
         ) -> TaskInfoFetcherResult<HashMap<Pubkey, Account>> {
+            Ok(Default::default())
+        }
+
+        async fn get_compressed_data(
+            &self,
+            _pubkey: &Pubkey,
+            _min_context_slot: Option<u64>,
+        ) -> TaskInfoFetcherResult<CompressedData> {
             Ok(Default::default())
         }
     }
@@ -860,17 +863,13 @@ mod tests {
             &info_fetcher,
             &intent,
             &None::<IntentPersisterImpl>,
-            &new_photon_client(),
         )
         .await
         .unwrap();
-        let finalize_task = TaskBuilderImpl::finalize_tasks(
-            &info_fetcher,
-            &intent,
-            &new_photon_client(),
-        )
-        .await
-        .unwrap();
+        let finalize_task =
+            TaskBuilderImpl::finalize_tasks(&info_fetcher, &intent)
+                .await
+                .unwrap();
 
         let execution_mode = TaskStrategist::build_execution_strategy(
             commit_task,
@@ -896,17 +895,13 @@ mod tests {
             &info_fetcher,
             &intent,
             &None::<IntentPersisterImpl>,
-            &new_photon_client(),
         )
         .await
         .unwrap();
-        let finalize_task = TaskBuilderImpl::finalize_tasks(
-            &info_fetcher,
-            &intent,
-            &new_photon_client(),
-        )
-        .await
-        .unwrap();
+        let finalize_task =
+            TaskBuilderImpl::finalize_tasks(&info_fetcher, &intent)
+                .await
+                .unwrap();
 
         let execution_mode = TaskStrategist::build_execution_strategy(
             commit_task,
@@ -937,17 +932,13 @@ mod tests {
             &info_fetcher,
             &intent,
             &None::<IntentPersisterImpl>,
-            &new_photon_client(),
         )
         .await
         .unwrap();
-        let finalize_task = TaskBuilderImpl::finalize_tasks(
-            &info_fetcher,
-            &intent,
-            &new_photon_client(),
-        )
-        .await
-        .unwrap();
+        let finalize_task =
+            TaskBuilderImpl::finalize_tasks(&info_fetcher, &intent)
+                .await
+                .unwrap();
 
         let execution_mode = TaskStrategist::build_execution_strategy(
             commit_task,

@@ -7,7 +7,9 @@ use std::{
 
 use async_trait::async_trait;
 use borsh::BorshDeserialize;
-use compressed_delegation_client::CompressedDelegationRecord;
+use compressed_delegation_client::{
+    CompressedAccountMeta, CompressedDelegationRecord,
+};
 use dlp::{
     delegation_metadata_seeds_from_delegated_account, state::DelegationMetadata,
 };
@@ -18,6 +20,7 @@ use light_client::{
     },
     rpc::RpcError as LightRpcError,
 };
+use light_sdk::instruction::{PackedAccounts, SystemAccountMetaConfig};
 use lru::LruCache;
 use magicblock_core::compression::derive_cda_from_pda;
 use magicblock_metrics::metrics;
@@ -32,6 +35,8 @@ use solana_rpc_client_api::{
 };
 use solana_signature::Signature;
 use tracing::{error, info, warn};
+
+use crate::tasks::task_builder::CompressedData;
 
 const NUM_FETCH_RETRIES: NonZeroUsize = NonZeroUsize::new(5).unwrap();
 const MUTEX_POISONED_MSG: &str = "CacheTaskInfoFetcher mutex poisoned!";
@@ -65,6 +70,12 @@ pub trait TaskInfoFetcher: Send + Sync + 'static {
         pubkeys: &[Pubkey],
         min_context_slot: u64,
     ) -> TaskInfoFetcherResult<HashMap<Pubkey, Account>>;
+
+    async fn get_compressed_data(
+        &self,
+        pubkey: &Pubkey,
+        min_context_slot: Option<u64>,
+    ) -> TaskInfoFetcherResult<CompressedData>;
 }
 
 pub enum ResetType<'a> {
@@ -193,6 +204,12 @@ impl CacheTaskInfoFetcher {
                     warn!("Fetch account error: {:?}, attempt: {}", err, i);
                 }
                 TaskInfoFetcherError::PhotonClientNotFound => break Err(err),
+                TaskInfoFetcherError::LightSdkError(ref err) => {
+                    warn!("LightSdk error: {:?}, attempt: {}", err, i);
+                }
+                TaskInfoFetcherError::MissingStateTrees => break Err(err),
+                TaskInfoFetcherError::MissingAddress => break Err(err),
+                TaskInfoFetcherError::MissingCompressedData => break Err(err),
             }
 
             if i >= max_retries.get() {
@@ -459,6 +476,75 @@ impl TaskInfoFetcher for CacheTaskInfoFetcher {
 
         Ok(pubkeys.iter().copied().zip(accounts).collect())
     }
+
+    async fn get_compressed_data(
+        &self,
+        pubkey: &Pubkey,
+        min_context_slot: Option<u64>,
+    ) -> TaskInfoFetcherResult<CompressedData> {
+        let cda = derive_cda_from_pda(pubkey);
+        let compressed_delegation_record = self
+            .photon_client
+            .get_compressed_account(
+                cda.to_bytes(),
+                min_context_slot.map(|slot| IndexerRpcConfig {
+                    slot,
+                    retry_config: RetryConfig::default(),
+                }),
+            )
+            .await
+            .map_err(TaskInfoFetcherError::IndexerError)?
+            .value;
+        let proof_result = self
+            .photon_client
+            .get_validity_proof(
+                vec![compressed_delegation_record.hash],
+                vec![],
+                min_context_slot.map(|slot| IndexerRpcConfig {
+                    slot,
+                    retry_config: RetryConfig::default(),
+                }),
+            )
+            .await
+            .map_err(TaskInfoFetcherError::IndexerError)?
+            .value;
+
+        let system_account_meta_config =
+            SystemAccountMetaConfig::new(compressed_delegation_client::ID);
+        let mut remaining_accounts = PackedAccounts::default();
+        remaining_accounts
+            .add_system_accounts_v2(system_account_meta_config)
+            .map_err(TaskInfoFetcherError::LightSdkError)?;
+        let packed_tree_accounts = proof_result
+            .pack_tree_infos(&mut remaining_accounts)
+            .state_trees
+            .ok_or(TaskInfoFetcherError::MissingStateTrees)?;
+
+        let tree_info = packed_tree_accounts
+            .packed_tree_infos
+            .first()
+            .copied()
+            .ok_or(TaskInfoFetcherError::MissingStateTrees)?;
+
+        let account_meta = CompressedAccountMeta {
+            tree_info,
+            address: compressed_delegation_record
+                .address
+                .ok_or(TaskInfoFetcherError::MissingAddress)?,
+            output_state_tree_index: packed_tree_accounts.output_tree_index,
+        };
+
+        Ok(CompressedData {
+            hash: compressed_delegation_record.hash,
+            compressed_delegation_record_bytes: compressed_delegation_record
+                .data
+                .ok_or(TaskInfoFetcherError::MissingCompressedData)?
+                .data,
+            remaining_accounts: remaining_accounts.to_account_metas().0,
+            account_meta,
+            proof: proof_result.proof,
+        })
+    }
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -483,6 +569,14 @@ pub enum TaskInfoFetcherError {
     DeserializeError(#[from] std::io::Error),
     #[error("PhotonClientNotFound")]
     PhotonClientNotFound,
+    #[error("LightSdkError: {0}")]
+    LightSdkError(#[from] light_sdk::error::LightSdkError),
+    #[error("MissingStateTrees")]
+    MissingStateTrees,
+    #[error("MissingAddress")]
+    MissingAddress,
+    #[error("MissingCompressedData")]
+    MissingCompressedData,
 }
 
 impl TaskInfoFetcherError {
@@ -539,6 +633,10 @@ impl TaskInfoFetcherError {
             Self::DeserializeError(_) => None,
             Self::LightRpcError(_) => None,
             Self::PhotonClientNotFound => None,
+            Self::LightSdkError(_) => None,
+            Self::MissingStateTrees => None,
+            Self::MissingAddress => None,
+            Self::MissingCompressedData => None,
         }
     }
 }

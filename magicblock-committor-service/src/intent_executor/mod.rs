@@ -10,7 +10,6 @@ use std::{
 
 use async_trait::async_trait;
 use futures_util::future::{join, try_join_all};
-use light_client::indexer::photon_indexer::PhotonIndexer;
 use magicblock_metrics::metrics;
 use magicblock_program::{
     magic_scheduled_base_intent::ScheduledBaseIntent,
@@ -114,7 +113,6 @@ pub trait IntentExecutor: Send + Sync + 'static {
 pub struct IntentExecutorImpl<T, F> {
     authority: Keypair,
     rpc_client: MagicblockRpcClient,
-    photon_client: Arc<PhotonIndexer>,
     transaction_preparator: T,
     task_info_fetcher: Arc<F>,
 
@@ -131,7 +129,6 @@ where
 {
     pub fn new(
         rpc_client: MagicblockRpcClient,
-        photon_client: Arc<PhotonIndexer>,
         transaction_preparator: T,
         task_info_fetcher: Arc<F>,
     ) -> Self {
@@ -139,7 +136,6 @@ where
         Self {
             authority,
             rpc_client,
-            photon_client,
             transaction_preparator,
             task_info_fetcher,
             junk: vec![],
@@ -175,7 +171,6 @@ where
                     &self.task_info_fetcher,
                     &base_intent,
                     persister,
-                    &self.photon_client,
                 )
                 .await?;
 
@@ -201,12 +196,10 @@ where
                 &self.task_info_fetcher,
                 &base_intent,
                 persister,
-                &self.photon_client,
             );
             let finalize_tasks_fut = TaskBuilderImpl::finalize_tasks(
                 &self.task_info_fetcher,
                 &base_intent,
-                &self.photon_client,
             );
             let (commit_tasks, finalize_tasks) =
                 join(commit_tasks_fut, finalize_tasks_fut).await;
@@ -657,7 +650,7 @@ where
                 &self.authority,
                 transaction_strategy,
                 persister,
-                &self.photon_client,
+                &self.task_info_fetcher,
                 commit_slot_fn,
             )
             .await?;

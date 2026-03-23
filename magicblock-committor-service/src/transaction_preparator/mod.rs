@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use light_client::indexer::photon_indexer::PhotonIndexer;
 use magicblock_rpc_client::MagicblockRpcClient;
 use magicblock_table_mania::TableMania;
 use solana_keypair::Keypair;
@@ -9,7 +8,7 @@ use solana_message::VersionedMessage;
 use solana_pubkey::Pubkey;
 
 use crate::{
-    intent_executor::CommitSlotFn,
+    intent_executor::{task_info_fetcher::TaskInfoFetcher, CommitSlotFn},
     persist::IntentPersister,
     tasks::{
         task_strategist::TransactionStrategy, utils::TransactionUtils, BaseTask,
@@ -30,12 +29,12 @@ pub mod error;
 pub trait TransactionPreparator: Send + Sync + 'static {
     /// Return [`VersionedMessage`] corresponding to [`TransactionStrategy`]
     /// Handles all necessary preparation needed for successful [`BaseTask`] execution
-    async fn prepare_for_strategy<'a, P: IntentPersister>(
+    async fn prepare_for_strategy<'a, P: IntentPersister, C: TaskInfoFetcher>(
         &self,
         authority: &Keypair,
         transaction_strategy: &mut TransactionStrategy,
         intent_persister: &Option<P>,
-        photon_client: &Arc<PhotonIndexer>,
+        info_fetcher: &Arc<C>,
         commit_slot_fn: Option<CommitSlotFn<'a>>,
     ) -> PreparatorResult<VersionedMessage>;
 
@@ -77,12 +76,16 @@ impl TransactionPreparatorImpl {
 
 #[async_trait]
 impl TransactionPreparator for TransactionPreparatorImpl {
-    async fn prepare_for_strategy<'a, P: IntentPersister>(
+    async fn prepare_for_strategy<
+        'a,
+        P: IntentPersister,
+        C: TaskInfoFetcher,
+    >(
         &self,
         authority: &Keypair,
         tx_strategy: &mut TransactionStrategy,
         intent_persister: &Option<P>,
-        photon_client: &Arc<PhotonIndexer>,
+        info_fetcher: &Arc<C>,
         commit_slot_fn: Option<CommitSlotFn<'a>>,
     ) -> PreparatorResult<VersionedMessage> {
         // If message won't fit, there's no reason to prepare anything
@@ -106,7 +109,7 @@ impl TransactionPreparator for TransactionPreparatorImpl {
                 authority,
                 tx_strategy,
                 intent_persister,
-                photon_client,
+                info_fetcher,
                 commit_slot_fn,
             )
             .await?;
