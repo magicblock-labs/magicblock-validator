@@ -10,16 +10,22 @@ use solana_pubkey::Pubkey;
 
 use crate::{
     magic_scheduled_base_intent::{
-        validate_commit_schedule_permissions, CommitAndUndelegate, CommitType,
-        MagicBaseIntent, ScheduledIntentBundle, UndelegateType,
+        calculate_commit_fee, validate_commit_schedule_permissions,
+        CommitAndUndelegate, CommitType, MagicBaseIntent,
+        ScheduledIntentBundle, UndelegateType,
     },
-    schedule_transactions::{self, ProcessScheduleCommitOptions},
+    magic_sys::fetch_current_commit_nonces,
+    schedule_transactions::{
+        self, check_commit_limits, try_get_fee_vault,
+        ProcessScheduleCommitOptions,
+    },
     utils::{
         account_actions::mark_account_as_undelegated,
         accounts::{
             get_instruction_account_with_idx, get_instruction_pubkey_with_idx,
             get_writable_with_idx,
         },
+        charge_delegated_payer,
         instruction_utils::InstructionUtils,
     },
     MagicContext,
@@ -54,8 +60,34 @@ pub(crate) fn process_schedule_commit_finalize(
             InstructionError::UnsupportedProgramId
         })?;
 
+    // Assert Payer is signer
+    let payer_pubkey =
+        get_instruction_pubkey_with_idx(transaction_context, PAYER_IDX)?;
+    if !signers.contains(payer_pubkey) {
+        ic_msg!(
+            invoke_context,
+            "ScheduleCommit ERR: payer pubkey {} not in signers",
+            payer_pubkey
+        );
+        return Err(InstructionError::MissingRequiredSignature);
+    }
+
+    let payer_account =
+        get_instruction_account_with_idx(transaction_context, PAYER_IDX)?;
+    let magic_fee_vault = try_get_fee_vault(
+        transaction_context,
+        invoke_context,
+        PAYER_IDX,
+        MAGIC_CONTEXT_IDX + 1,
+    )?;
+    let committees_start = if magic_fee_vault.is_some() {
+        COMMITTEES_START + 1
+    } else {
+        COMMITTEES_START
+    };
+
     // Assert enough accounts
-    if ix_accs_len <= COMMITTEES_START {
+    if ix_accs_len <= committees_start {
         ic_msg!(
             invoke_context,
             "ScheduleCommit ERR: not enough accounts to schedule commit ({}), need payer, signing program an account for each pubkey to be committed",
@@ -91,7 +123,7 @@ pub(crate) fn process_schedule_commit_finalize(
     let first_committee_owner = {
         *get_instruction_account_with_idx(
             transaction_context,
-            COMMITTEES_START as u16,
+            committees_start as u16,
         )?
         .borrow()
         .owner()
@@ -121,7 +153,7 @@ pub(crate) fn process_schedule_commit_finalize(
     // program owning the PDAs invoked us directly via CPI is sufficient
     // Thus we can be `invoke`d unsigned and no seeds need to be provided
     let mut committed_accounts: Vec<CommittedAccount> = Vec::new();
-    for idx in COMMITTEES_START..ix_accs_len {
+    for idx in committees_start..ix_accs_len {
         let acc_pubkey =
             get_instruction_pubkey_with_idx(transaction_context, idx as u16)?;
         let acc =
@@ -209,6 +241,16 @@ pub(crate) fn process_schedule_commit_finalize(
                 acc_pubkey
             );
         }
+    }
+
+    if let Some(fee_vault) = magic_fee_vault {
+        let nonces = fetch_current_commit_nonces(&committed_accounts)?;
+        let fee = calculate_commit_fee(&committed_accounts, &nonces)?;
+        charge_delegated_payer(payer_account, fee_vault, fee)?;
+    } else if !opts.request_undelegation {
+        // We validate commit nonces only for plain commits.
+        // If accounts are undelegated we don't want to fail.
+        check_commit_limits(&committed_accounts, invoke_context)?;
     }
 
     // NOTE: this is only protected by all the above checks however if the

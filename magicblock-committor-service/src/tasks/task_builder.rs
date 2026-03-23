@@ -159,7 +159,7 @@ impl TaskBuilderImpl {
 
 #[async_trait]
 impl TasksBuilder for TaskBuilderImpl {
-    /// Returns []s for Commit stage
+    /// Returns [`BaseTaskImpl`]s for Commit stage
     async fn commit_tasks<C: TaskInfoFetcher, P: IntentPersister>(
         task_info_fetcher: &Arc<C>,
         intent_bundle: &ScheduledIntentBundle,

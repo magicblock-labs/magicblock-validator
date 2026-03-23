@@ -380,10 +380,7 @@ impl MagicIntentBundle {
 
     pub fn has_undelegate_intent(&self) -> bool {
         self.commit_and_undelegate.is_some()
-
-        // TODO (snawaz): we need to add this as well?
-        // ||
-        // self.commit_finalize_and_undelegate.is_some()
+            || self.commit_finalize_and_undelegate.is_some()
     }
 
     pub fn has_committed_accounts(&self) -> bool {
