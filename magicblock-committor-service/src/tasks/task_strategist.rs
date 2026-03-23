@@ -1,4 +1,4 @@
-use std::collections::BinaryHeap;
+use std::collections::{BinaryHeap, HashSet};
 
 use magicblock_core::intent::BaseActionCallback;
 use solana_keypair::Keypair;
@@ -29,13 +29,17 @@ impl TransactionStrategy {
         if self.lookup_tables_keys.is_empty() {
             vec![]
         } else {
-            std::mem::replace(
+            let mut unused_alts = std::mem::replace(
                 &mut self.lookup_tables_keys,
                 TaskStrategist::collect_lookup_table_keys(
                     authority,
                     &self.optimized_tasks,
                 ),
-            )
+            );
+            let new_alt_set: HashSet<Pubkey> =
+                self.lookup_tables_keys.iter().cloned().collect();
+            unused_alts.retain(|el| !new_alt_set.contains(el));
+            unused_alts
         }
     }
 
