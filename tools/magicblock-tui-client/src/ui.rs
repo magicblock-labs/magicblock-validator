@@ -174,13 +174,9 @@ fn render_content(frame: &mut Frame, area: Rect, state: &TuiState) {
 }
 
 fn render_logs(frame: &mut Frame, area: Rect, state: &TuiState) {
-    let visible_count = area.height.saturating_sub(2) as usize;
-
-    let items: Vec<ListItem> = state
+    let lines: Vec<Line> = state
         .logs
         .iter()
-        .skip(state.log_scroll)
-        .take(visible_count)
         .map(|log| {
             let timestamp = log.timestamp.format("%H:%M:%S%.3f");
             let level_color = match log.level {
@@ -205,12 +201,15 @@ fn render_logs(frame: &mut Frame, area: Rect, state: &TuiState) {
                 Span::raw(&log.message),
             ]);
 
-            ListItem::new(line)
+            line
         })
         .collect();
 
-    let list = List::new(items).block(Block::default().borders(Borders::NONE));
-    frame.render_widget(list, area);
+    let paragraph = Paragraph::new(lines)
+        .wrap(Wrap { trim: false })
+        .scroll((state.log_scroll.min(u16::MAX as usize) as u16, 0))
+        .block(Block::default().borders(Borders::NONE));
+    frame.render_widget(paragraph, area);
 }
 
 fn render_transactions(frame: &mut Frame, area: Rect, state: &TuiState) {

@@ -13,6 +13,7 @@ use magicblock_metrics::metrics;
 use solana_pubkey::Pubkey;
 use solana_sdk_ids::sysvar::clock;
 use tokio::sync::mpsc;
+use tokio_util::sync::CancellationToken;
 use tracing::*;
 
 use crate::remote_account_provider::{
@@ -145,6 +146,9 @@ where
     /// Number of currently connected clients that activate subscriptions immediately when
     /// requested.
     connected_clients_subscribing_immediately: Arc<AtomicU16>,
+    /// Token cancelled on drop to stop background tasks
+    /// (dedup pruner, debounce flusher).
+    shutdown_token: CancellationToken,
 }
 
 // Parameters for the long-running forwarder loop, grouped to avoid
@@ -244,6 +248,7 @@ where
             connected_clients_subscribing_immediately.clone(),
         );
 
+        let shutdown_token = CancellationToken::new();
         let me = Self {
             clients,
             out_tx,
@@ -256,6 +261,7 @@ where
             never_debounce,
             program_subs,
             connected_clients_subscribing_immediately,
+            shutdown_token,
         };
 
         // Spawn background tasks
@@ -493,12 +499,17 @@ where
     fn spawn_dedup_pruner(&self) {
         let window = self.dedup_window;
         let cache = self.dedup_cache.clone();
+        let shutdown = self.shutdown_token.clone();
         tokio::spawn(async move {
             loop {
-                tokio::time::sleep(window).await;
-                let now = Instant::now();
-                let mut map = cache.lock().unwrap();
-                map.retain(|_, ts| now.duration_since(*ts) <= window);
+                tokio::select! {
+                    _ = tokio::time::sleep(window) => {
+                        let now = Instant::now();
+                        let mut map = cache.lock().unwrap();
+                        map.retain(|_, ts| now.duration_since(*ts) <= window);
+                    }
+                    _ = shutdown.cancelled() => break,
+                }
             }
         });
     }
@@ -519,33 +530,38 @@ where
         let states = self.debounce_states.clone();
         let out_tx = self.out_tx.clone();
         let interval = self.debounce_interval;
+        let shutdown = self.shutdown_token.clone();
         tokio::spawn(async move {
             let tick = cmp::max(Duration::from_millis(10), interval / 4);
             loop {
-                tokio::time::sleep(tick).await;
-                let now = Instant::now();
-                let mut to_forward = vec![];
-                {
-                    let mut map =
-                        states.lock().expect("debounce_states lock poisoned");
-                    for debounce_state in map.values_mut() {
-                        if let DebounceState::Enabled {
-                            next_allowed_forward,
-                            pending,
-                            ..
-                        } = debounce_state
+                tokio::select! {
+                    _ = tokio::time::sleep(tick) => {
+                        let now = Instant::now();
+                        let mut to_forward = vec![];
                         {
-                            if now >= *next_allowed_forward {
-                                if let Some(u) = pending.take() {
-                                    *next_allowed_forward = now + interval;
-                                    to_forward.push(u);
+                            let mut map =
+                                states.lock().expect("debounce_states lock poisoned");
+                            for debounce_state in map.values_mut() {
+                                if let DebounceState::Enabled {
+                                    next_allowed_forward,
+                                    pending,
+                                    ..
+                                } = debounce_state
+                                {
+                                    if now >= *next_allowed_forward {
+                                        if let Some(u) = pending.take() {
+                                            *next_allowed_forward = now + interval;
+                                            to_forward.push(u);
+                                        }
+                                    }
                                 }
                             }
                         }
+                        for update in to_forward {
+                            let _ = out_tx.send(update).await;
+                        }
                     }
-                }
-                for update in to_forward {
-                    let _ = out_tx.send(update).await;
+                    _ = shutdown.cancelled() => break,
                 }
             }
         });
@@ -775,6 +791,15 @@ where
             .lock()
             .expect("debounce_states lock poisoned");
         states.get(&pubkey).cloned()
+    }
+}
+
+impl<T> Drop for SubMuxClient<T>
+where
+    T: ChainPubsubClient + ReconnectableClient,
+{
+    fn drop(&mut self) {
+        self.shutdown_token.cancel();
     }
 }
 

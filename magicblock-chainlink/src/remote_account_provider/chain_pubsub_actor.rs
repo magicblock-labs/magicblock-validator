@@ -12,6 +12,7 @@ use magicblock_metrics::metrics::{
     inc_account_subscription_account_updates_count,
     inc_per_program_account_updates_count,
     inc_program_subscription_account_updates_count,
+    inc_pubsub_unsubscribe_timeout_count,
 };
 use solana_account_decoder_client_types::UiAccountEncoding;
 use solana_commitment_config::CommitmentConfig;
@@ -35,9 +36,9 @@ use super::{
 };
 use crate::remote_account_provider::{
     pubsub_common::{
-        AccountSubscription, ChainPubsubActorMessage, PubsubClientConfig,
-        SubscriptionUpdate, MESSAGE_CHANNEL_SIZE,
-        SUBSCRIPTION_UPDATE_CHANNEL_SIZE,
+        is_internal_dlp_account_data, AccountSubscription,
+        ChainPubsubActorMessage, PubsubClientConfig, SubscriptionUpdate,
+        MESSAGE_CHANNEL_SIZE, SUBSCRIPTION_UPDATE_CHANNEL_SIZE,
     },
     pubsub_connection::PubsubConnectionImpl,
     DEFAULT_SUBSCRIPTION_RETRIES,
@@ -74,6 +75,12 @@ pub struct ChainPubsubActor {
     is_connected: Arc<AtomicBool>,
     /// Channel used to signal connection issues to the submux
     abort_sender: mpsc::Sender<()>,
+}
+
+impl Drop for ChainPubsubActor {
+    fn drop(&mut self) {
+        self.shutdown_token.cancel();
+    }
 }
 
 impl ChainPubsubActor {
@@ -387,6 +394,18 @@ impl ChainPubsubActor {
                 .await;
                 let _ = response.send(result);
             }
+            ChainPubsubActorMessage::AccountSubscribeMultiple {
+                response,
+                ..
+            } => {
+                // Websockets don't support batch subscriptions (via a single call)
+                // thus we return an error here since the client should never call this
+                let _ = response.send(Err(
+                    RemoteAccountProviderError::UnsupportedActorMessage(
+                        "AccountSubscribeMultiple".to_string(),
+                    ),
+                ));
+            }
             ChainPubsubActorMessage::Shutdown { response } => {
                 Self::shutdown(
                     client_id,
@@ -520,9 +539,18 @@ impl ChainPubsubActor {
                                     &client_id,
                                 );
                             }
-                            let _ = subscription_updates_sender.send(update).await.inspect_err(|err| {
-                                error!(error = ?err, "Failed to send subscription update");
-                            });
+                            tokio::select! {
+                                result = subscription_updates_sender.send(update) => {
+                                    if result.is_err() {
+                                        warn!(pubkey = %pubkey, "Downstream receiver dropped; stopping subscription listener");
+                                        break;
+                                    }
+                                }
+                                _ = cancellation_token.cancelled() => {
+                                    trace!("Subscription was cancelled while sending update");
+                                    break;
+                                }
+                            }
                         } else {
                             static SIGNAL_CONNECTION_COUNT: AtomicU16 =
                                 AtomicU16::new(0);
@@ -543,10 +571,9 @@ impl ChainPubsubActor {
                                 is_connected.clone(),
                                 &format!("Subscription ended for {pubkey}")
                             );
-                            // Return early - abort_and_signal_connection_issue cancels all
-                            // subscriptions, triggering cleanup via the cancellation path
-                            // above. No need to run unsubscribe/cleanup here.
-                            return;
+                            // Break to run the unsubscribe timeout + map-cleanup
+                            // block below (mirrors program subscription behavior)
+                            break;
                         }
                     }
                 }
@@ -558,6 +585,7 @@ impl ChainPubsubActor {
                 .is_err()
             {
                 warn!(timeout_ms = 2000, "Unsubscribe timed out");
+                inc_pubsub_unsubscribe_timeout_count(&client_id, "account");
             }
             subs.lock()
                 .expect("subscriptions lock poisoned")
@@ -670,23 +698,54 @@ impl ChainPubsubActor {
                                     &program_pubkey.to_string(),
                                 );
 
-                                if subs.lock().expect("subscriptions lock poisoned").contains_key(&acc_pubkey) {
-                                    let ui_account = rpc_response.value.account;
-                                    let rpc_response = RpcResponse {
-                                        context: rpc_response.context,
-                                        value: ui_account,
-                                    };
-                                    let sub_update = SubscriptionUpdate::from((acc_pubkey, rpc_response));
+                                let is_directly_subscribed = match subs.lock() {
+                                    Ok(subs) => subs.contains_key(&acc_pubkey),
+                                    Err(err) => {
+                                        warn!(
+                                            error = ?err,
+                                            pubkey = %acc_pubkey,
+                                            "Failed to inspect direct subscriptions"
+                                        );
+                                        false
+                                    }
+                                };
+                                let ui_account = rpc_response.value.account;
+                                let rpc_response = RpcResponse {
+                                    context: rpc_response.context,
+                                    value: ui_account,
+                                };
+                                let sub_update = SubscriptionUpdate::from((
+                                    acc_pubkey,
+                                    rpc_response,
+                                ));
+                                let should_forward = is_directly_subscribed
+                                    || program_pubkey.eq(&dlp_api::dlp::id())
+                                        && sub_update.account.as_ref().is_some_and(
+                                            |account| {
+                                                !is_internal_dlp_account_data(
+                                                    &account.data,
+                                                )
+                                            },
+                                        );
+
+                                if should_forward {
                                     if acc_pubkey != clock::ID {
                                         inc_program_subscription_account_updates_count(
                                             &client_id,
                                         );
                                     }
-                                    let _ = subscription_updates_sender.send(sub_update)
-                                        .await
-                                        .inspect_err(|err| {
-                                            error!(error = ?err, pubkey = %acc_pubkey, "Failed to send program subscription update");
-                                        });
+                                    tokio::select! {
+                                        result = subscription_updates_sender.send(sub_update) => {
+                                            if result.is_err() {
+                                                warn!(program_id = %program_pubkey, "Downstream receiver dropped; stopping program subscription listener");
+                                                break;
+                                            }
+                                        }
+                                        _ = cancellation_token.cancelled() => {
+                                            trace!("Program subscription was cancelled while sending update");
+                                            break;
+                                        }
+                                    }
                                 }
                             }
                         } else {
@@ -721,6 +780,7 @@ impl ChainPubsubActor {
                 .is_err()
             {
                 warn!(timeout_ms = 2000, "Unsubscribe timed out for program");
+                inc_pubsub_unsubscribe_timeout_count(&client_id, "program");
             }
             program_subs
                 .lock()
@@ -769,6 +829,11 @@ impl ChainPubsubActor {
 
         // 5. We are now connected again
         is_connected.store(true, Ordering::SeqCst);
+
+        // 6. Prune any idle connections left over from before the
+        //    disruption
+        pubsub_connection.prune_idle().await;
+
         Ok(())
     }
 
