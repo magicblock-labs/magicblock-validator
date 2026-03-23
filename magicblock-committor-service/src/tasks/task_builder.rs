@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
 use async_trait::async_trait;
 use futures_util::{stream::FuturesUnordered, TryStreamExt};
@@ -135,7 +135,7 @@ impl TasksBuilder for TaskBuilderImpl {
                 }
             };
 
-        let (commit_ids, base_accounts) = {
+        let (commit_ids, base_accounts, associated_compressed_data) = {
             let mut min_context_slot = 0;
             let committed_pubkeys = accounts
                 .iter()
@@ -163,12 +163,36 @@ impl TasksBuilder for TaskBuilderImpl {
                 info_fetcher.get_base_accounts(
                     diffable_pubkeys.as_slice(),
                     min_context_slot
-                )
+                ),
+                async {
+                    if compressed {
+                        accounts
+                            .iter()
+                            .map(|account| async {
+                                Ok((
+                                    account.pubkey,
+                                    info_fetcher
+                                        .get_compressed_data(
+                                            &account.pubkey,
+                                            None,
+                                        )
+                                        .await?,
+                                ))
+                            })
+                            .collect::<FuturesUnordered<_>>()
+                            .try_collect::<HashMap<_, _>>()
+                            .await
+                    } else {
+                        Ok(HashMap::new())
+                    }
+                }
             )
         };
 
         let commit_ids =
             commit_ids.map_err(TaskBuilderError::CommitTasksBuildError)?;
+        let associated_compressed_data = associated_compressed_data
+            .map_err(TaskBuilderError::CommitTasksBuildError)?;
 
         let base_accounts = match base_accounts {
             Ok(map) => map,
@@ -195,27 +219,23 @@ impl TasksBuilder for TaskBuilderImpl {
                     let commit_id = *commit_ids.get(&account.pubkey).ok_or(
                         TaskBuilderError::MissingCommitId(account.pubkey),
                     )?;
-                    let account_clone = account.clone();
-                    Ok(async move {
-                        let compressed_data = info_fetcher
-                            .get_compressed_data(&account_clone.pubkey, None)
-                            .await?;
-                        let task = ArgsTaskType::CompressedCommit(
-                            CompressedCommitTask {
-                                commit_id,
-                                allow_undelegation,
-                                committed_account: account_clone,
-                                compressed_data,
-                            },
-                        );
-                        Ok::<_, TaskBuilderError>(
-                            Box::new(ArgsTask::new(task)) as Box<dyn BaseTask>
-                        )
-                    })
+                    let compressed_data = associated_compressed_data
+                        .get(&account.pubkey)
+                        .ok_or(TaskBuilderError::MissingCompressedData(
+                            account.pubkey,
+                        ))?;
+                    let task =
+                        ArgsTaskType::CompressedCommit(CompressedCommitTask {
+                            commit_id,
+                            allow_undelegation,
+                            committed_account: account.clone(),
+                            compressed_data: compressed_data.clone(),
+                        });
+                    Ok::<_, TaskBuilderError>(
+                        Box::new(ArgsTask::new(task)) as Box<dyn BaseTask>
+                    )
                 })
-                .collect::<Result<FuturesUnordered<_>, TaskBuilderError>>()?
-                .try_collect()
-                .await?
+                .collect::<Result<Vec<_>, _>>()?
         } else {
             accounts
                 .iter()
@@ -482,6 +502,8 @@ pub enum TaskBuilderError {
     MissingCommitId(Pubkey),
     #[error("TaskInfoFetcherError: {0}")]
     TaskInfoFetcherError(#[from] TaskInfoFetcherError),
+    #[error("MissingCompressedData: {0}")]
+    MissingCompressedData(Pubkey),
 }
 
 impl TaskBuilderError {
@@ -492,6 +514,7 @@ impl TaskBuilderError {
             Self::TaskStrategistError(_) => None,
             Self::MissingCommitId(_) => None,
             Self::TaskInfoFetcherError(err) => err.signature(),
+            Self::MissingCompressedData(_) => None,
         }
     }
 }
