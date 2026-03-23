@@ -305,33 +305,6 @@ impl TasksBuilder for TaskBuilderImpl {
             }
         }
 
-        // Helper to get compressed data
-        async fn get_compressed_data_for_accounts<C: TaskInfoFetcher>(
-            info_fetcher: &Arc<C>,
-            is_compressed: bool,
-            committed_accounts: &[CommittedAccount],
-        ) -> TaskBuilderResult<Vec<Option<CompressedData>>> {
-            if is_compressed {
-                committed_accounts
-                    .iter()
-                    .map(|account| {
-                        let pubkey = account.pubkey;
-                        async move {
-                            Ok(Some(
-                                info_fetcher
-                                    .get_compressed_data(&pubkey, None)
-                                    .await?,
-                            ))
-                        }
-                    })
-                    .collect::<FuturesUnordered<_>>()
-                    .try_collect()
-                    .await
-            } else {
-                Ok(vec![None; committed_accounts.len()])
-            }
-        }
-
         // Helper to process commit types
         async fn process_commit<C: TaskInfoFetcher>(
             info_fetcher: &Arc<C>,
@@ -342,14 +315,19 @@ impl TasksBuilder for TaskBuilderImpl {
                 CommitType::Standalone(committed_accounts) => {
                     Ok(committed_accounts
                         .iter()
-                        .zip(
-                            get_compressed_data_for_accounts(
-                                info_fetcher,
-                                is_compressed,
-                                committed_accounts,
-                            )
-                            .await?,
-                        )
+                        .zip(if is_compressed {
+                            info_fetcher
+                                .get_compressed_data_for_accounts(
+                                    &committed_accounts
+                                        .iter()
+                                        .map(|account| account.pubkey)
+                                        .collect::<Vec<_>>(),
+                                    None,
+                                )
+                                .await?
+                        } else {
+                            vec![None; committed_accounts.len()]
+                        })
                         .map(|(account, compressed_data)| {
                             finalize_task(account, compressed_data)
                         })
@@ -362,14 +340,19 @@ impl TasksBuilder for TaskBuilderImpl {
                 } => {
                     let mut tasks = committed_accounts
                         .iter()
-                        .zip(
-                            get_compressed_data_for_accounts(
-                                info_fetcher,
-                                is_compressed,
-                                committed_accounts,
-                            )
-                            .await?,
-                        )
+                        .zip(if is_compressed {
+                            info_fetcher
+                                .get_compressed_data_for_accounts(
+                                    &committed_accounts
+                                        .iter()
+                                        .map(|account| account.pubkey)
+                                        .collect::<Vec<_>>(),
+                                    None,
+                                )
+                                .await?
+                        } else {
+                            vec![None; committed_accounts.len()]
+                        })
                         .map(|(account, compressed_data)| {
                             finalize_task(account, compressed_data)
                         })

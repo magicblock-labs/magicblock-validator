@@ -13,6 +13,7 @@ use compressed_delegation_client::{
 use dlp::{
     delegation_metadata_seeds_from_delegated_account, state::DelegationMetadata,
 };
+use futures_util::{stream::FuturesUnordered, TryStreamExt};
 use light_client::{
     indexer::{
         photon_indexer::PhotonIndexer, Indexer, IndexerError, IndexerRpcConfig,
@@ -76,6 +77,23 @@ pub trait TaskInfoFetcher: Send + Sync + 'static {
         pubkey: &Pubkey,
         min_context_slot: Option<u64>,
     ) -> TaskInfoFetcherResult<CompressedData>;
+
+    async fn get_compressed_data_for_accounts(
+        &self,
+        pubkeys: &[Pubkey],
+        min_context_slot: Option<u64>,
+    ) -> TaskInfoFetcherResult<Vec<Option<CompressedData>>> {
+        pubkeys
+            .iter()
+            .map(|pubkey| async move {
+                Ok(Some(
+                    self.get_compressed_data(pubkey, min_context_slot).await?,
+                ))
+            })
+            .collect::<FuturesUnordered<_>>()
+            .try_collect::<Vec<_>>()
+            .await
+    }
 }
 
 pub enum ResetType<'a> {
