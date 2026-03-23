@@ -149,17 +149,24 @@ where
         &mut self,
         result: ActionResult,
     ) -> TransactionStrategy {
-        let mut removed_actions = self
-            .transaction_strategy
-            .remove_actions(&self.authority.pubkey());
-        let callbacks = removed_actions.extract_action_callbacks();
+        let (callbacks, junk) = if result.is_ok() {
+            let callbacks =
+                self.transaction_strategy.extract_action_callbacks();
+            (callbacks, TransactionStrategy::default())
+        } else {
+            let mut removed_actions = self
+                .transaction_strategy
+                .remove_actions(&self.authority.pubkey());
+            let callbacks = removed_actions.extract_action_callbacks();
+            (callbacks, removed_actions)
+        };
         if !callbacks.is_empty() {
             let callbacks_results =
                 self.callback_scheduler.schedule(callbacks, result);
             self.execution_report.add_callback_report(callbacks_results);
         }
 
-        removed_actions
+        junk
     }
 
     pub fn has_callbacks(&self) -> bool {

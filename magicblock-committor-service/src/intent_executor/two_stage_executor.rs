@@ -159,6 +159,10 @@ where
         self.execute_callbacks(commit_result.as_ref().map(|_| ()));
         self.execution_report
             .dispose(mem::take(&mut self.state.commit_strategy));
+        if commit_result.is_err() {
+            self.execution_report
+                .dispose(mem::take(&mut self.state.finalize_strategy));
+        }
         commit_result.map_err(|err| {
             IntentExecutorError::from_commit_execution_error(err)
         })
@@ -499,14 +503,21 @@ fn handle_actions_result<A>(
 where
     A: ActionsCallbackScheduler,
 {
-    let mut removed_actions = transaction_strategy.remove_actions(authority);
-    let callbacks = removed_actions.extract_action_callbacks();
+    let (callbacks, junk) = if result.is_ok() {
+        let callbacks = transaction_strategy.extract_action_callbacks();
+        (callbacks, TransactionStrategy::default())
+    } else {
+        let mut removed_actions =
+            transaction_strategy.remove_actions(authority);
+        let callbacks = removed_actions.extract_action_callbacks();
+        (callbacks, removed_actions)
+    };
     if !callbacks.is_empty() {
         let result = callback_scheduler.schedule(callbacks, result);
         execution_report.add_callback_report(result);
     }
 
-    removed_actions
+    junk
 }
 
 mod sealed {
