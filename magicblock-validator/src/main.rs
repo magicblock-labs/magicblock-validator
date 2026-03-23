@@ -53,8 +53,6 @@ async fn run() {
     init_logger();
     #[cfg(feature = "tui")]
     let validator_log_rx = init_embedded_logger();
-    #[cfg(feature = "tokio-console")]
-    console_subscriber::init();
     let args = std::env::args_os();
     let config = match ValidatorParams::try_new(args) {
         Ok(c) => c,

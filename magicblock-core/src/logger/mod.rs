@@ -14,38 +14,46 @@ pub fn init() {
 
 /// Initialize tracing with custom configuration.
 pub fn init_with_config(config: LoggingConfig) {
-    // Capture log records from dependencies using the `log` crate
-    LogTracer::init().expect("Failed to set LogTracer");
+    use tracing_subscriber::prelude::*;
 
     let env_filter = EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| EnvFilter::new("info"));
 
+    macro_rules! init_subscriber {
+        ($fmt_layer:expr) => {{
+            #[cfg(feature = "tokio-console")]
+            tracing_subscriber::registry()
+                .with(console_subscriber::spawn())
+                .with($fmt_layer)
+                .init();
+
+            #[cfg(not(feature = "tokio-console"))]
+            tracing_subscriber::registry()
+                .with($fmt_layer)
+                .init();
+        }};
+    }
+
     match config.style {
         LogStyle::Default => {
-            let subscriber = fmt::Subscriber::builder()
-                .with_env_filter(env_filter)
+            let layer = fmt::layer()
                 .with_timer(fmt::time::UtcTime::rfc_3339())
-                .finish();
-            tracing::subscriber::set_global_default(subscriber)
-                .expect("Failed to set subscriber");
+                .with_filter(env_filter);
+            init_subscriber!(layer);
         }
         LogStyle::Ephem => {
-            let subscriber = fmt::Subscriber::builder()
-                .with_env_filter(env_filter)
+            let layer = fmt::layer()
                 .fmt_fields(EphemFieldFormatter)
                 .event_format(EphemEventFormatter)
-                .finish();
-            tracing::subscriber::set_global_default(subscriber)
-                .expect("Failed to set subscriber");
+                .with_filter(env_filter);
+            init_subscriber!(layer);
         }
         LogStyle::Devnet => {
-            let subscriber = fmt::Subscriber::builder()
-                .with_env_filter(env_filter)
+            let layer = fmt::layer()
                 .fmt_fields(DevnetFieldFormatter)
                 .event_format(DevnetEventFormatter)
-                .finish();
-            tracing::subscriber::set_global_default(subscriber)
-                .expect("Failed to set subscriber");
+                .with_filter(env_filter);
+            init_subscriber!(layer);
         }
     }
 }
