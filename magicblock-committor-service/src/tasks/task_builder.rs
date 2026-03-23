@@ -378,14 +378,6 @@ impl TasksBuilder for TaskBuilderImpl {
                 Ok(process_commit(info_fetcher, commit, is_compressed).await?)
             }
             MagicBaseIntent::CommitAndUndelegate(t) => {
-                let mut tasks = process_commit(
-                    info_fetcher,
-                    &t.commit_action,
-                    is_compressed,
-                )
-                .await?;
-
-                // Get rent reimbursments for undelegated accounts
                 let accounts = t.get_committed_accounts();
                 let mut min_context_slot = 0;
                 let pubkeys = accounts
@@ -398,9 +390,17 @@ impl TasksBuilder for TaskBuilderImpl {
                         account.pubkey
                     })
                     .collect::<Vec<_>>();
-                let rent_reimbursements = info_fetcher
-                    .fetch_rent_reimbursements(&pubkeys, min_context_slot)
-                    .await
+                let (tasks, rent_reimbursements) = tokio::join!(
+                    process_commit(
+                        info_fetcher,
+                        &t.commit_action,
+                        is_compressed,
+                    ),
+                    info_fetcher
+                        .fetch_rent_reimbursements(&pubkeys, min_context_slot)
+                );
+                let mut tasks = tasks?;
+                let rent_reimbursements = rent_reimbursements
                     .map_err(TaskBuilderError::FinalizedTasksBuildError)?;
 
                 tasks.extend(accounts.iter().zip(rent_reimbursements).map(
