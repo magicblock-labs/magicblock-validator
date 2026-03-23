@@ -69,6 +69,7 @@ pub const COMMIT_STATE_SIZE_THRESHOLD: usize = 256;
 impl TaskBuilderImpl {
     pub fn create_commit_task(
         commit_id: u64,
+        compressed_data: Option<&CompressedData>,
         allow_undelegation: bool,
         account: CommittedAccount,
         base_account: Option<Account>,
@@ -80,7 +81,14 @@ impl TaskBuilderImpl {
                 None
             };
 
-        if let Some(base_account) = base_account {
+        if let Some(compressed_data) = compressed_data {
+            ArgsTaskType::CompressedCommit(CompressedCommitTask {
+                commit_id,
+                allow_undelegation,
+                committed_account: account.clone(),
+                compressed_data: compressed_data.clone(),
+            })
+        } else if let Some(base_account) = base_account {
             ArgsTaskType::CommitDiff(CommitDiffTask {
                 commit_id,
                 allow_undelegation,
@@ -211,55 +219,38 @@ impl TasksBuilder for TaskBuilderImpl {
                 }
             });
 
-        let tasks = if compressed {
-            // For compressed accounts, prepare compression data
-            accounts
-                .iter()
-                .map(|account| {
-                    let commit_id = *commit_ids.get(&account.pubkey).ok_or(
-                        TaskBuilderError::MissingCommitId(account.pubkey),
-                    )?;
-                    let compressed_data = associated_compressed_data
-                        .get(&account.pubkey)
-                        .ok_or(TaskBuilderError::MissingCompressedData(
-                            account.pubkey,
-                        ))?;
-                    let task =
-                        ArgsTaskType::CompressedCommit(CompressedCommitTask {
-                            commit_id,
-                            allow_undelegation,
-                            committed_account: account.clone(),
-                            compressed_data: compressed_data.clone(),
-                        });
-                    Ok::<_, TaskBuilderError>(
-                        Box::new(ArgsTask::new(task)) as Box<dyn BaseTask>
+        let tasks = accounts
+            .iter()
+            .map(|account| {
+                let commit_id = *commit_ids
+                    .get(&account.pubkey)
+                    .ok_or(TaskBuilderError::MissingCommitId(account.pubkey))?;
+                let compressed_data = if compressed {
+                    Some(
+                        associated_compressed_data.get(&account.pubkey).ok_or(
+                            TaskBuilderError::MissingCompressedData(
+                                account.pubkey,
+                            ),
+                        )?,
                     )
-                })
-                .collect::<Result<Vec<_>, _>>()?
-        } else {
-            accounts
-                .iter()
-                .map(|account| {
-                    let commit_id = *commit_ids.get(&account.pubkey).ok_or(
-                        TaskBuilderError::MissingCommitId(account.pubkey),
-                    )?;
-                    // TODO (snawaz): if accounts do not have duplicate, then we can use remove
-                    // instead:
-                    //  let base_account = base_accounts.remove(&account.pubkey);
-                    let base_account =
-                        base_accounts.get(&account.pubkey).cloned();
-                    let task = Self::create_commit_task(
-                        commit_id,
-                        allow_undelegation,
-                        account.clone(),
-                        base_account,
-                    );
-                    Ok::<_, TaskBuilderError>(
-                        Box::new(task) as Box<dyn BaseTask>
-                    )
-                })
-                .collect::<Result<_, _>>()?
-        };
+                } else {
+                    None
+                };
+
+                // TODO (snawaz): if accounts do not have duplicate, then we can use remove
+                // instead:
+                //  let base_account = base_accounts.remove(&account.pubkey);
+                let base_account = base_accounts.get(&account.pubkey).cloned();
+                let task = Self::create_commit_task(
+                    commit_id,
+                    compressed_data,
+                    allow_undelegation,
+                    account.clone(),
+                    base_account,
+                );
+                Ok::<_, TaskBuilderError>(Box::new(task) as Box<dyn BaseTask>)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
 
         Ok(tasks)
     }

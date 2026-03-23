@@ -504,6 +504,7 @@ mod tests {
         if diff_len == 0 {
             TaskBuilderImpl::create_commit_task(
                 commit_id,
+                None,
                 false,
                 committed_account,
                 None,
@@ -519,6 +520,7 @@ mod tests {
             };
             TaskBuilderImpl::create_commit_task(
                 commit_id,
+                None,
                 false,
                 committed_account,
                 Some(base_account),
