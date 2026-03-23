@@ -82,7 +82,7 @@ remotes = ["https://api.devnet.solana.com", "wss://api.devnet.solana.com"]
 To start the validator with the default configuration (or your custom config file):
 
 ```bash
-cargo run --release -- config.example.toml
+cargo run -p magicblock-validator --release -- config.example.toml
 ```
 
 ### Using Environment Variables
@@ -92,8 +92,8 @@ You can override any configuration value using environment variables with the `M
 ```bash
 # Example: Run as an ephemeral validator syncing from Mainnet
 MBV_LIFECYCLE=ephemeral \
-MBV_LISTEN=0.0.0.0:8899 \
-cargo run --release config.example.toml
+MBV_APERTURE__LISTEN=0.0.0.0:8899 \
+cargo run -p magicblock-validator --release config.example.toml
 
 ```
 
