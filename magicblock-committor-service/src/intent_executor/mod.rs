@@ -114,7 +114,7 @@ pub trait IntentExecutor: Send + Sync + 'static {
 pub struct IntentExecutorImpl<T, F> {
     authority: Keypair,
     rpc_client: MagicblockRpcClient,
-    photon_client: Option<Arc<PhotonIndexer>>,
+    photon_client: Arc<PhotonIndexer>,
     transaction_preparator: T,
     task_info_fetcher: Arc<F>,
 
@@ -131,7 +131,7 @@ where
 {
     pub fn new(
         rpc_client: MagicblockRpcClient,
-        photon_client: Option<Arc<PhotonIndexer>>,
+        photon_client: Arc<PhotonIndexer>,
         transaction_preparator: T,
         task_info_fetcher: Arc<F>,
     ) -> Self {

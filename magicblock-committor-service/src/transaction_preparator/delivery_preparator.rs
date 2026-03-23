@@ -66,7 +66,7 @@ impl DeliveryPreparator {
         authority: &Keypair,
         strategy: &mut TransactionStrategy,
         persister: &Option<P>,
-        photon_client: &Option<Arc<PhotonIndexer>>,
+        photon_client: &Arc<PhotonIndexer>,
         commit_slot_fn: Option<CommitSlotFn<'a>>,
     ) -> DeliveryPreparatorResult<Vec<AddressLookupTableAccount>> {
         let preparation_futures =
@@ -112,7 +112,7 @@ impl DeliveryPreparator {
         authority: &Keypair,
         task: &mut dyn BaseTask,
         persister: &Option<P>,
-        photon_client: &Option<Arc<PhotonIndexer>>,
+        photon_client: &Arc<PhotonIndexer>,
         commit_slot_fn: Option<CommitSlotFn<'a>>,
     ) -> DeliveryPreparatorResult<(), InternalError> {
         let PreparationState::Required(preparation_task) =
@@ -179,9 +179,6 @@ impl DeliveryPreparator {
                 let delegated_account = task
                     .delegated_account()
                     .ok_or(InternalError::DelegatedAccountNotFound)?;
-                let photon_client = photon_client
-                    .as_ref()
-                    .ok_or(InternalError::PhotonClientNotFound)?;
 
                 let compressed_data = get_compressed_data(
                     &delegated_account,
@@ -210,7 +207,7 @@ impl DeliveryPreparator {
         authority: &Keypair,
         task: &mut Box<dyn BaseTask>,
         persister: &Option<P>,
-        photon_client: &Option<Arc<PhotonIndexer>>,
+        photon_client: &Arc<PhotonIndexer>,
         commit_slot_fn: Option<CommitSlotFn<'a>>,
     ) -> Result<(), InternalError> {
         let res = self

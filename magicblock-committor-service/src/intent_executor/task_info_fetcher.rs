@@ -74,14 +74,14 @@ pub enum ResetType<'a> {
 
 pub struct CacheTaskInfoFetcher {
     rpc_client: MagicblockRpcClient,
-    photon_client: Option<Arc<PhotonIndexer>>,
+    photon_client: Arc<PhotonIndexer>,
     cache: Mutex<LruCache<Pubkey, u64>>,
 }
 
 impl CacheTaskInfoFetcher {
     pub fn new(
         rpc_client: MagicblockRpcClient,
-        photon_client: Option<Arc<PhotonIndexer>>,
+        photon_client: Arc<PhotonIndexer>,
     ) -> Self {
         const CACHE_SIZE: NonZeroUsize = NonZeroUsize::new(1000).unwrap();
 
@@ -362,11 +362,8 @@ impl TaskInfoFetcher for CacheTaskInfoFetcher {
         to_request.dedup();
 
         let remaining_ids = if compressed {
-            let Some(photon_client) = self.photon_client.as_ref() else {
-                return Err(TaskInfoFetcherError::PhotonClientNotFound);
-            };
             Self::fetch_compressed_delegation_records_with_retries(
-                photon_client,
+                &self.photon_client,
                 &to_request,
                 min_context_slot,
                 NUM_FETCH_RETRIES,

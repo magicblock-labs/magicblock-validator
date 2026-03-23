@@ -53,14 +53,14 @@ pub trait TasksBuilder {
         commit_id_fetcher: &Arc<C>,
         base_intent: &ScheduledBaseIntent,
         persister: &Option<P>,
-        photon_client: &Option<Arc<PhotonIndexer>>,
+        photon_client: &Arc<PhotonIndexer>,
     ) -> TaskBuilderResult<Vec<Box<dyn BaseTask>>>;
 
     // Create tasks for finalize stage
     async fn finalize_tasks<C: TaskInfoFetcher>(
         info_fetcher: &Arc<C>,
         base_intent: &ScheduledBaseIntent,
-        photon_client: &Option<Arc<PhotonIndexer>>,
+        photon_client: &Arc<PhotonIndexer>,
     ) -> TaskBuilderResult<Vec<Box<dyn BaseTask>>>;
 }
 
@@ -115,7 +115,7 @@ impl TasksBuilder for TaskBuilderImpl {
         commit_id_fetcher: &Arc<C>,
         base_intent: &ScheduledBaseIntent,
         persister: &Option<P>,
-        photon_client: &Option<Arc<PhotonIndexer>>,
+        photon_client: &Arc<PhotonIndexer>,
     ) -> TaskBuilderResult<Vec<Box<dyn BaseTask>>> {
         let (accounts, allow_undelegation, compressed) =
             match &base_intent.base_intent {
@@ -200,10 +200,6 @@ impl TasksBuilder for TaskBuilderImpl {
 
         let tasks = if compressed {
             // For compressed accounts, prepare compression data
-            let photon_client = photon_client
-                .as_ref()
-                .ok_or(TaskBuilderError::PhotonClientNotFound)?;
-
             accounts
                 .iter()
                 .map(|account| {
@@ -266,7 +262,7 @@ impl TasksBuilder for TaskBuilderImpl {
     async fn finalize_tasks<C: TaskInfoFetcher>(
         info_fetcher: &Arc<C>,
         base_intent: &ScheduledBaseIntent,
-        photon_client: &Option<Arc<PhotonIndexer>>,
+        photon_client: &Arc<PhotonIndexer>,
     ) -> TaskBuilderResult<Vec<Box<dyn BaseTask>>> {
         // Helper to create a finalize task
         fn finalize_task(
@@ -317,12 +313,9 @@ impl TasksBuilder for TaskBuilderImpl {
         async fn get_compressed_data_for_accounts(
             is_compressed: bool,
             committed_accounts: &[CommittedAccount],
-            photon_client: &Option<Arc<PhotonIndexer>>,
+            photon_client: &Arc<PhotonIndexer>,
         ) -> TaskBuilderResult<Vec<Option<CompressedData>>> {
             if is_compressed {
-                let photon_client = photon_client
-                    .as_ref()
-                    .ok_or(TaskBuilderError::PhotonClientNotFound)?;
                 committed_accounts
                     .iter()
                     .map(|account| {
@@ -349,7 +342,7 @@ impl TasksBuilder for TaskBuilderImpl {
         // Helper to process commit types
         async fn process_commit(
             commit: &CommitType,
-            photon_client: &Option<Arc<PhotonIndexer>>,
+            photon_client: &Arc<PhotonIndexer>,
             is_compressed: bool,
         ) -> TaskBuilderResult<Vec<Box<dyn BaseTask>>> {
             match commit {

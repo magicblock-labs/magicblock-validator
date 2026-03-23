@@ -440,6 +440,10 @@ mod tests {
         test_utils,
     };
 
+    pub fn new_photon_client() -> Arc<PhotonIndexer> {
+        Arc::new(PhotonIndexer::new("".to_string(), None))
+    }
+
     struct MockInfoFetcher;
 
     #[async_trait::async_trait]
@@ -856,14 +860,14 @@ mod tests {
             &info_fetcher,
             &intent,
             &None::<IntentPersisterImpl>,
-            &None::<Arc<PhotonIndexer>>,
+            &new_photon_client(),
         )
         .await
         .unwrap();
         let finalize_task = TaskBuilderImpl::finalize_tasks(
             &info_fetcher,
             &intent,
-            &None::<Arc<PhotonIndexer>>,
+            &new_photon_client(),
         )
         .await
         .unwrap();
@@ -892,14 +896,14 @@ mod tests {
             &info_fetcher,
             &intent,
             &None::<IntentPersisterImpl>,
-            &None::<Arc<PhotonIndexer>>,
+            &new_photon_client(),
         )
         .await
         .unwrap();
         let finalize_task = TaskBuilderImpl::finalize_tasks(
             &info_fetcher,
             &intent,
-            &None::<Arc<PhotonIndexer>>,
+            &new_photon_client(),
         )
         .await
         .unwrap();
@@ -933,14 +937,14 @@ mod tests {
             &info_fetcher,
             &intent,
             &None::<IntentPersisterImpl>,
-            &None::<Arc<PhotonIndexer>>,
+            &new_photon_client(),
         )
         .await
         .unwrap();
         let finalize_task = TaskBuilderImpl::finalize_tasks(
             &info_fetcher,
             &intent,
-            &None::<Arc<PhotonIndexer>>,
+            &new_photon_client(),
         )
         .await
         .unwrap();

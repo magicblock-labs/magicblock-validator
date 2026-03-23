@@ -341,12 +341,10 @@ impl MagicValidator {
     async fn init_committor_service(
         config: &ValidatorParams,
     ) -> ApiResult<Option<Arc<CommittorService>>> {
-        let photon_client = config.compression.photon_url.as_ref().map(|url| {
-            Arc::new(PhotonIndexer::new(
-                url.clone(),
-                config.compression.api_key.clone(),
-            ))
-        });
+        let photon_client = Arc::new(PhotonIndexer::new(
+            config.compression.photon_url.clone(),
+            config.compression.api_key.clone(),
+        ));
 
         let committor_persist_path =
             config.storage.join("committor_service.sqlite");
@@ -401,12 +399,10 @@ impl MagicValidator {
                 )
             })?;
 
-        if let Some(url) = &config.compression.photon_url {
-            endpoints.push(Endpoint::Compression {
-                url: url.clone(),
-                api_key: config.compression.api_key.clone(),
-            });
-        }
+        endpoints.push(Endpoint::Compression {
+            url: config.compression.photon_url.clone(),
+            api_key: config.compression.api_key.clone(),
+        });
 
         let cloner = ChainlinkCloner::new(
             committor_service,

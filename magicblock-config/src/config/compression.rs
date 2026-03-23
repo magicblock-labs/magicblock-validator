@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "kebab-case", deny_unknown_fields, default)]
 pub struct CompressionConfig {
     /// The URL of the Photon indexer.
-    pub photon_url: Option<String>,
+    pub photon_url: String,
     /// The API key for the Photon indexer.
     pub api_key: Option<String>,
 }

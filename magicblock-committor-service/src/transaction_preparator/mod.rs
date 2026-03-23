@@ -35,7 +35,7 @@ pub trait TransactionPreparator: Send + Sync + 'static {
         authority: &Keypair,
         transaction_strategy: &mut TransactionStrategy,
         intent_persister: &Option<P>,
-        photon_client: &Option<Arc<PhotonIndexer>>,
+        photon_client: &Arc<PhotonIndexer>,
         commit_slot_fn: Option<CommitSlotFn<'a>>,
     ) -> PreparatorResult<VersionedMessage>;
 
@@ -82,7 +82,7 @@ impl TransactionPreparator for TransactionPreparatorImpl {
         authority: &Keypair,
         tx_strategy: &mut TransactionStrategy,
         intent_persister: &Option<P>,
-        photon_client: &Option<Arc<PhotonIndexer>>,
+        photon_client: &Arc<PhotonIndexer>,
         commit_slot_fn: Option<CommitSlotFn<'a>>,
     ) -> PreparatorResult<VersionedMessage> {
         // If message won't fit, there's no reason to prepare anything
