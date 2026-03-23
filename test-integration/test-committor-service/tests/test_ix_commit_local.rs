@@ -920,8 +920,11 @@ async fn ix_commit_local(
                 .expect("Account should be persisted");
 
             // When we finalize it is possible to also undelegate the account
-            let expected_owner =
-                if is_undelegate { program_id } else { dlp::id() };
+            let expected_owner = if is_undelegate {
+                program_id
+            } else {
+                dlp_api::id()
+            };
 
             let lamports = account.account.lamports;
             get_account!(

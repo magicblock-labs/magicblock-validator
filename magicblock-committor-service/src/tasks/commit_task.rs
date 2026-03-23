@@ -1,6 +1,7 @@
-use dlp_api::dlp::{
+use dlp_api::{
     args::{CommitDiffArgs, CommitStateArgs, CommitStateFromBufferArgs},
-    compute_diff, AccountSizeClass,
+    diff::compute_diff,
+    AccountSizeClass,
 };
 use magicblock_committor_program::Chunks;
 use magicblock_core::intent::CommittedAccount;
@@ -229,7 +230,7 @@ impl CommitTask {
 
 impl BaseTask for CommitTask {
     fn program_id(&self) -> Pubkey {
-        dlp_api::dlp::id()
+        dlp_api::id()
     }
 
     fn instruction(&self, validator: &Pubkey) -> Instruction {

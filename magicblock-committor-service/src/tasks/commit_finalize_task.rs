@@ -1,6 +1,6 @@
-use dlp::{
+use dlp_api::{
     args::CommitFinalizeArgs,
-    compute_diff,
+    diff::compute_diff,
     instruction_builder::{commit_diff_size_budget, commit_size_budget},
     AccountSizeClass,
 };
@@ -60,7 +60,7 @@ impl CommitFinalizeTask {
             reserved_padding: Default::default(),
         };
 
-        dlp::instruction_builder::commit_finalize(
+        dlp_api::instruction_builder::commit_finalize(
             *validator,
             self.committed_account.pubkey,
             &mut args,
@@ -91,7 +91,7 @@ impl CommitFinalizeTask {
             reserved_padding: Default::default(),
         };
 
-        dlp::instruction_builder::commit_finalize_from_buffer(
+        dlp_api::instruction_builder::commit_finalize_from_buffer(
             *validator,
             self.committed_account.pubkey,
             data_buffer_pubkey,
@@ -192,7 +192,7 @@ impl CommitFinalizeTask {
 
 impl BaseTask for CommitFinalizeTask {
     fn program_id(&self) -> Pubkey {
-        dlp::id()
+        dlp_api::id()
     }
 
     fn instruction(&self, validator: &Pubkey) -> Instruction {

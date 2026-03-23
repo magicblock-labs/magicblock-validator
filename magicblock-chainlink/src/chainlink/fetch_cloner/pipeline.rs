@@ -1,6 +1,6 @@
 use std::{collections::HashSet, sync::atomic::Ordering};
 
-use dlp_api::dlp::pda::delegation_record_pda_from_delegated_account;
+use dlp_api::pda::delegation_record_pda_from_delegated_account;
 use magicblock_accounts_db::traits::AccountsBank;
 use magicblock_core::token_programs::is_ata;
 use magicblock_metrics::metrics::AccountFetchOrigin;
@@ -134,7 +134,7 @@ fn classify_single_account(
                 ResolvedAccount::Fresh(account_shared_data) => {
                     let slot = account_shared_data.remote_slot();
 
-                    if account_shared_data.owner().eq(&dlp_api::dlp::id()) {
+                    if account_shared_data.owner().eq(&dlp_api::id()) {
                         // Account owned by delegation program
                         owned_by_deleg.push((
                             pubkey,

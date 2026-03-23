@@ -186,9 +186,6 @@ pub enum ScheduleCommitInstruction {
     /// Update order book
     UpdateOrderBook(BookUpdate),
 
-    /// ScheduleCommitDiffCpi
-    ScheduleCommitForOrderBook,
-
     /// Commit accounts via MagicIntentBundleBuilder with fee vault and a
     /// post-commit UpdateOrderBook action.
     ///
@@ -219,17 +216,23 @@ impl ScheduleCommitType {
         accounts: Vec<&'a AccountInfo<'info>>,
         magic_context: &'a AccountInfo<'info>,
         magic_program: &'a AccountInfo<'info>,
+        magic_fee_vault: Option<&'a AccountInfo<'info>>,
     ) -> ProgramResult {
         match self {
-            ScheduleCommitType::Commit => {
-                commit_accounts(payer, accounts, magic_context, magic_program)
-            }
+            ScheduleCommitType::Commit => commit_accounts(
+                payer,
+                accounts,
+                magic_context,
+                magic_program,
+                magic_fee_vault,
+            ),
             ScheduleCommitType::CommitAndUndelegate => {
                 commit_and_undelegate_accounts(
                     payer,
                     accounts,
                     magic_context,
                     magic_program,
+                    magic_fee_vault,
                 )
             }
             ScheduleCommitType::CommitFinalize => commit_finalize_accounts(
@@ -665,10 +668,6 @@ pub fn process_schedulecommit_cpi(
         }
     }
 
-    // Then request the PDA accounts to be committed
-    let mut account_infos = vec![payer, magic_context];
-    account_infos.extend(remaining.iter());
-
     let mut committees = remaining.iter().collect::<Vec<_>>();
     if args.commit_payer {
         msg!("Commiting payer");
@@ -685,6 +684,7 @@ pub fn process_schedulecommit_cpi(
         committees,
         magic_context,
         magic_program,
+        magic_fee_vault,
     )?;
 
     Ok(())

@@ -1,4 +1,4 @@
-use dlp_api::dlp::pda::ephemeral_balance_pda_from_payer;
+use dlp_api::pda::ephemeral_balance_pda_from_payer;
 use integration_test_tools::IntegrationTestContext;
 use program_flexi_counter::{
     delegation_program_id,

@@ -1,4 +1,3 @@
-use dlp_api::dlp;
 use program_schedulecommit::{
     api::{schedule_commit_cpi_instruction, UserSeeds},
     ScheduleCommitType,
@@ -77,7 +76,7 @@ fn create_schedule_commit_ix(
 }
 
 fn magic_fee_vault(ctx: &ScheduleCommitTestContext) -> Pubkey {
-    dlp::pda::magic_fee_vault_pda_from_validator(
+    dlp_api::pda::magic_fee_vault_pda_from_validator(
         &ctx.ephem_validator_identity().unwrap(),
     )
 }

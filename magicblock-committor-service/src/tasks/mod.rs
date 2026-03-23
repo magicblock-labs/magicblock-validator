@@ -1,4 +1,4 @@
-use dlp_api::dlp::{args::CallHandlerArgs, AccountSizeClass};
+use dlp_api::{args::CallHandlerArgs, AccountSizeClass};
 use magicblock_committor_program::{
     instruction_builder::{
         close_buffer::{create_close_ix, CreateCloseIxArgs},
@@ -53,7 +53,7 @@ pub enum BaseTaskImpl {
 
 impl BaseTask for BaseTaskImpl {
     fn program_id(&self) -> Pubkey {
-        dlp_api::dlp::id()
+        dlp_api::id()
     }
 
     fn instruction(&self, validator: &Pubkey) -> Instruction {

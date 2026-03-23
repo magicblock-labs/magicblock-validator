@@ -1,6 +1,5 @@
 use std::sync::OnceLock;
 
-use dlp_api::dlp;
 use integration_test_tools::run_test;
 use magicblock_program::magic_sys::{COMMIT_LIMIT, COMMIT_LIMIT_ERR};
 use program_schedulecommit::{
@@ -448,8 +447,9 @@ fn test_fee_charged_and_vault_credited_after_actual_commit_limit() {
         } = ctx.fields();
 
         let committee = &committees[IDX_OVER_LIMIT];
-        let magic_fee_vault =
-            dlp::pda::magic_fee_vault_pda_from_validator(validator_identity);
+        let magic_fee_vault = dlp_api::pda::magic_fee_vault_pda_from_validator(
+            validator_identity,
+        );
 
         let payer_balance_before =
             ctx.fetch_ephem_account_balance(&payer.pubkey()).unwrap();
@@ -539,8 +539,9 @@ fn test_schedule_commit_with_vault_and_order_book_action() {
         } = ctx.fields();
 
         let committee = &committees[IDX_OVER_LIMIT];
-        let magic_fee_vault =
-            dlp::pda::magic_fee_vault_pda_from_validator(validator_identity);
+        let magic_fee_vault = dlp_api::pda::magic_fee_vault_pda_from_validator(
+            validator_identity,
+        );
 
         let payer_balance_before =
             ctx.fetch_ephem_account_balance(&payer.pubkey()).unwrap();

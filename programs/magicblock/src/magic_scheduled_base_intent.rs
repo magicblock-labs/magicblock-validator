@@ -1247,6 +1247,8 @@ mod tests {
                         make_base_action(100_000),
                     ]),
                 }),
+                commit_finalize: None,
+                commit_finalize_and_undelegate: None,
                 standalone_actions: vec![make_base_action(50_000)],
             },
         };

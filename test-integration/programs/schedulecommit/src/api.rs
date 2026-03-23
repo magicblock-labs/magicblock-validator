@@ -1,7 +1,4 @@
-use dlp_api::{
-    dlp,
-    dlp::args::{DelegateArgs, DelegateEphemeralBalanceArgs},
-};
+use dlp_api::args::{DelegateArgs, DelegateEphemeralBalanceArgs};
 use ephemeral_rollups_sdk::delegate_args::{
     DelegateAccountMetas, DelegateAccounts,
 };
@@ -223,7 +220,9 @@ pub fn schedule_commit_cpi_with_vault_instruction(
     ];
     if args.has_magic_vault {
         account_metas.push(AccountMeta {
-            pubkey: dlp::pda::magic_fee_vault_pda_from_validator(&validator),
+            pubkey: dlp_api::pda::magic_fee_vault_pda_from_validator(
+                &validator,
+            ),
             is_writable: true,
             is_signer: false,
         })
@@ -257,7 +256,7 @@ pub fn schedule_commit_with_vault_and_order_book_instruction(
 ) -> Instruction {
     let program_id = crate::id();
     let magic_fee_vault =
-        dlp::pda::magic_fee_vault_pda_from_validator(&validator);
+        dlp_api::pda::magic_fee_vault_pda_from_validator(&validator);
     let mut account_metas = vec![
         AccountMeta::new(payer, true),
         AccountMeta::new(magic_context_id, false),
@@ -354,6 +353,7 @@ pub fn schedule_commit_and_undelegate_cpi_instruction(
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn schedule_commit_cpi_instruction_impl(
     payer: Pubkey,
     magic_program_id: Pubkey,
