@@ -368,62 +368,6 @@ where
     })
 }
 
-pub(crate) async fn resolve_compressed_delegated_accounts<T, U, V, C, P>(
-    this: &FetchCloner<T, U, V, C, P>,
-    owned_by_deleg_compressed: Vec<(Pubkey, AccountSharedData, u64)>,
-) -> Vec<AccountCloneRequest>
-where
-    T: ChainRpcClient,
-    U: ChainPubsubClient,
-    V: AccountsBank,
-    C: Cloner,
-    P: PhotonClient,
-{
-    owned_by_deleg_compressed
-       .into_iter()
-       .filter_map(|(pubkey, mut account, _)| {
-           match CompressedDelegationRecord::try_from_slice(account.data()) {
-               Ok(delegation_record) => {
-                   account.set_compressed(true);
-                   account.set_lamports(delegation_record.lamports);
-                   account.set_owner(delegation_record.owner);
-                   account.set_data(delegation_record.data);
-                   account.set_delegated(
-                       delegation_record
-                           .authority
-                           .eq(&this.validator_pubkey),
-                   );
-                   account.set_confined(
-                       delegation_record.authority.eq(&Pubkey::default())
-                   );
-
-                   let delegated_to_other = this.get_delegated_to_other(&DelegationRecord {
-                       authority: delegation_record.authority,
-                       owner: delegation_record.owner,
-                       delegation_slot: delegation_record.delegation_slot,
-                       lamports: delegation_record.lamports,
-                       commit_frequency_ms: 0,
-                   });
-
-                   Some(AccountCloneRequest {
-                       pubkey,
-                       account,
-                       commit_frequency_ms: None,
-                       delegated_to_other,
-                   })
-               }
-               Err(err) => {
-                   error!(
-                       "Failed to deserialize compressed delegation record for {pubkey}: {err}\nAccount: {:?}",  
-                       account
-                   );
-                   None
-               }
-           }
-       })
-    .collect::<Vec<_>>()
-}
-
 /// Resolves program accounts, fetching program data accounts for LoaderV3 programs
 #[instrument(skip(this, programs, pubkeys, existing_subs), fields(pubkey_count = pubkeys.len()))]
 pub(crate) async fn resolve_programs_with_program_data<T, U, V, C, P>(

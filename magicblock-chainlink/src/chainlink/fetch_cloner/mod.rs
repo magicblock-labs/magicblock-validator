@@ -7,8 +7,6 @@ use std::{
     time::Duration,
 };
 
-use borsh::BorshDeserialize;
-use compressed_delegation_client::CompressedDelegationRecord;
 use dlp::{
     pda::delegation_record_pda_from_delegated_account, state::DelegationRecord,
 };
@@ -16,7 +14,7 @@ use magicblock_config::config::AllowedProgram;
 use magicblock_core::traits::AccountsBank;
 use magicblock_metrics::metrics::{self, AccountFetchOrigin};
 use scc::{hash_map::Entry, HashMap};
-use solana_account::{AccountSharedData, ReadableAccount, WritableAccount};
+use solana_account::{AccountSharedData, ReadableAccount};
 use solana_pubkey::Pubkey;
 use solana_sdk_ids::system_program;
 use tokio::{
@@ -27,6 +25,7 @@ use tokio::{
 use tracing::*;
 
 mod ata_projection;
+mod compression;
 mod delegation;
 mod pipeline;
 mod program_loader;
@@ -311,7 +310,7 @@ where
         let owned_by_compressed_delegation_program =
             account.is_owned_by_compressed_delegation_program();
 
-        if let Some(mut account) = account.fresh_account().cloned() {
+        if let Some(account) = account.fresh_account().cloned() {
             // If the account is owned by the delegation program we need to resolve
             // its true owner and determine if it is delegated to us
             if owned_by_delegation_program {
@@ -435,74 +434,13 @@ where
                     }
                 }
             } else if owned_by_compressed_delegation_program {
-                // If the account is compressed, it can contain either:
-                // 1. The delegation record
-                // 2. No data in case the last update was the notif where the account was emptied
-                // If we fail to get the record, we need to fetch again so that we obtain the data
-                // from the compressed account.
-                let delegation_record =
-                    match CompressedDelegationRecord::try_from_slice(
-                        account.data(),
-                    ) {
-                        Ok(delegation_record) => Some(delegation_record),
-                        Err(parse_err) => {
-                            debug!("The account's data did not contain a valid compressed delegation record for {pubkey}: {parse_err}, fetching...");
-                            match self
-                                .remote_account_provider
-                                .try_get(pubkey, AccountFetchOrigin::GetAccount)
-                                .await
-                            {
-                                Ok(remote_acc) => {
-                                    if let Some(acc) =
-                                        remote_acc.fresh_account().cloned()
-                                    {
-                                        match CompressedDelegationRecord::try_from_slice(acc.data()) {
-                                            Ok(delegation_record) => Some(delegation_record),
-                                            Err(parse_err) => {
-                                                error!("fetched account parse failed for {pubkey}: {parse_err}");
-                                                None
-                                            }
-                                        }
-                                    } else {
-                                        error!("remote fetch failed for {pubkey}: no fresh account returned");
-                                        None
-                                    }
-                                }
-                                Err(fetch_err) => {
-                                    error!("remote fetch failed for {pubkey}: {fetch_err}");
-                                    None
-                                }
-                            }
-                        }
-                    };
-
-                if let Some(delegation_record) = delegation_record {
-                    account.set_compressed(true);
-                    account.set_owner(delegation_record.owner);
-                    account.set_data(delegation_record.data);
-                    account.set_lamports(delegation_record.lamports);
-                    account.set_confined(
-                        delegation_record.authority.eq(&Pubkey::default()),
-                    );
-
-                    let is_delegated_to_us =
-                        delegation_record.authority.eq(&self.validator_pubkey);
-                    account.set_delegated(is_delegated_to_us);
-
-                    // TODO(dode): commit frequency ms is not supported for compressed delegation records
-                    (
-                        Some(account),
-                        Some(DelegationRecord {
-                            authority: delegation_record.authority,
-                            owner: delegation_record.owner,
-                            delegation_slot: delegation_record.delegation_slot,
-                            lamports: delegation_record.lamports,
-                            commit_frequency_ms: 0,
-                        }),
-                    )
-                } else {
-                    (None, None)
-                }
+                compression::resolve_compressed_accounts_to_clone(
+                    pubkey,
+                    account,
+                    self.remote_account_provider.clone(),
+                    self.validator_pubkey,
+                )
+                .await
             } else {
                 // Accounts not owned by the delegation program can be cloned as is
                 // No unsubscription needed for undelegated accounts
@@ -749,7 +687,7 @@ where
 
         // Handle compressed delegated accounts: for each compressed delegated account, we clone the account data into the bank.
         let compressed_delegated_accounts =
-            pipeline::resolve_compressed_delegated_accounts(
+            compression::resolve_compressed_delegated_accounts(
                 self,
                 owned_by_deleg_compressed,
             )
@@ -795,43 +733,12 @@ where
         fetch_origin: AccountFetchOrigin,
     ) -> RefreshDecision {
         if in_bank.compressed() {
-            let Some(record) =
-                CompressedDelegationRecord::from_bytes(in_bank.data()).ok()
-            else {
-                // The delegation record is not present in the account data because the actual account data
-                // has already been extracted from it. Refreshing would reset the account, losing local changes.
-                debug!(
-                    pubkey = %pubkey,
-                    data = %format!("{:?}", in_bank.data()),
-                    "Skip refresh for already processed compressed account"
-                );
-                return RefreshDecision::No;
-            };
-
-            if !account_still_undelegating_on_chain(
+            return compression::should_refresh_undelegating_in_bank_compressed_account(
                 pubkey,
-                record.authority.eq(&self.validator_pubkey)
-                    || record.authority.eq(&Pubkey::default()),
-                in_bank.remote_slot(),
-                Some(DelegationRecord {
-                    authority: record.authority,
-                    owner: record.owner,
-                    delegation_slot: record.delegation_slot,
-                    lamports: record.lamports,
-                    commit_frequency_ms: 0, // TODO(dode): use the actual commit frequency once implemented
-                }),
-                &self.validator_pubkey,
-            ) {
-                debug!(
-                    pubkey = %pubkey,
-                    "Refresh compressed account since the compressed delegation record is not undelegating"
-                );
-                return RefreshDecision::Yes;
-            };
-            debug!(
-                pubkey = %pubkey,
-                "Skip refresh for compressed account since the compressed delegation record is undelegating"
-            );
+                in_bank,
+                self.validator_pubkey,
+            )
+            .await;
         } else if in_bank.undelegating() {
             debug!(
                 pubkey = %pubkey,
