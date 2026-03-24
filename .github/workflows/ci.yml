@@ -1,7 +1,9 @@
 name: CI
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
   cancel-in-progress: true
+
 on:
   push:
     branches: [master, dev, chore/self-hosted-ci]
@@ -15,7 +17,6 @@ env:
   CARGO_REGISTRIES_CRATES_IO_PROTOCOL: sparse
 
 jobs:
-  # ── Format ─────────────────────────────────────────────────────────
   fmt:
     runs-on: self-hosted
     steps:
@@ -23,22 +24,27 @@ jobs:
         with:
           submodules: recursive
           token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
+
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: "magicblock-validator-ci-fmt-v002"
+          shared-key: rust-ci-${{ hashFiles('Cargo.lock', 'test-integration/Cargo.lock') }}
+          add-job-id-key: false
           workspaces: |
             . -> target
             test-integration -> target
-          cache-targets: true
-          cache-all-crates: true
+          cache-targets: false
           cache-on-failure: true
+          cache-all-crates: false
+          cache-workspace-crates: false
+
       - name: Format check
         run: make ci-fmt
+
       - name: Format check (test-integration)
         run: |
           cd test-integration
           make ci-fmt
-  # ── Lint ────────────────────────────────────────────────────────────
+
   lint:
     runs-on: self-hosted
     env:
@@ -48,22 +54,27 @@ jobs:
         with:
           submodules: recursive
           token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
+
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: "magicblock-validator-ci-lint-v003"
+          shared-key: rust-ci-${{ hashFiles('Cargo.lock', 'test-integration/Cargo.lock') }}
+          add-job-id-key: false
           workspaces: |
             . -> target
             test-integration -> target
           cache-targets: true
-          cache-all-crates: true
           cache-on-failure: true
+          cache-all-crates: false
+          cache-workspace-crates: true
+
       - name: Lint
         run: make ci-lint
+
       - name: Lint (test-integration)
         run: |
           cd test-integration
           make ci-lint
-  # ── Unit Tests ──────────────────────────────────────────────────────
+
   unit-tests:
     runs-on: self-hosted
     env:
@@ -73,23 +84,24 @@ jobs:
         with:
           submodules: recursive
           token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
+
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: "magicblock-validator-ci-test-unit-v002"
+          shared-key: rust-ci-${{ hashFiles('Cargo.lock', 'test-integration/Cargo.lock') }}
+          add-job-id-key: false
           workspaces: |
             . -> target
             test-integration -> target
           cache-targets: true
-          cache-all-crates: true
           cache-on-failure: true
+          cache-all-crates: false
+          cache-workspace-crates: true
+
       - name: Unit tests
         run: make ci-test-unit
-  # ── Build (for integration tests) ──────────────────────────────────
+
   build:
-    needs:
-      - fmt
-      - lint
-      - unit-tests
+    needs: [fmt, lint, unit-tests]
     runs-on: self-hosted
     env:
       RUSTFLAGS: -C link-arg=-fuse-ld=mold
@@ -98,22 +110,62 @@ jobs:
         with:
           submodules: recursive
           token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
+
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: "magicblock-validator-ci-test-integration-${{ github.ref_name }}-${{ hashFiles('Cargo.lock') }}"
+          shared-key: integration-${{ github.ref_name }}-${{ hashFiles('Cargo.lock', 'test-integration/Cargo.lock') }}
+          add-job-id-key: false
           workspaces: |
             . -> target
             test-integration -> target
           cache-targets: true
-          cache-all-crates: true
           cache-on-failure: true
+          cache-all-crates: false
+          cache-workspace-crates: true
+
       - name: Build project
         run: cargo build --locked
+
       - name: Build SBF programs
         env:
           RUSTFLAGS: ""
-        run: make -C test-integration programs
-  # ── Integration Tests ───────────────────────────────────────────────
+        run: |
+          make -C test-integration programs
+          make chainlink-prep-programs -C test-integration/test-chainlink
+
+      - name: Pack only SBF artifacts
+        run: |
+          set -euo pipefail
+
+          mkdir -p ci-artifacts/test-integration-deploy
+          mkdir -p ci-artifacts/root-deploy
+          mkdir -p ci-artifacts/chainlink-artifacts
+
+          if [ -d "test-integration/target/deploy" ]; then
+            find test-integration/target/deploy -mindepth 1 -maxdepth 1 -exec cp -r {} ci-artifacts/test-integration-deploy/ \;
+          else
+            echo "::warning::test-integration/target/deploy not found"
+          fi
+
+          if [ -d "target/deploy" ]; then
+            find target/deploy -mindepth 1 -maxdepth 1 -exec cp -r {} ci-artifacts/root-deploy/ \;
+          else
+            echo "::warning::target/deploy not found"
+          fi
+
+          if [ -d "test-integration/test-chainlink/target/deploy" ]; then
+            find test-integration/test-chainlink/target/deploy -mindepth 1 -maxdepth 1 -exec cp -r {} ci-artifacts/chainlink-artifacts/ \;
+          else
+            echo "::warning::test-integration/test-chainlink/target/deploy not found"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sbf-artifacts-${{ github.sha }}
+          path: ci-artifacts
+          if-no-files-found: warn
+          retention-days: 3
+
   integration-tests:
     needs: build
     runs-on: self-hosted
@@ -138,21 +190,61 @@ jobs:
         with:
           submodules: recursive
           token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
+
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: "magicblock-validator-ci-test-integration-${{ github.ref_name }}-${{ hashFiles('Cargo.lock') }}"
+          shared-key: integration-${{ github.ref_name }}-${{ hashFiles('Cargo.lock', 'test-integration/Cargo.lock') }}
+          add-job-id-key: false
           workspaces: |
             . -> target
             test-integration -> target
           cache-targets: true
-          cache-all-crates: true
           cache-on-failure: true
+          cache-all-crates: false
+          cache-workspace-crates: true
           save-if: false
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: sbf-artifacts-${{ github.sha }}
+          path: ci-artifacts
+
+      - name: Restore SBF artifacts only
+        run: |
+          set -euo pipefail
+
+          mkdir -p test-integration/target/deploy
+          mkdir -p target/deploy
+          mkdir -p test-integration/test-chainlink/target/deploy
+
+          if [ -d "ci-artifacts/test-integration-deploy" ]; then
+            find ci-artifacts/test-integration-deploy -mindepth 1 -maxdepth 1 -exec cp -r {} test-integration/target/deploy/ \;
+            find test-integration/target/deploy -type f -exec touch {} +
+          else
+            echo "::warning::No cached test-integration deploy artifacts found"
+          fi
+
+          if [ -d "ci-artifacts/root-deploy" ]; then
+            find ci-artifacts/root-deploy -mindepth 1 -maxdepth 1 -exec cp -r {} target/deploy/ \;
+            find target/deploy -type f -exec touch {} +
+          else
+            echo "::warning::No cached root deploy artifacts found"
+          fi
+
+          if [ -d "ci-artifacts/chainlink-artifacts" ]; then
+            find ci-artifacts/chainlink-artifacts -mindepth 1 -maxdepth 1 -exec cp -r {} test-integration/test-chainlink/target/deploy/ \;
+            find test-integration/test-chainlink/target/deploy -type f -exec touch {} +
+          else
+            echo "::warning::No cached chainlink deploy artifacts found"
+          fi
+
       - name: Run integration test
         env:
           RUN_TESTS: ${{ matrix.test }}
+          SKIP_CHAINLINK_PREP: "1"
+          PROGRAMS_SO: ""
         run: make ci-test-integration
-  # ── Status Gate ─────────────────────────────────────────────────────
+
   ci-status:
     if: always()
     needs: [fmt, lint, unit-tests, build, integration-tests]
@@ -167,10 +259,12 @@ jobs:
             "${{ needs.build.result }}"
             "${{ needs.integration-tests.result }}"
           )
+
           for r in "${results[@]}"; do
             if [[ "$r" != "success" ]]; then
               echo "::error::CI failed"
               exit 1
             fi
           done
+
           echo "All checks passed."
