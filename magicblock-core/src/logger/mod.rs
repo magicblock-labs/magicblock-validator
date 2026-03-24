@@ -28,9 +28,7 @@ pub fn init_with_config(config: LoggingConfig) {
                 .init();
 
             #[cfg(not(feature = "tokio-console"))]
-            tracing_subscriber::registry()
-                .with($fmt_layer)
-                .init();
+            tracing_subscriber::registry().with($fmt_layer).init();
         }};
     }
 
