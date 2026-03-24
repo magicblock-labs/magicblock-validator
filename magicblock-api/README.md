@@ -1,39 +1,37 @@
 # magicblock-api
 
-Provides a highlevel API which allows to initialize and startup all pieces of the validator.
+Provides the API used to initialize, start, and stop the validator runtime.
 
 ## Usage
 
-Provide `ValidatorParams` which includes the following:
+`MagicValidator` is created from `ValidatorParams` (from `magicblock-config`).
+The canonical config example is the workspace-level file:
 
-- configuration parameters which indicate how the validator should be configured,
-see [this default config toml](../magicblock-config/tests/fixtures/02_defaults.toml) for more
-info
-- `ledger: Option<Ledger>` if you want to control the ledger location, otherwise it is placed
-in a temporary folder
-- `init_geyser_service_config: InitGeyserServiceConfig` which can be used to control behavior
-of the built in geyser plugin as well as add more plugins
+- [`../config.example.toml`](../config.example.toml)
 
-Provide that config along with a `Keypair` to act as the validator's identity and authority in
-order to create a `MagicValidator` instance which you can then `start`.
+The current initialization flow is asynchronous:
+
+1. Build `ValidatorParams` (for example via `ValidatorParams::try_new(args)`).
+2. Create the runtime with `MagicValidator::try_from_config(config).await`.
+3. Start services with `magic_validator.start().await`.
+4. Stop gracefully with `magic_validator.stop().await`.
 
 ## Example
 
-From Luzid which embeds this validator:
-
 ```rust
-// The config is provided and Luzid provides ledger and identity keypair
-// as well as adding its own plugin
-config.ledger = Some(get_ledger(&app_data_dir).unwrap());
-config.init_geyser_service_config.add_plugin(
-    "Luzid Geyser Plugin".to_string(),
-    geyser_plugin::get_plugin(
-        account_update_handler,
-        transaction_update_handler,
-    ),
-);
+use magicblock_api::MagicValidator;
+use magicblock_config::ValidatorParams;
 
-let magic_validator =
-    MagicValidator::try_from_config(config, identity_keypair)?;
-// ...
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let args = std::env::args_os();
+    let config = ValidatorParams::try_new(args)?;
+
+    let mut magic_validator = MagicValidator::try_from_config(config).await?;
+    magic_validator.start().await?;
+
+    // ... application lifecycle ...
+
+    magic_validator.stop().await;
+    Ok(())
 ```
