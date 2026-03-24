@@ -15,6 +15,7 @@ env:
   RUSTUP_HOME: /usr/local/rustup
   CARGO_TERM_COLOR: always
   CARGO_REGISTRIES_CRATES_IO_PROTOCOL: sparse
+  RUSTFLAGS: -C link-arg=-fuse-ld=mold
 
 jobs:
   fmt:
@@ -29,6 +30,7 @@ jobs:
         with:
           shared-key: rust-ci-${{ hashFiles('Cargo.lock', 'test-integration/Cargo.lock') }}
           add-job-id-key: false
+          env-vars: "CARGO RUSTUP"
           workspaces: |
             . -> target
             test-integration -> target
@@ -36,6 +38,7 @@ jobs:
           cache-on-failure: true
           cache-all-crates: false
           cache-workspace-crates: false
+          save-if: false
 
       - name: Format check
         run: make ci-fmt
@@ -47,8 +50,6 @@ jobs:
 
   lint:
     runs-on: self-hosted
-    env:
-      RUSTFLAGS: -C link-arg=-fuse-ld=mold
     steps:
       - uses: actions/checkout@v5
         with:
@@ -59,6 +60,7 @@ jobs:
         with:
           shared-key: rust-ci-${{ hashFiles('Cargo.lock', 'test-integration/Cargo.lock') }}
           add-job-id-key: false
+          env-vars: "CARGO RUSTUP"
           workspaces: |
             . -> target
             test-integration -> target
@@ -66,6 +68,7 @@ jobs:
           cache-on-failure: true
           cache-all-crates: false
           cache-workspace-crates: true
+          save-if: false
 
       - name: Lint
         run: make ci-lint
@@ -77,8 +80,6 @@ jobs:
 
   unit-tests:
     runs-on: self-hosted
-    env:
-      RUSTFLAGS: -C link-arg=-fuse-ld=mold
     steps:
       - uses: actions/checkout@v5
         with:
@@ -89,6 +90,7 @@ jobs:
         with:
           shared-key: rust-ci-${{ hashFiles('Cargo.lock', 'test-integration/Cargo.lock') }}
           add-job-id-key: false
+          env-vars: "CARGO RUSTUP"
           workspaces: |
             . -> target
             test-integration -> target
@@ -96,6 +98,7 @@ jobs:
           cache-on-failure: true
           cache-all-crates: false
           cache-workspace-crates: true
+          save-if: true
 
       - name: Unit tests
         run: make ci-test-unit
@@ -103,8 +106,6 @@ jobs:
   build:
     needs: [fmt, lint, unit-tests]
     runs-on: self-hosted
-    env:
-      RUSTFLAGS: -C link-arg=-fuse-ld=mold
     steps:
       - uses: actions/checkout@v5
         with:
@@ -115,6 +116,7 @@ jobs:
         with:
           shared-key: integration-${{ github.ref_name }}-${{ hashFiles('Cargo.lock', 'test-integration/Cargo.lock') }}
           add-job-id-key: false
+          env-vars: "CARGO RUSTUP"
           workspaces: |
             . -> target
             test-integration -> target
@@ -122,6 +124,7 @@ jobs:
           cache-on-failure: true
           cache-all-crates: false
           cache-workspace-crates: true
+          save-if: true
 
       - name: Build project
         run: cargo build --locked
@@ -195,6 +198,7 @@ jobs:
         with:
           shared-key: integration-${{ github.ref_name }}-${{ hashFiles('Cargo.lock', 'test-integration/Cargo.lock') }}
           add-job-id-key: false
+          env-vars: "CARGO RUSTUP"
           workspaces: |
             . -> target
             test-integration -> target
@@ -244,27 +248,3 @@ jobs:
           SKIP_CHAINLINK_PREP: "1"
           PROGRAMS_SO: ""
         run: make ci-test-integration
-
-  ci-status:
-    if: always()
-    needs: [fmt, lint, unit-tests, build, integration-tests]
-    runs-on: self-hosted
-    steps:
-      - name: Verify pipeline
-        run: |
-          results=(
-            "${{ needs.fmt.result }}"
-            "${{ needs.lint.result }}"
-            "${{ needs.unit-tests.result }}"
-            "${{ needs.build.result }}"
-            "${{ needs.integration-tests.result }}"
-          )
-
-          for r in "${results[@]}"; do
-            if [[ "$r" != "success" ]]; then
-              echo "::error::CI failed"
-              exit 1
-            fi
-          done
-
-          echo "All checks passed."
