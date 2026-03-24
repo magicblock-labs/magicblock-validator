@@ -585,6 +585,7 @@ async fn test_ix_execute_intent_bundle_commit_and_cau_simultaneously_union_of_ac
 ) {
     execute_intent_bundle(
         &[1024, 2048],
+        &[],
         &[1024, 2048],
         expect_strategies(&[(CommitStrategy::DiffBufferWithLookupTable, 4)]),
     )
@@ -595,6 +596,7 @@ async fn test_ix_execute_intent_bundle_commit_and_cau_simultaneously_union_of_ac
 async fn test_ix_execute_intent_bundle_commit_three_accounts_cau_one_account() {
     execute_intent_bundle(
         &[512, 512, 512],
+        &[],
         &[512],
         expect_strategies(&[(CommitStrategy::DiffBufferWithLookupTable, 4)]),
     )
@@ -605,8 +607,31 @@ async fn test_ix_execute_intent_bundle_commit_three_accounts_cau_one_account() {
 async fn test_ix_execute_intent_bundle_mixed_fits_in_args() {
     execute_intent_bundle(
         &[10, 20, 10],
+        &[],
         &[20],
         expect_strategies(&[(CommitStrategy::StateArgs, 4)]),
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn test_ix_execute_intent_bundle_commit_finalize_only() {
+    execute_intent_bundle(
+        &[],
+        &[10, 20],
+        &[],
+        expect_strategies(&[(CommitStrategy::StateArgs, 2)]),
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn test_ix_execute_intent_bundle_commit_and_commit_finalize_mixed() {
+    execute_intent_bundle(
+        &[1024, 2048],
+        &[1024, 2048],
+        &[],
+        expect_strategies(&[(CommitStrategy::DiffBufferWithLookupTable, 4)]),
     )
     .await;
 }
@@ -743,6 +768,7 @@ async fn commit_multiple_accounts(
 
 async fn execute_intent_bundle(
     bytess_to_commit: &[usize],
+    bytess_to_commit_finalize: &[usize],
     bytes_to_undelegate: &[usize],
     expected_strategies: ExpectedStrategies,
 ) {
@@ -761,12 +787,19 @@ async fn execute_intent_bundle(
 
     // Create bundles of committed accounts
     let to_commit = create_and_delegate_accounts(bytess_to_commit);
+    let to_commit_finalize =
+        create_and_delegate_accounts(bytess_to_commit_finalize);
     let to_undelegate = create_and_delegate_accounts(bytes_to_undelegate);
-    let (committees, undelegetees) = tokio::join!(to_commit, to_undelegate);
+    let (committees, commit_finalize_committees, undelegetees) =
+        tokio::join!(to_commit, to_commit_finalize, to_undelegate);
 
     let mut intent_bundle = MagicIntentBundle::default();
     if !committees.is_empty() {
         intent_bundle.commit = Some(CommitType::Standalone(committees));
+    }
+    if !commit_finalize_committees.is_empty() {
+        intent_bundle.commit_finalize =
+            Some(CommitType::Standalone(commit_finalize_committees));
     }
     if !undelegetees.is_empty() {
         intent_bundle.commit_and_undelegate = Some(CommitAndUndelegate {

@@ -7,7 +7,7 @@ edition.workspace = true
 borsh = { workspace = true }
 ephemeral-rollups-sdk = { workspace = true }
 solana-program = { workspace = true }
-magicblock-delegation-program-api = { workspace = true }
+magicblock-delegation-program-api = { workspace = true, features = ["instruction"] }
 magicblock_magic_program_api = { workspace = true }
 rkyv = { workspace = true }
 static_assertions = { workspace = true }
