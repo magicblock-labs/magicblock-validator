@@ -7,6 +7,13 @@ on:
     branches: [master, dev, chore/self-hosted-ci]
   pull_request:
     types: [opened, reopened, synchronize]
+
+env:
+  CARGO_HOME: ${{ github.workspace }}/.cargo
+  RUSTUP_HOME: /usr/local/rustup
+  CARGO_TERM_COLOR: always
+  CARGO_REGISTRIES_CRATES_IO_PROTOCOL: sparse
+
 jobs:
   # ── Format ─────────────────────────────────────────────────────────
   fmt:
