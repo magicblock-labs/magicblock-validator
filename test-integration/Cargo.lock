@@ -10480,8 +10480,10 @@ dependencies = [
 name = "test-schedule-intent"
 version = "0.0.0"
 dependencies = [
+ "ephemeral-rollups-sdk",
  "integration-test-tools",
  "magicblock-delegation-program-api 0.1.1",
+ "magicblock-magic-program-api 0.8.4",
  "program-flexi-counter",
  "solana-rpc-client-api",
  "solana-sdk",
