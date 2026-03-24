@@ -79,6 +79,10 @@ jobs:
         run: make ci-test-unit
   # ── Build (for integration tests) ──────────────────────────────────
   build:
+    needs:
+      - fmt
+      - lint
+      - unit-tests
     runs-on: self-hosted
     env:
       RUSTFLAGS: -C link-arg=-fuse-ld=mold
