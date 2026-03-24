@@ -14,6 +14,7 @@ use magicblock_rpc_client::{
     MagicBlockSendTransactionOutcome, MagicblockRpcClient,
 };
 use magicblock_table_mania::{error::TableManiaError, TableMania};
+use solana_commitment_config::CommitmentConfig;
 use solana_compute_budget_interface::ComputeBudgetInstruction;
 use solana_instruction::{error::InstructionError, Instruction};
 use solana_keypair::Keypair;
@@ -21,6 +22,7 @@ use solana_message::{
     v0::Message, AddressLookupTableAccount, CompileError, VersionedMessage,
 };
 use solana_pubkey::Pubkey;
+use solana_rpc_client_api::config::RpcTransactionConfig;
 use solana_signature::Signature;
 use solana_signer::{Signer, SignerError};
 use solana_transaction::versioned::VersionedTransaction;
@@ -28,9 +30,8 @@ use solana_transaction_error::TransactionError;
 use tracing::{error, info};
 
 use crate::{
-    intent_executor::{
-        task_info_fetcher::{TaskInfoFetcher, TaskInfoFetcherError},
-        CommitSlotFn,
+    intent_executor::task_info_fetcher::{
+        TaskInfoFetcher, TaskInfoFetcherError,
     },
     persist::{CommitStatus, IntentPersister},
     tasks::{
@@ -60,9 +61,27 @@ impl DeliveryPreparator {
         }
     }
 
+    async fn commit_slot_for_signature(
+        &self,
+        signature: Signature,
+    ) -> Option<u64> {
+        self.rpc_client
+            .get_transaction(
+                &signature,
+                Some(RpcTransactionConfig {
+                    commitment: Some(CommitmentConfig::confirmed()),
+                    max_supported_transaction_version: Some(0),
+                    ..Default::default()
+                }),
+            )
+            .await
+            .inspect_err(|err| error!("Failed to get commit slot: {}", err))
+            .map(|tx| tx.slot)
+            .ok()
+    }
+
     /// Prepares buffers and necessary pieces for optimized TX
     pub async fn prepare_for_delivery<
-        'a,
         P: IntentPersister,
         C: TaskInfoFetcher,
     >(
@@ -71,25 +90,22 @@ impl DeliveryPreparator {
         strategy: &mut TransactionStrategy,
         persister: &Option<P>,
         info_fetcher: &Arc<C>,
-        commit_slot_fn: Option<CommitSlotFn<'a>>,
+        commit_signature: Option<Signature>,
     ) -> DeliveryPreparatorResult<Vec<AddressLookupTableAccount>> {
         let preparation_futures =
-            strategy.optimized_tasks.iter_mut().map(|task| {
-                let commit_slot_fn_clone = commit_slot_fn.clone();
-                async move {
-                    let _timer =
-                        metrics::observe_committor_intent_task_preparation_time(
-                            task.as_ref(),
-                        );
-                    self.prepare_task_handling_errors(
-                        authority,
-                        task,
-                        persister,
-                        info_fetcher,
-                        commit_slot_fn_clone,
-                    )
-                    .await
-                }
+            strategy.optimized_tasks.iter_mut().map(|task| async move {
+                let _timer =
+                    metrics::observe_committor_intent_task_preparation_time(
+                        task.as_ref(),
+                    );
+                self.prepare_task_handling_errors(
+                    authority,
+                    task,
+                    persister,
+                    info_fetcher,
+                    commit_signature,
+                )
+                .await
             });
 
         let task_preparations = join_all(preparation_futures);
@@ -111,13 +127,13 @@ impl DeliveryPreparator {
     }
 
     /// Prepares necessary parts for TX if needed, otherwise returns immediately
-    pub async fn prepare_task<'a, P: IntentPersister, C: TaskInfoFetcher>(
+    pub async fn prepare_task<P: IntentPersister, C: TaskInfoFetcher>(
         &self,
         authority: &Keypair,
         task: &mut dyn BaseTask,
         persister: &Option<P>,
         info_fetcher: &Arc<C>,
-        commit_slot_fn: Option<CommitSlotFn<'a>>,
+        commit_signature: Option<Signature>,
     ) -> DeliveryPreparatorResult<(), InternalError> {
         let PreparationState::Required(preparation_task) =
             task.preparation_state()
@@ -170,8 +186,8 @@ impl DeliveryPreparator {
             }
             PreparationTask::Compressed => {
                 // Trying to fetch fresh data from the indexer
-                let commit_slot = if let Some(commit_slot_fn) = commit_slot_fn {
-                    commit_slot_fn().await
+                let commit_slot = if let Some(sig) = commit_signature {
+                    self.commit_slot_for_signature(sig).await
                 } else {
                     None
                 };
@@ -193,7 +209,6 @@ impl DeliveryPreparator {
     /// Runs `prepare_task` and, if the buffer was already initialized,
     /// performs cleanup and retries once.
     pub async fn prepare_task_handling_errors<
-        'a,
         P: IntentPersister,
         C: TaskInfoFetcher,
     >(
@@ -202,7 +217,7 @@ impl DeliveryPreparator {
         task: &mut Box<dyn BaseTask>,
         persister: &Option<P>,
         info_fetcher: &Arc<C>,
-        commit_slot_fn: Option<CommitSlotFn<'a>>,
+        commit_signature: Option<Signature>,
     ) -> Result<(), InternalError> {
         let res = self
             .prepare_task(
@@ -210,7 +225,7 @@ impl DeliveryPreparator {
                 task.as_mut(),
                 persister,
                 info_fetcher,
-                commit_slot_fn.clone(),
+                commit_signature,
             )
             .await;
         match res {
@@ -247,7 +262,7 @@ impl DeliveryPreparator {
             task.as_mut(),
             persister,
             info_fetcher,
-            commit_slot_fn,
+            commit_signature,
         )
         .await
     }

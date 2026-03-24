@@ -6,9 +6,10 @@ use magicblock_table_mania::TableMania;
 use solana_keypair::Keypair;
 use solana_message::VersionedMessage;
 use solana_pubkey::Pubkey;
+use solana_signature::Signature;
 
 use crate::{
-    intent_executor::{task_info_fetcher::TaskInfoFetcher, CommitSlotFn},
+    intent_executor::task_info_fetcher::TaskInfoFetcher,
     persist::IntentPersister,
     tasks::{
         task_strategist::TransactionStrategy, utils::TransactionUtils, BaseTask,
@@ -29,13 +30,13 @@ pub mod error;
 pub trait TransactionPreparator: Send + Sync + 'static {
     /// Return [`VersionedMessage`] corresponding to [`TransactionStrategy`]
     /// Handles all necessary preparation needed for successful [`BaseTask`] execution
-    async fn prepare_for_strategy<'a, P: IntentPersister, C: TaskInfoFetcher>(
+    async fn prepare_for_strategy<P: IntentPersister, C: TaskInfoFetcher>(
         &self,
         authority: &Keypair,
         transaction_strategy: &mut TransactionStrategy,
         intent_persister: &Option<P>,
         info_fetcher: &Arc<C>,
-        commit_slot_fn: Option<CommitSlotFn<'a>>,
+        commit_signature: Option<Signature>,
     ) -> PreparatorResult<VersionedMessage>;
 
     /// Cleans up after strategy
@@ -76,17 +77,13 @@ impl TransactionPreparatorImpl {
 
 #[async_trait]
 impl TransactionPreparator for TransactionPreparatorImpl {
-    async fn prepare_for_strategy<
-        'a,
-        P: IntentPersister,
-        C: TaskInfoFetcher,
-    >(
+    async fn prepare_for_strategy<P: IntentPersister, C: TaskInfoFetcher>(
         &self,
         authority: &Keypair,
         tx_strategy: &mut TransactionStrategy,
         intent_persister: &Option<P>,
         info_fetcher: &Arc<C>,
-        commit_slot_fn: Option<CommitSlotFn<'a>>,
+        commit_signature: Option<Signature>,
     ) -> PreparatorResult<VersionedMessage> {
         // If message won't fit, there's no reason to prepare anything
         // Fail early
@@ -110,7 +107,7 @@ impl TransactionPreparator for TransactionPreparatorImpl {
                 tx_strategy,
                 intent_persister,
                 info_fetcher,
-                commit_slot_fn,
+                commit_signature,
             )
             .await?;
 

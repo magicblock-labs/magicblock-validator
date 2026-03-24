@@ -11,7 +11,7 @@ use crate::{
             TransactionStrategyExecutionError,
         },
         task_info_fetcher::TaskInfoFetcher,
-        CommitSlotFn, ExecutionOutput, IntentExecutorImpl,
+        ExecutionOutput, IntentExecutorImpl,
     },
     persist::{IntentPersister, IntentPersisterImpl},
     tasks::{
@@ -220,7 +220,7 @@ where
                     compressed: task.is_compressed(),
                 },
                 &None::<IntentPersisterImpl>,
-                None::<CommitSlotFn>,
+                None,
             )
             .await
             .map_err(IntentExecutorError::FailedFinalizePreparationError)?
