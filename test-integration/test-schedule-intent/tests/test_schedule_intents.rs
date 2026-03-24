@@ -1,26 +1,20 @@
 use dlp_api::pda::ephemeral_balance_pda_from_payer;
-use ephemeral_rollups_sdk::consts::{MAGIC_CONTEXT_ID, MAGIC_PROGRAM_ID};
-use integration_test_tools::IntegrationTestContext;
-use magicblock_magic_program_api::{
-    args::{CommitTypeArgs, MagicIntentBundleArgs},
-    instruction::MagicBlockInstruction,
+use integration_test_tools::{
+    conversions::stringify_simulation_result, IntegrationTestContext,
 };
 use program_flexi_counter::{
     delegation_program_id,
     instruction::{
         create_add_ix, create_delegate_ix, create_init_ix,
-        create_intent_bundle_ix, create_intent_ix,
+        create_intent_bundle_commit_and_finalize_ix, create_intent_bundle_ix,
+        create_intent_ix,
     },
     state::FlexiCounter,
 };
+use solana_rpc_client_api::config::RpcSimulateTransactionConfig;
 use solana_sdk::{
-    instruction::{AccountMeta, Instruction},
-    native_token::LAMPORTS_PER_SOL,
-    pubkey::Pubkey,
-    rent::Rent,
-    signature::Keypair,
-    signer::Signer,
-    transaction::Transaction,
+    native_token::LAMPORTS_PER_SOL, pubkey::Pubkey, rent::Rent,
+    signature::Keypair, signer::Signer, transaction::Transaction,
 };
 use test_kit::init_logger;
 use tracing::*;
@@ -804,50 +798,33 @@ fn schedule_intent_bundle_commit_and_finalize(
     commit_finalize_accounts: Vec<Pubkey>,
 ) {
     ctx.wait_for_next_slot_ephem().unwrap();
-
-    let mut all_accounts = Vec::new();
-    all_accounts.extend(commit_accounts.iter().copied());
-    all_accounts.extend(commit_finalize_accounts.iter().copied());
-    all_accounts.sort();
-    all_accounts.dedup();
-
-    let mut metas = vec![
-        AccountMeta::new(payer.pubkey(), true),
-        AccountMeta::new(MAGIC_CONTEXT_ID, false),
-    ];
-    metas.extend(
-        all_accounts
-            .iter()
-            .map(|pubkey| AccountMeta::new(*pubkey, false)),
-    );
-
-    let account_index = |pubkey: &Pubkey| -> u8 {
-        (2 + all_accounts.iter().position(|k| k == pubkey).unwrap()) as u8
-    };
-
-    let args = MagicIntentBundleArgs {
-        commit: Some(CommitTypeArgs::Standalone(
-            commit_accounts.iter().map(account_index).collect(),
-        )),
-        commit_and_undelegate: None,
-        commit_finalize: Some(CommitTypeArgs::Standalone(
-            commit_finalize_accounts.iter().map(account_index).collect(),
-        )),
-        commit_finalize_and_undelegate: None,
-        standalone_actions: vec![],
-    };
-
-    let ix = Instruction::new_with_bincode(
-        MAGIC_PROGRAM_ID,
-        &MagicBlockInstruction::ScheduleIntentBundle(args),
-        metas,
+    let ix = create_intent_bundle_commit_and_finalize_ix(
+        payer.pubkey(),
+        commit_accounts,
+        commit_finalize_accounts,
     );
 
     let mut tx = Transaction::new_with_payer(&[ix], Some(&payer.pubkey()));
-    let (sig, confirmed) = ctx
-        .send_and_confirm_transaction_ephem(&mut tx, &[payer])
-        .unwrap();
-    assert!(confirmed);
+    let (sig, confirmed) =
+        match ctx.send_and_confirm_transaction_ephem(&mut tx, &[payer]) {
+            Ok(res) => res,
+            Err(err) => {
+                dump_ephem_simulation(
+                    ctx,
+                    &tx,
+                    "schedule_intent_bundle_commit_and_finalize",
+                );
+                panic!("Failed to send/confirm ephem tx: {err:#}");
+            }
+        };
+    if !confirmed {
+        dump_ephem_simulation(
+            ctx,
+            &tx,
+            "schedule_intent_bundle_commit_and_finalize",
+        );
+        panic!("Ephem tx not confirmed: {sig}");
+    }
 
     let commit_result = ctx
         .fetch_schedule_commit_result::<FlexiCounter>(sig)
@@ -855,6 +832,38 @@ fn schedule_intent_bundle_commit_and_finalize(
     commit_result
         .confirm_commit_transactions_on_chain(ctx)
         .unwrap();
+}
+
+fn dump_ephem_simulation(
+    ctx: &IntegrationTestContext,
+    tx: &Transaction,
+    label: &str,
+) {
+    let Ok(client) = ctx.try_ephem_client() else {
+        eprintln!("[{label}] failed to get ephem client for simulation");
+        return;
+    };
+
+    let sig = tx.signatures.first().cloned().unwrap_or_default();
+
+    match client.simulate_transaction_with_config(
+        tx,
+        RpcSimulateTransactionConfig {
+            sig_verify: false,
+            replace_recent_blockhash: true,
+            ..Default::default()
+        },
+    ) {
+        Ok(res) => {
+            eprintln!(
+                "[{label}] {}",
+                stringify_simulation_result(res.value, &sig)
+            );
+        }
+        Err(err) => {
+            eprintln!("[{label}] simulation request failed: {err:?}");
+        }
+    }
 }
 
 fn verify_undelegation_in_ephem_via_owner(

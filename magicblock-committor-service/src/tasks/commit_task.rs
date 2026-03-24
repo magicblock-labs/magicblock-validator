@@ -109,6 +109,7 @@ impl CommitTask {
             .to_vec(),
             allow_undelegation: self.allow_undelegation,
         };
+
         dlp_api::instruction_builder::commit_diff(
             *validator,
             self.committed_account.pubkey,
@@ -184,15 +185,13 @@ impl CommitTask {
         self.preparation_stage(diff)
     }
 
-    fn preparation_stage(&self, committed_data: Vec<u8>) -> CommitBufferStage {
-        let chunks = Chunks::from_data_length(
-            committed_data.len(),
-            MAX_WRITE_CHUNK_SIZE,
-        );
+    fn preparation_stage(&self, buffer_data: Vec<u8>) -> CommitBufferStage {
+        let chunks =
+            Chunks::from_data_length(buffer_data.len(), MAX_WRITE_CHUNK_SIZE);
         CommitBufferStage::Preparation(PreparationTask {
             commit_id: self.commit_id,
             pubkey: self.committed_account.pubkey,
-            committed_data,
+            buffer_data,
             chunks,
         })
     }

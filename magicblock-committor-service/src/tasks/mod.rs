@@ -69,6 +69,7 @@ impl BaseTask for BaseTaskImpl {
     fn try_optimize_tx_size(&mut self) -> bool {
         match self {
             Self::Commit(value) => value.try_optimize_tx_size(),
+            Self::CommitFinalize(value) => value.try_optimize_tx_size(),
             _ => false,
         }
     }
@@ -106,6 +107,9 @@ impl BaseTaskImpl {
     pub fn strategy(&self) -> TaskStrategy {
         match self {
             Self::Commit(task) if task.is_buffer() => TaskStrategy::Buffer,
+            Self::CommitFinalize(task) if task.is_buffer() => {
+                TaskStrategy::Buffer
+            }
             _ => TaskStrategy::Args,
         }
     }
@@ -373,7 +377,7 @@ pub struct PreparationTask {
     pub chunks: Chunks,
 
     // TODO(edwin): replace with reference once done
-    pub committed_data: Vec<u8>,
+    pub buffer_data: Vec<u8>,
 }
 
 impl PreparationTask {
@@ -386,7 +390,7 @@ impl PreparationTask {
         // // https://github.com/near/borsh-rs/blob/f1b75a6b50740bfb6231b7d0b1bd93ea58ca5452/borsh/src/ser/helpers.rs#L59
         let chunks_account_size =
             borsh::object_length(&self.chunks).unwrap() as u64;
-        let buffer_account_size = self.committed_data.len() as u64;
+        let buffer_account_size = self.buffer_data.len() as u64;
 
         let (instruction, _, _) = create_init_ix(CreateInitIxArgs {
             authority: *authority,
@@ -409,7 +413,7 @@ impl PreparationTask {
     /// Returns realloc instruction required for Buffer preparation
     #[allow(clippy::let_and_return)]
     pub fn realloc_instructions(&self, authority: &Pubkey) -> Vec<Instruction> {
-        let buffer_account_size = self.committed_data.len() as u64;
+        let buffer_account_size = self.buffer_data.len() as u64;
         let realloc_instructions =
             create_realloc_buffer_ixs(CreateReallocBufferIxArgs {
                 authority: *authority,
@@ -431,7 +435,7 @@ impl PreparationTask {
     pub fn write_instructions(&self, authority: &Pubkey) -> Vec<Instruction> {
         let chunks_iter =
             ChangesetChunks::new(&self.chunks, self.chunks.chunk_size())
-                .iter(&self.committed_data);
+                .iter(&self.buffer_data);
         let write_instructions = chunks_iter
             .map(|chunk| {
                 create_write_ix(CreateWriteIxArgs {

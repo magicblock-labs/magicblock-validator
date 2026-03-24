@@ -7,7 +7,7 @@ use std::{
 use borsh::to_vec;
 use magicblock_committor_service::{
     config::ChainConfig,
-    intent_executor::ExecutionOutput,
+    intent_executor::{error::IntentExecutorError, ExecutionOutput},
     persist::CommitStrategy,
     service_ext::{BaseIntentCommittorExt, CommittorServiceExt},
     BaseIntentCommittor, CommittorService, ComputeBudgetConfig,
@@ -30,7 +30,7 @@ use solana_sdk::{
 use test_kit::init_logger;
 use tokio::task::JoinSet;
 use tracing::*;
-use utils::transactions::tx_logs_contain;
+use utils::transactions::{print_tx_logs, tx_logs_contain};
 
 use self::utils::transactions::init_and_delegate_order_book_on_chain;
 use crate::utils::{
@@ -631,7 +631,7 @@ async fn test_ix_execute_intent_bundle_commit_and_commit_finalize_mixed() {
         &[1024, 2048],
         &[1024, 2048],
         &[],
-        expect_strategies(&[(CommitStrategy::DiffBufferWithLookupTable, 4)]),
+        expect_strategies(&[(CommitStrategy::DiffArgs, 4)]),
     )
     .await;
 }
@@ -876,7 +876,33 @@ async fn ix_commit_local(
         .into_iter()
         .zip(intent_bundles.into_iter())
     {
-        let output = execution_result.inner.unwrap();
+        let output = match execution_result.inner {
+            Ok(output) => output,
+            Err(err) => {
+                match &*err {
+                    IntentExecutorError::FailedToFinalizeError {
+                        commit_signature,
+                        finalize_signature,
+                        ..
+                    } => {
+                        if let Some(commit_sig) = commit_signature {
+                            print_tx_logs(&rpc_client, commit_sig).await;
+                        }
+                        if let Some(finalize_sig) = finalize_signature {
+                            print_tx_logs(&rpc_client, finalize_sig).await;
+                        }
+                    }
+                    IntentExecutorError::FailedToCommitError {
+                        signature: Some(signature),
+                        ..
+                    } => {
+                        print_tx_logs(&rpc_client, signature).await;
+                    }
+                    _ => {}
+                }
+                panic!("Intent execution failed: {err:?}");
+            }
+        };
         let (commit_signature, finalize_signature) = match output {
             ExecutionOutput::SingleStage(signature) => (signature, signature),
             ExecutionOutput::TwoStage {

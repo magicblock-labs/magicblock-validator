@@ -3798,8 +3798,7 @@ dependencies = [
 [[package]]
 name = "magicblock-delegation-program-api"
 version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1a413fd0a3ce67bba8c31b681f37088a897d47a3c39fd0d9303725882898ad78"
+source = "git+https://github.com/magicblock-labs/delegation-program.git?rev=09e0102df4ff69dfe9795cdf3b642943a3bbdf59#09e0102df4ff69dfe9795cdf3b642943a3bbdf59"
 dependencies = [
  "bincode",
  "borsh 1.6.0",
@@ -3820,7 +3819,7 @@ dependencies = [
  "solana-sha256-hasher 3.1.0",
  "static_assertions",
  "strum 0.27.2",
- "thiserror 2.0.18",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
