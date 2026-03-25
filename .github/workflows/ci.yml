@@ -30,7 +30,7 @@ jobs:
         with:
           shared-key: rust-ci-${{ hashFiles('Cargo.lock', 'test-integration/Cargo.lock') }}
           add-job-id-key: false
-          env-vars: "CARGO RUSTUP"
+          env-vars: ""
           workspaces: |
             . -> target
             test-integration -> target
@@ -38,6 +38,7 @@ jobs:
           cache-on-failure: true
           cache-all-crates: false
           cache-workspace-crates: false
+          cache-bin: false
           save-if: false
 
       - name: Format check
@@ -60,7 +61,7 @@ jobs:
         with:
           shared-key: rust-ci-${{ hashFiles('Cargo.lock', 'test-integration/Cargo.lock') }}
           add-job-id-key: false
-          env-vars: "CARGO RUSTUP"
+          env-vars: ""
           workspaces: |
             . -> target
             test-integration -> target
@@ -68,6 +69,7 @@ jobs:
           cache-on-failure: true
           cache-all-crates: false
           cache-workspace-crates: true
+          cache-bin: false
           save-if: false
 
       - name: Lint
@@ -90,7 +92,7 @@ jobs:
         with:
           shared-key: rust-ci-${{ hashFiles('Cargo.lock', 'test-integration/Cargo.lock') }}
           add-job-id-key: false
-          env-vars: "CARGO RUSTUP"
+          env-vars: ""
           workspaces: |
             . -> target
             test-integration -> target
@@ -98,6 +100,7 @@ jobs:
           cache-on-failure: true
           cache-all-crates: false
           cache-workspace-crates: true
+          cache-bin: false
           save-if: true
 
       - name: Unit tests
@@ -116,7 +119,7 @@ jobs:
         with:
           shared-key: integration-${{ github.ref_name }}-${{ hashFiles('Cargo.lock', 'test-integration/Cargo.lock') }}
           add-job-id-key: false
-          env-vars: "CARGO RUSTUP"
+          env-vars: ""
           workspaces: |
             . -> target
             test-integration -> target
@@ -124,6 +127,7 @@ jobs:
           cache-on-failure: true
           cache-all-crates: false
           cache-workspace-crates: true
+          cache-bin: false
           save-if: true
 
       - name: Build project
@@ -198,7 +202,7 @@ jobs:
         with:
           shared-key: integration-${{ github.ref_name }}-${{ hashFiles('Cargo.lock', 'test-integration/Cargo.lock') }}
           add-job-id-key: false
-          env-vars: "CARGO RUSTUP"
+          env-vars: ""
           workspaces: |
             . -> target
             test-integration -> target
@@ -206,6 +210,7 @@ jobs:
           cache-on-failure: true
           cache-all-crates: false
           cache-workspace-crates: true
+          cache-bin: false
           save-if: false
 
       - uses: actions/download-artifact@v4
@@ -249,3 +254,27 @@ jobs:
           PROGRAMS_SO: ""
           RUSTFLAGS: ""
         run: make ci-test-integration
+
+  ci-status:
+    if: always()
+    needs: [fmt, lint, unit-tests, build, integration-tests]
+    runs-on: self-hosted
+    steps:
+      - name: Verify pipeline
+        run: |
+          results=(
+            "${{ needs.fmt.result }}"
+            "${{ needs.lint.result }}"
+            "${{ needs.unit-tests.result }}"
+            "${{ needs.build.result }}"
+            "${{ needs.integration-tests.result }}"
+          )
+
+          for r in "${results[@]}"; do
+            if [[ "$r" != "success" ]]; then
+              echo "::error::CI failed"
+              exit 1
+            fi
+          done
+
+          echo "All checks passed."
