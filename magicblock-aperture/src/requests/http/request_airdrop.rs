@@ -1,5 +1,3 @@
-use magicblock_core::link::transactions::with_encoded;
-
 use super::prelude::*;
 
 impl HttpDispatcher {
@@ -10,39 +8,39 @@ impl HttpDispatcher {
     /// the faucet is not enabled on the node.
     pub(crate) async fn request_airdrop(
         &self,
-        request: &mut JsonRequest,
+        _request: &mut JsonRequest,
     ) -> HandlerResult {
         // Airdrops are only supported if a faucet keypair is configured.
         // Which is never the case with *ephemeral* running mode of the validator
-        let Some(ref faucet) = self.context.faucet else {
-            return Err(RpcError::invalid_request(
-                "free airdrop faucet is disabled",
-            ));
-        };
+        return Err(RpcError::invalid_request(
+            "free airdrop faucet is disabled",
+        ));
+        // TODO(bmuddha): allow free airdrops when other modes are fully reintroduced
+        // https://github.com/magicblock-labs/magicblock-validator/issues/1093
 
-        let (pubkey, lamports) =
-            parse_params!(request.params()?, Serde32Bytes, u64);
-        let pubkey = some_or_err!(pubkey);
-        let lamports = some_or_err!(lamports);
-        if lamports == 0 {
-            return Err(RpcError::invalid_params("lamports must be > 0"));
-        }
+        // let (pubkey, lamports) =
+        //     parse_params!(request.params()?, Serde32Bytes, u64);
+        // let pubkey = some_or_err!(pubkey);
+        // let lamports = some_or_err!(lamports);
+        // if lamports == 0 {
+        //     return Err(RpcError::invalid_params("lamports must be > 0"));
+        // }
 
-        // Build and execute the airdrop transfer transaction.
-        let txn = solana_system_transaction::transfer(
-            faucet,
-            &pubkey,
-            lamports,
-            self.blocks.get_latest().hash,
-        );
-        // we just signed the transaction, it must have a signature
-        let signature =
-            SerdeSignature(txn.signatures.first().cloned().unwrap_or_default());
+        // // Build and execute the airdrop transfer transaction.
+        // let txn = solana_system_transaction::transfer(
+        //     faucet,
+        //     &pubkey,
+        //     lamports,
+        //     self.blocks.get_latest().hash,
+        // );
+        // // we just signed the transaction, it must have a signature
+        // let signature =
+        //     SerdeSignature(txn.signatures.first().cloned().unwrap_or_default());
 
-        self.transactions_scheduler
-            .execute(with_encoded(txn)?)
-            .await?;
+        // self.transactions_scheduler
+        //     .execute(with_encoded(txn)?)
+        //     .await?;
 
-        Ok(ResponsePayload::encode_no_context(&request.id, signature))
+        // Ok(ResponsePayload::encode_no_context(&request.id, signature))
     }
 }

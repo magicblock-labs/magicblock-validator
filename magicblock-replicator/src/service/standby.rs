@@ -51,6 +51,7 @@ impl Standby {
     /// Runs until leadership acquired or shutdown.
     /// Returns `Some(Primary)` on promotion, `None` on shutdown.
     pub async fn run(mut self) -> Result<Option<Primary>> {
+        info!("entering standby replication mode");
         let mut timeout_check = tokio::time::interval(Duration::from_secs(1));
         let Some(mut stream) = self.consumer.messages(&self.ctx.cancel).await
         else {
@@ -91,8 +92,11 @@ impl Standby {
                         Err(e) => warn!(%e, "message consumption stream error"),
                     }
                 }
-                _ = timeout_check.tick(), if self.last_activity.elapsed() > LEADER_TIMEOUT => {
-                    if !self.can_promote {
+                _ = timeout_check.tick() => {
+                     if self.last_activity.elapsed() < LEADER_TIMEOUT {
+                         continue;
+                     }
+                     if !self.can_promote {
                         warn!("leader timeout reached, but takeover disabled (ReplicaOnly mode)");
                         continue;
                     }
@@ -130,19 +134,13 @@ impl Standby {
         }
 
         let result = match message {
-            Message::Transaction(txn) => {
-                self.replay_tx(txn).await
-            }
+            Message::Transaction(txn) => self.replay_tx(txn).await,
             Message::Block(block) => self.ctx.write_block(&block).await,
-            Message::SuperBlock(sb) => {
-                self.ctx.verify_checksum(&sb).await.inspect_err(|error|
-                    error!(slot, %error, "accountsdb state has diverged")
-                )
-            }
+            Message::SuperBlock(sb) => self.ctx.verify_checksum(&sb).await,
         };
 
         if let Err(error) = result {
-            warn!(slot, index, %error, "message processing error");
+            error!(slot, index, %error, "message processing error");
             return;
         }
         self.ctx.update_position(slot, index);

@@ -1,6 +1,6 @@
 //! Shared context for primary and standby roles.
 
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 
 use machineid_rs::IdBuilder;
 use magicblock_accounts_db::AccountsDb;
@@ -11,7 +11,7 @@ use magicblock_core::{
     },
     Slot, TransactionIndex,
 };
-use magicblock_ledger::Ledger;
+use magicblock_ledger::{LatestBlockInner, Ledger};
 use tokio::{
     fs::File,
     sync::mpsc::{Receiver, Sender},
@@ -66,11 +66,9 @@ impl ReplicationContext {
             .build("magicblock")
             .map_err(|e| Error::Internal(e.to_string()))?;
 
-        let (slot, index) = ledger
-            .get_latest_transaction_position()?
-            .unwrap_or_default();
+        let slot = accountsdb.slot();
 
-        info!(%id, slot, index, can_promote, "context initialized");
+        info!(%id, slot, can_promote, "context initialized");
         Ok(Self {
             id,
             broker,
@@ -80,7 +78,7 @@ impl ReplicationContext {
             ledger,
             scheduler,
             slot,
-            index,
+            index: 0,
             can_promote,
         })
     }
@@ -95,13 +93,15 @@ impl ReplicationContext {
     pub async fn write_block(&self, block: &Block) -> Result<()> {
         // wait for the scheduler to accept all of the previous block transactions
         let _guard = self.scheduler.wait_for_idle().await;
-        self.ledger
-            .write_block(block.slot, block.timestamp, block.hash)?;
+        let block =
+            LatestBlockInner::new(block.slot, block.hash, block.timestamp);
+        self.ledger.write_block(block)?;
         Ok(())
     }
 
     /// Verifies superblock checksum.
     pub async fn verify_checksum(&self, sb: &SuperBlock) -> Result<()> {
+        tokio::time::sleep(Duration::from_millis(200)).await;
         let _guard = self.scheduler.wait_for_idle().await;
         // SAFETY: Scheduler is paused, no concurrent modifications during checksum.
         let checksum = unsafe { self.accountsdb.checksum() };
@@ -109,7 +109,7 @@ impl ReplicationContext {
             Ok(())
         } else {
             let msg = format!(
-                "accountsdb state mismatch at {}, expected {checksum}, got {}",
+                "accountsdb state mismatch at {}, expected {}, got {checksum}",
                 sb.slot, sb.checksum
             );
             Err(Error::Internal(msg))

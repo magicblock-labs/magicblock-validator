@@ -10,10 +10,7 @@ use solana_sdk_ids::{
 };
 use solana_sysvar;
 
-pub fn blacklisted_accounts(
-    validator_id: &Pubkey,
-    faucet_id: &Pubkey,
-) -> HashSet<Pubkey> {
+pub fn blacklisted_accounts(validator_id: &Pubkey) -> HashSet<Pubkey> {
     // This is buried in the accounts_db::native_mint module and we don't
     // want to take a dependency on that crate just for this ID which won't change
     const NATIVE_SOL_ID: Pubkey =
@@ -31,7 +28,6 @@ pub fn blacklisted_accounts(
     blacklisted_accounts.insert(magic_program::MAGIC_CONTEXT_PUBKEY);
     blacklisted_accounts.insert(magic_program::EPHEMERAL_VAULT_PUBKEY);
     blacklisted_accounts.insert(*validator_id);
-    blacklisted_accounts.insert(*faucet_id);
     blacklisted_accounts
 }
 

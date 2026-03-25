@@ -90,8 +90,7 @@ use crate::{
     domain_registry_manager::DomainRegistryManager,
     errors::{ApiError, ApiResult},
     fund_account::{
-        fund_ephemeral_vault, fund_magic_context, funded_faucet,
-        init_validator_identity,
+        fund_ephemeral_vault, fund_magic_context, init_validator_identity,
     },
     genesis_utils::{create_genesis_config_with_leader, GenesisConfigInfo},
     ledger::{
@@ -268,9 +267,6 @@ impl MagicValidator {
         fund_magic_context(&accountsdb);
         fund_ephemeral_vault(&accountsdb);
 
-        let faucet_keypair =
-            funded_faucet(&accountsdb, ledger.ledger_path().as_path())?;
-
         let step_start = Instant::now();
         let metrics_service = magicblock_metrics::try_start_metrics_service(
             config.metrics.address.0,
@@ -312,7 +308,6 @@ impl MagicValidator {
                 &dispatch.transaction_scheduler,
                 &ledger.latest_block().clone(),
                 &accountsdb,
-                faucet_keypair.pubkey(),
             )
             .await?,
         );
@@ -371,11 +366,8 @@ impl MagicValidator {
         // Faucet keypair is only used for airdrops, which are not allowed in
         // the Ephemeral mode by setting the faucet to None in node context
         // (used by the RPC implementation), we effectively disable airdrops
-        let faucet = (config.lifecycle != LifecycleMode::Ephemeral)
-            .then_some(faucet_keypair);
         let node_context = NodeContext {
             identity: validator_pubkey,
-            faucet,
             base_fee,
             featureset: txn_scheduler_state.environment.feature_set.clone(),
             blocktime: config.ledger.block_time_ms(),
@@ -530,7 +522,6 @@ impl MagicValidator {
         transaction_scheduler: &TransactionSchedulerHandle,
         latest_block: &LatestBlock,
         accountsdb: &Arc<AccountsDb>,
-        faucet_pubkey: Pubkey,
     ) -> ApiResult<ChainlinkImpl> {
         let endpoints = Endpoints::try_from(config.remotes.as_slice())
             .map_err(|e| {
@@ -578,7 +569,6 @@ impl MagicValidator {
             &accounts_bank,
             &cloner,
             config.validator.keypair.insecure_clone(),
-            faucet_pubkey,
             chainlink_config,
             &config.chainlink,
         )
@@ -862,23 +852,23 @@ impl MagicValidator {
                     std::process::exit(1);
                 }
 
-                let step_start = Instant::now();
-                let result =
-                    MagicValidator::ensure_magic_fee_vault_on_chain(rpc_url)
-                        .await;
-                log_timing(
-                    "startup_background",
-                    "ensure_magic_fee_vault_on_chain",
-                    step_start,
-                );
+                // let step_start = Instant::now();
+                // let result =
+                //     MagicValidator::ensure_magic_fee_vault_on_chain(rpc_url)
+                //         .await;
+                // log_timing(
+                //     "startup_background",
+                //     "ensure_magic_fee_vault_on_chain",
+                //     step_start,
+                // );
 
                 // Without magic fee vault being properly set up
                 // transactions scheduling commits will fail
-                if let Err(err) = result {
-                    error!(error = ?err, "Magic fee vault setup failed");
-                    error!("Exiting process");
-                    std::process::exit(1);
-                }
+                // if let Err(err) = result {
+                //     error!(error = ?err, "Magic fee vault setup failed");
+                //     error!("Exiting process");
+                //     std::process::exit(1);
+                // }
             });
             if let Some(ref config) = self.config.chain_operation {
                 let step_start = Instant::now();

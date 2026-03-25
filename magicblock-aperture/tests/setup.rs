@@ -64,7 +64,6 @@ fn chainlink(accounts_db: &Arc<AccountsDb>) -> Arc<ChainlinkImpl> {
             accounts_db,
             None,
             Pubkey::new_unique(),
-            Pubkey::new_unique(),
             &ChainLinkConfig::default(),
         )
         .expect("Failed to create Chainlink"),
@@ -90,51 +89,38 @@ impl RpcTestEnv {
         const BLOCK_TIME_MS: u64 = 50;
 
         let execution = ExecutionTestEnv::new();
-        // Wait for the scheduler to be ready and in primary mode
-        execution.wait_for_scheduler_ready().await;
+        execution.advance_slot();
 
         let faucet = Keypair::new();
         execution.fund_account(faucet.pubkey(), Self::INIT_ACCOUNT_BALANCE);
 
-        // Try to find a free port, this is handy when using nextest
-        // where each test needs to run in a separate process.
-        let (server, port) = loop {
-            let port: u16 = rand::random_range(7000..u16::MAX - 1);
-            let node_context = NodeContext {
-                identity: execution.get_payer().pubkey,
-                faucet: Some(faucet.insecure_clone()),
-                base_fee: Self::BASE_FEE,
-                featureset: Default::default(),
-                blocktime: BLOCK_TIME_MS,
-            };
-            let state = SharedState::new(
-                node_context,
-                execution.accountsdb.clone(),
-                execution.ledger.clone(),
-                chainlink(&execution.accountsdb),
-            );
-            let cancel = CancellationToken::new();
-            let listen = format!("127.0.0.1:{port}").parse().unwrap();
-            let config = ApertureConfig {
-                listen,
-                ..Default::default()
-            };
-            let server = initialize_aperture(
-                &config,
-                state,
-                &execution.dispatch,
-                cancel,
-            )
-            .await;
-            if let Ok(server) = server {
-                break (server, port);
-            }
+        let node_context = NodeContext {
+            identity: execution.get_payer().pubkey,
+            base_fee: Self::BASE_FEE,
+
+            featureset: Default::default(),
+            blocktime: BLOCK_TIME_MS,
         };
+        let state = SharedState::new(
+            node_context,
+            execution.accountsdb.clone(),
+            execution.ledger.clone(),
+            chainlink(&execution.accountsdb),
+        );
+        let cancel = CancellationToken::new();
+        let config = ApertureConfig {
+            listen: "127.0.0.1:0".parse().unwrap(),
+            ..Default::default()
+        };
+        let server =
+            initialize_aperture(&config, state, &execution.dispatch, cancel)
+                .await
+                .expect("failed to initialize aperture test server");
+
+        let rpc_url = format!("http://{}", server.http_addr());
+        let pubsub_url = format!("ws://{}", server.ws_addr());
 
         tokio::spawn(server.run());
-
-        let rpc_url = format!("http://127.0.0.1:{port}");
-        let pubsub_url = format!("ws://127.0.0.1:{}", port + 1);
 
         let rpc = RpcClient::new(rpc_url);
         let pubsub = PubsubClient::new(&pubsub_url)
