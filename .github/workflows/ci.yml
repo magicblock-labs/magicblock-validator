@@ -247,4 +247,5 @@ jobs:
           RUN_TESTS: ${{ matrix.test }}
           SKIP_CHAINLINK_PREP: "1"
           PROGRAMS_SO: ""
+          RUSTFLAGS: ""
         run: make ci-test-integration
