@@ -1,8 +1,6 @@
 use std::{mem, ops::ControlFlow};
 
-use magicblock_core::traits::{
-    ActionError, ActionResult, ActionsCallbackScheduler,
-};
+use magicblock_core::traits::{ActionError, ActionsCallbackScheduler};
 use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
 use solana_signature::Signature;
@@ -19,8 +17,8 @@ use crate::{
         task_info_fetcher::{CacheTaskInfoFetcher, TaskInfoFetcher},
         two_stage_executor::sealed::Sealed,
         utils::{
-            handle_commit_id_error, handle_undelegation_error,
-            prepare_and_execute_strategy,
+            handle_actions_result, handle_commit_id_error,
+            handle_undelegation_error, prepare_and_execute_strategy,
         },
         IntentExecutionReport,
     },
@@ -491,33 +489,6 @@ where
             finalize_signature,
         }
     }
-}
-
-fn handle_actions_result<A>(
-    authority: &Pubkey,
-    callback_scheduler: &A,
-    execution_report: &mut IntentExecutionReport,
-    transaction_strategy: &mut TransactionStrategy,
-    result: ActionResult,
-) -> TransactionStrategy
-where
-    A: ActionsCallbackScheduler,
-{
-    let (callbacks, junk) = if result.is_ok() {
-        let callbacks = transaction_strategy.extract_action_callbacks();
-        (callbacks, TransactionStrategy::default())
-    } else {
-        let mut removed_actions =
-            transaction_strategy.remove_actions(authority);
-        let callbacks = removed_actions.extract_action_callbacks();
-        (callbacks, removed_actions)
-    };
-    if !callbacks.is_empty() {
-        let result = callback_scheduler.schedule(callbacks, result);
-        execution_report.add_callback_report(result);
-    }
-
-    junk
 }
 
 mod sealed {

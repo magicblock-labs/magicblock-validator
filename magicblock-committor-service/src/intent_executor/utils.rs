@@ -17,7 +17,7 @@ use crate::{
         single_stage_executor::SingleStageExecutor,
         task_info_fetcher::{CacheTaskInfoFetcher, ResetType, TaskInfoFetcher},
         two_stage_executor::{Committed, Initialized, TwoStageExecutor},
-        ExecutionOutput,
+        ExecutionOutput, IntentExecutionReport,
     },
     persist::IntentPersister,
     tasks::{
@@ -205,6 +205,33 @@ pub(in crate::intent_executor) fn handle_undelegation_error(
             lookup_tables_keys: vec![],
         }
     }
+}
+
+pub(in crate::intent_executor) fn handle_actions_result<A>(
+    authority: &Pubkey,
+    callback_scheduler: &A,
+    execution_report: &mut IntentExecutionReport,
+    transaction_strategy: &mut TransactionStrategy,
+    result: ActionResult,
+) -> TransactionStrategy
+where
+    A: ActionsCallbackScheduler,
+{
+    let (callbacks, junk) = if result.is_ok() {
+        let callbacks = transaction_strategy.extract_action_callbacks();
+        (callbacks, TransactionStrategy::default())
+    } else {
+        let mut removed_actions =
+            transaction_strategy.remove_actions(authority);
+        let callbacks = removed_actions.extract_action_callbacks();
+        (callbacks, removed_actions)
+    };
+    if !callbacks.is_empty() {
+        let result = callback_scheduler.schedule(callbacks, result);
+        execution_report.add_callback_report(result);
+    }
+
+    junk
 }
 
 pub(in crate::intent_executor) async fn execute_with_timeout<

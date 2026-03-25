@@ -1,8 +1,6 @@
 use std::{ops::ControlFlow, sync::Arc};
 
-use magicblock_core::traits::{
-    ActionError, ActionResult, ActionsCallbackScheduler,
-};
+use magicblock_core::traits::{ActionError, ActionsCallbackScheduler};
 use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
 use solana_signature::Signature;
@@ -18,8 +16,8 @@ use crate::{
         intent_execution_client::IntentExecutionClient,
         task_info_fetcher::{CacheTaskInfoFetcher, TaskInfoFetcher},
         utils::{
-            handle_commit_id_error, handle_undelegation_error,
-            prepare_and_execute_strategy,
+            handle_actions_result, handle_commit_id_error,
+            handle_undelegation_error, prepare_and_execute_strategy,
         },
         ExecutionOutput, IntentExecutionReport,
     },
@@ -143,32 +141,6 @@ where
         })
     }
 
-    /// Removes actions from strategy and if they contained callbacks executes them
-    /// Returns removed strategy
-    fn handle_actions_result(
-        &mut self,
-        result: ActionResult,
-    ) -> TransactionStrategy {
-        let (callbacks, junk) = if result.is_ok() {
-            let callbacks =
-                self.transaction_strategy.extract_action_callbacks();
-            (callbacks, TransactionStrategy::default())
-        } else {
-            let mut removed_actions = self
-                .transaction_strategy
-                .remove_actions(&self.authority.pubkey());
-            let callbacks = removed_actions.extract_action_callbacks();
-            (callbacks, removed_actions)
-        };
-        if !callbacks.is_empty() {
-            let callbacks_results =
-                self.callback_scheduler.schedule(callbacks, result);
-            self.execution_report.add_callback_report(callbacks_results);
-        }
-
-        junk
-    }
-
     pub fn has_callbacks(&self) -> bool {
         self.transaction_strategy.has_actions_callbacks()
     }
@@ -177,8 +149,13 @@ where
         &mut self,
         result: Result<(), impl Into<ActionError>>,
     ) {
-        let junk_strategy =
-            self.handle_actions_result(result.map_err(|err| err.into()));
+        let junk_strategy = handle_actions_result(
+            &self.authority.pubkey(),
+            &self.callback_scheduler,
+            self.execution_report,
+            &mut self.transaction_strategy,
+            result.map_err(|err| err.into()),
+        );
         self.execution_report.dispose(junk_strategy);
     }
 
@@ -209,7 +186,13 @@ where
                 // Here we patch strategy for it to be retried in next iteration
                 // & we also record data that has to be cleaned up after patch
                 let action_error = Err(ActionError::ActionsError(err.clone(), *signature));
-                let to_cleanup = self.handle_actions_result(action_error);
+                let to_cleanup = handle_actions_result(
+                    &self.authority.pubkey(),
+                    &self.callback_scheduler,
+                    self.execution_report,
+                    &mut self.transaction_strategy,
+                    action_error,
+                );
                 Ok(ControlFlow::Continue(to_cleanup))
             }
             TransactionStrategyExecutionError::CommitIDError(_, _) => {
