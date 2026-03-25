@@ -77,6 +77,9 @@ pub enum MagicBlockRpcClientError {
 
     #[error("Sent transaction {1} but got error: {0:?}")]
     SentTransactionError(TransactionError, Signature),
+
+    #[error("{0}")]
+    Other(String),
 }
 
 impl From<solana_rpc_client_api::client_error::Error>
@@ -321,6 +324,12 @@ impl MagicblockRpcClient {
         max_per_fetch: Option<usize>,
     ) -> MagicBlockRpcClientResult<Vec<Option<Account>>> {
         let max_per_fetch = max_per_fetch.unwrap_or(MAX_MULTIPLE_ACCOUNTS);
+        if max_per_fetch == 0 {
+            return Err(MagicBlockRpcClientError::Other(
+                "get_multiple_accounts_with_config: max_per_fetch must be > 0"
+                    .to_string(),
+            ));
+        }
 
         let mut join_set = JoinSet::new();
         for (chunk_idx, pubkey_chunk) in
