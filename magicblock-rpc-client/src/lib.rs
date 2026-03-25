@@ -323,23 +323,53 @@ impl MagicblockRpcClient {
         let max_per_fetch = max_per_fetch.unwrap_or(MAX_MULTIPLE_ACCOUNTS);
 
         let mut join_set = JoinSet::new();
-        for pubkey_chunk in pubkeys.chunks(max_per_fetch) {
+        for (chunk_idx, pubkey_chunk) in
+            pubkeys.chunks(max_per_fetch).enumerate()
+        {
             let client = self.client.clone();
             let pubkeys = pubkey_chunk.to_vec();
             let config = config.clone();
             join_set.spawn(async move {
-                client
-                    .get_multiple_accounts_with_config(&pubkeys, config)
-                    .await
+                (
+                    chunk_idx,
+                    client
+                        .get_multiple_accounts_with_config(&pubkeys, config)
+                        .await,
+                )
             });
         }
+
+        // `JoinSet::join_all()` returns results in completion order, not spawn order.
+        // Reassemble by chunk index to preserve positional correspondence with `pubkeys`.
         let chunked_results = join_set.join_all().await;
-        let mut results = Vec::new();
+        let num_chunks = (pubkeys.len() + max_per_fetch - 1) / max_per_fetch;
+        let mut chunks: Vec<Option<Vec<Option<Account>>>> =
+            vec![None; num_chunks];
+
         for result in chunked_results {
-            match result {
-                Ok(accs) => results.extend(accs.value),
+            let (chunk_idx, rpc_result) = match result {
+                Ok(v) => v,
                 Err(err) => return Err(err.into()),
+            };
+            let accs = rpc_result?;
+            if chunk_idx >= chunks.len() {
+                return Err(MagicBlockRpcClientError::Other(format!(
+                    "get_multiple_accounts_with_config: chunk index out of bounds ({chunk_idx} >= {})",
+                    chunks.len()
+                )));
             }
+            chunks[chunk_idx] = Some(accs.value);
+        }
+
+        let mut results = Vec::with_capacity(pubkeys.len());
+        for chunk in chunks {
+            let chunk = chunk.ok_or_else(|| {
+                MagicBlockRpcClientError::Other(
+                    "get_multiple_accounts_with_config: missing chunk result"
+                        .to_string(),
+                )
+            })?;
+            results.extend(chunk);
         }
         Ok(results)
     }
