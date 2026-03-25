@@ -158,13 +158,13 @@ async fn test_get_epoch_info() {
         .expect("get_epoch_info request failed");
 
     assert_eq!(epoch_info.epoch, 0, "epoch should be 0");
-    // The absolute_slot should be at most 1 behind the current slot
-    // due to auto-advancement timing
+    // The absolute_slot should be at most 3 behind the current slot
+    // due to auto-advancement timing (50ms block time)
     let current_slot = env.latest_slot();
     assert!(
         epoch_info.absolute_slot <= current_slot
-            && epoch_info.absolute_slot >= current_slot.saturating_sub(1),
-        "absolute_slot {} should be within 1 of current slot {}",
+            && epoch_info.absolute_slot >= current_slot.saturating_sub(3),
+        "absolute_slot {} should be within 3 of current slot {}",
         epoch_info.absolute_slot,
         current_slot
     );

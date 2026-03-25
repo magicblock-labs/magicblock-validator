@@ -61,7 +61,6 @@ pub struct Chainlink<
     removed_accounts_sub: Option<task::JoinHandle<()>>,
 
     validator_id: Pubkey,
-    faucet_id: Pubkey,
 
     /// If > 0, automatically airdrop this many lamports to feepayers when they are new/empty
     auto_airdrop_lamports: u64,
@@ -77,7 +76,6 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
         accounts_bank: &Arc<V>,
         fetch_cloner: Option<Arc<FetchCloner<T, U, V, C>>>,
         validator_pubkey: Pubkey,
-        faucet_pubkey: Pubkey,
         config: &ChainLinkConfig,
     ) -> ChainlinkResult<Self> {
         let removed_accounts_sub = if let Some(fetch_cloner) = &fetch_cloner {
@@ -95,7 +93,6 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
             fetch_cloner,
             removed_accounts_sub,
             validator_id: validator_pubkey,
-            faucet_id: faucet_pubkey,
             auto_airdrop_lamports: config.auto_airdrop_lamports,
             remove_confined_accounts: config.remove_confined_accounts,
         })
@@ -115,7 +112,6 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
         accounts_bank: &Arc<V>,
         cloner: &Arc<C>,
         validator_keypair: Keypair,
-        faucet_pubkey: Pubkey,
         config: ChainlinkConfig,
         chainlink_config: &ChainLinkConfig,
     ) -> ChainlinkResult<
@@ -139,7 +135,6 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
                 accounts_bank,
                 cloner,
                 validator_keypair,
-                faucet_pubkey,
                 rx,
                 chainlink_config.allowed_programs.clone(),
             );
@@ -152,7 +147,6 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
             accounts_bank,
             fetch_cloner,
             validator_pubkey,
-            faucet_pubkey,
             chainlink_config,
         )
     }
@@ -162,8 +156,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
     /// when resuming an existing ledger to guarantee that we don't hold
     /// accounts that might be stale.
     pub fn reset_accounts_bank(&self) -> AccountsDbResult<()> {
-        let blacklisted_accounts =
-            blacklisted_accounts(&self.validator_id, &self.faucet_id);
+        let blacklisted_accounts = blacklisted_accounts(&self.validator_id);
 
         let delegated_only = AtomicU64::new(0);
         let undelegating = AtomicU64::new(0);

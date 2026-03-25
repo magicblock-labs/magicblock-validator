@@ -4,6 +4,7 @@ use magicblock_core::link::DispatchEndpoints;
 use processor::EventProcessor;
 use server::{http::HttpServer, websocket::WebsocketServer};
 use state::SharedState;
+use std::net::SocketAddr;
 use tokio::net::TcpListener;
 use tokio_util::sync::CancellationToken;
 use tracing::{info, instrument};
@@ -17,10 +18,12 @@ pub async fn initialize_aperture(
     dispatch: &DispatchEndpoints,
     cancel: CancellationToken,
 ) -> ApertureResult<JsonRpcServer> {
-    // Start up an event processor tasks, which will handle forwarding of any validator
-    // originating event to client subscribers, or use them to update server's caches
-    EventProcessor::start(config, &state, dispatch, cancel.clone())?;
-    let server = JsonRpcServer::new(config, state, dispatch, cancel).await?;
+    let server =
+        JsonRpcServer::new(config, state.clone(), dispatch, cancel.clone())
+            .await?;
+    // Start event processors only after the server has bound its sockets so a
+    // bind failure cannot leak background tasks during retries in tests/startup.
+    EventProcessor::start(config, &state, dispatch, cancel)?;
     Ok(server)
 }
 
@@ -28,6 +31,8 @@ pub async fn initialize_aperture(
 pub struct JsonRpcServer {
     http: HttpServer,
     websocket: WebsocketServer,
+    http_addr: SocketAddr,
+    ws_addr: SocketAddr,
 }
 
 impl JsonRpcServer {
@@ -39,10 +44,21 @@ impl JsonRpcServer {
         cancel: CancellationToken,
     ) -> ApertureResult<Self> {
         // try to bind to socket before spawning anything (handy in tests)
-        let mut addr = config.listen.0;
-        let http = TcpListener::bind(addr).await.map_err(RpcError::internal)?;
-        addr.set_port(addr.port() + 1);
-        let ws = TcpListener::bind(addr).await.map_err(RpcError::internal)?;
+        let http = TcpListener::bind(config.listen.0)
+            .await
+            .map_err(RpcError::internal)?;
+        let http_addr = http.local_addr().map_err(RpcError::internal)?;
+
+        let mut ws_addr = http_addr;
+        if config.listen.0.port() == 0 {
+            ws_addr.set_port(0);
+        } else {
+            ws_addr.set_port(config.listen.0.port() + 1);
+        }
+        let ws = TcpListener::bind(ws_addr)
+            .await
+            .map_err(RpcError::internal)?;
+        let ws_addr = ws.local_addr().map_err(RpcError::internal)?;
 
         // initialize HTTP and Websocket servers
         let websocket = {
@@ -50,7 +66,20 @@ impl JsonRpcServer {
             WebsocketServer::new(ws, &state, cancel).await?
         };
         let http = HttpServer::new(http, state, cancel, dispatch).await?;
-        Ok(Self { http, websocket })
+        Ok(Self {
+            http,
+            websocket,
+            http_addr,
+            ws_addr,
+        })
+    }
+
+    pub fn http_addr(&self) -> SocketAddr {
+        self.http_addr
+    }
+
+    pub fn ws_addr(&self) -> SocketAddr {
+        self.ws_addr
     }
 
     /// Run JSON-RPC server indefinitely, until cancel token is used to signal shut down

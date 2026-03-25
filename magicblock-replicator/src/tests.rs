@@ -56,6 +56,35 @@ async fn test_watcher_ignores_non_snapshots() {
     assert_eq!(contents, test_data);
 }
 
+#[tokio::test]
+async fn test_watcher_ignores_older_slots() {
+    let temp_dir = TempDir::new().unwrap();
+    let mut watcher = SnapshotWatcher::new(temp_dir.path()).unwrap();
+
+    let newer_path = temp_dir.path().join("snapshot-000000000010.tar.gz");
+    std::fs::File::create(&newer_path)
+        .unwrap()
+        .write_all(b"newer")
+        .unwrap();
+
+    let (_, slot) =
+        tokio::time::timeout(Duration::from_secs(2), watcher.recv())
+            .await
+            .expect("Timeout waiting for snapshot")
+            .expect("Channel closed");
+    assert_eq!(slot, 10);
+
+    let older_path = temp_dir.path().join("snapshot-000000000009.tar.gz");
+    std::fs::File::create(&older_path)
+        .unwrap()
+        .write_all(b"older")
+        .unwrap();
+
+    tokio::time::timeout(Duration::from_millis(300), watcher.recv())
+        .await
+        .expect_err("older snapshot should be ignored");
+}
+
 #[test]
 fn test_parse_slot() {
     assert_eq!(

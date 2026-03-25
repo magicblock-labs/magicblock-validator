@@ -408,7 +408,7 @@ impl AccountsDb {
     }
 
     pub fn database_directory(&self) -> &Path {
-        self.snapshot_manager.database_path()
+        &self.snapshot_manager.snapshots_dir
     }
 }
 
