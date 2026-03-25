@@ -11,7 +11,7 @@ on:
     types: [opened, reopened, synchronize]
 
 env:
-  CARGO_HOME: /tmp/cargo-home
+  CARGO_HOME: /cargo-home
   RUSTUP_HOME: /usr/local/rustup
   CARGO_TERM_COLOR: always
   CARGO_REGISTRIES_CRATES_IO_PROTOCOL: sparse
