@@ -28,17 +28,17 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: rust-ci-${{ hashFiles('Cargo.lock', 'test-integration/Cargo.lock') }}
+          shared-key: rust-ci-${{ github.ref_name }}-${{ hashFiles('Cargo.lock', 'test-integration/Cargo.lock', 'rust-toolchain.toml', 'test-integration/rust-toolchain.toml') }}
           add-job-id-key: false
-          env-vars: ""
+          add-rust-environment-hash-key: false
           workspaces: |
             . -> target
             test-integration -> target
           cache-targets: false
-          cache-on-failure: true
           cache-all-crates: false
           cache-workspace-crates: false
           cache-bin: false
+          cache-on-failure: true
           save-if: false
 
       - name: Format check
@@ -59,17 +59,17 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: rust-ci-${{ hashFiles('Cargo.lock', 'test-integration/Cargo.lock') }}
+          shared-key: rust-ci-${{ github.ref_name }}-${{ hashFiles('Cargo.lock', 'test-integration/Cargo.lock', 'rust-toolchain.toml', 'test-integration/rust-toolchain.toml') }}
           add-job-id-key: false
-          env-vars: ""
+          add-rust-environment-hash-key: false
           workspaces: |
             . -> target
             test-integration -> target
           cache-targets: true
-          cache-on-failure: true
           cache-all-crates: false
           cache-workspace-crates: true
           cache-bin: false
+          cache-on-failure: true
           save-if: false
 
       - name: Lint
@@ -90,17 +90,17 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: rust-ci-${{ hashFiles('Cargo.lock', 'test-integration/Cargo.lock') }}
+          shared-key: rust-ci-${{ github.ref_name }}-${{ hashFiles('Cargo.lock', 'test-integration/Cargo.lock', 'rust-toolchain.toml', 'test-integration/rust-toolchain.toml') }}
           add-job-id-key: false
-          env-vars: ""
+          add-rust-environment-hash-key: false
           workspaces: |
             . -> target
             test-integration -> target
           cache-targets: true
-          cache-on-failure: true
           cache-all-crates: false
           cache-workspace-crates: true
           cache-bin: false
+          cache-on-failure: true
           save-if: true
 
       - name: Unit tests
@@ -117,17 +117,17 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: integration-${{ github.ref_name }}-${{ hashFiles('Cargo.lock', 'test-integration/Cargo.lock') }}
+          shared-key: integration-${{ github.ref_name }}-${{ hashFiles('Cargo.lock', 'test-integration/Cargo.lock', 'rust-toolchain.toml', 'test-integration/rust-toolchain.toml') }}
           add-job-id-key: false
-          env-vars: ""
+          add-rust-environment-hash-key: false
           workspaces: |
             . -> target
             test-integration -> target
           cache-targets: true
-          cache-on-failure: true
           cache-all-crates: false
           cache-workspace-crates: true
           cache-bin: false
+          cache-on-failure: true
           save-if: true
 
       - name: Build project
@@ -200,17 +200,17 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: integration-${{ github.ref_name }}-${{ hashFiles('Cargo.lock', 'test-integration/Cargo.lock') }}
+          shared-key: integration-${{ github.ref_name }}-${{ hashFiles('Cargo.lock', 'test-integration/Cargo.lock', 'rust-toolchain.toml', 'test-integration/rust-toolchain.toml') }}
           add-job-id-key: false
-          env-vars: ""
+          add-rust-environment-hash-key: false
           workspaces: |
             . -> target
             test-integration -> target
           cache-targets: true
-          cache-on-failure: true
           cache-all-crates: false
           cache-workspace-crates: true
           cache-bin: false
+          cache-on-failure: true
           save-if: false
 
       - uses: actions/download-artifact@v4
