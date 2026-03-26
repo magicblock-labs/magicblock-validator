@@ -52,7 +52,7 @@ fn test_claim_fees_instruction() {
     );
     assert_eq!(
         instruction.program_id,
-        dlp_api::dlp::id(),
+        dlp_api::id(),
         "Instruction should target delegation program"
     );
 

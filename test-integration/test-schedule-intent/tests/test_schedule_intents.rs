@@ -1,13 +1,17 @@
-use dlp_api::dlp::pda::ephemeral_balance_pda_from_payer;
-use integration_test_tools::IntegrationTestContext;
+use dlp_api::pda::ephemeral_balance_pda_from_payer;
+use integration_test_tools::{
+    conversions::stringify_simulation_result, IntegrationTestContext,
+};
 use program_flexi_counter::{
     delegation_program_id,
     instruction::{
         create_add_ix, create_delegate_ix, create_init_ix,
-        create_intent_bundle_ix, create_intent_ix,
+        create_intent_bundle_commit_and_finalize_ix, create_intent_bundle_ix,
+        create_intent_ix,
     },
     state::FlexiCounter,
 };
+use solana_rpc_client_api::config::RpcSimulateTransactionConfig;
 use solana_sdk::{
     native_token::LAMPORTS_PER_SOL, pubkey::Pubkey, rent::Rent,
     signature::Keypair, signer::Signer, transaction::Transaction,
@@ -507,6 +511,57 @@ fn test_intent_bundle_undelegate_only() {
     );
 }
 
+#[test]
+fn test_intent_bundle_commit_and_commit_finalize() {
+    init_logger!();
+
+    let ctx = IntegrationTestContext::try_new().unwrap();
+
+    let commit_payer = setup_payer(&ctx);
+    let commit_finalize_payer = setup_payer(&ctx);
+
+    init_counter(&ctx, &commit_payer);
+    delegate_counter(&ctx, &commit_payer);
+    add_to_counter(&ctx, &commit_payer, 31);
+
+    init_counter(&ctx, &commit_finalize_payer);
+    delegate_counter(&ctx, &commit_finalize_payer);
+    add_to_counter(&ctx, &commit_finalize_payer, 47);
+
+    schedule_intent_bundle_commit_and_finalize(
+        &ctx,
+        &commit_payer,
+        vec![FlexiCounter::pda(&commit_payer.pubkey()).0],
+        vec![FlexiCounter::pda(&commit_finalize_payer.pubkey()).0],
+    );
+
+    assert_counters(
+        &ctx,
+        &[
+            ExpectedCounter {
+                pda: FlexiCounter::pda(&commit_payer.pubkey()).0,
+                expected: 31,
+            },
+            ExpectedCounter {
+                pda: FlexiCounter::pda(&commit_finalize_payer.pubkey()).0,
+                expected: 47,
+            },
+        ],
+        true,
+    );
+
+    let owner_commit = ctx
+        .fetch_chain_account_owner(FlexiCounter::pda(&commit_payer.pubkey()).0)
+        .unwrap();
+    let owner_finalize = ctx
+        .fetch_chain_account_owner(
+            FlexiCounter::pda(&commit_finalize_payer.pubkey()).0,
+        )
+        .unwrap();
+    assert_eq!(owner_commit, delegation_program_id());
+    assert_eq!(owner_finalize, delegation_program_id());
+}
+
 fn setup_payer(ctx: &IntegrationTestContext) -> Keypair {
     // Airdrop to payer on chain
     let payer = Keypair::new();
@@ -734,6 +789,81 @@ fn schedule_intent_bundle(
     let expected_balance = (commit_only_payers.len() as u64 * 1_000_000)
         + (undelegate_payers.len() as u64 * 2 * 1_000_000);
     assert_eq!(transfer_destination_balance, expected_balance);
+}
+
+fn schedule_intent_bundle_commit_and_finalize(
+    ctx: &IntegrationTestContext,
+    payer: &Keypair,
+    commit_accounts: Vec<Pubkey>,
+    commit_finalize_accounts: Vec<Pubkey>,
+) {
+    ctx.wait_for_next_slot_ephem().unwrap();
+    let ix = create_intent_bundle_commit_and_finalize_ix(
+        payer.pubkey(),
+        commit_accounts,
+        commit_finalize_accounts,
+    );
+
+    let mut tx = Transaction::new_with_payer(&[ix], Some(&payer.pubkey()));
+    let (sig, confirmed) =
+        match ctx.send_and_confirm_transaction_ephem(&mut tx, &[payer]) {
+            Ok(res) => res,
+            Err(err) => {
+                dump_ephem_simulation(
+                    ctx,
+                    &tx,
+                    "schedule_intent_bundle_commit_and_finalize",
+                );
+                panic!("Failed to send/confirm ephem tx: {err:#}");
+            }
+        };
+    if !confirmed {
+        dump_ephem_simulation(
+            ctx,
+            &tx,
+            "schedule_intent_bundle_commit_and_finalize",
+        );
+        panic!("Ephem tx not confirmed: {sig}");
+    }
+
+    let commit_result = ctx
+        .fetch_schedule_commit_result::<FlexiCounter>(sig)
+        .unwrap();
+    commit_result
+        .confirm_commit_transactions_on_chain(ctx)
+        .unwrap();
+}
+
+fn dump_ephem_simulation(
+    ctx: &IntegrationTestContext,
+    tx: &Transaction,
+    label: &str,
+) {
+    let Ok(client) = ctx.try_ephem_client() else {
+        eprintln!("[{label}] failed to get ephem client for simulation");
+        return;
+    };
+
+    let sig = tx.signatures.first().cloned().unwrap_or_default();
+
+    match client.simulate_transaction_with_config(
+        tx,
+        RpcSimulateTransactionConfig {
+            sig_verify: false,
+            replace_recent_blockhash: true,
+            ..Default::default()
+        },
+    ) {
+        Ok(res) => {
+            eprintln!(
+                "[{label}] {}",
+                stringify_simulation_result(res.value, &sig)
+            );
+        }
+        Err(err) => {
+            eprintln!("[{label}] simulation request failed: {err:?}");
+        }
+    }
 }
 
 fn verify_undelegation_in_ephem_via_owner(

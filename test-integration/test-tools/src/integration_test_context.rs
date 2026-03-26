@@ -578,7 +578,7 @@ impl IntegrationTestContext {
         // 2.Delegate the ephem payer
         let delegated_already = self
             .fetch_chain_account_owner(payer_ephem.pubkey())
-            .map(|owner| owner.eq(&dlp_api::dlp::id()))
+            .map(|owner| owner.eq(&dlp_api::id()))
             .unwrap_or(false);
         let deleg_sig = if !delegated_already {
             let (deleg_sig, confirmed) =

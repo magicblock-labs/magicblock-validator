@@ -1,6 +1,5 @@
 use std::sync::OnceLock;
 
-use dlp_api::dlp;
 use integration_test_tools::run_test;
 use magicblock_program::magic_sys::{COMMIT_LIMIT, COMMIT_LIMIT_ERR};
 use program_schedulecommit::{
@@ -11,7 +10,8 @@ use program_schedulecommit::{
         schedule_commit_cpi_with_vault_instruction,
         schedule_commit_with_vault_and_order_book_instruction, UserSeeds,
     },
-    ScheduleCommitCpiWithVaultArgs, ScheduleCommitWithOrderBookArgs,
+    ScheduleCommitCpiWithVaultArgs, ScheduleCommitType,
+    ScheduleCommitWithOrderBookArgs,
 };
 use schedulecommit_client::{
     verify, ScheduleCommitTestContext, ScheduleCommitTestContextFields,
@@ -71,6 +71,7 @@ fn get_prepared() -> &'static ScheduleCommitTestContext {
                 None,
                 &players,
                 &pdas,
+                ScheduleCommitType::Commit,
             );
             let blockhash = ephem_client.get_latest_blockhash().unwrap();
             let tx = Transaction::new_signed_with_payer(
@@ -129,6 +130,7 @@ fn test_schedule_commit_fails_at_commit_limit() {
             None,
             &[committee.0.pubkey()],
             &[committee.1],
+            ScheduleCommitType::Commit,
         );
         let blockhash = ephem_client.get_latest_blockhash().unwrap();
         let tx = Transaction::new_signed_with_payer(
@@ -445,8 +447,9 @@ fn test_fee_charged_and_vault_credited_after_actual_commit_limit() {
         } = ctx.fields();
 
         let committee = &committees[IDX_OVER_LIMIT];
-        let magic_fee_vault =
-            dlp::pda::magic_fee_vault_pda_from_validator(validator_identity);
+        let magic_fee_vault = dlp_api::pda::magic_fee_vault_pda_from_validator(
+            validator_identity,
+        );
 
         let payer_balance_before =
             ctx.fetch_ephem_account_balance(&payer.pubkey()).unwrap();
@@ -536,8 +539,9 @@ fn test_schedule_commit_with_vault_and_order_book_action() {
         } = ctx.fields();
 
         let committee = &committees[IDX_OVER_LIMIT];
-        let magic_fee_vault =
-            dlp::pda::magic_fee_vault_pda_from_validator(validator_identity);
+        let magic_fee_vault = dlp_api::pda::magic_fee_vault_pda_from_validator(
+            validator_identity,
+        );
 
         let payer_balance_before =
             ctx.fetch_ephem_account_balance(&payer.pubkey()).unwrap();
