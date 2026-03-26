@@ -6,7 +6,7 @@ use program_schedulecommit::{
         delegate_account_cpi_instruction, init_account_instruction,
         pda_and_bump, schedule_commit_cpi_instruction, UserSeeds,
     },
-    ScheduleCommitCpiArgs, ScheduleCommitInstruction,
+    ScheduleCommitCpiArgs, ScheduleCommitInstruction, ScheduleCommitType,
 };
 use schedulecommit_client::{verify, ScheduleCommitTestContextFields};
 use solana_rpc_client::rpc_client::SerializableTransaction;
@@ -70,6 +70,7 @@ fn test_committing_one_account() {
                 .map(|(player, _)| player.pubkey())
                 .collect::<Vec<_>>(),
             &committees.iter().map(|(_, pda)| *pda).collect::<Vec<_>>(),
+            program_schedulecommit::ScheduleCommitType::Commit,
         );
 
         let ephem_blockhash = ephem_client.get_latest_blockhash().unwrap();
@@ -125,6 +126,7 @@ fn test_committing_two_accounts() {
                 .map(|(player, _)| player.pubkey())
                 .collect::<Vec<_>>(),
             &committees.iter().map(|(_, pda)| *pda).collect::<Vec<_>>(),
+            program_schedulecommit::ScheduleCommitType::Commit,
         );
 
         let ephem_blockhash = ephem_client.get_latest_blockhash().unwrap();
@@ -321,10 +323,16 @@ fn schedule_commit_cpi_illegal_owner(
     let cpi_args = ScheduleCommitCpiArgs {
         players: players.to_vec(),
         modify_accounts: false,
-        undelegate: is_undelegate,
         commit_payer: true,
         has_magic_vault: false,
     };
-    let ix = ScheduleCommitInstruction::ScheduleCommitCpi(cpi_args);
+    let ix = ScheduleCommitInstruction::ScheduleCommitCpi(
+        cpi_args,
+        if is_undelegate {
+            ScheduleCommitType::CommitAndUndelegate
+        } else {
+            ScheduleCommitType::Commit
+        },
+    );
     Instruction::new_with_borsh(program_id, &ix, account_metas)
 }

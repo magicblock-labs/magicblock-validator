@@ -198,7 +198,7 @@ pub fn init_validator_fees_vault(
     chain_ctx: &IntegrationTestContext,
     validator_identity: &Keypair,
 ) {
-    let vault_pda = dlp_api::dlp::pda::validator_fees_vault_pda_from_validator(
+    let vault_pda = dlp_api::pda::validator_fees_vault_pda_from_validator(
         &validator_identity.pubkey(),
     );
     if chain_ctx.fetch_chain_account(vault_pda).is_ok() {
@@ -268,11 +268,11 @@ pub fn init_and_delegate_counter_and_payer(
         cleanup(validator)
     );
     let owner = fetch_counter_owner_chain(&payer.pubkey(), validator);
-    assert_eq!(owner, dlp_api::dlp::id(), cleanup(validator));
+    assert_eq!(owner, dlp_api::id(), cleanup(validator));
 
     let payer_chain =
         expect!(ctx.fetch_chain_account(payer.pubkey()), validator);
-    assert_eq!(payer_chain.owner, dlp_api::dlp::id(), cleanup(validator));
+    assert_eq!(payer_chain.owner, dlp_api::id(), cleanup(validator));
     assert!(payer_chain.lamports > LAMPORTS_PER_SOL, cleanup(validator));
 
     debug!(

@@ -1,10 +1,6 @@
 use dlp_api::{
-    decrypt::Decrypt,
-    dlp::{
-        args::PostDelegationActions,
-        pda::delegation_record_pda_from_delegated_account,
-        state::DelegationRecord,
-    },
+    args::PostDelegationActions, decrypt::Decrypt,
+    pda::delegation_record_pda_from_delegated_account, state::DelegationRecord,
 };
 use magicblock_accounts_db::traits::AccountsBank;
 use magicblock_core::token_programs::{derive_eata, EATA_PROGRAM_ID};
@@ -237,7 +233,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use dlp_api::dlp::args::{
+    use dlp_api::args::{
         EncryptedBuffer, MaybeEncryptedAccountMeta, MaybeEncryptedInstruction,
         MaybeEncryptedIxData, MaybeEncryptedPubkey, PostDelegationActions,
     };
@@ -287,12 +283,12 @@ mod tests {
                     program_id: 1,
                     accounts: vec![
                         MaybeEncryptedAccountMeta::ClearText(
-                            dlp_api::dlp::compact::AccountMeta::new_readonly(
+                            dlp_api::compact::AccountMeta::new_readonly(
                                 0, true,
                             ),
                         ),
                         MaybeEncryptedAccountMeta::ClearText(
-                            dlp_api::dlp::compact::AccountMeta::new(2, false),
+                            dlp_api::compact::AccountMeta::new(2, false),
                         ),
                     ],
                     data: MaybeEncryptedIxData {
@@ -354,12 +350,12 @@ mod tests {
                     program_id: 2,
                     accounts: vec![
                         MaybeEncryptedAccountMeta::ClearText(
-                            dlp_api::dlp::compact::AccountMeta::new_readonly(
+                            dlp_api::compact::AccountMeta::new_readonly(
                                 0, true,
                             ),
                         ),
                         MaybeEncryptedAccountMeta::ClearText(
-                            dlp_api::dlp::compact::AccountMeta::new(1, false),
+                            dlp_api::compact::AccountMeta::new(1, false),
                         ),
                     ],
                     data: MaybeEncryptedIxData {

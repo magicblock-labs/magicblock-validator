@@ -12,7 +12,7 @@ schedulecommit-client = { workspace = true }
 magicblock-core = { workspace = true }
 magicblock-program = { workspace = true }
 magicblock_magic_program_api = { workspace = true }
-dlp-api = { workspace = true }
+magicblock-delegation-program-api = { workspace = true }
 solana-program = { workspace = true }
 solana-rpc-client = { workspace = true }
 solana-rpc-client-api = { workspace = true }
