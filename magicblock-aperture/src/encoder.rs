@@ -158,13 +158,13 @@ impl Encoder for TransactionLogsEncoder {
         #[derive(Serialize)]
         struct TransactionLogs<'a> {
             signature: SerdeSignature,
-            err: Option<String>,
+            err: Option<TransactionError>,
             logs: &'a [String],
         }
         let method = "logsNotification";
         let result = TransactionLogs {
             signature: SerdeSignature(*data.txn.signature()),
-            err: data.meta.status.as_ref().err().map(ToString::to_string),
+            err: data.meta.status.as_ref().err().cloned(),
             logs,
         };
         NotificationPayload::encode(result, slot, method, id)
