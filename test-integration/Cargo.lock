@@ -3430,6 +3430,7 @@ version = "0.8.4"
 dependencies = [
  "async-trait",
  "bincode",
+ "lru",
  "magicblock-accounts-db",
  "magicblock-chainlink",
  "magicblock-committor-service",
