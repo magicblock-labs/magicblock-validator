@@ -4,10 +4,12 @@ use magicblock_accounts_db::traits::AccountsBank;
 use magicblock_core::link::blocks::BlockHash;
 use setup::RpcTestEnv;
 use solana_account::ReadableAccount;
+use solana_account_decoder::UiAccountEncoding;
 use solana_pubkey::Pubkey;
 use solana_rpc_client::rpc_client::GetConfirmedSignaturesForAddress2Config;
 use solana_rpc_client_api::config::{
-    RpcSendTransactionConfig, RpcSimulateTransactionConfig,
+    RpcSendTransactionConfig, RpcSimulateTransactionAccountsConfig,
+    RpcSimulateTransactionConfig,
 };
 use solana_signature::Signature;
 use solana_transaction_status::UiTransactionEncoding;
@@ -204,6 +206,50 @@ async fn test_simulate_transaction_success() {
         recipient_account.lamports(),
         RpcTestEnv::INIT_ACCOUNT_BALANCE,
         "recipient balance should not change after simulation"
+    );
+}
+
+#[tokio::test]
+async fn test_simulate_transaction_returns_requested_accounts() {
+    let env = RpcTestEnv::new().await;
+    let sender = Pubkey::new_unique();
+    let recipient = Pubkey::new_unique();
+    let transfer_tx =
+        env.build_transfer_txn_with_params(sender, recipient, false);
+    let config = RpcSimulateTransactionConfig {
+        accounts: Some(RpcSimulateTransactionAccountsConfig {
+            encoding: Some(UiAccountEncoding::Base64),
+            addresses: vec![
+                sender.to_string(),
+                recipient.to_string(),
+                guinea::ID.to_string(),
+            ],
+        }),
+        ..Default::default()
+    };
+
+    let result = env
+        .rpc
+        .simulate_transaction_with_config(&transfer_tx, config)
+        .await
+        .expect("simulate_transaction request failed")
+        .value;
+    let accounts = result.accounts.expect("accounts should be returned");
+
+    assert_eq!(accounts.len(), 3, "unexpected account count");
+    assert_eq!(
+        accounts[0].as_ref().map(|account| account.lamports),
+        Some(RpcTestEnv::INIT_ACCOUNT_BALANCE - RpcTestEnv::TRANSFER_AMOUNT),
+        "sender should reflect the simulated transfer",
+    );
+    assert_eq!(
+        accounts[1].as_ref().map(|account| account.lamports),
+        Some(RpcTestEnv::INIT_ACCOUNT_BALANCE + RpcTestEnv::TRANSFER_AMOUNT),
+        "recipient should reflect the simulated transfer",
+    );
+    assert!(
+        accounts[2].is_some(),
+        "program account should be returned for requested addresses"
     );
 }
 

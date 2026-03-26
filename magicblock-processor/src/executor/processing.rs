@@ -111,23 +111,42 @@ impl super::TransactionExecutor {
         transaction: [SanitizedTransaction; 1],
         tx: TxnSimulationResultTx,
     ) {
+        let number_of_accounts = transaction[0].message().account_keys().len();
         let (result, _) = self.process(&transaction);
         let simulation_result = match result {
             Ok(processed) => {
                 let status = processed.status();
                 let units_consumed = processed.executed_units();
-                let (logs, return_data, inner_instructions) = match processed {
-                    ProcessedTransaction::Executed(ex) => (
-                        ex.execution_details.log_messages,
-                        ex.execution_details.return_data,
-                        ex.execution_details.inner_instructions,
-                    ),
-                    ProcessedTransaction::FeesOnly(_) => Default::default(),
+                let (
+                    logs,
+                    post_simulation_accounts,
+                    return_data,
+                    inner_instructions,
+                ) = match processed {
+                    ProcessedTransaction::Executed(executed) => {
+                        let execution_details = executed.execution_details;
+                        let post_simulation_accounts = executed
+                            .loaded_transaction
+                            .accounts
+                            .into_iter()
+                            .take(number_of_accounts)
+                            .collect();
+                        (
+                            execution_details.log_messages,
+                            post_simulation_accounts,
+                            execution_details.return_data,
+                            execution_details.inner_instructions,
+                        )
+                    }
+                    ProcessedTransaction::FeesOnly(_) => {
+                        (None, vec![], None, None)
+                    }
                 };
                 TransactionSimulationResult {
                     result: status,
                     units_consumed,
                     logs,
+                    post_simulation_accounts,
                     return_data,
                     inner_instructions,
                 }
@@ -136,6 +155,7 @@ impl super::TransactionExecutor {
                 result: Err(error),
                 units_consumed: 0,
                 logs: Default::default(),
+                post_simulation_accounts: vec![],
                 return_data: None,
                 inner_instructions: None,
             },

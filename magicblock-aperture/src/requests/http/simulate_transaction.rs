@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use solana_message::inner_instruction::InnerInstructions;
 use solana_rpc_client_api::{
     config::RpcSimulateTransactionConfig,
@@ -44,10 +46,13 @@ impl HttpDispatcher {
                 debug!(error = ?err, "Failed to prepare transaction to simulate")
             })?;
         self.ensure_transaction_accounts(&transaction.txn).await?;
+        let number_of_accounts = transaction.txn.message().account_keys().len();
 
         let replacement_blockhash = config
             .replace_recent_blockhash
             .then(|| RpcBlockhash::from(self.blocks.get_latest()));
+        let inner_instructions_enabled = config.inner_instructions;
+        let accounts_config = config.accounts;
 
         // Submit the transaction to the scheduler for simulation.
         let result = self
@@ -55,6 +60,72 @@ impl HttpDispatcher {
             .simulate(transaction.txn)
             .await
             .map_err(RpcError::transaction_simulation)?;
+        let magicblock_core::link::transactions::TransactionSimulationResult {
+            result,
+            logs,
+            post_simulation_accounts,
+            units_consumed,
+            return_data,
+            inner_instructions: recorded_inner_instructions,
+        } = result;
+        let result_err = result.as_ref().err().cloned();
+        let accounts = if let Some(config_accounts) = accounts_config {
+            let accounts_encoding = config_accounts
+                .encoding
+                .unwrap_or(UiAccountEncoding::Base64);
+
+            if accounts_encoding == UiAccountEncoding::Binary
+                || accounts_encoding == UiAccountEncoding::Base58
+            {
+                return Err(RpcError::invalid_params(
+                    "base58 encoding not supported",
+                ));
+            }
+
+            if config_accounts.addresses.len() > number_of_accounts {
+                return Err(RpcError::invalid_params(format!(
+                    "Too many accounts provided; max {number_of_accounts}"
+                )));
+            }
+
+            if result_err.is_some() {
+                Some(vec![None; config_accounts.addresses.len()])
+            } else {
+                let pubkeys = config_accounts
+                    .addresses
+                    .into_iter()
+                    .map(|address| {
+                        address
+                            .parse::<Pubkey>()
+                            .map_err(RpcError::invalid_params)
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                let current_accounts =
+                    self.read_accounts_with_ensure(&pubkeys).await;
+                let post_simulation_accounts = post_simulation_accounts
+                    .into_iter()
+                    .collect::<HashMap<_, _>>();
+
+                Some(
+                    pubkeys
+                        .into_iter()
+                        .zip(current_accounts)
+                        .map(|(pubkey, account)| {
+                            post_simulation_accounts
+                                .get(&pubkey)
+                                .cloned()
+                                .or(account)
+                                .map(|account| {
+                                    LockedAccount::new(pubkey, account)
+                                        .ui_encode(accounts_encoding, None)
+                                })
+                        })
+                        .collect(),
+                )
+            }
+        } else {
+            None
+        };
 
         // Convert the internal simulation result to the client-facing RPC format.
         let converter = |(index, ixs): (usize, InnerInstructions)| {
@@ -71,9 +142,8 @@ impl HttpDispatcher {
             .into()
         };
 
-        let inner_instructions = config.inner_instructions.then(|| {
-            result
-                .inner_instructions
+        let inner_instructions = inner_instructions_enabled.then(|| {
+            recorded_inner_instructions
                 .into_iter()
                 .flatten()
                 .enumerate()
@@ -82,11 +152,11 @@ impl HttpDispatcher {
         });
 
         let result = RpcSimulateTransactionResult {
-            err: result.result.err(),
-            logs: result.logs,
-            accounts: None,
-            units_consumed: Some(result.units_consumed),
-            return_data: result.return_data.map(Into::into),
+            err: result_err,
+            logs,
+            accounts,
+            units_consumed: Some(units_consumed),
+            return_data: return_data.map(Into::into),
             inner_instructions,
             replacement_blockhash,
         };

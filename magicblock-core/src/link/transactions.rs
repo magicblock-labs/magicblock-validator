@@ -1,6 +1,7 @@
 use flume::{Receiver as MpmcReceiver, Sender as MpmcSender};
 use magicblock_magic_program_api::args::TaskRequest;
 use serde::Serialize;
+use solana_account::AccountSharedData;
 use solana_program::message::{
     inner_instruction::InnerInstructionsList, SimpleAddressLoader,
 };
@@ -114,6 +115,8 @@ pub enum TransactionProcessingMode {
 pub struct TransactionSimulationResult {
     pub result: TransactionResult,
     pub logs: Option<Vec<String>>,
+    pub post_simulation_accounts:
+        Vec<(solana_pubkey::Pubkey, AccountSharedData)>,
     pub units_consumed: u64,
     pub return_data: Option<TransactionReturnData>,
     pub inner_instructions: Option<InnerInstructionsList>,
