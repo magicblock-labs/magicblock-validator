@@ -1,5 +1,7 @@
-use dlp_api::dlp;
-use program_schedulecommit::api::{schedule_commit_cpi_instruction, UserSeeds};
+use program_schedulecommit::{
+    api::{schedule_commit_cpi_instruction, UserSeeds},
+    ScheduleCommitType,
+};
 use schedulecommit_client::{
     ScheduleCommitTestContext, ScheduleCommitTestContextFields,
 };
@@ -74,7 +76,7 @@ fn create_schedule_commit_ix(
 }
 
 fn magic_fee_vault(ctx: &ScheduleCommitTestContext) -> Pubkey {
-    dlp::pda::magic_fee_vault_pda_from_validator(
+    dlp_api::pda::magic_fee_vault_pda_from_validator(
         &ctx.ephem_validator_identity().unwrap(),
     )
 }
@@ -313,6 +315,7 @@ fn test_schedule_commit_via_direct_and_from_other_program_indirect_cpi_including
         None,
         players,
         pdas,
+        ScheduleCommitType::Commit,
     );
 
     let nested_cpi_ix =

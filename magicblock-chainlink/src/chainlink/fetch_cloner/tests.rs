@@ -194,7 +194,7 @@ fn create_non_raw_eata_owned_account(
         Account {
             lamports: 1_000_000,
             data,
-            owner: dlp_api::dlp::id(),
+            owner: dlp_api::id(),
             executable: false,
             rent_epoch: 0,
         },
@@ -328,7 +328,7 @@ async fn test_fetch_and_clone_single_delegated_account_with_valid_delegation_rec
     let account = Account {
         lamports: 1_234,
         data: vec![1, 2, 3, 4],
-        owner: dlp_api::dlp::id(),
+        owner: dlp_api::id(),
         executable: false,
         rent_epoch: 0,
     };
@@ -407,7 +407,7 @@ async fn test_fetch_and_clone_single_delegated_account_with_different_authority(
     let account = Account {
         lamports: 1_234,
         data: vec![1, 2, 3, 4],
-        owner: dlp_api::dlp::id(),
+        owner: dlp_api::id(),
         executable: false,
         rent_epoch: 0,
     };
@@ -489,7 +489,7 @@ async fn test_fetch_and_clone_single_delegated_account_without_delegation_record
     let account = Account {
         lamports: 1_234,
         data: vec![1, 2, 3, 4],
-        owner: dlp_api::dlp::id(),
+        owner: dlp_api::id(),
         executable: false,
         rent_epoch: 0,
     };
@@ -591,7 +591,7 @@ async fn test_fetch_and_clone_multiple_accounts_mixed_types() {
     let delegated_account = Account {
         lamports: 1_000_000,
         data: vec![1, 2, 3, 4],
-        owner: dlp_api::dlp::id(),
+        owner: dlp_api::id(),
         executable: false,
         rent_epoch: 0,
     };
@@ -599,7 +599,7 @@ async fn test_fetch_and_clone_multiple_accounts_mixed_types() {
     let delegation_record_account = Account {
         lamports: 2_000_000,
         data: vec![100, 101, 102],
-        owner: dlp_api::dlp::id(),
+        owner: dlp_api::id(),
         executable: false,
         rent_epoch: 0,
     };
@@ -667,7 +667,7 @@ async fn test_fetch_and_clone_multiple_accounts_mixed_types() {
         delegation_record_pubkey,
         delegation_record_account,
         CURRENT_SLOT,
-        dlp_api::dlp::id()
+        dlp_api::id()
     );
 
     assert_subscribed_without_delegation_record!(
@@ -695,7 +695,7 @@ async fn test_fetch_and_clone_valid_delegated_account_and_account_with_invalid_d
     let delegated_account = Account {
         lamports: 1_000_000,
         data: vec![1, 2, 3, 4],
-        owner: dlp_api::dlp::id(),
+        owner: dlp_api::id(),
         executable: false,
         rent_epoch: 0,
     };
@@ -703,7 +703,7 @@ async fn test_fetch_and_clone_valid_delegated_account_and_account_with_invalid_d
     let invalid_delegated_account = Account {
         lamports: 500_000,
         data: vec![5, 6, 7, 8],
-        owner: dlp_api::dlp::id(),
+        owner: dlp_api::id(),
         executable: false,
         rent_epoch: 0,
     };
@@ -777,7 +777,7 @@ async fn test_deleg_record_stale() {
     let account = Account {
         lamports: 1_000_000,
         data: vec![1, 2, 3, 4],
-        owner: dlp_api::dlp::id(),
+        owner: dlp_api::id(),
         executable: false,
         rent_epoch: 0,
     };
@@ -854,7 +854,7 @@ async fn test_account_stale() {
     let account = Account {
         lamports: 1_000_000,
         data: vec![1, 2, 3, 4],
-        owner: dlp_api::dlp::id(),
+        owner: dlp_api::id(),
         executable: false,
         rent_epoch: 0,
     };
@@ -929,7 +929,7 @@ async fn test_delegation_record_unsub_race_condition_prevention() {
     let account = Account {
         lamports: 1_000_000,
         data: vec![1, 2, 3, 4],
-        owner: dlp_api::dlp::id(),
+        owner: dlp_api::id(),
         executable: false,
         rent_epoch: 0,
     };
@@ -1087,7 +1087,7 @@ async fn test_undelegation_requested_subscription_behavior() {
     let account = Account {
         lamports: 1_000_000,
         data: vec![1, 2, 3, 4],
-        owner: dlp_api::dlp::id(),
+        owner: dlp_api::id(),
         executable: false,
         rent_epoch: 0,
     };
@@ -1158,7 +1158,7 @@ async fn test_delegated_authoritative_skip_unsubscribes_subscription() {
     let delegated_account = Account {
         lamports: 1_000_000,
         data: vec![1, 2, 3, 4],
-        owner: dlp_api::dlp::id(),
+        owner: dlp_api::id(),
         executable: false,
         rent_epoch: 0,
     };
@@ -1461,7 +1461,7 @@ async fn test_confined_delegation_behavior() {
     let account1 = Account {
         lamports: 1_000_000,
         data: vec![1, 2, 3],
-        owner: dlp_api::dlp::id(), // Owned by DLP initially (as it is delegated)
+        owner: dlp_api::id(), // Owned by DLP initially (as it is delegated)
         executable: false,
         rent_epoch: 0,
     };
@@ -1471,7 +1471,7 @@ async fn test_confined_delegation_behavior() {
     let account2 = Account {
         lamports: 2_000_000,
         data: vec![4, 5, 6],
-        owner: dlp_api::dlp::id(),
+        owner: dlp_api::id(),
         executable: false,
         rent_epoch: 0,
     };
@@ -1927,7 +1927,7 @@ async fn test_subscribe_to_original_owner_program_on_delegated_account_fetch() {
     let account = Account {
         lamports: 1_000_000,
         data: vec![1, 2, 3, 4],
-        owner: dlp_api::dlp::id(),
+        owner: dlp_api::id(),
         executable: false,
         rent_epoch: 0,
     };
@@ -2134,7 +2134,7 @@ async fn test_subscribe_to_original_owner_program_on_delegated_account_subscript
     let delegated_account = Account {
         lamports: 1_000_000,
         data: vec![1, 2, 3, 4],
-        owner: dlp_api::dlp::id(),
+        owner: dlp_api::id(),
         executable: false,
         rent_epoch: 0,
     };
@@ -2377,7 +2377,7 @@ async fn test_discovered_dlp_owned_account_without_delegation_record_falls_back(
     let dlp_owned_account = Account {
         lamports: 1_000_000,
         data: vec![1, 2, 3, 4],
-        owner: dlp_api::dlp::id(),
+        owner: dlp_api::id(),
         executable: false,
         rent_epoch: 0,
     };
@@ -2424,7 +2424,7 @@ async fn test_discovered_dlp_owned_account_without_delegation_record_falls_back(
     let cloned_account = accounts_bank
         .get_account(&account_pubkey)
         .expect("account should be cloned by fallback subscription path");
-    assert_eq!(*cloned_account.owner(), dlp_api::dlp::id());
+    assert_eq!(*cloned_account.owner(), dlp_api::id());
     assert!(!cloned_account.delegated());
     assert_eq!(cloned_account.remote_slot(), CURRENT_SLOT);
 }
@@ -2441,7 +2441,7 @@ async fn test_discovered_dlp_owned_account_delegated_elsewhere_is_ignored() {
     let delegated_account = Account {
         lamports: 1_000_000,
         data: vec![1, 2, 3, 4],
-        owner: dlp_api::dlp::id(),
+        owner: dlp_api::id(),
         executable: false,
         rent_epoch: 0,
     };
@@ -2585,7 +2585,7 @@ async fn test_subscription_update_with_delegation_actions_clones_dependencies()
     let delegated_account = Account {
         lamports: 1_000_000,
         data: vec![],
-        owner: dlp_api::dlp::id(),
+        owner: dlp_api::id(),
         executable: false,
         rent_epoch: 0,
     };

@@ -8,7 +8,6 @@ use std::{
     time::{Duration, Instant},
 };
 
-use dlp_api::dlp;
 use magicblock_account_cloner::{
     map_committor_request_result, ChainlinkCloner,
 };
@@ -671,9 +670,9 @@ impl MagicValidator {
         let validator_keypair = validator_authority();
         let validator_pubkey = validator_keypair.pubkey();
         let vault_pubkey =
-            dlp::pda::magic_fee_vault_pda_from_validator(&validator_pubkey);
+            dlp_api::pda::magic_fee_vault_pda_from_validator(&validator_pubkey);
         let delegation_record_pubkey =
-            dlp::pda::delegation_record_pda_from_delegated_account(
+            dlp_api::pda::delegation_record_pda_from_delegated_account(
                 &vault_pubkey,
             );
 

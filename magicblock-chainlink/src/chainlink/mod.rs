@@ -6,7 +6,7 @@ use std::{
     },
 };
 
-use dlp_api::dlp::pda::ephemeral_balance_pda_from_payer;
+use dlp_api::pda::ephemeral_balance_pda_from_payer;
 use errors::ChainlinkResult;
 use fetch_cloner::FetchCloner;
 use magicblock_accounts_db::{traits::AccountsBank, AccountsDbResult};
