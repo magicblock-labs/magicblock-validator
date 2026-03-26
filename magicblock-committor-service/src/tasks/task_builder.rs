@@ -1,6 +1,7 @@
 use std::{collections::HashMap, sync::Arc};
 
 use async_trait::async_trait;
+use futures_util::future::try_join_all;
 use magicblock_core::intent::CommittedAccount;
 use magicblock_program::magic_scheduled_base_intent::{
     BaseAction, CommitAndUndelegate, CommitType, ScheduledIntentBundle,
@@ -340,6 +341,7 @@ impl TasksBuilder for TaskBuilderImpl {
         }
 
         let mut tasks = Vec::new();
+        let mut futures = Vec::with_capacity(2);
 
         if let Some(ref value) = intent_bundle.intent_bundle.commit {
             tasks.extend(create_finalize_tasks(value));
@@ -349,14 +351,16 @@ impl TasksBuilder for TaskBuilderImpl {
             intent_bundle.intent_bundle.commit_and_undelegate
         {
             tasks.extend(create_finalize_tasks(&value.commit_action));
-            tasks.extend(create_undelegate_tasks(value, info_fetcher).await?);
-        };
+            futures.push(create_undelegate_tasks(value, info_fetcher));
+        }
 
         if let Some(ref value) =
             intent_bundle.intent_bundle.commit_finalize_and_undelegate
         {
-            tasks.extend(create_undelegate_tasks(value, info_fetcher).await?);
-        };
+            futures.push(create_undelegate_tasks(value, info_fetcher));
+        }
+
+        tasks.extend(try_join_all(futures).await?.into_iter().flatten());
 
         Ok(tasks)
     }
