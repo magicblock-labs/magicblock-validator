@@ -356,10 +356,7 @@ impl MagicblockRpcClient {
             vec![None; num_chunks];
 
         for result in chunked_results {
-            let (chunk_idx, rpc_result) = match result {
-                Ok(v) => v,
-                Err(err) => return Err(err.into()),
-            };
+            let (chunk_idx, rpc_result) = result;
             let accs = rpc_result?;
             if chunk_idx >= chunks.len() {
                 return Err(MagicBlockRpcClientError::Other(format!(
