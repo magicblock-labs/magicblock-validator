@@ -332,9 +332,11 @@ impl MagicblockRpcClient {
         }
 
         let mut join_set = JoinSet::new();
+        let mut chunk_count = 0usize;
         for (chunk_idx, pubkey_chunk) in
             pubkeys.chunks(max_per_fetch).enumerate()
         {
+            chunk_count = chunk_idx + 1;
             let client = self.client.clone();
             let pubkeys = pubkey_chunk.to_vec();
             let config = config.clone();
@@ -348,15 +350,14 @@ impl MagicblockRpcClient {
             });
         }
 
-        // `JoinSet::join_all()` returns results in completion order, not spawn order.
-        // Reassemble by chunk index to preserve positional correspondence with `pubkeys`.
-        let chunked_results = join_set.join_all().await;
-        let num_chunks = (pubkeys.len() + max_per_fetch - 1) / max_per_fetch;
         let mut chunks: Vec<Option<Vec<Option<Account>>>> =
-            vec![None; num_chunks];
-
-        for result in chunked_results {
-            let (chunk_idx, rpc_result) = result;
+            vec![None; chunk_count];
+        while let Some(joined) = join_set.join_next().await {
+            let (chunk_idx, rpc_result) = joined.map_err(|err| {
+                MagicBlockRpcClientError::Other(format!(
+                    "get_multiple_accounts_with_config: task join error: {err}"
+                ))
+            })?;
             let accs = rpc_result?;
             if chunk_idx >= chunks.len() {
                 return Err(MagicBlockRpcClientError::Other(format!(
