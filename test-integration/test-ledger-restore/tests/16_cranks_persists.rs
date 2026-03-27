@@ -1,12 +1,17 @@
-use std::{path::Path, process::Child};
+use std::{
+    path::Path,
+    process::Child,
+    thread::sleep,
+    time::{Duration, Instant},
+};
 
 use cleanass::assert;
 use integration_test_tools::{
     expect, loaded_accounts::LoadedAccounts, tmpdir::resolve_tmp_dir,
-    validator::cleanup,
+    validator::cleanup, IntegrationTestContext,
 };
 use program_flexi_counter::instruction::create_schedule_task_ix;
-use solana_sdk::{signature::Keypair, signer::Signer};
+use solana_sdk::{pubkey::Pubkey, signature::Keypair, signer::Signer};
 use test_kit::init_logger;
 use test_ledger_restore::{
     confirm_tx_with_payer_ephem, fetch_counter_ephem,
@@ -95,12 +100,12 @@ fn read(ledger_path: &Path, kp: &Keypair, count: u64) -> Child {
         count
     );
 
-    // Wait for the crank to execute
-    expect!(ctx.wait_for_delta_slot_ephem(10), validator);
-
-    // Check that the count increased
-    let new_count =
-        fetch_counter_ephem(&ctx, &kp.pubkey(), &mut validator).count;
+    let new_count = wait_for_counter_to_increase(
+        &ctx,
+        &mut validator,
+        &kp.pubkey(),
+        current_count,
+    );
     assert!(
         new_count > current_count,
         cleanup(&mut validator),
@@ -110,4 +115,36 @@ fn read(ledger_path: &Path, kp: &Keypair, count: u64) -> Child {
     );
 
     validator
+}
+
+fn wait_for_counter_to_increase(
+    ctx: &IntegrationTestContext,
+    validator: &mut Child,
+    payer: &Pubkey,
+    current_count: u64,
+) -> u64 {
+    const TIMEOUT: Duration = Duration::from_secs(45);
+    const POLL_INTERVAL: Duration = Duration::from_millis(200);
+
+    let started = Instant::now();
+    loop {
+        let new_count = fetch_counter_ephem(ctx, payer, validator).count;
+        if new_count > current_count {
+            return new_count;
+        }
+
+        if started.elapsed() >= TIMEOUT {
+            cleanup(validator);
+            panic!(
+                "Timed out waiting for counter to increase after restore: current_count={}, last_observed={:?}",
+                current_count,
+                new_count
+            );
+        }
+
+        // The first resumed execution after restore rehydrates accounts and
+        // programs on demand, so progress is not guaranteed within a fixed
+        // number of slots on CI.
+        sleep(POLL_INTERVAL);
+    }
 }
