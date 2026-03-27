@@ -2852,3 +2852,167 @@ async fn test_delegated_eata_update_does_not_override_delegated_ata_in_bank() {
         "Delegated ATA amount should keep local state",
     );
 }
+
+#[tokio::test]
+async fn test_fetch_subscription_race_duplicate_clone() {
+    // This test reproduces the duplicate clone transaction race condition
+    // between the on-demand fetch path (fetch_and_clone_accounts_with_dedup)
+    // and the subscription update path (process_subscription_update).
+    //
+    // The race condition: both paths do not coordinate with each other.
+    // When an account is being fetched on-demand while a subscription update
+    // arrives for the same (pubkey, slot), both paths independently submit
+    // clone requests, resulting in duplicate clone transactions.
+    //
+    // BEFORE FIX: new_clones == 2 (both paths submit independently)
+    // AFTER FIX: new_clones == 1 (shared dedup cache prevents duplicates)
+    //
+    // To reproduce reliably we use:
+    // 1. A non-delegated account so the subscription path doesn't get
+    //    intercepted by greedy clone (which routes back through the fetch path).
+    // 2. A clone delay in the ClonerStub so the fetch path's clone_account()
+    //    takes long enough for the subscription path to also pass the bank
+    //    slot check before either writes to the bank.
+
+    init_logger();
+    let validator_keypair = Keypair::new();
+    let account_owner = random_pubkey();
+    const CURRENT_SLOT: u64 = 100;
+
+    let account_pubkey = random_pubkey();
+    // Non-delegated account (owner is NOT dlp_api::id()) so the subscription
+    // path goes through resolve → clone_account() independently instead of
+    // being intercepted by maybe_greedily_clone_discovered_delegated_account.
+    let account = Account {
+        lamports: 1_000_000,
+        data: vec![1, 2, 3, 4],
+        owner: account_owner,
+        executable: false,
+        rent_epoch: 0,
+    };
+
+    let FetcherTestCtx {
+        accounts_bank,
+        remote_account_provider,
+        ..
+    } = setup(
+        [(account_pubkey, account.clone())],
+        CURRENT_SLOT,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+
+    // Create a cloner stub with a delay so clone_account() takes long enough
+    // for both paths to pass the bank slot check before either writes.
+    let cloner_stub = Arc::new(ClonerStub::new(accounts_bank.clone()));
+    cloner_stub
+        .set_clone_delay(std::time::Duration::from_millis(200));
+    let initial_count = cloner_stub.clone_request_count();
+
+    // Create FetchCloner with our tracking cloner stub
+    let (subscription_tx, subscription_rx) = mpsc::channel(100);
+    let fetch_cloner = FetchCloner::new(
+        &remote_account_provider,
+        &accounts_bank,
+        &cloner_stub,
+        validator_keypair.insecure_clone(),
+        Pubkey::new_unique(),
+        subscription_rx,
+        None,
+    );
+
+    // PHASE 1: Trigger on-demand fetch (spawned, runs concurrently)
+    let fetch_task = {
+        let fc = fetch_cloner.clone();
+        tokio::spawn(async move {
+            fc.fetch_and_clone_accounts_with_dedup(
+                &[account_pubkey],
+                None,
+                None,
+                AccountFetchOrigin::GetAccount,
+                None,
+            )
+            .await
+        })
+    };
+
+    // PHASE 2: Let the fetch path start processing (RPC call completes in
+    // the mock almost instantly, but we need it past the bank check).
+    // The 200ms clone delay ensures it hasn't written to bank yet.
+    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+
+    // PHASE 3: Inject subscription update for the SAME (pubkey, slot).
+    // The subscription listener picks this up and processes it through
+    // process_subscription_update → resolve → clone_account().
+    // Since the fetch path's clone_account() is still sleeping (200ms delay),
+    // the account is NOT yet in bank, so the subscription path passes
+    // the out-of-order slot check and also calls clone_account().
+    let subscription_account =
+        crate::remote_account_provider::RemoteAccount::from_fresh_account(
+            account.clone(),
+            CURRENT_SLOT,
+            crate::remote_account_provider::RemoteAccountUpdateSource::Subscription,
+        );
+    subscription_tx
+        .send(ForwardedSubscriptionUpdate {
+            pubkey: account_pubkey,
+            account: subscription_account,
+        })
+        .await
+        .unwrap();
+
+    // PHASE 4: Wait for both paths to complete.
+    // The fetch path takes ~200ms (clone delay). The subscription path
+    // also takes ~200ms. Give enough time for both.
+    let fetch_result = fetch_task.await.unwrap();
+    assert!(
+        fetch_result.is_ok(),
+        "Fetch should succeed, got: {:?}",
+        fetch_result
+    );
+
+    // Wait for the subscription path to finish processing too
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+    // ASSERTION: Both paths submitted clone requests independently (the bug)
+    let clone_requests = cloner_stub.clone_requests();
+    let post_count = clone_requests.len();
+    let new_clones = post_count - initial_count;
+
+    // Count clones specifically for our account at the same slot
+    let same_account_clones = clone_requests
+        .iter()
+        .filter(|r| {
+            r.pubkey == account_pubkey
+                && r.account.remote_slot() == CURRENT_SLOT
+        })
+        .count();
+
+    // EXPECTED: Only 1 clone request should be submitted for the same
+    // (pubkey, slot). Without cross-path dedup both the fetch and subscription
+    // paths independently call clone_account(), producing 2 requests.
+    // This assertion will FAIL until the dedup fix is applied.
+    assert_eq!(
+        same_account_clones, 1,
+        "Expected 1 clone request (dedup should prevent duplicate), got {}. \
+         Clone requests: {}",
+        same_account_clones,
+        clone_requests
+            .iter()
+            .enumerate()
+            .map(|(i, r)| format!(
+                "[{}] pubkey={}, slot={}",
+                i,
+                r.pubkey,
+                r.account.remote_slot()
+            ))
+            .collect::<Vec<_>>()
+            .join("; ")
+    );
+
+    // Verify account was cloned into bank
+    assert!(
+        accounts_bank.get_account(&account_pubkey).is_some(),
+        "Account should be present in bank"
+    );
+}

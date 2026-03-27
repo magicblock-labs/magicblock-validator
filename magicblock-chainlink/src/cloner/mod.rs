@@ -49,6 +49,7 @@ impl Deref for DelegationActions {
     }
 }
 
+#[derive(Clone)]
 pub struct AccountCloneRequest {
     pub pubkey: Pubkey,
     pub account: AccountSharedData,
