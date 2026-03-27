@@ -212,7 +212,7 @@ pub(in crate::intent_executor) fn handle_actions_result<A>(
     callback_scheduler: &A,
     execution_report: &mut IntentExecutionReport,
     transaction_strategy: &mut TransactionStrategy,
-    signauture: Option<Signature>,
+    signature: Option<Signature>,
     result: ActionResult,
 ) -> TransactionStrategy
 where
@@ -228,7 +228,7 @@ where
         (callbacks, removed_actions)
     };
     if !callbacks.is_empty() {
-        let result = callback_scheduler.schedule(callbacks, signauture, result);
+        let result = callback_scheduler.schedule(callbacks, signature, result);
         execution_report.add_callback_report(result);
     }
 
