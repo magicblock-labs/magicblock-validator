@@ -15,11 +15,7 @@ use config::RemoteAccountProviderConfig;
 pub(crate) use errors::{
     RemoteAccountProviderError, RemoteAccountProviderResult,
 };
-use futures_util::{
-    future::{join_all, try_join_all},
-    stream::FuturesUnordered,
-    StreamExt,
-};
+use futures_util::future::{join_all, try_join_all};
 pub use lru_cache::AccountsLruCache;
 pub(crate) use remote_account::RemoteAccount;
 pub use remote_account::RemoteAccountUpdateSource;
@@ -84,6 +80,7 @@ use crate::{
 
 const ACTIVE_SUBSCRIPTIONS_UPDATE_INTERVAL_MS: u64 = 60_000;
 pub(crate) const DEFAULT_SUBSCRIPTION_RETRIES: usize = 5;
+const INITIAL_PUBSUB_CONNECT_TIMEOUT_SECS: u64 = 5;
 
 // Maps pubkey -> (fetch_start_slot, requests_waiting)
 type FetchResult = Result<RemoteAccount, RemoteAccountProviderError>;
@@ -351,48 +348,53 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         // Build pubsub clients and wrap them into a SubMuxClient
         let pubsubs = endpoints.pubsubs();
         let resubscription_delay = config.resubscription_delay();
-        let mut pubsub_futs = FuturesUnordered::new();
-        for ep in pubsubs.iter() {
+        let pubsub_futs = pubsubs.iter().map(|ep| {
             let rpc_client = rpc_client.clone();
             let chain_slot = chain_slot.clone();
             let ep_label = ep.label().to_string();
             let grpc_cfg = config.grpc().clone();
-            pubsub_futs.push(async move {
+            async move {
                 let (abort_tx, abort_rx) = mpsc::channel(1);
-                let client = ChainUpdatesClient::try_new_from_endpoint(
-                    ep,
-                    commitment,
-                    abort_tx,
-                    chain_slot,
-                    resubscription_delay,
-                    rpc_client,
-                    &grpc_cfg,
+                let client = time::timeout(
+                    Duration::from_secs(INITIAL_PUBSUB_CONNECT_TIMEOUT_SECS),
+                    ChainUpdatesClient::try_new_from_endpoint(
+                        ep,
+                        commitment,
+                        abort_tx,
+                        chain_slot,
+                        resubscription_delay,
+                        rpc_client,
+                        &grpc_cfg,
+                    ),
                 )
-                .await;
+                .await
+                .map_err(|_| {
+                    RemoteAccountProviderError::AccountSubscriptionsTaskFailed(
+                        format!(
+                            "Timed out connecting to pubsub endpoint after {}s",
+                            INITIAL_PUBSUB_CONNECT_TIMEOUT_SECS
+                        ),
+                    )
+                })
+                .and_then(|result| result);
                 (ep_label, client.map(|c| (Arc::new(c), abort_rx)))
-            });
-        }
-
-        let mut pubsubs = Vec::new();
-        while let Some((label, result)) = pubsub_futs.next().await {
-            match result {
-                Ok(client) => {
-                    pubsubs.push(client);
-                    debug!(
-                        endpoint = %label,
-                        "Proceeding with first connected pubsub client"
-                    );
-                    break;
-                }
+            }
+        });
+        let results = join_all(pubsub_futs).await;
+        let pubsubs: Vec<_> = results
+            .into_iter()
+            .filter_map(|(label, result)| match result {
+                Ok(client) => Some(client),
                 Err(err) => {
                     warn!(
                         endpoint = %label,
                         error = %err,
                         "Skipping pubsub client that failed to connect"
                     );
+                    None
                 }
-            }
-        }
+            })
+            .collect();
 
         if pubsubs.is_empty() {
             return Err(RemoteAccountProviderError::AllPubsubClientsFailed);
