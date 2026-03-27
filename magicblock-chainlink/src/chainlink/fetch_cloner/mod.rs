@@ -138,6 +138,7 @@ where
     C: Cloner,
 {
     /// Create FetchCloner with subscription updates properly connected
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         remote_account_provider: &Arc<RemoteAccountProvider<T, U>>,
         accounts_bank: &Arc<V>,

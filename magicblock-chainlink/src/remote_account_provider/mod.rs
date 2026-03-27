@@ -34,8 +34,7 @@ use solana_rpc_client_api::{
 use solana_sysvar::clock;
 use tokio::{
     sync::{mpsc, oneshot},
-    task,
-    time,
+    task, time,
 };
 use tracing::*;
 

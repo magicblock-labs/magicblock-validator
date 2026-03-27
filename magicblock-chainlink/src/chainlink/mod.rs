@@ -132,11 +132,8 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
             &config.remote_account_provider,
         )
         .await?;
-        let fetch_cloner = if let Some((
-            provider,
-            dedup_cache,
-            dedup_window,
-        )) = account_provider
+        let fetch_cloner = if let Some((provider, dedup_cache, dedup_window)) =
+            account_provider
         {
             let provider = Arc::new(provider);
             let fetch_cloner = FetchCloner::new(

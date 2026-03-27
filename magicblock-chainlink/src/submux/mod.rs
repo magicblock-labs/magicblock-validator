@@ -782,9 +782,7 @@ where
     /// Returns a clone of the dedup cache Arc.
     /// Used to share the cache with FetchCloner so both fetch and
     /// subscription paths coordinate on (pubkey, slot) deduplication.
-    pub fn dedup_cache(
-        &self,
-    ) -> Arc<Mutex<HashMap<(Pubkey, u64), Instant>>> {
+    pub fn dedup_cache(&self) -> Arc<Mutex<HashMap<(Pubkey, u64), Instant>>> {
         self.dedup_cache.clone()
     }
 
