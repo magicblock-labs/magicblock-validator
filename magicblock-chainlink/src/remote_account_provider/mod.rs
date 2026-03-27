@@ -15,7 +15,11 @@ use config::RemoteAccountProviderConfig;
 pub(crate) use errors::{
     RemoteAccountProviderError, RemoteAccountProviderResult,
 };
-use futures_util::future::{join_all, try_join_all};
+use futures_util::{
+    future::{join_all, try_join_all},
+    stream::FuturesUnordered,
+    StreamExt,
+};
 pub use lru_cache::AccountsLruCache;
 pub(crate) use remote_account::RemoteAccount;
 pub use remote_account::RemoteAccountUpdateSource;
@@ -347,12 +351,13 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         // Build pubsub clients and wrap them into a SubMuxClient
         let pubsubs = endpoints.pubsubs();
         let resubscription_delay = config.resubscription_delay();
-        let pubsub_futs = pubsubs.iter().map(|ep| {
+        let mut pubsub_futs = FuturesUnordered::new();
+        for ep in pubsubs.iter() {
             let rpc_client = rpc_client.clone();
             let chain_slot = chain_slot.clone();
             let ep_label = ep.label().to_string();
             let grpc_cfg = config.grpc().clone();
-            async move {
+            pubsub_futs.push(async move {
                 let (abort_tx, abort_rx) = mpsc::channel(1);
                 let client = ChainUpdatesClient::try_new_from_endpoint(
                     ep,
@@ -365,23 +370,29 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                 )
                 .await;
                 (ep_label, client.map(|c| (Arc::new(c), abort_rx)))
-            }
-        });
-        let results = join_all(pubsub_futs).await;
-        let pubsubs: Vec<_> = results
-            .into_iter()
-            .filter_map(|(label, result)| match result {
-                Ok(client) => Some(client),
+            });
+        }
+
+        let mut pubsubs = Vec::new();
+        while let Some((label, result)) = pubsub_futs.next().await {
+            match result {
+                Ok(client) => {
+                    pubsubs.push(client);
+                    debug!(
+                        endpoint = %label,
+                        "Proceeding with first connected pubsub client"
+                    );
+                    break;
+                }
                 Err(err) => {
                     warn!(
                         endpoint = %label,
                         error = %err,
                         "Skipping pubsub client that failed to connect"
                     );
-                    None
                 }
-            })
-            .collect();
+            }
+        }
 
         if pubsubs.is_empty() {
             return Err(RemoteAccountProviderError::AllPubsubClientsFailed);
