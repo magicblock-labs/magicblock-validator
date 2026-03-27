@@ -4,10 +4,10 @@ use dlp_api::state::DelegationRecord;
 use futures_util::future::join_all;
 use magicblock_accounts_db::traits::AccountsBank;
 use magicblock_core::token_programs::{
-    is_ata, try_derive_eata_address_and_bump,
+    is_ata, try_derive_ata_address_and_bump, try_derive_eata_address_and_bump,
 };
 use magicblock_metrics::metrics;
-use solana_account::AccountSharedData;
+use solana_account::{AccountSharedData, ReadableAccount};
 use solana_pubkey::Pubkey;
 use tokio::task::JoinSet;
 use tracing::*;
@@ -27,6 +27,28 @@ pub(crate) fn derive_eata_pubkey_from_ata_account(
     let ata_info = is_ata(ata_pubkey, ata_account)?;
     let (eata_pubkey, _) =
         try_derive_eata_address_and_bump(&ata_info.owner, &ata_info.mint)?;
+    Some(eata_pubkey)
+}
+
+pub(crate) fn derive_eata_pubkey_from_ata_layout(
+    ata_pubkey: &Pubkey,
+    ata_account: &AccountSharedData,
+) -> Option<Pubkey> {
+    let data = ata_account.data();
+    if data.len() < 64 {
+        return None;
+    }
+
+    let mint = Pubkey::new_from_array(data[0..32].try_into().ok()?);
+    let wallet_owner = Pubkey::new_from_array(data[32..64].try_into().ok()?);
+    let (derived_ata, _) =
+        try_derive_ata_address_and_bump(&wallet_owner, &mint)?;
+    if derived_ata != *ata_pubkey {
+        return None;
+    }
+
+    let (eata_pubkey, _) =
+        try_derive_eata_address_and_bump(&wallet_owner, &mint)?;
     Some(eata_pubkey)
 }
 

@@ -345,7 +345,10 @@ where
                 );
 
                 if account.delegated()
-                    && is_ata(&pubkey, &account).is_some()
+                    && ata_projection::derive_eata_pubkey_from_ata_account(
+                        &pubkey, &account,
+                    )
+                    .is_some()
                     && deleg_record.as_ref().is_some_and(|record| {
                         record.owner == EATA_PROGRAM_ID
                             && (record.authority == self.validator_pubkey
@@ -1431,7 +1434,7 @@ where
             );
 
             if let Some(eata_pubkey) =
-                ata_projection::derive_eata_pubkey_from_ata_account(
+                ata_projection::derive_eata_pubkey_from_ata_layout(
                     pubkey, in_bank,
                 )
             {
