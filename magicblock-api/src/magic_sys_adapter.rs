@@ -1,11 +1,11 @@
-use std::{collections::HashMap, error::Error, sync::Arc, time::Duration};
+use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use magicblock_committor_service::CommittorService;
 use magicblock_core::{intent::CommittedAccount, traits::MagicSys};
 use magicblock_metrics::metrics;
 use solana_instruction::error::InstructionError;
 use solana_pubkey::Pubkey;
-use tracing::{error, trace};
+use tracing::error;
 
 #[derive(Clone)]
 pub struct MagicSysAdapter {
@@ -30,15 +30,6 @@ impl MagicSysAdapter {
 }
 
 impl MagicSys for MagicSysAdapter {
-    fn persist(&self, id: u64, data: Vec<u8>) -> Result<(), Box<dyn Error>> {
-        trace!(id, data_len = data.len(), "Persisting data");
-        Ok(())
-    }
-
-    fn load(&self, _id: u64) -> Result<Option<Vec<u8>>, Box<dyn Error>> {
-        Ok(None)
-    }
-
     fn fetch_current_commit_nonces(
         &self,
         commits: &[CommittedAccount],

@@ -17,12 +17,13 @@ use crate::{
     magic_sys::fetch_current_commit_nonces,
     schedule_transactions::{self, check_commit_limits, try_get_fee_vault},
     utils::{
-        account_actions::mark_account_as_undelegated,
+        account_actions::{
+            charge_delegated_payer, mark_account_as_undelegated,
+        },
         accounts::{
             get_instruction_account_with_idx, get_instruction_pubkey_with_idx,
             get_writable_with_idx,
         },
-        charge_delegated_payer,
         instruction_utils::InstructionUtils,
     },
     MagicContext,

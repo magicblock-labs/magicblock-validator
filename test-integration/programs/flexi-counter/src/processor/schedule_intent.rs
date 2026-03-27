@@ -1,8 +1,9 @@
 use borsh::to_vec;
 use ephemeral_rollups_sdk::{
     ephem::{
-        CallHandler, CommitAndUndelegate, CommitType, MagicAction,
-        MagicInstructionBuilder, MagicIntentBundleBuilder, UndelegateType,
+        CallHandler, CommitAndUndelegate, CommitType, FoldableIntentBuilder,
+        MagicAction, MagicInstructionBuilder, MagicIntentBundleBuilder,
+        UndelegateType,
     },
     ActionArgs, ShortAccountMeta,
 };
@@ -89,6 +90,7 @@ pub fn process_create_intent(
         .collect::<Vec<_>>();
     let commit_action = CommitType::WithHandler {
         commited_accounts: committees.to_vec(),
+        callbacks: vec![],
         call_handlers,
     };
 
@@ -126,7 +128,10 @@ pub fn process_create_intent(
                 })
             })
             .collect::<Result<Vec<_>, ProgramError>>()?;
-        let undelegate_action = UndelegateType::WithHandler(call_handlers);
+        let undelegate_action = UndelegateType::WithHandler {
+            call_handlers,
+            callbacks: vec![],
+        };
         let undelegate_type_action = CommitAndUndelegate {
             commit_type: commit_action,
             undelegate_type: undelegate_action,
@@ -250,7 +255,7 @@ pub fn process_create_intent_bundle(
         builder = builder
             .commit(commit_only_counters)
             .add_post_commit_actions(call_handlers)
-            .fold();
+            .fold_builder();
     }
 
     // Build CommitAndUndelegate intent
@@ -322,7 +327,7 @@ pub fn process_create_intent_bundle(
             .commit_and_undelegate(undelegate_counters)
             .add_post_commit_actions(commit_handlers)
             .add_post_undelegate_actions(undelegate_handlers)
-            .fold();
+            .fold_builder();
     }
 
     // Build and invoke the intent bundle

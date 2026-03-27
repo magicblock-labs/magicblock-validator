@@ -1,5 +1,6 @@
 use std::{collections::HashMap, path::Path, sync::Arc, time::Instant};
 
+use magicblock_core::traits::ActionsCallbackScheduler;
 use magicblock_program::magic_scheduled_base_intent::ScheduledIntentBundle;
 use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
@@ -107,19 +108,22 @@ struct CommittorActor {
 }
 
 impl CommittorActor {
-    pub fn try_new<P>(
+    pub fn try_new<P, A>(
         receiver: mpsc::Receiver<CommittorMessage>,
         authority: Keypair,
         persist_file: P,
         chain_config: ChainConfig,
+        actions_callback_executor: A,
     ) -> CommittorServiceResult<Self>
     where
         P: AsRef<Path>,
+        A: ActionsCallbackScheduler,
     {
         let processor = Arc::new(CommittorProcessor::try_new(
             authority,
             persist_file,
             chain_config,
+            actions_callback_executor,
         )?);
 
         Ok(Self {
@@ -308,13 +312,15 @@ pub struct CommittorService {
 }
 
 impl CommittorService {
-    pub fn try_start<P>(
+    pub fn try_start<P, A>(
         authority: Keypair,
         persist_file: P,
         chain_config: ChainConfig,
+        actions_callback_executor: A,
     ) -> CommittorServiceResult<Self>
     where
         P: AsRef<Path>,
+        A: ActionsCallbackScheduler,
     {
         debug!("Starting committor service");
         let (sender, receiver) = mpsc::channel(1_000);
@@ -326,6 +332,7 @@ impl CommittorService {
                 authority,
                 persist_file,
                 chain_config,
+                actions_callback_executor,
             )?;
             tokio::spawn(async move {
                 actor.run(cancel_token).await;
