@@ -8,7 +8,9 @@ use magicblock_core::{
         LatestBlockProvider,
     },
 };
-use magicblock_magic_program_api::response::{ActionReceipt, MagicResponse};
+use magicblock_magic_program_api::response::{
+    ActionReceipt, MagicResponse, MagicResponseV1,
+};
 use solana_instruction::{AccountMeta, Instruction};
 use solana_keypair::Keypair;
 use solana_message::{Message, VersionedMessage};
@@ -83,26 +85,18 @@ impl<L: LatestBlockProvider> ActionsCallbackService<L> {
             .collect()
     }
 
-    fn build_action_receipt(signature: Signature) -> ActionReceipt {
-        ActionReceipt {
-            signature,
-            slot: None,
-            logs: None,
-        }
-    }
-
     fn build_instruction(
         callback: BaseActionCallback,
         authority: &Pubkey,
         signature: Option<Signature>,
         result: Result<(), String>,
     ) -> Result<Instruction, CallbackScheduleError> {
-        let response = MagicResponse {
+        let response = MagicResponse::V1(MagicResponseV1 {
             ok: result.is_ok(),
             data: callback.payload,
             error: result.err().unwrap_or_default(),
-            receipt: signature.map(Self::build_action_receipt),
-        };
+            receipt: signature.map(|signature| ActionReceipt { signature }),
+        });
         let mut data = callback.discriminator;
         data.extend(
             bincode::serialize(&response)
