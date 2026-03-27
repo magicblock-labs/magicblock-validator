@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use futures_util::future::join_all;
 use magicblock_core::{
     intent::BaseActionCallback,
     traits::{
@@ -7,7 +8,7 @@ use magicblock_core::{
         LatestBlockProvider,
     },
 };
-use magicblock_magic_program_api::response::MagicResponse;
+use magicblock_magic_program_api::response::{ActionReceipt, MagicResponse};
 use solana_instruction::{AccountMeta, Instruction};
 use solana_keypair::Keypair;
 use solana_message::{Message, VersionedMessage};
@@ -52,6 +53,7 @@ impl<L: LatestBlockProvider> ActionsCallbackService<L> {
     fn build_transactions(
         &self,
         callbacks: Vec<BaseActionCallback>,
+        signature: Option<Signature>,
         result: ActionResult,
     ) -> Vec<Result<VersionedTransaction, CallbackScheduleError>> {
         let authority_pubkey = self.authority.pubkey();
@@ -64,6 +66,7 @@ impl<L: LatestBlockProvider> ActionsCallbackService<L> {
                 let ix = Self::build_instruction(
                     callback,
                     &authority_pubkey,
+                    signature,
                     result.clone(),
                 )?;
                 let message = Message::new_with_blockhash(
@@ -80,15 +83,25 @@ impl<L: LatestBlockProvider> ActionsCallbackService<L> {
             .collect()
     }
 
+    fn build_action_receipt(signature: Signature) -> ActionReceipt {
+        ActionReceipt {
+            signature,
+            slot: None,
+            logs: None,
+        }
+    }
+
     fn build_instruction(
         callback: BaseActionCallback,
         authority: &Pubkey,
+        signature: Option<Signature>,
         result: Result<(), String>,
     ) -> Result<Instruction, CallbackScheduleError> {
         let response = MagicResponse {
             ok: result.is_ok(),
             data: callback.payload,
             error: result.err().unwrap_or_default(),
+            receipt: signature.map(Self::build_action_receipt),
         };
         let mut data = callback.discriminator;
         data.extend(
@@ -126,9 +139,11 @@ impl<L: LatestBlockProvider> ActionsCallbackScheduler
     fn schedule(
         &self,
         callbacks: Vec<BaseActionCallback>,
+        signature: Option<Signature>,
         result: ActionResult,
     ) -> Vec<Result<Signature, CallbackScheduleError>> {
-        let transactions_result = self.build_transactions(callbacks, result);
+        let transactions_result =
+            self.build_transactions(callbacks, signature, result);
 
         let mut valid_transactions = vec![];
         let signatures = transactions_result
@@ -146,14 +161,17 @@ impl<L: LatestBlockProvider> ActionsCallbackScheduler
         if !valid_transactions.is_empty() {
             let rpc_client = self.rpc_client.clone();
             tokio::spawn(async move {
-                for tx in valid_transactions {
-                    if let Err(err) = rpc_client.send_transaction(&tx).await {
+                let send_futs = valid_transactions
+                    .iter()
+                    .map(|tx| rpc_client.send_transaction(tx));
+                join_all(send_futs).await.into_iter().for_each(|result| {
+                    if let Err(err) = result {
                         error!(
                             error = ?err,
                             "Failed to send action callback transaction"
                         );
                     }
-                }
+                });
             });
         }
 

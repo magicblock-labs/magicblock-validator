@@ -286,8 +286,10 @@ where
                         // The race between callback and intent txn is handled
                         // on the user smart contract side via TimeoutError.
                         // We must respect the timeout contract.
-                        single_stage_executor
-                            .execute_callbacks(Err(ActionError::TimeoutError));
+                        single_stage_executor.execute_callbacks(
+                            None,
+                            Err(ActionError::TimeoutError),
+                        );
                         single_stage_executor
                             .execute(&committed_pubkeys, persister)
                             .await
@@ -296,7 +298,7 @@ where
             } else {
                 // Already timed out; see comment above.
                 single_stage_executor
-                    .execute_callbacks(Err(ActionError::TimeoutError));
+                    .execute_callbacks(None, Err(ActionError::TimeoutError));
                 single_stage_executor
                     .execute(&committed_pubkeys, persister)
                     .await
@@ -324,10 +326,11 @@ where
                 finalize_signature: _,
             }) if !committed_pubkeys.is_empty() => err,
             res => {
-            single_stage_executor.execute_callbacks(res.as_ref().map(|_| ()));
+                let signature = res.as_ref().ok().copied();
+            single_stage_executor.execute_callbacks(signature, res.as_ref().map(|_| ()));
                 let transaction_strategy = single_stage_executor.consume_strategy();
                 self.junk.push(transaction_strategy);
-                return res;
+                return res.map(ExecutionOutput::SingleStage);
             }
         };
 
@@ -378,15 +381,18 @@ where
                         // on the user smart contract side via TimeoutError.
                         // We must respect the timeout contract.
                         has_finalize_callbacks = false;
-                        executor
-                            .execute_callbacks(Err(ActionError::TimeoutError));
+                        executor.execute_callbacks(
+                            None,
+                            Err(ActionError::TimeoutError),
+                        );
                         executor.commit(committed_pubkeys, persister).await
                     }
                 }
             } else {
                 // Already timed out; see comment above.
                 has_finalize_callbacks = false;
-                executor.execute_callbacks(Err(ActionError::TimeoutError));
+                executor
+                    .execute_callbacks(None, Err(ActionError::TimeoutError));
                 executor.commit(committed_pubkeys, persister).await
             }
         } else {
@@ -406,15 +412,18 @@ where
                         // The race between callback and intent txn is handled
                         // on the user smart contract side via TimeoutError.
                         // We must respect the timeout contract.
-                        finalize_executor
-                            .execute_callbacks(Err(ActionError::TimeoutError));
+                        // TODO(edwin): enable executors to store Sent signature
+                        finalize_executor.execute_callbacks(
+                            None,
+                            Err(ActionError::TimeoutError),
+                        );
                         finalize_executor.finalize(persister).await
                     }
                 }
             } else {
                 // Already timed out; see comment above.
                 finalize_executor
-                    .execute_callbacks(Err(ActionError::TimeoutError));
+                    .execute_callbacks(None, Err(ActionError::TimeoutError));
                 finalize_executor.finalize(persister).await
             }
         } else {

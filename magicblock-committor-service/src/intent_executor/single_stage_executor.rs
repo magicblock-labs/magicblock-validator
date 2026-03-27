@@ -14,7 +14,7 @@ use crate::{
             TransactionStrategyExecutionError,
         },
         task_info_fetcher::TaskInfoFetcher,
-        ExecutionOutput, IntentExecutorImpl,
+        IntentExecutorImpl,
     },
     persist::{IntentPersister, IntentPersisterImpl},
     tasks::{
@@ -56,7 +56,7 @@ where
         &mut self,
         committed_pubkeys: &[Pubkey],
         persister: &Option<P>,
-    ) -> IntentExecutorResult<ExecutionOutput> {
+    ) -> IntentExecutorResult<Signature> {
         const RECURSION_CEILING: u8 = 10;
 
         let result = loop {
@@ -76,7 +76,7 @@ where
             let execution_err = match execution_result {
                 // break with result, strategy that was executed at this point has to be returned for cleanup
                 Ok(value) => {
-                    break Ok(ExecutionOutput::SingleStage(value));
+                    break Ok(value);
                 }
                 Err(err) => err,
             };
@@ -119,6 +119,7 @@ where
     /// Returns removed strategy
     fn handle_actions_result(
         &mut self,
+        signature: Option<Signature>,
         result: ActionResult,
     ) -> TransactionStrategy {
         let mut removed_actions =
@@ -128,7 +129,7 @@ where
             let callbacks_results = self
                 .inner
                 .actions_callback_executor
-                .schedule(callbacks, result);
+                .schedule(callbacks, signature, result);
             self.inner.callbacks_report.extend(callbacks_results);
         }
 
@@ -137,10 +138,11 @@ where
 
     pub fn execute_callbacks(
         &mut self,
+        signature: Option<Signature>,
         result: Result<(), impl Into<ActionError>>,
     ) {
-        let junk_strategy =
-            self.handle_actions_result(result.map_err(|err| err.into()));
+        let junk_strategy = self
+            .handle_actions_result(signature, result.map_err(|err| err.into()));
         self.inner.junk.push(junk_strategy);
     }
 
@@ -170,7 +172,7 @@ where
                 // Here we patch strategy for it to be retried in next iteration
                 // & we also record data that has to be cleaned up after patch
                 let action_error = Err(ActionError::ActionsError(err.clone(), *signature));
-                let to_cleanup = self.handle_actions_result(action_error);
+                let to_cleanup = self.handle_actions_result(*signature, action_error);
                 Ok(ControlFlow::Continue(to_cleanup))
             }
             TransactionStrategyExecutionError::CommitIDError(_, _) => {

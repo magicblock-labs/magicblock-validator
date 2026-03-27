@@ -152,6 +152,7 @@ impl ActionsCallbackScheduler for MockActionsCallbackExecutor {
     fn schedule(
         &self,
         callbacks: Vec<BaseActionCallback>,
+        _signature: Option<Signature>,
         result: ActionResult,
     ) -> Vec<Result<Signature, CallbackScheduleError>> {
         let signatures = callbacks

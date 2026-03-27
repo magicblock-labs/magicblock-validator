@@ -10,6 +10,7 @@ description = "Services that run on top of the MagicBlock validator and communic
 
 [dependencies]
 bincode = { workspace = true }
+futures-util = { workspace = true }
 magicblock-core = { workspace = true }
 magicblock-magic-program-api = { workspace = true }
 thiserror = { workspace = true }

@@ -124,7 +124,10 @@ where
             }
         };
 
-        self.execute_callbacks(commit_result.as_ref().map(|_| ()));
+        self.execute_callbacks(
+            commit_result.as_ref().ok().copied(),
+            commit_result.as_ref().map(|_| ()),
+        );
         self.inner
             .junk
             .push(mem::take(&mut self.state.commit_strategy));
@@ -180,7 +183,7 @@ where
             TransactionStrategyExecutionError::ActionsError(err, signature) => {
                 // Intent bundles allow for actions to be in commit stage
                 let action_error = Err(ActionError::ActionsError(err.clone(), *signature));
-                let to_cleanup = handle_actions_result(self.inner, &mut self.state.commit_strategy, action_error);
+                let to_cleanup = handle_actions_result(self.inner, &mut self.state.commit_strategy, *signature, action_error);
                 Ok(ControlFlow::Continue(to_cleanup))
             }
             TransactionStrategyExecutionError::UndelegationError(_, _) => {
@@ -243,12 +246,14 @@ where
     /// callbacks, preserving finalize-stage actions for the finalize phase.
     pub fn execute_callbacks(
         &mut self,
+        signature: Option<Signature>,
         result: Result<(), impl Into<ActionError>>,
     ) {
         let result = result.map(|_| ()).map_err(|err| err.into());
         let junk_strategy = handle_actions_result(
             self.inner,
             &mut self.state.commit_strategy,
+            signature,
             result.clone(),
         );
         self.inner.junk.push(junk_strategy);
@@ -257,6 +262,7 @@ where
             let junk_strategy = handle_actions_result(
                 self.inner,
                 &mut self.state.finalize_strategy,
+                signature,
                 result,
             );
             self.inner.junk.push(junk_strategy);
@@ -328,7 +334,11 @@ where
         };
 
         // Even if failed - dump finalize into junk
-        self.execute_callbacks(finalize_result.as_ref().map(|_| ()));
+
+        self.execute_callbacks(
+            finalize_result.as_ref().ok().copied(),
+            finalize_result.as_ref().map(|_| ()),
+        );
         self.inner
             .junk
             .push(mem::take(&mut self.state.finalize_strategy));
@@ -344,11 +354,13 @@ where
     /// Executes callbacks
     pub fn execute_callbacks(
         &mut self,
+        signature: Option<Signature>,
         result: Result<(), impl Into<ActionError>>,
     ) {
         let junk_strategy = handle_actions_result(
             self.inner,
             &mut self.state.finalize_strategy,
+            signature,
             result.map_err(|err| err.into()),
         );
         self.inner.junk.push(junk_strategy);
@@ -379,7 +391,7 @@ where
                 // Here we patch strategy for it to be retried in next iteration
                 // & we also record data that has to be cleaned up after patch
                 let action_error = Err(ActionError::ActionsError(err.clone(), *signature));
-                let to_cleanup = handle_actions_result(self.inner, &mut self.state.finalize_strategy, action_error);
+                let to_cleanup = handle_actions_result(self.inner, &mut self.state.finalize_strategy, *signature, action_error);
                 Ok(ControlFlow::Continue(to_cleanup))
             }
             TransactionStrategyExecutionError::UndelegationError(_, _) => {
@@ -429,6 +441,7 @@ impl<'a, T, F, A> TwoStageExecutor<'a, T, F, A, Finalized> {
 fn handle_actions_result<T, F, A>(
     inner: &mut IntentExecutorImpl<T, F, A>,
     transaction_strategy: &mut TransactionStrategy,
+    signature: Option<Signature>,
     result: ActionResult,
 ) -> TransactionStrategy
 where
@@ -439,8 +452,9 @@ where
     let mut removed_actions = inner.remove_actions(transaction_strategy);
     let callbacks = removed_actions.extract_action_callbacks();
     if !callbacks.is_empty() {
-        let result =
-            inner.actions_callback_executor.schedule(callbacks, result);
+        let result = inner
+            .actions_callback_executor
+            .schedule(callbacks, signature, result);
         inner.callbacks_report.extend(result);
     }
 
