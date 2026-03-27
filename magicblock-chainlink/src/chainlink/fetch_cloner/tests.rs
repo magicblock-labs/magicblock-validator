@@ -1,6 +1,6 @@
 use std::{collections::HashMap, sync::Arc};
 
-use dlp_api::dlp::state::DelegationRecord;
+use dlp_api::state::DelegationRecord;
 use solana_account::{Account, AccountSharedData, WritableAccount};
 use solana_keypair::Keypair;
 use solana_sdk_ids::system_program;
@@ -212,9 +212,7 @@ fn add_delegation_record_with_slot_for(
     delegation_slot: u64,
 ) -> Pubkey {
     let deleg_record_pubkey =
-        dlp_api::dlp::pda::delegation_record_pda_from_delegated_account(
-            &pubkey,
-        );
+        dlp_api::pda::delegation_record_pda_from_delegated_account(&pubkey);
     let deleg_record = DelegationRecord {
         authority,
         owner,
@@ -225,7 +223,7 @@ fn add_delegation_record_with_slot_for(
     rpc_client.add_account(
         deleg_record_pubkey,
         Account {
-            owner: dlp_api::dlp::id(),
+            owner: dlp_api::id(),
             data: delegation_record_to_vec(&deleg_record),
             ..Default::default()
         },
@@ -2927,7 +2925,7 @@ async fn test_fetch_keeps_undelegating_projected_ata_in_bank() {
     let mut local_ata = create_ata_account(&wallet_owner, &mint);
     local_ata.data[64..72].copy_from_slice(&LOCAL_ATA_AMOUNT.to_le_bytes());
     let mut local_ata_shared = AccountSharedData::from(local_ata);
-    local_ata_shared.set_owner(dlp_api::dlp::id());
+    local_ata_shared.set_owner(dlp_api::id());
     local_ata_shared.set_remote_slot(LOCAL_SLOT);
     local_ata_shared.set_undelegating(true);
     accounts_bank.insert(ata_pubkey, local_ata_shared);
@@ -2955,7 +2953,7 @@ async fn test_fetch_keeps_undelegating_projected_ata_in_bank() {
     );
     assert_eq!(
         *ata_after.owner(),
-        dlp_api::dlp::id(),
+        dlp_api::id(),
         "Undelegating ATA should remain locked to the delegation program",
     );
     let ata_amount =
@@ -3008,7 +3006,7 @@ async fn test_undelegating_projected_ata_subscription_update_stays_locked() {
     let mut local_ata = create_ata_account(&wallet_owner, &mint);
     local_ata.data[64..72].copy_from_slice(&LOCAL_ATA_AMOUNT.to_le_bytes());
     let mut local_ata_shared = AccountSharedData::from(local_ata);
-    local_ata_shared.set_owner(dlp_api::dlp::id());
+    local_ata_shared.set_owner(dlp_api::id());
     local_ata_shared.set_remote_slot(LOCAL_SLOT);
     local_ata_shared.set_undelegating(true);
     accounts_bank.insert(ata_pubkey, local_ata_shared);
@@ -3042,7 +3040,7 @@ async fn test_undelegating_projected_ata_subscription_update_stays_locked() {
     );
     assert_eq!(
         *ata_after.owner(),
-        dlp_api::dlp::id(),
+        dlp_api::id(),
         "Undelegating ATA should remain locked to the delegation program",
     );
     let ata_amount =
@@ -3094,7 +3092,7 @@ async fn test_delegated_eata_update_does_not_override_undelegating_ata_in_bank()
     let mut local_ata = create_ata_account(&wallet_owner, &mint);
     local_ata.data[64..72].copy_from_slice(&LOCAL_ATA_AMOUNT.to_le_bytes());
     let mut local_ata_shared = AccountSharedData::from(local_ata);
-    local_ata_shared.set_owner(dlp_api::dlp::id());
+    local_ata_shared.set_owner(dlp_api::id());
     local_ata_shared.set_remote_slot(LOCAL_SLOT);
     local_ata_shared.set_undelegating(true);
     accounts_bank.insert(ata_pubkey, local_ata_shared);
@@ -3136,7 +3134,7 @@ async fn test_delegated_eata_update_does_not_override_undelegating_ata_in_bank()
     );
     assert_eq!(
         *ata_after.owner(),
-        dlp_api::dlp::id(),
+        dlp_api::id(),
         "Undelegating ATA should remain locked to the delegation program",
     );
     let ata_amount =
