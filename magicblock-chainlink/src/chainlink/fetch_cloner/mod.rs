@@ -14,7 +14,7 @@ use magicblock_accounts_db::traits::AccountsBank;
 use magicblock_config::config::AllowedProgram;
 use magicblock_core::token_programs::{
     is_ata, try_derive_ata_address_and_bump, try_derive_eata_address_and_bump,
-    MaybeIntoAta,
+    MaybeIntoAta, EATA_PROGRAM_ID,
 };
 use magicblock_metrics::metrics::{self, AccountFetchOrigin};
 use scc::{hash_map::Entry, HashMap};
@@ -343,6 +343,23 @@ where
                     chain_slot = account.remote_slot(),
                     "Received update for undelegating account"
                 );
+
+                if account.delegated()
+                    && ata_projection::derive_eata_pubkey_from_ata_account(
+                        &pubkey, &account,
+                    )
+                    .is_some()
+                    && deleg_record.as_ref().is_some_and(|record| {
+                        record.owner == EATA_PROGRAM_ID
+                            && record.authority == self.validator_pubkey
+                    })
+                {
+                    debug!(
+                        pubkey = %pubkey,
+                        "Keeping undelegating ATA in bank while companion eATA remains delegated"
+                    );
+                    return;
+                }
 
                 // This will only be true in the following case:
                 // 1. a commit was triggered for the account
@@ -886,7 +903,7 @@ where
         )?;
 
         if let Some(in_bank_ata) = self.accounts_bank.get_account(&ata_pubkey) {
-            if in_bank_ata.delegated() && !in_bank_ata.undelegating() {
+            if in_bank_ata.delegated() || in_bank_ata.undelegating() {
                 return None;
             }
             if in_bank_ata.remote_slot() >= projected_ata.remote_slot() {
@@ -1414,6 +1431,32 @@ where
                 undelegating = in_bank.undelegating(),
                 "Fetching undelegating account"
             );
+
+            if let Some(eata_pubkey) =
+                ata_projection::derive_eata_pubkey_from_ata_layout(
+                    pubkey, in_bank,
+                )
+            {
+                let projected_deleg_record = self
+                    .fetch_and_parse_delegation_record(
+                        eata_pubkey,
+                        self.remote_account_provider.chain_slot(),
+                        fetch_origin,
+                    )
+                    .await;
+                if projected_deleg_record.as_ref().is_some_and(|(record, _)| {
+                    record.owner == EATA_PROGRAM_ID
+                        && record.authority == self.validator_pubkey
+                }) {
+                    debug!(
+                        pubkey = %pubkey,
+                        eata_pubkey = %eata_pubkey,
+                        "Keeping undelegating ATA in bank while companion eATA remains delegated"
+                    );
+                    return RefreshDecision::No;
+                }
+            }
+
             let deleg_record = self
                 .fetch_and_parse_delegation_record(
                     *pubkey,
