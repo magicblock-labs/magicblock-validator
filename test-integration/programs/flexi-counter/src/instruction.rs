@@ -254,6 +254,19 @@ pub enum FlexiCounterInstruction {
     /// 3. []      escrow authority (auto)
     /// 4. [signer, write] escrow account (auto)
     TransferActionHandler { amount: u64, fail: bool },
+
+    /// Creates an intent bundle that contains Commit + CommitFinalize intents.
+    ///
+    /// Accounts:
+    /// 0.      `[write]`  MagicContext
+    /// 1.      `[]`       MagicBlock Program
+    /// 2.      `[signer]` Payer (escrow authority)
+    /// 3.      `[write]` Commit counters
+    /// ..      `[write]` CommitFinalize counters
+    CreateIntentBundleCommitAndFinalize {
+        num_commit: u8,
+        num_commit_finalize: u8,
+    },
 }
 
 pub fn create_init_ix(payer: Pubkey, label: String) -> Instruction {
@@ -638,6 +651,38 @@ pub fn create_intent_bundle_ix(
             num_undelegate: undelegate_payers.len() as u8,
             counter_diffs,
             compute_units,
+        },
+        accounts,
+    )
+}
+
+pub fn create_intent_bundle_commit_and_finalize_ix(
+    payer: Pubkey,
+    commit_accounts: Vec<Pubkey>,
+    commit_finalize_accounts: Vec<Pubkey>,
+) -> Instruction {
+    let program_id = &crate::id();
+    let mut accounts = vec![
+        AccountMeta::new(MAGIC_CONTEXT_ID, false),
+        AccountMeta::new_readonly(MAGIC_PROGRAM_ID, false),
+        AccountMeta::new_readonly(payer, true),
+    ];
+    accounts.extend(
+        commit_accounts
+            .iter()
+            .map(|pubkey| AccountMeta::new(*pubkey, false)),
+    );
+    accounts.extend(
+        commit_finalize_accounts
+            .iter()
+            .map(|pubkey| AccountMeta::new(*pubkey, false)),
+    );
+
+    Instruction::new_with_borsh(
+        *program_id,
+        &FlexiCounterInstruction::CreateIntentBundleCommitAndFinalize {
+            num_commit: commit_accounts.len() as u8,
+            num_commit_finalize: commit_finalize_accounts.len() as u8,
         },
         accounts,
     )

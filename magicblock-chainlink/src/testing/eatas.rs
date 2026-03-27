@@ -50,7 +50,7 @@ pub fn create_eata_account(
     let lamports = Rent::default().minimum_balance(data.len());
 
     let account_owner = if delegate {
-        dlp_api::dlp::id()
+        dlp_api::id()
     } else {
         EATA_PROGRAM_ID
     };

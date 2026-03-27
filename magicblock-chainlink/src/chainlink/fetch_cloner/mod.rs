@@ -7,7 +7,7 @@ use std::{
     time::Duration,
 };
 
-use dlp_api::dlp::{
+use dlp_api::{
     pda::delegation_record_pda_from_delegated_account, state::DelegationRecord,
 };
 use magicblock_accounts_db::traits::AccountsBank;
@@ -360,7 +360,7 @@ where
                 ) {
                     return;
                 }
-            } else if in_bank.owner().eq(&dlp_api::dlp::id()) {
+            } else if in_bank.owner().eq(&dlp_api::id()) {
                 debug!(
                     pubkey = %pubkey,
                     "Received update for account owned by delegation program but not marked as undelegating"
@@ -500,7 +500,7 @@ where
             return false;
         };
 
-        if !account.owner().eq(&dlp_api::dlp::id()) {
+        if !account.owner().eq(&dlp_api::id()) {
             return false;
         }
 
@@ -1447,7 +1447,7 @@ where
                 );
                 return RefreshDecision::Yes;
             }
-        } else if in_bank.owner().eq(&dlp_api::dlp::id()) {
+        } else if in_bank.owner().eq(&dlp_api::id()) {
             debug!(
                 "Account {pubkey} owned by deleg program not marked as undelegating"
             );
@@ -1502,7 +1502,7 @@ where
                 if account_in_bank.undelegating() {
                     undelegating_checks.push((**pubkey, account_in_bank));
                 } else {
-                    if account_in_bank.owner().eq(&dlp_api::dlp::id()) {
+                    if account_in_bank.owner().eq(&dlp_api::id()) {
                         debug!(
                             pubkey = %pubkey,
                             "Account owned by deleg program not marked as undelegating"

@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use dlp_api::dlp::pda;
+use dlp_api::pda;
 use solana_pubkey::Pubkey;
 use solana_system_program::id as system_program_id;
 use tracing::*;
@@ -41,7 +41,7 @@ pub fn provide_committee_pubkeys(
 pub fn provide_common_pubkeys(validator: &Pubkey) -> HashSet<Pubkey> {
     let mut set = HashSet::new();
 
-    let deleg_program = dlp_api::dlp::id();
+    let deleg_program = dlp_api::id();
     let protocol_fees_vault = pda::fees_vault_pda();
     let validator_fees_vault =
         pda::validator_fees_vault_pda_from_validator(validator);

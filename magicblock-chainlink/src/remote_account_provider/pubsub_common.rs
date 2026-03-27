@@ -1,6 +1,6 @@
 use std::{collections::HashSet, fmt};
 
-use dlp_api::dlp::state::{
+use dlp_api::state::{
     CommitRecord, DelegationMetadata, DelegationRecord, ProgramConfig,
 };
 use solana_account::Account;
@@ -79,7 +79,7 @@ pub(crate) fn is_internal_dlp_account_data(data: &[u8]) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use dlp_api::dlp::{
+    use dlp_api::{
         args::{
             EncryptedBuffer, MaybeEncryptedInstruction, MaybeEncryptedIxData,
             PostDelegationActions,
