@@ -5,6 +5,7 @@ use futures_util::future::join_all;
 use magicblock_accounts_db::traits::AccountsBank;
 use magicblock_core::token_programs::{
     is_ata, try_derive_ata_address_and_bump, try_derive_eata_address_and_bump,
+    AtaInfo,
 };
 use magicblock_metrics::metrics;
 use solana_account::{AccountSharedData, ReadableAccount};
@@ -24,16 +25,26 @@ pub(crate) fn derive_eata_pubkey_from_ata_account(
     ata_pubkey: &Pubkey,
     ata_account: &AccountSharedData,
 ) -> Option<Pubkey> {
-    let ata_info = is_ata(ata_pubkey, ata_account)?;
-    let (eata_pubkey, _) =
-        try_derive_eata_address_and_bump(&ata_info.owner, &ata_info.mint)?;
-    Some(eata_pubkey)
+    derive_eata_pubkey(is_ata(ata_pubkey, ata_account)?)
 }
 
 pub(crate) fn derive_eata_pubkey_from_ata_layout(
     ata_pubkey: &Pubkey,
     ata_account: &AccountSharedData,
 ) -> Option<Pubkey> {
+    derive_eata_pubkey(ata_info_from_layout(ata_pubkey, ata_account)?)
+}
+
+fn derive_eata_pubkey(ata_info: AtaInfo) -> Option<Pubkey> {
+    let (eata_pubkey, _) =
+        try_derive_eata_address_and_bump(&ata_info.owner, &ata_info.mint)?;
+    Some(eata_pubkey)
+}
+
+fn ata_info_from_layout(
+    ata_pubkey: &Pubkey,
+    ata_account: &AccountSharedData,
+) -> Option<AtaInfo> {
     let data = ata_account.data();
     if data.len() < 64 {
         return None;
@@ -47,9 +58,10 @@ pub(crate) fn derive_eata_pubkey_from_ata_layout(
         return None;
     }
 
-    let (eata_pubkey, _) =
-        try_derive_eata_address_and_bump(&wallet_owner, &mint)?;
-    Some(eata_pubkey)
+    Some(AtaInfo {
+        mint,
+        owner: wallet_owner,
+    })
 }
 
 /// Resolves ATAs with eATA projection.
