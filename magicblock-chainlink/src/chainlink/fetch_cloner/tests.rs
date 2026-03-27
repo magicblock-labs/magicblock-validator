@@ -1,5 +1,6 @@
 use std::{collections::HashMap, sync::Arc};
 
+use dlp_api::state::DelegationRecord;
 use solana_account::{Account, AccountSharedData, WritableAccount};
 use solana_keypair::Keypair;
 use solana_sdk_ids::system_program;
@@ -23,7 +24,7 @@ use crate::{
         cloner_stub::ClonerStub,
         deleg::{
             add_delegation_record_for, add_delegation_record_with_actions_for,
-            add_invalid_delegation_record_for,
+            add_invalid_delegation_record_for, delegation_record_to_vec,
         },
         eatas::{
             create_ata_account, create_eata_account, derive_ata, derive_eata,
@@ -201,6 +202,33 @@ fn create_non_raw_eata_owned_account(
         wallet_owner,
         mint,
     )
+}
+
+fn add_delegation_record_with_slot_for(
+    rpc_client: &ChainRpcClientMock,
+    pubkey: Pubkey,
+    authority: Pubkey,
+    owner: Pubkey,
+    delegation_slot: u64,
+) -> Pubkey {
+    let deleg_record_pubkey =
+        dlp_api::pda::delegation_record_pda_from_delegated_account(&pubkey);
+    let deleg_record = DelegationRecord {
+        authority,
+        owner,
+        delegation_slot,
+        lamports: 1_000,
+        commit_frequency_ms: 2_000,
+    };
+    rpc_client.add_account(
+        deleg_record_pubkey,
+        Account {
+            owner: dlp_api::id(),
+            data: delegation_record_to_vec(&deleg_record),
+            ..Default::default()
+        },
+    );
+    deleg_record_pubkey
 }
 
 /// Helper function to initialize FetchCloner for tests with subscription updates
@@ -2850,5 +2878,283 @@ async fn test_delegated_eata_update_does_not_override_delegated_ata_in_bank() {
     assert_eq!(
         ata_amount, LOCAL_ATA_AMOUNT,
         "Delegated ATA amount should keep local state",
+    );
+}
+
+#[tokio::test]
+async fn test_fetch_keeps_undelegating_projected_ata_in_bank() {
+    init_logger();
+    let validator_keypair = Keypair::new();
+    let validator_pubkey = validator_keypair.pubkey();
+    let wallet_owner = random_pubkey();
+    let mint = random_pubkey();
+    const CURRENT_SLOT: u64 = 100;
+    const LOCAL_SLOT: u64 = CURRENT_SLOT - 1;
+    const CHAIN_EATA_AMOUNT: u64 = 777;
+    const LOCAL_ATA_AMOUNT: u64 = 999;
+
+    let ata_pubkey = derive_ata(&wallet_owner, &mint);
+    let eata_pubkey = derive_eata(&wallet_owner, &mint);
+    let ata_account = create_ata_account(&wallet_owner, &mint);
+    let eata_account =
+        create_eata_account(&wallet_owner, &mint, CHAIN_EATA_AMOUNT, true);
+
+    let FetcherTestCtx {
+        accounts_bank,
+        fetch_cloner,
+        rpc_client,
+        ..
+    } = setup(
+        [
+            (ata_pubkey, ata_account.clone()),
+            (eata_pubkey, eata_account),
+        ],
+        CURRENT_SLOT,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+
+    add_delegation_record_with_slot_for(
+        &rpc_client,
+        eata_pubkey,
+        validator_pubkey,
+        EATA_PROGRAM_ID,
+        CURRENT_SLOT + 1,
+    );
+
+    let mut local_ata = create_ata_account(&wallet_owner, &mint);
+    local_ata.data[64..72].copy_from_slice(&LOCAL_ATA_AMOUNT.to_le_bytes());
+    let mut local_ata_shared = AccountSharedData::from(local_ata);
+    local_ata_shared.set_owner(dlp_api::id());
+    local_ata_shared.set_remote_slot(LOCAL_SLOT);
+    local_ata_shared.set_undelegating(true);
+    accounts_bank.insert(ata_pubkey, local_ata_shared);
+
+    let result = fetch_cloner
+        .fetch_and_clone_accounts_with_dedup(
+            &[ata_pubkey],
+            None,
+            None,
+            AccountFetchOrigin::GetAccount,
+            None,
+        )
+        .await
+        .expect("fetch should succeed");
+    assert!(result.is_ok());
+
+    let ata_after = accounts_bank
+        .get_account(&ata_pubkey)
+        .expect("ATA should still exist in bank");
+    assert!(ata_after.undelegating(), "ATA must remain undelegating");
+    assert_eq!(
+        ata_after.remote_slot(),
+        LOCAL_SLOT,
+        "Undelegating ATA should keep its local slot",
+    );
+    assert_eq!(
+        *ata_after.owner(),
+        dlp_api::id(),
+        "Undelegating ATA should remain locked to the delegation program",
+    );
+    let ata_amount =
+        u64::from_le_bytes(ata_after.data()[64..72].try_into().unwrap());
+    assert_eq!(
+        ata_amount, LOCAL_ATA_AMOUNT,
+        "Undelegating ATA amount should keep local state",
+    );
+}
+
+#[tokio::test]
+async fn test_undelegating_projected_ata_subscription_update_stays_locked() {
+    init_logger();
+    let validator_keypair = Keypair::new();
+    let validator_pubkey = validator_keypair.pubkey();
+    let wallet_owner = random_pubkey();
+    let mint = random_pubkey();
+    const CURRENT_SLOT: u64 = 100;
+    const LOCAL_SLOT: u64 = CURRENT_SLOT - 1;
+    const LOCAL_ATA_AMOUNT: u64 = 999;
+
+    let ata_pubkey = derive_ata(&wallet_owner, &mint);
+    let eata_pubkey = derive_eata(&wallet_owner, &mint);
+    let ata_account = create_ata_account(&wallet_owner, &mint);
+    let eata_account = create_eata_account(&wallet_owner, &mint, 777, true);
+
+    let FetcherTestCtx {
+        remote_account_provider,
+        accounts_bank,
+        rpc_client,
+        subscription_tx,
+        ..
+    } = setup(
+        [
+            (ata_pubkey, ata_account.clone()),
+            (eata_pubkey, eata_account),
+        ],
+        CURRENT_SLOT,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+
+    add_delegation_record_with_slot_for(
+        &rpc_client,
+        eata_pubkey,
+        validator_pubkey,
+        EATA_PROGRAM_ID,
+        CURRENT_SLOT + 1,
+    );
+
+    let mut local_ata = create_ata_account(&wallet_owner, &mint);
+    local_ata.data[64..72].copy_from_slice(&LOCAL_ATA_AMOUNT.to_le_bytes());
+    let mut local_ata_shared = AccountSharedData::from(local_ata);
+    local_ata_shared.set_owner(dlp_api::id());
+    local_ata_shared.set_remote_slot(LOCAL_SLOT);
+    local_ata_shared.set_undelegating(true);
+    accounts_bank.insert(ata_pubkey, local_ata_shared);
+    assert_not_subscribed!(remote_account_provider, &[&eata_pubkey]);
+
+    use crate::remote_account_provider::{
+        RemoteAccount, RemoteAccountUpdateSource,
+    };
+
+    subscription_tx
+        .send(ForwardedSubscriptionUpdate {
+            pubkey: ata_pubkey,
+            account: RemoteAccount::from_fresh_account(
+                ata_account,
+                CURRENT_SLOT,
+                RemoteAccountUpdateSource::Subscription,
+            ),
+        })
+        .await
+        .unwrap();
+
+    const POLL_INTERVAL: std::time::Duration = Duration::from_millis(10);
+    const TIMEOUT: std::time::Duration = Duration::from_millis(500);
+    tokio::time::timeout(TIMEOUT, async {
+        loop {
+            if remote_account_provider.is_watching(&eata_pubkey) {
+                break;
+            }
+            tokio::time::sleep(POLL_INTERVAL).await;
+        }
+    })
+    .await
+    .expect("timed out waiting for projected ATA subscription update");
+    assert_subscribed!(remote_account_provider, &[&eata_pubkey]);
+
+    let ata_after = accounts_bank
+        .get_account(&ata_pubkey)
+        .expect("ATA should still exist in bank");
+    assert!(ata_after.undelegating(), "ATA must remain undelegating");
+    assert_eq!(
+        ata_after.remote_slot(),
+        LOCAL_SLOT,
+        "Undelegating ATA should keep its local slot",
+    );
+    assert_eq!(
+        *ata_after.owner(),
+        dlp_api::id(),
+        "Undelegating ATA should remain locked to the delegation program",
+    );
+    let ata_amount =
+        u64::from_le_bytes(ata_after.data()[64..72].try_into().unwrap());
+    assert_eq!(
+        ata_amount, LOCAL_ATA_AMOUNT,
+        "Undelegating ATA amount should keep local state",
+    );
+}
+
+#[tokio::test]
+async fn test_delegated_eata_update_does_not_override_undelegating_ata_in_bank()
+{
+    init_logger();
+    let validator_keypair = Keypair::new();
+    let validator_pubkey = validator_keypair.pubkey();
+    let wallet_owner = random_pubkey();
+    let mint = random_pubkey();
+    const CURRENT_SLOT: u64 = 100;
+    const LOCAL_SLOT: u64 = CURRENT_SLOT - 1;
+    const CHAIN_EATA_AMOUNT: u64 = 777;
+    const LOCAL_ATA_AMOUNT: u64 = 999;
+
+    let eata_pubkey = derive_eata(&wallet_owner, &mint);
+    let ata_pubkey = derive_ata(&wallet_owner, &mint);
+    let eata_account =
+        create_eata_account(&wallet_owner, &mint, CHAIN_EATA_AMOUNT, true);
+
+    let FetcherTestCtx {
+        accounts_bank,
+        rpc_client,
+        subscription_tx,
+        ..
+    } = setup(
+        [(eata_pubkey, eata_account.clone())],
+        CURRENT_SLOT,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+
+    add_delegation_record_with_slot_for(
+        &rpc_client,
+        eata_pubkey,
+        validator_pubkey,
+        EATA_PROGRAM_ID,
+        CURRENT_SLOT + 1,
+    );
+
+    let mut local_ata = create_ata_account(&wallet_owner, &mint);
+    local_ata.data[64..72].copy_from_slice(&LOCAL_ATA_AMOUNT.to_le_bytes());
+    let mut local_ata_shared = AccountSharedData::from(local_ata);
+    local_ata_shared.set_owner(dlp_api::id());
+    local_ata_shared.set_remote_slot(LOCAL_SLOT);
+    local_ata_shared.set_undelegating(true);
+    accounts_bank.insert(ata_pubkey, local_ata_shared);
+
+    use crate::remote_account_provider::{
+        RemoteAccount, RemoteAccountUpdateSource,
+    };
+
+    subscription_tx
+        .send(ForwardedSubscriptionUpdate {
+            pubkey: eata_pubkey,
+            account: RemoteAccount::from_fresh_account(
+                eata_account,
+                CURRENT_SLOT,
+                RemoteAccountUpdateSource::Subscription,
+            ),
+        })
+        .await
+        .unwrap();
+
+    const POLL_INTERVAL: std::time::Duration = Duration::from_millis(10);
+    const TIMEOUT: std::time::Duration = Duration::from_millis(500);
+    tokio::time::timeout(TIMEOUT, async {
+        while accounts_bank.get_account(&eata_pubkey).is_none() {
+            tokio::time::sleep(POLL_INTERVAL).await;
+        }
+    })
+    .await
+    .expect("timed out waiting for delegated eATA subscription update");
+
+    let ata_after = accounts_bank
+        .get_account(&ata_pubkey)
+        .expect("ATA should still exist in bank");
+    assert!(ata_after.undelegating(), "ATA must remain undelegating");
+    assert_eq!(
+        ata_after.remote_slot(),
+        LOCAL_SLOT,
+        "Undelegating ATA should keep its local slot",
+    );
+    assert_eq!(
+        *ata_after.owner(),
+        dlp_api::id(),
+        "Undelegating ATA should remain locked to the delegation program",
+    );
+    let ata_amount =
+        u64::from_le_bytes(ata_after.data()[64..72].try_into().unwrap());
+    assert_eq!(
+        ata_amount, LOCAL_ATA_AMOUNT,
+        "Undelegating ATA amount should keep local state",
     );
 }
