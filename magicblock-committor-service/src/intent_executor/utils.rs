@@ -17,7 +17,7 @@ use crate::{
         single_stage_executor::SingleStageExecutor,
         task_info_fetcher::{CacheTaskInfoFetcher, ResetType, TaskInfoFetcher},
         two_stage_executor::{Committed, Initialized, TwoStageExecutor},
-        ExecutionOutput, IntentExecutionReport,
+        IntentExecutionReport,
     },
     persist::IntentPersister,
     tasks::{
@@ -212,6 +212,7 @@ pub(in crate::intent_executor) fn handle_actions_result<A>(
     callback_scheduler: &A,
     execution_report: &mut IntentExecutionReport,
     transaction_strategy: &mut TransactionStrategy,
+    signauture: Option<Signature>,
     result: ActionResult,
 ) -> TransactionStrategy
 where
@@ -227,7 +228,7 @@ where
         (callbacks, removed_actions)
     };
     if !callbacks.is_empty() {
-        let result = callback_scheduler.schedule(callbacks, result);
+        let result = callback_scheduler.schedule(callbacks, signauture, result);
         execution_report.add_callback_report(result);
     }
 
@@ -235,26 +236,30 @@ where
 }
 
 pub(in crate::intent_executor) async fn execute_with_timeout<
-    R,
     P: IntentPersister,
 >(
     time_left: Option<Duration>,
-    mut executor: impl StageExecutor<Output = R>,
+    mut executor: impl StageExecutor,
     persister: &Option<P>,
-) -> IntentExecutorResult<R> {
+) -> IntentExecutorResult<Signature> {
     if executor.has_callbacks() {
         if let Some(time_left) = time_left {
             match timeout(time_left, executor.execute(persister)).await {
                 Ok(res) => return res,
                 Err(_) => {
+                    // The race between callback and intent txn is handled
+                    // on the user smart contract side via TimeoutError.
+                    // We must respect the timeout contract.
                     info!("Intent execution timed out, cleaning up actions");
-                    executor.execute_callbacks(Err(ActionError::TimeoutError));
+                    executor.execute_callbacks(
+                        None,
+                        Err(ActionError::TimeoutError),
+                    );
                 }
             }
         } else {
-            // Already timed out
-            // Handle timeout and continue execution
-            executor.execute_callbacks(Err(ActionError::TimeoutError));
+            // Already timed out; see comment above.
+            executor.execute_callbacks(None, Err(ActionError::TimeoutError));
         }
     }
 
@@ -263,14 +268,16 @@ pub(in crate::intent_executor) async fn execute_with_timeout<
 
 #[async_trait]
 pub(in crate::intent_executor) trait StageExecutor {
-    type Output;
-
     fn has_callbacks(&self) -> bool;
     async fn execute<P: IntentPersister>(
         &mut self,
         persister: &Option<P>,
-    ) -> IntentExecutorResult<Self::Output>;
-    fn execute_callbacks(&mut self, result: ActionResult);
+    ) -> IntentExecutorResult<Signature>;
+    fn execute_callbacks(
+        &mut self,
+        signature: Option<Signature>,
+        result: ActionResult,
+    );
 }
 
 pub(in crate::intent_executor) struct SingleStage<'a, 'e, A, T, F> {
@@ -286,8 +293,6 @@ where
     T: TransactionPreparator,
     F: TaskInfoFetcher,
 {
-    type Output = ExecutionOutput;
-
     fn has_callbacks(&self) -> bool {
         self.inner.has_callbacks()
     }
@@ -295,7 +300,7 @@ where
     async fn execute<P: IntentPersister>(
         &mut self,
         persister: &Option<P>,
-    ) -> IntentExecutorResult<Self::Output> {
+    ) -> IntentExecutorResult<Signature> {
         self.inner
             .execute(
                 self.committed_pubkeys,
@@ -305,8 +310,12 @@ where
             .await
     }
 
-    fn execute_callbacks(&mut self, result: ActionResult) {
-        self.inner.execute_callbacks(result)
+    fn execute_callbacks(
+        &mut self,
+        signature: Option<Signature>,
+        result: ActionResult,
+    ) {
+        self.inner.execute_callbacks(signature, result)
     }
 }
 
@@ -326,8 +335,6 @@ where
     T: TransactionPreparator,
     F: TaskInfoFetcher,
 {
-    type Output = Signature;
-
     fn has_callbacks(&self) -> bool {
         self.inner.has_callbacks()
     }
@@ -335,7 +342,7 @@ where
     async fn execute<P: IntentPersister>(
         &mut self,
         persister: &Option<P>,
-    ) -> IntentExecutorResult<Self::Output> {
+    ) -> IntentExecutorResult<Signature> {
         self.inner
             .commit(
                 self.committed_pubkeys,
@@ -346,8 +353,12 @@ where
             .await
     }
 
-    fn execute_callbacks(&mut self, result: ActionResult) {
-        self.inner.execute_callbacks(result)
+    fn execute_callbacks(
+        &mut self,
+        signature: Option<Signature>,
+        result: ActionResult,
+    ) {
+        self.inner.execute_callbacks(signature, result)
     }
 }
 
@@ -363,8 +374,6 @@ where
     A: ActionsCallbackScheduler,
     T: TransactionPreparator,
 {
-    type Output = Signature;
-
     fn has_callbacks(&self) -> bool {
         self.inner.has_callbacks()
     }
@@ -372,13 +381,17 @@ where
     async fn execute<P: IntentPersister>(
         &mut self,
         persister: &Option<P>,
-    ) -> IntentExecutorResult<Self::Output> {
+    ) -> IntentExecutorResult<Signature> {
         self.inner
             .finalize(self.transaction_preparator, persister)
             .await
     }
 
-    fn execute_callbacks(&mut self, result: ActionResult) {
-        self.inner.execute_callbacks(result)
+    fn execute_callbacks(
+        &mut self,
+        signature: Option<Signature>,
+        result: ActionResult,
+    ) {
+        self.inner.execute_callbacks(signature, result)
     }
 }

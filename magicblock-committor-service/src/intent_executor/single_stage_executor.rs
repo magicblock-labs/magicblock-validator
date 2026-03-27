@@ -19,7 +19,7 @@ use crate::{
             handle_actions_result, handle_commit_id_error,
             handle_undelegation_error, prepare_and_execute_strategy,
         },
-        ExecutionOutput, IntentExecutionReport,
+        IntentExecutionReport,
     },
     persist::{IntentPersister, IntentPersisterImpl},
     tasks::{
@@ -73,7 +73,7 @@ where
         committed_pubkeys: &[Pubkey],
         transaction_preparator: &T,
         persister: &Option<P>,
-    ) -> IntentExecutorResult<ExecutionOutput>
+    ) -> IntentExecutorResult<Signature>
     where
         T: TransactionPreparator,
         P: IntentPersister,
@@ -98,7 +98,7 @@ where
             let execution_err = match execution_result {
                 // break with result, strategy that was executed at this point has to be returned for cleanup
                 Ok(value) => {
-                    break Ok(ExecutionOutput::SingleStage(value));
+                    break Ok(value);
                 }
                 Err(err) => err,
             };
@@ -147,6 +147,7 @@ where
 
     pub fn execute_callbacks(
         &mut self,
+        signature: Option<Signature>,
         result: Result<(), impl Into<ActionError>>,
     ) {
         let junk_strategy = handle_actions_result(
@@ -154,6 +155,7 @@ where
             &self.callback_scheduler,
             self.execution_report,
             &mut self.transaction_strategy,
+            signature,
             result.map_err(|err| err.into()),
         );
         self.execution_report.dispose(junk_strategy);
@@ -191,6 +193,7 @@ where
                     &self.callback_scheduler,
                     self.execution_report,
                     &mut self.transaction_strategy,
+                    *signature,
                     action_error,
                 );
                 Ok(ControlFlow::Continue(to_cleanup))

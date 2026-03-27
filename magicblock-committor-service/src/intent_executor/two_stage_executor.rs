@@ -154,7 +154,10 @@ where
             }
         };
 
-        self.execute_callbacks(commit_result.as_ref().map(|_| ()));
+        self.execute_callbacks(
+            commit_result.as_ref().ok().copied(),
+            commit_result.as_ref().map(|_| ()),
+        );
         self.execution_report
             .dispose(mem::take(&mut self.state.commit_strategy));
         if commit_result.is_err() {
@@ -226,6 +229,7 @@ where
                     &self.callback_scheduler,
                     self.execution_report,
                     &mut self.state.commit_strategy,
+                    *signature,
                     action_error
                 );
                 Ok(ControlFlow::Continue(to_cleanup))
@@ -298,6 +302,7 @@ where
     /// callbacks, preserving finalize-stage actions for the finalize phase.
     pub fn execute_callbacks(
         &mut self,
+        signature: Option<Signature>,
         result: Result<(), impl Into<ActionError>>,
     ) {
         let result = result.map(|_| ()).map_err(|err| err.into());
@@ -306,6 +311,7 @@ where
             &self.callback_scheduler,
             self.execution_report,
             &mut self.state.commit_strategy,
+            signature,
             result.clone(),
         );
         self.execution_report.dispose(junk_strategy);
@@ -316,6 +322,7 @@ where
                 &self.callback_scheduler,
                 self.execution_report,
                 &mut self.state.finalize_strategy,
+                signature,
                 result,
             );
             self.execution_report.dispose(junk_strategy);
@@ -397,7 +404,10 @@ where
         };
 
         // Even if failed - dump finalize into junk
-        self.execute_callbacks(finalize_result.as_ref().map(|_| ()));
+        self.execute_callbacks(
+            finalize_result.as_ref().ok().copied(),
+            finalize_result.as_ref().map(|_| ()),
+        );
         self.execution_report
             .dispose(mem::take(&mut self.state.finalize_strategy));
         finalize_result.map_err(|err| {
@@ -416,6 +426,7 @@ where
     /// Executes callbacks
     pub fn execute_callbacks(
         &mut self,
+        signature: Option<Signature>,
         result: Result<(), impl Into<ActionError>>,
     ) {
         let junk_strategy = handle_actions_result(
@@ -423,6 +434,7 @@ where
             &self.callback_scheduler,
             self.execution_report,
             &mut self.state.finalize_strategy,
+            signature,
             result.map_err(|err| err.into()),
         );
         self.execution_report.dispose(junk_strategy);
@@ -458,6 +470,7 @@ where
                     &self.callback_scheduler,
                     self.execution_report,
                     &mut self.state.finalize_strategy,
+                    *signature,
                     action_error
                 );
                 Ok(ControlFlow::Continue(to_cleanup))

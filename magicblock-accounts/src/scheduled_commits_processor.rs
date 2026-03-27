@@ -283,7 +283,7 @@ impl ScheduledCommitsProcessorImpl {
             requested_undelegation: intent_meta.requested_undelegation,
             error_message,
             patched_errors,
-            callbacks_report,
+            callbacks_scheduling_results: callbacks_report,
         }
     }
 }

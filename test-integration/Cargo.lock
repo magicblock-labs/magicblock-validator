@@ -3882,6 +3882,7 @@ dependencies = [
  "bincode",
  "serde",
  "solana-program",
+ "solana-signature",
 ]
 
 [[package]]
@@ -3996,6 +3997,7 @@ name = "magicblock-services"
 version = "0.8.4"
 dependencies = [
  "bincode",
+ "futures-util",
  "magicblock-core",
  "magicblock-magic-program-api 0.8.4",
  "solana-instruction 2.2.1",

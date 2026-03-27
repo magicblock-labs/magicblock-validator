@@ -102,14 +102,14 @@ pub fn process_transfer_callback(
 
     msg!(
         "TransferCallback: ok={}, error={}",
-        response.ok,
-        response.error
+        response.ok(),
+        response.error()
     );
 
-    if !response.ok {
+    if !response.ok() {
         let amount = u64::from_le_bytes(
             response
-                .data
+                .data()
                 .try_into()
                 .map_err(|_| ProgramError::InvalidInstructionData)?,
         );

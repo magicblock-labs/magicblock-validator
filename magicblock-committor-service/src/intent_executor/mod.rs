@@ -338,10 +338,11 @@ where
                 finalize_signature: _,
             }) if !committed_pubkeys.is_empty() => err,
             res => {
-            single_stage_executor.execute_callbacks(res.as_ref().map(|_| ()));
+                let signature = res.as_ref().ok().copied();
+            	single_stage_executor.execute_callbacks(signature, res.as_ref().map(|_| ()));
                 let transaction_strategy = single_stage_executor.consume_strategy();
                 execution_report.dispose(transaction_strategy);
-                return res;
+                return res.map(ExecutionOutput::SingleStage);
             }
         };
 

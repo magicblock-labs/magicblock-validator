@@ -30,12 +30,14 @@ pub trait LatestBlockProvider: Send + Sync + Clone + 'static {
     fn clock(&self) -> Clock;
 }
 
+/// Interface for service handling callback execution/scheduling
 pub trait ActionsCallbackScheduler: Send + Sync + Clone + 'static {
     /// Schedules callback txs.
     /// Returns signature or construction error per callback.
     fn schedule(
         &self,
         callbacks: Vec<BaseActionCallback>,
+        signature: Option<Signature>,
         result: ActionResult,
     ) -> Vec<Result<Signature, CallbackScheduleError>>;
 }
