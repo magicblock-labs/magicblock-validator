@@ -10,7 +10,7 @@ use std::{
 
 use borsh::to_vec;
 use dlp_api::{args::CommitStateArgs, pda::ephemeral_balance_pda_from_payer};
-use futures::future::join_all;
+use futures::future::{join_all, try_join_all};
 use magicblock_committor_program::pdas;
 use magicblock_committor_service::{
     intent_executor::{
