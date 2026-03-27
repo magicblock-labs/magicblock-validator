@@ -84,7 +84,7 @@ pub use util::derive_buffer_pubkey;
 /// unbounded memory growth while still preventing near-term duplicate sends.
 const SENT_ACTION_TXS_MAX_ENTRIES: usize = 16_384;
 
-type ActionTxDedupCache = LruCache<Signature, ()>;
+type ActionTxDedupCache = LruCache<Pubkey, ()>;
 
 pub struct ChainlinkCloner {
     changeset_committor: Option<Arc<CommittorService>>,
@@ -590,6 +590,7 @@ impl ChainlinkCloner {
     async fn send_actions_tx(
         &self,
         actions_tx: Option<SanitizedTransaction>,
+        associated_delegated_account: Pubkey,
     ) -> ClonerResult<Option<()>> {
         let Some(sanitized_tx) = actions_tx else {
             return Ok(None);
@@ -597,19 +598,22 @@ impl ChainlinkCloner {
         let action_tx_sig = *sanitized_tx.signature();
         {
             let mut sent = self.lock_sent_action_txs();
-            if sent.contains(&action_tx_sig) {
+            if sent.contains(&associated_delegated_account) {
                 warn!(
+                    associated_delegated_account = %associated_delegated_account,
                     tx_sig = %action_tx_sig,
                     "Skipping duplicate post-delegation actions transaction"
                 );
                 return Ok(Some(()));
             }
-            sent.put(action_tx_sig, ());
+            sent.put(associated_delegated_account, ());
         }
 
         if let Err(err) = self.send_sanitized_tx(sanitized_tx).await {
-            self.lock_sent_action_txs().pop(&action_tx_sig);
+            self.lock_sent_action_txs()
+                .pop(&associated_delegated_account);
             error!(
+                associated_delegated_account = %associated_delegated_account,
                 tx_sig = %action_tx_sig,
                 error = ?err,
                 "Failed to execute post-delegation actions transaction"
@@ -673,7 +677,7 @@ impl Cloner for ChainlinkCloner {
                 )
             })?;
 
-            self.send_actions_tx(actions_tx).await?;
+            self.send_actions_tx(actions_tx, request.pubkey).await?;
 
             return Ok(signature);
         }
@@ -698,7 +702,7 @@ impl Cloner for ChainlinkCloner {
             }
         }
 
-        self.send_actions_tx(actions_tx).await?;
+        self.send_actions_tx(actions_tx, request.pubkey).await?;
 
         Ok(last_sig.unwrap_or_default())
     }
