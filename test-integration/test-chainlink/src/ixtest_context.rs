@@ -1,8 +1,4 @@
-use std::{
-    collections::HashMap,
-    sync::{Arc, Mutex},
-    time::Duration,
-};
+use std::sync::Arc;
 
 use integration_test_tools::dlp_interface;
 use magicblock_chainlink::{
@@ -121,7 +117,11 @@ impl IxtestContext {
                 .await;
 
             match remote_account_provider {
-                Ok(Some(remote_account_provider)) => {
+                Ok(Some((
+                    remote_account_provider,
+                    dedup_cache,
+                    dedup_window,
+                ))) => {
                     debug!("Initializing FetchCloner");
                     let provider = Arc::new(remote_account_provider);
                     (
@@ -133,8 +133,8 @@ impl IxtestContext {
                             faucet_kp.pubkey(),
                             rx,
                             None,
-                            Arc::new(Mutex::new(HashMap::new())),
-                            Duration::from_millis(2_000),
+                            dedup_cache,
+                            dedup_window,
                         )),
                         Some(provider),
                     )
