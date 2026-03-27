@@ -2981,6 +2981,7 @@ async fn test_undelegating_projected_ata_subscription_update_stays_locked() {
     let eata_account = create_eata_account(&wallet_owner, &mint, 777, true);
 
     let FetcherTestCtx {
+        remote_account_provider,
         accounts_bank,
         rpc_client,
         subscription_tx,
@@ -3010,6 +3011,7 @@ async fn test_undelegating_projected_ata_subscription_update_stays_locked() {
     local_ata_shared.set_remote_slot(LOCAL_SLOT);
     local_ata_shared.set_undelegating(true);
     accounts_bank.insert(ata_pubkey, local_ata_shared);
+    assert_not_subscribed!(remote_account_provider, &[&eata_pubkey]);
 
     use crate::remote_account_provider::{
         RemoteAccount, RemoteAccountUpdateSource,
@@ -3027,7 +3029,19 @@ async fn test_undelegating_projected_ata_subscription_update_stays_locked() {
         .await
         .unwrap();
 
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    const POLL_INTERVAL: std::time::Duration = Duration::from_millis(10);
+    const TIMEOUT: std::time::Duration = Duration::from_millis(500);
+    tokio::time::timeout(TIMEOUT, async {
+        loop {
+            if remote_account_provider.is_watching(&eata_pubkey) {
+                break;
+            }
+            tokio::time::sleep(POLL_INTERVAL).await;
+        }
+    })
+    .await
+    .expect("timed out waiting for projected ATA subscription update");
+    assert_subscribed!(remote_account_provider, &[&eata_pubkey]);
 
     let ata_after = accounts_bank
         .get_account(&ata_pubkey)

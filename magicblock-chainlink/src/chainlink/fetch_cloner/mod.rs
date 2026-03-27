@@ -351,8 +351,7 @@ where
                     .is_some()
                     && deleg_record.as_ref().is_some_and(|record| {
                         record.owner == EATA_PROGRAM_ID
-                            && (record.authority == self.validator_pubkey
-                                || record.authority == Pubkey::default())
+                            && record.authority == self.validator_pubkey
                     })
                 {
                     debug!(
@@ -1447,8 +1446,7 @@ where
                     .await;
                 if projected_deleg_record.as_ref().is_some_and(|(record, _)| {
                     record.owner == EATA_PROGRAM_ID
-                        && (record.authority == self.validator_pubkey
-                            || record.authority == Pubkey::default())
+                        && record.authority == self.validator_pubkey
                 }) {
                     debug!(
                         pubkey = %pubkey,
