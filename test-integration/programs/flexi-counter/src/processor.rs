@@ -43,6 +43,7 @@ use crate::{
         },
         schedule_intent::{
             process_create_intent, process_create_intent_bundle,
+            process_create_intent_bundle_commit_and_finalize,
         },
         transfer_intent::process_create_transfer_intent,
     },
@@ -125,6 +126,14 @@ pub fn process(
             num_undelegate,
             counter_diffs,
             compute_units,
+        ),
+        CreateIntentBundleCommitAndFinalize {
+            num_commit,
+            num_commit_finalize,
+        } => process_create_intent_bundle_commit_and_finalize(
+            accounts,
+            num_commit,
+            num_commit_finalize,
         ),
         CreateTransferIntent {
             amount,

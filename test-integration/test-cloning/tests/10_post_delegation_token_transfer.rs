@@ -1,7 +1,7 @@
 use std::{thread::sleep, time::Duration};
 
 use dlp_api::{
-    dlp::args::DelegateArgs,
+    args::DelegateArgs,
     instruction_builder::{
         delegate_with_actions, Encryptable, PostDelegationInstruction,
     },
@@ -178,10 +178,8 @@ fn test_post_delegation_action_executes_spl_token_transfer_100() {
         post_actions,
     );
 
-    let assign_ix = system_instruction::assign(
-        &delegated_account.pubkey(),
-        &dlp_api::dlp::id(),
-    );
+    let assign_ix =
+        system_instruction::assign(&delegated_account.pubkey(), &dlp_api::id());
     let mut assign_tx =
         Transaction::new_with_payer(&[assign_ix], Some(&fee_payer.pubkey()));
     let (_sig, confirmed) = ctx

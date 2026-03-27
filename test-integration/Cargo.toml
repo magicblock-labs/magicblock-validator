@@ -60,7 +60,7 @@ magic-domain-program = { git = "https://github.com/magicblock-labs/magic-domain-
   "modular-sdk",
 ] }
 magicblock_magic_program_api = { package = "magicblock-magic-program-api", path = "../magicblock-magic-program-api" }
-dlp-api = { git = "https://github.com/magicblock-labs/delegation-program.git", rev = "293e9222", package = "magicblock-delegation-program-api", default-features = false }
+magicblock-delegation-program-api = { version = "0.2.0", default-features = false }
 magicblock-program = { path = "../programs/magicblock" }
 magicblock-rpc-client = { path = "../magicblock-rpc-client" }
 magicblock-table-mania = { path = "../magicblock-table-mania" }
@@ -112,3 +112,5 @@ solana-storage-proto = { path = "../storage-proto" }
 # same reason as above
 rocksdb = { git = "https://github.com/magicblock-labs/rust-rocksdb.git", rev = "6d975197" }
 solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "3ff1b2ea" }
+# Fix libsodium for ARM builds - upstream crates.io version breaks Linux ARM binaries
+libsodium-rs = { git = "https://github.com/jedisct1/libsodium-rs.git", rev = "0397a6c5785233f9f2ac91f3eedc3cceb74e0060" }

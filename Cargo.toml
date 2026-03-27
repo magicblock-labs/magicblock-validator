@@ -103,7 +103,7 @@ magicblock-committor-program = { path = "./magicblock-committor-program", featur
 magicblock-committor-service = { path = "./magicblock-committor-service" }
 magicblock-config = { path = "./magicblock-config" }
 magicblock-core = { path = "./magicblock-core" }
-dlp-api = { git = "https://github.com/magicblock-labs/delegation-program.git", rev = "293e9222", package = "magicblock-delegation-program-api" }
+magicblock-delegation-program-api = { version = "0.2.0" }
 magicblock-ledger = { path = "./magicblock-ledger" }
 magicblock-magic-program-api = { path = "./magicblock-magic-program-api" }
 magicblock-metrics = { path = "./magicblock-metrics" }
@@ -223,7 +223,7 @@ spl-token-2022 = "7.0"
 
 [workspace.dependencies.solana-svm]
 git = "https://github.com/magicblock-labs/magicblock-svm.git"
-rev = "bdbaac86"
+rev = "5ea30a7"
 features = ["dev-context-only-utils"]
 
 [workspace.dependencies.rocksdb]
@@ -237,8 +237,9 @@ version = "0.22.0"
 # and we use protobuf-src v2.1.1. Otherwise compilation fails
 solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "3ff1b2ea" }
 solana-storage-proto = { path = "./storage-proto" }
-solana-svm = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "bdbaac86" }
+solana-svm = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "5ea30a7" }
 # Fork is used to enable `disable_manual_compaction` usage
 # Fork is based on commit d4e9e16 of rocksdb (parent commit of 0.23.0 release)
 # without patching update isn't possible due to conflict with solana deps
 rocksdb = { git = "https://github.com/magicblock-labs/rust-rocksdb.git", rev = "6d975197" }
+libsodium-rs = { git = "https://github.com/jedisct1/libsodium-rs.git", rev = "0397a6c5785233f9f2ac91f3eedc3cceb74e0060" }

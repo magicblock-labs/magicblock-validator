@@ -1,5 +1,5 @@
 use assert_matches::assert_matches;
-use dlp_api::dlp::pda::delegation_record_pda_from_delegated_account;
+use dlp_api::pda::delegation_record_pda_from_delegated_account;
 use magicblock_chainlink::{
     assert_cloned_as_delegated, assert_cloned_as_undelegated,
     assert_not_cloned, assert_not_found, assert_not_subscribed,
@@ -99,7 +99,7 @@ async fn test_existing_account_missing_delegation_record() {
     rpc_client.add_account(
         pubkey,
         Account {
-            owner: dlp_api::dlp::id(),
+            owner: dlp_api::id(),
             ..Default::default()
         },
     );
@@ -137,7 +137,7 @@ async fn test_write_existing_account_valid_delegation_record() {
     let owner = Pubkey::new_unique();
 
     let acc = Account {
-        owner: dlp_api::dlp::id(),
+        owner: dlp_api::id(),
         lamports: 1_234,
         ..Default::default()
     };
@@ -182,7 +182,7 @@ async fn test_write_existing_account_other_authority() {
 
     let pubkey = Pubkey::new_unique();
     let account = Account {
-        owner: dlp_api::dlp::id(),
+        owner: dlp_api::id(),
         ..Default::default()
     };
     rpc_client.add_account(pubkey, account);
@@ -229,7 +229,7 @@ async fn test_write_undelegating_account_undelegated_to_other_validator() {
 
     // The account was re-delegated to other validator on chain
     let account = Account {
-        owner: dlp_api::dlp::id(),
+        owner: dlp_api::id(),
         ..Default::default()
     };
     let owner = Pubkey::new_unique();
@@ -240,7 +240,7 @@ async fn test_write_undelegating_account_undelegated_to_other_validator() {
     // The same account is already marked as undelegated in the bank
     // (set the owner to the delegation program and mark it as _undelegating_)
     let mut shared_data = AccountSharedData::from(Account {
-        owner: dlp_api::dlp::id(),
+        owner: dlp_api::id(),
         data: vec![0; 100],
         ..Default::default()
     });
@@ -278,7 +278,7 @@ async fn test_write_undelegating_account_still_being_undelegated() {
 
     // The account is still delegated to us on chain
     let account = Account {
-        owner: dlp_api::dlp::id(),
+        owner: dlp_api::id(),
         ..Default::default()
     };
     let owner = Pubkey::new_unique();
@@ -289,7 +289,7 @@ async fn test_write_undelegating_account_still_being_undelegated() {
     // The same account is already marked as undelegated in the bank
     // (setting the owner to the delegation program marks it as _undelegating_)
     let mut shared_data = AccountSharedData::from(Account {
-        owner: dlp_api::dlp::id(),
+        owner: dlp_api::id(),
         data: vec![0; 100],
         ..Default::default()
     });
@@ -327,7 +327,7 @@ async fn test_write_existing_account_invalid_delegation_record() {
     rpc_client.add_account(
         pubkey,
         Account {
-            owner: dlp_api::dlp::id(),
+            owner: dlp_api::id(),
             ..Default::default()
         },
     );
@@ -336,7 +336,7 @@ async fn test_write_existing_account_invalid_delegation_record() {
     rpc_client.add_account(
         deleg_record_pubkey,
         Account {
-            owner: dlp_api::dlp::id(),
+            owner: dlp_api::id(),
             data: vec![1, 2, 3],
             ..Default::default()
         },

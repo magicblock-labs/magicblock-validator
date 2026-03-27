@@ -1,6 +1,7 @@
 mod process_accept_scheduled_commits;
 mod process_add_action_callback;
 mod process_schedule_commit;
+mod process_schedule_commit_finalize;
 #[cfg(test)]
 mod process_schedule_commit_tests;
 mod process_schedule_intent_bundle;
@@ -14,6 +15,7 @@ use magicblock_magic_program_api::MAGIC_CONTEXT_PUBKEY;
 pub(crate) use process_accept_scheduled_commits::*;
 pub(crate) use process_add_action_callback::process_add_action_callback;
 pub(crate) use process_schedule_commit::*;
+pub(crate) use process_schedule_commit_finalize::*;
 pub(crate) use process_schedule_intent_bundle::process_schedule_intent_bundle;
 pub use process_scheduled_commit_sent::{
     process_scheduled_commit_sent, register_scheduled_commit_sent, SentCommit,

@@ -719,7 +719,7 @@ impl ChainPubsubActor {
                                     rpc_response,
                                 ));
                                 let should_forward = is_directly_subscribed
-                                    || program_pubkey.eq(&dlp_api::dlp::id())
+                                    || program_pubkey.eq(&dlp_api::id())
                                         && sub_update.account.as_ref().is_some_and(
                                             |account| {
                                                 !is_internal_dlp_account_data(

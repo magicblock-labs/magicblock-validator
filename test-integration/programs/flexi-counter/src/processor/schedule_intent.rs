@@ -7,10 +7,16 @@ use ephemeral_rollups_sdk::{
     },
     ActionArgs, ShortAccountMeta,
 };
+use magicblock_magic_program_api::{
+    args::{CommitTypeArgs, MagicIntentBundleArgs},
+    instruction::MagicBlockInstruction,
+};
 use solana_program::{
     account_info::{next_account_info, next_account_infos, AccountInfo},
     entrypoint::ProgramResult,
+    instruction::{AccountMeta, Instruction},
     msg,
+    program::invoke,
     program_error::ProgramError,
 };
 
@@ -326,4 +332,97 @@ pub fn process_create_intent_bundle(
 
     // Build and invoke the intent bundle
     builder.build_and_invoke()
+}
+
+pub fn process_create_intent_bundle_commit_and_finalize(
+    accounts: &[AccountInfo],
+    num_commit: u8,
+    num_commit_finalize: u8,
+) -> ProgramResult {
+    let num_commit = num_commit as usize;
+    let num_commit_finalize = num_commit_finalize as usize;
+
+    let expected_accounts = 3 + num_commit + num_commit_finalize;
+    if accounts.len() != expected_accounts {
+        msg!(
+            "Invalid number of accounts expected: {}, got: {}",
+            expected_accounts,
+            accounts.len()
+        );
+        return Err(ProgramError::NotEnoughAccountKeys);
+    }
+
+    let account_info_iter = &mut accounts.iter();
+    let magic_context = next_account_info(account_info_iter)?;
+    let magic_program = next_account_info(account_info_iter)?;
+    let payer = next_account_info(account_info_iter)?;
+    let commit_accounts = next_account_infos(account_info_iter, num_commit)?;
+    let commit_finalize_accounts =
+        next_account_infos(account_info_iter, num_commit_finalize)?;
+
+    let mut all_accounts = Vec::new();
+    all_accounts.extend(commit_accounts.iter().cloned());
+    all_accounts.extend(commit_finalize_accounts.iter().cloned());
+
+    let mut dedup_keys = Vec::new();
+    for account in &all_accounts {
+        if !dedup_keys.iter().any(|key| key == account.key) {
+            dedup_keys.push(*account.key);
+        }
+    }
+
+    let account_index = |pubkey: &solana_program::pubkey::Pubkey| -> u8 {
+        dedup_keys
+            .iter()
+            .position(|key| key == pubkey)
+            // ScheduleIntentBundle account indices are over instruction metas:
+            // [0]=payer, [1]=magic_context, [2..]=committed accounts...
+            .map(|index| (2 + index) as u8)
+            .unwrap()
+    };
+
+    let args = MagicIntentBundleArgs {
+        commit: Some(CommitTypeArgs::Standalone(
+            commit_accounts
+                .iter()
+                .map(|account| account_index(account.key))
+                .collect(),
+        )),
+        commit_and_undelegate: None,
+        commit_finalize: Some(CommitTypeArgs::Standalone(
+            commit_finalize_accounts
+                .iter()
+                .map(|account| account_index(account.key))
+                .collect(),
+        )),
+        commit_finalize_and_undelegate: None,
+        standalone_actions: vec![],
+    };
+
+    let mut metas = vec![
+        AccountMeta::new(*payer.key, true),
+        AccountMeta::new(*magic_context.key, false),
+    ];
+    metas.extend(
+        dedup_keys
+            .iter()
+            .map(|pubkey| AccountMeta::new(*pubkey, false)),
+    );
+
+    let mut cpi_accounts =
+        vec![magic_program.clone(), payer.clone(), magic_context.clone()];
+    cpi_accounts.extend(dedup_keys.iter().filter_map(|pubkey| {
+        all_accounts
+            .iter()
+            .find(|account| account.key == pubkey)
+            .cloned()
+    }));
+
+    let ix = Instruction::new_with_bincode(
+        *magic_program.key,
+        &MagicBlockInstruction::ScheduleIntentBundle(args),
+        metas,
+    );
+
+    invoke(&ix, &cpi_accounts)
 }
