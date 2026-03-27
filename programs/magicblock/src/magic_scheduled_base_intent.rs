@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use magicblock_core::{
-    intent::{CommittedAccount, CommittedAccountRef},
+    intent::{BaseActionCallback, CommittedAccount, CommittedAccountRef},
     token_programs::{EATA_PROGRAM_ID, TOKEN_PROGRAM_ID},
     Slot,
 };
@@ -32,7 +32,7 @@ use crate::{
 };
 
 /// Commits that are covered by User's dlp PDAs
-pub(crate) const ACTUAL_COMMIT_LIMIT: u64 = 25;
+pub const ACTUAL_COMMIT_LIMIT: u64 = 25;
 /// Fixed fee per commit.
 /// https://github.com/magicblock-labs/delegation-program/blob/main/src/consts.rs#L11
 pub const COMMIT_FEE_LAMPORTS: u64 = 100_000;
@@ -178,6 +178,10 @@ impl ScheduledIntentBundle {
 
     pub fn has_undelegate_intent(&self) -> bool {
         self.intent_bundle.has_undelegate_intent()
+    }
+
+    pub fn has_callbacks(&self) -> bool {
+        self.intent_bundle.has_callbacks()
     }
 
     pub fn is_empty(&self) -> bool {
@@ -539,6 +543,47 @@ impl MagicIntentBundle {
             && no_commit_finalize_and_undelegate
             && no_actions
     }
+
+    pub fn has_callbacks(&self) -> bool {
+        let x = self
+            .commit
+            .as_ref()
+            .map(|el| el.has_callbacks())
+            .unwrap_or(false);
+        let y = self
+            .commit_and_undelegate
+            .as_ref()
+            .map(|el| el.has_callbacks())
+            .unwrap_or(false);
+        let z = self
+            .standalone_actions
+            .iter()
+            .any(|el| el.callback.is_some());
+
+        x || y || z
+    }
+
+    pub fn get_action_mut(&mut self, index: usize) -> Option<&mut BaseAction> {
+        let mut offset = 0usize;
+
+        if let Some(commit) = self.commit.as_mut() {
+            let count = commit.action_count();
+            if index < offset + count {
+                return commit.get_action_mut(index - offset);
+            }
+            offset += count;
+        }
+
+        if let Some(cau) = self.commit_and_undelegate.as_mut() {
+            let count = cau.action_count();
+            if index < offset + count {
+                return cau.get_action_mut(index - offset);
+            }
+            offset += count;
+        }
+
+        self.standalone_actions.get_mut(index.checked_sub(offset)?)
+    }
 }
 
 impl MagicBaseIntent {
@@ -719,6 +764,32 @@ impl CommitAndUndelegate {
     pub fn is_empty(&self) -> bool {
         self.commit_action.is_empty()
     }
+
+    pub fn has_callbacks(&self) -> bool {
+        let x = self.commit_action.has_callbacks();
+        let y = if let UndelegateType::WithBaseActions(actions) =
+            &self.undelegate_action
+        {
+            actions.iter().any(|el| el.callback.is_some())
+        } else {
+            false
+        };
+
+        x || y
+    }
+
+    pub fn action_count(&self) -> usize {
+        self.commit_action.action_count()
+            + self.undelegate_action.action_count()
+    }
+
+    pub fn get_action_mut(&mut self, index: usize) -> Option<&mut BaseAction> {
+        let commit_count = self.commit_action.action_count();
+        if index < commit_count {
+            return self.commit_action.get_action_mut(index);
+        }
+        self.undelegate_action.get_action_mut(index - commit_count)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -750,6 +821,7 @@ pub struct BaseAction {
     pub escrow_authority: Pubkey,
     pub data_per_program: ProgramArgs,
     pub account_metas_per_program: Vec<ShortAccountMeta>,
+    pub callback: Option<BaseActionCallback>,
 }
 
 impl BaseAction {
@@ -802,6 +874,7 @@ impl BaseAction {
             escrow_authority: *authority_pubkey,
             data_per_program: args.args.into(),
             account_metas_per_program: args.accounts,
+            callback: None,
         })
     }
 }
@@ -988,6 +1061,33 @@ impl CommitType {
             } => committed_accounts.is_empty(),
         }
     }
+
+    pub fn has_callbacks(&self) -> bool {
+        if let Self::WithBaseActions {
+            committed_accounts: _,
+            base_actions,
+        } = self
+        {
+            base_actions.iter().any(|el| el.callback.is_some())
+        } else {
+            false
+        }
+    }
+
+    pub fn action_count(&self) -> usize {
+        match self {
+            Self::Standalone(_) => 0,
+            Self::WithBaseActions { base_actions, .. } => base_actions.len(),
+        }
+    }
+
+    pub fn get_action_mut(&mut self, index: usize) -> Option<&mut BaseAction> {
+        if let Self::WithBaseActions { base_actions, .. } = self {
+            base_actions.get_mut(index)
+        } else {
+            None
+        }
+    }
 }
 
 /// No CommitedAccounts since it is only used with CommitAction.
@@ -998,6 +1098,21 @@ pub enum UndelegateType {
 }
 
 impl UndelegateType {
+    pub fn action_count(&self) -> usize {
+        match self {
+            Self::Standalone => 0,
+            Self::WithBaseActions(actions) => actions.len(),
+        }
+    }
+
+    pub fn get_action_mut(&mut self, index: usize) -> Option<&mut BaseAction> {
+        if let Self::WithBaseActions(actions) = self {
+            actions.get_mut(index)
+        } else {
+            None
+        }
+    }
+
     pub fn try_from_args(
         args: UndelegateTypeArgs,
         context: &ConstructionContext<'_, '_>,
@@ -1135,6 +1250,7 @@ mod tests {
                 data: vec![],
             },
             account_metas_per_program: vec![],
+            callback: None,
         }
     }
 

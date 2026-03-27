@@ -10,6 +10,7 @@ use magicblock_committor_program::{
     },
     pdas, ChangesetChunks, Chunks,
 };
+use magicblock_core::intent::BaseActionCallback;
 use magicblock_metrics::metrics::LabelValue;
 use magicblock_program::magic_scheduled_base_intent::BaseAction;
 use solana_instruction::{AccountMeta, Instruction};
@@ -238,6 +239,20 @@ impl BaseActionTask {
 
     pub fn compute_units(&self) -> u32 {
         self.action().compute_units
+    }
+
+    pub fn extract_callback(&mut self) -> Option<BaseActionCallback> {
+        match self {
+            BaseActionTask::V1(value) => value.action.callback.take(),
+            BaseActionTask::V2(value) => value.action.callback.take(),
+        }
+    }
+
+    pub fn has_callback(&self) -> bool {
+        match self {
+            BaseActionTask::V1(value) => value.action.callback.is_some(),
+            BaseActionTask::V2(value) => value.action.callback.is_some(),
+        }
     }
 
     pub fn accounts_size_budget(&self) -> u32 {
@@ -616,6 +631,7 @@ mod serialization_safety_test {
                     escrow_index: 1,
                 },
                 compute_units: 10_000,
+                callback: None,
             },
         })
         .into();
@@ -637,6 +653,7 @@ mod serialization_safety_test {
                         escrow_index: 2,
                     },
                     compute_units: 15_000,
+                    callback: None,
                 },
                 source_program: Pubkey::new_unique(),
             })

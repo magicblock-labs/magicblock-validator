@@ -31,7 +31,7 @@ use magicblock_chainlink::{
 };
 use magicblock_committor_service::{
     config::ChainConfig, BaseIntentCommittor, CommittorService,
-    ComputeBudgetConfig,
+    ComputeBudgetConfig, DEFAULT_ACTIONS_TIMEOUT,
 };
 use magicblock_config::{
     config::{
@@ -65,6 +65,7 @@ use magicblock_program::{
     validator::{self, validator_authority},
     TransactionScheduler as ActionTransactionScheduler,
 };
+use magicblock_services::actions_callback_service::ActionsCallbackService;
 use magicblock_task_scheduler::{SchedulerDatabase, TaskSchedulerService};
 use magicblock_validator_admin::claim_fees::ClaimFeesTask;
 use mdp::state::{
@@ -220,7 +221,9 @@ impl MagicValidator {
         let (mut dispatch, validator_channels) = link();
 
         let step_start = Instant::now();
-        let committor_service = Self::init_committor_service(&config).await?;
+        let committor_service =
+            Self::init_committor_service(&config, ledger.latest_block())
+                .await?;
         log_timing("startup", "committor_service_init", step_start);
         init_magic_sys(Arc::new(MagicSysAdapter::new(
             committor_service.clone(),
@@ -391,14 +394,20 @@ impl MagicValidator {
         })
     }
 
-    #[instrument(skip(config))]
+    #[instrument(skip(config, latest_block))]
     async fn init_committor_service(
         config: &ValidatorParams,
+        latest_block: &LatestBlock,
     ) -> ApiResult<Option<Arc<CommittorService>>> {
         let committor_persist_path =
             config.storage.join("committor_service.sqlite");
         debug!(path = %committor_persist_path.display(), "Initializing committor service");
         // TODO(thlorenz): when we support lifecycle modes again, only start it when needed
+        let actions_callback_executor = ActionsCallbackService::new(
+            Arc::new(RpcClient::new(config.aperture.listen.http())),
+            config.validator.keypair.insecure_clone(),
+            latest_block.clone(),
+        );
         let committor_service = Some(Arc::new(CommittorService::try_start(
             config.validator.keypair.insecure_clone(),
             committor_persist_path,
@@ -408,7 +417,9 @@ impl MagicValidator {
                 compute_budget_config: ComputeBudgetConfig::new(
                     config.commit.compute_unit_price,
                 ),
+                actions_timeout: DEFAULT_ACTIONS_TIMEOUT,
             },
+            actions_callback_executor,
         )?));
 
         if let Some(committor_service) = &committor_service {

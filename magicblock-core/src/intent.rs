@@ -1,5 +1,6 @@
 use std::cell::RefCell;
 
+use magicblock_magic_program_api::args::ShortAccountMeta;
 use serde::{Deserialize, Serialize};
 use solana_account::{Account, AccountSharedData};
 use solana_pubkey::Pubkey;
@@ -56,4 +57,14 @@ impl CommittedAccount {
             remote_slot,
         }
     }
+}
+
+/// A callback that is execution with result of BaseAction
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BaseActionCallback {
+    pub destination_program: Pubkey,
+    pub discriminator: Vec<u8>,
+    pub payload: Vec<u8>,
+    pub compute_units: u32,
+    pub account_metas_per_program: Vec<ShortAccountMeta>,
 }
