@@ -194,7 +194,8 @@ where
     /// handles periodic cleanup of the shared cache.
     pub(crate) fn check_dedup_cache(&self, pubkey: &Pubkey, slot: u64) -> bool {
         let now = Instant::now();
-        let mut cache = self.dedup_cache.lock().unwrap();
+        let mut cache =
+            self.dedup_cache.lock().expect("dedup_cache mutex poisoned");
 
         if let Some(timestamp) = cache.get(&(*pubkey, slot)) {
             if now.duration_since(*timestamp) < self.dedup_window {
