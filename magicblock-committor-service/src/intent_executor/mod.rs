@@ -283,6 +283,9 @@ where
                         info!(
                             "Intent execution timed out, cleaning up actions"
                         );
+                        // The race between callback and intent txn is handled
+                        // on the user smart contract side via TimeoutError.
+                        // We must respect the timeout contract.
                         single_stage_executor
                             .execute_callbacks(Err(ActionError::TimeoutError));
                         single_stage_executor
@@ -291,8 +294,7 @@ where
                     }
                 }
             } else {
-                // Already timed out
-                // Handle timeout and continue execution
+                // Already timed out; see comment above.
                 single_stage_executor
                     .execute_callbacks(Err(ActionError::TimeoutError));
                 single_stage_executor
@@ -372,7 +374,9 @@ where
                 match timeout(time_left, fut).await {
                     Ok(res) => res,
                     Err(_) => {
-                        // Timeout triggers all callbacks
+                        // The race between callback and intent txn is handled
+                        // on the user smart contract side via TimeoutError.
+                        // We must respect the timeout contract.
                         has_finalize_callbacks = false;
                         executor
                             .execute_callbacks(Err(ActionError::TimeoutError));
@@ -380,7 +384,7 @@ where
                     }
                 }
             } else {
-                // Timeout triggers all callbacks
+                // Already timed out; see comment above.
                 has_finalize_callbacks = false;
                 executor.execute_callbacks(Err(ActionError::TimeoutError));
                 executor.commit(committed_pubkeys, persister).await
@@ -399,14 +403,16 @@ where
                         info!(
                             "Intent execution timed out, cleaning up actions"
                         );
+                        // The race between callback and intent txn is handled
+                        // on the user smart contract side via TimeoutError.
+                        // We must respect the timeout contract.
                         finalize_executor
                             .execute_callbacks(Err(ActionError::TimeoutError));
                         finalize_executor.finalize(persister).await
                     }
                 }
             } else {
-                // Already timed out
-                // Handle timeout and continue execution
+                // Already timed out; see comment above.
                 finalize_executor
                     .execute_callbacks(Err(ActionError::TimeoutError));
                 finalize_executor.finalize(persister).await
