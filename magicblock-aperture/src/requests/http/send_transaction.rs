@@ -34,10 +34,8 @@ impl HttpDispatcher {
             )?;
         let signature = *transaction.txn.signature();
 
-        // Perform a replay check and reserve the signature in the cache
-        if self.transactions.contains(&signature)
-            || !self.transactions.push(signature, None)
-        {
+        // Fast replay check before doing account resolution / scheduling work.
+        if self.transactions.contains(&signature) {
             return Err(TransactionError::AlreadyProcessed.into());
         }
 
@@ -50,6 +48,12 @@ impl HttpDispatcher {
             self.transactions_scheduler.schedule(transaction).await?;
         } else {
             self.transactions_scheduler.execute(transaction).await?;
+        }
+
+        // Reserve signature only after we successfully handed the transaction
+        // to the execution pipeline so failed pre-checks don't poison retries.
+        if !self.transactions.push(signature, None) {
+            return Err(TransactionError::AlreadyProcessed.into());
         }
 
         let signature = SerdeSignature(signature);
