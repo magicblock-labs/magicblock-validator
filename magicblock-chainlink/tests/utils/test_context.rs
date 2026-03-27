@@ -1,6 +1,7 @@
 #![allow(unused)]
 use std::{
-    sync::{atomic::AtomicU64, Arc},
+    collections::HashMap,
+    sync::{atomic::AtomicU64, Arc, Mutex},
     time::{Duration, Instant},
 };
 
@@ -102,6 +103,8 @@ impl TestContext {
                             faucet_pubkey,
                             rx,
                             None,
+                            Arc::new(Mutex::new(HashMap::new())),
+                            Duration::from_millis(2_000),
                         )),
                         Some(provider),
                     )

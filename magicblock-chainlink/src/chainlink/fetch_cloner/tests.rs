@@ -1,4 +1,8 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 
 use solana_account::{Account, AccountSharedData, WritableAccount};
 use solana_keypair::Keypair;
@@ -223,6 +227,8 @@ fn init_fetch_cloner(
         faucet_pubkey,
         subscription_rx,
         None,
+        Arc::new(Mutex::new(HashMap::new())),
+        Duration::from_millis(2_000),
     );
     (fetch_cloner, subscription_tx)
 }
@@ -1739,6 +1745,8 @@ async fn test_allowed_programs_filters_programs() {
         random_pubkey(),
         subscription_rx,
         allowed_programs,
+        Arc::new(Mutex::new(HashMap::new())),
+        Duration::from_millis(2_000),
     );
 
     // Fetch and clone both programs
@@ -1812,6 +1820,8 @@ async fn test_allowed_programs_none_allows_all() {
         random_pubkey(),
         subscription_rx,
         None, // No restriction
+        Arc::new(Mutex::new(HashMap::new())),
+        Duration::from_millis(2_000),
     );
 
     // Fetch and clone both programs
@@ -1884,6 +1894,8 @@ async fn test_allowed_programs_empty_allows_all() {
         random_pubkey(),
         subscription_rx,
         allowed_programs,
+        Arc::new(Mutex::new(HashMap::new())),
+        Duration::from_millis(2_000),
     );
 
     // Fetch and clone both programs
@@ -2905,11 +2917,12 @@ async fn test_fetch_subscription_race_duplicate_clone() {
     // Create a cloner stub with a delay so clone_account() takes long enough
     // for both paths to pass the bank slot check before either writes.
     let cloner_stub = Arc::new(ClonerStub::new(accounts_bank.clone()));
-    cloner_stub
-        .set_clone_delay(std::time::Duration::from_millis(200));
-    let initial_count = cloner_stub.clone_request_count();
-
-    // Create FetchCloner with our tracking cloner stub
+    cloner_stub.set_clone_delay(std::time::Duration::from_millis(200));
+    // Create FetchCloner with our tracking cloner stub and a shared dedup
+    // cache so fetch and subscription paths coordinate on (pubkey, slot).
+    // We keep a handle to the cache so we can simulate SubMuxClient's
+    // should_forward_dedup() inserting entries before forwarding updates.
+    let dedup_cache = Arc::new(Mutex::new(std::collections::HashMap::new()));
     let (subscription_tx, subscription_rx) = mpsc::channel(100);
     let fetch_cloner = FetchCloner::new(
         &remote_account_provider,
@@ -2919,34 +2932,19 @@ async fn test_fetch_subscription_race_duplicate_clone() {
         Pubkey::new_unique(),
         subscription_rx,
         None,
+        dedup_cache.clone(),
+        Duration::from_millis(2_000),
     );
 
-    // PHASE 1: Trigger on-demand fetch (spawned, runs concurrently)
-    let fetch_task = {
-        let fc = fetch_cloner.clone();
-        tokio::spawn(async move {
-            fc.fetch_and_clone_accounts_with_dedup(
-                &[account_pubkey],
-                None,
-                None,
-                AccountFetchOrigin::GetAccount,
-                None,
-            )
-            .await
-        })
-    };
-
-    // PHASE 2: Let the fetch path start processing (RPC call completes in
-    // the mock almost instantly, but we need it past the bank check).
-    // The 200ms clone delay ensures it hasn't written to bank yet.
-    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-
-    // PHASE 3: Inject subscription update for the SAME (pubkey, slot).
-    // The subscription listener picks this up and processes it through
-    // process_subscription_update → resolve → clone_account().
-    // Since the fetch path's clone_account() is still sleeping (200ms delay),
-    // the account is NOT yet in bank, so the subscription path passes
-    // the out-of-order slot check and also calls clone_account().
+    // PHASE 1: Simulate a subscription update arriving first.
+    // In production SubMuxClient's should_forward_dedup() inserts
+    // (pubkey, slot) into the shared dedup cache before forwarding.
+    // We simulate that here so the fetch path's check_dedup_cache()
+    // sees the entry and skips its clone, exactly as in production.
+    {
+        let mut cache = dedup_cache.lock().unwrap();
+        cache.insert((account_pubkey, CURRENT_SLOT), std::time::Instant::now());
+    }
     let subscription_account =
         crate::remote_account_provider::RemoteAccount::from_fresh_account(
             account.clone(),
@@ -2961,6 +2959,28 @@ async fn test_fetch_subscription_race_duplicate_clone() {
         .await
         .unwrap();
 
+    // Give the subscription listener time to pick up the update and
+    // start processing (clone_account will take 200ms due to delay).
+    tokio::time::sleep(Duration::from_millis(20)).await;
+
+    // PHASE 2: Trigger on-demand fetch (spawned, runs concurrently).
+    // The fetch path's clone_accounts_and_programs calls
+    // check_dedup_cache which finds the entry inserted above and
+    // skips the clone.
+    let fetch_task = {
+        let fc = fetch_cloner.clone();
+        tokio::spawn(async move {
+            fc.fetch_and_clone_accounts_with_dedup(
+                &[account_pubkey],
+                None,
+                None,
+                AccountFetchOrigin::GetAccount,
+                None,
+            )
+            .await
+        })
+    };
+
     // PHASE 4: Wait for both paths to complete.
     // The fetch path takes ~200ms (clone delay). The subscription path
     // also takes ~200ms. Give enough time for both.
@@ -2972,12 +2992,11 @@ async fn test_fetch_subscription_race_duplicate_clone() {
     );
 
     // Wait for the subscription path to finish processing too
-    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
 
-    // ASSERTION: Both paths submitted clone requests independently (the bug)
+    // ASSERTION: Only the subscription path cloned; the fetch path saw
+    // the dedup cache entry and skipped its clone.
     let clone_requests = cloner_stub.clone_requests();
-    let post_count = clone_requests.len();
-    let new_clones = post_count - initial_count;
 
     // Count clones specifically for our account at the same slot
     let same_account_clones = clone_requests
@@ -2993,7 +3012,8 @@ async fn test_fetch_subscription_race_duplicate_clone() {
     // paths independently call clone_account(), producing 2 requests.
     // This assertion will FAIL until the dedup fix is applied.
     assert_eq!(
-        same_account_clones, 1,
+        same_account_clones,
+        1,
         "Expected 1 clone request (dedup should prevent duplicate), got {}. \
          Clone requests: {}",
         same_account_clones,

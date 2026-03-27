@@ -695,7 +695,26 @@ where
         .into_iter()
         .collect::<ClonerResult<Vec<_>>>()?;
 
-    // 2) Clone accounts without post-delegation actions first so all action
+    // 2) Filter accounts through shared dedup cache before cloning
+    let accounts_to_clone: Vec<_> = accounts_to_clone
+        .into_iter()
+        .filter(|request| {
+            let dominated = this.check_dedup_cache(
+                &request.pubkey,
+                request.account.remote_slot(),
+            );
+            if dominated {
+                trace!(
+                    pubkey = %request.pubkey,
+                    slot = request.account.remote_slot(),
+                    "Skipping clone: (pubkey, slot) already in dedup cache"
+                );
+            }
+            !dominated
+        })
+        .collect();
+
+    // 3) Clone accounts without post-delegation actions first so all action
     // dependencies are materialized in the bank before action tx execution.
     let (accounts_with_actions, accounts_without_actions): (Vec<_>, Vec<_>) =
         accounts_to_clone
@@ -723,7 +742,7 @@ where
         .into_iter()
         .collect::<ClonerResult<Vec<_>>>()?;
 
-    // 3) Finally clone accounts that carry post-delegation actions.
+    // 4) Finally clone accounts that carry post-delegation actions.
     let mut action_accounts_join_set = JoinSet::new();
     for request in accounts_with_actions {
         if tracing::enabled!(tracing::Level::TRACE) {

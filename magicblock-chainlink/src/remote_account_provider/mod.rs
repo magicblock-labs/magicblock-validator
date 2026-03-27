@@ -5,6 +5,7 @@ use std::{
         atomic::{AtomicU64, Ordering},
         Arc, Mutex,
     },
+    time::{Duration, Instant},
 };
 
 pub(crate) use chain_pubsub_client::{
@@ -34,7 +35,7 @@ use solana_sysvar::clock;
 use tokio::{
     sync::{mpsc, oneshot},
     task,
-    time::{self, Duration},
+    time,
 };
 use tracing::*;
 
@@ -172,17 +173,19 @@ impl
         subscription_forwarder: mpsc::Sender<ForwardedSubscriptionUpdate>,
         config: &RemoteAccountProviderConfig,
     ) -> ChainlinkResult<
-        Option<
+        Option<(
             RemoteAccountProvider<
                 ChainRpcClientImpl,
                 SubMuxClient<ChainUpdatesClient>,
             >,
-        >,
+            Arc<Mutex<HashMap<(Pubkey, u64), Instant>>>,
+            Duration,
+        )>,
     > {
         let mode = config.lifecycle_mode();
         if mode.needs_remote_account_provider() {
             debug!("Creating RemoteAccountProvider");
-            Ok(Some(
+            let (provider, dedup_cache, dedup_window) =
                 RemoteAccountProvider::<
                     ChainRpcClientImpl,
                     SubMuxClient<ChainUpdatesClient>,
@@ -192,8 +195,8 @@ impl
                     subscription_forwarder,
                     config,
                 )
-                .await?,
-            ))
+                .await?;
+            Ok(Some((provider, dedup_cache, dedup_window)))
         } else {
             Ok(None)
         }
@@ -318,12 +321,14 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         commitment: CommitmentConfig,
         subscription_forwarder: mpsc::Sender<ForwardedSubscriptionUpdate>,
         config: &RemoteAccountProviderConfig,
-    ) -> RemoteAccountProviderResult<
+    ) -> RemoteAccountProviderResult<(
         RemoteAccountProvider<
             ChainRpcClientImpl,
             SubMuxClient<ChainUpdatesClient>,
         >,
-    > {
+        Arc<Mutex<HashMap<(Pubkey, u64), Instant>>>,
+        Duration,
+    )> {
         if endpoints.is_empty() {
             return Err(
                 RemoteAccountProviderError::AccountSubscriptionsTaskFailed(
@@ -396,6 +401,8 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
 
         let submux =
             SubMuxClient::new(pubsubs, subscribed_accounts.clone(), None);
+        let dedup_cache = submux.dedup_cache();
+        let dedup_window = submux.dedup_window();
 
         if !config.program_subs().is_empty() {
             let count = config.program_subs().len();
@@ -407,7 +414,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             try_join_all(subscribe_program_futs).await?;
         }
 
-        RemoteAccountProvider::<
+        let provider = RemoteAccountProvider::<
             ChainRpcClientImpl,
             SubMuxClient<ChainUpdatesClient>,
         >::new(
@@ -418,7 +425,8 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             subscribed_accounts,
             ChainSlot::new(chain_slot),
         )
-        .await
+        .await?;
+        Ok((provider, dedup_cache, dedup_window))
     }
 
     pub(crate) fn promote_accounts(&self, pubkeys: &[&Pubkey]) {

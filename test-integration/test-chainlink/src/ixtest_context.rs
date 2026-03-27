@@ -1,4 +1,8 @@
-use std::sync::Arc;
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 
 use integration_test_tools::dlp_interface;
 use magicblock_chainlink::{
@@ -129,6 +133,8 @@ impl IxtestContext {
                             faucet_kp.pubkey(),
                             rx,
                             None,
+                            Arc::new(Mutex::new(HashMap::new())),
+                            Duration::from_millis(2_000),
                         )),
                         Some(provider),
                     )
