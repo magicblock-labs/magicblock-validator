@@ -16,9 +16,6 @@ env:
   CARGO_TERM_COLOR: always
   CARGO_REGISTRIES_CRATES_IO_PROTOCOL: sparse
   RUSTFLAGS: -C link-arg=-fuse-ld=mold
-  RUST_CACHE_KEY: rust-ci-${{ hashFiles('Cargo.lock', 'test-integration/Cargo.lock', 'rust-toolchain.toml', 'test-integration/rust-toolchain.toml') }}
-  INTEGRATION_CACHE_KEY: integration-${{ hashFiles('Cargo.lock', 'test-integration/Cargo.lock', 'rust-toolchain.toml', 'test-integration/rust-toolchain.toml') }}
-  SBF_ARTIFACT_NAME: sbf-artifacts-${{ github.sha }}
 
 jobs:
   fmt:
@@ -31,7 +28,7 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: ${{ env.RUST_CACHE_KEY }}
+          shared-key: rust-ci-${{ hashFiles('Cargo.lock', 'test-integration/Cargo.lock', 'rust-toolchain.toml', 'test-integration/rust-toolchain.toml') }}
           add-job-id-key: false
           add-rust-environment-hash-key: false
           workspaces: |
@@ -62,7 +59,7 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: ${{ env.RUST_CACHE_KEY }}
+          shared-key: rust-ci-${{ hashFiles('Cargo.lock', 'test-integration/Cargo.lock', 'rust-toolchain.toml', 'test-integration/rust-toolchain.toml') }}
           add-job-id-key: false
           add-rust-environment-hash-key: false
           workspaces: |
@@ -93,7 +90,7 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: ${{ env.RUST_CACHE_KEY }}
+          shared-key: rust-ci-${{ hashFiles('Cargo.lock', 'test-integration/Cargo.lock', 'rust-toolchain.toml', 'test-integration/rust-toolchain.toml') }}
           add-job-id-key: false
           add-rust-environment-hash-key: false
           workspaces: |
@@ -120,7 +117,7 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: ${{ env.INTEGRATION_CACHE_KEY }}
+          shared-key: integration-${{ hashFiles('Cargo.lock', 'test-integration/Cargo.lock', 'rust-toolchain.toml', 'test-integration/rust-toolchain.toml') }}
           add-job-id-key: false
           add-rust-environment-hash-key: false
           workspaces: |
@@ -175,7 +172,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.SBF_ARTIFACT_NAME }}
+          name: sbf-artifacts-${{ github.sha }}
           path: ci-artifacts
           if-no-files-found: warn
           retention-days: 3
@@ -207,7 +204,7 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: ${{ env.INTEGRATION_CACHE_KEY }}
+          shared-key: integration-${{ hashFiles('Cargo.lock', 'test-integration/Cargo.lock', 'rust-toolchain.toml', 'test-integration/rust-toolchain.toml') }}
           add-job-id-key: false
           add-rust-environment-hash-key: false
           workspaces: |
@@ -222,7 +219,7 @@ jobs:
 
       - uses: actions/download-artifact@v4
         with:
-          name: ${{ env.SBF_ARTIFACT_NAME }}
+          name: sbf-artifacts-${{ github.sha }}
           path: ci-artifacts
 
       - name: Restore SBF artifacts only
