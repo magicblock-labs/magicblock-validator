@@ -913,6 +913,7 @@ impl TryFrom<tx_by_addr::TransactionError> for TransactionError {
             34 => TransactionError::ResanitizationNeeded,
             36 => TransactionError::UnbalancedTransaction,
             37 => TransactionError::ProgramCacheHitMaxLimit,
+            38 => TransactionError::CommitCancelled,
             _ => return Err("Invalid TransactionError"),
         })
     }
@@ -1032,7 +1033,7 @@ impl From<TransactionError> for tx_by_addr::TransactionError {
                     tx_by_addr::TransactionErrorType::UnbalancedTransaction
                 }
                 TransactionError::CommitCancelled => {
-                    todo!()
+                    tx_by_addr::TransactionErrorType::CommitCancelled
                 }
                 TransactionError::ProgramCacheHitMaxLimit => {
                     tx_by_addr::TransactionErrorType::ProgramCacheHitMaxLimit
