@@ -22,6 +22,7 @@ use solana_account::{AccountSharedData, ReadableAccount};
 use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
 use solana_sdk_ids::system_program;
+use solana_signature::Signature;
 use solana_signer::Signer;
 use tokio::{
     sync::{mpsc, oneshot},
@@ -306,8 +307,9 @@ where
                     projected_ata_clone_request
                 {
                     if let Err(err) = self
-                        .cloner
-                        .clone_account(projected_ata_clone_request)
+                        .clone_projected_ata_request(
+                            projected_ata_clone_request,
+                        )
                         .await
                     {
                         warn!(
@@ -505,6 +507,20 @@ where
         ))
     }
 
+    async fn clone_projected_ata_request(
+        &self,
+        request: AccountCloneRequest,
+    ) -> ChainlinkResult<Signature> {
+        self.ensure_delegation_action_dependencies(
+            request.pubkey,
+            request.account.remote_slot(),
+            &request.delegation_actions,
+        )
+        .await?;
+
+        Ok(self.cloner.clone_account(request).await?)
+    }
+
     async fn maybe_greedily_clone_discovered_delegated_account(
         &self,
         pubkey: Pubkey,
@@ -608,8 +624,9 @@ where
                     let projected_ata_pubkey =
                         projected_ata_clone_request.pubkey;
                     if let Err(err) = self
-                        .cloner
-                        .clone_account(projected_ata_clone_request)
+                        .clone_projected_ata_request(
+                            projected_ata_clone_request,
+                        )
                         .await
                     {
                         warn!(
