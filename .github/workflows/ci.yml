@@ -17,6 +17,7 @@ env:
   CARGO_REGISTRIES_CRATES_IO_PROTOCOL: sparse
   RUSTFLAGS: -C link-arg=-fuse-ld=mold
 
+
 jobs:
   fmt:
     runs-on: self-hosted
