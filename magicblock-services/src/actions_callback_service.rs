@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{collections::HashSet, sync::Arc};
 
 use futures_util::future::join_all;
 use magicblock_core::{
@@ -8,8 +8,9 @@ use magicblock_core::{
         LatestBlockProvider,
     },
 };
-use magicblock_magic_program_api::response::{
-    ActionReceipt, MagicResponse, MagicResponseV1,
+use magicblock_magic_program_api::{
+    instruction::MagicBlockInstruction, MAGIC_CONTEXT_PUBKEY,
+    response::{ActionReceipt, MagicResponse, MagicResponseV1},
 };
 use solana_instruction::{AccountMeta, Instruction};
 use solana_keypair::Keypair;
@@ -21,7 +22,7 @@ use solana_rpc_client::{
 use solana_signature::Signature;
 use solana_signer::Signer;
 use solana_transaction::versioned::VersionedTransaction;
-use tracing::error;
+use tracing::{debug, error};
 
 pub struct ActionsCallbackService<L> {
     rpc_client: Arc<RpcClient>,
@@ -136,6 +137,21 @@ impl<L: LatestBlockProvider> ActionsCallbackScheduler
         signature: Option<Signature>,
         result: ActionResult,
     ) -> Vec<Result<Signature, CallbackScheduleError>> {
+        // Collect writable accounts from callbacks before consuming them.
+        // These are the accounts that the callback will modify on ER and
+        // that need to be auto-committed to L1 afterward.
+        let writable_accounts: Vec<Pubkey> = callbacks
+            .iter()
+            .flat_map(|cb| {
+                cb.account_metas_per_program
+                    .iter()
+                    .filter(|m| m.is_writable)
+                    .map(|m| m.pubkey)
+            })
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .collect();
+
         let transactions_result =
             self.build_transactions(callbacks, signature, result);
 
@@ -154,21 +170,103 @@ impl<L: LatestBlockProvider> ActionsCallbackScheduler
 
         if !valid_transactions.is_empty() {
             let rpc_client = self.rpc_client.clone();
+            let authority = self.authority.insecure_clone();
+            let latest_block = self.latest_block.clone();
+
             tokio::spawn(async move {
-                let send_futs = valid_transactions
+                // 1. Send callback transactions and await confirmation
+                let send_results = join_all(
+                    valid_transactions
+                        .iter()
+                        .map(|tx| rpc_client.send_and_confirm_transaction(tx)),
+                )
+                .await;
+
+                let any_confirmed = send_results
                     .iter()
-                    .map(|tx| rpc_client.send_transaction(tx));
-                join_all(send_futs).await.into_iter().for_each(|result| {
+                    .any(|r| r.is_ok());
+
+                for result in &send_results {
                     if let Err(err) = result {
                         error!(
                             error = ?err,
                             "Failed to send action callback transaction"
                         );
                     }
-                });
+                }
+
+                // 2. Auto-commit callback-modified accounts to L1.
+                //    ScheduleCommit accepts validator authority as signer,
+                //    bypassing the CPI ownership check.
+                if any_confirmed && !writable_accounts.is_empty() {
+                    if let Err(err) = Self::schedule_auto_commit(
+                        &rpc_client,
+                        &authority,
+                        &latest_block,
+                        &writable_accounts,
+                    )
+                    .await
+                    {
+                        error!(
+                            error = ?err,
+                            "Failed to auto-commit post-callback state"
+                        );
+                    }
+                }
             });
         }
 
         signatures
+    }
+}
+
+impl<L: LatestBlockProvider> ActionsCallbackService<L> {
+    /// Schedule a standalone commit for accounts modified by a callback.
+    ///
+    /// After a callback transaction confirms on ER, the modified account state
+    /// exists only in ER memory. This method sends a `ScheduleCommit`
+    /// transaction so that the slot ticker picks it up via
+    /// `AcceptScheduleCommits` and the committor service flushes the updated
+    /// state to L1 within the same or next ER slot.
+    async fn schedule_auto_commit(
+        rpc_client: &RpcClient,
+        authority: &Keypair,
+        latest_block: &L,
+        accounts: &[Pubkey],
+    ) -> Result<Signature, Box<dyn std::error::Error + Send + Sync>> {
+        let blockhash = latest_block.blockhash();
+        let authority_pubkey = authority.pubkey();
+
+        let mut account_metas = Vec::with_capacity(2 + accounts.len());
+        account_metas
+            .push(AccountMeta::new(authority_pubkey, true));
+        account_metas
+            .push(AccountMeta::new(MAGIC_CONTEXT_PUBKEY, false));
+        for pubkey in accounts {
+            account_metas.push(AccountMeta::new(*pubkey, false));
+        }
+
+        let ix = Instruction::new_with_bincode(
+            magicblock_magic_program_api::id(),
+            &MagicBlockInstruction::ScheduleCommit,
+            account_metas,
+        );
+        let message = Message::new_with_blockhash(
+            &[ix],
+            Some(&authority_pubkey),
+            &blockhash,
+        );
+        let tx = VersionedTransaction::try_new(
+            VersionedMessage::Legacy(message),
+            &[authority],
+        )?;
+
+        let sig = rpc_client.send_and_confirm_transaction(&tx).await?;
+        debug!(
+            signature = %sig,
+            accounts = accounts.len(),
+            "Post-callback auto-commit scheduled"
+        );
+        Ok(sig)
     }
 }
