@@ -236,13 +236,24 @@ pub fn set_account_from_fields(
     );
 
     // In the same slot, we do not expect an account to be delegated,
-    // undelegated and then delegated.
-    if acc.remote_slot() > fields.remote_slot {
-        return Err(MagicBlockProgramError::OutOfOrderUpdate.into());
-    } else if fields.delegated && acc.remote_slot() == fields.remote_slot {
+    // undelegated and then delegated. So if we see the same account being
+    // delegated twice (ore more) in the same slot, we consider such cases
+    // as "duplicates".
+    //
+    // Under current design, we clone with "CONFIRMED" commitment and thus:
+    //
+    //  - [delegation -> undelegation -> delegation] is currently not possible in the same tx.
+    //    - though [undelegation -> delegation] is still possible though unlikely and allowed by
+    //    design.
+    //
+    // Given this, same slot re-delegation is impossible therefore this this totally acceptable.
+    //
+    if fields.delegated && acc.remote_slot() == fields.remote_slot {
         return Err(
             MagicBlockProgramError::DuplicateDelegatedAccountClone.into()
         );
+    } else if acc.remote_slot() > fields.remote_slot {
+        return Err(MagicBlockProgramError::OutOfOrderUpdate.into());
     }
 
     acc.set_lamports(fields.lamports);

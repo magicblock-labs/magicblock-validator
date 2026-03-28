@@ -66,6 +66,11 @@ pub(crate) fn process_clone_account(
             "CloneAccount: actions_tx_sig={}",
             actions_tx_sig
         );
+    } else {
+        ic_msg!(
+            invoke_context,
+            "CloneAccount did not receive actions_tx_sig"
+        );
     }
 
     let current_lamports = account.borrow().lamports();
