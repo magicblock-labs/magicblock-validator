@@ -22,6 +22,7 @@ use solana_account::{AccountSharedData, ReadableAccount};
 use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
 use solana_sdk_ids::system_program;
+use solana_signature::Signature;
 use solana_signer::Signer;
 use tokio::{
     sync::{mpsc, oneshot},
@@ -286,6 +287,7 @@ where
                 pubkey,
                 &account,
                 deleg_record.as_ref(),
+                &delegation_actions,
             );
 
         // Ensure that the subscription update isn't out of order, i.e.
@@ -305,8 +307,9 @@ where
                     projected_ata_clone_request
                 {
                     if let Err(err) = self
-                        .cloner
-                        .clone_account(projected_ata_clone_request)
+                        .clone_projected_ata_request(
+                            projected_ata_clone_request,
+                        )
                         .await
                     {
                         warn!(
@@ -504,6 +507,20 @@ where
         ))
     }
 
+    async fn clone_projected_ata_request(
+        &self,
+        request: AccountCloneRequest,
+    ) -> ChainlinkResult<Signature> {
+        self.ensure_delegation_action_dependencies(
+            request.pubkey,
+            request.account.remote_slot(),
+            &request.delegation_actions,
+        )
+        .await?;
+
+        Ok(self.cloner.clone_account(request).await?)
+    }
+
     async fn maybe_greedily_clone_discovered_delegated_account(
         &self,
         pubkey: Pubkey,
@@ -521,7 +538,7 @@ where
             return false;
         }
 
-        let Some((deleg_record, _)) = self
+        let Some((deleg_record, delegation_actions)) = self
             .fetch_and_parse_delegation_record(
                 pubkey,
                 account.remote_slot(),
@@ -548,6 +565,7 @@ where
             );
             return true;
         }
+        let delegation_actions = delegation_actions.unwrap_or_default();
 
         let greedy_ata_pubkey = delegation::parse_raw_eata_pda(
             &pubkey,
@@ -600,13 +618,15 @@ where
                         pubkey,
                         &account,
                         Some(&deleg_record),
+                        &delegation_actions,
                     )
                 {
                     let projected_ata_pubkey =
                         projected_ata_clone_request.pubkey;
                     if let Err(err) = self
-                        .cloner
-                        .clone_account(projected_ata_clone_request)
+                        .clone_projected_ata_request(
+                            projected_ata_clone_request,
+                        )
                         .await
                     {
                         warn!(
@@ -879,6 +899,7 @@ where
         eata_pubkey: Pubkey,
         eata_account: &AccountSharedData,
         deleg_record: Option<&DelegationRecord>,
+        delegation_actions: &DelegationActions,
     ) -> Option<AccountCloneRequest> {
         let deleg_record = deleg_record?;
 
@@ -914,7 +935,7 @@ where
             pubkey: ata_pubkey,
             account: projected_ata,
             commit_frequency_ms: None,
-            delegation_actions: DelegationActions::default(),
+            delegation_actions: delegation_actions.clone(),
             delegated_to_other: None,
         })
     }
