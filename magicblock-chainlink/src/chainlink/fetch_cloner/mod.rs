@@ -286,6 +286,7 @@ where
                 pubkey,
                 &account,
                 deleg_record.as_ref(),
+                &delegation_actions,
             );
 
         // Ensure that the subscription update isn't out of order, i.e.
@@ -521,7 +522,7 @@ where
             return false;
         }
 
-        let Some((deleg_record, _)) = self
+        let Some((deleg_record, delegation_actions)) = self
             .fetch_and_parse_delegation_record(
                 pubkey,
                 account.remote_slot(),
@@ -548,6 +549,7 @@ where
             );
             return true;
         }
+        let delegation_actions = delegation_actions.unwrap_or_default();
 
         let greedy_ata_pubkey = delegation::parse_raw_eata_pda(
             &pubkey,
@@ -600,6 +602,7 @@ where
                         pubkey,
                         &account,
                         Some(&deleg_record),
+                        &delegation_actions,
                     )
                 {
                     let projected_ata_pubkey =
@@ -879,6 +882,7 @@ where
         eata_pubkey: Pubkey,
         eata_account: &AccountSharedData,
         deleg_record: Option<&DelegationRecord>,
+        delegation_actions: &DelegationActions,
     ) -> Option<AccountCloneRequest> {
         let deleg_record = deleg_record?;
 
@@ -914,7 +918,7 @@ where
             pubkey: ata_pubkey,
             account: projected_ata,
             commit_frequency_ms: None,
-            delegation_actions: DelegationActions::default(),
+            delegation_actions: delegation_actions.clone(),
             delegated_to_other: None,
         })
     }

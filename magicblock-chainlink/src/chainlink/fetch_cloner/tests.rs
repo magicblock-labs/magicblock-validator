@@ -2794,6 +2794,71 @@ async fn test_delegated_eata_subscription_update_clones_raw_eata_and_projects_at
 }
 
 #[tokio::test]
+async fn test_projected_ata_clone_request_from_eata_update_keeps_actions() {
+    init_logger();
+    let validator_keypair = Keypair::new();
+    let validator_pubkey = validator_keypair.pubkey();
+    let wallet_owner = random_pubkey();
+    let mint = random_pubkey();
+    let action_program_pubkey = random_pubkey();
+    const CURRENT_SLOT: u64 = 100;
+
+    let eata_pubkey = derive_eata(&wallet_owner, &mint);
+    let ata_pubkey = derive_ata(&wallet_owner, &mint);
+    let eata_account = create_eata_account(&wallet_owner, &mint, 777, true);
+
+    let FetcherTestCtx {
+        fetch_cloner,
+        rpc_client,
+        ..
+    } = setup(
+        [(eata_pubkey, eata_account.clone())],
+        CURRENT_SLOT,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+
+    add_delegation_record_with_actions_for(
+        &rpc_client,
+        eata_pubkey,
+        validator_pubkey,
+        EATA_PROGRAM_ID,
+        action_program_pubkey,
+    );
+
+    let (deleg_record, delegation_actions) = fetch_cloner
+        .fetch_and_parse_delegation_record(
+            eata_pubkey,
+            CURRENT_SLOT,
+            AccountFetchOrigin::GetAccount,
+        )
+        .await
+        .expect("delegation record with actions should resolve");
+
+    let mut eata_shared = AccountSharedData::from(eata_account);
+    eata_shared.set_remote_slot(CURRENT_SLOT);
+
+    let projected_ata_request = fetch_cloner
+        .maybe_build_projected_ata_clone_request_from_eata_sub_update(
+            eata_pubkey,
+            &eata_shared,
+            Some(&deleg_record),
+            delegation_actions.as_ref().expect(
+                "delegation actions should be parsed for our validator",
+            ),
+        )
+        .expect(
+            "delegated eATA update should build projected ATA clone request",
+        );
+
+    assert_eq!(projected_ata_request.pubkey, ata_pubkey);
+    assert!(
+        !projected_ata_request.delegation_actions.is_empty(),
+        "projected ATA clone request must preserve post-delegation actions",
+    );
+}
+
+#[tokio::test]
 async fn test_delegated_eata_update_does_not_override_delegated_ata_in_bank() {
     init_logger();
     let validator_keypair = Keypair::new();
