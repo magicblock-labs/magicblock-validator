@@ -243,7 +243,7 @@ impl<L: LatestBlockProvider> ActionsCallbackService<L> {
         account_metas
             .push(AccountMeta::new(MAGIC_CONTEXT_PUBKEY, false));
         for pubkey in accounts {
-            account_metas.push(AccountMeta::new(*pubkey, false));
+            account_metas.push(AccountMeta::new_readonly(*pubkey, false));
         }
 
         let ix = Instruction::new_with_bincode(
