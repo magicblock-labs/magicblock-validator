@@ -137,31 +137,36 @@ impl<L: LatestBlockProvider> ActionsCallbackScheduler
         signature: Option<Signature>,
         result: ActionResult,
     ) -> Vec<Result<Signature, CallbackScheduleError>> {
-        // Collect writable accounts from callbacks before consuming them.
-        // These are the accounts that the callback will modify on ER and
-        // that need to be auto-committed to L1 afterward.
-        let writable_accounts: Vec<Pubkey> = callbacks
+        let authority_pubkey = self.authority.pubkey();
+
+        // Extract normalized writable accounts per callback BEFORE consuming them.
+        // Applies the same authority exclusion as build_instruction (line 114):
+        // validator authority is never writable in the callback instruction,
+        // so it must not appear in the auto-commit target list either.
+        let per_callback_accounts: Vec<Vec<Pubkey>> = callbacks
             .iter()
-            .flat_map(|cb| {
+            .map(|cb| {
                 cb.account_metas_per_program
                     .iter()
-                    .filter(|m| m.is_writable)
+                    .filter(|m| m.is_writable && m.pubkey != authority_pubkey)
                     .map(|m| m.pubkey)
+                    .collect()
             })
-            .collect::<HashSet<_>>()
-            .into_iter()
             .collect();
 
         let transactions_result =
             self.build_transactions(callbacks, signature, result);
 
         let mut valid_transactions = vec![];
+        let mut valid_accounts = vec![];
         let signatures = transactions_result
             .into_iter()
-            .map(|el| match el {
+            .enumerate()
+            .map(|(i, el)| match el {
                 Ok(tx) => {
                     let signature = *tx.get_signature();
                     valid_transactions.push(tx);
+                    valid_accounts.push(per_callback_accounts[i].clone());
                     Ok(signature)
                 }
                 Err(err) => Err(err),
@@ -182,28 +187,35 @@ impl<L: LatestBlockProvider> ActionsCallbackScheduler
                 )
                 .await;
 
-                let any_confirmed = send_results
-                    .iter()
-                    .any(|r| r.is_ok());
-
-                for result in &send_results {
-                    if let Err(err) = result {
-                        error!(
-                            error = ?err,
-                            "Failed to send action callback transaction"
-                        );
+                // 2. Collect writable accounts only from confirmed callbacks
+                let mut confirmed_accounts = HashSet::new();
+                for (i, result) in send_results.iter().enumerate() {
+                    match result {
+                        Ok(_) => {
+                            if let Some(accounts) = valid_accounts.get(i) {
+                                confirmed_accounts.extend(accounts);
+                            }
+                        }
+                        Err(err) => {
+                            error!(
+                                error = ?err,
+                                "Failed to send action callback transaction"
+                            );
+                        }
                     }
                 }
 
-                // 2. Auto-commit callback-modified accounts to L1.
+                // 3. Auto-commit only accounts modified by confirmed callbacks.
                 //    ScheduleCommit accepts validator authority as signer,
                 //    bypassing the CPI ownership check.
-                if any_confirmed && !writable_accounts.is_empty() {
+                if !confirmed_accounts.is_empty() {
+                    let accounts: Vec<Pubkey> =
+                        confirmed_accounts.into_iter().collect();
                     if let Err(err) = Self::schedule_auto_commit(
                         &rpc_client,
                         &authority,
                         &latest_block,
-                        &writable_accounts,
+                        &accounts,
                     )
                     .await
                     {
