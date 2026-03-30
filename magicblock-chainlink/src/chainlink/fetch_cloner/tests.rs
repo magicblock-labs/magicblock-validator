@@ -2,6 +2,7 @@ use std::{collections::HashMap, sync::Arc};
 
 use dlp_api::state::DelegationRecord;
 use solana_account::{Account, AccountSharedData, WritableAccount};
+use solana_instruction::{AccountMeta, Instruction};
 use solana_keypair::Keypair;
 use solana_sdk_ids::system_program;
 use solana_signer::Signer;
@@ -253,6 +254,114 @@ fn init_fetch_cloner(
         None,
     );
     (fetch_cloner, subscription_tx)
+}
+
+#[tokio::test]
+async fn test_classify_delegation_action_dependencies_allows_missing_writable_nonsigner(
+) {
+    let validator_keypair = Keypair::new();
+    let FetcherTestCtx {
+        fetch_cloner,
+        ..
+    } = setup(
+        std::iter::empty::<(Pubkey, Account)>(),
+        100,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+
+    let root_pubkey = random_pubkey();
+    let action_program = random_pubkey();
+    let creatable_account = random_pubkey();
+    let readonly_dependency = random_pubkey();
+    let signer_dependency = random_pubkey();
+
+    let actions = DelegationActions::from(vec![Instruction {
+        program_id: action_program,
+        accounts: vec![
+            AccountMeta::new(creatable_account, false),
+            AccountMeta::new_readonly(readonly_dependency, false),
+            AccountMeta::new_readonly(signer_dependency, true),
+            AccountMeta::new(root_pubkey, false),
+        ],
+        data: vec![],
+    }]);
+
+    let deps = fetch_cloner
+        .classify_delegation_action_dependencies(root_pubkey, &actions);
+
+    assert!(
+        deps.required_existing.contains(&action_program),
+        "program ids must already exist",
+    );
+    assert!(
+        deps.required_existing.contains(&readonly_dependency),
+        "readonly accounts must already exist",
+    );
+    assert!(
+        deps.required_existing.contains(&signer_dependency),
+        "signer accounts must already exist",
+    );
+    assert!(
+        deps.may_be_created_in_actions.contains(&creatable_account),
+        "writable non-signer accounts may be created by earlier action instructions",
+    );
+    assert!(
+        !deps.required_existing.contains(&creatable_account),
+        "creatable writable non-signer accounts should not be required to pre-exist",
+    );
+    assert!(
+        !deps.required_existing.contains(&root_pubkey),
+        "root cloned account should be excluded from dependency classification",
+    );
+}
+
+#[tokio::test]
+async fn test_classify_delegation_action_dependencies_writable_readonly_mix_allows_creation(
+) {
+    let validator_keypair = Keypair::new();
+    let FetcherTestCtx {
+        fetch_cloner,
+        ..
+    } = setup(
+        std::iter::empty::<(Pubkey, Account)>(),
+        100,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+
+    let root_pubkey = random_pubkey();
+    let action_program = random_pubkey();
+    let account_created_then_read = random_pubkey();
+
+    let actions = DelegationActions::from(vec![
+        Instruction {
+            program_id: action_program,
+            accounts: vec![AccountMeta::new(account_created_then_read, false)],
+            data: vec![1],
+        },
+        Instruction {
+            program_id: action_program,
+            accounts: vec![AccountMeta::new_readonly(
+                account_created_then_read,
+                false,
+            )],
+            data: vec![2],
+        },
+    ]);
+
+    let deps = fetch_cloner
+        .classify_delegation_action_dependencies(root_pubkey, &actions);
+
+    assert!(
+        deps.may_be_created_in_actions
+            .contains(&account_created_then_read),
+        "an account that is writable in one instruction and readonly in a later one should still be treated as creatable in-actions",
+    );
+    assert!(
+        !deps.required_existing.contains(&account_created_then_read),
+        "later readonly usage should not force pre-existence when an earlier action can create it",
+    );
 }
 
 // -----------------
