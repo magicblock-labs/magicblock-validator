@@ -3887,6 +3887,7 @@ name = "magicblock-core"
 version = "0.8.6"
 dependencies = [
  "bincode",
+ "bytes",
  "flume",
  "magicblock-magic-program-api 0.8.6",
  "serde",
@@ -4140,6 +4141,7 @@ dependencies = [
  "solana-transaction-error",
  "thiserror 1.0.69",
  "tokio",
+ "tokio-util 0.7.17",
  "tracing",
  "url",
 ]
@@ -10791,6 +10793,7 @@ dependencies = [
  "solana-signature",
  "solana-signer",
  "solana-transaction",
+ "solana-transaction-error",
  "solana-transaction-status-client-types",
  "tempfile",
  "tokio",
