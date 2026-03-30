@@ -153,7 +153,6 @@ impl MagicValidator {
             genesis_config,
             validator_pubkey,
         } = create_genesis_config_with_leader(
-            u64::MAX,
             &validator_pubkey,
             config.validator.basefee,
         );
@@ -175,7 +174,6 @@ impl MagicValidator {
         log_timing("startup", "sync_validator_keypair", step_start);
 
         let latest_block = ledger.latest_block().load();
-        let step_start = Instant::now();
         let mut accountsdb =
             AccountsDb::new(&config.accountsdb, &config.storage, last_slot)?;
 
@@ -223,6 +221,26 @@ impl MagicValidator {
         let accountsdb = Arc::new(accountsdb);
         let (mut dispatch, validator_channels) = link();
 
+        let step_start = Instant::now();
+        let committor_service = Self::init_committor_service(&config).await?;
+        log_timing("startup", "committor_service_init", step_start);
+        init_magic_sys(Arc::new(MagicSysAdapter::new(
+            committor_service.clone(),
+        )));
+
+        let step_start = Instant::now();
+        let chainlink = Arc::new(
+            Self::init_chainlink(
+                &config,
+                committor_service.clone(),
+                &dispatch.transaction_scheduler,
+                &ledger.latest_block().clone(),
+                &accountsdb,
+            )
+            .await?,
+        );
+        log_timing("startup", "chainlink_init", step_start);
+
         let replication_service =
             if let Some((broker, is_fresh_start)) = broker {
                 let messages_rx = dispatch.replication_messages.take().expect(
@@ -238,6 +256,7 @@ impl MagicValidator {
                     mode_tx.clone(),
                     accountsdb.clone(),
                     ledger.clone(),
+                    chainlink.stub(),
                     dispatch.transaction_scheduler.clone(),
                     messages_rx,
                     token.clone(),
@@ -248,7 +267,6 @@ impl MagicValidator {
             } else {
                 None
             };
-        log_timing("startup", "accountsdb_init", step_start);
         for (pubkey, account) in genesis_config.accounts {
             if accountsdb.get_account(&pubkey).is_some() {
                 continue;
@@ -851,23 +869,23 @@ impl MagicValidator {
                     std::process::exit(1);
                 }
 
-                // let step_start = Instant::now();
-                // let result =
-                //     MagicValidator::ensure_magic_fee_vault_on_chain(rpc_url)
-                //         .await;
-                // log_timing(
-                //     "startup_background",
-                //     "ensure_magic_fee_vault_on_chain",
-                //     step_start,
-                // );
+                let step_start = Instant::now();
+                let result =
+                    MagicValidator::ensure_magic_fee_vault_on_chain(rpc_url)
+                        .await;
+                log_timing(
+                    "startup_background",
+                    "ensure_magic_fee_vault_on_chain",
+                    step_start,
+                );
 
                 // Without magic fee vault being properly set up
                 // transactions scheduling commits will fail
-                // if let Err(err) = result {
-                //     error!(error = ?err, "Magic fee vault setup failed");
-                //     error!("Exiting process");
-                //     std::process::exit(1);
-                // }
+                if let Err(err) = result {
+                    error!(error = ?err, "Magic fee vault setup failed");
+                    error!("Exiting process");
+                    std::process::exit(1);
+                }
             });
             if let Some(ref config) = self.config.chain_operation {
                 let step_start = Instant::now();

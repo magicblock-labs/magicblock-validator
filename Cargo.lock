@@ -3801,6 +3801,7 @@ dependencies = [
  "futures",
  "machineid-rs",
  "magicblock-accounts-db",
+ "magicblock-chainlink",
  "magicblock-core",
  "magicblock-ledger",
  "notify",

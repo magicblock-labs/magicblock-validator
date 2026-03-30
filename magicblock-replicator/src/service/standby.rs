@@ -2,7 +2,7 @@
 
 use std::time::{Duration, Instant};
 
-use async_nats::Message as NatsMessage;
+use async_nats::jetstream::Message as NatsMessage;
 use futures::StreamExt;
 use magicblock_core::link::{
     replication::{Message, Transaction},
@@ -144,6 +144,14 @@ impl Standby {
             return;
         }
         self.ctx.update_position(slot, index);
+        // NOTE:
+        // for performance reasons we batch messages from NATS and ack the
+        // entire batch on slot boudaries, instead of on every message
+        if current_slot < self.ctx.slot {
+            if let Err(error) = msg.ack().await {
+                warn!(%error, "failed to ack nats message");
+            }
+        }
     }
 
     /// Check whether consumer has any undelivered messages in the stream

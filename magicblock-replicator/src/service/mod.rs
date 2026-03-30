@@ -27,6 +27,7 @@ use std::{sync::Arc, thread::JoinHandle, time::Duration};
 
 pub use context::ReplicationContext;
 use magicblock_accounts_db::AccountsDb;
+use magicblock_chainlink::StubbedChainlink;
 use magicblock_core::link::{
     replication::Message,
     transactions::{SchedulerMode, TransactionSchedulerHandle},
@@ -71,6 +72,7 @@ impl Service {
         mode_tx: Sender<SchedulerMode>,
         accountsdb: Arc<AccountsDb>,
         ledger: Arc<Ledger>,
+        chainlink: StubbedChainlink<AccountsDb>,
         scheduler: TransactionSchedulerHandle,
         messages: Receiver<Message>,
         cancel: CancellationToken,
@@ -82,6 +84,7 @@ impl Service {
             mode_tx,
             accountsdb,
             ledger,
+            chainlink,
             scheduler,
             cancel,
             can_promote,

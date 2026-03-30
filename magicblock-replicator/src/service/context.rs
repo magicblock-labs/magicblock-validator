@@ -4,6 +4,7 @@ use std::{sync::Arc, time::Duration};
 
 use machineid_rs::IdBuilder;
 use magicblock_accounts_db::AccountsDb;
+use magicblock_chainlink::StubbedChainlink;
 use magicblock_core::{
     link::{
         replication::{Block, Message, SuperBlock},
@@ -38,6 +39,10 @@ pub struct ReplicationContext {
     pub mode_tx: Sender<SchedulerMode>,
     /// Accounts database.
     pub accountsdb: Arc<AccountsDb>,
+    /// Mocked chainlink to reset accountsdb
+    /// TODO(bmuddha): this is a temporary hack, which will be removed
+    /// once the accounts management is moved to the accountsdb
+    pub chainlink: StubbedChainlink<AccountsDb>,
     /// Transaction ledger.
     pub ledger: Arc<Ledger>,
     /// Transaction scheduler.
@@ -52,11 +57,13 @@ pub struct ReplicationContext {
 
 impl ReplicationContext {
     /// Creates context from ledger state.
+    #[allow(clippy::too_many_arguments)]
     pub async fn new(
         broker: Broker,
         mode_tx: Sender<SchedulerMode>,
         accountsdb: Arc<AccountsDb>,
         ledger: Arc<Ledger>,
+        chainlink: StubbedChainlink<AccountsDb>,
         scheduler: TransactionSchedulerHandle,
         cancel: CancellationToken,
         can_promote: bool,
@@ -75,6 +82,7 @@ impl ReplicationContext {
             cancel,
             mode_tx,
             accountsdb,
+            chainlink,
             ledger,
             scheduler,
             slot,
@@ -174,6 +182,8 @@ impl ReplicationContext {
         messages: Receiver<Message>,
     ) -> Result<Primary> {
         let snapshots = self.create_snapshot_watcher()?;
+        // TODO(bmuddha): remove dependency on the chainlink
+        self.chainlink.reset_accounts_bank()?;
         self.enter_primary_mode().await;
         Ok(Primary::new(self, producer, messages, snapshots))
     }

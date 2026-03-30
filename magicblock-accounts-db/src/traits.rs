@@ -8,7 +8,7 @@ pub trait AccountsBank: Send + Sync + 'static {
     fn remove_account(&self, pubkey: &Pubkey);
     fn remove_where(
         &self,
-        predicate: impl Fn(&Pubkey, &AccountSharedData) -> bool,
+        predicate: impl FnMut(&Pubkey, &AccountSharedData) -> bool,
     ) -> AccountsDbResult<usize>;
 
     fn remove_account_conditionally(

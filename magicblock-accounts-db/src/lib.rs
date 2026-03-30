@@ -397,10 +397,13 @@ impl AccountsDb {
     /// accountsdb, so that the state doesn't change during checksum computation
     pub unsafe fn checksum(&self) -> u64 {
         let mut hasher = xxhash3_64::Hasher::new();
+        let mut i = 0;
         for (pubkey, acc) in self.iter_all() {
             let Some(borrowed) = acc.as_borrowed() else {
                 continue;
             };
+            println!("{i}. {pubkey}");
+            i += 1;
             hasher.write(pubkey.as_ref());
             hasher.write(borrowed.buffer());
         }
@@ -434,7 +437,7 @@ impl AccountsBank for AccountsDb {
     /// Removes accounts matching a predicate.
     fn remove_where(
         &self,
-        predicate: impl Fn(&Pubkey, &AccountSharedData) -> bool,
+        mut predicate: impl FnMut(&Pubkey, &AccountSharedData) -> bool,
     ) -> AccountsDbResult<usize> {
         let to_remove = self
             .iter_all()
