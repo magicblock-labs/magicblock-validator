@@ -12,9 +12,7 @@ impl HttpDispatcher {
     ) -> HandlerResult {
         // Airdrops are only supported if a faucet keypair is configured.
         // Which is never the case with *ephemeral* running mode of the validator
-        Err(RpcError::invalid_request(
-            "free airdrop faucet is disabled",
-        ))
+        Err(RpcError::invalid_request("free airdrop faucet is disabled"))
         // TODO(bmuddha): allow free airdrops when other modes are fully reintroduced
         // https://github.com/magicblock-labs/magicblock-validator/issues/1093
 

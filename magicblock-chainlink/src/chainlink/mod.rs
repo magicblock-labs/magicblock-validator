@@ -186,7 +186,9 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
             } else if account.delegated() {
                 delegated_only += 1;
                 false
-            } else { *account.owner() != feature::ID };
+            } else {
+                *account.owner() != feature::ID
+            };
             if should_remove {
                 error!(
                     pubkey = %pubkey,

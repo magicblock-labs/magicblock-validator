@@ -21,9 +21,15 @@ fn test_get_block_meta() {
     let slot_1_hash = Hash::new_unique();
     let slot_2_hash = Hash::new_unique();
 
-    assert!(ledger.write_block(LatestBlockInner::new(0, slot_0_hash, slot_0_time)).is_ok());
-    assert!(ledger.write_block(LatestBlockInner::new(1, slot_1_hash, slot_1_time)).is_ok());
-    assert!(ledger.write_block(LatestBlockInner::new(2, slot_2_hash, slot_2_time)).is_ok());
+    assert!(ledger
+        .write_block(LatestBlockInner::new(0, slot_0_hash, slot_0_time))
+        .is_ok());
+    assert!(ledger
+        .write_block(LatestBlockInner::new(1, slot_1_hash, slot_1_time))
+        .is_ok());
+    assert!(ledger
+        .write_block(LatestBlockInner::new(2, slot_2_hash, slot_2_time))
+        .is_ok());
 
     let slot_0_block = get_block(&ledger, 0);
     let slot_1_block = get_block(&ledger, 1);
@@ -49,7 +55,11 @@ fn test_get_block_transactions() {
     let slot_41_block_time = 410;
     let slot_41_block_hash = Hash::new_unique();
     ledger
-        .write_block(LatestBlockInner::new(41, slot_41_block_hash, slot_41_block_time))
+        .write_block(LatestBlockInner::new(
+            41,
+            slot_41_block_hash,
+            slot_41_block_time,
+        ))
         .unwrap();
 
     let (slot_42_tx1, _) = write_dummy_transaction(&ledger, 42, 0);
@@ -58,7 +68,11 @@ fn test_get_block_transactions() {
     let slot_42_block_time = 420;
     let slot_42_block_hash = Hash::new_unique();
     ledger
-        .write_block(LatestBlockInner::new(42, slot_42_block_hash, slot_42_block_time))
+        .write_block(LatestBlockInner::new(
+            42,
+            slot_42_block_hash,
+            slot_42_block_time,
+        ))
         .unwrap();
 
     let block_41 = get_block(&ledger, 41);

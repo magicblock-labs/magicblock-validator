@@ -222,7 +222,9 @@ impl MagicValidator {
         let (mut dispatch, validator_channels) = link();
 
         let step_start = Instant::now();
-        let committor_service = Self::init_committor_service(&config).await?;
+        let committor_service =
+            Self::init_committor_service(&config, ledger.latest_block())
+                .await?;
         log_timing("startup", "committor_service_init", step_start);
         init_magic_sys(Arc::new(MagicSysAdapter::new(
             committor_service.clone(),
@@ -301,39 +303,6 @@ impl MagicValidator {
             token.clone(),
         );
         log_timing("startup", "system_metrics_ticker_start", step_start);
-
-        let step_start = Instant::now();
-        info!("Starting committor service");
-        let committor_service =
-            Self::init_committor_service(&config, ledger.latest_block())
-                .await?;
-        info!(
-            duration_ms = step_start.elapsed().as_millis() as u64,
-            enabled = committor_service.is_some(),
-            "Committor service started"
-        );
-        log_timing("startup", "committor_service_init", step_start);
-        init_magic_sys(Arc::new(MagicSysAdapter::new(
-            committor_service.clone(),
-        )));
-
-        let step_start = Instant::now();
-        info!("Starting chainlink");
-        let chainlink = Arc::new(
-            Self::init_chainlink(
-                &config,
-                committor_service.clone(),
-                &dispatch.transaction_scheduler,
-                &ledger.latest_block().clone(),
-                &accountsdb,
-            )
-            .await?,
-        );
-        info!(
-            duration_ms = step_start.elapsed().as_millis() as u64,
-            "Chainlink started"
-        );
-        log_timing("startup", "chainlink_init", step_start);
 
         let scheduled_commits_processor =
             committor_service.as_ref().map(|committor_service| {
