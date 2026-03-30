@@ -20,6 +20,7 @@ members = [
   "magicblock-metrics",
   "magicblock-processor",
   "magicblock-rpc-client",
+  "magicblock-services",
   "magicblock-table-mania",
   "magicblock-task-scheduler",
   "magicblock-validator",
@@ -39,7 +40,7 @@ resolver = "2"
 
 [workspace.package]
 # Solana Version (2.2.x)
-version = "0.8.4"
+version = "0.8.5"
 authors = ["MagicBlock Maintainers <maintainers@magicblock.xyz>"]
 repository = "https://github.com/magicblock-labs/ephemeral-validator"
 homepage = "https://www.magicblock.xyz"
@@ -109,6 +110,7 @@ magicblock-metrics = { path = "./magicblock-metrics" }
 magicblock-processor = { path = "./magicblock-processor" }
 magicblock-program = { path = "./programs/magicblock" }
 magicblock-rpc-client = { path = "./magicblock-rpc-client" }
+magicblock-services = { path = "./magicblock-services" }
 magicblock-table-mania = { path = "./magicblock-table-mania" }
 magicblock-task-scheduler = { path = "./magicblock-task-scheduler" }
 magicblock-tui-client = { path = "./tools/magicblock-tui-client" }

@@ -4,6 +4,7 @@ use arc_swap::{ArcSwapAny, Guard};
 pub use database::{
     meta::PerfSample, options::BLOCKSTORE_DIRECTORY_ROCKS_LEVEL,
 };
+use magicblock_core::traits::LatestBlockProvider;
 use solana_clock::Clock;
 use solana_hash::Hash;
 pub use store::api::{Ledger, SignatureInfosForAddress};
@@ -81,6 +82,20 @@ impl LatestBlock {
     /// This allows multiple components to react to new blocks concurrently.
     pub fn subscribe(&self) -> broadcast::Receiver<()> {
         self.notifier.subscribe()
+    }
+}
+
+impl LatestBlockProvider for LatestBlock {
+    fn slot(&self) -> u64 {
+        self.inner.load().slot
+    }
+
+    fn blockhash(&self) -> Hash {
+        self.inner.load().blockhash
+    }
+
+    fn clock(&self) -> Clock {
+        self.inner.load().clock.clone()
     }
 }
 
