@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap as StdHashMap, HashSet},
+    collections::HashSet,
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc,
@@ -64,12 +64,6 @@ use crate::{
 };
 
 type RemoteAccountRequests = Vec<oneshot::Sender<()>>;
-
-#[derive(Default)]
-struct DelegationActionDependencies {
-    required_existing: Vec<Pubkey>,
-    may_be_created_in_actions: HashSet<Pubkey>,
-}
 
 pub struct FetchCloner<T, U, V, C>
 where
@@ -169,50 +163,6 @@ where
     /// Get the current fetch count
     pub fn fetch_count(&self) -> u64 {
         self.fetch_count.load(Ordering::Relaxed)
-    }
-
-    fn classify_delegation_action_dependencies(
-        &self,
-        root_pubkey: Pubkey,
-        delegation_actions: &DelegationActions,
-    ) -> DelegationActionDependencies {
-        #[derive(Default, Clone, Copy)]
-        struct Usage {
-            writable: bool,
-            signer: bool,
-        }
-
-        let mut required_existing = HashSet::new();
-        let mut account_usage: StdHashMap<Pubkey, Usage> = StdHashMap::new();
-
-        for instruction in delegation_actions.iter() {
-            required_existing.insert(instruction.program_id);
-            for account_meta in &instruction.accounts {
-                if account_meta.pubkey == root_pubkey {
-                    continue;
-                }
-
-                let usage = account_usage.entry(account_meta.pubkey).or_default();
-                usage.writable |= account_meta.is_writable;
-                usage.signer |= account_meta.is_signer;
-            }
-        }
-
-        let mut may_be_created_in_actions = HashSet::new();
-        for (pubkey, usage) in account_usage {
-            if usage.signer {
-                required_existing.insert(pubkey);
-            } else if usage.writable {
-                may_be_created_in_actions.insert(pubkey);
-            } else {
-                required_existing.insert(pubkey);
-            }
-        }
-
-        DelegationActionDependencies {
-            required_existing: required_existing.into_iter().collect(),
-            may_be_created_in_actions,
-        }
     }
 
     /// Check if a program is allowed to be cloned.
@@ -515,41 +465,31 @@ where
             return Ok(());
         }
 
-        let dependencies = self.classify_delegation_action_dependencies(
-            pubkey,
-            delegation_actions,
-        );
-        let required_existing = dependencies.required_existing;
+        let dependencies = delegation_actions
+            .iter()
+            .flat_map(|instruction| {
+                std::iter::once(instruction.program_id)
+                    .chain(instruction.accounts.iter().map(|meta| meta.pubkey))
+            })
+            .filter(|dependency| dependency != &pubkey)
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .collect::<Vec<_>>();
 
-        if required_existing.is_empty() {
+        if dependencies.is_empty() {
             return Ok(());
         }
 
-        let result = self
+        self
             .fetch_and_clone_accounts_with_dedup(
-                &required_existing,
+                &dependencies,
                 None,
                 Some(remote_slot),
                 AccountFetchOrigin::GetAccount,
                 None,
             )
             .await?;
-        if result.is_ok() {
-            return Ok(());
-        }
-
-        let missing_accounts = result
-            .pubkeys_not_found_on_chain()
-            .into_iter()
-            .chain(result.pubkeys_missing_delegation_record())
-            .collect::<HashSet<_>>()
-            .into_iter()
-            .collect::<Vec<_>>();
-        let mut missing_accounts = missing_accounts;
-        missing_accounts.sort_unstable();
-        Err(ChainlinkError::MissingDelegationActionAccounts(
-            missing_accounts,
-        ))
+        Ok(())
     }
 
     async fn clone_projected_ata_request(
@@ -1345,16 +1285,6 @@ where
                         .any(|program| program.program_id.eq(dependency))
             })
             .collect::<Vec<_>>();
-        let mut may_be_created_in_actions = HashSet::new();
-        for request in &accounts_to_clone {
-            may_be_created_in_actions.extend(
-                self.classify_delegation_action_dependencies(
-                    request.pubkey,
-                    &request.delegation_actions,
-                )
-                .may_be_created_in_actions,
-            );
-        }
 
         if !action_dependencies_to_fetch.is_empty() {
             if tracing::enabled!(tracing::Level::TRACE) {
@@ -1412,32 +1342,6 @@ where
                 existing_subs.clone(),
             )
             .await?;
-
-            let unexpected_missing_accounts = not_found
-                .into_iter()
-                .filter_map(|(pubkey, _)| {
-                    (!may_be_created_in_actions.contains(&pubkey))
-                        .then_some(pubkey)
-                })
-                .collect::<Vec<_>>();
-            let mut unexpected_missing_accounts =
-                unexpected_missing_accounts;
-            unexpected_missing_accounts.sort_unstable();
-
-            if !unexpected_missing_accounts.is_empty() {
-                return Err(ChainlinkError::MissingDelegationActionAccounts(
-                    unexpected_missing_accounts,
-                ));
-            }
-
-            if !action_dep_missing_delegation_record.is_empty() {
-                return Err(ChainlinkError::MissingDelegationActionAccounts(
-                    action_dep_missing_delegation_record
-                        .iter()
-                        .map(|(pubkey, _)| *pubkey)
-                        .collect(),
-                ));
-            }
 
             new_subs.extend(action_dep_record_subs.iter().copied());
             record_subs.extend(action_dep_record_subs);
