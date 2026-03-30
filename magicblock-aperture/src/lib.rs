@@ -1,10 +1,11 @@
+use std::net::SocketAddr;
+
 use error::{ApertureError, RpcError};
 use magicblock_config::config::aperture::ApertureConfig;
 use magicblock_core::link::DispatchEndpoints;
 use processor::EventProcessor;
 use server::{http::HttpServer, websocket::WebsocketServer};
 use state::SharedState;
-use std::net::SocketAddr;
 use tokio::net::TcpListener;
 use tokio_util::sync::CancellationToken;
 use tracing::{info, instrument};

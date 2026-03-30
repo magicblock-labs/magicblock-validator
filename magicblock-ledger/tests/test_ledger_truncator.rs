@@ -57,7 +57,9 @@ async fn test_truncator_not_purged_size() {
 
     for i in 0..NUM_TRANSACTIONS {
         write_dummy_transaction(&ledger, i, 0);
-        ledger.write_block(LatestBlockInner::new(i, Hash::new_unique(), 0)).unwrap()
+        ledger
+            .write_block(LatestBlockInner::new(i, Hash::new_unique(), 0))
+            .unwrap()
     }
     let signatures = (0..NUM_TRANSACTIONS)
         .map(|i| {
@@ -88,7 +90,9 @@ async fn test_truncator_non_empty_ledger() {
     let signatures = (0..FINAL_SLOT + 20)
         .map(|i| {
             let (_, signature) = write_dummy_transaction(&ledger, i, 0);
-            ledger.write_block(LatestBlockInner::new(i, Hash::new_unique(), 0)).unwrap();
+            ledger
+                .write_block(LatestBlockInner::new(i, Hash::new_unique(), 0))
+                .unwrap();
             signature
         })
         .collect::<Vec<_>>();
@@ -131,7 +135,9 @@ async fn transaction_spammer(
         for _ in 0..tx_per_operation {
             let slot = signatures.len() as u64;
             let (_, signature) = write_dummy_transaction(&ledger, slot, 0);
-            ledger.write_block(LatestBlockInner::new(slot, Hash::new_unique(), 0)).unwrap();
+            ledger
+                .write_block(LatestBlockInner::new(slot, Hash::new_unique(), 0))
+                .unwrap();
             signatures.push(signature);
         }
 
@@ -189,7 +195,9 @@ async fn test_with_1gb_db() {
         }
 
         write_dummy_transaction(&ledger, slot, 0);
-        ledger.write_block(LatestBlockInner::new(slot, Hash::new_unique(), 0)).unwrap();
+        ledger
+            .write_block(LatestBlockInner::new(slot, Hash::new_unique(), 0))
+            .unwrap();
         slot += 1
     }
 
