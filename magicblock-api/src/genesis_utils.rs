@@ -8,11 +8,9 @@ use solana_feature_gate_interface::{create_account, Feature};
 use solana_feature_set::FeatureSet;
 use solana_fee_calculator::FeeRateGovernor;
 use solana_genesis_config::{ClusterType, GenesisConfig};
-use solana_keypair::Keypair;
 use solana_native_token::LAMPORTS_PER_SOL;
 use solana_pubkey::Pubkey;
 use solana_rent::Rent;
-use solana_signer::Signer;
 
 // Default amount received by the validator
 const VALIDATOR_LAMPORTS: u64 = u64::MAX / 2;
@@ -23,15 +21,10 @@ pub struct GenesisConfigInfo {
 }
 
 pub fn create_genesis_config_with_leader(
-    mint_lamports: u64,
     validator_pubkey: &Pubkey,
     lamports_per_signature: u64,
 ) -> GenesisConfigInfo {
-    let mint_keypair = Keypair::new();
-
     let genesis_config = create_genesis_config_with_leader_ex(
-        mint_lamports,
-        &mint_keypair.pubkey(),
         validator_pubkey,
         VALIDATOR_LAMPORTS,
         FeeRateGovernor {
@@ -77,18 +70,12 @@ pub fn activate_feature(
 
 #[allow(clippy::too_many_arguments)]
 pub fn create_genesis_config_with_leader_ex(
-    mint_lamports: u64,
-    mint_pubkey: &Pubkey,
     validator_pubkey: &Pubkey,
     validator_lamports: u64,
     fee_rate_governor: FeeRateGovernor,
     rent: Rent,
     mut initial_accounts: Vec<(Pubkey, AccountSharedData)>,
 ) -> GenesisConfig {
-    initial_accounts.push((
-        *mint_pubkey,
-        AccountSharedData::new(mint_lamports, 0, &Pubkey::default()),
-    ));
     initial_accounts.push((
         *validator_pubkey,
         AccountSharedData::new(validator_lamports, 0, &Pubkey::default()),

@@ -110,7 +110,7 @@ pub mod mock {
         }
         fn remove_where(
             &self,
-            predicate: impl Fn(&Pubkey, &AccountSharedData) -> bool,
+            mut predicate: impl FnMut(&Pubkey, &AccountSharedData) -> bool,
         ) -> AccountsDbResult<usize> {
             let mut accounts = self.accounts.lock().unwrap();
             let initial_len = accounts.len();
