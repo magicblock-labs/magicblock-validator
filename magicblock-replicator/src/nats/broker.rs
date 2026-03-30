@@ -32,10 +32,13 @@ impl Broker {
     /// Connects to NATS and initializes all JetStream resources.
     ///
     /// Resources are created idempotently - safe to call multiple times.
-    pub async fn connect(url: Url) -> Result<Self> {
+    /// secret argument: is the NATS nkey secret, which must have a paired
+    /// public key stored in the server
+    pub async fn connect(url: Url, secret: String) -> Result<Self> {
         let addr = ServerAddr::from_url(url)?;
 
         let client = ConnectOptions::new()
+            .nkey(secret)
             .max_reconnects(None)
             .reconnect_delay_callback(|attempts| {
                 let ms = (attempts as u64 * cfg::RECONNECT_BASE_MS)

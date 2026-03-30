@@ -30,9 +30,17 @@ pub enum ReplicationMode {
     // Validator which doesn't participate in replication
     Standalone,
     /// Validator which participates in replication: acting as either a primary or replicator
-    StandBy(Url),
+    StandBy(ReplicationConfig),
     /// Validator which participates in replication only as replicator (no takeover)
-    ReplicaOnly(Url, SerdePubkey),
+    ReplicaOnly(ReplicationConfig),
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone)]
+#[serde(rename_all = "kebab-case")]
+pub struct ReplicationConfig {
+    pub url: Url,
+    pub secret: String,
+    pub authority_override: Option<SerdePubkey>,
 }
 
 impl Default for ValidatorConfig {
@@ -50,16 +58,16 @@ impl Default for ValidatorConfig {
 impl ReplicationMode {
     /// Returns the remote URL if this node participates in replication.
     /// Returns `None` for `Standalone` mode.
-    pub fn remote(&self) -> Option<Url> {
+    pub fn config(&self) -> Option<ReplicationConfig> {
         match self {
             Self::Standalone => None,
-            Self::StandBy(u) | Self::ReplicaOnly(u, _) => Some(u.clone()),
+            Self::StandBy(c) | Self::ReplicaOnly(c) => Some(c.clone()),
         }
     }
 
     pub fn authority_override(&self) -> Option<Pubkey> {
-        if let Self::ReplicaOnly(_, pk) = self {
-            return Some(pk.0);
+        if let Self::ReplicaOnly(c) = self {
+            return c.authority_override.as_ref().map(|pk| pk.0);
         }
         None
     }
