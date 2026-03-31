@@ -591,23 +591,26 @@ impl MagicValidator {
         let max_block_age =
             SOLANA_VALID_BLOCKHASH_AGE / self.config.ledger.block_time_ms();
         let step_start = Instant::now();
-        let slot_to_continue_at = process_ledger(
+        let process_ledger_result = process_ledger(
             &self.ledger,
             accountsdb_slot,
             self.transaction_scheduler.clone(),
             max_block_age,
         )
-        .await?;
-        log_timing("startup", "ledger_replay", step_start);
-        self.accountsdb.set_slot(slot_to_continue_at);
+        .await;
 
-        // Restore the prior authority override now that replay is done.
+        // Restore the prior authority override now that replay is done,
+        // regardless of whether process_ledger succeeded or failed.
         if self.config.ledger.replay_authority_override.is_some() {
             match prior_override {
                 Some(pk) => validator::set_validator_authority_override(pk),
                 None => validator::unset_validator_authority_override(),
             }
         }
+
+        let slot_to_continue_at = process_ledger_result?;
+        log_timing("startup", "ledger_replay", step_start);
+        self.accountsdb.set_slot(slot_to_continue_at);
 
         // The transactions to schedule and accept account commits re-run when we
         // process the ledger, however we do not want to re-commit them.
