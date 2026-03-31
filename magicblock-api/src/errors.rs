@@ -48,7 +48,10 @@ pub enum ApiError {
         "StandBy node keypair '{configured}' does not match primary's \
          keypair '{expected}'. StandBy nodes must use the primary's keypair."
     )]
-    StandByKeypairMismatch { configured: Pubkey, expected: Pubkey },
+    StandByKeypairMismatch {
+        configured: Pubkey,
+        expected: Pubkey,
+    },
 
     #[error("Failed to send mode switch to scheduler: {0}")]
     FailedToSendModeSwitch(String),
