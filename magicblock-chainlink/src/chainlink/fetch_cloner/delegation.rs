@@ -77,6 +77,12 @@ fn parse_post_delegation_actions(
             )
         })?;
 
+    validate_post_delegation_action_signers(
+        &actions,
+        delegation_record_pubkey,
+        validator_keypair,
+    )?;
+
     let instructions = actions
         .decrypt_with_keypair(validator_keypair)
         .map_err(|err| {
@@ -87,6 +93,66 @@ fn parse_post_delegation_actions(
         })?;
 
     Ok(instructions.into())
+}
+
+fn validate_post_delegation_action_signers(
+    actions: &PostDelegationActions,
+    delegation_record_pubkey: Pubkey,
+    validator_keypair: &Keypair,
+) -> ChainlinkResult<()> {
+    let signers_count = actions.signers.len();
+    let keys_count = signers_count + actions.non_signers.len();
+
+    for (instruction_index, instruction) in
+        actions.instructions.iter().enumerate()
+    {
+        if usize::from(instruction.program_id) >= keys_count {
+            return Err(ChainlinkError::InvalidDelegationActions(
+                delegation_record_pubkey,
+                format!(
+                    "Post-delegation action {instruction_index} references invalid program_id index {} for pubkey table len {keys_count}",
+                    instruction.program_id
+                ),
+            ));
+        }
+
+        for (account_index, maybe_account_meta) in
+            instruction.accounts.iter().enumerate()
+        {
+            let compact_meta = maybe_account_meta
+                .clone()
+                .decrypt_with_keypair(validator_keypair)
+                .map_err(|err| {
+                    ChainlinkError::InvalidDelegationActions(
+                        delegation_record_pubkey,
+                        format!(
+                            "Failed to decrypt account meta {account_index} for post-delegation action {instruction_index}: {err}"
+                        ),
+                    )
+                })?;
+            let key_index = usize::from(compact_meta.key());
+
+            if key_index >= keys_count {
+                return Err(ChainlinkError::InvalidDelegationActions(
+                    delegation_record_pubkey,
+                    format!(
+                        "Post-delegation action {instruction_index} account {account_index} references invalid pubkey index {key_index} for pubkey table len {keys_count}"
+                    ),
+                ));
+            }
+
+            if compact_meta.is_signer() && key_index >= signers_count {
+                return Err(ChainlinkError::InvalidDelegationActions(
+                    delegation_record_pubkey,
+                    format!(
+                        "Post-delegation action {instruction_index} account {account_index} marks pubkey index {key_index} as signer, but only the first {signers_count} pubkeys are authorized signers"
+                    ),
+                ));
+            }
+        }
+    }
+
+    Ok(())
 }
 
 pub(crate) fn apply_delegation_record_to_account<T, U, V, C>(
@@ -382,6 +448,61 @@ mod tests {
                 data: vec![1, 2, 3, 4, 5],
             }]
         );
+    }
+
+    #[test]
+    fn rejects_encrypted_signer_outside_signers_field() {
+        let validator = Keypair::new();
+        let program_id = Pubkey::new_unique();
+        let delegated_account = Pubkey::new_unique();
+
+        let encrypted_program_id =
+            dlp_api::encryption::encrypt_ed25519_recipient(
+                program_id.as_array(),
+                validator.pubkey().as_array(),
+            )
+            .unwrap();
+        let encrypted_account_meta =
+            dlp_api::encryption::encrypt_ed25519_recipient(
+                &[dlp_api::compact::AccountMeta::new_readonly(1, true)
+                    .to_byte()],
+                validator.pubkey().as_array(),
+            )
+            .unwrap();
+
+        let payload = serialize_record_with_actions(
+            validator.pubkey(),
+            PostDelegationActions {
+                inserted_signers: 0,
+                inserted_non_signers: 0,
+                signers: vec![],
+                non_signers: vec![
+                    MaybeEncryptedPubkey::Encrypted(EncryptedBuffer::new(
+                        encrypted_program_id,
+                    )),
+                    (*delegated_account.as_array()).into(),
+                ],
+                instructions: vec![MaybeEncryptedInstruction {
+                    program_id: 0,
+                    accounts: vec![MaybeEncryptedAccountMeta::Encrypted(
+                        EncryptedBuffer::new(encrypted_account_meta),
+                    )],
+                    data: MaybeEncryptedIxData {
+                        prefix: vec![],
+                        suffix: EncryptedBuffer::default(),
+                    },
+                }],
+            },
+        );
+
+        let err =
+            parse_delegation_record(&payload, Pubkey::new_unique(), &validator)
+                .unwrap_err();
+
+        assert!(matches!(
+            err,
+            ChainlinkError::InvalidDelegationActions(_, _)
+        ));
     }
 
     #[test]
