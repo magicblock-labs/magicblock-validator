@@ -16,7 +16,7 @@ env:
   CARGO_TERM_COLOR: always
   CARGO_REGISTRIES_CRATES_IO_PROTOCOL: sparse
   RUSTFLAGS: -C link-arg=-fuse-ld=mold
-
+  LOCAL_CACHE_BASE_PATH: /gha-local-cache
 
 jobs:
   fmt:
@@ -27,20 +27,16 @@ jobs:
           submodules: recursive
           token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
 
-      - uses: Swatinem/rust-cache@v2
+      - name: Restore local Rust cache
+        uses: khj809/github-action-cache-local-fs/restore@v1
         with:
-          shared-key: rust-ci-${{ hashFiles('Cargo.lock', 'test-integration/Cargo.lock', 'rust-toolchain.toml', 'test-integration/rust-toolchain.toml') }}
-          add-job-id-key: false
-          add-rust-environment-hash-key: false
-          workspaces: |
-            . -> target
-            test-integration -> target
-          cache-targets: false
-          cache-all-crates: false
-          cache-workspace-crates: false
-          cache-bin: false
-          cache-on-failure: true
-          save-if: false
+          path: |
+            /cargo-home/registry
+            /cargo-home/git
+            target
+            test-integration/target
+          key: rust-ci-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'test-integration/Cargo.lock', 'rust-toolchain.toml', 'test-integration/rust-toolchain.toml') }}
+          cache-base-path: ${{ env.LOCAL_CACHE_BASE_PATH }}
 
       - name: Format check
         run: make ci-fmt
@@ -58,20 +54,16 @@ jobs:
           submodules: recursive
           token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
 
-      - uses: Swatinem/rust-cache@v2
+      - name: Restore local Rust cache
+        uses: khj809/github-action-cache-local-fs/restore@v1
         with:
-          shared-key: rust-ci-${{ hashFiles('Cargo.lock', 'test-integration/Cargo.lock', 'rust-toolchain.toml', 'test-integration/rust-toolchain.toml') }}
-          add-job-id-key: false
-          add-rust-environment-hash-key: false
-          workspaces: |
-            . -> target
-            test-integration -> target
-          cache-targets: true
-          cache-all-crates: false
-          cache-workspace-crates: true
-          cache-bin: false
-          cache-on-failure: true
-          save-if: false
+          path: |
+            /cargo-home/registry
+            /cargo-home/git
+            target
+            test-integration/target
+          key: rust-ci-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'test-integration/Cargo.lock', 'rust-toolchain.toml', 'test-integration/rust-toolchain.toml') }}
+          cache-base-path: ${{ env.LOCAL_CACHE_BASE_PATH }}
 
       - name: Lint
         run: make ci-lint
@@ -89,23 +81,32 @@ jobs:
           submodules: recursive
           token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
 
-      - uses: Swatinem/rust-cache@v2
+      - name: Restore local Rust cache
+        id: rust-cache-restore
+        uses: khj809/github-action-cache-local-fs/restore@v1
         with:
-          shared-key: rust-ci-${{ hashFiles('Cargo.lock', 'test-integration/Cargo.lock', 'rust-toolchain.toml', 'test-integration/rust-toolchain.toml') }}
-          add-job-id-key: false
-          add-rust-environment-hash-key: false
-          workspaces: |
-            . -> target
-            test-integration -> target
-          cache-targets: true
-          cache-all-crates: false
-          cache-workspace-crates: true
-          cache-bin: false
-          cache-on-failure: true
-          save-if: true
+          path: |
+            /cargo-home/registry
+            /cargo-home/git
+            target
+            test-integration/target
+          key: rust-ci-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'test-integration/Cargo.lock', 'rust-toolchain.toml', 'test-integration/rust-toolchain.toml') }}
+          cache-base-path: ${{ env.LOCAL_CACHE_BASE_PATH }}
 
       - name: Unit tests
         run: make ci-test-unit
+
+      - name: Save local Rust cache
+        if: success()
+        uses: khj809/github-action-cache-local-fs/save@v1
+        with:
+          path: |
+            /cargo-home/registry
+            /cargo-home/git
+            target
+            test-integration/target
+          key: ${{ steps.rust-cache-restore.outputs.cache-primary-key }}
+          cache-base-path: ${{ env.LOCAL_CACHE_BASE_PATH }}
 
   build:
     needs: [fmt, lint, unit-tests]
@@ -116,20 +117,17 @@ jobs:
           submodules: recursive
           token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
 
-      - uses: Swatinem/rust-cache@v2
+      - name: Restore local Rust cache
+        id: rust-cache-restore
+        uses: khj809/github-action-cache-local-fs/restore@v1
         with:
-          shared-key: integration-${{ hashFiles('Cargo.lock', 'test-integration/Cargo.lock', 'rust-toolchain.toml', 'test-integration/rust-toolchain.toml') }}
-          add-job-id-key: false
-          add-rust-environment-hash-key: false
-          workspaces: |
-            . -> target
-            test-integration -> target
-          cache-targets: true
-          cache-all-crates: false
-          cache-workspace-crates: true
-          cache-bin: false
-          cache-on-failure: true
-          save-if: true
+          path: |
+            /cargo-home/registry
+            /cargo-home/git
+            target
+            test-integration/target
+          key: integration-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'test-integration/Cargo.lock', 'rust-toolchain.toml', 'test-integration/rust-toolchain.toml') }}
+          cache-base-path: ${{ env.LOCAL_CACHE_BASE_PATH }}
 
       - name: Build project
         run: cargo build --locked
@@ -145,38 +143,17 @@ jobs:
           make -C test-integration programs
           make chainlink-prep-programs -C test-integration/test-chainlink
 
-      - name: Pack only SBF artifacts
-        run: |
-          set -euo pipefail
-
-          mkdir -p ci-artifacts/test-integration-deploy
-          mkdir -p ci-artifacts/root-deploy
-          mkdir -p ci-artifacts/chainlink-artifacts
-
-          if [ -d "test-integration/target/deploy" ]; then
-            find test-integration/target/deploy -mindepth 1 -maxdepth 1 -exec cp -r {} ci-artifacts/test-integration-deploy/ \;
-          else
-            echo "::warning::test-integration/target/deploy not found"
-          fi
-
-          if [ -d "target/deploy" ]; then
-            find target/deploy -mindepth 1 -maxdepth 1 -exec cp -r {} ci-artifacts/root-deploy/ \;
-          else
-            echo "::warning::target/deploy not found"
-          fi
-
-          if [ -d "test-integration/test-chainlink/target/deploy" ]; then
-            find test-integration/test-chainlink/target/deploy -mindepth 1 -maxdepth 1 -exec cp -r {} ci-artifacts/chainlink-artifacts/ \;
-          else
-            echo "::warning::test-integration/test-chainlink/target/deploy not found"
-          fi
-
-      - uses: actions/upload-artifact@v4
+      - name: Save local Rust cache
+        if: success()
+        uses: khj809/github-action-cache-local-fs/save@v1
         with:
-          name: sbf-artifacts-${{ github.sha }}
-          path: ci-artifacts
-          if-no-files-found: warn
-          retention-days: 3
+          path: |
+            /cargo-home/registry
+            /cargo-home/git
+            target
+            test-integration/target
+          key: ${{ steps.rust-cache-restore.outputs.cache-primary-key }}
+          cache-base-path: ${{ env.LOCAL_CACHE_BASE_PATH }}
 
   integration-tests:
     needs: build
@@ -203,54 +180,16 @@ jobs:
           submodules: recursive
           token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
 
-      - uses: Swatinem/rust-cache@v2
+      - name: Restore local Rust cache
+        uses: khj809/github-action-cache-local-fs/restore@v1
         with:
-          shared-key: integration-${{ hashFiles('Cargo.lock', 'test-integration/Cargo.lock', 'rust-toolchain.toml', 'test-integration/rust-toolchain.toml') }}
-          add-job-id-key: false
-          add-rust-environment-hash-key: false
-          workspaces: |
-            . -> target
-            test-integration -> target
-          cache-targets: true
-          cache-all-crates: false
-          cache-workspace-crates: true
-          cache-bin: false
-          cache-on-failure: true
-          save-if: false
-
-      - uses: actions/download-artifact@v4
-        with:
-          name: sbf-artifacts-${{ github.sha }}
-          path: ci-artifacts
-
-      - name: Restore SBF artifacts only
-        run: |
-          set -euo pipefail
-
-          mkdir -p test-integration/target/deploy
-          mkdir -p target/deploy
-          mkdir -p test-integration/test-chainlink/target/deploy
-
-          if [ -d "ci-artifacts/test-integration-deploy" ]; then
-            find ci-artifacts/test-integration-deploy -mindepth 1 -maxdepth 1 -exec cp -r {} test-integration/target/deploy/ \;
-            find test-integration/target/deploy -type f -exec touch {} +
-          else
-            echo "::warning::No cached test-integration deploy artifacts found"
-          fi
-
-          if [ -d "ci-artifacts/root-deploy" ]; then
-            find ci-artifacts/root-deploy -mindepth 1 -maxdepth 1 -exec cp -r {} target/deploy/ \;
-            find target/deploy -type f -exec touch {} +
-          else
-            echo "::warning::No cached root deploy artifacts found"
-          fi
-
-          if [ -d "ci-artifacts/chainlink-artifacts" ]; then
-            find ci-artifacts/chainlink-artifacts -mindepth 1 -maxdepth 1 -exec cp -r {} test-integration/test-chainlink/target/deploy/ \;
-            find test-integration/test-chainlink/target/deploy -type f -exec touch {} +
-          else
-            echo "::warning::No cached chainlink deploy artifacts found"
-          fi
+          path: |
+            /cargo-home/registry
+            /cargo-home/git
+            target
+            test-integration/target
+          key: integration-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'test-integration/Cargo.lock', 'rust-toolchain.toml', 'test-integration/rust-toolchain.toml') }}
+          cache-base-path: ${{ env.LOCAL_CACHE_BASE_PATH }}
 
       - name: Run integration test
         env:
