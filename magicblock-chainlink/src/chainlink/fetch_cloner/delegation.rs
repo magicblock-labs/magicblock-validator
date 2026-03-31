@@ -142,10 +142,23 @@ fn validate_post_delegation_action_signers(
             }
 
             if compact_meta.is_signer() && key_index >= signers_count {
+                let offending_pubkey = Pubkey::new_from_array(
+                    actions.non_signers[key_index - signers_count]
+                        .clone()
+                        .decrypt_with_keypair(validator_keypair)
+                        .map_err(|err| {
+                            ChainlinkError::InvalidDelegationActions(
+                                delegation_record_pubkey,
+                                format!(
+                                    "Failed to decrypt pubkey index {key_index} for post-delegation action {instruction_index} signer validation: {err}"
+                                ),
+                            )
+                        })?,
+                );
                 return Err(ChainlinkError::InvalidDelegationActions(
                     delegation_record_pubkey,
                     format!(
-                        "Post-delegation action {instruction_index} account {account_index} marks pubkey index {key_index} as signer, but only the first {signers_count} pubkeys are authorized signers"
+                        "InvalidSignature: post-delegation action {instruction_index} account {account_index} ({offending_pubkey}) marks pubkey index {key_index} as signer, but only the first {signers_count} pubkeys are authorized signers"
                     ),
                 ));
             }
@@ -499,10 +512,13 @@ mod tests {
             parse_delegation_record(&payload, Pubkey::new_unique(), &validator)
                 .unwrap_err();
 
-        assert!(matches!(
-            err,
-            ChainlinkError::InvalidDelegationActions(_, _)
-        ));
+        match err {
+            ChainlinkError::InvalidDelegationActions(_, message) => {
+                assert!(message.contains("InvalidSignature"));
+                assert!(message.contains(&delegated_account.to_string()));
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
     }
 
     #[test]
