@@ -1,7 +1,7 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use magicblock_core::{
-    intent::{CommittedAccount, CommittedAccountRef},
+    intent::{BaseActionCallback, CommittedAccount, CommittedAccountRef},
     token_programs::{EATA_PROGRAM_ID, TOKEN_PROGRAM_ID},
     Slot,
 };
@@ -23,12 +23,22 @@ use solana_transaction::Transaction;
 
 use crate::{
     instruction_utils::InstructionUtils,
+    magic_sys::MISSING_COMMIT_NONCE_ERR,
     utils::accounts::{
         get_instruction_account_with_idx, get_instruction_pubkey_with_idx,
         get_writable_with_idx,
     },
     validator::effective_validator_authority_id,
 };
+
+/// Commits that are covered by User's dlp PDAs
+pub const ACTUAL_COMMIT_LIMIT: u64 = 25;
+/// Fixed fee per commit.
+/// https://github.com/magicblock-labs/delegation-program/blob/main/src/consts.rs#L11
+pub const COMMIT_FEE_LAMPORTS: u64 = 100_000;
+/// Price per compute unit for a BaseAction executed on Solana base chain,
+/// denominated in micro-lamports per CU (mirrors Solana's priority fee model).
+pub const COMPUTE_UNIT_PRICE_MICRO_LAMPORTS: u64 = 50_000;
 
 /// Context necessary for construction of Schedule Action
 pub struct ConstructionContext<'a, 'ic> {
@@ -95,6 +105,18 @@ impl ScheduledIntentBundle {
         })
     }
 
+    /// Calculates fee for intent
+    pub fn calculate_fee(
+        &self,
+        commit_nonces: &HashMap<Pubkey, u64>,
+    ) -> Result<u64, InstructionError> {
+        const SCHEDULING_FEE: u64 = 0;
+
+        Ok({
+            SCHEDULING_FEE + self.intent_bundle.calculate_fee(commit_nonces)?
+        })
+    }
+
     /// Returns all accounts that will be committed on Base layer,
     /// including the one scheduled for undelegation
     pub fn get_all_committed_accounts(&self) -> Vec<CommittedAccount> {
@@ -124,6 +146,21 @@ impl ScheduledIntentBundle {
         self.intent_bundle.get_commit_intent_accounts()
     }
 
+    /// Returns `[CommitFinalizeAndUndelegate]` intent's accounts
+    pub fn get_commit_finalize_and_undelegate_intent_accounts(
+        &self,
+    ) -> Option<&Vec<CommittedAccount>> {
+        self.intent_bundle
+            .get_commit_finalize_and_undelegate_intent_accounts()
+    }
+
+    /// Returns `CommitFinalize` intent's accounts
+    pub fn get_commit_finalize_intent_accounts(
+        &self,
+    ) -> Option<&Vec<CommittedAccount>> {
+        self.intent_bundle.get_commit_finalize_intent_accounts()
+    }
+
     /// Returns `Commit` intent's accounts
     pub fn get_commit_intent_accounts_mut(
         &mut self,
@@ -143,6 +180,10 @@ impl ScheduledIntentBundle {
         self.intent_bundle.has_undelegate_intent()
     }
 
+    pub fn has_callbacks(&self) -> bool {
+        self.intent_bundle.has_callbacks()
+    }
+
     pub fn is_empty(&self) -> bool {
         self.intent_bundle.is_empty()
     }
@@ -159,6 +200,8 @@ pub enum MagicBaseIntent {
     BaseActions(Vec<BaseAction>),
     Commit(CommitType),
     CommitAndUndelegate(CommitAndUndelegate),
+    CommitFinalize(CommitType),
+    CommitFinalizeAndUndelegate(CommitAndUndelegate),
 }
 
 // Bundle of BaseIntents
@@ -166,6 +209,8 @@ pub enum MagicBaseIntent {
 pub struct MagicIntentBundle {
     pub commit: Option<CommitType>,
     pub commit_and_undelegate: Option<CommitAndUndelegate>,
+    pub commit_finalize: Option<CommitType>,
+    pub commit_finalize_and_undelegate: Option<CommitAndUndelegate>,
     pub standalone_actions: Vec<BaseAction>,
 }
 
@@ -179,6 +224,12 @@ impl From<MagicBaseIntent> for MagicIntentBundle {
             MagicBaseIntent::Commit(value) => this.commit = Some(value),
             MagicBaseIntent::CommitAndUndelegate(value) => {
                 this.commit_and_undelegate = Some(value)
+            }
+            MagicBaseIntent::CommitFinalize(value) => {
+                this.commit_finalize = Some(value)
+            }
+            MagicBaseIntent::CommitFinalizeAndUndelegate(value) => {
+                this.commit_finalize_and_undelegate = Some(value)
             }
         }
 
@@ -197,10 +248,22 @@ impl MagicIntentBundle {
             .commit
             .map(|value| CommitType::try_from_args(value, context))
             .transpose()?;
+
         let commit_and_undelegate = args
             .commit_and_undelegate
             .map(|value| CommitAndUndelegate::try_from_args(value, context))
             .transpose()?;
+
+        let commit_finalize = args
+            .commit_finalize
+            .map(|value| CommitType::try_from_args(value, context))
+            .transpose()?;
+
+        let commit_finalize_and_undelegate = args
+            .commit_finalize_and_undelegate
+            .map(|value| CommitAndUndelegate::try_from_args(value, context))
+            .transpose()?;
+
         let actions = args
             .standalone_actions
             .into_iter()
@@ -210,6 +273,8 @@ impl MagicIntentBundle {
         let this = Self {
             commit,
             commit_and_undelegate,
+            commit_finalize,
+            commit_finalize_and_undelegate,
             standalone_actions: actions,
         };
         this.post_validation(context)?;
@@ -290,12 +355,36 @@ impl MagicIntentBundle {
         if let Some(cau) = &self.commit_and_undelegate {
             check(cau.get_committed_accounts())?;
         }
+        if let Some(commit_finalize) = &self.commit_finalize {
+            check(commit_finalize.get_committed_accounts())?;
+        }
+        if let Some(commit_finalize_and_undelegate) =
+            &self.commit_finalize_and_undelegate
+        {
+            check(commit_finalize_and_undelegate.get_committed_accounts())?;
+        }
 
         Ok(())
     }
 
+    pub fn calculate_fee(
+        &self,
+        commit_nonces: &HashMap<Pubkey, u64>,
+    ) -> Result<u64, InstructionError> {
+        let mut fee = 0;
+        if let Some(ref commit) = self.commit {
+            fee += commit.calculate_fee(commit_nonces)?;
+        }
+        if let Some(ref cau) = self.commit_and_undelegate {
+            fee += cau.calculate_fee(commit_nonces)?;
+        }
+        fee += calculate_actions_fee(&self.standalone_actions);
+        Ok(fee)
+    }
+
     pub fn has_undelegate_intent(&self) -> bool {
         self.commit_and_undelegate.is_some()
+            || self.commit_finalize_and_undelegate.is_some()
     }
 
     pub fn has_committed_accounts(&self) -> bool {
@@ -307,8 +396,19 @@ impl MagicIntentBundle {
             .get_undelegate_intent_accounts()
             .map(|el| !el.is_empty())
             .unwrap_or(false);
+        let has_commit_finalize_intent_accounts = self
+            .get_commit_finalize_intent_accounts()
+            .map(|el| !el.is_empty())
+            .unwrap_or(false);
+        let has_commit_finalize_and_undelegate_intent_accounts = self
+            .get_commit_finalize_and_undelegate_intent_accounts()
+            .map(|el| !el.is_empty())
+            .unwrap_or(false);
 
-        has_commit_intent_accounts || has_undelegate_intent_accounts
+        has_commit_intent_accounts
+            || has_undelegate_intent_accounts
+            || has_commit_finalize_intent_accounts
+            || has_commit_finalize_and_undelegate_intent_accounts
     }
 
     /// Returns `[CommitAndUndelegate]` intent's accounts
@@ -327,6 +427,24 @@ impl MagicIntentBundle {
         Some(self.commit.as_ref()?.get_committed_accounts())
     }
 
+    /// Returns `[CommitAndUndelegate]` intent's accounts
+    pub fn get_commit_finalize_and_undelegate_intent_accounts(
+        &self,
+    ) -> Option<&Vec<CommittedAccount>> {
+        Some(
+            self.commit_finalize_and_undelegate
+                .as_ref()?
+                .get_committed_accounts(),
+        )
+    }
+
+    /// Returns `Commit` intent's accounts
+    pub fn get_commit_finalize_intent_accounts(
+        &self,
+    ) -> Option<&Vec<CommittedAccount>> {
+        Some(self.commit_finalize.as_ref()?.get_committed_accounts())
+    }
+
     /// Returns `Commit` intent's accounts
     pub fn get_commit_intent_accounts_mut(
         &mut self,
@@ -339,18 +457,29 @@ impl MagicIntentBundle {
     pub fn get_all_committed_accounts(&self) -> Vec<CommittedAccount> {
         let committed = self.get_commit_intent_accounts();
         let undelegated = self.get_undelegate_intent_accounts();
-        [committed, undelegated]
-            .into_iter()
-            .flatten()
-            .flatten()
-            .cloned()
-            .collect()
+        let commit_finalize = self.get_commit_finalize_intent_accounts();
+        let commit_finalize_and_undelegate =
+            self.get_commit_finalize_and_undelegate_intent_accounts();
+
+        [
+            committed,
+            undelegated,
+            commit_finalize,
+            commit_finalize_and_undelegate,
+        ]
+        .into_iter()
+        .flatten()
+        .flatten()
+        .cloned()
+        .collect()
     }
 
     pub fn get_all_committed_pubkeys(&self) -> Vec<Pubkey> {
         [
             self.get_commit_intent_pubkeys(),
             self.get_undelegate_intent_pubkeys(),
+            self.get_commit_finalize_intent_pubkeys(),
+            self.get_commit_finalize_and_undelegate_intent_pubkeys(),
         ]
         .into_iter()
         .flatten()
@@ -370,17 +499,90 @@ impl MagicIntentBundle {
             .map(|value| value.get_committed_pubkeys())
     }
 
+    pub fn get_commit_finalize_intent_pubkeys(&self) -> Option<Vec<Pubkey>> {
+        self.commit_finalize
+            .as_ref()
+            .map(|value| value.get_committed_pubkeys())
+    }
+
+    pub fn get_commit_finalize_and_undelegate_intent_pubkeys(
+        &self,
+    ) -> Option<Vec<Pubkey>> {
+        self.commit_finalize_and_undelegate
+            .as_ref()
+            .map(|value| value.get_committed_pubkeys())
+    }
+
     pub fn is_empty(&self) -> bool {
         let no_committed =
             self.commit.as_ref().map(|el| el.is_empty()).unwrap_or(true);
+
         let no_committed_and_undelegated = self
             .commit_and_undelegate
             .as_ref()
             .map(|el| el.is_empty())
             .unwrap_or(true);
+
+        let no_commit_finalize = self
+            .commit_finalize
+            .as_ref()
+            .map(|el| el.is_empty())
+            .unwrap_or(true);
+
+        let no_commit_finalize_and_undelegate = self
+            .commit_finalize_and_undelegate
+            .as_ref()
+            .map(|el| el.is_empty())
+            .unwrap_or(true);
+
         let no_actions = self.standalone_actions.is_empty();
 
-        no_committed && no_committed_and_undelegated && no_actions
+        no_committed
+            && no_committed_and_undelegated
+            && no_commit_finalize
+            && no_commit_finalize_and_undelegate
+            && no_actions
+    }
+
+    pub fn has_callbacks(&self) -> bool {
+        let x = self
+            .commit
+            .as_ref()
+            .map(|el| el.has_callbacks())
+            .unwrap_or(false);
+        let y = self
+            .commit_and_undelegate
+            .as_ref()
+            .map(|el| el.has_callbacks())
+            .unwrap_or(false);
+        let z = self
+            .standalone_actions
+            .iter()
+            .any(|el| el.callback.is_some());
+
+        x || y || z
+    }
+
+    pub fn get_action_mut(&mut self, index: usize) -> Option<&mut BaseAction> {
+        let mut offset = 0usize;
+
+        if let Some(commit) = self.commit.as_mut() {
+            let count = commit.action_count();
+            if index < offset + count {
+                return commit.get_action_mut(index - offset);
+            }
+            offset += count;
+        }
+
+        if let Some(cau) = self.commit_and_undelegate.as_mut() {
+            let count = cau.action_count();
+            if index < offset + count {
+                return cau.get_action_mut(index - offset);
+            }
+            offset += count;
+        }
+
+        self.standalone_actions.get_mut(index.checked_sub(offset)?)
     }
 }
 
@@ -406,8 +608,17 @@ impl MagicBaseIntent {
                     CommitAndUndelegate::try_from_args(type_, context)?;
                 Ok(MagicBaseIntent::CommitAndUndelegate(commit_and_undelegate))
             }
-            MagicBaseIntentArgs::CommitFinalize(_) => todo!(),
-            MagicBaseIntentArgs::CommitFinalizeAndUndelegate(_) => todo!(),
+            MagicBaseIntentArgs::CommitFinalize(type_) => {
+                let commit = CommitType::try_from_args(type_, context)?;
+                Ok(MagicBaseIntent::CommitFinalize(commit))
+            }
+            MagicBaseIntentArgs::CommitFinalizeAndUndelegate(type_) => {
+                let commit_and_undelegate =
+                    CommitAndUndelegate::try_from_args(type_, context)?;
+                Ok(MagicBaseIntent::CommitFinalizeAndUndelegate(
+                    commit_and_undelegate,
+                ))
+            }
         }
     }
 
@@ -416,6 +627,18 @@ impl MagicBaseIntent {
             MagicBaseIntent::BaseActions(_) => false,
             MagicBaseIntent::Commit(_) => false,
             MagicBaseIntent::CommitAndUndelegate(_) => true,
+            MagicBaseIntent::CommitFinalize(_) => false,
+            MagicBaseIntent::CommitFinalizeAndUndelegate(_) => true,
+        }
+    }
+
+    pub fn is_commit_finalize(&self) -> bool {
+        match &self {
+            MagicBaseIntent::BaseActions(_) => false,
+            MagicBaseIntent::Commit(_) => false,
+            MagicBaseIntent::CommitAndUndelegate(_) => false,
+            MagicBaseIntent::CommitFinalize(_) => true,
+            MagicBaseIntent::CommitFinalizeAndUndelegate(_) => true,
         }
     }
 
@@ -424,6 +647,12 @@ impl MagicBaseIntent {
             MagicBaseIntent::BaseActions(_) => None,
             MagicBaseIntent::Commit(t) => Some(t.get_committed_accounts()),
             MagicBaseIntent::CommitAndUndelegate(t) => {
+                Some(t.get_committed_accounts())
+            }
+            MagicBaseIntent::CommitFinalize(t) => {
+                Some(t.get_committed_accounts())
+            }
+            MagicBaseIntent::CommitFinalizeAndUndelegate(t) => {
                 Some(t.get_committed_accounts())
             }
         }
@@ -436,6 +665,12 @@ impl MagicBaseIntent {
             MagicBaseIntent::BaseActions(_) => None,
             MagicBaseIntent::Commit(t) => Some(t.get_committed_accounts_mut()),
             MagicBaseIntent::CommitAndUndelegate(t) => {
+                Some(t.get_committed_accounts_mut())
+            }
+            MagicBaseIntent::CommitFinalize(t) => {
+                Some(t.get_committed_accounts_mut())
+            }
+            MagicBaseIntent::CommitFinalizeAndUndelegate(t) => {
                 Some(t.get_committed_accounts_mut())
             }
         }
@@ -452,6 +687,8 @@ impl MagicBaseIntent {
             MagicBaseIntent::BaseActions(actions) => actions.is_empty(),
             MagicBaseIntent::Commit(t) => t.is_empty(),
             MagicBaseIntent::CommitAndUndelegate(t) => t.is_empty(),
+            MagicBaseIntent::CommitFinalize(t) => t.is_empty(),
+            MagicBaseIntent::CommitFinalizeAndUndelegate(t) => t.is_empty(),
         }
     }
 }
@@ -502,6 +739,16 @@ impl CommitAndUndelegate {
         })
     }
 
+    pub fn calculate_fee(
+        &self,
+        commit_nonces: &HashMap<Pubkey, u64>,
+    ) -> Result<u64, InstructionError> {
+        let mut fee = 0;
+        fee += self.commit_action.calculate_fee(commit_nonces)?;
+        fee += self.undelegate_action.calculate_fee(commit_nonces)?;
+        Ok(fee)
+    }
+
     pub fn get_committed_accounts(&self) -> &Vec<CommittedAccount> {
         self.commit_action.get_committed_accounts()
     }
@@ -516,6 +763,32 @@ impl CommitAndUndelegate {
 
     pub fn is_empty(&self) -> bool {
         self.commit_action.is_empty()
+    }
+
+    pub fn has_callbacks(&self) -> bool {
+        let x = self.commit_action.has_callbacks();
+        let y = if let UndelegateType::WithBaseActions(actions) =
+            &self.undelegate_action
+        {
+            actions.iter().any(|el| el.callback.is_some())
+        } else {
+            false
+        };
+
+        x || y
+    }
+
+    pub fn action_count(&self) -> usize {
+        self.commit_action.action_count()
+            + self.undelegate_action.action_count()
+    }
+
+    pub fn get_action_mut(&mut self, index: usize) -> Option<&mut BaseAction> {
+        let commit_count = self.commit_action.action_count();
+        if index < commit_count {
+            return self.commit_action.get_action_mut(index);
+        }
+        self.undelegate_action.get_action_mut(index - commit_count)
     }
 }
 
@@ -548,6 +821,7 @@ pub struct BaseAction {
     pub escrow_authority: Pubkey,
     pub data_per_program: ProgramArgs,
     pub account_metas_per_program: Vec<ShortAccountMeta>,
+    pub callback: Option<BaseActionCallback>,
 }
 
 impl BaseAction {
@@ -600,6 +874,7 @@ impl BaseAction {
             escrow_authority: *authority_pubkey,
             data_per_program: args.args.into(),
             account_metas_per_program: args.accounts,
+            callback: None,
         })
     }
 }
@@ -729,6 +1004,28 @@ impl CommitType {
         }
     }
 
+    /// Calculate fee commits
+    pub fn calculate_fee(
+        &self,
+        commit_nonces: &HashMap<Pubkey, u64>,
+    ) -> Result<u64, InstructionError> {
+        let mut fee = 0;
+        match self {
+            CommitType::Standalone(ref committed_accounts) => {
+                fee += calculate_commit_fee(committed_accounts, commit_nonces)?;
+            }
+            CommitType::WithBaseActions {
+                committed_accounts,
+                base_actions,
+            } => {
+                fee += calculate_commit_fee(committed_accounts, commit_nonces)?;
+                fee += calculate_actions_fee(base_actions);
+            }
+        }
+
+        Ok(fee)
+    }
+
     pub fn get_committed_accounts(&self) -> &Vec<CommittedAccount> {
         match self {
             Self::Standalone(committed_accounts) => committed_accounts,
@@ -764,6 +1061,33 @@ impl CommitType {
             } => committed_accounts.is_empty(),
         }
     }
+
+    pub fn has_callbacks(&self) -> bool {
+        if let Self::WithBaseActions {
+            committed_accounts: _,
+            base_actions,
+        } = self
+        {
+            base_actions.iter().any(|el| el.callback.is_some())
+        } else {
+            false
+        }
+    }
+
+    pub fn action_count(&self) -> usize {
+        match self {
+            Self::Standalone(_) => 0,
+            Self::WithBaseActions { base_actions, .. } => base_actions.len(),
+        }
+    }
+
+    pub fn get_action_mut(&mut self, index: usize) -> Option<&mut BaseAction> {
+        if let Self::WithBaseActions { base_actions, .. } = self {
+            base_actions.get_mut(index)
+        } else {
+            None
+        }
+    }
 }
 
 /// No CommitedAccounts since it is only used with CommitAction.
@@ -774,6 +1098,21 @@ pub enum UndelegateType {
 }
 
 impl UndelegateType {
+    pub fn action_count(&self) -> usize {
+        match self {
+            Self::Standalone => 0,
+            Self::WithBaseActions(actions) => actions.len(),
+        }
+    }
+
+    pub fn get_action_mut(&mut self, index: usize) -> Option<&mut BaseAction> {
+        if let Self::WithBaseActions(actions) = self {
+            actions.get_mut(index)
+        } else {
+            None
+        }
+    }
+
     pub fn try_from_args(
         args: UndelegateTypeArgs,
         context: &ConstructionContext<'_, '_>,
@@ -788,6 +1127,18 @@ impl UndelegateType {
                     })
                     .collect::<Result<Vec<BaseAction>, InstructionError>>()?;
                 Ok(UndelegateType::WithBaseActions(base_actions))
+            }
+        }
+    }
+
+    pub fn calculate_fee(
+        &self,
+        _commit_nonces: &HashMap<Pubkey, u64>,
+    ) -> Result<u64, InstructionError> {
+        match self {
+            UndelegateType::Standalone => Ok(0),
+            UndelegateType::WithBaseActions(actions) => {
+                Ok(calculate_actions_fee(actions))
             }
         }
     }
@@ -838,5 +1189,199 @@ pub(crate) fn validate_commit_schedule_permissions(
         }
     } else {
         Ok(())
+    }
+}
+
+pub(crate) fn calculate_commit_fee(
+    accounts: &[CommittedAccount],
+    commit_nonces: &HashMap<Pubkey, u64>,
+) -> Result<u64, InstructionError> {
+    accounts.iter().try_fold(0u64, |fee, account| {
+        if let Some(nonce) = commit_nonces.get(&account.pubkey) {
+            if nonce >= &ACTUAL_COMMIT_LIMIT {
+                Ok(fee + COMMIT_FEE_LAMPORTS)
+            } else {
+                Ok(fee)
+            }
+        } else {
+            Err(InstructionError::Custom(MISSING_COMMIT_NONCE_ERR))
+        }
+    })
+}
+
+fn calculate_actions_fee(actions: &[BaseAction]) -> u64 {
+    const MICRO_LAMPORTS_PER_LAMPORT: u64 = 1_000_000;
+    let micro_lamports = actions.iter().fold(0u64, |acc, action| {
+        acc.saturating_add(
+            action.compute_units as u64 * COMPUTE_UNIT_PRICE_MICRO_LAMPORTS,
+        )
+    });
+    micro_lamports.div_ceil(MICRO_LAMPORTS_PER_LAMPORT)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use magicblock_core::intent::CommittedAccount;
+    use solana_account::Account;
+    use solana_instruction::error::InstructionError;
+    use solana_pubkey::Pubkey;
+
+    use super::*;
+    use crate::magic_sys::MISSING_COMMIT_NONCE_ERR;
+
+    fn make_committed_account(pubkey: Pubkey) -> CommittedAccount {
+        CommittedAccount {
+            pubkey,
+            account: Account::default(),
+            remote_slot: 0,
+        }
+    }
+
+    fn make_base_action(compute_units: u32) -> BaseAction {
+        BaseAction {
+            compute_units,
+            destination_program: Pubkey::new_unique(),
+            source_program: None,
+            escrow_authority: Pubkey::new_unique(),
+            data_per_program: ProgramArgs {
+                escrow_index: 0,
+                data: vec![],
+            },
+            account_metas_per_program: vec![],
+            callback: None,
+        }
+    }
+
+    // ---- calculate_commit_fee ----
+
+    #[test]
+    fn test_commit_fee_at_limit_is_zero() {
+        let pk = Pubkey::new_unique();
+        // nonce is commits done so far; nonce+1 is the next commit number.
+        // ACTUAL_COMMIT_LIMIT - 1 means the next commit is exactly at the limit → free.
+        let nonces = HashMap::from([(pk, ACTUAL_COMMIT_LIMIT - 1)]);
+        let fee = calculate_commit_fee(&[make_committed_account(pk)], &nonces)
+            .unwrap();
+        assert_eq!(fee, 0);
+    }
+
+    #[test]
+    fn test_commit_fee_above_limit_charges_per_account() {
+        let pk1 = Pubkey::new_unique();
+        let pk2 = Pubkey::new_unique();
+        let nonces = HashMap::from([
+            (pk1, ACTUAL_COMMIT_LIMIT + 1),
+            (pk2, ACTUAL_COMMIT_LIMIT + 1),
+        ]);
+        let fee = calculate_commit_fee(
+            &[make_committed_account(pk1), make_committed_account(pk2)],
+            &nonces,
+        )
+        .unwrap();
+        assert_eq!(fee, COMMIT_FEE_LAMPORTS * 2);
+    }
+
+    #[test]
+    fn test_commit_fee_mixed_accounts() {
+        let pk_below = Pubkey::new_unique();
+        let pk_above = Pubkey::new_unique();
+        let nonces = HashMap::from([
+            (pk_below, ACTUAL_COMMIT_LIMIT - 1), // next commit is exactly at limit → free
+            (pk_above, ACTUAL_COMMIT_LIMIT), // next commit exceeds limit → charged
+        ]);
+        let fee = calculate_commit_fee(
+            &[
+                make_committed_account(pk_below),
+                make_committed_account(pk_above),
+            ],
+            &nonces,
+        )
+        .unwrap();
+        assert_eq!(fee, COMMIT_FEE_LAMPORTS);
+    }
+
+    #[test]
+    fn test_commit_fee_missing_nonce_errors() {
+        let pk = Pubkey::new_unique();
+        let err = calculate_commit_fee(
+            &[make_committed_account(pk)],
+            &HashMap::new(),
+        )
+        .unwrap_err();
+        assert_eq!(err, InstructionError::Custom(MISSING_COMMIT_NONCE_ERR));
+    }
+
+    /// two actions of 200_000 CUs each → 20_000 lamports
+    #[test]
+    fn test_actions_fee_multiple_actions() {
+        assert_eq!(
+            calculate_actions_fee(&[
+                make_base_action(200_000),
+                make_base_action(200_000)
+            ]),
+            20_000
+        );
+    }
+
+    // ---- ScheduledIntentBundle::calculate_fee ----
+
+    #[test]
+    fn test_scheduled_intent_bundle_fee_mixed_commit_and_cau() {
+        use solana_hash::Hash;
+        use solana_transaction::Transaction;
+
+        // commit WithBaseActions: pk1 above limit (charged), pk2 at limit (free)
+        let pk1 = Pubkey::new_unique();
+        let pk2 = Pubkey::new_unique();
+        // cau commit: pk3 above limit (charged); undelegate has actions too
+        let pk3 = Pubkey::new_unique();
+
+        let bundle = ScheduledIntentBundle {
+            id: 0,
+            slot: 0,
+            blockhash: Hash::default(),
+            sent_transaction: Transaction::default(),
+            payer: Pubkey::new_unique(),
+            intent_bundle: MagicIntentBundle {
+                commit: Some(CommitType::WithBaseActions {
+                    committed_accounts: vec![
+                        make_committed_account(pk1),
+                        make_committed_account(pk2),
+                    ],
+                    base_actions: vec![make_base_action(200_000)],
+                }),
+                commit_and_undelegate: Some(CommitAndUndelegate {
+                    commit_action: CommitType::Standalone(vec![
+                        make_committed_account(pk3),
+                    ]),
+                    undelegate_action: UndelegateType::WithBaseActions(vec![
+                        make_base_action(100_000),
+                    ]),
+                }),
+                commit_finalize: None,
+                commit_finalize_and_undelegate: None,
+                standalone_actions: vec![make_base_action(50_000)],
+            },
+        };
+
+        let nonces = HashMap::from([
+            (pk1, ACTUAL_COMMIT_LIMIT), // next commit exceeds limit → charged
+            (pk2, ACTUAL_COMMIT_LIMIT - 1), // next commit is exactly at limit → free
+            (pk3, ACTUAL_COMMIT_LIMIT), // next commit exceeds limit → charged
+        ]);
+
+        let fee = bundle.calculate_fee(&nonces).unwrap();
+
+        // commit: pk1 (100_000) + action 200k CUs (10_000) = 110_000
+        // cau:    pk3 (100_000) + undelegate action 100k CUs (5_000) = 105_000
+        // standalone: action 50k CUs (2_500)
+        let expected = COMMIT_FEE_LAMPORTS       // pk1
+            + 10_000                             // 200k CU action
+            + COMMIT_FEE_LAMPORTS               // pk3
+            + 5_000                              // 100k CU undelegate action
+            + 2_500; // 50k CU standalone action
+        assert_eq!(fee, expected);
     }
 }

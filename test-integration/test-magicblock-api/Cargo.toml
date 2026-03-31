@@ -10,7 +10,7 @@ tracing = { workspace = true }
 cleanass = { workspace = true }
 magicblock-api = { workspace = true }
 magicblock-config = { workspace = true }
-magicblock-delegation-program = { workspace = true }
+magicblock-delegation-program-api = { workspace = true }
 magicblock-program = { path = "../../programs/magicblock" }
 magicblock-validator-admin = { path = "../../magicblock-validator-admin" }
 magic-domain-program = { workspace = true }

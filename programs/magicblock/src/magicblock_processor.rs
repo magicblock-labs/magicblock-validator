@@ -16,7 +16,8 @@ use crate::{
     process_scheduled_commit_sent,
     schedule_task::{process_cancel_task, process_schedule_task},
     schedule_transactions::{
-        process_accept_scheduled_commits, process_schedule_commit,
+        process_accept_scheduled_commits, process_add_action_callback,
+        process_schedule_commit, process_schedule_commit_finalize,
         process_schedule_intent_bundle, ProcessScheduleCommitOptions,
     },
     toggle_executable_check::process_toggle_executable_check,
@@ -70,8 +71,14 @@ declare_process_instruction!(
                 },
             ),
             ScheduleCommitFinalize {
-                request_undelegation: _,
-            } => todo!(),
+                request_undelegation,
+            } => process_schedule_commit_finalize(
+                signers,
+                invoke_context,
+                ProcessScheduleCommitOptions {
+                    request_undelegation,
+                },
+            ),
             AcceptScheduleCommits => {
                 process_accept_scheduled_commits(signers, invoke_context)
             }
@@ -123,11 +130,15 @@ declare_process_instruction!(
                 invoke_context,
                 transaction_context,
             ),
+            AddActionCallback(args) => {
+                process_add_action_callback(signers, invoke_context, args)
+            }
             Noop(_) => Ok(()),
             CloneAccount {
                 pubkey,
                 data,
                 fields,
+                actions_tx_sig,
             } => process_clone_account(
                 &signers,
                 invoke_context,
@@ -135,12 +146,14 @@ declare_process_instruction!(
                 pubkey,
                 data,
                 fields,
+                actions_tx_sig,
             ),
             CloneAccountInit {
                 pubkey,
                 total_data_len,
                 initial_data,
                 fields,
+                actions_tx_sig,
             } => process_clone_account_init(
                 &signers,
                 invoke_context,
@@ -149,6 +162,7 @@ declare_process_instruction!(
                 total_data_len,
                 initial_data,
                 fields,
+                actions_tx_sig,
             ),
             CloneAccountContinue {
                 pubkey,

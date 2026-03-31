@@ -122,7 +122,7 @@ impl Default for RemoteAccountProviderConfig {
             subscribed_accounts_lru_capacity: DEFAULT_MAX_MONITORED_ACCOUNTS,
             lifecycle_mode: LifecycleMode::default(),
             enable_subscription_metrics: true,
-            program_subs: vec![dlp::id()].into_iter().collect(),
+            program_subs: vec![dlp_api::id()].into_iter().collect(),
             resubscription_delay: std::time::Duration::from_millis(
                 DEFAULT_RESUBSCRIPTION_DELAY_MS,
             ),

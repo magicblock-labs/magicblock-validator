@@ -4,13 +4,14 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
+log = "0.4.29"
 
 [dev-dependencies]
 tracing = { workspace = true }
+ephemeral-rollups-sdk = { workspace = true }
 integration-test-tools = { workspace = true }
-magicblock-delegation-program = { workspace = true, features = [
-  "no-entrypoint",
-] }
+magicblock-delegation-program-api = { workspace = true }
+magicblock_magic_program_api = { workspace = true }
 program-flexi-counter = { workspace = true, features = ["no-entrypoint"] }
 solana-sdk = { workspace = true }
 solana-rpc-client-api = { workspace = true }

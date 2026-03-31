@@ -189,6 +189,7 @@ async fn test_prepare_commit_tx_with_base_actions() {
             pubkey: Pubkey::new_unique(),
             is_writable: true,
         }],
+        callback: None,
     };
 
     let mut buffer_commit_task =

@@ -10,7 +10,7 @@ edition.workspace = true
 [dependencies]
 tracing = { workspace = true }
 
-magicblock-delegation-program = { workspace = true }
+magicblock-delegation-program-api = { workspace = true }
 magicblock-program = { workspace = true }
 magicblock-rpc-client = { workspace = true }
 

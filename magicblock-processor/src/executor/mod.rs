@@ -88,6 +88,7 @@ impl TransactionExecutor {
         let mut processor = TransactionBatchProcessor::new_uninitialized(
             slot,
             Default::default(),
+            true,
         );
 
         // Use global program cache to share compilation results across executors

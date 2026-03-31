@@ -4,7 +4,8 @@ use serde::{Deserialize, Serialize};
 use solana_program::pubkey::Pubkey;
 
 use crate::args::{
-    MagicBaseIntentArgs, MagicIntentBundleArgs, ScheduleTaskArgs,
+    AddActionCallbackArgs, MagicBaseIntentArgs, MagicIntentBundleArgs,
+    ScheduleTaskArgs,
 };
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
@@ -203,6 +204,7 @@ pub enum MagicBlockInstruction {
         pubkey: Pubkey,
         data: Vec<u8>,
         fields: AccountCloneFields,
+        actions_tx_sig: Option<String>,
     },
 
     /// Initialize a multi-transaction clone for a large account.
@@ -217,6 +219,7 @@ pub enum MagicBlockInstruction {
         total_data_len: u32,
         initial_data: Vec<u8>,
         fields: AccountCloneFields,
+        actions_tx_sig: Option<String>,
     },
 
     /// Continue a multi-transaction clone with the next data chunk.
@@ -275,6 +278,19 @@ pub enum MagicBlockInstruction {
     /// - **0.** `[SIGNER]` Validator Authority
     /// - **1.** `[WRITE]` Program account
     SetProgramAuthority { authority: Pubkey },
+
+    /// Attaches a callback to a previously scheduled action in the latest intent.
+    ///
+    /// Must be called via CPI from the program that originally scheduled the
+    /// action. The caller's program ID is checked against the action's
+    /// `source_program` field for authorization.
+    ///
+    /// If the payer account is delegated, a callback fee is deducted from it.
+    ///
+    /// # Account references
+    /// - **0.**   `[WRITE, SIGNER]` Payer
+    /// - **1.**   `[WRITE]`         Magic Context account
+    AddActionCallback(AddActionCallbackArgs),
 }
 
 impl MagicBlockInstruction {

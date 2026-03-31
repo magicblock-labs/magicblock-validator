@@ -1,5 +1,6 @@
 pub mod args;
 pub mod instruction;
+pub mod response;
 
 pub use solana_program::{declare_id, pubkey, pubkey::Pubkey};
 

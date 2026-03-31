@@ -1,5 +1,7 @@
 mod call_handler;
+pub(crate) mod callback;
 mod schedule_intent;
+mod transfer_intent;
 
 use borsh::{to_vec, BorshDeserialize};
 use ephemeral_rollups_sdk::{
@@ -35,9 +37,15 @@ use crate::{
         call_handler::{
             process_commit_action_handler, process_undelegate_action_handler,
         },
+        callback::{
+            process_transfer_action_handler, process_transfer_callback,
+            TRANSFER_CALLBACK_DISCRIMINATOR,
+        },
         schedule_intent::{
             process_create_intent, process_create_intent_bundle,
+            process_create_intent_bundle_commit_and_finalize,
         },
+        transfer_intent::process_create_transfer_intent,
     },
     state::{FlexiCounter, FAIL_UNDELEGATION_CODE, FAIL_UNDELEGATION_LABEL},
     utils::assert_keys_equal,
@@ -55,6 +63,10 @@ pub fn process(
         if disc == EXTERNAL_UNDELEGATE_DISCRIMINATOR {
             return process_undelegate_request(accounts, data);
         }
+
+        if disc == TRANSFER_CALLBACK_DISCRIMINATOR {
+            return process_transfer_callback(accounts, data);
+        }
     }
 
     let ix = FlexiCounterInstruction::try_from_slice(instruction_data)?;
@@ -71,9 +83,16 @@ pub fn process(
         AddError { count } => process_add_error(accounts, count),
         Mul { multiplier } => process_mul(accounts, multiplier),
         Delegate(args) => process_delegate(accounts, &args),
-        AddAndScheduleCommit { count, undelegate } => {
-            process_add_and_schedule_commit(accounts, count, undelegate)
-        }
+        AddAndScheduleCommit {
+            count,
+            undelegate,
+            has_magic_vault,
+        } => process_add_and_schedule_commit(
+            accounts,
+            count,
+            undelegate,
+            has_magic_vault,
+        ),
         AddCounter => process_add_counter(accounts),
         CreateIntent {
             num_committees,
@@ -108,6 +127,27 @@ pub fn process(
             counter_diffs,
             compute_units,
         ),
+        CreateIntentBundleCommitAndFinalize {
+            num_commit,
+            num_commit_finalize,
+        } => process_create_intent_bundle_commit_and_finalize(
+            accounts,
+            num_commit,
+            num_commit_finalize,
+        ),
+        CreateTransferIntent {
+            amount,
+            fail,
+            compute_units,
+        } => process_create_transfer_intent(
+            accounts,
+            amount,
+            fail,
+            compute_units,
+        ),
+        TransferActionHandler { amount, fail } => {
+            process_transfer_action_handler(accounts, amount, fail)
+        }
     }?;
     Ok(())
 }
@@ -326,6 +366,7 @@ fn process_add_and_schedule_commit(
     accounts: &[AccountInfo],
     count: u8,
     undelegate: bool,
+    has_magic_vault: bool,
 ) -> ProgramResult {
     msg!(
         "Add {} and schedule commit undelegate: {}",
@@ -338,6 +379,11 @@ fn process_add_and_schedule_commit(
     let counter_pda_info = next_account_info(account_info_iter)?;
     let magic_context_info = next_account_info(account_info_iter)?;
     let magic_program_info = next_account_info(account_info_iter)?;
+    let magic_fee_vault = if has_magic_vault {
+        Some(next_account_info(account_info_iter)?)
+    } else {
+        None
+    };
 
     // Perform the add operation
     add(payer_info, counter_pda_info, count)?;
@@ -349,6 +395,7 @@ fn process_add_and_schedule_commit(
             vec![counter_pda_info],
             magic_context_info,
             magic_program_info,
+            magic_fee_vault,
         )?;
     } else {
         commit_accounts(
@@ -356,6 +403,7 @@ fn process_add_and_schedule_commit(
             vec![counter_pda_info],
             magic_context_info,
             magic_program_info,
+            magic_fee_vault,
         )?;
     }
     Ok(())

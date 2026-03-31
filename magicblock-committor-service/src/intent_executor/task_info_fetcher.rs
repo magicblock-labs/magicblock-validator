@@ -7,7 +7,7 @@ use std::{
 };
 
 use async_trait::async_trait;
-use dlp::{
+use dlp_api::{
     delegation_metadata_seeds_from_delegated_account, state::DelegationMetadata,
 };
 use lru::LruCache;
@@ -92,7 +92,7 @@ impl RpcTaskInfoFetcher {
                     delegation_metadata_seeds_from_delegated_account!(
                         delegated_account
                     ),
-                    &dlp::id(),
+                    &dlp_api::id(),
                 )
                 .0
             })

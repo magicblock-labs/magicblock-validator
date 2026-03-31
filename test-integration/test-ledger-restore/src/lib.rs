@@ -9,7 +9,7 @@ use std::{
 use cleanass::{assert, assert_eq};
 use integration_test_tools::{
     expect,
-    loaded_accounts::LoadedAccounts,
+    loaded_accounts::{LoadedAccounts, DLP_TEST_AUTHORITY_BYTES},
     validator::{
         cleanup, resolve_programs,
         start_magicblock_validator_with_config_struct,
@@ -165,12 +165,19 @@ pub fn setup_validator_with_local_remote_and_resume_strategy(
     {
         let chain_only_ctx =
             IntegrationTestContext::try_new_chain_only().unwrap();
+
         chain_only_ctx
             .airdrop_chain(
                 &loaded_accounts.validator_authority(),
                 20 * LAMPORTS_PER_SOL,
             )
             .unwrap();
+
+        // Init fees vault for validator
+        init_validator_fees_vault(
+            &chain_only_ctx,
+            loaded_accounts.validator_authority_keypair(),
+        );
     }
 
     let (default_tmpdir_config, Some(mut validator), port) =
@@ -305,6 +312,43 @@ pub fn setup_validator_with_local_remote_and_authority_override(
     (default_tmpdir_config, validator, ctx)
 }
 
+/// Init validator fees vault for proper validator setup
+pub fn init_validator_fees_vault(
+    chain_ctx: &IntegrationTestContext,
+    validator_identity: &Keypair,
+) {
+    let vault_pda = dlp_api::pda::validator_fees_vault_pda_from_validator(
+        &validator_identity.pubkey(),
+    );
+    if chain_ctx.fetch_chain_account(vault_pda).is_ok() {
+        // Account exists
+        return;
+    }
+
+    // DLP authority in integration tests
+    let dlp_authority = Keypair::from_bytes(&DLP_TEST_AUTHORITY_BYTES).unwrap();
+
+    let latest_block_hash = chain_ctx.try_get_latest_blockhash_chain().unwrap();
+    let ix = dlp_api::instruction_builder::init_validator_fees_vault(
+        validator_identity.pubkey(),
+        dlp_authority.pubkey(),
+        validator_identity.pubkey(),
+    );
+    let mut tx = Transaction::new_signed_with_payer(
+        &[ix],
+        Some(&validator_identity.pubkey()),
+        &[validator_identity, &dlp_authority],
+        latest_block_hash,
+    );
+
+    chain_ctx
+        .send_and_confirm_transaction_chain(
+            &mut tx,
+            &[validator_identity, &dlp_authority],
+        )
+        .unwrap();
+}
+
 // -----------------
 // Transactions and Account Updates
 // -----------------
@@ -343,11 +387,11 @@ pub fn init_and_delegate_counter_and_payer(
         cleanup(validator)
     );
     let owner = fetch_counter_owner_chain(&payer.pubkey(), validator);
-    assert_eq!(owner, dlp::id(), cleanup(validator));
+    assert_eq!(owner, dlp_api::id(), cleanup(validator));
 
     let payer_chain =
         expect!(ctx.fetch_chain_account(payer.pubkey()), validator);
-    assert_eq!(payer_chain.owner, dlp::id(), cleanup(validator));
+    assert_eq!(payer_chain.owner, dlp_api::id(), cleanup(validator));
     assert!(payer_chain.lamports > LAMPORTS_PER_SOL, cleanup(validator));
 
     debug!(

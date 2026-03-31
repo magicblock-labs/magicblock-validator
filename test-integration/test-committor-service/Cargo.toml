@@ -15,9 +15,7 @@ magicblock-committor-program = { workspace = true, features = [
 magicblock-committor-service = { workspace = true, features = [
   "dev-context-only-utils",
 ] }
-magicblock-delegation-program = { workspace = true, features = [
-  "no-entrypoint",
-] }
+magicblock-delegation-program-api = { workspace = true }
 magicblock-program = { workspace = true }
 magicblock-rpc-client = { workspace = true }
 magicblock-table-mania = { workspace = true, features = [

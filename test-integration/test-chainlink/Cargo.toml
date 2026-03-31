@@ -9,7 +9,7 @@ futures = { workspace = true }
 tracing = { workspace = true }
 magicblock-chainlink = { workspace = true }
 magicblock-config = { workspace = true }
-magicblock-delegation-program = { workspace = true }
+magicblock-delegation-program-api = { workspace = true }
 program-mini = { workspace = true, features = ["no-entrypoint"] }
 program-flexi-counter = { workspace = true, features = ["no-entrypoint"] }
 solana-account = { workspace = true }

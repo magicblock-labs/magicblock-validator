@@ -21,6 +21,9 @@ pub enum ChainlinkError {
     #[error("Delegation record could not be decoded: {0} ({1:?})")]
     InvalidDelegationRecord(Pubkey, ProgramError),
 
+    #[error("Delegation actions could not be decoded: {0} ({1})")]
+    InvalidDelegationActions(Pubkey, String),
+
     #[error("Failed to resolve one or more accounts {0} when getting delegation records")]
     DelegatedAccountResolutionsFailed(String),
 
@@ -41,4 +44,7 @@ pub enum ChainlinkError {
 
     #[error("Unexpected number of accounts returned when fetching account with companion: {0}")]
     UnexpectedAccountCount(String),
+
+    #[error("Missing accounts required by delegation actions: {0:?}")]
+    MissingDelegationActionAccounts(Vec<Pubkey>),
 }

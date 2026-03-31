@@ -6,7 +6,7 @@ use std::{
     },
 };
 
-use dlp::pda::ephemeral_balance_pda_from_payer;
+use dlp_api::pda::ephemeral_balance_pda_from_payer;
 use errors::ChainlinkResult;
 use fetch_cloner::FetchCloner;
 use magicblock_accounts_db::{traits::AccountsBank, AccountsDbResult};
@@ -15,7 +15,9 @@ use magicblock_metrics::metrics::AccountFetchOrigin;
 use solana_account::{AccountSharedData, ReadableAccount};
 use solana_commitment_config::CommitmentConfig;
 use solana_feature_set;
+use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
+use solana_signer::Signer;
 use solana_transaction::sanitized::SanitizedTransaction;
 use tokio::{sync::mpsc, task};
 use tracing::*;
@@ -112,16 +114,17 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
         commitment: CommitmentConfig,
         accounts_bank: &Arc<V>,
         cloner: &Arc<C>,
-        validator_pubkey: Pubkey,
+        validator_keypair: Keypair,
         faucet_pubkey: Pubkey,
         config: ChainlinkConfig,
         chainlink_config: &ChainLinkConfig,
     ) -> ChainlinkResult<
         Chainlink<ChainRpcClientImpl, SubMuxClient<ChainUpdatesClient>, V, C>,
     > {
+        let validator_pubkey = validator_keypair.pubkey();
         // Extract accounts provider and create fetch cloner while connecting
         // the subscription channel
-        let (tx, rx) = tokio::sync::mpsc::channel(100);
+        let (tx, rx) = tokio::sync::mpsc::channel(5_000);
         let account_provider = RemoteAccountProvider::try_from_urls_and_config(
             endpoints,
             commitment,
@@ -135,7 +138,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
                 &provider,
                 accounts_bank,
                 cloner,
-                validator_pubkey,
+                validator_keypair,
                 faucet_pubkey,
                 rx,
                 chainlink_config.allowed_programs.clone(),
@@ -312,15 +315,14 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
             .collect::<Vec<_>>();
         let feepayer = tx.message().fee_payer();
 
+        let balance_pda = ephemeral_balance_pda_from_payer(feepayer, 0);
+
         // Determine if we need to clone the escrow account for the feepayer
-        let clone_escrow = self
-            .accounts_bank
-            .get_account(feepayer)
-            .is_none_or(|a| !a.delegated());
+        let clone_escrow =
+            self.accounts_bank.get_account(&balance_pda).is_none();
 
         // If cloning escrow, add the balance PDA
         if clone_escrow {
-            let balance_pda = ephemeral_balance_pda_from_payer(feepayer, 0);
             trace!(
                 balance_pda = %balance_pda,
                 feepayer = %feepayer,

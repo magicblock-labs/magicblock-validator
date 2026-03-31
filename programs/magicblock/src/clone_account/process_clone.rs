@@ -26,6 +26,7 @@ pub(crate) fn process_clone_account(
     pubkey: Pubkey,
     data: Vec<u8>,
     fields: AccountCloneFields,
+    actions_tx_sig: Option<String>,
 ) -> Result<(), InstructionError> {
     validate_authority(signers, invoke_context)?;
 
@@ -59,11 +60,23 @@ pub(crate) fn process_clone_account(
         pubkey,
         data.len()
     );
+    if let Some(actions_tx_sig) = actions_tx_sig {
+        ic_msg!(
+            invoke_context,
+            "CloneAccount: actions_tx_sig={}",
+            actions_tx_sig
+        );
+    } else {
+        ic_msg!(
+            invoke_context,
+            "CloneAccount did not receive actions_tx_sig"
+        );
+    }
 
     let current_lamports = account.borrow().lamports();
     let lamports_delta = fields.lamports as i64 - current_lamports as i64;
 
-    set_account_from_fields(invoke_context, account, &data, &fields);
+    set_account_from_fields(invoke_context, account, &data, &fields)?;
 
     adjust_authority_lamports(auth_acc, lamports_delta)?;
     Ok(())

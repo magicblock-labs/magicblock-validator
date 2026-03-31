@@ -98,10 +98,14 @@ impl DeliveryPreparator {
         task: &mut BaseTaskImpl,
         persister: &Option<P>,
     ) -> DeliveryPreparatorResult<(), InternalError> {
-        let BaseTaskImpl::Commit(commit_task) = task else {
-            return Ok(());
+        let stage = match task {
+            BaseTaskImpl::Commit(commit_task) => commit_task.stage_mut(),
+            BaseTaskImpl::CommitFinalize(commit_finalize_task) => {
+                commit_finalize_task.stage_mut()
+            }
+            _ => None,
         };
-        let Some(stage) = commit_task.stage_mut() else {
+        let Some(stage) = stage else {
             return Ok(());
         };
         let CommitBufferStage::Preparation(preparation_task) = stage else {
@@ -170,10 +174,14 @@ impl DeliveryPreparator {
         }
 
         // Prepare cleanup task - set stage to Cleanup before calling cleanup
-        let BaseTaskImpl::Commit(commit_task) = task else {
-            return Ok(());
+        let stage = match task {
+            BaseTaskImpl::Commit(commit_task) => commit_task.stage_mut(),
+            BaseTaskImpl::CommitFinalize(commit_finalize_task) => {
+                commit_finalize_task.stage_mut()
+            }
+            _ => None,
         };
-        let Some(stage) = commit_task.stage_mut() else {
+        let Some(stage) = stage else {
             return Ok(());
         };
         let CommitBufferStage::Preparation(preparation_task) = stage else {

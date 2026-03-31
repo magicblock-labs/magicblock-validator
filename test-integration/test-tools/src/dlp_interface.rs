@@ -1,5 +1,5 @@
 use anyhow::Context;
-use dlp::args::{DelegateArgs, DelegateEphemeralBalanceArgs};
+use dlp_api::args::{DelegateArgs, DelegateEphemeralBalanceArgs};
 use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_rpc_client_api::config::RpcSendTransactionConfig;
@@ -19,7 +19,7 @@ pub fn create_topup_ixs(
     lamports: u64,
     validator: Option<Pubkey>,
 ) -> Vec<Instruction> {
-    let topup_ix = dlp::instruction_builder::top_up_ephemeral_balance(
+    let topup_ix = dlp_api::instruction_builder::top_up_ephemeral_balance(
         payer,
         recvr,
         Some(lamports),
@@ -27,17 +27,18 @@ pub fn create_topup_ixs(
     );
     let mut ixs = vec![topup_ix];
     if let Some(validator) = validator {
-        let delegate_ix = dlp::instruction_builder::delegate_ephemeral_balance(
-            payer,
-            recvr,
-            DelegateEphemeralBalanceArgs {
-                delegate_args: DelegateArgs {
-                    validator: Some(validator),
+        let delegate_ix =
+            dlp_api::instruction_builder::delegate_ephemeral_balance(
+                payer,
+                recvr,
+                DelegateEphemeralBalanceArgs {
+                    delegate_args: DelegateArgs {
+                        validator: Some(validator),
+                        ..Default::default()
+                    },
                     ..Default::default()
                 },
-                ..Default::default()
-            },
-        );
+            );
         ixs.push(delegate_ix);
     }
     ixs
@@ -48,8 +49,9 @@ pub fn create_delegate_ixs(
     delegatee: Pubkey,
     validator: Option<Pubkey>,
 ) -> Vec<Instruction> {
-    let change_owner_ix = system_instruction::assign(&delegatee, &dlp::id());
-    let delegate_ix = dlp::instruction_builder::delegate(
+    let change_owner_ix =
+        system_instruction::assign(&delegatee, &dlp_api::id());
+    let delegate_ix = dlp_api::instruction_builder::delegate(
         payer,
         delegatee,
         None,
@@ -67,8 +69,9 @@ pub fn create_delegate_to_any_ixs(
     delegatee: Pubkey,
     validator: Option<Pubkey>,
 ) -> Vec<Instruction> {
-    let change_owner_ix = system_instruction::assign(&delegatee, &dlp::id());
-    let delegate_ix = dlp::instruction_builder::delegate_with_any_validator(
+    let change_owner_ix =
+        system_instruction::assign(&delegatee, &dlp_api::id());
+    let delegate_ix = dlp_api::instruction_builder::delegate_with_any_validator(
         payer,
         delegatee,
         None,
@@ -112,11 +115,11 @@ pub fn escrow_pdas(payer: &Pubkey) -> (Pubkey, Pubkey) {
 }
 
 pub fn delegation_record_pubkey(pubkey: &Pubkey) -> Pubkey {
-    dlp::pda::delegation_record_pda_from_delegated_account(pubkey)
+    dlp_api::pda::delegation_record_pda_from_delegated_account(pubkey)
 }
 
 pub fn ephemeral_balance_pda_from_payer_pubkey(payer: &Pubkey) -> Pubkey {
-    dlp::pda::ephemeral_balance_pda_from_payer(payer, 0)
+    dlp_api::pda::ephemeral_balance_pda_from_payer(payer, 0)
 }
 
 // -----------------

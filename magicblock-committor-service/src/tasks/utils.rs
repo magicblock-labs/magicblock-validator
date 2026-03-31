@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use dlp::DLP_PROGRAM_DATA_SIZE_CLASS;
+use dlp_api::DLP_PROGRAM_DATA_SIZE_CLASS;
 use solana_compute_budget_interface::ComputeBudgetInstruction;
 use solana_hash::Hash;
 use solana_instruction::Instruction;
@@ -141,7 +141,7 @@ impl TransactionUtils {
 
         let dlp_task_count: u32 = tasks
             .iter()
-            .filter(|task| task.program_id() == dlp::id())
+            .filter(|task| task.program_id() == dlp_api::id())
             .count() as u32;
 
         if dlp_task_count > 0 {

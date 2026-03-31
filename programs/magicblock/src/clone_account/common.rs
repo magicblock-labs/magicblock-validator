@@ -130,6 +130,7 @@ pub fn validate_remote_slot(
         return Ok(());
     };
     let current = account.borrow().remote_slot();
+
     if incoming < current {
         ic_msg!(
             invoke_context,
@@ -138,6 +139,14 @@ pub fn validate_remote_slot(
         );
         return Err(MagicBlockProgramError::OutOfOrderUpdate.into());
     }
+
+    ic_msg!(
+        invoke_context,
+        "incoming_slot = {}, current_slot = {}",
+        incoming,
+        current
+    );
+
     Ok(())
 }
 
@@ -204,10 +213,10 @@ pub fn set_account_from_fields(
     account: &RefCell<AccountSharedData>,
     data: &[u8],
     fields: &AccountCloneFields,
-) {
+) -> Result<(), InstructionError> {
     ic_msg!(
         invoke_context,
-        "account state: lamports={}, owner={}, executable={}, delegated={}, confined={}, remote_slot={}, data_len={}",
+        "src account state: lamports={}, owner={}, executable={}, delegated={}, confined={}, remote_slot={}, data_len={}",
         fields.lamports,
         fields.owner,
         fields.executable,
@@ -217,6 +226,40 @@ pub fn set_account_from_fields(
         data.len()
     );
     let mut acc = account.borrow_mut();
+    ic_msg!(
+        invoke_context,
+        "dest account state: lamports={}, owner={}, executable={}, delegated={}, undelegating={} confined={}, remote_slot={}, data_len={}",
+        acc.lamports(),
+        acc.owner(),
+        acc.executable(),
+        acc.delegated(),
+        acc.undelegating(),
+        acc.confined(),
+        acc.remote_slot(),
+        acc.data().len()
+    );
+
+    // In the same slot, we do not expect an account to be delegated,
+    // undelegated and then delegated. So if we see the same account being
+    // delegated twice (ore more) in the same slot, we consider such cases
+    // as "duplicates".
+    //
+    // Under current design, we clone with "CONFIRMED" commitment and thus:
+    //
+    //  - [delegation -> undelegation -> delegation] is currently not possible in the same tx.
+    //    - though [undelegation -> delegation] is still possible though unlikely and allowed by
+    //    design.
+    //
+    // Given this, same slot re-delegation is impossible therefore this this totally acceptable.
+    //
+    if fields.delegated && acc.remote_slot() == fields.remote_slot {
+        return Err(
+            MagicBlockProgramError::DuplicateDelegatedAccountClone.into()
+        );
+    } else if acc.remote_slot() > fields.remote_slot {
+        return Err(MagicBlockProgramError::OutOfOrderUpdate.into());
+    }
+
     acc.set_lamports(fields.lamports);
     acc.set_owner(fields.owner);
     acc.set_data_from_slice(data);
@@ -225,4 +268,6 @@ pub fn set_account_from_fields(
     acc.set_confined(fields.confined);
     acc.set_remote_slot(fields.remote_slot);
     acc.set_undelegating(false);
+
+    Ok(())
 }

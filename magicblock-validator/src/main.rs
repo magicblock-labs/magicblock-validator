@@ -6,7 +6,9 @@ use std::time::Instant;
 use magicblock_api::{ledger, magic_validator::MagicValidator};
 use magicblock_config::ValidatorParams;
 #[cfg(feature = "tui")]
-use magicblock_tui_client::{enrich_config_from_rpc, run_tui, TuiConfig};
+use magicblock_tui_client::{
+    enrich_config_from_rpc, init_embedded_logger, run_tui, TuiConfig,
+};
 use solana_signer::Signer;
 use tokio::runtime::Builder;
 #[cfg(not(feature = "tui"))]
@@ -49,8 +51,8 @@ async fn run() {
     let overall_start = Instant::now();
     #[cfg(not(feature = "tui"))]
     init_logger();
-    #[cfg(feature = "tokio-console")]
-    console_subscriber::init();
+    #[cfg(feature = "tui")]
+    let validator_log_rx = init_embedded_logger();
     let args = std::env::args_os();
     let config = match ValidatorParams::try_new(args) {
         Ok(c) => c,
@@ -117,7 +119,7 @@ async fn run() {
         };
         enrich_config_from_rpc(&mut tui_config).await;
 
-        if let Err(err) = run_tui(tui_config).await {
+        if let Err(err) = run_tui(tui_config, Some(validator_log_rx)).await {
             error!(error = ?err, "TUI error");
         }
     }
