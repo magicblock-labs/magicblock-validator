@@ -198,10 +198,7 @@ pub fn setup_offline_validator_with_authority_override(
     reset_ledger: bool,
     replay_authority_override: Pubkey,
 ) -> (TempDir, Child, IntegrationTestContext) {
-    let accountsdb_config = AccountsDbConfig {
-        snapshot_frequency: SNAPSHOT_FREQUENCY,
-        ..Default::default()
-    };
+    let accountsdb_config = AccountsDbConfig::default();
 
     let validator_config = ValidatorConfig::default();
     let programs = resolve_programs(programs);
@@ -252,7 +249,6 @@ pub fn setup_validator_with_local_remote_and_authority_override(
     replay_authority_override: Pubkey,
 ) -> (TempDir, Child, IntegrationTestContext) {
     let accountsdb_config = AccountsDbConfig {
-        snapshot_frequency: SNAPSHOT_FREQUENCY,
         reset: reset_ledger,
         ..Default::default()
     };
