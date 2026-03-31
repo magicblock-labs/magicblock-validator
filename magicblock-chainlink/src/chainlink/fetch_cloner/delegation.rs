@@ -6,6 +6,7 @@ use magicblock_accounts_db::traits::AccountsBank;
 use magicblock_core::token_programs::{derive_eata, EATA_PROGRAM_ID};
 use magicblock_metrics::metrics;
 use solana_account::ReadableAccount;
+use solana_instruction::{AccountMeta, Instruction};
 use solana_keypair::Keypair;
 use solana_program::program_error::ProgramError;
 use solana_pubkey::Pubkey;
@@ -77,16 +78,154 @@ fn parse_post_delegation_actions(
             )
         })?;
 
-    let instructions = actions
-        .decrypt_with_keypair(validator_keypair)
-        .map_err(|err| {
-            ChainlinkError::InvalidDelegationActions(
-                delegation_record_pubkey,
-                format!("Failed to parse/decrypt PostDelegationActions: {err}"),
-            )
-        })?;
+    let instructions = decrypt_post_delegation_actions(
+        actions,
+        delegation_record_pubkey,
+        validator_keypair,
+    )?;
 
     Ok(instructions.into())
+}
+
+fn decrypt_post_delegation_actions(
+    actions: PostDelegationActions,
+    delegation_record_pubkey: Pubkey,
+    validator_keypair: &Keypair,
+) -> ChainlinkResult<Vec<Instruction>> {
+    let inserted_signers = usize::from(actions.inserted_signers);
+    let inserted_non_signers = usize::from(actions.inserted_non_signers);
+    let signers = actions.signers;
+    let non_signers = actions
+        .non_signers
+        .into_iter()
+        .enumerate()
+        .map(|(index, non_signer)| {
+            non_signer
+                .decrypt_with_keypair(validator_keypair)
+                .map_err(|err| {
+                    ChainlinkError::InvalidDelegationActions(
+                        delegation_record_pubkey,
+                        format!(
+                        "Failed to decrypt non-signer pubkey {index}: {err}"
+                    ),
+                    )
+                })
+        })
+        .collect::<ChainlinkResult<Vec<_>>>()?;
+
+    if inserted_signers > signers.len() {
+        return Err(ChainlinkError::InvalidDelegationActions(
+            delegation_record_pubkey,
+            format!(
+                "inserted_signers {inserted_signers} exceeds signers len {}",
+                signers.len()
+            ),
+        ));
+    }
+    if inserted_non_signers > non_signers.len() {
+        return Err(ChainlinkError::InvalidDelegationActions(
+            delegation_record_pubkey,
+            format!(
+                "inserted_non_signers {inserted_non_signers} exceeds non_signers len {}",
+                non_signers.len()
+            ),
+        ));
+    }
+
+    let mut pubkeys = Vec::with_capacity(signers.len() + non_signers.len());
+    pubkeys.extend_from_slice(&signers[..inserted_signers]);
+    pubkeys.extend_from_slice(&non_signers[..inserted_non_signers]);
+    pubkeys.extend_from_slice(&signers[inserted_signers..]);
+    pubkeys.extend_from_slice(&non_signers[inserted_non_signers..]);
+
+    let mut authorized_signers = Vec::with_capacity(pubkeys.len());
+    authorized_signers.extend(vec![true; inserted_signers]);
+    authorized_signers.extend(vec![false; inserted_non_signers]);
+    authorized_signers.extend(vec![true; signers.len() - inserted_signers]);
+    authorized_signers
+        .extend(vec![false; non_signers.len() - inserted_non_signers]);
+
+    let keys_count = pubkeys.len();
+    let instructions = actions
+        .instructions
+        .into_iter()
+        .enumerate()
+        .map(|(instruction_index, instruction)| {
+            if usize::from(instruction.program_id) >= keys_count {
+                return Err(ChainlinkError::InvalidDelegationActions(
+                    delegation_record_pubkey,
+                    format!(
+                        "Post-delegation action {instruction_index} references invalid program_id index {} for pubkey table len {keys_count}",
+                        instruction.program_id
+                    ),
+                ));
+            }
+
+            let accounts = instruction
+                .accounts
+                .into_iter()
+                .enumerate()
+                .map(|(account_index, maybe_account_meta)| {
+                    let compact_meta = maybe_account_meta
+                        .decrypt_with_keypair(validator_keypair)
+                        .map_err(|err| {
+                            ChainlinkError::InvalidDelegationActions(
+                                delegation_record_pubkey,
+                                format!(
+                                    "Failed to decrypt account meta {account_index} for post-delegation action {instruction_index}: {err}"
+                                ),
+                            )
+                        })?;
+                    let key_index = usize::from(compact_meta.key());
+
+                    if key_index >= keys_count {
+                        return Err(ChainlinkError::InvalidDelegationActions(
+                            delegation_record_pubkey,
+                            format!(
+                                "Post-delegation action {instruction_index} account {account_index} references invalid pubkey index {key_index} for pubkey table len {keys_count}"
+                            ),
+                        ));
+                    }
+
+                    if compact_meta.is_signer()
+                        && !authorized_signers[key_index]
+                    {
+                        let offending_pubkey =
+                            Pubkey::new_from_array(pubkeys[key_index]);
+                        return Err(ChainlinkError::InvalidDelegationActions(
+                            delegation_record_pubkey,
+                            format!(
+                                "InvalidSignature: post-delegation action {instruction_index} account {account_index} ({offending_pubkey}) marks pubkey index {key_index} as signer, but that pubkey is not authorized as a signer"
+                            ),
+                        ));
+                    }
+
+                    Ok(AccountMeta {
+                        pubkey: Pubkey::new_from_array(pubkeys[key_index]),
+                        is_signer: compact_meta.is_signer(),
+                        is_writable: compact_meta.is_writable(),
+                    })
+                })
+                .collect::<ChainlinkResult<Vec<_>>>()?;
+
+            Ok(Instruction {
+                program_id: Pubkey::new_from_array(
+                    pubkeys[usize::from(instruction.program_id)],
+                ),
+                accounts,
+                data: instruction.data.decrypt_with_keypair(validator_keypair).map_err(|err| {
+                    ChainlinkError::InvalidDelegationActions(
+                        delegation_record_pubkey,
+                        format!(
+                            "Failed to decrypt data for post-delegation action {instruction_index}: {err}"
+                        ),
+                    )
+                })?,
+            })
+        })
+        .collect::<ChainlinkResult<Vec<_>>>()?;
+
+    Ok(instructions)
 }
 
 pub(crate) fn apply_delegation_record_to_account<T, U, V, C>(
@@ -382,6 +521,130 @@ mod tests {
                 data: vec![1, 2, 3, 4, 5],
             }]
         );
+    }
+
+    #[test]
+    fn parses_post_delegation_actions_with_inserted_keys() {
+        let validator = Keypair::new();
+        let inserted_signer = Pubkey::new_unique();
+        let inserted_non_signer = Pubkey::new_unique();
+        let signer = Pubkey::new_unique();
+        let program_id = Pubkey::new_unique();
+        let account = Pubkey::new_unique();
+
+        let payload = serialize_record_with_actions(
+            validator.pubkey(),
+            PostDelegationActions {
+                inserted_signers: 1,
+                inserted_non_signers: 1,
+                signers: vec![*inserted_signer.as_array(), *signer.as_array()],
+                non_signers: vec![
+                    (*inserted_non_signer.as_array()).into(),
+                    (*program_id.as_array()).into(),
+                    (*account.as_array()).into(),
+                ],
+                instructions: vec![MaybeEncryptedInstruction {
+                    program_id: 3,
+                    accounts: vec![
+                        MaybeEncryptedAccountMeta::ClearText(
+                            dlp_api::compact::AccountMeta::new_readonly(
+                                0, true,
+                            ),
+                        ),
+                        MaybeEncryptedAccountMeta::ClearText(
+                            dlp_api::compact::AccountMeta::new_readonly(
+                                2, true,
+                            ),
+                        ),
+                        MaybeEncryptedAccountMeta::ClearText(
+                            dlp_api::compact::AccountMeta::new_readonly(
+                                4, false,
+                            ),
+                        ),
+                    ],
+                    data: MaybeEncryptedIxData {
+                        prefix: vec![4, 5, 6],
+                        suffix: EncryptedBuffer::default(),
+                    },
+                }],
+            },
+        );
+
+        let (_, actions) =
+            parse_delegation_record(&payload, Pubkey::new_unique(), &validator)
+                .unwrap();
+
+        let actions: Vec<Instruction> = actions.unwrap().into();
+        assert_eq!(
+            actions,
+            vec![Instruction {
+                program_id,
+                accounts: vec![
+                    AccountMeta::new_readonly(inserted_signer, true),
+                    AccountMeta::new_readonly(signer, true),
+                    AccountMeta::new_readonly(account, false),
+                ],
+                data: vec![4, 5, 6],
+            }]
+        );
+    }
+
+    #[test]
+    fn rejects_encrypted_signer_outside_signers_field() {
+        let validator = Keypair::new();
+        let program_id = Pubkey::new_unique();
+        let delegated_account = Pubkey::new_unique();
+
+        let encrypted_program_id =
+            dlp_api::encryption::encrypt_ed25519_recipient(
+                program_id.as_array(),
+                validator.pubkey().as_array(),
+            )
+            .unwrap();
+        let encrypted_account_meta =
+            dlp_api::encryption::encrypt_ed25519_recipient(
+                &[dlp_api::compact::AccountMeta::new_readonly(1, true)
+                    .to_byte()],
+                validator.pubkey().as_array(),
+            )
+            .unwrap();
+
+        let payload = serialize_record_with_actions(
+            validator.pubkey(),
+            PostDelegationActions {
+                inserted_signers: 0,
+                inserted_non_signers: 0,
+                signers: vec![],
+                non_signers: vec![
+                    MaybeEncryptedPubkey::Encrypted(EncryptedBuffer::new(
+                        encrypted_program_id,
+                    )),
+                    (*delegated_account.as_array()).into(),
+                ],
+                instructions: vec![MaybeEncryptedInstruction {
+                    program_id: 0,
+                    accounts: vec![MaybeEncryptedAccountMeta::Encrypted(
+                        EncryptedBuffer::new(encrypted_account_meta),
+                    )],
+                    data: MaybeEncryptedIxData {
+                        prefix: vec![],
+                        suffix: EncryptedBuffer::default(),
+                    },
+                }],
+            },
+        );
+
+        let err =
+            parse_delegation_record(&payload, Pubkey::new_unique(), &validator)
+                .unwrap_err();
+
+        match err {
+            ChainlinkError::InvalidDelegationActions(_, message) => {
+                assert!(message.contains("InvalidSignature"));
+                assert!(message.contains(&delegated_account.to_string()));
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
     }
 
     #[test]
