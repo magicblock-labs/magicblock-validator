@@ -175,11 +175,6 @@ index-size = 16_777_216
 # Env: MBV_ACCOUNTSDB__MAX_SNAPSHOTS
 max-snapshots = 4
 
-# How often (in slots) to take a snapshot of the database.
-# Default: 1024
-# Env: MBV_ACCOUNTSDB__SNAPSHOT_FREQUENCY
-snapshot-frequency = 1024
-
 # If true, wipes the accounts database on every startup.
 # Default: false
 # Env: MBV_ACCOUNTSDB__RESET

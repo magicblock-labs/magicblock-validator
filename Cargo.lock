@@ -3591,6 +3591,7 @@ dependencies = [
 name = "magicblock-accounts-db"
 version = "0.9.0"
 dependencies = [
+ "flate2",
  "lmdb-rkv",
  "magicblock-config",
  "memmap2",
@@ -3598,6 +3599,7 @@ dependencies = [
  "reflink-copy",
  "solana-account",
  "solana-pubkey 3.0.0",
+ "tar",
  "tempfile",
  "thiserror 2.0.18",
  "tracing",
