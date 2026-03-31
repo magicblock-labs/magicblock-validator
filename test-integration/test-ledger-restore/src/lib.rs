@@ -297,6 +297,11 @@ pub fn setup_validator_with_local_remote_and_authority_override(
                 20 * LAMPORTS_PER_SOL,
             )
             .unwrap();
+
+        init_validator_fees_vault(
+            &chain_only_ctx,
+            loaded_accounts.validator_authority_keypair(),
+        );
     }
 
     let (default_tmpdir_config, Some(mut validator), port) =
