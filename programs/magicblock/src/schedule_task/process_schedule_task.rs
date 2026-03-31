@@ -11,7 +11,7 @@ use solana_pubkey::Pubkey;
 
 use crate::{
     utils::accounts::get_instruction_pubkey_with_idx,
-    validator::validator_authority_id,
+    validator::effective_validator_authority_id,
 };
 
 pub(crate) fn process_schedule_task(
@@ -87,7 +87,7 @@ pub(crate) fn process_schedule_task(
                 .copied()
         })
         .collect::<Result<HashSet<_>, _>>()?;
-    let val_id = validator_authority_id();
+    let val_id = effective_validator_authority_id();
     for instruction in &args.instructions {
         for account in &instruction.accounts {
             if account.is_signer && account.pubkey.ne(&val_id) {
