@@ -274,6 +274,20 @@ impl MagicValidator {
         log_timing("startup", "load_programs", step_start);
 
         validator::init_validator_authority(identity_keypair);
+        match &config.validator.replication_mode {
+            ReplicationMode::ReplicateOnly(_, pk) => {
+                validator::set_validator_authority_override(pk.0);
+            }
+            ReplicationMode::StandBy(_, pk) => {
+                if validator_pubkey != pk.0 {
+                    return Err(ApiError::StandByKeypairMismatch {
+                        configured: validator_pubkey,
+                        expected: pk.0,
+                    });
+                }
+            }
+            ReplicationMode::Standalone => {}
+        }
         let base_fee = config.validator.basefee;
 
         // Mode switch channel for transitioning from StartingUp to Primary
@@ -568,6 +582,15 @@ impl MagicValidator {
         if accountsdb_slot.saturating_sub(1) == ledger_slot {
             return Ok(());
         }
+        // If a replay authority override is configured, set it before
+        // replaying so transactions are verified against that key.
+        // Save the prior override so we can restore it after replay
+        // (e.g. a replication-mode override may already be active).
+        let prior_override = validator::validator_authority_override();
+        if let Some(ref pk) = self.config.ledger.replay_authority_override {
+            validator::set_validator_authority_override(pk.0);
+        }
+
         // SOLANA only allows blockhash to be valid for 150 slot back in time,
         // considering that the average slot time on solana is 400ms, then:
         const SOLANA_VALID_BLOCKHASH_AGE: u64 = 150 * 400;
@@ -575,13 +598,24 @@ impl MagicValidator {
         let max_block_age =
             SOLANA_VALID_BLOCKHASH_AGE / self.config.ledger.block_time_ms();
         let step_start = Instant::now();
-        let slot_to_continue_at = process_ledger(
+        let process_ledger_result = process_ledger(
             &self.ledger,
             accountsdb_slot,
             self.transaction_scheduler.clone(),
             max_block_age,
         )
-        .await?;
+        .await;
+
+        // Restore the prior authority override now that replay is done,
+        // regardless of whether process_ledger succeeded or failed.
+        if self.config.ledger.replay_authority_override.is_some() {
+            match prior_override {
+                Some(pk) => validator::set_validator_authority_override(pk),
+                None => validator::unset_validator_authority_override(),
+            }
+        }
+
+        let slot_to_continue_at = process_ledger_result?;
         log_timing("startup", "ledger_replay", step_start);
         self.accountsdb.set_slot(slot_to_continue_at);
 
@@ -851,7 +885,7 @@ impl MagicValidator {
         // The message carries the target mode so the scheduler transitions to
         // the correct coordination mode:
         // - Standalone validators transition to Primary mode
-        // - StandBy/ReplicatOnly validators transition to Replica mode
+        // - StandBy/ReplicateOnly validators transition to Replica mode
         let target = if self.is_standalone {
             SchedulerMode::Primary
         } else {

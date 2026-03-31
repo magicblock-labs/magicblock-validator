@@ -14,6 +14,7 @@ use test_kit::init_logger;
 use test_ledger_restore::{
     confirm_tx_with_payer_ephem, fetch_counter_ephem,
     init_and_delegate_counter_and_payer, setup_offline_validator,
+    setup_offline_validator_with_authority_override,
     setup_validator_with_local_remote_and_resume_strategy,
     wait_for_ledger_persist, TMP_DIR_LEDGER,
 };
@@ -37,7 +38,7 @@ fn test_restore_ledger_with_flexi_counter_same_slot() {
     let (mut validator, _, payer1, payer2) = write(&ledger_path, false);
     validator.kill().unwrap();
 
-    let mut validator = read(&ledger_path, &payer1, &payer2);
+    let mut validator = read(&ledger_path, &payer1, &payer2, None);
     validator.kill().unwrap();
 }
 
@@ -50,7 +51,24 @@ fn test_restore_ledger_with_flexi_counter_separate_slot() {
     let (mut validator, _, payer1, payer2) = write(&ledger_path, true);
     validator.kill().unwrap();
 
-    let mut validator = read(&ledger_path, &payer1, &payer2);
+    let mut validator = read(&ledger_path, &payer1, &payer2, None);
+    validator.kill().unwrap();
+}
+
+#[test]
+fn test_restore_ledger_with_flexi_counter_authority_override() {
+    init_logger!();
+    let (_tmpdir, ledger_path) = resolve_tmp_dir(TMP_DIR_LEDGER);
+
+    let original_authority =
+        LoadedAccounts::with_delegation_program_test_authority()
+            .validator_authority();
+
+    let (mut validator, _, payer1, payer2) = write(&ledger_path, true);
+    validator.kill().unwrap();
+
+    let mut validator =
+        read(&ledger_path, &payer1, &payer2, Some(original_authority));
     validator.kill().unwrap();
 }
 
@@ -199,9 +217,28 @@ fn write(
     (validator, slot, payer1.pubkey(), payer2.pubkey())
 }
 
-fn read(ledger_path: &Path, payer1: &Pubkey, payer2: &Pubkey) -> Child {
-    let (_, mut validator, ctx) =
-        setup_offline_validator(ledger_path, None, Some(SLOT_MS), false, true);
+fn read(
+    ledger_path: &Path,
+    payer1: &Pubkey,
+    payer2: &Pubkey,
+    authority_override: Option<Pubkey>,
+) -> Child {
+    let (_, mut validator, ctx) = match authority_override {
+        Some(original) => setup_offline_validator_with_authority_override(
+            ledger_path,
+            None,
+            Some(SLOT_MS),
+            false,
+            original,
+        ),
+        None => setup_offline_validator(
+            ledger_path,
+            None,
+            Some(SLOT_MS),
+            false,
+            true,
+        ),
+    };
 
     let counter1_decoded = fetch_counter_ephem(&ctx, payer1, &mut validator);
     assert_eq!(
