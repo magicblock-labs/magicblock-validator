@@ -276,7 +276,7 @@ impl MagicValidator {
         validator::init_validator_authority(identity_keypair);
         match &config.validator.replication_mode {
             ReplicationMode::StandBy(_, pk)
-            | ReplicationMode::ReplicatOnly(_, pk) => {
+            | ReplicationMode::ReplicateOnly(_, pk) => {
                 validator::set_validator_authority_override(pk.0);
             }
             ReplicationMode::Standalone => {}
@@ -875,7 +875,7 @@ impl MagicValidator {
         // The message carries the target mode so the scheduler transitions to
         // the correct coordination mode:
         // - Standalone validators transition to Primary mode
-        // - StandBy/ReplicatOnly validators transition to Replica mode
+        // - StandBy/ReplicateOnly validators transition to Replica mode
         let target = if self.is_standalone {
             SchedulerMode::Primary
         } else {

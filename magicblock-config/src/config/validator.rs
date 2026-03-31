@@ -32,7 +32,7 @@ pub enum ReplicationMode {
     StandBy(Url, SerdePubkey),
     /// Validator which participates in replication only as replicator (no takeover).
     /// The `SerdePubkey` is the primary validator's pubkey used for authority signature verification.
-    ReplicatOnly(Url, SerdePubkey),
+    ReplicateOnly(Url, SerdePubkey),
 }
 
 impl Default for ValidatorConfig {
