@@ -417,7 +417,6 @@ fn test_example_config_full_coverage() {
     assert!(matches!(config.accountsdb.block_size, BlockSize::Block256));
     assert_eq!(config.accountsdb.index_size, 16_777_216);
     assert_eq!(config.accountsdb.max_snapshots, 4);
-    assert_eq!(config.accountsdb.snapshot_frequency, 1024);
     assert!(!config.accountsdb.reset);
 
     // ========================================================================
@@ -506,7 +505,6 @@ fn test_env_vars_full_coverage() {
         EnvVarGuard::new("MBV_ACCOUNTSDB__BLOCK_SIZE", "block512"),
         EnvVarGuard::new("MBV_ACCOUNTSDB__INDEX_SIZE", "2048"),
         EnvVarGuard::new("MBV_ACCOUNTSDB__MAX_SNAPSHOTS", "10"),
-        EnvVarGuard::new("MBV_ACCOUNTSDB__SNAPSHOT_FREQUENCY", "500"),
         EnvVarGuard::new("MBV_ACCOUNTSDB__RESET", "true"),
         // --- Ledger ---
         EnvVarGuard::new("MBV_LEDGER__BLOCK_TIME", "200ms"),
@@ -568,7 +566,6 @@ fn test_env_vars_full_coverage() {
     assert!(matches!(config.accountsdb.block_size, BlockSize::Block512));
     assert_eq!(config.accountsdb.index_size, 2048);
     assert_eq!(config.accountsdb.max_snapshots, 10);
-    assert_eq!(config.accountsdb.snapshot_frequency, 500);
     assert!(config.accountsdb.reset);
 
     // Ledger
