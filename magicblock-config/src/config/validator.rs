@@ -1,6 +1,7 @@
 // src/config/validator.rs
 use serde::{Deserialize, Serialize};
 use solana_keypair::Keypair;
+use solana_pubkey::Pubkey;
 use url::Url;
 
 use crate::{
@@ -31,7 +32,7 @@ pub enum ReplicationMode {
     /// Validator which participates in replication: acting as either a primary or replicator
     StandBy(Url),
     /// Validator which participates in replication only as replicator (no takeover)
-    ReplicaOnly(Url),
+    ReplicaOnly(Url, SerdePubkey),
 }
 
 impl Default for ValidatorConfig {
@@ -52,7 +53,14 @@ impl ReplicationMode {
     pub fn remote(&self) -> Option<Url> {
         match self {
             Self::Standalone => None,
-            Self::StandBy(u) | Self::ReplicaOnly(u) => Some(u.clone()),
+            Self::StandBy(u) | Self::ReplicaOnly(u, _) => Some(u.clone()),
         }
+    }
+
+    pub fn authority_override(&self) -> Option<Pubkey> {
+        if let Self::ReplicaOnly(_, pk) = self {
+            return Some(pk.0);
+        }
+        None
     }
 }
