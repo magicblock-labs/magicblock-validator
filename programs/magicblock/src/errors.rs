@@ -50,6 +50,10 @@ pub enum MagicBlockProgramError {
 
     #[error("Updates cannot be older than the current remote slot")]
     OutOfOrderUpdate,
+
     #[error("Buffer account not found for program finalization")]
     BufferAccountNotFound,
+
+    #[error("Duplicate delegated-account cloning within same slot")]
+    DuplicateDelegatedAccountClone,
 }

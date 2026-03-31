@@ -5,13 +5,11 @@ import * as fs from "fs";
 
 function runWithForwardedExit(child: ReturnType<typeof spawn>): void {
   child.on("exit", (code: number | null, signal: NodeJS.Signals | null) => {
-    process.on("exit", () => {
-      if (signal) {
-        process.kill(process.pid, signal);
-      } else if (code !== null) {
-        process.exit(code);
-      }
-    });
+    if (signal) {
+      process.kill(process.pid, signal);
+    } else {
+      process.exit(code ?? 1);
+    }
   });
 
   process.on("SIGINT", () => {

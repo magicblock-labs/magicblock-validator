@@ -3,9 +3,12 @@ use std::collections::HashSet;
 use dlp_api::state::DelegationRecord;
 use futures_util::future::join_all;
 use magicblock_accounts_db::traits::AccountsBank;
-use magicblock_core::token_programs::try_derive_eata_address_and_bump;
+use magicblock_core::token_programs::{
+    is_ata, try_derive_ata_address_and_bump, try_derive_eata_address_and_bump,
+    AtaInfo,
+};
 use magicblock_metrics::metrics;
-use solana_account::AccountSharedData;
+use solana_account::{AccountSharedData, ReadableAccount};
 use solana_pubkey::Pubkey;
 use tokio::task::JoinSet;
 use tracing::*;
@@ -17,6 +20,49 @@ use crate::{
         ChainPubsubClient, ChainRpcClient, ResolvedAccountSharedData,
     },
 };
+
+pub(crate) fn derive_eata_pubkey_from_ata_account(
+    ata_pubkey: &Pubkey,
+    ata_account: &AccountSharedData,
+) -> Option<Pubkey> {
+    derive_eata_pubkey(is_ata(ata_pubkey, ata_account)?)
+}
+
+pub(crate) fn derive_eata_pubkey_from_ata_layout(
+    ata_pubkey: &Pubkey,
+    ata_account: &AccountSharedData,
+) -> Option<Pubkey> {
+    derive_eata_pubkey(ata_info_from_layout(ata_pubkey, ata_account)?)
+}
+
+fn derive_eata_pubkey(ata_info: AtaInfo) -> Option<Pubkey> {
+    let (eata_pubkey, _) =
+        try_derive_eata_address_and_bump(&ata_info.owner, &ata_info.mint)?;
+    Some(eata_pubkey)
+}
+
+fn ata_info_from_layout(
+    ata_pubkey: &Pubkey,
+    ata_account: &AccountSharedData,
+) -> Option<AtaInfo> {
+    let data = ata_account.data();
+    if data.len() < 64 {
+        return None;
+    }
+
+    let mint = Pubkey::new_from_array(data[0..32].try_into().ok()?);
+    let wallet_owner = Pubkey::new_from_array(data[32..64].try_into().ok()?);
+    let (derived_ata, _) =
+        try_derive_ata_address_and_bump(&wallet_owner, &mint)?;
+    if derived_ata != *ata_pubkey {
+        return None;
+    }
+
+    Some(AtaInfo {
+        mint,
+        owner: wallet_owner,
+    })
+}
 
 /// Resolves ATAs with eATA projection.
 /// For each detected ATA, we derive the eATA PDA, subscribe to both,
