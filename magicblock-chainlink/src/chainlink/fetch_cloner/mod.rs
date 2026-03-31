@@ -14,7 +14,7 @@ use magicblock_accounts_db::traits::AccountsBank;
 use magicblock_config::config::AllowedProgram;
 use magicblock_core::token_programs::{
     is_ata, try_derive_ata_address_and_bump, try_derive_eata_address_and_bump,
-    MaybeIntoAta,
+    MaybeIntoAta, EATA_PROGRAM_ID,
 };
 use magicblock_metrics::metrics::{self, AccountFetchOrigin};
 use scc::{hash_map::Entry, HashMap};
@@ -22,6 +22,7 @@ use solana_account::{AccountSharedData, ReadableAccount};
 use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
 use solana_sdk_ids::system_program;
+use solana_signature::Signature;
 use solana_signer::Signer;
 use tokio::{
     sync::{mpsc, oneshot},
@@ -286,6 +287,7 @@ where
                 pubkey,
                 &account,
                 deleg_record.as_ref(),
+                &delegation_actions,
             );
 
         // Ensure that the subscription update isn't out of order, i.e.
@@ -305,8 +307,9 @@ where
                     projected_ata_clone_request
                 {
                     if let Err(err) = self
-                        .cloner
-                        .clone_account(projected_ata_clone_request)
+                        .clone_projected_ata_request(
+                            projected_ata_clone_request,
+                        )
                         .await
                     {
                         warn!(
@@ -343,6 +346,23 @@ where
                     chain_slot = account.remote_slot(),
                     "Received update for undelegating account"
                 );
+
+                if account.delegated()
+                    && ata_projection::derive_eata_pubkey_from_ata_account(
+                        &pubkey, &account,
+                    )
+                    .is_some()
+                    && deleg_record.as_ref().is_some_and(|record| {
+                        record.owner == EATA_PROGRAM_ID
+                            && record.authority == self.validator_pubkey
+                    })
+                {
+                    debug!(
+                        pubkey = %pubkey,
+                        "Keeping undelegating ATA in bank while companion eATA remains delegated"
+                    );
+                    return;
+                }
 
                 // This will only be true in the following case:
                 // 1. a commit was triggered for the account
@@ -469,14 +489,13 @@ where
                 None,
             )
             .await?;
-        if result.is_ok() {
+        if result.missing_delegation_record.is_empty() {
             return Ok(());
         }
 
         let missing_accounts = result
-            .pubkeys_not_found_on_chain()
+            .pubkeys_missing_delegation_record()
             .into_iter()
-            .chain(result.pubkeys_missing_delegation_record())
             .collect::<HashSet<_>>()
             .into_iter()
             .collect::<Vec<_>>();
@@ -485,6 +504,20 @@ where
         Err(ChainlinkError::MissingDelegationActionAccounts(
             missing_accounts,
         ))
+    }
+
+    async fn clone_projected_ata_request(
+        &self,
+        request: AccountCloneRequest,
+    ) -> ChainlinkResult<Signature> {
+        self.ensure_delegation_action_dependencies(
+            request.pubkey,
+            request.account.remote_slot(),
+            &request.delegation_actions,
+        )
+        .await?;
+
+        Ok(self.cloner.clone_account(request).await?)
     }
 
     async fn maybe_greedily_clone_discovered_delegated_account(
@@ -504,7 +537,7 @@ where
             return false;
         }
 
-        let Some((deleg_record, _)) = self
+        let Some((deleg_record, delegation_actions)) = self
             .fetch_and_parse_delegation_record(
                 pubkey,
                 account.remote_slot(),
@@ -531,6 +564,7 @@ where
             );
             return true;
         }
+        let delegation_actions = delegation_actions.unwrap_or_default();
 
         let greedy_ata_pubkey = delegation::parse_raw_eata_pda(
             &pubkey,
@@ -583,13 +617,15 @@ where
                         pubkey,
                         &account,
                         Some(&deleg_record),
+                        &delegation_actions,
                     )
                 {
                     let projected_ata_pubkey =
                         projected_ata_clone_request.pubkey;
                     if let Err(err) = self
-                        .cloner
-                        .clone_account(projected_ata_clone_request)
+                        .clone_projected_ata_request(
+                            projected_ata_clone_request,
+                        )
                         .await
                     {
                         warn!(
@@ -862,6 +898,7 @@ where
         eata_pubkey: Pubkey,
         eata_account: &AccountSharedData,
         deleg_record: Option<&DelegationRecord>,
+        delegation_actions: &DelegationActions,
     ) -> Option<AccountCloneRequest> {
         let deleg_record = deleg_record?;
 
@@ -886,7 +923,7 @@ where
         )?;
 
         if let Some(in_bank_ata) = self.accounts_bank.get_account(&ata_pubkey) {
-            if in_bank_ata.delegated() && !in_bank_ata.undelegating() {
+            if in_bank_ata.delegated() || in_bank_ata.undelegating() {
                 return None;
             }
             if in_bank_ata.remote_slot() >= projected_ata.remote_slot() {
@@ -897,7 +934,7 @@ where
             pubkey: ata_pubkey,
             account: projected_ata,
             commit_frequency_ms: None,
-            delegation_actions: DelegationActions::default(),
+            delegation_actions: delegation_actions.clone(),
             delegated_to_other: None,
         })
     }
@@ -1305,10 +1342,12 @@ where
                 &action_dependencies_to_fetch,
             );
 
-            if !not_found.is_empty() {
-                return Err(ChainlinkError::MissingDelegationActionAccounts(
-                    not_found.iter().map(|(pubkey, _)| *pubkey).collect(),
-                ));
+            if tracing::enabled!(tracing::Level::TRACE) && !not_found.is_empty()
+            {
+                trace!(
+                    dependencies = ?not_found,
+                    "Delegation action dependencies not found on chain; continuing clone flow"
+                );
             }
 
             let ResolvedDelegatedAccounts {
@@ -1414,6 +1453,32 @@ where
                 undelegating = in_bank.undelegating(),
                 "Fetching undelegating account"
             );
+
+            if let Some(eata_pubkey) =
+                ata_projection::derive_eata_pubkey_from_ata_layout(
+                    pubkey, in_bank,
+                )
+            {
+                let projected_deleg_record = self
+                    .fetch_and_parse_delegation_record(
+                        eata_pubkey,
+                        self.remote_account_provider.chain_slot(),
+                        fetch_origin,
+                    )
+                    .await;
+                if projected_deleg_record.as_ref().is_some_and(|(record, _)| {
+                    record.owner == EATA_PROGRAM_ID
+                        && record.authority == self.validator_pubkey
+                }) {
+                    debug!(
+                        pubkey = %pubkey,
+                        eata_pubkey = %eata_pubkey,
+                        "Keeping undelegating ATA in bank while companion eATA remains delegated"
+                    );
+                    return RefreshDecision::No;
+                }
+            }
+
             let deleg_record = self
                 .fetch_and_parse_delegation_record(
                     *pubkey,

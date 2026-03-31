@@ -221,15 +221,22 @@ impl MagicValidator {
         let (mut dispatch, validator_channels) = link();
 
         let step_start = Instant::now();
+        info!("Starting committor service");
         let committor_service =
             Self::init_committor_service(&config, ledger.latest_block())
                 .await?;
+        info!(
+            duration_ms = step_start.elapsed().as_millis() as u64,
+            enabled = committor_service.is_some(),
+            "Committor service started"
+        );
         log_timing("startup", "committor_service_init", step_start);
         init_magic_sys(Arc::new(MagicSysAdapter::new(
             committor_service.clone(),
         )));
 
         let step_start = Instant::now();
+        info!("Starting chainlink");
         let chainlink = Arc::new(
             Self::init_chainlink(
                 &config,
@@ -240,6 +247,10 @@ impl MagicValidator {
                 faucet_keypair.pubkey(),
             )
             .await?,
+        );
+        info!(
+            duration_ms = step_start.elapsed().as_millis() as u64,
+            "Chainlink started"
         );
         log_timing("startup", "chainlink_init", step_start);
 
