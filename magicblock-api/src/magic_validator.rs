@@ -275,9 +275,16 @@ impl MagicValidator {
 
         validator::init_validator_authority(identity_keypair);
         match &config.validator.replication_mode {
-            ReplicationMode::StandBy(_, pk)
-            | ReplicationMode::ReplicateOnly(_, pk) => {
+            ReplicationMode::ReplicateOnly(_, pk) => {
                 validator::set_validator_authority_override(pk.0);
+            }
+            ReplicationMode::StandBy(_, pk) => {
+                if validator_pubkey != pk.0 {
+                    return Err(ApiError::StandByKeypairMismatch {
+                        configured: validator_pubkey,
+                        expected: pk.0,
+                    });
+                }
             }
             ReplicationMode::Standalone => {}
         }
