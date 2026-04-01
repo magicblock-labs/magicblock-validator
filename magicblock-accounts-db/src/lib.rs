@@ -278,7 +278,6 @@ impl AccountsDb {
     }
 
     /// Updates the current slot.
-    #[inline(always)]
     pub fn set_slot(&self, slot: u64) {
         self.storage.update_slot(slot);
     }
@@ -440,6 +439,10 @@ impl AccountsDb {
     /// during operations like checksum computation.
     pub fn lock_database(&self) -> RwLockWriteGuard<'_, ()> {
         self.write_lock.write()
+    }
+
+    pub fn database_directory(&self) -> &Path {
+        self.snapshot_manager.database_path()
     }
 }
 
