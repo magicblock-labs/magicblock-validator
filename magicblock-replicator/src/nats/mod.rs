@@ -39,9 +39,9 @@ mod cfg {
     pub const META_SLOT: &str = "slot";
     pub const META_SEQUENCE: &str = "sequence";
 
-    // Size limits (256 GB stream, 512 GB snapshots)
-    pub const STREAM_BYTES: i64 = 2 * 1024 * 1024 * 1024;
-    pub const SNAPSHOT_BYTES: i64 = 5 * 1024 * 1024 * 1024;
+    // Size limits (256 GB stream, 1 GB snapshots)
+    pub const STREAM_BYTES: i64 = 256 * 1024 * 1024 * 1024;
+    pub const SNAPSHOT_BYTES: i64 = 1024 * 1024 * 1024;
 
     // Timeouts
     pub const TTL_STREAM: Duration = Duration::from_secs(24 * 60 * 60);

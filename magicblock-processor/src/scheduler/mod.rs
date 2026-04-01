@@ -43,6 +43,7 @@
 //! 5. **Update program cache** - prune stale programs, re-root to new slot
 //! 6. **Update sysvars** - Clock and SlotHashes accounts
 
+use core::matches;
 use std::{
     sync::{Arc, RwLock},
     thread::JoinHandle,
@@ -371,7 +372,9 @@ impl TransactionScheduler {
                 (self.slot, index)
             }
         };
-        self.hasher.update(txn.transaction.signature().as_ref());
+        if !matches!(txn.mode, TransactionProcessingMode::Simulation(_)) {
+            self.hasher.update(txn.transaction.signature().as_ref());
+        }
 
         let msg = txn
             .encoded
