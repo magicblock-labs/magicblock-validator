@@ -17,7 +17,7 @@ use locks::{ExecutorId, MAX_SVM_EXECUTORS};
 use magicblock_accounts_db::{traits::AccountsBank, AccountsDb};
 use magicblock_core::{
     link::transactions::{
-        ProcessableTransaction, TransactionProcessingMode,
+        ProcessableTransaction, SchedulerMode, TransactionProcessingMode,
         TransactionToProcessRx,
     },
     Slot,
@@ -27,7 +27,7 @@ use solana_account::{from_account, to_account};
 use solana_program::slot_hashes::SlotHashes;
 use solana_program_runtime::loaded_programs::ProgramCache;
 use solana_sdk_ids::sysvar::{clock, slot_hashes};
-use state::{SchedulerMode, TransactionSchedulerState};
+use state::TransactionSchedulerState;
 use tokio::{
     runtime::Builder,
     sync::mpsc::{channel, Receiver, Sender},
