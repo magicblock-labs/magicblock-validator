@@ -24,6 +24,7 @@ pub struct ValidatorConfig {
 
 /// Defines the validator's role in a replication setup.
 #[derive(Deserialize, Serialize, Debug, Clone)]
+#[serde(rename_all = "kebab-case")]
 pub enum ReplicationMode {
     // Validator which doesn't participate in replication
     Standalone,
