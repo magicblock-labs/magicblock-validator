@@ -13,7 +13,8 @@ pub struct LedgerConfig {
     #[serde(with = "humantime")]
     pub block_time: Duration,
 
-    /// The number of slots that must elapse before they accountsdb snapshot/checksum is taken
+    /// The number of slots that must elapse before
+    /// the accountsdb snapshot/checksum is taken
     pub superblock_size: u64,
 
     /// If true, the existing ledger database will be wiped on startup.
