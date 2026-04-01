@@ -467,6 +467,9 @@ impl TransactionScheduler {
             // this should never happen, and it's unclear how
             // to recover from it, right now the log is used
             // for debugging purposes only
+            // NOTE:
+            // This error will always be logged once
+            // when replica starts up with an empty ledger
             error!(
                 slot = block.slot,
                 "replication blockhash has diverged from local"
