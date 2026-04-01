@@ -228,6 +228,19 @@ fn test_take_snapshot() {
         "Snapshot should be a file, not directory"
     );
 
+    // Verify archive file exists (not directory)
+    let archive_path = env
+        .snapshot_manager
+        .database_path()
+        .parent()
+        .unwrap()
+        .join(format!("snapshot-{:0>12}.tar.gz", SNAPSHOT_SLOT));
+    assert!(archive_path.exists(), "Archive file should exist");
+    assert!(
+        archive_path.is_file(),
+        "Snapshot should be a file, not directory"
+    );
+
     // Update Account
     acc.account.set_data(ACCOUNT_DATA.to_vec());
     env.insert_account(&acc.pubkey, &acc.account).unwrap();
