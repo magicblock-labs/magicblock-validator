@@ -6,7 +6,6 @@ use index::{
 };
 use lmdb::{RwTransaction, Transaction};
 use magicblock_config::config::AccountsDbConfig;
-use parking_lot::{RwLock, RwLockWriteGuard};
 use solana_account::{
     cow::AccountBorrowed, AccountSharedData, ReadableAccount,
 };
@@ -18,10 +17,6 @@ use twox_hash::xxhash3_64;
 use crate::{snapshot::SnapshotManager, traits::AccountsBank};
 
 pub type AccountsDbResult<T> = Result<T, AccountsDbError>;
-
-/// A global lock used to suspend all write operations during critical
-/// sections (like snapshots).
-pub type GlobalSyncLock = Arc<RwLock<()>>;
 
 pub const ACCOUNTSDB_DIR: &str = "accountsdb";
 
@@ -39,10 +34,6 @@ pub struct AccountsDb {
     index: AccountsDbIndex,
     /// Manages snapshots and state restoration.
     snapshot_manager: Arc<SnapshotManager>,
-    /// Global lock ensures atomic snapshots by pausing writes.
-    /// Note: Reads are generally wait-free/lock-free via mmap,
-    /// unless they require index cursor stability.
-    write_lock: GlobalSyncLock,
 }
 
 impl AccountsDb {
@@ -79,7 +70,6 @@ impl AccountsDb {
             storage,
             index,
             snapshot_manager,
-            write_lock: GlobalSyncLock::default(),
         };
 
         // Recover state if the requested slot is older than our current state
@@ -291,30 +281,22 @@ impl AccountsDb {
     ///
     /// Returns the state checksum computed at snapshot time.
     /// The checksum can be used to verify state consistency across nodes.
-    pub fn take_snapshot(self: &Arc<Self>, slot: u64) -> u64 {
-        let this = self.clone();
+    ///
+    ///
+    /// # Safety
+    /// the caller must ensure that no state transitions are taking
+    /// place concurrently when this operation is in progress
+    pub unsafe fn take_snapshot(&self, slot: u64) -> AccountsDbResult<u64> {
+        // Create snapshot directory (potential deep copy)
+        self.flush();
+        let checksum = self.checksum();
+        let used_storage = self.storage.active_segment();
 
-        // Phase 1: Create snapshot directory (with write lock)
-        let locked = this.write_lock.write();
-        this.flush();
-        // SAFETY:
-        // we have acquired the write lock above
-        let checksum = unsafe { this.checksum() };
-        let used_storage = this.storage.active_segment();
-
-        let snapshot_dir = this
-            .snapshot_manager
-            .create_snapshot_dir(slot, used_storage);
-        drop(locked);
-        thread::spawn(move || {
-            // Phase 2: Archive directory (no lock needed)
-            let _ = snapshot_dir
-                .and_then(|dir| {
-                    this.snapshot_manager.archive_and_register(&dir)
-                })
-                .log_err(|| "failed to create accountsdb snapshot");
-        });
-        checksum
+        let manager = self.snapshot_manager.clone();
+        let dir = manager.create_snapshot_dir(slot, used_storage)?;
+        // Archive directory in background to avoid blocking the caller
+        thread::spawn(move || manager.archive_and_register(&dir));
+        Ok(checksum)
     }
 
     /// Ensures the database state is at most `slot`.
@@ -335,9 +317,6 @@ impl AccountsDb {
             target_slot = target_slot,
             "Current slot ahead of target, rolling back"
         );
-
-        // Block all writes during restoration
-        let _guard = self.write_lock.write();
 
         let restored_slot = self
             .snapshot_manager
@@ -370,10 +349,6 @@ impl AccountsDb {
     pub fn flush(&self) {
         self.storage.flush();
         self.index.flush();
-    }
-
-    pub fn write_lock(&self) -> GlobalSyncLock {
-        self.write_lock.clone()
     }
 
     /// Inserts an external snapshot archive received over the network.
@@ -418,8 +393,8 @@ impl AccountsDb {
     /// suitable for verifying state consistency across nodes.
     ///
     /// # Safety
-    /// the caller must acquire the write lock on accountsdb, so that
-    /// the state doesn't change during checksum computation
+    /// the caller must ensure that no concurrent write access is being performed on
+    /// accountsdb, so that the state doesn't change during checksum computation
     pub unsafe fn checksum(&self) -> u64 {
         let mut hasher = xxhash3_64::Hasher::new();
         for (pubkey, acc) in self.iter_all() {
@@ -430,15 +405,6 @@ impl AccountsDb {
             hasher.write(borrowed.buffer());
         }
         hasher.finish()
-    }
-
-    /// Acquires exclusive write access to the database.
-    ///
-    /// The returned guard blocks all other write operations while held.
-    /// Use this when you need to ensure the database state doesn't change
-    /// during operations like checksum computation.
-    pub fn lock_database(&self) -> RwLockWriteGuard<'_, ()> {
-        self.write_lock.write()
     }
 
     pub fn database_directory(&self) -> &Path {
