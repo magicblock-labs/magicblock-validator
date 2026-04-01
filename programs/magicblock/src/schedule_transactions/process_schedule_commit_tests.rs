@@ -1391,18 +1391,16 @@ mod tests {
 
     /// Helper: builds transaction accounts for a delegated-payer commit.
     /// Payer is delegated+writable; fee vault is delegated+writable.
-    fn prepare_delegated_payer_transaction(
+    fn prepare_delegated_payer_transaction_with_fee_vault(
         payer: &Keypair,
         program: Pubkey,
         committees: &[Pubkey],
         nonces: StubNonces,
+        fee_vault_pubkey: Pubkey,
     ) -> (
         HashMap<Pubkey, AccountSharedData>,
         Vec<(Pubkey, AccountSharedData)>,
     ) {
-        validator::generate_validator_authority_if_needed();
-        let fee_vault_pubkey = magic_fee_vault_pubkey();
-
         let mut account_data = {
             let mut map = HashMap::new();
 
@@ -1442,6 +1440,64 @@ mod tests {
         )];
 
         (account_data, transaction_accounts)
+    }
+
+    fn prepare_delegated_payer_transaction(
+        payer: &Keypair,
+        program: Pubkey,
+        committees: &[Pubkey],
+        nonces: StubNonces,
+    ) -> (
+        HashMap<Pubkey, AccountSharedData>,
+        Vec<(Pubkey, AccountSharedData)>,
+    ) {
+        validator::generate_validator_authority_if_needed();
+        prepare_delegated_payer_transaction_with_fee_vault(
+            payer,
+            program,
+            committees,
+            nonces,
+            magic_fee_vault_pubkey(),
+        )
+    }
+
+    fn schedule_commit_instruction_with_fee_vault(
+        payer: &Pubkey,
+        fee_vault: Pubkey,
+        pdas: Vec<Pubkey>,
+    ) -> Instruction {
+        let mut account_metas = vec![
+            AccountMeta::new(*payer, true),
+            AccountMeta::new(MAGIC_CONTEXT_PUBKEY, false),
+            AccountMeta::new(fee_vault, false),
+        ];
+        for pubkey in &pdas {
+            account_metas.push(AccountMeta::new_readonly(*pubkey, true));
+        }
+        Instruction::new_with_bincode(
+            crate::id(),
+            &MagicBlockInstruction::ScheduleCommit,
+            account_metas,
+        )
+    }
+
+    struct ValidatorAuthorityOverrideGuard(Option<Pubkey>);
+
+    impl ValidatorAuthorityOverrideGuard {
+        fn set(override_pubkey: Pubkey) -> Self {
+            let prior = validator::validator_authority_override();
+            validator::set_validator_authority_override(override_pubkey);
+            Self(prior)
+        }
+    }
+
+    impl Drop for ValidatorAuthorityOverrideGuard {
+        fn drop(&mut self) {
+            match self.0 {
+                Some(pubkey) => validator::set_validator_authority_override(pubkey),
+                None => validator::unset_validator_authority_override(),
+            }
+        }
     }
 
     #[test]
@@ -1493,6 +1549,114 @@ mod tests {
                 a.lamports() == 1_000_000 - COMMIT_FEE_LAMPORTS && a.delegated()
             })
             .expect("payer should have been debited");
+    }
+
+    #[test]
+    #[serial]
+    fn test_schedule_commit_delegated_payer_uses_override_fee_vault() {
+        init_logger!();
+        validator::generate_validator_authority_if_needed();
+        let payer =
+            Keypair::from_seed(b"delegated_payer_override_vault__").unwrap();
+        let program = Pubkey::new_unique();
+        let committee = Pubkey::new_unique();
+        let override_authority = Pubkey::new_unique();
+        let _override_guard =
+            ValidatorAuthorityOverrideGuard::set(override_authority);
+
+        let override_fee_vault = Pubkey::find_program_address(
+            &[b"magic-fee-vault", override_authority.as_ref()],
+            &DELEGATION_PROGRAM_ID,
+        )
+        .0;
+
+        let (mut account_data, mut transaction_accounts) =
+            prepare_delegated_payer_transaction_with_fee_vault(
+                &payer,
+                program,
+                &[committee],
+                StubNonces::Global(ACTUAL_COMMIT_LIMIT),
+                override_fee_vault,
+            );
+
+        let ix = schedule_commit_instruction_with_fee_vault(
+            &payer.pubkey(),
+            override_fee_vault,
+            vec![committee],
+        );
+        extend_transaction_accounts_from_ix(
+            &ix,
+            &mut account_data,
+            &mut transaction_accounts,
+        );
+
+        let accounts = process_instruction(
+            ix.data.as_slice(),
+            transaction_accounts,
+            ix.accounts,
+            Ok(()),
+        );
+
+        accounts
+            .iter()
+            .find(|a| a.lamports() == COMMIT_FEE_LAMPORTS)
+            .expect("override-derived fee vault should be charged");
+    }
+
+    #[test]
+    #[serial]
+    fn test_schedule_commit_delegated_payer_rejects_base_fee_vault_under_override(
+    ) {
+        init_logger!();
+        validator::generate_validator_authority_if_needed();
+        let payer =
+            Keypair::from_seed(b"delegated_payer_base_vault______").unwrap();
+        let program = Pubkey::new_unique();
+        let committee = Pubkey::new_unique();
+        let base_authority = validator::validator_authority_id();
+        let base_fee_vault = Pubkey::find_program_address(
+            &[b"magic-fee-vault", base_authority.as_ref()],
+            &DELEGATION_PROGRAM_ID,
+        )
+        .0;
+        let _override_guard =
+            ValidatorAuthorityOverrideGuard::set(Pubkey::new_unique());
+
+        let (mut account_data, mut transaction_accounts) =
+            prepare_delegated_payer_transaction_with_fee_vault(
+                &payer,
+                program,
+                &[committee],
+                StubNonces::Global(ACTUAL_COMMIT_LIMIT),
+                base_fee_vault,
+            );
+
+        let ix = schedule_commit_instruction_with_fee_vault(
+            &payer.pubkey(),
+            base_fee_vault,
+            vec![committee],
+        );
+        extend_transaction_accounts_from_ix(
+            &ix,
+            &mut account_data,
+            &mut transaction_accounts,
+        );
+
+        let (accounts, logs) = process_instruction_with_logs(
+            ix.data.as_slice(),
+            transaction_accounts,
+            ix.accounts,
+            Err(InstructionError::MissingAccount),
+        );
+
+        assert!(
+            logs.iter().any(|log| log.contains("invalid magic fee vault account")),
+            "expected invalid magic fee vault log, got: {logs:?}"
+        );
+        accounts
+            .iter()
+            .find(|a| a.lamports() == 1_000_000 && a.delegated())
+            .expect("payer should remain unchanged when fee vault is rejected");
     }
 
     #[test]
