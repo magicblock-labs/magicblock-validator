@@ -1,6 +1,6 @@
 //! Shared context for primary and standby roles.
 
-use std::{sync::Arc, time::Duration};
+use std::sync::Arc;
 
 use machineid_rs::IdBuilder;
 use magicblock_accounts_db::AccountsDb;
@@ -109,7 +109,6 @@ impl ReplicationContext {
 
     /// Verifies superblock checksum.
     pub async fn verify_checksum(&self, sb: &SuperBlock) -> Result<()> {
-        tokio::time::sleep(Duration::from_millis(200)).await;
         let _guard = self.scheduler.wait_for_idle().await;
         // SAFETY: Scheduler is paused, no concurrent modifications during checksum.
         let checksum = unsafe { self.accountsdb.checksum() };
@@ -183,6 +182,7 @@ impl ReplicationContext {
     ) -> Result<Primary> {
         let snapshots = self.create_snapshot_watcher()?;
         // TODO(bmuddha): remove dependency on the chainlink
+        let _guard = self.scheduler.wait_for_idle().await;
         self.chainlink.reset_accounts_bank()?;
         self.enter_primary_mode().await;
         Ok(Primary::new(self, producer, messages, snapshots))
