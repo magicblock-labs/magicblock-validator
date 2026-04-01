@@ -6,7 +6,7 @@ use solana_keypair::Keypair;
 use tempfile::TempDir;
 
 use crate::{
-    config::{BlockSize, LifecycleMode},
+    config::{validator::ReplicationConfig, BlockSize, LifecycleMode},
     consts::{self, DEFAULT_VALIDATOR_KEYPAIR},
     types::network::{BindAddress, Remote},
     ValidatorParams,
@@ -404,6 +404,10 @@ fn test_example_config_full_coverage() {
         config.validator.keypair.0.to_base58_string(),
         DEFAULT_VALIDATOR_KEYPAIR
     );
+    assert!(matches!(
+        config.validator.replication_mode,
+        crate::config::validator::ReplicationMode::Standalone
+    ));
 
     // ========================================================================
     // 6. Chain Commitment
@@ -709,4 +713,18 @@ fn test_bind_address_toml_deserialize_port_out_of_range_errors() {
         "unexpected error: {}",
         msg
     );
+}
+
+#[test]
+#[parallel]
+fn test_replication_config_debug_redacts_secret() {
+    let cfg = ReplicationConfig {
+        url: "nats://0.0.0.0:4222".parse().unwrap(),
+        secret: "SUASECRET".into(),
+        authority_override: None,
+    };
+
+    let dbg = format!("{cfg:?}");
+    assert!(dbg.contains("<redacted>"));
+    assert!(!dbg.contains("SUASECRET"));
 }

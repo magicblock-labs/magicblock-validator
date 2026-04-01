@@ -1,4 +1,5 @@
-// src/config/validator.rs
+use std::fmt;
+
 use serde::{Deserialize, Serialize};
 use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
@@ -35,12 +36,45 @@ pub enum ReplicationMode {
     ReplicaOnly(ReplicationConfig),
 }
 
-#[derive(Deserialize, Serialize, Debug, Clone)]
+#[derive(Deserialize, Clone)]
 #[serde(rename_all = "kebab-case")]
 pub struct ReplicationConfig {
     pub url: Url,
     pub secret: String,
     pub authority_override: Option<SerdePubkey>,
+}
+
+impl fmt::Debug for ReplicationConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ReplicationConfig")
+            .field("url", &self.url)
+            .field("secret", &"<redacted>")
+            .field("authority_override", &self.authority_override)
+            .finish()
+    }
+}
+
+impl Serialize for ReplicationConfig {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        #[derive(Serialize)]
+        #[serde(rename_all = "kebab-case")]
+        struct Redacted<'a> {
+            url: &'a Url,
+            secret: &'static str,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            authority_override: &'a Option<SerdePubkey>,
+        }
+
+        Redacted {
+            url: &self.url,
+            secret: "<redacted>",
+            authority_override: &self.authority_override,
+        }
+        .serialize(serializer)
+    }
 }
 
 impl Default for ValidatorConfig {
