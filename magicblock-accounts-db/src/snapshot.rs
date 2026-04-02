@@ -143,9 +143,7 @@ impl SnapshotManager {
         let enc = tar
             .into_inner()
             .log_err(|| "Failed to recover gzip encoder from tar builder")?;
-        let file = enc
-            .finish()
-            .log_err(|| "Failed to finish gzip archive")?;
+        let file = enc.finish().log_err(|| "Failed to finish gzip archive")?;
         file.sync_all()
             .log_err(|| "Failed to sync archive to disk")?;
 
