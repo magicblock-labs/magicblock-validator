@@ -312,6 +312,20 @@ impl InstructionUtils {
     }
 
     // -----------------
+    // EvictAccount
+    // -----------------
+    pub fn evict_account_instruction(pubkey: Pubkey) -> Instruction {
+        Instruction::new_with_bincode(
+            crate::id(),
+            &MagicBlockInstruction::EvictAccount { pubkey },
+            vec![
+                AccountMeta::new(validator_authority_id(), true),
+                AccountMeta::new(pubkey, false),
+            ],
+        )
+    }
+
+    // -----------------
     // CloneAccount
     // -----------------
     pub fn clone_account_instruction(

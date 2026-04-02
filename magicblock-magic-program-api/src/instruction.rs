@@ -291,6 +291,18 @@ pub enum MagicBlockInstruction {
     /// - **0.**   `[WRITE, SIGNER]` Payer
     /// - **1.**   `[WRITE]`         Magic Context account
     AddActionCallback(AddActionCallbackArgs),
+
+    /// Evict an account from the ephemeral validator.
+    /// Sets the account to empty state (lamports=0, data=[], owner=default,
+    /// delegated=false, confined=false, ephemeral=true).
+    /// The ephemeral+default-owner combination triggers automatic removal
+    /// from AccountsDb during commit (see AccountsDb::upsert).
+    /// Rejects accounts that are delegated or undelegating.
+    ///
+    /// # Account references
+    /// - **0.** `[SIGNER]`  Validator Authority
+    /// - **1.** `[WRITE]`   Account to evict
+    EvictAccount { pubkey: Pubkey },
 }
 
 impl MagicBlockInstruction {
