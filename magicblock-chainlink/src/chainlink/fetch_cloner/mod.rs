@@ -2,9 +2,9 @@ use std::{
     collections::HashSet,
     sync::{
         atomic::{AtomicU64, Ordering},
-        Arc, Mutex,
+        Arc,
     },
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 use dlp_api::{
@@ -64,8 +64,6 @@ use crate::{
 };
 
 type RemoteAccountRequests = Vec<oneshot::Sender<()>>;
-type DedupCache = Arc<Mutex<std::collections::HashMap<(Pubkey, u64), Instant>>>;
-
 pub struct FetchCloner<T, U, V, C>
 where
     T: ChainRpcClient,
@@ -93,15 +91,6 @@ where
     /// If specified, only these programs will be cloned. If None or empty,
     /// all programs are allowed.
     allowed_programs: Option<HashSet<Pubkey>>,
-
-    /// Shared dedup cache (same instance as SubMuxClient's cache in
-    /// production). Tracks (pubkey, slot) tuples currently being processed
-    /// to prevent duplicate clone submissions between concurrent fetch and
-    /// subscription paths.
-    dedup_cache: DedupCache,
-    /// The dedup window duration, matching SubMuxClient's configured
-    /// dedup_window. Used to determine if a cache entry is still active.
-    dedup_window: Duration,
 }
 
 /// Manual Clone impl: `#[derive(Clone)]` would add `V: Clone, C: Clone`
@@ -125,8 +114,6 @@ where
             validator_keypair: Arc::clone(&self.validator_keypair),
             blacklisted_accounts: self.blacklisted_accounts.clone(),
             allowed_programs: self.allowed_programs.clone(),
-            dedup_cache: self.dedup_cache.clone(),
-            dedup_window: self.dedup_window,
         }
     }
 }
@@ -148,8 +135,6 @@ where
         faucet_pubkey: Pubkey,
         subscription_updates_rx: mpsc::Receiver<ForwardedSubscriptionUpdate>,
         allowed_programs: Option<Vec<AllowedProgram>>,
-        dedup_cache: DedupCache,
-        dedup_window: Duration,
     ) -> Arc<Self> {
         let validator_pubkey = validator_keypair.pubkey();
         let blacklisted_accounts =
@@ -167,8 +152,6 @@ where
             fetch_count: Arc::new(AtomicU64::new(0)),
             blacklisted_accounts,
             allowed_programs,
-            dedup_cache,
-            dedup_window,
         });
 
         me.clone()
@@ -180,32 +163,6 @@ where
     /// Get the current fetch count
     pub fn fetch_count(&self) -> u64 {
         self.fetch_count.load(Ordering::Relaxed)
-    }
-
-    /// Check if (pubkey, slot) is in the shared dedup cache and still
-    /// valid. Returns true if the entry is active and we should skip
-    /// processing. If not in cache, adds an entry with current timestamp
-    /// and returns false.
-    ///
-    /// Uses SubMuxClient's dedup cache to coordinate between fetch and
-    /// subscription paths.
-    ///
-    /// NOTE: This method does NOT clean up stale entries —
-    /// SubMuxClient's `spawn_dedup_pruner` background task already
-    /// handles periodic cleanup of the shared cache.
-    pub(crate) fn check_dedup_cache(&self, pubkey: &Pubkey, slot: u64) -> bool {
-        let now = Instant::now();
-        let mut cache =
-            self.dedup_cache.lock().expect("dedup_cache mutex poisoned");
-
-        if let Some(timestamp) = cache.get(&(*pubkey, slot)) {
-            if now.duration_since(*timestamp) < self.dedup_window {
-                return true;
-            }
-        }
-
-        cache.insert((*pubkey, slot), now);
-        false
     }
 
     /// Check if a program is allowed to be cloned.

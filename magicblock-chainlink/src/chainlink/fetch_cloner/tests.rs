@@ -1,8 +1,4 @@
-use std::{
-    collections::HashMap,
-    sync::{Arc, Mutex},
-    time::Duration,
-};
+use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use dlp_api::state::DelegationRecord;
 use solana_account::{Account, AccountSharedData, WritableAccount};
@@ -255,8 +251,6 @@ fn init_fetch_cloner(
         faucet_pubkey,
         subscription_rx,
         None,
-        Arc::new(Mutex::new(HashMap::new())),
-        Duration::from_millis(2_000),
     );
     (fetch_cloner, subscription_tx)
 }
@@ -1773,8 +1767,6 @@ async fn test_allowed_programs_filters_programs() {
         random_pubkey(),
         subscription_rx,
         allowed_programs,
-        Arc::new(Mutex::new(HashMap::new())),
-        Duration::from_millis(2_000),
     );
 
     // Fetch and clone both programs
@@ -1848,8 +1840,6 @@ async fn test_allowed_programs_none_allows_all() {
         random_pubkey(),
         subscription_rx,
         None, // No restriction
-        Arc::new(Mutex::new(HashMap::new())),
-        Duration::from_millis(2_000),
     );
 
     // Fetch and clone both programs
@@ -1922,8 +1912,6 @@ async fn test_allowed_programs_empty_allows_all() {
         random_pubkey(),
         subscription_rx,
         allowed_programs,
-        Arc::new(Mutex::new(HashMap::new())),
-        Duration::from_millis(2_000),
     );
 
     // Fetch and clone both programs
@@ -3191,7 +3179,6 @@ async fn test_fetch_subscription_race_duplicate_clone() {
     // cache so fetch and subscription paths coordinate on (pubkey, slot).
     // We keep a handle to the cache so we can simulate SubMuxClient's
     // should_forward_dedup() inserting entries before forwarding updates.
-    let dedup_cache = Arc::new(Mutex::new(std::collections::HashMap::new()));
     let (subscription_tx, subscription_rx) = mpsc::channel(100);
     let fetch_cloner = FetchCloner::new(
         &remote_account_provider,
@@ -3201,19 +3188,7 @@ async fn test_fetch_subscription_race_duplicate_clone() {
         Pubkey::new_unique(),
         subscription_rx,
         None,
-        dedup_cache.clone(),
-        Duration::from_millis(2_000),
     );
-
-    // PHASE 1: Simulate a subscription update arriving first.
-    // In production SubMuxClient's should_forward_dedup() inserts
-    // (pubkey, slot) into the shared dedup cache before forwarding.
-    // We simulate that here so the fetch path's check_dedup_cache()
-    // sees the entry and skips its clone, exactly as in production.
-    {
-        let mut cache = dedup_cache.lock().unwrap();
-        cache.insert((account_pubkey, CURRENT_SLOT), std::time::Instant::now());
-    }
     let subscription_account =
         crate::remote_account_provider::RemoteAccount::from_fresh_account(
             account.clone(),

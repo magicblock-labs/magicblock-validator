@@ -779,18 +779,6 @@ where
         cmp::max(1, n / 3)
     }
 
-    /// Returns a clone of the dedup cache Arc.
-    /// Used to share the cache with FetchCloner so both fetch and
-    /// subscription paths coordinate on (pubkey, slot) deduplication.
-    pub fn dedup_cache(&self) -> Arc<Mutex<HashMap<(Pubkey, u64), Instant>>> {
-        self.dedup_cache.clone()
-    }
-
-    /// Returns the configured dedup window duration.
-    pub fn dedup_window(&self) -> Duration {
-        self.dedup_window
-    }
-
     fn allowed_in_debounce_window_count(&self) -> usize {
         (self.debounce_detection_window.as_millis()
             / self.debounce_interval.as_millis()) as usize

@@ -37,7 +37,7 @@ async fn init_remote_account_provider(
         },
     ];
     let endpoints = Endpoints::from(endpoints_vec.as_slice());
-    let (provider, _dedup_cache, _dedup_window) = RemoteAccountProvider::<
+    let provider = RemoteAccountProvider::<
         ChainRpcClientImpl,
         SubMuxClient<ChainUpdatesClient>,
     >::try_from_urls_and_config(

@@ -117,11 +117,7 @@ impl IxtestContext {
                 .await;
 
             match remote_account_provider {
-                Ok(Some((
-                    remote_account_provider,
-                    dedup_cache,
-                    dedup_window,
-                ))) => {
+                Ok(Some(remote_account_provider)) => {
                     debug!("Initializing FetchCloner");
                     let provider = Arc::new(remote_account_provider);
                     (
@@ -133,8 +129,6 @@ impl IxtestContext {
                             faucet_kp.pubkey(),
                             rx,
                             None,
-                            dedup_cache,
-                            dedup_window,
                         )),
                         Some(provider),
                     )

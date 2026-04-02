@@ -103,8 +103,6 @@ impl TestContext {
                             faucet_pubkey,
                             rx,
                             None,
-                            Arc::new(Mutex::new(HashMap::new())),
-                            Duration::from_millis(2_000),
                         )),
                         Some(provider),
                     )
