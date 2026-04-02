@@ -164,7 +164,7 @@ impl TransactionScheduler {
         let slot_ticker = interval(state.block_time);
         let latest_block = state.ledger.latest_block().clone();
         hasher.update(latest_block.load().blockhash.as_ref());
-        let slot = latest_block.load().slot;
+        let slot = state.accountsdb.slot() + 1;
 
         Self {
             coordinator: ExecutionCoordinator::new(count, execution_permits),
@@ -516,7 +516,6 @@ impl TransactionScheduler {
         let mut cache = self.program_cache.write().unwrap();
         // Prune stale programs and re-root to new slot
         cache.prune(slot, 0);
-        cache.latest_root_slot = slot;
         // Release lock before syscall lookup (prevents deadlock if sysvar is accessed)
         drop(cache);
     }
