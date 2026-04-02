@@ -46,11 +46,13 @@ pub(crate) fn process_evict_account(
 
     let evicted_lamports = account.borrow().lamports();
     if evicted_lamports > 0 {
+        let delta = i64::try_from(evicted_lamports)
+            .map_err(|_| InstructionError::ArithmeticOverflow)?;
         let ctx = transaction_context.get_current_instruction_context()?;
         let auth_acc = transaction_context.get_account_at_index(
             ctx.get_index_of_instruction_account_in_transaction(0)?,
         )?;
-        adjust_authority_lamports(auth_acc, -(evicted_lamports as i64))?;
+        adjust_authority_lamports(auth_acc, -delta)?;
     }
 
     {
