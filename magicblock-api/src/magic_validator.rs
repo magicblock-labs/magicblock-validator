@@ -617,10 +617,10 @@ impl MagicValidator {
         }
         let accountsdb_slot = self.accountsdb.slot();
         let ledger_slot = self.ledger.latest_block().load().slot;
-        // In case if we have a perfect match between accountsdb and ledger slot
-        // (note: that accountsdb is always 1 slot ahead of ledger), then there's
-        // no need to run any kind of ledger replay
-        if accountsdb_slot.saturating_sub(1) == ledger_slot {
+
+        // If we have accountsdb state, which is at least as new as the last state state
+        // transition in the ledger then there's no need to run any kind of ledger replay
+        if accountsdb_slot >= ledger_slot {
             return Ok(());
         }
 
