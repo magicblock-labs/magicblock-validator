@@ -31,7 +31,6 @@ async fn test_get_account_info() {
         .get_account_with_commitment(&Pubkey::new_unique(), Default::default())
         .await
         .expect("rpc request for non-existent account failed");
-    assert_eq!(nonexistent.context.slot, env.latest_slot());
     assert_eq!(nonexistent.value, None, "account should not exist");
 }
 

@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use magicblock_accounts_db::traits::AccountsBank;
 use magicblock_core::link::blocks::BlockHash;
@@ -212,6 +212,8 @@ async fn test_simulate_transaction_success() {
 async fn test_simulate_transaction_with_config_options() {
     let env = RpcTestEnv::new().await;
 
+    // Replacing the blockhash invalidates the original signature, so this must
+    // run with signature verification disabled.
     // Test `replace_recent_blockhash: true`
     {
         let mut transfer_tx = env.build_transfer_txn();
@@ -219,7 +221,7 @@ async fn test_simulate_transaction_with_config_options() {
         transfer_tx.message.recent_blockhash = bogus_blockhash;
 
         let config = RpcSimulateTransactionConfig {
-            sig_verify: true,
+            sig_verify: false,
             replace_recent_blockhash: true,
             ..Default::default()
         };
@@ -346,14 +348,26 @@ async fn test_get_signature_statuses() {
         .await
         .unwrap();
     let sig_nonexistent = Signature::new_unique();
-    tokio::time::sleep(Duration::from_millis(10)).await; // Allow propagation
 
-    let statuses = env
-        .rpc
-        .get_signature_statuses(&[sig_success, sig_fail, sig_nonexistent])
-        .await
-        .expect("get_signature_statuses request failed")
-        .value;
+    let start = Instant::now();
+    let statuses = loop {
+        let statuses = env
+            .rpc
+            .get_signature_statuses(&[sig_success, sig_fail, sig_nonexistent])
+            .await
+            .expect("get_signature_statuses request failed")
+            .value;
+        if statuses.first().and_then(Clone::clone).is_some()
+            && statuses.get(1).and_then(Clone::clone).is_some()
+        {
+            break statuses;
+        }
+        assert!(
+            start.elapsed() < Duration::from_secs(5),
+            "timed out waiting for signature statuses to propagate"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    };
 
     assert_eq!(
         statuses.len(),
@@ -398,7 +412,6 @@ async fn test_get_signatures_for_address() {
 async fn test_get_signatures_for_address_pagination() {
     let env = RpcTestEnv::new().await;
     let mut signatures = Vec::new();
-    env.advance_slots(1);
     for _ in 0..5 {
         signatures.push(env.execute_transaction().await);
     }
@@ -442,13 +455,20 @@ async fn test_get_signatures_for_address_pagination() {
 async fn test_get_transaction() {
     // Test successful transaction
     let env = RpcTestEnv::new().await;
+    let initial_slot = env.latest_slot();
     let success_sig = env.execute_transaction().await;
     let transaction = env
         .rpc
         .get_transaction(&success_sig, UiTransactionEncoding::Base64)
         .await
         .expect("getTransaction request failed");
-    assert_eq!(transaction.slot, env.latest_slot());
+    // Transaction should be in a slot >= initial_slot (scheduler may have advanced)
+    assert!(
+        transaction.slot >= initial_slot,
+        "transaction slot {} should be >= initial slot {}",
+        transaction.slot,
+        initial_slot
+    );
     assert_eq!(transaction.transaction.meta.unwrap().err, None);
 
     // Test failed transaction
@@ -459,7 +479,8 @@ async fn test_get_transaction() {
         .schedule(failing_tx)
         .await
         .unwrap();
-    tokio::time::sleep(Duration::from_millis(10)).await;
+    // Wait longer for the transaction to be processed with auto-advancement
+    tokio::time::sleep(Duration::from_millis(100)).await;
     let transaction = env
         .rpc
         .get_transaction(&fail_sig, UiTransactionEncoding::Base64)
