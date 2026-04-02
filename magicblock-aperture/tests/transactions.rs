@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use magicblock_accounts_db::traits::AccountsBank;
 use magicblock_core::link::blocks::BlockHash;
@@ -212,6 +212,8 @@ async fn test_simulate_transaction_success() {
 async fn test_simulate_transaction_with_config_options() {
     let env = RpcTestEnv::new().await;
 
+    // Replacing the blockhash invalidates the original signature, so this must
+    // run with signature verification disabled.
     // Test `replace_recent_blockhash: true`
     {
         let mut transfer_tx = env.build_transfer_txn();
@@ -219,7 +221,7 @@ async fn test_simulate_transaction_with_config_options() {
         transfer_tx.message.recent_blockhash = bogus_blockhash;
 
         let config = RpcSimulateTransactionConfig {
-            sig_verify: true,
+            sig_verify: false,
             replace_recent_blockhash: true,
             ..Default::default()
         };
@@ -346,14 +348,26 @@ async fn test_get_signature_statuses() {
         .await
         .unwrap();
     let sig_nonexistent = Signature::new_unique();
-    tokio::time::sleep(Duration::from_millis(10)).await; // Allow propagation
 
-    let statuses = env
-        .rpc
-        .get_signature_statuses(&[sig_success, sig_fail, sig_nonexistent])
-        .await
-        .expect("get_signature_statuses request failed")
-        .value;
+    let start = Instant::now();
+    let statuses = loop {
+        let statuses = env
+            .rpc
+            .get_signature_statuses(&[sig_success, sig_fail, sig_nonexistent])
+            .await
+            .expect("get_signature_statuses request failed")
+            .value;
+        if statuses.first().and_then(Clone::clone).is_some()
+            && statuses.get(1).and_then(Clone::clone).is_some()
+        {
+            break statuses;
+        }
+        assert!(
+            start.elapsed() < Duration::from_secs(5),
+            "timed out waiting for signature statuses to propagate"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    };
 
     assert_eq!(
         statuses.len(),

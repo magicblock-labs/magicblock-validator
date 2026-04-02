@@ -4,7 +4,7 @@ use std::{
         atomic::{AtomicUsize, Ordering},
         Arc,
     },
-    thread,
+    thread::{self, JoinHandle},
     time::Duration,
 };
 
@@ -40,6 +40,7 @@ use solana_transaction_error::TransactionResult;
 use solana_transaction_status_client_types::TransactionStatusMeta;
 use tempfile::TempDir;
 use tokio::sync::mpsc::Sender;
+use tokio_util::sync::CancellationToken;
 use tracing::{error, instrument};
 
 pub const BLOCK_TIME: Duration = Duration::from_millis(50);
@@ -67,6 +68,10 @@ pub struct ExecutionTestEnv {
     pub dispatch: DispatchEndpoints,
     /// Transaction execution scheduler/backend for deferred launch
     pub scheduler: Option<TransactionScheduler>,
+    /// Join handle for the spawned scheduler thread.
+    scheduler_thread: Option<JoinHandle<()>>,
+    /// Shutdown token for the scheduler runtime.
+    shutdown: CancellationToken,
     /// Sender for transitioning from StartingUp to Primary/Replica mode
     mode_tx: Sender<SchedulerMode>,
 }
@@ -139,6 +144,7 @@ impl ExecutionTestEnv {
 
         let (mode_tx, mode_rx) = tokio::sync::mpsc::channel(1);
 
+        let shutdown = CancellationToken::new();
         let mut this = Self {
             payer_index: AtomicUsize::new(0),
             payers,
@@ -148,6 +154,8 @@ impl ExecutionTestEnv {
             dir,
             dispatch,
             scheduler: None,
+            scheduler_thread: None,
+            shutdown: shutdown.clone(),
             mode_tx,
         };
         this.advance_slot(); // Move to slot 1 to ensure a non-genesis state.
@@ -169,7 +177,7 @@ impl ExecutionTestEnv {
             replication_tx: validator_channels.replication_messages,
             environment,
             is_auto_airdrop_lamports_enabled: false,
-            shutdown: Default::default(),
+            shutdown,
             mode_rx,
             pause_permit: validator_channels.pause_permit,
             block_time: BLOCK_TIME,
@@ -188,7 +196,7 @@ impl ExecutionTestEnv {
         if defer_startup {
             this.scheduler.replace(scheduler);
         } else {
-            scheduler.spawn();
+            this.scheduler_thread = Some(scheduler.spawn());
         }
 
         for payer in this.payers.iter() {
@@ -199,7 +207,7 @@ impl ExecutionTestEnv {
 
     pub fn run_scheduler(&mut self) {
         if let Some(scheduler) = self.scheduler.take() {
-            scheduler.spawn();
+            self.scheduler_thread = Some(scheduler.spawn());
         }
     }
 
@@ -448,6 +456,15 @@ impl ExecutionTestEnv {
             &self.payers[index % self.payers.len()]
         };
         self.get_account(payer.pubkey())
+    }
+}
+
+impl Drop for ExecutionTestEnv {
+    fn drop(&mut self) {
+        self.shutdown.cancel();
+        if let Some(handle) = self.scheduler_thread.take() {
+            let _ = handle.join();
+        }
     }
 }
 
