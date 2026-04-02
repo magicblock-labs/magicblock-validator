@@ -5,14 +5,13 @@ use crate::{
     clone_account::{
         process_cleanup_partial_clone, process_clone_account,
         process_clone_account_continue, process_clone_account_init,
-        process_finalize_program_from_buffer,
+        process_evict_account, process_finalize_program_from_buffer,
         process_finalize_v1_program_from_buffer, process_set_program_authority,
     },
     ephemeral_accounts::{
         process_close_ephemeral_account, process_create_ephemeral_account,
         process_resize_ephemeral_account,
     },
-    evict_account::process_evict_account,
     mutate_accounts::process_mutate_accounts,
     process_scheduled_commit_sent,
     schedule_task::{process_cancel_task, process_schedule_task},
