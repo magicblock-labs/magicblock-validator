@@ -1,8 +1,8 @@
 use std::{
-    collections::HashSet,
+    collections::{hash_map, HashSet},
     sync::{
         atomic::{AtomicU64, Ordering},
-        Arc,
+        Arc, Mutex,
     },
     time::Duration,
 };
@@ -53,7 +53,8 @@ use crate::{
         blacklisted_accounts::blacklisted_accounts,
     },
     cloner::{
-        errors::ClonerResult, AccountCloneRequest, Cloner, DelegationActions,
+        errors::{ClonerError, ClonerResult},
+        AccountCloneRequest, Cloner, DelegationActions,
     },
     remote_account_provider::{
         program_account::get_loaderv3_get_program_data_address,
@@ -64,6 +65,21 @@ use crate::{
 };
 
 type RemoteAccountRequests = Vec<oneshot::Sender<()>>;
+type CloneKey = (Pubkey, u64);
+
+#[allow(dead_code)] // Used in Phase 3
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CloneCompletion {
+    Success,
+    Failed,
+}
+
+#[allow(dead_code)] // Used in Phase 3
+enum CloneClaim {
+    Owner,
+    Waiter(oneshot::Receiver<CloneCompletion>),
+}
+
 pub struct FetchCloner<T, U, V, C>
 where
     T: ChainRpcClient,
@@ -91,6 +107,20 @@ where
     /// If specified, only these programs will be cloned. If None or empty,
     /// all programs are allowed.
     allowed_programs: Option<HashSet<Pubkey>>,
+
+    /// Tracks in-flight clone operations per (pubkey, slot).
+    /// The first caller to claim a key becomes the owner and performs
+    /// the actual clone. Subsequent callers become waiters and receive
+    /// the result via oneshot channels. Prevents duplicate clone
+    /// submissions across concurrent fetch and subscription paths.
+    pending_clones: Arc<
+        Mutex<
+            hash_map::HashMap<
+                CloneKey,
+                Vec<oneshot::Sender<CloneCompletion>>,
+            >,
+        >,
+    >,
 }
 
 /// Manual Clone impl: `#[derive(Clone)]` would add `V: Clone, C: Clone`
@@ -114,6 +144,7 @@ where
             validator_keypair: Arc::clone(&self.validator_keypair),
             blacklisted_accounts: self.blacklisted_accounts.clone(),
             allowed_programs: self.allowed_programs.clone(),
+            pending_clones: self.pending_clones.clone(),
         }
     }
 }
@@ -152,6 +183,9 @@ where
             fetch_count: Arc::new(AtomicU64::new(0)),
             blacklisted_accounts,
             allowed_programs,
+            pending_clones: Arc::new(Mutex::new(
+                hash_map::HashMap::new(),
+            )),
         });
 
         me.clone()
@@ -180,6 +214,95 @@ where
                     allowed.contains(program_id)
                 }
             }
+        }
+    }
+
+    #[allow(dead_code)] // Used in Phase 3
+    /// Attempt to claim ownership of a clone operation for (pubkey, slot).
+    /// Returns `CloneClaim::Owner` if this caller is the first and should
+    /// perform the clone. Returns `CloneClaim::Waiter(rx)` if another
+    /// caller already owns this clone and this caller should wait.
+    fn claim_pending_clone(&self, pubkey: Pubkey, slot: u64) -> CloneClaim {
+        let key = (pubkey, slot);
+        let mut map = self
+            .pending_clones
+            .lock()
+            .expect("pending_clones mutex poisoned");
+        match map.entry(key) {
+            hash_map::Entry::Vacant(entry) => {
+                entry.insert(Vec::new());
+                CloneClaim::Owner
+            }
+            hash_map::Entry::Occupied(mut entry) => {
+                let (tx, rx) = oneshot::channel();
+                entry.get_mut().push(tx);
+                CloneClaim::Waiter(rx)
+            }
+        }
+    }
+
+    #[allow(dead_code)] // Used in Phase 3
+    /// Called by the owner when the clone operation completes.
+    /// Removes the pending entry and notifies all waiters.
+    fn finish_pending_clone(
+        &self,
+        pubkey: Pubkey,
+        slot: u64,
+        result: CloneCompletion,
+    ) {
+        let key = (pubkey, slot);
+        let waiters = {
+            let mut map = self
+                .pending_clones
+                .lock()
+                .expect("pending_clones mutex poisoned");
+            map.remove(&key).unwrap_or_default()
+        };
+        for tx in waiters {
+            let _ = tx.send(result);
+        }
+    }
+
+    #[allow(dead_code)] // Used in Phase 3
+    /// Submits a clone request through ownership coordination.
+    /// Only one caller per (pubkey, slot) will actually submit the
+    /// clone transaction. All other concurrent callers wait for the
+    /// owner's result.
+    async fn clone_account_with_ownership(
+        &self,
+        request: AccountCloneRequest,
+    ) -> ClonerResult<Signature> {
+        let pubkey = request.pubkey;
+        let slot = request.account.remote_slot();
+
+        match self.claim_pending_clone(pubkey, slot) {
+            CloneClaim::Owner => {
+                let result = self.cloner.clone_account(request).await;
+                let completion = if result.is_ok() {
+                    CloneCompletion::Success
+                } else {
+                    CloneCompletion::Failed
+                };
+                self.finish_pending_clone(pubkey, slot, completion);
+                result
+            }
+            CloneClaim::Waiter(rx) => match rx.await {
+                Ok(CloneCompletion::Success) => Ok(Signature::default()),
+                Ok(CloneCompletion::Failed) => {
+                    Err(ClonerError::FailedToCloneRegularAccount(
+                        pubkey,
+                        Box::new(ClonerError::CommittorServiceError(
+                            "Clone owner failed".to_string(),
+                        )),
+                    ))
+                }
+                Err(_) => Err(ClonerError::FailedToCloneRegularAccount(
+                    pubkey,
+                    Box::new(ClonerError::CommittorServiceError(
+                        "Clone owner dropped".to_string(),
+                    )),
+                )),
+            },
         }
     }
 
