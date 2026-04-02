@@ -67,14 +67,12 @@ use crate::{
 type RemoteAccountRequests = Vec<oneshot::Sender<()>>;
 type CloneKey = (Pubkey, u64);
 
-#[allow(dead_code)] // Used in Phase 3
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CloneCompletion {
     Success,
     Failed,
 }
 
-#[allow(dead_code)] // Used in Phase 3
 enum CloneClaim {
     Owner,
     Waiter(oneshot::Receiver<CloneCompletion>),
@@ -115,10 +113,7 @@ where
     /// submissions across concurrent fetch and subscription paths.
     pending_clones: Arc<
         Mutex<
-            hash_map::HashMap<
-                CloneKey,
-                Vec<oneshot::Sender<CloneCompletion>>,
-            >,
+            hash_map::HashMap<CloneKey, Vec<oneshot::Sender<CloneCompletion>>>,
         >,
     >,
 }
@@ -183,9 +178,7 @@ where
             fetch_count: Arc::new(AtomicU64::new(0)),
             blacklisted_accounts,
             allowed_programs,
-            pending_clones: Arc::new(Mutex::new(
-                hash_map::HashMap::new(),
-            )),
+            pending_clones: Arc::new(Mutex::new(hash_map::HashMap::new())),
         });
 
         me.clone()
@@ -217,7 +210,6 @@ where
         }
     }
 
-    #[allow(dead_code)] // Used in Phase 3
     /// Attempt to claim ownership of a clone operation for (pubkey, slot).
     /// Returns `CloneClaim::Owner` if this caller is the first and should
     /// perform the clone. Returns `CloneClaim::Waiter(rx)` if another
@@ -241,7 +233,6 @@ where
         }
     }
 
-    #[allow(dead_code)] // Used in Phase 3
     /// Called by the owner when the clone operation completes.
     /// Removes the pending entry and notifies all waiters.
     fn finish_pending_clone(
@@ -263,7 +254,6 @@ where
         }
     }
 
-    #[allow(dead_code)] // Used in Phase 3
     /// Submits a clone request through ownership coordination.
     /// Only one caller per (pubkey, slot) will actually submit the
     /// clone transaction. All other concurrent callers wait for the
@@ -548,8 +538,7 @@ where
         if account.executable() {
             self.handle_executable_sub_update(pubkey, account).await;
         } else if let Err(err) = self
-            .cloner
-            .clone_account(AccountCloneRequest {
+            .clone_account_with_ownership(AccountCloneRequest {
                 pubkey,
                 account,
                 commit_frequency_ms: None,
@@ -566,8 +555,9 @@ where
         } else if let Some(projected_ata_clone_request) =
             projected_ata_clone_request
         {
-            if let Err(err) =
-                self.cloner.clone_account(projected_ata_clone_request).await
+            if let Err(err) = self
+                .clone_account_with_ownership(projected_ata_clone_request)
+                .await
             {
                 error!(
                     pubkey = %pubkey,
@@ -640,7 +630,7 @@ where
         )
         .await?;
 
-        Ok(self.cloner.clone_account(request).await?)
+        Ok(self.clone_account_with_ownership(request).await?)
     }
 
     async fn maybe_greedily_clone_discovered_delegated_account(
