@@ -140,6 +140,14 @@ impl SnapshotManager {
         tar.append_dir_all(".", snapshot_dir)
             .log_err(|| "Failed to append directory to tar")?;
         tar.finish().log_err(|| "Failed to finalize tar archive")?;
+        let enc = tar
+            .into_inner()
+            .log_err(|| "Failed to recover gzip encoder from tar builder")?;
+        let file = enc
+            .finish()
+            .log_err(|| "Failed to finish gzip archive")?;
+        file.sync_all()
+            .log_err(|| "Failed to sync archive to disk")?;
 
         // Atomically rename to final path
         fs::rename(&tmp_path, &archive_path).log_err(|| {
