@@ -5,7 +5,7 @@ use crate::{
     clone_account::{
         process_cleanup_partial_clone, process_clone_account,
         process_clone_account_continue, process_clone_account_init,
-        process_finalize_program_from_buffer,
+        process_evict_account, process_finalize_program_from_buffer,
         process_finalize_v1_program_from_buffer, process_set_program_authority,
     },
     ephemeral_accounts::{
@@ -133,6 +133,12 @@ declare_process_instruction!(
             AddActionCallback(args) => {
                 process_add_action_callback(signers, invoke_context, args)
             }
+            EvictAccount { pubkey } => process_evict_account(
+                &signers,
+                invoke_context,
+                transaction_context,
+                pubkey,
+            ),
             Noop(_) => Ok(()),
             CloneAccount {
                 pubkey,

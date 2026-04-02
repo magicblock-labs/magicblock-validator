@@ -192,6 +192,10 @@ where
         self.fetch_count.load(Ordering::Relaxed)
     }
 
+    pub fn cloner(&self) -> &Arc<C> {
+        &self.cloner
+    }
+
     /// Check if a program is allowed to be cloned.
     /// Returns true if:
     /// - No allowed_programs restriction is set (None), OR

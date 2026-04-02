@@ -79,4 +79,8 @@ pub trait Cloner: Send + Sync + 'static {
         &self,
         program: LoadedProgram,
     ) -> ClonerResult<Signature>;
+
+    /// Evicts an account from the ephemeral validator by submitting an
+    /// EvictAccount transaction through the transaction pipeline.
+    async fn evict_account(&self, pubkey: Pubkey) -> ClonerResult<()>;
 }
