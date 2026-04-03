@@ -21,7 +21,7 @@ use magicblock_core::{
     },
     Slot,
 };
-use magicblock_ledger::Ledger;
+use magicblock_ledger::{LatestBlockInner, Ledger};
 use magicblock_processor::{
     build_svm_env,
     loader::load_upgradeable_programs,
@@ -255,6 +255,43 @@ impl ExecutionTestEnv {
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
     }
 
+    /// Waits for the scheduler to advance to the next slot.
+    pub fn wait_for_next_slot(&self) {
+        let initial_slot = self.ledger.latest_block().load().slot;
+        let start = std::time::Instant::now();
+        while self.ledger.latest_block().load().slot <= initial_slot {
+            if start.elapsed() > std::time::Duration::from_secs(5) {
+                panic!(
+                    "Timed out waiting for slot to advance: slot {}",
+                    initial_slot
+                );
+            }
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+    }
+
+    /// Advances the slot and writes a new block to the ledger.
+    pub fn advance_slot(&self) -> Slot {
+        let block = self.ledger.latest_block();
+        let b = block.load();
+        let slot = b.slot + 1;
+        let hash = {
+            let mut hasher = Hasher::default();
+            hasher.hash(b.blockhash.as_ref());
+            hasher.hash(&b.slot.to_le_bytes());
+            hasher.result()
+        };
+        let time = slot as i64;
+        self.ledger
+            .write_block(LatestBlockInner::new(slot, hash, time))
+            .expect("failed to write new block to the ledger");
+        self.accountsdb.set_slot(slot);
+
+        // Yield to allow other tasks (like the executor) to process the slot change.
+        thread::yield_now();
+        slot
+    }
+
     /// Creates a new account with the specified properties.
     /// Note: This helper automatically marks the account as `delegated`.
     pub fn create_account_with_config(
@@ -303,31 +340,6 @@ impl ExecutionTestEnv {
             .get_transaction_status(sig, u64::MAX)
             .expect("failed to get transaction meta from ledger")
             .map(|(_, m)| m)
-    }
-
-    /// Simulates the production of a new block.
-    ///
-    /// This advances the slot, calculates a new blockhash, writes the block to the
-    /// ledger, and broadcasts a `BlockUpdate` notification.
-    pub fn advance_slot(&self) -> Slot {
-        let block = self.ledger.latest_block();
-        let b = block.load();
-        let slot = b.slot + 1;
-        let hash = {
-            let mut hasher = Hasher::default();
-            hasher.hash(b.blockhash.as_ref());
-            hasher.hash(&b.slot.to_le_bytes());
-            hasher.result()
-        };
-        let time = slot as i64;
-        self.ledger
-            .write_block(slot, time, hash)
-            .expect("failed to write new block to the ledger");
-        self.accountsdb.set_slot(slot);
-
-        // Yield to allow other tasks (like the executor) to process the slot change.
-        thread::yield_now();
-        slot
     }
 
     /// Builds a transaction with the given instructions, signed by the default payer.

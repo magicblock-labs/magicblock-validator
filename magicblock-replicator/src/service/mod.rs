@@ -27,6 +27,7 @@ use std::{sync::Arc, thread::JoinHandle, time::Duration};
 
 pub use context::ReplicationContext;
 use magicblock_accounts_db::AccountsDb;
+use magicblock_chainlink::StubbedChainlink;
 use magicblock_core::link::{
     replication::Message,
     transactions::{SchedulerMode, TransactionSchedulerHandle},
@@ -47,7 +48,7 @@ use crate::{nats::Broker, Result};
 // =============================================================================
 
 pub(crate) const LOCK_REFRESH_INTERVAL: Duration = Duration::from_secs(1);
-pub(crate) const LEADER_TIMEOUT: Duration = Duration::from_secs(10);
+pub(crate) const LEADER_TIMEOUT: Duration = Duration::from_secs(5);
 const CONSUMER_RETRY_DELAY: Duration = Duration::from_secs(1);
 
 // =============================================================================
@@ -71,6 +72,7 @@ impl Service {
         mode_tx: Sender<SchedulerMode>,
         accountsdb: Arc<AccountsDb>,
         ledger: Arc<Ledger>,
+        chainlink: StubbedChainlink<AccountsDb>,
         scheduler: TransactionSchedulerHandle,
         messages: Receiver<Message>,
         cancel: CancellationToken,
@@ -82,6 +84,7 @@ impl Service {
             mode_tx,
             accountsdb,
             ledger,
+            chainlink,
             scheduler,
             cancel,
             can_promote,

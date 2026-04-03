@@ -90,8 +90,7 @@ use crate::{
     domain_registry_manager::DomainRegistryManager,
     errors::{ApiError, ApiResult},
     fund_account::{
-        fund_ephemeral_vault, fund_magic_context, funded_faucet,
-        init_validator_identity,
+        fund_ephemeral_vault, fund_magic_context, init_validator_identity,
     },
     genesis_utils::{create_genesis_config_with_leader, GenesisConfigInfo},
     ledger::{
@@ -154,7 +153,6 @@ impl MagicValidator {
             genesis_config,
             validator_pubkey,
         } = create_genesis_config_with_leader(
-            u64::MAX,
             &validator_pubkey,
             config.validator.basefee,
         );
@@ -176,7 +174,6 @@ impl MagicValidator {
         log_timing("startup", "sync_validator_keypair", step_start);
 
         let latest_block = ledger.latest_block().load();
-        let step_start = Instant::now();
         let mut accountsdb =
             AccountsDb::new(&config.accountsdb, &config.storage, last_slot)?;
 
@@ -224,6 +221,28 @@ impl MagicValidator {
         let accountsdb = Arc::new(accountsdb);
         let (mut dispatch, validator_channels) = link();
 
+        let step_start = Instant::now();
+        let committor_service =
+            Self::init_committor_service(&config, ledger.latest_block())
+                .await?;
+        log_timing("startup", "committor_service_init", step_start);
+        init_magic_sys(Arc::new(MagicSysAdapter::new(
+            committor_service.clone(),
+        )));
+
+        let step_start = Instant::now();
+        let chainlink = Arc::new(
+            Self::init_chainlink(
+                &config,
+                committor_service.clone(),
+                &dispatch.transaction_scheduler,
+                &ledger.latest_block().clone(),
+                &accountsdb,
+            )
+            .await?,
+        );
+        log_timing("startup", "chainlink_init", step_start);
+
         let replication_service =
             if let Some((broker, is_fresh_start)) = broker {
                 let messages_rx = dispatch.replication_messages.take().expect(
@@ -239,6 +258,7 @@ impl MagicValidator {
                     mode_tx.clone(),
                     accountsdb.clone(),
                     ledger.clone(),
+                    chainlink.stub(),
                     dispatch.transaction_scheduler.clone(),
                     messages_rx,
                     token.clone(),
@@ -249,7 +269,6 @@ impl MagicValidator {
             } else {
                 None
             };
-        log_timing("startup", "accountsdb_init", step_start);
         for (pubkey, account) in genesis_config.accounts {
             if accountsdb.get_account(&pubkey).is_some() {
                 continue;
@@ -268,9 +287,6 @@ impl MagicValidator {
         fund_magic_context(&accountsdb);
         fund_ephemeral_vault(&accountsdb);
 
-        let faucet_keypair =
-            funded_faucet(&accountsdb, ledger.ledger_path().as_path())?;
-
         let step_start = Instant::now();
         let metrics_service = magicblock_metrics::try_start_metrics_service(
             config.metrics.address.0,
@@ -287,40 +303,6 @@ impl MagicValidator {
             token.clone(),
         );
         log_timing("startup", "system_metrics_ticker_start", step_start);
-
-        let step_start = Instant::now();
-        info!("Starting committor service");
-        let committor_service =
-            Self::init_committor_service(&config, ledger.latest_block())
-                .await?;
-        info!(
-            duration_ms = step_start.elapsed().as_millis() as u64,
-            enabled = committor_service.is_some(),
-            "Committor service started"
-        );
-        log_timing("startup", "committor_service_init", step_start);
-        init_magic_sys(Arc::new(MagicSysAdapter::new(
-            committor_service.clone(),
-        )));
-
-        let step_start = Instant::now();
-        info!("Starting chainlink");
-        let chainlink = Arc::new(
-            Self::init_chainlink(
-                &config,
-                committor_service.clone(),
-                &dispatch.transaction_scheduler,
-                &ledger.latest_block().clone(),
-                &accountsdb,
-                faucet_keypair.pubkey(),
-            )
-            .await?,
-        );
-        info!(
-            duration_ms = step_start.elapsed().as_millis() as u64,
-            "Chainlink started"
-        );
-        log_timing("startup", "chainlink_init", step_start);
 
         let scheduled_commits_processor =
             committor_service.as_ref().map(|committor_service| {
@@ -371,11 +353,8 @@ impl MagicValidator {
         // Faucet keypair is only used for airdrops, which are not allowed in
         // the Ephemeral mode by setting the faucet to None in node context
         // (used by the RPC implementation), we effectively disable airdrops
-        let faucet = (config.lifecycle != LifecycleMode::Ephemeral)
-            .then_some(faucet_keypair);
         let node_context = NodeContext {
             identity: validator_pubkey,
-            faucet,
             base_fee,
             featureset: txn_scheduler_state.environment.feature_set.clone(),
             blocktime: config.ledger.block_time_ms(),
@@ -530,7 +509,6 @@ impl MagicValidator {
         transaction_scheduler: &TransactionSchedulerHandle,
         latest_block: &LatestBlock,
         accountsdb: &Arc<AccountsDb>,
-        faucet_pubkey: Pubkey,
     ) -> ApiResult<ChainlinkImpl> {
         let endpoints = Endpoints::try_from(config.remotes.as_slice())
             .map_err(|e| {
@@ -578,7 +556,6 @@ impl MagicValidator {
             &accounts_bank,
             &cloner,
             config.validator.keypair.insecure_clone(),
-            faucet_pubkey,
             chainlink_config,
             &config.chainlink,
         )
@@ -632,7 +609,6 @@ impl MagicValidator {
         }
         let accountsdb_slot = self.accountsdb.slot();
         let ledger_slot = self.ledger.latest_block().load().slot;
-
         // If we have accountsdb state, which is at least as new as the last state state
         // transition in the ledger then there's no need to run any kind of ledger replay
         if accountsdb_slot >= ledger_slot {

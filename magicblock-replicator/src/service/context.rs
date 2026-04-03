@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use machineid_rs::IdBuilder;
 use magicblock_accounts_db::AccountsDb;
+use magicblock_chainlink::StubbedChainlink;
 use magicblock_core::{
     link::{
         replication::{Block, Message, SuperBlock},
@@ -11,7 +12,7 @@ use magicblock_core::{
     },
     Slot, TransactionIndex,
 };
-use magicblock_ledger::Ledger;
+use magicblock_ledger::{LatestBlockInner, Ledger};
 use tokio::{
     fs::File,
     sync::mpsc::{Receiver, Sender},
@@ -38,6 +39,10 @@ pub struct ReplicationContext {
     pub mode_tx: Sender<SchedulerMode>,
     /// Accounts database.
     pub accountsdb: Arc<AccountsDb>,
+    /// Mocked chainlink to reset accountsdb
+    /// TODO(bmuddha): this is a temporary hack, which will be removed
+    /// once the accounts management is moved to the accountsdb
+    pub chainlink: StubbedChainlink<AccountsDb>,
     /// Transaction ledger.
     pub ledger: Arc<Ledger>,
     /// Transaction scheduler.
@@ -52,11 +57,13 @@ pub struct ReplicationContext {
 
 impl ReplicationContext {
     /// Creates context from ledger state.
+    #[allow(clippy::too_many_arguments)]
     pub async fn new(
         broker: Broker,
         mode_tx: Sender<SchedulerMode>,
         accountsdb: Arc<AccountsDb>,
         ledger: Arc<Ledger>,
+        chainlink: StubbedChainlink<AccountsDb>,
         scheduler: TransactionSchedulerHandle,
         cancel: CancellationToken,
         can_promote: bool,
@@ -66,21 +73,20 @@ impl ReplicationContext {
             .build("magicblock")
             .map_err(|e| Error::Internal(e.to_string()))?;
 
-        let (slot, index) = ledger
-            .get_latest_transaction_position()?
-            .unwrap_or_default();
+        let slot = accountsdb.slot();
 
-        info!(%id, slot, index, can_promote, "context initialized");
+        info!(%id, slot, can_promote, "context initialized");
         Ok(Self {
             id,
             broker,
             cancel,
             mode_tx,
             accountsdb,
+            chainlink,
             ledger,
             scheduler,
             slot,
-            index,
+            index: 0,
             can_promote,
         })
     }
@@ -95,8 +101,9 @@ impl ReplicationContext {
     pub async fn write_block(&self, block: &Block) -> Result<()> {
         // wait for the scheduler to accept all of the previous block transactions
         let _guard = self.scheduler.wait_for_idle().await;
-        self.ledger
-            .write_block(block.slot, block.timestamp, block.hash)?;
+        let block =
+            LatestBlockInner::new(block.slot, block.hash, block.timestamp);
+        self.ledger.write_block(block)?;
         Ok(())
     }
 
@@ -109,7 +116,7 @@ impl ReplicationContext {
             Ok(())
         } else {
             let msg = format!(
-                "accountsdb state mismatch at {}, expected {checksum}, got {}",
+                "accountsdb state mismatch at {}, expected {}, got {checksum}",
                 sb.slot, sb.checksum
             );
             Err(Error::Internal(msg))
@@ -174,6 +181,9 @@ impl ReplicationContext {
         messages: Receiver<Message>,
     ) -> Result<Primary> {
         let snapshots = self.create_snapshot_watcher()?;
+        // TODO(bmuddha): remove dependency on the chainlink
+        let _guard = self.scheduler.wait_for_idle().await;
+        self.chainlink.reset_accounts_bank()?;
         self.enter_primary_mode().await;
         Ok(Primary::new(self, producer, messages, snapshots))
     }

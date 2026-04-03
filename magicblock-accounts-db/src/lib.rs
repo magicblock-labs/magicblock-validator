@@ -408,7 +408,7 @@ impl AccountsDb {
     }
 
     pub fn database_directory(&self) -> &Path {
-        self.snapshot_manager.database_path()
+        &self.snapshot_manager.snapshots_dir
     }
 }
 
@@ -434,7 +434,7 @@ impl AccountsBank for AccountsDb {
     /// Removes accounts matching a predicate.
     fn remove_where(
         &self,
-        predicate: impl Fn(&Pubkey, &AccountSharedData) -> bool,
+        mut predicate: impl FnMut(&Pubkey, &AccountSharedData) -> bool,
     ) -> AccountsDbResult<usize> {
         let to_remove = self
             .iter_all()
