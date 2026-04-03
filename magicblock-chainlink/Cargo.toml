@@ -7,6 +7,7 @@ edition.workspace = true
 arc-swap = "1.7"
 async-trait = { workspace = true }
 bincode = { workspace = true }
+borsh = { workspace = true }
 futures-util = { workspace = true }
 helius-laserstream = { workspace = true }
 tracing = { workspace = true }
@@ -17,7 +18,7 @@ magicblock-core = { workspace = true }
 parking_lot = { workspace = true }
 magicblock-magic-program-api = { workspace = true }
 magicblock-metrics = { workspace = true }
-magicblock-delegation-program = { workspace = true }
+magicblock-delegation-program-api = { workspace = true }
 solana-account = { workspace = true }
 solana-account-decoder = { workspace = true }
 solana-account-decoder-client-types = { workspace = true }

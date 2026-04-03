@@ -3,7 +3,10 @@ use serde::{Deserialize, Serialize};
 use solana_keypair::Keypair;
 use url::Url;
 
-use crate::{consts, types::SerdeKeypair};
+use crate::{
+    consts,
+    types::{SerdeKeypair, SerdePubkey},
+};
 
 /// Configuration for the validator's core behavior and identity.
 #[derive(Deserialize, Serialize, Debug, Clone)]
@@ -24,10 +27,12 @@ pub struct ValidatorConfig {
 pub enum ReplicationMode {
     // Validator which doesn't participate in replication
     Standalone,
-    /// Validator which participates in replication: acting as either a primary or replicator
-    StandBy(Url),
-    /// Validator which participates in replication only as replicator (no takeover)
-    ReplicatOnly(Url),
+    /// Validator which participates in replication: acting as either a primary or replicator.
+    /// The `SerdePubkey` is the primary validator's pubkey used for authority signature verification.
+    StandBy(Url, SerdePubkey),
+    /// Validator which participates in replication only as replicator (no takeover).
+    /// The `SerdePubkey` is the primary validator's pubkey used for authority signature verification.
+    ReplicateOnly(Url, SerdePubkey),
 }
 
 impl Default for ValidatorConfig {

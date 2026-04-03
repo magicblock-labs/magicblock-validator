@@ -243,7 +243,7 @@ impl ScheduledCommitsProcessorImpl {
                             .map(|finalize| vec![commit, finalize])
                             .unwrap_or(vec![commit])
                     })
-                    .unwrap_or(vec![])
+                    .unwrap_or_default()
             }
         };
         let patched_errors = result
@@ -252,6 +252,23 @@ impl ScheduledCommitsProcessorImpl {
             .map(|err| {
                 info!("Patched intent: {}. error was: {}", intent_id, err);
                 err.to_string()
+            })
+            .collect();
+
+        let callbacks_report = result
+            .callbacks_report
+            .iter()
+            .map(|r| match r {
+                Ok(sig) => {
+                    format!("OK: {sig}")
+                }
+                Err(err) => {
+                    error!(
+                        "Callback failed to schedule: {}. error: {}",
+                        intent_id, err
+                    );
+                    format!("ERR: {err}")
+                }
             })
             .collect();
 
@@ -266,6 +283,7 @@ impl ScheduledCommitsProcessorImpl {
             requested_undelegation: intent_meta.requested_undelegation,
             error_message,
             patched_errors,
+            callbacks_scheduling_results: callbacks_report,
         }
     }
 }

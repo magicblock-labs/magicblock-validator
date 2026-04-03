@@ -1,6 +1,5 @@
 use std::{
     collections::HashMap,
-    error::Error,
     sync::{Arc, RwLock},
 };
 
@@ -22,31 +21,12 @@ lazy_static! {
 }
 
 const MAGIC_SYS_POISONED_MSG: &str = "MAGIC_SYS poisoned";
-const MAGIC_SYS_UNSET_MSG: &str = "MagicSys needs to be set on startup";
 
 pub fn init_magic_sys<T: MagicSys>(magic_sys: Arc<T>) {
     MAGIC_SYS
         .write()
         .expect(MAGIC_SYS_POISONED_MSG)
         .replace(magic_sys);
-}
-
-pub fn load_data(id: u64) -> Result<Option<Vec<u8>>, Box<dyn Error>> {
-    MAGIC_SYS
-        .read()
-        .expect(MAGIC_SYS_POISONED_MSG)
-        .as_ref()
-        .ok_or(MAGIC_SYS_UNSET_MSG)?
-        .load(id)
-}
-
-pub fn persist_data(id: u64, data: Vec<u8>) -> Result<(), Box<dyn Error>> {
-    MAGIC_SYS
-        .read()
-        .expect(MAGIC_SYS_POISONED_MSG)
-        .as_ref()
-        .ok_or(MAGIC_SYS_UNSET_MSG)?
-        .persist(id, data)
 }
 
 pub(crate) fn fetch_current_commit_nonces(

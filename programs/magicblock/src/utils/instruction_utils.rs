@@ -15,6 +15,7 @@ use solana_hash::Hash;
 use solana_instruction::{AccountMeta, Instruction};
 use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
+use solana_signature::Signature;
 use solana_signer::Signer;
 use solana_transaction::Transaction;
 
@@ -85,6 +86,27 @@ impl InstructionUtils {
         Instruction::new_with_bincode(
             crate::id(),
             &MagicBlockInstruction::ScheduleCommitAndUndelegate,
+            account_metas,
+        )
+    }
+
+    #[cfg(test)]
+    pub(crate) fn schedule_commit_with_delegated_payer_instruction(
+        payer: &Pubkey,
+        pdas: Vec<Pubkey>,
+    ) -> Instruction {
+        let fee_vault = crate::schedule_transactions::magic_fee_vault_pubkey();
+        let mut account_metas = vec![
+            AccountMeta::new(*payer, true),
+            AccountMeta::new(MAGIC_CONTEXT_PUBKEY, false),
+            AccountMeta::new(fee_vault, false),
+        ];
+        for pubkey in &pdas {
+            account_metas.push(AccountMeta::new_readonly(*pubkey, true));
+        }
+        Instruction::new_with_bincode(
+            crate::id(),
+            &MagicBlockInstruction::ScheduleCommit,
             account_metas,
         )
     }
@@ -290,12 +312,27 @@ impl InstructionUtils {
     }
 
     // -----------------
+    // EvictAccount
+    // -----------------
+    pub fn evict_account_instruction(pubkey: Pubkey) -> Instruction {
+        Instruction::new_with_bincode(
+            crate::id(),
+            &MagicBlockInstruction::EvictAccount { pubkey },
+            vec![
+                AccountMeta::new(validator_authority_id(), true),
+                AccountMeta::new(pubkey, false),
+            ],
+        )
+    }
+
+    // -----------------
     // CloneAccount
     // -----------------
     pub fn clone_account_instruction(
         pubkey: Pubkey,
         data: Vec<u8>,
         fields: magicblock_magic_program_api::instruction::AccountCloneFields,
+        actions_tx_sig: Option<Signature>,
     ) -> Instruction {
         Instruction::new_with_bincode(
             crate::id(),
@@ -303,6 +340,7 @@ impl InstructionUtils {
                 pubkey,
                 data,
                 fields,
+                actions_tx_sig: actions_tx_sig.map(|sig| sig.to_string()),
             },
             vec![
                 AccountMeta::new(validator_authority_id(), true),
@@ -316,6 +354,7 @@ impl InstructionUtils {
         total_data_len: u32,
         initial_data: Vec<u8>,
         fields: magicblock_magic_program_api::instruction::AccountCloneFields,
+        actions_tx_sig: Option<Signature>,
     ) -> Instruction {
         Instruction::new_with_bincode(
             crate::id(),
@@ -324,6 +363,7 @@ impl InstructionUtils {
                 total_data_len,
                 initial_data,
                 fields,
+                actions_tx_sig: actions_tx_sig.map(|sig| sig.to_string()),
             },
             vec![
                 AccountMeta::new(validator_authority_id(), true),

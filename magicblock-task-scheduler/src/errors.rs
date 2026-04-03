@@ -16,6 +16,9 @@ pub enum TaskSchedulerError {
     #[error(transparent)]
     Io(#[from] std::io::Error),
 
+    #[error("Pending execution missing for task {0}")]
+    PendingExecutionMissing(i64),
+
     #[error("Task {0} already exists and is owned by {1}, not {2}")]
     UnauthorizedReplacing(i64, String, String),
 }

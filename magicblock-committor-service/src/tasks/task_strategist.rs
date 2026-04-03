@@ -1,5 +1,6 @@
 use std::collections::BinaryHeap;
 
+use magicblock_core::intent::BaseActionCallback;
 use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
 use solana_signer::{Signer, SignerError};
@@ -8,12 +9,13 @@ use tracing::error;
 use crate::{
     persist::{CommitStrategy, IntentPersister},
     tasks::{
-        commit_task::CommitDelivery, utils::TransactionUtils, BaseTask,
-        BaseTaskImpl,
+        commit_task::CommitDelivery, utils::TransactionUtils, BaseActionTask,
+        BaseTask, BaseTaskImpl,
     },
     transactions::{serialize_and_encode_base64, MAX_ENCODED_TRANSACTION_SIZE},
 };
 
+#[derive(Default)]
 pub struct TransactionStrategy {
     pub optimized_tasks: Vec<BaseTaskImpl>,
     pub lookup_tables_keys: Vec<Pubkey>,
@@ -35,6 +37,34 @@ impl TransactionStrategy {
                 ),
             )
         }
+    }
+
+    /// Extracts callbacks from actions
+    pub fn extract_action_callbacks(&mut self) -> Vec<BaseActionCallback> {
+        self.optimized_tasks
+            .iter_mut()
+            .filter_map(|el| {
+                if let BaseTaskImpl::BaseAction(value) = el {
+                    Some(value)
+                } else {
+                    None
+                }
+            })
+            .filter_map(BaseActionTask::extract_callback)
+            .collect()
+    }
+
+    pub fn has_actions_callbacks(&self) -> bool {
+        self.optimized_tasks
+            .iter()
+            .filter_map(|el| {
+                if let BaseTaskImpl::BaseAction(value) = el {
+                    Some(value)
+                } else {
+                    None
+                }
+            })
+            .any(BaseActionTask::has_callback)
     }
 
     pub fn uses_alts(&self) -> bool {
@@ -265,11 +295,8 @@ impl TaskStrategist {
         tasks: &[BaseTaskImpl],
         uses_lookup_tables: bool,
     ) {
-        for task in tasks {
-            let BaseTaskImpl::Commit(commit_task) = task else {
-                continue;
-            };
-            let commit_strategy = match &commit_task.delivery_details {
+        let commit_strategy_from_delivery =
+            |delivery: &CommitDelivery| match delivery {
                 CommitDelivery::StateInArgs => {
                     if uses_lookup_tables {
                         CommitStrategy::StateArgsWithLookupTable
@@ -299,14 +326,33 @@ impl TaskStrategist {
                     }
                 }
             };
+
+        for task in tasks {
+            let (commit_id, pubkey, commit_strategy) = match task {
+                BaseTaskImpl::Commit(commit_task) => (
+                    commit_task.commit_id,
+                    commit_task.committed_account.pubkey,
+                    commit_strategy_from_delivery(
+                        &commit_task.delivery_details,
+                    ),
+                ),
+                BaseTaskImpl::CommitFinalize(commit_finalize_task) => (
+                    commit_finalize_task.commit_id,
+                    commit_finalize_task.committed_account.pubkey,
+                    commit_strategy_from_delivery(
+                        &commit_finalize_task.delivery,
+                    ),
+                ),
+                _ => continue,
+            };
             if let Err(err) = persistor.set_commit_strategy(
-                commit_task.commit_id,
-                &commit_task.committed_account.pubkey,
+                commit_id,
+                &pubkey,
                 commit_strategy,
             ) {
                 error!(
-                    commit_id = %commit_task.commit_id,
-                    pubkey = %commit_task.committed_account.pubkey,
+                    commit_id = %commit_id,
+                    pubkey = %pubkey,
                     strategy = commit_strategy.as_str(),
                     error = ?err,
                     "Failed to persist commit strategy"
@@ -520,6 +566,7 @@ mod tests {
                     escrow_index: 0,
                 },
                 compute_units: 30_000,
+                callback: None,
             },
         }
         .into()

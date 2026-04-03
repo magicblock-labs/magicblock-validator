@@ -2,7 +2,7 @@ use borsh::{BorshDeserialize, BorshSerialize};
 use ephemeral_rollups_sdk::ephem::create_schedule_commit_ix;
 use program_schedulecommit::{
     api::schedule_commit_cpi_instruction, process_schedulecommit_cpi,
-    ProcessSchedulecommitCpiArgs,
+    ProcessSchedulecommitCpiArgs, ScheduleCommitType,
 };
 use solana_program::{
     account_info::{next_account_info, AccountInfo},
@@ -82,9 +82,10 @@ pub fn process_instruction<'a>(
             &players,
             ProcessSchedulecommitCpiArgs {
                 modify_accounts: false,
-                undelegate: false,
                 commit_payer: false,
+                has_magic_vault: false,
             },
+            ScheduleCommitType::Commit,
         ),
     }
 }
@@ -122,8 +123,10 @@ fn process_sibling_schedule_cpis(
             *payer.key,
             *magic_program.key,
             *magic_context.key,
+            None,
             players,
             &pdas,
+            ScheduleCommitType::Commit,
         );
         let mut account_infos = account_infos
             .clone()
@@ -136,17 +139,19 @@ fn process_sibling_schedule_cpis(
 
     {
         // 2. CPI into the schedule commit directly
+        let committees = pda_infos.iter().collect::<Vec<_>>();
+        let direct_ix = create_schedule_commit_ix(
+            payer,
+            &committees,
+            magic_context,
+            magic_program,
+            None,
+            false,
+        );
+
         let mut account_infos =
             account_infos.clone().into_iter().collect::<Vec<_>>();
         account_infos.extend(pda_infos.iter());
-
-        let direct_ix = create_schedule_commit_ix(
-            payer,
-            &account_infos,
-            magic_context,
-            magic_program,
-            false,
-        );
         invoke(
             &direct_ix,
             &account_infos.into_iter().cloned().collect::<Vec<_>>(),

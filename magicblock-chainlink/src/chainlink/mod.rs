@@ -6,7 +6,7 @@ use std::{
     },
 };
 
-use dlp::pda::ephemeral_balance_pda_from_payer;
+use dlp_api::pda::ephemeral_balance_pda_from_payer;
 use errors::ChainlinkResult;
 use fetch_cloner::FetchCloner;
 use magicblock_accounts_db::{traits::AccountsBank, AccountsDbResult};
@@ -15,7 +15,9 @@ use magicblock_metrics::metrics::AccountFetchOrigin;
 use solana_account::{AccountSharedData, ReadableAccount};
 use solana_commitment_config::CommitmentConfig;
 use solana_feature_set;
+use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
+use solana_signer::Signer;
 use solana_transaction::sanitized::SanitizedTransaction;
 use tokio::{sync::mpsc, task};
 use tracing::*;
@@ -81,8 +83,10 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
         let removed_accounts_sub = if let Some(fetch_cloner) = &fetch_cloner {
             let removed_accounts_rx =
                 fetch_cloner.try_get_removed_account_rx()?;
+            let cloner = fetch_cloner.cloner();
             Some(Self::subscribe_account_removals(
                 accounts_bank,
+                cloner,
                 removed_accounts_rx,
             ))
         } else {
@@ -112,16 +116,17 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
         commitment: CommitmentConfig,
         accounts_bank: &Arc<V>,
         cloner: &Arc<C>,
-        validator_pubkey: Pubkey,
+        validator_keypair: Keypair,
         faucet_pubkey: Pubkey,
         config: ChainlinkConfig,
         chainlink_config: &ChainLinkConfig,
     ) -> ChainlinkResult<
         Chainlink<ChainRpcClientImpl, SubMuxClient<ChainUpdatesClient>, V, C>,
     > {
+        let validator_pubkey = validator_keypair.pubkey();
         // Extract accounts provider and create fetch cloner while connecting
         // the subscription channel
-        let (tx, rx) = tokio::sync::mpsc::channel(100);
+        let (tx, rx) = tokio::sync::mpsc::channel(5_000);
         let account_provider = RemoteAccountProvider::try_from_urls_and_config(
             endpoints,
             commitment,
@@ -135,7 +140,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
                 &provider,
                 accounts_bank,
                 cloner,
-                validator_pubkey,
+                validator_keypair,
                 faucet_pubkey,
                 rx,
                 chainlink_config.allowed_programs.clone(),
@@ -228,45 +233,52 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
 
     fn subscribe_account_removals(
         accounts_bank: &Arc<V>,
+        cloner: &Arc<C>,
         mut removed_accounts_rx: mpsc::Receiver<Pubkey>,
     ) -> task::JoinHandle<()> {
         let accounts_bank = accounts_bank.clone();
+        let cloner = cloner.clone();
 
         task::spawn(async move {
             while let Some(pubkey) = removed_accounts_rx.recv().await {
-                accounts_bank.remove_account_conditionally(
-                    &pubkey,
-                    |account| {
-                        // Accounts that are still undelegating need to be kept in the bank
-                        // until the undelegation completes on chain.
-                        // Otherwise we might loose data in case the undelegation fails to
-                        // complete.
-                        // Another issue we avoid this way is that an account update received
-                        // before the account completes undelegation would overwrite the in-bank
-                        // account and thus also set unedelegating to false.
+                // Pre-flight check: skip if delegated/undelegating
+                // (the processor enforces this too, but this avoids
+                // the overhead of building and submitting a doomed tx)
+                let should_evict = match accounts_bank.get_account(&pubkey) {
+                    Some(account) => {
                         let undelegating = account.undelegating();
                         let delegated = account.delegated();
-                        let remove = !undelegating && !delegated;
-                        if tracing::enabled!(tracing::Level::TRACE) {
-                            if remove {
-                                trace!(
-                                    pubkey = %pubkey,
-                                    "Removing unsubscribed account from bank"
-                                );
-                            } else {
-                                let owner = account.owner();
-                                trace!(
-                                    pubkey = %pubkey,
-                                    undelegating,
-                                    delegated,
-                                    owner = %owner,
-                                    "Keeping unsubscribed account in bank"
-                                );
-                            }
+                        let evict = !undelegating && !delegated;
+                        if !evict {
+                            trace!(
+                                pubkey = %pubkey,
+                                undelegating,
+                                delegated,
+                                owner = %account.owner(),
+                                "Keeping unsubscribed account \
+                                 in bank \
+                                 (delegated/undelegating)"
+                            );
                         }
-                        remove
-                    },
+                        evict
+                    }
+                    None => false,
+                };
+                if !should_evict {
+                    continue;
+                }
+
+                trace!(
+                    pubkey = %pubkey,
+                    "Submitting eviction transaction"
                 );
+                if let Err(err) = cloner.evict_account(pubkey).await {
+                    warn!(
+                        pubkey = %pubkey,
+                        error = ?err,
+                        "Failed to submit eviction transaction"
+                    );
+                }
             }
             warn!("Removed accounts channel closed");
         })
@@ -312,15 +324,14 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
             .collect::<Vec<_>>();
         let feepayer = tx.message().fee_payer();
 
+        let balance_pda = ephemeral_balance_pda_from_payer(feepayer, 0);
+
         // Determine if we need to clone the escrow account for the feepayer
-        let clone_escrow = self
-            .accounts_bank
-            .get_account(feepayer)
-            .is_none_or(|a| !a.delegated());
+        let clone_escrow =
+            self.accounts_bank.get_account(&balance_pda).is_none();
 
         // If cloning escrow, add the balance PDA
         if clone_escrow {
-            let balance_pda = ephemeral_balance_pda_from_payer(feepayer, 0);
             trace!(
                 balance_pda = %balance_pda,
                 feepayer = %feepayer,

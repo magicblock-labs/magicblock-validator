@@ -36,7 +36,7 @@ chrono = "0.4"
 cleanass = "0.0.1"
 color-backtrace = { version = "0.7" }
 ctrlc = "3.4.7"
-ephemeral-rollups-sdk = { git = "https://github.com/magicblock-labs/ephemeral-rollups-sdk.git", rev = "d6a81e25a80d78fea9adf3fb1342df9bc9b87ba6", default-features = false, features = [
+ephemeral-rollups-sdk = { git = "https://github.com/magicblock-labs/ephemeral-rollups-sdk.git", rev = "285d8b4", default-features = false, features = [
   "modular-sdk",
 ] }
 futures = "0.3.31"
@@ -60,9 +60,7 @@ magic-domain-program = { git = "https://github.com/magicblock-labs/magic-domain-
   "modular-sdk",
 ] }
 magicblock_magic_program_api = { package = "magicblock-magic-program-api", path = "../magicblock-magic-program-api" }
-magicblock-delegation-program = { git = "https://github.com/magicblock-labs/delegation-program.git", rev = "2cb491032f372", features = [
-  "no-entrypoint",
-] }
+magicblock-delegation-program-api = { version = "0.3.0", default-features = false }
 magicblock-program = { path = "../programs/magicblock" }
 magicblock-rpc-client = { path = "../magicblock-rpc-client" }
 magicblock-table-mania = { path = "../magicblock-table-mania" }
@@ -72,7 +70,6 @@ program-mini = { path = "./programs/mini" }
 program-schedulecommit = { path = "programs/schedulecommit" }
 program-schedulecommit-security = { path = "programs/schedulecommit-security" }
 rand = "0.8.5"
-random-port = "0.1.1"
 rayon = "1.10.0"
 rkyv = "0.7.45"
 schedulecommit-client = { path = "schedulecommit/client" }
@@ -115,3 +112,5 @@ solana-storage-proto = { path = "../storage-proto" }
 # same reason as above
 rocksdb = { git = "https://github.com/magicblock-labs/rust-rocksdb.git", rev = "6d975197" }
 solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "3ff1b2ea" }
+# Fix libsodium for ARM builds - upstream crates.io version breaks Linux ARM binaries
+libsodium-rs = { git = "https://github.com/jedisct1/libsodium-rs.git", rev = "0397a6c5785233f9f2ac91f3eedc3cceb74e0060" }

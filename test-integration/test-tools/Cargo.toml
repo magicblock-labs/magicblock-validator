@@ -8,16 +8,14 @@ anyhow = { workspace = true }
 borsh = { workspace = true }
 color-backtrace = { workspace = true }
 tracing = { workspace = true }
-random-port = { workspace = true }
+rand = { workspace = true }
 rayon = { workspace = true }
 serde = { workspace = true }
 ureq = { workspace = true }
 url = { workspace = true }
 magicblock-core = { workspace = true }
 magicblock-config = { workspace = true }
-magicblock-delegation-program = { workspace = true, features = [
-  "no-entrypoint",
-] }
+magicblock-delegation-program-api = { workspace = true, features = ["instruction"] }
 solana-pubkey = { workspace = true }
 solana-rpc-client = { workspace = true }
 solana-rpc-client-api = { workspace = true }

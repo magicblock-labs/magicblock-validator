@@ -2,6 +2,7 @@ use borsh::{BorshDeserialize, BorshSerialize};
 use ephemeral_rollups_sdk::{
     consts::{MAGIC_CONTEXT_ID, MAGIC_PROGRAM_ID},
     delegate_args::{DelegateAccountMetas, DelegateAccounts},
+    dlp_api::dlp,
 };
 use solana_program::{
     instruction::{AccountMeta, Instruction},
@@ -114,7 +115,11 @@ pub enum FlexiCounterInstruction {
     /// 1. `[write]`  The counter PDA account that will be updated.
     /// 2. `[]`       MagicContext (used to record scheduled commit)
     /// 3. `[]`       MagicBlock Program (used to schedule commit)
-    AddAndScheduleCommit { count: u8, undelegate: bool },
+    AddAndScheduleCommit {
+        count: u8,
+        undelegate: bool,
+        has_magic_vault: bool,
+    },
 
     /// Updates the first FlexiCounter by adding the count found in the
     /// second FlexiCounter created by another payer
@@ -217,6 +222,50 @@ pub enum FlexiCounterInstruction {
         num_undelegate: u8,
         counter_diffs: Vec<i64>,
         compute_units: u32,
+    },
+
+    /// Deducts `amount` lamports from the delegated payer into the counter PDA
+    /// on ER, then schedules a CommitAndUndelegate intent with a post-commit
+    /// transfer action.  If `fail` is true the action intentionally errors so
+    /// the callback exercises the refund path.
+    ///
+    /// Accounts:
+    /// 0. [signer, write] payer (delegated counter owner)
+    /// 1. [write]         counter PDA
+    /// 2. [write]         destination (receives lamports on action success)
+    /// 3. []              system program
+    /// 4. [write]         magic context
+    /// 5. []              magic program
+    /// 6. [write]         magic fee vault
+    CreateTransferIntent {
+        amount: u64,
+        fail: bool,
+        compute_units: u32,
+    },
+
+    /// Post-commit base-layer action: transfers `amount` lamports from the
+    /// payer's escrow to `destination`, or returns `TRANSFER_FAIL_CODE` when
+    /// `fail` is set.
+    ///
+    /// Accounts (dispatched by magic program):
+    /// 0. [write] destination
+    /// 1. []      system program
+    /// 2. []      source program (auto)
+    /// 3. []      escrow authority (auto)
+    /// 4. [signer, write] escrow account (auto)
+    TransferActionHandler { amount: u64, fail: bool },
+
+    /// Creates an intent bundle that contains Commit + CommitFinalize intents.
+    ///
+    /// Accounts:
+    /// 0.      `[write]`  MagicContext
+    /// 1.      `[]`       MagicBlock Program
+    /// 2.      `[signer]` Payer (escrow authority)
+    /// 3.      `[write]` Commit counters
+    /// ..      `[write]` CommitFinalize counters
+    CreateIntentBundleCommitAndFinalize {
+        num_commit: u8,
+        num_commit_finalize: u8,
     },
 }
 
@@ -345,18 +394,28 @@ pub fn create_add_and_schedule_commit_ix(
     payer: Pubkey,
     count: u8,
     undelegate: bool,
+    magic_fee_vault: Option<Pubkey>,
 ) -> Instruction {
     let program_id = &crate::id();
     let (pda, _) = FlexiCounter::pda(&payer);
-    let accounts = vec![
+    let mut accounts = vec![
         AccountMeta::new(payer, true),
         AccountMeta::new(pda, false),
         AccountMeta::new(MAGIC_CONTEXT_ID, false),
         AccountMeta::new_readonly(MAGIC_PROGRAM_ID, false),
     ];
+    let has_magic_vault = magic_fee_vault.is_some();
+    if let Some(magic_fee_vault) = magic_fee_vault {
+        accounts.push(AccountMeta::new(magic_fee_vault, false));
+    }
+
     Instruction::new_with_borsh(
         *program_id,
-        &FlexiCounterInstruction::AddAndScheduleCommit { count, undelegate },
+        &FlexiCounterInstruction::AddAndScheduleCommit {
+            count,
+            undelegate,
+            has_magic_vault,
+        },
         accounts,
     )
 }
@@ -496,6 +555,42 @@ pub fn create_cancel_task_ix(payer: Pubkey, task_id: i64) -> Instruction {
     )
 }
 
+/// Creates a `CreateTransferIntent` instruction.
+///
+/// The payer's counter PDA is derived from `payer`.
+pub fn create_transfer_intent_ix(
+    payer: Pubkey,
+    destination: Pubkey,
+    validator: Pubkey,
+    amount: u64,
+    fail: bool,
+    compute_units: u32,
+) -> Instruction {
+    let program_id = &crate::id();
+    let (counter_pda, _) = FlexiCounter::pda(&payer);
+    let accounts = vec![
+        AccountMeta::new(payer, true),
+        AccountMeta::new(counter_pda, false),
+        AccountMeta::new_readonly(destination, false),
+        AccountMeta::new_readonly(system_program::id(), false),
+        AccountMeta::new(MAGIC_CONTEXT_ID, false),
+        AccountMeta::new_readonly(MAGIC_PROGRAM_ID, false),
+        AccountMeta::new(
+            dlp::pda::magic_fee_vault_pda_from_validator(&validator),
+            false,
+        ),
+    ];
+    Instruction::new_with_borsh(
+        *program_id,
+        &FlexiCounterInstruction::CreateTransferIntent {
+            amount,
+            fail,
+            compute_units,
+        },
+        accounts,
+    )
+}
+
 /// Creates an instruction for CreateIntentBundle that tests both Commit and
 /// CommitAndUndelegate intents simultaneously.
 ///
@@ -556,6 +651,38 @@ pub fn create_intent_bundle_ix(
             num_undelegate: undelegate_payers.len() as u8,
             counter_diffs,
             compute_units,
+        },
+        accounts,
+    )
+}
+
+pub fn create_intent_bundle_commit_and_finalize_ix(
+    payer: Pubkey,
+    commit_accounts: Vec<Pubkey>,
+    commit_finalize_accounts: Vec<Pubkey>,
+) -> Instruction {
+    let program_id = &crate::id();
+    let mut accounts = vec![
+        AccountMeta::new(MAGIC_CONTEXT_ID, false),
+        AccountMeta::new_readonly(MAGIC_PROGRAM_ID, false),
+        AccountMeta::new_readonly(payer, true),
+    ];
+    accounts.extend(
+        commit_accounts
+            .iter()
+            .map(|pubkey| AccountMeta::new(*pubkey, false)),
+    );
+    accounts.extend(
+        commit_finalize_accounts
+            .iter()
+            .map(|pubkey| AccountMeta::new(*pubkey, false)),
+    );
+
+    Instruction::new_with_borsh(
+        *program_id,
+        &FlexiCounterInstruction::CreateIntentBundleCommitAndFinalize {
+            num_commit: commit_accounts.len() as u8,
+            num_commit_finalize: commit_finalize_accounts.len() as u8,
         },
         accounts,
     )

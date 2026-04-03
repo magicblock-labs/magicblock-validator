@@ -9,8 +9,10 @@ program-mini = { workspace = true, features = ["no-entrypoint"] }
 integration-test-tools = { workspace = true }
 tracing = { workspace = true }
 test-chainlink = { workspace = true }
+magicblock-delegation-program-api = { workspace = true, features = ["encryption"] }
 solana-loader-v4-interface = { workspace = true, features = ["serde"] }
 solana-sdk = { workspace = true }
+spl-token = { workspace = true }
 spl-memo-interface = { workspace = true }
 test-kit = { workspace = true }
 tokio = { workspace = true, features = ["full"] }

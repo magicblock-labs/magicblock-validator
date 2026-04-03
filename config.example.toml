@@ -210,6 +210,14 @@ verify-keypair = true
 # Env: MBV_LEDGER__RESET
 reset = false
 
+# (Optional) Override the validator authority pubkey during ledger replay.
+# When set, replayed transactions are verified against this key instead of
+# the validator's own identity. The override is automatically unset once
+# replay completes. Useful when replaying a ledger from a different validator.
+# Default: not set (uses the validator's own keypair)
+# Env: MBV_LEDGER__REPLAY_AUTHORITY_OVERRIDE
+# Example: replay-authority-override = "11111111111111111111111111111111"
+
 # ==============================================================================
 # Chainlink (cloning pipeline)
 # ==============================================================================

@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use dlp::instruction_builder::validator_claim_fees;
+use dlp_api::instruction_builder::validator_claim_fees;
 use magicblock_program::validator::validator_authority;
 use magicblock_rpc_client::MagicBlockRpcClientError;
 use solana_commitment_config::CommitmentConfig;
@@ -10,6 +10,8 @@ use solana_transaction::Transaction;
 use tokio::{task::JoinHandle, time::Instant};
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, instrument};
+
+const MIN_CLAIMABLE_LAMPORTS: u64 = 100_000_000;
 
 pub struct ClaimFeesTask {
     pub handle: Option<JoinHandle<()>>,
@@ -87,6 +89,22 @@ async fn claim_fees(url: String) -> Result<(), MagicBlockRpcClientError> {
 
     let keypair_ref = &validator_authority();
     let validator = keypair_ref.pubkey();
+    let validator_fees_vault =
+        dlp_api::pda::validator_fees_vault_pda_from_validator(&validator);
+    let vault_lamports = rpc_client
+        .get_balance(&validator_fees_vault)
+        .await
+        .map_err(|e| MagicBlockRpcClientError::RpcClientError(Box::new(e)))?;
+
+    if vault_lamports <= MIN_CLAIMABLE_LAMPORTS {
+        info!(
+            validator_fees_vault = %validator_fees_vault,
+            vault_lamports,
+            min_claimable_lamports = MIN_CLAIMABLE_LAMPORTS,
+            "Skipping validator fee claim below threshold"
+        );
+        return Ok(());
+    }
 
     let ix = validator_claim_fees(validator, None);
 

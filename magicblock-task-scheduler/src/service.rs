@@ -262,22 +262,21 @@ impl TaskSchedulerService {
             self.pending_executions.insert(task.id, execution);
         }
 
-        let retry_delay =
-            Duration::from_millis(task.execution_interval_millis as u64);
+        let retry_delay = self.slot_interval;
         let send_result = {
             let execution = self
                 .pending_executions
                 .get(&task.id)
-                .expect("pending execution was initialized");
+                .ok_or(TaskSchedulerError::PendingExecutionMissing(task.id))?;
             self.rpc_client.send_transaction(&execution.tx).await
         };
 
         match send_result {
             Ok(signature) => {
-                let execution = self
-                    .pending_executions
-                    .remove(&task.id)
-                    .expect("pending execution exists on success");
+                let execution =
+                    self.pending_executions.remove(&task.id).ok_or(
+                        TaskSchedulerError::PendingExecutionMissing(task.id),
+                    )?;
                 Ok(TaskExecutionResult::Success {
                     execution_started_at: execution.execution_started_at,
                     signature,
@@ -288,7 +287,9 @@ impl TaskSchedulerService {
                     let execution = self
                         .pending_executions
                         .get(&task.id)
-                        .expect("pending execution exists on retry");
+                        .ok_or(TaskSchedulerError::PendingExecutionMissing(
+                            task.id,
+                        ))?;
                     (
                         execution.signature,
                         execution.blockhash,
@@ -343,8 +344,13 @@ impl TaskSchedulerService {
 
         self.pending_executions.remove(&task.id);
         self.db.insert_task(&task).await?;
-        self.task_queue
+        if let Some(old_key) = self.task_queue_keys.remove(&task.id) {
+            self.task_queue.remove(&old_key);
+        }
+        let key = self
+            .task_queue
             .insert(task.clone(), Duration::from_millis(0));
+        self.task_queue_keys.insert(task.id, key);
         debug!("Registered task {} from context", task.id);
 
         Ok(())
@@ -358,6 +364,30 @@ impl TaskSchedulerService {
         debug!("Removed task {} from database", task_id);
 
         Ok(())
+    }
+
+    async fn fail_task(&mut self, task_id: i64, error: &TaskSchedulerError) {
+        self.pending_executions.remove(&task_id);
+
+        if let Err(remove_err) = self.db.remove_task(task_id).await {
+            error!(
+                task_id,
+                error = ?remove_err,
+                "Failed to remove task after scheduler error"
+            );
+        }
+
+        if let Err(insert_err) = self
+            .db
+            .insert_failed_task(task_id, format!("{:?}", error))
+            .await
+        {
+            error!(
+                task_id,
+                error = ?insert_err,
+                "Failed to record failed task after scheduler error"
+            );
+        }
     }
 
     pub async fn run(mut self) -> TaskSchedulerResult<()> {
@@ -379,9 +409,19 @@ impl TaskSchedulerService {
                             // If any instruction fails, the task is cancelled
                             debug!("Executed task {} with signature {}", task.id, signature);
 
-                            self.db
+                            if let Err(e) = self
+                                .db
                                 .update_task_after_execution(task.id, execution_started_at)
-                                .await?;
+                                .await
+                            {
+                                error!(
+                                    task_id,
+                                    error = ?e,
+                                    "Failed to persist task execution"
+                                );
+                                self.fail_task(task_id, &e).await;
+                                continue;
+                            }
 
                             if task.executions_left > 1 {
                                 // Reschedule the task at the original cadence, without adding retry drift.
@@ -413,9 +453,7 @@ impl TaskSchedulerService {
                             error!("Failed to execute task {}: {}", task_id, e);
 
                             // If any instruction fails, the task is cancelled
-                            self.pending_executions.remove(&task_id);
-                            self.db.remove_task(task_id).await?;
-                            self.db.insert_failed_task(task_id, format!("{:?}", e)).await?;
+                            self.fail_task(task_id, &e).await;
                         }
                     }
                 }
@@ -691,7 +729,7 @@ mod tests {
 
         match result {
             TaskExecutionResult::Retry { delay } => {
-                assert_eq!(delay, Duration::from_secs(30));
+                assert_eq!(delay, Duration::from_secs(1));
                 assert_eq!(
                     service
                         .pending_executions
@@ -706,5 +744,41 @@ mod tests {
                 panic!("task should have been requeued for retry");
             }
         }
+    }
+
+    #[tokio::test]
+    async fn test_register_task_replaces_existing_queue_entry() {
+        magicblock_core::logger::init_for_tests();
+
+        let (_tx, rx) = mpsc::unbounded_channel();
+        let db = SchedulerDatabase::new(":memory:").unwrap();
+        let mut service = TaskSchedulerService {
+            db,
+            rpc_client: RpcClient::new("http://localhost:8899".to_string()),
+            block: LatestBlock::default(),
+            task_queue: DelayQueue::new(),
+            task_queue_keys: HashMap::new(),
+            pending_executions: HashMap::new(),
+            tx_counter: AtomicU64::default(),
+            token: CancellationToken::new(),
+            min_interval: Duration::from_millis(1000),
+            slot_interval: Duration::from_millis(1000),
+            scheduled_tasks: rx,
+        };
+
+        let task = DbTask {
+            id: 1,
+            authority: Pubkey::new_unique(),
+            execution_interval_millis: 30_000,
+            executions_left: 1,
+            last_execution_millis: 0,
+            instructions: vec![],
+        };
+
+        service.register_task(task.clone()).await.unwrap();
+        service.register_task(task).await.unwrap();
+
+        assert_eq!(service.task_queue.len(), 1);
+        assert!(service.task_queue_keys.contains_key(&1));
     }
 }

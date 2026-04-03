@@ -1,6 +1,6 @@
 use std::{
     fs,
-    net::{SocketAddr, TcpStream},
+    net::{IpAddr, SocketAddr, TcpListener, TcpStream},
     path::{Path, PathBuf},
     process::{self, Child},
     thread::sleep,
@@ -10,7 +10,7 @@ use std::{
 use magicblock_config::{
     config::LoadableProgram, types::BindAddress, ValidatorParams,
 };
-use random_port::{PortPicker, Protocol};
+use rand::{thread_rng, Rng};
 use tempfile::TempDir;
 
 use crate::{
@@ -101,6 +101,10 @@ pub fn start_test_validator_with_config(
             "protocol-fees-vault.json".to_string(),
         ),
         (
+            loaded_accounts.magic_fee_vault().to_string(),
+            "magic-fee-vault.json".to_string(),
+        ),
+        (
             "9yXjZTevvMp1XgZSZEaziPRgFiXtAQChpnP2oX9eCpvt".to_string(),
             "non-delegated-cloneable-account1.json".to_string(),
         ),
@@ -180,16 +184,38 @@ pub fn wait_for_validator(mut validator: Child, port: u16) -> Option<Child> {
 
 pub const TMP_DIR_CONFIG: &str = "TMP_DIR_CONFIG";
 
-fn resolve_port() -> u16 {
+const MIN_RANDOM_PORT: u16 = 1024;
+const MAX_RANDOM_PORT: u16 = u16::MAX;
+const RANDOM_PORT_ATTEMPTS: usize = 128;
+
+fn resolve_port(bind_ip: IpAddr, exclude: &[u16]) -> u16 {
     std::env::var("EPHEM_PORT")
         .ok()
         .and_then(|p| p.parse().ok())
         .unwrap_or_else(|| {
-            PortPicker::new()
-                .random(true)
-                .protocol(Protocol::Tcp)
-                .pick()
-                .unwrap()
+            let mut rng = thread_rng();
+
+            for _ in 0..RANDOM_PORT_ATTEMPTS {
+                let port = rng.gen_range(MIN_RANDOM_PORT..=MAX_RANDOM_PORT);
+                if exclude.contains(&port) {
+                    continue;
+                }
+
+                if TcpListener::bind(SocketAddr::new(bind_ip, port)).is_ok() {
+                    return port;
+                }
+            }
+
+            loop {
+                let port = TcpListener::bind(SocketAddr::new(bind_ip, 0))
+                    .and_then(|listener| listener.local_addr())
+                    .map(|addr| addr.port())
+                    .unwrap();
+
+                if !exclude.contains(&port) {
+                    return port;
+                }
+            }
         })
 }
 
@@ -201,8 +227,8 @@ pub fn start_magicblock_validator_with_config_struct(
     config: ValidatorParams,
     loaded_chain_accounts: &LoadedAccounts,
 ) -> (TempDir, Option<process::Child>, u16) {
-    let rpc_port = resolve_port();
-    let metrics_port = resolve_port();
+    let rpc_port = resolve_port(config.aperture.listen.ip(), &[]);
+    let metrics_port = resolve_port(config.metrics.address.ip(), &[rpc_port]);
 
     let mut config = config.clone();
     config.aperture.listen =
@@ -243,8 +269,8 @@ pub fn start_magicblock_validator_with_config_struct_and_temp_dir(
     default_tmpdir: TempDir,
     temp_dir: PathBuf,
 ) -> (TempDir, Option<process::Child>, u16) {
-    let rpc_port = resolve_port();
-    let metrics_port = resolve_port();
+    let rpc_port = resolve_port(config.aperture.listen.ip(), &[]);
+    let metrics_port = resolve_port(config.metrics.address.ip(), &[rpc_port]);
 
     let mut config = config.clone();
     config.aperture.listen =

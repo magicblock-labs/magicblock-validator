@@ -85,13 +85,21 @@ impl LoadedAccounts {
     }
 
     pub fn validator_fees_vault(&self) -> Pubkey {
-        dlp::pda::validator_fees_vault_pda_from_validator(
+        dlp_api::pda::validator_fees_vault_pda_from_validator(
             &self.validator_authority(),
         )
     }
+
     pub fn protocol_fees_vault(&self) -> Pubkey {
-        dlp::pda::fees_vault_pda()
+        dlp_api::pda::fees_vault_pda()
     }
+
+    pub fn magic_fee_vault(&self) -> Pubkey {
+        dlp_api::pda::magic_fee_vault_pda_from_validator(
+            &self.validator_authority(),
+        )
+    }
+
     pub fn extra_accounts(
         &self,
         workspace_dir: &Path,
