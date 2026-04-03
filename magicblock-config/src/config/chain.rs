@@ -37,8 +37,12 @@ pub struct ChainOperationConfig {
     pub fqdn: Url,
 
     /// Frequency at which the validator claims accrued fees from the chain.
-    #[serde(with = "humantime")]
+    #[serde(default = "default_claim_fees_frequency", with = "humantime")]
     pub claim_fees_frequency: Duration,
+}
+
+fn default_claim_fees_frequency() -> Duration {
+    Duration::from_secs(24 * 60 * 60)
 }
 
 /// Configuration for ChainLink (Cloning/BaseChain synchronization)
