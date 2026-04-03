@@ -45,7 +45,6 @@ impl Consumer {
                     durable_name: Some(id.into()),
                     ack_policy: AckPolicy::All,
                     ack_wait: cfg::ACK_WAIT,
-                    max_ack_pending: cfg::MAX_ACK_PENDING,
                     deliver_policy,
                     ..Default::default()
                 },

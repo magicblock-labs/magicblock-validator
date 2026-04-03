@@ -55,7 +55,6 @@ mod cfg {
     pub const RECONNECT_MAX_MS: u64 = 5000;
 
     // Backpressure
-    pub const MAX_ACK_PENDING: i64 = 512;
     pub const MAX_ACK_INFLIGHT: usize = 2048;
     pub const BATCH_SIZE: usize = 512;
 }

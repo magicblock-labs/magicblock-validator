@@ -51,7 +51,7 @@ pub struct SharedState {
 }
 
 /// Holds the core configuration and runtime parameters that define the node's operational context.
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct NodeContext {
     /// The public key of the validator node.
     pub identity: Pubkey,
@@ -61,17 +61,6 @@ pub struct NodeContext {
     pub featureset: Arc<FeatureSet>,
     /// Block production time in milliseconds
     pub blocktime: u64,
-}
-
-impl Clone for NodeContext {
-    fn clone(&self) -> Self {
-        Self {
-            identity: self.identity,
-            base_fee: self.base_fee,
-            featureset: self.featureset.clone(),
-            blocktime: self.blocktime,
-        }
-    }
 }
 
 impl SharedState {
