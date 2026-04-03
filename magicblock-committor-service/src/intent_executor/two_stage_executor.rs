@@ -422,7 +422,7 @@ where
         self.state.finalize_strategy.has_actions_callbacks()
     }
 
-    /// Removes actions from finalize strateg
+    /// Removes actions from finalize strategy
     /// Executes callbacks
     pub fn execute_callbacks(
         &mut self,

@@ -61,7 +61,7 @@ where
 
 /// Handles out of sync commit id error, fixes current strategy
 /// Returns strategy to be cleaned up
-/// TODO(edwin): TransactionStrategy -> CleanuoStrategy or something, naming it confusing for something that is cleaned up
+/// TODO(edwin): TransactionStrategy -> CleanupStrategy or something, naming is confusing for something that is cleaned up
 pub(in crate::intent_executor) async fn handle_commit_id_error<
     T: TaskInfoFetcher,
 >(

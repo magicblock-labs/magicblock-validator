@@ -1381,7 +1381,6 @@ async fn test_callbacks_fired_in_two_stage() {
         )
         .await
         .expect("commit must succeed");
-    executor.execute_callbacks(Some(commit_sig), Ok::<(), ActionError>(()));
 
     // standalone_actions land in the commit strategy as a BaseAction
     let calls = callback_executor.calls();
@@ -1399,8 +1398,6 @@ async fn test_callbacks_fired_in_two_stage() {
         .finalize(&transaction_preparator, &None::<IntentPersisterImpl>)
         .await
         .expect("finalize must succeed");
-    finalize_executor
-        .execute_callbacks(Some(commit_sig), Ok::<(), ActionError>(()));
 
     // Expect 2 actions to be executed in finalize stage
     let calls = callback_executor.calls();
