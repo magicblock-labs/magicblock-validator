@@ -98,7 +98,9 @@ async fn ixtest_undelegate_redelegate_to_us_in_same_slot_compressed() {
     let counter_auth = Keypair::new();
     ctx.init_counter(&counter_auth)
         .await
-        .delegate_compressed_counter(&counter_auth, false)
+        .init_compressed_delegation_record(&counter_auth)
+        .await
+        .delegate_compressed_counter(&counter_auth)
         .await;
 
     let counter_pda = ctx.counter_pda(&counter_auth.pubkey());

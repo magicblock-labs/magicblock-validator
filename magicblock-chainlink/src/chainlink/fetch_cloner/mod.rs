@@ -732,6 +732,14 @@ where
         in_bank: &AccountSharedData,
         fetch_origin: AccountFetchOrigin,
     ) -> RefreshDecision {
+        info!(
+            pubkey = %pubkey,
+            delegated = in_bank.delegated(),
+            undelegating = in_bank.undelegating(),
+            compressed = in_bank.compressed(),
+            owner = %in_bank.owner(),
+            "should_refresh_undelegating_in_bank_account"
+        );
         if in_bank.compressed() {
             return compression::should_refresh_undelegating_in_bank_compressed_account(
                 pubkey,
@@ -863,11 +871,13 @@ where
                         if tracing::enabled!(tracing::Level::TRACE) {
                             let undelegating = account_in_bank.undelegating();
                             let delegated = account_in_bank.delegated();
+                            let compressed = account_in_bank.compressed();
                             let owner = account_in_bank.owner();
                             trace!(
                                 pubkey = %pubkey,
                                 undelegating,
                                 delegated,
+                                compressed,
                                 owner = %owner,
                                 "Account found in bank in valid state, no fetch needed"
                             );

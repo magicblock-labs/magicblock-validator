@@ -533,22 +533,24 @@ mod tests {
         commit_id: u64,
         data_size: usize,
     ) -> ArgsTask {
-        ArgsTask::new(ArgsTaskType::CompressedCommit(CompressedCommitTask {
-            commit_id,
-            allow_undelegation: false,
-            committed_account: CommittedAccount {
-                pubkey: Pubkey::new_unique(),
-                account: Account {
-                    lamports: 1000,
-                    data: vec![1; data_size],
-                    owner: system_program_id(),
-                    executable: false,
-                    rent_epoch: 0,
+        ArgsTask::new(ArgsTaskType::CompressedCommitAndFinalize(
+            CompressedCommitTask {
+                commit_id,
+                allow_undelegation: false,
+                committed_account: CommittedAccount {
+                    pubkey: Pubkey::new_unique(),
+                    account: Account {
+                        lamports: 1000,
+                        data: vec![1; data_size],
+                        owner: system_program_id(),
+                        executable: false,
+                        rent_epoch: 0,
+                    },
+                    remote_slot: Default::default(),
                 },
-                remote_slot: Default::default(),
+                compressed_data: CompressedData::default(),
             },
-            compressed_data: CompressedData::default(),
-        }))
+        ))
     }
 
     // Helper to create a Base action task

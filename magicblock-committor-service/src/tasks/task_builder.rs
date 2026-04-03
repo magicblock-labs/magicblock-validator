@@ -24,8 +24,8 @@ use crate::{
     tasks::{
         args_task::{ArgsTask, ArgsTaskType},
         task_strategist::TaskStrategistError,
-        BaseActionTask, BaseTask, CompressedCommitTask, CompressedFinalizeTask,
-        CompressedUndelegateTask, FinalizeTask, UndelegateTask,
+        BaseActionTask, BaseTask, CompressedCommitTask, FinalizeTask,
+        UndelegateTask,
     },
 };
 
@@ -82,7 +82,7 @@ impl TaskBuilderImpl {
             };
 
         if let Some(compressed_data) = compressed_data {
-            ArgsTaskType::CompressedCommit(CompressedCommitTask {
+            ArgsTaskType::CompressedCommitAndFinalize(CompressedCommitTask {
                 commit_id,
                 allow_undelegation,
                 committed_account: account.clone(),
@@ -261,76 +261,35 @@ impl TasksBuilder for TaskBuilderImpl {
         base_intent: &ScheduledBaseIntent,
     ) -> TaskBuilderResult<Vec<Box<dyn BaseTask>>> {
         // Helper to create a finalize task
-        fn finalize_task(
-            account: &CommittedAccount,
-            compressed_data: Option<CompressedData>,
-        ) -> Box<dyn BaseTask> {
-            if let Some(compressed_data) = compressed_data {
-                let task_type =
-                    ArgsTaskType::CompressedFinalize(CompressedFinalizeTask {
-                        delegated_account: account.pubkey,
-                        compressed_data,
-                    });
-                Box::new(ArgsTask::new(task_type))
-            } else {
-                let task_type = ArgsTaskType::Finalize(FinalizeTask {
-                    delegated_account: account.pubkey,
-                });
-                Box::new(ArgsTask::new(task_type))
-            }
+        fn finalize_task(account: &CommittedAccount) -> Box<dyn BaseTask> {
+            let task_type = ArgsTaskType::Finalize(FinalizeTask {
+                delegated_account: account.pubkey,
+            });
+            Box::new(ArgsTask::new(task_type))
         }
 
         // Helper to create an undelegate task
         fn undelegate_task(
             account: &CommittedAccount,
             rent_reimbursement: &Pubkey,
-            compressed_data: Option<CompressedData>,
         ) -> Box<dyn BaseTask> {
-            if let Some(compressed_data) = compressed_data {
-                let task_type = ArgsTaskType::CompressedUndelegate(
-                    CompressedUndelegateTask {
-                        delegated_account: account.pubkey,
-                        owner_program: account.account.owner,
-                        compressed_data,
-                    },
-                );
-                Box::new(ArgsTask::new(task_type))
-            } else {
-                let task_type = ArgsTaskType::Undelegate(UndelegateTask {
-                    delegated_account: account.pubkey,
-                    owner_program: account.account.owner,
-                    rent_reimbursement: *rent_reimbursement,
-                });
-                Box::new(ArgsTask::new(task_type))
-            }
+            let task_type = ArgsTaskType::Undelegate(UndelegateTask {
+                delegated_account: account.pubkey,
+                owner_program: account.account.owner,
+                rent_reimbursement: *rent_reimbursement,
+            });
+            Box::new(ArgsTask::new(task_type))
         }
 
         // Helper to process commit types
-        async fn process_commit<C: TaskInfoFetcher>(
-            info_fetcher: &Arc<C>,
+        async fn process_commit(
             commit: &CommitType,
-            is_compressed: bool,
         ) -> TaskBuilderResult<Vec<Box<dyn BaseTask>>> {
             match commit {
                 CommitType::Standalone(committed_accounts) => {
                     Ok(committed_accounts
                         .iter()
-                        .zip(if is_compressed {
-                            info_fetcher
-                                .get_compressed_data_for_accounts(
-                                    &committed_accounts
-                                        .iter()
-                                        .map(|account| account.pubkey)
-                                        .collect::<Vec<_>>(),
-                                    None,
-                                )
-                                .await?
-                        } else {
-                            vec![None; committed_accounts.len()]
-                        })
-                        .map(|(account, compressed_data)| {
-                            finalize_task(account, compressed_data)
-                        })
+                        .map(|account| finalize_task(account))
                         .collect())
                 }
                 CommitType::WithBaseActions {
@@ -340,22 +299,7 @@ impl TasksBuilder for TaskBuilderImpl {
                 } => {
                     let mut tasks = committed_accounts
                         .iter()
-                        .zip(if is_compressed {
-                            info_fetcher
-                                .get_compressed_data_for_accounts(
-                                    &committed_accounts
-                                        .iter()
-                                        .map(|account| account.pubkey)
-                                        .collect::<Vec<_>>(),
-                                    None,
-                                )
-                                .await?
-                        } else {
-                            vec![None; committed_accounts.len()]
-                        })
-                        .map(|(account, compressed_data)| {
-                            finalize_task(account, compressed_data)
-                        })
+                        .map(|account| finalize_task(account))
                         .collect::<Vec<_>>();
                     tasks.extend(base_actions.iter().map(|action| {
                         let task = BaseActionTask {
@@ -370,12 +314,11 @@ impl TasksBuilder for TaskBuilderImpl {
             }
         }
 
-        let is_compressed = base_intent.is_compressed();
         match &base_intent.base_intent {
             MagicBaseIntent::BaseActions(_) => Ok(vec![]),
             MagicBaseIntent::Commit(commit)
             | MagicBaseIntent::CompressedCommit(commit) => {
-                Ok(process_commit(info_fetcher, commit, is_compressed).await?)
+                Ok(process_commit(commit).await?)
             }
             MagicBaseIntent::CommitAndUndelegate(t) => {
                 let accounts = t.get_committed_accounts();
@@ -391,11 +334,7 @@ impl TasksBuilder for TaskBuilderImpl {
                     })
                     .collect::<Vec<_>>();
                 let (tasks, rent_reimbursements) = tokio::join!(
-                    process_commit(
-                        info_fetcher,
-                        &t.commit_action,
-                        is_compressed,
-                    ),
+                    process_commit(&t.commit_action),
                     info_fetcher
                         .fetch_rent_reimbursements(&pubkeys, min_context_slot)
                 );
@@ -405,7 +344,7 @@ impl TasksBuilder for TaskBuilderImpl {
 
                 tasks.extend(accounts.iter().zip(rent_reimbursements).map(
                     |(account, rent_reimbursement)| {
-                        undelegate_task(account, &rent_reimbursement, None)
+                        undelegate_task(account, &rent_reimbursement)
                     },
                 ));
 
@@ -426,12 +365,7 @@ impl TasksBuilder for TaskBuilderImpl {
                 }
             }
             MagicBaseIntent::CompressedCommitAndUndelegate(t) => {
-                let mut tasks = process_commit(
-                    info_fetcher,
-                    &t.commit_action,
-                    is_compressed,
-                )
-                .await?;
+                let mut tasks = process_commit(&t.commit_action).await?;
 
                 // TODO: Compressed undelegate is not supported yet
                 // This is because the validator would have to pay rent out of pocket.

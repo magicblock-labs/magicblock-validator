@@ -118,7 +118,9 @@ async fn ixtest_undelegate_redelegate_to_us_in_separate_slots_compressed() {
     let counter_auth = Keypair::new();
     ctx.init_counter(&counter_auth)
         .await
-        .delegate_compressed_counter(&counter_auth, false)
+        .init_compressed_delegation_record(&counter_auth)
+        .await
+        .delegate_compressed_counter(&counter_auth)
         .await;
 
     let counter_pda = ctx.counter_pda(&counter_auth.pubkey());
@@ -178,7 +180,7 @@ async fn ixtest_undelegate_redelegate_to_us_in_separate_slots_compressed() {
     // 3. Account redelegated to us (separate slot) - writes allowed again
     {
         info!("3. Account redelegated to us - Would allow write");
-        ctx.delegate_compressed_counter(&counter_auth, true).await;
+        ctx.delegate_compressed_counter(&counter_auth).await;
 
         ctx.chainlink
             .ensure_accounts(

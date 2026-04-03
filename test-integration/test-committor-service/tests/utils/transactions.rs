@@ -18,9 +18,10 @@ use solana_sdk::{
 use tracing::{debug, error};
 
 use crate::utils::instructions::{
-    init_account_and_delegate_compressed_ixs, init_account_and_delegate_ixs,
-    init_order_book_account_and_delegate_ixs, init_validator_fees_vault_ix,
-    InitAccountAndDelegateCompressedIxs, InitAccountAndDelegateIxs,
+    delegate_compressed_ixs, init_account_and_compressed_record_ixs,
+    init_account_and_delegate_ixs, init_order_book_account_and_delegate_ixs,
+    init_validator_fees_vault_ix, DelegateCompressedIx,
+    InitAccountAndCompressedRecordIxs, InitAccountAndDelegateIxs,
     InitOrderBookAndDelegateIxs,
 };
 
@@ -301,7 +302,7 @@ pub async fn init_and_delegate_account_on_chain(
 
 /// This needs to be run for each test that required a new counter to be compressed delegated
 #[allow(dead_code)]
-pub async fn init_and_delegate_compressed_account_on_chain(
+pub async fn init_and_delegate_compressed_record_on_chain(
     counter_auth: &Keypair,
 ) -> (Pubkey, [u8; 32], Account) {
     let rpc_client = RpcClient::new(RPC_URL.to_string());
@@ -314,23 +315,22 @@ pub async fn init_and_delegate_compressed_account_on_chain(
         .unwrap();
     debug!("Airdropped to counter auth: {} SOL", 777 * LAMPORTS_PER_SOL);
 
-    let InitAccountAndDelegateCompressedIxs {
+    let InitAccountAndCompressedRecordIxs {
         init: init_counter_ix,
-        delegate: delegate_ix,
+        init_record: init_record_ix,
         pda,
-        address,
-    } = init_account_and_delegate_compressed_ixs(
+    } = init_account_and_compressed_record_ixs(
         counter_auth.pubkey(),
         photon_indexer.clone(),
     )
     .await;
 
     let latest_block_hash = rpc_client.get_latest_blockhash().await.unwrap();
-    // 1. Init account
+    // 1. Init account and record
     rpc_client
         .send_and_confirm_transaction_with_spinner_and_config(
             &Transaction::new_signed_with_payer(
-                &[init_counter_ix],
+                &[init_counter_ix, init_record_ix],
                 Some(&counter_auth.pubkey()),
                 &[&counter_auth],
                 latest_block_hash,
@@ -347,7 +347,13 @@ pub async fn init_and_delegate_compressed_account_on_chain(
 
     let pda_acc = get_account!(rpc_client, pda, "pda");
 
-    // 2. Delegate account
+    // 2. Delegate
+    let DelegateCompressedIx {
+        delegate: delegate_ix,
+        pda,
+        address,
+    } = delegate_compressed_ixs(counter_auth.pubkey(), photon_indexer.clone())
+        .await;
     let tx = Transaction::new_signed_with_payer(
         &[
             ComputeBudgetInstruction::set_compute_unit_limit(250_000),
@@ -369,17 +375,17 @@ pub async fn init_and_delegate_compressed_account_on_chain(
         .await
         .inspect_err(|err| {
             error!(
-                "Failed to delegate: {err:?}, signature: {:?}",
+                "Failed to init compressed record: {err:?}, signature: {:?}",
                 tx.signatures[0]
             )
         })
-        .expect("Failed to delegate");
+        .expect("Failed to init compressed record");
 
     let compressed_account =
-        get_compressed_account!(photon_indexer, address, "pda");
-    debug!("Compressed account: {:?}", compressed_account);
+        get_compressed_account!(photon_indexer, address, "compressed record");
+    debug!("Compressed record: {:?}", compressed_account);
 
-    (pda, compressed_account.hash, pda_acc)
+    (pda, address, pda_acc)
 }
 
 /// This needs to be run for each test that required a new order_book to be delegated

@@ -107,14 +107,16 @@ async fn ixtest_write_existing_account_compressed() {
     let counter_auth = Keypair::new();
     ctx.init_counter(&counter_auth)
         .await
-        .delegate_compressed_counter(&counter_auth, false)
+        .init_compressed_delegation_record(&counter_auth)
+        .await
+        .delegate_compressed_counter(&counter_auth)
         .await;
 
     let counter_pda = ctx.counter_pda(&counter_auth.pubkey());
+    info!(counter =% counter_pda, "init");
     let pubkeys = [counter_pda];
 
-    let res = ctx
-        .chainlink
+    ctx.chainlink
         .ensure_accounts(
             &pubkeys,
             None,
@@ -123,7 +125,6 @@ async fn ixtest_write_existing_account_compressed() {
         )
         .await
         .unwrap();
-    debug!("res: {res:?}");
 
     let account = ctx.cloner.get_account(&counter_pda).unwrap();
     assert_cloned_as_delegated!(

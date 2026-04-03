@@ -12,7 +12,6 @@ use std::{
 use borsh::to_vec;
 use dlp::{args::CommitStateArgs, pda::ephemeral_balance_pda_from_payer};
 use futures::future::join_all;
-use light_client::indexer::photon_indexer::PhotonIndexer;
 use magicblock_committor_program::pdas;
 use magicblock_committor_service::{
     intent_executor::{
@@ -90,7 +89,7 @@ impl TestEnv {
         let transaction_preparator = fixture.create_transaction_preparator();
         let task_info_fetcher = Arc::new(CacheTaskInfoFetcher::new(
             fixture.rpc_client.clone(),
-            fixture.photon_client.clone(),
+            fixture._photon_indexer.clone(),
         ));
 
         let tm = &fixture.table_mania;
@@ -102,7 +101,6 @@ impl TestEnv {
 
         let intent_executor = IntentExecutorImpl::new(
             fixture.rpc_client.clone(),
-            fixture.photon_client.clone(),
             transaction_preparator,
             task_info_fetcher.clone(),
         );
@@ -1229,17 +1227,13 @@ async fn single_flow_transaction_strategy(
         task_info_fetcher,
         intent,
         &None::<IntentPersisterImpl>,
-        &None::<Arc<PhotonIndexer>>,
     )
     .await
     .unwrap();
-    let finalize_tasks = TaskBuilderImpl::finalize_tasks(
-        task_info_fetcher,
-        intent,
-        &None::<Arc<PhotonIndexer>>,
-    )
-    .await
-    .unwrap();
+    let finalize_tasks =
+        TaskBuilderImpl::finalize_tasks(task_info_fetcher, intent)
+            .await
+            .unwrap();
     tasks.extend(finalize_tasks);
 
     TaskStrategist::build_strategy(

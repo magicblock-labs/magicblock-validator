@@ -16,6 +16,7 @@ fetch = []
 
 [dependencies]
 borsh = { workspace = true }
+compressed-delegation-api = { workspace = true }
 light-compressed-account = { workspace = true }
 light-hasher = { workspace = true }
 light-sdk = { workspace = true }

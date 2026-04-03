@@ -146,7 +146,7 @@ where
         RemoteAccountProvider::new(
             rpc_client,
             pubsub_client,
-            None::<PhotonClientMock>,
+            PhotonClientMock::new(),
             forward_tx,
             &config,
             subscribed_accounts,

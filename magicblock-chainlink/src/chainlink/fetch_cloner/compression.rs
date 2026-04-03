@@ -174,7 +174,7 @@ pub(crate) async fn should_refresh_undelegating_in_bank_compressed_account(
     validator_pubkey: Pubkey,
 ) -> RefreshDecision {
     let Some(record) =
-        CompressedDelegationRecord::from_bytes(in_bank.data()).ok()
+        CompressedDelegationRecord::try_from_slice(in_bank.data()).ok()
     else {
         // The delegation record is not present in the account data because the actual account data
         // has already been extracted from it. Refreshing would reset the account, losing local changes.

@@ -291,7 +291,7 @@ impl RemoteAccount {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum FetchedRemoteAccounts {
     Rpc(Vec<RemoteAccount>),
     Compressed(Vec<RemoteAccount>),

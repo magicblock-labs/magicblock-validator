@@ -45,15 +45,15 @@ pub async fn create_test_client() -> MagicblockRpcClient {
 }
 
 // Helper function to create a test PhotonIndexer
-pub fn create_test_photon_indexer() -> Option<Arc<PhotonIndexer>> {
+pub fn create_test_photon_indexer() -> Arc<PhotonIndexer> {
     let url = PHOTON_URL.to_string();
-    Some(Arc::new(PhotonIndexer::new(url, None)))
+    Arc::new(PhotonIndexer::new(url, None))
 }
 
 // Test fixture structure
 pub struct TestFixture {
     pub rpc_client: MagicblockRpcClient,
-    pub photon_client: Option<Arc<PhotonIndexer>>,
+    pub _photon_indexer: Arc<PhotonIndexer>,
     pub table_mania: TableMania,
     pub authority: Keypair,
     pub compute_budget_config: ComputeBudgetConfig,
@@ -69,8 +69,7 @@ impl TestFixture {
     pub async fn new_with_keypair(authority: Keypair) -> Self {
         let rpc_client = create_test_client().await;
 
-        // PhotonIndexer
-        let photon_client = create_test_photon_indexer();
+        let _photon_indexer = create_test_photon_indexer();
 
         // TableMania
         let gc_config = GarbageCollectorConfig::default();
@@ -89,7 +88,7 @@ impl TestFixture {
         let compute_budget_config = ComputeBudgetConfig::new(1_000_000);
         Self {
             rpc_client,
-            photon_client,
+            _photon_indexer,
             table_mania,
             authority,
             compute_budget_config,
@@ -123,7 +122,6 @@ impl TestFixture {
 
         IntentExecutorImpl::new(
             self.rpc_client.clone(),
-            self.photon_client.clone(),
             transaction_preparator,
             self.create_task_info_fetcher(),
         )
@@ -180,6 +178,14 @@ impl TaskInfoFetcher for MockTaskInfoFetcher {
                     .filter_map(|(key, value)| value.map(|value| (*key, value)))
                     .collect()
             })
+    }
+
+    async fn get_compressed_data(
+        &self,
+        _pubkey: &Pubkey,
+        _: Option<u64>,
+    ) -> TaskInfoFetcherResult<CompressedData> {
+        Ok(CompressedData::default())
     }
 }
 

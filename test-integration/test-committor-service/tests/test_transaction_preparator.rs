@@ -1,7 +1,4 @@
-use std::sync::Arc;
-
 use borsh::BorshDeserialize;
-use light_client::indexer::photon_indexer::PhotonIndexer;
 use magicblock_committor_program::Chunks;
 use magicblock_committor_service::{
     persist::IntentPersisterImpl,
@@ -40,6 +37,7 @@ async fn test_prepare_commit_tx_with_single_account() {
     let tasks = vec![
         Box::new(TaskBuilderImpl::create_commit_task(
             1,
+            None,
             true,
             committed_account.clone(),
             None,
@@ -60,7 +58,7 @@ async fn test_prepare_commit_tx_with_single_account() {
             &fixture.authority,
             &mut tx_strategy,
             &None::<IntentPersisterImpl>,
-            &None::<Arc<PhotonIndexer>>,
+            &fixture.create_task_info_fetcher(),
             None,
         )
         .await;
@@ -99,6 +97,7 @@ async fn test_prepare_commit_tx_with_multiple_accounts() {
     let buffer_commit_task = BufferTask::new_preparation_required(
         TaskBuilderImpl::create_commit_task(
             1,
+            None,
             true,
             committed_account2.clone(),
             None,
@@ -111,6 +110,7 @@ async fn test_prepare_commit_tx_with_multiple_accounts() {
         // account 1
         Box::new(TaskBuilderImpl::create_commit_task(
             1,
+            None,
             true,
             committed_account1.clone(),
             None,
@@ -138,7 +138,7 @@ async fn test_prepare_commit_tx_with_multiple_accounts() {
             &fixture.authority,
             &mut tx_strategy,
             &None::<IntentPersisterImpl>,
-            &None::<Arc<PhotonIndexer>>,
+            &fixture.create_task_info_fetcher(),
             None,
         )
         .await
@@ -203,6 +203,7 @@ async fn test_prepare_commit_tx_with_base_actions() {
     let buffer_commit_task = BufferTask::new_preparation_required(
         TaskBuilderImpl::create_commit_task(
             1,
+            None,
             true,
             committed_account.clone(),
             None,
@@ -236,7 +237,7 @@ async fn test_prepare_commit_tx_with_base_actions() {
             &fixture.authority,
             &mut tx_strategy,
             &None::<IntentPersisterImpl>,
-            &None::<Arc<PhotonIndexer>>,
+            &fixture.create_task_info_fetcher(),
             None,
         )
         .await
@@ -313,7 +314,7 @@ async fn test_prepare_finalize_tx_with_undelegate_with_atls() {
             &fixture.authority,
             &mut tx_strategy,
             &None::<IntentPersisterImpl>,
-            &None::<Arc<PhotonIndexer>>,
+            &fixture.create_task_info_fetcher(),
             None,
         )
         .await;

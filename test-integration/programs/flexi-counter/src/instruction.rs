@@ -1,11 +1,10 @@
 use borsh::{BorshDeserialize, BorshSerialize};
-use compressed_delegation_client::{
-    types::{CompressedAccountMeta, ValidityProof},
-    PackedAddressTreeInfo,
-};
 use ephemeral_rollups_sdk::{
     consts::{MAGIC_CONTEXT_ID, MAGIC_PROGRAM_ID},
     delegate_args::{DelegateAccountMetas, DelegateAccounts},
+};
+use light_sdk::instruction::{
+    account_meta::CompressedAccountMeta, PackedAddressTreeInfo, ValidityProof,
 };
 use solana_program::{
     instruction::{AccountMeta, Instruction},
@@ -36,17 +35,23 @@ pub struct CancelArgs {
 }
 
 #[derive(BorshSerialize, BorshDeserialize, Debug, Clone)]
+pub struct InitDelegationRecordArgs {
+    /// The proof of the account data
+    pub validity_proof: ValidityProof,
+    /// The address tree info
+    pub address_tree_info: PackedAddressTreeInfo,
+    /// The output state tree index
+    pub output_state_tree_index: u8,
+}
+
+#[derive(BorshSerialize, BorshDeserialize, Debug, Clone)]
 pub struct DelegateCompressedArgs {
     /// The validator authority that is added to the delegation record
     pub validator: Option<Pubkey>,
     /// The proof of the account data
     pub validity_proof: ValidityProof,
     /// The account meta
-    pub account_meta: Option<CompressedAccountMeta>,
-    /// The address tree info
-    pub address_tree_info: Option<PackedAddressTreeInfo>,
-    /// The output state tree index
-    pub output_state_tree_index: u8,
+    pub account_meta: CompressedAccountMeta,
 }
 
 pub const MAX_ACCOUNT_ALLOC_PER_INSTRUCTION_SIZE: u16 = 10_240;
@@ -202,6 +207,18 @@ pub enum FlexiCounterInstruction {
     /// 1. `[signer]` The payer that created and is cancelling the task.
     /// 2. `[write]`  Task context account.
     Cancel(CancelArgs),
+
+    /// Initializes a compressed delegation record for the FlexiCounter account
+    ///
+    /// Accounts:
+    /// 0.   `[signer]` The payer that is initializing the delegation record.
+    /// 1.   `[write]`  The counter PDA account that will be initialized.
+    /// 2.   `[]`       The compressed delegation program id
+    /// 3.   `[]`       The CPI signer of the compressed delegation program
+    /// 4.   `[]`       The system program
+    ///
+    /// 5..N `[]`       Remaining accounts using by the Light program
+    InitCompressedDelegationRecord(InitDelegationRecordArgs),
 
     /// Compressed delegation of the FlexiCounter account to an ephemaral validator
     ///
@@ -507,6 +524,29 @@ pub fn create_cancel_task_ix(payer: Pubkey, task_id: i64) -> Instruction {
         &borsh::to_vec(&FlexiCounterInstruction::Cancel(CancelArgs {
             task_id,
         }))
+        .unwrap(),
+        accounts,
+    )
+}
+
+pub fn create_init_compressed_delegation_record_ix(
+    payer: Pubkey,
+    remaining_accounts: &[AccountMeta],
+    args: InitDelegationRecordArgs,
+) -> Instruction {
+    let program_id = &crate::id();
+    let (pda, _) = FlexiCounter::pda(&payer);
+    let mut accounts = vec![
+        AccountMeta::new(payer, true),
+        AccountMeta::new(pda, false),
+        AccountMeta::new_readonly(compressed_delegation_client::ID, false),
+    ];
+    accounts.extend(remaining_accounts.iter().cloned());
+    Instruction::new_with_bytes(
+        *program_id,
+        &borsh::to_vec(
+            &FlexiCounterInstruction::InitCompressedDelegationRecord(args),
+        )
         .unwrap(),
         accounts,
     )

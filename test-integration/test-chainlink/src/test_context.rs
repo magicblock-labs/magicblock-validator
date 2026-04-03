@@ -91,7 +91,7 @@ impl TestContext {
                 RemoteAccountProvider::try_from_clients_and_mode(
                     rpc_client.clone(),
                     pubsub_client.clone(),
-                    Some(photon_indexer.clone()),
+                    photon_indexer.clone(),
                     tx,
                     &config,
                     subscribed_accounts,

@@ -3,13 +3,13 @@ mod schedule_intent;
 
 use borsh::{to_vec, BorshDeserialize};
 use compressed_delegation_client::{
-    instructions::DelegateCpiBuilder, types::DelegateArgs as DelegateArgsCpi,
     ExternalUndelegateArgs,
     EXTERNAL_UNDELEGATE_DISCRIMINATOR as EXTERNAL_UNDELEGATE_COMPRESSED_DISCRIMINATOR,
 };
 use ephemeral_rollups_sdk::{
     consts::{
-        EXTERNAL_UNDELEGATE_DISCRIMINATOR, MAGIC_CONTEXT_ID, MAGIC_PROGRAM_ID,
+        DEFAULT_VALIDATOR_IDENTITY, EXTERNAL_UNDELEGATE_DISCRIMINATOR,
+        MAGIC_CONTEXT_ID, MAGIC_PROGRAM_ID,
     },
     cpi::{
         delegate_account, undelegate_account, DelegateAccounts, DelegateConfig,
@@ -36,7 +36,8 @@ use crate::{
     instruction::{
         create_add_error_ix, create_add_ix, create_add_unsigned_ix, CancelArgs,
         DelegateArgs, DelegateCompressedArgs, FlexiCounterInstruction,
-        ScheduleArgs, MAX_ACCOUNT_ALLOC_PER_INSTRUCTION_SIZE,
+        InitDelegationRecordArgs, ScheduleArgs,
+        MAX_ACCOUNT_ALLOC_PER_INSTRUCTION_SIZE,
     },
     processor::{
         call_handler::{
@@ -104,6 +105,9 @@ pub fn process(
         } => process_undelegate_action_handler(accounts, amount, counter_diff),
         Schedule(args) => process_schedule_task(accounts, args),
         Cancel(args) => process_cancel_task(accounts, args),
+        InitCompressedDelegationRecord(args) => {
+            process_init_compressed_delegation_record(accounts, args)
+        }
         DelegateCompressed(args) => process_delegate_compressed(accounts, args),
         ScheduleCommitCompressed => {
             process_schedule_commit_compressed(accounts)
@@ -515,6 +519,67 @@ fn process_cancel_task(
     Ok(())
 }
 
+fn process_init_compressed_delegation_record(
+    accounts: &[AccountInfo],
+    args: InitDelegationRecordArgs,
+) -> ProgramResult {
+    msg!("InitCompressedDelegationRecord");
+
+    let [payer_info, counter_pda_info, compressed_delegation_program_info, remaining_accounts @ ..] =
+        accounts
+    else {
+        return Err(ProgramError::NotEnoughAccountKeys);
+    };
+
+    if compressed_delegation_program_info
+        .key
+        .ne(&compressed_delegation_client::ID)
+    {
+        return Err(ProgramError::IncorrectProgramId);
+    }
+
+    let pda_seeds = FlexiCounter::seeds(payer_info.key);
+    let (counter_pda, bump) = FlexiCounter::pda(payer_info.key);
+    if counter_pda_info.key.ne(&counter_pda) {
+        msg!(
+            "Invalid counter PDA {}, should be {}",
+            counter_pda_info.key,
+            counter_pda
+        );
+        return Err(ProgramError::InvalidSeeds);
+    }
+
+    // Cpi into delegation program
+    let bump_slice = &[bump];
+    let signer_seeds =
+        FlexiCounter::seeds_with_bump(payer_info.key, bump_slice);
+    let signer = [signer_seeds.as_ref()];
+    compressed_delegation_client::cpi::InitDelegationRecordCpi {
+        payer: payer_info.clone(),
+        delegated_account: counter_pda_info.clone(),
+        remaining_accounts: remaining_accounts
+            .iter()
+            .map(|account| {
+                (account.clone(), account.is_signer, account.is_writable)
+            })
+            .collect(),
+        args: compressed_delegation_client::InitDelegationRecordArgs {
+            owner_program_id: crate::ID,
+            pda_seeds: pda_seeds
+                .iter()
+                .map(|seed| seed.to_vec())
+                .collect::<Vec<_>>(),
+            bump,
+            output_state_tree_index: args.output_state_tree_index,
+            address_tree_info: args.address_tree_info,
+            validity_proof: args.validity_proof,
+        },
+    }
+    .invoke_signed(&signer)?;
+
+    Ok(())
+}
+
 fn process_delegate_compressed(
     accounts: &[AccountInfo],
     args: DelegateCompressedArgs,
@@ -545,52 +610,68 @@ fn process_delegate_compressed(
         return Err(ProgramError::InvalidSeeds);
     }
 
-    // Send back excess lamports to the payer
-    let rent = Rent::get()?;
-    let min_rent = rent.minimum_balance(0);
-    **payer_info.try_borrow_mut_lamports()? += counter_pda_info
-        .lamports()
-        .checked_sub(min_rent)
-        .ok_or(ProgramError::ArithmeticOverflow)?;
-    **counter_pda_info.try_borrow_mut_lamports()? = min_rent;
-
-    // Remove data from the delegated account and reassign ownership
-    let account_data = counter_pda_info.data.borrow().to_vec();
+    // Close the counter
+    let account_data = { counter_pda_info.data.borrow().to_vec() };
     counter_pda_info.realloc(0, false)?;
-    counter_pda_info.assign(compressed_delegation_program_info.key);
+    **payer_info.try_borrow_mut_lamports()? += counter_pda_info.lamports();
+    **counter_pda_info.try_borrow_mut_lamports()? = 0;
 
     // Cpi into delegation program
     let bump_slice = &[bump];
     let signer_seeds =
         FlexiCounter::seeds_with_bump(payer_info.key, bump_slice);
     let signer = [signer_seeds.as_ref()];
-    DelegateCpiBuilder::new(compressed_delegation_program_info)
-        .payer(payer_info)
-        .delegated_account(counter_pda_info)
-        .args(DelegateArgsCpi {
-            validator: args.validator,
+    compressed_delegation_client::cpi::DelegateCpi {
+        payer: payer_info.clone(),
+        delegated_account: counter_pda_info.clone(),
+        remaining_accounts: remaining_accounts
+            .iter()
+            .map(|account| {
+                (account.clone(), account.is_signer, account.is_writable)
+            })
+            .collect(),
+        args: compressed_delegation_client::DelegateArgs {
+            validator: args.validator.unwrap_or(DEFAULT_VALIDATOR_IDENTITY),
             validity_proof: args.validity_proof,
-            address_tree_info: args.address_tree_info,
             account_meta: args.account_meta,
-            lamports: rent.minimum_balance(account_data.len()),
+            lamports: 0,
             account_data,
             pda_seeds: pda_seeds
                 .iter()
                 .map(|seed| seed.to_vec())
                 .collect::<Vec<_>>(),
             bump,
-            output_state_tree_index: args.output_state_tree_index,
             owner_program_id: crate::ID,
-        })
-        .add_remaining_accounts(
-            &remaining_accounts
-                .iter()
-                .map(|account| {
-                    (account, account.is_signer, account.is_writable)
-                })
-                .collect::<Vec<_>>(),
-        )
-        .invoke_signed(&signer)?;
+        },
+    }
+    .invoke_signed(&signer)?;
+    // ::new(compressed_delegation_program_info)
+    //     .payer(payer_info)
+    //     .delegated_account(counter_pda_info)
+    //     .args(DelegateArgsCpi {
+    //         validator: args.validator,
+    //         validity_proof: args.validity_proof,
+    //         address_tree_info: args.address_tree_info,
+    //         account_meta: args.account_meta,
+    //         lamports: rent.minimum_balance(account_data.len()),
+    //         account_data,
+    //         pda_seeds: pda_seeds
+    //             .iter()
+    //             .map(|seed| seed.to_vec())
+    //             .collect::<Vec<_>>(),
+    //         bump,
+    //         output_state_tree_index: args.output_state_tree_index,
+    //         owner_program_id: crate::ID,
+    //     })
+    //     .add_remaining_accounts(
+    //         &remaining_accounts
+    //             .iter()
+    //             .map(|account| {
+    //                 (account, account.is_signer, account.is_writable)
+    //             })
+    //             .collect::<Vec<_>>(),
+    //     )
+    //     .invoke_signed(&signer)?;
 
     Ok(())
 }

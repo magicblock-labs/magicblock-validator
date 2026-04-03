@@ -34,11 +34,9 @@ pub use task_builder::TaskBuilderImpl;
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum TaskType {
     Commit,
-    CompressedCommit,
+    CompressedCommitAndFinalize,
     Finalize,
-    CompressedFinalize,
     Undelegate,
-    CompressedUndelegate,
     Action,
 }
 

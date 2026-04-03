@@ -105,6 +105,7 @@ async fn ixtest_deleg_after_subscribe_case2_compressed() {
     let counter_auth = Keypair::new();
     let counter_pda = ctx.counter_pda(&counter_auth.pubkey());
     let pubkeys = [counter_pda];
+    info!(counter =% counter_pda, "init");
 
     // 1. Initially the account does not exist
     {
@@ -114,7 +115,7 @@ async fn ixtest_deleg_after_subscribe_case2_compressed() {
             .ensure_accounts(
                 &pubkeys,
                 None,
-                AccountFetchOrigin::GetMultipleAccounts,
+                AccountFetchOrigin::GetAccount,
                 None,
             )
             .await
@@ -133,8 +134,8 @@ async fn ixtest_deleg_after_subscribe_case2_compressed() {
         ctx.chainlink
             .ensure_accounts(
                 &pubkeys,
-                None,
-                AccountFetchOrigin::GetMultipleAccounts,
+                Some(&pubkeys),
+                AccountFetchOrigin::GetAccount,
                 None,
             )
             .await
@@ -155,13 +156,16 @@ async fn ixtest_deleg_after_subscribe_case2_compressed() {
     // 3. Account delegated to us
     {
         info!("3. Delegate account to us");
-        ctx.delegate_compressed_counter(&counter_auth, false).await;
+        ctx.init_compressed_delegation_record(&counter_auth)
+            .await
+            .delegate_compressed_counter(&counter_auth)
+            .await;
 
         ctx.chainlink
             .ensure_accounts(
                 &pubkeys,
                 None,
-                AccountFetchOrigin::GetMultipleAccounts,
+                AccountFetchOrigin::GetAccount,
                 None,
             )
             .await

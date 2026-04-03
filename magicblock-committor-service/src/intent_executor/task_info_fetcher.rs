@@ -7,9 +7,7 @@ use std::{
 
 use async_trait::async_trait;
 use borsh::BorshDeserialize;
-use compressed_delegation_client::{
-    CompressedAccountMeta, CompressedDelegationRecord,
-};
+use compressed_delegation_client::CompressedDelegationRecord;
 use dlp::{
     delegation_metadata_seeds_from_delegated_account, state::DelegationMetadata,
 };
@@ -21,7 +19,10 @@ use light_client::{
     },
     rpc::RpcError as LightRpcError,
 };
-use light_sdk::instruction::{PackedAccounts, SystemAccountMetaConfig};
+use light_sdk::instruction::{
+    account_meta::CompressedAccountMeta, PackedAccounts,
+    SystemAccountMetaConfig,
+};
 use lru::LruCache;
 use magicblock_core::compression::derive_cda_from_pda;
 use magicblock_metrics::metrics;

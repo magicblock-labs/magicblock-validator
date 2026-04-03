@@ -1,9 +1,6 @@
-use std::sync::Arc;
-
 use borsh::BorshDeserialize;
 use compressed_delegation_client::CompressedDelegationRecord;
 use futures::future::join_all;
-use light_client::indexer::photon_indexer::PhotonIndexer;
 use magicblock_committor_program::Chunks;
 use magicblock_committor_service::{
     persist::IntentPersisterImpl,
@@ -25,7 +22,7 @@ use crate::{
         create_commit_task, create_dummy_compressed_commit_task,
         generate_random_bytes, TestFixture,
     },
-    utils::transactions::init_and_delegate_compressed_account_on_chain,
+    utils::transactions::init_and_delegate_compressed_record_on_chain,
 };
 
 mod common;
@@ -52,7 +49,7 @@ async fn test_prepare_10kb_buffer() {
             &fixture.authority,
             &mut strategy,
             &None::<IntentPersisterImpl>,
-            &None::<Arc<PhotonIndexer>>,
+            &fixture.create_task_info_fetcher(),
             None,
         )
         .await;
@@ -123,7 +120,7 @@ async fn test_prepare_multiple_buffers() {
             &fixture.authority,
             &mut strategy,
             &None::<IntentPersisterImpl>,
-            &None::<Arc<PhotonIndexer>>,
+            &fixture.create_task_info_fetcher(),
             None,
         )
         .await;
@@ -205,7 +202,7 @@ async fn test_lookup_tables() {
             &fixture.authority,
             &mut strategy,
             &None::<IntentPersisterImpl>,
-            &None::<Arc<PhotonIndexer>>,
+            &fixture.create_task_info_fetcher(),
             None,
         )
         .await;
@@ -247,7 +244,7 @@ async fn test_already_initialized_error_handled() {
             &fixture.authority,
             &mut strategy,
             &None::<IntentPersisterImpl>,
-            &None::<Arc<PhotonIndexer>>,
+            &fixture.create_task_info_fetcher(),
             None,
         )
         .await;
@@ -289,7 +286,7 @@ async fn test_already_initialized_error_handled() {
             &fixture.authority,
             &mut strategy,
             &None::<IntentPersisterImpl>,
-            &None::<Arc<PhotonIndexer>>,
+            &fixture.create_task_info_fetcher(),
             None,
         )
         .await;
@@ -357,7 +354,7 @@ async fn test_prepare_cleanup_and_reprepare_mixed_tasks() {
             &fixture.authority,
             &mut strategy,
             &None::<IntentPersisterImpl>,
-            &None::<Arc<PhotonIndexer>>,
+            &fixture.create_task_info_fetcher(),
             None,
         )
         .await;
@@ -459,7 +456,7 @@ async fn test_prepare_cleanup_and_reprepare_mixed_tasks() {
             &fixture.authority,
             &mut strategy2,
             &None::<IntentPersisterImpl>,
-            &None::<Arc<PhotonIndexer>>,
+            &fixture.create_task_info_fetcher(),
             None,
         )
         .await;
@@ -532,17 +529,18 @@ async fn test_prepare_compressed_commit() {
     init_logger!();
 
     let counter_auth = Keypair::new();
-    let (pda, _hash, account) =
-        init_and_delegate_compressed_account_on_chain(&counter_auth).await;
+    let (pda, _address, account) =
+        init_and_delegate_compressed_record_on_chain(&counter_auth).await;
 
     let data = generate_random_bytes(10);
-    let mut task = Box::new(ArgsTask::new(ArgsTaskType::CompressedCommit(
-        create_dummy_compressed_commit_task(
-            pda,
-            Default::default(),
-            data.as_slice(),
-        ),
-    ))) as Box<dyn BaseTask>;
+    let mut task =
+        Box::new(ArgsTask::new(ArgsTaskType::CompressedCommitAndFinalize(
+            create_dummy_compressed_commit_task(
+                pda,
+                Default::default(),
+                data.as_slice(),
+            ),
+        ))) as Box<dyn BaseTask>;
     let compressed_data = task.get_compressed_data().cloned();
 
     preparator
@@ -550,7 +548,7 @@ async fn test_prepare_compressed_commit() {
             &fixture.authority,
             &mut *task,
             &None::<IntentPersisterImpl>,
-            &fixture.photon_client,
+            &fixture.create_task_info_fetcher(),
             None,
         )
         .await
@@ -564,7 +562,7 @@ async fn test_prepare_compressed_commit() {
     );
 
     // Verify the delegation record is correct
-    let delegation_record = CompressedDelegationRecord::from_bytes(
+    let delegation_record = CompressedDelegationRecord::try_from_slice(
         &new_compressed_data
             .unwrap()
             .compressed_delegation_record_bytes,

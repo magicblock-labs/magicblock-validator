@@ -4,7 +4,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use borsh::to_vec;
+use borsh::{to_vec, BorshDeserialize};
 use compressed_delegation_client::CompressedDelegationRecord;
 use light_client::indexer::{
     photon_indexer::PhotonIndexer, CompressedAccount, Indexer,
@@ -43,7 +43,7 @@ use crate::utils::{
     transactions::{
         fund_validator_auth_and_ensure_validator_fees_vault,
         init_and_delegate_account_on_chain,
-        init_and_delegate_compressed_account_on_chain,
+        init_and_delegate_compressed_record_on_chain,
     },
 };
 
@@ -234,15 +234,8 @@ async fn commit_single_account(
     let validator_auth = ensure_validator_authority();
     fund_validator_auth_and_ensure_validator_fees_vault(&validator_auth).await;
 
-    let photon_client = if matches!(
-        mode,
-        CommitAccountMode::CompressedCommit
-            | CommitAccountMode::CompressedCommitAndUndelegate
-    ) {
-        Some(Arc::new(PhotonIndexer::new(PHOTON_URL.to_string(), None)))
-    } else {
-        None
-    };
+    let photon_client =
+        Arc::new(PhotonIndexer::new(PHOTON_URL.to_string(), None));
 
     // Run each test with and without finalizing
     let service = CommittorService::try_start(
@@ -266,8 +259,8 @@ async fn commit_single_account(
         }
         CommitAccountMode::CompressedCommit
         | CommitAccountMode::CompressedCommitAndUndelegate => {
-            let (pubkey, _hash, account) =
-                init_and_delegate_compressed_account_on_chain(&counter_auth)
+            let (pubkey, _address, account) =
+                init_and_delegate_compressed_record_on_chain(&counter_auth)
                     .await;
             (pubkey, account)
         }
@@ -344,12 +337,15 @@ async fn commit_book_order_account(
     let validator_auth = ensure_validator_authority();
     fund_validator_auth_and_ensure_validator_fees_vault(&validator_auth).await;
 
+    let photon_client =
+        Arc::new(PhotonIndexer::new(PHOTON_URL.to_string(), None));
+
     // Run each test with and without finalizing
     let service = CommittorService::try_start(
         validator_auth.insecure_clone(),
         ":memory:",
         ChainConfig::local(ComputeBudgetConfig::new(1_000_000)),
-        None,
+        photon_client,
     )
     .unwrap();
     let service = CommittorServiceExt::new(Arc::new(service));
@@ -800,11 +796,9 @@ async fn create_bundles(
                 )
                 .await
             } else {
-                let (pda, _hash, pda_acc) =
-                    init_and_delegate_compressed_account_on_chain(
-                        &counter_auth,
-                    )
-                    .await;
+                let (pda, _address, pda_acc) =
+                    init_and_delegate_compressed_record_on_chain(&counter_auth)
+                        .await;
                 (pda, pda_acc)
             };
 
@@ -838,7 +832,7 @@ async fn commit_multiple_accounts(
     fund_validator_auth_and_ensure_validator_fees_vault(&validator_auth).await;
 
     let photon_client =
-        Some(Arc::new(PhotonIndexer::new(PHOTON_URL.to_string(), None)));
+        Arc::new(PhotonIndexer::new(PHOTON_URL.to_string(), None));
 
     let service = CommittorService::try_start(
         validator_auth.insecure_clone(),
@@ -1210,7 +1204,7 @@ fn validate_compressed_account(
     is_undelegate: bool,
 ) -> bool {
     let Some(data) = acc.data.as_ref().and_then(|data| {
-        CompressedDelegationRecord::from_bytes(&data.data).ok()
+        CompressedDelegationRecord::try_from_slice(&data.data).ok()
     }) else {
         trace!(
             "Compressed account ({}) data is not present",

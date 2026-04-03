@@ -2,16 +2,17 @@ use std::sync::Arc;
 
 use borsh::{BorshDeserialize, BorshSerialize};
 use compressed_delegation_client::{
-    CommitArgs, CommitBuilder, CompressedAccountMeta,
-    CompressedDelegationRecord, FinalizeArgs, FinalizeBuilder,
-    PackedAddressTreeInfo, UndelegateArgs, UndelegateBuilder,
+    CommitAndFinalizeArgs, CompressedDelegationRecord, UndelegateArgs,
 };
 use integration_test_tools::dlp_interface;
 use light_client::indexer::{
     photon_indexer::PhotonIndexer, AddressWithTree, CompressedAccount, Indexer,
     ValidityProofWithContext,
 };
-use light_sdk::instruction::{PackedAccounts, SystemAccountMetaConfig};
+use light_sdk::instruction::{
+    account_meta::CompressedAccountMeta, PackedAccounts, PackedAddressTreeInfo,
+    SystemAccountMetaConfig,
+};
 use magicblock_chainlink::{
     accounts_bank::mock::AccountsBankStub,
     cloner::{AccountCloneRequest, Cloner},
@@ -35,7 +36,12 @@ use magicblock_config::config::{ChainLinkConfig, LifecycleMode};
 use magicblock_core::compression::{
     derive_cda_from_pda, ADDRESS_TREE, OUTPUT_QUEUE,
 };
-use program_flexi_counter::state::FlexiCounter;
+use program_flexi_counter::{
+    instruction::{
+        create_init_compressed_delegation_record_ix, InitDelegationRecordArgs,
+    },
+    state::FlexiCounter,
+};
 use solana_account::AccountSharedData;
 use solana_compute_budget_interface::ComputeBudgetInstruction;
 use solana_pubkey::Pubkey;
@@ -384,10 +390,97 @@ impl IxtestContext {
         self
     }
 
+    pub async fn init_compressed_delegation_record(
+        &self,
+        counter_auth: &Keypair,
+    ) -> &Self {
+        debug!(
+            "Initializing compressed delegation record for counter account {}",
+            counter_auth.pubkey()
+        );
+
+        let auth = counter_auth.pubkey();
+        let (pda, _bump) = FlexiCounter::pda(&auth);
+        let record_address = derive_cda_from_pda(&pda);
+
+        let mut remaining_accounts = self.get_packed_accounts();
+
+        let rpc_result: ValidityProofWithContext = self
+            .photon_indexer
+            .get_validity_proof(
+                vec![],
+                vec![AddressWithTree {
+                    address: record_address.to_bytes(),
+                    tree: ADDRESS_TREE,
+                }],
+                None,
+            )
+            .await
+            .unwrap()
+            .value;
+
+        // Insert trees in accounts
+        let address_merkle_tree_pubkey_index =
+            remaining_accounts.insert_or_get(ADDRESS_TREE);
+        let state_queue_pubkey_index =
+            remaining_accounts.insert_or_get(OUTPUT_QUEUE);
+
+        let packed_address_tree_info = PackedAddressTreeInfo {
+            root_index: rpc_result.addresses[0].root_index,
+            address_merkle_tree_pubkey_index,
+            address_queue_pubkey_index: address_merkle_tree_pubkey_index,
+        };
+
+        let (remaining_accounts_metas, _, _) =
+            remaining_accounts.to_account_metas();
+
+        let init_compressed_delegation_record_ix =
+            create_init_compressed_delegation_record_ix(
+                counter_auth.pubkey(),
+                &remaining_accounts_metas,
+                InitDelegationRecordArgs {
+                    validity_proof: rpc_result.proof,
+                    address_tree_info: packed_address_tree_info,
+                    output_state_tree_index: state_queue_pubkey_index,
+                },
+            );
+
+        let latest_block_hash =
+            self.rpc_client.get_latest_blockhash().await.unwrap();
+        let tx = Transaction::new_signed_with_payer(
+            &[
+                ComputeBudgetInstruction::set_compute_unit_limit(300_000),
+                init_compressed_delegation_record_ix,
+            ],
+            Some(&counter_auth.pubkey()),
+            &[&counter_auth],
+            latest_block_hash,
+        );
+        debug!(
+            "Init compressed delegation record transaction: {:?}",
+            tx.signatures[0]
+        );
+        self.rpc_client
+            .send_and_confirm_transaction_with_spinner_and_config(
+                &tx,
+                CommitmentConfig::confirmed(),
+                RpcSendTransactionConfig {
+                    skip_preflight: true,
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect("Failed to init compressed delegation record");
+
+        // Wait for the indexer to index the account
+        sleep_ms(1500).await;
+
+        self
+    }
+
     pub async fn delegate_compressed_counter(
         &self,
         counter_auth: &Keypair,
-        redelegate: bool,
     ) -> &Self {
         debug!(
             "Delegating compressed counter account {}",
@@ -401,83 +494,29 @@ impl IxtestContext {
 
         let mut remaining_accounts = self.get_packed_accounts();
 
-        let (
-            remaining_accounts_metas,
-            validity_proof,
-            address_tree_info,
-            account_meta,
-            output_state_tree_index,
-        ) = if redelegate {
-            let (compressed_delegated_record, proof) =
-                self.get_compressed_account_and_proof(&record_address).await;
+        let (compressed_delegated_record, proof) =
+            self.get_compressed_account_and_proof(&record_address).await;
 
-            let packed_state_tree = proof
-                .pack_tree_infos(&mut remaining_accounts)
-                .state_trees
-                .unwrap();
-            let account_meta = CompressedAccountMeta {
-                tree_info: packed_state_tree.packed_tree_infos[0],
-                address: compressed_delegated_record.address.unwrap(),
-                output_state_tree_index: packed_state_tree.output_tree_index,
-            };
-
-            let (remaining_accounts_metas, _, _) =
-                remaining_accounts.to_account_metas();
-            (
-                remaining_accounts_metas,
-                proof.proof,
-                None,
-                Some(account_meta),
-                packed_state_tree.output_tree_index,
-            )
-        } else {
-            let rpc_result: ValidityProofWithContext = self
-                .photon_indexer
-                .get_validity_proof(
-                    vec![],
-                    vec![AddressWithTree {
-                        address: record_address.to_bytes(),
-                        tree: ADDRESS_TREE,
-                    }],
-                    None,
-                )
-                .await
-                .unwrap()
-                .value;
-
-            // Insert trees in accounts
-            let address_merkle_tree_pubkey_index =
-                remaining_accounts.insert_or_get(ADDRESS_TREE);
-            let state_queue_pubkey_index =
-                remaining_accounts.insert_or_get(OUTPUT_QUEUE);
-
-            let packed_address_tree_info = PackedAddressTreeInfo {
-                root_index: rpc_result.addresses[0].root_index,
-                address_merkle_tree_pubkey_index,
-                address_queue_pubkey_index: address_merkle_tree_pubkey_index,
-            };
-
-            let (remaining_accounts_metas, _, _) =
-                remaining_accounts.to_account_metas();
-
-            (
-                remaining_accounts_metas,
-                rpc_result.proof,
-                Some(packed_address_tree_info),
-                None,
-                state_queue_pubkey_index,
-            )
+        let packed_state_tree = proof
+            .pack_tree_infos(&mut remaining_accounts)
+            .state_trees
+            .unwrap();
+        let account_meta = CompressedAccountMeta {
+            tree_info: packed_state_tree.packed_tree_infos[0],
+            address: compressed_delegated_record.address.unwrap(),
+            output_state_tree_index: packed_state_tree.output_tree_index,
         };
+
+        let (remaining_accounts_metas, _, _) =
+            remaining_accounts.to_account_metas();
 
         let delegate_ix = create_delegate_compressed_ix(
             counter_auth.pubkey(),
             &remaining_accounts_metas,
             DelegateCompressedArgs {
                 validator: Some(self.validator_kp.pubkey()),
-                validity_proof,
+                validity_proof: proof.proof,
                 account_meta,
-                address_tree_info,
-                output_state_tree_index,
             },
         );
 
@@ -551,10 +590,10 @@ impl IxtestContext {
             remaining_accounts.to_account_metas();
 
         let commit_ix =
-            CommitBuilder::new()
-                .validator(self.validator_kp.pubkey())
-                .delegated_account(pda)
-                .args(CommitArgs {
+            compressed_delegation_client::builders::CommitAndFinalizeBuilder {
+                validator: self.validator_kp.pubkey(),
+                delegated_account: pda,
+                args: CommitAndFinalizeArgs {
                     current_compressed_delegated_account_data:
                         compressed_account.data.unwrap().data.to_vec(),
                     new_data: FlexiCounter::new("COUNTER".to_string())
@@ -564,9 +603,10 @@ impl IxtestContext {
                     validity_proof: proof.proof,
                     update_nonce: 1,
                     allow_undelegation: true,
-                })
-                .add_remaining_accounts(remaining_accounts_metas.as_slice())
-                .instruction();
+                },
+                remaining_accounts: remaining_accounts_metas,
+            }
+            .instruction();
 
         let latest_block_hash =
             self.rpc_client.get_latest_blockhash().await.unwrap();
@@ -590,61 +630,6 @@ impl IxtestContext {
         // Wait for the indexer to index the account
         sleep_ms(500).await;
 
-        // Finalize
-        let (compressed_account, proof) =
-            self.get_compressed_account_and_proof(&record_address).await;
-
-        let mut remaining_accounts = self.get_packed_accounts();
-
-        let packed_tree_accounts = proof
-            .pack_tree_infos(&mut remaining_accounts)
-            .state_trees
-            .unwrap();
-
-        let account_meta = CompressedAccountMeta {
-            tree_info: packed_tree_accounts.packed_tree_infos[0],
-            address: compressed_account.address.unwrap(),
-            output_state_tree_index: packed_tree_accounts.output_tree_index,
-        };
-
-        let (remaining_accounts_metas, _, _) =
-            remaining_accounts.to_account_metas();
-
-        let finalize_ix =
-            FinalizeBuilder::new()
-                .validator(self.validator_kp.pubkey())
-                .delegated_account(pda)
-                .args(FinalizeArgs {
-                    current_compressed_delegated_account_data:
-                        compressed_account.data.unwrap().data,
-                    account_meta,
-                    validity_proof: proof.proof,
-                })
-                .add_remaining_accounts(remaining_accounts_metas.as_slice())
-                .instruction();
-
-        let latest_block_hash =
-            self.rpc_client.get_latest_blockhash().await.unwrap();
-        self.rpc_client
-            .send_and_confirm_transaction_with_spinner_and_config(
-                &Transaction::new_signed_with_payer(
-                    &[finalize_ix],
-                    Some(&self.validator_kp.pubkey()),
-                    &[&self.validator_kp],
-                    latest_block_hash,
-                ),
-                CommitmentConfig::confirmed(),
-                RpcSendTransactionConfig {
-                    skip_preflight: true,
-                    ..Default::default()
-                },
-            )
-            .await
-            .expect("Failed to finalize account");
-
-        // Wait for the indexer to index the account
-        sleep_ms(1500).await;
-
         let (compressed_account, proof) =
             self.get_compressed_account_and_proof(&record_address).await;
 
@@ -663,21 +648,23 @@ impl IxtestContext {
         let (remaining_accounts_metas, _, _) =
             remaining_accounts.to_account_metas();
 
-        let undelegate_ix = UndelegateBuilder::new()
-            .payer(counter_auth.pubkey())
-            .delegated_account(counter_pda)
-            .owner_program(program_flexi_counter::ID)
-            .system_program(system_program::ID)
-            .args(UndelegateArgs {
-                validity_proof: proof.proof,
-                delegation_record_account_meta: account_meta,
-                compressed_delegated_record:
-                    CompressedDelegationRecord::try_from_slice(
-                        &compressed_account.data.clone().unwrap().data,
-                    )
-                    .unwrap(),
-            })
-            .add_remaining_accounts(remaining_accounts_metas.as_slice())
+        let undelegate_ix =
+            compressed_delegation_client::builders::UndelegateBuilder {
+                payer: counter_auth.pubkey(),
+                delegated_account: counter_pda,
+                owner_program: program_flexi_counter::ID,
+                system_program: system_program::ID,
+                args: UndelegateArgs {
+                    validity_proof: proof.proof,
+                    delegation_record_account_meta: account_meta,
+                    compressed_delegated_record:
+                        CompressedDelegationRecord::try_from_slice(
+                            &compressed_account.data.clone().unwrap().data,
+                        )
+                        .unwrap(),
+                },
+                remaining_accounts: remaining_accounts_metas,
+            }
             .instruction();
         let latest_block_hash =
             self.rpc_client.get_latest_blockhash().await.unwrap();
@@ -708,7 +695,7 @@ impl IxtestContext {
             // Wait for the indexer to index the account
             sleep_ms(1500).await;
 
-            self.delegate_compressed_counter(counter_auth, true).await
+            self.delegate_compressed_counter(counter_auth).await
         } else {
             self
         }
