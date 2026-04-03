@@ -540,33 +540,40 @@ where
 
         if account.executable() {
             self.handle_executable_sub_update(pubkey, account).await;
-        } else if let Err(err) = self
-            .clone_account_with_ownership(AccountCloneRequest {
-                pubkey,
-                account,
-                commit_frequency_ms: None,
-                delegation_actions,
-                delegated_to_other,
-            })
-            .await
-        {
-            error!(
-                pubkey = %pubkey,
-                error = %err,
-                "Failed to clone account into bank"
-            );
-        } else if let Some(projected_ata_clone_request) =
-            projected_ata_clone_request
-        {
+        } else {
+            let commit_frequency_ms = deleg_record.as_ref().and_then(|dr| {
+                dr.authority
+                    .eq(&self.validator_pubkey)
+                    .then_some(dr.commit_frequency_ms)
+            });
             if let Err(err) = self
-                .clone_account_with_ownership(projected_ata_clone_request)
+                .clone_account_with_ownership(AccountCloneRequest {
+                    pubkey,
+                    account,
+                    commit_frequency_ms,
+                    delegation_actions,
+                    delegated_to_other,
+                })
                 .await
             {
                 error!(
                     pubkey = %pubkey,
                     error = %err,
-                    "Failed to clone projected ATA from delegated eATA update"
+                    "Failed to clone account into bank"
                 );
+            } else if let Some(projected_ata_clone_request) =
+                projected_ata_clone_request
+            {
+                if let Err(err) = self
+                    .clone_account_with_ownership(projected_ata_clone_request)
+                    .await
+                {
+                    error!(
+                        pubkey = %pubkey,
+                        error = %err,
+                        "Failed to clone projected ATA from delegated eATA update"
+                    );
+                }
             }
         }
     }
