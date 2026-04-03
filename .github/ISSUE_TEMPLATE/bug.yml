@@ -6,13 +6,12 @@ body:
   - type: textarea
     id: report
     attributes:
-      label: Report
-      description: What happened + expected + minimal repro (in one block). Link logs if big.
+      label: What happened
+      description: Describe the bug and what you expected to happen
       placeholder: |
-        What happened:
-        Expected:
-        Repro:
-        Logs/links:
+        **Observed:**
+        **Expected:**
+        **Steps to reproduce:**
     validations:
       required: true
 
@@ -24,10 +23,31 @@ body:
     validations:
       required: true
 
-  - type: input
-    id: env
+  - type: dropdown
+    id: deployment
     attributes:
-      label: Environment
-      placeholder: "OS/arch + how you run it (docker/native) + anything relevant"
+      label: Deployment
+      options:
+        - Local (native)
+        - Local (Docker)
+        - Testnet
+        - Mainnet
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: OS / Arch
+      placeholder: "e.g., macOS arm64, Linux x86_64"
+    validations:
+      required: false
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / Links
+      description: Relevant logs, stack traces, or links
     validations:
       required: false

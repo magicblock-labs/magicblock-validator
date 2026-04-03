@@ -12,6 +12,8 @@ const SPACE: usize = 73;
 const OWNER: Pubkey = Pubkey::new_from_array([23; 32]);
 const ACCOUNT_DATA: &[u8] = b"hello world?";
 const INIT_DATA_LEN: usize = ACCOUNT_DATA.len();
+/// Default slot used for snapshots in tests.
+const SNAPSHOT_SLOT: u64 = 1024;
 
 /// Verifies basic account insertion and retrieval.
 #[test]
@@ -208,34 +210,130 @@ fn test_take_snapshot() {
     assert_eq!(env.slot(), 0);
 
     // Trigger Snapshot 1
-    env.advance_slot(env.snapshot_frequency);
-    assert_eq!(env.slot(), env.snapshot_frequency);
-    assert!(env.snapshot_exists(env.snapshot_frequency));
+    env.set_slot(SNAPSHOT_SLOT);
+    env.take_snapshot_and_wait(SNAPSHOT_SLOT);
+    assert_eq!(env.slot(), SNAPSHOT_SLOT);
+    assert!(env.snapshot_exists(SNAPSHOT_SLOT));
+
+    // Verify archive file exists (not directory)
+    let archive_path = env
+        .snapshot_manager
+        .database_path()
+        .parent()
+        .unwrap()
+        .join(format!("snapshot-{:0>12}.tar.gz", SNAPSHOT_SLOT));
+    assert!(archive_path.exists(), "Archive file should exist");
+    assert!(
+        archive_path.is_file(),
+        "Snapshot should be a file, not directory"
+    );
+
+    // Verify archive file exists (not directory)
+    let archive_path = env
+        .snapshot_manager
+        .database_path()
+        .parent()
+        .unwrap()
+        .join(format!("snapshot-{:0>12}.tar.gz", SNAPSHOT_SLOT));
+    assert!(archive_path.exists(), "Archive file should exist");
+    assert!(
+        archive_path.is_file(),
+        "Snapshot should be a file, not directory"
+    );
 
     // Update Account
     acc.account.set_data(ACCOUNT_DATA.to_vec());
     env.insert_account(&acc.pubkey, &acc.account).unwrap();
 
     // Trigger Snapshot 2
-    env.advance_slot(env.snapshot_frequency * 2);
-    assert!(env.snapshot_exists(env.snapshot_frequency * 2));
+    let slot2 = SNAPSHOT_SLOT * 2;
+    env.set_slot(slot2);
+    env.take_snapshot_and_wait(slot2);
+    assert!(env.snapshot_exists(slot2));
+}
+
+/// Verifies that orphan snapshot directories are cleaned up on startup.
+#[test]
+fn test_orphan_directory_cleanup() {
+    let (adb, temp_dir) = TestEnv::init_raw_db();
+
+    // Create an orphan directory (simulating interrupted archiving)
+    let orphan_dir = temp_dir.path().join("accountsdb/snapshot-000000000512");
+    std::fs::create_dir_all(&orphan_dir).unwrap();
+    std::fs::write(orphan_dir.join("test.txt"), "orphan data").unwrap();
+
+    // Drop and reopen - orphan should be cleaned up
+    drop(adb);
+    let config = AccountsDbConfig::default();
+    let _adb = AccountsDb::new(&config, temp_dir.path(), 0).unwrap();
+
+    assert!(
+        !orphan_dir.exists(),
+        "Orphan directory should be cleaned up on startup"
+    );
+}
+
+/// Verifies external snapshot fast-forward when snapshot is newer than current state.
+#[test]
+fn test_external_snapshot_fast_forward() {
+    let env = TestEnv::new();
+
+    // Create an account and take a local snapshot
+    let acc = env.create_and_insert_account();
+    env.set_slot(SNAPSHOT_SLOT);
+    env.take_snapshot_and_wait(SNAPSHOT_SLOT);
+
+    // Read the archive bytes
+    let archive_path = env
+        .snapshot_manager
+        .database_path()
+        .parent()
+        .unwrap()
+        .join(format!("snapshot-{:0>12}.tar.gz", SNAPSHOT_SLOT));
+    let archive_bytes =
+        std::fs::read(&archive_path).expect("Failed to read archive");
+    let pubkey = acc.pubkey;
+
+    // Drop current DB and create new one at slot 0
+    drop(env);
+    let temp_dir = tempfile::tempdir().unwrap();
+    let config = AccountsDbConfig {
+        reset: true,
+        ..Default::default()
+    };
+    let mut new_db = AccountsDb::new(&config, temp_dir.path(), 0).unwrap();
+    assert_eq!(new_db.slot(), 0, "New DB should start at slot 0");
+
+    // Insert external snapshot (snapshot slot > current slot 0, should fast-forward)
+    let fast_forwarded = new_db
+        .insert_external_snapshot(SNAPSHOT_SLOT, &archive_bytes)
+        .unwrap();
+    assert!(fast_forwarded, "Should fast-forward when snapshot is newer");
+
+    // Verify the account exists immediately after fast-forward
+    let restored = new_db.get_account(&pubkey);
+    assert!(
+        restored.is_some(),
+        "Account should exist after fast-forward"
+    );
+    assert_eq!(restored.unwrap().lamports(), LAMPORTS);
 }
 
 #[test]
 fn test_restore_from_snapshot() {
     let mut env = TestEnv::new();
     let mut acc = env.create_and_insert_account();
-    let snap_freq = env.snapshot_frequency;
 
     // Create Base Snapshot
-    env.advance_slot(snap_freq);
+    env.set_slot(SNAPSHOT_SLOT);
+    env.take_snapshot_and_wait(SNAPSHOT_SLOT);
 
     // Make changes after snapshot
-    env.advance_slot(snap_freq + 3);
+    env.set_slot(SNAPSHOT_SLOT + 3);
     let new_lamports = 999;
     acc.account.set_lamports(new_lamports);
     env.insert_account(&acc.pubkey, &acc.account).unwrap();
-    env.advance_slot(snap_freq + 3);
+    env.set_slot(SNAPSHOT_SLOT + 6);
 
     // Verify update persisted in current state
     assert_eq!(
@@ -244,7 +342,7 @@ fn test_restore_from_snapshot() {
     );
 
     // Rollback to before the update
-    env = env.restore_to_slot(snap_freq);
+    env = env.restore_to_slot(SNAPSHOT_SLOT);
 
     let restored_acc = env.get_account(&acc.pubkey).unwrap();
     assert_eq!(
@@ -265,14 +363,17 @@ fn test_get_all_accounts_after_rollback() {
     for i in 0..=ITERS {
         let acc = env.create_and_insert_account();
         pks.push(acc.pubkey);
-        env.advance_slot(i);
+        env.set_slot(i);
     }
+
+    // Take a snapshot at ITERS
+    env.take_snapshot_and_wait(ITERS);
 
     // Add accounts after the restore point
     let mut post_snap_pks = vec![];
-    for i in ITERS..ITERS + env.snapshot_frequency {
+    for i in ITERS..ITERS + 100 {
         let acc = env.create_and_insert_account();
-        env.advance_slot(i + 1);
+        env.set_slot(i + 1);
         post_snap_pks.push(acc.pubkey);
     }
 
@@ -484,9 +585,15 @@ fn test_checksum_deterministic_across_dbs() {
         db2.insert_account(&pubkey, &account).unwrap();
     }
 
+    // Acquire write locks before computing checksums
+    let lock1 = db1.write_lock();
+    let lock2 = db2.write_lock();
+    let _guard1 = lock1.write();
+    let _guard2 = lock2.write();
+
     assert_eq!(
-        db1.checksum(),
-        db2.checksum(),
+        unsafe { db1.checksum() },
+        unsafe { db2.checksum() },
         "checksums must match for identical state"
     );
 }
@@ -503,28 +610,37 @@ fn test_checksum_detects_state_change() {
         })
         .collect();
 
-    let original_checksum = env.checksum();
+    let lock = env.write_lock();
+    let _guard = lock.write();
+    let original_checksum = unsafe { env.checksum() };
+    drop(_guard);
 
     // Modify a single account's data
     accounts[5].1.data_as_mut_slice()[0] ^= 0xFF;
     env.insert_account(&accounts[5].0, &accounts[5].1).unwrap();
 
-    assert_ne!(
-        env.checksum(),
-        original_checksum,
-        "checksum must detect single account modification"
-    );
+    {
+        let _guard = lock.write();
+        assert_ne!(
+            unsafe { env.checksum() },
+            original_checksum,
+            "checksum must detect single account modification"
+        );
+    }
 
     // Modify lamports on a different account
     accounts[10].1.set_lamports(1_000_000);
     env.insert_account(&accounts[10].0, &accounts[10].1)
         .unwrap();
 
-    assert_ne!(
-        env.checksum(),
-        original_checksum,
-        "checksum must detect lamport change"
-    );
+    {
+        let _guard = lock.write();
+        assert_ne!(
+            unsafe { env.checksum() },
+            original_checksum,
+            "checksum must detect lamport change"
+        );
+    }
 }
 
 // ==============================================================
@@ -595,31 +711,35 @@ impl TestEnv {
 
     fn advance_slot(&self, target_slot: u64) {
         self.adb.set_slot(target_slot);
+    }
 
-        // Simple spin-wait if we expect a snapshot trigger.
-        // This ensures the background thread has started and possibly finished creating the file.
-        if target_slot.is_multiple_of(self.adb.snapshot_frequency) {
-            let mut retries = 0;
-            while !self.adb.snapshot_exists(target_slot) && retries < 50 {
-                std::thread::sleep(std::time::Duration::from_millis(10));
-                retries += 1;
-            }
+    /// Takes a snapshot and waits for archiving to complete.
+    fn take_snapshot_and_wait(&self, slot: u64) -> u64 {
+        let checksum = self.adb.take_snapshot(slot);
+        // Wait for background archiving to complete
+        let mut retries = 0;
+        while !self.adb.snapshot_exists(slot) && retries < 200 {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            retries += 1;
         }
+        assert!(self.adb.snapshot_exists(slot), "Snapshot should exist");
+        checksum
     }
 
     fn restore_to_slot(mut self, slot: u64) -> Self {
         // Robustly wait for background threads (snapshots) to release the Arc.
+        // Archiving can take several seconds for large databases.
         let mut retries = 0;
         let mut inner = loop {
             match Arc::try_unwrap(self.adb) {
                 Ok(inner) => break inner,
                 Err(adb) => {
-                    if retries > 50 {
-                        // Panic if still shared after ~1 second
+                    if retries > 200 {
+                        // Panic if still shared after ~10 seconds
                         panic!("Cannot restore: DB is shared (background snapshot thread likely still running)");
                     }
                     self.adb = adb; // Put it back to retry
-                    std::thread::sleep(std::time::Duration::from_millis(20));
+                    std::thread::sleep(std::time::Duration::from_millis(50));
                     retries += 1;
                 }
             }
