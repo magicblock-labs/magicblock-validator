@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use magicblock_core::{
-    intent::{CommittedAccount, CommittedAccountRef},
+    intent::{BaseActionCallback, CommittedAccount, CommittedAccountRef},
     token_programs::{EATA_PROGRAM_ID, TOKEN_PROGRAM_ID},
     Slot,
 };
@@ -28,11 +28,11 @@ use crate::{
         get_instruction_account_with_idx, get_instruction_pubkey_with_idx,
         get_writable_with_idx,
     },
-    validator::validator_authority_id,
+    validator::effective_validator_authority_id,
 };
 
 /// Commits that are covered by User's dlp PDAs
-pub(crate) const ACTUAL_COMMIT_LIMIT: u64 = 25;
+pub const ACTUAL_COMMIT_LIMIT: u64 = 25;
 /// Fixed fee per commit.
 /// https://github.com/magicblock-labs/delegation-program/blob/main/src/consts.rs#L11
 pub const COMMIT_FEE_LAMPORTS: u64 = 100_000;
@@ -146,6 +146,21 @@ impl ScheduledIntentBundle {
         self.intent_bundle.get_commit_intent_accounts()
     }
 
+    /// Returns `[CommitFinalizeAndUndelegate]` intent's accounts
+    pub fn get_commit_finalize_and_undelegate_intent_accounts(
+        &self,
+    ) -> Option<&Vec<CommittedAccount>> {
+        self.intent_bundle
+            .get_commit_finalize_and_undelegate_intent_accounts()
+    }
+
+    /// Returns `CommitFinalize` intent's accounts
+    pub fn get_commit_finalize_intent_accounts(
+        &self,
+    ) -> Option<&Vec<CommittedAccount>> {
+        self.intent_bundle.get_commit_finalize_intent_accounts()
+    }
+
     /// Returns `Commit` intent's accounts
     pub fn get_commit_intent_accounts_mut(
         &mut self,
@@ -165,6 +180,10 @@ impl ScheduledIntentBundle {
         self.intent_bundle.has_undelegate_intent()
     }
 
+    pub fn has_callbacks(&self) -> bool {
+        self.intent_bundle.has_callbacks()
+    }
+
     pub fn is_empty(&self) -> bool {
         self.intent_bundle.is_empty()
     }
@@ -181,6 +200,8 @@ pub enum MagicBaseIntent {
     BaseActions(Vec<BaseAction>),
     Commit(CommitType),
     CommitAndUndelegate(CommitAndUndelegate),
+    CommitFinalize(CommitType),
+    CommitFinalizeAndUndelegate(CommitAndUndelegate),
 }
 
 // Bundle of BaseIntents
@@ -188,6 +209,8 @@ pub enum MagicBaseIntent {
 pub struct MagicIntentBundle {
     pub commit: Option<CommitType>,
     pub commit_and_undelegate: Option<CommitAndUndelegate>,
+    pub commit_finalize: Option<CommitType>,
+    pub commit_finalize_and_undelegate: Option<CommitAndUndelegate>,
     pub standalone_actions: Vec<BaseAction>,
 }
 
@@ -201,6 +224,12 @@ impl From<MagicBaseIntent> for MagicIntentBundle {
             MagicBaseIntent::Commit(value) => this.commit = Some(value),
             MagicBaseIntent::CommitAndUndelegate(value) => {
                 this.commit_and_undelegate = Some(value)
+            }
+            MagicBaseIntent::CommitFinalize(value) => {
+                this.commit_finalize = Some(value)
+            }
+            MagicBaseIntent::CommitFinalizeAndUndelegate(value) => {
+                this.commit_finalize_and_undelegate = Some(value)
             }
         }
 
@@ -219,10 +248,22 @@ impl MagicIntentBundle {
             .commit
             .map(|value| CommitType::try_from_args(value, context))
             .transpose()?;
+
         let commit_and_undelegate = args
             .commit_and_undelegate
             .map(|value| CommitAndUndelegate::try_from_args(value, context))
             .transpose()?;
+
+        let commit_finalize = args
+            .commit_finalize
+            .map(|value| CommitType::try_from_args(value, context))
+            .transpose()?;
+
+        let commit_finalize_and_undelegate = args
+            .commit_finalize_and_undelegate
+            .map(|value| CommitAndUndelegate::try_from_args(value, context))
+            .transpose()?;
+
         let actions = args
             .standalone_actions
             .into_iter()
@@ -232,6 +273,8 @@ impl MagicIntentBundle {
         let this = Self {
             commit,
             commit_and_undelegate,
+            commit_finalize,
+            commit_finalize_and_undelegate,
             standalone_actions: actions,
         };
         this.post_validation(context)?;
@@ -312,6 +355,14 @@ impl MagicIntentBundle {
         if let Some(cau) = &self.commit_and_undelegate {
             check(cau.get_committed_accounts())?;
         }
+        if let Some(commit_finalize) = &self.commit_finalize {
+            check(commit_finalize.get_committed_accounts())?;
+        }
+        if let Some(commit_finalize_and_undelegate) =
+            &self.commit_finalize_and_undelegate
+        {
+            check(commit_finalize_and_undelegate.get_committed_accounts())?;
+        }
 
         Ok(())
     }
@@ -333,6 +384,7 @@ impl MagicIntentBundle {
 
     pub fn has_undelegate_intent(&self) -> bool {
         self.commit_and_undelegate.is_some()
+            || self.commit_finalize_and_undelegate.is_some()
     }
 
     pub fn has_committed_accounts(&self) -> bool {
@@ -344,8 +396,19 @@ impl MagicIntentBundle {
             .get_undelegate_intent_accounts()
             .map(|el| !el.is_empty())
             .unwrap_or(false);
+        let has_commit_finalize_intent_accounts = self
+            .get_commit_finalize_intent_accounts()
+            .map(|el| !el.is_empty())
+            .unwrap_or(false);
+        let has_commit_finalize_and_undelegate_intent_accounts = self
+            .get_commit_finalize_and_undelegate_intent_accounts()
+            .map(|el| !el.is_empty())
+            .unwrap_or(false);
 
-        has_commit_intent_accounts || has_undelegate_intent_accounts
+        has_commit_intent_accounts
+            || has_undelegate_intent_accounts
+            || has_commit_finalize_intent_accounts
+            || has_commit_finalize_and_undelegate_intent_accounts
     }
 
     /// Returns `[CommitAndUndelegate]` intent's accounts
@@ -364,6 +427,24 @@ impl MagicIntentBundle {
         Some(self.commit.as_ref()?.get_committed_accounts())
     }
 
+    /// Returns `[CommitAndUndelegate]` intent's accounts
+    pub fn get_commit_finalize_and_undelegate_intent_accounts(
+        &self,
+    ) -> Option<&Vec<CommittedAccount>> {
+        Some(
+            self.commit_finalize_and_undelegate
+                .as_ref()?
+                .get_committed_accounts(),
+        )
+    }
+
+    /// Returns `Commit` intent's accounts
+    pub fn get_commit_finalize_intent_accounts(
+        &self,
+    ) -> Option<&Vec<CommittedAccount>> {
+        Some(self.commit_finalize.as_ref()?.get_committed_accounts())
+    }
+
     /// Returns `Commit` intent's accounts
     pub fn get_commit_intent_accounts_mut(
         &mut self,
@@ -376,18 +457,29 @@ impl MagicIntentBundle {
     pub fn get_all_committed_accounts(&self) -> Vec<CommittedAccount> {
         let committed = self.get_commit_intent_accounts();
         let undelegated = self.get_undelegate_intent_accounts();
-        [committed, undelegated]
-            .into_iter()
-            .flatten()
-            .flatten()
-            .cloned()
-            .collect()
+        let commit_finalize = self.get_commit_finalize_intent_accounts();
+        let commit_finalize_and_undelegate =
+            self.get_commit_finalize_and_undelegate_intent_accounts();
+
+        [
+            committed,
+            undelegated,
+            commit_finalize,
+            commit_finalize_and_undelegate,
+        ]
+        .into_iter()
+        .flatten()
+        .flatten()
+        .cloned()
+        .collect()
     }
 
     pub fn get_all_committed_pubkeys(&self) -> Vec<Pubkey> {
         [
             self.get_commit_intent_pubkeys(),
             self.get_undelegate_intent_pubkeys(),
+            self.get_commit_finalize_intent_pubkeys(),
+            self.get_commit_finalize_and_undelegate_intent_pubkeys(),
         ]
         .into_iter()
         .flatten()
@@ -407,17 +499,90 @@ impl MagicIntentBundle {
             .map(|value| value.get_committed_pubkeys())
     }
 
+    pub fn get_commit_finalize_intent_pubkeys(&self) -> Option<Vec<Pubkey>> {
+        self.commit_finalize
+            .as_ref()
+            .map(|value| value.get_committed_pubkeys())
+    }
+
+    pub fn get_commit_finalize_and_undelegate_intent_pubkeys(
+        &self,
+    ) -> Option<Vec<Pubkey>> {
+        self.commit_finalize_and_undelegate
+            .as_ref()
+            .map(|value| value.get_committed_pubkeys())
+    }
+
     pub fn is_empty(&self) -> bool {
         let no_committed =
             self.commit.as_ref().map(|el| el.is_empty()).unwrap_or(true);
+
         let no_committed_and_undelegated = self
             .commit_and_undelegate
             .as_ref()
             .map(|el| el.is_empty())
             .unwrap_or(true);
+
+        let no_commit_finalize = self
+            .commit_finalize
+            .as_ref()
+            .map(|el| el.is_empty())
+            .unwrap_or(true);
+
+        let no_commit_finalize_and_undelegate = self
+            .commit_finalize_and_undelegate
+            .as_ref()
+            .map(|el| el.is_empty())
+            .unwrap_or(true);
+
         let no_actions = self.standalone_actions.is_empty();
 
-        no_committed && no_committed_and_undelegated && no_actions
+        no_committed
+            && no_committed_and_undelegated
+            && no_commit_finalize
+            && no_commit_finalize_and_undelegate
+            && no_actions
+    }
+
+    pub fn has_callbacks(&self) -> bool {
+        let x = self
+            .commit
+            .as_ref()
+            .map(|el| el.has_callbacks())
+            .unwrap_or(false);
+        let y = self
+            .commit_and_undelegate
+            .as_ref()
+            .map(|el| el.has_callbacks())
+            .unwrap_or(false);
+        let z = self
+            .standalone_actions
+            .iter()
+            .any(|el| el.callback.is_some());
+
+        x || y || z
+    }
+
+    pub fn get_action_mut(&mut self, index: usize) -> Option<&mut BaseAction> {
+        let mut offset = 0usize;
+
+        if let Some(commit) = self.commit.as_mut() {
+            let count = commit.action_count();
+            if index < offset + count {
+                return commit.get_action_mut(index - offset);
+            }
+            offset += count;
+        }
+
+        if let Some(cau) = self.commit_and_undelegate.as_mut() {
+            let count = cau.action_count();
+            if index < offset + count {
+                return cau.get_action_mut(index - offset);
+            }
+            offset += count;
+        }
+
+        self.standalone_actions.get_mut(index.checked_sub(offset)?)
     }
 }
 
@@ -443,8 +608,17 @@ impl MagicBaseIntent {
                     CommitAndUndelegate::try_from_args(type_, context)?;
                 Ok(MagicBaseIntent::CommitAndUndelegate(commit_and_undelegate))
             }
-            MagicBaseIntentArgs::CommitFinalize(_) => todo!(),
-            MagicBaseIntentArgs::CommitFinalizeAndUndelegate(_) => todo!(),
+            MagicBaseIntentArgs::CommitFinalize(type_) => {
+                let commit = CommitType::try_from_args(type_, context)?;
+                Ok(MagicBaseIntent::CommitFinalize(commit))
+            }
+            MagicBaseIntentArgs::CommitFinalizeAndUndelegate(type_) => {
+                let commit_and_undelegate =
+                    CommitAndUndelegate::try_from_args(type_, context)?;
+                Ok(MagicBaseIntent::CommitFinalizeAndUndelegate(
+                    commit_and_undelegate,
+                ))
+            }
         }
     }
 
@@ -453,6 +627,18 @@ impl MagicBaseIntent {
             MagicBaseIntent::BaseActions(_) => false,
             MagicBaseIntent::Commit(_) => false,
             MagicBaseIntent::CommitAndUndelegate(_) => true,
+            MagicBaseIntent::CommitFinalize(_) => false,
+            MagicBaseIntent::CommitFinalizeAndUndelegate(_) => true,
+        }
+    }
+
+    pub fn is_commit_finalize(&self) -> bool {
+        match &self {
+            MagicBaseIntent::BaseActions(_) => false,
+            MagicBaseIntent::Commit(_) => false,
+            MagicBaseIntent::CommitAndUndelegate(_) => false,
+            MagicBaseIntent::CommitFinalize(_) => true,
+            MagicBaseIntent::CommitFinalizeAndUndelegate(_) => true,
         }
     }
 
@@ -461,6 +647,12 @@ impl MagicBaseIntent {
             MagicBaseIntent::BaseActions(_) => None,
             MagicBaseIntent::Commit(t) => Some(t.get_committed_accounts()),
             MagicBaseIntent::CommitAndUndelegate(t) => {
+                Some(t.get_committed_accounts())
+            }
+            MagicBaseIntent::CommitFinalize(t) => {
+                Some(t.get_committed_accounts())
+            }
+            MagicBaseIntent::CommitFinalizeAndUndelegate(t) => {
                 Some(t.get_committed_accounts())
             }
         }
@@ -473,6 +665,12 @@ impl MagicBaseIntent {
             MagicBaseIntent::BaseActions(_) => None,
             MagicBaseIntent::Commit(t) => Some(t.get_committed_accounts_mut()),
             MagicBaseIntent::CommitAndUndelegate(t) => {
+                Some(t.get_committed_accounts_mut())
+            }
+            MagicBaseIntent::CommitFinalize(t) => {
+                Some(t.get_committed_accounts_mut())
+            }
+            MagicBaseIntent::CommitFinalizeAndUndelegate(t) => {
                 Some(t.get_committed_accounts_mut())
             }
         }
@@ -489,6 +687,8 @@ impl MagicBaseIntent {
             MagicBaseIntent::BaseActions(actions) => actions.is_empty(),
             MagicBaseIntent::Commit(t) => t.is_empty(),
             MagicBaseIntent::CommitAndUndelegate(t) => t.is_empty(),
+            MagicBaseIntent::CommitFinalize(t) => t.is_empty(),
+            MagicBaseIntent::CommitFinalizeAndUndelegate(t) => t.is_empty(),
         }
     }
 }
@@ -564,6 +764,32 @@ impl CommitAndUndelegate {
     pub fn is_empty(&self) -> bool {
         self.commit_action.is_empty()
     }
+
+    pub fn has_callbacks(&self) -> bool {
+        let x = self.commit_action.has_callbacks();
+        let y = if let UndelegateType::WithBaseActions(actions) =
+            &self.undelegate_action
+        {
+            actions.iter().any(|el| el.callback.is_some())
+        } else {
+            false
+        };
+
+        x || y
+    }
+
+    pub fn action_count(&self) -> usize {
+        self.commit_action.action_count()
+            + self.undelegate_action.action_count()
+    }
+
+    pub fn get_action_mut(&mut self, index: usize) -> Option<&mut BaseAction> {
+        let commit_count = self.commit_action.action_count();
+        if index < commit_count {
+            return self.commit_action.get_action_mut(index);
+        }
+        self.undelegate_action.get_action_mut(index - commit_count)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -595,6 +821,7 @@ pub struct BaseAction {
     pub escrow_authority: Pubkey,
     pub data_per_program: ProgramArgs,
     pub account_metas_per_program: Vec<ShortAccountMeta>,
+    pub callback: Option<BaseActionCallback>,
 }
 
 impl BaseAction {
@@ -647,6 +874,7 @@ impl BaseAction {
             escrow_authority: *authority_pubkey,
             data_per_program: args.args.into(),
             account_metas_per_program: args.accounts,
+            callback: None,
         })
     }
 }
@@ -833,6 +1061,33 @@ impl CommitType {
             } => committed_accounts.is_empty(),
         }
     }
+
+    pub fn has_callbacks(&self) -> bool {
+        if let Self::WithBaseActions {
+            committed_accounts: _,
+            base_actions,
+        } = self
+        {
+            base_actions.iter().any(|el| el.callback.is_some())
+        } else {
+            false
+        }
+    }
+
+    pub fn action_count(&self) -> usize {
+        match self {
+            Self::Standalone(_) => 0,
+            Self::WithBaseActions { base_actions, .. } => base_actions.len(),
+        }
+    }
+
+    pub fn get_action_mut(&mut self, index: usize) -> Option<&mut BaseAction> {
+        if let Self::WithBaseActions { base_actions, .. } = self {
+            base_actions.get_mut(index)
+        } else {
+            None
+        }
+    }
 }
 
 /// No CommitedAccounts since it is only used with CommitAction.
@@ -843,6 +1098,21 @@ pub enum UndelegateType {
 }
 
 impl UndelegateType {
+    pub fn action_count(&self) -> usize {
+        match self {
+            Self::Standalone => 0,
+            Self::WithBaseActions(actions) => actions.len(),
+        }
+    }
+
+    pub fn get_action_mut(&mut self, index: usize) -> Option<&mut BaseAction> {
+        if let Self::WithBaseActions(actions) = self {
+            actions.get_mut(index)
+        } else {
+            None
+        }
+    }
+
     pub fn try_from_args(
         args: UndelegateTypeArgs,
         context: &ConstructionContext<'_, '_>,
@@ -891,7 +1161,7 @@ pub(crate) fn validate_commit_schedule_permissions(
     parent_program_id: Option<&Pubkey>,
     signers: &HashSet<Pubkey>,
 ) -> Result<(), InstructionError> {
-    let validator_id = validator_authority_id();
+    let validator_id = effective_validator_authority_id();
     let is_eata_token_program_call = parent_program_id
         == Some(&EATA_PROGRAM_ID)
         && committee_owner == &TOKEN_PROGRAM_ID;
@@ -980,6 +1250,7 @@ mod tests {
                 data: vec![],
             },
             account_metas_per_program: vec![],
+            callback: None,
         }
     }
 
@@ -1089,6 +1360,8 @@ mod tests {
                         make_base_action(100_000),
                     ]),
                 }),
+                commit_finalize: None,
+                commit_finalize_and_undelegate: None,
                 standalone_actions: vec![make_base_action(50_000)],
             },
         };

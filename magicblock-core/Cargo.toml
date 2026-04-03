@@ -9,6 +9,7 @@ edition.workspace = true
 
 [dependencies]
 
+console-subscriber = { workspace = true, optional = true }
 tokio = { workspace = true, features = ["sync"] }
 flume = { workspace = true }
 bincode = { workspace = true }
@@ -16,6 +17,7 @@ bincode = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 solana-account = { workspace = true }
 solana-account-decoder = { workspace = true }
+solana-clock = { workspace = true }
 solana-hash = { workspace = true }
 solana-program = { workspace = true }
 solana-pubkey = { workspace = true }
@@ -31,3 +33,6 @@ spl-token-2022 = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["time"] }
 tracing-log = { workspace = true }
+
+[features]
+tokio-console = ["console-subscriber", "tokio/tracing"]

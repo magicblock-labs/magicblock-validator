@@ -2,7 +2,8 @@ use std::{path::Path, process::Child};
 
 use cleanass::{assert, assert_eq};
 use integration_test_tools::{
-    expect, tmpdir::resolve_tmp_dir, unwrap, validator::cleanup,
+    expect, loaded_accounts::LoadedAccounts, tmpdir::resolve_tmp_dir, unwrap,
+    validator::cleanup,
 };
 use solana_sdk::{
     commitment_config::CommitmentConfig,
@@ -13,6 +14,7 @@ use solana_sdk::{
 use test_kit::init_logger;
 use test_ledger_restore::{
     airdrop_and_delegate_accounts, setup_offline_validator,
+    setup_offline_validator_with_authority_override,
     setup_validator_with_local_remote, transfer_lamports,
     wait_for_ledger_persist, TMP_DIR_LEDGER,
 };
@@ -29,8 +31,32 @@ fn test_restore_ledger_with_transferred_account() {
     validator.kill().unwrap();
     debug!("Transfer sig: {transfer_sig}");
 
-    let mut validator =
-        read_ledger(&ledger_path, &keypair2.pubkey(), Some(&transfer_sig));
+    let mut validator = read_ledger(
+        &ledger_path,
+        &keypair2.pubkey(),
+        Some(&transfer_sig),
+        None,
+    );
+    validator.kill().unwrap();
+}
+
+#[test]
+fn test_restore_ledger_with_transferred_account_authority_override() {
+    init_logger!();
+    let (_tmpdir, ledger_path) = resolve_tmp_dir(TMP_DIR_LEDGER);
+
+    let original_authority = LoadedAccounts::default().validator_authority();
+
+    let (mut validator, transfer_sig, _slot, _keypair1, keypair2) =
+        write_ledger(&ledger_path);
+    validator.kill().unwrap();
+
+    let mut validator = read_ledger(
+        &ledger_path,
+        &keypair2.pubkey(),
+        Some(&transfer_sig),
+        Some(original_authority),
+    );
     validator.kill().unwrap();
 }
 
@@ -81,10 +107,19 @@ fn read_ledger(
     ledger_path: &Path,
     pubkey2: &Pubkey,
     transfer_sig1: Option<&Signature>,
+    authority_override: Option<Pubkey>,
 ) -> Child {
     // Launch another validator reusing ledger
-    let (_, mut validator, ctx) =
-        setup_offline_validator(ledger_path, None, None, false, false);
+    let (_, mut validator, ctx) = match authority_override {
+        Some(original) => setup_offline_validator_with_authority_override(
+            ledger_path,
+            None,
+            None,
+            false,
+            original,
+        ),
+        None => setup_offline_validator(ledger_path, None, None, false, false),
+    };
 
     let acc = expect!(
         expect!(ctx.try_ephem_client(), validator).get_account(pubkey2),

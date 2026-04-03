@@ -1,8 +1,10 @@
 use std::sync::OnceLock;
 
-use dlp_api::dlp;
 use integration_test_tools::run_test;
-use magicblock_program::magic_sys::{COMMIT_LIMIT, COMMIT_LIMIT_ERR};
+use magicblock_program::{
+    magic_scheduled_base_intent::{ACTUAL_COMMIT_LIMIT, COMMIT_FEE_LAMPORTS},
+    magic_sys::{COMMIT_LIMIT, COMMIT_LIMIT_ERR},
+};
 use program_schedulecommit::{
     api::{
         init_order_book_instruction,
@@ -11,7 +13,8 @@ use program_schedulecommit::{
         schedule_commit_cpi_with_vault_instruction,
         schedule_commit_with_vault_and_order_book_instruction, UserSeeds,
     },
-    ScheduleCommitCpiWithVaultArgs, ScheduleCommitWithOrderBookArgs,
+    ScheduleCommitCpiWithVaultArgs, ScheduleCommitType,
+    ScheduleCommitWithOrderBookArgs,
 };
 use schedulecommit_client::{
     verify, ScheduleCommitTestContext, ScheduleCommitTestContextFields,
@@ -71,6 +74,7 @@ fn get_prepared() -> &'static ScheduleCommitTestContext {
                 None,
                 &players,
                 &pdas,
+                ScheduleCommitType::Commit,
             );
             let blockhash = ephem_client.get_latest_blockhash().unwrap();
             let tx = Transaction::new_signed_with_payer(
@@ -129,6 +133,7 @@ fn test_schedule_commit_fails_at_commit_limit() {
             None,
             &[committee.0.pubkey()],
             &[committee.1],
+            ScheduleCommitType::Commit,
         );
         let blockhash = ephem_client.get_latest_blockhash().unwrap();
         let tx = Transaction::new_signed_with_payer(
@@ -211,11 +216,6 @@ fn test_schedule_commit_and_undelegate_succeeds_at_commit_limit() {
 // ---------------------------------------------------------------------------
 // Shared context — vault / actual commit limit (ACTUAL_COMMIT_LIMIT = 25)
 // ---------------------------------------------------------------------------
-
-/// Matches `ACTUAL_COMMIT_LIMIT` in `magic_scheduled_base_intent.rs`.
-const ACTUAL_COMMIT_LIMIT: u64 = 25;
-/// Matches `COMMIT_FEE_LAMPORTS` in `magic_scheduled_base_intent.rs`.
-const COMMIT_FEE_LAMPORTS: u64 = 100_000;
 
 const NUM_VAULT_TESTS: usize = 3;
 /// Fresh committee used to verify that a delegated payer without a vault errors.
@@ -445,14 +445,14 @@ fn test_fee_charged_and_vault_credited_after_actual_commit_limit() {
         } = ctx.fields();
 
         let committee = &committees[IDX_OVER_LIMIT];
-        let magic_fee_vault =
-            dlp::pda::magic_fee_vault_pda_from_validator(validator_identity);
+        let magic_fee_vault = dlp_api::pda::magic_fee_vault_pda_from_validator(
+            validator_identity,
+        );
 
         let payer_balance_before =
             ctx.fetch_ephem_account_balance(&payer.pubkey()).unwrap();
-        let vault_balance_before = ctx
-            .fetch_ephem_account_balance(&magic_fee_vault)
-            .unwrap_or(0);
+        let vault_balance_before =
+            ctx.fetch_ephem_account_balance(&magic_fee_vault).unwrap();
 
         let ix = schedule_commit_cpi_with_vault_instruction(
             payer.pubkey(),
@@ -490,9 +490,8 @@ fn test_fee_charged_and_vault_credited_after_actual_commit_limit() {
 
         let payer_balance_after =
             ctx.fetch_ephem_account_balance(&payer.pubkey()).unwrap();
-        let vault_balance_after = ctx
-            .fetch_ephem_account_balance(&magic_fee_vault)
-            .unwrap_or(0);
+        let vault_balance_after =
+            ctx.fetch_ephem_account_balance(&magic_fee_vault).unwrap();
 
         assert_eq!(
             payer_balance_after,
@@ -536,14 +535,14 @@ fn test_schedule_commit_with_vault_and_order_book_action() {
         } = ctx.fields();
 
         let committee = &committees[IDX_OVER_LIMIT];
-        let magic_fee_vault =
-            dlp::pda::magic_fee_vault_pda_from_validator(validator_identity);
+        let magic_fee_vault = dlp_api::pda::magic_fee_vault_pda_from_validator(
+            validator_identity,
+        );
 
         let payer_balance_before =
             ctx.fetch_ephem_account_balance(&payer.pubkey()).unwrap();
-        let vault_balance_before = ctx
-            .fetch_ephem_account_balance(&magic_fee_vault)
-            .unwrap_or(0);
+        let vault_balance_before =
+            ctx.fetch_ephem_account_balance(&magic_fee_vault).unwrap();
 
         // Derive and lazily init the order book PDA on chain.
         let (order_book_pda, _) = Pubkey::find_program_address(
@@ -607,9 +606,8 @@ fn test_schedule_commit_with_vault_and_order_book_action() {
         // Verify that both the commit fee and the action fee were charged.
         let payer_balance_after =
             ctx.fetch_ephem_account_balance(&payer.pubkey()).unwrap();
-        let vault_balance_after = ctx
-            .fetch_ephem_account_balance(&magic_fee_vault)
-            .unwrap_or(0);
+        let vault_balance_after =
+            ctx.fetch_ephem_account_balance(&magic_fee_vault).unwrap();
 
         assert_eq!(
             payer_balance_after,

@@ -1,5 +1,5 @@
 use anyhow::Context;
-use dlp_api::dlp::args::{DelegateArgs, DelegateEphemeralBalanceArgs};
+use dlp_api::args::{DelegateArgs, DelegateEphemeralBalanceArgs};
 use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_rpc_client_api::config::RpcSendTransactionConfig;
@@ -50,7 +50,7 @@ pub fn create_delegate_ixs(
     validator: Option<Pubkey>,
 ) -> Vec<Instruction> {
     let change_owner_ix =
-        system_instruction::assign(&delegatee, &dlp_api::dlp::id());
+        system_instruction::assign(&delegatee, &dlp_api::id());
     let delegate_ix = dlp_api::instruction_builder::delegate(
         payer,
         delegatee,
@@ -70,7 +70,7 @@ pub fn create_delegate_to_any_ixs(
     validator: Option<Pubkey>,
 ) -> Vec<Instruction> {
     let change_owner_ix =
-        system_instruction::assign(&delegatee, &dlp_api::dlp::id());
+        system_instruction::assign(&delegatee, &dlp_api::id());
     let delegate_ix = dlp_api::instruction_builder::delegate_with_any_validator(
         payer,
         delegatee,
@@ -115,11 +115,11 @@ pub fn escrow_pdas(payer: &Pubkey) -> (Pubkey, Pubkey) {
 }
 
 pub fn delegation_record_pubkey(pubkey: &Pubkey) -> Pubkey {
-    dlp_api::dlp::pda::delegation_record_pda_from_delegated_account(pubkey)
+    dlp_api::pda::delegation_record_pda_from_delegated_account(pubkey)
 }
 
 pub fn ephemeral_balance_pda_from_payer_pubkey(payer: &Pubkey) -> Pubkey {
-    dlp_api::dlp::pda::ephemeral_balance_pda_from_payer(payer, 0)
+    dlp_api::pda::ephemeral_balance_pda_from_payer(payer, 0)
 }
 
 // -----------------

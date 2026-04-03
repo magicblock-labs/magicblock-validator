@@ -1,3 +1,4 @@
+use magicblock_core::traits::ActionError;
 use magicblock_metrics::metrics;
 use magicblock_rpc_client::{
     utils::TransactionErrorMapper, MagicBlockRpcClientError,
@@ -221,19 +222,16 @@ impl TransactionStrategyExecutionError {
     ) -> Result<Self, TransactionError> {
         // Commit Nonce order error
         const NONCE_OUT_OF_ORDER: u32 =
-            dlp_api::dlp::error::DlpError::NonceOutOfOrder as u32;
+            dlp_api::error::DlpError::NonceOutOfOrder as u32;
         // Errors when commit state already exists
         const COMMIT_STATE_INVALID_ACCOUNT_OWNER: u32 =
-            dlp_api::dlp::error::DlpError::CommitStateInvalidAccountOwner
-                as u32;
+            dlp_api::error::DlpError::CommitStateInvalidAccountOwner as u32;
         const COMMIT_STATE_ALREADY_INITIALIZED: u32 =
-            dlp_api::dlp::error::DlpError::CommitStateAlreadyInitialized as u32;
+            dlp_api::error::DlpError::CommitStateAlreadyInitialized as u32;
         const COMMIT_RECORD_INVALID_ACCOUNT_OWNER: u32 =
-            dlp_api::dlp::error::DlpError::CommitRecordInvalidAccountOwner
-                as u32;
+            dlp_api::error::DlpError::CommitRecordInvalidAccountOwner as u32;
         const COMMIT_RECORD_ALREADY_INITIALIZED: u32 =
-            dlp_api::dlp::error::DlpError::CommitRecordAlreadyInitialized
-                as u32;
+            dlp_api::error::DlpError::CommitRecordAlreadyInitialized as u32;
 
         match err {
             // Some tx may use too much CPIs and we can handle it in certain cases
@@ -355,6 +353,30 @@ impl From<TaskStrategistError> for IntentExecutorError {
         match value {
             TaskStrategistError::FailedToFitError => Self::FailedToFitError,
             TaskStrategistError::SignerError(err) => Self::SignerError(err),
+        }
+    }
+}
+
+impl From<&TransactionStrategyExecutionError> for ActionError {
+    fn from(value: &TransactionStrategyExecutionError) -> Self {
+        if let TransactionStrategyExecutionError::ActionsError(err, signature) =
+            value
+        {
+            Self::ActionsError(err.clone(), *signature)
+        } else {
+            Self::IntentFailedError(value.to_string())
+        }
+    }
+}
+
+impl From<&IntentExecutorError> for ActionError {
+    fn from(value: &IntentExecutorError) -> Self {
+        match value {
+            IntentExecutorError::FailedToCommitError { err, .. }
+            | IntentExecutorError::FailedToFinalizeError { err, .. } => {
+                err.into()
+            }
+            err => ActionError::IntentFailedError(err.to_string()),
         }
     }
 }

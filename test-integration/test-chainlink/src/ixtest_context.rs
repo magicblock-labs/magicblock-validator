@@ -309,7 +309,7 @@ impl IxtestContext {
             self.validator_kp.pubkey(),
             counter_pda,
             program_flexi_counter::id(),
-            dlp_api::dlp::args::CommitStateArgs {
+            dlp_api::args::CommitStateArgs {
                 nonce: 1,
                 lamports: 1_000_000,
                 allow_undelegation: true,

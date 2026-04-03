@@ -282,7 +282,18 @@ fn run_table_mania_and_committor_tests(
             let test_committor_dir =
                 format!("{}/../{}", manifest_dir, "test-committor-service");
             eprintln!("Running committor tests in {}", test_committor_dir);
-            match run_test(test_committor_dir, Default::default()) {
+            match run_test(
+                test_committor_dir,
+                RunTestConfig::default(),
+                // RunTestConfig {
+                //     package: Some("schedulecommit-committor-service"),
+                //     test_file: Some("test_ix_commit_local"),
+                //     test_fn_name: Some(
+                //         "test_ix_execute_intent_bundle_commit_and_commit_finalize_mixed",
+                //         //"test_ix_execute_intent_bundle_commit_and_cau_simultaneously_union_of_accounts",
+                //     ),
+                // },
+            ) {
                 Ok(output) => output,
                 Err(err) => {
                     eprintln!("Failed to run committor: {:?}", err);
@@ -461,10 +472,12 @@ fn run_cloning_tests(
         eprintln!("Running cloning tests in {}", test_cloning_dir);
         let output = match run_test(
             test_cloning_dir,
-            RunTestConfig {
-                package: Some("test-cloning"),
-                test: Some("10_post_delegation_token_transfer"),
-            },
+            RunTestConfig::default(),
+            // RunTestConfig {
+            //     package: Some("test-cloning"),
+            //     test_file: Some("10_post_delegation_token_transfer"),
+            //     test_fn_name: None,
+            // },
         ) {
             Ok(output) => output,
             Err(err) => {
@@ -688,7 +701,17 @@ fn run_schedule_intents_tests(
         let test_intents_dir =
             format!("{}/../{}", manifest_dir, "test-schedule-intent");
         eprintln!("Running schedule intents tests in {}", test_intents_dir);
-        let test_output = match run_test(test_intents_dir, Default::default()) {
+        let test_output = match run_test(
+            test_intents_dir,
+            RunTestConfig::default(),
+            // RunTestConfig {
+            //     package: Some("test-schedule-intent"),
+            //     test_file: Some("test_schedule_intents"),
+            //     test_fn_name: Some(
+            //         "test_intent_bundle_commit_and_commit_finalize",
+            //     ),
+            // },
+        ) {
             Ok(output) => output,
             Err(err) => {
                 eprintln!("Failed to run issues: {:?}", err);
@@ -777,7 +800,8 @@ fn assert_cargo_tests_passed(output: process::Output, test_name: &str) {
 #[derive(Default)]
 struct RunTestConfig<'a> {
     package: Option<&'a str>,
-    test: Option<&'a str>,
+    test_file: Option<&'a str>,
+    test_fn_name: Option<&'a str>,
 }
 
 fn run_test(
@@ -793,8 +817,11 @@ fn run_test(
     if let Some(package) = config.package {
         cmd.arg("-p").arg(package);
     }
-    if let Some(test) = config.test {
-        cmd.arg("--test").arg(test);
+    if let Some(test_file) = config.test_file {
+        cmd.arg("--test").arg(test_file);
+    }
+    if let Some(test_fn_name) = config.test_fn_name {
+        cmd.arg(test_fn_name);
     }
     cmd.arg("--").arg("--test-threads=1").arg("--nocapture");
     cmd.current_dir(manifest_dir.clone());

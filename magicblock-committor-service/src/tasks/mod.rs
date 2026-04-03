@@ -1,4 +1,4 @@
-use dlp_api::dlp::{args::CallHandlerArgs, AccountSizeClass};
+use dlp_api::{args::CallHandlerArgs, AccountSizeClass};
 use magicblock_committor_program::{
     instruction_builder::{
         close_buffer::{create_close_ix, CreateCloseIxArgs},
@@ -10,13 +10,13 @@ use magicblock_committor_program::{
     },
     pdas, ChangesetChunks, Chunks,
 };
-use magicblock_core::intent::CommittedAccount;
+use magicblock_core::intent::BaseActionCallback;
 use magicblock_metrics::metrics::LabelValue;
 use magicblock_program::magic_scheduled_base_intent::BaseAction;
-use solana_account::Account;
 use solana_instruction::{AccountMeta, Instruction};
 use solana_pubkey::Pubkey;
 
+pub mod commit_finalize_task;
 pub mod commit_task;
 pub mod task_builder;
 pub mod task_strategist;
@@ -24,11 +24,14 @@ pub mod utils;
 
 pub use task_builder::TaskBuilderImpl;
 
-use crate::tasks::commit_task::CommitTask;
+use crate::tasks::{
+    commit_finalize_task::CommitFinalizeTask, commit_task::CommitTask,
+};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum TaskType {
     Commit,
+    CommitFinalize,
     Finalize,
     Undelegate,
     Action,
@@ -43,6 +46,7 @@ pub enum TaskStrategy {
 #[derive(Clone, Debug)]
 pub enum BaseTaskImpl {
     Commit(CommitTask),
+    CommitFinalize(CommitFinalizeTask),
     Finalize(FinalizeTask),
     Undelegate(UndelegateTask),
     BaseAction(BaseActionTask),
@@ -50,12 +54,13 @@ pub enum BaseTaskImpl {
 
 impl BaseTask for BaseTaskImpl {
     fn program_id(&self) -> Pubkey {
-        dlp_api::dlp::id()
+        dlp_api::id()
     }
 
     fn instruction(&self, validator: &Pubkey) -> Instruction {
         match self {
             Self::Commit(value) => value.instruction(validator),
+            Self::CommitFinalize(value) => value.instruction(validator),
             Self::Finalize(value) => value.instruction(validator),
             Self::Undelegate(value) => value.instruction(validator),
             Self::BaseAction(value) => value.instruction(validator),
@@ -65,6 +70,7 @@ impl BaseTask for BaseTaskImpl {
     fn try_optimize_tx_size(&mut self) -> bool {
         match self {
             Self::Commit(value) => value.try_optimize_tx_size(),
+            Self::CommitFinalize(value) => value.try_optimize_tx_size(),
             _ => false,
         }
     }
@@ -72,6 +78,7 @@ impl BaseTask for BaseTaskImpl {
     fn compute_units(&self) -> u32 {
         match self {
             Self::Commit(value) => value.compute_units(),
+            Self::CommitFinalize(value) => value.compute_units(),
             Self::BaseAction(value) => value.compute_units(),
             Self::Finalize(_) => 70_000,
             Self::Undelegate(_) => 70_000,
@@ -81,6 +88,7 @@ impl BaseTask for BaseTaskImpl {
     fn accounts_size_budget(&self) -> u32 {
         match self {
             Self::Commit(value) => value.accounts_size_budget(),
+            Self::CommitFinalize(value) => value.accounts_size_budget(),
             Self::BaseAction(value) => value.accounts_size_budget(),
             Self::Finalize(_) => {
                 dlp_api::instruction_builder::finalize_size_budget(
@@ -100,6 +108,9 @@ impl BaseTaskImpl {
     pub fn strategy(&self) -> TaskStrategy {
         match self {
             Self::Commit(task) if task.is_buffer() => TaskStrategy::Buffer,
+            Self::CommitFinalize(task) if task.is_buffer() => {
+                TaskStrategy::Buffer
+            }
             _ => TaskStrategy::Args,
         }
     }
@@ -113,6 +124,13 @@ impl LabelValue for BaseTaskImpl {
                     "buffer_commit"
                 } else {
                     "args_commit"
+                }
+            }
+            Self::CommitFinalize(task) => {
+                if task.is_buffer() {
+                    "buffer_commit_finalize"
+                } else {
+                    "args_commit_finalize"
                 }
             }
             Self::Finalize(_) => "args_finalize",
@@ -152,14 +170,6 @@ pub trait BaseTask: Send + Sync + Clone {
 
     /// Returns the max accounts-data-size that can be used with SetLoadedAccountsDataSizeLimit
     fn accounts_size_budget(&self) -> u32;
-}
-
-#[derive(Clone, Debug)]
-pub struct CommitDiffTask {
-    pub commit_id: u64,
-    pub allow_undelegation: bool,
-    pub committed_account: CommittedAccount,
-    pub base_account: Account,
 }
 
 #[derive(Clone, Debug)]
@@ -229,6 +239,20 @@ impl BaseActionTask {
 
     pub fn compute_units(&self) -> u32 {
         self.action().compute_units
+    }
+
+    pub fn extract_callback(&mut self) -> Option<BaseActionCallback> {
+        match self {
+            BaseActionTask::V1(value) => value.action.callback.take(),
+            BaseActionTask::V2(value) => value.action.callback.take(),
+        }
+    }
+
+    pub fn has_callback(&self) -> bool {
+        match self {
+            BaseActionTask::V1(value) => value.action.callback.is_some(),
+            BaseActionTask::V2(value) => value.action.callback.is_some(),
+        }
     }
 
     pub fn accounts_size_budget(&self) -> u32 {
@@ -368,7 +392,7 @@ pub struct PreparationTask {
     pub chunks: Chunks,
 
     // TODO(edwin): replace with reference once done
-    pub committed_data: Vec<u8>,
+    pub buffer_data: Vec<u8>,
 }
 
 impl PreparationTask {
@@ -381,7 +405,7 @@ impl PreparationTask {
         // // https://github.com/near/borsh-rs/blob/f1b75a6b50740bfb6231b7d0b1bd93ea58ca5452/borsh/src/ser/helpers.rs#L59
         let chunks_account_size =
             borsh::object_length(&self.chunks).unwrap() as u64;
-        let buffer_account_size = self.committed_data.len() as u64;
+        let buffer_account_size = self.buffer_data.len() as u64;
 
         let (instruction, _, _) = create_init_ix(CreateInitIxArgs {
             authority: *authority,
@@ -404,7 +428,7 @@ impl PreparationTask {
     /// Returns realloc instruction required for Buffer preparation
     #[allow(clippy::let_and_return)]
     pub fn realloc_instructions(&self, authority: &Pubkey) -> Vec<Instruction> {
-        let buffer_account_size = self.committed_data.len() as u64;
+        let buffer_account_size = self.buffer_data.len() as u64;
         let realloc_instructions =
             create_realloc_buffer_ixs(CreateReallocBufferIxArgs {
                 authority: *authority,
@@ -426,7 +450,7 @@ impl PreparationTask {
     pub fn write_instructions(&self, authority: &Pubkey) -> Vec<Instruction> {
         let chunks_iter =
             ChangesetChunks::new(&self.chunks, self.chunks.chunk_size())
-                .iter(&self.committed_data);
+                .iter(&self.buffer_data);
         let write_instructions = chunks_iter
             .map(|chunk| {
                 create_write_ix(CreateWriteIxArgs {
@@ -607,6 +631,7 @@ mod serialization_safety_test {
                     escrow_index: 1,
                 },
                 compute_units: 10_000,
+                callback: None,
             },
         })
         .into();
@@ -628,6 +653,7 @@ mod serialization_safety_test {
                         escrow_index: 2,
                     },
                     compute_units: 15_000,
+                    callback: None,
                 },
                 source_program: Pubkey::new_unique(),
             })

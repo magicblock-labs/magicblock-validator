@@ -1,4 +1,4 @@
-use dlp_api::dlp::state::DelegationRecord;
+use dlp_api::state::DelegationRecord;
 use solana_pubkey::Pubkey;
 use tracing::*;
 
@@ -83,7 +83,7 @@ pub(crate) fn account_still_undelegating_on_chain(
 
 #[cfg(test)]
 mod tests {
-    use dlp_api::dlp::state::DelegationRecord;
+    use dlp_api::state::DelegationRecord;
     use solana_pubkey::Pubkey;
 
     use super::*;

@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
-dlp-api = { workspace = true }
+magicblock-delegation-program-api = { workspace = true }
 anyhow = { workspace = true }
 borsh = { workspace = true }
 integration-test-tools = { workspace = true }

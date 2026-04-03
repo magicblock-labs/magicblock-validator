@@ -120,6 +120,9 @@ impl TransactionPreparator for TransactionPreparatorImpl {
             .iter()
             .filter_map(|task| match task {
                 BaseTaskImpl::Commit(commit_task) => commit_task.stage(),
+                BaseTaskImpl::CommitFinalize(commit_finalize_task) => {
+                    commit_finalize_task.stage()
+                }
                 _ => None,
             })
             .filter_map(|stage| match stage {

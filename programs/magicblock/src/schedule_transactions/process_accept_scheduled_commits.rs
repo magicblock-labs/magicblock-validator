@@ -11,7 +11,7 @@ use crate::{
     utils::accounts::{
         get_instruction_account_with_idx, get_instruction_pubkey_with_idx,
     },
-    validator::validator_authority_id,
+    validator::effective_validator_authority_id,
     MagicContext, TransactionScheduler,
 };
 
@@ -59,7 +59,7 @@ pub fn process_accept_scheduled_commits(
         transaction_context,
         VALIDATOR_AUTHORITY_IDX,
     )?;
-    let validator_auth = validator_authority_id();
+    let validator_auth = effective_validator_authority_id();
     if !provided_validator_auth.eq(&validator_auth) {
         ic_msg!(
              invoke_context,

@@ -736,7 +736,7 @@ impl<H: StreamHandle, S: StreamFactory<H>> ChainLaserActor<H, S> {
 
         let should_forward = self.stream_manager.is_subscribed(&pubkey)
             || matches!(source, AccountUpdateSource::Program)
-                && owner.eq(&dlp_api::dlp::id())
+                && owner.eq(&dlp_api::id())
                 && !is_internal_dlp_account_data(&account.data);
         if !should_forward {
             return;
