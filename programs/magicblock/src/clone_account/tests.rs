@@ -405,6 +405,100 @@ fn test_clone_continue_rejects_offset_overflow() {
 }
 
 // -----------------
+// EvictAccount
+// -----------------
+
+#[test]
+fn test_evict_account_succeeds() {
+    init_logger!();
+    let pubkey = Pubkey::new_unique();
+    let accounts = setup_with_account(pubkey, 500, 0);
+
+    let ix = InstructionUtils::evict_account_instruction(pubkey);
+    let mut result = process_instruction(
+        &ix.data,
+        tx_accounts(accounts, &ix.accounts),
+        ix.accounts,
+        Ok(()),
+    );
+
+    let authority = result.drain(0..1).next().unwrap();
+    assert_eq!(authority.lamports(), AUTHORITY_BALANCE + 500);
+
+    let account = result.drain(0..1).next().unwrap();
+    assert_eq!(account.lamports(), 0);
+    assert_eq!(account.owner(), &Pubkey::default());
+    assert_eq!(account.data().len(), 0);
+    assert!(account.ephemeral());
+    assert!(!account.delegated());
+    assert!(!account.confined());
+}
+
+#[test]
+fn test_evict_account_rejects_delegated() {
+    init_logger!();
+    let pubkey = Pubkey::new_unique();
+    let mut account = AccountSharedData::new(100, 0, &pubkey);
+    account.set_delegated(true);
+    let mut accounts = HashMap::new();
+    accounts.insert(pubkey, account);
+    ensure_started_validator(&mut accounts, None);
+
+    let ix = InstructionUtils::evict_account_instruction(pubkey);
+    process_instruction(
+        &ix.data,
+        tx_accounts(accounts, &ix.accounts),
+        ix.accounts,
+        Err(MagicBlockProgramError::AccountIsDelegated.into()),
+    );
+}
+
+#[test]
+fn test_evict_account_rejects_undelegating() {
+    init_logger!();
+    let pubkey = Pubkey::new_unique();
+    let mut account = AccountSharedData::new(100, 0, &pubkey);
+    account.set_undelegating(true);
+    let mut accounts = HashMap::new();
+    accounts.insert(pubkey, account);
+    ensure_started_validator(&mut accounts, None);
+
+    let ix = InstructionUtils::evict_account_instruction(pubkey);
+    process_instruction(
+        &ix.data,
+        tx_accounts(accounts, &ix.accounts),
+        ix.accounts,
+        Err(MagicBlockProgramError::AccountIsDelegated.into()),
+    );
+}
+
+#[test]
+fn test_evict_account_rejects_wrong_signer() {
+    init_logger!();
+    let pubkey = Pubkey::new_unique();
+    let wrong_signer = Pubkey::new_unique();
+    let mut accounts = setup_with_account(pubkey, 100, 0);
+    accounts
+        .insert(wrong_signer, AccountSharedData::new(1000, 0, &wrong_signer));
+
+    let ix = solana_instruction::Instruction::new_with_bincode(
+        crate::id(),
+        &MagicBlockInstruction::EvictAccount { pubkey },
+        vec![
+            AccountMeta::new(wrong_signer, true),
+            AccountMeta::new(pubkey, false),
+        ],
+    );
+
+    process_instruction(
+        &ix.data,
+        tx_accounts(accounts, &ix.accounts),
+        ix.accounts,
+        Err(InstructionError::MissingRequiredSignature),
+    );
+}
+
+// -----------------
 // CleanupPartialClone
 // -----------------
 

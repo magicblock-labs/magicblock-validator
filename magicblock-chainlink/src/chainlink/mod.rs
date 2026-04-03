@@ -83,8 +83,10 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
         let removed_accounts_sub = if let Some(fetch_cloner) = &fetch_cloner {
             let removed_accounts_rx =
                 fetch_cloner.try_get_removed_account_rx()?;
+            let cloner = fetch_cloner.cloner();
             Some(Self::subscribe_account_removals(
                 accounts_bank,
+                cloner,
                 removed_accounts_rx,
             ))
         } else {
@@ -231,45 +233,52 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
 
     fn subscribe_account_removals(
         accounts_bank: &Arc<V>,
+        cloner: &Arc<C>,
         mut removed_accounts_rx: mpsc::Receiver<Pubkey>,
     ) -> task::JoinHandle<()> {
         let accounts_bank = accounts_bank.clone();
+        let cloner = cloner.clone();
 
         task::spawn(async move {
             while let Some(pubkey) = removed_accounts_rx.recv().await {
-                accounts_bank.remove_account_conditionally(
-                    &pubkey,
-                    |account| {
-                        // Accounts that are still undelegating need to be kept in the bank
-                        // until the undelegation completes on chain.
-                        // Otherwise we might loose data in case the undelegation fails to
-                        // complete.
-                        // Another issue we avoid this way is that an account update received
-                        // before the account completes undelegation would overwrite the in-bank
-                        // account and thus also set unedelegating to false.
+                // Pre-flight check: skip if delegated/undelegating
+                // (the processor enforces this too, but this avoids
+                // the overhead of building and submitting a doomed tx)
+                let should_evict = match accounts_bank.get_account(&pubkey) {
+                    Some(account) => {
                         let undelegating = account.undelegating();
                         let delegated = account.delegated();
-                        let remove = !undelegating && !delegated;
-                        if tracing::enabled!(tracing::Level::TRACE) {
-                            if remove {
-                                trace!(
-                                    pubkey = %pubkey,
-                                    "Removing unsubscribed account from bank"
-                                );
-                            } else {
-                                let owner = account.owner();
-                                trace!(
-                                    pubkey = %pubkey,
-                                    undelegating,
-                                    delegated,
-                                    owner = %owner,
-                                    "Keeping unsubscribed account in bank"
-                                );
-                            }
+                        let evict = !undelegating && !delegated;
+                        if !evict {
+                            trace!(
+                                pubkey = %pubkey,
+                                undelegating,
+                                delegated,
+                                owner = %account.owner(),
+                                "Keeping unsubscribed account \
+                                 in bank \
+                                 (delegated/undelegating)"
+                            );
                         }
-                        remove
-                    },
+                        evict
+                    }
+                    None => false,
+                };
+                if !should_evict {
+                    continue;
+                }
+
+                trace!(
+                    pubkey = %pubkey,
+                    "Submitting eviction transaction"
                 );
+                if let Err(err) = cloner.evict_account(pubkey).await {
+                    warn!(
+                        pubkey = %pubkey,
+                        error = ?err,
+                        "Failed to submit eviction transaction"
+                    );
+                }
             }
             warn!("Removed accounts channel closed");
         })
