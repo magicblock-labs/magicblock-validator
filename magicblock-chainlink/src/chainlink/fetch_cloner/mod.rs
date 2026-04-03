@@ -78,6 +78,63 @@ enum CloneClaim {
     Waiter(oneshot::Receiver<CloneCompletion>),
 }
 
+/// Drop guard that calls `finish_pending_clone` with `Failed` unless
+/// explicitly dismissed. Protects against task cancellation or panics
+/// leaving waiters hanging forever.
+struct PendingCloneGuard {
+    pending_clones: Arc<
+        Mutex<
+            hash_map::HashMap<CloneKey, Vec<oneshot::Sender<CloneCompletion>>>,
+        >,
+    >,
+    key: CloneKey,
+    dismissed: bool,
+}
+
+impl PendingCloneGuard {
+    fn new(
+        pending_clones: Arc<
+            Mutex<
+                hash_map::HashMap<
+                    CloneKey,
+                    Vec<oneshot::Sender<CloneCompletion>>,
+                >,
+            >,
+        >,
+        pubkey: Pubkey,
+        slot: u64,
+    ) -> Self {
+        Self {
+            pending_clones,
+            key: (pubkey, slot),
+            dismissed: false,
+        }
+    }
+
+    /// Mark the guard as dismissed so `Drop` becomes a no-op.
+    fn dismiss(&mut self) {
+        self.dismissed = true;
+    }
+}
+
+impl Drop for PendingCloneGuard {
+    fn drop(&mut self) {
+        if self.dismissed {
+            return;
+        }
+        let waiters = {
+            let mut map = self
+                .pending_clones
+                .lock()
+                .expect("pending_clones mutex poisoned");
+            map.remove(&self.key).unwrap_or_default()
+        };
+        for tx in waiters {
+            let _ = tx.send(CloneCompletion::Failed);
+        }
+    }
+}
+
 pub struct FetchCloner<T, U, V, C>
 where
     T: ChainRpcClient,
@@ -271,6 +328,11 @@ where
 
         match self.claim_pending_clone(pubkey, slot) {
             CloneClaim::Owner => {
+                let mut guard = PendingCloneGuard::new(
+                    Arc::clone(&self.pending_clones),
+                    pubkey,
+                    slot,
+                );
                 let result = self.cloner.clone_account(request).await;
                 let completion = if result.is_ok() {
                     CloneCompletion::Success
@@ -278,6 +340,7 @@ where
                     CloneCompletion::Failed
                 };
                 self.finish_pending_clone(pubkey, slot, completion);
+                guard.dismiss();
                 result
             }
             CloneClaim::Waiter(rx) => match rx.await {
