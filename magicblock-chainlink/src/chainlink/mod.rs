@@ -188,7 +188,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
                 *account.owner() != feature::ID
             };
             if should_remove {
-                error!(
+                trace!(
                     pubkey = %pubkey,
                     account=%format!("{account:#?}"),
                     "Removing non-delegated, non-DLP-owned account"
