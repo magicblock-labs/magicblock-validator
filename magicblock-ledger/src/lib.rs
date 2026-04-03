@@ -10,7 +10,7 @@ use solana_hash::Hash;
 pub use store::api::{Ledger, SignatureInfosForAddress};
 use tokio::sync::broadcast;
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct LatestBlockInner {
     pub slot: u64,
     pub blockhash: Hash,
