@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use magicblock_core::link::transactions::TransactionSimulationResult;
 use solana_message::inner_instruction::InnerInstructions;
 use solana_rpc_client_api::{
     config::RpcSimulateTransactionConfig,
@@ -60,7 +61,7 @@ impl HttpDispatcher {
             .simulate(transaction.txn)
             .await
             .map_err(RpcError::transaction_simulation)?;
-        let magicblock_core::link::transactions::TransactionSimulationResult {
+        let TransactionSimulationResult {
             result,
             logs,
             post_simulation_accounts,
