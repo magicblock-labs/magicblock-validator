@@ -73,7 +73,7 @@ impl RiskService {
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS address_risk_cache (
                 address TEXT NOT NULL,
-                risk_score REAL,
+                risk_score INTEGER NOT NULL,
                 fetched_at_unix_s INTEGER NOT NULL,
                 PRIMARY KEY address
             )",
