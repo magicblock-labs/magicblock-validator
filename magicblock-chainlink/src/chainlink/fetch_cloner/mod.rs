@@ -131,6 +131,7 @@ where
     C: Cloner,
 {
     /// Create FetchCloner with subscription updates properly connected
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         remote_account_provider: &Arc<RemoteAccountProvider<T, U>>,
         accounts_bank: &Arc<V>,
@@ -527,7 +528,7 @@ where
             return Ok(());
         };
 
-        let signers = delegation_actions
+        let mut signers = delegation_actions
             .iter()
             .flat_map(|instruction| {
                 instruction
@@ -535,18 +536,17 @@ where
                     .iter()
                     .filter_map(|meta| {
                         if meta.is_signer {
-                            Some(meta.pubkey)
+                            Some(meta.pubkey.to_string())
                         } else {
                             None
                         }
                     })
                     .collect::<Vec<_>>()
             })
-            .collect::<HashSet<_>>();
+            .collect::<Vec<_>>();
+        signers.dedup();
 
-        for signer in signers {
-            risk_service.check_address(&signer.to_string()).await?;
-        }
+        risk_service.check_addresses(&signers).await?;
 
         Ok(())
     }

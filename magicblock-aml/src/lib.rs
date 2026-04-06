@@ -3,9 +3,10 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
+use futures_util::future::try_join_all;
 use magicblock_config::config::RiskConfig;
 use reqwest::Client;
-use rusqlite::{params, Connection};
+use rusqlite::{fallible_iterator::FallibleIterator, params, Connection};
 use serde_json::Value;
 use thiserror::Error;
 use tokio::sync::Mutex;
@@ -38,11 +39,15 @@ pub enum RiskError {
     Sqlite(#[from] rusqlite::Error),
     #[error("Risk score not found in response")]
     RiskScoreNotFound,
-    #[error("Address {0} is high risk")]
-    HighRiskAddress(String),
+    #[error("Addresses {0:?} are high risk")]
+    HighRiskAddresses(Vec<String>),
 }
 
 pub type RiskResult<T> = Result<T, RiskError>;
+pub type PartitionedCache<'a> = (
+    Vec<(&'a Option<u64>, &'a String)>,
+    Vec<(&'a Option<u64>, &'a String)>,
+);
 
 pub struct RiskService {
     client: Client,
@@ -94,78 +99,112 @@ impl RiskService {
         }))
     }
 
-    pub async fn check_address(&self, address: &str) -> RiskResult<()> {
-        if let Some(cached) = self.read_cache(address).await? {
-            if cached >= self.risk_score_threshold {
-                return Err(RiskError::HighRiskAddress(address.to_string()));
-            } else {
-                return Ok(());
-            }
+    pub async fn check_addresses(
+        &self,
+        addresses: &[String],
+    ) -> RiskResult<()> {
+        let cache = self.read_cache(addresses).await?;
+        let (cached_scores, uncached_addresses): PartitionedCache = cache
+            .iter()
+            .zip(addresses)
+            .partition(|(score, _address)| score.is_some());
+
+        let risky_cached_addresses = cached_scores
+            .iter()
+            .filter_map(|(score, address)| {
+                if score.unwrap_or(0) >= self.risk_score_threshold {
+                    Some(address.to_string())
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
+        if !risky_cached_addresses.is_empty() {
+            return Err(RiskError::HighRiskAddresses(risky_cached_addresses));
         }
 
-        let response = self
-            .client
-            .get(format!("{}/risk/address", self.base_url))
-            .query(&[("network", "solana"), ("address", address)])
-            .bearer_auth(&self.api_key)
-            .send()
-            .await?
-            .error_for_status()?
-            .text()
+        let scores =
+            try_join_all(uncached_addresses.iter().map(|(_, address)| async {
+                let response = self
+                    .client
+                    .get(format!("{}/risk/address", self.base_url))
+                    .query(&[("network", "solana"), ("address", address)])
+                    .bearer_auth(&self.api_key)
+                    .send()
+                    .await?
+                    .error_for_status()?
+                    .text()
+                    .await?;
+
+                let body: Value = serde_json::from_str(&response)?;
+                let score = body
+                    .get("riskScore")
+                    .and_then(|v| v.as_u64())
+                    .ok_or(RiskError::RiskScoreNotFound)?;
+                Ok::<_, RiskError>((address.to_string(), score))
+            }))
             .await?;
 
-        let body: Value = serde_json::from_str(&response)?;
-        let score = body
-            .get("riskScore")
-            .and_then(|v| v.as_u64())
-            .ok_or(RiskError::RiskScoreNotFound)?;
-        self.write_cache(address, score).await?;
+        self.write_cache(&scores).await?;
 
-        if score >= self.risk_score_threshold {
-            return Err(RiskError::HighRiskAddress(address.to_string()));
+        let risky_addresses = scores
+            .iter()
+            .filter_map(|(address, score)| {
+                if *score >= self.risk_score_threshold {
+                    Some(address.to_string())
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
+        if !risky_addresses.is_empty() {
+            return Err(RiskError::HighRiskAddresses(risky_addresses));
         }
 
         Ok(())
     }
 
-    async fn read_cache(&self, address: &str) -> RiskResult<Option<u64>> {
+    async fn read_cache(
+        &self,
+        addresses: &[String],
+    ) -> RiskResult<Vec<Option<u64>>> {
         let now = now_unix_seconds();
         let max_age = self.cache_ttl.as_secs() as i64;
         let conn = self.cache.lock().await;
         let mut stmt = conn.prepare(
             "SELECT risk_score, fetched_at_unix_s
              FROM address_risk_cache
-             WHERE address = ?1",
+             WHERE address IN (?1)",
         )?;
-        let mut rows = stmt.query(params![address])?;
-        let Some(row) = rows.next()? else {
-            return Ok(None);
-        };
-
-        let fetched_at: i64 = row.get(1)?;
-        if now.saturating_sub(fetched_at) > max_age {
-            return Ok(None);
-        }
-
-        let risk_score: u64 = row.get(0)?;
-        Ok(Some(risk_score))
+        let rows = stmt
+            .query(params![addresses.join(",")])?
+            .map(|row| {
+                let risk_score = row.get::<_, u64>(0)?;
+                let fetched_at = row.get::<_, i64>(1)?;
+                if now.saturating_sub(fetched_at) > max_age {
+                    Ok(None)
+                } else {
+                    Ok(Some(risk_score))
+                }
+            })
+            .collect::<Vec<_>>()?;
+        Ok(rows)
     }
 
-    async fn write_cache(
-        &self,
-        address: &str,
-        risk_score: u64,
-    ) -> RiskResult<()> {
+    async fn write_cache(&self, values: &[(String, u64)]) -> RiskResult<()> {
         let conn = self.cache.lock().await;
-        conn.execute(
-            "INSERT INTO address_risk_cache
-                (address, risk_score, fetched_at_unix_s)
-             VALUES (?1, ?2, ?3)
-             ON CONFLICT(address) DO UPDATE SET
-                risk_score = excluded.risk_score,
-                fetched_at_unix_s = excluded.fetched_at_unix_s",
-            params![address, risk_score, now_unix_seconds(),],
-        )?;
+        let now = now_unix_seconds();
+        for (address, risk_score) in values {
+            conn.execute(
+                "INSERT INTO address_risk_cache
+                    (address, risk_score, fetched_at_unix_s)
+                 VALUES (?1, ?2, ?3)
+                 ON CONFLICT(address) DO UPDATE SET
+                    risk_score = excluded.risk_score,
+                    fetched_at_unix_s = excluded.fetched_at_unix_s",
+                params![address, risk_score, now],
+            )?;
+        }
         Ok(())
     }
 }

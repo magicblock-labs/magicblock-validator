@@ -141,7 +141,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
             let provider = Arc::new(provider);
             let risk_service = RiskService::try_from_config(
                 &chainlink_config.risk,
-                &ledger_path,
+                ledger_path,
             )?
             .map(Arc::new);
             let fetch_cloner = FetchCloner::new(

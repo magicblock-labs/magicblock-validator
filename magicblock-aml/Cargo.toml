@@ -12,6 +12,7 @@ name = "magicblock_aml"
 path = "src/lib.rs"
 
 [dependencies]
+futures-util = { workspace = true }
 magicblock-config = { workspace = true }
 reqwest = { workspace = true, features = ["json"] }
 rusqlite = { workspace = true }

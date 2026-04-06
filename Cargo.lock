@@ -3161,6 +3161,7 @@ dependencies = [
 name = "magicblock-aml"
 version = "0.8.6"
 dependencies = [
+ "futures-util",
  "magicblock-config",
  "reqwest",
  "rusqlite",
