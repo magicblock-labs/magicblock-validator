@@ -1,9 +1,9 @@
+use magicblock_aml::RiskError;
 use solana_program::program_error::ProgramError;
 use solana_pubkey::Pubkey;
 use thiserror::Error;
 
 use crate::remote_account_provider::RemoteAccountProviderError;
-use magicblock_aml::RiskError;
 
 pub type ChainlinkResult<T> = std::result::Result<T, ChainlinkError>;
 
