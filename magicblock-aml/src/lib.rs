@@ -38,6 +38,8 @@ pub enum RiskError {
     Sqlite(#[from] rusqlite::Error),
     #[error("Risk score not found in response")]
     RiskScoreNotFound,
+    #[error("Address {0} is high risk")]
+    HighRiskAddress(String),
 }
 
 pub type RiskResult<T> = Result<T, RiskError>;
@@ -92,12 +94,13 @@ impl RiskService {
         }))
     }
 
-    pub async fn check_address(
-        &self,
-        address: &str,
-    ) -> RiskResult<AddressRiskAssessment> {
+    pub async fn check_address(&self, address: &str) -> RiskResult<()> {
         if let Some(cached) = self.read_cache(address).await? {
-            return Ok(cached);
+            if cached >= self.risk_score_threshold {
+                return Err(RiskError::HighRiskAddress(address.to_string()));
+            } else {
+                return Ok(());
+            }
         }
 
         let response = self
@@ -112,15 +115,20 @@ impl RiskService {
             .await?;
 
         let body: Value = serde_json::from_str(&response)?;
-        let assessment = self.assessment_from_value(&body)?;
-        self.write_cache(address, &assessment).await?;
-        Ok(assessment)
+        let score = body
+            .get("riskScore")
+            .and_then(|v| v.as_u64())
+            .ok_or(RiskError::RiskScoreNotFound)?;
+        self.write_cache(address, score).await?;
+
+        if score >= self.risk_score_threshold {
+            return Err(RiskError::HighRiskAddress(address.to_string()));
+        }
+
+        Ok(())
     }
 
-    async fn read_cache(
-        &self,
-        address: &str,
-    ) -> RiskResult<Option<AddressRiskAssessment>> {
+    async fn read_cache(&self, address: &str) -> RiskResult<Option<u64>> {
         let now = now_unix_seconds();
         let max_age = self.cache_ttl.as_secs() as i64;
         let conn = self.cache.lock().await;
@@ -140,16 +148,13 @@ impl RiskService {
         }
 
         let risk_score: u64 = row.get(0)?;
-        Ok(Some(AddressRiskAssessment {
-            is_high_risk: risk_score >= self.risk_score_threshold,
-            risk_score,
-        }))
+        Ok(Some(risk_score))
     }
 
     async fn write_cache(
         &self,
         address: &str,
-        assessment: &AddressRiskAssessment,
+        risk_score: u64,
     ) -> RiskResult<()> {
         let conn = self.cache.lock().await;
         conn.execute(
@@ -159,24 +164,9 @@ impl RiskService {
              ON CONFLICT(address) DO UPDATE SET
                 risk_score = excluded.risk_score,
                 fetched_at_unix_s = excluded.fetched_at_unix_s",
-            params![address, assessment.risk_score, now_unix_seconds(),],
+            params![address, risk_score, now_unix_seconds(),],
         )?;
         Ok(())
-    }
-
-    fn assessment_from_value(
-        &self,
-        value: &Value,
-    ) -> RiskResult<AddressRiskAssessment> {
-        let score = value
-            .get("riskScore")
-            .and_then(|v| v.as_u64())
-            .ok_or(RiskError::RiskScoreNotFound)?;
-
-        Ok(AddressRiskAssessment {
-            is_high_risk: self.risk_score_threshold >= score,
-            risk_score: score,
-        })
     }
 }
 

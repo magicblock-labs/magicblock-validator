@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeSet, HashSet},
+    collections::HashSet,
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc,
@@ -475,7 +475,7 @@ where
             return Ok(());
         }
 
-        self.validate_post_delegation_action_addresses(delegation_actions)
+        self.validate_post_delegation_action_signers(delegation_actions)
             .await?;
 
         let dependencies = delegation_actions
@@ -519,7 +519,7 @@ where
         ))
     }
 
-    async fn validate_post_delegation_action_addresses(
+    async fn validate_post_delegation_action_signers(
         &self,
         delegation_actions: &DelegationActions,
     ) -> ChainlinkResult<()> {
@@ -527,7 +527,7 @@ where
             return Ok(());
         };
 
-        let addresses = delegation_actions
+        let signers = delegation_actions
             .iter()
             .flat_map(|instruction| {
                 instruction
@@ -542,17 +542,10 @@ where
                     })
                     .collect::<Vec<_>>()
             })
-            .collect::<BTreeSet<_>>();
+            .collect::<HashSet<_>>();
 
-        for address in addresses {
-            let assessment =
-                risk_service.check_address(&address.to_string()).await?;
-            if assessment.is_high_risk {
-                return Err(ChainlinkError::RiskyDelegationActionAddress {
-                    address,
-                    risk_score: assessment.risk_score,
-                });
-            }
+        for signer in signers {
+            risk_service.check_address(&signer.to_string()).await?;
         }
 
         Ok(())
