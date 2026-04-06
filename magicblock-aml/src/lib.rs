@@ -4,11 +4,11 @@ use std::{
 };
 
 use magicblock_config::config::RiskConfig;
-use parking_lot::Mutex;
 use reqwest::Client;
 use rusqlite::{params, Connection};
 use serde_json::Value;
 use thiserror::Error;
+use tokio::sync::Mutex;
 
 #[derive(Debug, Clone)]
 pub struct AddressRiskAssessment {
@@ -96,7 +96,7 @@ impl RiskService {
         &self,
         address: &str,
     ) -> RiskResult<AddressRiskAssessment> {
-        if let Some(cached) = self.read_cache(address)? {
+        if let Some(cached) = self.read_cache(address).await? {
             return Ok(cached);
         }
 
@@ -113,17 +113,17 @@ impl RiskService {
 
         let body: Value = serde_json::from_str(&response)?;
         let assessment = self.assessment_from_value(&body)?;
-        self.write_cache(address, &assessment)?;
+        self.write_cache(address, &assessment).await?;
         Ok(assessment)
     }
 
-    fn read_cache(
+    async fn read_cache(
         &self,
         address: &str,
     ) -> RiskResult<Option<AddressRiskAssessment>> {
         let now = now_unix_seconds();
         let max_age = self.cache_ttl.as_secs() as i64;
-        let conn = self.cache.lock();
+        let conn = self.cache.lock().await;
         let mut stmt = conn.prepare(
             "SELECT risk_score, fetched_at_unix_s
              FROM address_risk_cache
@@ -146,12 +146,12 @@ impl RiskService {
         }))
     }
 
-    fn write_cache(
+    async fn write_cache(
         &self,
         address: &str,
         assessment: &AddressRiskAssessment,
     ) -> RiskResult<()> {
-        let conn = self.cache.lock();
+        let conn = self.cache.lock().await;
         conn.execute(
             "INSERT INTO address_risk_cache
                 (address, risk_score, fetched_at_unix_s)

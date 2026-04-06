@@ -3501,7 +3501,6 @@ name = "magicblock-aml"
 version = "0.8.6"
 dependencies = [
  "magicblock-config",
- "parking_lot",
  "reqwest",
  "rusqlite",
  "serde",
