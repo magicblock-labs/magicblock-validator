@@ -3,6 +3,7 @@ use solana_pubkey::Pubkey;
 use thiserror::Error;
 
 use crate::remote_account_provider::RemoteAccountProviderError;
+use magicblock_aml::RiskError;
 
 pub type ChainlinkResult<T> = std::result::Result<T, ChainlinkError>;
 
@@ -47,4 +48,10 @@ pub enum ChainlinkError {
 
     #[error("Missing accounts required by delegation actions: {0:?}")]
     MissingDelegationActionAccounts(Vec<Pubkey>),
+
+    #[error("Failed to perform Range risk check: {0}")]
+    RangeRisk(#[from] RiskError),
+
+    #[error("Address blocked by Range risk check: {address} (risk_score={risk_score:?})")]
+    RiskyDelegationActionAddress { address: Pubkey, risk_score: u64 },
 }

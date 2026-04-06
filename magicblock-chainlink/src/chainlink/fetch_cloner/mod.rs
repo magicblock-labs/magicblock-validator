@@ -1,5 +1,5 @@
 use std::{
-    collections::HashSet,
+    collections::{BTreeSet, HashSet},
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc,
@@ -11,6 +11,7 @@ use dlp_api::{
     pda::delegation_record_pda_from_delegated_account, state::DelegationRecord,
 };
 use magicblock_accounts_db::traits::AccountsBank;
+use magicblock_aml::RiskService;
 use magicblock_config::config::AllowedProgram;
 use magicblock_core::token_programs::{
     is_ata, try_derive_ata_address_and_bump, try_derive_eata_address_and_bump,
@@ -92,6 +93,8 @@ where
     /// If specified, only these programs will be cloned. If None or empty,
     /// all programs are allowed.
     allowed_programs: Option<HashSet<Pubkey>>,
+    /// Risk checker for post-delegation action addresses.
+    risk_service: Option<Arc<RiskService>>,
 }
 
 /// Manual Clone impl: `#[derive(Clone)]` would add `V: Clone, C: Clone`
@@ -115,6 +118,7 @@ where
             validator_keypair: Arc::clone(&self.validator_keypair),
             blacklisted_accounts: self.blacklisted_accounts.clone(),
             allowed_programs: self.allowed_programs.clone(),
+            risk_service: self.risk_service.clone(),
         }
     }
 }
@@ -135,6 +139,7 @@ where
         faucet_pubkey: Pubkey,
         subscription_updates_rx: mpsc::Receiver<ForwardedSubscriptionUpdate>,
         allowed_programs: Option<Vec<AllowedProgram>>,
+        risk_service: Option<Arc<RiskService>>,
     ) -> Arc<Self> {
         let validator_pubkey = validator_keypair.pubkey();
         let blacklisted_accounts =
@@ -152,6 +157,7 @@ where
             fetch_count: Arc::new(AtomicU64::new(0)),
             blacklisted_accounts,
             allowed_programs,
+            risk_service,
         });
 
         me.clone()
@@ -469,6 +475,9 @@ where
             return Ok(());
         }
 
+        self.validate_post_delegation_action_addresses(delegation_actions)
+            .await?;
+
         let dependencies = delegation_actions
             .iter()
             .flat_map(|instruction| {
@@ -508,6 +517,45 @@ where
         Err(ChainlinkError::MissingDelegationActionAccounts(
             missing_accounts,
         ))
+    }
+
+    async fn validate_post_delegation_action_addresses(
+        &self,
+        delegation_actions: &DelegationActions,
+    ) -> ChainlinkResult<()> {
+        let Some(risk_service) = self.risk_service.as_ref() else {
+            return Ok(());
+        };
+
+        let addresses = delegation_actions
+            .iter()
+            .flat_map(|instruction| {
+                instruction
+                    .accounts
+                    .iter()
+                    .filter_map(|meta| {
+                        if meta.is_signer {
+                            Some(meta.pubkey)
+                        } else {
+                            None
+                        }
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect::<BTreeSet<_>>();
+
+        for address in addresses {
+            let assessment =
+                risk_service.check_address(&address.to_string()).await?;
+            if assessment.is_high_risk {
+                return Err(ChainlinkError::RiskyDelegationActionAddress {
+                    address,
+                    risk_score: assessment.risk_score,
+                });
+            }
+        }
+
+        Ok(())
     }
 
     async fn clone_projected_ata_request(

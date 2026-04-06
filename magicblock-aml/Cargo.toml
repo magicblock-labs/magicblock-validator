@@ -1,0 +1,27 @@
+[package]
+name = "magicblock-aml"
+version.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+license.workspace = true
+edition.workspace = true
+
+[lib]
+name = "magicblock_aml"
+path = "src/lib.rs"
+
+[dependencies]
+magicblock-config = { workspace = true }
+parking_lot = { workspace = true }
+reqwest = { workspace = true, features = ["json"] }
+rusqlite = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+solana-pubkey = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["sync", "time"] }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

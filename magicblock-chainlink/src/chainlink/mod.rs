@@ -1,5 +1,6 @@
 use std::{
     collections::HashSet,
+    path::Path,
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc,
@@ -10,6 +11,7 @@ use dlp_api::pda::ephemeral_balance_pda_from_payer;
 use errors::ChainlinkResult;
 use fetch_cloner::FetchCloner;
 use magicblock_accounts_db::{traits::AccountsBank, AccountsDbResult};
+use magicblock_aml::RiskService;
 use magicblock_config::config::ChainLinkConfig;
 use magicblock_metrics::metrics::AccountFetchOrigin;
 use solana_account::{AccountSharedData, ReadableAccount};
@@ -120,6 +122,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
         faucet_pubkey: Pubkey,
         config: ChainlinkConfig,
         chainlink_config: &ChainLinkConfig,
+        ledger_path: &Path,
     ) -> ChainlinkResult<
         Chainlink<ChainRpcClientImpl, SubMuxClient<ChainUpdatesClient>, V, C>,
     > {
@@ -136,6 +139,11 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
         .await?;
         let fetch_cloner = if let Some(provider) = account_provider {
             let provider = Arc::new(provider);
+            let risk_service = RiskService::try_from_config(
+                &chainlink_config.risk,
+                &ledger_path,
+            )?
+            .map(Arc::new);
             let fetch_cloner = FetchCloner::new(
                 &provider,
                 accounts_bank,
@@ -144,6 +152,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
                 faucet_pubkey,
                 rx,
                 chainlink_config.allowed_programs.clone(),
+                risk_service,
             );
             Some(fetch_cloner)
         } else {

@@ -13,6 +13,7 @@ helius-laserstream = { workspace = true }
 tracing = { workspace = true }
 lru = { workspace = true }
 magicblock-accounts-db = { workspace = true }
+magicblock-aml = { workspace = true }
 magicblock-config = { workspace = true }
 magicblock-core = { workspace = true }
 parking_lot = { workspace = true }
