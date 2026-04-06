@@ -13,6 +13,7 @@ pub mod magicblock_processor;
 pub mod test_utils;
 mod utils;
 pub mod validator;
+pub mod verify_validator_identity;
 
 pub use magic_sys::init_magic_sys;
 pub use magicblock_magic_program_api::*;
