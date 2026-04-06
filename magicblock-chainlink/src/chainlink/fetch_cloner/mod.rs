@@ -531,17 +531,13 @@ where
         let mut signers = delegation_actions
             .iter()
             .flat_map(|instruction| {
-                instruction
-                    .accounts
-                    .iter()
-                    .filter_map(|meta| {
-                        if meta.is_signer {
-                            Some(meta.pubkey.to_string())
-                        } else {
-                            None
-                        }
-                    })
-                    .collect::<Vec<_>>()
+                instruction.accounts.iter().filter_map(|meta| {
+                    if meta.is_signer {
+                        Some(meta.pubkey.to_string())
+                    } else {
+                        None
+                    }
+                })
             })
             .collect::<Vec<_>>();
         signers.dedup();
