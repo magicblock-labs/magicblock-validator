@@ -51,7 +51,4 @@ pub enum ChainlinkError {
 
     #[error("Failed to perform Range risk check: {0}")]
     RangeRisk(#[from] RiskError),
-
-    #[error("Address blocked by Range risk check: {address} (risk_score={risk_score:?})")]
-    RiskyDelegationActionAddress { address: Pubkey, risk_score: u64 },
 }
