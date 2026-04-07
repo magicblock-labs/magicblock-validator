@@ -1,6 +1,5 @@
 use std::{
     collections::HashMap,
-    mem,
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc,
@@ -11,25 +10,29 @@ use std::{
 
 use borsh::to_vec;
 use dlp_api::{args::CommitStateArgs, pda::ephemeral_balance_pda_from_payer};
-use futures::future::join_all;
+use futures::future::{join_all, try_join_all};
 use magicblock_committor_program::pdas;
 use magicblock_committor_service::{
     intent_executor::{
         error::{IntentExecutorError, TransactionStrategyExecutionError},
+        intent_execution_client::IntentExecutionClient,
         task_info_fetcher::{
             CacheTaskInfoFetcher, RpcTaskInfoFetcher, TaskInfoFetcher,
             TaskInfoFetcherError,
         },
         two_stage_executor::{Initialized, TwoStageExecutor},
-        ExecutionOutput, IntentExecutionResult, IntentExecutor,
-        IntentExecutorImpl,
+        utils::prepare_and_execute_strategy,
+        ExecutionOutput, IntentExecutionReport, IntentExecutionResult,
+        IntentExecutor, IntentExecutorImpl,
     },
     persist::IntentPersisterImpl,
     tasks::{
         task_builder::{TaskBuilderError, TaskBuilderImpl, TasksBuilder},
         task_strategist::{TaskStrategist, TransactionStrategy},
     },
-    transaction_preparator::TransactionPreparatorImpl,
+    transaction_preparator::{
+        TransactionPreparator, TransactionPreparatorImpl,
+    },
     DEFAULT_ACTIONS_TIMEOUT,
 };
 use magicblock_core::{
@@ -135,7 +138,7 @@ async fn test_commit_id_error_parsing() {
 
     let TestEnv {
         fixture,
-        intent_executor,
+        intent_executor: _,
         task_info_fetcher,
         callback_executor: _,
         pre_test_tablemania_state: _,
@@ -167,12 +170,16 @@ async fn test_commit_id_error_parsing() {
         &intent,
     )
     .await;
-    let execution_result = intent_executor
-        .prepare_and_execute_strategy(
-            &mut transaction_strategy,
-            &None::<IntentPersisterImpl>,
-        )
-        .await;
+    let intent_client = IntentExecutionClient::new(fixture.rpc_client.clone());
+    let transaction_preparator = fixture.create_transaction_preparator();
+    let execution_result = prepare_and_execute_strategy(
+        &intent_client,
+        &fixture.authority,
+        &transaction_preparator,
+        &mut transaction_strategy,
+        &None::<IntentPersisterImpl>,
+    )
+    .await;
     assert!(execution_result.is_ok(), "Preparation is expected to pass!");
 
     // Verify that we got CommitIdError
@@ -202,7 +209,7 @@ async fn test_undelegation_error_parsing() {
 
     let TestEnv {
         fixture,
-        intent_executor,
+        intent_executor: _,
         task_info_fetcher,
         callback_executor: _,
         pre_test_tablemania_state: _,
@@ -227,12 +234,16 @@ async fn test_undelegation_error_parsing() {
         &intent,
     )
     .await;
-    let execution_result = intent_executor
-        .prepare_and_execute_strategy(
-            &mut transaction_strategy,
-            &None::<IntentPersisterImpl>,
-        )
-        .await;
+    let intent_client = IntentExecutionClient::new(fixture.rpc_client.clone());
+    let transaction_preparator = fixture.create_transaction_preparator();
+    let execution_result = prepare_and_execute_strategy(
+        &intent_client,
+        &fixture.authority,
+        &transaction_preparator,
+        &mut transaction_strategy,
+        &None::<IntentPersisterImpl>,
+    )
+    .await;
     assert!(execution_result.is_ok(), "Preparation is expected to pass!");
 
     // Verify that we got UndelegationError
@@ -260,7 +271,7 @@ async fn test_action_error_parsing() {
 
     let TestEnv {
         fixture,
-        intent_executor,
+        intent_executor: _,
         task_info_fetcher,
         callback_executor: _,
         pre_test_tablemania_state: _,
@@ -295,12 +306,16 @@ async fn test_action_error_parsing() {
         &scheduled_intent,
     )
     .await;
-    let execution_result = intent_executor
-        .prepare_and_execute_strategy(
-            &mut transaction_strategy,
-            &None::<IntentPersisterImpl>,
-        )
-        .await;
+    let intent_client = IntentExecutionClient::new(fixture.rpc_client.clone());
+    let transaction_preparator = fixture.create_transaction_preparator();
+    let execution_result = prepare_and_execute_strategy(
+        &intent_client,
+        &fixture.authority,
+        &transaction_preparator,
+        &mut transaction_strategy,
+        &None::<IntentPersisterImpl>,
+    )
+    .await;
     assert!(execution_result.is_ok(), "Preparation is expected to pass!");
 
     // Verify that we got ActionsError
@@ -329,7 +344,7 @@ async fn test_cpi_limits_error_parsing() {
 
     let TestEnv {
         fixture,
-        intent_executor,
+        intent_executor: _,
         task_info_fetcher,
         callback_executor: _,
         pre_test_tablemania_state: _,
@@ -360,12 +375,16 @@ async fn test_cpi_limits_error_parsing() {
         &scheduled_intent,
     )
     .await;
-    let execution_result = intent_executor
-        .prepare_and_execute_strategy(
-            &mut transaction_strategy,
-            &None::<IntentPersisterImpl>,
-        )
-        .await;
+    let intent_client = IntentExecutionClient::new(fixture.rpc_client.clone());
+    let transaction_preparator = fixture.create_transaction_preparator();
+    let execution_result = prepare_and_execute_strategy(
+        &intent_client,
+        &fixture.authority,
+        &transaction_preparator,
+        &mut transaction_strategy,
+        &None::<IntentPersisterImpl>,
+    )
+    .await;
     assert!(execution_result.is_ok(), "Preparation is expected to pass!");
 
     let execution_result = execution_result.unwrap();
@@ -789,10 +808,12 @@ async fn test_cpi_limits_error_recovery() {
         &scheduled_intent,
     )
     .await;
+    let mut execution_report = IntentExecutionReport::default();
     let execution_result = intent_executor
         .single_stage_execution_flow(
             scheduled_intent,
             strategy,
+            &mut execution_report,
             &None::<IntentPersisterImpl>,
         )
         .await;
@@ -806,7 +827,16 @@ async fn test_cpi_limits_error_recovery() {
     ));
 
     // Cleanup after intent
-    assert!(intent_executor.cleanup().await.is_ok());
+    let transaction_preparator = fixture.create_transaction_preparator();
+    let cleanup_futs = execution_report.junk().iter().map(|to_cleanup| {
+        transaction_preparator.cleanup_for_strategy(
+            &fixture.authority,
+            &to_cleanup.optimized_tasks,
+            &to_cleanup.lookup_tables_keys,
+        )
+    });
+    assert!(try_join_all(cleanup_futs).await.is_ok());
+
     let mut commit_ids_by_pk = HashMap::new();
     for el in committed_accounts.iter() {
         let nonce = task_info_fetcher
@@ -900,15 +930,17 @@ async fn test_commit_id_actions_cpi_limit_errors_recovery() {
     .await;
 
     intent_executor.started_at = std::time::Instant::now();
+    let mut execution_report = IntentExecutionReport::default();
     let res = intent_executor
         .single_stage_execution_flow(
             scheduled_intent,
             strategy,
+            &mut execution_report,
             &None::<IntentPersisterImpl>,
         )
         .await;
 
-    let patched_errors = mem::take(&mut intent_executor.patched_errors);
+    let patched_errors = execution_report.patched_errors();
     // We expect recovery to succeed by splitting into two stages (commit, then finalize)
     assert!(
         res.is_ok(),
@@ -923,7 +955,7 @@ async fn test_commit_id_actions_cpi_limit_errors_recovery() {
         }
     ));
 
-    let mut iter = patched_errors.into_iter();
+    let mut iter = patched_errors.iter();
     let commit_id_error = iter.next().unwrap();
     let cpi_limit_err = iter.next().unwrap();
     let action_error = iter.next().unwrap();
@@ -942,7 +974,15 @@ async fn test_commit_id_actions_cpi_limit_errors_recovery() {
     ));
 
     // Cleanup after intent
-    assert!(intent_executor.cleanup().await.is_ok());
+    let transaction_preparator = fixture.create_transaction_preparator();
+    let cleanup_futs = execution_report.junk().iter().map(|to_cleanup| {
+        transaction_preparator.cleanup_for_strategy(
+            &fixture.authority,
+            &to_cleanup.optimized_tasks,
+            &to_cleanup.lookup_tables_keys,
+        )
+    });
+    assert!(try_join_all(cleanup_futs).await.is_ok());
     let mut commit_ids_by_pk = HashMap::new();
     for el in committed_accounts.iter() {
         let nonce = task_info_fetcher
@@ -1279,7 +1319,7 @@ async fn test_callbacks_fired_in_two_stage() {
 
     let TestEnv {
         fixture,
-        mut intent_executor,
+        intent_executor: _,
         task_info_fetcher,
         callback_executor,
         pre_test_tablemania_state: _,
@@ -1320,20 +1360,27 @@ async fn test_callbacks_fired_in_two_stage() {
     });
     let committed_pubkeys = intent.get_all_committed_pubkeys();
 
+    let transaction_preparator = fixture.create_transaction_preparator();
+    let mut execution_report = IntentExecutionReport::default();
     let mut executor = create_two_stage_executor(
-        &mut intent_executor,
+        &fixture,
+        &callback_executor,
         &intent,
         &task_info_fetcher,
-        &fixture.authority.pubkey(),
+        &mut execution_report,
     )
     .await;
 
     // Execute commit stage
     let commit_sig = executor
-        .commit(&committed_pubkeys, &None::<IntentPersisterImpl>)
+        .commit(
+            &committed_pubkeys,
+            &transaction_preparator,
+            &task_info_fetcher,
+            &None::<IntentPersisterImpl>,
+        )
         .await
         .expect("commit must succeed");
-    executor.execute_callbacks(Some(commit_sig), Ok::<(), ActionError>(()));
 
     // standalone_actions land in the commit strategy as a BaseAction
     let calls = callback_executor.calls();
@@ -1348,11 +1395,9 @@ async fn test_callbacks_fired_in_two_stage() {
     // Execute finalize stage
     let mut finalize_executor = executor.done(commit_sig);
     finalize_executor
-        .finalize(&None::<IntentPersisterImpl>)
+        .finalize(&transaction_preparator, &None::<IntentPersisterImpl>)
         .await
         .expect("finalize must succeed");
-    finalize_executor
-        .execute_callbacks(Some(commit_sig), Ok::<(), ActionError>(()));
 
     // Expect 2 actions to be executed in finalize stage
     let calls = callback_executor.calls();
@@ -1369,21 +1414,13 @@ async fn test_callbacks_fired_in_two_stage() {
 /// commit and finalize strategies independently, without going through
 /// `execute_inner` or any CPI-limit recovery path.
 async fn create_two_stage_executor<'a>(
-    inner: &'a mut IntentExecutorImpl<
-        TransactionPreparatorImpl,
-        RpcTaskInfoFetcher,
-        MockActionsCallbackExecutor,
-    >,
+    fixture: &TestFixture,
+    callback_executor: &MockActionsCallbackExecutor,
     intent: &ScheduledIntentBundle,
     task_info_fetcher: &Arc<CacheTaskInfoFetcher<RpcTaskInfoFetcher>>,
-    authority: &Pubkey,
-) -> TwoStageExecutor<
-    'a,
-    TransactionPreparatorImpl,
-    RpcTaskInfoFetcher,
-    MockActionsCallbackExecutor,
-    Initialized,
-> {
+    execution_report: &'a mut IntentExecutionReport,
+) -> TwoStageExecutor<'a, MockActionsCallbackExecutor, Initialized> {
+    let authority = &fixture.authority.pubkey();
     let commit_tasks = TaskBuilderImpl::commit_tasks(
         task_info_fetcher,
         intent,
@@ -1407,7 +1444,14 @@ async fn create_two_stage_executor<'a>(
         &None::<IntentPersisterImpl>,
     )
     .unwrap();
-    TwoStageExecutor::new(inner, commit_strategy, finalize_strategy)
+    TwoStageExecutor::new(
+        fixture.authority.insecure_clone(),
+        commit_strategy,
+        finalize_strategy,
+        IntentExecutionClient::new(fixture.rpc_client.clone()),
+        callback_executor.clone(),
+        execution_report,
+    )
 }
 
 fn succeeding_commit_action(
