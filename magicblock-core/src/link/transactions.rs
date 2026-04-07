@@ -1,15 +1,19 @@
 use flume::{Receiver as MpmcReceiver, Sender as MpmcSender};
 use magicblock_magic_program_api::args::TaskRequest;
 use serde::Serialize;
+use solana_account::AccountSharedData;
 use solana_program::message::{
     inner_instruction::InnerInstructionsList, SimpleAddressLoader,
 };
+use solana_pubkey::Pubkey;
 use solana_transaction::{
     sanitized::SanitizedTransaction, versioned::VersionedTransaction,
     Transaction,
 };
 use solana_transaction_context::TransactionReturnData;
-use solana_transaction_error::TransactionError;
+use solana_transaction_error::{
+    TransactionError, TransactionResult as SolanaTransactionResult,
+};
 use solana_transaction_status_client_types::TransactionStatusMeta;
 use tokio::sync::{
     mpsc::{Receiver, Sender, UnboundedReceiver, UnboundedSender},
@@ -45,7 +49,7 @@ pub type ScheduledTasksTx = UnboundedSender<TaskRequest>;
 pub struct TransactionSchedulerHandle(pub(super) TransactionToProcessTx);
 
 /// The standard result of a transaction execution, indicating success or a `TransactionError`.
-pub type TransactionResult = solana_transaction_error::TransactionResult<()>;
+pub type TransactionResult = SolanaTransactionResult<()>;
 /// The sender half of a one-shot channel used to return the result of a transaction simulation.
 pub type TxnSimulationResultTx = oneshot::Sender<TransactionSimulationResult>;
 /// An optional sender half of a one-shot channel for returning a transaction execution result.
@@ -114,6 +118,7 @@ pub enum TransactionProcessingMode {
 pub struct TransactionSimulationResult {
     pub result: TransactionResult,
     pub logs: Option<Vec<String>>,
+    pub post_simulation_accounts: Vec<(Pubkey, AccountSharedData)>,
     pub units_consumed: u64,
     pub return_data: Option<TransactionReturnData>,
     pub inner_instructions: Option<InnerInstructionsList>,
