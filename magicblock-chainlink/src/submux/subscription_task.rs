@@ -184,8 +184,20 @@ impl AccountSubscriptionTask {
                         }
                     }
                     Err(e) => {
-                        errors.push(format!("Client {}: {:?}", client_id, e));
-                        failed_client_ids.push(client_id);
+                        if matches!(
+                            e,
+                            RemoteAccountProviderError::AccountSubscriptionDoesNotExist(_)
+                        ) {
+                            debug!(
+                                client_id = %client_id,
+                                error = ?e,
+                                "Ignoring unsubscribe for non-existent subscription"
+                            );
+                        } else {
+                            errors
+                                .push(format!("Client {}: {:?}", client_id, e));
+                            failed_client_ids.push(client_id);
+                        }
                     }
                 }
             }
