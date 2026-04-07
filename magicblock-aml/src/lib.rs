@@ -43,6 +43,8 @@ pub enum RiskError {
     HighRiskAddresses(Vec<String>),
     #[error("Task join failed: {0}")]
     Join(#[from] tokio::task::JoinError),
+    #[error("Invalid risk score threshold: {0} > 10")]
+    InvalidRiskScoreThreshold(u64),
 }
 
 pub type RiskResult<T> = Result<T, RiskError>;
@@ -69,6 +71,11 @@ impl RiskService {
         let Some(api_key) = config.api_key.clone() else {
             return Err(RiskError::MissingApiKey);
         };
+        if config.risk_score_threshold > 10 {
+            return Err(RiskError::InvalidRiskScoreThreshold(
+                config.risk_score_threshold,
+            ));
+        }
 
         let cache_path = ledger_path.join("risk-cache.db");
         let conn = Connection::open(&cache_path).map_err(|source| {
