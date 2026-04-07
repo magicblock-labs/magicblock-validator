@@ -542,7 +542,7 @@ where
             .collect::<Vec<_>>();
         signers.dedup();
 
-        risk_service.check_addresses(&signers).await?;
+        risk_service.check_addresses(signers).await?;
 
         Ok(())
     }

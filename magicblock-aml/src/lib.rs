@@ -1,5 +1,6 @@
 use std::{
     path::{Path, PathBuf},
+    sync::{Arc, Mutex},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
@@ -9,7 +10,6 @@ use reqwest::Client;
 use rusqlite::{params, Connection};
 use serde_json::Value;
 use thiserror::Error;
-use tokio::sync::Mutex;
 
 #[derive(Debug, Clone)]
 pub struct AddressRiskAssessment {
@@ -41,17 +41,17 @@ pub enum RiskError {
     RiskScoreNotFound,
     #[error("Addresses {0:?} are high risk")]
     HighRiskAddresses(Vec<String>),
+    #[error("Task join failed: {0}")]
+    Join(#[from] tokio::task::JoinError),
 }
 
 pub type RiskResult<T> = Result<T, RiskError>;
-pub type PartitionedCache<'a> = (
-    Vec<(&'a Option<u64>, &'a String)>,
-    Vec<(&'a Option<u64>, &'a String)>,
-);
+pub type PartitionedCache =
+    (Vec<(Option<u64>, String)>, Vec<(Option<u64>, String)>);
 
 pub struct RiskService {
     client: Client,
-    cache: Mutex<Connection>,
+    cache: Arc<Mutex<Connection>>,
     base_url: String,
     api_key: String,
     cache_ttl: Duration,
@@ -91,7 +91,7 @@ impl RiskService {
 
         Ok(Some(Self {
             client,
-            cache: Mutex::new(conn),
+            cache: Arc::new(Mutex::new(conn)),
             base_url: config.base_url.trim_end_matches('/').to_string(),
             api_key,
             cache_ttl: config.cache_ttl,
@@ -101,12 +101,11 @@ impl RiskService {
 
     pub async fn check_addresses(
         &self,
-        addresses: &[String],
+        addresses: Vec<String>,
     ) -> RiskResult<()> {
         let cache = self.read_cache(addresses).await?;
         let (cached_scores, uncached_addresses): PartitionedCache = cache
-            .iter()
-            .zip(addresses)
+            .into_iter()
             .partition(|(score, _address)| score.is_some());
 
         let risky_cached_addresses = cached_scores
@@ -166,55 +165,66 @@ impl RiskService {
 
     async fn read_cache(
         &self,
-        addresses: &[String],
-    ) -> RiskResult<Vec<Option<u64>>> {
+        addresses: Vec<String>,
+    ) -> RiskResult<Vec<(Option<u64>, String)>> {
         let now = now_unix_seconds();
         let max_age = self.cache_ttl.as_secs() as i64;
-        let conn = self.cache.lock().await;
+        let addresses = addresses.to_vec();
+        let cache = Arc::clone(&self.cache);
+        tokio::task::spawn_blocking(move || {
+            let conn = cache.lock().expect("failed to lock cache");
+            let mut results = Vec::with_capacity(addresses.len());
+            for address in &addresses {
+                let mut stmt = conn.prepare_cached(
+                    "SELECT risk_score, fetched_at_unix_s
+                 FROM address_risk_cache
+                 WHERE address = ?1",
+                )?;
+                let result = stmt.query_row(params![address], |row| {
+                    let risk_score: u64 = row.get(0)?;
+                    let fetched_at: i64 = row.get(1)?;
+                    Ok((risk_score, fetched_at))
+                });
 
-        let mut results = Vec::with_capacity(addresses.len());
-        for address in addresses {
-            let mut stmt = conn.prepare_cached(
-                "SELECT risk_score, fetched_at_unix_s
-             FROM address_risk_cache
-             WHERE address = ?1",
-            )?;
-            let result = stmt.query_row(params![address], |row| {
-                let risk_score: u64 = row.get(0)?;
-                let fetched_at: i64 = row.get(1)?;
-                Ok((risk_score, fetched_at))
-            });
-
-            match result {
-                Ok((risk_score, fetched_at)) => {
-                    if now.saturating_sub(fetched_at) > max_age {
-                        results.push(None);
-                    } else {
-                        results.push(Some(risk_score));
+                match result {
+                    Ok((risk_score, fetched_at)) => {
+                        if now.saturating_sub(fetched_at) > max_age {
+                            results.push(None);
+                        } else {
+                            results.push(Some(risk_score));
+                        }
                     }
+                    Err(rusqlite::Error::QueryReturnedNoRows) => {
+                        results.push(None)
+                    }
+                    Err(e) => return Err(e.into()),
                 }
-                Err(rusqlite::Error::QueryReturnedNoRows) => results.push(None),
-                Err(e) => return Err(e.into()),
             }
-        }
-        Ok(results)
+            Ok(results.into_iter().zip(addresses).collect::<Vec<_>>())
+        })
+        .await?
     }
 
     async fn write_cache(&self, values: &[(String, u64)]) -> RiskResult<()> {
-        let conn = self.cache.lock().await;
         let now = now_unix_seconds();
-        for (address, risk_score) in values {
-            conn.execute(
-                "INSERT INTO address_risk_cache
-                    (address, risk_score, fetched_at_unix_s)
-                 VALUES (?1, ?2, ?3)
-                 ON CONFLICT(address) DO UPDATE SET
-                    risk_score = excluded.risk_score,
-                    fetched_at_unix_s = excluded.fetched_at_unix_s",
-                params![address, risk_score, now],
-            )?;
-        }
-        Ok(())
+        let values = values.to_vec();
+        let cache = Arc::clone(&self.cache);
+        tokio::task::spawn_blocking(move || {
+            let conn = cache.lock().expect("failed to lock cache");
+            for (address, risk_score) in &values {
+                conn.execute(
+                    "INSERT INTO address_risk_cache
+                        (address, risk_score, fetched_at_unix_s)
+                     VALUES (?1, ?2, ?3)
+                     ON CONFLICT(address) DO UPDATE SET
+                        risk_score = excluded.risk_score,
+                        fetched_at_unix_s = excluded.fetched_at_unix_s",
+                    params![address, risk_score, now],
+                )?;
+            }
+            Ok(())
+        })
+        .await?
     }
 }
 
@@ -227,14 +237,18 @@ fn now_unix_seconds() -> i64 {
 
 #[cfg(test)]
 mod tests {
-    use super::{RiskConfig, RiskError, RiskService};
+    use std::{
+        collections::HashMap,
+        io::{Read, Write},
+        net::TcpListener,
+        time::Duration,
+    };
+
     use rusqlite::Connection;
-    use std::collections::HashMap;
-    use std::io::{Read, Write};
-    use std::net::TcpListener;
-    use std::time::Duration;
     use tempfile::tempdir;
     use tokio::task::JoinHandle;
+
+    use super::{RiskConfig, RiskError, RiskService};
 
     struct MockRiskServer {
         base_url: String,
@@ -242,7 +256,10 @@ mod tests {
     }
 
     impl MockRiskServer {
-        async fn start(address_scores: Vec<(String, u64)>, expected_calls: usize) -> Self {
+        async fn start(
+            address_scores: Vec<(String, u64)>,
+            expected_calls: usize,
+        ) -> Self {
             let listener = TcpListener::bind("127.0.0.1:0")
                 .expect("failed to bind mock risk server");
             let addr = listener
@@ -288,8 +305,13 @@ mod tests {
 
                     let score = score_by_address.get(&address);
                     let (status, body) = match score {
-                        Some(score) => ("200 OK", format!(r#"{{"riskScore":{score}}}"#)),
-                        None => ("404 Not Found", r#"{"error":"unknown address"}"#.to_string()),
+                        Some(score) => {
+                            ("200 OK", format!(r#"{{"riskScore":{score}}}"#))
+                        }
+                        None => (
+                            "404 Not Found",
+                            r#"{"error":"unknown address"}"#.to_string(),
+                        ),
                     };
                     let response = format!(
                         "HTTP/1.1 {status}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
@@ -325,17 +347,12 @@ mod tests {
 
     fn extract_query_value(request: &str, key: &str) -> Option<String> {
         let first_line = request.lines().next()?;
-        let path_and_query = first_line
-            .split_whitespace()
-            .nth(1)?
-            .split('?')
-            .nth(1)?;
+        let path_and_query =
+            first_line.split_whitespace().nth(1)?.split('?').nth(1)?;
         path_and_query.split('&').find_map(|part| {
-            let mut kv = part.splitn(2, '=');
-            let current_key = kv.next()?;
-            let current_value = kv.next()?;
-            if current_key == key {
-                Some(current_value.to_string())
+            let (k, v) = part.split_once('=')?;
+            if k == key {
+                Some(v.to_string())
             } else {
                 None
             }
@@ -343,7 +360,8 @@ mod tests {
     }
 
     fn load_cached_scores(cache_path: &std::path::Path) -> Vec<(String, u64)> {
-        let conn = Connection::open(cache_path).expect("failed to open sqlite cache");
+        let conn =
+            Connection::open(cache_path).expect("failed to open sqlite cache");
         let mut stmt = conn
             .prepare(
                 "SELECT address, risk_score
@@ -379,11 +397,11 @@ mod tests {
             .expect("risk service should be enabled");
 
         service
-            .check_addresses(&addresses)
+            .check_addresses(addresses.clone())
             .await
             .expect("first lookup should call mocked API");
         service
-            .check_addresses(&addresses)
+            .check_addresses(addresses)
             .await
             .expect("second lookup should be served from sqlite cache");
 
@@ -406,7 +424,7 @@ mod tests {
             .expect("failed to create risk service")
             .expect("risk service should be enabled");
 
-        let result = service.check_addresses(&addresses).await;
+        let result = service.check_addresses(addresses).await;
         assert!(matches!(
             result,
             Err(RiskError::HighRiskAddresses(ref risky)) if risky == &vec![address.clone()]
