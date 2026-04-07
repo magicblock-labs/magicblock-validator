@@ -6,7 +6,7 @@ use std::{
 use futures_util::future::try_join_all;
 use magicblock_config::config::RiskConfig;
 use reqwest::Client;
-use rusqlite::{fallible_iterator::FallibleIterator, params, Connection};
+use rusqlite::{params, Connection};
 use serde_json::Value;
 use thiserror::Error;
 use tokio::sync::Mutex;
@@ -171,24 +171,33 @@ impl RiskService {
         let now = now_unix_seconds();
         let max_age = self.cache_ttl.as_secs() as i64;
         let conn = self.cache.lock().await;
-        let mut stmt = conn.prepare(
-            "SELECT risk_score, fetched_at_unix_s
+
+        let mut results = Vec::with_capacity(addresses.len());
+        for address in addresses {
+            let mut stmt = conn.prepare_cached(
+                "SELECT risk_score, fetched_at_unix_s
              FROM address_risk_cache
-             WHERE address IN (?1)",
-        )?;
-        let rows = stmt
-            .query(params![addresses.join(",")])?
-            .map(|row| {
-                let risk_score = row.get::<_, u64>(0)?;
-                let fetched_at = row.get::<_, i64>(1)?;
-                if now.saturating_sub(fetched_at) > max_age {
-                    Ok(None)
-                } else {
-                    Ok(Some(risk_score))
+             WHERE address = ?1",
+            )?;
+            let result = stmt.query_row(params![address], |row| {
+                let risk_score: u64 = row.get(0)?;
+                let fetched_at: i64 = row.get(1)?;
+                Ok((risk_score, fetched_at))
+            });
+
+            match result {
+                Ok((risk_score, fetched_at)) => {
+                    if now.saturating_sub(fetched_at) > max_age {
+                        results.push(None);
+                    } else {
+                        results.push(Some(risk_score));
+                    }
                 }
-            })
-            .collect::<Vec<_>>()?;
-        Ok(rows)
+                Err(rusqlite::Error::QueryReturnedNoRows) => results.push(None),
+                Err(e) => return Err(e.into()),
+            }
+        }
+        Ok(results)
     }
 
     async fn write_cache(&self, values: &[(String, u64)]) -> RiskResult<()> {
