@@ -1,15 +1,22 @@
 use std::{
+    collections::HashMap,
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-use futures_util::future::try_join_all;
+use futures_util::future::{try_join_all, BoxFuture, FutureExt, Shared};
 use magicblock_config::config::RiskConfig;
 use reqwest::Client;
 use rusqlite::{params, Connection};
 use serde_json::Value;
 use thiserror::Error;
+use tokio::sync::Mutex as AsyncMutex;
+
+pub type RiskResult<T> = Result<T, RiskError>;
+pub type PartitionedCache =
+    (Vec<(Option<u64>, String)>, Vec<(Option<u64>, String)>);
+type SharedRiskScoreFuture = Shared<BoxFuture<'static, Result<u64, Arc<str>>>>;
 
 #[derive(Debug, Clone)]
 pub struct AddressRiskAssessment {
@@ -47,15 +54,14 @@ pub enum RiskError {
     InvalidRiskScoreThreshold(u64),
     #[error("Poisoned lock")]
     PoisonedLock,
+    #[error("In-flight risk fetch failed: {0}")]
+    InFlightFetch(String),
 }
-
-pub type RiskResult<T> = Result<T, RiskError>;
-pub type PartitionedCache =
-    (Vec<(Option<u64>, String)>, Vec<(Option<u64>, String)>);
 
 pub struct RiskService {
     client: Client,
     cache: Arc<Mutex<Connection>>,
+    in_flight: Arc<AsyncMutex<HashMap<String, SharedRiskScoreFuture>>>,
     base_url: String,
     api_key: String,
     cache_ttl: Duration,
@@ -101,6 +107,7 @@ impl RiskService {
         Ok(Some(Self {
             client,
             cache: Arc::new(Mutex::new(conn)),
+            in_flight: Arc::new(AsyncMutex::new(HashMap::new())),
             base_url: config.base_url.trim_end_matches('/').to_string(),
             api_key,
             cache_ttl: config.cache_ttl,
@@ -131,27 +138,23 @@ impl RiskService {
             return Err(RiskError::HighRiskAddresses(risky_cached_addresses));
         }
 
-        let scores =
-            try_join_all(uncached_addresses.iter().map(|(_, address)| async {
-                let response = self
-                    .client
-                    .get(format!("{}/risk/address", self.base_url))
-                    .query(&[("network", "solana"), ("address", address)])
-                    .bearer_auth(&self.api_key)
-                    .send()
-                    .await?
-                    .error_for_status()?
-                    .text()
-                    .await?;
+        let uncached_addresses = uncached_addresses
+            .into_iter()
+            .map(|(_, address)| address)
+            .collect::<Vec<_>>();
 
-                let body: Value = serde_json::from_str(&response)?;
-                let score = body
-                    .get("riskScore")
-                    .and_then(|v| v.as_u64())
-                    .ok_or(RiskError::RiskScoreNotFound)?;
+        let fetch_result =
+            try_join_all(uncached_addresses.iter().map(|address| async move {
+                let score = self
+                    .get_or_insert_in_flight(address.clone())
+                    .await
+                    .await
+                    .map_err(|err| RiskError::InFlightFetch(err.to_string()))?;
                 Ok::<_, RiskError>((address.to_string(), score))
             }))
-            .await?;
+            .await;
+        self.remove_from_in_flight(&uncached_addresses).await;
+        let scores = fetch_result?;
 
         self.write_cache(&scores).await?;
 
@@ -170,6 +173,38 @@ impl RiskService {
         }
 
         Ok(())
+    }
+
+    async fn get_or_insert_in_flight(
+        &self,
+        address: String,
+    ) -> SharedRiskScoreFuture {
+        let mut in_flight = self.in_flight.lock().await;
+        if let Some(existing) = in_flight.get(&address) {
+            return existing.clone();
+        }
+
+        let future = self.make_risk_fetch_future(address.clone());
+        in_flight.insert(address, future.clone());
+        future
+    }
+
+    fn make_risk_fetch_future(&self, address: String) -> SharedRiskScoreFuture {
+        let client = self.client.clone();
+        let base_url = self.base_url.clone();
+        let api_key = self.api_key.clone();
+        async move {
+            fetch_risk_score(client, base_url, api_key, address).await
+        }
+        .boxed()
+        .shared()
+    }
+
+    async fn remove_from_in_flight(&self, addresses: &[String]) {
+        let mut in_flight = self.in_flight.lock().await;
+        for address in addresses {
+            in_flight.remove(address.as_str());
+        }
     }
 
     async fn read_cache(
@@ -235,6 +270,34 @@ impl RiskService {
         })
         .await?
     }
+}
+
+async fn fetch_risk_score(
+    client: Client,
+    base_url: String,
+    api_key: String,
+    address: String,
+) -> Result<u64, Arc<str>> {
+    let response = client
+        .get(format!("{}/risk/address", base_url))
+        .query(&[("network", "solana"), ("address", address.as_str())])
+        .bearer_auth(api_key)
+        .send()
+        .await
+        .map_err(|e| Arc::<str>::from(e.to_string()))?
+        .error_for_status()
+        .map_err(|e| Arc::<str>::from(e.to_string()))?
+        .text()
+        .await
+        .map_err(|e| Arc::<str>::from(e.to_string()))?;
+
+    let body: Value = serde_json::from_str(&response)
+        .map_err(|e| Arc::<str>::from(e.to_string()))?;
+    body.get("riskScore")
+        .and_then(|v| v.as_u64())
+        .ok_or_else(|| {
+            Arc::<str>::from(RiskError::RiskScoreNotFound.to_string())
+        })
 }
 
 fn now_unix_seconds() -> i64 {
@@ -444,5 +507,26 @@ mod tests {
         assert!(cache_path.exists());
         let rows = load_cached_scores(&cache_path);
         assert_eq!(rows, vec![(address, 9)]);
+    }
+
+    #[tokio::test]
+    async fn check_addresses_deduplicates_inflight_requests_for_same_address() {
+        let address = "44444444444444444444444444444444".to_string();
+        let server = MockRiskServer::start(vec![(address.clone(), 3)], 1).await;
+
+        let temp_ledger = tempdir().expect("failed to create temp dir");
+        let config = make_risk_config(server.base_url.clone());
+        let service = RiskService::try_from_config(&config, temp_ledger.path())
+            .expect("failed to create risk service")
+            .expect("risk service should be enabled");
+
+        let first = service.check_addresses(vec![address.clone()]);
+        let second = service.check_addresses(vec![address]);
+        let (first_result, second_result) = tokio::join!(first, second);
+        first_result.expect("first concurrent lookup should succeed");
+        second_result
+            .expect("second concurrent lookup should dedupe and succeed");
+
+        server.join().await;
     }
 }
