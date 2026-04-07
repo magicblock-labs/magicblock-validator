@@ -540,6 +540,7 @@ where
                 })
             })
             .collect::<Vec<_>>();
+        signers.sort_unstable();
         signers.dedup();
 
         risk_service.check_addresses(signers).await?;
