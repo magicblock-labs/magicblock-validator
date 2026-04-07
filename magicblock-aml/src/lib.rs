@@ -45,6 +45,8 @@ pub enum RiskError {
     Join(#[from] tokio::task::JoinError),
     #[error("Invalid risk score threshold: {0} > 10")]
     InvalidRiskScoreThreshold(u64),
+    #[error("Poisoned lock")]
+    PoisonedLock,
 }
 
 pub type RiskResult<T> = Result<T, RiskError>;
@@ -179,7 +181,7 @@ impl RiskService {
         let addresses = addresses.to_vec();
         let cache = Arc::clone(&self.cache);
         tokio::task::spawn_blocking(move || {
-            let conn = cache.lock().expect("failed to lock cache");
+            let conn = cache.lock().map_err(|_| RiskError::PoisonedLock)?;
             let mut results = Vec::with_capacity(addresses.len());
             for address in &addresses {
                 let mut stmt = conn.prepare_cached(
@@ -217,7 +219,7 @@ impl RiskService {
         let values = values.to_vec();
         let cache = Arc::clone(&self.cache);
         tokio::task::spawn_blocking(move || {
-            let conn = cache.lock().expect("failed to lock cache");
+            let conn = cache.lock().map_err(|_| RiskError::PoisonedLock)?;
             for (address, risk_score) in &values {
                 conn.execute(
                     "INSERT INTO address_risk_cache
