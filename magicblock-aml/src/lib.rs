@@ -82,7 +82,7 @@ impl RiskService {
                 address TEXT NOT NULL,
                 risk_score INTEGER NOT NULL,
                 fetched_at_unix_s INTEGER NOT NULL,
-                PRIMARY KEY address
+                PRIMARY KEY (address)
             )",
         )?;
 
