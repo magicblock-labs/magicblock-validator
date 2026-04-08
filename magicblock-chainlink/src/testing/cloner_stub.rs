@@ -82,6 +82,12 @@ impl Cloner for ClonerStub {
         Ok(Signature::default())
     }
 
+    async fn evict_account(&self, pubkey: Pubkey) -> ClonerResult<()> {
+        use magicblock_accounts_db::traits::AccountsBank;
+        self.accounts_bank.remove_account(&pubkey);
+        Ok(())
+    }
+
     async fn clone_program(
         &self,
         program: LoadedProgram,

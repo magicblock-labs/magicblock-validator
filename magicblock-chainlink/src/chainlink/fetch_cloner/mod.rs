@@ -165,6 +165,10 @@ where
         self.fetch_count.load(Ordering::Relaxed)
     }
 
+    pub fn cloner(&self) -> &Arc<C> {
+        &self.cloner
+    }
+
     /// Check if a program is allowed to be cloned.
     /// Returns true if:
     /// - No allowed_programs restriction is set (None), OR
@@ -489,14 +493,13 @@ where
                 None,
             )
             .await?;
-        if result.is_ok() {
+        if result.missing_delegation_record.is_empty() {
             return Ok(());
         }
 
         let missing_accounts = result
-            .pubkeys_not_found_on_chain()
+            .pubkeys_missing_delegation_record()
             .into_iter()
-            .chain(result.pubkeys_missing_delegation_record())
             .collect::<HashSet<_>>()
             .into_iter()
             .collect::<Vec<_>>();
@@ -1343,10 +1346,12 @@ where
                 &action_dependencies_to_fetch,
             );
 
-            if !not_found.is_empty() {
-                return Err(ChainlinkError::MissingDelegationActionAccounts(
-                    not_found.iter().map(|(pubkey, _)| *pubkey).collect(),
-                ));
+            if tracing::enabled!(tracing::Level::TRACE) && !not_found.is_empty()
+            {
+                trace!(
+                    dependencies = ?not_found,
+                    "Delegation action dependencies not found on chain; continuing clone flow"
+                );
             }
 
             let ResolvedDelegatedAccounts {

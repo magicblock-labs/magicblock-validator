@@ -54,6 +54,27 @@ impl TransactionStrategy {
             .collect()
     }
 
+    /// Handles actions error, stripping away actions
+    /// Returns [`TransactionStrategy`] to be cleaned up
+    pub fn remove_actions(
+        &mut self,
+        authority: &Pubkey,
+    ) -> TransactionStrategy {
+        // Strip away actions
+        let (optimized_tasks, action_tasks) = self
+            .optimized_tasks
+            .drain(..)
+            .partition(|el| !matches!(el, BaseTaskImpl::BaseAction(_)));
+        self.optimized_tasks = optimized_tasks;
+
+        let old_alts = self.dummy_revaluate_alts(authority);
+
+        TransactionStrategy {
+            optimized_tasks: action_tasks,
+            lookup_tables_keys: old_alts,
+        }
+    }
+
     pub fn has_actions_callbacks(&self) -> bool {
         self.optimized_tasks
             .iter()
