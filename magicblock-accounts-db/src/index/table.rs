@@ -36,7 +36,7 @@ impl Table {
 
     /// Inserts a key-value pair, **overwriting** any existing value.
     #[inline]
-    pub(super) fn upsert<K: AsRef<[u8]>, V: AsRef<[u8]>>(
+    pub fn upsert<K: AsRef<[u8]>, V: AsRef<[u8]>>(
         &self,
         txn: &mut RwTransaction,
         key: K,
