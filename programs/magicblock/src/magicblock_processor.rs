@@ -5,7 +5,7 @@ use crate::{
     clone_account::{
         process_cleanup_partial_clone, process_clone_account,
         process_clone_account_continue, process_clone_account_init,
-        process_finalize_program_from_buffer,
+        process_evict_account, process_finalize_program_from_buffer,
         process_finalize_v1_program_from_buffer, process_set_program_authority,
     },
     ephemeral_accounts::{
@@ -16,9 +16,9 @@ use crate::{
     process_scheduled_commit_sent,
     schedule_task::{process_cancel_task, process_schedule_task},
     schedule_transactions::{
-        process_accept_scheduled_commits, process_schedule_commit,
-        process_schedule_commit_finalize, process_schedule_intent_bundle,
-        ProcessScheduleCommitOptions,
+        process_accept_scheduled_commits, process_add_action_callback,
+        process_schedule_commit, process_schedule_commit_finalize,
+        process_schedule_intent_bundle, ProcessScheduleCommitOptions,
     },
     toggle_executable_check::process_toggle_executable_check,
 };
@@ -129,6 +129,15 @@ declare_process_instruction!(
             CloseEphemeralAccount => process_close_ephemeral_account(
                 invoke_context,
                 transaction_context,
+            ),
+            AddActionCallback(args) => {
+                process_add_action_callback(signers, invoke_context, args)
+            }
+            EvictAccount { pubkey } => process_evict_account(
+                &signers,
+                invoke_context,
+                transaction_context,
+                pubkey,
             ),
             Noop(_) => Ok(()),
             CloneAccount {

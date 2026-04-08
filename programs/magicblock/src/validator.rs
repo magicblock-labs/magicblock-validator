@@ -7,6 +7,8 @@ use solana_signer::Signer;
 
 lazy_static! {
     static ref VALIDATOR_AUTHORITY: RwLock<Option<Keypair>> = RwLock::new(None);
+    static ref VALIDATOR_AUTHORITY_OVERRIDE: RwLock<Option<Pubkey>> =
+        RwLock::new(None);
 }
 
 pub fn validator_authority() -> Keypair {
@@ -45,6 +47,30 @@ pub fn init_validator_authority_if_needed(keypair: Keypair) {
         return;
     }
     validator_authority_lock.replace(keypair);
+}
+
+pub fn set_validator_authority_override(pubkey: Pubkey) {
+    let mut lock = VALIDATOR_AUTHORITY_OVERRIDE
+        .write()
+        .expect("RwLock VALIDATOR_AUTHORITY_OVERRIDE poisoned");
+    lock.replace(pubkey);
+}
+
+pub fn unset_validator_authority_override() {
+    let mut lock = VALIDATOR_AUTHORITY_OVERRIDE
+        .write()
+        .expect("RwLock VALIDATOR_AUTHORITY_OVERRIDE poisoned");
+    *lock = None;
+}
+
+pub fn validator_authority_override() -> Option<Pubkey> {
+    *VALIDATOR_AUTHORITY_OVERRIDE
+        .read()
+        .expect("RwLock VALIDATOR_AUTHORITY_OVERRIDE poisoned")
+}
+
+pub fn effective_validator_authority_id() -> Pubkey {
+    validator_authority_override().unwrap_or_else(validator_authority_id)
 }
 
 pub fn generate_validator_authority_if_needed() {

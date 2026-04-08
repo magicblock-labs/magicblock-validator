@@ -9,7 +9,7 @@ use ephemeral_rollups_sdk::{
     ephem::{
         commit_accounts, commit_and_undelegate_accounts,
         commit_finalize_accounts, commit_finalize_and_undelegate_accounts,
-        CallHandler, MagicIntentBundleBuilder,
+        CallHandler, FoldableIntentBuilder, MagicIntentBundleBuilder,
     },
     ActionArgs, ShortAccountMeta,
 };

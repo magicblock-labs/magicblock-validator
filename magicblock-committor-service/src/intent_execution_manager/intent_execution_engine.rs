@@ -5,8 +5,10 @@ use std::{
 };
 
 use futures_util::{stream::FuturesUnordered, StreamExt};
+use magicblock_core::traits::CallbackScheduleError;
 use magicblock_metrics::metrics;
 use magicblock_program::magic_scheduled_base_intent::ScheduledIntentBundle;
+use solana_signature::Signature;
 use tokio::{
     sync::{
         broadcast, mpsc, mpsc::error::TryRecvError, OwnedSemaphorePermit,
@@ -44,16 +46,24 @@ pub struct BroadcastedIntentExecutionResult {
     pub inner: Result<ExecutionOutput, Arc<IntentExecutorError>>,
     pub id: u64,
     pub patched_errors: Arc<PatchedErrors>,
+    pub callbacks_report: Vec<Result<Signature, Arc<CallbackScheduleError>>>,
 }
 
 impl BroadcastedIntentExecutionResult {
     fn new(id: u64, execution_result: IntentExecutionResult) -> Self {
         let inner = execution_result.inner.map_err(Arc::new);
         let patched_errors = execution_result.patched_errors.into();
+        let callbacks_report = execution_result
+            .callbacks_report
+            .into_iter()
+            .map(|el| el.map_err(Arc::new))
+            .collect();
+
         Self {
             id,
             patched_errors,
             inner,
+            callbacks_report,
         }
     }
 }
@@ -260,7 +270,7 @@ where
     }
 
     /// Wrapper on [`IntentExecutor`] that handles its results and drops execution permit
-    #[instrument(skip(executor, persister, inner_scheduler, execution_permit, result_sender), fields(intent_id = intent.id))]
+    #[instrument(skip(executor, persister, intent, inner_scheduler, execution_permit, result_sender), fields(intent_id = intent.id))]
     async fn execute(
         mut executor: E,
         persister: Option<P>,
@@ -822,6 +832,7 @@ mod tests {
                             None,
                         ),
                     ],
+                    callbacks_report: vec![],
                 }
             } else {
                 IntentExecutionResult {
@@ -830,6 +841,7 @@ mod tests {
                         finalize_signature: Signature::default(),
                     }),
                     patched_errors: vec![],
+                    callbacks_report: vec![],
                 }
             };
 
