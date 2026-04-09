@@ -187,7 +187,8 @@ impl AccountSubscriptionTask {
                         if matches!(
                             e,
                             RemoteAccountProviderError::AccountSubscriptionDoesNotExist(_)
-                        ) {
+                        ) && matches!(self, Unsubscribe(_))
+                        {
                             debug!(
                                 client_id = %client_id,
                                 error = ?e,
@@ -196,12 +197,10 @@ impl AccountSubscriptionTask {
                             // For Unsubscribe, "does not exist" is
                             // effectively a successful confirmation —
                             // the subscription is already gone.
-                            if matches!(self, Unsubscribe(_)) {
-                                successes += 1;
-                                if successes >= required_confirmations {
-                                    if let Some(tx) = tx.take() {
-                                        let _ = tx.send(Ok(()));
-                                    }
+                            successes += 1;
+                            if successes >= required_confirmations {
+                                if let Some(tx) = tx.take() {
+                                    let _ = tx.send(Ok(()));
                                 }
                             }
                         } else {
