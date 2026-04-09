@@ -905,11 +905,22 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         if !errors.is_empty() {
             for pubkey in &succeeded {
                 if let Err(unsub_err) = self.unsubscribe(pubkey).await {
-                    warn!(
-                        pubkey = %pubkey, err = ?unsub_err,
-                        "Failed to unsubscribe after partial \
-                         subscription failure"
-                    );
+                    if matches!(
+                        unsub_err,
+                        RemoteAccountProviderError::AccountSubscriptionDoesNotExist(_)
+                    ) {
+                        debug!(
+                            pubkey = %pubkey, err = ?unsub_err,
+                            "Failed to unsubscribe after partial \
+                             subscription failure"
+                        );
+                    } else {
+                        warn!(
+                            pubkey = %pubkey, err = ?unsub_err,
+                            "Failed to unsubscribe after partial \
+                             subscription failure"
+                        );
+                    }
                 }
             }
             return Err(
@@ -942,8 +953,17 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
 
             // 1. Unsubscribe from the account directly (LRU has already removed it)
             if let Err(err) = self.pubsub_client.unsubscribe(evicted).await {
-                // Should we retry here?
-                warn!(evicted = %evicted, error = ?err, "Failed to unsubscribe from pubsub for evicted account");
+                if matches!(
+                    err,
+                    RemoteAccountProviderError::AccountSubscriptionDoesNotExist(
+                        _
+                    )
+                ) {
+                    debug!(evicted = %evicted, error = ?err, "Failed to unsubscribe from pubsub for evicted account");
+                } else {
+                    // Should we retry here?
+                    warn!(evicted = %evicted, error = ?err, "Failed to unsubscribe from pubsub for evicted account");
+                }
             }
 
             // 2. Inform upstream so it can remove it from the store
