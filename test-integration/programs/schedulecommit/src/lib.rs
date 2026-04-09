@@ -24,9 +24,9 @@ use solana_program::{
     program_error::ProgramError,
     pubkey::Pubkey,
     rent::Rent,
-    system_instruction,
     sysvar::Sysvar,
 };
+use solana_system_interface::instruction as system_instruction;
 
 use crate::{
     api::{pda_and_bump, pda_seeds, pda_seeds_with_bump},
@@ -528,7 +528,7 @@ fn process_grow_order_book<'a>(
         )?;
     }
 
-    order_book.realloc(new_size, true)?;
+    order_book.resize(new_size)?;
 
     Ok(())
 }

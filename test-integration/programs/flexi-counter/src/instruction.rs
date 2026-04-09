@@ -2,13 +2,13 @@ use borsh::{BorshDeserialize, BorshSerialize};
 use ephemeral_rollups_sdk::{
     consts::{MAGIC_CONTEXT_ID, MAGIC_PROGRAM_ID},
     delegate_args::{DelegateAccountMetas, DelegateAccounts},
-    dlp_api::dlp,
+    dlp_api,
 };
 use solana_program::{
     instruction::{AccountMeta, Instruction},
     pubkey::Pubkey,
-    system_program,
 };
+use solana_system_interface::program as system_program;
 
 use crate::state::FlexiCounter;
 
@@ -576,7 +576,7 @@ pub fn create_transfer_intent_ix(
         AccountMeta::new(MAGIC_CONTEXT_ID, false),
         AccountMeta::new_readonly(MAGIC_PROGRAM_ID, false),
         AccountMeta::new(
-            dlp::pda::magic_fee_vault_pda_from_validator(&validator),
+            dlp_api::pda::magic_fee_vault_pda_from_validator(&validator),
             false,
         ),
     ];

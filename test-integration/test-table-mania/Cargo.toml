@@ -10,6 +10,8 @@ magicblock-table-mania = { workspace = true, features = [
   "randomize_lookup_table_slot",
 ] }
 paste = { workspace = true }
+solana-address-lookup-table-interface = { workspace = true }
+solana-commitment-config = { workspace = true }
 solana-pubkey = { workspace = true }
 solana-rpc-client = { workspace = true }
 solana-sdk = { workspace = true }

@@ -4,8 +4,8 @@ use cleanass::{assert, assert_eq};
 use integration_test_tools::{
     expect, tmpdir::resolve_tmp_dir, unwrap, validator::cleanup,
 };
+use solana_commitment_config::CommitmentConfig;
 use solana_sdk::{
-    commitment_config::CommitmentConfig,
     pubkey::Pubkey,
     signature::{Keypair, Signature},
 };

@@ -17,6 +17,7 @@ use magicblock_core::{
 };
 use magicblock_ledger::{LatestBlock, LatestBlockInner, Ledger};
 use parking_lot::RwLockReadGuard;
+use solana_feature_set::FeatureSet;
 use solana_program::slot_hashes::SlotHashes;
 use solana_program_runtime::loaded_programs::{
     BlockRelation, ForkGraph, ProgramCache, ProgramCacheEntry,
@@ -63,7 +64,8 @@ pub(super) struct TransactionExecutor {
     // SVM Components
     processor: TransactionBatchProcessor<SimpleForkGraph>,
     config: Box<TransactionProcessingConfig<'static>>,
-    environment: TransactionProcessingEnvironment<'static>,
+    environment: TransactionProcessingEnvironment,
+    feature_set: FeatureSet,
 
     // Channels
     rx: Receiver<IndexedTransaction>,
@@ -71,9 +73,6 @@ pub(super) struct TransactionExecutor {
     accounts_tx: AccountUpdateTx,
     tasks_tx: ScheduledTasksTx,
     ready_tx: Sender<ExecutorId>,
-
-    // Config
-    is_auto_airdrop_lamports_enabled: bool,
 }
 
 impl TransactionExecutor {
@@ -85,14 +84,15 @@ impl TransactionExecutor {
         programs_cache: Arc<RwLock<ProgramCache<SimpleForkGraph>>>,
     ) -> Self {
         let slot = state.accountsdb.slot();
-        let mut processor = TransactionBatchProcessor::new_uninitialized(
-            slot,
-            Default::default(),
-            true,
-        );
+        let mut processor =
+            TransactionBatchProcessor::new_uninitialized(slot, 0);
 
         // Use global program cache to share compilation results across executors
-        processor.program_cache = programs_cache;
+        processor.global_program_cache = programs_cache;
+        processor.environments = state
+            .environment
+            .program_runtime_environments_for_execution
+            .clone();
 
         // Enable recording for accurate fee/unit usage tracking
         let config = Box::new(TransactionProcessingConfig {
@@ -111,14 +111,13 @@ impl TransactionExecutor {
             ledger: state.ledger.clone(),
             config,
             block: state.ledger.latest_block().clone(),
-            environment: state.environment.clone(),
+            environment: copy_env(&state.environment),
+            feature_set: state.feature_set.clone(),
             rx,
             ready_tx,
             accounts_tx: state.account_update_tx.clone(),
             transaction_tx: state.transaction_status_tx.clone(),
             tasks_tx: state.tasks_tx.clone(),
-            is_auto_airdrop_lamports_enabled: state
-                .is_auto_airdrop_lamports_enabled,
         };
 
         this.processor.fill_missing_sysvar_cache_entries(&this);
@@ -132,12 +131,7 @@ impl TransactionExecutor {
                 builtin.name.len(),
                 builtin.entrypoint,
             );
-            self.processor.add_builtin(
-                self,
-                builtin.program_id,
-                builtin.name,
-                entry,
-            );
+            self.processor.add_builtin(builtin.program_id, entry);
         }
     }
 
@@ -225,6 +219,24 @@ impl ForkGraph for SimpleForkGraph {
 // SAFETY: Required for SVM internals (`dyn SVMRentCollector` interactions).
 // Concrete types used here are Send.
 unsafe impl Send for TransactionExecutor {}
+
+fn copy_env(
+    env: &TransactionProcessingEnvironment,
+) -> TransactionProcessingEnvironment {
+    TransactionProcessingEnvironment {
+        blockhash: env.blockhash,
+        blockhash_lamports_per_signature: env.blockhash_lamports_per_signature,
+        epoch_total_stake: env.epoch_total_stake,
+        feature_set: env.feature_set,
+        program_runtime_environments_for_execution: env
+            .program_runtime_environments_for_execution
+            .clone(),
+        program_runtime_environments_for_deployment: env
+            .program_runtime_environments_for_deployment
+            .clone(),
+        rent: env.rent.clone(),
+    }
+}
 
 mod callback;
 mod processing;

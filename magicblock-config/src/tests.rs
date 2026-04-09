@@ -433,8 +433,7 @@ fn test_example_config_full_coverage() {
     // 9. Chainlink (Cloning)
     // ========================================================================
     assert!(!config.chainlink.prepare_lookup_tables);
-    assert_eq!(config.chainlink.auto_airdrop_lamports, 0);
-    assert_eq!(config.chainlink.max_monitored_accounts, 1000);
+    assert_eq!(config.chainlink.max_monitored_accounts, 5000);
 
     // ========================================================================
     // 10. Aperture
@@ -515,7 +514,6 @@ fn test_env_vars_full_coverage() {
         EnvVarGuard::new("MBV_LEDGER__RESET", "true"),
         // --- Chainlink ---
         EnvVarGuard::new("MBV_CHAINLINK__PREPARE_LOOKUP_TABLES", "true"),
-        EnvVarGuard::new("MBV_CHAINLINK__AUTO_AIRDROP_LAMPORTS", "555"),
         EnvVarGuard::new("MBV_CHAINLINK__MAX_MONITORED_ACCOUNTS", "123"),
         EnvVarGuard::new("MBV_CHAINLINK__RESUBSCRIPTION_DELAY", "150ms"),
         // --- Task Scheduler ---
@@ -579,7 +577,6 @@ fn test_env_vars_full_coverage() {
 
     // Chainlink
     assert!(config.chainlink.prepare_lookup_tables);
-    assert_eq!(config.chainlink.auto_airdrop_lamports, 555);
     assert_eq!(config.chainlink.max_monitored_accounts, 123);
     assert_eq!(
         config.chainlink.resubscription_delay,

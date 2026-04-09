@@ -10,12 +10,12 @@ use integration_test_tools::{
     loaded_accounts::DLP_TEST_AUTHORITY_BYTES, IntegrationTestContext,
 };
 use solana_sdk::{
-    signature::Keypair, signer::Signer, system_instruction,
+    program_pack::Pack, signature::Keypair, signer::Signer,
     transaction::Transaction,
 };
+use solana_system_interface::instruction as system_instruction;
 use spl_token::{
     instruction as spl_token_ix,
-    solana_program::program_pack::Pack,
     state::{Account as TokenAccount, Mint},
 };
 use test_kit::init_logger;
@@ -163,7 +163,7 @@ fn test_post_delegation_action_executes_spl_token_transfer_100() {
     let post_actions: Vec<PostDelegationInstruction> =
         vec![transfer_100_ix.cleartext()];
 
-    let validator = Keypair::from_bytes(&DLP_TEST_AUTHORITY_BYTES)
+    let validator = Keypair::try_from(&DLP_TEST_AUTHORITY_BYTES[..])
         .unwrap()
         .pubkey();
     let delegate_with_actions_ix = delegate_with_actions(

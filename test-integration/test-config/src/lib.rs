@@ -20,9 +20,10 @@ use program_flexi_counter::instruction::{
     create_add_ix, create_delegate_ix, create_init_ix,
 };
 use solana_sdk::{
-    address_lookup_table, native_token::LAMPORTS_PER_SOL, signature::Keypair,
-    signer::Signer, transaction::Transaction,
+    native_token::LAMPORTS_PER_SOL, signature::Keypair, signer::Signer,
+    transaction::Transaction,
 };
+use solana_sdk_ids::address_lookup_table;
 use tempfile::TempDir;
 use tracing::*;
 
@@ -50,7 +51,6 @@ pub fn start_validator_with_clone_config(
         ],
         chainlink: ChainLinkConfig {
             prepare_lookup_tables,
-            auto_airdrop_lamports: 0,
             ..Default::default()
         },
         accountsdb: AccountsDbConfig {
@@ -169,7 +169,7 @@ pub fn delegate_and_clone(
 pub fn count_lookup_table_transactions_on_chain(
     ctx: &IntegrationTestContext,
 ) -> anyhow::Result<usize> {
-    let lookup_table_program_id = address_lookup_table::program::id();
+    let lookup_table_program_id = address_lookup_table::id();
 
     let sigs =
         ctx.get_signaturestats_for_address_chain(&lookup_table_program_id)?;

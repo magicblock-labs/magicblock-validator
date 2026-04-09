@@ -11,6 +11,7 @@ use std::{
 use async_trait::async_trait;
 #[cfg(any(test, feature = "dev-context"))]
 use solana_account::Account;
+use solana_clock::Clock;
 #[cfg(any(test, feature = "dev-context"))]
 use solana_commitment_config::CommitmentConfig;
 #[cfg(any(test, feature = "dev-context"))]
@@ -22,7 +23,6 @@ use solana_rpc_client_api::{
     config::RpcAccountInfoConfig,
     response::{Response, RpcResponseContext, RpcResult},
 };
-use solana_sysvar::clock;
 #[cfg(any(test, feature = "dev-context"))]
 use tracing::*;
 
@@ -34,7 +34,7 @@ pub struct ChainRpcClientMockBuilder {
     commitment: CommitmentConfig,
     accounts: HashMap<Pubkey, AccountAtSlot>,
     current_slot: u64,
-    clock_sysvar: Option<clock::Clock>,
+    clock_sysvar: Option<Clock>,
 }
 
 #[cfg(any(test, feature = "dev-context"))]
@@ -74,7 +74,7 @@ impl ChainRpcClientMockBuilder {
     }
 
     pub fn clock_sysvar_for_slot(mut self, slot: u64) -> Self {
-        self.clock_sysvar.replace(clock::Clock {
+        self.clock_sysvar.replace(Clock {
             slot,
             ..Default::default()
         });
@@ -174,17 +174,19 @@ impl ChainRpcClientMock {
         self.set_clock_sysvar_with(slot, 0, 0);
     }
 
-    pub fn set_clock_sysvar(&self, clock: clock::Clock) {
+    pub fn set_clock_sysvar(&self, clock: Clock) {
+        use solana_program::sysvar::SysvarId;
+
         trace!(clock = ?clock, "Setting clock sysvar");
         let clock_data = bincode::serialize(&clock).unwrap();
         let account = Account {
             lamports: 1_000_000_000,
             data: clock_data,
-            owner: clock::id(),
+            owner: Clock::id(),
             ..Default::default()
         };
-        self.add_account(clock::id(), account);
-        self.account_override_slot(&clock::id(), clock.slot);
+        self.add_account(Clock::id(), account);
+        self.account_override_slot(&Clock::id(), clock.slot);
     }
 
     pub fn set_clock_sysvar_with(
@@ -199,7 +201,7 @@ impl ChainRpcClientMock {
             leader_schedule_epoch = leader_schedule_epoch,
             "Adding clock sysvar"
         );
-        let clock = clock::Clock {
+        let clock = Clock {
             slot,
             epoch,
             leader_schedule_epoch,

@@ -15,7 +15,8 @@ program-flexi-counter = { workspace = true, features = ["no-entrypoint"] }
 solana-account = { workspace = true }
 solana-loader-v2-interface = { workspace = true, features = ["serde"] }
 solana-loader-v3-interface = { workspace = true, features = ["serde"] }
-solana-loader-v4-interface = { workspace = true, features = ["serde"] }
+solana-loader-v4-interface = { workspace = true, features = ["bincode", "serde"] }
+solana-commitment-config = { workspace = true }
 solana-pubkey = { workspace = true }
 solana-rpc-client = { workspace = true }
 solana-rpc-client-api = { workspace = true }

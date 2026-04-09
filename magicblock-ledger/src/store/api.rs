@@ -1543,6 +1543,7 @@ mod tests {
                 loaded_addresses: Default::default(),
                 return_data: Some(test_return_data.clone()),
                 compute_units_consumed: compute_units_consumed_1,
+                cost_units: None,
             },
             writable_keys,
             readonly_keys,

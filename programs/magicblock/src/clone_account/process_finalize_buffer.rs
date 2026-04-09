@@ -49,19 +49,19 @@ pub(crate) fn process_finalize_program_from_buffer(
     validate_authority(signers, invoke_context)?;
 
     let ctx = transaction_context.get_current_instruction_context()?;
-    let auth_acc = transaction_context.get_account_at_index(
+    let mut auth_acc = transaction_context.accounts().try_borrow_mut(
         ctx.get_index_of_instruction_account_in_transaction(0)?,
     )?;
-    let prog_acc = transaction_context.get_account_at_index(
+    let mut prog_acc = transaction_context.accounts().try_borrow_mut(
         ctx.get_index_of_instruction_account_in_transaction(1)?,
     )?;
-    let buf_acc = transaction_context.get_account_at_index(
+    let buf_acc = transaction_context.accounts().try_borrow_mut(
         ctx.get_index_of_instruction_account_in_transaction(2)?,
     )?;
 
-    let buf_data = buf_acc.borrow().data().to_vec();
-    let buf_lamports = buf_acc.borrow().lamports();
-    let prog_current_lamports = prog_acc.borrow().lamports();
+    let buf_data = buf_acc.data().to_vec();
+    let buf_lamports = buf_acc.lamports();
+    let prog_current_lamports = prog_acc.lamports();
 
     let deploy_slot = get_deploy_slot(invoke_context);
 
@@ -89,19 +89,18 @@ pub(crate) fn process_finalize_program_from_buffer(
 
     // Set up program account
     {
-        let mut prog = prog_acc.borrow_mut();
-        prog.set_lamports(prog_lamports);
-        prog.set_owner(loader_v4::id());
-        prog.set_executable(true);
-        prog.set_data_from_slice(&program_data);
-        prog.set_remote_slot(remote_slot);
-        prog.set_undelegating(false);
+        prog_acc.set_lamports(prog_lamports);
+        prog_acc.set_owner(loader_v4::id());
+        prog_acc.set_executable(true);
+        prog_acc.set_data_from_slice(&program_data);
+        prog_acc.set_remote_slot(remote_slot);
+        prog_acc.set_undelegating(false);
     }
 
     // Close buffer account
     close_buffer_account(buf_acc);
 
-    adjust_authority_lamports(auth_acc, lamports_delta)?;
+    adjust_authority_lamports(&mut auth_acc, lamports_delta)?;
     Ok(())
 }
 

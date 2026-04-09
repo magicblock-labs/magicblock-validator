@@ -1,22 +1,23 @@
 [package]
+edition.workspace = true
 name = "program-flexi-counter"
 version.workspace = true
-edition.workspace = true
 
 [dependencies]
 bincode = { workspace = true }
 borsh = { workspace = true }
 ephemeral-rollups-sdk = { workspace = true }
+magicblock-magic-program-api = { workspace = true }
 serde = { workspace = true }
 solana-program = { workspace = true }
-magicblock_magic_program_api = { workspace = true }
+solana-system-interface = { workspace = true }
 
 [lib]
 crate-type = ["cdylib", "lib"]
 
 [features]
-no-entrypoint = []
 cpi = ["no-entrypoint"]
-default = []
-custom-panic = []
 custom-heap = []
+custom-panic = []
+default = []
+no-entrypoint = []

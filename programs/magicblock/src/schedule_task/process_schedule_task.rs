@@ -21,43 +21,47 @@ pub(crate) fn process_schedule_task(
 ) -> Result<(), InstructionError> {
     const PAYER_IDX: u16 = 0;
 
-    let transaction_context = &invoke_context.transaction_context.clone();
-    let ix_ctx = transaction_context.get_current_instruction_context()?;
-    let ix_accs_len = ix_ctx.get_number_of_instruction_accounts() as usize;
     const ACCOUNTS_START: usize = PAYER_IDX as usize + 1;
 
-    // Assert MagicBlock program
-    ix_ctx
-        .find_index_of_program_account(transaction_context, &crate::id())
-        .ok_or_else(|| {
+    let payer_pubkey = {
+        let transaction_context = &*invoke_context.transaction_context;
+        let ix_ctx = transaction_context.get_current_instruction_context()?;
+        let ix_accs_len = ix_ctx.get_number_of_instruction_accounts() as usize;
+
+        // Assert MagicBlock program
+        if ix_ctx.get_program_key()? != &crate::id() {
             ic_msg!(
                 invoke_context,
-                "ScheduleTask ERR: Magic program account not found"
+                "ScheduleTask ERR: program ID mismatch, expected {}",
+                crate::id()
             );
-            InstructionError::UnsupportedProgramId
-        })?;
+            return Err(InstructionError::UnsupportedProgramId);
+        }
 
-    // Assert enough accounts
-    if ix_accs_len < ACCOUNTS_START {
-        ic_msg!(
-            invoke_context,
-            "ScheduleTask ERR: not enough accounts to schedule task ({}), need payer, signing program and task context",
-            ix_accs_len
-        );
-        return Err(InstructionError::NotEnoughAccountKeys);
-    }
+        // Assert enough accounts
+        if ix_accs_len < ACCOUNTS_START {
+            ic_msg!(
+                invoke_context,
+                "ScheduleTask ERR: not enough accounts to schedule task ({}), need payer, signing program and task context",
+                ix_accs_len
+            );
+            return Err(InstructionError::MissingAccount);
+        }
 
-    // Assert Payer is signer
-    let payer_pubkey =
-        get_instruction_pubkey_with_idx(transaction_context, PAYER_IDX)?;
-    if !signers.contains(payer_pubkey) {
-        ic_msg!(
-            invoke_context,
-            "ScheduleTask ERR: payer pubkey {} not in signers",
-            payer_pubkey
-        );
-        return Err(InstructionError::MissingRequiredSignature);
-    }
+        // Assert Payer is signer
+        let payer_pubkey =
+            *get_instruction_pubkey_with_idx(transaction_context, PAYER_IDX)?;
+        if !signers.contains(&payer_pubkey) {
+            ic_msg!(
+                invoke_context,
+                "ScheduleTask ERR: payer pubkey {} not in signers",
+                payer_pubkey
+            );
+            return Err(InstructionError::MissingRequiredSignature);
+        }
+
+        payer_pubkey
+    };
 
     // Enforce minimal number of iterations
     if args.iterations < 1 {
@@ -94,7 +98,7 @@ pub(crate) fn process_schedule_task(
     let schedule_request = ScheduleTaskRequest {
         id: args.task_id,
         instructions: args.instructions,
-        authority: *payer_pubkey,
+        authority: payer_pubkey,
         execution_interval_millis: args.execution_interval_millis,
         iterations: args.iterations,
     };

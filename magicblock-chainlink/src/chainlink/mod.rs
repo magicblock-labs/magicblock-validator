@@ -63,9 +63,6 @@ pub struct Chainlink<
     validator_id: Pubkey,
     faucet_id: Pubkey,
 
-    /// If > 0, automatically airdrop this many lamports to feepayers when they are new/empty
-    auto_airdrop_lamports: u64,
-
     /// If true, remove confined accounts during bank reset
     remove_confined_accounts: bool,
 }
@@ -98,7 +95,6 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
             removed_accounts_sub,
             validator_id: validator_pubkey,
             faucet_id: faucet_pubkey,
-            auto_airdrop_lamports: config.auto_airdrop_lamports,
             remove_confined_accounts: config.remove_confined_accounts,
         })
     }
@@ -355,33 +351,6 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
                 Some(&program_ids),
             )
             .await?;
-
-        // Best-effort auto airdrop for fee payer if configured
-        if self.auto_airdrop_lamports > 0 {
-            if let Some(fetch_cloner) = self.fetch_cloner() {
-                let lamports = self
-                    .accounts_bank
-                    .get_account(feepayer)
-                    .map(|a| a.lamports())
-                    .unwrap_or(0);
-
-                if lamports == 0 {
-                    if let Err(err) = fetch_cloner
-                        .airdrop_account_if_empty(
-                            *feepayer,
-                            self.auto_airdrop_lamports,
-                        )
-                        .await
-                    {
-                        warn!(
-                            feepayer = %feepayer,
-                            error = %err,
-                            "Auto airdrop for feepayer failed"
-                        );
-                    }
-                }
-            }
-        }
 
         Ok(res)
     }

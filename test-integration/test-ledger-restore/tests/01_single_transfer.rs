@@ -5,8 +5,8 @@ use integration_test_tools::{
     expect, loaded_accounts::LoadedAccounts, tmpdir::resolve_tmp_dir, unwrap,
     validator::cleanup,
 };
+use solana_commitment_config::CommitmentConfig;
 use solana_sdk::{
-    commitment_config::CommitmentConfig,
     pubkey::Pubkey,
     signature::{Keypair, Signature},
     signer::Signer,

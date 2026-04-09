@@ -31,7 +31,7 @@ pub(crate) fn process_clone_account(
     validate_authority(signers, invoke_context)?;
 
     let ctx = transaction_context.get_current_instruction_context()?;
-    let auth_acc = transaction_context.get_account_at_index(
+    let mut auth_acc = transaction_context.accounts().try_borrow_mut(
         ctx.get_index_of_instruction_account_in_transaction(0)?,
     )?;
 
@@ -42,13 +42,13 @@ pub(crate) fn process_clone_account(
         "CloneAccount",
         invoke_context,
     )?;
-    let account = transaction_context.get_account_at_index(tx_idx)?;
+    let mut account = transaction_context.accounts().try_borrow_mut(tx_idx)?;
 
     // Prevent overwriting ephemeral or active delegated accounts
-    validate_mutable(account, &pubkey, invoke_context)?;
+    validate_mutable(&account, &pubkey, invoke_context)?;
     // Prevent stale updates from overwriting fresher data
     validate_remote_slot(
-        account,
+        &mut account,
         &pubkey,
         Some(fields.remote_slot),
         invoke_context,
@@ -73,11 +73,11 @@ pub(crate) fn process_clone_account(
         );
     }
 
-    let current_lamports = account.borrow().lamports();
+    let current_lamports = account.lamports();
     let lamports_delta = fields.lamports as i64 - current_lamports as i64;
 
     set_account_from_fields(invoke_context, account, &data, &fields)?;
 
-    adjust_authority_lamports(auth_acc, lamports_delta)?;
+    adjust_authority_lamports(&mut auth_acc, lamports_delta)?;
     Ok(())
 }

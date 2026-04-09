@@ -54,10 +54,10 @@ use program_flexi_counter::{
     state::{FlexiCounter, FAIL_UNDELEGATION_LABEL},
 };
 use solana_account::Account;
+use solana_commitment_config::CommitmentConfig;
 use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_sdk::{
-    commitment_config::CommitmentConfig,
     hash::Hash,
     instruction::InstructionError,
     native_token::LAMPORTS_PER_SOL,
@@ -65,6 +65,7 @@ use solana_sdk::{
     signature::{Keypair, Signer},
     transaction::{Transaction, TransactionError},
 };
+use solana_sdk_ids::system_program;
 
 use crate::{
     common::{MockActionsCallbackExecutor, TestFixture},
@@ -1472,7 +1473,7 @@ fn succeeding_commit_action(
             is_writable: true,
         },
         ShortAccountMeta {
-            pubkey: solana_sdk::system_program::id(),
+            pubkey: system_program::id(),
             is_writable: false,
         },
     ];
@@ -1514,7 +1515,7 @@ fn succeeding_undelegate_action(
             is_writable: true,
         },
         ShortAccountMeta {
-            pubkey: solana_sdk::system_program::id(),
+            pubkey: system_program::id(),
             is_writable: false,
         },
     ];
@@ -1557,7 +1558,7 @@ fn failing_undelegate_action(
             is_writable: true,
         },
         ShortAccountMeta {
-            pubkey: solana_sdk::system_program::id(),
+            pubkey: system_program::id(),
             is_writable: false,
         },
     ];

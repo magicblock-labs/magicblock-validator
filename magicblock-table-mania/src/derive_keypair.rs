@@ -1,4 +1,4 @@
-use ed25519_dalek::{PublicKey, SecretKey};
+use ed25519_dalek::SecretKey;
 use solana_clock::Slot;
 use solana_keypair::Keypair;
 use solana_signer::Signer;
@@ -29,16 +29,10 @@ fn derive_insecure(message: &[u8]) -> Keypair {
     let hash = <sha3::Sha3_512 as sha3::Digest>::digest(message);
     let seed = &hash.as_slice()[0..32];
 
-    // Create a keypair using the seed bytes
     let secret = SecretKey::from_bytes(seed).unwrap();
-    let public = PublicKey::from(&secret);
-
-    // Convert to Solana Keypair format
-    let mut keypair_bytes = [0u8; 64];
-    keypair_bytes[0..32].copy_from_slice(secret.as_bytes());
-    keypair_bytes[32..64].copy_from_slice(&public.to_bytes());
-
-    Keypair::from_bytes(&keypair_bytes).unwrap()
+    let mut secret_bytes = [0u8; Keypair::SECRET_KEY_LENGTH];
+    secret_bytes.copy_from_slice(secret.as_bytes());
+    Keypair::new_from_array(secret_bytes)
 }
 
 #[cfg(test)]
