@@ -17,7 +17,6 @@ solana-message = { workspace = true }
 solana-pubkey = { workspace = true }
 solana-signature = { workspace = true }
 solana-transaction = { workspace = true }
-solana-transaction-context = { workspace = true }
 solana-transaction-error = { workspace = true }
 solana-transaction-status = { workspace = true }
 
@@ -32,7 +31,7 @@ name = "solana_storage_proto"
 targets = ["x86_64-unknown-linux-gnu"]
 
 [build-dependencies]
-tonic-build = { workspace = true }
+tonic-prost-build = { workspace = true }
 
 # windows users should install the protobuf compiler manually and set the PROTOC
 # envar to point to the installed binary

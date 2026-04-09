@@ -166,7 +166,7 @@ mod tests {
 
     #[test]
     fn registers_sol_matmul_i8_syscall() {
-        let mut runtime: BuiltinProgram<InvokeContext<'_>> =
+        let mut runtime: BuiltinProgram<InvokeContext<'_, '_>> =
             BuiltinProgram::new_loader(Default::default());
         runtime
             .register_function("sol_matmul_i8", SyscallMatmulI8::vm)

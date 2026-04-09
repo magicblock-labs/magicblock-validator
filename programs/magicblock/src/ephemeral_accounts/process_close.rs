@@ -21,12 +21,12 @@ pub(crate) fn process_close_ephemeral_account(
     let ephemeral =
         validate_existing_ephemeral(transaction_context, &caller_program_id)?;
 
-    let data_len = get_ephemeral_data_len(ephemeral)?;
+    let data_len = get_ephemeral_data_len(&ephemeral)?;
     let refund = rent_for(data_len)?;
     transfer_rent(transaction_context, -(refund as i64))?;
 
     // Reset account to empty state
-    let mut acc = ephemeral.borrow_mut();
+    let mut acc = ephemeral.borrow_mut()?;
     acc.set_lamports(0);
     acc.set_owner(system_program::id());
     acc.resize(0, 0);

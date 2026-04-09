@@ -10,9 +10,7 @@ use solana_sdk_ids::system_program;
 use solana_transaction_context::TransactionContext;
 
 use crate::{
-    clone_account::{
-        is_ephemeral, validate_not_delegated, validate_remote_slot,
-    },
+    clone_account::{validate_not_delegated, validate_remote_slot},
     errors::MagicBlockProgramError,
     validator::effective_validator_authority_id,
 };
@@ -33,7 +31,7 @@ pub(crate) fn process_mutate_accounts(
     let account_mods_len = account_mods.len() as u64;
 
     // 1. Checks
-    let validator_authority_acc = {
+    let mut validator_authority_acc = {
         // 1.1. MagicBlock authority must sign
         let validator_authority_id = effective_validator_authority_id();
         if !signers.contains(&validator_authority_id) {
@@ -80,12 +78,9 @@ pub(crate) fn process_mutate_accounts(
             );
         }
         let magicblock_authority_acc = transaction_context
-            .get_account_at_index(authority_transaction_index)?;
-        if magicblock_authority_acc
-            .borrow()
-            .owner()
-            .ne(&system_program::id())
-        {
+            .accounts()
+            .try_borrow_mut(authority_transaction_index)?;
+        if magicblock_authority_acc.owner().ne(&system_program::id()) {
             ic_msg!(
                 invoke_context,
                 "MutateAccounts: MagicBlock authority needs to be owned by the system program"
@@ -106,11 +101,12 @@ pub(crate) fn process_mutate_accounts(
         let account_idx = (idx + 1) as u16;
         let account_transaction_index = instruction_context
             .get_index_of_instruction_account_in_transaction(account_idx)?;
-        let account = transaction_context
-            .get_account_at_index(account_transaction_index)?;
+        let mut account = transaction_context
+            .accounts()
+            .try_borrow_mut(account_transaction_index)?;
 
         // Skip ephemeral accounts (exist locally on ER only)
-        if is_ephemeral(account) {
+        if account.ephemeral() {
             let key = transaction_context
                 .get_key_of_account_at_index(account_transaction_index)?;
             account_mods.remove(key);
@@ -146,9 +142,9 @@ pub(crate) fn process_mutate_accounts(
         }
 
         // Validate account is mutable
-        validate_not_delegated(account, account_key, invoke_context)?;
+        validate_not_delegated(&account, account_key, invoke_context)?;
         validate_remote_slot(
-            account,
+            &mut account,
             account_key,
             modification.remote_slot,
             invoke_context,
@@ -157,7 +153,7 @@ pub(crate) fn process_mutate_accounts(
         // While an account is undelegating and the delegation is not completed,
         // we will never clone/mutate it. Thus we can safely untoggle this flag
         // here AFTER validation passes.
-        account.borrow_mut().set_undelegating(false);
+        account.set_undelegating(false);
 
         if let Some(lamports) = modification.lamports {
             ic_msg!(
@@ -165,10 +161,10 @@ pub(crate) fn process_mutate_accounts(
                 "MutateAccounts: setting lamports to {}",
                 lamports
             );
-            let current_lamports = account.borrow().lamports();
+            let current_lamports = account.lamports();
             lamports_to_debit += lamports as i128 - current_lamports as i128;
 
-            account.borrow_mut().set_lamports(lamports);
+            account.set_lamports(lamports);
         }
         if let Some(owner) = modification.owner {
             ic_msg!(
@@ -176,7 +172,7 @@ pub(crate) fn process_mutate_accounts(
                 "MutateAccounts: setting owner to {}",
                 owner
             );
-            account.borrow_mut().set_owner(owner);
+            account.set_owner(owner);
         }
         if let Some(executable) = modification.executable {
             ic_msg!(
@@ -184,7 +180,7 @@ pub(crate) fn process_mutate_accounts(
                 "MutateAccounts: setting executable to {}",
                 executable
             );
-            account.borrow_mut().set_executable(executable);
+            account.set_executable(executable);
         }
         if let Some(data) = modification.data.take() {
             ic_msg!(
@@ -192,7 +188,7 @@ pub(crate) fn process_mutate_accounts(
                 "MutateAccounts: setting data to len {}",
                 data.len()
             );
-            account.borrow_mut().set_data_from_slice(&data);
+            account.set_data_from_slice(&data);
         }
         if let Some(delegated) = modification.delegated {
             ic_msg!(
@@ -200,7 +196,7 @@ pub(crate) fn process_mutate_accounts(
                 "MutateAccounts: setting delegated to {}",
                 delegated
             );
-            account.borrow_mut().set_delegated(delegated);
+            account.set_delegated(delegated);
         }
         if let Some(confined) = modification.confined {
             ic_msg!(
@@ -208,7 +204,7 @@ pub(crate) fn process_mutate_accounts(
                 "MutateAccounts: setting confined to {}",
                 confined
             );
-            account.borrow_mut().set_confined(confined);
+            account.set_confined(confined);
         }
         if let Some(remote_slot) = modification.remote_slot {
             ic_msg!(
@@ -216,12 +212,12 @@ pub(crate) fn process_mutate_accounts(
                 "MutateAccounts: setting remote_slot to {}",
                 remote_slot
             );
-            account.borrow_mut().set_remote_slot(remote_slot);
+            account.set_remote_slot(remote_slot);
         }
     }
 
     if lamports_to_debit != 0 {
-        let authority_lamports = validator_authority_acc.borrow().lamports();
+        let authority_lamports = validator_authority_acc.lamports();
         let adjusted_authority_lamports = if lamports_to_debit > 0 {
             (authority_lamports as u128)
                 .checked_sub(lamports_to_debit as u128)
@@ -248,7 +244,7 @@ pub(crate) fn process_mutate_accounts(
                 })?
         };
 
-        validator_authority_acc.borrow_mut().set_lamports(
+        validator_authority_acc.set_lamports(
             u64::try_from(adjusted_authority_lamports).map_err(|err| {
                 ic_msg!(
                     invoke_context,
