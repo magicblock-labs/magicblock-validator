@@ -193,6 +193,17 @@ impl AccountSubscriptionTask {
                                 error = ?e,
                                 "Ignoring unsubscribe for non-existent subscription"
                             );
+                            // For Unsubscribe, "does not exist" is
+                            // effectively a successful confirmation —
+                            // the subscription is already gone.
+                            if matches!(self, Unsubscribe(_)) {
+                                successes += 1;
+                                if successes >= required_confirmations {
+                                    if let Some(tx) = tx.take() {
+                                        let _ = tx.send(Ok(()));
+                                    }
+                                }
+                            }
                         } else {
                             errors
                                 .push(format!("Client {}: {:?}", client_id, e));
