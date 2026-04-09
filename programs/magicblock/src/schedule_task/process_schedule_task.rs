@@ -84,7 +84,7 @@ pub(crate) fn process_schedule_task(
             if account.is_signer && account.pubkey.ne(&val_id) {
                 ic_msg!(
                     invoke_context,
-                    "ScheduleTask: signer account '{}' is not the validator authority.",
+                    "ScheduleTask: only the validator authority can be a signer in cranks and '{}' is not the validator.",
                     account.pubkey,
                 );
                 return Err(InstructionError::MissingRequiredSignature);
