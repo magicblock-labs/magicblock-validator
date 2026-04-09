@@ -1018,10 +1018,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             return Ok(());
         }
 
-        // Atomic claim: remove from LRU first so concurrent callers
-        // see it as already gone. First caller wins.
-        let was_present = self.lrucache_subscribed_accounts.remove(pubkey);
-        if !was_present {
+        if !self.lrucache_subscribed_accounts.contains(pubkey) {
             trace!(pubkey = %pubkey, "Already unsubscribed from LRU");
             return Ok(());
         }
@@ -1033,13 +1030,8 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         )
         .await;
 
-        if !success {
-            warn!(
-                pubkey = %pubkey,
-                "Pubsub unsubscribe failed after LRU removal \
-                 (likely already removed by concurrent path; \
-                 reconciler will clean up)"
-            );
+        if success {
+            self.lrucache_subscribed_accounts.remove(pubkey);
         }
 
         Ok(())
