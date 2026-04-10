@@ -133,7 +133,7 @@ keypair = "9Vo7TbA5YfC5a33JhAi9Fb41usA6JwecHNRw3f9MzzHAM8hFnXTzL5DcEHwsAFjuUZ8vN
 # secret = "SUAXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
 # 
 # - "replica-only": replicate without takeover
-# # specify the pubkey of the primary node, which we are replicating from
+#   Requires the primary validator pubkey we are replicating from.
 # 
 # [validator.replication-mode.replica-only]
 # url = "nats://0.0.0.0:4222"

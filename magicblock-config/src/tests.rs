@@ -721,7 +721,6 @@ fn test_replication_config_debug_redacts_secret() {
     let cfg = ReplicationConfig {
         url: "nats://0.0.0.0:4222".parse().unwrap(),
         secret: "SUASECRET".into(),
-        authority_override: None,
     };
 
     let dbg = format!("{cfg:?}");

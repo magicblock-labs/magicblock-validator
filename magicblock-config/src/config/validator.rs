@@ -33,7 +33,12 @@ pub enum ReplicationMode {
     /// Validator which participates in replication: acting as either a primary or replicator
     StandBy(ReplicationConfig),
     /// Validator which participates in replication only as replicator (no takeover)
-    ReplicaOnly(ReplicationConfig),
+    ReplicaOnly {
+        #[serde(flatten)]
+        config: ReplicationConfig,
+        #[serde(rename = "kebab-case")]
+        authority_override: SerdePubkey,
+    },
 }
 
 #[derive(Deserialize, Clone)]
@@ -41,7 +46,6 @@ pub enum ReplicationMode {
 pub struct ReplicationConfig {
     pub url: Url,
     pub secret: String,
-    pub authority_override: Option<SerdePubkey>,
 }
 
 impl fmt::Debug for ReplicationConfig {
@@ -49,7 +53,6 @@ impl fmt::Debug for ReplicationConfig {
         f.debug_struct("ReplicationConfig")
             .field("url", &self.url)
             .field("secret", &"<redacted>")
-            .field("authority_override", &self.authority_override)
             .finish()
     }
 }
@@ -64,14 +67,11 @@ impl Serialize for ReplicationConfig {
         struct Redacted<'a> {
             url: &'a Url,
             secret: &'static str,
-            #[serde(skip_serializing_if = "Option::is_none")]
-            authority_override: &'a Option<SerdePubkey>,
         }
 
         Redacted {
             url: &self.url,
             secret: "<redacted>",
-            authority_override: &self.authority_override,
         }
         .serialize(serializer)
     }
@@ -95,13 +95,17 @@ impl ReplicationMode {
     pub fn config(&self) -> Option<ReplicationConfig> {
         match self {
             Self::Standalone => None,
-            Self::StandBy(c) | Self::ReplicaOnly(c) => Some(c.clone()),
+            Self::StandBy(c) => Some(c.clone()),
+            Self::ReplicaOnly { config, .. } => Some(config.clone()),
         }
     }
 
     pub fn authority_override(&self) -> Option<Pubkey> {
-        if let Self::ReplicaOnly(c) = self {
-            return c.authority_override.as_ref().map(|pk| pk.0);
+        if let Self::ReplicaOnly {
+            authority_override, ..
+        } = self
+        {
+            return Some(authority_override.0);
         }
         None
     }
