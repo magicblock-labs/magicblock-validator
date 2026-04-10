@@ -1157,7 +1157,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                             break res;
                         }
                     }
-                    Ok(Err(err)) => match err.kind {
+                    Ok(Err(err)) => match *err.kind {
                         ErrorKind::RpcError(rpc_err) => {
                             match rpc_err {
                                 RpcError::ForUser(ref rpc_user_err) => {

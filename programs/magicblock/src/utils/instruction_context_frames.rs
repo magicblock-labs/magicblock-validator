@@ -1,9 +1,7 @@
 use solana_instruction::error::InstructionError;
 use solana_pubkey::Pubkey;
-use solana_transaction_context::{InstructionContext, TransactionContext};
-// -----------------
-// InstructionFrame Trait
-// -----------------
+use solana_transaction_context::TransactionContext;
+
 pub(crate) trait InstructionFrame {
     /// How deeply in the stack this frame is.
     fn get_nesting_level(&self) -> usize;
@@ -13,42 +11,34 @@ pub(crate) trait InstructionFrame {
     fn get_program_id(&self) -> Option<&Pubkey>;
 }
 
-// -----------------
-// InstructionContextFrame
-// -----------------
-pub(crate) struct InstructionContextFrame<'a> {
-    instruction_ctx: &'a InstructionContext,
-    transaction_ctx: &'a TransactionContext,
+pub(crate) struct InstructionContextFrame {
+    nesting_level: usize,
+    program_id: Option<Pubkey>,
     index: usize,
 }
 
-impl InstructionFrame for InstructionContextFrame<'_> {
+impl InstructionFrame for InstructionContextFrame {
     fn get_nesting_level(&self) -> usize {
-        // NOTE: stack_height is nesting_level + 1 (1 based)
-        self.instruction_ctx.get_stack_height() - 1
+        self.nesting_level
     }
+
     fn get_index(&self) -> usize {
         self.index
     }
+
     fn get_program_id(&self) -> Option<&Pubkey> {
-        self.instruction_ctx
-            .get_last_program_key(self.transaction_ctx)
-            .ok()
+        self.program_id.as_ref()
     }
 }
 
-// -----------------
-// GenericInstructionContextFrames
-// -----------------
-
 /// Represents all frames in a transaction in the order that they would be called.
-/// For top level instrucions the nesting_level is 0.
+/// For top level instructions the nesting_level is 0.
 /// All nested instructions are invoked via CPI.
 ///
 /// This vec holds frames of multiple stacks.
 ///
 /// The frames are in depth first order, meaning sibling instructions come after
-/// any child instrucions of a specific frame.
+/// any child instructions of a specific frame.
 pub(crate) struct GenericInstructionContextFrames<F: InstructionFrame>(Vec<F>);
 
 impl<F: InstructionFrame> GenericInstructionContextFrames<F> {
@@ -63,7 +53,6 @@ impl<F: InstructionFrame> GenericInstructionContextFrames<F> {
         }
         let current_index = current_frame.get_index();
 
-        // Find the first frame whose nesting level is less than the current frame
         for frame_idx in (0..current_index).rev() {
             let frame = &self.0[frame_idx];
             let nesting_level = frame.get_nesting_level();
@@ -94,17 +83,14 @@ impl<F: InstructionFrame> GenericInstructionContextFrames<F> {
     }
 }
 
-// -----------------
-// InstructionContextFrames
-// -----------------
-pub(crate) struct InstructionContextFrames<'a> {
-    frames: GenericInstructionContextFrames<InstructionContextFrame<'a>>,
+pub(crate) struct InstructionContextFrames {
+    frames: GenericInstructionContextFrames<InstructionContextFrame>,
     current_frame_idx: usize,
 }
 
-impl<'a> InstructionContextFrames<'a> {
+impl InstructionContextFrames {
     pub fn new(
-        frames: Vec<InstructionContextFrame<'a>>,
+        frames: Vec<InstructionContextFrame>,
         current_frame_idx: usize,
     ) -> Self {
         Self {
@@ -112,46 +98,50 @@ impl<'a> InstructionContextFrames<'a> {
             current_frame_idx,
         }
     }
+
     pub fn find_program_id_of_parent_of_current_instruction(
-        &'a self,
-    ) -> Option<&'a Pubkey> {
+        &self,
+    ) -> Option<&Pubkey> {
         self.frames
             .find_program_id_of_parent_frame(self.current_frame())
     }
 
-    fn current_frame(&self) -> &InstructionContextFrame<'a> {
+    fn current_frame(&self) -> &InstructionContextFrame {
         &self.frames.0[self.current_frame_idx]
     }
 }
 
-impl<'a> TryFrom<&'a TransactionContext> for InstructionContextFrames<'a> {
+impl TryFrom<&TransactionContext<'_>> for InstructionContextFrames {
     type Error = InstructionError;
-    fn try_from(ctx: &'a TransactionContext) -> Result<Self, Self::Error> {
-        let mut frames = vec![];
+
+    fn try_from(ctx: &TransactionContext<'_>) -> Result<Self, Self::Error> {
         let current_ix_ctx = ctx.get_current_instruction_context()?;
-        let mut current_frame_idx: Option<usize> = None;
+        let current_ix_idx = current_ix_ctx.get_index_in_trace();
+        let mut current_frame_idx = None;
+        let mut frames = Vec::with_capacity(ctx.get_instruction_trace_length());
+
         for idx in 0..ctx.get_instruction_trace_length() {
             let ix_ctx = ctx.get_instruction_context_at_index_in_trace(idx)?;
-            let frame = InstructionContextFrame {
-                instruction_ctx: ix_ctx,
-                transaction_ctx: ctx,
-                index: idx,
-            };
-            if current_ix_ctx.eq(ix_ctx) {
+            if current_ix_idx == idx {
                 current_frame_idx = Some(idx);
             }
-            frames.push(frame);
+            let nesting_level = ix_ctx
+                .get_stack_height()
+                .checked_sub(1)
+                .ok_or(InstructionError::InvalidAccountData)?;
+            frames.push(InstructionContextFrame {
+                nesting_level,
+                program_id: ix_ctx.get_program_key().ok().copied(),
+                index: idx,
+            });
         }
 
         let current_frame_idx =
             current_frame_idx.ok_or(InstructionError::InvalidAccountData)?;
-        Ok(InstructionContextFrames::new(frames, current_frame_idx))
+        Ok(Self::new(frames, current_frame_idx))
     }
 }
 
-// -----------------
-// Tests
-// -----------------
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -284,8 +274,7 @@ mod tests {
             },
         ]);
 
-        // Stack 1
-        assert_eq!(frames.find_program_id_of_parent_frame(frames.get(0)), None);
+        assert_eq!(frames.find_program_id_of_parent_frame(frames.get(0)), None,);
         assert_eq!(
             frames.find_program_id_of_parent_frame(frames.get(1)),
             Some(program_id_uno).as_ref()
@@ -294,9 +283,7 @@ mod tests {
             frames.find_program_id_of_parent_frame(frames.get(2)),
             Some(program_id_dos).as_ref()
         );
-
-        // Stack 2
-        assert_eq!(frames.find_program_id_of_parent_frame(frames.get(3)), None);
+        assert_eq!(frames.find_program_id_of_parent_frame(frames.get(3)), None,);
         assert_eq!(
             frames.find_program_id_of_parent_frame(frames.get(4)),
             Some(program_id_cuatro).as_ref()
@@ -305,12 +292,8 @@ mod tests {
             frames.find_program_id_of_parent_frame(frames.get(5)),
             Some(program_id_cinco).as_ref()
         );
-
-        // Stack 3 (shallow)
-        assert_eq!(frames.find_program_id_of_parent_frame(frames.get(6)), None);
-
-        // Stack 4
-        assert_eq!(frames.find_program_id_of_parent_frame(frames.get(7)), None);
+        assert_eq!(frames.find_program_id_of_parent_frame(frames.get(6)), None,);
+        assert_eq!(frames.find_program_id_of_parent_frame(frames.get(7)), None,);
         assert_eq!(
             frames.find_program_id_of_parent_frame(frames.get(8)),
             Some(program_id_ocho).as_ref()

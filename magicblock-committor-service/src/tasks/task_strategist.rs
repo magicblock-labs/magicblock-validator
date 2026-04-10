@@ -464,6 +464,7 @@ pub enum TaskStrategistError {
 pub type TaskStrategistResult<T, E = TaskStrategistError> = Result<T, E>;
 
 #[cfg(test)]
+#[allow(deprecated)]
 mod tests {
     use std::{collections::HashMap, sync::Arc};
 
@@ -472,9 +473,8 @@ mod tests {
         BaseAction, ProgramArgs,
     };
     use solana_account::Account;
-    use solana_program::system_program;
     use solana_pubkey::Pubkey;
-    use solana_system_program::id as system_program_id;
+    use solana_system_program as system_program;
 
     use super::*;
     use crate::{
@@ -604,7 +604,7 @@ mod tests {
     fn create_test_undelegate_task() -> UndelegateTask {
         UndelegateTask {
             delegated_account: Pubkey::new_unique(),
-            owner_program: system_program_id(),
+            owner_program: system_program::id(),
             rent_reimbursement: Pubkey::new_unique(),
         }
     }

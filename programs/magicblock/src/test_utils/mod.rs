@@ -77,7 +77,7 @@ pub fn process_instruction_with_logs(
     let mut logs = Vec::new();
     let accounts = mock_process_instruction(
         &crate::id(),
-        Vec::new(),
+        None,
         instruction_data,
         transaction_accounts,
         instruction_accounts,

@@ -20,7 +20,6 @@ use crate::{
         process_schedule_commit, process_schedule_commit_finalize,
         process_schedule_intent_bundle, ProcessScheduleCommitOptions,
     },
-    toggle_executable_check::process_toggle_executable_check,
 };
 
 pub const DEFAULT_COMPUTE_UNITS: u64 = 150;
@@ -43,7 +42,7 @@ declare_process_instruction!(
         let transaction_context = &invoke_context.transaction_context;
         let instruction_context =
             transaction_context.get_current_instruction_context()?;
-        let signers = instruction_context.get_signers(transaction_context)?;
+        let signers = instruction_context.get_signers()?;
 
         match instruction {
             ModifyAccounts {
@@ -106,12 +105,10 @@ declare_process_instruction!(
             CancelTask { task_id } => {
                 process_cancel_task(signers, invoke_context, task_id)
             }
-            DisableExecutableCheck => {
-                process_toggle_executable_check(signers, invoke_context, false)
-            }
-            EnableExecutableCheck => {
-                process_toggle_executable_check(signers, invoke_context, true)
-            }
+            // NOTE: Solana runtime 3.x no longer exposes executable checks,
+            // and program deployment works without them.
+            DisableExecutableCheck => Ok(()),
+            EnableExecutableCheck => Ok(()),
             CreateEphemeralAccount { data_len } => {
                 process_create_ephemeral_account(
                     invoke_context,

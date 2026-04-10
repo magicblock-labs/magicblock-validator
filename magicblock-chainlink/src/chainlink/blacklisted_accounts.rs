@@ -49,7 +49,7 @@ pub fn sysvar_accounts() -> HashSet<Pubkey> {
     blacklisted_sysvars.insert(solana_sysvar::rewards::ID);
     blacklisted_sysvars.insert(solana_sysvar::slot_hashes::ID);
     blacklisted_sysvars.insert(solana_sysvar::slot_history::ID);
-    blacklisted_sysvars.insert(solana_sysvar::stake_history::ID);
+    blacklisted_sysvars.insert(solana_sdk_ids::sysvar::stake_history::ID);
     blacklisted_sysvars
 }
 

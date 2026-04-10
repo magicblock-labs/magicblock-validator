@@ -149,13 +149,9 @@ impl MagicValidator {
 
         let validator_pubkey = identity_keypair.pubkey();
         let GenesisConfigInfo {
-            genesis_config,
+            accounts: genesis_accounts,
             validator_pubkey,
-        } = create_genesis_config_with_leader(
-            u64::MAX,
-            &validator_pubkey,
-            config.validator.basefee,
-        );
+        } = create_genesis_config_with_leader(u64::MAX, &validator_pubkey);
 
         let step_start = Instant::now();
         let (ledger, last_slot) =
@@ -178,11 +174,11 @@ impl MagicValidator {
         let accountsdb =
             AccountsDb::new(&config.accountsdb, &config.storage, last_slot)?;
         log_timing("startup", "accountsdb_init", step_start);
-        for (pubkey, account) in genesis_config.accounts {
+        for (pubkey, account) in genesis_accounts {
             if accountsdb.get_account(&pubkey).is_some() {
                 continue;
             }
-            let _ = accountsdb.insert_account(&pubkey, &account.into());
+            let _ = accountsdb.insert_account(&pubkey, &account);
         }
 
         let exit = Arc::<AtomicBool>::default();
@@ -297,18 +293,17 @@ impl MagicValidator {
             config.validator.replication_mode,
             ReplicationMode::Standalone
         );
+        let svm_env = build_svm_env(&accountsdb, latest_block.blockhash, 0);
+        let feature_set = svm_env.feature_set.clone();
         let txn_scheduler_state = TransactionSchedulerState {
             accountsdb: accountsdb.clone(),
             ledger: ledger.clone(),
             transaction_status_tx: validator_channels.transaction_status,
             txn_to_process_rx: validator_channels.transaction_to_process,
             account_update_tx: validator_channels.account_update,
-            environment: build_svm_env(&accountsdb, latest_block.blockhash, 0),
+            environment: svm_env.environment,
+            feature_set: feature_set.clone(),
             tasks_tx: validator_channels.tasks_service,
-            is_auto_airdrop_lamports_enabled: config
-                .chainlink
-                .auto_airdrop_lamports
-                > 0,
             shutdown: token.clone(),
             mode_rx,
         };
@@ -322,7 +317,7 @@ impl MagicValidator {
             identity: validator_pubkey,
             faucet,
             base_fee,
-            featureset: txn_scheduler_state.environment.feature_set.clone(),
+            featureset: Arc::new(feature_set),
             blocktime: config.ledger.block_time_ms(),
         };
         // We dedicate half of the available resources to the execution
@@ -652,7 +647,7 @@ impl MagicValidator {
         Ok(())
     }
 
-    #[instrument(skip(self, config), fields(identity = %self.identity))]
+    #[instrument(skip(self), fields(identity = %self.identity))]
     async fn register_validator_on_chain(
         &self,
         config: &ChainOperationConfig,
@@ -665,7 +660,7 @@ impl MagicValidator {
             block_time_ms: self.config.ledger.block_time_ms() as u16,
             base_fee: self.config.validator.basefee as u16,
             features: FeaturesSet::default(),
-            load_average: 0, // not implemented
+            load_average: 0,
             country_code,
             addr: config.fqdn.to_string(),
         });
@@ -676,19 +671,18 @@ impl MagicValidator {
             validator_info,
         )
         .map_err(|err| {
-            ApiError::FailedToRegisterValidatorOnChain(format!("{:?}", err))
+            ApiError::FailedToRegisterValidatorOnChain(err.to_string())
         })
     }
 
     fn unregister_validator_on_chain(&self) -> ApiResult<()> {
         let validator_keypair = validator_authority();
-
         DomainRegistryManager::handle_unregistration_static(
             self.config.rpc_url(),
             &validator_keypair,
         )
         .map_err(|err| {
-            ApiError::FailedToUnregisterValidatorOnChain(format!("{err:#}"))
+            ApiError::FailedToUnregisterValidatorOnChain(err.to_string())
         })
         .inspect(|_| info!("Unregistered validator on chain"))
     }

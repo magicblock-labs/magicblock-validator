@@ -25,14 +25,14 @@ pub(crate) fn process_resize_ephemeral_account(
     let ephemeral =
         validate_existing_ephemeral(transaction_context, &caller_program_id)?;
 
-    let old_len = get_ephemeral_data_len(ephemeral)?;
+    let old_len = get_ephemeral_data_len(&ephemeral)?;
     let new_rent = rent_for(new_data_len)?;
     let old_rent = rent_for(old_len)?;
     let delta = new_rent as i64 - old_rent as i64;
 
     transfer_rent(transaction_context, delta)?;
 
-    ephemeral.borrow_mut().resize(new_data_len as usize, 0);
+    ephemeral.borrow_mut()?.resize(new_data_len as usize, 0);
 
     ic_msg!(
         invoke_context,

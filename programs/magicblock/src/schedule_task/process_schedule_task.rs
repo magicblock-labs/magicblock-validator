@@ -21,21 +21,20 @@ pub(crate) fn process_schedule_task(
 ) -> Result<(), InstructionError> {
     const PAYER_IDX: u16 = 0;
 
-    let transaction_context = &invoke_context.transaction_context.clone();
+    let transaction_context = &*invoke_context.transaction_context;
     let ix_ctx = transaction_context.get_current_instruction_context()?;
     let ix_accs_len = ix_ctx.get_number_of_instruction_accounts() as usize;
     const ACCOUNTS_START: usize = PAYER_IDX as usize + 1;
 
     // Assert MagicBlock program
-    ix_ctx
-        .find_index_of_program_account(transaction_context, &crate::id())
-        .ok_or_else(|| {
-            ic_msg!(
-                invoke_context,
-                "ScheduleTask ERR: Magic program account not found"
-            );
-            InstructionError::UnsupportedProgramId
-        })?;
+    if ix_ctx.get_program_key()? != &crate::id() {
+        ic_msg!(
+            invoke_context,
+            "ScheduleTask ERR: program ID mismatch, expected {}",
+            crate::id()
+        );
+        return Err(InstructionError::UnsupportedProgramId);
+    }
 
     // Assert enough accounts
     if ix_accs_len < ACCOUNTS_START {
@@ -44,7 +43,7 @@ pub(crate) fn process_schedule_task(
             "ScheduleTask ERR: not enough accounts to schedule task ({}), need payer, signing program and task context",
             ix_accs_len
         );
-        return Err(InstructionError::NotEnoughAccountKeys);
+        return Err(InstructionError::MissingAccount);
     }
 
     // Assert Payer is signer

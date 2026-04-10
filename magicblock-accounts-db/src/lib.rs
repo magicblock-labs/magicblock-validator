@@ -175,9 +175,10 @@ impl AccountsDb {
             self.index.remove(pubkey, txn!())?;
             return Ok(());
         }
+        let owner_changed = account.owner_changed();
         match account {
             AccountSharedData::Borrowed(acc) => {
-                if acc.owner_changed() {
+                if owner_changed {
                     self.index
                         .ensure_correct_owner(pubkey, account.owner(), txn!())
                         .log_err(|| "Failed to update owner index")?;
@@ -387,7 +388,7 @@ impl AccountsDb {
         let _locked = self.write_lock.write();
         let mut hasher = xxhash3_64::Hasher::new();
         for (pubkey, acc) in self.iter_all() {
-            let Some(borrowed) = acc.as_borrowed() else {
+            let AccountSharedData::Borrowed(borrowed) = &acc else {
                 continue;
             };
             hasher.write(pubkey.as_ref());

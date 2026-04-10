@@ -41,7 +41,7 @@ pub(crate) fn init_validator_identity(
 ) {
     fund_account(accountsdb, validator_id, u64::MAX / 2);
     let mut authority = accountsdb.get_account(validator_id).unwrap();
-    authority.as_borrowed_mut().unwrap().set_privileged(true);
+    authority.set_privileged(true);
     let _ = accountsdb.insert_account(validator_id, &authority);
 }
 

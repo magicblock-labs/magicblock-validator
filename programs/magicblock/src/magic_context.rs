@@ -2,7 +2,7 @@ use std::mem;
 
 use magicblock_magic_program_api::MAGIC_CONTEXT_SIZE;
 use serde::{Deserialize, Serialize};
-use solana_account::{AccountSharedData, ReadableAccount};
+use solana_instruction::error::InstructionError;
 
 use crate::magic_scheduled_base_intent::ScheduledIntentBundle;
 
@@ -15,14 +15,28 @@ pub struct MagicContext {
 impl MagicContext {
     pub const SIZE: usize = MAGIC_CONTEXT_SIZE;
     pub const ZERO: [u8; Self::SIZE] = [0; Self::SIZE];
-    pub(crate) fn deserialize(
-        data: &AccountSharedData,
-    ) -> Result<Self, bincode::Error> {
-        if data.data().is_empty() {
+
+    pub(crate) fn deserialize(data: &[u8]) -> Result<Self, bincode::Error> {
+        if data.is_empty() || is_zeroed(data) {
             Ok(Self::default())
         } else {
-            data.deserialize_data()
+            bincode::deserialize(data)
         }
+    }
+
+    pub(crate) fn write_to(
+        &self,
+        data: &mut [u8],
+    ) -> Result<(), InstructionError> {
+        let size = bincode::serialized_size(self)
+            .map_err(|_| InstructionError::GenericError)?;
+        if size > data.len() as u64 {
+            return Err(InstructionError::AccountDataTooSmall);
+        }
+
+        data.fill(0);
+        bincode::serialize_into(&mut &mut data[..], self)
+            .map_err(|_| InstructionError::GenericError)
     }
 
     pub(crate) fn next_intent_id(&mut self) -> u64 {
@@ -46,11 +60,19 @@ impl MagicContext {
     }
 
     pub fn has_scheduled_commits(data: &[u8]) -> bool {
-        // Currently we only store a vec of scheduled commits in the MagicContext
-        // The first 8 bytes contain the length of the vec
-        // This works even if the length is actually stored as a u32
-        // since we zero out the entire context whenever we update the vec
-        !is_zeroed(&data[8..16])
+        const LEN_OFF: usize = mem::size_of::<u64>();
+        const LEN_END: usize = LEN_OFF + mem::size_of::<u64>();
+
+        if is_zeroed(data) {
+            return false;
+        }
+
+        let Some(raw_len) = data.get(LEN_OFF..LEN_END) else {
+            return false;
+        };
+        let mut len = [0; mem::size_of::<u64>()];
+        len.copy_from_slice(raw_len);
+        u64::from_le_bytes(len) != 0
     }
 }
 

@@ -147,14 +147,16 @@ pub fn try_map_client_error<TxMap, ExecErr>(
 where
     TxMap: TransactionErrorMapper<ExecutionError = ExecErr>,
 {
-    match err.kind {
+    match *err.kind {
         ErrorKind::TransactionError(transaction_err) => {
             transaction_error_mapper
                 .try_map(transaction_err, None)
                 .map_err(|transaction_err| {
                     Box::new(solana_rpc_client_api::client_error::Error {
                         request: err.request,
-                        kind: ErrorKind::TransactionError(transaction_err),
+                        kind: Box::new(ErrorKind::TransactionError(
+                            transaction_err,
+                        )),
                     })
                 })
         }
@@ -167,7 +169,7 @@ where
         | ErrorKind::Io(_)) => {
             Err(Box::new(solana_rpc_client_api::client_error::Error {
                 request: err.request,
-                kind: err_kind,
+                kind: Box::new(err_kind),
             }))
         }
     }
@@ -206,7 +208,7 @@ pub fn decide_rpc_error_flow(
 pub fn decide_rpc_native_flow(
     err: &solana_rpc_client_api::client_error::Error,
 ) -> ControlFlow<(), Duration> {
-    match &err.kind {
+    match &*err.kind {
         // Retry IO errors
         ErrorKind::Io(_) => ControlFlow::Continue(Duration::from_millis(500)),
         // Retry 5xx server errors
