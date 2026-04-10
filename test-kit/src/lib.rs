@@ -15,8 +15,7 @@ use magicblock_core::{
         link,
         transactions::{
             ReplayPosition, SanitizeableTransaction, SchedulerMode,
-            TransactionResult, TransactionSchedulerHandle,
-            TransactionSimulationResult,
+            TransactionSchedulerHandle, TransactionSimulationResult,
         },
         DispatchEndpoints,
     },
@@ -37,6 +36,7 @@ use solana_program::{
 use solana_signature::Signature;
 pub use solana_signer::Signer;
 use solana_transaction::Transaction;
+use solana_transaction_error::TransactionResult;
 use solana_transaction_status_client_types::TransactionStatusMeta;
 use tempfile::TempDir;
 use tokio::sync::mpsc::Sender;
@@ -167,10 +167,12 @@ impl ExecutionTestEnv {
             transaction_status_tx: validator_channels.transaction_status,
             txn_to_process_rx: validator_channels.transaction_to_process,
             tasks_tx: validator_channels.tasks_service,
+            replication_tx: validator_channels.replication_messages,
             environment,
             is_auto_airdrop_lamports_enabled: false,
             shutdown: Default::default(),
             mode_rx,
+            pause_permit: validator_channels.pause_permit,
         };
 
         // Pre-send the target mode so the scheduler picks it up once running.
@@ -330,7 +332,7 @@ impl ExecutionTestEnv {
     pub async fn execute_transaction(
         &self,
         txn: impl SanitizeableTransaction,
-    ) -> TransactionResult {
+    ) -> TransactionResult<()> {
         self.transaction_scheduler.execute(txn).await.inspect_err(
             |err| error!(error = ?err, "Transaction execution failed"),
         )
@@ -372,7 +374,7 @@ impl ExecutionTestEnv {
         &self,
         persist: bool,
         txn: impl SanitizeableTransaction,
-    ) -> TransactionResult {
+    ) -> TransactionResult<()> {
         let position = ReplayPosition {
             slot: 0,
             index: 0,

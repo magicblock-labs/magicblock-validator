@@ -3407,6 +3407,7 @@ dependencies = [
  "magicblock-metrics",
  "magicblock-processor",
  "magicblock-program",
+ "magicblock-replicator",
  "magicblock-services",
  "magicblock-task-scheduler",
  "magicblock-validator-admin",
@@ -3588,6 +3589,7 @@ name = "magicblock-core"
 version = "0.8.6"
 dependencies = [
  "bincode",
+ "bytes",
  "console-subscriber",
  "flume",
  "magicblock-magic-program-api",
@@ -3790,7 +3792,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-replicator"
-version = "0.8.5"
+version = "0.8.6"
 dependencies = [
  "async-nats",
  "bincode",
@@ -3808,6 +3810,7 @@ dependencies = [
  "tempfile",
  "thiserror 1.0.69",
  "tokio",
+ "tokio-util",
  "tracing",
  "url",
 ]
@@ -9203,6 +9206,7 @@ dependencies = [
  "solana-signature",
  "solana-signer",
  "solana-transaction",
+ "solana-transaction-error",
  "solana-transaction-status-client-types",
  "tempfile",
  "tokio",

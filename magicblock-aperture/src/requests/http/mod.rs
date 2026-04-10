@@ -213,7 +213,10 @@ impl HttpDispatcher {
         }
 
         let txn = transaction.sanitize(sigverify)?;
-        Ok(WithEncoded { txn, encoded })
+        Ok(WithEncoded {
+            txn,
+            encoded: encoded.into(),
+        })
     }
 
     /// Ensures all accounts required for a transaction are present in the `AccountsDb`.
