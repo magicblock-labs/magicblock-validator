@@ -74,6 +74,9 @@ impl ReplicationContext {
             .map_err(|e| Error::Internal(e.to_string()))?;
 
         let slot = accountsdb.slot();
+        let index = ledger
+            .get_highest_transaction_index_for_slot(slot)?
+            .unwrap_or_default();
 
         info!(%id, slot, can_promote, "context initialized");
         Ok(Self {
@@ -86,7 +89,7 @@ impl ReplicationContext {
             ledger,
             scheduler,
             slot,
-            index: 0,
+            index,
             can_promote,
         })
     }
