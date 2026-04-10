@@ -4057,6 +4057,7 @@ name = "magicblock-processor"
 version = "0.8.6"
 dependencies = [
  "bincode",
+ "blake3",
  "magicblock-accounts-db",
  "magicblock-core",
  "magicblock-ledger",

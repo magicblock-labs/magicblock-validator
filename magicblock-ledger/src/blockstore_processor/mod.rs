@@ -8,7 +8,7 @@ use solana_clock::{Slot, UnixTimestamp};
 use solana_hash::Hash;
 use solana_transaction::versioned::VersionedTransaction;
 use solana_transaction_status::VersionedConfirmedBlock;
-use tracing::{instrument, Level, *};
+use tracing::{Level, *};
 
 use crate::{
     errors::{LedgerError, LedgerResult},
