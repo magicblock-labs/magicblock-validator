@@ -10798,6 +10798,7 @@ dependencies = [
  "solana-transaction-status-client-types",
  "tempfile",
  "tokio",
+ "tokio-util 0.7.17",
  "tracing",
  "tracing-log",
  "tracing-subscriber",
