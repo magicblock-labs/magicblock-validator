@@ -344,24 +344,10 @@ async fn test_request_airdrop() {
     env.execution.fund_account(recipient, 1); // Start with 1 lamport
     let airdrop_amount = RpcTestEnv::INIT_ACCOUNT_BALANCE / 10;
 
-    let signature = env
-        .rpc
-        .request_airdrop(&recipient, airdrop_amount)
-        .await
-        .expect("request_airdrop failed");
+    let result = env.rpc.request_airdrop(&recipient, airdrop_amount).await;
 
-    let meta = env
-        .execution
-        .get_transaction(signature)
-        .expect("airdrop transaction should have been persisted");
-    assert!(meta.status.is_ok(), "airdrop transaction should succeed");
-
-    let account = env.execution.accountsdb.get_account(&recipient).unwrap();
-    assert_eq!(
-        account.lamports(),
-        airdrop_amount + 1,
-        "airdrop was not credited correctly"
-    );
+    // TODO: restore the behavior, once the airdrops are enabled again
+    assert!(result.is_err(), "airdrop transaction should have failed");
 }
 
 /// Verifies that `get_fee_for_message` returns the correct fee based on the number of signatures.

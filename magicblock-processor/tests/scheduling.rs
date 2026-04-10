@@ -177,7 +177,6 @@ async fn scenario_parallel_transfers(executors: u32) {
 
     let mut txs = Vec::with_capacity(pairs);
     for i in 0..pairs {
-        env.advance_slot();
         txs.push(tx_transfer(&mut env, accounts[i * 2], accounts[i * 2 + 1]));
     }
 
@@ -216,7 +215,6 @@ async fn scenario_conflicting_transfers(executors: u32) {
 
     let mut txs = Vec::with_capacity(senders.len());
     for sender in &senders {
-        env.advance_slot();
         txs.push(tx_transfer(&mut env, *sender, recipient));
     }
 
@@ -245,7 +243,6 @@ async fn scenario_readonly_parallel(executors: u32) {
 
     let mut txs = Vec::with_capacity(count);
     for i in 0..count {
-        env.advance_slot();
         txs.push(tx_read(
             &mut env,
             &[accounts[i % 10], accounts[(i + 1) % 10]],
@@ -272,7 +269,6 @@ async fn scenario_mixed_workload(executors: u32) {
         txs.push(tx_transfer(&mut env, accs[2], accs[3])); // C->D
         txs.push(tx_transfer(&mut env, accs[1], accs[0])); // B->A (conflict T1)
         txs.push(tx_transfer(&mut env, accs[4], accs[5])); // E->F
-        env.advance_slot();
     }
 
     let sigs = schedule(&mut env, txs).await;
@@ -307,7 +303,6 @@ async fn scenario_conflicting_writes(executors: u32) {
 
     let mut txs = Vec::with_capacity(count);
     for i in 1..=count {
-        env.advance_slot();
         txs.push(tx_write(&mut env, acc, i as u8));
     }
 
@@ -330,7 +325,6 @@ async fn scenario_serial_conflicting_writes(executors: u32) {
 
     let mut txs = Vec::with_capacity(count);
     for i in 0..count {
-        env.advance_slot();
         txs.push(tx_write(&mut env, acc, i as u8));
     }
 
@@ -359,7 +353,6 @@ async fn scenario_serial_transfer_chain(executors: u32) {
 
     let mut txs = Vec::with_capacity(count);
     for i in 0..count {
-        env.advance_slot();
         txs.push(tx_transfer(&mut env, accs[i], accs[i + 1]));
     }
 
@@ -399,7 +392,6 @@ async fn scenario_stress_test(executors: u32) {
 
     let mut txs = Vec::with_capacity(count);
     for i in 0..count {
-        env.advance_slot();
         let idx = i % num_accs;
         let tx = match i % 4 {
             0 => {
