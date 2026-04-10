@@ -21,6 +21,7 @@ use crate::{
         process_schedule_intent_bundle, ProcessScheduleCommitOptions,
     },
     toggle_executable_check::process_toggle_executable_check,
+    verify_validator_identity::process_verify_validator_identity,
 };
 
 pub const DEFAULT_COMPUTE_UNITS: u64 = 150;
@@ -214,6 +215,9 @@ declare_process_instruction!(
                 remote_slot,
                 authority,
             ),
+            VerifyValidatorIdentity => {
+                process_verify_validator_identity(signers, invoke_context)
+            }
         }
     }
 );
