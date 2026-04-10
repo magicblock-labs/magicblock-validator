@@ -1,6 +1,8 @@
-// src/config/validator.rs
+use std::fmt;
+
 use serde::{Deserialize, Serialize};
 use solana_keypair::Keypair;
+use solana_pubkey::Pubkey;
 use url::Url;
 
 use crate::{
@@ -24,15 +26,55 @@ pub struct ValidatorConfig {
 
 /// Defines the validator's role in a replication setup.
 #[derive(Deserialize, Serialize, Debug, Clone)]
+#[serde(rename_all = "kebab-case")]
 pub enum ReplicationMode {
     // Validator which doesn't participate in replication
     Standalone,
-    /// Validator which participates in replication: acting as either a primary or replicator.
-    /// The `SerdePubkey` is the primary validator's pubkey used for authority signature verification.
-    StandBy(Url, SerdePubkey),
-    /// Validator which participates in replication only as replicator (no takeover).
-    /// The `SerdePubkey` is the primary validator's pubkey used for authority signature verification.
-    ReplicateOnly(Url, SerdePubkey),
+    /// Validator which participates in replication: acting as either a primary or replicator
+    StandBy(ReplicationConfig),
+    /// Validator which participates in replication only as replicator (no takeover)
+    ReplicaOnly {
+        #[serde(flatten)]
+        config: ReplicationConfig,
+        #[serde(rename = "kebab-case")]
+        authority_override: SerdePubkey,
+    },
+}
+
+#[derive(Deserialize, Clone)]
+#[serde(rename_all = "kebab-case")]
+pub struct ReplicationConfig {
+    pub url: Url,
+    pub secret: String,
+}
+
+impl fmt::Debug for ReplicationConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ReplicationConfig")
+            .field("url", &self.url)
+            .field("secret", &"<redacted>")
+            .finish()
+    }
+}
+
+impl Serialize for ReplicationConfig {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        #[derive(Serialize)]
+        #[serde(rename_all = "kebab-case")]
+        struct Redacted<'a> {
+            url: &'a Url,
+            secret: &'static str,
+        }
+
+        Redacted {
+            url: &self.url,
+            secret: "<redacted>",
+        }
+        .serialize(serializer)
+    }
 }
 
 impl Default for ValidatorConfig {
@@ -44,5 +86,27 @@ impl Default for ValidatorConfig {
             keypair: SerdeKeypair(keypair),
             replication_mode: ReplicationMode::Standalone,
         }
+    }
+}
+
+impl ReplicationMode {
+    /// Returns the remote URL if this node participates in replication.
+    /// Returns `None` for `Standalone` mode.
+    pub fn config(&self) -> Option<ReplicationConfig> {
+        match self {
+            Self::Standalone => None,
+            Self::StandBy(c) => Some(c.clone()),
+            Self::ReplicaOnly { config, .. } => Some(config.clone()),
+        }
+    }
+
+    pub fn authority_override(&self) -> Option<Pubkey> {
+        if let Self::ReplicaOnly {
+            authority_override, ..
+        } = self
+        {
+            return Some(authority_override.0);
+        }
+        None
     }
 }

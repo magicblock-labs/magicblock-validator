@@ -6,7 +6,6 @@ use index::{
 };
 use lmdb::{RwTransaction, Transaction};
 use magicblock_config::config::AccountsDbConfig;
-use parking_lot::RwLock;
 use solana_account::{
     cow::AccountBorrowed, AccountSharedData, ReadableAccount,
 };
@@ -18,10 +17,6 @@ use twox_hash::xxhash3_64;
 use crate::{snapshot::SnapshotManager, traits::AccountsBank};
 
 pub type AccountsDbResult<T> = Result<T, AccountsDbError>;
-
-/// A global lock used to suspend all write operations during critical
-/// sections (like snapshots).
-pub type GlobalSyncLock = Arc<RwLock<()>>;
 
 pub const ACCOUNTSDB_DIR: &str = "accountsdb";
 
@@ -39,12 +34,6 @@ pub struct AccountsDb {
     index: AccountsDbIndex,
     /// Manages snapshots and state restoration.
     snapshot_manager: Arc<SnapshotManager>,
-    /// Global lock ensures atomic snapshots by pausing writes.
-    /// Note: Reads are generally wait-free/lock-free via mmap,
-    /// unless they require index cursor stability.
-    write_lock: GlobalSyncLock,
-    /// Configured interval (in slots) for creating snapshots.
-    snapshot_frequency: u64,
 }
 
 impl AccountsDb {
@@ -77,18 +66,10 @@ impl AccountsDb {
             SnapshotManager::new(db_dir.clone(), config.max_snapshots as usize)
                 .log_err(|| "Failed to initialize snapshot manager")?;
 
-        if config.snapshot_frequency == 0 {
-            return Err(AccountsDbError::Internal(
-                "Snapshot frequency cannot be zero".to_string(),
-            ));
-        }
-
         let mut this = Self {
             storage,
             index,
             snapshot_manager,
-            write_lock: GlobalSyncLock::default(),
-            snapshot_frequency: config.snapshot_frequency,
         };
 
         // Recover state if the requested slot is older than our current state
@@ -99,10 +80,7 @@ impl AccountsDb {
 
     /// Opens an existing database (helper for tooling/tests).
     pub fn open(directory: &Path) -> AccountsDbResult<Self> {
-        let config = AccountsDbConfig {
-            snapshot_frequency: u64::MAX,
-            ..Default::default()
-        };
+        let config = AccountsDbConfig::default();
         Self::new(&config, directory, 0)
     }
 
@@ -151,6 +129,8 @@ impl AccountsDb {
         count: usize,
     ) {
         for acc in accounts.take(count) {
+            // SAFETY:
+            // we are rolling back committed accounts
             unsafe { acc.1.rollback() };
         }
     }
@@ -287,34 +267,36 @@ impl AccountsDb {
         self.storage.slot()
     }
 
-    /// Updates the current slot. Triggers a background snapshot if the schedule matches.
-    #[inline(always)]
-    pub fn set_slot(self: &Arc<Self>, slot: u64) {
+    /// Updates the current slot.
+    pub fn set_slot(&self, slot: u64) {
         self.storage.update_slot(slot);
-
-        if slot > 0 && slot.is_multiple_of(self.snapshot_frequency) {
-            self.trigger_background_snapshot(slot);
-        }
     }
 
-    /// Spawns a background thread to take a snapshot.
-    fn trigger_background_snapshot(self: &Arc<Self>, slot: u64) {
-        let this = self.clone();
+    /// Takes a database snapshot for the given slot.
+    ///
+    /// The snapshot is created in two phases:
+    /// 1. **Synchronous**: Flush data, compute checksum, create snapshot directory
+    ///    (with write lock held to ensure consistency)
+    /// 2. **Background**: Archive directory to tar.gz and register
+    ///
+    /// Returns the state checksum computed at snapshot time.
+    /// The checksum can be used to verify state consistency across nodes.
+    ///
+    ///
+    /// # Safety
+    /// the caller must ensure that no state transitions are taking
+    /// place concurrently when this operation is in progress
+    pub unsafe fn take_snapshot(&self, slot: u64) -> AccountsDbResult<u64> {
+        // Create snapshot directory (potential deep copy)
+        self.flush();
+        let checksum = self.checksum();
+        let used_storage = self.storage.active_segment();
 
-        thread::spawn(move || {
-            // Acquire write lock to ensure consistent state capture
-            let write_guard = this.write_lock.write();
-            this.flush();
-
-            // Capture the active memory map region for the snapshot
-            let used_storage = this.storage.active_segment();
-
-            let _ = this.snapshot_manager.create_snapshot(
-                slot,
-                used_storage,
-                write_guard,
-            );
-        });
+        let manager = self.snapshot_manager.clone();
+        let dir = manager.create_snapshot_dir(slot, used_storage)?;
+        // Archive directory in background to avoid blocking the caller
+        thread::spawn(move || manager.archive_and_register(&dir));
+        Ok(checksum)
     }
 
     /// Ensures the database state is at most `slot`.
@@ -335,9 +317,6 @@ impl AccountsDb {
             target_slot = target_slot,
             "Current slot ahead of target, rolling back"
         );
-
-        // Block all writes during restoration
-        let _guard = self.write_lock.write();
 
         let restored_slot = self
             .snapshot_manager
@@ -372,8 +351,39 @@ impl AccountsDb {
         self.index.flush();
     }
 
-    pub fn write_lock(&self) -> GlobalSyncLock {
-        self.write_lock.clone()
+    /// Inserts an external snapshot archive received over the network.
+    ///
+    /// If the snapshot slot is newer than the current DB slot, immediately
+    /// fast-forwards to it (bringing state forward in time).
+    ///
+    /// Returns `true` if fast-forward was performed, `false` if just registered.
+    /// NOTE:
+    /// This method is only ever used to initialize accountsdb from external source
+    /// It's not used to overwrite existing instance
+    pub fn insert_external_snapshot(
+        &mut self,
+        slot: u64,
+        archive_bytes: &[u8],
+    ) -> AccountsDbResult<bool> {
+        let current_slot = self.slot();
+        // we do not overwrite accountsdb which already has been initialized
+        if current_slot > 0 {
+            return Ok(false);
+        }
+        let fast_forwarded = self.snapshot_manager.insert_external_snapshot(
+            slot,
+            archive_bytes,
+            current_slot,
+        )?;
+
+        if fast_forwarded {
+            // Reload components to reflect new state
+            let path = self.snapshot_manager.database_path();
+            self.storage.reload(path)?;
+            self.index.reload(path)?;
+        }
+
+        Ok(fast_forwarded)
     }
 
     /// Computes a deterministic checksum of all active accounts.
@@ -382,9 +392,10 @@ impl AccountsDb {
     /// pubkey and serialized account data using xxHash3. Returns a 64-bit hash
     /// suitable for verifying state consistency across nodes.
     ///
-    /// Acquires the write lock to ensure a consistent snapshot of the state.
-    pub fn checksum(&self) -> u64 {
-        let _locked = self.write_lock.write();
+    /// # Safety
+    /// the caller must ensure that no concurrent write access is being performed on
+    /// accountsdb, so that the state doesn't change during checksum computation
+    pub unsafe fn checksum(&self) -> u64 {
         let mut hasher = xxhash3_64::Hasher::new();
         for (pubkey, acc) in self.iter_all() {
             let Some(borrowed) = acc.as_borrowed() else {
@@ -394,6 +405,10 @@ impl AccountsDb {
             hasher.write(borrowed.buffer());
         }
         hasher.finish()
+    }
+
+    pub fn database_directory(&self) -> &Path {
+        self.snapshot_manager.database_path()
     }
 }
 

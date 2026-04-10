@@ -1,10 +1,8 @@
 use std::{ops::Deref, sync::Arc, time::Duration};
 
 use arc_swap::ArcSwapAny;
-use magicblock_core::{
-    link::blocks::{BlockHash, BlockMeta, BlockUpdate},
-    Slot,
-};
+use magicblock_core::{link::blocks::BlockHash, Slot};
+use magicblock_ledger::LatestBlockInner;
 use solana_rpc_client_api::response::RpcBlockhash;
 
 use super::ExpiringCache;
@@ -26,7 +24,7 @@ pub(crate) struct BlocksCache {
     /// Latest observed block (updated whenever the ledger transitions to new slot)
     latest: ArcSwapAny<Arc<LastCachedBlock>>,
     /// An underlying time-based cache for storing `BlockHash` to `BlockMeta` mappings.
-    cache: ExpiringCache<BlockHash, BlockMeta>,
+    cache: ExpiringCache<BlockHash, Slot>,
 }
 
 /// Last produced block that has been put into cache. We need to keep this separately,
@@ -38,7 +36,7 @@ pub(crate) struct LastCachedBlock {
 }
 
 impl Deref for BlocksCache {
-    type Target = ExpiringCache<BlockHash, BlockMeta>;
+    type Target = ExpiringCache<BlockHash, Slot>;
     fn deref(&self) -> &Self::Target {
         &self.cache
     }
@@ -61,6 +59,8 @@ impl BlocksCache {
         let blocktime_ratio = SOLANA_BLOCK_TIME / blocktime as f64;
         let block_validity = blocktime_ratio * MAX_VALID_BLOCKHASH_SLOTS;
         let cache = ExpiringCache::new(BLOCK_CACHE_TTL);
+        // Add the initial blockhash to the cache so it's recognized as valid
+        cache.push(latest.blockhash, latest.slot);
         Self {
             latest: ArcSwapAny::new(latest.into()),
             block_validity: block_validity as u64,
@@ -69,14 +69,14 @@ impl BlocksCache {
     }
 
     /// Updates the latest block information in the cache.
-    pub(crate) fn set_latest(&self, latest: BlockUpdate) {
+    pub(crate) fn set_latest(&self, latest: &LatestBlockInner) {
         let last = LastCachedBlock {
-            blockhash: latest.hash,
-            slot: latest.meta.slot,
+            blockhash: latest.blockhash,
+            slot: latest.slot,
         };
 
         // Register the block in the expiring cache
-        self.cache.push(latest.hash, latest.meta);
+        self.cache.push(latest.blockhash, latest.slot);
         // And mark it as latest observed
         self.latest.swap(last.into());
     }
