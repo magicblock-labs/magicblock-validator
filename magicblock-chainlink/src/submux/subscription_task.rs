@@ -184,8 +184,30 @@ impl AccountSubscriptionTask {
                         }
                     }
                     Err(e) => {
-                        errors.push(format!("Client {}: {:?}", client_id, e));
-                        failed_client_ids.push(client_id);
+                        if matches!(
+                            e,
+                            RemoteAccountProviderError::AccountSubscriptionDoesNotExist(_)
+                        ) && matches!(self, Unsubscribe(_))
+                        {
+                            debug!(
+                                client_id = %client_id,
+                                error = ?e,
+                                "Ignoring unsubscribe for non-existent subscription"
+                            );
+                            // For Unsubscribe, "does not exist" is
+                            // effectively a successful confirmation —
+                            // the subscription is already gone.
+                            successes += 1;
+                            if successes >= required_confirmations {
+                                if let Some(tx) = tx.take() {
+                                    let _ = tx.send(Ok(()));
+                                }
+                            }
+                        } else {
+                            errors
+                                .push(format!("Client {}: {:?}", client_id, e));
+                            failed_client_ids.push(client_id);
+                        }
                     }
                 }
             }
@@ -204,7 +226,7 @@ impl AccountSubscriptionTask {
                     ),
                 );
 
-                maybe_alert(&err);
+                maybe_alert(&err, successes);
 
                 let _ = tx.send(err);
             } else if !errors.is_empty() {
@@ -244,10 +266,13 @@ impl AccountSubscriptionTask {
     }
 }
 
-/// Logs an error alert for total subscription failures, throttled to
-/// at most once per [ALERT_ON_TOTAL_SUB_FAILURE_INTERVAL].
+/// Logs a subscription failure alert, throttled to at most once per
+/// [ALERT_ON_TOTAL_SUB_FAILURE_INTERVAL].
 /// The first occurrence is always logged immediately.
-fn maybe_alert(err: &RemoteAccountProviderResult<()>) {
+///
+/// - If no client succeeded at all, logs at `error` (critical).
+/// - If at least one client succeeded but not enough, logs at `warn`.
+fn maybe_alert(err: &RemoteAccountProviderResult<()>, successes: usize) {
     static LAST_ALERT: OnceLock<Mutex<Option<Instant>>> = OnceLock::new();
     let last_alert = LAST_ALERT.get_or_init(|| Mutex::new(None));
     let mut last = last_alert.lock().expect("last_alert mutex poisoned");
@@ -257,10 +282,18 @@ fn maybe_alert(err: &RemoteAccountProviderResult<()>) {
     };
     if should_alert {
         *last = Some(Instant::now());
-        error!(
-            err = ?err,
-            "Critical: failed to establish subscription"
-        );
+        if successes == 0 {
+            error!(
+                err = ?err,
+                "Critical: failed to establish subscription"
+            );
+        } else {
+            warn!(
+                err = ?err,
+                successes,
+                "Not all clients succeeded"
+            );
+        }
     }
 }
 

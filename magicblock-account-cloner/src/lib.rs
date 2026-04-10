@@ -641,6 +641,16 @@ impl ChainlinkCloner {
 /// Shared account metas for clone instructions.
 #[async_trait]
 impl Cloner for ChainlinkCloner {
+    async fn evict_account(&self, pubkey: Pubkey) -> ClonerResult<()> {
+        let blockhash = self.block.load().blockhash;
+        let evict_ix = InstructionUtils::evict_account_instruction(pubkey);
+        let tx = self.create_signed_tx(&[evict_ix], blockhash);
+        self.send_tx(tx).await.map_err(|err| {
+            ClonerError::FailedToEvictAccount(pubkey, Box::new(err))
+        })?;
+        Ok(())
+    }
+
     async fn clone_account(
         &self,
         request: AccountCloneRequest,

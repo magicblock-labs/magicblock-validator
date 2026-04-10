@@ -270,7 +270,7 @@ where
     }
 
     /// Wrapper on [`IntentExecutor`] that handles its results and drops execution permit
-    #[instrument(skip(executor, persister, inner_scheduler, execution_permit, result_sender), fields(intent_id = intent.id))]
+    #[instrument(skip(executor, persister, intent, inner_scheduler, execution_permit, result_sender), fields(intent_id = intent.id))]
     async fn execute(
         mut executor: E,
         persister: Option<P>,
