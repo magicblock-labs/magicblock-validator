@@ -473,3 +473,65 @@ async fn test_serial_transfer_chain() {
 async fn test_large_queue_mixed_8_executors() {
     scenario_stress_test(8).await;
 }
+
+/// Tests that wait_for_idle() blocks scheduling while held, and releases when idle.
+///
+/// Flow:
+/// 1. Acquire permit before scheduler starts
+/// 2. Queue transaction
+/// 3. Start scheduler - it blocks waiting for permit
+/// 4. Verify transaction doesn't execute for 500ms
+/// 5. Release permit - transaction executes
+/// 6. Reacquire permit - succeeds quickly (scheduler is idle)
+#[tokio::test]
+async fn test_wait_for_idle_coordination() {
+    let mut env = ExecutionTestEnv::new_with_config(
+        ExecutionTestEnv::BASE_FEE,
+        1,
+        true, // defer_startup
+    );
+
+    // 1. Acquire permit before scheduler starts (owned to avoid borrow issues)
+    let permit = env.transaction_scheduler.wait_for_idle().await;
+
+    // 2. Queue a transaction
+    let accounts = create_accounts(&mut env, 2);
+    let tx = tx_transfer(&mut env, accounts[0], accounts[1]);
+    let sig = tx.signatures[0];
+    env.schedule_transaction(tx).await;
+
+    // 3. Start scheduler
+    env.run_scheduler();
+    env.advance_slot();
+
+    // 4. Transaction should NOT execute while we hold the permit
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert!(
+        env.get_transaction(sig).is_none(),
+        "transaction should not execute while permit is held"
+    );
+
+    // 5. Release permit - scheduler should now process
+    drop(permit);
+
+    // Wait for transaction to complete
+    let status = timeout(TIMEOUT, async {
+        loop {
+            match env.dispatch.transaction_status.recv_async().await {
+                Ok(s) if s.txn.signatures()[0] == sig => break s,
+                _ => continue,
+            }
+        }
+    })
+    .await
+    .expect("transaction should complete after permit released");
+    assert!(status.meta.status.is_ok(), "transaction should succeed");
+
+    // 6. Reacquire permit - should succeed quickly (scheduler is idle)
+    let _permit = timeout(
+        Duration::from_millis(100),
+        env.transaction_scheduler.wait_for_idle(),
+    )
+    .await
+    .expect("should acquire permit quickly when scheduler is idle");
+}

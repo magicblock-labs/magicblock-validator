@@ -1,19 +1,11 @@
 //! Protocol message types for replication.
-//!
-//! # Wire Format
-//!
-//! The enum variant index serves as an implicit type tag.
 
-use async_nats::Subject;
-use magicblock_core::Slot;
+use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 use solana_hash::Hash;
 use solana_transaction::versioned::VersionedTransaction;
 
-use crate::nats::Subjects;
-
-/// Ordinal position of a transaction within a slot.
-pub type TransactionIndex = u32;
+use crate::{Slot, TransactionIndex};
 
 /// Index for block boundary markers (TransactionIndex::MAX - 1).
 /// Used to identify Block messages in slot/index comparisons.
@@ -37,15 +29,9 @@ pub enum Message {
 }
 
 impl Message {
-    pub(crate) fn subject(&self) -> Subject {
-        match self {
-            Self::Transaction(_) => Subjects::transaction(),
-            Self::Block(_) => Subjects::block(),
-            Self::SuperBlock(_) => Subjects::superblock(),
-        }
-    }
-
-    pub(crate) fn slot_and_index(&self) -> (Slot, TransactionIndex) {
+    /// Returns the (slot, index) position of this message.
+    /// Block and SuperBlock messages use sentinel index values.
+    pub fn slot_and_index(&self) -> (Slot, TransactionIndex) {
         match self {
             Self::Transaction(tx) => (tx.slot, tx.index),
             Self::Block(block) => (block.slot, BLOCK_INDEX),
@@ -62,7 +48,7 @@ pub struct Transaction {
     /// Ordinal position within the slot.
     pub index: TransactionIndex,
     /// Bincode-encoded `VersionedTransaction`.
-    pub payload: Vec<u8>,
+    pub payload: Bytes,
 }
 
 /// Slot boundary marker with blockhash.
