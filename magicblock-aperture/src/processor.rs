@@ -5,6 +5,7 @@ use magicblock_core::link::{
     accounts::AccountUpdateRx, blocks::BlockUpdateRx,
     transactions::TransactionStatusRx, DispatchEndpoints,
 };
+use magicblock_ledger::LatestBlockInner;
 use tokio_util::sync::CancellationToken;
 use tracing::{info, instrument, warn};
 
@@ -48,8 +49,8 @@ pub(crate) struct EventProcessor {
     account_update_rx: AccountUpdateRx,
     /// A receiver for transaction status events, sourced from the `TransactionExecutor`.
     transaction_status_rx: TransactionStatusRx,
-    /// A receiver for new block events.
-    block_update_rx: BlockUpdateRx,
+    /// A receiver for block update events from the ledger.
+    block_update_rx: BlockUpdateRx<LatestBlockInner>,
     /// An entry point for communicating with loaded geyser plugins
     geyser: Arc<GeyserPluginManager>,
 }
@@ -61,13 +62,17 @@ impl EventProcessor {
         state: &SharedState,
         geyser: Arc<GeyserPluginManager>,
     ) -> ApertureResult<Self> {
+        let latest_block = state.ledger.latest_block().clone();
+        // Subscribe to block updates immediately to ensure we don't miss any
+        // notifications that might be sent before the `run()` method is polled.
+        let block_update_rx = latest_block.subscribe();
         Ok(Self {
             subscriptions: state.subscriptions.clone(),
             transactions: state.transactions.clone(),
             blocks: state.blocks.clone(),
             account_update_rx: channels.account_update.clone(),
             transaction_status_rx: channels.transaction_status.clone(),
-            block_update_rx: channels.block_update.clone(),
+            block_update_rx,
             geyser,
         })
     }
@@ -107,16 +112,20 @@ impl EventProcessor {
     #[instrument(skip(self, cancel), fields(processor_id = id))]
     async fn run(self, id: usize, cancel: CancellationToken) {
         info!("Event processor started");
+        let mut block_update_rx = self.block_update_rx;
         loop {
             tokio::select! {
                 biased;
 
-                // Process a new block.
-                Ok(latest) = self.block_update_rx.recv_async() => {
+                // Process a new block. We use `recv()` which returns `Ok(())` on
+                // success or `Err(Lagged)` if we fell behind. In either case, we
+                // want to update with the latest block. Only `Err(Closed)` should
+                // stop us, but that's handled by the cancel token.
+                Ok(latest) = block_update_rx.recv() => {
                     // Notify subscribers waiting on slot updates.
-                    self.subscriptions.send_slot(latest.meta.slot);
+                    self.subscriptions.send_slot(latest.slot);
                     // Notify registered geyser plugins (if any) of the latest slot.
-                    let _ = self.geyser.notify_slot(latest.meta.slot).inspect_err(|e| {
+                    let _ = self.geyser.notify_slot(latest.slot).inspect_err(|e| {
                         warn!(error = ?e, "Geyser slot update failed");
                     });
                     // Notify listening geyser plugins
@@ -124,7 +133,7 @@ impl EventProcessor {
                         warn!(error = ?e, "Geyser block update failed");
                     });
                     // Update the global blocks cache with the latest block.
-                    self.blocks.set_latest(latest);
+                    self.blocks.set_latest(&latest);
                 }
 
                 // Process a new account state update.

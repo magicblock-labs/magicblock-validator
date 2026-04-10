@@ -31,5 +31,7 @@ magicblock-test-storage/
 
 # AI related
 **/CLAUDE.md
+CODEBASE_MAP.md
 config.json
 config.toml
+AGENTS.md

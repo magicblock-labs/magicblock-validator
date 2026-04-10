@@ -68,4 +68,12 @@ impl Producer {
             }
         }
     }
+
+    /// Release the leader lock
+    pub async fn release(&self) -> Result<()> {
+        self.lock
+            .delete_expect_revision(cfg::LOCK_KEY, Some(self.revision))
+            .await
+            .map_err(Into::into)
+    }
 }
