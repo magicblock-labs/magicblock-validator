@@ -135,7 +135,16 @@ impl Standby {
 
         let result = match message {
             Message::Transaction(txn) => self.replay_tx(txn).await,
-            Message::Block(block) => self.ctx.write_block(&block).await,
+            Message::Block(block) => {
+                let result = self.ctx.write_block(&block).await;
+                // NOTE:
+                // for performance reasons we batch messages from NATS and ack the
+                // entire batch on slot boudaries, instead of on every message
+                if let Err(error) = msg.ack().await {
+                    warn!(%error, "failed to ack nats message");
+                }
+                result
+            }
             Message::SuperBlock(sb) => self.ctx.verify_checksum(&sb).await,
         };
 
@@ -144,14 +153,6 @@ impl Standby {
             return;
         }
         self.ctx.update_position(slot, index);
-        // NOTE:
-        // for performance reasons we batch messages from NATS and ack the
-        // entire batch on slot boudaries, instead of on every message
-        if current_slot < self.ctx.slot {
-            if let Err(error) = msg.ack().await {
-                warn!(%error, "failed to ack nats message");
-            }
-        }
     }
 
     /// Check whether consumer has any undelivered messages in the stream

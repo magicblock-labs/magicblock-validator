@@ -193,7 +193,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
                 trace!(
                     pubkey = %pubkey,
                     account=%format!("{account:#?}"),
-                    "Removing non-delegated, non-DLP-owned account"
+                    "Removing non-delegated account during accountsdb reset"
                 );
             } else {
                 remaining += 1;
