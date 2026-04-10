@@ -13,6 +13,10 @@ pub struct LedgerConfig {
     #[serde(with = "humantime")]
     pub block_time: Duration,
 
+    /// The number of slots that must elapse before
+    /// the accountsdb snapshot/checksum is taken
+    pub superblock_size: u64,
+
     /// If true, the existing ledger database will be wiped on startup.
     /// Useful for ephemeral or testing environments.
     pub reset: bool,
@@ -39,6 +43,8 @@ impl Default for LedgerConfig {
             block_time: Duration::from_millis(
                 consts::DEFAULT_LEDGER_BLOCK_TIME_MS,
             ),
+
+            superblock_size: consts::DEFAULT_SUPERBLOCK_SIZE,
             reset: false,
             verify_keypair: true,
             size: consts::DEFAULT_LEDGER_SIZE,

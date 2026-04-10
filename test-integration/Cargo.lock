@@ -4555,6 +4555,7 @@ dependencies = [
  "agave-precompiles",
  "agave-syscalls",
  "bincode",
+ "blake3",
  "magicblock-accounts-db",
  "magicblock-core",
  "magicblock-ledger",

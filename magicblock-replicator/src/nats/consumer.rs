@@ -1,8 +1,8 @@
 //! Pull-based consumer for receiving replicated events.
 
+pub use async_nats::jetstream::consumer::pull::Stream as MessageStream;
 use async_nats::jetstream::consumer::{
-    pull::{Config as PullConfig, Stream as MessageStream},
-    AckPolicy, DeliverPolicy, PullConsumer,
+    pull::Config as PullConfig, AckPolicy, DeliverPolicy, PullConsumer,
 };
 use tokio_util::sync::CancellationToken;
 use tracing::warn;
@@ -75,6 +75,27 @@ impl Consumer {
                         Ok(s) => break Some(s),
                         Err(error) => {
                             warn!(%error, "failed to create message stream")
+                        }
+                    }
+                }
+                _ = cancel.cancelled() => {
+                    break None;
+                }
+            }
+        }
+    }
+
+    pub(crate) async fn pending(
+        &self,
+        cancel: &CancellationToken,
+    ) -> Option<u64> {
+        loop {
+            tokio::select! {
+                result = self.inner.get_info() => {
+                    match result {
+                        Ok(i) => break Some(i.num_pending),
+                        Err(error) => {
+                            warn!(%error, "failed to query consumer info")
                         }
                     }
                 }

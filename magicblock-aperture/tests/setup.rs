@@ -85,9 +85,13 @@ impl RpcTestEnv {
     /// 3.  Starts a live `JsonRpcServer` (HTTP and WebSocket) in a background task.
     /// 4.  Connects an `RpcClient` and `PubsubClient` to the running server.
     pub async fn new() -> Self {
+        // Use a short block time so the scheduler auto-advances slots.
+        // Tests should use `wait_for_slot_progress()` to wait for slot progression.
         const BLOCK_TIME_MS: u64 = 50;
 
         let execution = ExecutionTestEnv::new();
+        // Wait for the scheduler to be ready and in primary mode
+        execution.wait_for_scheduler_ready().await;
 
         let faucet = Keypair::new();
         execution.fund_account(faucet.pubkey(), Self::INIT_ACCOUNT_BALANCE);
@@ -137,8 +141,17 @@ impl RpcTestEnv {
             .await
             .expect("failed to create a pubsub client to RPC server");
 
-        // Allow server threads to initialize.
-        thread::yield_now();
+        // Allow async tasks (event processors) to initialize and start
+        // listening for notifications.
+        // We need to ensure the event processor's run() task has been polled
+        // at least once to start receiving notifications.
+        // Multiple yield_now calls give the runtime chances to schedule spawned tasks.
+        for _ in 0..10 {
+            tokio::task::yield_now().await;
+        }
+        // Small additional delay to ensure the select! loop in the event processor
+        // has started waiting for notifications.
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
 
         Self {
             block: execution.ledger.latest_block().clone(),
@@ -232,9 +245,35 @@ impl RpcTestEnv {
         }
     }
 
+    /// Waits for the RPC slot to advance by at least `count` slots from the current
+    /// RPC slot value.
+    ///
+    /// This is used when the scheduler auto-advances slots and tests need to wait
+    /// for the BlocksCache to catch up.
+    pub async fn wait_for_slot_progress(&self, count: u64) {
+        let initial_slot =
+            self.rpc.get_slot().await.expect("get_slot request failed");
+        let target_slot = initial_slot + count;
+
+        let start = std::time::Instant::now();
+        loop {
+            let slot =
+                self.rpc.get_slot().await.expect("get_slot request failed");
+            if slot >= target_slot {
+                break;
+            }
+            if start.elapsed() > std::time::Duration::from_secs(5) {
+                panic!(
+                    "Timed out waiting for slot to advance: expected >= {target_slot}, got {slot}"
+                );
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+        }
+    }
+
     /// Returns the latest slot number from the ledger.
     pub fn latest_slot(&self) -> Slot {
-        self.block.load().slot
+        self.execution.ledger.latest_block().load().slot
     }
 
     /// Creates and executes a generic transaction that modifies a new account.

@@ -20,13 +20,14 @@
 //! - `TransactionId`: Monotonic ID for FIFO queue ordering
 //! - `BinaryHeap<TransactionWithId>`: Min-heap ordered by transaction ID
 
-use std::{cmp::Ordering, collections::BinaryHeap};
+use std::{cmp::Ordering, collections::BinaryHeap, sync::Arc};
 
 use magicblock_core::{
     coordination_mode,
     link::transactions::{ProcessableTransaction, TransactionProcessingMode},
 };
 use magicblock_metrics::metrics::MAX_LOCK_CONTENTION_QUEUE_SIZE;
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tracing::{error, warn};
 
 use super::locks::{
@@ -59,6 +60,9 @@ pub(super) struct ExecutionCoordinator {
     locks: LocksCache,
     /// Current coordination mode (Primary or Replica)
     mode: CoordinationMode,
+    /// Semaphore for counting the number of busy executors
+    /// (i.e. ones executing transaction at any given moment)
+    execution_permits: Arc<Semaphore>,
 }
 
 /// Coordination mode determining how transactions are scheduled.
@@ -115,7 +119,7 @@ impl ExecutionCoordinator {
     ///
     /// Starts in StartingUp mode to allow ledger replay before switching to Primary
     /// or Replica.
-    pub(super) fn new(count: usize) -> Self {
+    pub(super) fn new(count: usize, execution_permits: Arc<Semaphore>) -> Self {
         Self {
             blocked_transactions: (0..count)
                 .map(|_| BinaryHeap::new())
@@ -124,6 +128,7 @@ impl ExecutionCoordinator {
             ready_executors: (0..count as u32).collect(),
             locks: LocksCache::default(),
             mode: CoordinationMode::StartingUp(ReplicaMode::default()),
+            execution_permits,
         }
     }
 
@@ -316,7 +321,7 @@ impl ExecutionCoordinator {
     }
 
     /// Check whether the node is acting as an event source for replication
-    pub(super) fn should_replicate(&self) -> bool {
+    pub(super) fn is_primary(&self) -> bool {
         matches!(self.mode, CoordinationMode::Primary(_))
     }
 
@@ -327,6 +332,22 @@ impl ExecutionCoordinator {
     /// operations like checksums to access AccountsDb.
     pub(super) fn is_idle(&self) -> bool {
         self.ready_executors.len() == self.blocked_transactions.len()
+    }
+
+    /// Waits until all executors are idle, then returns a permit that keeps them paused.
+    ///
+    /// This acquires all execution permits, blocking until every executor finishes
+    /// its current transaction. While holding the returned permit, no executors can
+    /// start new transactions.
+    ///
+    /// Use this for operations that require exclusive access to `AccountsDb`,
+    /// such as taking snapshots or computing checksums.
+    pub(super) async fn wait_for_idle(&self) -> OwnedSemaphorePermit {
+        self.execution_permits
+            .clone()
+            .acquire_many_owned(self.blocked_transactions.len() as u32)
+            .await
+            .expect("semaphore can never be closed")
     }
 }
 

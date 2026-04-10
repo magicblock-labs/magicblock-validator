@@ -16,7 +16,7 @@ mod snapshot;
 
 use async_nats::Subject;
 pub use broker::Broker;
-pub use consumer::Consumer;
+pub use consumer::{Consumer, MessageStream};
 pub use lock_watcher::LockWatcher;
 use magicblock_core::link::replication::Message;
 pub use producer::Producer;

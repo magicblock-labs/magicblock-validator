@@ -7,6 +7,8 @@
 //! - Coordination modes (Primary/Replica)
 //! - Edge cases (empty transactions, duplicate accounts)
 
+use std::sync::Arc;
+
 use magicblock_core::link::transactions::{
     ProcessableTransaction, ReplayPosition, SanitizeableTransaction,
     TransactionProcessingMode,
@@ -19,8 +21,15 @@ use solana_program::{
 use solana_pubkey::Pubkey;
 use solana_signer::Signer;
 use solana_transaction::Transaction;
+use tokio::sync::Semaphore;
 
 use super::coordinator::{ExecutionCoordinator, TransactionWithId};
+
+/// Creates a coordinator for testing with the required execution permits semaphore.
+fn new_coordinator(count: usize) -> ExecutionCoordinator {
+    let execution_permits = Arc::new(Semaphore::new(count));
+    ExecutionCoordinator::new(count, execution_permits)
+}
 
 /// Creates a mock transaction with the specified accounts and processing mode.
 fn mock_txn_with_mode(
@@ -73,7 +82,7 @@ fn mock_replay_txn(
 
 #[test]
 fn write_blocks_write() {
-    let mut c = ExecutionCoordinator::new(2);
+    let mut c = new_coordinator(2);
     let acc = Pubkey::new_unique();
 
     let e0 = c.get_ready_executor().unwrap();
@@ -85,7 +94,7 @@ fn write_blocks_write() {
 
 #[test]
 fn write_blocks_read() {
-    let mut c = ExecutionCoordinator::new(2);
+    let mut c = new_coordinator(2);
     let acc = Pubkey::new_unique();
 
     let e0 = c.get_ready_executor().unwrap();
@@ -100,7 +109,7 @@ fn write_blocks_read() {
 
 #[test]
 fn read_blocks_write() {
-    let mut c = ExecutionCoordinator::new(2);
+    let mut c = new_coordinator(2);
     let acc = Pubkey::new_unique();
 
     let e0 = c.get_ready_executor().unwrap();
@@ -112,7 +121,7 @@ fn read_blocks_write() {
 
 #[test]
 fn multiple_readers_allowed() {
-    let mut c = ExecutionCoordinator::new(3);
+    let mut c = new_coordinator(3);
     let acc = Pubkey::new_unique();
 
     let e0 = c.get_ready_executor().unwrap();
@@ -130,7 +139,7 @@ fn multiple_readers_allowed() {
 
 #[test]
 fn partial_locks_released_on_failure() {
-    let mut c = ExecutionCoordinator::new(2);
+    let mut c = new_coordinator(2);
     let (a, b) = (Pubkey::new_unique(), Pubkey::new_unique());
 
     let e0 = c.get_ready_executor().unwrap();
@@ -156,7 +165,7 @@ fn partial_locks_released_on_failure() {
 
 #[test]
 fn blocked_transactions_dequeued_in_fifo_order() {
-    let mut c = ExecutionCoordinator::new(4);
+    let mut c = new_coordinator(4);
     // Switch to primary mode for tests that need multiple blocked transactions
     c.switch_to_primary_mode();
     let acc = Pubkey::new_unique();
@@ -197,7 +206,7 @@ fn blocked_transactions_dequeued_in_fifo_order() {
 
 #[test]
 fn blocked_transaction_releases_executor() {
-    let mut c = ExecutionCoordinator::new(2);
+    let mut c = new_coordinator(2);
     let acc = Pubkey::new_unique();
 
     let e0 = c.get_ready_executor().unwrap();
@@ -217,7 +226,7 @@ fn blocked_transaction_releases_executor() {
 
 #[test]
 fn unlock_allows_blocked_transaction_to_proceed() {
-    let mut c = ExecutionCoordinator::new(2);
+    let mut c = new_coordinator(2);
     let acc = Pubkey::new_unique();
 
     let e0 = c.get_ready_executor().unwrap();
@@ -237,7 +246,7 @@ fn unlock_allows_blocked_transaction_to_proceed() {
 
 #[test]
 fn transaction_requeued_to_different_executor_keeps_id() {
-    let mut c = ExecutionCoordinator::new(3);
+    let mut c = new_coordinator(3);
     let (a, b) = (Pubkey::new_unique(), Pubkey::new_unique());
 
     let e0 = c.get_ready_executor().unwrap();
@@ -272,7 +281,7 @@ fn transaction_requeued_to_different_executor_keeps_id() {
 
 #[test]
 fn empty_transaction_always_succeeds() {
-    let mut c = ExecutionCoordinator::new(1);
+    let mut c = new_coordinator(1);
     let e = c.get_ready_executor().unwrap();
     assert!(c.try_schedule(e, mock_txn(&[])).is_ok());
 }
@@ -280,7 +289,7 @@ fn empty_transaction_always_succeeds() {
 #[test]
 fn transaction_with_duplicate_accounts() {
     // Real transactions shouldn't have duplicates, but verify we don't panic
-    let mut c = ExecutionCoordinator::new(1);
+    let mut c = new_coordinator(1);
     let acc = Pubkey::new_unique();
     let e = c.get_ready_executor().unwrap();
 
@@ -296,7 +305,7 @@ fn transaction_with_duplicate_accounts() {
 
 #[test]
 fn replica_mode_blocks_new_transactions_when_pending() {
-    let mut c = ExecutionCoordinator::new(2);
+    let mut c = new_coordinator(2);
     let acc = Pubkey::new_unique();
     let position = ReplayPosition {
         slot: 0,
@@ -323,7 +332,7 @@ fn replica_mode_blocks_new_transactions_when_pending() {
 
 #[test]
 fn replica_mode_unblocks_when_pending_completes() {
-    let mut c = ExecutionCoordinator::new(2);
+    let mut c = new_coordinator(2);
     let acc = Pubkey::new_unique();
     let position = ReplayPosition {
         slot: 0,
@@ -357,7 +366,7 @@ fn replica_mode_unblocks_when_pending_completes() {
 
 #[test]
 fn starting_up_mode_rejects_execution_transactions() {
-    let c = ExecutionCoordinator::new(1);
+    let c = new_coordinator(1);
 
     // StartingUp mode should reject Execution transactions
     assert!(
@@ -375,7 +384,7 @@ fn starting_up_mode_rejects_execution_transactions() {
 
 #[test]
 fn starting_up_mode_allows_replay_transactions() {
-    let c = ExecutionCoordinator::new(1);
+    let c = new_coordinator(1);
 
     // StartingUp mode should allow Replay transactions
     assert!(c.is_transaction_allowed(&TransactionProcessingMode::Replay(
@@ -389,7 +398,7 @@ fn starting_up_mode_allows_replay_transactions() {
 
 #[test]
 fn starting_up_to_primary_mode_switch() {
-    let mut c = ExecutionCoordinator::new(1);
+    let mut c = new_coordinator(1);
 
     // Start in StartingUp, should reject Execution
     assert!(
@@ -417,7 +426,7 @@ fn starting_up_to_primary_mode_switch() {
 
 #[test]
 fn starting_up_to_replica_mode_switch() {
-    let mut c = ExecutionCoordinator::new(1);
+    let mut c = new_coordinator(1);
 
     // Start in StartingUp, should allow Replay
     assert!(c.is_transaction_allowed(&TransactionProcessingMode::Replay(
@@ -447,7 +456,7 @@ fn starting_up_to_replica_mode_switch() {
 
 #[test]
 fn starting_up_blocks_new_transactions_when_pending() {
-    let mut c = ExecutionCoordinator::new(2);
+    let mut c = new_coordinator(2);
     let acc = Pubkey::new_unique();
     let position = ReplayPosition {
         slot: 0,

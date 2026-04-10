@@ -93,6 +93,8 @@ impl ReplicationContext {
 
     /// Writes block to ledger.
     pub async fn write_block(&self, block: &Block) -> Result<()> {
+        // wait for the scheduler to accept all of the previous block transactions
+        let _guard = self.scheduler.wait_for_idle().await;
         self.ledger
             .write_block(block.slot, block.timestamp, block.hash)?;
         Ok(())

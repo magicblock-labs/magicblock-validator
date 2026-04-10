@@ -29,6 +29,13 @@ pub enum Message {
 }
 
 impl Message {
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Self::Transaction(_) => "transaction",
+            Self::Block(_) => "block",
+            Self::SuperBlock(_) => "superblock",
+        }
+    }
     /// Returns the (slot, index) position of this message.
     /// Block and SuperBlock messages use sentinel index values.
     pub fn slot_and_index(&self) -> (Slot, TransactionIndex) {

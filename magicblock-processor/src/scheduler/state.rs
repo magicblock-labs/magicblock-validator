@@ -4,7 +4,10 @@
 //! `TransactionSchedulerState` is constructed externally and passed to
 //! `TransactionScheduler::new()` for initialization.
 
-use std::sync::{Arc, OnceLock, RwLock};
+use std::{
+    sync::{Arc, OnceLock, RwLock},
+    time::Duration,
+};
 
 use magicblock_accounts_db::{traits::AccountsBank, AccountsDb};
 use magicblock_core::link::{
@@ -57,6 +60,9 @@ pub struct TransactionSchedulerState {
     pub pause_permit: Arc<Semaphore>,
 
     pub shutdown: CancellationToken,
+    pub block_time: Duration,
+    pub superblock_size: u64,
+
     /// Receives mode transition commands (Primary or Replica) at runtime.
     pub mode_rx: Receiver<SchedulerMode>,
 }

@@ -189,6 +189,13 @@ reset = false
 # Env: MBV_LEDGER__BLOCK_TIME
 block-time = "400ms"
 
+# The number of slots included in a superblock.
+# accountsdb checksum/snapshot is taken at superblock boundary
+# 
+# Default: 72000
+# Env: MBV_LEDGER__SUPERBLOCK_SIZE
+superblock-size = 72000
+
 # Upper hard threshold for the max size of the ledger (in bytes).
 # Ledger truncation logic kicks in when disk usage approaches this limit.
 # Default: 536_870_912 (512 MB)
