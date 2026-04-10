@@ -142,7 +142,9 @@ impl MagicValidator {
     // Initialization
     // -----------------
     #[instrument(skip_all, fields(last_slot = tracing::field::Empty))]
-    pub async fn try_from_config(config: ValidatorParams) -> ApiResult<Self> {
+    pub async fn try_from_config(
+        mut config: ValidatorParams,
+    ) -> ApiResult<Self> {
         // TODO(thlorenz): this will need to be recreated on each start
         let token = CancellationToken::new();
         let identity_keypair = config.validator.keypair.insecure_clone();
@@ -189,23 +191,36 @@ impl MagicValidator {
         // Connect to replication broker if configured.
         // Returns (broker, is_fresh_start) where is_fresh_start indicates
         // whether accountsdb was empty and may need a snapshot.
-        let broker =
-            if let Some(url) = config.validator.replication_mode.remote() {
-                let mut broker = Broker::connect(url).await?;
-                let is_fresh_start = accountsdb.slot() == 0;
-                // Fetch snapshot from primary if starting fresh
-                if is_fresh_start {
-                    if let Some(snapshot) = broker.get_snapshot().await? {
-                        accountsdb.insert_external_snapshot(
-                            snapshot.slot,
-                            &snapshot.data,
-                        )?;
-                    }
+        let broker = if let Some(conf) =
+            config.validator.replication_mode.config()
+        {
+            let step_start = Instant::now();
+            let mut broker = Broker::connect(conf.url, conf.secret).await?;
+            let is_fresh_start = accountsdb.slot() == 0;
+            // Fetch snapshot from primary if starting fresh
+            if is_fresh_start {
+                info!(
+                    "accountsdb is not initialized, trying to fetch snapshot"
+                );
+                if let Some(snapshot) = broker.get_snapshot().await? {
+                    info!(slot = snapshot.slot, "fetched accountsdb snapshot");
+                    accountsdb.insert_external_snapshot(
+                        snapshot.slot,
+                        &snapshot.data,
+                    )?;
+                    // we have essentially reset the accountsdb,
+                    // and chainlink should not prune it, as it
+                    // would introduce divergence with primary node
+                    config.accountsdb.reset = true;
+                } else {
+                    warn!("no snapshot is found in replication stream");
                 }
-                Some((broker, is_fresh_start))
-            } else {
-                None
-            };
+            }
+            log_timing("startup", "replication broker init", step_start);
+            Some((broker, is_fresh_start))
+        } else {
+            None
+        };
         let accountsdb = Arc::new(accountsdb);
         let (mut dispatch, validator_channels) = link();
 
