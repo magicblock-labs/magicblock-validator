@@ -14,7 +14,6 @@
 
 pub mod error;
 pub mod nats;
-pub mod proto;
 pub mod service;
 pub mod watcher;
 
@@ -22,4 +21,4 @@ pub mod watcher;
 mod tests;
 
 pub use error::{Error, Result};
-pub use proto::{Message, TransactionIndex};
+pub use service::Service as ReplicationService;

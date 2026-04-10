@@ -314,6 +314,20 @@ impl ExecutionCoordinator {
         );
         !mode_mismatch
     }
+
+    /// Check whether the node is acting as an event source for replication
+    pub(super) fn should_replicate(&self) -> bool {
+        matches!(self.mode, CoordinationMode::Primary(_))
+    }
+
+    /// Returns true when no transactions are actively executing.
+    ///
+    /// Idle means: all executors are either ready or blocked, so no state
+    /// transitions are in progress. This is the safe moment for external
+    /// operations like checksums to access AccountsDb.
+    pub(super) fn is_idle(&self) -> bool {
+        self.ready_executors.len() == self.blocked_transactions.len()
+    }
 }
 
 /// Transaction wrapped with a monotonic ID for FIFO queue ordering.

@@ -27,8 +27,9 @@ use std::{sync::Arc, thread::JoinHandle, time::Duration};
 
 pub use context::ReplicationContext;
 use magicblock_accounts_db::AccountsDb;
-use magicblock_core::link::transactions::{
-    SchedulerMode, TransactionSchedulerHandle,
+use magicblock_core::link::{
+    replication::Message,
+    transactions::{SchedulerMode, TransactionSchedulerHandle},
 };
 use magicblock_ledger::Ledger;
 pub use primary::Primary;
@@ -37,8 +38,9 @@ use tokio::{
     runtime::Builder,
     sync::mpsc::{Receiver, Sender},
 };
+use tokio_util::sync::CancellationToken;
 
-use crate::{nats::Broker, Message, Result};
+use crate::{nats::Broker, Result};
 
 // =============================================================================
 // Constants
@@ -59,7 +61,11 @@ pub enum Service {
 }
 
 impl Service {
-    /// Creates service, attempting primary role first.
+    /// Creates service, attempting primary role first if allowed.
+    ///
+    /// When `can_promote` is false (ReplicaOnly mode), skips lock acquisition
+    /// and goes directly to standby mode.
+    #[allow(clippy::too_many_arguments)]
     pub async fn new(
         broker: Broker,
         mode_tx: Sender<SchedulerMode>,
@@ -67,22 +73,44 @@ impl Service {
         ledger: Arc<Ledger>,
         scheduler: TransactionSchedulerHandle,
         messages: Receiver<Message>,
+        cancel: CancellationToken,
         reset: bool,
-    ) -> crate::Result<Self> {
+        can_promote: bool,
+    ) -> crate::Result<Option<Self>> {
         let ctx = ReplicationContext::new(
-            broker, mode_tx, accountsdb, ledger, scheduler,
+            broker,
+            mode_tx,
+            accountsdb,
+            ledger,
+            scheduler,
+            cancel,
+            can_promote,
         )
         .await?;
 
-        // Try to become primary.
-        match ctx.try_acquire_producer().await? {
-            Some(producer) => {
-                Ok(Self::Primary(ctx.into_primary(producer, messages).await?))
+        // Try to become primary only if promotion is allowed.
+        if can_promote {
+            match ctx.try_acquire_producer().await? {
+                Some(producer) => Ok(Some(Self::Primary(
+                    ctx.into_primary(producer, messages).await?,
+                ))),
+                None => {
+                    let Some(standby) =
+                        ctx.into_standby(messages, reset).await?
+                    else {
+                        // Shutdown during consumer creation
+                        return Ok(None);
+                    };
+                    Ok(Some(Self::Standby(standby)))
+                }
             }
-            None => {
-                let standby = ctx.into_standby(messages, reset).await?;
-                Ok(Self::Standby(standby))
-            }
+        } else {
+            // ReplicaOnly mode: skip lock acquisition, go directly to standby
+            let Some(standby) = ctx.into_standby(messages, reset).await? else {
+                // Shutdown during consumer creation
+                return Ok(None);
+            };
+            Ok(Some(Self::Standby(standby)))
         }
     }
 
@@ -90,13 +118,13 @@ impl Service {
     pub async fn run(mut self) -> Result<()> {
         loop {
             self = match self {
-                Service::Primary(p) => Service::Standby(p.run().await?),
-                Service::Standby(s) => match s.run().await {
-                    Ok(p) => Service::Primary(p),
-                    Err(error) => {
-                        tracing::error!(%error, "unrecoverable replication failure");
-                        return Err(error);
-                    }
+                Service::Primary(p) => match p.run().await? {
+                    Some(s) => Service::Standby(s),
+                    None => return Ok(()),
+                },
+                Service::Standby(s) => match s.run().await? {
+                    Some(p) => Service::Primary(p),
+                    None => return Ok(()),
                 },
             };
         }
@@ -108,6 +136,7 @@ impl Service {
     pub fn spawn(self) -> JoinHandle<Result<()>> {
         std::thread::spawn(move || {
             let runtime = Builder::new_current_thread()
+                .enable_all()
                 .thread_name("replication-service")
                 .build()
                 .expect("Failed to build replication service runtime");

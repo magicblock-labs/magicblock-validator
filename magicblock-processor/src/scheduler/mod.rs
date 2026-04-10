@@ -16,9 +16,12 @@ use coordinator::{ExecutionCoordinator, TransactionWithId};
 use locks::{ExecutorId, MAX_SVM_EXECUTORS};
 use magicblock_accounts_db::{traits::AccountsBank, AccountsDb};
 use magicblock_core::{
-    link::transactions::{
-        ProcessableTransaction, SchedulerMode, TransactionProcessingMode,
-        TransactionToProcessRx,
+    link::{
+        replication::{self, Message},
+        transactions::{
+            ProcessableTransaction, SchedulerMode, TransactionProcessingMode,
+            TransactionToProcessRx,
+        },
     },
     Slot,
 };
@@ -30,7 +33,10 @@ use solana_sdk_ids::sysvar::{clock, slot_hashes};
 use state::TransactionSchedulerState;
 use tokio::{
     runtime::Builder,
-    sync::mpsc::{channel, Receiver, Sender},
+    sync::{
+        mpsc::{channel, Receiver, Sender},
+        OwnedSemaphorePermit, Semaphore,
+    },
 };
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, instrument, warn};
@@ -64,7 +70,14 @@ pub struct TransactionScheduler {
     shutdown: CancellationToken,
     /// Receives mode transition commands (Primary or Replica) at runtime.
     mode_rx: Receiver<SchedulerMode>,
+    /// A sink for the events (transactions, blocks etc) that need to be replicated
+    replication_tx: Sender<Message>,
+    /// Semaphore for coordinating exclusive DB access with external callers.
+    /// Scheduler acquires permit when scheduling, releases when idle.
+    pause_permit: Arc<Semaphore>,
+    /// Current Slot that scheduler is operating on (clock value)
     slot: Slot,
+    /// Current transaction index included into the block under assembly
     index: u32,
 }
 
@@ -107,6 +120,8 @@ impl TransactionScheduler {
             accountsdb: state.accountsdb,
             shutdown: state.shutdown,
             mode_rx: state.mode_rx,
+            replication_tx: state.replication_tx,
+            pause_permit: state.pause_permit,
             slot: state.ledger.latest_block().load().slot,
             index: 0,
         }
@@ -118,6 +133,7 @@ impl TransactionScheduler {
             // Single-threaded runtime avoids scheduler contention with other async tasks
             let runtime = Builder::new_current_thread()
                 .thread_name("transaction-scheduler")
+                .enable_all()
                 .build()
                 .expect("Failed to build single-threaded Tokio runtime");
             runtime.block_on(tokio::task::unconstrained(self.run()));
@@ -134,11 +150,20 @@ impl TransactionScheduler {
     #[instrument(skip(self))]
     async fn run(mut self) {
         let mut block_produced = self.latest_block.subscribe();
+        // Holds the scheduling permit while transactions are being processed.
+        // Released when idle so external callers can acquire exclusive access.
+        let mut scheduling_permit = None;
         loop {
             tokio::select! {
                 biased;
                 Ok(()) = block_produced.recv() => self.transition_to_new_slot(),
-                Some(executor) = self.ready_rx.recv() => self.handle_ready_executor(executor),
+                Some(executor) = self.ready_rx.recv() => {
+                    self.handle_ready_executor(executor).await;
+                    // Release permit when idle: no active work, safe for external access
+                    if self.coordinator.is_idle() {
+                        scheduling_permit.take();
+                    }
+                }
                 Some(mode) = self.mode_rx.recv() => {
                     match mode {
                         SchedulerMode::Primary => {
@@ -150,7 +175,7 @@ impl TransactionScheduler {
                     }
                 }
                 Some(txn) = self.transactions_rx.recv(), if self.coordinator.is_ready() => {
-                    self.handle_new_transaction(txn);
+                    self.handle_new_transaction(txn, &mut scheduling_permit).await;
                 }
                 _ = self.shutdown.cancelled() => break,
                 else => break,
@@ -163,15 +188,30 @@ impl TransactionScheduler {
         info!("Scheduler terminated");
     }
 
-    fn handle_ready_executor(&mut self, executor: ExecutorId) {
+    async fn handle_ready_executor(&mut self, executor: ExecutorId) {
         self.coordinator.unlock_accounts(executor);
-        self.reschedule_blocked_transactions(executor);
+        self.reschedule_blocked_transactions(executor).await;
     }
 
-    fn handle_new_transaction(&mut self, txn: ProcessableTransaction) {
+    async fn handle_new_transaction(
+        &mut self,
+        txn: ProcessableTransaction,
+        scheduling_permit: &mut Option<OwnedSemaphorePermit>,
+    ) {
         if !self.coordinator.is_transaction_allowed(&txn.mode) {
             warn!("Dropping transaction due to mode incompatibility");
             return;
+        }
+        // Acquire permit if not already held. This blocks if an external caller
+        // (e.g., checksum) currently holds it, ensuring mutual exclusion.
+        if scheduling_permit.is_none() {
+            let permit = self
+                .pause_permit
+                .clone()
+                .acquire_owned()
+                .await
+                .expect("scheduler semaphore can never be closed");
+            scheduling_permit.replace(permit);
         }
         // SAFETY:
         // the caller ensured that executor was ready before invoking this
@@ -179,10 +219,11 @@ impl TransactionScheduler {
         let executor = self.coordinator.get_ready_executor().expect(
             "unreachable: is_ready() guard ensures an executor is available",
         );
-        self.schedule_transaction(executor, TransactionWithId::new(txn));
+        self.schedule_transaction(executor, TransactionWithId::new(txn))
+            .await;
     }
 
-    fn reschedule_blocked_transactions(&mut self, blocker: ExecutorId) {
+    async fn reschedule_blocked_transactions(&mut self, blocker: ExecutorId) {
         let mut executor = Some(blocker);
         while let Some(exec) = executor.take() {
             // Try to get next transaction blocked by this executor
@@ -193,7 +234,7 @@ impl TransactionScheduler {
                 break;
             };
 
-            let blocked = self.schedule_transaction(exec, txn);
+            let blocked = self.schedule_transaction(exec, txn).await;
 
             // If blocked by the same executor we're draining, stop to avoid infinite loop
             if blocked.is_some_and(|b| b == blocker) {
@@ -204,7 +245,7 @@ impl TransactionScheduler {
         }
     }
 
-    fn schedule_transaction(
+    async fn schedule_transaction(
         &mut self,
         executor: ExecutorId,
         txn: TransactionWithId,
@@ -222,11 +263,31 @@ impl TransactionScheduler {
                 (self.slot, index)
             };
 
+        let msg = txn
+            .encoded
+            .as_ref()
+            .cloned()
+            .filter(|_| {
+                matches!(txn.mode, TransactionProcessingMode::Execution(_))
+                    && self.coordinator.should_replicate()
+            })
+            .map(|payload| {
+                Message::Transaction(replication::Transaction {
+                    index,
+                    slot,
+                    payload,
+                })
+            });
         let txn = IndexedTransaction { slot, index, txn };
 
-        let _ = self.executors[executor as usize].try_send(txn).inspect_err(
-            |e| error!(executor, error = ?e, "Executor channel send failed"),
-        );
+        let sent = self.executors[executor as usize].try_send(txn).inspect_err(
+            |error| error!(executor, %error, "Executor channel send failed"),
+        ).is_ok();
+        if let Some(msg) = msg.filter(|_| sent) {
+            let _ = self.replication_tx.send(msg).await.inspect_err(
+                |error| error!(executor, %error, "Replication channel send failed"),
+            );
+        }
         None
     }
 

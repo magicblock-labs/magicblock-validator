@@ -2,6 +2,7 @@
 
 use async_nats::jetstream::kv::{Operation, Watch};
 use futures::StreamExt;
+use tokio_util::sync::CancellationToken;
 use tracing::warn;
 
 use super::cfg;
@@ -17,8 +18,14 @@ pub struct LockWatcher {
 
 impl LockWatcher {
     /// Creates a new lock watcher.
-    pub(crate) async fn new(broker: &Broker) -> Self {
+    pub(crate) async fn new(
+        broker: &Broker,
+        cancel: &CancellationToken,
+    ) -> Option<Self> {
         let watch = loop {
+            if cancel.is_cancelled() {
+                return None;
+            }
             let store = match broker.ctx.get_key_value(cfg::PRODUCER_LOCK).await
             {
                 Ok(s) => s,
@@ -35,7 +42,7 @@ impl LockWatcher {
                 }
             }
         };
-        Self { watch }
+        Some(Self { watch })
     }
 
     /// Waits for the lock to be deleted or expire.

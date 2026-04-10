@@ -9,6 +9,7 @@ use std::sync::{Arc, OnceLock, RwLock};
 use magicblock_accounts_db::{traits::AccountsBank, AccountsDb};
 use magicblock_core::link::{
     accounts::AccountUpdateTx,
+    replication::Message,
     transactions::{
         ScheduledTasksTx, SchedulerMode, TransactionStatusTx,
         TransactionToProcessRx,
@@ -27,7 +28,10 @@ use solana_program::{
 use solana_program_runtime::loaded_programs::ProgramCache;
 use solana_pubkey::Pubkey;
 use solana_svm::transaction_processor::TransactionProcessingEnvironment;
-use tokio::sync::mpsc::Receiver;
+use tokio::sync::{
+    mpsc::{Receiver, Sender},
+    Semaphore,
+};
 use tokio_util::sync::CancellationToken;
 
 use crate::executor::SimpleForkGraph;
@@ -48,6 +52,9 @@ pub struct TransactionSchedulerState {
     pub account_update_tx: AccountUpdateTx,
     pub transaction_status_tx: TransactionStatusTx,
     pub tasks_tx: ScheduledTasksTx,
+    pub replication_tx: Sender<Message>,
+    /// Semaphore for pausing scheduling during exclusive DB access.
+    pub pause_permit: Arc<Semaphore>,
 
     pub shutdown: CancellationToken,
     /// Receives mode transition commands (Primary or Replica) at runtime.

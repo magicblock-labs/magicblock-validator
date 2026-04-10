@@ -26,6 +26,7 @@ tokio = { workspace = true, features = [
   "io-util",
   "fs",
 ] }
+tokio-util = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 solana-hash = { workspace = true, features = ["serde"] }
 solana-transaction = { workspace = true, features = ["serde"] }

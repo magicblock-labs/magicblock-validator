@@ -4,6 +4,7 @@ use async_nats::jetstream::consumer::{
     pull::{Config as PullConfig, Stream as MessageStream},
     AckPolicy, DeliverPolicy, PullConsumer,
 };
+use tokio_util::sync::CancellationToken;
 use tracing::warn;
 
 use super::cfg;
@@ -58,18 +59,27 @@ impl Consumer {
     ///
     /// Use this in a `tokio::select!` loop to process messages as they arrive.
     /// Messages are fetched in batches for efficiency.
-    pub async fn messages(&self) -> MessageStream {
+    pub async fn messages(
+        &self,
+        cancel: &CancellationToken,
+    ) -> Option<MessageStream> {
         loop {
-            let result = self
+            let messages = self
                 .inner
                 .stream()
                 .max_messages_per_batch(cfg::BATCH_SIZE)
-                .messages()
-                .await;
-            match result {
-                Ok(s) => break s,
-                Err(error) => {
-                    warn!(%error, "failed to create message stream")
+                .messages();
+            tokio::select! {
+                result = messages => {
+                    match result {
+                        Ok(s) => break Some(s),
+                        Err(error) => {
+                            warn!(%error, "failed to create message stream")
+                        }
+                    }
+                }
+                _ = cancel.cancelled() => {
+                    break None;
                 }
             }
         }
