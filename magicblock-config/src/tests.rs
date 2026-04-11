@@ -269,6 +269,13 @@ fn test_chainlink_config() {
         prepare-lookup-tables = true
         max-monitored-accounts = 5000
         resubscription-delay = "50ms"
+
+        [chainlink.risk]
+        enabled = true
+        api-key = "test-token"
+        cache-ttl = "20m"
+        request-timeout = "2s"
+        risk-score-threshold = 8
         "#,
     );
 
@@ -280,6 +287,20 @@ fn test_chainlink_config() {
         config.chainlink.resubscription_delay,
         std::time::Duration::from_millis(50)
     );
+    assert!(config.chainlink.risk.enabled);
+    assert_eq!(
+        config.chainlink.risk.api_key,
+        Some("test-token".to_string())
+    );
+    assert_eq!(
+        config.chainlink.risk.cache_ttl,
+        std::time::Duration::from_secs(20 * 60)
+    );
+    assert_eq!(
+        config.chainlink.risk.request_timeout,
+        std::time::Duration::from_secs(2)
+    );
+    assert_eq!(config.chainlink.risk.risk_score_threshold, 8);
 }
 
 // ============================================================================
@@ -435,6 +456,7 @@ fn test_example_config_full_coverage() {
     assert!(!config.chainlink.prepare_lookup_tables);
     assert_eq!(config.chainlink.auto_airdrop_lamports, 0);
     assert_eq!(config.chainlink.max_monitored_accounts, 1000);
+    assert!(!config.chainlink.risk.enabled);
 
     // ========================================================================
     // 10. Aperture
@@ -518,6 +540,11 @@ fn test_env_vars_full_coverage() {
         EnvVarGuard::new("MBV_CHAINLINK__AUTO_AIRDROP_LAMPORTS", "555"),
         EnvVarGuard::new("MBV_CHAINLINK__MAX_MONITORED_ACCOUNTS", "123"),
         EnvVarGuard::new("MBV_CHAINLINK__RESUBSCRIPTION_DELAY", "150ms"),
+        EnvVarGuard::new("MBV_CHAINLINK__RISK__ENABLED", "true"),
+        EnvVarGuard::new("MBV_CHAINLINK__RISK__API_KEY", "env-range-token"),
+        EnvVarGuard::new("MBV_CHAINLINK__RISK__CACHE_TTL", "45m"),
+        EnvVarGuard::new("MBV_CHAINLINK__RISK__REQUEST_TIMEOUT", "3s"),
+        EnvVarGuard::new("MBV_CHAINLINK__RISK__RISK_SCORE_THRESHOLD", "8"),
         // --- Task Scheduler ---
         EnvVarGuard::new("MBV_TASK_SCHEDULER__RESET", "true"),
         EnvVarGuard::new("MBV_TASK_SCHEDULER__MIN_INTERVAL", "99ms"),
@@ -585,6 +612,20 @@ fn test_env_vars_full_coverage() {
         config.chainlink.resubscription_delay,
         Duration::from_millis(150)
     );
+    assert!(config.chainlink.risk.enabled);
+    assert_eq!(
+        config.chainlink.risk.api_key,
+        Some("env-range-token".to_string())
+    );
+    assert_eq!(
+        config.chainlink.risk.cache_ttl,
+        Duration::from_secs(45 * 60)
+    );
+    assert_eq!(
+        config.chainlink.risk.request_timeout,
+        Duration::from_secs(3)
+    );
+    assert_eq!(config.chainlink.risk.risk_score_threshold, 8);
 
     // Task Scheduler
     assert!(config.task_scheduler.reset);

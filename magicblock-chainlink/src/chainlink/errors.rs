@@ -1,3 +1,4 @@
+use magicblock_aml::RiskError;
 use solana_program::program_error::ProgramError;
 use solana_pubkey::Pubkey;
 use thiserror::Error;
@@ -47,4 +48,7 @@ pub enum ChainlinkError {
 
     #[error("Missing accounts required by delegation actions: {0:?}")]
     MissingDelegationActionAccounts(Vec<Pubkey>),
+
+    #[error("Failed to perform Range risk check: {0}")]
+    RangeRisk(#[from] RiskError),
 }

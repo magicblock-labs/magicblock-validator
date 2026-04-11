@@ -251,6 +251,7 @@ fn init_fetch_cloner(
         faucet_pubkey,
         subscription_rx,
         None,
+        None,
     );
     (fetch_cloner, subscription_tx)
 }
@@ -1767,6 +1768,7 @@ async fn test_allowed_programs_filters_programs() {
         random_pubkey(),
         subscription_rx,
         allowed_programs,
+        None,
     );
 
     // Fetch and clone both programs
@@ -1840,6 +1842,7 @@ async fn test_allowed_programs_none_allows_all() {
         random_pubkey(),
         subscription_rx,
         None, // No restriction
+        None,
     );
 
     // Fetch and clone both programs
@@ -1912,6 +1915,7 @@ async fn test_allowed_programs_empty_allows_all() {
         random_pubkey(),
         subscription_rx,
         allowed_programs,
+        None,
     );
 
     // Fetch and clone both programs
