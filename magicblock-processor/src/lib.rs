@@ -102,4 +102,3 @@ mod builtins;
 mod executor;
 pub mod loader;
 pub mod scheduler;
-mod syscalls;

@@ -34,7 +34,7 @@ use solana_svm::transaction_processor::TransactionProcessingEnvironment;
 use tokio::sync::mpsc::Receiver;
 use tokio_util::sync::CancellationToken;
 
-use crate::{executor::SimpleForkGraph, syscalls::SyscallMatmulI8};
+use crate::executor::SimpleForkGraph;
 
 /// Container for global state and communication channels.
 ///
@@ -78,27 +78,13 @@ impl TransactionSchedulerState {
             false,
             false,
         )
-        .and_then(|mut runtime| {
-            runtime.register_function("sol_matmul_i8", SyscallMatmulI8::vm)?;
-            Ok(runtime)
-        })
         .map(Into::into)
         .unwrap_or_else(|_| {
             Arc::new(BuiltinProgram::new_loader(Default::default()))
         });
 
-        let runtime_v2 = {
-            let mut runtime = create_program_runtime_environment_v2(
-                &Default::default(),
-                false,
-            );
-            runtime
-                .register_function("sol_matmul_i8", SyscallMatmulI8::vm)
-                .expect(
-                    "failed to register sol_matmul_i8 in runtime environment v2",
-                );
-            runtime
-        };
+        let runtime_v2 =
+            create_program_runtime_environment_v2(&Default::default(), false);
 
         let mut cache = ProgramCache::new(self.accountsdb.slot(), 0);
         cache.set_fork_graph(forkgraph);
