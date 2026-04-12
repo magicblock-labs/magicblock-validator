@@ -11,7 +11,181 @@ on:
     types: [opened, reopened, synchronize, ready_for_review]
 
 jobs:
+  determine_scope:
+    runs-on: ubuntu-latest
+    outputs:
+      run_all: ${{ steps.scope.outputs.run_all }}
+      run_any: ${{ steps.scope.outputs.run_any }}
+      selected_batches_csv: ${{ steps.scope.outputs.selected_batches_csv }}
+      reason: ${{ steps.scope.outputs.reason }}
+    steps:
+      - name: Determine integration test scope
+        id: scope
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const allBatches = [
+              'schedulecommit',
+              'chainlink',
+              'cloning',
+              'restore_ledger',
+              'magicblock_api',
+              'config',
+              'table_mania',
+              'committor',
+              'pubsub',
+              'schedule_intents',
+              'task-scheduler',
+            ];
+
+            if (context.eventName !== 'pull_request') {
+              core.setOutput('run_all', 'true');
+              core.setOutput('run_any', 'true');
+              core.setOutput(
+                'selected_batches_csv',
+                `,${allBatches.join(',')},`
+              );
+              core.setOutput('reason', 'push to protected branch');
+              return;
+            }
+
+            const batchPrefixes = {
+              schedulecommit: [
+                'test-integration/schedulecommit/',
+                'test-integration/programs/schedulecommit/',
+                'test-integration/programs/schedulecommit-security/',
+              ],
+              chainlink: ['test-integration/test-chainlink/'],
+              cloning: ['test-integration/test-cloning/'],
+              restore_ledger: ['test-integration/test-ledger-restore/'],
+              magicblock_api: ['test-integration/test-magicblock-api/'],
+              config: ['test-integration/test-config/'],
+              table_mania: ['test-integration/test-table-mania/'],
+              committor: ['test-integration/test-committor-service/'],
+              pubsub: ['test-integration/test-pubsub/'],
+              schedule_intents: ['test-integration/test-schedule-intent/'],
+              'task-scheduler': ['test-integration/test-task-scheduler/'],
+            };
+
+            const runAllPrefixes = [
+              '.github/actions/',
+              '.github/workflows/ci-test-integration.yml',
+              'Cargo.toml',
+              'Cargo.lock',
+              'Makefile',
+              'magicblock-',
+              'programs/',
+              'storage-proto/',
+              'test-integration/Makefile',
+              'test-integration/configs/',
+              'test-integration/test-runner/',
+              'test-integration/test-tools/',
+              'test-kit/',
+            ];
+
+            const ignoredPrefixes = [
+              '.claude/',
+              '.github/ISSUE_TEMPLATE/',
+              '.github/packages/',
+              '.github/workflows/',
+              'docs/',
+              'magicblock-validator-admin/',
+              'sh/',
+              'test-manual/',
+              'tools/',
+            ];
+
+            const ignoredExact = new Set([
+              '.gitignore',
+            ]);
+
+            const ignoredSuffixes = ['.md'];
+
+            const matchesAnyPrefix = (file, prefixes) =>
+              prefixes.some(prefix => file === prefix || file.startsWith(prefix));
+
+            const isIgnored = file =>
+              ignoredExact.has(file) ||
+              ignoredSuffixes.some(suffix => file.endsWith(suffix)) ||
+              ignoredPrefixes.some(prefix => {
+                if (
+                  prefix === '.github/workflows/' &&
+                  file === '.github/workflows/ci-test-integration.yml'
+                ) {
+                  return false;
+                }
+                return file.startsWith(prefix);
+              });
+
+            const files = await github.paginate(
+              github.rest.pulls.listFiles,
+              {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: context.payload.pull_request.number,
+                per_page: 100,
+              }
+            );
+
+            const selectedBatches = new Set();
+            const changedFiles = files.map(file => file.filename);
+            let runAll = false;
+            let reason = '';
+
+            for (const file of changedFiles) {
+              if (isIgnored(file)) {
+                continue;
+              }
+
+              let matchedBatch = false;
+              for (const [batch, prefixes] of Object.entries(batchPrefixes)) {
+                if (matchesAnyPrefix(file, prefixes)) {
+                  selectedBatches.add(batch);
+                  matchedBatch = true;
+                }
+              }
+
+              if (matchedBatch) {
+                continue;
+              }
+
+              if (matchesAnyPrefix(file, runAllPrefixes)) {
+                runAll = true;
+                reason = `full integration run required by ${file}`;
+                break;
+              }
+
+              runAll = true;
+              reason = `full integration run required by unclassified change ${file}`;
+              break;
+            }
+
+            const finalBatches = runAll
+              ? allBatches
+              : Array.from(selectedBatches).sort();
+            const runAny = finalBatches.length > 0;
+
+            if (!reason) {
+              reason = runAny
+                ? `targeted integration batches: ${finalBatches.join(', ')}`
+                : 'integration tests skipped for docs/tooling-only changes';
+            }
+
+            core.info(`Changed files: ${changedFiles.join(', ') || '(none)'}`);
+            core.info(`Integration scope: ${reason}`);
+
+            core.setOutput('run_all', runAll ? 'true' : 'false');
+            core.setOutput('run_any', runAny ? 'true' : 'false');
+            core.setOutput(
+              'selected_batches_csv',
+              finalBatches.length ? `,${finalBatches.join(',')},` : ''
+            );
+            core.setOutput('reason', reason);
+
   build:
+    needs: determine_scope
+    if: needs.determine_scope.outputs.run_any == 'true'
     runs-on: ubuntu-latest-m
     name: Build Project
     steps:
@@ -37,7 +211,13 @@ jobs:
         working-directory: magicblock-validator
 
   run_integration_tests:
-    needs: build
+    needs: [determine_scope, build]
+    if: |
+      needs.determine_scope.outputs.run_all == 'true' ||
+      contains(
+        needs.determine_scope.outputs.selected_batches_csv,
+        format(',{0},', matrix.batch_tests)
+      )
     runs-on: ubuntu-latest-m
     strategy:
       matrix:
