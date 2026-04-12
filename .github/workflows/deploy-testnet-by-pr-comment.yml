@@ -91,17 +91,12 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const body = context.payload.comment.body.trim();
-            if (body !== '/deploy') {
-              core.setOutput('should_deploy', 'false');
-              core.info(`Skipping non-exact deploy command: '${body}'`);
-              return;
-            }
+            core.setOutput('should_deploy', 'false');
+            core.setOutput('branch', '');
+            core.setOutput('failure_reason', '');
 
-            const authorizedUsers = (process.env.AUTHORIZED_USERS || '')
-              .split(/\s+/)
-              .filter(Boolean);
-            if (!authorizedUsers.includes(context.actor)) {
-              core.setFailed(`Unauthorized user: ${context.actor}`);
+            if (body !== '/deploy') {
+              core.info(`Skipping non-exact deploy command: '${body}'`);
               return;
             }
 
@@ -111,6 +106,19 @@ jobs:
               repo: context.repo.repo,
               pull_number: prNumber,
             });
+            core.setOutput('branch', pr.data.head.ref);
+
+            const authorizedUsers = (process.env.AUTHORIZED_USERS || '')
+              .split(/\s+/)
+              .filter(Boolean);
+            if (!authorizedUsers.includes(context.actor)) {
+              core.setOutput(
+                'failure_reason',
+                `@${context.actor} is not authorized to trigger testnet deploys.`
+              );
+              core.setFailed(`Unauthorized user: ${context.actor}`);
+              return;
+            }
 
             const internalAssociations = new Set([
               'OWNER',
@@ -123,6 +131,10 @@ jobs:
               internalAssociations.has(pr.data.author_association);
 
             if (!isInternalPr) {
+              core.setOutput(
+                'failure_reason',
+                'Deploy-by-comment is disabled for third-party contributor PRs.'
+              );
               core.setFailed(
                 'Deploy-by-comment is disabled for third-party contributor PRs.'
               );
@@ -130,9 +142,9 @@ jobs:
             }
 
             core.setOutput('should_deploy', 'true');
-            core.setOutput('branch', pr.data.head.ref);
 
       - name: Trigger main deploy workflow (workflow_dispatch)
+        id: dispatch
         if: steps.validate.outputs.should_deploy == 'true'
         uses: actions/github-script@v7
         with:
@@ -152,7 +164,7 @@ jobs:
             });
 
       - name: Add success comment
-        if: success()
+        if: success() && steps.validate.outputs.should_deploy == 'true'
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -165,14 +177,23 @@ jobs:
             });
 
       - name: Add failure comment
-        if: failure()
+        if: always() && (steps.validate.outcome == 'failure' || steps.dispatch.outcome == 'failure')
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
+            const branch = '${{ steps.validate.outputs.branch }}';
+            const reason = '${{ steps.validate.outputs.failure_reason }}';
+            const branchText = branch
+              ? ` for branch \`${branch}\``
+              : '';
+            const detail = reason
+              ? ` ${reason}`
+              : ' Make sure you have permission and that the PR comes from an internal branch rather than a third-party contributor.';
+
             await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.payload.issue.number,
-              body: `❌ Failed to trigger deploy. Make sure you have permission and that the PR comes from an internal branch rather than a third-party contributor.`
+              body: `❌ Failed to trigger deploy${branchText}.${detail}`
             });
