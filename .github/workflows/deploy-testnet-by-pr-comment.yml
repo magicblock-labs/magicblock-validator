@@ -19,7 +19,14 @@ permissions:
 jobs:
   add-deploy-comment:
     runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request' && github.event.pull_request.base.ref == 'master'
+    if: |
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.base.ref == 'master' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      contains(
+        fromJSON('["OWNER","MEMBER","COLLABORATOR"]'),
+        github.event.pull_request.author_association
+      )
     steps:
       - name: Add or update deploy link comment
         uses: actions/github-script@v7
@@ -75,54 +82,63 @@ jobs:
       github.event.issue.pull_request &&
       contains(github.event.comment.body, '/deploy')
     steps:
-      - name: Validate comment is deploy command & check authorization
+      - name: Validate deploy request
         id: validate
-        run: |
-          # Trim the comment body
-          BODY="${{ github.event.comment.body }}"
-          BODY_TRIM="$(echo "$BODY" | xargs)"
-          if [ "$BODY_TRIM" != "/deploy" ]; then
-            echo "Not a deploy command (trimmed body: '$BODY_TRIM'), skipping."
-            exit 0
-          fi
-
-          # Load authorized users (space-separated)
-          AUTH="${{ secrets.TEST_NODE_MANUAL_DEPLOY_AUTHORIZED_USERS }}"
-          IFS=' ' read -ra AUTH_ARR <<< "$AUTH"
-          USER="${{ github.actor }}"
-          authorized=false
-          for u in "${AUTH_ARR[@]}"; do
-            if [ "$u" = "$USER" ]; then
-              authorized=true
-              break
-            fi
-          done
-
-          if [ "$authorized" != "true" ]; then
-            echo "Unauthorized user: $USER"
-            exit 1
-          fi
-
-      - name: Get PR branch
-        id: get_branch
         uses: actions/github-script@v7
+        env:
+          AUTHORIZED_USERS: ${{ secrets.TEST_NODE_MANUAL_DEPLOY_AUTHORIZED_USERS }}
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
+            const body = context.payload.comment.body.trim();
+            if (body !== '/deploy') {
+              core.setOutput('should_deploy', 'false');
+              core.info(`Skipping non-exact deploy command: '${body}'`);
+              return;
+            }
+
+            const authorizedUsers = (process.env.AUTHORIZED_USERS || '')
+              .split(/\s+/)
+              .filter(Boolean);
+            if (!authorizedUsers.includes(context.actor)) {
+              core.setFailed(`Unauthorized user: ${context.actor}`);
+              return;
+            }
+
             const prNumber = context.payload.issue.number;
             const pr = await github.rest.pulls.get({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              pull_number: prNumber
+              pull_number: prNumber,
             });
+
+            const internalAssociations = new Set([
+              'OWNER',
+              'MEMBER',
+              'COLLABORATOR',
+            ]);
+            const isInternalPr =
+              pr.data.head.repo.full_name ===
+                `${context.repo.owner}/${context.repo.repo}` &&
+              internalAssociations.has(pr.data.author_association);
+
+            if (!isInternalPr) {
+              core.setFailed(
+                'Deploy-by-comment is disabled for third-party contributor PRs.'
+              );
+              return;
+            }
+
+            core.setOutput('should_deploy', 'true');
             core.setOutput('branch', pr.data.head.ref);
 
       - name: Trigger main deploy workflow (workflow_dispatch)
+        if: steps.validate.outputs.should_deploy == 'true'
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            const branch = '${{ steps.get_branch.outputs.branch }}';
+            const branch = '${{ steps.validate.outputs.branch }}';
             // pass requested_by so the main workflow check can trust who requested the deploy
             await github.rest.actions.createWorkflowDispatch({
               owner: context.repo.owner,
@@ -145,7 +161,7 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.payload.issue.number,
-              body: `🚀 Deploy triggered for branch \`${{ steps.get_branch.outputs.branch }}\` by @${context.actor}. (You can follow progress in Actions.)`
+              body: `🚀 Deploy triggered for branch \`${{ steps.validate.outputs.branch }}\` by @${context.actor}. (You can follow progress in Actions.)`
             });
 
       - name: Add failure comment
@@ -158,5 +174,5 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.payload.issue.number,
-              body: `❌ Failed to trigger deploy for branch \`${{ steps.get_branch.outputs.branch }}\`. Make sure you have permission or use the manual deploy link in the PR comment.`
+              body: `❌ Failed to trigger deploy. Make sure you have permission and that the PR comes from an internal branch rather than a third-party contributor.`
             });
