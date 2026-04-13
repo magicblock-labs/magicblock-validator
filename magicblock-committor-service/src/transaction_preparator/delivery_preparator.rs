@@ -27,7 +27,7 @@ use solana_signature::Signature;
 use solana_signer::{Signer, SignerError};
 use solana_transaction::versioned::VersionedTransaction;
 use solana_transaction_error::TransactionError;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 use crate::{
     intent_executor::task_info_fetcher::{
@@ -185,6 +185,12 @@ impl DeliveryPreparator {
                 ))?;
             }
             PreparationTask::Compressed => {
+                if task.get_compressed_data().is_some() {
+                    return Ok(());
+                }
+
+                warn!("Compressed data should have been fetched already");
+
                 // Trying to fetch fresh data from the indexer
                 let commit_slot = if let Some(sig) = commit_signature {
                     self.commit_slot_for_signature(sig).await
