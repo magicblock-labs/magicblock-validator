@@ -273,8 +273,10 @@ impl InstructionUtils {
     pub fn execute_task_instruction(
         instructions: Vec<Instruction>,
     ) -> Instruction {
-        let mut account_metas =
-            vec![AccountMeta::new_readonly(CRANK_SIGNER, false)];
+        let mut account_metas = vec![
+            AccountMeta::new_readonly(validator_authority_id(), true),
+            AccountMeta::new_readonly(CRANK_SIGNER, false),
+        ];
         account_metas.extend(instructions.iter().flat_map(|i| {
             [
                 vec![AccountMeta::new(i.program_id, false)],

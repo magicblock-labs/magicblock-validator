@@ -6,14 +6,18 @@ use solana_log_collector::ic_msg;
 use solana_program_runtime::invoke_context::InvokeContext;
 use solana_pubkey::Pubkey;
 
-use crate::utils::accounts::get_instruction_pubkey_with_idx;
+use crate::{
+    utils::accounts::get_instruction_pubkey_with_idx,
+    validator::validator_authority_id,
+};
 
 pub(crate) fn process_execute_crank(
     _signers: HashSet<Pubkey>,
     invoke_context: &mut InvokeContext,
     instructions: Vec<Instruction>,
 ) -> Result<(), InstructionError> {
-    const CRANK_SIGNER_IDX: u16 = 0;
+    const VALIDATOR_IDX: u16 = 0;
+    const CRANK_SIGNER_IDX: u16 = 1;
 
     let transaction_context = &invoke_context.transaction_context.clone();
     let ix_ctx = transaction_context.get_current_instruction_context()?;
@@ -39,6 +43,19 @@ pub(crate) fn process_execute_crank(
             ix_accs_len
         );
         return Err(InstructionError::NotEnoughAccountKeys);
+    }
+
+    // Assert Validator is signer
+    // Only the validator can execute a crank
+    let validator_pubkey =
+        get_instruction_pubkey_with_idx(transaction_context, VALIDATOR_IDX)?;
+    if validator_pubkey != &validator_authority_id() {
+        ic_msg!(
+            invoke_context,
+            "ExecuteCrank ERR: validator pubkey {} is not the expected validator",
+            validator_pubkey
+        );
+        return Err(InstructionError::MissingRequiredSignature);
     }
 
     // Assert Crank signer is provided
@@ -67,23 +84,32 @@ pub(crate) fn process_execute_crank(
 mod test {
     use magicblock_magic_program_api::args::ScheduleTaskArgs;
     use solana_account::AccountSharedData;
+    use solana_keypair::Keypair;
     use solana_sdk_ids::system_program;
 
     use super::*;
     use crate::{
         test_utils::process_instruction,
         utils::instruction_utils::InstructionUtils,
+        validator::init_validator_authority_if_needed,
     };
 
     #[test]
     fn test_execute_task_simple() {
+        init_validator_authority_if_needed(Keypair::new());
         let ix = InstructionUtils::execute_task_instruction(vec![
             InstructionUtils::noop_instruction(0),
         ]);
-        let transaction_accounts = vec![(
-            CRANK_SIGNER,
-            AccountSharedData::new(0, 0, &system_program::id()),
-        )];
+        let transaction_accounts = vec![
+            (
+                validator_authority_id(),
+                AccountSharedData::new(0, 0, &system_program::id()),
+            ),
+            (
+                CRANK_SIGNER,
+                AccountSharedData::new(0, 0, &system_program::id()),
+            ),
+        ];
         process_instruction(
             &ix.data,
             transaction_accounts,
@@ -94,6 +120,7 @@ mod test {
 
     #[test]
     fn test_execute_task_complex() {
+        init_validator_authority_if_needed(Keypair::new());
         let payer = Pubkey::new_unique();
         let ix = InstructionUtils::execute_task_instruction(vec![
             InstructionUtils::schedule_task_instruction(
@@ -107,6 +134,10 @@ mod test {
             ),
         ]);
         let transaction_accounts = vec![
+            (
+                validator_authority_id(),
+                AccountSharedData::new(0, 0, &system_program::id()),
+            ),
             (
                 CRANK_SIGNER,
                 AccountSharedData::new(0, 0, &system_program::id()),
@@ -126,13 +157,20 @@ mod test {
 
     #[test]
     fn fail_execute_task_without_crank_signer() {
+        init_validator_authority_if_needed(Keypair::new());
         let ix = InstructionUtils::execute_task_instruction(vec![
             InstructionUtils::noop_instruction(0),
         ]);
-        let transaction_accounts = vec![(
-            CRANK_SIGNER,
-            AccountSharedData::new(0, 0, &system_program::id()),
-        )];
+        let transaction_accounts = vec![
+            (
+                validator_authority_id(),
+                AccountSharedData::new(0, 0, &system_program::id()),
+            ),
+            (
+                CRANK_SIGNER,
+                AccountSharedData::new(0, 0, &system_program::id()),
+            ),
+        ];
         process_instruction(
             &ix.data,
             transaction_accounts,
@@ -143,14 +181,21 @@ mod test {
 
     #[test]
     fn fail_execute_task_wrong_crank_signer() {
+        init_validator_authority_if_needed(Keypair::new());
         let ix = InstructionUtils::execute_task_instruction(vec![
             InstructionUtils::noop_instruction(0),
         ]);
         let wrong_crank_signer = Pubkey::new_unique();
-        let transaction_accounts = vec![(
-            wrong_crank_signer,
-            AccountSharedData::new(0, 0, &system_program::id()),
-        )];
+        let transaction_accounts = vec![
+            (
+                validator_authority_id(),
+                AccountSharedData::new(0, 0, &system_program::id()),
+            ),
+            (
+                wrong_crank_signer,
+                AccountSharedData::new(0, 0, &system_program::id()),
+            ),
+        ];
         process_instruction(
             &ix.data,
             transaction_accounts,
@@ -161,6 +206,7 @@ mod test {
 
     #[test]
     fn fail_execute_task_missing_accounts() {
+        init_validator_authority_if_needed(Keypair::new());
         let payer = Pubkey::new_unique();
         let ix = InstructionUtils::execute_task_instruction(vec![
             InstructionUtils::schedule_task_instruction(
@@ -173,10 +219,16 @@ mod test {
                 },
             ),
         ]);
-        let transaction_accounts = vec![(
-            CRANK_SIGNER,
-            AccountSharedData::new(0, 0, &system_program::id()),
-        )];
+        let transaction_accounts = vec![
+            (
+                validator_authority_id(),
+                AccountSharedData::new(0, 0, &system_program::id()),
+            ),
+            (
+                CRANK_SIGNER,
+                AccountSharedData::new(0, 0, &system_program::id()),
+            ),
+        ];
         process_instruction(
             &ix.data,
             transaction_accounts,
