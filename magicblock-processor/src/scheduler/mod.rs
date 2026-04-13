@@ -43,6 +43,7 @@
 //! 5. **Update program cache** - prune stale programs, re-root to new slot
 //! 6. **Update sysvars** - Clock and SlotHashes accounts
 
+use core::matches;
 use std::{
     sync::{Arc, RwLock},
     thread::JoinHandle,
@@ -371,7 +372,7 @@ impl TransactionScheduler {
                 (self.slot, index)
             }
         };
-        if is_execution {
+        if !matches!(txn.mode, TransactionProcessingMode::Simulation(_)) {
             self.hasher.update(txn.transaction.signature().as_ref());
         }
 
@@ -407,7 +408,7 @@ impl TransactionScheduler {
         block: Option<LatestBlockInner>,
     ) -> u64 {
         let block = self.prepare_block(block).await;
-        self.finalize_block(&block).await;
+        self.finalize_block(block.clone()).await;
         self.update_sysvars(&block);
         metrics::set_slot(block.slot);
         block.slot
@@ -431,26 +432,17 @@ impl TransactionScheduler {
 
     /// Prepares block as primary: computes blockhash and broadcasts to replicas.
     async fn prepare_block_as_primary(&mut self) -> LatestBlockInner {
-        let blockhash: [u8; 32] = *self.hasher.finalize().as_bytes();
+        let blockhash = (*self.hasher.finalize().as_bytes()).into();
         // NOTE:
         // As we have a single node network, we have no
         // option but to use the time from host machine
-        let unix_timestamp = SystemTime::now()
+        let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             // NOTE: since we can tick very frequently, a lot
             // of blocks might have identical timestamps
             .as_secs() as i64;
-        let clock = Clock {
-            slot: self.slot + 1,
-            unix_timestamp,
-            ..Default::default()
-        };
-        let block = LatestBlockInner {
-            slot: self.slot,
-            blockhash: blockhash.into(),
-            clock,
-        };
+        let block = LatestBlockInner::new(self.slot, blockhash, timestamp);
         let msg = Message::Block(replication::Block {
             slot: block.slot,
             hash: block.blockhash,
@@ -478,20 +470,13 @@ impl TransactionScheduler {
     }
 
     /// Finalizes the block: persists to ledger and updates accountsdb slot.
-    async fn finalize_block(&self, block: &LatestBlockInner) {
-        if self.coordinator.is_primary() {
-            let _ = self
-                .ledger
-                .write_block(
-                    block.slot,
-                    block.clock.unix_timestamp,
-                    block.blockhash,
-                )
-                .inspect_err(|error| {
-                    error!(%error, "failed to write block to the ledger")
-                });
-        }
+    async fn finalize_block(&self, block: LatestBlockInner) {
         self.accountsdb.set_slot(block.slot);
+        if self.coordinator.is_primary() {
+            let _ = self.ledger.write_block(block).inspect_err(
+                |error| error!(%error, "failed to write block to the ledger"),
+            );
+        }
     }
 
     /// Updates sysvars and program cache for the new slot.

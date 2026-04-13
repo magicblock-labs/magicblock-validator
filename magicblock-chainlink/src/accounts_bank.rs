@@ -84,8 +84,7 @@ pub mod mock {
         pub fn dump_account_keys(&self, include_blacklisted: bool) -> String {
             let mut output = String::new();
             output.push_str("AccountsBank {\n");
-            let blacklisted_accounts =
-                blacklisted_accounts(&Pubkey::default(), &Pubkey::default());
+            let blacklisted_accounts = blacklisted_accounts(&Pubkey::default());
             for pubkey in self.accounts.lock().unwrap().keys() {
                 if !include_blacklisted && blacklisted_accounts.contains(pubkey)
                 {
@@ -111,7 +110,7 @@ pub mod mock {
         }
         fn remove_where(
             &self,
-            predicate: impl Fn(&Pubkey, &AccountSharedData) -> bool,
+            mut predicate: impl FnMut(&Pubkey, &AccountSharedData) -> bool,
         ) -> AccountsDbResult<usize> {
             let mut accounts = self.accounts.lock().unwrap();
             let initial_len = accounts.len();

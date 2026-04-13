@@ -2,6 +2,7 @@
 
 use std::fmt::{Debug, Display};
 
+use magicblock_accounts_db::error::AccountsDbError;
 use magicblock_ledger::errors::LedgerError;
 use solana_transaction_error::TransactionError;
 
@@ -19,6 +20,10 @@ pub enum Error {
     /// Serialization or deserialization failed.
     #[error("serialization error: {0}")]
     SerDe(#[from] bincode::Error),
+
+    /// AccountsDB access error.
+    #[error("accountsdb access error: {0}")]
+    AccountsDb(#[from] AccountsDbError),
 
     /// Ledger access error.
     #[error("ledger access error: {0}")]

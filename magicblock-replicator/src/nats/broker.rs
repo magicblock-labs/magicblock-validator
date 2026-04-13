@@ -167,6 +167,8 @@ impl Broker {
         tokio::spawn(async move {
             if let Err(error) = store.put(meta, &mut file).await {
                 error!(%error, "snapshot upload failed");
+            } else {
+                info!(slot, "uploaded accountsdb snapshot");
             }
         });
 

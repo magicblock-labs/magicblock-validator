@@ -67,50 +67,6 @@ pub fn lock_ledger<'lock>(
 }
 
 // -----------------
-// Faucet
-// -----------------
-fn faucet_keypair_path(ledger_path: &Path) -> ApiResult<PathBuf> {
-    let parent = ledger_parent_dir(ledger_path)?;
-    Ok(parent.join("faucet-keypair.json"))
-}
-
-pub(crate) fn read_faucet_keypair_from_ledger(
-    ledger_path: &Path,
-) -> ApiResult<Keypair> {
-    let keypair_path = faucet_keypair_path(ledger_path)?;
-    if fs::exists(keypair_path.as_path()).unwrap_or_default() {
-        let keypair =
-            Keypair::read_from_file(keypair_path.as_path()).map_err(|err| {
-                ApiError::LedgerInvalidFaucetKeypair(
-                    keypair_path.display().to_string(),
-                    err.to_string(),
-                )
-            })?;
-        Ok(keypair)
-    } else {
-        Err(ApiError::LedgerIsMissingFaucetKeypair(
-            keypair_path.display().to_string(),
-        ))
-    }
-}
-
-pub(crate) fn write_faucet_keypair_to_ledger(
-    ledger_path: &Path,
-    keypair: &Keypair,
-) -> ApiResult<()> {
-    let keypair_path = faucet_keypair_path(ledger_path)?;
-    keypair
-        .write_to_file(keypair_path.as_path())
-        .map_err(|err| {
-            ApiError::LedgerCouldNotWriteFaucetKeypair(
-                keypair_path.display().to_string(),
-                err.to_string(),
-            )
-        })?;
-    Ok(())
-}
-
-// -----------------
 // Validator Keypair
 // -----------------
 pub(crate) fn validator_keypair_path(ledger_path: &Path) -> ApiResult<PathBuf> {

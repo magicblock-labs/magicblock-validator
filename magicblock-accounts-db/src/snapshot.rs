@@ -66,7 +66,7 @@ impl SnapshotStrategy {
 #[derive(Debug)]
 pub struct SnapshotManager {
     db_path: PathBuf,
-    snapshots_dir: PathBuf,
+    pub(crate) snapshots_dir: PathBuf,
     strategy: SnapshotStrategy,
     /// Ordered registry of archive paths (oldest to newest).
     registry: Mutex<VecDeque<PathBuf>>,
@@ -129,7 +129,9 @@ impl SnapshotManager {
         let archive_path = snapshot_dir.with_extension(ARCHIVE_EXT);
         let tmp_path = archive_path.with_extension("tmp");
 
-        info!(archive_path = %archive_path.display(), "Archiving snapshot");
+        if let Some(archive) = archive_path.file_name() {
+            info!(?archive, "Archiving snapshot");
+        }
 
         // Write to temporary file first
         let file = File::create(&tmp_path).log_err(|| {
@@ -146,6 +148,7 @@ impl SnapshotManager {
         let file = enc.finish().log_err(|| "Failed to finish gzip archive")?;
         file.sync_all()
             .log_err(|| "Failed to sync archive to disk")?;
+        drop(file);
 
         // Atomically rename to final path
         fs::rename(&tmp_path, &archive_path).log_err(|| {
@@ -178,7 +181,9 @@ impl SnapshotManager {
         current_slot: u64,
     ) -> AccountsDbResult<bool> {
         // Validate archive structure
-        Self::validate_archive(archive_bytes)?;
+        Self::validate_archive(archive_bytes).log_err(|| {
+            format!("snapshot archive bytes are corrupted, slot: {slot}")
+        })?;
 
         let archive_path = self.slot_to_archive_path(slot);
         if archive_path.exists() {
@@ -331,7 +336,6 @@ impl SnapshotManager {
 
     /// Registers an archive in the registry.
     fn register_archive(&self, archive_path: PathBuf) {
-        info!(archive_path = %archive_path.display(), "Snapshot registered");
         self.registry.lock().push_back(archive_path);
     }
 

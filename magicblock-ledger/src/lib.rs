@@ -31,15 +31,13 @@ pub struct LatestBlock {
     /// readers automatically get access to the latest version of the block
     inner: Arc<ArcSwapAny<Arc<LatestBlockInner>>>,
     /// Notification mechanism to signal that the block has been modified,
-    /// the actual state is not sent via channel, as it can be accessed any
-    /// time with `load` method, only the fact of production is communicated
     notifier: broadcast::Sender<LatestBlockInner>,
 }
 
 impl LatestBlockInner {
-    fn new(slot: u64, blockhash: Hash, timestamp: i64) -> Self {
+    pub fn new(slot: u64, blockhash: Hash, timestamp: i64) -> Self {
         let clock = Clock {
-            slot,
+            slot: slot + 1,
             unix_timestamp: timestamp,
             ..Default::default()
         };
@@ -68,8 +66,7 @@ impl LatestBlock {
 
     /// Atomically updates the latest block information and notifies all subscribers.
     /// This is the "writer" method for the single-writer, multi-reader pattern.
-    pub fn store(&self, slot: u64, blockhash: Hash, timestamp: i64) {
-        let block = LatestBlockInner::new(slot, blockhash, timestamp);
+    pub fn store(&self, block: LatestBlockInner) {
         self.inner.store(block.clone().into());
         // Broadcast the update. It's okay if there are no active listeners.
         let _ = self.notifier.send(block);

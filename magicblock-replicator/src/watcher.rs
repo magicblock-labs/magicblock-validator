@@ -3,7 +3,10 @@
 //! Monitors a directory for new `.tar.gz` snapshot files and yields them
 //! as open [`tokio::fs::File`] handles via a channel for tokio::select compatibility.
 
-use std::path::{Path, PathBuf};
+use std::{
+    path::{Path, PathBuf},
+    time::Duration,
+};
 
 use notify::{Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use tokio::{fs::File, sync::mpsc};
@@ -13,6 +16,8 @@ use crate::Result;
 
 const SNAPSHOT_EXTENSION: &str = "tar.gz";
 const SNAPSHOT_PREFIX: &str = "snapshot-";
+const OPEN_RETRY_DELAY: Duration = Duration::from_millis(50);
+const OPEN_RETRIES: usize = 8;
 
 /// Extracts the slot number from a snapshot filename.
 ///
@@ -34,6 +39,7 @@ pub fn parse_slot(path: &Path) -> Option<u64> {
 pub struct SnapshotWatcher {
     _watcher: RecommendedWatcher,
     rx: mpsc::Receiver<PathBuf>,
+    last_slot: Option<u64>,
 }
 
 impl SnapshotWatcher {
@@ -51,17 +57,14 @@ impl SnapshotWatcher {
 
         let mut watcher =
             notify::recommended_watcher(move |res: notify::Result<Event>| {
-                match res {
-                    Ok(event) => {
-                        if let Some(path) = Self::process_event(&event) {
-                            if let Err(e) = tx.blocking_send(path) {
-                                error!("Failed to send snapshot event: {}", e);
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        error!("Watch error: {}", e);
-                    }
+                let Ok(event) = res else {
+                    return;
+                };
+                let Some(path) = Self::process_event(&event) else {
+                    return;
+                };
+                if let Err(e) = tx.blocking_send(path) {
+                    error!("Failed to send snapshot event: {}", e);
                 }
             })?;
 
@@ -71,6 +74,7 @@ impl SnapshotWatcher {
         Ok(Self {
             _watcher: watcher,
             rx,
+            last_slot: None,
         })
     }
 
@@ -82,7 +86,6 @@ impl SnapshotWatcher {
 
         for path in &event.paths {
             if Self::is_snapshot_file(path) {
-                info!(path = %path.display(), "Detected new snapshot");
                 return Some(path.clone());
             }
         }
@@ -110,10 +113,28 @@ impl SnapshotWatcher {
             let Some(slot) = parse_slot(&path) else {
                 continue;
             };
-            let Ok(file) = File::open(&path).await else {
+
+            if self.last_slot.is_some_and(|last| slot <= last) {
+                continue;
+            }
+
+            let Some(file) = Self::open_with_retry(&path).await else {
                 continue;
             };
+            self.last_slot = Some(slot);
             break Some((file, slot));
         }
+    }
+
+    async fn open_with_retry(path: &Path) -> Option<File> {
+        for _ in 0..OPEN_RETRIES {
+            if let Ok(file) = File::open(path).await {
+                return Some(file);
+            }
+
+            tokio::time::sleep(OPEN_RETRY_DELAY).await;
+        }
+
+        None
     }
 }

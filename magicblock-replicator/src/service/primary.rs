@@ -40,6 +40,7 @@ impl Primary {
     /// Returns `Some(Standby)` on demotion, `None` on shutdown.
     #[instrument(skip(self))]
     pub async fn run(mut self) -> Result<Option<Standby>> {
+        info!("entering primary replication mode");
         let mut lock_tick = tokio::time::interval(LOCK_REFRESH_INTERVAL);
 
         loop {

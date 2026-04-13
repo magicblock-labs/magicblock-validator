@@ -12,7 +12,7 @@ use tracing::{Level, *};
 
 use crate::{
     errors::{LedgerError, LedgerResult},
-    Ledger,
+    LatestBlockInner, Ledger,
 };
 
 #[derive(Debug)]
@@ -115,9 +115,11 @@ async fn replay_blocks(
                 "Block has no timestamp, {block:?}",
             )));
         };
-        ledger
-            .latest_block()
-            .store(block.slot, block.blockhash, timestamp);
+        {
+            let block =
+                LatestBlockInner::new(block.slot, block.blockhash, timestamp);
+            ledger.latest_block().store(block);
+        }
         // Transactions are stored in the ledger ordered by most recent to latest
         // such to replay them in the order they executed we need to reverse them
         for txn in block.transactions.into_iter().rev() {
