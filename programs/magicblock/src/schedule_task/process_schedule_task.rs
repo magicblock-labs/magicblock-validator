@@ -332,7 +332,7 @@ mod test {
     #[test]
     fn test_process_schedule_task_with_invalid_execution_interval() {
         let (payer, pdas, transaction_accounts) = setup_accounts(0);
-        for execution_interval_millis in [0, u32::MAX as i64 + 1] {
+        for execution_interval_millis in [-12345, 0, u32::MAX as i64 + 1] {
             let args = ScheduleTaskArgs {
                 task_id: 1,
                 execution_interval_millis,
