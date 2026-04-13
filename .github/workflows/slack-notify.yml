@@ -1,8 +1,8 @@
 name: Notify Ready PR on Slack
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}-${{ github.event.review.id || 'pr' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -13,10 +13,12 @@ permissions:
 on:
   pull_request:
     types: [ready_for_review]
+  pull_request_review:
+    types: [submitted]
 
 jobs:
   notify:
-    if: github.event.action == 'ready_for_review'
+    if: github.event_name == 'pull_request' && github.event.action == 'ready_for_review'
     runs-on: ubuntu-latest
     steps:
       - name: Fetch requested reviewers
@@ -206,6 +208,63 @@ jobs:
                   "type": "section",
                   "text": {
                     "type": "mrkdwn", 
+                    "text": ${{ toJson(steps.message.outputs.text) }}
+                  }
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+  notify-review:
+    if: github.event_name == 'pull_request_review' && github.event.action == 'submitted'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Build Slack review message
+        id: message
+        env:
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          REVIEWER: ${{ github.event.review.user.login }}
+          REVIEW_STATE: ${{ github.event.review.state }}
+        run: |
+          review_summary="submitted a review for"
+          case "$REVIEW_STATE" in
+            approved)
+              review_summary="submitted an *approved* review for"
+              ;;
+            changes_requested)
+              review_summary="submitted a *changes requested* review for"
+              ;;
+            commented)
+              review_summary="submitted a review for"
+              ;;
+            *)
+              if [ -n "$REVIEW_STATE" ]; then
+                review_summary="submitted a *${REVIEW_STATE}* review for"
+              fi
+              ;;
+          esac
+
+          text="📝 *${REVIEWER}* ${review_summary} PR #${PR_NUMBER}: <${PR_URL}|${PR_TITLE}> by *${PR_AUTHOR}*."
+
+          echo "text<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$text" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+
+      - name: Send Slack Notification
+        uses: slackapi/slack-github-action@v1.24.0
+        with:
+          payload: |
+            {
+              "text": ${{ toJson(steps.message.outputs.text) }},
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
                     "text": ${{ toJson(steps.message.outputs.text) }}
                   }
                 }
