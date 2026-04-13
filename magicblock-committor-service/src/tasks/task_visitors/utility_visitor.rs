@@ -11,6 +11,7 @@ pub struct CommitMeta {
     pub committed_pubkey: Pubkey,
     pub commit_id: u64,
     pub remote_slot: u64,
+    pub is_compressed: bool,
 }
 
 impl From<CommitMeta> for FinalizeTask {
@@ -46,6 +47,7 @@ impl Visitor for TaskVisitorUtils {
                     committed_pubkey: task.committed_account.pubkey,
                     commit_id: task.commit_id,
                     remote_slot: task.committed_account.remote_slot,
+                    is_compressed: false,
                 })
             }
             ArgsTaskType::CommitDiff(task) => {
@@ -53,6 +55,15 @@ impl Visitor for TaskVisitorUtils {
                     committed_pubkey: task.committed_account.pubkey,
                     commit_id: task.commit_id,
                     remote_slot: task.committed_account.remote_slot,
+                    is_compressed: false,
+                })
+            }
+            ArgsTaskType::CompressedCommitAndFinalize(task) => {
+                *commit_meta = Some(CommitMeta {
+                    committed_pubkey: task.committed_account.pubkey,
+                    commit_id: task.commit_id,
+                    remote_slot: task.committed_account.remote_slot,
+                    is_compressed: true,
                 })
             }
             _ => *commit_meta = None,
@@ -68,6 +79,7 @@ impl Visitor for TaskVisitorUtils {
                     committed_pubkey: task.committed_account.pubkey,
                     commit_id: task.commit_id,
                     remote_slot: task.committed_account.remote_slot,
+                    is_compressed: false,
                 })
             }
             BufferTaskType::CommitDiff(task) => {
@@ -75,6 +87,7 @@ impl Visitor for TaskVisitorUtils {
                     committed_pubkey: task.committed_account.pubkey,
                     commit_id: task.commit_id,
                     remote_slot: task.committed_account.remote_slot,
+                    is_compressed: false,
                 })
             }
         }

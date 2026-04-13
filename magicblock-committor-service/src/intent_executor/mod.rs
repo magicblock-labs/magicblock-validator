@@ -338,15 +338,24 @@ where
         // We re-fetch them to fix out of sync tasks
         self.task_info_fetcher
             .reset(ResetType::Specific(committed_pubkeys));
-        let commit_ids = self
-            .task_info_fetcher
-            .fetch_next_commit_ids(
-                committed_pubkeys,
-                min_context_slot,
-                strategy.compressed,
-            )
-            .await
-            .map_err(TaskBuilderError::CommitTasksBuildError)?;
+        let commit_ids = {
+            let (commit_ids_not_compressed, commit_ids_compressed) = tokio::join!(
+                self.task_info_fetcher.fetch_next_commit_ids(
+                    committed_pubkeys,
+                    min_context_slot,
+                    false
+                ),
+                self.task_info_fetcher.fetch_next_commit_ids(
+                    committed_pubkeys,
+                    min_context_slot,
+                    true
+                )
+            );
+
+            let mut commit_ids = commit_ids_not_compressed?;
+            commit_ids.extend(commit_ids_compressed?);
+            commit_ids
+        };
 
         // Here we find the broken tasks and reset them
         // Broken tasks are prepared incorrectly so they have to be cleaned up
@@ -369,7 +378,6 @@ where
         Ok(TransactionStrategy {
             optimized_tasks: to_cleanup,
             lookup_tables_keys: old_alts,
-            compressed: strategy.compressed,
         })
     }
 
@@ -391,7 +399,6 @@ where
         TransactionStrategy {
             optimized_tasks: action_tasks,
             lookup_tables_keys: old_alts,
-            compressed: strategy.compressed,
         }
     }
 
@@ -425,7 +432,6 @@ where
         let commit_strategy = TransactionStrategy {
             optimized_tasks: commit_stage_tasks,
             lookup_tables_keys: commit_alt_pubkeys,
-            compressed: strategy.compressed,
         };
 
         let finalize_alt_pubkeys = if strategy.lookup_tables_keys.is_empty() {
@@ -439,14 +445,12 @@ where
         let finalize_strategy = TransactionStrategy {
             optimized_tasks: finalize_stage_tasks,
             lookup_tables_keys: finalize_alt_pubkeys,
-            compressed: strategy.compressed,
         };
 
         // We clean up only ALTs
         let to_cleanup = TransactionStrategy {
             optimized_tasks: vec![],
             lookup_tables_keys: strategy.lookup_tables_keys,
-            compressed: strategy.compressed,
         };
 
         (commit_strategy, finalize_strategy, to_cleanup)
@@ -472,13 +476,11 @@ where
             TransactionStrategy {
                 optimized_tasks: removed_task,
                 lookup_tables_keys: old_alts,
-                compressed: strategy.compressed,
             }
         } else {
             TransactionStrategy {
                 optimized_tasks: vec![],
                 lookup_tables_keys: vec![],
-                compressed: strategy.compressed,
             }
         }
     }
@@ -558,13 +560,9 @@ where
             }
             Err(IntentExecutorError::EmptyIntentError)
             | Err(IntentExecutorError::FailedToFitError)
-            | Err(IntentExecutorError::InconsistentTaskCompression)
             | Err(IntentExecutorError::TaskBuilderError(_))
             | Err(IntentExecutorError::FailedCommitPreparationError(
                 TransactionPreparatorError::SignerError(_),
-            ))
-            | Err(IntentExecutorError::FailedCommitPreparationError(
-                TransactionPreparatorError::InconsistentTaskCompression,
             ))
             | Err(IntentExecutorError::FailedFinalizePreparationError(
                 TransactionPreparatorError::SignerError(_),

@@ -20,7 +20,6 @@ use crate::{
 pub struct TransactionStrategy {
     pub optimized_tasks: Vec<Box<dyn BaseTask>>,
     pub lookup_tables_keys: Vec<Pubkey>,
-    pub compressed: bool,
 }
 
 impl TransactionStrategy {
@@ -28,21 +27,9 @@ impl TransactionStrategy {
         optimized_tasks: Vec<Box<dyn BaseTask>>,
         lookup_tables_keys: Vec<Pubkey>,
     ) -> Result<Self, TaskStrategistError> {
-        let compressed = optimized_tasks
-            .iter()
-            .fold(None, |state, task| match state {
-                None => Some(Ok(task.is_compressed())),
-                Some(Ok(state)) if state != task.is_compressed() => {
-                    Some(Err(TaskStrategistError::InconsistentTaskCompression))
-                }
-                Some(Ok(state)) => Some(Ok(state)),
-                Some(Err(err)) => Some(Err(err)),
-            })
-            .unwrap_or(Ok(false))?;
         Ok(Self {
             optimized_tasks,
             lookup_tables_keys,
-            compressed,
         })
     }
     /// In case old strategy used ALTs recalculate old value
@@ -150,9 +137,6 @@ impl TaskStrategist {
             }
             Err(TaskStrategistError::SignerError(err)) => {
                 return Err(err.into())
-            }
-            Err(TaskStrategistError::InconsistentTaskCompression) => {
-                return Err(TaskStrategistError::InconsistentTaskCompression);
             }
         };
 
@@ -404,8 +388,6 @@ pub enum TaskStrategistError {
     FailedToFitError,
     #[error("SignerError: {0}")]
     SignerError(#[from] SignerError),
-    #[error("Inconsistent task compression")]
-    InconsistentTaskCompression,
 }
 
 pub type TaskStrategistResult<T, E = TaskStrategistError> = Result<T, E>;
@@ -434,7 +416,7 @@ mod tests {
                 CompressedData, TaskBuilderImpl, TasksBuilder,
                 COMMIT_STATE_SIZE_THRESHOLD,
             },
-            BaseActionTask, CompressedCommitTask, TaskStrategy, UndelegateTask,
+            BaseActionTask, TaskStrategy, UndelegateTask,
         },
         test_utils,
     };
@@ -526,31 +508,6 @@ mod tests {
                 Some(base_account),
             )
         }
-    }
-
-    // Helper to create a simple compressed commit task
-    fn create_test_compressed_commit_task(
-        commit_id: u64,
-        data_size: usize,
-    ) -> ArgsTask {
-        ArgsTask::new(ArgsTaskType::CompressedCommitAndFinalize(
-            CompressedCommitTask {
-                commit_id,
-                allow_undelegation: false,
-                committed_account: CommittedAccount {
-                    pubkey: Pubkey::new_unique(),
-                    account: Account {
-                        lamports: 1000,
-                        data: vec![1; data_size],
-                        owner: system_program_id(),
-                        executable: false,
-                        rent_epoch: 0,
-                    },
-                    remote_slot: Default::default(),
-                },
-                compressed_data: CompressedData::default(),
-            },
-        ))
     }
 
     // Helper to create a Base action task
@@ -835,26 +792,6 @@ mod tests {
         // So had to switch to ALTs
         // As expected
         assert!(!strategy.lookup_tables_keys.is_empty());
-    }
-
-    #[test]
-    fn test_mixed_task_types_compressed() {
-        let validator = Pubkey::new_unique();
-        let tasks = vec![
-            Box::new(create_test_commit_task(1, 100, 0)) as Box<dyn BaseTask>,
-            Box::new(create_test_compressed_commit_task(2, 100))
-                as Box<dyn BaseTask>,
-        ];
-
-        let Err(err) = TaskStrategist::build_strategy(
-            tasks,
-            &validator,
-            &None::<IntentPersisterImpl>,
-        ) else {
-            panic!("Should not build invalid strategy");
-        };
-
-        assert_eq!(err, TaskStrategistError::InconsistentTaskCompression);
     }
 
     #[tokio::test]

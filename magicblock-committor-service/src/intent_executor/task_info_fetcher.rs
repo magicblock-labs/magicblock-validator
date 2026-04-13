@@ -320,7 +320,7 @@ impl CacheTaskInfoFetcher {
                 }),
             )
             .await
-            .map_err(TaskInfoFetcherError::IndexerError)?
+            .map_err(|err| TaskInfoFetcherError::IndexerError(Box::new(err)))?
             .value;
 
         metrics::inc_task_info_fetcher_compressed_count();
@@ -512,7 +512,7 @@ impl TaskInfoFetcher for CacheTaskInfoFetcher {
                 }),
             )
             .await
-            .map_err(TaskInfoFetcherError::IndexerError)?
+            .map_err(|err| TaskInfoFetcherError::IndexerError(Box::new(err)))?
             .value;
         let proof_result = self
             .photon_client
@@ -525,7 +525,7 @@ impl TaskInfoFetcher for CacheTaskInfoFetcher {
                 }),
             )
             .await
-            .map_err(TaskInfoFetcherError::IndexerError)?
+            .map_err(|err| TaskInfoFetcherError::IndexerError(Box::new(err)))?
             .value;
 
         let system_account_meta_config =
@@ -533,7 +533,9 @@ impl TaskInfoFetcher for CacheTaskInfoFetcher {
         let mut remaining_accounts = PackedAccounts::default();
         remaining_accounts
             .add_system_accounts_v2(system_account_meta_config)
-            .map_err(TaskInfoFetcherError::LightSdkError)?;
+            .map_err(|err| {
+                TaskInfoFetcherError::LightSdkError(Box::new(err))
+            })?;
         let packed_tree_accounts = proof_result
             .pack_tree_infos(&mut remaining_accounts)
             .state_trees
@@ -569,7 +571,7 @@ impl TaskInfoFetcher for CacheTaskInfoFetcher {
 #[derive(thiserror::Error, Debug)]
 pub enum TaskInfoFetcherError {
     #[error("LightRpcError: {0}")]
-    LightRpcError(#[from] LightRpcError),
+    LightRpcError(#[from] Box<LightRpcError>),
     #[error("Metadata not found for: {0}")]
     AccountNotFoundError(Pubkey),
     #[error("InvalidAccountDataError for: {0}")]
@@ -579,7 +581,7 @@ pub enum TaskInfoFetcherError {
     #[error("MagicBlockRpcClientError: {0}")]
     MagicBlockRpcClientError(Box<MagicBlockRpcClientError>),
     #[error("IndexerError: {0}")]
-    IndexerError(#[from] IndexerError),
+    IndexerError(#[from] Box<IndexerError>),
     #[error("NoCompressedAccount: {0}")]
     NoCompressedAccount(Pubkey),
     #[error("CompressedAccountDataNotFound: {0}")]
@@ -589,7 +591,7 @@ pub enum TaskInfoFetcherError {
     #[error("PhotonClientNotFound")]
     PhotonClientNotFound,
     #[error("LightSdkError: {0}")]
-    LightSdkError(#[from] light_sdk::error::LightSdkError),
+    LightSdkError(#[from] Box<light_sdk::error::LightSdkError>),
     #[error("MissingStateTrees")]
     MissingStateTrees,
     #[error("MissingAddress")]

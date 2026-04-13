@@ -47,8 +47,6 @@ pub enum IntentExecutorError {
     FailedToFitError,
     #[error("SignerError: {0}")]
     SignerError(#[from] SignerError),
-    #[error("Inconsistent tasks compression used in strategy")]
-    InconsistentTaskCompression,
     // TODO(edwin): remove once proper retries introduced
     #[error("TaskBuilderError: {0}")]
     TaskBuilderError(#[from] TaskBuilderError),
@@ -113,8 +111,7 @@ impl IntentExecutorError {
             } => commit_signature.map(|el| (el, *finalize_signature)),
             IntentExecutorError::EmptyIntentError
             | IntentExecutorError::FailedToFitError
-            | IntentExecutorError::SignerError(_)
-            | IntentExecutorError::InconsistentTaskCompression => None,
+            | IntentExecutorError::SignerError(_) => None,
         }
     }
 }
@@ -339,9 +336,6 @@ impl From<TaskStrategistError> for IntentExecutorError {
         match value {
             TaskStrategistError::FailedToFitError => Self::FailedToFitError,
             TaskStrategistError::SignerError(err) => Self::SignerError(err),
-            TaskStrategistError::InconsistentTaskCompression => {
-                Self::InconsistentTaskCompression
-            }
         }
     }
 }

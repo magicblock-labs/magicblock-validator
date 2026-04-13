@@ -165,7 +165,7 @@ impl TasksBuilder for TaskBuilderImpl {
                 info_fetcher.fetch_next_commit_ids(
                     &committed_pubkeys,
                     min_context_slot,
-                    compressed
+                    compressed,
                 ),
                 info_fetcher.get_base_accounts(
                     diffable_pubkeys.as_slice(),
