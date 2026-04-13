@@ -4126,7 +4126,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-replicator"
-version = "0.8.6"
+version = "0.8.7"
 dependencies = [
  "async-nats",
  "bincode",
@@ -4134,6 +4134,7 @@ dependencies = [
  "futures",
  "machineid-rs",
  "magicblock-accounts-db",
+ "magicblock-chainlink",
  "magicblock-core",
  "magicblock-ledger",
  "notify",

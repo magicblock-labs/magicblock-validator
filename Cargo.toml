@@ -100,7 +100,9 @@ magicblock-accounts = { path = "./magicblock-accounts" }
 magicblock-accounts-db = { path = "./magicblock-accounts-db" }
 magicblock-aperture = { path = "./magicblock-aperture" }
 magicblock-api = { path = "./magicblock-api" }
-magicblock-chainlink = { path = "./magicblock-chainlink" }
+magicblock-chainlink = { path = "./magicblock-chainlink", features = [
+  "dev-context",
+] }
 magicblock-committor-program = { path = "./magicblock-committor-program", features = [
   "no-entrypoint",
 ] }

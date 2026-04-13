@@ -15,11 +15,12 @@ target/
 #  and can be added to the global gitignore or merged into this file.  For a more nuclear
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 .idea/
+.vscode
 
 # Ledger
 test-ledger/
 test-ledger-magicblock/
-magicblock-test-storage/
+magicblock-test-storage*
 
 # Mac
 **/.DS_Store
@@ -29,9 +30,11 @@ magicblock-test-storage/
 .github/packages/npm-package/node_modules
 .github/packages/npm-package/package-lock.json
 
+# Configs
+config.json
+config.toml
+
 # AI related
 **/CLAUDE.md
 CODEBASE_MAP.md
-config.json
-config.toml
 AGENTS.md

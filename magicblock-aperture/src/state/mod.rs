@@ -14,7 +14,6 @@ use magicblock_chainlink::{
 };
 use magicblock_ledger::Ledger;
 use solana_feature_set::FeatureSet;
-use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
 use subscriptions::SubscriptionsDb;
 use transactions::TransactionsCache;
@@ -31,6 +30,7 @@ pub type ChainlinkImpl = Chainlink<
 /// This struct aggregates thread-safe handles (`Arc`) and concurrently accessible
 /// components (caches, databases) that need to be available across various parts
 /// of the application, such as RPC handlers and event processors.
+#[derive(Clone)]
 pub struct SharedState {
     /// The public key of the validator node.
     pub(crate) context: NodeContext,
@@ -51,12 +51,10 @@ pub struct SharedState {
 }
 
 /// Holds the core configuration and runtime parameters that define the node's operational context.
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct NodeContext {
     /// The public key of the validator node.
     pub identity: Pubkey,
-    /// The keypair for the optional faucet, used to airdrop tokens.
-    pub faucet: Option<Keypair>,
     /// Base fee charged for transaction execution per signature.
     pub base_fee: u64,
     /// Runtime features activated for this node (used to compute fees)

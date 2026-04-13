@@ -100,7 +100,6 @@ impl TestContext {
                             &bank,
                             &cloner,
                             validator_keypair.insecure_clone(),
-                            faucet_pubkey,
                             rx,
                             None,
                         )),
@@ -117,7 +116,6 @@ impl TestContext {
             &bank,
             fetch_cloner,
             validator_pubkey,
-            faucet_pubkey,
             &ChainLinkConfig::default(),
         )
         .unwrap();

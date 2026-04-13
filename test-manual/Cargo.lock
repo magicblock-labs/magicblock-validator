@@ -610,6 +610,9 @@ name = "bytes"
 version = "1.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d71b6127be86fdcfddb610f7182ac57211d4b18a3e9c82eb2d17662f2227ad6a"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "caps"
@@ -2045,12 +2048,16 @@ checksum = "112b39cec0b298b6c1999fee3e31427f74f676e4cb9879ed1a121b43661a4154"
 
 [[package]]
 name = "magicblock-core"
-version = "0.6.1"
+version = "0.8.7"
 dependencies = [
+ "bincode",
+ "bytes",
  "flume",
  "magicblock-magic-program-api",
- "solana-account 2.2.1 (git+https://github.com/magicblock-labs/solana-account.git?rev=2246929)",
+ "serde",
+ "solana-account 2.2.1 (git+https://github.com/magicblock-labs/solana-account.git?rev=3ff1b2ea)",
  "solana-account-decoder",
+ "solana-clock",
  "solana-hash",
  "solana-program",
  "solana-pubkey",
@@ -2069,11 +2076,12 @@ dependencies = [
 
 [[package]]
 name = "magicblock-magic-program-api"
-version = "0.6.1"
+version = "0.8.7"
 dependencies = [
  "bincode",
  "serde",
  "solana-program",
+ "solana-signature",
 ]
 
 [[package]]
@@ -3397,7 +3405,7 @@ dependencies = [
 [[package]]
 name = "solana-account"
 version = "2.2.1"
-source = "git+https://github.com/magicblock-labs/solana-account.git?rev=2246929#2246929c6614f60d9909fdd117aab3bc454a9775"
+source = "git+https://github.com/magicblock-labs/solana-account.git?rev=3ff1b2ea#3ff1b2eaf16fd8b82dd8e625673df9798b07db22"
 dependencies = [
  "bincode",
  "qualifier_attr",

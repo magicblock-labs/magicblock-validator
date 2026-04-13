@@ -9,7 +9,7 @@ use std::{
     time::Duration,
 };
 
-use magicblock_accounts_db::{traits::AccountsBank, AccountsDb};
+use magicblock_accounts_db::AccountsDb;
 use magicblock_core::link::{
     accounts::AccountUpdateTx,
     replication::Message,
@@ -117,8 +117,6 @@ impl TransactionSchedulerState {
 
         let slot_hashes =
             SlotHashes::new(&[(block.slot, block.blockhash); MAX_ENTRIES]);
-        // Remove first to avoid "account already exists" errors
-        self.accountsdb.remove_account(&sysvar::slot_hashes::ID);
         self.ensure_sysvar(&sysvar::slot_hashes::ID, &slot_hashes);
 
         // Immutable/Static sysvars (initialized once)

@@ -73,7 +73,6 @@ impl IxtestContext {
 
     pub async fn init_with_config(config: ChainlinkConfig) -> Self {
         let validator_kp = Keypair::from_bytes(&TEST_AUTHORITY[..]).unwrap();
-        let faucet_kp = Keypair::new();
 
         let commitment = CommitmentConfig::confirmed();
         let bank = Arc::<AccountsBankStub>::default();
@@ -126,7 +125,6 @@ impl IxtestContext {
                             &bank,
                             &cloner,
                             validator_kp.insecure_clone(),
-                            faucet_kp.pubkey(),
                             rx,
                             None,
                         )),
@@ -143,7 +141,6 @@ impl IxtestContext {
             &bank,
             fetch_cloner,
             validator_kp.pubkey(),
-            faucet_kp.pubkey(),
             &ChainLinkConfig::default(),
         )
         .unwrap();
