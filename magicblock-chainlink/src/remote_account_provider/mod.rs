@@ -1004,7 +1004,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
                     min_context_slot,
                 )
             );
-            info!(rpc_accounts = ?rpc_accounts, photon_accounts = ?photon_accounts, "Fetched accounts from RPC and Photon");
+            debug!(rpc_accounts = ?rpc_accounts, photon_accounts = ?photon_accounts, "Fetched accounts from RPC and Photon");
 
             let mut remote_accounts_results = Vec::with_capacity(2);
             let mut found_cnt = 0;
