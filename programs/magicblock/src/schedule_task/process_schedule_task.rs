@@ -78,34 +78,16 @@ pub(crate) fn process_schedule_task(
     }
 
     // Assert that the task instructions do not have signers aside from the validator authority
-    // Assert that instruction accounts are passed to this instruction
-    let ix_ctx = transaction_context.get_current_instruction_context()?;
-    let ix_accounts = (ACCOUNTS_START
-        ..ix_ctx.get_number_of_instruction_accounts() as usize)
-        .map(|i| {
-            get_instruction_pubkey_with_idx(transaction_context, i as u16)
-                .copied()
-        })
-        .collect::<Result<HashSet<_>, _>>()?;
     let val_id = effective_validator_authority_id();
     for instruction in &args.instructions {
         for account in &instruction.accounts {
             if account.is_signer && account.pubkey.ne(&val_id) {
                 ic_msg!(
                     invoke_context,
-                    "ScheduleTask: signer account '{}' is not the validator authority.",
+                    "ScheduleTask: only the validator authority can be a signer in cranks and '{}' is not the validator.",
                     account.pubkey,
                 );
                 return Err(InstructionError::MissingRequiredSignature);
-            }
-
-            if !ix_accounts.contains(&account.pubkey) {
-                ic_msg!(
-                    invoke_context,
-                    "ScheduleTask: missing account '{}'.",
-                    account.pubkey,
-                );
-                return Err(InstructionError::MissingAccount);
             }
         }
     }
@@ -178,24 +160,10 @@ mod test {
         let pdas = (0..n_pdas)
             .map(|_| Keypair::new().pubkey())
             .collect::<Vec<_>>();
-        let mut transaction_accounts = vec![(
+        let transaction_accounts = vec![(
             payer.pubkey(),
             AccountSharedData::new(u64::MAX, 0, &system_program::id()),
         )];
-        transaction_accounts.extend(
-            pdas.iter()
-                .map(|pda| {
-                    (
-                        *pda,
-                        AccountSharedData::new(
-                            u64::MAX,
-                            0,
-                            &Keypair::new().pubkey(),
-                        ),
-                    )
-                })
-                .collect::<Vec<_>>(),
-        );
         (payer, pdas, transaction_accounts)
     }
 
@@ -258,22 +226,6 @@ mod test {
 
         let (tx_accs, ix) = setup_complex_ix_test(2, true, false);
         process_instruction(&ix.data, tx_accs, ix.accounts, Ok(()));
-    }
-
-    #[test]
-    fn fail_process_schedule_task_without_accounts() {
-        // Read only signer
-        let (mut tx_accs, ix) = setup_complex_ix_test(2, false, false);
-
-        // Remove accounts
-        tx_accs.pop();
-
-        process_instruction(
-            &ix.data,
-            tx_accs,
-            ix.accounts,
-            Err(InstructionError::MissingAccount),
-        );
     }
 
     #[test]
