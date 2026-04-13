@@ -353,7 +353,6 @@ pub type BaseTaskResult<T> = Result<T, BaseTaskError>;
 
 #[cfg(test)]
 mod serialization_safety_test {
-
     use magicblock_program::{
         args::ShortAccountMeta, magic_scheduled_base_intent::ProgramArgs,
     };
@@ -403,6 +402,29 @@ mod serialization_safety_test {
                 delegated_account: Pubkey::new_unique(),
             }));
         assert_serializable(&finalize_task.instruction(&validator));
+
+        // Test CompressedCommitAndFinalize variant
+        let compressed_commit_and_finalize_task: ArgsTask =
+            ArgsTaskType::CompressedCommitAndFinalize(CompressedCommitTask {
+                commit_id: 123,
+                allow_undelegation: true,
+                committed_account: CommittedAccount {
+                    pubkey: Pubkey::new_unique(),
+                    account: Account {
+                        lamports: 1000,
+                        data: vec![1, 2, 3],
+                        owner: Pubkey::new_unique(),
+                        executable: false,
+                        rent_epoch: 0,
+                    },
+                    remote_slot: Default::default(),
+                },
+                compressed_data: CompressedData::default(),
+            })
+            .into();
+        assert_serializable(
+            &compressed_commit_and_finalize_task.instruction(&validator),
+        );
 
         // Test Undelegate variant
         let undelegate_task: ArgsTask =
