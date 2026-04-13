@@ -212,19 +212,17 @@ impl CacheTaskInfoFetcher {
                     warn!(error = ?err, attempt = i, "Fetch account error");
                 }
                 TaskInfoFetcherError::IndexerError(ref err) => {
-                    warn!("Fetch compressed delegation records error: {:?}, attempt: {}", err, i);
+                    warn!(error = ?err, attempt = i, "Fetch compressed delegation records error");
                 }
                 TaskInfoFetcherError::NoCompressedAccount(_) => break Err(err),
                 TaskInfoFetcherError::NoCompressedData(_) => break Err(err),
-                TaskInfoFetcherError::DeserializeError(ref err) => {
-                    warn!("Deserialize compressed delegation record error: {:?}, attempt: {}", err, i);
-                }
+                TaskInfoFetcherError::DeserializeError(_) => break Err(err),
                 TaskInfoFetcherError::LightRpcError(ref err) => {
-                    warn!("Fetch account error: {:?}, attempt: {}", err, i);
+                    warn!(error = ?err, attempt = i, "Fetch account error");
                 }
                 TaskInfoFetcherError::PhotonClientNotFound => break Err(err),
                 TaskInfoFetcherError::LightSdkError(ref err) => {
-                    warn!("LightSdk error: {:?}, attempt: {}", err, i);
+                    warn!(error = ?err, attempt = i, "LightSdk error");
                 }
                 TaskInfoFetcherError::MissingStateTrees => break Err(err),
                 TaskInfoFetcherError::MissingAddress => break Err(err),
