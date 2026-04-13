@@ -5,6 +5,7 @@ use std::{
         atomic::{AtomicU64, Ordering},
         Arc, Mutex,
     },
+    time::Duration,
 };
 
 pub(crate) use chain_pubsub_client::{
@@ -33,8 +34,7 @@ use solana_rpc_client_api::{
 use solana_sysvar::clock;
 use tokio::{
     sync::{mpsc, oneshot},
-    task,
-    time::{self, Duration},
+    task, time,
 };
 use tracing::*;
 
@@ -182,18 +182,17 @@ impl
         let mode = config.lifecycle_mode();
         if mode.needs_remote_account_provider() {
             debug!("Creating RemoteAccountProvider");
-            Ok(Some(
-                RemoteAccountProvider::<
-                    ChainRpcClientImpl,
-                    SubMuxClient<ChainUpdatesClient>,
-                >::try_new_from_endpoints(
-                    endpoints,
-                    commitment,
-                    subscription_forwarder,
-                    config,
-                )
-                .await?,
-            ))
+            let provider = RemoteAccountProvider::<
+                ChainRpcClientImpl,
+                SubMuxClient<ChainUpdatesClient>,
+            >::try_new_from_endpoints(
+                endpoints,
+                commitment,
+                subscription_forwarder,
+                config,
+            )
+            .await?;
+            Ok(Some(provider))
         } else {
             Ok(None)
         }
@@ -407,7 +406,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             try_join_all(subscribe_program_futs).await?;
         }
 
-        RemoteAccountProvider::<
+        let provider = RemoteAccountProvider::<
             ChainRpcClientImpl,
             SubMuxClient<ChainUpdatesClient>,
         >::new(
@@ -418,7 +417,8 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             subscribed_accounts,
             ChainSlot::new(chain_slot),
         )
-        .await
+        .await?;
+        Ok(provider)
     }
 
     pub(crate) fn promote_accounts(&self, pubkeys: &[&Pubkey]) {
@@ -1037,8 +1037,9 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             warn!(pubkey = %pubkey, "Tried to unsubscribe from account that should never be evicted");
             return Ok(());
         }
+
         if !self.lrucache_subscribed_accounts.contains(pubkey) {
-            warn!(pubkey = %pubkey, "Tried to unsubscribe from account not subscribed in LRU");
+            trace!(pubkey = %pubkey, "Already unsubscribed from LRU");
             return Ok(());
         }
 
