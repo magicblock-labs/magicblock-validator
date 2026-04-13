@@ -35,14 +35,6 @@ pub(crate) fn process_schedule_commit(
     invoke_context: &mut InvokeContext,
     opts: ProcessScheduleCommitOptions,
 ) -> Result<(), InstructionError> {
-    schedule_commit(signers, invoke_context, opts)
-}
-
-fn schedule_commit(
-    signers: HashSet<Pubkey>,
-    invoke_context: &mut InvokeContext,
-    opts: ProcessScheduleCommitOptions,
-) -> Result<(), InstructionError> {
     const PAYER_IDX: u16 = 0;
     const MAGIC_CONTEXT_IDX: u16 = PAYER_IDX + 1;
 
