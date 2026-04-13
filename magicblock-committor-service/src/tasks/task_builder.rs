@@ -1,7 +1,6 @@
 use std::{collections::HashMap, sync::Arc};
 
 use async_trait::async_trait;
-use futures_util::{stream::FuturesUnordered, TryStreamExt};
 use light_sdk::instruction::{
     account_meta::CompressedAccountMeta, ValidityProof,
 };
@@ -174,22 +173,22 @@ impl TasksBuilder for TaskBuilderImpl {
                 ),
                 async {
                     if compressed {
-                        accounts
+                        let pks = accounts
                             .iter()
-                            .map(|account| async {
-                                Ok((
-                                    account.pubkey,
-                                    info_fetcher
-                                        .get_compressed_data(
-                                            &account.pubkey,
-                                            None,
-                                        )
-                                        .await?,
-                                ))
+                            .map(|account| account.pubkey)
+                            .collect::<Vec<_>>();
+                        Ok(info_fetcher
+                            .get_compressed_data_for_accounts(
+                                &pks,
+                                Some(min_context_slot),
+                            )
+                            .await?
+                            .iter()
+                            .zip(pks)
+                            .filter_map(|(data, pk)| {
+                                data.as_ref().map(|data| (pk, data.clone()))
                             })
-                            .collect::<FuturesUnordered<_>>()
-                            .try_collect::<HashMap<_, _>>()
-                            .await
+                            .collect::<HashMap<_, _>>())
                     } else {
                         Ok(HashMap::new())
                     }
@@ -282,7 +281,7 @@ impl TasksBuilder for TaskBuilderImpl {
         }
 
         // Helper to process commit types
-        async fn process_commit(
+        fn process_commit(
             commit: &CommitType,
         ) -> TaskBuilderResult<Vec<Box<dyn BaseTask>>> {
             match commit {
@@ -318,7 +317,7 @@ impl TasksBuilder for TaskBuilderImpl {
             MagicBaseIntent::BaseActions(_) => Ok(vec![]),
             MagicBaseIntent::Commit(commit)
             | MagicBaseIntent::CompressedCommit(commit) => {
-                Ok(process_commit(commit).await?)
+                Ok(process_commit(commit)?)
             }
             MagicBaseIntent::CommitAndUndelegate(t) => {
                 let accounts = t.get_committed_accounts();
@@ -333,13 +332,10 @@ impl TasksBuilder for TaskBuilderImpl {
                         account.pubkey
                     })
                     .collect::<Vec<_>>();
-                let (tasks, rent_reimbursements) = tokio::join!(
-                    process_commit(&t.commit_action),
-                    info_fetcher
-                        .fetch_rent_reimbursements(&pubkeys, min_context_slot)
-                );
-                let mut tasks = tasks?;
-                let rent_reimbursements = rent_reimbursements
+                let mut tasks = process_commit(&t.commit_action)?;
+                let rent_reimbursements = info_fetcher
+                    .fetch_rent_reimbursements(&pubkeys, min_context_slot)
+                    .await
                     .map_err(TaskBuilderError::FinalizedTasksBuildError)?;
 
                 tasks.extend(accounts.iter().zip(rent_reimbursements).map(
@@ -365,7 +361,7 @@ impl TasksBuilder for TaskBuilderImpl {
                 }
             }
             MagicBaseIntent::CompressedCommitAndUndelegate(t) => {
-                let mut tasks = process_commit(&t.commit_action).await?;
+                let mut tasks = process_commit(&t.commit_action)?;
 
                 // TODO: Compressed undelegate is not supported yet
                 // This is because the validator would have to pay rent out of pocket.
