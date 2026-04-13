@@ -307,8 +307,9 @@ pub enum MagicBlockInstruction {
     /// Executes a crank
     ///
     /// # Account references
-    /// - **0.**   `[SIGNER]`  Crank signer PDA
-    /// - **1..n** `[]`        Accounts to execute the instructions on
+    /// - **0.**   `[SIGNER]`  Validator authority
+    /// - **1.**   `[]`        Crank signer PDA
+    /// - **2..n** `[]`        Accounts required by the embedded instructions
     ExecuteCrank { instructions: Vec<Instruction> },
 }
 

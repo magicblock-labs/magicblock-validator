@@ -277,20 +277,16 @@ impl InstructionUtils {
             AccountMeta::new_readonly(validator_authority_id(), true),
             AccountMeta::new_readonly(CRANK_SIGNER, false),
         ];
-        account_metas.extend(instructions.iter().flat_map(|i| {
-            [
-                vec![AccountMeta::new(i.program_id, false)],
-                i.accounts
-                    .iter()
-                    .map(|a| AccountMeta {
-                        pubkey: a.pubkey,
-                        is_signer: a.is_signer,
-                        is_writable: a.is_writable,
-                    })
-                    .collect::<Vec<_>>(),
-            ]
-            .concat()
-        }));
+        for instruction in &instructions {
+            account_metas.push(AccountMeta::new(instruction.program_id, false));
+            account_metas.extend(instruction.accounts.iter().map(|account| {
+                AccountMeta {
+                    pubkey: account.pubkey,
+                    is_signer: account.is_signer,
+                    is_writable: account.is_writable,
+                }
+            }));
+        }
         Instruction::new_with_bincode(
             crate::id(),
             &MagicBlockInstruction::ExecuteCrank { instructions },

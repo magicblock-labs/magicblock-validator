@@ -12,7 +12,7 @@ use crate::{
 };
 
 pub(crate) fn process_execute_crank(
-    _signers: HashSet<Pubkey>,
+    signers: HashSet<Pubkey>,
     invoke_context: &mut InvokeContext,
     instructions: Vec<Instruction>,
 ) -> Result<(), InstructionError> {
@@ -53,6 +53,14 @@ pub(crate) fn process_execute_crank(
         ic_msg!(
             invoke_context,
             "ExecuteCrank ERR: validator pubkey {} is not the expected validator",
+            validator_pubkey
+        );
+        return Err(InstructionError::IncorrectAuthority);
+    }
+    if !signers.contains(&validator_pubkey) {
+        ic_msg!(
+            invoke_context,
+            "ExecuteCrank ERR: validator pubkey {} is not in signers",
             validator_pubkey
         );
         return Err(InstructionError::MissingRequiredSignature);
@@ -176,6 +184,56 @@ mod test {
             transaction_accounts,
             vec![],
             Err(InstructionError::NotEnoughAccountKeys),
+        );
+    }
+
+    #[test]
+    fn fail_execute_task_wrong_validator() {
+        init_validator_authority_if_needed(Keypair::new());
+        let ix = InstructionUtils::execute_task_instruction(vec![
+            InstructionUtils::noop_instruction(0),
+        ]);
+        let wrong_validator = Pubkey::new_unique();
+        let transaction_accounts = vec![
+            (
+                wrong_validator,
+                AccountSharedData::new(0, 0, &system_program::id()),
+            ),
+            (
+                CRANK_SIGNER,
+                AccountSharedData::new(0, 0, &system_program::id()),
+            ),
+        ];
+        process_instruction(
+            &ix.data,
+            transaction_accounts,
+            ix.accounts,
+            Err(InstructionError::IncorrectAuthority),
+        );
+    }
+
+    #[test]
+    fn fail_execute_task_validator_not_in_signers() {
+        init_validator_authority_if_needed(Keypair::new());
+        let mut ix = InstructionUtils::execute_task_instruction(vec![
+            InstructionUtils::noop_instruction(0),
+        ]);
+        ix.accounts[0].is_signer = false;
+        let transaction_accounts = vec![
+            (
+                validator_authority_id(),
+                AccountSharedData::new(0, 0, &system_program::id()),
+            ),
+            (
+                CRANK_SIGNER,
+                AccountSharedData::new(0, 0, &system_program::id()),
+            ),
+        ];
+        process_instruction(
+            &ix.data,
+            transaction_accounts,
+            ix.accounts,
+            Err(InstructionError::MissingRequiredSignature),
         );
     }
 
