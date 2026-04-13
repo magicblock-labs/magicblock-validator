@@ -57,7 +57,7 @@ pub(crate) fn process_execute_crank(
         );
         return Err(InstructionError::IncorrectAuthority);
     }
-    if !signers.contains(&validator_pubkey) {
+    if !signers.contains(validator_pubkey) {
         ic_msg!(
             invoke_context,
             "ExecuteCrank ERR: validator pubkey {} is not in signers",
