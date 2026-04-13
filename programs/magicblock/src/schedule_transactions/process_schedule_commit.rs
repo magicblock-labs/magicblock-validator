@@ -193,6 +193,21 @@ pub(crate) fn process_schedule_commit(
             committed_accounts.push(committed);
         }
 
+        // TODO(dode): handle compressed commit with lamports
+        // Currently, compressed accounts are assumed to always have 0 lamports.
+        // Undelegating a compressed account with lamports would cause users to pay more than rent-exemption.
+        if opts.compressed
+            && committed_accounts
+                .iter()
+                .any(|acc| acc.account.lamports > 0)
+        {
+            ic_msg!(
+                    invoke_context,
+                    "ScheduleCommit: compressed commit is not supported for accounts with lamports",
+                );
+            return Err(InstructionError::InvalidAccountData);
+        }
+
         if opts.request_undelegation {
             // If the account is scheduled to be undelegated then we need to lock it
             // immediately in order to prevent the following actions:

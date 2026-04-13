@@ -645,33 +645,6 @@ fn process_delegate_compressed(
         },
     }
     .invoke_signed(&signer)?;
-    // ::new(compressed_delegation_program_info)
-    //     .payer(payer_info)
-    //     .delegated_account(counter_pda_info)
-    //     .args(DelegateArgsCpi {
-    //         validator: args.validator,
-    //         validity_proof: args.validity_proof,
-    //         address_tree_info: args.address_tree_info,
-    //         account_meta: args.account_meta,
-    //         lamports: rent.minimum_balance(account_data.len()),
-    //         account_data,
-    //         pda_seeds: pda_seeds
-    //             .iter()
-    //             .map(|seed| seed.to_vec())
-    //             .collect::<Vec<_>>(),
-    //         bump,
-    //         output_state_tree_index: args.output_state_tree_index,
-    //         owner_program_id: crate::ID,
-    //     })
-    //     .add_remaining_accounts(
-    //         &remaining_accounts
-    //             .iter()
-    //             .map(|account| {
-    //                 (account, account.is_signer, account.is_writable)
-    //             })
-    //             .collect::<Vec<_>>(),
-    //     )
-    //     .invoke_signed(&signer)?;
 
     Ok(())
 }
@@ -737,24 +710,28 @@ fn process_external_undelegate_compressed(
         return Err(ProgramError::InvalidSeeds);
     }
 
-    // Reset lamports
-    if args.delegation_record.lamports > delegated_account.lamports() {
+    // Pay rent-exemption
+    // TODO(dode): restore the lamports in the delegation record
+    let rent = Rent::get()?;
+    let rent_exemption =
+        rent.minimum_balance(args.delegation_record.data.len());
+    if rent_exemption > delegated_account.lamports() {
         invoke(
             &system_instruction::transfer(
                 payer.key,
                 delegated_account.key,
-                args.delegation_record.lamports - delegated_account.lamports(),
+                rent_exemption - delegated_account.lamports(),
             ),
             &[payer.clone(), delegated_account.clone()],
         )?;
-    } else if args.delegation_record.lamports < delegated_account.lamports() {
+    } else if rent_exemption < delegated_account.lamports() {
         let bump = &[bump];
         let seeds = FlexiCounter::seeds_with_bump(payer.key, bump);
         invoke_signed(
             &system_instruction::transfer(
                 delegated_account.key,
                 payer.key,
-                delegated_account.lamports() - args.delegation_record.lamports,
+                delegated_account.lamports() - rent_exemption,
             ),
             &[delegated_account.clone(), payer.clone()],
             &[&seeds],
