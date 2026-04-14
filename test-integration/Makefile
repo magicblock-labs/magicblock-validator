@@ -30,7 +30,7 @@ list-programs:
 programs: $(PROGRAMS_SO)
 
 test: $(PROGRAMS_SO)
-	if [ -z "$(RUN_TESTS)" ] || printf ',%s,' "$(RUN_TESTS)" | grep -q ',chainlink,'; then \
+	if [ -z "$(RUN_TESTS)" ] || printf ',%s,' "$(RUN_TESTS)" | grep -Eq ',(chainlink|cloning),'; then \
 		$(MAKE) chainlink-prep-programs -C ./test-chainlink; \
 	fi && \
 	RUST_BACKTRACE=1 \
