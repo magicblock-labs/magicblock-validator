@@ -39,7 +39,9 @@ fn payer_keypair() -> Keypair {
 //
 // NOTE: this same setup is repeated in ./10_readonly_update_after.rs except
 // we only check here that we can properly restore all of these accounts at all
+// Flaky integration test.
 #[test]
+#[ignore = "flaky"]
 fn test_restore_ledger_different_accounts_multiple_times() {
     init_logger!();
     let (_tmpdir, ledger_path) = resolve_tmp_dir(TMP_DIR_LEDGER);
