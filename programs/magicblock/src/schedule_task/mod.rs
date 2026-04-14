@@ -23,20 +23,20 @@ pub(crate) fn validate_cranks_instructions(
             if account.is_signer && account.pubkey.ne(&CRANK_SIGNER) {
                 ic_msg!(
                     invoke_context,
-                    "ScheduleTask: only the crank signer PDA can be a signer in cranks (invalid signer: '{}')",
+                    "Crank ERR: only the crank signer PDA can be a signer in cranks (invalid signer: '{}')",
                     account.pubkey,
                 );
                 return Err(InstructionError::MissingRequiredSignature);
             } else if account.is_writable && account.pubkey.eq(&CRANK_SIGNER) {
                 ic_msg!(
                     invoke_context,
-                    "ScheduleTask: the crank signer PDA cannot be a writable account in cranks",
+                    "Crank ERR: the crank signer PDA cannot be a writable account in cranks",
                 );
                 return Err(InstructionError::Immutable);
             } else if account.pubkey.eq(&validator_authority_id()) {
                 ic_msg!(
                     invoke_context,
-                    "ScheduleTask: the validator authority cannot be used in cranks",
+                    "Crank ERR: the validator authority cannot be used in cranks",
                 );
                 return Err(InstructionError::IncorrectAuthority);
             }
