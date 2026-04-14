@@ -303,6 +303,11 @@ pub enum MagicBlockInstruction {
     /// - **0.** `[SIGNER]`  Validator Authority
     /// - **1.** `[WRITE]`   Account to evict
     EvictAccount { pubkey: Pubkey },
+
+    /// Verifies if account's pubkey corresponds to current validator identity
+    /// # Account references
+    /// - **0.** `[]`  Validator Authority
+    VerifyValidatorIdentity,
 }
 
 impl MagicBlockInstruction {
