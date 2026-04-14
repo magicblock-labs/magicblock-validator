@@ -283,7 +283,7 @@ impl InstructionUtils {
             account_metas.extend(instruction.accounts.iter().map(|account| {
                 AccountMeta {
                     pubkey: account.pubkey,
-                    is_signer: account.is_signer,
+                    is_signer: false,
                     is_writable: account.is_writable,
                 }
             }));
