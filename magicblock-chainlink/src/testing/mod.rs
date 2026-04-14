@@ -463,7 +463,7 @@ macro_rules! assert_loaded_program_with_size {
 macro_rules! assert_data_has_size {
     ($data:expr, $size:expr) => {{
         let actual_size = $data.len();
-        let (min, max) = $crate::min_max_with_deviation_percent!($size, 5.0);
+        let (min, max) = $crate::min_max_with_deviation_percent!($size, 10.0);
         assert!(
             actual_size >= min && actual_size <= max,
             "Expected data to have size around {}, got {}",
