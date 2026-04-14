@@ -9,7 +9,8 @@ use magicblock_magic_program_api::{
         AccountModification, AccountModificationForInstruction,
         MagicBlockInstruction,
     },
-    CRANK_SIGNER, MAGIC_CONTEXT_PUBKEY,
+    pda::CRANK_SIGNER,
+    MAGIC_CONTEXT_PUBKEY,
 };
 use solana_hash::Hash;
 use solana_instruction::{AccountMeta, Instruction};

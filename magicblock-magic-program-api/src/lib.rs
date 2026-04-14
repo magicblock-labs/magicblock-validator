@@ -1,5 +1,6 @@
 pub mod args;
 pub mod instruction;
+pub mod pda;
 pub mod response;
 
 pub use solana_program::{declare_id, pubkey, pubkey::Pubkey};
@@ -23,9 +24,3 @@ pub const MAGIC_CONTEXT_SIZE: usize = 1024 * 1024 * 5; // 5 MB
 /// Rent rate for ephemeral accounts: 32 lamports per byte.
 /// This is ~109x cheaper than Solana's base rent (3,480 lamports/byte).
 pub const EPHEMERAL_RENT_PER_BYTE: u64 = 32;
-
-pub const CRANK_SEED: &[u8] = b"crank-executor";
-const CRANK_SIGNER_PDA: ([u8; 32], u8) =
-    const_crypto::ed25519::derive_program_address(&[CRANK_SEED], ID.as_array());
-pub const CRANK_SIGNER: Pubkey = Pubkey::new_from_array(CRANK_SIGNER_PDA.0);
-pub const CRANK_SIGNER_BUMP: u8 = CRANK_SIGNER_PDA.1;

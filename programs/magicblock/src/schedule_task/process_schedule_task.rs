@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use magicblock_core::tls::ExecutionTlsStash;
 use magicblock_magic_program_api::{
     args::{ScheduleTaskArgs, ScheduleTaskRequest, TaskRequest},
-    CRANK_SIGNER,
+    pda::CRANK_SIGNER,
 };
 use solana_instruction::error::InstructionError;
 use solana_log_collector::ic_msg;

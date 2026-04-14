@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use magicblock_magic_program_api::CRANK_SIGNER;
+use magicblock_magic_program_api::pda::CRANK_SIGNER;
 use solana_instruction::{error::InstructionError, Instruction};
 use solana_log_collector::ic_msg;
 use solana_program_runtime::invoke_context::InvokeContext;
