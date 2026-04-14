@@ -39,6 +39,7 @@ solana-system-program = { workspace = true }
 solana-transaction = { workspace = true }
 solana-transaction-error = { workspace = true }
 solana-transaction-status = { workspace = true }
+solana-zk-elgamal-proof-program = { workspace = true }
 
 rustc-hash = { workspace = true }
 

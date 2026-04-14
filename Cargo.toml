@@ -198,6 +198,7 @@ solana-transaction-context = { version = "2.2", features = ["serde"] }
 solana-transaction-error = { version = "2.2" }
 solana-transaction-status = { version = "2.2" }
 solana-transaction-status-client-types = "2.2"
+solana-zk-elgamal-proof-program = { version = "2.2" }
 static_assertions = "1.1.0"
 tempfile = "3.10.1"
 test-kit = { path = "./test-kit" }
