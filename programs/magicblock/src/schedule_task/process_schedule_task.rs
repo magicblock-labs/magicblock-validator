@@ -10,7 +10,10 @@ use solana_log_collector::ic_msg;
 use solana_program_runtime::invoke_context::InvokeContext;
 use solana_pubkey::Pubkey;
 
-use crate::utils::accounts::get_instruction_pubkey_with_idx;
+use crate::{
+    utils::accounts::get_instruction_pubkey_with_idx,
+    validator::validator_authority_id,
+};
 
 pub(crate) fn process_schedule_task(
     signers: HashSet<Pubkey>,
@@ -76,6 +79,7 @@ pub(crate) fn process_schedule_task(
     }
 
     // Assert that the task instructions do not have signers aside from the crank signer
+    // Assert they don't use the validator either
     for instruction in &args.instructions {
         for account in &instruction.accounts {
             if account.is_signer && account.pubkey.ne(&CRANK_SIGNER) {
@@ -91,6 +95,12 @@ pub(crate) fn process_schedule_task(
                     "ScheduleTask: the crank signer PDA cannot be a writable account in cranks",
                 );
                 return Err(InstructionError::Immutable);
+            } else if account.pubkey.eq(&validator_authority_id()) {
+                ic_msg!(
+                    invoke_context,
+                    "ScheduleTask: the validator authority cannot be used in cranks",
+                );
+                return Err(InstructionError::IncorrectAuthority);
             }
         }
     }
@@ -243,6 +253,26 @@ mod test {
             tx_accs,
             ix.accounts,
             Err(InstructionError::MissingRequiredSignature),
+        );
+    }
+
+    #[test]
+    fn fail_process_schedule_task_with_validator_authority() {
+        let (payer, mut pdas, transaction_accounts) = setup_accounts(0);
+        pdas.push(validator_authority_id());
+        let args = ScheduleTaskArgs {
+            task_id: 1,
+            execution_interval_millis: 1000,
+            iterations: 1,
+            instructions: vec![create_complex_ix(&pdas, false, false)],
+        };
+        let ix =
+            InstructionUtils::schedule_task_instruction(&payer.pubkey(), args);
+        process_instruction(
+            &ix.data,
+            transaction_accounts,
+            ix.accounts,
+            Err(InstructionError::IncorrectAuthority),
         );
     }
 
