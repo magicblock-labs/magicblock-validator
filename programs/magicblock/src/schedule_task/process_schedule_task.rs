@@ -1,9 +1,8 @@
 use std::collections::HashSet;
 
 use magicblock_core::tls::ExecutionTlsStash;
-use magicblock_magic_program_api::{
-    args::{ScheduleTaskArgs, ScheduleTaskRequest, TaskRequest},
-    pda::CRANK_SIGNER,
+use magicblock_magic_program_api::args::{
+    ScheduleTaskArgs, ScheduleTaskRequest, TaskRequest,
 };
 use solana_instruction::error::InstructionError;
 use solana_log_collector::ic_msg;
@@ -11,8 +10,8 @@ use solana_program_runtime::invoke_context::InvokeContext;
 use solana_pubkey::Pubkey;
 
 use crate::{
+    schedule_task::validate_cranks_instructions,
     utils::accounts::get_instruction_pubkey_with_idx,
-    validator::validator_authority_id,
 };
 
 pub(crate) fn process_schedule_task(
@@ -90,32 +89,7 @@ pub(crate) fn process_schedule_task(
         return Err(InstructionError::InvalidInstructionData);
     }
 
-    // Assert that the task instructions do not have signers aside from the crank signer
-    // Assert they don't use the validator either
-    for instruction in &args.instructions {
-        for account in &instruction.accounts {
-            if account.is_signer && account.pubkey.ne(&CRANK_SIGNER) {
-                ic_msg!(
-                    invoke_context,
-                    "ScheduleTask: only the crank signer PDA can be a signer in cranks (invalid signer: '{}')",
-                    account.pubkey,
-                );
-                return Err(InstructionError::MissingRequiredSignature);
-            } else if account.is_writable && account.pubkey.eq(&CRANK_SIGNER) {
-                ic_msg!(
-                    invoke_context,
-                    "ScheduleTask: the crank signer PDA cannot be a writable account in cranks",
-                );
-                return Err(InstructionError::Immutable);
-            } else if account.pubkey.eq(&validator_authority_id()) {
-                ic_msg!(
-                    invoke_context,
-                    "ScheduleTask: the validator authority cannot be used in cranks",
-                );
-                return Err(InstructionError::IncorrectAuthority);
-            }
-        }
-    }
+    validate_cranks_instructions(invoke_context, &args.instructions)?;
 
     let schedule_request = ScheduleTaskRequest {
         id: args.task_id,
@@ -150,7 +124,9 @@ mod test {
     use crate::{
         test_utils::{process_instruction, COUNTER_PROGRAM_ID},
         utils::instruction_utils::InstructionUtils,
-        validator::generate_validator_authority_if_needed,
+        validator::{
+            generate_validator_authority_if_needed, validator_authority_id,
+        },
     };
 
     fn create_simple_ix() -> Instruction {

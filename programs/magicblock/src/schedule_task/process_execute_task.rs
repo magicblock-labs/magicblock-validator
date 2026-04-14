@@ -7,6 +7,7 @@ use solana_program_runtime::invoke_context::InvokeContext;
 use solana_pubkey::Pubkey;
 
 use crate::{
+    schedule_task::validate_cranks_instructions,
     utils::accounts::get_instruction_pubkey_with_idx,
     validator::validator_authority_id,
 };
@@ -77,6 +78,10 @@ pub(crate) fn process_execute_crank(
         );
         return Err(InstructionError::InvalidSeeds);
     }
+
+    // Already validated when scheduling the task.
+    // This check prevents the validator from manually sending transactions disguised as cranks.
+    validate_cranks_instructions(invoke_context, &instructions)?;
 
     let len = instructions.len();
     for ix in instructions {
@@ -293,5 +298,61 @@ mod test {
             ix.accounts,
             Err(InstructionError::MissingAccount),
         );
+    }
+
+    #[test]
+    fn fail_execute_task_with_invalid_instructions() {
+        init_validator_authority_if_needed(Keypair::new());
+        let payer = Pubkey::new_unique();
+        let mut inner_ix = InstructionUtils::schedule_task_instruction(
+            &payer,
+            ScheduleTaskArgs {
+                task_id: 0,
+                execution_interval_millis: 1,
+                iterations: 1,
+                instructions: vec![InstructionUtils::noop_instruction(0)],
+            },
+        );
+
+        for (signer, writable, pubkey, expected) in [
+            (
+                true,
+                false,
+                Pubkey::new_unique(),
+                InstructionError::MissingRequiredSignature,
+            ),
+            (false, true, CRANK_SIGNER, InstructionError::Immutable),
+            (
+                false,
+                false,
+                validator_authority_id(),
+                InstructionError::IncorrectAuthority,
+            ),
+        ] {
+            inner_ix.accounts[0].is_signer = signer;
+            inner_ix.accounts[0].is_writable = writable;
+            inner_ix.accounts[0].pubkey = pubkey;
+            let ix = InstructionUtils::execute_task_instruction(vec![
+                inner_ix.clone()
+            ]);
+
+            let transaction_accounts = vec![
+                (
+                    validator_authority_id(),
+                    AccountSharedData::new(0, 0, &system_program::id()),
+                ),
+                (
+                    CRANK_SIGNER,
+                    AccountSharedData::new(0, 0, &system_program::id()),
+                ),
+            ];
+
+            process_instruction(
+                &ix.data,
+                transaction_accounts,
+                ix.accounts,
+                Err(expected),
+            );
+        }
     }
 }
