@@ -6,7 +6,7 @@ use solana_sdk_ids::{
     address_lookup_table, bpf_loader, bpf_loader_deprecated,
     bpf_loader_upgradeable, compute_budget, config, ed25519_program,
     incinerator, loader_v4, native_loader, secp256k1_program, stake,
-    system_program, vote,
+    system_program, vote, zk_elgamal_proof_program,
 };
 use solana_sysvar;
 
@@ -69,5 +69,6 @@ pub fn native_program_accounts() -> HashSet<Pubkey> {
     blacklisted_programs.insert(stake::ID);
     blacklisted_programs.insert(system_program::ID);
     blacklisted_programs.insert(vote::ID);
+    blacklisted_programs.insert(zk_elgamal_proof_program::ID);
     blacklisted_programs
 }

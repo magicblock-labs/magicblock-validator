@@ -37,7 +37,7 @@ async fn init_remote_account_provider(
         },
     ];
     let endpoints = Endpoints::from(endpoints_vec.as_slice());
-    RemoteAccountProvider::<
+    let provider = RemoteAccountProvider::<
         ChainRpcClientImpl,
         SubMuxClient<ChainUpdatesClient>,
     >::try_from_urls_and_config(
@@ -47,7 +47,11 @@ async fn init_remote_account_provider(
         &RemoteAccountProviderConfig::default_with_lifecycle_mode(
             LifecycleMode::Ephemeral,
         ),
-    ).await.expect("Failed to create RemoteAccountProvider").unwrap()
+    )
+    .await
+    .expect("Failed to create RemoteAccountProvider")
+    .unwrap();
+    provider
 }
 
 #[tokio::test]

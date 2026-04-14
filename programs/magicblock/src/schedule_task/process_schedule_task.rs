@@ -69,6 +69,18 @@ pub(crate) fn process_schedule_task(
         return Err(InstructionError::InvalidInstructionData);
     }
 
+    // Enforce valid interval
+    if args.execution_interval_millis <= 0
+        || args.execution_interval_millis > u32::MAX as i64
+    {
+        ic_msg!(
+            invoke_context,
+            "ScheduleTask ERR: execution interval must be between 1 and {} milliseconds",
+            u32::MAX
+        );
+        return Err(InstructionError::InvalidInstructionData);
+    }
+
     // Enforce minimal number of instructions
     if args.instructions.is_empty() {
         ic_msg!(
@@ -336,5 +348,29 @@ mod test {
             ix.accounts,
             Err(InstructionError::InvalidInstructionData),
         );
+    }
+
+    #[test]
+    fn test_process_schedule_task_with_invalid_execution_interval() {
+        let (payer, pdas, transaction_accounts) = setup_accounts(0);
+        for execution_interval_millis in [-12345, 0, u32::MAX as i64 + 1] {
+            let args = ScheduleTaskArgs {
+                task_id: 1,
+                execution_interval_millis,
+                iterations: 1,
+                instructions: vec![create_simple_ix()],
+            };
+            let ix = InstructionUtils::schedule_task_instruction(
+                &payer.pubkey(),
+                args,
+                &pdas,
+            );
+            process_instruction(
+                &ix.data,
+                transaction_accounts.clone(),
+                ix.accounts,
+                Err(InstructionError::InvalidInstructionData),
+            );
+        }
     }
 }

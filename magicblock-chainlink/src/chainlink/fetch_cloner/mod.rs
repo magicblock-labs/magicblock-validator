@@ -1,8 +1,8 @@
 use std::{
-    collections::HashSet,
+    collections::{hash_map, HashSet},
     sync::{
         atomic::{AtomicU64, Ordering},
-        Arc,
+        Arc, Mutex,
     },
     time::Duration,
 };
@@ -33,6 +33,7 @@ use tracing::*;
 
 mod ata_projection;
 mod delegation;
+mod pending_clone_guard;
 mod pipeline;
 mod program_loader;
 mod subscription;
@@ -53,7 +54,8 @@ use crate::{
         blacklisted_accounts::blacklisted_accounts,
     },
     cloner::{
-        errors::ClonerResult, AccountCloneRequest, Cloner, DelegationActions,
+        errors::{ClonerError, ClonerResult},
+        AccountCloneRequest, Cloner, DelegationActions,
     },
     remote_account_provider::{
         program_account::get_loaderv3_get_program_data_address,
@@ -64,6 +66,10 @@ use crate::{
 };
 
 type RemoteAccountRequests = Vec<oneshot::Sender<()>>;
+
+use self::pending_clone_guard::{
+    CloneClaim, CloneCompletion, CloneKey, PendingCloneGuard,
+};
 
 pub struct FetchCloner<T, U, V, C>
 where
@@ -92,6 +98,17 @@ where
     /// If specified, only these programs will be cloned. If None or empty,
     /// all programs are allowed.
     allowed_programs: Option<HashSet<Pubkey>>,
+
+    /// Tracks in-flight clone operations per (pubkey, slot).
+    /// The first caller to claim a key becomes the owner and performs
+    /// the actual clone. Subsequent callers become waiters and receive
+    /// the result via oneshot channels. Prevents duplicate clone
+    /// submissions across concurrent fetch and subscription paths.
+    pending_clones: Arc<
+        Mutex<
+            hash_map::HashMap<CloneKey, Vec<oneshot::Sender<CloneCompletion>>>,
+        >,
+    >,
 }
 
 /// Manual Clone impl: `#[derive(Clone)]` would add `V: Clone, C: Clone`
@@ -115,6 +132,7 @@ where
             validator_keypair: Arc::clone(&self.validator_keypair),
             blacklisted_accounts: self.blacklisted_accounts.clone(),
             allowed_programs: self.allowed_programs.clone(),
+            pending_clones: self.pending_clones.clone(),
         }
     }
 }
@@ -127,6 +145,7 @@ where
     C: Cloner,
 {
     /// Create FetchCloner with subscription updates properly connected
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         remote_account_provider: &Arc<RemoteAccountProvider<T, U>>,
         accounts_bank: &Arc<V>,
@@ -152,6 +171,7 @@ where
             fetch_count: Arc::new(AtomicU64::new(0)),
             blacklisted_accounts,
             allowed_programs,
+            pending_clones: Arc::new(Mutex::new(hash_map::HashMap::new())),
         });
 
         me.clone()
@@ -184,6 +204,98 @@ where
                     allowed.contains(program_id)
                 }
             }
+        }
+    }
+
+    /// Attempt to claim ownership of a clone operation for (pubkey, slot).
+    /// Returns `CloneClaim::Owner` if this caller is the first and should
+    /// perform the clone. Returns `CloneClaim::Waiter(rx)` if another
+    /// caller already owns this clone and this caller should wait.
+    fn claim_pending_clone(&self, pubkey: Pubkey, slot: u64) -> CloneClaim {
+        let key = (pubkey, slot);
+        let mut map = self
+            .pending_clones
+            .lock()
+            .expect("pending_clones mutex poisoned");
+        match map.entry(key) {
+            hash_map::Entry::Vacant(entry) => {
+                entry.insert(Vec::new());
+                CloneClaim::Owner
+            }
+            hash_map::Entry::Occupied(mut entry) => {
+                let (tx, rx) = oneshot::channel();
+                entry.get_mut().push(tx);
+                CloneClaim::Waiter(rx)
+            }
+        }
+    }
+
+    /// Called by the owner when the clone operation completes.
+    /// Removes the pending entry and notifies all waiters.
+    fn finish_pending_clone(
+        &self,
+        pubkey: Pubkey,
+        slot: u64,
+        result: CloneCompletion,
+    ) {
+        let key = (pubkey, slot);
+        let waiters = {
+            let mut map = self
+                .pending_clones
+                .lock()
+                .expect("pending_clones mutex poisoned");
+            map.remove(&key).unwrap_or_default()
+        };
+        for tx in waiters {
+            let _ = tx.send(result);
+        }
+    }
+
+    /// Submits a clone request through ownership coordination.
+    /// Only one caller per (pubkey, slot) will actually submit the
+    /// clone transaction. All other concurrent callers wait for the
+    /// owner's result.
+    async fn clone_account_with_ownership(
+        &self,
+        request: AccountCloneRequest,
+    ) -> ClonerResult<Signature> {
+        let pubkey = request.pubkey;
+        let slot = request.account.remote_slot();
+
+        match self.claim_pending_clone(pubkey, slot) {
+            CloneClaim::Owner => {
+                let mut guard = PendingCloneGuard::new(
+                    Arc::clone(&self.pending_clones),
+                    pubkey,
+                    slot,
+                );
+                let result = self.cloner.clone_account(request).await;
+                let completion = if result.is_ok() {
+                    CloneCompletion::Success
+                } else {
+                    CloneCompletion::Failed
+                };
+                self.finish_pending_clone(pubkey, slot, completion);
+                guard.dismiss();
+                result
+            }
+            CloneClaim::Waiter(rx) => match rx.await {
+                Ok(CloneCompletion::Success) => Ok(Signature::default()),
+                Ok(CloneCompletion::Failed) => {
+                    Err(ClonerError::FailedToCloneRegularAccount(
+                        pubkey,
+                        Box::new(ClonerError::CommittorServiceError(
+                            "Clone owner failed".to_string(),
+                        )),
+                    ))
+                }
+                Err(_) => Err(ClonerError::FailedToCloneRegularAccount(
+                    pubkey,
+                    Box::new(ClonerError::CommittorServiceError(
+                        "Clone owner dropped".to_string(),
+                    )),
+                )),
+            },
         }
     }
 
@@ -428,33 +540,40 @@ where
 
         if account.executable() {
             self.handle_executable_sub_update(pubkey, account).await;
-        } else if let Err(err) = self
-            .cloner
-            .clone_account(AccountCloneRequest {
-                pubkey,
-                account,
-                commit_frequency_ms: None,
-                delegation_actions,
-                delegated_to_other,
-            })
-            .await
-        {
-            error!(
-                pubkey = %pubkey,
-                error = %err,
-                "Failed to clone account into bank"
-            );
-        } else if let Some(projected_ata_clone_request) =
-            projected_ata_clone_request
-        {
-            if let Err(err) =
-                self.cloner.clone_account(projected_ata_clone_request).await
+        } else {
+            let commit_frequency_ms = deleg_record.as_ref().and_then(|dr| {
+                dr.authority
+                    .eq(&self.validator_pubkey)
+                    .then_some(dr.commit_frequency_ms)
+            });
+            if let Err(err) = self
+                .clone_account_with_ownership(AccountCloneRequest {
+                    pubkey,
+                    account,
+                    commit_frequency_ms,
+                    delegation_actions,
+                    delegated_to_other,
+                })
+                .await
             {
                 error!(
                     pubkey = %pubkey,
                     error = %err,
-                    "Failed to clone projected ATA from delegated eATA update"
+                    "Failed to clone account into bank"
                 );
+            } else if let Some(projected_ata_clone_request) =
+                projected_ata_clone_request
+            {
+                if let Err(err) = self
+                    .clone_account_with_ownership(projected_ata_clone_request)
+                    .await
+                {
+                    error!(
+                        pubkey = %pubkey,
+                        error = %err,
+                        "Failed to clone projected ATA from delegated eATA update"
+                    );
+                }
             }
         }
     }
@@ -521,7 +640,7 @@ where
         )
         .await?;
 
-        Ok(self.cloner.clone_account(request).await?)
+        Ok(self.clone_account_with_ownership(request).await?)
     }
 
     async fn maybe_greedily_clone_discovered_delegated_account(
