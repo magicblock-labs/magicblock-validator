@@ -97,6 +97,7 @@ pub(crate) fn process_execute_crank(
 mod test {
     use magicblock_magic_program_api::args::ScheduleTaskArgs;
     use solana_account::AccountSharedData;
+    use solana_instruction::AccountMeta;
     use solana_keypair::Keypair;
     use solana_sdk_ids::system_program;
 
@@ -106,6 +107,12 @@ mod test {
         utils::instruction_utils::InstructionUtils,
         validator::init_validator_authority_if_needed,
     };
+
+    pub fn complex_ix(payer: Pubkey) -> Instruction {
+        let mut ix = InstructionUtils::noop_instruction(0);
+        ix.accounts.push(AccountMeta::new(payer, false));
+        ix
+    }
 
     #[test]
     fn test_execute_task_simple() {
@@ -135,17 +142,8 @@ mod test {
     fn test_execute_task_complex() {
         init_validator_authority_if_needed(Keypair::new());
         let payer = Pubkey::new_unique();
-        let ix = InstructionUtils::execute_task_instruction(vec![
-            InstructionUtils::schedule_task_instruction(
-                &payer,
-                ScheduleTaskArgs {
-                    task_id: 0,
-                    execution_interval_millis: 1,
-                    iterations: 1,
-                    instructions: vec![InstructionUtils::noop_instruction(0)],
-                },
-            ),
-        ]);
+        let ix =
+            InstructionUtils::execute_task_instruction(vec![complex_ix(payer)]);
         let transaction_accounts = vec![
             (
                 validator_authority_id(),
@@ -271,17 +269,8 @@ mod test {
     fn fail_execute_task_missing_accounts() {
         init_validator_authority_if_needed(Keypair::new());
         let payer = Pubkey::new_unique();
-        let ix = InstructionUtils::execute_task_instruction(vec![
-            InstructionUtils::schedule_task_instruction(
-                &payer,
-                ScheduleTaskArgs {
-                    task_id: 0,
-                    execution_interval_millis: 1,
-                    iterations: 1,
-                    instructions: vec![InstructionUtils::noop_instruction(0)],
-                },
-            ),
-        ]);
+        let ix =
+            InstructionUtils::execute_task_instruction(vec![complex_ix(payer)]);
         let transaction_accounts = vec![
             (
                 validator_authority_id(),
