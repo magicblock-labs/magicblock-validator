@@ -3179,6 +3179,7 @@ async fn test_fetch_subscription_race_duplicate_clone() {
         Pubkey::new_unique(),
         subscription_rx,
         None,
+        None,
     );
 
     // Send subscription update (this will become the owner).
@@ -3301,6 +3302,7 @@ async fn test_delegated_account_fetch_subscription_race() {
         Pubkey::new_unique(),
         subscription_rx,
         None,
+        None,
     );
 
     // Send subscription update.
@@ -3408,6 +3410,7 @@ async fn test_clone_ownership_failure_propagates_to_waiters() {
         validator_keypair.insecure_clone(),
         Pubkey::new_unique(),
         subscription_rx,
+        None,
         None,
     );
 
