@@ -16,8 +16,7 @@ use prelude::JsonBody;
 use solana_account::AccountSharedData;
 use solana_pubkey::Pubkey;
 use solana_transaction::{
-    sanitized::{SanitizedTransaction, MAX_TX_ACCOUNT_LOCKS},
-    versioned::VersionedTransaction,
+    sanitized::SanitizedTransaction, versioned::VersionedTransaction,
 };
 use solana_transaction_status::UiTransactionEncoding;
 use tracing::*;
@@ -221,7 +220,6 @@ impl HttpDispatcher {
         }
 
         let txn = transaction.sanitize(sigverify)?;
-        txn.get_account_locks(MAX_TX_ACCOUNT_LOCKS)?;
         Ok(WithEncoded { txn, encoded })
     }
 
