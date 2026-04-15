@@ -3163,6 +3163,7 @@ version = "0.8.7"
 dependencies = [
  "futures-util",
  "magicblock-config",
+ "magicblock-core",
  "reqwest",
  "rusqlite",
  "serde",

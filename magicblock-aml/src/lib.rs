@@ -11,7 +11,8 @@ use reqwest::Client;
 use rusqlite::{params, Connection};
 use serde_json::Value;
 use thiserror::Error;
-use tokio::sync::Mutex as AsyncMutex;
+use tokio::sync::{mpsc, Mutex as AsyncMutex};
+use tracing::*;
 
 pub type RiskResult<T> = Result<T, RiskError>;
 pub type PartitionedCache =
@@ -62,6 +63,7 @@ pub struct RiskService {
     client: Client,
     cache: Arc<Mutex<Connection>>,
     in_flight: Arc<AsyncMutex<HashMap<String, SharedRiskScoreFuture>>>,
+    cache_writer: mpsc::UnboundedSender<Vec<(String, u64)>>,
     base_url: String,
     api_key: String,
     cache_ttl: Duration,
@@ -104,10 +106,15 @@ impl RiskService {
         let client =
             Client::builder().timeout(config.request_timeout).build()?;
 
+        let cache = Arc::new(Mutex::new(conn));
+        let (cache_writer, cache_rx) = mpsc::unbounded_channel();
+        spawn_cache_writer(Arc::clone(&cache), cache_rx);
+
         Ok(Some(Self {
             client,
-            cache: Arc::new(Mutex::new(conn)),
+            cache,
             in_flight: Arc::new(AsyncMutex::new(HashMap::new())),
+            cache_writer,
             base_url: config.base_url.trim_end_matches('/').to_string(),
             api_key,
             cache_ttl: config.cache_ttl,
@@ -156,7 +163,7 @@ impl RiskService {
         self.remove_from_in_flight(&uncached_addresses).await;
         let scores = fetch_result?;
 
-        self.write_cache(&scores).await?;
+        self.write_cache(scores.clone());
 
         let risky_addresses = scores
             .iter()
@@ -249,27 +256,46 @@ impl RiskService {
         .await?
     }
 
-    async fn write_cache(&self, values: &[(String, u64)]) -> RiskResult<()> {
-        let now = now_unix_seconds();
-        let values = values.to_vec();
-        let cache = Arc::clone(&self.cache);
-        tokio::task::spawn_blocking(move || {
-            let conn = cache.lock().map_err(|_| RiskError::PoisonedLock)?;
-            for (address, risk_score) in &values {
-                conn.execute(
-                    "INSERT INTO address_risk_cache
-                        (address, risk_score, fetched_at_unix_s)
-                     VALUES (?1, ?2, ?3)
-                     ON CONFLICT(address) DO UPDATE SET
-                        risk_score = excluded.risk_score,
-                        fetched_at_unix_s = excluded.fetched_at_unix_s",
-                    params![address, risk_score, now],
-                )?;
-            }
-            Ok(())
-        })
-        .await?
+    fn write_cache(&self, values: Vec<(String, u64)>) {
+        if let Err(e) = self.cache_writer.send(values) {
+            error!(error = %e, "Cache writer channel closed");
+        }
     }
+}
+
+fn spawn_cache_writer(
+    cache: Arc<Mutex<Connection>>,
+    mut rx: mpsc::UnboundedReceiver<Vec<(String, u64)>>,
+) {
+    tokio::spawn(async move {
+        while let Some(values) = rx.recv().await {
+            let now = now_unix_seconds();
+            let db = Arc::clone(&cache);
+            match tokio::task::spawn_blocking(move || {
+                let conn = db.lock().map_err(|_| RiskError::PoisonedLock)?;
+                for (address, risk_score) in &values {
+                    conn.execute(
+                        "INSERT INTO address_risk_cache
+                            (address, risk_score, fetched_at_unix_s)
+                         VALUES (?1, ?2, ?3)
+                         ON CONFLICT(address) DO UPDATE SET
+                            risk_score = excluded.risk_score,
+                            fetched_at_unix_s = excluded.fetched_at_unix_s",
+                        params![address, risk_score, now],
+                    )?;
+                }
+                Ok::<_, RiskError>(())
+            })
+            .await
+            {
+                Ok(Err(e)) => {
+                    error!(error = ?e, "Failed to write risk score cache")
+                }
+                Err(e) => error!(error = ?e, "Cache writer task panicked"),
+                _ => {}
+            }
+        }
+    });
 }
 
 async fn fetch_risk_score(
@@ -309,18 +335,16 @@ fn now_unix_seconds() -> i64 {
 
 #[cfg(test)]
 mod tests {
+
     use std::{
-        collections::HashMap,
         io::{Read, Write},
         net::TcpListener,
-        time::Duration,
     };
 
-    use rusqlite::Connection;
     use tempfile::tempdir;
     use tokio::task::JoinHandle;
 
-    use super::{RiskConfig, RiskError, RiskService};
+    use super::*;
 
     struct MockRiskServer {
         base_url: String,
@@ -395,6 +419,7 @@ mod tests {
                 }
             });
 
+            debug!(address =? addr, "Mock risk server started");
             Self {
                 base_url: format!("http://{addr}"),
                 worker,
@@ -451,8 +476,22 @@ mod tests {
         .expect("failed to collect cache rows")
     }
 
+    async fn assert_eventually_cached(
+        cache_path: &std::path::Path,
+        expected: &[(String, u64)],
+    ) {
+        for _ in 0..50 {
+            if load_cached_scores(cache_path) == expected {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert_eq!(load_cached_scores(cache_path), expected);
+    }
+
     #[tokio::test]
     async fn check_addresses_uses_mocked_api_and_persists_cache_in_tempdir() {
+        magicblock_core::logger::init_for_tests();
         let first = "11111111111111111111111111111111".to_string();
         let second = "33333333333333333333333333333333".to_string();
         let addresses = vec![first.clone(), second.clone()];
@@ -468,17 +507,23 @@ mod tests {
             .expect("failed to create risk service")
             .expect("risk service should be enabled");
 
+        let cache_path = temp_ledger.path().join("risk-cache.db");
+
         service
             .check_addresses(addresses.clone())
             .await
             .expect("first lookup should call mocked API");
+        assert_eventually_cached(
+            &cache_path,
+            &[(first.clone(), 3), (second.clone(), 4)],
+        )
+        .await;
         service
             .check_addresses(addresses)
             .await
             .expect("second lookup should be served from sqlite cache");
 
         server.join().await;
-        let cache_path = temp_ledger.path().join("risk-cache.db");
         assert!(cache_path.exists());
         let rows = load_cached_scores(&cache_path);
         assert_eq!(rows, vec![(first, 3), (second, 4)]);
@@ -486,6 +531,7 @@ mod tests {
 
     #[tokio::test]
     async fn check_addresses_returns_high_risk_error_for_mocked_response() {
+        magicblock_core::logger::init_for_tests();
         let address = "22222222222222222222222222222222".to_string();
         let addresses = vec![address.clone()];
         let server = MockRiskServer::start(vec![(address.clone(), 9)], 1).await;
@@ -503,14 +549,15 @@ mod tests {
         ));
 
         server.join().await;
+
         let cache_path = temp_ledger.path().join("risk-cache.db");
         assert!(cache_path.exists());
-        let rows = load_cached_scores(&cache_path);
-        assert_eq!(rows, vec![(address, 9)]);
+        assert_eventually_cached(&cache_path, &[(address, 9)]).await;
     }
 
     #[tokio::test]
     async fn check_addresses_deduplicates_inflight_requests_for_same_address() {
+        magicblock_core::logger::init_for_tests();
         let address = "44444444444444444444444444444444".to_string();
         let server = MockRiskServer::start(vec![(address.clone(), 3)], 1).await;
 
