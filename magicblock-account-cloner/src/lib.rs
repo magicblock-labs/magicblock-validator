@@ -287,7 +287,6 @@ impl ChainlinkCloner {
                 iterations: i64::MAX,
                 instructions: vec![schedule_commit_ix],
             },
-            &[pubkey, MAGIC_CONTEXT_PUBKEY, validator_authority_id()],
         )
     }
 
