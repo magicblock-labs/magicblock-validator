@@ -221,9 +221,7 @@ impl TaskSchedulerService {
             return Ok(());
         }
 
-        self.remove_task_from_queue(cancel_request.task_id);
-
-        // Remove task from database
+        // Remove task from queue and database
         self.unregister_task(cancel_request.task_id).await?;
 
         Ok(())
@@ -278,17 +276,21 @@ impl TaskSchedulerService {
         }
 
         self.db.insert_task(&task).await?;
-        self.task_queue
+        self.remove_task_from_queue(task.id);
+        let key = self
+            .task_queue
             .insert(task.clone(), Duration::from_millis(0));
+        self.task_queue_keys.insert(task.id, key);
         debug!("Registered task {} from context", task.id);
 
         Ok(())
     }
 
     pub async fn unregister_task(
-        &self,
+        &mut self,
         task_id: i64,
     ) -> TaskSchedulerResult<()> {
+        self.remove_task_from_queue(task_id);
         self.db.remove_task(task_id).await?;
         debug!("Removed task {} from database", task_id);
 
@@ -345,18 +347,15 @@ impl TaskSchedulerService {
         let blockhash = self.block.load().blockhash;
         // Execute unsigned transactions
         // We prepend a noop instruction to make each transaction unique.
-        let noop_instruction = InstructionUtils::noop_instruction(
-            self.tx_counter.fetch_add(1, Ordering::Relaxed),
-        );
+        let ixs = [
+            InstructionUtils::noop_instruction(
+                self.tx_counter.fetch_add(1, Ordering::Relaxed),
+            ),
+            InstructionUtils::execute_task_instruction(instructions),
+        ];
         let tx = Transaction::new(
             &[validator_authority()],
-            Message::new(
-                &[noop_instruction]
-                    .into_iter()
-                    .chain(instructions)
-                    .collect::<Vec<_>>(),
-                Some(&validator_authority_id()),
-            ),
+            Message::new(&ixs, Some(&validator_authority_id())),
             blockhash,
         );
 

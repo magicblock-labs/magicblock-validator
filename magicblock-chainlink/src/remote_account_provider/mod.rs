@@ -5,6 +5,7 @@ use std::{
         atomic::{AtomicU64, Ordering},
         Arc, Mutex,
     },
+    time::Duration,
 };
 
 pub(crate) use chain_pubsub_client::{
@@ -33,8 +34,7 @@ use solana_rpc_client_api::{
 use solana_sysvar::clock;
 use tokio::{
     sync::{mpsc, oneshot},
-    task,
-    time::{self, Duration},
+    task, time,
 };
 use tracing::*;
 
@@ -182,18 +182,17 @@ impl
         let mode = config.lifecycle_mode();
         if mode.needs_remote_account_provider() {
             debug!("Creating RemoteAccountProvider");
-            Ok(Some(
-                RemoteAccountProvider::<
-                    ChainRpcClientImpl,
-                    SubMuxClient<ChainUpdatesClient>,
-                >::try_new_from_endpoints(
-                    endpoints,
-                    commitment,
-                    subscription_forwarder,
-                    config,
-                )
-                .await?,
-            ))
+            let provider = RemoteAccountProvider::<
+                ChainRpcClientImpl,
+                SubMuxClient<ChainUpdatesClient>,
+            >::try_new_from_endpoints(
+                endpoints,
+                commitment,
+                subscription_forwarder,
+                config,
+            )
+            .await?;
+            Ok(Some(provider))
         } else {
             Ok(None)
         }
@@ -407,7 +406,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             try_join_all(subscribe_program_futs).await?;
         }
 
-        RemoteAccountProvider::<
+        let provider = RemoteAccountProvider::<
             ChainRpcClientImpl,
             SubMuxClient<ChainUpdatesClient>,
         >::new(
@@ -418,7 +417,8 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             subscribed_accounts,
             ChainSlot::new(chain_slot),
         )
-        .await
+        .await?;
+        Ok(provider)
     }
 
     pub(crate) fn promote_accounts(&self, pubkeys: &[&Pubkey]) {
@@ -905,11 +905,22 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         if !errors.is_empty() {
             for pubkey in &succeeded {
                 if let Err(unsub_err) = self.unsubscribe(pubkey).await {
-                    warn!(
-                        pubkey = %pubkey, err = ?unsub_err,
-                        "Failed to unsubscribe after partial \
-                         subscription failure"
-                    );
+                    if matches!(
+                        unsub_err,
+                        RemoteAccountProviderError::AccountSubscriptionDoesNotExist(_)
+                    ) {
+                        debug!(
+                            pubkey = %pubkey, err = ?unsub_err,
+                            "Failed to unsubscribe after partial \
+                             subscription failure"
+                        );
+                    } else {
+                        warn!(
+                            pubkey = %pubkey, err = ?unsub_err,
+                            "Failed to unsubscribe after partial \
+                             subscription failure"
+                        );
+                    }
                 }
             }
             return Err(
@@ -942,8 +953,17 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
 
             // 1. Unsubscribe from the account directly (LRU has already removed it)
             if let Err(err) = self.pubsub_client.unsubscribe(evicted).await {
-                // Should we retry here?
-                warn!(evicted = %evicted, error = ?err, "Failed to unsubscribe from pubsub for evicted account");
+                if matches!(
+                    err,
+                    RemoteAccountProviderError::AccountSubscriptionDoesNotExist(
+                        _
+                    )
+                ) {
+                    debug!(evicted = %evicted, error = ?err, "Failed to unsubscribe from pubsub for evicted account");
+                } else {
+                    // Should we retry here?
+                    warn!(evicted = %evicted, error = ?err, "Failed to unsubscribe from pubsub for evicted account");
+                }
             }
 
             // 2. Inform upstream so it can remove it from the store
@@ -1017,8 +1037,9 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             warn!(pubkey = %pubkey, "Tried to unsubscribe from account that should never be evicted");
             return Ok(());
         }
+
         if !self.lrucache_subscribed_accounts.contains(pubkey) {
-            warn!(pubkey = %pubkey, "Tried to unsubscribe from account not subscribed in LRU");
+            trace!(pubkey = %pubkey, "Already unsubscribed from LRU");
             return Ok(());
         }
 

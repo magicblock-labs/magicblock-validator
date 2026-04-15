@@ -10,8 +10,8 @@ use solana_program_runtime::invoke_context::InvokeContext;
 use solana_pubkey::Pubkey;
 
 use crate::{
+    schedule_task::validate_cranks_instructions,
     utils::accounts::get_instruction_pubkey_with_idx,
-    validator::effective_validator_authority_id,
 };
 
 pub(crate) fn process_schedule_task(
@@ -68,6 +68,18 @@ pub(crate) fn process_schedule_task(
         return Err(InstructionError::InvalidInstructionData);
     }
 
+    // Enforce valid interval
+    if args.execution_interval_millis <= 0
+        || args.execution_interval_millis > u32::MAX as i64
+    {
+        ic_msg!(
+            invoke_context,
+            "ScheduleTask ERR: execution interval must be between 1 and {} milliseconds",
+            u32::MAX
+        );
+        return Err(InstructionError::InvalidInstructionData);
+    }
+
     // Enforce minimal number of instructions
     if args.instructions.is_empty() {
         ic_msg!(
@@ -77,38 +89,7 @@ pub(crate) fn process_schedule_task(
         return Err(InstructionError::InvalidInstructionData);
     }
 
-    // Assert that the task instructions do not have signers aside from the validator authority
-    // Assert that instruction accounts are passed to this instruction
-    let ix_ctx = transaction_context.get_current_instruction_context()?;
-    let ix_accounts = (ACCOUNTS_START
-        ..ix_ctx.get_number_of_instruction_accounts() as usize)
-        .map(|i| {
-            get_instruction_pubkey_with_idx(transaction_context, i as u16)
-                .copied()
-        })
-        .collect::<Result<HashSet<_>, _>>()?;
-    let val_id = effective_validator_authority_id();
-    for instruction in &args.instructions {
-        for account in &instruction.accounts {
-            if account.is_signer && account.pubkey.ne(&val_id) {
-                ic_msg!(
-                    invoke_context,
-                    "ScheduleTask: signer account '{}' is not the validator authority.",
-                    account.pubkey,
-                );
-                return Err(InstructionError::MissingRequiredSignature);
-            }
-
-            if !ix_accounts.contains(&account.pubkey) {
-                ic_msg!(
-                    invoke_context,
-                    "ScheduleTask: missing account '{}'.",
-                    account.pubkey,
-                );
-                return Err(InstructionError::MissingAccount);
-            }
-        }
-    }
+    validate_cranks_instructions(invoke_context, &args.instructions)?;
 
     let schedule_request = ScheduleTaskRequest {
         id: args.task_id,
@@ -143,7 +124,9 @@ mod test {
     use crate::{
         test_utils::{process_instruction, COUNTER_PROGRAM_ID},
         utils::instruction_utils::InstructionUtils,
-        validator::generate_validator_authority_if_needed,
+        validator::{
+            generate_validator_authority_if_needed, validator_authority_id,
+        },
     };
 
     fn create_simple_ix() -> Instruction {
@@ -178,24 +161,10 @@ mod test {
         let pdas = (0..n_pdas)
             .map(|_| Keypair::new().pubkey())
             .collect::<Vec<_>>();
-        let mut transaction_accounts = vec![(
+        let transaction_accounts = vec![(
             payer.pubkey(),
             AccountSharedData::new(u64::MAX, 0, &system_program::id()),
         )];
-        transaction_accounts.extend(
-            pdas.iter()
-                .map(|pda| {
-                    (
-                        *pda,
-                        AccountSharedData::new(
-                            u64::MAX,
-                            0,
-                            &Keypair::new().pubkey(),
-                        ),
-                    )
-                })
-                .collect::<Vec<_>>(),
-        );
         (payer, pdas, transaction_accounts)
     }
 
@@ -209,11 +178,8 @@ mod test {
             iterations: 1,
             instructions: vec![create_simple_ix()],
         };
-        let ix = InstructionUtils::schedule_task_instruction(
-            &payer.pubkey(),
-            args,
-            &[],
-        );
+        let ix =
+            InstructionUtils::schedule_task_instruction(&payer.pubkey(), args);
 
         (transaction_accounts, ix)
     }
@@ -231,11 +197,8 @@ mod test {
             iterations: 1,
             instructions: vec![create_complex_ix(&pdas, writable, signer)],
         };
-        let ix = InstructionUtils::schedule_task_instruction(
-            &payer.pubkey(),
-            args,
-            &pdas,
-        );
+        let ix =
+            InstructionUtils::schedule_task_instruction(&payer.pubkey(), args);
 
         (transaction_accounts, ix)
     }
@@ -261,22 +224,6 @@ mod test {
     }
 
     #[test]
-    fn fail_process_schedule_task_without_accounts() {
-        // Read only signer
-        let (mut tx_accs, ix) = setup_complex_ix_test(2, false, false);
-
-        // Remove accounts
-        tx_accs.pop();
-
-        process_instruction(
-            &ix.data,
-            tx_accs,
-            ix.accounts,
-            Err(InstructionError::MissingAccount),
-        );
-    }
-
-    #[test]
     fn fail_process_schedule_task_with_instructions_signers() {
         // Read only signer
         let (tx_accs, ix) = setup_complex_ix_test(2, false, true);
@@ -294,6 +241,26 @@ mod test {
             tx_accs,
             ix.accounts,
             Err(InstructionError::MissingRequiredSignature),
+        );
+    }
+
+    #[test]
+    fn fail_process_schedule_task_with_validator_authority() {
+        let (payer, mut pdas, transaction_accounts) = setup_accounts(0);
+        pdas.push(validator_authority_id());
+        let args = ScheduleTaskArgs {
+            task_id: 1,
+            execution_interval_millis: 1000,
+            iterations: 1,
+            instructions: vec![create_complex_ix(&pdas, false, false)],
+        };
+        let ix =
+            InstructionUtils::schedule_task_instruction(&payer.pubkey(), args);
+        process_instruction(
+            &ix.data,
+            transaction_accounts,
+            ix.accounts,
+            Err(InstructionError::IncorrectAuthority),
         );
     }
 
@@ -323,18 +290,15 @@ mod test {
 
     #[test]
     fn fail_process_schedule_empty_task() {
-        let (payer, pdas, transaction_accounts) = setup_accounts(0);
+        let (payer, _pdas, transaction_accounts) = setup_accounts(0);
         let args = ScheduleTaskArgs {
             task_id: 1,
             execution_interval_millis: 1000,
             iterations: 1,
             instructions: vec![],
         };
-        let ix = InstructionUtils::schedule_task_instruction(
-            &payer.pubkey(),
-            args,
-            &pdas,
-        );
+        let ix =
+            InstructionUtils::schedule_task_instruction(&payer.pubkey(), args);
         process_instruction(
             &ix.data,
             transaction_accounts,
@@ -345,23 +309,43 @@ mod test {
 
     #[test]
     fn test_process_schedule_task_with_invalid_iterations() {
-        let (payer, pdas, transaction_accounts) = setup_accounts(0);
+        let (payer, _pdas, transaction_accounts) = setup_accounts(0);
         let args = ScheduleTaskArgs {
             task_id: 1,
             execution_interval_millis: 1000,
             iterations: -100,
             instructions: vec![create_simple_ix()],
         };
-        let ix = InstructionUtils::schedule_task_instruction(
-            &payer.pubkey(),
-            args,
-            &pdas,
-        );
+        let ix =
+            InstructionUtils::schedule_task_instruction(&payer.pubkey(), args);
         process_instruction(
             &ix.data,
             transaction_accounts,
             ix.accounts,
             Err(InstructionError::InvalidInstructionData),
         );
+    }
+
+    #[test]
+    fn test_process_schedule_task_with_invalid_execution_interval() {
+        let (payer, _pdas, transaction_accounts) = setup_accounts(0);
+        for execution_interval_millis in [-12345, 0, u32::MAX as i64 + 1] {
+            let args = ScheduleTaskArgs {
+                task_id: 1,
+                execution_interval_millis,
+                iterations: 1,
+                instructions: vec![create_simple_ix()],
+            };
+            let ix = InstructionUtils::schedule_task_instruction(
+                &payer.pubkey(),
+                args,
+            );
+            process_instruction(
+                &ix.data,
+                transaction_accounts.clone(),
+                ix.accounts,
+                Err(InstructionError::InvalidInstructionData),
+            );
+        }
     }
 }

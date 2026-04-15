@@ -14,7 +14,9 @@ use crate::{
     },
     mutate_accounts::process_mutate_accounts,
     process_scheduled_commit_sent,
-    schedule_task::{process_cancel_task, process_schedule_task},
+    schedule_task::{
+        process_cancel_task, process_execute_crank, process_schedule_task,
+    },
     schedule_transactions::{
         process_accept_scheduled_commits, process_add_action_callback,
         process_schedule_commit, process_schedule_commit_finalize,
@@ -214,6 +216,9 @@ declare_process_instruction!(
                 remote_slot,
                 authority,
             ),
+            ExecuteCrank { instructions } => {
+                process_execute_crank(signers, invoke_context, instructions)
+            }
         }
     }
 );

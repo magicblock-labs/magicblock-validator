@@ -3,6 +3,7 @@ use std::{
     collections::HashMap,
     fmt,
     sync::{Arc, Mutex},
+    time::Duration,
 };
 
 use async_trait::async_trait;
@@ -28,6 +29,9 @@ use crate::{
 pub struct ClonerStub {
     accounts_bank: Arc<AccountsBankStub>,
     cloned_programs: Arc<Mutex<HashMap<Pubkey, LoadedProgram>>>,
+    clone_requests: Arc<Mutex<Vec<AccountCloneRequest>>>,
+    clone_delay: Arc<Mutex<Option<Duration>>>,
+    fail_next_clone: Arc<Mutex<bool>>,
 }
 
 #[cfg(any(test, feature = "dev-context"))]
@@ -37,7 +41,18 @@ impl ClonerStub {
             accounts_bank,
             cloned_programs:
                 Arc::<Mutex<HashMap<Pubkey, LoadedProgram>>>::default(),
+            clone_requests: Arc::new(Mutex::new(Vec::new())),
+            clone_delay: Arc::new(Mutex::new(None)),
+            fail_next_clone: Arc::new(Mutex::new(false)),
         }
+    }
+
+    pub fn set_fail_next_clone(&self, fail: bool) {
+        *self.fail_next_clone.lock().unwrap() = fail;
+    }
+
+    pub fn set_clone_delay(&self, delay: Duration) {
+        *self.clone_delay.lock().unwrap() = Some(delay);
     }
 
     #[allow(dead_code)]
@@ -66,6 +81,14 @@ impl ClonerStub {
     pub fn dump_account_keys(&self, include_blacklisted: bool) -> String {
         self.accounts_bank.dump_account_keys(include_blacklisted)
     }
+
+    pub fn clone_requests(&self) -> Vec<AccountCloneRequest> {
+        self.clone_requests.lock().unwrap().clone()
+    }
+
+    pub fn clone_request_count(&self) -> usize {
+        self.clone_requests.lock().unwrap().len()
+    }
 }
 
 #[cfg(any(test, feature = "dev-context"))]
@@ -78,6 +101,22 @@ impl Cloner for ClonerStub {
         &self,
         request: AccountCloneRequest,
     ) -> ClonerResult<Signature> {
+        self.clone_requests.lock().unwrap().push(request.clone());
+        let delay = *self.clone_delay.lock().unwrap();
+        if let Some(delay) = delay {
+            tokio::time::sleep(delay).await;
+        }
+        {
+            let mut should_fail = self.fail_next_clone.lock().unwrap();
+            if *should_fail {
+                *should_fail = false;
+                return Err(
+                    crate::cloner::errors::ClonerError::CommittorServiceError(
+                        "Injected test failure".to_string(),
+                    ),
+                );
+            }
+        }
         self.accounts_bank.insert(request.pubkey, request.account);
         Ok(Signature::default())
     }
