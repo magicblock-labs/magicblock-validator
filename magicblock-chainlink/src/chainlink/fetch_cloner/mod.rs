@@ -110,7 +110,7 @@ where
             hash_map::HashMap<CloneKey, Vec<oneshot::Sender<CloneCompletion>>>,
         >,
     >,
-  
+
     /// Risk checker for post-delegation action addresses.
     risk_service: Option<Arc<RiskService>>,
 }
@@ -662,9 +662,10 @@ where
         signers.sort_unstable();
         signers.dedup();
 
-        risk_service.check_addresses(signers).await?;
-
-        Ok(())
+        if signers.is_empty() {
+            return Ok(());
+        }
+        Ok(risk_service.check_addresses(signers).await?)
     }
 
     async fn clone_projected_ata_request(
