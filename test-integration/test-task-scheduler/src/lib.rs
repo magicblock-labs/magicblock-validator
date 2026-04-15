@@ -4,12 +4,13 @@ use std::{
     time::{Duration, Instant},
 };
 
+use cleanass::assert;
 use integration_test_tools::{
     expect,
     loaded_accounts::LoadedAccounts,
     tmpdir::resolve_tmp_dir,
     validator::{
-        start_magicblock_validator_with_config_struct_and_temp_dir,
+        cleanup, start_magicblock_validator_with_config_struct_and_temp_dir,
         TMP_DIR_CONFIG,
     },
     IntegrationTestContext,
@@ -149,8 +150,13 @@ pub fn wait_for_incremented_counter(
         let counter =
             expect!(FlexiCounter::try_decode(&counter_account.data), validator);
         if counter.count == expected_count {
-            break;
+            return;
         }
         expect!(ctx.wait_for_next_slot_ephem(), validator);
     }
+    assert!(
+        false,
+        cleanup(validator),
+        "Failed to wait for incremented counter"
+    );
 }
