@@ -251,9 +251,9 @@ remove-confined-accounts = false
 # resubscription-delay = "50ms"
 
 # ------------------------------------------------------------------------------
-# Optional: Range Risk API validation for post-delegation actions
+# Optional: Range Risk API validation for post-delegation actions signers
 # ------------------------------------------------------------------------------
-# When enabled, all addresses referenced by post-delegation actions are checked
+# When enabled, all signers referenced by post-delegation actions are checked
 # against Range API before actions are allowed to execute.
 [chainlink.risk]
 # Enables/disables Range risk checks.
