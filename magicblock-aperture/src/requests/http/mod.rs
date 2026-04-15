@@ -31,7 +31,8 @@ pub(crate) type HandlerResult = RpcResult<Response<JsonBody>>;
 
 // Solana's builtin-program filters in compute-budget processing assume program
 // indices fit within a packet-bounded pubkey table (1232 / 32 = 38).
-const MAX_RUNTIME_PROGRAM_ID_INDEX_EXCLUSIVE: usize = 1232 / size_of::<Pubkey>();
+const MAX_RUNTIME_PROGRAM_ID_INDEX_EXCLUSIVE: usize =
+    1232 / size_of::<Pubkey>();
 
 /// An enum to efficiently represent a request body, avoiding allocation
 /// for single-chunk bodies (which are almost always the case)
@@ -340,13 +341,14 @@ pub(crate) mod get_delegation_status;
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use magicblock_core::link::blocks::BlockHash;
     use solana_message::{
         compiled_instruction::CompiledInstruction, legacy::Message,
         MessageHeader, VersionedMessage,
     };
     use solana_signature::Signature;
+
+    use super::*;
 
     const SYSTEM_PROGRAM_ID: Pubkey =
         Pubkey::from_str_const("11111111111111111111111111111111");
@@ -365,10 +367,7 @@ mod tests {
                 },
                 account_keys: {
                     let mut keys = vec![SYSTEM_PROGRAM_ID];
-                    keys.extend(std::iter::repeat_n(
-                        SYSTEM_PROGRAM_ID,
-                        36,
-                    ));
+                    keys.extend(std::iter::repeat_n(SYSTEM_PROGRAM_ID, 36));
                     keys.push(COMPUTE_BUDGET_ID);
                     keys
                 },
@@ -396,10 +395,7 @@ mod tests {
                 },
                 account_keys: {
                     let mut keys = vec![SYSTEM_PROGRAM_ID];
-                    keys.extend(std::iter::repeat_n(
-                        SYSTEM_PROGRAM_ID,
-                        37,
-                    ));
+                    keys.extend(std::iter::repeat_n(SYSTEM_PROGRAM_ID, 37));
                     keys.push(COMPUTE_BUDGET_ID);
                     keys
                 },
