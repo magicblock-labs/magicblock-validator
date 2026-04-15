@@ -217,7 +217,7 @@ jobs:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
 
   notify-review:
-    if: github.event_name == 'pull_request_review' && github.event.action == 'submitted'
+    if: github.event_name == 'pull_request_review' && github.event.action == 'submitted' && (github.event.review.state == 'approved' || github.event.review.state == 'changes_requested')
     runs-on: ubuntu-latest
     steps:
       - name: Build Slack review message
@@ -237,9 +237,6 @@ jobs:
               ;;
             changes_requested)
               review_summary="submitted a *changes requested* review for"
-              ;;
-            commented)
-              review_summary="submitted a review for"
               ;;
             *)
               if [ -n "$REVIEW_STATE" ]; then
