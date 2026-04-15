@@ -1,4 +1,5 @@
-use cleanass::assert;
+use std::time::Duration;
+
 use integration_test_tools::{expect, validator::cleanup};
 use magicblock_program::{
     args::ScheduleTaskArgs, instruction_utils::InstructionUtils,
@@ -14,7 +15,9 @@ use solana_sdk::{
     signer::Signer,
     transaction::Transaction,
 };
-use test_task_scheduler::{create_delegated_counter, setup_validator};
+use test_task_scheduler::{
+    create_delegated_counter, setup_validator, wait_for_incremented_counter,
+};
 
 #[test]
 fn test_use_crank_signer() {
@@ -74,23 +77,13 @@ fn test_use_crank_signer() {
         validator
     );
 
-    // Wait for the task to be scheduled
-    expect!(ctx.wait_for_delta_slot_ephem(10), validator);
-
     // Check that the counter was incremented
-    let counter_account = expect!(
-        ctx.try_ephem_client().and_then(|client| client
-            .get_account(&counter_pda)
-            .map_err(|e| anyhow::anyhow!("Failed to get account: {}", e))),
-        validator
-    );
-    let counter =
-        expect!(FlexiCounter::try_decode(&counter_account.data), validator);
-    assert!(
-        counter.count == iterations as u64,
-        cleanup(&mut validator),
-        "counter.count: {}",
-        counter.count
+    wait_for_incremented_counter(
+        &ctx,
+        &counter_pda,
+        iterations as u64,
+        Duration::from_secs(10),
+        &mut validator,
     );
 
     cleanup(&mut validator);
