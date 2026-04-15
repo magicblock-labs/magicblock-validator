@@ -107,13 +107,14 @@ impl RiskService {
             Client::builder().timeout(config.request_timeout).build()?;
 
         let cache = Arc::new(Mutex::new(conn));
+        let in_flight = Arc::new(AsyncMutex::new(HashMap::new()));
         let (cache_writer, cache_rx) = mpsc::unbounded_channel();
-        spawn_cache_writer(Arc::clone(&cache), cache_rx);
+        spawn_cache_writer(cache.clone(), in_flight.clone(), cache_rx);
 
         Ok(Some(Self {
             client,
             cache,
-            in_flight: Arc::new(AsyncMutex::new(HashMap::new())),
+            in_flight,
             cache_writer,
             base_url: config.base_url.trim_end_matches('/').to_string(),
             api_key,
@@ -160,7 +161,9 @@ impl RiskService {
                 Ok::<_, RiskError>((address.to_string(), score))
             }))
             .await;
-        self.remove_from_in_flight(&uncached_addresses).await;
+        if fetch_result.is_err() {
+            self.remove_from_in_flight(&uncached_addresses).await;
+        }
         let scores = fetch_result?;
 
         self.write_cache(scores.clone());
@@ -265,15 +268,18 @@ impl RiskService {
 
 fn spawn_cache_writer(
     cache: Arc<Mutex<Connection>>,
+    in_flight: Arc<AsyncMutex<HashMap<String, SharedRiskScoreFuture>>>,
     mut rx: mpsc::UnboundedReceiver<Vec<(String, u64)>>,
 ) {
     tokio::spawn(async move {
-        while let Some(values) = rx.recv().await {
+        while let Some(scores) = rx.recv().await {
+            let addresses: Vec<String> =
+                scores.iter().map(|(a, _)| a.clone()).collect();
             let now = now_unix_seconds();
             let db = Arc::clone(&cache);
             match tokio::task::spawn_blocking(move || {
                 let conn = db.lock().map_err(|_| RiskError::PoisonedLock)?;
-                for (address, risk_score) in &values {
+                for (address, risk_score) in &scores {
                     conn.execute(
                         "INSERT INTO address_risk_cache
                             (address, risk_score, fetched_at_unix_s)
@@ -293,6 +299,10 @@ fn spawn_cache_writer(
                 }
                 Err(e) => error!(error = ?e, "Cache writer task panicked"),
                 _ => {}
+            }
+            let mut guard = in_flight.lock().await;
+            for address in &addresses {
+                guard.remove(address.as_str());
             }
         }
     });
