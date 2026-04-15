@@ -157,6 +157,7 @@ async fn test_escrowed_payer_success() {
 #[tokio::test]
 async fn test_fee_charged_for_failed_transaction() {
     let env = ExecutionTestEnv::new();
+    env.wait_for_scheduler_ready().await;
     let initial_bal = env.get_payer().lamports();
 
     // Create invalid instruction (writing to empty data)
@@ -187,6 +188,7 @@ async fn test_fee_charged_for_failed_transaction() {
 #[tokio::test]
 async fn test_escrow_charged_for_failed_transaction() {
     let env = ExecutionTestEnv::new();
+    env.wait_for_scheduler_ready().await;
     let mut payer = env.get_payer();
     payer.set_lamports(0);
     payer.set_delegated(false);

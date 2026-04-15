@@ -22,10 +22,12 @@ solana-rpc-client = { workspace = true }
 solana-signature = { workspace = true }
 solana-signer = { workspace = true }
 solana-transaction = { workspace = true }
+solana-transaction-error = { workspace = true }
 solana-transaction-status-client-types = { workspace = true }
 
 tempfile = { workspace = true }
 tokio = { workspace = true }
+tokio-util = { workspace = true }
 tracing = { workspace = true }
 tracing-log = { workspace = true }
 tracing-subscriber = { workspace = true }

@@ -1,10 +1,4 @@
-use std::{
-    collections::HashSet,
-    sync::{
-        atomic::{AtomicU64, Ordering},
-        Arc,
-    },
-};
+use std::{collections::HashSet, sync::Arc};
 
 use dlp_api::pda::ephemeral_balance_pda_from_payer;
 use errors::ChainlinkResult;
@@ -14,9 +8,9 @@ use magicblock_config::config::ChainLinkConfig;
 use magicblock_metrics::metrics::AccountFetchOrigin;
 use solana_account::{AccountSharedData, ReadableAccount};
 use solana_commitment_config::CommitmentConfig;
-use solana_feature_set;
 use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
+use solana_sdk_ids::feature;
 use solana_signer::Signer;
 use solana_transaction::sanitized::SanitizedTransaction;
 use tokio::{sync::mpsc, task};
@@ -28,10 +22,12 @@ use crate::{
     fetch_cloner::FetchAndCloneResult,
     filters::is_noop_system_transfer,
     remote_account_provider::{
+        chain_pubsub_client::mock::ChainPubsubClientMock,
         chain_updates_client::ChainUpdatesClient, ChainPubsubClient,
         ChainRpcClient, ChainRpcClientImpl, Endpoints, RemoteAccountProvider,
     },
     submux::SubMuxClient,
+    testing::{cloner_stub::ClonerStub, rpc_client_mock::ChainRpcClientMock},
 };
 
 mod account_still_undelegating_on_chain;
@@ -41,6 +37,10 @@ pub mod errors;
 pub mod fetch_cloner;
 
 pub use blacklisted_accounts::*;
+
+/// A type alias for chainlink with only accountsdb being real impl
+pub type StubbedChainlink<V> =
+    Chainlink<ChainRpcClientMock, ChainPubsubClientMock, V, ClonerStub>;
 
 // -----------------
 // Chainlink
@@ -61,7 +61,6 @@ pub struct Chainlink<
     removed_accounts_sub: Option<task::JoinHandle<()>>,
 
     validator_id: Pubkey,
-    faucet_id: Pubkey,
 
     /// If > 0, automatically airdrop this many lamports to feepayers when they are new/empty
     auto_airdrop_lamports: u64,
@@ -77,7 +76,6 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
         accounts_bank: &Arc<V>,
         fetch_cloner: Option<Arc<FetchCloner<T, U, V, C>>>,
         validator_pubkey: Pubkey,
-        faucet_pubkey: Pubkey,
         config: &ChainLinkConfig,
     ) -> ChainlinkResult<Self> {
         let removed_accounts_sub = if let Some(fetch_cloner) = &fetch_cloner {
@@ -97,7 +95,6 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
             fetch_cloner,
             removed_accounts_sub,
             validator_id: validator_pubkey,
-            faucet_id: faucet_pubkey,
             auto_airdrop_lamports: config.auto_airdrop_lamports,
             remove_confined_accounts: config.remove_confined_accounts,
         })
@@ -117,7 +114,6 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
         accounts_bank: &Arc<V>,
         cloner: &Arc<C>,
         validator_keypair: Keypair,
-        faucet_pubkey: Pubkey,
         config: ChainlinkConfig,
         chainlink_config: &ChainLinkConfig,
     ) -> ChainlinkResult<
@@ -141,7 +137,6 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
                 accounts_bank,
                 cloner,
                 validator_keypair,
-                faucet_pubkey,
                 rx,
                 chainlink_config.allowed_programs.clone(),
             );
@@ -154,7 +149,6 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
             accounts_bank,
             fetch_cloner,
             validator_pubkey,
-            faucet_pubkey,
             chainlink_config,
         )
     }
@@ -164,18 +158,17 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
     /// when resuming an existing ledger to guarantee that we don't hold
     /// accounts that might be stale.
     pub fn reset_accounts_bank(&self) -> AccountsDbResult<()> {
-        let blacklisted_accounts =
-            blacklisted_accounts(&self.validator_id, &self.faucet_id);
+        let blacklisted_accounts = blacklisted_accounts(&self.validator_id);
 
-        let delegated_only = AtomicU64::new(0);
-        let undelegating = AtomicU64::new(0);
-        let blacklisted = AtomicU64::new(0);
-        let remaining = AtomicU64::new(0);
-        let remaining_empty = AtomicU64::new(0);
+        let mut delegated_only = 0;
+        let mut kept_ephemeral = 0;
+        let mut undelegating = 0;
+        let mut blacklisted = 0;
+        let mut remaining = 0u32;
 
         let removed = self.accounts_bank.remove_where(|pubkey, account| {
             if blacklisted_accounts.contains(pubkey) {
-                blacklisted.fetch_add(1, Ordering::Relaxed);
+                blacklisted += 1;
                 return false;
             }
             if self.remove_confined_accounts && account.confined() {
@@ -184,48 +177,37 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
             // Undelegating accounts are normally also delegated, but if that ever changes
             // we want to make sure we never remove an account of which we aren't sure
             // if the undelegation completed on chain or not.
-            if account.delegated() || account.undelegating() {
-                if account.undelegating() {
-                    undelegating.fetch_add(1, Ordering::Relaxed);
-                } else {
-                    delegated_only.fetch_add(1, Ordering::Relaxed);
-                }
-                return false;
-            }
-            if tracing::enabled!(tracing::Level::TRACE) {
-                let account_fmt = format!("{:#?}", account);
+            let should_remove = if account.undelegating() {
+                undelegating += 1;
+                false
+            } else if account.ephemeral() {
+                kept_ephemeral += 1;
+                false
+            } else if account.delegated() {
+                delegated_only += 1;
+                false
+            } else {
+                *account.owner() != feature::ID
+            };
+            if should_remove {
                 trace!(
                     pubkey = %pubkey,
-                    account = %account_fmt,
-                    "Removing non-delegated, non-DLP-owned account"
+                    account=%format!("{account:#?}"),
+                    "Removing non-delegated account during accountsdb reset"
                 );
+            } else {
+                remaining += 1;
             }
-            remaining.fetch_add(1, Ordering::Relaxed);
-            if account.owner().as_ref() != solana_feature_set::ID.as_ref() {
-                remaining_empty.fetch_add(1, Ordering::Relaxed);
-            }
-            true
+            should_remove
         })?;
 
-        let non_empty = remaining
-            .load(Ordering::Relaxed)
-            .saturating_sub(remaining_empty.load(Ordering::Relaxed));
-
-        let delegated_only = delegated_only.into_inner();
-        let undelegating = undelegating.into_inner();
-        let remaining_empty_count = remaining_empty.into_inner();
-        let kept_delegated = delegated_only;
-        let kept_blacklisted = blacklisted.into_inner();
-        let total_removed = removed;
-
         info!(
-            total_removed,
-            non_empty,
-            empty = remaining_empty_count,
+            total_removed = removed,
             delegated_not_undelegating = delegated_only,
             delegated_and_undelegating = undelegating,
-            kept_delegated,
-            kept_blacklisted,
+            kept_delegated = delegated_only,
+            kept_blacklisted = blacklisted,
+            kept_ephemeral,
             "Removed accounts from bank"
         );
         Ok(())
@@ -526,6 +508,22 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
         self.fetch_cloner()
             .map(|provider| provider.is_watching(pubkey))
             .unwrap_or(false)
+    }
+
+    /// A temporary hacky method to clone chainlink with accountsdb only,
+    /// for it's used by the replication service to clean up accountsdb
+    ///
+    /// TODO(bmuddha):
+    /// remove all accountsdb management from chainlink, after accountsdb refactoring
+    pub fn stub(&self) -> StubbedChainlink<V> {
+        Chainlink {
+            accounts_bank: self.accounts_bank.clone(),
+            fetch_cloner: None,
+            removed_accounts_sub: None,
+            validator_id: self.validator_id,
+            auto_airdrop_lamports: 0,
+            remove_confined_accounts: self.remove_confined_accounts,
+        }
     }
 }
 

@@ -151,13 +151,11 @@ where
         accounts_bank: &Arc<V>,
         cloner: &Arc<C>,
         validator_keypair: Keypair,
-        faucet_pubkey: Pubkey,
         subscription_updates_rx: mpsc::Receiver<ForwardedSubscriptionUpdate>,
         allowed_programs: Option<Vec<AllowedProgram>>,
     ) -> Arc<Self> {
         let validator_pubkey = validator_keypair.pubkey();
-        let blacklisted_accounts =
-            blacklisted_accounts(&validator_pubkey, &faucet_pubkey);
+        let blacklisted_accounts = blacklisted_accounts(&validator_pubkey);
         let allowed_programs = allowed_programs.map(|programs| {
             programs.iter().map(|p| p.id).collect::<HashSet<_>>()
         });

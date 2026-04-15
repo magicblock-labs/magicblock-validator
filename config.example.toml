@@ -121,6 +121,25 @@ basefee = 0
 # Env: MBV_VALIDATOR__KEYPAIR
 keypair = "9Vo7TbA5YfC5a33JhAi9Fb41usA6JwecHNRw3f9MzzHAM8hFnXTzL5DcEHwsAFjuUZ8vNQcJ4XziRFpMc3gTgBQ"
 
+# Replication role for this validator.
+# Default: "standalone"
+# Options:
+# - "standalone": disable replication
+# 
+# - "stand-by": replicate and allow takeover
+# 
+# [validator.replication-mode.stand-by]
+# url = "nats://0.0.0.0:4222"
+# secret = "SUAXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
+# 
+# - "replica-only": replicate without takeover
+#   Requires the primary validator pubkey we are replicating from.
+# 
+# [validator.replication-mode.replica-only]
+# url = "nats://0.0.0.0:4222"
+# secret = "SUAXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
+# authority-override = "L12m1UhkJRfHyvLMcVucJwxXeuD728EqVDDwQDxFMNo"
+
 [aperture]
 # Network address to bind the main JSON RPC service to.
 # Websocket bind address is derived by incrementing the port
@@ -175,11 +194,6 @@ index-size = 16_777_216
 # Env: MBV_ACCOUNTSDB__MAX_SNAPSHOTS
 max-snapshots = 4
 
-# How often (in slots) to take a snapshot of the database.
-# Default: 1024
-# Env: MBV_ACCOUNTSDB__SNAPSHOT_FREQUENCY
-snapshot-frequency = 1024
-
 # If true, wipes the accounts database on every startup.
 # Default: false
 # Env: MBV_ACCOUNTSDB__RESET
@@ -193,6 +207,13 @@ reset = false
 # Default: "400ms"
 # Env: MBV_LEDGER__BLOCK_TIME
 block-time = "400ms"
+
+# The number of slots included in a superblock.
+# accountsdb checksum/snapshot is taken at superblock boundary
+# 
+# Default: 72000
+# Env: MBV_LEDGER__SUPERBLOCK_SIZE
+superblock-size = 72000
 
 # Upper hard threshold for the max size of the ledger (in bytes).
 # Ledger truncation logic kicks in when disk usage approaches this limit.

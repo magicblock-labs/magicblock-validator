@@ -1,7 +1,9 @@
 mod common;
 use std::{sync::Arc, time::Duration};
 
-use magicblock_ledger::{ledger_truncator::LedgerTruncator, Ledger};
+use magicblock_ledger::{
+    ledger_truncator::LedgerTruncator, LatestBlockInner, Ledger,
+};
 use solana_hash::Hash;
 use solana_signature::Signature;
 use test_kit::init_logger;
@@ -55,7 +57,9 @@ async fn test_truncator_not_purged_size() {
 
     for i in 0..NUM_TRANSACTIONS {
         write_dummy_transaction(&ledger, i, 0);
-        ledger.write_block(i, 0, Hash::new_unique()).unwrap()
+        ledger
+            .write_block(LatestBlockInner::new(i, Hash::new_unique(), 0))
+            .unwrap()
     }
     let signatures = (0..NUM_TRANSACTIONS)
         .map(|i| {
@@ -86,7 +90,9 @@ async fn test_truncator_non_empty_ledger() {
     let signatures = (0..FINAL_SLOT + 20)
         .map(|i| {
             let (_, signature) = write_dummy_transaction(&ledger, i, 0);
-            ledger.write_block(i, 0, Hash::new_unique()).unwrap();
+            ledger
+                .write_block(LatestBlockInner::new(i, Hash::new_unique(), 0))
+                .unwrap();
             signature
         })
         .collect::<Vec<_>>();
@@ -129,7 +135,9 @@ async fn transaction_spammer(
         for _ in 0..tx_per_operation {
             let slot = signatures.len() as u64;
             let (_, signature) = write_dummy_transaction(&ledger, slot, 0);
-            ledger.write_block(slot, 0, Hash::new_unique()).unwrap();
+            ledger
+                .write_block(LatestBlockInner::new(slot, Hash::new_unique(), 0))
+                .unwrap();
             signatures.push(signature);
         }
 
@@ -187,7 +195,9 @@ async fn test_with_1gb_db() {
         }
 
         write_dummy_transaction(&ledger, slot, 0);
-        ledger.write_block(slot, 0, Hash::new_unique()).unwrap();
+        ledger
+            .write_block(LatestBlockInner::new(slot, Hash::new_unique(), 0))
+            .unwrap();
         slot += 1
     }
 

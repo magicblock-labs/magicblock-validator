@@ -1,0 +1,39 @@
+[package]
+name = "magicblock-replicator"
+version.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+license.workspace = true
+edition.workspace = true
+
+[dependencies]
+async-nats = { workspace = true }
+bincode = { workspace = true }
+bytes = { workspace = true }
+futures = { workspace = true }
+magicblock-accounts-db = { workspace = true }
+magicblock-chainlink = { workspace = true }
+magicblock-core = { workspace = true }
+magicblock-ledger = { workspace = true }
+machineid-rs = { workspace = true }
+notify = { version = "8.0", features = ["macos_kqueue"] }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = [
+  "net",
+  "rt",
+  "macros",
+  "sync",
+  "io-util",
+  "fs",
+] }
+tokio-util = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+solana-hash = { workspace = true, features = ["serde"] }
+solana-transaction = { workspace = true, features = ["serde"] }
+solana-transaction-error = { workspace = true }
+tracing = { workspace = true }
+url = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

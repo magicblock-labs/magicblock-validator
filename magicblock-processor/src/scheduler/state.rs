@@ -4,13 +4,18 @@
 //! `TransactionSchedulerState` is constructed externally and passed to
 //! `TransactionScheduler::new()` for initialization.
 
-use std::sync::{Arc, OnceLock, RwLock};
+use std::{
+    sync::{Arc, OnceLock, RwLock},
+    time::Duration,
+};
 
-use magicblock_accounts_db::{traits::AccountsBank, AccountsDb};
+use magicblock_accounts_db::AccountsDb;
 use magicblock_core::link::{
     accounts::AccountUpdateTx,
+    replication::Message,
     transactions::{
-        ScheduledTasksTx, TransactionStatusTx, TransactionToProcessRx,
+        ScheduledTasksTx, SchedulerMode, TransactionStatusTx,
+        TransactionToProcessRx,
     },
 };
 use magicblock_ledger::Ledger;
@@ -31,7 +36,10 @@ use solana_program_runtime::{
 };
 use solana_pubkey::Pubkey;
 use solana_svm::transaction_processor::TransactionProcessingEnvironment;
-use tokio::sync::mpsc::Receiver;
+use tokio::sync::{
+    mpsc::{Receiver, Sender},
+    Semaphore,
+};
 use tokio_util::sync::CancellationToken;
 
 use crate::executor::SimpleForkGraph;
@@ -51,10 +59,16 @@ pub struct TransactionSchedulerState {
     pub account_update_tx: AccountUpdateTx,
     pub transaction_status_tx: TransactionStatusTx,
     pub tasks_tx: ScheduledTasksTx,
+    pub replication_tx: Sender<Message>,
+    /// Semaphore for pausing scheduling during exclusive DB access.
+    pub pause_permit: Arc<Semaphore>,
 
     // === Configuration ===
     pub is_auto_airdrop_lamports_enabled: bool,
     pub shutdown: CancellationToken,
+    pub block_time: Duration,
+    pub superblock_size: u64,
+
     /// Receives mode transition commands (Primary or Replica) at runtime.
     pub mode_rx: Receiver<SchedulerMode>,
 }
@@ -103,8 +117,6 @@ impl TransactionSchedulerState {
 
         let slot_hashes =
             SlotHashes::new(&[(block.slot, block.blockhash); MAX_ENTRIES]);
-        // Remove first to avoid "account already exists" errors
-        self.accountsdb.remove_account(&sysvar::slot_hashes::ID);
         self.ensure_sysvar(&sysvar::slot_hashes::ID, &slot_hashes);
 
         // Immutable/Static sysvars (initialized once)
@@ -130,16 +142,4 @@ impl TransactionSchedulerState {
             let _ = self.accountsdb.insert_account(id, &account);
         }
     }
-}
-
-/// Scheduler execution mode command.
-///
-/// Send via channel to transition the scheduler between modes.
-/// See [`CoordinationMode`](super::coordinator::CoordinationMode) for internal state.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum SchedulerMode {
-    /// Accept client transactions with concurrent execution.
-    Primary,
-    /// Replay transactions with strict ordering.
-    Replica,
 }

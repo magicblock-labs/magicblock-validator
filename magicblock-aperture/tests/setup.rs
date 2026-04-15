@@ -64,7 +64,6 @@ fn chainlink(accounts_db: &Arc<AccountsDb>) -> Arc<ChainlinkImpl> {
             accounts_db,
             None,
             Pubkey::new_unique(),
-            Pubkey::new_unique(),
             &ChainLinkConfig::default(),
         )
         .expect("Failed to create Chainlink"),
@@ -85,60 +84,60 @@ impl RpcTestEnv {
     /// 3.  Starts a live `JsonRpcServer` (HTTP and WebSocket) in a background task.
     /// 4.  Connects an `RpcClient` and `PubsubClient` to the running server.
     pub async fn new() -> Self {
+        // Use a short block time so the scheduler auto-advances slots.
+        // Tests should use `wait_for_slot_progress()` to wait for slot progression.
         const BLOCK_TIME_MS: u64 = 50;
 
         let execution = ExecutionTestEnv::new();
+        execution.advance_slot();
 
         let faucet = Keypair::new();
         execution.fund_account(faucet.pubkey(), Self::INIT_ACCOUNT_BALANCE);
 
-        // Try to find a free port, this is handy when using nextest
-        // where each test needs to run in a separate process.
-        let (server, port) = loop {
-            let port: u16 = rand::random_range(7000..u16::MAX - 1);
-            let node_context = NodeContext {
-                identity: execution.get_payer().pubkey,
-                faucet: Some(faucet.insecure_clone()),
-                base_fee: Self::BASE_FEE,
-                featureset: Default::default(),
-                blocktime: BLOCK_TIME_MS,
-            };
-            let state = SharedState::new(
-                node_context,
-                execution.accountsdb.clone(),
-                execution.ledger.clone(),
-                chainlink(&execution.accountsdb),
-            );
-            let cancel = CancellationToken::new();
-            let listen = format!("127.0.0.1:{port}").parse().unwrap();
-            let config = ApertureConfig {
-                listen,
-                ..Default::default()
-            };
-            let server = initialize_aperture(
-                &config,
-                state,
-                &execution.dispatch,
-                cancel,
-            )
-            .await;
-            if let Ok(server) = server {
-                break (server, port);
-            }
+        let node_context = NodeContext {
+            identity: execution.get_payer().pubkey,
+            base_fee: Self::BASE_FEE,
+
+            featureset: Default::default(),
+            blocktime: BLOCK_TIME_MS,
         };
+        let state = SharedState::new(
+            node_context,
+            execution.accountsdb.clone(),
+            execution.ledger.clone(),
+            chainlink(&execution.accountsdb),
+        );
+        let cancel = CancellationToken::new();
+        let config = ApertureConfig {
+            listen: "127.0.0.1:0".parse().unwrap(),
+            ..Default::default()
+        };
+        let server =
+            initialize_aperture(&config, state, &execution.dispatch, cancel)
+                .await
+                .expect("failed to initialize aperture test server");
+
+        let rpc_url = format!("http://{}", server.http_addr());
+        let pubsub_url = format!("ws://{}", server.ws_addr());
 
         tokio::spawn(server.run());
-
-        let rpc_url = format!("http://127.0.0.1:{port}");
-        let pubsub_url = format!("ws://127.0.0.1:{}", port + 1);
 
         let rpc = RpcClient::new(rpc_url);
         let pubsub = PubsubClient::new(&pubsub_url)
             .await
             .expect("failed to create a pubsub client to RPC server");
 
-        // Allow server threads to initialize.
-        thread::yield_now();
+        // Allow async tasks (event processors) to initialize and start
+        // listening for notifications.
+        // We need to ensure the event processor's run() task has been polled
+        // at least once to start receiving notifications.
+        // Multiple yield_now calls give the runtime chances to schedule spawned tasks.
+        for _ in 0..10 {
+            tokio::task::yield_now().await;
+        }
+        // Small additional delay to ensure the select! loop in the event processor
+        // has started waiting for notifications.
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
 
         Self {
             block: execution.ledger.latest_block().clone(),
@@ -232,9 +231,35 @@ impl RpcTestEnv {
         }
     }
 
+    /// Waits for the RPC slot to advance by at least `count` slots from the current
+    /// RPC slot value.
+    ///
+    /// This is used when the scheduler auto-advances slots and tests need to wait
+    /// for the BlocksCache to catch up.
+    pub async fn wait_for_slot_progress(&self, count: u64) {
+        let initial_slot =
+            self.rpc.get_slot().await.expect("get_slot request failed");
+        let target_slot = initial_slot + count;
+
+        let start = std::time::Instant::now();
+        loop {
+            let slot =
+                self.rpc.get_slot().await.expect("get_slot request failed");
+            if slot >= target_slot {
+                break;
+            }
+            if start.elapsed() > std::time::Duration::from_secs(5) {
+                panic!(
+                    "Timed out waiting for slot to advance: expected >= {target_slot}, got {slot}"
+                );
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+        }
+    }
+
     /// Returns the latest slot number from the ledger.
     pub fn latest_slot(&self) -> Slot {
-        self.block.load().slot
+        self.execution.ledger.latest_block().load().slot
     }
 
     /// Creates and executes a generic transaction that modifies a new account.

@@ -10,7 +10,7 @@ use solana_hash::Hash;
 pub use store::api::{Ledger, SignatureInfosForAddress};
 use tokio::sync::broadcast;
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct LatestBlockInner {
     pub slot: u64,
     pub blockhash: Hash,
@@ -31,15 +31,13 @@ pub struct LatestBlock {
     /// readers automatically get access to the latest version of the block
     inner: Arc<ArcSwapAny<Arc<LatestBlockInner>>>,
     /// Notification mechanism to signal that the block has been modified,
-    /// the actual state is not sent via channel, as it can be accessed any
-    /// time with `load` method, only the fact of production is communicated
-    notifier: broadcast::Sender<()>,
+    notifier: broadcast::Sender<LatestBlockInner>,
 }
 
 impl LatestBlockInner {
-    fn new(slot: u64, blockhash: Hash, timestamp: i64) -> Self {
+    pub fn new(slot: u64, blockhash: Hash, timestamp: i64) -> Self {
         let clock = Clock {
-            slot,
+            slot: slot + 1,
             unix_timestamp: timestamp,
             ..Default::default()
         };
@@ -53,9 +51,7 @@ impl LatestBlockInner {
 
 impl Default for LatestBlock {
     fn default() -> Self {
-        // 1 is just enough number of notifications to keep around, in order to cover
-        // cases when a subscriber might not be listening when broadcast is triggered
-        let (notifier, _) = broadcast::channel(1);
+        let (notifier, _) = broadcast::channel(32);
         let inner = Default::default();
         Self { inner, notifier }
     }
@@ -70,17 +66,16 @@ impl LatestBlock {
 
     /// Atomically updates the latest block information and notifies all subscribers.
     /// This is the "writer" method for the single-writer, multi-reader pattern.
-    pub fn store(&self, slot: u64, blockhash: Hash, timestamp: i64) {
-        let block = LatestBlockInner::new(slot, blockhash, timestamp);
-        self.inner.store(block.into());
+    pub fn store(&self, block: LatestBlockInner) {
+        self.inner.store(block.clone().into());
         // Broadcast the update. It's okay if there are no active listeners.
-        let _ = self.notifier.send(());
+        let _ = self.notifier.send(block);
     }
 
     /// Creates a new receiver to listen for block updates.
     /// Each receiver created via this method will be notified when `store` is called.
     /// This allows multiple components to react to new blocks concurrently.
-    pub fn subscribe(&self) -> broadcast::Receiver<()> {
+    pub fn subscribe(&self) -> broadcast::Receiver<LatestBlockInner> {
         self.notifier.subscribe()
     }
 }

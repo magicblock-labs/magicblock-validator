@@ -47,15 +47,15 @@ pub const DEFAULT_ACCOUNTS_INDEX_SIZE: usize = 16 * 1024 * 1024;
 /// Maximum number of account snapshots to retain
 pub const DEFAULT_ACCOUNTS_MAX_SNAPSHOTS: u16 = 4;
 
-/// Frequency of account snapshots (every N slots)
-pub const DEFAULT_ACCOUNTS_SNAPSHOT_FREQUENCY: u64 = 1024;
-
 /// Ledger Defaults
 /// Default block time in milliseconds
 pub const DEFAULT_LEDGER_BLOCK_TIME_MS: u64 = 50;
 
 /// Default ledger size (100 GB)
 pub const DEFAULT_LEDGER_SIZE: u64 = 100 * 1024 * 1024 * 1024;
+
+/// Default superblock size (72K ~ 1 hour with 50ms block time)
+pub const DEFAULT_SUPERBLOCK_SIZE: u64 = 3600 * 20;
 
 /// Metrics Defaults
 /// Default address for the metrics endpoint (Prometheus format)
