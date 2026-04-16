@@ -325,6 +325,13 @@ impl MagicIntentBundle {
         &self,
         context: &ConstructionContext<'_, '_>,
     ) -> Result<(), InstructionError> {
+        const CPI_LIMIT: usize = 64;
+
+        const COMMIT_CPIS: usize = 3;
+        const FINALIZE_CPIS: usize = 1;
+        const UNDELEGATE_CPIS: usize = 5;
+        const COMMIT_FINALIZE_CPIS: usize = 1;
+
         if self.is_empty() {
             ic_msg!(
                 context.invoke_context,
@@ -349,19 +356,43 @@ impl MagicIntentBundle {
                 Ok(())
             };
 
+        // always 2 budget
+        let mut commit_stage_cpis = 2;
+        // always 2 budget
+        let mut finalize_stage_cpis = 2;
         if let Some(commit) = &self.commit {
-            check(commit.get_committed_accounts())?;
+            let committed = commit.get_committed_accounts();
+            let num_committed = committed.len();
+            commit_stage_cpis += COMMIT_CPIS * num_committed;
+            finalize_stage_cpis += FINALIZE_CPIS * num_committed;
+
+            check(committed)?;
         }
         if let Some(cau) = &self.commit_and_undelegate {
-            check(cau.get_committed_accounts())?;
+            let committed = cau.get_committed_accounts();
+            let num_committed = committed.len();
+            commit_stage_cpis += COMMIT_CPIS * num_committed;
+            finalize_stage_cpis +=
+                (FINALIZE_CPIS + UNDELEGATE_CPIS) * num_committed;
+
+            check(committed)?;
         }
         if let Some(commit_finalize) = &self.commit_finalize {
-            check(commit_finalize.get_committed_accounts())?;
+            let committed = commit_finalize.get_committed_accounts();
+            // Only in stage
+            commit_stage_cpis += COMMIT_FINALIZE_CPIS * committed.len();
+            check(committed)?;
         }
         if let Some(commit_finalize_and_undelegate) =
             &self.commit_finalize_and_undelegate
         {
-            check(commit_finalize_and_undelegate.get_committed_accounts())?;
+            let committed =
+                commit_finalize_and_undelegate.get_committed_accounts();
+            let num_committed = committed.len();
+            commit_stage_cpis += COMMIT_FINALIZE_CPIS * num_committed;
+            finalize_stage_cpis += UNDELEGATE_CPIS * num_committed;
+
+            check(committed)?;
         }
 
         Ok(())
