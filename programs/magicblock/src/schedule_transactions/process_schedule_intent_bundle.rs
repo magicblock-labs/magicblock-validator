@@ -111,15 +111,21 @@ pub(crate) fn process_schedule_intent_bundle(
         secure,
     );
 
-    let undelegated_accounts_ref =
-        if let Some(ref value) = args.commit_and_undelegate {
-            Some(CommitType::extract_commit_accounts(
-                value.committed_accounts_indices(),
-                construction_context.transaction_context,
-            )?)
-        } else {
-            None
-        };
+    // Collect all undelegated account refs
+    let undelegated_accounts_ref = [
+        args.commit_and_undelegate.as_ref(),
+        args.commit_finalize_and_undelegate.as_ref(),
+    ]
+    .into_iter()
+    .flatten()
+    .map(|el| el.committed_accounts_indices())
+    .try_fold(vec![], |mut acc, indices| {
+        acc.extend(CommitType::extract_commit_accounts(
+            indices,
+            construction_context.transaction_context,
+        )?);
+        Ok::<_, InstructionError>(acc)
+    })?;
 
     let scheduled_intent = ScheduledIntentBundle::try_new(
         args,
@@ -130,13 +136,11 @@ pub(crate) fn process_schedule_intent_bundle(
     )?;
 
     let mut undelegated_pubkeys = vec![];
-    if let Some(undelegated_accounts_ref) = undelegated_accounts_ref.as_ref() {
-        // Change owner to dlp and set undelegating flag
-        // Once account is undelegated we need to make it immutable in our validator.
-        for (pubkey, account_ref) in undelegated_accounts_ref.iter() {
-            undelegated_pubkeys.push(pubkey.to_string());
-            mark_account_as_undelegated(account_ref);
-        }
+    // Change owner to dlp and set undelegating flag
+    // Once account is undelegated we need to make it immutable in our validator.
+    for (pubkey, account_ref) in undelegated_accounts_ref.iter() {
+        undelegated_pubkeys.push(pubkey.to_string());
+        mark_account_as_undelegated(account_ref);
     }
     if !undelegated_pubkeys.is_empty() {
         ic_msg!(
