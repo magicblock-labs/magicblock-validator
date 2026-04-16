@@ -51,6 +51,14 @@ impl CoordinationMode {
     pub fn should_schedule_intents(self) -> bool {
         matches!(self, Self::Primary)
     }
+
+    pub fn needs_onchain_interactions(self) -> bool {
+        matches!(self, Self::Primary)
+    }
+}
+
+pub fn needs_onchain_interactions() -> bool {
+    CoordinationMode::current().needs_validator_signer()
 }
 
 /// Whether the validator signer is required for transactions.
