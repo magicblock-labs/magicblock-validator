@@ -26,8 +26,6 @@ pub(crate) fn process_execute_crank(
     const ACCOUNTS_START: usize = CRANK_SIGNER_IDX as usize + 1;
 
     // Assert crank executor program.
-    // Unit tests still invoke this path through the Magic builtin, while the
-    // live scheduler now emits ExecuteCrank to the dedicated crank builtin.
     ix_ctx
         .find_index_of_program_account(transaction_context, &crate::id())
         .or_else(|| {
