@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use magicblock_magic_program_api::pda::CRANK_SIGNER;
+use magicblock_magic_program_api::{pda::CRANK_SIGNER, CRANK_PROGRAM_ID};
 use solana_instruction::{error::InstructionError, Instruction};
 use solana_log_collector::ic_msg;
 use solana_program_runtime::invoke_context::InvokeContext;
@@ -25,13 +25,21 @@ pub(crate) fn process_execute_crank(
     let ix_accs_len = ix_ctx.get_number_of_instruction_accounts() as usize;
     const ACCOUNTS_START: usize = CRANK_SIGNER_IDX as usize + 1;
 
-    // Assert MagicBlock program
+    // Assert crank executor program.
+    // Unit tests still invoke this path through the Magic builtin, while the
+    // live scheduler now emits ExecuteCrank to the dedicated crank builtin.
     ix_ctx
         .find_index_of_program_account(transaction_context, &crate::id())
+        .or_else(|| {
+            ix_ctx.find_index_of_program_account(
+                transaction_context,
+                &CRANK_PROGRAM_ID,
+            )
+        })
         .ok_or_else(|| {
             ic_msg!(
                 invoke_context,
-                "ExecuteCrank ERR: Magic program account not found"
+                "ExecuteCrank ERR: crank executor program account not found"
             );
             InstructionError::UnsupportedProgramId
         })?;
