@@ -1,11 +1,16 @@
-use std::{process::Child, str::FromStr, time::Duration};
+use std::{
+    process::Child,
+    str::FromStr,
+    time::{Duration, Instant},
+};
 
+use cleanass::assert;
 use integration_test_tools::{
     expect,
     loaded_accounts::LoadedAccounts,
     tmpdir::resolve_tmp_dir,
     validator::{
-        start_magicblock_validator_with_config_struct_and_temp_dir,
+        cleanup, start_magicblock_validator_with_config_struct_and_temp_dir,
         TMP_DIR_CONFIG,
     },
     IntegrationTestContext,
@@ -19,8 +24,12 @@ use magicblock_config::{
     types::{network::Remote, StorageDirectory},
     ValidatorParams,
 };
-use program_flexi_counter::instruction::{
-    create_delegate_ix_with_commit_frequency_ms, create_init_ix,
+use magicblock_program::Pubkey;
+use program_flexi_counter::{
+    instruction::{
+        create_delegate_ix_with_commit_frequency_ms, create_init_ix,
+    },
+    state::FlexiCounter,
 };
 use solana_sdk::{
     signature::Keypair, signer::Signer, transaction::Transaction,
@@ -121,4 +130,33 @@ pub fn create_delegated_counter(
 
     // Wait for account to be delegated
     expect!(ctx.wait_for_delta_slot_ephem(10), validator);
+}
+
+pub fn wait_for_incremented_counter(
+    ctx: &IntegrationTestContext,
+    counter_pda: &Pubkey,
+    expected_count: u64,
+    max_timeout: Duration,
+    validator: &mut Child,
+) {
+    let now = Instant::now();
+    while now.elapsed() < max_timeout {
+        let counter_account = expect!(
+            ctx.try_ephem_client().and_then(|client| client
+                .get_account(counter_pda)
+                .map_err(|e| anyhow::anyhow!("Failed to get account: {}", e))),
+            validator
+        );
+        let counter =
+            expect!(FlexiCounter::try_decode(&counter_account.data), validator);
+        if counter.count == expected_count {
+            return;
+        }
+        expect!(ctx.wait_for_next_slot_ephem(), validator);
+    }
+    assert!(
+        false,
+        cleanup(validator),
+        "Failed to wait for incremented counter"
+    );
 }
