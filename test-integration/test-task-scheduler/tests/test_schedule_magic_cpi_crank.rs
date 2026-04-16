@@ -1,6 +1,5 @@
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
-use cleanass::assert;
 use integration_test_tools::{expect, validator::cleanup};
 use magicblock_program::{
     args::ScheduleTaskArgs, instruction_utils::InstructionUtils,
@@ -11,48 +10,13 @@ use program_schedulecommit::{
         delegate_account_cpi_instruction, init_account_instruction,
         schedule_commit_cpi_instruction, UserSeeds,
     },
-    MainAccount, ScheduleCommitType,
+    ScheduleCommitType,
 };
 use solana_sdk::{
     native_token::LAMPORTS_PER_SOL, pubkey::Pubkey, signature::Keypair,
     signer::Signer, transaction::Transaction,
 };
-use test_task_scheduler::setup_validator;
-
-fn wait_for_committed_count(
-    ctx: &integration_test_tools::IntegrationTestContext,
-    committee: &Pubkey,
-    expected_count: u64,
-    max_timeout: Duration,
-    validator: &mut std::process::Child,
-) {
-    let started_at = Instant::now();
-    while started_at.elapsed() < max_timeout {
-        let account = expect!(
-            ctx.try_chain_client().and_then(|client| client
-                .get_account(committee)
-                .map_err(|e| anyhow::anyhow!(
-                    "Failed to get chain account: {}",
-                    e
-                ))),
-            validator
-        );
-        let state = expect!(MainAccount::try_decode(&account.data), validator);
-        if state.count == expected_count {
-            return;
-        }
-
-        expect!(ctx.wait_for_next_slot_ephem(), validator);
-    }
-
-    assert!(
-        false,
-        cleanup(validator),
-        "Timed out waiting for committed count {} on {}",
-        expected_count,
-        committee
-    );
-}
+use test_task_scheduler::{setup_validator, wait_for_committed_count};
 
 #[test]
 fn test_crank_can_execute_program_that_cpis_into_magic() {
