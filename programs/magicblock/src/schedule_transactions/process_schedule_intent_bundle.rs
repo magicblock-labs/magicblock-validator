@@ -111,7 +111,7 @@ pub(crate) fn process_schedule_intent_bundle(
         secure,
     );
 
-    /// Collect all undelegated account refs
+    // Collect all undelegated account refs
     let undelegated_accounts_ref = [
         args.commit_and_undelegate.as_ref(),
         args.commit_finalize_and_undelegate.as_ref(),
