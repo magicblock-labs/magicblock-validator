@@ -52,7 +52,7 @@ pub static BUILTINS: &[Builtin] = &[
     Builtin {
         program_id: magicblock_program::CRANK_PROGRAM_ID,
         name: "magicblock_crank_program",
-        entrypoint: magicblock_processor::Entrypoint::vm,
+        entrypoint: magicblock_processor::CrankEntrypoint::vm,
     },
     Builtin {
         program_id: compute_budget::ID,

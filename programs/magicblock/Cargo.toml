@@ -11,7 +11,7 @@ edition = { workspace = true }
 bincode = { workspace = true }
 lazy_static = { workspace = true }
 magicblock-core = { workspace = true }
-magicblock-magic-program-api = { workspace = true }
+magicblock-magic-program-api = { path = "../../magicblock-magic-program-api" }
 num-derive = { workspace = true }
 num-traits = { workspace = true }
 parking_lot = { workspace = true }

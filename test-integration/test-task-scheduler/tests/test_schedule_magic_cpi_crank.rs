@@ -14,11 +14,8 @@ use program_schedulecommit::{
     MainAccount, ScheduleCommitType,
 };
 use solana_sdk::{
-    native_token::LAMPORTS_PER_SOL,
-    pubkey::Pubkey,
-    signature::Keypair,
-    signer::Signer,
-    transaction::Transaction,
+    native_token::LAMPORTS_PER_SOL, pubkey::Pubkey, signature::Keypair,
+    signer::Signer, transaction::Transaction,
 };
 use test_task_scheduler::setup_validator;
 
@@ -34,7 +31,10 @@ fn wait_for_committed_count(
         let account = expect!(
             ctx.try_chain_client().and_then(|client| client
                 .get_account(committee)
-                .map_err(|e| anyhow::anyhow!("Failed to get chain account: {}", e))),
+                .map_err(|e| anyhow::anyhow!(
+                    "Failed to get chain account: {}",
+                    e
+                ))),
             validator
         );
         let state = expect!(MainAccount::try_decode(&account.data), validator);
