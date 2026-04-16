@@ -49,9 +49,6 @@ fn default_claim_fees_frequency() -> Duration {
 #[derive(Deserialize, Serialize, Debug, Clone)]
 #[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
 pub struct ChainLinkConfig {
-    /// If true, initializes address lookup tables for oracle accounts.
-    pub prepare_lookup_tables: bool,
-
     /// Amount of lamports to automatically airdrop to feepayer accounts on clone.
     pub auto_airdrop_lamports: u64,
 
@@ -76,7 +73,6 @@ pub struct ChainLinkConfig {
 impl Default for ChainLinkConfig {
     fn default() -> Self {
         Self {
-            prepare_lookup_tables: false,
             auto_airdrop_lamports: 0,
             max_monitored_accounts: consts::DEFAULT_MAX_MONITORED_ACCOUNTS,
             remove_confined_accounts: false,

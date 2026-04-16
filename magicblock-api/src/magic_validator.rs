@@ -8,9 +8,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use magicblock_account_cloner::{
-    map_committor_request_result, ChainlinkCloner,
-};
+use magicblock_account_cloner::ChainlinkCloner;
 use magicblock_accounts::{
     scheduled_commits_processor::ScheduledCommitsProcessorImpl,
     ScheduledCommitsProcessor,
@@ -234,7 +232,6 @@ impl MagicValidator {
         let chainlink = Arc::new(
             Self::init_chainlink(
                 &config,
-                committor_service.clone(),
                 &dispatch.transaction_scheduler,
                 &ledger.latest_block().clone(),
                 &accountsdb,
@@ -482,30 +479,13 @@ impl MagicValidator {
             actions_callback_executor,
         )?));
 
-        if let Some(committor_service) = &committor_service {
-            if config.chainlink.prepare_lookup_tables {
-                debug!("Reserving common pubkeys");
-                map_committor_request_result(
-                    committor_service.reserve_common_pubkeys(),
-                    committor_service.clone(),
-                )
-                .await?;
-            }
-        }
         Ok(committor_service)
     }
 
     #[allow(clippy::too_many_arguments)]
-    #[instrument(skip(
-        config,
-        committor_service,
-        transaction_scheduler,
-        latest_block,
-        accountsdb
-    ))]
+    #[instrument(skip_all)]
     async fn init_chainlink(
         config: &ValidatorParams,
-        committor_service: Option<Arc<CommittorService>>,
         transaction_scheduler: &TransactionSchedulerHandle,
         latest_block: &LatestBlock,
         accountsdb: &Arc<AccountsDb>,
@@ -518,8 +498,6 @@ impl MagicValidator {
             })?;
 
         let cloner = ChainlinkCloner::new(
-            committor_service,
-            config.chainlink.clone(),
             transaction_scheduler.clone(),
             latest_block.clone(),
         );

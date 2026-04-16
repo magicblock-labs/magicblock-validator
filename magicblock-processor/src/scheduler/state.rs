@@ -114,7 +114,6 @@ impl TransactionSchedulerState {
 
         // Mutable sysvars (updated on each slot transition)
         self.ensure_sysvar(&sysvar::clock::ID, &block.clock);
-
         let slot_hashes =
             SlotHashes::new(&[(block.slot, block.blockhash); MAX_ENTRIES]);
         self.ensure_sysvar(&sysvar::slot_hashes::ID, &slot_hashes);

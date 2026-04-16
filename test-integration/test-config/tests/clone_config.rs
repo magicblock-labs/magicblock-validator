@@ -10,7 +10,7 @@ use test_config::{
 use test_kit::init_logger;
 use tracing::*;
 
-fn lookup_table_interaction(config: bool) -> (usize, usize, usize) {
+fn lookup_table_interaction() -> (usize, usize, usize) {
     let lookup_table_tx_count_before =
         count_lookup_table_transactions_on_chain(
             &IntegrationTestContext::try_new_chain_only().unwrap(),
@@ -18,7 +18,6 @@ fn lookup_table_interaction(config: bool) -> (usize, usize, usize) {
         .unwrap();
 
     let (_temp_dir, mut validator, ctx) = start_validator_with_clone_config(
-        config,
         &LoadedAccounts::with_delegation_program_test_authority(),
     );
     wait_for_startup(&ctx, &mut validator);
@@ -60,7 +59,7 @@ fn test_clone_config_never() {
         lookup_table_tx_count_before,
         lookup_table_tx_count_after_start,
         lookup_table_tx_count_after_clone,
-    ) = lookup_table_interaction(false);
+    ) = lookup_table_interaction();
 
     debug!(
         "Lookup table tx count before: {}, after start: {}, after clone: {}",
@@ -78,35 +77,5 @@ fn test_clone_config_never() {
     assert_eq!(
         lookup_table_tx_count_after_clone,
         lookup_table_tx_count_before
-    );
-}
-
-#[test]
-#[file_serial]
-fn test_clone_config_always() {
-    init_logger!();
-
-    let (
-        lookup_table_tx_count_before,
-        lookup_table_tx_count_after_start,
-        lookup_table_tx_count_after_clone,
-    ) = lookup_table_interaction(true);
-
-    debug!(
-        "Lookup table tx count before: {}, after start: {}, after clone: {}",
-        lookup_table_tx_count_before,
-        lookup_table_tx_count_after_start,
-        lookup_table_tx_count_after_clone
-    );
-
-    // Common pubkeys should be reserved during validator startup, in a single lookup table
-    // transaction
-    assert!(lookup_table_tx_count_after_start > lookup_table_tx_count_before);
-
-    // The pubkeys needed to commit the cloned account should be reserved when it was cloned
-    // in a single lookup table transaction
-    // NOTE: we clone both the payer account and the counter account
-    assert!(
-        lookup_table_tx_count_after_clone > lookup_table_tx_count_after_start
     );
 }

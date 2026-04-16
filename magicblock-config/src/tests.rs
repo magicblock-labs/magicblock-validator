@@ -266,7 +266,6 @@ fn test_chainlink_config() {
     let (_dir, config_path) = create_temp_config(
         r#"
         [chainlink]
-        prepare-lookup-tables = true
         max-monitored-accounts = 5000
         resubscription-delay = "50ms"
         "#,
@@ -274,7 +273,6 @@ fn test_chainlink_config() {
 
     let config = run_cli(vec![config_path.to_str().unwrap()]);
 
-    assert!(config.chainlink.prepare_lookup_tables);
     assert_eq!(config.chainlink.max_monitored_accounts, 5000);
     assert_eq!(
         config.chainlink.resubscription_delay,
@@ -379,9 +377,20 @@ fn test_example_config_full_coverage() {
     // 3. Core & Network
     // ========================================================================
     assert_eq!(config.lifecycle, LifecycleMode::Ephemeral);
-    // Example config has 3 remotes: devnet HTTP, devnet WebSocket, and Helius gRPC
+    // Example config has 3 remotes: Helius gRPC, devnet HTTP, and devnet WebSocket.
     assert_eq!(config.remotes.len(), 3);
-    assert_eq!(config.remotes[0].url_str(), consts::DEVNET_URL);
+    assert!(config.remotes.iter().any(|r| {
+        matches!(r, Remote::Grpc(_))
+            && r.url_str()
+                == "https://laserstream-devnet-ewr.helius-rpc.com/?api-key=YOUR_API_KEY"
+    }));
+    assert!(config.remotes.iter().any(|r| {
+        matches!(r, Remote::Http(_)) && r.url_str() == consts::DEVNET_URL
+    }));
+    assert!(config.remotes.iter().any(|r| {
+        matches!(r, Remote::Websocket(_))
+            && r.url_str() == "wss://api.devnet.solana.com/"
+    }));
     assert_eq!(config.aperture.listen.0.port(), 8899);
     // Check that storage path is set (contains the expected folder name)
     assert!(config
@@ -435,7 +444,6 @@ fn test_example_config_full_coverage() {
     // ========================================================================
     // 9. Chainlink (Cloning)
     // ========================================================================
-    assert!(!config.chainlink.prepare_lookup_tables);
     assert_eq!(config.chainlink.auto_airdrop_lamports, 0);
     assert_eq!(config.chainlink.max_monitored_accounts, 1000);
 
@@ -516,7 +524,6 @@ fn test_env_vars_full_coverage() {
         EnvVarGuard::new("MBV_LEDGER__VERIFY_KEYPAIR", "false"),
         EnvVarGuard::new("MBV_LEDGER__RESET", "true"),
         // --- Chainlink ---
-        EnvVarGuard::new("MBV_CHAINLINK__PREPARE_LOOKUP_TABLES", "true"),
         EnvVarGuard::new("MBV_CHAINLINK__AUTO_AIRDROP_LAMPORTS", "555"),
         EnvVarGuard::new("MBV_CHAINLINK__MAX_MONITORED_ACCOUNTS", "123"),
         EnvVarGuard::new("MBV_CHAINLINK__RESUBSCRIPTION_DELAY", "150ms"),
@@ -579,7 +586,6 @@ fn test_env_vars_full_coverage() {
     assert!(config.ledger.reset);
 
     // Chainlink
-    assert!(config.chainlink.prepare_lookup_tables);
     assert_eq!(config.chainlink.auto_airdrop_lamports, 555);
     assert_eq!(config.chainlink.max_monitored_accounts, 123);
     assert_eq!(

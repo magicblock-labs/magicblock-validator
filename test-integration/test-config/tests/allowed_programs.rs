@@ -55,7 +55,6 @@ fn run_allowed_programs(allow_committor_program: bool) {
             Remote::from_str(IntegrationTestContext::ws_url_chain()).unwrap(),
         ],
         chainlink: ChainLinkConfig {
-            prepare_lookup_tables: false,
             auto_airdrop_lamports: 0,
             // Only allow flexicounter program, block the other one
             allowed_programs,

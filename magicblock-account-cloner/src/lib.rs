@@ -42,8 +42,6 @@ use magicblock_chainlink::{
         LoadedProgram, RemoteProgramLoader,
     },
 };
-use magicblock_committor_service::{BaseIntentCommittor, CommittorService};
-use magicblock_config::config::ChainLinkConfig;
 use magicblock_core::link::transactions::{
     with_encoded, SanitizeableTransaction, TransactionSchedulerHandle,
 };
@@ -87,8 +85,6 @@ const SENT_ACTION_TXS_MAX_ENTRIES: usize = 16_384;
 type ActionTxDedupCache = LruCache<Signature, ()>;
 
 pub struct ChainlinkCloner {
-    changeset_committor: Option<Arc<CommittorService>>,
-    config: ChainLinkConfig,
     tx_scheduler: TransactionSchedulerHandle,
     block: LatestBlock,
     sent_action_txs: Arc<Mutex<ActionTxDedupCache>>,
@@ -96,14 +92,10 @@ pub struct ChainlinkCloner {
 
 impl ChainlinkCloner {
     pub fn new(
-        changeset_committor: Option<Arc<CommittorService>>,
-        config: ChainLinkConfig,
         tx_scheduler: TransactionSchedulerHandle,
         block: LatestBlock,
     ) -> Self {
         Self {
-            changeset_committor,
-            config,
             tx_scheduler,
             block,
             sent_action_txs: Arc::new(Mutex::new(ActionTxDedupCache::new(
@@ -569,24 +561,6 @@ impl ChainlinkCloner {
     // Lookup Tables
     // -----------------
 
-    fn maybe_prepare_lookup_tables(&self, pubkey: Pubkey, owner: Pubkey) {
-        let Some(committor) = self
-            .config
-            .prepare_lookup_tables
-            .then_some(self.changeset_committor.as_ref())
-            .flatten()
-            .cloned()
-        else {
-            return;
-        };
-        tokio::spawn(async move {
-            let result = committor.reserve_pubkeys_for_committee(pubkey, owner);
-            if let Err(e) = result.await {
-                error!(error = ?e, "Failed to reserve lookup tables");
-            }
-        });
-    }
-
     async fn send_actions_tx(
         &self,
         actions_tx: Option<SanitizedTransaction>,
@@ -660,13 +634,6 @@ impl Cloner for ChainlinkCloner {
         let actions_tx =
             self.create_actions_tx(&request.delegation_actions, blockhash)?;
         let actions_tx_sig = actions_tx.as_ref().map(|tx| *tx.signature());
-
-        if request.account.delegated() {
-            self.maybe_prepare_lookup_tables(
-                request.pubkey,
-                *request.account.owner(),
-            );
-        }
 
         // Small account: single tx
         if data_len <= MAX_INLINE_DATA_SIZE {

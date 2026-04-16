@@ -59,9 +59,9 @@ lifecycle = "ephemeral"
 # Example format: grpcs://<network>.helius-rpc.com?api-key=<YOUR_API_KEY>
 # See Helius gRPC docs for available network endpoints.
 remotes = [
-  "https://api.devnet.solana.com",
-  "wss://api.devnet.solana.com",
-  "grpcs://laserstream-devnet-ewr.helius-rpc.com?api-key=YOUR_API_KEY",
+    "grpcs://laserstream-devnet-ewr.helius-rpc.com?api-key=YOUR_API_KEY",
+    "https://api.devnet.solana.com",
+    "wss://api.devnet.solana.com"
 ]
 
 # Root directory for application storage (ledger, accountsdb, snapshots).
@@ -243,11 +243,6 @@ reset = false
 # Chainlink (cloning pipeline)
 # ==============================================================================
 [chainlink]
-# If true, creates and initializes Address Lookup Tables for oracle feeds.
-# Default: false
-# Env: MBV_CHAINLINK__PREPARE_LOOKUP_TABLES
-prepare-lookup-tables = false
-
 # Amount of lamports to automatically airdrop to empty feepayer accounts on startup.
 # Default: 0
 # Env: MBV_CHAINLINK__AUTO_AIRDROP_LAMPORTS
