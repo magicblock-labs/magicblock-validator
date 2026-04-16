@@ -2,13 +2,17 @@ use std::time::UNIX_EPOCH;
 
 use solana_account::{Account, AccountSharedData};
 use solana_clock::UnixTimestamp;
+use solana_cluster_type::ClusterType;
 use solana_feature_gate_interface::{create_account, Feature};
 use solana_feature_set::FeatureSet;
 use solana_fee_calculator::FeeRateGovernor;
-use solana_genesis_config::{ClusterType, GenesisConfig};
+use solana_genesis_config::GenesisConfig;
 use solana_native_token::LAMPORTS_PER_SOL;
+use solana_program_option::COption;
+use solana_program_pack::Pack;
 use solana_pubkey::Pubkey;
 use solana_rent::Rent;
+use spl_token::{native_mint, state::Mint};
 
 // Default amount received by the validator.
 const VALIDATOR_LAMPORTS: u64 = u64::MAX / 2;
@@ -47,8 +51,8 @@ pub fn create_genesis_config_with_leader(
 
 pub fn activate_all_features(genesis_config: &mut GenesisConfig) {
     // Activate all features at genesis in development mode.
-    for feature_id in FeatureSet::default().inactive {
-        activate_feature(genesis_config, feature_id);
+    for feature_id in FeatureSet::default().inactive() {
+        activate_feature(genesis_config, *feature_id);
     }
 }
 
@@ -84,17 +88,24 @@ pub fn create_genesis_config_with_leader_ex(
     ));
 
     // Native mint must be stable across primary and replica genesis state.
+    let mut native_mint_data = vec![0; Mint::LEN];
+    Mint {
+        mint_authority: COption::None,
+        supply: 0,
+        decimals: native_mint::DECIMALS,
+        is_initialized: true,
+        freeze_authority: COption::None,
+    }
+    .pack_into_slice(&mut native_mint_data);
+
     let native_mint_account = AccountSharedData::from(Account {
-        owner: solana_inline_spl::token::id(),
-        data: solana_inline_spl::token::native_mint::ACCOUNT_DATA.to_vec(),
+        owner: spl_token::id(),
+        data: native_mint_data,
         lamports: LAMPORTS_PER_SOL,
         executable: false,
         rent_epoch: 1,
     });
-    initial_accounts.push((
-        solana_inline_spl::token::native_mint::id(),
-        native_mint_account,
-    ));
+    initial_accounts.push((native_mint::id(), native_mint_account));
 
     let mut genesis_config = GenesisConfig {
         accounts: initial_accounts

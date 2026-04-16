@@ -37,6 +37,7 @@ num_cpus = { workspace = true }
 paste = { workspace = true }
 solana-account = { workspace = true }
 solana-clock = { workspace = true }
+solana-cluster-type = { workspace = true }
 solana-commitment-config = { workspace = true }
 solana-feature-set = { workspace = true }
 solana-hash = { workspace = true }
@@ -58,6 +59,7 @@ solana-transaction-error = { workspace = true }
 solana-rent = { workspace = true }
 solana-fee-calculator = { workspace = true }
 solana-feature-gate-interface = { workspace = true }
+solana-genesis-config = { workspace = true }
 solana-message = { workspace = true }
 solana-native-token = { workspace = true }
 spl-token = { workspace = true }

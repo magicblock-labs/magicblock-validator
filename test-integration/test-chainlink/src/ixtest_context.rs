@@ -73,7 +73,7 @@ impl IxtestContext {
     }
 
     pub async fn init_with_config(config: ChainlinkConfig) -> Self {
-        let validator_kp = Keypair::from_bytes(&TEST_AUTHORITY[..]).unwrap();
+        let validator_kp = Keypair::try_from(&TEST_AUTHORITY[..]).unwrap();
 
         let commitment = CommitmentConfig::confirmed();
         let bank = Arc::<AccountsBankStub>::default();

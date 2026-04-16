@@ -3,7 +3,7 @@ DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 DEPLOY_DIR := $(DIR)target/deploy
 ROOT_DEPLOY_DIR := $(DIR)../target/deploy
 
-RUST_LOG ?= 'warn,geyser_plugin=warn,magicblock=trace,magicblock_chainlink::remote_account_provider::chain_pubsub_actor=debug,rpc=trace,bank=trace,banking_stage=warn,solana_geyser_plugin_manager=warn,solana_svm=warn,test_tools=trace,schedulecommit_test=trace,'
+RUST_LOG ?= 'info'
 
 FLEXI_COUNTER_DIR := $(DIR)programs/flexi-counter
 SCHEDULECOMMIT_DIR := $(DIR)programs/schedulecommit
@@ -236,16 +236,16 @@ setup-task-scheduler-devnet:
 
 $(FLEXI_COUNTER_SO): $(FLEXI_COUNTER_SRC)
 	cargo build-sbf --manifest-path $(FLEXI_COUNTER_DIR)/Cargo.toml \
-		--sbf-out-dir $(DEPLOY_DIR)
+		--sbf-out-dir $(DEPLOY_DIR) --quiet
 $(SCHEDULECOMMIT_SO): $(SCHEDULECOMMIT_SRC)
 	cargo build-sbf --manifest-path $(SCHEDULECOMMIT_DIR)/Cargo.toml \
-		--sbf-out-dir $(DEPLOY_DIR)
+		--sbf-out-dir $(DEPLOY_DIR) --quiet
 $(SCHEDULECOMMIT_SECURITY_SO): $(SCHEDULECOMMIT_SECURITY_SRC)
 	cargo build-sbf --manifest-path $(SCHEDULECOMMIT_SECURITY_DIR)/Cargo.toml \
-		--sbf-out-dir $(DEPLOY_DIR)
+		--sbf-out-dir $(DEPLOY_DIR) --quiet
 $(COMMITTOR_PROGRAM_SO): $(COMMITTOR_PROGRAM_SRC)
 	cargo build-sbf --manifest-path $(COMMITTOR_PROGRAM_DIR)/Cargo.toml \
-	--sbf-out-dir $(ROOT_DEPLOY_DIR)/
+	--sbf-out-dir $(ROOT_DEPLOY_DIR)/ --quiet
 
 deploy-flexi-counter: $(FLEXI_COUNTER_SO)
 	solana program deploy \

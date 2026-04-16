@@ -399,6 +399,9 @@ impl AccountsDb {
     pub unsafe fn checksum(&self) -> u64 {
         let mut hasher = xxhash3_64::Hasher::new();
         for (pubkey, acc) in self.iter_all() {
+            if !(acc.delegated() || acc.ephemeral() || acc.undelegating()) {
+                continue;
+            }
             let AccountSharedData::Borrowed(borrowed) = &acc else {
                 continue;
             };

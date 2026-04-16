@@ -500,7 +500,7 @@ impl TransactionScheduler {
     fn update_program_cache(&mut self, slot: Slot) {
         let mut cache = self.program_cache.write().unwrap();
         // Prune stale programs and re-root to new slot
-        cache.prune(slot, 0);
+        cache.prune(slot, None);
         // Release lock before syscall lookup (prevents deadlock if sysvar is accessed)
         drop(cache);
     }

@@ -670,6 +670,7 @@ impl TestEnv {
     fn new_account_obj(&self, size: usize) -> AccountWithPubkey {
         let pubkey = Pubkey::new_unique();
         let mut account = AccountSharedData::new(LAMPORTS, size, &OWNER);
+        account.set_delegated(true);
         // Fill with some data
         if size >= INIT_DATA_LEN {
             account.data_as_mut_slice()[..INIT_DATA_LEN]

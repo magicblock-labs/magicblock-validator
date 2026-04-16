@@ -9,7 +9,8 @@ use solana_sdk_ids::{
     address_lookup_table, bpf_loader, bpf_loader_deprecated,
     bpf_loader_upgradeable, compute_budget, config, ed25519_program,
     incinerator, loader_v4, native_loader, secp256k1_program,
-    secp256r1_program, stake, system_program, vote, zk_elgamal_proof_program,
+    secp256r1_program, stake, system_program, sysvar, vote,
+    zk_elgamal_proof_program,
 };
 
 pub fn blacklisted_accounts(validator_id: &Pubkey) -> HashSet<Pubkey> {

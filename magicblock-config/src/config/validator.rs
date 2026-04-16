@@ -36,7 +36,7 @@ pub enum ReplicationMode {
     ReplicaOnly {
         #[serde(flatten)]
         config: ReplicationConfig,
-        #[serde(rename = "kebab-case")]
+        #[serde(rename = "authority-override")]
         authority_override: SerdePubkey,
     },
 }
