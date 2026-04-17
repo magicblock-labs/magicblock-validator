@@ -608,7 +608,7 @@ impl ChainlinkCloner {
 
         if let Err(err) = self.send_sanitized_tx(sanitized_tx).await {
             self.lock_sent_action_txs().pop(&action_tx_sig);
-            error!(
+            debug!(
                 tx_sig = %action_tx_sig,
                 error = ?err,
                 "Failed to execute post-delegation actions transaction"
