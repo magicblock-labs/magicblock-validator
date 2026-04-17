@@ -56,6 +56,7 @@ magicblock-committor-program = { path = "../magicblock-committor-program", featu
 magicblock-committor-service = { path = "../magicblock-committor-service" }
 magicblock-config = { path = "../magicblock-config" }
 magicblock-core = { path = "../magicblock-core" }
+magicblock-magic-program-api = { path = "../magicblock-magic-program-api" }
 magic-domain-program = { git = "https://github.com/magicblock-labs/magic-domain-program.git", rev = "cffcfeb", default-features = false, features = [
   "modular-sdk",
 ] }

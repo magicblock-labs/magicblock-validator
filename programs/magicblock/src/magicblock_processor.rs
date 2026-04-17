@@ -1,4 +1,5 @@
 use magicblock_magic_program_api::instruction::MagicBlockInstruction;
+use solana_instruction::error::InstructionError;
 use solana_program_runtime::declare_process_instruction;
 
 use crate::{
@@ -27,20 +28,24 @@ use crate::{
 
 pub const DEFAULT_COMPUTE_UNITS: u64 = 150;
 
+fn deserialize_instruction(
+    invoke_context: &mut solana_program_runtime::invoke_context::InvokeContext,
+) -> Result<MagicBlockInstruction, InstructionError> {
+    bincode::deserialize(
+        invoke_context
+            .transaction_context
+            .get_current_instruction_context()?
+            .get_instruction_data(),
+    )
+    .map_err(|_| InstructionError::InvalidInstructionData)
+}
+
 declare_process_instruction!(
     Entrypoint,
     DEFAULT_COMPUTE_UNITS,
     |invoke_context| {
         use MagicBlockInstruction::*;
-        let instruction: MagicBlockInstruction = bincode::deserialize(
-            invoke_context
-                .transaction_context
-                .get_current_instruction_context()?
-                .get_instruction_data(),
-        )
-        .map_err(|_| {
-            solana_instruction::error::InstructionError::InvalidInstructionData
-        })?;
+        let instruction = deserialize_instruction(invoke_context)?;
 
         let transaction_context = &invoke_context.transaction_context;
         let instruction_context =
@@ -222,3 +227,56 @@ declare_process_instruction!(
         }
     }
 );
+
+declare_process_instruction!(
+    CrankEntrypoint,
+    DEFAULT_COMPUTE_UNITS,
+    |invoke_context| {
+        let instruction = deserialize_instruction(invoke_context)?;
+        let transaction_context = &invoke_context.transaction_context;
+        let instruction_context =
+            transaction_context.get_current_instruction_context()?;
+        let signers = instruction_context.get_signers(transaction_context)?;
+
+        match instruction {
+            MagicBlockInstruction::ExecuteCrank { instructions } => {
+                process_execute_crank(signers, invoke_context, instructions)
+            }
+            _ => Err(InstructionError::InvalidInstructionData),
+        }
+    }
+);
+
+#[cfg(test)]
+mod test {
+    use magicblock_magic_program_api::args::ScheduleTaskArgs;
+    use solana_instruction::AccountMeta;
+    use solana_program_runtime::invoke_context::mock_process_instruction;
+
+    use super::*;
+
+    #[test]
+    fn crank_entrypoint_rejects_non_execute_crank_instructions() {
+        let data = bincode::serialize(&MagicBlockInstruction::ScheduleTask(
+            ScheduleTaskArgs {
+                task_id: 1,
+                execution_interval_millis: 10,
+                iterations: 1,
+                instructions: vec![],
+            },
+        ))
+        .unwrap();
+
+        mock_process_instruction(
+            &crate::CRANK_PROGRAM_ID,
+            Vec::new(),
+            &data,
+            Vec::new(),
+            vec![AccountMeta::new_readonly(crate::CRANK_PROGRAM_ID, false)],
+            Err(InstructionError::InvalidInstructionData),
+            CrankEntrypoint::vm,
+            |_invoke_context| {},
+            |_invoke_context| {},
+        );
+    }
+}
