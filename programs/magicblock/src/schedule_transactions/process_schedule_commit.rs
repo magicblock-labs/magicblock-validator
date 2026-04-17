@@ -11,7 +11,7 @@ use solana_pubkey::Pubkey;
 use crate::{
     magic_scheduled_base_intent::{
         calculate_commit_fee, validate_commit_schedule_permissions,
-        CommitAndUndelegate, CommitType, MagicBaseIntent,
+        CommitAndUndelegate, CommitType, MagicBaseIntent, MagicIntentBundle,
         ScheduledIntentBundle, UndelegateType,
     },
     magic_sys::fetch_current_commit_nonces,
@@ -297,7 +297,7 @@ pub(crate) fn process_schedule_commit(
         InstructionUtils::scheduled_commit_sent(intent_id, blockhash);
     let commit_sent_sig = action_sent_transaction.signatures[0];
 
-    let base_intent = if opts.request_undelegation {
+    let base_intent: MagicIntentBundle = if opts.request_undelegation {
         MagicBaseIntent::CommitAndUndelegate(CommitAndUndelegate {
             commit_action: CommitType::Standalone(committed_accounts),
             undelegate_action: UndelegateType::Standalone,
@@ -306,6 +306,7 @@ pub(crate) fn process_schedule_commit(
         MagicBaseIntent::Commit(CommitType::Standalone(committed_accounts))
     }
     .into();
+    base_intent.validate_cpi_budget(&invoke_context)?;
 
     let scheduled_base_intent = ScheduledIntentBundle {
         id: intent_id,

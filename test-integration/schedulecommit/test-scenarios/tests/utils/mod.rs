@@ -25,15 +25,15 @@ pub fn get_context_with_delegated_committees(
     .unwrap();
     println!("get_context_with_delegated_committees inside");
 
-    let txhash = ctx.init_committees().unwrap();
-    println!("txhash (init_committees): {}", txhash);
+    for sig in ctx.init_committees().unwrap() {
+        println!("txhash (init_committees): {}", sig);
+        ctx.dump_chain_logs(sig);
+    }
 
-    ctx.dump_chain_logs(txhash);
-
-    let txhash = ctx.delegate_committees().unwrap();
-    println!("txhash (delegate_committees): {}", txhash);
-
-    ctx.dump_chain_logs(txhash);
+    for sig in ctx.delegate_committees().unwrap() {
+        println!("txhash (delegate_committees): {}", sig);
+        ctx.dump_chain_logs(sig);
+    }
 
     ctx
 }

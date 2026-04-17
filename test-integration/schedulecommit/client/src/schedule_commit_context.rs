@@ -14,6 +14,7 @@ use solana_sdk::{
     commitment_config::CommitmentConfig,
     compute_budget::ComputeBudgetInstruction,
     hash::Hash,
+    instruction::Instruction,
     native_token::LAMPORTS_PER_SOL,
     pubkey::Pubkey,
     signature::{Keypair, Signature},
@@ -162,82 +163,74 @@ impl ScheduleCommitTestContext {
     // -----------------
     // Schedule Commit specific Transactions
     // -----------------
-    pub fn init_committees(&self) -> Result<Signature> {
+    fn init_committee_ixs(
+        &self,
+        chunk: &[(Keypair, Pubkey)],
+    ) -> Vec<Instruction> {
         let mut ixs = vec![
             ComputeBudgetInstruction::set_compute_unit_limit(1_400_000),
             ComputeBudgetInstruction::set_compute_unit_price(10_000),
         ];
         match self.user_seed {
             UserSeeds::MagicScheduleCommit => {
-                ixs.extend(self.committees.iter().map(
-                    |(player, committee)| {
-                        init_account_instruction(
-                            self.payer_chain.pubkey(),
-                            player.pubkey(),
-                            *committee,
-                        )
-                    },
-                ));
+                ixs.extend(chunk.iter().map(|(player, committee)| {
+                    init_account_instruction(
+                        self.payer_chain.pubkey(),
+                        player.pubkey(),
+                        *committee,
+                    )
+                }));
             }
             UserSeeds::OrderBook => {
-                ixs.extend(self.committees.iter().map(
-                    |(book_manager, committee)| {
-                        init_order_book_instruction(
-                            self.payer_chain.pubkey(),
-                            book_manager.pubkey(),
-                            *committee,
-                        )
-                    },
-                ));
-
-                //// TODO (snawaz): currently the size of delegatable-account cannot be
-                //// more than 10K, else delegation will fail. So Let's revisit this when
-                //// we relax the limit on the account size, then we can use larger
-                //// account, say even 10 MB, and execute CommitDiff.
-                //
-                // ixs.extend(self.committees.iter().flat_map(
-                //     |(payer, committee)| {
-                //         [grow_order_book_instruction(
-                //             payer.pubkey(),
-                //             *committee,
-                //             10 * 1024
-                //         )]
-                //     },
-                // ));
+                ixs.extend(chunk.iter().map(|(book_manager, committee)| {
+                    init_order_book_instruction(
+                        self.payer_chain.pubkey(),
+                        book_manager.pubkey(),
+                        *committee,
+                    )
+                }));
             }
         };
+        ixs
+    }
 
-        let mut signers = self
-            .committees
-            .iter()
-            .map(|(payer, _)| payer)
-            .collect::<Vec<_>>();
-        signers.push(&self.payer_chain);
+    pub fn init_committees(&self) -> Result<Vec<Signature>> {
+        const CHUNK_SIZE: usize = 5;
+        let chain_client = self.try_chain_client()?;
 
-        let tx = Transaction::new_signed_with_payer(
-            &ixs,
-            Some(&self.payer_chain.pubkey()),
-            &signers,
-            self.try_chain_blockhash()?,
-        );
-        let sig = self.try_chain_client()?
-            .send_and_confirm_transaction_with_spinner_and_config(
-                &tx,
-                self.commitment,
-                RpcSendTransactionConfig {
-                    skip_preflight: true,
-                    ..Default::default()
-                },
-            )
-            .with_context(|| {
-                format!(
-                    "Failed to initialize committees. Transaction signature: {}",
-                    tx.get_signature()
-                )
-            })?;
-
-        debug!("Initialized committees: {sig}");
-        Ok(sig)
+        self.committees
+            .chunks(CHUNK_SIZE)
+            .map(|chunk| {
+                let ixs = self.init_committee_ixs(chunk);
+                let mut signers =
+                    chunk.iter().map(|(p, _)| p).collect::<Vec<_>>();
+                signers.push(&self.payer_chain);
+                (ixs, signers)
+            })
+            .map(|(ixs, signers)| -> Result<Signature> {
+                let tx = Transaction::new_signed_with_payer(
+                    &ixs,
+                    Some(&self.payer_chain.pubkey()),
+                    &signers,
+                    self.try_chain_blockhash()?,
+                );
+                chain_client
+                    .send_and_confirm_transaction_with_spinner_and_config(
+                        &tx,
+                        self.commitment,
+                        RpcSendTransactionConfig {
+                            skip_preflight: true,
+                            ..Default::default()
+                        },
+                    )
+                    .with_context(|| {
+                        format!(
+                            "Failed to initialize committees. Transaction signature: {}",
+                            tx.get_signature()
+                        )
+                    })
+            })
+            .collect::<Result<Vec<_>>>()
     }
 
     pub fn escrow_lamports_for_payer(&self) -> Result<Signature> {
@@ -262,44 +255,49 @@ impl ScheduleCommitTestContext {
             .with_context(|| "Failed to escrow fund for payer")
     }
 
-    pub fn delegate_committees(&self) -> Result<Signature> {
-        let mut ixs = vec![];
-        for (player, _) in &self.committees {
-            let ix = delegate_account_cpi_instruction(
-                self.payer_chain.pubkey(),
-                self.ephem_validator_identity,
-                player.pubkey(),
-                self.user_seed,
-            );
-            ixs.push(ix);
-        }
+    pub fn delegate_committees(&self) -> Result<Vec<Signature>> {
+        const CHUNK_SIZE: usize = 4;
+        let chain_client = self.try_chain_client()?;
 
-        let chain_blockhash = self.try_chain_blockhash()?;
-
-        let tx = Transaction::new_signed_with_payer(
-            &ixs,
-            Some(&self.payer_chain.pubkey()),
-            &[&self.payer_chain],
-            chain_blockhash,
-        );
-        let sig = self
-            .try_chain_client()?
-            .send_and_confirm_transaction_with_spinner_and_config(
-                &tx,
-                self.commitment,
-                RpcSendTransactionConfig {
-                    skip_preflight: true,
-                    ..Default::default()
-                },
-            )
-            .with_context(|| {
-                format!(
-                    "Failed to delegate committees on chain '{:?}'",
-                    tx.signatures[0]
-                )
-            })?;
-        debug!("Delegated committees: {sig}");
-        Ok(sig)
+        self.committees
+            .chunks(CHUNK_SIZE)
+            .map(|chunk| {
+                chunk
+                    .iter()
+                    .map(|(player, _)| {
+                        delegate_account_cpi_instruction(
+                            self.payer_chain.pubkey(),
+                            self.ephem_validator_identity,
+                            player.pubkey(),
+                            self.user_seed,
+                        )
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .map(|ixs| -> Result<Signature> {
+                let tx = Transaction::new_signed_with_payer(
+                    &ixs,
+                    Some(&self.payer_chain.pubkey()),
+                    &[&self.payer_chain],
+                    self.try_chain_blockhash()?,
+                );
+                chain_client
+                    .send_and_confirm_transaction_with_spinner_and_config(
+                        &tx,
+                        self.commitment,
+                        RpcSendTransactionConfig {
+                            skip_preflight: true,
+                            ..Default::default()
+                        },
+                    )
+                    .with_context(|| {
+                        format!(
+                            "Failed to delegate committees on chain '{:?}'",
+                            tx.signatures[0]
+                        )
+                    })
+            })
+            .collect::<Result<Vec<_>>>()
     }
 
     // -----------------
