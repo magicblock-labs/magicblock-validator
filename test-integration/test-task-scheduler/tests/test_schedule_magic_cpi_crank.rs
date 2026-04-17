@@ -85,7 +85,7 @@ fn test_crank_can_execute_program_that_cpis_into_magic() {
 
     let ephem_blockhash =
         expect!(ctx.try_get_latest_blockhash_ephem(), validator);
-    let crank_ix = schedule_commit_cpi_instruction(
+    let mut crank_ix = schedule_commit_cpi_instruction(
         CRANK_SIGNER,
         magicblock_program::ID,
         MAGIC_CONTEXT_PUBKEY,
@@ -94,6 +94,7 @@ fn test_crank_can_execute_program_that_cpis_into_magic() {
         &[committee],
         ScheduleCommitType::Commit,
     );
+    crank_ix.accounts[0].is_writable = false;
 
     let schedule_sig = expect!(
         ctx.send_transaction_ephem_with_preflight(
