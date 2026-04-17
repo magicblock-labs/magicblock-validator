@@ -556,7 +556,7 @@ where
                 })
                 .await
             {
-                warn!(
+                error!(
                     pubkey = %pubkey,
                     error = %err,
                     "Failed to clone account into bank"
