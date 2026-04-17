@@ -12,6 +12,7 @@ use schedulecommit_client::{verify, ScheduleCommitTestContextFields};
 use solana_rpc_client::rpc_client::SerializableTransaction;
 use solana_rpc_client_api::config::RpcSendTransactionConfig;
 use solana_sdk::{
+    compute_budget::ComputeBudgetInstruction,
     instruction::InstructionError,
     native_token::LAMPORTS_PER_SOL,
     pubkey::Pubkey,
@@ -29,7 +30,7 @@ use utils::{
     get_context_with_delegated_committees,
 };
 
-use crate::utils::extract_transaction_error;
+use crate::utils::{assert_is_instruction_error, extract_transaction_error};
 
 mod utils;
 
@@ -296,6 +297,82 @@ fn schedule_commit_tx(
     debug!("schedule commit tx signature: {}", tx.get_signature());
 
     res
+}
+
+// -----------------
+// CPI budget tests
+// -----------------
+
+// Commit:         commit_stage = 2 + 3*n; overflows CPI_LIMIT(64) at n=21
+// CommitFinalize: commit_stage = 2 + 1*n; overflows CPI_LIMIT(64) at n=62
+
+fn assert_schedule_commit_cpi_budget_exceeded(
+    committees: usize,
+    commit_type: ScheduleCommitType,
+) {
+    let ctx = get_context_with_delegated_committees(
+        committees,
+        UserSeeds::MagicScheduleCommit,
+    );
+    let ScheduleCommitTestContextFields {
+        payer_chain: payer,
+        committees,
+        commitment,
+        ephem_client,
+        ..
+    } = ctx.fields();
+
+    let mut ixs = vec![
+        ComputeBudgetInstruction::set_compute_unit_limit(1_000_000),
+        ComputeBudgetInstruction::set_compute_unit_price(1_000_000),
+    ];
+    let ix = schedule_commit_cpi_instruction(
+        payer.pubkey(),
+        magicblock_magic_program_api::id(),
+        magicblock_magic_program_api::MAGIC_CONTEXT_PUBKEY,
+        None,
+        &committees
+            .iter()
+            .map(|(p, _)| p.pubkey())
+            .collect::<Vec<_>>(),
+        &committees.iter().map(|(_, pda)| *pda).collect::<Vec<_>>(),
+        commit_type,
+    );
+    ixs.push(ix);
+
+    let blockhash = ephem_client.get_latest_blockhash().unwrap();
+    let tx = Transaction::new_signed_with_payer(
+        &ixs,
+        Some(&payer.pubkey()),
+        &[&payer],
+        blockhash,
+    );
+    let res = ephem_client
+        .send_and_confirm_transaction_with_spinner_and_config(
+            &tx,
+            *commitment,
+            RpcSendTransactionConfig {
+                skip_preflight: true,
+                ..Default::default()
+            },
+        );
+
+    let (tx_result_err, tx_err) = extract_transaction_error(res);
+    assert_is_instruction_error(
+        tx_err.unwrap(),
+        &tx_result_err,
+        InstructionError::MaxAccountsExceeded,
+    );
+}
+
+#[test]
+fn test_commit_exceeds_cpi_budget() {
+    run_test!({
+        assert_schedule_commit_cpi_budget_exceeded(
+            21,
+            ScheduleCommitType::Commit,
+        );
+    });
 }
 
 fn schedule_commit_cpi_illegal_owner(

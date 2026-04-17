@@ -9,6 +9,7 @@ use program_schedulecommit::{
         schedule_commit_and_undelegate_cpi_instruction,
         schedule_commit_and_undelegate_cpi_twice,
         schedule_commit_and_undelegate_cpi_with_mod_after_instruction,
+        schedule_commit_cpi_instruction,
         schedule_commit_instruction_for_order_book, set_count_instruction,
         update_order_book_instruction, UserSeeds,
     },
@@ -24,6 +25,7 @@ use solana_rpc_client_api::{
 };
 use solana_sdk::{
     commitment_config::CommitmentConfig,
+    compute_budget::ComputeBudgetInstruction,
     instruction::InstructionError,
     pubkey::Pubkey,
     signature::{Keypair, Signature},
@@ -43,7 +45,7 @@ use utils::{
 };
 
 use crate::utils::{
-    assert_is_one_of_instruction_errors,
+    assert_is_instruction_error, assert_is_one_of_instruction_errors,
     assert_one_committee_account_was_not_undelegated_on_chain,
 };
 
@@ -882,5 +884,81 @@ fn test_committing_after_failed_undelegation() {
         }
 
         set_counter(2222, true);
+    });
+}
+
+// -----------------
+// CPI budget tests
+// -----------------
+
+// CommitAndUndelegate:          finalize_stage = 2 + 6*n; overflows CPI_LIMIT(64) at n=11
+// CommitFinalizeAndUndelegate:  finalize_stage = 2 + 5*n; overflows CPI_LIMIT(64) at n=13
+
+fn assert_schedule_commit_cpi_budget_exceeded(
+    n: usize,
+    commit_type: ScheduleCommitType,
+) {
+    let ctx = get_context_with_delegated_committees(
+        n,
+        UserSeeds::MagicScheduleCommit,
+    );
+    let ScheduleCommitTestContextFields {
+        payer_chain: payer,
+        committees,
+        commitment,
+        ephem_client,
+        ..
+    } = ctx.fields();
+
+    let mut ixs = vec![
+        ComputeBudgetInstruction::set_compute_unit_limit(1_000_000),
+        ComputeBudgetInstruction::set_compute_unit_price(1_000_000),
+    ];
+    let ix = schedule_commit_cpi_instruction(
+        payer.pubkey(),
+        magicblock_magic_program_api::id(),
+        magicblock_magic_program_api::MAGIC_CONTEXT_PUBKEY,
+        None,
+        &committees
+            .iter()
+            .map(|(p, _)| p.pubkey())
+            .collect::<Vec<_>>(),
+        &committees.iter().map(|(_, pda)| *pda).collect::<Vec<_>>(),
+        commit_type,
+    );
+    ixs.push(ix);
+
+    let blockhash = ephem_client.get_latest_blockhash().unwrap();
+    let tx = Transaction::new_signed_with_payer(
+        &ixs,
+        Some(&payer.pubkey()),
+        &[&payer],
+        blockhash,
+    );
+    let res = ephem_client
+        .send_and_confirm_transaction_with_spinner_and_config(
+            &tx,
+            *commitment,
+            RpcSendTransactionConfig {
+                skip_preflight: true,
+                ..Default::default()
+            },
+        );
+
+    let (tx_result_err, tx_err) = extract_transaction_error(res);
+    assert_is_instruction_error(
+        tx_err.unwrap(),
+        &tx_result_err,
+        InstructionError::MaxAccountsExceeded,
+    );
+}
+
+#[test]
+fn test_commit_and_undelegate_exceeds_cpi_budget() {
+    run_test!({
+        assert_schedule_commit_cpi_budget_exceeded(
+            11,
+            ScheduleCommitType::CommitAndUndelegate,
+        );
     });
 }

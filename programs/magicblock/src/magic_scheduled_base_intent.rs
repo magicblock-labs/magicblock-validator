@@ -40,6 +40,11 @@ pub const COMMIT_FEE_LAMPORTS: u64 = 100_000;
 /// denominated in micro-lamports per CU (mirrors Solana's priority fee model).
 pub const COMPUTE_UNIT_PRICE_MICRO_LAMPORTS: u64 = 50_000;
 
+/// Number of CPIS limited to 64 on Solana
+pub const CPI_LIMIT: usize = 64;
+/// Fixed base CPIs per tx stage (SetComputeUnitLimit + SetComputeUnitPrice).
+const BASE_STAGE_CPIS: usize = 2;
+
 /// Context necessary for construction of Schedule Action
 pub struct ConstructionContext<'a, 'ic> {
     parent_program_id: Option<Pubkey>,
@@ -277,7 +282,7 @@ impl MagicIntentBundle {
             commit_finalize_and_undelegate,
             standalone_actions: actions,
         };
-        this.post_validation(context)?;
+        this.post_validation(&context.invoke_context)?;
 
         Ok(this)
     }
@@ -286,7 +291,7 @@ impl MagicIntentBundle {
     /// 1. Set of committed accounts shall not overlap with
     ///    set of undelegated accounts
     /// 2. None for now :)
-    fn validate(
+    pub fn validate(
         args: &MagicIntentBundleArgs,
         context: &ConstructionContext<'_, '_>,
     ) -> Result<(), InstructionError> {
@@ -321,13 +326,13 @@ impl MagicIntentBundle {
     /// Post cross intent validation:
     /// 1. Validates that all committed accounts across the entire intent bundle
     ///    are globally unique by pubkey.
-    fn post_validation(
+    pub fn post_validation(
         &self,
-        context: &ConstructionContext<'_, '_>,
+        invoke_context: &&mut InvokeContext<'_>,
     ) -> Result<(), InstructionError> {
         if self.is_empty() {
             ic_msg!(
-                context.invoke_context,
+                invoke_context,
                 "ScheduleCommit ERR: intent bundle must not be empty.",
             );
             return Err(InstructionError::InvalidInstructionData);
@@ -339,7 +344,7 @@ impl MagicIntentBundle {
                 for el in accounts {
                     if !seen.insert(el.pubkey) {
                         ic_msg!(
-                            context.invoke_context,
+                            invoke_context,
                             "ScheduleCommit ERR: duplicate committed account pubkey across bundle: {}",
                             el.pubkey
                         );
@@ -364,7 +369,25 @@ impl MagicIntentBundle {
             check(commit_finalize_and_undelegate.get_committed_accounts())?;
         }
 
-        Ok(())
+        self.validate_cpi_budget(invoke_context)
+    }
+
+    pub fn validate_cpi_budget(
+        &self,
+        invoke_context: &&mut InvokeContext<'_>,
+    ) -> Result<(), InstructionError> {
+        let (commit_stage_cpis, finalize_stage_cpis) =
+            (self.commit_stage_cpis(), self.finalize_stage_cpis());
+        if commit_stage_cpis >= CPI_LIMIT || finalize_stage_cpis >= CPI_LIMIT {
+            ic_msg!(
+                invoke_context,
+                "ScheduleCommit ERR: too many committed accounts.",
+            );
+
+            Err(InstructionError::MaxAccountsExceeded)
+        } else {
+            Ok(())
+        }
     }
 
     pub fn calculate_fee(
@@ -583,6 +606,46 @@ impl MagicIntentBundle {
         }
 
         self.standalone_actions.get_mut(index.checked_sub(offset)?)
+    }
+
+    fn commit_stage_cpis(&self) -> usize {
+        const COMMIT_CPIS: usize = 3;
+        const COMMIT_FINALIZE_CPIS: usize = 1;
+
+        let mut cpis = BASE_STAGE_CPIS;
+        if let Some(c) = &self.commit {
+            cpis += COMMIT_CPIS * c.get_committed_accounts().len();
+        }
+        if let Some(cau) = &self.commit_and_undelegate {
+            cpis += COMMIT_CPIS * cau.get_committed_accounts().len();
+        }
+        if let Some(cf) = &self.commit_finalize {
+            cpis += COMMIT_FINALIZE_CPIS * cf.get_committed_accounts().len();
+        }
+        if let Some(cfau) = &self.commit_finalize_and_undelegate {
+            cpis += COMMIT_FINALIZE_CPIS * cfau.get_committed_accounts().len();
+        }
+
+        cpis
+    }
+
+    fn finalize_stage_cpis(&self) -> usize {
+        const FINALIZE_CPIS: usize = 1;
+        const UNDELEGATE_CPIS: usize = 5;
+
+        let mut cpis = BASE_STAGE_CPIS;
+        if let Some(c) = &self.commit {
+            cpis += FINALIZE_CPIS * c.get_committed_accounts().len();
+        }
+        if let Some(cau) = &self.commit_and_undelegate {
+            cpis += (FINALIZE_CPIS + UNDELEGATE_CPIS)
+                * cau.get_committed_accounts().len();
+        }
+        if let Some(cfau) = &self.commit_finalize_and_undelegate {
+            cpis += UNDELEGATE_CPIS * cfau.get_committed_accounts().len();
+        }
+
+        cpis
     }
 }
 
