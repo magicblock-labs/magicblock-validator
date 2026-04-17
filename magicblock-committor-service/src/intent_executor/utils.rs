@@ -132,10 +132,12 @@ pub(in crate::intent_executor) fn handle_cpi_limit_error(
     // We encountered error "Max instruction trace length exceeded"
     // All the tasks a prepared to be executed at this point
     // We attempt Two stages commit flow, need to split tasks up
-    let last_commit_ind = strategy
-        .optimized_tasks
-        .iter()
-        .rposition(|el| matches!(el, BaseTaskImpl::Commit(_)));
+    let last_commit_ind = strategy.optimized_tasks.iter().rposition(|el| {
+        matches!(
+            el,
+            BaseTaskImpl::Commit(_) | BaseTaskImpl::CommitFinalize(_)
+        )
+    });
     let (mut commit_stage_tasks, mut finalize_stage_tasks) = (vec![], vec![]);
     for (i, el) in strategy.optimized_tasks.into_iter().enumerate() {
         if Some(i) <= last_commit_ind {
