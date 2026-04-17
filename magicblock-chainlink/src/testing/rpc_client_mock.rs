@@ -114,6 +114,8 @@ impl ChainRpcClientMockBuilder {
             commitment: self.commitment,
             accounts: Arc::new(Mutex::new(self.accounts)),
             current_slot: Arc::new(AtomicU64::new(self.current_slot)),
+            single_account_fetches: Arc::<AtomicU64>::default(),
+            multi_account_fetches: Arc::<AtomicU64>::default(),
         };
         if let Some(clock_sysvar) = self.clock_sysvar {
             mock.set_clock_sysvar(clock_sysvar);
@@ -135,6 +137,8 @@ pub struct ChainRpcClientMock {
     commitment: CommitmentConfig,
     accounts: Arc<Mutex<HashMap<Pubkey, AccountAtSlot>>>,
     current_slot: Arc<AtomicU64>,
+    single_account_fetches: Arc<AtomicU64>,
+    multi_account_fetches: Arc<AtomicU64>,
 }
 
 #[cfg(any(test, feature = "dev-context"))]
@@ -144,6 +148,8 @@ impl ChainRpcClientMock {
             commitment,
             accounts: Arc::new(Mutex::new(HashMap::new())),
             current_slot: Arc::<AtomicU64>::default(),
+            single_account_fetches: Arc::<AtomicU64>::default(),
+            multi_account_fetches: Arc::<AtomicU64>::default(),
         }
     }
 
@@ -244,6 +250,14 @@ impl ChainRpcClientMock {
         trace!(slot = slot, "Setting current slot");
         self.current_slot.store(slot, Ordering::Relaxed);
     }
+
+    pub fn single_account_fetches(&self) -> u64 {
+        self.single_account_fetches.load(Ordering::Relaxed)
+    }
+
+    pub fn multi_account_fetches(&self) -> u64 {
+        self.multi_account_fetches.load(Ordering::Relaxed)
+    }
 }
 
 #[cfg(any(test, feature = "dev-context"))]
@@ -269,6 +283,7 @@ impl ChainRpcClient for ChainRpcClientMock {
         pubkey: &Pubkey,
         _config: RpcAccountInfoConfig,
     ) -> RpcResult<Option<Account>> {
+        self.single_account_fetches.fetch_add(1, Ordering::Relaxed);
         let res = if let Some(AccountAtSlot { account, slot }) =
             self.get_account_at_slot(pubkey)
         {
@@ -297,6 +312,7 @@ impl ChainRpcClient for ChainRpcClientMock {
         pubkeys: &[Pubkey],
         config: RpcAccountInfoConfig,
     ) -> RpcResult<Vec<Option<Account>>> {
+        self.multi_account_fetches.fetch_add(1, Ordering::Relaxed);
         if tracing::enabled!(tracing::Level::TRACE) {
             let pubkeys = pubkeys
                 .iter()
