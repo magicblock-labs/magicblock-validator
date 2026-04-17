@@ -568,7 +568,7 @@ where
                     .clone_account_with_ownership(projected_ata_clone_request)
                     .await
                 {
-                    warn!(
+                    error!(
                         pubkey = %pubkey,
                         error = %err,
                         "Failed to clone projected ATA from delegated eATA update"
