@@ -13,7 +13,7 @@ magicblock-task-scheduler = { path = "../../magicblock-task-scheduler" }
 magicblock-program = { path = "../../programs/magicblock" }
 magicblock-config = { path = "../../magicblock-config" }
 program-flexi-counter = { path = "../programs/flexi-counter" }
-program-schedulecommit = { path = "../programs/schedulecommit" }
+program-schedulecommit = { path = "../programs/schedulecommit", features = ["no-entrypoint"] }
 solana-sdk = { workspace = true }
 solana-rpc-client = { workspace = true }
 tempfile = { workspace = true }
