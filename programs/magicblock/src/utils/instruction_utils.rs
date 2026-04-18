@@ -10,7 +10,7 @@ use magicblock_magic_program_api::{
         MagicBlockInstruction,
     },
     pda::CRANK_SIGNER,
-    MAGIC_CONTEXT_PUBKEY,
+    CRANK_PROGRAM_ID, MAGIC_CONTEXT_PUBKEY,
 };
 use solana_hash::Hash;
 use solana_instruction::{AccountMeta, Instruction};
@@ -289,7 +289,7 @@ impl InstructionUtils {
             }));
         }
         Instruction::new_with_bincode(
-            crate::id(),
+            CRANK_PROGRAM_ID,
             &MagicBlockInstruction::ExecuteCrank { instructions },
             account_metas,
         )
