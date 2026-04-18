@@ -57,9 +57,19 @@ macro_rules! register_tests {
     };
 }
 
+struct ValidatorCleanupGuard;
+
+impl Drop for ValidatorCleanupGuard {
+    fn drop(&mut self) {
+        kill_validators();
+    }
+}
+
 pub fn main() {
     let config = TestConfigViaEnvVars::default();
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
+
+    let _validator_cleanup = ValidatorCleanupGuard;
 
     let results: Vec<(&'static str, Output)> = thread::scope(|s| {
         let handles = register_tests!(s, (&manifest_dir, &config), {
@@ -84,7 +94,6 @@ pub fn main() {
     for (name, output) in results {
         assert_cargo_tests_passed(output, name);
     }
-    kill_validators();
 }
 
 fn success_output() -> Output {
