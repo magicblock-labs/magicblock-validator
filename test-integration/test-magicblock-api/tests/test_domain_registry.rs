@@ -23,8 +23,6 @@ lazy_static! {
     static ref VALIDATOR_KEYPAIR: Arc<Keypair> = Arc::new(Keypair::new());
 }
 
-const DEVNET_URL: &str = "http://localhost:7799";
-
 fn get_validator_info() -> ErRecord {
     ErRecord::V0(RecordV0 {
         identity: VALIDATOR_KEYPAIR.pubkey(),
@@ -42,7 +40,8 @@ fn get_validator_info() -> ErRecord {
 
 fn test_registration() {
     let validator_info = get_validator_info();
-    let domain_manager = DomainRegistryManager::new(DEVNET_URL);
+    let domain_manager =
+        DomainRegistryManager::new(IntegrationTestContext::url_chain());
     domain_manager
         .handle_registration(&VALIDATOR_KEYPAIR, validator_info.clone())
         .expect("Failed to register");
@@ -64,7 +63,8 @@ fn test_sync() {
         }
     }
 
-    let domain_manager = DomainRegistryManager::new(DEVNET_URL);
+    let domain_manager =
+        DomainRegistryManager::new(IntegrationTestContext::url_chain());
     domain_manager
         .sync(&VALIDATOR_KEYPAIR, &validator_info)
         .expect("Failed to sync");
@@ -77,7 +77,8 @@ fn test_sync() {
 }
 
 fn test_unregister() {
-    let domain_manager = DomainRegistryManager::new(DEVNET_URL);
+    let domain_manager =
+        DomainRegistryManager::new(IntegrationTestContext::url_chain());
     domain_manager
         .unregister(&VALIDATOR_KEYPAIR)
         .expect("Failed to unregister");
@@ -93,7 +94,7 @@ fn test_unregister() {
 #[test]
 fn test_domain_registry() {
     let client = RpcClient::new_with_commitment(
-        DEVNET_URL,
+        IntegrationTestContext::url_chain().to_string(),
         CommitmentConfig::confirmed(),
     );
     IntegrationTestContext::airdrop(

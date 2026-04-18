@@ -6025,6 +6025,7 @@ dependencies = [
  "async-trait",
  "borsh 1.6.0",
  "futures",
+ "integration-test-tools",
  "magicblock-committor-program",
  "magicblock-committor-service",
  "magicblock-core",
@@ -10521,6 +10522,7 @@ dependencies = [
 name = "test-table-mania"
 version = "0.0.0"
 dependencies = [
+ "integration-test-tools",
  "magicblock-rpc-client",
  "magicblock-table-mania",
  "paste",

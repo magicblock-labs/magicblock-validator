@@ -8,7 +8,7 @@ use crate::{
         chain_pubsub_actor::ChainPubsubActor,
         pubsub_common::{ChainPubsubActorMessage, SubscriptionUpdate},
     },
-    testing::utils::{PUBSUB_URL, RPC_URL},
+    testing::utils::{pubsub_url, rpc_url},
 };
 
 pub async fn setup_actor_and_client() -> (
@@ -18,14 +18,14 @@ pub async fn setup_actor_and_client() -> (
 ) {
     let (tx, _) = mpsc::channel(10);
     let (actor, updates_rx) = ChainPubsubActor::new_from_url(
-        PUBSUB_URL,
+        pubsub_url(),
         "test-client",
         tx,
         CommitmentConfig::confirmed(),
     )
     .await
     .expect("failed to create ChainPubsubActor");
-    let rpc_client = RpcClient::new(RPC_URL.to_string());
+    let rpc_client = RpcClient::new(rpc_url().to_string());
     (actor, updates_rx, rpc_client)
 }
 

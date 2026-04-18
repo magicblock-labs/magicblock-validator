@@ -11,7 +11,7 @@ use magicblock_chainlink::{
     },
     testing::{
         init_logger,
-        utils::{airdrop, random_pubkey, PUBSUB_URL, RPC_URL},
+        utils::{airdrop, pubsub_url, random_pubkey, rpc_url},
     },
 };
 use solana_pubkey::Pubkey;
@@ -26,7 +26,7 @@ async fn setup() -> (ChainPubsubClientImpl, mpsc::Receiver<SubscriptionUpdate>)
     init_logger();
     let (tx, _) = mpsc::channel(10);
     let client = ChainPubsubClientImpl::try_new_from_url(
-        PUBSUB_URL,
+        pubsub_url(),
         "test-pubsub".to_string(),
         tx,
         CommitmentConfig::confirmed(),
@@ -117,7 +117,7 @@ async fn ixtest_chain_pubsub_client_clock() {
 #[tokio::test]
 async fn ixtest_chain_pubsub_client_airdropping() {
     let rpc_client = RpcClient::new_with_commitment(
-        RPC_URL.to_string(),
+        rpc_url().to_string(),
         CommitmentConfig::confirmed(),
     );
     let (client, mut updates) = setup().await;

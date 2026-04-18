@@ -3,11 +3,12 @@ use std::{
     io,
     path::Path,
     process::{self, Output},
+    thread,
 };
 
 use integration_test_tools::{
     loaded_accounts::LoadedAccounts,
-    toml_to_args::ProgramLoader,
+    toml_to_args::{rpc_port_from_config, ProgramLoader},
     validator::{
         resolve_workspace_dir, start_magic_block_validator_with_config,
         start_test_validator_with_config, TestRunnerPaths,
@@ -19,78 +20,71 @@ use test_runner::{
     env_config::TestConfigViaEnvVars,
     signal::wait_for_ctrlc,
 };
+use test_runner::cleanup::kill_validators;
+
+// Helper macro that registers a list of tests executed each on a separate thread
+macro_rules! register_tests {
+    ($scope:expr, ($($arg:expr),* $(,)?), { $($rule:tt)* }) => {{
+        let mut handles = Vec::new();
+        register_tests!(@rules $scope, ($($arg),*), handles, $($rule)*);
+        handles
+    }};
+
+    (@rules $scope:expr, $args:tt, $handles:ident,) => {};
+
+    // Single-label: function returns `Result<Output, _>`.
+    (@rules $scope:expr, ($($arg:expr),*), $handles:ident,
+        $func:path => $label:ident $(, $($rest:tt)*)?
+    ) => {
+        $handles.push($scope.spawn(|| {
+            let out = $func($($arg),*)
+                .expect(concat!(stringify!($label), " panicked"));
+            vec![(stringify!($label), out)]
+        }));
+        register_tests!(@rules $scope, ($($arg),*), $handles, $($($rest)*)?);
+    };
+
+    // Tuple-label: function returns `Result<(Output, Output, ...), _>`.
+    (@rules $scope:expr, ($($arg:expr),*), $handles:ident,
+        $func:path => ($($label:ident),+ $(,)?) $(, $($rest:tt)*)?
+    ) => {
+        $handles.push($scope.spawn(|| {
+            let ($($label),+) = $func($($arg),*)
+                .expect(concat!(stringify!($func), " panicked"));
+            vec![$((stringify!($label), $label)),+]
+        }));
+        register_tests!(@rules $scope, ($($arg),*), $handles, $($($rest)*)?);
+    };
+}
 
 pub fn main() {
     let config = TestConfigViaEnvVars::default();
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
-    let Ok((security_output, scenarios_output)) =
-        run_schedule_commit_tests(&manifest_dir, &config)
-    else {
-        // If any test run panics (i.e. not just a failing test) then we bail
-        return;
-    };
-    let Ok(chainlink_output) = run_chainlink_tests(&manifest_dir, &config)
-    else {
-        return;
-    };
 
-    let Ok(cloning_output) = run_cloning_tests(&manifest_dir, &config) else {
-        return;
-    };
+    let results: Vec<(&'static str, Output)> = thread::scope(|s| {
+        let handles = register_tests!(s, (&manifest_dir, &config), {
+            run_schedule_commit_tests => (security, scenarios),
+            run_chainlink_tests => chainlink,
+            run_cloning_tests => cloning,
+            run_restore_ledger_tests => restore_ledger,
+            run_magicblock_api_tests => magicblock_api,
+            run_table_mania_and_committor_tests => (table_mania, committor),
+            run_magicblock_pubsub_tests => magicblock_pubsub,
+            run_config_tests => config,
+            run_schedule_intents_tests => schedule_intents,
+            run_task_scheduler_tests => task_scheduler,
+        });
 
-    let Ok(restore_ledger_output) =
-        run_restore_ledger_tests(&manifest_dir, &config)
-    else {
-        return;
-    };
+        handles
+            .into_iter()
+            .flat_map(|h| h.join().expect("handler thread panicked"))
+            .collect()
+    });
 
-    let Ok(magicblock_api_output) =
-        run_magicblock_api_tests(&manifest_dir, &config)
-    else {
-        return;
-    };
-
-    let Ok((table_mania_output, committor_output)) =
-        run_table_mania_and_committor_tests(&manifest_dir, &config)
-    else {
-        return;
-    };
-
-    let Ok(magicblock_pubsub_output) =
-        run_magicblock_pubsub_tests(&manifest_dir, &config)
-    else {
-        return;
-    };
-
-    let Ok(config_output) = run_config_tests(&manifest_dir, &config) else {
-        return;
-    };
-
-    let Ok(schedule_intents_output) =
-        run_schedule_intents_tests(&manifest_dir, &config)
-    else {
-        return;
-    };
-
-    let Ok(task_scheduler_output) =
-        run_task_scheduler_tests(&manifest_dir, &config)
-    else {
-        return;
-    };
-
-    // Assert that all tests passed
-    assert_cargo_tests_passed(security_output, "security");
-    assert_cargo_tests_passed(scenarios_output, "scenarios");
-    assert_cargo_tests_passed(chainlink_output, "chainlink");
-    assert_cargo_tests_passed(cloning_output, "cloning");
-    assert_cargo_tests_passed(restore_ledger_output, "restore_ledger");
-    assert_cargo_tests_passed(magicblock_api_output, "magicblock_api");
-    assert_cargo_tests_passed(table_mania_output, "table_mania");
-    assert_cargo_tests_passed(committor_output, "committor");
-    assert_cargo_tests_passed(magicblock_pubsub_output, "magicblock_pubsub");
-    assert_cargo_tests_passed(config_output, "config");
-    assert_cargo_tests_passed(schedule_intents_output, "schedule_intents");
-    assert_cargo_tests_passed(task_scheduler_output, "task_scheduler");
+    for (name, output) in results {
+        assert_cargo_tests_passed(output, name);
+    }
+    kill_validators();
 }
 
 fn success_output() -> Output {
@@ -120,6 +114,7 @@ fn run_restore_ledger_tests(
         "restore-ledger-conf.devnet.toml",
         ValidatorCluster::Chain(None),
         &loaded_chain_accounts,
+        TEST_NAME,
     ) {
         Some(validator) => validator,
         None => {
@@ -138,8 +133,13 @@ fn run_restore_ledger_tests(
             "Running restore ledger tests in {}",
             test_restore_ledger_dir
         );
-        let output = match run_test(test_restore_ledger_dir, Default::default())
-        {
+        let output = match run_test(
+            test_restore_ledger_dir,
+            RunTestConfig {
+                chain_config: Some("restore-ledger-conf.devnet.toml"),
+                ..Default::default()
+            },
+        ) {
             Ok(output) => output,
             Err(err) => {
                 eprintln!("Failed to run restore ledger tests: {:?}", err);
@@ -191,6 +191,7 @@ fn run_chainlink_tests(
         "chainlink-conf.devnet.toml",
         ValidatorCluster::Chain(None),
         &loaded_chain_accounts,
+        TEST_NAME,
     ) {
         Some(validator) => validator,
         None => {
@@ -203,7 +204,13 @@ fn run_chainlink_tests(
         let test_chainlink_dir =
             format!("{}/../{}", manifest_dir, "test-chainlink");
         eprintln!("Running chainlink tests in {}", test_chainlink_dir);
-        let output = match run_test(test_chainlink_dir, Default::default()) {
+        let output = match run_test(
+            test_chainlink_dir,
+            RunTestConfig {
+                chain_config: Some("chainlink-conf.devnet.toml"),
+                ..Default::default()
+            },
+        ) {
             Ok(output) => output,
             Err(err) => {
                 eprintln!("Failed to run chainlink tests: {:?}", err);
@@ -242,6 +249,7 @@ fn run_table_mania_and_committor_tests(
         "committor-conf.devnet.toml",
         ValidatorCluster::Chain(None),
         &loaded_chain_accounts,
+        COMMITTOR_TEST,
     ) {
         Some(validator) => validator,
         None => {
@@ -265,7 +273,13 @@ fn run_table_mania_and_committor_tests(
             let test_table_mania_dir =
                 format!("{}/../{}", manifest_dir, "test-table-mania");
 
-            match run_test(test_table_mania_dir, Default::default()) {
+            match run_test(
+                test_table_mania_dir,
+                RunTestConfig {
+                    chain_config: Some("committor-conf.devnet.toml"),
+                    ..Default::default()
+                },
+            ) {
                 Ok(output) => output,
                 Err(err) => {
                     eprintln!("Failed to run table-mania: {:?}", err);
@@ -284,7 +298,10 @@ fn run_table_mania_and_committor_tests(
             eprintln!("Running committor tests in {}", test_committor_dir);
             match run_test(
                 test_committor_dir,
-                RunTestConfig::default(),
+                RunTestConfig {
+                    chain_config: Some("committor-conf.devnet.toml"),
+                    ..Default::default()
+                },
                 // RunTestConfig {
                 //     package: Some("schedulecommit-committor-service"),
                 //     test_file: Some("test_ix_commit_local"),
@@ -336,6 +353,7 @@ fn run_schedule_commit_tests(
         "schedulecommit-conf.devnet.toml",
         ValidatorCluster::Chain(None),
         &loaded_chain_accounts,
+        TEST_NAME,
     ) {
         Some(validator) => validator,
         None => {
@@ -347,6 +365,7 @@ fn run_schedule_commit_tests(
         "schedulecommit-conf-fees.ephem.toml",
         ValidatorCluster::Ephem,
         &loaded_chain_accounts,
+        TEST_NAME,
     ) {
         Some(validator) => validator,
         None => {
@@ -372,24 +391,33 @@ fn run_schedule_commit_tests(
         let test_security_dir =
             format!("{}/../{}", manifest_dir, "schedulecommit/test-security");
         eprintln!("Running security tests in {}", test_security_dir);
-        let test_security_output =
-            match run_test(test_security_dir, Default::default()) {
-                Ok(output) => output,
-                Err(err) => {
-                    eprintln!("Failed to run security: {:?}", err);
-                    cleanup_validators(
-                        &mut ephem_validator,
-                        &mut devnet_validator,
-                    );
-                    return Err(err.into());
-                }
-            };
+        let test_security_output = match run_test(
+            test_security_dir,
+            RunTestConfig {
+                chain_config: Some("schedulecommit-conf.devnet.toml"),
+                ephem_config: Some("schedulecommit-conf-fees.ephem.toml"),
+                ..Default::default()
+            },
+        ) {
+            Ok(output) => output,
+            Err(err) => {
+                eprintln!("Failed to run security: {:?}", err);
+                cleanup_validators(&mut ephem_validator, &mut devnet_validator);
+                return Err(err.into());
+            }
+        };
 
         eprintln!("======== RUNNING SCENARIOS TESTS ========");
         let test_scenarios_dir =
             format!("{}/../{}", manifest_dir, "schedulecommit/test-scenarios");
-        let test_scenarios_output =
-            match run_test(test_scenarios_dir, Default::default()) {
+        let test_scenarios_output = match run_test(
+            test_scenarios_dir,
+            RunTestConfig {
+                chain_config: Some("schedulecommit-conf.devnet.toml"),
+                ephem_config: Some("schedulecommit-conf-fees.ephem.toml"),
+                ..Default::default()
+            },
+        ) {
                 Ok(output) => output,
                 Err(err) => {
                     eprintln!("Failed to run scenarios: {:?}", err);
@@ -443,6 +471,7 @@ fn run_cloning_tests(
         "cloning-conf.devnet.toml",
         ValidatorCluster::Chain(Some(ProgramLoader::UpgradeableProgram)),
         &loaded_chain_accounts,
+        TEST_NAME,
     ) {
         Some(validator) => validator,
         None => {
@@ -454,6 +483,7 @@ fn run_cloning_tests(
         "cloning-conf.ephem.toml",
         ValidatorCluster::Ephem,
         &loaded_chain_accounts,
+        TEST_NAME,
     ) {
         Some(validator) => validator,
         None => {
@@ -472,11 +502,16 @@ fn run_cloning_tests(
         eprintln!("Running cloning tests in {}", test_cloning_dir);
         let output = match run_test(
             test_cloning_dir,
-            RunTestConfig::default(),
+            RunTestConfig {
+                chain_config: Some("cloning-conf.devnet.toml"),
+                ephem_config: Some("cloning-conf.ephem.toml"),
+                ..Default::default()
+            },
             // RunTestConfig {
             //     package: Some("test-cloning"),
             //     test_file: Some("10_post_delegation_token_transfer"),
             //     test_fn_name: None,
+            //     ..Default::default()
             // },
         ) {
             Ok(output) => output,
@@ -507,9 +542,10 @@ fn run_magicblock_api_tests(
     }
 
     let start_devnet_validator = || match start_validator(
-        "schedulecommit-conf.devnet.toml",
+        "magicblock-api-chain.devnet.toml",
         ValidatorCluster::Chain(None),
         &LoadedAccounts::with_delegation_program_test_authority(),
+        TEST_NAME,
     ) {
         Some(validator) => validator,
         None => {
@@ -521,6 +557,7 @@ fn run_magicblock_api_tests(
         "api-conf.ephem.toml",
         ValidatorCluster::Ephem,
         &LoadedAccounts::with_delegation_program_test_authority(),
+        TEST_NAME,
     ) {
         Some(validator) => validator,
         None => {
@@ -537,7 +574,15 @@ fn run_magicblock_api_tests(
         let test_dir = format!("{}/../{}", manifest_dir, "test-magicblock-api");
         eprintln!("Running magicblock-api tests in {}", test_dir);
 
-        let output = run_test(test_dir, Default::default()).map_err(|err| {
+        let output = run_test(
+            test_dir,
+            RunTestConfig {
+                chain_config: Some("magicblock-api-chain.devnet.toml"),
+                ephem_config: Some("api-conf.ephem.toml"),
+                ..Default::default()
+            },
+        )
+        .map_err(|err| {
             eprintln!("Failed to magicblock api tests: {:?}", err);
             cleanup_validators(&mut ephem_validator, &mut devnet_validator);
             err
@@ -567,9 +612,10 @@ fn run_magicblock_pubsub_tests(
         LoadedAccounts::with_delegation_program_test_authority();
 
     let start_devnet_validator = || match start_validator(
-        "validator-offline.devnet.toml",
+        "pubsub-chain.devnet.toml",
         ValidatorCluster::Chain(None),
         &loaded_chain_accounts,
+        TEST_NAME,
     ) {
         Some(validator) => validator,
         None => {
@@ -577,9 +623,10 @@ fn run_magicblock_pubsub_tests(
         }
     };
     let start_ephem_validator = || match start_validator(
-        "cloning-conf.ephem.toml",
+        "pubsub-ephem.toml",
         ValidatorCluster::Ephem,
         &loaded_chain_accounts,
+        TEST_NAME,
     ) {
         Some(validator) => validator,
         None => {
@@ -596,7 +643,15 @@ fn run_magicblock_pubsub_tests(
         let test_dir = format!("{}/../{}", manifest_dir, "test-pubsub");
         eprintln!("Running magicblock pubsub tests in {}", test_dir);
 
-        let output = run_test(test_dir, Default::default()).map_err(|err| {
+        let output = run_test(
+            test_dir,
+            RunTestConfig {
+                chain_config: Some("pubsub-chain.devnet.toml"),
+                ephem_config: Some("pubsub-ephem.toml"),
+                ..Default::default()
+            },
+        )
+        .map_err(|err| {
             eprintln!("Failed to magicblock pubsub tests: {:?}", err);
             cleanup_validators(&mut ephem_validator, &mut devnet_validator);
             err
@@ -629,6 +684,7 @@ fn run_config_tests(
         "config-conf.devnet.toml",
         ValidatorCluster::Chain(Some(ProgramLoader::UpgradeableProgram)),
         &loaded_chain_accounts,
+        TEST_NAME,
     ) {
         Some(validator) => validator,
         None => {
@@ -643,7 +699,13 @@ fn run_config_tests(
 
         let test_config_dir = format!("{}/../{}", manifest_dir, "test-config");
         eprintln!("Running config tests in {}", test_config_dir);
-        let output = match run_test(test_config_dir, Default::default()) {
+        let output = match run_test(
+            test_config_dir,
+            RunTestConfig {
+                chain_config: Some("config-conf.devnet.toml"),
+                ..Default::default()
+            },
+        ) {
             Ok(output) => output,
             Err(err) => {
                 eprintln!("Failed to run config tests: {:?}", err);
@@ -672,9 +734,10 @@ fn run_schedule_intents_tests(
     let loaded_chain_accounts =
         LoadedAccounts::with_delegation_program_test_authority();
     let start_devnet_validator = || match start_validator(
-        "config-conf.devnet.toml",
+        "schedule-intents-chain.devnet.toml",
         ValidatorCluster::Chain(None),
         &loaded_chain_accounts,
+        TEST_NAME,
     ) {
         Some(validator) => validator,
         None => {
@@ -682,9 +745,10 @@ fn run_schedule_intents_tests(
         }
     };
     let start_ephem_validator = || match start_validator(
-        "schedulecommit-conf.ephem.frequent-commits.toml",
+        "schedule-intents-ephem.toml",
         ValidatorCluster::Ephem,
         &loaded_chain_accounts,
+        TEST_NAME,
     ) {
         Some(validator) => validator,
         None => {
@@ -703,13 +767,18 @@ fn run_schedule_intents_tests(
         eprintln!("Running schedule intents tests in {}", test_intents_dir);
         let test_output = match run_test(
             test_intents_dir,
-            RunTestConfig::default(),
+            RunTestConfig {
+                chain_config: Some("schedule-intents-chain.devnet.toml"),
+                ephem_config: Some("schedule-intents-ephem.toml"),
+                ..Default::default()
+            },
             // RunTestConfig {
             //     package: Some("test-schedule-intent"),
             //     test_file: Some("test_schedule_intents"),
             //     test_fn_name: Some(
             //         "test_intent_bundle_commit_and_commit_finalize",
             //     ),
+            //     ..Default::default()
             // },
         ) {
             Ok(output) => output,
@@ -746,6 +815,7 @@ fn run_task_scheduler_tests(
         "schedule-task.devnet.toml",
         ValidatorCluster::Chain(Some(ProgramLoader::UpgradeableProgram)),
         &loaded_chain_accounts,
+        TEST_NAME,
     ) {
         Some(validator) => validator,
         None => {
@@ -761,7 +831,13 @@ fn run_task_scheduler_tests(
         let test_dir = format!("{}/../{}", manifest_dir, "test-task-scheduler");
         eprintln!("Running task scheduler tests in {}", test_dir);
 
-        let output = match run_test(test_dir, Default::default()) {
+        let output = match run_test(
+            test_dir,
+            RunTestConfig {
+                chain_config: Some("schedule-task.devnet.toml"),
+                ..Default::default()
+            },
+        ) {
             Ok(output) => output,
             Err(err) => {
                 eprintln!("Failed to run task scheduler tests: {:?}", err);
@@ -802,6 +878,14 @@ struct RunTestConfig<'a> {
     package: Option<&'a str>,
     test_file: Option<&'a str>,
     test_fn_name: Option<&'a str>,
+    /// Chain TOML config filename (relative to configs/). When set,
+    /// `[aperture].listen` is resolved and exported as CHAIN_URL/CHAIN_WS_URL
+    /// on the cargo test child process so tests reach the correct port
+    /// without racing on process-wide env vars.
+    chain_config: Option<&'a str>,
+    /// Ephem TOML config filename (relative to configs/). Resolved into
+    /// EPHEM_URL/EPHEM_WS_URL on the cargo test child process.
+    ephem_config: Option<&'a str>,
 }
 
 fn run_test(
@@ -814,6 +898,16 @@ fn run_test(
         std::env::var("RUST_LOG").unwrap_or_else(|_| "info".to_string()),
     )
     .arg("test");
+    if let Some(chain_config) = config.chain_config {
+        let port = rpc_port_from_config(&resolve_paths(chain_config).config_path);
+        cmd.env("CHAIN_URL", format!("http://127.0.0.1:{port}"))
+            .env("CHAIN_WS_URL", format!("ws://127.0.0.1:{}", port + 1));
+    }
+    if let Some(ephem_config) = config.ephem_config {
+        let port = rpc_port_from_config(&resolve_paths(ephem_config).config_path);
+        cmd.env("EPHEM_URL", format!("http://127.0.0.1:{port}"))
+            .env("EPHEM_WS_URL", format!("ws://127.0.0.1:{}", port + 1));
+    }
     if let Some(package) = config.package {
         cmd.arg("-p").arg(package);
     }
@@ -866,6 +960,7 @@ fn start_validator(
     config_file: &str,
     cluster: ValidatorCluster,
     loaded_chain_accounts: &LoadedAccounts,
+    suite_name: &str,
 ) -> Option<process::Child> {
     let log_suffix = cluster.log_suffix();
     let test_runner_paths = resolve_paths(config_file);
@@ -879,6 +974,7 @@ fn start_validator(
                 program_loader,
                 loaded_chain_accounts,
                 log_suffix,
+                suite_name,
             )
         }
         _ => start_magic_block_validator_with_config(

@@ -6,12 +6,10 @@ pub fn cleanup_validators(
 ) {
     cleanup_validator(ephem_validator, "ephemeral");
     cleanup_validator(devnet_validator, "devnet");
-    kill_validators();
 }
 
 pub fn cleanup_devnet_only(devnet_validator: &mut Child) {
     cleanup_validator(devnet_validator, "devnet");
-    kill_validators();
 }
 
 pub fn cleanup_validator(validator: &mut Child, label: &str) {
@@ -33,7 +31,7 @@ fn kill_process(name: &str) {
         .unwrap();
 }
 
-fn kill_validators() {
+pub fn kill_validators() {
     // Makes sure all the magicblock-validator + solana test validators  are really killed
     kill_process("magicblock-validator");
     kill_process("solana-test-validator");

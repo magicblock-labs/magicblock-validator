@@ -1,6 +1,6 @@
 #![cfg(any(test, feature = "dev-context"))]
 #![allow(dead_code)]
-use std::{num::NonZeroUsize, sync::Arc};
+use std::{num::NonZeroUsize, sync::Arc, sync::OnceLock};
 
 use magicblock_config::config::LifecycleMode;
 use solana_keypair::Keypair;
@@ -16,8 +16,24 @@ use crate::{
     },
 };
 
-pub const PUBSUB_URL: &str = "ws://localhost:7800";
-pub const RPC_URL: &str = "http://localhost:7799";
+const DEFAULT_PUBSUB_URL: &str = "ws://localhost:7800";
+const DEFAULT_RPC_URL: &str = "http://localhost:7799";
+
+fn resolve_url(env_key: &'static str, default: &str) -> String {
+    std::env::var(env_key).unwrap_or_else(|_| default.to_string())
+}
+
+pub fn pubsub_url() -> &'static str {
+    static URL: OnceLock<String> = OnceLock::new();
+    URL.get_or_init(|| resolve_url("CHAIN_WS_URL", DEFAULT_PUBSUB_URL))
+        .as_str()
+}
+
+pub fn rpc_url() -> &'static str {
+    static URL: OnceLock<String> = OnceLock::new();
+    URL.get_or_init(|| resolve_url("CHAIN_URL", DEFAULT_RPC_URL))
+        .as_str()
+}
 
 pub fn random_pubkey() -> Pubkey {
     Keypair::new().pubkey()

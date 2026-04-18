@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use integration_test_tools::dlp_interface;
+use integration_test_tools::{dlp_interface, IntegrationTestContext};
 use magicblock_chainlink::{
     accounts_bank::mock::AccountsBankStub,
     cloner::{AccountCloneRequest, Cloner, DelegationActions},
@@ -56,7 +56,6 @@ pub struct IxtestContext {
     pub validator_kp: Arc<Keypair>,
 }
 
-const RPC_URL: &str = "http://localhost:7799";
 pub const TEST_AUTHORITY: [u8; 64] = [
     251, 62, 129, 184, 107, 49, 62, 184, 1, 147, 178, 128, 185, 157, 247, 92,
     56, 158, 145, 53, 51, 226, 202, 96, 178, 248, 195, 133, 133, 237, 237, 146,
@@ -82,11 +81,11 @@ impl IxtestContext {
         let (fetch_cloner, remote_account_provider) = {
             let endpoints_vec = vec![
                 Endpoint::Rpc {
-                    url: RPC_URL.to_string(),
+                    url: IntegrationTestContext::url_chain().to_string(),
                     label: "test-rpc".to_string(),
                 },
                 Endpoint::WebSocket {
-                    url: "ws://localhost:7800".to_string(),
+                    url: IntegrationTestContext::ws_url_chain().to_string(),
                     label: "test-ws".to_string(),
                 },
             ];
@@ -400,6 +399,9 @@ impl IxtestContext {
     }
 
     pub fn get_rpc_client(commitment: CommitmentConfig) -> RpcClient {
-        RpcClient::new_with_commitment(RPC_URL.to_string(), commitment)
+        RpcClient::new_with_commitment(
+            IntegrationTestContext::url_chain().to_string(),
+            commitment,
+        )
     }
 }

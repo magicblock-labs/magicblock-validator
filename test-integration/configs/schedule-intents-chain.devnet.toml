@@ -1,9 +1,9 @@
-lifecycle = "ephemeral"
-remotes = ["http://127.0.0.1:9040"]
-storage = "magicblock-test-storage/magicblock-api-ephem"
+lifecycle = "offline"
+remotes = ["devnet"]
+storage = "magicblock-test-storage/schedule-intents-chain"
 
 [aperture]
-listen = "0.0.0.0:9042"
+listen = "0.0.0.0:9080"
 
 [commit]
 compute-unit-price = 1_000_000
@@ -29,5 +29,17 @@ snapshot-frequency = 1024
 reset = true
 block-time = "50ms"
 
+[[programs]]
+id = "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh"
+path = "../schedulecommit/elfs/dlp.so"
+
+[[programs]]
+id = "ComtrB2KEaWgXsW1dhr1xYL4Ht4Bjj3gXnnL6KMdABq"
+path = "../../target/deploy/magicblock_committor_program.so"
+
+[[programs]]
+id = "f1exzKGtdeVX3d6UXZ89cY7twiNJe9S5uq84RTA4Rq4"
+path = "../target/deploy/program_flexi_counter.so"
+
 [metrics]
-address = "0.0.0.0:9142"
+address = "0.0.0.0:9180"

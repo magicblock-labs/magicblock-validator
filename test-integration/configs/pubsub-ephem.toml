@@ -1,12 +1,15 @@
 lifecycle = "ephemeral"
-remotes = ["http://127.0.0.1:9040"]
-storage = "magicblock-test-storage/magicblock-api-ephem"
+remotes = ["http://0.0.0.0:9060"]
+storage = "magicblock-test-storage/pubsub-ephem"
 
 [aperture]
-listen = "0.0.0.0:9042"
+listen = "0.0.0.0:9062"
 
 [commit]
 compute-unit-price = 1_000_000
+
+[chainlink]
+max-monitored-accounts = 300
 
 [accountsdb]
 # size of the main storage, we have to preallocate in advance
@@ -27,7 +30,6 @@ snapshot-frequency = 1024
 
 [ledger]
 reset = true
-block-time = "50ms"
 
 [metrics]
-address = "0.0.0.0:9142"
+address = "0.0.0.0:9162"

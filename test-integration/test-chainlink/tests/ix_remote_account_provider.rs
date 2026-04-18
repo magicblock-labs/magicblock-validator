@@ -10,7 +10,7 @@ use magicblock_chainlink::{
         airdrop, await_next_slot, current_slot, dump_remote_account_lamports,
         dump_remote_account_update_source, get_remote_account_lamports,
         get_remote_account_update_sources, init_logger, random_pubkey,
-        sleep_ms, PUBSUB_URL, RPC_URL,
+        pubsub_url, rpc_url, sleep_ms,
     },
     AccountFetchOrigin,
 };
@@ -28,11 +28,11 @@ async fn init_remote_account_provider(
     let (fwd_tx, _fwd_rx) = mpsc::channel(100);
     let endpoints_vec = vec![
         Endpoint::Rpc {
-            url: RPC_URL.to_string(),
+            url: rpc_url().to_string(),
             label: "test-rpc".to_string(),
         },
         Endpoint::WebSocket {
-            url: PUBSUB_URL.to_string(),
+            url: pubsub_url().to_string(),
             label: "test-ws".to_string(),
         },
     ];

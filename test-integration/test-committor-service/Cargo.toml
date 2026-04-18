@@ -6,6 +6,7 @@ edition.workspace = true
 [dev-dependencies]
 async-trait = { workspace = true }
 borsh = { workspace = true }
+integration-test-tools = { workspace = true }
 tracing = { workspace = true }
 futures = { workspace = true }
 magicblock-core = { workspace = true }

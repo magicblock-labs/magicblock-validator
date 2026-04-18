@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use integration_test_tools::IntegrationTestContext;
 use magicblock_chainlink::{
     assert_data_has_size, assert_loaded_program_with_size,
     assert_subscribed_without_loaderv3_program_data_account,
@@ -32,9 +33,11 @@ use test_chainlink::{
 };
 use tracing::*;
 
-const RPC_URL: &str = "http://localhost:7799";
 fn get_rpc_client(commitment: CommitmentConfig) -> RpcClient {
-    RpcClient::new_with_commitment(RPC_URL.to_string(), commitment)
+    RpcClient::new_with_commitment(
+        IntegrationTestContext::url_chain().to_string(),
+        commitment,
+    )
 }
 
 fn pretty_bytes(bytes: usize) -> String {

@@ -1,6 +1,11 @@
 #![allow(clippy::result_large_err)]
 
-use std::{str::FromStr, thread::sleep, time::Duration};
+use std::{
+    str::FromStr,
+    sync::OnceLock,
+    thread::sleep,
+    time::Duration,
+};
 
 use anyhow::{Context, Result};
 use borsh::BorshDeserialize;
@@ -42,9 +47,14 @@ use crate::{
     },
 };
 
-const URL_CHAIN: &str = "http://localhost:7799";
-const WS_URL_CHAIN: &str = "ws://localhost:7800";
-const URL_EPHEM: &str = "http://localhost:8899";
+const DEFAULT_URL_CHAIN: &str = "http://localhost:7799";
+const DEFAULT_WS_URL_CHAIN: &str = "ws://localhost:7800";
+const DEFAULT_URL_EPHEM: &str = "http://localhost:8899";
+const DEFAULT_WS_URL_EPHEM: &str = "ws://localhost:8900";
+
+fn resolve_url(env_key: &'static str, default: &str) -> String {
+    std::env::var(env_key).unwrap_or_else(|_| default.to_string())
+}
 
 fn async_rpc_client(
     rpc_client: &RpcClient,
@@ -114,10 +124,14 @@ impl IntegrationTestContext {
     }
 
     pub fn try_new() -> Result<Self> {
-        Self::try_new_with_ephem_port(8899)
+        Self::try_new_with_ephem_url(Self::url_ephem().to_string())
     }
 
     pub fn try_new_with_ephem_port(port: u16) -> Result<Self> {
+        Self::try_new_with_ephem_url(Self::url_local_ephem_at_port(port))
+    }
+
+    fn try_new_with_ephem_url(ephem_url: String) -> Result<Self> {
         color_backtrace::install();
 
         let commitment = CommitmentConfig::confirmed();
@@ -126,10 +140,8 @@ impl IntegrationTestContext {
             Self::url_chain().to_string(),
             commitment,
         );
-        let ephem_client = RpcClient::new_with_commitment(
-            Self::url_local_ephem_at_port(port).to_string(),
-            commitment,
-        );
+        let ephem_client =
+            RpcClient::new_with_commitment(ephem_url, commitment);
         let validator_identity = ephem_client.get_identity()?;
 
         Ok(Self {
@@ -1266,16 +1278,27 @@ impl IntegrationTestContext {
     // RPC Clients
     // -----------------
     pub fn url_ephem() -> &'static str {
-        URL_EPHEM
+        static URL: OnceLock<String> = OnceLock::new();
+        URL.get_or_init(|| resolve_url("EPHEM_URL", DEFAULT_URL_EPHEM))
+            .as_str()
+    }
+    pub fn ws_url_ephem() -> &'static str {
+        static URL: OnceLock<String> = OnceLock::new();
+        URL.get_or_init(|| resolve_url("EPHEM_WS_URL", DEFAULT_WS_URL_EPHEM))
+            .as_str()
     }
     pub fn url_local_ephem_at_port(port: u16) -> String {
         format!("http://localhost:{}", port)
     }
     pub fn url_chain() -> &'static str {
-        URL_CHAIN
+        static URL: OnceLock<String> = OnceLock::new();
+        URL.get_or_init(|| resolve_url("CHAIN_URL", DEFAULT_URL_CHAIN))
+            .as_str()
     }
     pub fn ws_url_chain() -> &'static str {
-        WS_URL_CHAIN
+        static URL: OnceLock<String> = OnceLock::new();
+        URL.get_or_init(|| resolve_url("CHAIN_WS_URL", DEFAULT_WS_URL_CHAIN))
+            .as_str()
     }
 
     // -----------------

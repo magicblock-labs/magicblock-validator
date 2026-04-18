@@ -1,5 +1,5 @@
 lifecycle = "ephemeral"
-remotes = ["http://0.0.0.0:7799", "ws://0.0.0.0:7800"]
+remotes = ["http://0.0.0.0:7799"]
 
 [aperture]
 listen = "0.0.0.0:8899"

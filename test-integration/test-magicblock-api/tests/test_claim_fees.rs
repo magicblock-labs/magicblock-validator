@@ -14,7 +14,6 @@ use solana_sdk::{
 };
 
 // Test constants
-const DEVNET_URL: &str = "http://127.0.0.1:7799";
 const TEST_FEE_AMOUNT: u64 = 1_000_000;
 const INITIAL_AIRDROP_AMOUNT: u64 = 5_000_000_000;
 const CONFIRMATION_WAIT_MS: u64 = 500;
@@ -64,7 +63,7 @@ fn test_add_fees_to_vault() {
     println!("Adding test fees to vault...");
 
     let rpc_client = RpcClient::new_with_commitment(
-        DEVNET_URL,
+        IntegrationTestContext::url_chain().to_string(),
         CommitmentConfig::confirmed(),
     );
 
@@ -110,7 +109,7 @@ fn test_claim_fees_transaction() {
     println!("Testing actual claim fees transaction...");
 
     let rpc_client = RpcClient::new_with_commitment(
-        DEVNET_URL,
+        IntegrationTestContext::url_chain().to_string(),
         CommitmentConfig::confirmed(),
     );
 
@@ -152,7 +151,7 @@ fn test_claim_fees_rpc_connection() {
     println!("Testing RPC connection...");
 
     let rpc_client = RpcClient::new_with_commitment(
-        DEVNET_URL,
+        IntegrationTestContext::url_chain().to_string(),
         CommitmentConfig::confirmed(),
     );
 
@@ -167,7 +166,7 @@ fn test_validator_claim_fees() {
 
     // 3. Fund the validator for transaction fees
     let client = RpcClient::new_with_commitment(
-        DEVNET_URL,
+        IntegrationTestContext::url_chain().to_string(),
         CommitmentConfig::confirmed(),
     );
     IntegrationTestContext::airdrop(

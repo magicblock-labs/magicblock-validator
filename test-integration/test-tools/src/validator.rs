@@ -72,6 +72,7 @@ pub fn start_test_validator_with_config(
     program_loader: Option<ProgramLoader>,
     loaded_accounts: &LoadedAccounts,
     log_suffix: &str,
+    suite_name: &str,
 ) -> Option<process::Child> {
     let TestRunnerPaths {
         config_path,
@@ -80,7 +81,15 @@ pub fn start_test_validator_with_config(
     } = test_runner_paths;
 
     let port = rpc_port_from_config(config_path);
-    let mut args = config_to_args(config_path, program_loader);
+    let mut args = config_to_args(config_path, program_loader, port, suite_name);
+
+    let ledger_path = root_dir.join("test-ledger").join(suite_name);
+    fs::create_dir_all(&ledger_path).unwrap_or_else(|err| {
+        panic!(
+            "Failed to create ledger directory '{}': {err}",
+            ledger_path.display()
+        )
+    });
 
     let accounts_dir = workspace_dir.join("configs").join("accounts");
     let accounts = [

@@ -1,8 +1,9 @@
 lifecycle = "offline"
 remotes = ["devnet"]
+storage = "magicblock-test-storage/schedule-task-chain"
 
 [aperture]
-listen = "0.0.0.0:7799"
+listen = "0.0.0.0:9090"
 
 [commit]
 compute-unit-price = 1_000_000
@@ -23,4 +24,4 @@ id = "DmnRGfyyftzacFb1XadYhWF6vWqXwtQk5tbr6XgR3BA1"
 path = "../schedulecommit/elfs/mdp.so"
 
 [metrics]
-address = "0.0.0.0:9000"
+address = "0.0.0.0:9190"
