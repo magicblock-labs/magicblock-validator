@@ -33,6 +33,27 @@ async fn test_get_account_info() {
         .expect("rpc request for non-existent account failed");
     assert_eq!(nonexistent.context.slot, env.latest_slot());
     assert_eq!(nonexistent.value, None, "account should not exist");
+
+    // Repeated lookup should continue to render the synthetic empty placeholder
+    // as JSON-RPC null after the ensure path has populated the bank.
+    let missing_pubkey = Pubkey::new_unique();
+    let first_miss = env
+        .rpc
+        .get_account_with_commitment(&missing_pubkey, Default::default())
+        .await
+        .expect("first rpc request for non-existent account failed");
+    let second_miss = env
+        .rpc
+        .get_account_with_commitment(&missing_pubkey, Default::default())
+        .await
+        .expect("second rpc request for non-existent account failed");
+    assert_eq!(first_miss.context.slot, env.latest_slot());
+    assert_eq!(second_miss.context.slot, env.latest_slot());
+    assert_eq!(first_miss.value, None, "first lookup should return null");
+    assert_eq!(
+        second_miss.value, None,
+        "repeated lookup should still return null"
+    );
 }
 
 /// Verifies `getMultipleAccounts` for both existing and non-existent accounts.
@@ -63,6 +84,44 @@ async fn test_get_multiple_accounts() {
     assert!(
         nonexistent.iter().all(Option::is_none),
         "non-existent accounts should not be found"
+    );
+
+    // Mixed existing and non-existent accounts should preserve ordering and
+    // still render synthetic empty placeholders as JSON-RPC null.
+    let missing_pubkey = Pubkey::new_unique();
+    let mixed = env
+        .rpc
+        .get_multiple_accounts(&[acc1.pubkey, missing_pubkey, acc2.pubkey])
+        .await
+        .expect(
+            "rpc request for mixed existing and non-existent accounts failed",
+        );
+    assert_eq!(
+        mixed.len(),
+        3,
+        "should return one entry per requested pubkey"
+    );
+    assert!(
+        accounts_equal(
+            mixed[0]
+                .as_ref()
+                .expect("existing first account should be returned"),
+            &acc1.account
+        ),
+        "first result should match the first requested account"
+    );
+    assert_eq!(
+        mixed[1], None,
+        "missing middle account should render as null"
+    );
+    assert!(
+        accounts_equal(
+            mixed[2]
+                .as_ref()
+                .expect("existing last account should be returned"),
+            &acc2.account
+        ),
+        "last result should match the last requested account"
     );
 }
 
