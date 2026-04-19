@@ -251,6 +251,7 @@ fn init_fetch_cloner(
         faucet_pubkey,
         subscription_rx,
         None,
+        None,
     );
     (fetch_cloner, subscription_tx)
 }
@@ -1767,6 +1768,7 @@ async fn test_allowed_programs_filters_programs() {
         random_pubkey(),
         subscription_rx,
         allowed_programs,
+        None,
     );
 
     // Fetch and clone both programs
@@ -1840,6 +1842,7 @@ async fn test_allowed_programs_none_allows_all() {
         random_pubkey(),
         subscription_rx,
         None, // No restriction
+        None,
     );
 
     // Fetch and clone both programs
@@ -1912,6 +1915,7 @@ async fn test_allowed_programs_empty_allows_all() {
         random_pubkey(),
         subscription_rx,
         allowed_programs,
+        None,
     );
 
     // Fetch and clone both programs
@@ -3175,6 +3179,7 @@ async fn test_fetch_subscription_race_duplicate_clone() {
         Pubkey::new_unique(),
         subscription_rx,
         None,
+        None,
     );
 
     // Send subscription update (this will become the owner).
@@ -3297,6 +3302,7 @@ async fn test_delegated_account_fetch_subscription_race() {
         Pubkey::new_unique(),
         subscription_rx,
         None,
+        None,
     );
 
     // Send subscription update.
@@ -3404,6 +3410,7 @@ async fn test_clone_ownership_failure_propagates_to_waiters() {
         validator_keypair.insecure_clone(),
         Pubkey::new_unique(),
         subscription_rx,
+        None,
         None,
     );
 

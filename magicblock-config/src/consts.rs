@@ -73,3 +73,15 @@ pub const DEFAULT_RESUBSCRIPTION_DELAY_MS: u64 = 50;
 
 /// Default capacity for the LRU cache of subscribed accounts
 pub const DEFAULT_MAX_MONITORED_ACCOUNTS: usize = 5_000;
+
+/// Default base URL for Range risk service
+pub const DEFAULT_RISK_BASE_URL: &str = "https://api.range.org/v1";
+
+/// Default cache TTL for Range risk service
+pub const DEFAULT_RISK_CACHE_TTL_SEC: u64 = 60 * 60 * 24 * 30;
+
+/// Default request timeout for Range risk service
+pub const DEFAULT_RISK_REQUEST_TIMEOUT_SEC: u64 = 5;
+
+/// Default risk score threshold for Range risk service
+pub const DEFAULT_RISK_SCORE_THRESHOLD: u64 = 5;

@@ -525,6 +525,7 @@ impl MagicValidator {
             faucet_pubkey,
             chainlink_config,
             &config.chainlink,
+            config.storage.as_path(),
         )
         .await?;
 

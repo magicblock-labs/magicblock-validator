@@ -250,6 +250,42 @@ remove-confined-accounts = false
 # Env: MBV_CHAINLINK__RESUBSCRIPTION_DELAY
 # resubscription-delay = "50ms"
 
+# ------------------------------------------------------------------------------
+# Optional: Range Risk API validation for post-delegation actions signers
+# ------------------------------------------------------------------------------
+# When enabled, all signers referenced by post-delegation actions are checked
+# against Range API before actions are allowed to execute.
+[chainlink.risk]
+# Enables/disables Range risk checks.
+# Default: false
+# Env: MBV_CHAINLINK__RISK__ENABLED
+enabled = false
+
+# Range API base URL.
+# Default: "https://api.range.org/v1"
+# Env: MBV_CHAINLINK__RISK__BASE_URL
+base-url = "https://api.range.org/v1"
+
+# Range API bearer token.
+# Default: None
+# Env: MBV_CHAINLINK__RISK__API_KEY
+api-key = "your-api-key"
+
+# Cache TTL.
+# Default: "30 days"
+# Env: MBV_CHAINLINK__RISK__CACHE_TTL
+cache-ttl = "30 days"
+
+# HTTP timeout for Range API calls.
+# Default: "5s"
+# Env: MBV_CHAINLINK__RISK__REQUEST_TIMEOUT
+request-timeout = "5s"
+
+# Risk score threshold to consider an address high risk, on scale of 0-10.
+# Default: 5
+# Env: MBV_CHAINLINK__RISK__RISK_SCORE_THRESHOLD
+# risk-score-threshold = 5
+
 # ==============================================================================
 # On-Chain Registration (Optional)
 # ==============================================================================

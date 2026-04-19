@@ -3158,6 +3158,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "magicblock-aml"
+version = "0.8.7"
+dependencies = [
+ "futures-util",
+ "magicblock-config",
+ "magicblock-core",
+ "reqwest",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "solana-pubkey 2.2.1",
+ "tempfile",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "magicblock-aperture"
 version = "0.8.8"
 dependencies = [
@@ -3280,6 +3298,7 @@ dependencies = [
  "helius-laserstream",
  "lru 0.16.2",
  "magicblock-accounts-db",
+ "magicblock-aml",
  "magicblock-chainlink",
  "magicblock-config",
  "magicblock-core",

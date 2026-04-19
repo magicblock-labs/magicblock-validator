@@ -11,6 +11,7 @@ use dlp_api::{
     pda::delegation_record_pda_from_delegated_account, state::DelegationRecord,
 };
 use magicblock_accounts_db::traits::AccountsBank;
+use magicblock_aml::RiskService;
 use magicblock_config::config::AllowedProgram;
 use magicblock_core::token_programs::{
     is_ata, try_derive_ata_address_and_bump, try_derive_eata_address_and_bump,
@@ -109,6 +110,9 @@ where
             hash_map::HashMap<CloneKey, Vec<oneshot::Sender<CloneCompletion>>>,
         >,
     >,
+
+    /// Risk checker for post-delegation action addresses.
+    risk_service: Option<Arc<RiskService>>,
 }
 
 /// Manual Clone impl: `#[derive(Clone)]` would add `V: Clone, C: Clone`
@@ -133,6 +137,7 @@ where
             blacklisted_accounts: self.blacklisted_accounts.clone(),
             allowed_programs: self.allowed_programs.clone(),
             pending_clones: self.pending_clones.clone(),
+            risk_service: self.risk_service.clone(),
         }
     }
 }
@@ -154,6 +159,7 @@ where
         faucet_pubkey: Pubkey,
         subscription_updates_rx: mpsc::Receiver<ForwardedSubscriptionUpdate>,
         allowed_programs: Option<Vec<AllowedProgram>>,
+        risk_service: Option<Arc<RiskService>>,
     ) -> Arc<Self> {
         let validator_pubkey = validator_keypair.pubkey();
         let blacklisted_accounts =
@@ -172,6 +178,7 @@ where
             blacklisted_accounts,
             allowed_programs,
             pending_clones: Arc::new(Mutex::new(hash_map::HashMap::new())),
+            risk_service,
         });
 
         me.clone()
@@ -588,6 +595,9 @@ where
             return Ok(());
         }
 
+        self.validate_post_delegation_action_signers(delegation_actions)
+            .await?;
+
         let dependencies = delegation_actions
             .iter()
             .flat_map(|instruction| {
@@ -627,6 +637,35 @@ where
         Err(ChainlinkError::MissingDelegationActionAccounts(
             missing_accounts,
         ))
+    }
+
+    async fn validate_post_delegation_action_signers(
+        &self,
+        delegation_actions: &DelegationActions,
+    ) -> ChainlinkResult<()> {
+        let Some(risk_service) = self.risk_service.as_ref() else {
+            return Ok(());
+        };
+
+        let mut signers = delegation_actions
+            .iter()
+            .flat_map(|instruction| {
+                instruction.accounts.iter().filter_map(|meta| {
+                    if meta.is_signer {
+                        Some(meta.pubkey.to_string())
+                    } else {
+                        None
+                    }
+                })
+            })
+            .collect::<Vec<_>>();
+        signers.sort_unstable();
+        signers.dedup();
+
+        if signers.is_empty() {
+            return Ok(());
+        }
+        Ok(risk_service.check_addresses(signers).await?)
     }
 
     async fn clone_projected_ata_request(
