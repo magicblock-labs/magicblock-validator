@@ -117,6 +117,7 @@ impl HttpDispatcher {
         &self,
         pubkey: &Pubkey,
     ) -> Option<AccountSharedData> {
+        let mark_empty_if_not_found = [*pubkey];
         let _timer = ENSURE_ACCOUNTS_TIME
             .with_label_values(&["account"])
             .start_timer();
@@ -124,7 +125,7 @@ impl HttpDispatcher {
             .chainlink
             .ensure_accounts(
                 &[*pubkey],
-                None,
+                Some(&mark_empty_if_not_found),
                 AccountFetchOrigin::GetAccount,
                 None,
             )
@@ -152,7 +153,7 @@ impl HttpDispatcher {
             .chainlink
             .ensure_accounts(
                 pubkeys,
-                None,
+                Some(pubkeys),
                 AccountFetchOrigin::GetMultipleAccounts,
                 None,
             )
