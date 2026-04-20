@@ -8,8 +8,6 @@ mod process_create;
 mod process_resize;
 mod validation;
 
-use std::cell::RefCell;
-
 use magicblock_magic_program_api::EPHEMERAL_RENT_PER_BYTE;
 pub(crate) use process_close::process_close_ephemeral_account;
 pub(crate) use process_create::process_create_ephemeral_account;
@@ -18,7 +16,7 @@ use solana_account::{AccountSharedData, ReadableAccount};
 use solana_instruction::error::InstructionError;
 use solana_transaction_context::TransactionContext;
 
-use crate::utils::accounts;
+use crate::utils::accounts::{self, InstructionAccount};
 
 // ----- Account indices shared by validation and processors -----
 
@@ -46,10 +44,10 @@ fn rent_for(data_len: u32) -> Result<u64, InstructionError> {
 
 /// Returns the data length of an ephemeral account as a `u32`.
 fn get_ephemeral_data_len(
-    ephemeral: &RefCell<AccountSharedData>,
+    ephemeral: &InstructionAccount<'_, '_>,
 ) -> Result<u32, InstructionError> {
     ephemeral
-        .borrow()
+        .borrow()?
         .data()
         .len()
         .try_into()

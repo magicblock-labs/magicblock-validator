@@ -35,6 +35,7 @@ pub fn process_instruction(
 }
 
 #[cfg(test)]
+#[allow(deprecated)]
 mod tests {
     use sdk::MiniSdk;
     use solana_program_test::*;

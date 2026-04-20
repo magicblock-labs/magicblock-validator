@@ -4,7 +4,7 @@ pub use magicblock_core::token_programs::{
 use solana_account::Account;
 use solana_program::{program_option::COption, program_pack::Pack};
 use solana_pubkey::Pubkey;
-use solana_sysvar::rent::Rent;
+use solana_rent::Rent;
 use spl_token::state::{Account as SplAccount, AccountState};
 
 /// Creates a test ATA (Associated Token Account) with initialized state and zero balance.

@@ -1,31 +1,31 @@
 [workspace]
 members = [
-  "programs/flexi-counter",
-  "programs/schedulecommit",
-  "programs/schedulecommit-security",
-  "programs/sysvars",
-  "programs/mini",
-  "schedulecommit/client",
-  "test-committor-service",
-  "schedulecommit/test-scenarios",
-  "schedulecommit/test-security",
-  "test-chainlink",
-  "test-cloning",
-  "test-ledger-restore",
-  "test-magicblock-api",
-  "test-runner",
-  "test-table-mania",
-  "test-tools",
-  "test-pubsub",
-  "test-config",
-  "test-schedule-intent",
-  "test-task-scheduler",
+    "programs/flexi-counter",
+    "programs/mini",
+    "programs/schedulecommit",
+    "programs/schedulecommit-security",
+    "programs/sysvars",
+    "schedulecommit/client",
+    "schedulecommit/test-scenarios",
+    "schedulecommit/test-security",
+    "test-chainlink",
+    "test-cloning",
+    "test-committor-service",
+    "test-config",
+    "test-ledger-restore",
+    "test-magicblock-api",
+    "test-pubsub",
+    "test-runner",
+    "test-schedule-intent",
+    "test-table-mania",
+    "test-task-scheduler",
+    "test-tools"
 ]
 resolver = "2"
 
 [workspace.package]
-version = "0.0.0"
 edition = "2021"
+version = "0.0.0"
 
 [workspace.dependencies]
 anyhow = "1.0.86"
@@ -36,32 +36,26 @@ chrono = "0.4"
 cleanass = "0.0.1"
 color-backtrace = { version = "0.7" }
 ctrlc = "3.4.7"
-ephemeral-rollups-sdk = { git = "https://github.com/magicblock-labs/ephemeral-rollups-sdk.git", rev = "285d8b4", default-features = false, features = [
-  "modular-sdk",
+ephemeral-rollups-sdk = { git = "https://github.com/magicblock-labs/ephemeral-rollups-sdk.git", rev = "ccfc9f924dc40", default-features = false, features = [
+    "disable-realloc",
+    "modular-sdk"
 ] }
 futures = "0.3.31"
 integration-test-tools = { path = "test-tools" }
 isocountry = "0.3.2"
 lazy_static = "1.4.0"
+magic-domain-program = { git = "https://github.com/magicblock-labs/magic-domain-program.git", rev = "335a22", default-features = false }
+magicblock-accounts-db = { path = "../magicblock-accounts-db", features = ["dev-tools"] }
 magicblock-api = { path = "../magicblock-api" }
-magicblock-chainlink = { path = "../magicblock-chainlink", features = [
-  "dev-context",
-] }
-magicblock-accounts-db = { path = "../magicblock-accounts-db", features = [
-  "dev-tools",
-] }
+magicblock-chainlink = { path = "../magicblock-chainlink", features = ["dev-context"] }
 magicblock-committor-program = { path = "../magicblock-committor-program", features = [
-  "no-entrypoint",
+    "no-entrypoint"
 ] }
 magicblock-committor-service = { path = "../magicblock-committor-service" }
 magicblock-config = { path = "../magicblock-config" }
 magicblock-core = { path = "../magicblock-core" }
+magicblock-delegation-program-api = { git = "https://github.com/magicblock-labs/delegation-program.git", rev = "25386a7c1d406d06b8d07a4d5b0fd37d5e74213b", default-features = false }
 magicblock-magic-program-api = { path = "../magicblock-magic-program-api" }
-magic-domain-program = { git = "https://github.com/magicblock-labs/magic-domain-program.git", rev = "cffcfeb", default-features = false, features = [
-  "modular-sdk",
-] }
-magicblock_magic_program_api = { package = "magicblock-magic-program-api", path = "../magicblock-magic-program-api" }
-magicblock-delegation-program-api = { version = "0.3.0", default-features = false }
 magicblock-program = { path = "../programs/magicblock" }
 magicblock-rpc-client = { path = "../magicblock-rpc-client" }
 magicblock-table-mania = { path = "../magicblock-table-mania" }
@@ -76,29 +70,32 @@ rkyv = "0.7.45"
 schedulecommit-client = { path = "schedulecommit/client" }
 serde = "1.0.217"
 serial_test = "3.2.0"
-solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "3ff1b2ea" }
-solana-loader-v2-interface = "2.2"
-solana-loader-v3-interface = "4.0"
-solana-loader-v4-interface = "2.1"
-solana-program = "2.2"
-solana-program-test = "2.2"
-solana-pubkey = { version = "2.2" }
-solana-pubsub-client = "2.2"
-solana-rpc-client = "2.2"
-solana-rpc-client-api = "2.2"
-solana-sdk = "2.2"
-solana-sdk-ids = { version = "2.2" }
-solana-system-interface = "1.0"
-solana-transaction-status = "2.2"
-spl-memo-interface = "1.0"
-spl-token = "=7.0"
+solana-account = { git = "https://github.com/magicblock-labs/magicblock-svm.git", branch = "v3" }
+solana-address-lookup-table-interface = "3.1"
+solana-commitment-config = "3.1.1"
+solana-compute-budget-interface = "3.0"
+solana-loader-v2-interface = "3.0"
+solana-loader-v3-interface = "6.1.0"
+solana-loader-v4-interface = "3.1"
+solana-program = "3.0"
+solana-program-test = "3.1.12"
+solana-pubkey = { version = "3.0" }
+solana-pubsub-client = "3.1.12"
+solana-rpc-client = "3.1.12"
+solana-rpc-client-api = "3.1.12"
+solana-sdk = "3.0"
+solana-sdk-ids = { version = "3.0" }
+solana-system-interface = "3.1"
+solana-transaction-status = "3.1.12"
+spl-memo-interface = "2.0"
+spl-token = { package = "spl-token-interface", version = "2.0" }
 static_assertions = "1.1.0"
 teepee = "0.0.1"
 tempfile = "3.10.1"
 test-chainlink = { path = "./test-chainlink" }
 test-config = { path = "test-config" }
-test-ledger-restore = { path = "./test-ledger-restore" }
 test-kit = { path = "../test-kit" }
+test-ledger-restore = { path = "./test-ledger-restore" }
 tokio = "1.0"
 toml = "0.8.13"
 tracing = "0.1"
@@ -112,6 +109,9 @@ url = "2.5.0"
 solana-storage-proto = { path = "../storage-proto" }
 # same reason as above
 rocksdb = { git = "https://github.com/magicblock-labs/rust-rocksdb.git", rev = "6d975197" }
-solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "3ff1b2ea" }
+solana-account = { git = "https://github.com/magicblock-labs/magicblock-svm.git", branch = "v3" }
+solana-program-runtime = { git = "https://github.com/magicblock-labs/magicblock-svm.git", branch = "v3" }
+solana-svm = { git = "https://github.com/magicblock-labs/magicblock-svm.git", branch = "v3" }
+solana-transaction-context = { git = "https://github.com/magicblock-labs/magicblock-svm.git", branch = "v3" }
 # Fix libsodium for ARM builds - upstream crates.io version breaks Linux ARM binaries
 libsodium-rs = { git = "https://github.com/jedisct1/libsodium-rs.git", rev = "0397a6c5785233f9f2ac91f3eedc3cceb74e0060" }

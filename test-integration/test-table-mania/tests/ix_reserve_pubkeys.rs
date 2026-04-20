@@ -1,9 +1,8 @@
 use std::collections::HashSet;
 
+use solana_address_lookup_table_interface::state::LOOKUP_TABLE_MAX_ADDRESSES;
 use solana_pubkey::Pubkey;
-use solana_sdk::{
-    address_lookup_table::state::LOOKUP_TABLE_MAX_ADDRESSES, signature::Keypair,
-};
+use solana_sdk::signature::Keypair;
 use test_kit::init_logger;
 use tokio::task::JoinSet;
 use tracing::*;

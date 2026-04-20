@@ -14,11 +14,10 @@ use magicblock_chainlink::{
         utils::{airdrop, random_pubkey, PUBSUB_URL, RPC_URL},
     },
 };
+use solana_commitment_config::CommitmentConfig;
 use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
-use solana_sdk::{
-    clock::Clock, commitment_config::CommitmentConfig, sysvar::clock,
-};
+use solana_sdk::{clock::Clock, sysvar::clock};
 use tokio::{sync::mpsc, task};
 
 async fn setup() -> (ChainPubsubClientImpl, mpsc::Receiver<SubscriptionUpdate>)

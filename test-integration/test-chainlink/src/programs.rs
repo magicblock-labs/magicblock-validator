@@ -562,15 +562,18 @@ pub mod mini {
 pub mod deploy {
     use std::{fs, path::PathBuf, process::Command, sync::Arc};
 
-    use solana_loader_v4_interface::instruction::LoaderV4Instruction as LoaderInstructionV4;
+    use solana_loader_v4_interface::instruction::{
+        self as loader_v4_instruction,
+        LoaderV4Instruction as LoaderInstructionV4,
+    };
     use solana_rpc_client::nonblocking::rpc_client::RpcClient;
     use solana_sdk::{
         instruction::{AccountMeta, Instruction},
-        loader_v4, loader_v4_instruction,
         native_token::LAMPORTS_PER_SOL,
         signature::Keypair,
         signer::Signer,
     };
+    use solana_sdk_ids::{loader_v4, system_program};
     use solana_system_interface::instruction as system_instruction;
     use tracing::*;
 
@@ -651,8 +654,10 @@ pub mod deploy {
             .await;
             debug!("Created program account: {signature}");
         } else {
-            let retract_instruction =
-                loader_v4::retract(&program_kp.pubkey(), &auth_kp.pubkey());
+            let retract_instruction = loader_v4_instruction::retract(
+                &program_kp.pubkey(),
+                &auth_kp.pubkey(),
+            );
             let signature = send_instructions(
                 &rpc_client,
                 &[retract_instruction],
@@ -815,6 +820,7 @@ pub mod not_working {
         signer::Signer,
         transaction::Transaction,
     };
+    use solana_sdk_ids::system_program;
     use solana_system_interface::instruction as system_instruction;
     use tracing::*;
 
@@ -1115,10 +1121,7 @@ pub mod not_working {
                         false,
                     ),
                     // [] System program
-                    AccountMeta::new_readonly(
-                        solana_sdk::system_program::id(),
-                        false,
-                    ),
+                    AccountMeta::new_readonly(system_program::id(), false),
                     // [signer] The program's authority
                     AccountMeta::new_readonly(auth_kp.pubkey(), true),
                 ],

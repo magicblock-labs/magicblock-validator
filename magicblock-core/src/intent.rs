@@ -1,5 +1,3 @@
-use std::cell::RefCell;
-
 use magicblock_magic_program_api::args::ShortAccountMeta;
 use serde::{Deserialize, Serialize};
 use solana_account::{Account, AccountSharedData};
@@ -7,7 +5,7 @@ use solana_pubkey::Pubkey;
 
 use crate::token_programs::try_remap_ata_to_eata;
 
-pub type CommittedAccountRef<'a> = (Pubkey, &'a RefCell<AccountSharedData>);
+pub type CommittedAccountRef = (Pubkey, AccountSharedData);
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CommittedAccount {
@@ -16,13 +14,12 @@ pub struct CommittedAccount {
     pub remote_slot: u64,
 }
 
-impl<'a> From<CommittedAccountRef<'a>> for CommittedAccount {
-    fn from(value: CommittedAccountRef<'a>) -> Self {
-        let account = value.1.borrow();
-        let remote_slot = account.remote_slot();
+impl From<CommittedAccountRef> for CommittedAccount {
+    fn from(value: CommittedAccountRef) -> Self {
+        let remote_slot = value.1.remote_slot();
         Self {
             pubkey: value.0,
-            account: account.to_owned().into(),
+            account: value.1.into(),
             remote_slot,
         }
     }

@@ -39,7 +39,7 @@ async fn test_gasless_undelegated_feepayer_modification_fails() {
     }
 
     // 2. Execute Transfer (Payer -> Recipient)
-    let recipient = env.create_account(100);
+    let recipient = env.create_account(LAMPORTS_PER_SOL);
     let ix = transfer_ix(env.get_payer().pubkey, recipient.pubkey(), 1000);
     let txn = env.build_transaction(&[ix]);
 

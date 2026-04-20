@@ -4,6 +4,7 @@ use std::{str::FromStr, thread::sleep, time::Duration};
 
 use anyhow::{Context, Result};
 use borsh::BorshDeserialize;
+use solana_commitment_config::CommitmentConfig;
 use solana_rpc_client::{
     nonblocking,
     rpc_client::{GetConfirmedSignaturesForAddress2Config, RpcClient},
@@ -17,14 +18,13 @@ use solana_sdk::signer::SeedDerivable;
 use solana_sdk::{
     account::Account,
     clock::Slot,
-    commitment_config::CommitmentConfig,
     hash::Hash,
     instruction::Instruction,
     pubkey::Pubkey,
     rent::Rent,
     signature::{Keypair, Signature},
     signer::Signer,
-    transaction::{Transaction, TransactionError},
+    transaction::Transaction,
 };
 use solana_transaction_status::{
     EncodedConfirmedBlock, EncodedConfirmedTransactionWithStatusMeta,
@@ -55,11 +55,18 @@ fn async_rpc_client(
     )
 }
 
+fn client_error(kind: client_error::ErrorKind) -> client_error::Error {
+    client_error::Error {
+        request: None,
+        kind: Box::new(kind),
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TransactionStatusWithSignature {
     pub signature: String,
     pub slot: Slot,
-    pub err: Option<TransactionError>,
+    pub err: Option<solana_rpc_client_api::response::UiTransactionError>,
 }
 
 impl TransactionStatusWithSignature {
@@ -752,10 +759,8 @@ impl IntegrationTestContext {
     fn assert_transaction_error(res: &Result<Signature, ClientError>) {
         assert!(matches!(
             res,
-            Err(ClientError {
-                kind: ClientErrorKind::TransactionError(_),
-                ..
-            })
+            Err(err)
+                if matches!(err.kind(), ClientErrorKind::TransactionError(_))
         ));
     }
 
@@ -767,9 +772,8 @@ impl IntegrationTestContext {
     ) -> Result<bool, client_error::Error> {
         confirm_transaction(
             sig,
-            self.try_chain_client().map_err(|err| client_error::Error {
-                request: None,
-                kind: client_error::ErrorKind::Custom(err.to_string()),
+            self.try_chain_client().map_err(|err| {
+                client_error(client_error::ErrorKind::Custom(err.to_string()))
             })?,
             self.commitment,
             tx,
@@ -784,9 +788,8 @@ impl IntegrationTestContext {
     ) -> Result<bool, client_error::Error> {
         confirm_transaction(
             sig,
-            self.try_ephem_client().map_err(|err| client_error::Error {
-                request: None,
-                kind: client_error::ErrorKind::Custom(err.to_string()),
+            self.try_ephem_client().map_err(|err| {
+                client_error(client_error::ErrorKind::Custom(err.to_string()))
             })?,
             self.commitment,
             tx,
@@ -800,9 +803,8 @@ impl IntegrationTestContext {
         signers: &[&Keypair],
     ) -> Result<Signature, client_error::Error> {
         send_transaction(
-            self.try_ephem_client().map_err(|err| client_error::Error {
-                request: None,
-                kind: client_error::ErrorKind::Custom(err.to_string()),
+            self.try_ephem_client().map_err(|err| {
+                client_error(client_error::ErrorKind::Custom(err.to_string()))
             })?,
             tx,
             signers,
@@ -816,9 +818,8 @@ impl IntegrationTestContext {
         signers: &[&Keypair],
     ) -> Result<Signature, client_error::Error> {
         send_transaction(
-            self.try_ephem_client().map_err(|err| client_error::Error {
-                request: None,
-                kind: client_error::ErrorKind::Custom(err.to_string()),
+            self.try_ephem_client().map_err(|err| {
+                client_error(client_error::ErrorKind::Custom(err.to_string()))
             })?,
             tx,
             signers,
@@ -832,9 +833,8 @@ impl IntegrationTestContext {
         signers: &[&Keypair],
     ) -> Result<Signature, client_error::Error> {
         send_transaction(
-            self.try_chain_client().map_err(|err| client_error::Error {
-                request: None,
-                kind: client_error::ErrorKind::Custom(err.to_string()),
+            self.try_chain_client().map_err(|err| {
+                client_error(client_error::ErrorKind::Custom(err.to_string()))
             })?,
             tx,
             signers,
@@ -848,9 +848,8 @@ impl IntegrationTestContext {
         payer: &Keypair,
     ) -> Result<(Signature, Transaction), client_error::Error> {
         send_instructions_with_payer(
-            self.try_chain_client().map_err(|err| client_error::Error {
-                request: None,
-                kind: client_error::ErrorKind::Custom(err.to_string()),
+            self.try_chain_client().map_err(|err| {
+                client_error(client_error::ErrorKind::Custom(err.to_string()))
             })?,
             ixs,
             payer,

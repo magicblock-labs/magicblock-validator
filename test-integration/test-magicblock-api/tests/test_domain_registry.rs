@@ -12,9 +12,9 @@ use mdp::state::{
     status::ErStatus,
     version::v0::RecordV0,
 };
+use solana_commitment_config::CommitmentConfig;
 use solana_rpc_client::rpc_client::RpcClient;
 use solana_sdk::{
-    commitment_config::CommitmentConfig,
     native_token::LAMPORTS_PER_SOL,
     signature::{Keypair, Signer},
 };

@@ -2,7 +2,7 @@ use flume::{Receiver as MpmcReceiver, Sender as MpmcSender};
 use magicblock_magic_program_api::args::TaskRequest;
 use serde::Serialize;
 use solana_account::AccountSharedData;
-use solana_program::message::{
+use solana_message::{
     inner_instruction::InnerInstructionsList, SimpleAddressLoader,
 };
 use solana_pubkey::Pubkey;

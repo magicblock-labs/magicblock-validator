@@ -1,10 +1,11 @@
 use borsh::{to_vec, BorshDeserialize};
+use solana_account_info::AccountInfo;
 use solana_program::{
-    account_info::AccountInfo, entrypoint::ProgramResult, log::sol_log_64, msg,
-    program::invoke_signed, program_error::ProgramError, system_instruction,
-    sysvar::Sysvar,
+    entrypoint::ProgramResult, log::sol_log_64, msg, program::invoke_signed,
+    program_error::ProgramError, sysvar::Sysvar,
 };
 use solana_pubkey::Pubkey;
+use solana_system_interface::instruction as system_instruction;
 
 use crate::{
     consts,
@@ -257,7 +258,7 @@ fn process_realloc_buffer(
     //       Doing this as needed increases the cost for each realloc to 4,959 CUs.
     //       Reallocing without any rent check/increase uses only 4,025 CUs
     //       and does not require the system program to be provided.
-    buffer_account_info.realloc(next_alloc_size as usize, true)?;
+    buffer_account_info.resize(next_alloc_size as usize)?;
 
     Ok(())
 }

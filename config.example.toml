@@ -227,15 +227,10 @@ reset = false
 # Env: MBV_CHAINLINK__PREPARE_LOOKUP_TABLES
 prepare-lookup-tables = false
 
-# Amount of lamports to automatically airdrop to empty feepayer accounts on startup.
-# Default: 0
-# Env: MBV_CHAINLINK__AUTO_AIRDROP_LAMPORTS
-auto-airdrop-lamports = 0
-
 # Maximum number of accounts to monitor for price updates.
-# Default: 0
+# Default: 5000
 # Env: MBV_CHAINLINK__MAX_MONITORED_ACCOUNTS
-max-monitored-accounts = 1000
+max-monitored-accounts = 5000
 
 # When true, confined accounts are removed during accounts bank reset.
 # Default: false

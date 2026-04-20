@@ -5,8 +5,8 @@ use ephemeral_rollups_sdk::delegate_args::{
 use solana_program::{
     instruction::{AccountMeta, Instruction},
     pubkey::Pubkey,
-    system_program,
 };
+use solana_system_interface::program as system_program;
 
 use crate::{
     BookUpdate, DelegateCpiArgs, DelegateOrderBookArgs, ScheduleCommitCpiArgs,

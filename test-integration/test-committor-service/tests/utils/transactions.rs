@@ -1,15 +1,16 @@
 use solana_account::Account;
+use solana_commitment_config::CommitmentConfig;
 use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_rpc_client_api::config::{
     RpcSendTransactionConfig, RpcTransactionConfig,
 };
 use solana_sdk::{
-    commitment_config::CommitmentConfig,
     native_token::LAMPORTS_PER_SOL,
     signature::{Keypair, Signature, Signer},
     transaction::Transaction,
 };
+use solana_system_interface::instruction as system_instruction;
 use tracing::{debug, error};
 
 use crate::utils::instructions::{
@@ -126,6 +127,50 @@ pub async fn print_tx_logs(rpc_client: &RpcClient, signature: &Signature) {
     println!("logs: {:#?}", fetch_tx_logs(rpc_client, signature).await);
 }
 
+async fn airdrop_and_confirm(
+    rpc_client: &RpcClient,
+    pubkey: &Pubkey,
+    lamports: u64,
+    label: &str,
+) {
+    const AIRDROP_CHUNK: u64 = LAMPORTS_PER_SOL;
+    const MAX_ROUNDS: usize = 50;
+    const RETRY_SLEEP_MS: u64 = 200;
+
+    let mut current = rpc_client.get_balance(pubkey).await.unwrap_or(0);
+    if current >= lamports {
+        debug!(
+            "{} already funded: {} SOL",
+            label,
+            current as f64 / LAMPORTS_PER_SOL as f64
+        );
+        return;
+    }
+
+    for _ in 0..MAX_ROUNDS {
+        let chunk = (lamports - current).min(AIRDROP_CHUNK);
+        let _sig = rpc_client.request_airdrop(pubkey, chunk).await.unwrap();
+
+        for _ in 0..MAX_ROUNDS {
+            current = rpc_client.get_balance(pubkey).await.unwrap_or(0);
+            if current >= lamports {
+                debug!(
+                    "{} funded: {} SOL",
+                    label,
+                    current as f64 / LAMPORTS_PER_SOL as f64
+                );
+                return;
+            }
+
+            crate::utils::sleep_millis(RETRY_SLEEP_MS).await;
+        }
+    }
+
+    panic!(
+        "Failed to fund {label} to required balance: current={current}, target={lamports}"
+    );
+}
+
 #[allow(dead_code)]
 pub async fn tx_logs_contain(
     rpc_client: &RpcClient,
@@ -157,14 +202,9 @@ pub async fn init_and_delegate_account_on_chain(
     bytes: u64,
     label: Option<String>,
 ) -> (Pubkey, Account) {
+    const BASE_COUNTER_AUTH_BALANCE: u64 = LAMPORTS_PER_SOL;
+
     let rpc_client = RpcClient::new("http://localhost:7799".to_string());
-
-    rpc_client
-        .request_airdrop(&counter_auth.pubkey(), 777 * LAMPORTS_PER_SOL)
-        .await
-        .unwrap();
-    debug!("Airdropped to counter auth: {} SOL", 777 * LAMPORTS_PER_SOL);
-
     let InitAccountAndDelegateIxs {
         init: init_counter_ix,
         reallocs: realloc_ixs,
@@ -172,8 +212,16 @@ pub async fn init_and_delegate_account_on_chain(
         pda,
         rent_excempt,
     } = init_account_and_delegate_ixs(counter_auth.pubkey(), bytes, label);
+    let min_balance = BASE_COUNTER_AUTH_BALANCE + rent_excempt;
 
-    let latest_block_hash = rpc_client.get_latest_blockhash().await.unwrap();
+    airdrop_and_confirm(
+        &rpc_client,
+        &counter_auth.pubkey(),
+        min_balance,
+        "counter auth",
+    )
+    .await;
+
     // 1. Init account
     rpc_client
         .send_and_confirm_transaction_with_spinner_and_config(
@@ -181,7 +229,7 @@ pub async fn init_and_delegate_account_on_chain(
                 &[init_counter_ix],
                 Some(&counter_auth.pubkey()),
                 &[&counter_auth],
-                latest_block_hash,
+                rpc_client.get_latest_blockhash().await.unwrap(),
             ),
             CommitmentConfig::confirmed(),
             RpcSendTransactionConfig {
@@ -193,14 +241,32 @@ pub async fn init_and_delegate_account_on_chain(
         .expect("Failed to init account");
     debug!("Init account: {:?}", pda);
 
-    // 2. Airdrop to account for extra rent needed for reallocs
+    // 2. Fund account for extra rent needed for reallocs.
+    // A direct transfer is more deterministic here than a fresh airdrop when
+    // multiple test tasks are racing in CI.
     rpc_client
-        .request_airdrop(&pda, rent_excempt)
+        .send_and_confirm_transaction_with_spinner_and_config(
+            &Transaction::new_signed_with_payer(
+                &[system_instruction::transfer(
+                    &counter_auth.pubkey(),
+                    &pda,
+                    rent_excempt,
+                )],
+                Some(&counter_auth.pubkey()),
+                &[&counter_auth],
+                rpc_client.get_latest_blockhash().await.unwrap(),
+            ),
+            CommitmentConfig::confirmed(),
+            RpcSendTransactionConfig {
+                skip_preflight: true,
+                ..Default::default()
+            },
+        )
         .await
-        .unwrap();
+        .expect("Failed to fund account for reallocs");
 
     debug!(
-        "Airdropped to account: {:4} {}SOL to pay rent for {} bytes",
+        "Funded account: {:4} {}SOL to pay rent for {} bytes",
         pda,
         rent_excempt as f64 / LAMPORTS_PER_SOL as f64,
         bytes
@@ -212,7 +278,7 @@ pub async fn init_and_delegate_account_on_chain(
             realloc_ix_chunk,
             Some(&counter_auth.pubkey()),
             &[&counter_auth],
-            latest_block_hash,
+            rpc_client.get_latest_blockhash().await.unwrap(),
         );
         rpc_client
             .send_and_confirm_transaction_with_spinner_and_config(
@@ -235,7 +301,7 @@ pub async fn init_and_delegate_account_on_chain(
                 &[delegate_ix],
                 Some(&counter_auth.pubkey()),
                 &[&counter_auth],
-                latest_block_hash,
+                rpc_client.get_latest_blockhash().await.unwrap(),
             ),
             CommitmentConfig::confirmed(),
             RpcSendTransactionConfig {
@@ -256,12 +322,17 @@ pub async fn init_and_delegate_account_on_chain(
 pub async fn init_and_delegate_order_book_on_chain(
     payer: &Keypair,
 ) -> (Pubkey, Account) {
+    const MIN_ORDER_BOOK_PAYER_BALANCE: u64 = 2 * LAMPORTS_PER_SOL;
+
     let rpc_client = RpcClient::new("http://localhost:7799".to_string());
 
-    rpc_client
-        .request_airdrop(&payer.pubkey(), 777 * LAMPORTS_PER_SOL)
-        .await
-        .unwrap();
+    airdrop_and_confirm(
+        &rpc_client,
+        &payer.pubkey(),
+        MIN_ORDER_BOOK_PAYER_BALANCE,
+        "payer",
+    )
+    .await;
 
     let InitOrderBookAndDelegateIxs {
         init,
@@ -270,8 +341,6 @@ pub async fn init_and_delegate_order_book_on_chain(
         order_book,
     } = init_order_book_account_and_delegate_ixs(payer.pubkey());
 
-    let latest_block_hash = rpc_client.get_latest_blockhash().await.unwrap();
-
     //  Init account
     rpc_client
         .send_and_confirm_transaction_with_spinner_and_config(
@@ -279,7 +348,7 @@ pub async fn init_and_delegate_order_book_on_chain(
                 &[init],
                 Some(&payer.pubkey()),
                 &[payer, &book_manager],
-                latest_block_hash,
+                rpc_client.get_latest_blockhash().await.unwrap(),
             ),
             CommitmentConfig::confirmed(),
             RpcSendTransactionConfig {
@@ -297,7 +366,7 @@ pub async fn init_and_delegate_order_book_on_chain(
                 &[delegate],
                 Some(&payer.pubkey()),
                 &[&payer],
-                latest_block_hash,
+                rpc_client.get_latest_blockhash().await.unwrap(),
             ),
             CommitmentConfig::confirmed(),
             RpcSendTransactionConfig {
@@ -317,17 +386,24 @@ pub async fn init_and_delegate_order_book_on_chain(
 pub async fn fund_validator_auth_and_ensure_validator_fees_vault(
     validator_auth: &Keypair,
 ) {
+    const MIN_VALIDATOR_BALANCE: u64 = 20 * LAMPORTS_PER_SOL;
+
     let rpc_client = RpcClient::new("http://localhost:7799".to_string());
-    rpc_client
-        .request_airdrop(&validator_auth.pubkey(), 777 * LAMPORTS_PER_SOL)
-        .await
-        .unwrap();
+    airdrop_and_confirm(
+        &rpc_client,
+        &validator_auth.pubkey(),
+        MIN_VALIDATOR_BALANCE,
+        "validator",
+    )
+    .await;
     debug!("Airdropped to validator: {} ", validator_auth.pubkey(),);
 
-    let validator_fees_vault_exists = rpc_client
-        .get_account(&validator_auth.pubkey())
-        .await
-        .is_ok();
+    let validator_fees_vault =
+        dlp_api::pda::validator_fees_vault_pda_from_validator(
+            &validator_auth.pubkey(),
+        );
+    let validator_fees_vault_exists =
+        rpc_client.get_account(&validator_fees_vault).await.is_ok();
 
     if !validator_fees_vault_exists {
         let latest_block_hash =

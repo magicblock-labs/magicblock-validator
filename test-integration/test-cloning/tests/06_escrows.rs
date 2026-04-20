@@ -1,8 +1,9 @@
 use integration_test_tools::{dlp_interface, IntegrationTestContext};
 use solana_sdk::{
     account::Account, native_token::LAMPORTS_PER_SOL, pubkey::Pubkey,
-    signature::Keypair, signer::Signer, system_instruction,
+    signature::Keypair, signer::Signer,
 };
+use solana_system_interface::instruction as system_instruction;
 use test_kit::init_logger;
 use tracing::*;
 

@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use magicblock_core::{
-    intent::{BaseActionCallback, CommittedAccount, CommittedAccountRef},
+    intent::{BaseActionCallback, CommittedAccount},
     token_programs::{EATA_PROGRAM_ID, TOKEN_PROGRAM_ID},
     Slot,
 };
@@ -26,7 +26,7 @@ use crate::{
     magic_sys::MISSING_COMMIT_NONCE_ERR,
     utils::accounts::{
         get_instruction_account_with_idx, get_instruction_pubkey_with_idx,
-        get_writable_with_idx,
+        get_writable_with_idx, InstructionAccount,
     },
     validator::effective_validator_authority_id,
 };
@@ -41,34 +41,38 @@ pub const COMMIT_FEE_LAMPORTS: u64 = 100_000;
 pub const COMPUTE_UNIT_PRICE_MICRO_LAMPORTS: u64 = 50_000;
 
 /// Context necessary for construction of Schedule Action
-pub struct ConstructionContext<'a, 'ic> {
+pub struct ConstructionContext<'a, 'ic, 'ix_data> {
     parent_program_id: Option<Pubkey>,
     signers: &'a HashSet<Pubkey>,
-    pub transaction_context: &'a TransactionContext,
-    pub invoke_context: &'a mut InvokeContext<'ic>,
+    pub invoke_context: &'a mut InvokeContext<'ic, 'ix_data>,
     /// When `true`, actions use `call_handler_v2` which passes `source_program`
     /// to the delegation program. Legacy `ScheduleBaseIntent` sets this to
     /// `false` for backward compatibility with old deployed contracts.
     pub secure: bool,
 }
 
-impl<'a, 'ic> ConstructionContext<'a, 'ic> {
+impl<'a, 'ic, 'ix_data> ConstructionContext<'a, 'ic, 'ix_data> {
     pub fn new(
         parent_program_id: Option<Pubkey>,
         signers: &'a HashSet<Pubkey>,
-        transaction_context: &'a TransactionContext,
-        invoke_context: &'a mut InvokeContext<'ic>,
+        invoke_context: &'a mut InvokeContext<'ic, 'ix_data>,
         secure: bool,
     ) -> Self {
         Self {
             parent_program_id,
             signers,
-            transaction_context,
             invoke_context,
             secure,
         }
     }
+
+    pub fn transaction_context(&self) -> &TransactionContext<'ix_data> {
+        &*self.invoke_context.transaction_context
+    }
 }
+
+type CommitAccountRef<'a, 'ix_data> =
+    (Pubkey, InstructionAccount<'a, 'ix_data>);
 
 /// Scheduled action to be executed on base layer
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -88,7 +92,7 @@ impl ScheduledIntentBundle {
         commit_id: u64,
         slot: Slot,
         payer_pubkey: &Pubkey,
-        context: &ConstructionContext<'_, '_>,
+        context: &ConstructionContext<'_, '_, '_>,
     ) -> Result<ScheduledIntentBundle, InstructionError> {
         let intent_bundle = MagicIntentBundle::try_from_args(args, context)?;
         let blockhash = context.invoke_context.environment_config.blockhash;
@@ -240,7 +244,7 @@ impl From<MagicBaseIntent> for MagicIntentBundle {
 impl MagicIntentBundle {
     pub fn try_from_args(
         args: MagicIntentBundleArgs,
-        context: &ConstructionContext<'_, '_>,
+        context: &ConstructionContext<'_, '_, '_>,
     ) -> Result<Self, InstructionError> {
         Self::validate(&args, context)?;
 
@@ -288,7 +292,7 @@ impl MagicIntentBundle {
     /// 2. None for now :)
     fn validate(
         args: &MagicIntentBundleArgs,
-        context: &ConstructionContext<'_, '_>,
+        context: &ConstructionContext<'_, '_, '_>,
     ) -> Result<(), InstructionError> {
         let committed_set: Option<HashSet<_>> =
             args.commit.as_ref().map(|el| {
@@ -323,7 +327,7 @@ impl MagicIntentBundle {
     ///    are globally unique by pubkey.
     fn post_validation(
         &self,
-        context: &ConstructionContext<'_, '_>,
+        context: &ConstructionContext<'_, '_, '_>,
     ) -> Result<(), InstructionError> {
         if self.is_empty() {
             ic_msg!(
@@ -589,7 +593,7 @@ impl MagicIntentBundle {
 impl MagicBaseIntent {
     pub fn try_from_args(
         args: MagicBaseIntentArgs,
-        context: &ConstructionContext<'_, '_>,
+        context: &ConstructionContext<'_, '_, '_>,
     ) -> Result<MagicBaseIntent, InstructionError> {
         match args {
             MagicBaseIntentArgs::BaseActions(base_actions) => {
@@ -702,7 +706,7 @@ pub struct CommitAndUndelegate {
 impl CommitAndUndelegate {
     pub fn try_from_args(
         args: CommitAndUndelegateArgs,
-        context: &ConstructionContext<'_, '_>,
+        context: &ConstructionContext<'_, '_, '_>,
     ) -> Result<CommitAndUndelegate, InstructionError> {
         let account_indices = args.commit_type.committed_accounts_indices();
         Self::validate(account_indices.as_slice(), context)?;
@@ -720,15 +724,22 @@ impl CommitAndUndelegate {
 
     pub fn validate(
         account_indices: &[u8],
-        context: &ConstructionContext<'_, '_>,
+        context: &ConstructionContext<'_, '_, '_>,
     ) -> Result<(), InstructionError> {
         account_indices.iter().copied().try_for_each(|idx| {
-            let is_writable = get_writable_with_idx(context.transaction_context, idx as u16)?;
-            let delegated = get_instruction_account_with_idx(context.transaction_context, idx as u16)?;
-            if is_writable && delegated.borrow().delegated() {
+            let is_writable =
+                get_writable_with_idx(context.transaction_context(), idx as u16)?;
+            let delegated = get_instruction_account_with_idx(
+                context.transaction_context(),
+                idx as u16,
+            )?;
+            if is_writable && delegated.borrow()?.delegated() {
                 Ok(())
             } else {
-                let pubkey = get_instruction_pubkey_with_idx(context.transaction_context, idx as u16)?;
+                let pubkey = get_instruction_pubkey_with_idx(
+                    context.transaction_context(),
+                    idx as u16,
+                )?;
                 ic_msg!(
                     context.invoke_context,
                     "ScheduleCommit ERR: account {} is required to be writable and delegated in order to be undelegated",
@@ -827,12 +838,12 @@ pub struct BaseAction {
 impl BaseAction {
     pub fn try_from_args(
         args: BaseActionArgs,
-        context: &ConstructionContext<'_, '_>,
+        context: &ConstructionContext<'_, '_, '_>,
     ) -> Result<BaseAction, InstructionError> {
         // Since action on Base layer performed on behalf of some escrow
         // We need to ensure that action was authorized by legit owner
         let authority_pubkey = get_instruction_pubkey_with_idx(
-            context.transaction_context,
+            context.transaction_context(),
             args.escrow_authority as u16,
         )?;
         if !context.signers.contains(authority_pubkey) {
@@ -892,12 +903,11 @@ pub enum CommitType {
 
 impl CommitType {
     fn validate_accounts(
-        accounts: &[CommittedAccountRef],
-        context: &ConstructionContext<'_, '_>,
+        accounts: &[CommitAccountRef<'_, '_>],
+        context: &ConstructionContext<'_, '_, '_>,
     ) -> Result<(), InstructionError> {
         accounts.iter().try_for_each(|(pubkey, account)| {
-            let account_shared = account.borrow();
-            if !account_shared.delegated() {
+            if !account.borrow()?.delegated() {
                 ic_msg!(
                     context.invoke_context,
                     "ScheduleCommit ERR: account {} is required to be delegated to the current validator, in order to be committed",
@@ -907,7 +917,7 @@ impl CommitType {
             }
 
             // Validate committed account was scheduled by valid authority
-            let owner = *account_shared.owner();
+            let owner = *account.borrow()?.owner();
             validate_commit_schedule_permissions(
                 &context.invoke_context,
                 &owner,
@@ -926,10 +936,10 @@ impl CommitType {
     // So first:
     // 1. Validate
     // 2. Fetch current account states
-    pub fn extract_commit_accounts<'a>(
+    pub(crate) fn extract_commit_accounts<'a, 'ix_data>(
         account_indices: &[u8],
-        transaction_context: &'a TransactionContext,
-    ) -> Result<Vec<CommittedAccountRef<'a>>, InstructionError> {
+        transaction_context: &'a TransactionContext<'ix_data>,
+    ) -> Result<Vec<CommitAccountRef<'a, 'ix_data>>, InstructionError> {
         account_indices
             .iter()
             .map(|i| {
@@ -949,25 +959,26 @@ impl CommitType {
 
     pub fn try_from_args(
         args: CommitTypeArgs,
-        context: &ConstructionContext<'_, '_>,
+        context: &ConstructionContext<'_, '_, '_>,
     ) -> Result<CommitType, InstructionError> {
         match args {
             CommitTypeArgs::Standalone(accounts) => {
                 let committed_accounts_ref = Self::extract_commit_accounts(
                     &accounts,
-                    context.transaction_context,
+                    context.transaction_context(),
                 )?;
                 Self::validate_accounts(&committed_accounts_ref, context)?;
                 let committed_accounts = committed_accounts_ref
                     .into_iter()
-                    .map(|(pubkey, account_ref)| {
-                        CommittedAccount::from_account_shared(
+                    .map(|(pubkey, account)| {
+                        let account = account.to_account_shared_data()?;
+                        Ok(CommittedAccount::from_account_shared(
                             pubkey,
-                            &account_ref.borrow(),
+                            &account,
                             context.parent_program_id,
-                        )
+                        ))
                     })
-                    .collect();
+                    .collect::<Result<_, InstructionError>>()?;
 
                 Ok(CommitType::Standalone(committed_accounts))
             }
@@ -977,7 +988,7 @@ impl CommitType {
             } => {
                 let committed_accounts_ref = Self::extract_commit_accounts(
                     &committed_accounts,
-                    context.transaction_context,
+                    context.transaction_context(),
                 )?;
                 Self::validate_accounts(&committed_accounts_ref, context)?;
 
@@ -987,14 +998,15 @@ impl CommitType {
                     .collect::<Result<Vec<BaseAction>, InstructionError>>()?;
                 let committed_accounts = committed_accounts_ref
                     .into_iter()
-                    .map(|(pubkey, account_ref)| {
-                        CommittedAccount::from_account_shared(
+                    .map(|(pubkey, account)| {
+                        let account = account.to_account_shared_data()?;
+                        Ok(CommittedAccount::from_account_shared(
                             pubkey,
-                            &account_ref.borrow(),
+                            &account,
                             context.parent_program_id,
-                        )
+                        ))
                     })
-                    .collect();
+                    .collect::<Result<_, InstructionError>>()?;
 
                 Ok(CommitType::WithBaseActions {
                     committed_accounts,
@@ -1115,7 +1127,7 @@ impl UndelegateType {
 
     pub fn try_from_args(
         args: UndelegateTypeArgs,
-        context: &ConstructionContext<'_, '_>,
+        context: &ConstructionContext<'_, '_, '_>,
     ) -> Result<UndelegateType, InstructionError> {
         match args {
             UndelegateTypeArgs::Standalone => Ok(UndelegateType::Standalone),

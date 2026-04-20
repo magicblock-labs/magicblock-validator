@@ -21,11 +21,11 @@ use magicblock_rpc_client::MagicblockRpcClient;
 use program_flexi_counter::state::FlexiCounter;
 use program_schedulecommit::ScheduleCommitType;
 use solana_account::{Account, ReadableAccount};
+use solana_commitment_config::CommitmentConfig;
 use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_sdk::{
-    commitment_config::CommitmentConfig, hash::Hash, signature::Keypair,
-    signer::Signer, transaction::Transaction,
+    hash::Hash, signature::Keypair, signer::Signer, transaction::Transaction,
 };
 use test_kit::init_logger;
 use tokio::task::JoinSet;

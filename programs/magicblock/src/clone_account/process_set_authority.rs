@@ -28,25 +28,21 @@ pub(crate) fn process_set_program_authority(
 
     let ctx = transaction_context.get_current_instruction_context()?;
     let idx = ctx.get_index_of_instruction_account_in_transaction(1)?;
-    let account = transaction_context.get_account_at_index(idx)?;
+    let mut account = transaction_context.accounts().try_borrow_mut(idx)?;
     let key = *transaction_context.get_key_of_account_at_index(idx)?;
 
     // Verify loader v4 ownership
-    {
-        let acc = account.borrow();
-        if acc.owner() != &loader_v4::id() {
-            ic_msg!(
-                invoke_context,
-                "SetProgramAuthority: {} not owned by loader_v4",
-                key
-            );
-            return Err(InstructionError::InvalidAccountOwner);
-        }
+    if account.owner() != &loader_v4::id() {
+        ic_msg!(
+            invoke_context,
+            "SetProgramAuthority: {} not owned by loader_v4",
+            key
+        );
+        return Err(InstructionError::InvalidAccountOwner);
     }
 
     // Update authority in header
-    let mut acc = account.borrow_mut();
-    let data = acc.data();
+    let data = account.data().to_vec();
     let header_size = LoaderV4State::program_data_offset();
 
     if data.len() < header_size {
@@ -68,7 +64,7 @@ pub(crate) fn process_set_program_authority(
         status: current.status,
     };
 
-    acc.data_as_mut_slice()[..header_size]
+    account.data_as_mut_slice()[..header_size]
         .copy_from_slice(loader_v4_state_to_bytes(&new_state));
 
     ic_msg!(

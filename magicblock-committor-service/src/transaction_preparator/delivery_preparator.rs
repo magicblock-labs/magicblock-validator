@@ -43,6 +43,8 @@ pub struct DeliveryPreparator {
     compute_budget_config: ComputeBudgetConfig,
 }
 
+const MAX_PARALLEL_BUFFER_SENDS: usize = 8;
+
 impl DeliveryPreparator {
     pub fn new(
         rpc_client: MagicblockRpcClient,
@@ -240,11 +242,14 @@ impl DeliveryPreparator {
             .await?;
 
         // Reallocs can be performed in parallel
-        let preparation_futs =
-            preparation_instructions.iter().skip(1).map(|instructions| {
+        for batch in
+            preparation_instructions[1..].chunks(MAX_PARALLEL_BUFFER_SENDS)
+        {
+            let preparation_futs = batch.iter().map(|instructions| {
                 self.send_ixs_with_retry(instructions, authority, 5)
             });
-        try_join_all(preparation_futs).await?;
+            try_join_all(preparation_futs).await?;
+        }
 
         Ok(())
     }
@@ -288,10 +293,13 @@ impl DeliveryPreparator {
             })
             .collect::<Vec<_>>();
 
-        let fut_iter = chunks_write_instructions.iter().map(|instructions| {
-            self.send_ixs_with_retry(instructions.as_slice(), authority, 5)
-        });
-        try_join_all(fut_iter).await?;
+        for batch in chunks_write_instructions.chunks(MAX_PARALLEL_BUFFER_SENDS)
+        {
+            let fut_iter = batch.iter().map(|instructions| {
+                self.send_ixs_with_retry(instructions.as_slice(), authority, 5)
+            });
+            try_join_all(fut_iter).await?;
+        }
 
         Ok(())
     }
