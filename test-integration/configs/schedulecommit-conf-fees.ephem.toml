@@ -1,8 +1,9 @@
 lifecycle = "ephemeral"
-remotes = ["http://0.0.0.0:7799", "ws://0.0.0.0:7800"]
+remotes = ["http://0.0.0.0:9000"]
+storage = "magicblock-test-storage/schedulecommit-ephem"
 
 [aperture]
-listen = "0.0.0.0:8899"
+listen = "0.0.0.0:9002"
 
 [commit]
 compute-unit-price = 1_000_000
@@ -39,4 +40,4 @@ id = "4RaQH3CUBMSMQsSHPVaww2ifeNEEuaDZjF9CUdFwr3xr"
 path = "test-integration/target/deploy/program_schedulecommit_security.so"
 
 [metrics]
-address = "0.0.0.0:9000"
+address = "0.0.0.0:9102"

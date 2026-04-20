@@ -7,6 +7,7 @@ use std::{
 };
 
 use async_trait::async_trait;
+use integration_test_tools::IntegrationTestContext;
 use magicblock_committor_service::{
     intent_executor::{
         task_info_fetcher::{
@@ -38,7 +39,7 @@ use solana_sdk::{
 
 // Helper function to create a test RPC client
 pub async fn create_test_client() -> MagicblockRpcClient {
-    let url = "http://localhost:7799".to_string();
+    let url = IntegrationTestContext::url_chain().to_string();
     let rpc_client =
         RpcClient::new_with_commitment(url, CommitmentConfig::confirmed());
 

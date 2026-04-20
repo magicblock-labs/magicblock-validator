@@ -25,6 +25,7 @@ pub fn start_devnet_validator_with_config(config_name: &str) -> Child {
         None,
         &Default::default(),
         "CHAIN",
+        "magicblock_api",
     ) {
         Some(validator) => validator,
         None => {

@@ -14,8 +14,6 @@ use solana_sdk::{
 };
 use tracing::*;
 
-const VALIDATOR_WS: &str = "ws://127.0.0.1:8900";
-
 pub struct PubSubEnv {
     /// Account we delegated into ephem
     pub account1: Keypair,
@@ -30,9 +28,10 @@ impl PubSubEnv {
     pub async fn new() -> Self {
         let ctx = IntegrationTestContext::try_new().unwrap();
 
-        let ws_client = PubsubClient::new(VALIDATOR_WS)
-            .await
-            .expect("failed to connect to ER validator via websocket");
+        let ws_client =
+            PubsubClient::new(IntegrationTestContext::ws_url_ephem())
+                .await
+                .expect("failed to connect to ER validator via websocket");
 
         let payer_chain = Keypair::new();
         let account1 = Keypair::new();

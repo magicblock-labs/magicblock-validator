@@ -5,6 +5,7 @@ use std::{
 };
 
 use borsh::to_vec;
+use integration_test_tools::IntegrationTestContext;
 use magicblock_committor_service::{
     config::ChainConfig,
     intent_executor::{error::IntentExecutorError, ExecutionOutput},
@@ -950,7 +951,8 @@ async fn ix_commit_local(
     assert_eq!(execution_outputs.len(), intent_bundles.len());
     service.release_common_pubkeys().await.unwrap();
 
-    let rpc_client = RpcClient::new("http://localhost:7799".to_string());
+    let rpc_client =
+        RpcClient::new(IntegrationTestContext::url_chain().to_string());
     let mut strategies = ExpectedStrategies::new();
     for (execution_result, base_intent) in execution_outputs
         .into_iter()

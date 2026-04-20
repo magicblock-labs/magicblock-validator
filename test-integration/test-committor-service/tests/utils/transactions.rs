@@ -1,3 +1,4 @@
+use integration_test_tools::IntegrationTestContext;
 use solana_account::Account;
 use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
@@ -157,7 +158,8 @@ pub async fn init_and_delegate_account_on_chain(
     bytes: u64,
     label: Option<String>,
 ) -> (Pubkey, Account) {
-    let rpc_client = RpcClient::new("http://localhost:7799".to_string());
+    let rpc_client =
+        RpcClient::new(IntegrationTestContext::url_chain().to_string());
 
     rpc_client
         .request_airdrop(&counter_auth.pubkey(), 777 * LAMPORTS_PER_SOL)
@@ -256,7 +258,8 @@ pub async fn init_and_delegate_account_on_chain(
 pub async fn init_and_delegate_order_book_on_chain(
     payer: &Keypair,
 ) -> (Pubkey, Account) {
-    let rpc_client = RpcClient::new("http://localhost:7799".to_string());
+    let rpc_client =
+        RpcClient::new(IntegrationTestContext::url_chain().to_string());
 
     rpc_client
         .request_airdrop(&payer.pubkey(), 777 * LAMPORTS_PER_SOL)
@@ -317,7 +320,8 @@ pub async fn init_and_delegate_order_book_on_chain(
 pub async fn fund_validator_auth_and_ensure_validator_fees_vault(
     validator_auth: &Keypair,
 ) {
-    let rpc_client = RpcClient::new("http://localhost:7799".to_string());
+    let rpc_client =
+        RpcClient::new(IntegrationTestContext::url_chain().to_string());
     rpc_client
         .request_airdrop(&validator_auth.pubkey(), 777 * LAMPORTS_PER_SOL)
         .await

@@ -34,8 +34,10 @@ impl ChainConfig {
     }
 
     pub fn local(compute_budget_config: ComputeBudgetConfig) -> Self {
+        let rpc_uri = std::env::var("CHAIN_URL")
+            .unwrap_or_else(|_| "http://localhost:7799".to_string());
         Self {
-            rpc_uri: "http://localhost:7799".to_string(),
+            rpc_uri,
             commitment: CommitmentConfig::processed(),
             compute_budget_config,
             actions_timeout: DEFAULT_ACTIONS_TIMEOUT,

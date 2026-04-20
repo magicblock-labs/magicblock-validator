@@ -1,8 +1,9 @@
 lifecycle = "ephemeral"
-remotes = ["http://0.0.0.0:7799", "ws://0.0.0.0:7800"]
+remotes = ["http://0.0.0.0:9020"]
+storage = "magicblock-test-storage/cloning-ephem"
 
 [aperture]
-listen = "0.0.0.0:8899"
+listen = "0.0.0.0:9022"
 
 [commit]
 compute-unit-price = 1_000_000
@@ -31,4 +32,4 @@ snapshot-frequency = 1024
 reset = true
 
 [metrics]
-address = "0.0.0.0:9000"
+address = "0.0.0.0:9122"

@@ -47,21 +47,48 @@ fn extract_port_from_listen(listen: &str) -> &str {
 pub fn config_to_args(
     config_path: &PathBuf,
     program_loader: Option<ProgramLoader>,
+    rpc_port: u16,
+    suite_name: &str,
 ) -> Vec<String> {
     let config = parse_config(config_path);
     let program_loader = program_loader.unwrap_or_default();
 
-    let listen = config
-        .aperture
-        .as_ref()
-        .map(|a| a.listen.as_str())
-        .unwrap_or("127.0.0.1:8899");
-    let port = extract_port_from_listen(listen);
+    // Default ports (faucet 9900, gossip 8000, dynamic 1024-65535) collide
+    // when multiple chain validators run concurrently. Derive unique, non-
+    // overlapping port zones from rpc_port (which is already unique per suite
+    // via the TOML configs, spaced by 10).
+    let faucet_port = rpc_port
+        .checked_add(1000)
+        .expect("rpc_port + 1000 overflows u16");
+    let gossip_port = rpc_port
+        .checked_sub(200)
+        .expect("rpc_port - 200 underflows u16");
+    // Solana requires a minimum dynamic-port-range (~26 ports). Give each
+    // suite 50 ports, allocated by its "slot" — derived from rpc_port which
+    // is spaced by 10 starting at 9000 in the TOML configs.
+    let slot = rpc_port
+        .checked_sub(9000)
+        .expect("rpc_port must be >= 9000")
+        / 10;
+    let dyn_start = 11000u16
+        .checked_add(slot.checked_mul(50).expect("slot * 50 overflows u16"))
+        .expect("dynamic-port-range start overflows u16");
+    let dyn_end = dyn_start
+        .checked_add(49)
+        .expect("dynamic-port-range end overflows u16");
 
     let mut args = vec![
         "--log".to_string(),
         "--rpc-port".to_string(),
-        port.to_string(),
+        rpc_port.to_string(),
+        "--faucet-port".to_string(),
+        faucet_port.to_string(),
+        "--gossip-port".to_string(),
+        gossip_port.to_string(),
+        "--dynamic-port-range".to_string(),
+        format!("{dyn_start}-{dyn_end}"),
+        "--ledger".to_string(),
+        format!("test-ledger/{suite_name}"),
         "-r".to_string(),
         "--limit-ledger-size".to_string(),
         "10000".to_string(),

@@ -1,5 +1,6 @@
 use std::time::{Duration, Instant};
 
+use integration_test_tools::IntegrationTestContext;
 use magicblock_rpc_client::MagicblockRpcClient;
 use magicblock_table_mania::{GarbageCollectorConfig, TableMania};
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
@@ -20,7 +21,7 @@ pub async fn sleep_millis(millis: u64) {
 pub async fn setup_table_mania(validator_auth: &Keypair) -> TableMania {
     let rpc_client = {
         let client = RpcClient::new_with_commitment(
-            "http://localhost:7799".to_string(),
+            IntegrationTestContext::url_chain().to_string(),
             CommitmentConfig::processed(),
         );
         MagicblockRpcClient::from(client)

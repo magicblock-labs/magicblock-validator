@@ -1,3 +1,4 @@
+use integration_test_tools::IntegrationTestContext;
 use magicblock_rpc_client::MagicblockRpcClient;
 use magicblock_table_mania::{
     find_open_tables, LookupTableRc, TableManiaComputeBudgets,
@@ -23,7 +24,7 @@ pub async fn setup_lookup_table(
 ) -> (MagicblockRpcClient, LookupTableRc) {
     let rpc_client = {
         let client = RpcClient::new_with_commitment(
-            "http://localhost:7799".to_string(),
+            IntegrationTestContext::url_chain().to_string(),
             CommitmentConfig::confirmed(),
         );
         MagicblockRpcClient::from(client)

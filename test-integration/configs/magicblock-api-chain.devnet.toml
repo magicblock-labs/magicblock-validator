@@ -1,9 +1,9 @@
-lifecycle = "ephemeral"
-remotes = ["http://127.0.0.1:9040"]
-storage = "magicblock-test-storage/magicblock-api-ephem"
+lifecycle = "offline"
+remotes = ["devnet"]
+storage = "magicblock-test-storage/magicblock-api-chain"
 
 [aperture]
-listen = "0.0.0.0:9042"
+listen = "0.0.0.0:9040"
 
 [commit]
 compute-unit-price = 1_000_000
@@ -24,10 +24,32 @@ index-size = 2048576
 max-snapshots = 7
 # how frequently (slot-wise) we should take snapshots
 snapshot-frequency = 1024
+reset = true
 
 [ledger]
 reset = true
 block-time = "50ms"
 
+[[programs]]
+id = "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh"
+path = "../schedulecommit/elfs/dlp.so"
+
+[[programs]]
+id = "DmnRGfyyftzacFb1XadYhWF6vWqXwtQk5tbr6XgR3BA1"
+path = "../schedulecommit/elfs/mdp.so"
+
+# NOTE: `cargo build-sbf` needs to run from the root to build the program
+[[programs]]
+id = "ComtrB2KEaWgXsW1dhr1xYL4Ht4Bjj3gXnnL6KMdABq"
+path = "../../target/deploy/magicblock_committor_program.so"
+
+[[programs]]
+id = "9hgprgZiRWmy8KkfvUuaVkDGrqo9GzeXMohwq6BazgUY"
+path = "../target/deploy/program_schedulecommit.so"
+
+[[programs]]
+id = "4RaQH3CUBMSMQsSHPVaww2ifeNEEuaDZjF9CUdFwr3xr"
+path = "../target/deploy/program_schedulecommit_security.so"
+
 [metrics]
-address = "0.0.0.0:9142"
+address = "0.0.0.0:9140"
