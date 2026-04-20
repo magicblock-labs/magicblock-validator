@@ -1,6 +1,6 @@
+use solana_commitment_config::CommitmentConfig;
 use solana_rpc_client::rpc_client::RpcClient;
 // NOTE: sync version of test-tools/src/services.rs
-use solana_sdk::commitment_config::CommitmentConfig;
 
 pub fn is_devnet_up() -> bool {
     RpcClient::new_with_commitment(

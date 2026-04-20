@@ -136,7 +136,7 @@ impl ExecutionTestEnv {
 
         let (dispatch, validator_channels) = link();
         let blockhash = ledger.latest_block().load().blockhash;
-        let environment = build_svm_env(&accountsdb, blockhash, fee);
+        let svm_env = build_svm_env(&accountsdb, blockhash, fee);
         let payers = (0..executors).map(|_| Keypair::new()).collect();
 
         let (mode_tx, mode_rx) = tokio::sync::mpsc::channel(1);
@@ -169,8 +169,8 @@ impl ExecutionTestEnv {
             transaction_status_tx: validator_channels.transaction_status,
             txn_to_process_rx: validator_channels.transaction_to_process,
             tasks_tx: validator_channels.tasks_service,
-            environment,
-            is_auto_airdrop_lamports_enabled: false,
+            environment: svm_env.environment,
+            feature_set: svm_env.feature_set,
             shutdown: Default::default(),
             mode_rx,
         };

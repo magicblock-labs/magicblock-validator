@@ -16,19 +16,14 @@ use magicblock_core::link::{
 use magicblock_ledger::Ledger;
 use serde::Serialize;
 use solana_account::AccountSharedData;
-use solana_bpf_loader_program::syscalls::{
-    create_program_runtime_environment_v1,
-    create_program_runtime_environment_v2,
-};
+use solana_feature_set::FeatureSet;
 use solana_program::{
     clock::DEFAULT_SLOTS_PER_EPOCH,
     epoch_schedule::EpochSchedule,
     slot_hashes::{SlotHashes, MAX_ENTRIES},
     sysvar,
 };
-use solana_program_runtime::{
-    loaded_programs::ProgramCache, solana_sbpf::program::BuiltinProgram,
-};
+use solana_program_runtime::loaded_programs::ProgramCache;
 use solana_pubkey::Pubkey;
 use solana_svm::transaction_processor::TransactionProcessingEnvironment;
 use tokio::sync::mpsc::Receiver;
@@ -44,7 +39,8 @@ pub struct TransactionSchedulerState {
     // === Global State Handles ===
     pub accountsdb: Arc<AccountsDb>,
     pub ledger: Arc<Ledger>,
-    pub environment: TransactionProcessingEnvironment<'static>,
+    pub environment: TransactionProcessingEnvironment,
+    pub feature_set: FeatureSet,
 
     // === Communication Channels ===
     pub txn_to_process_rx: TransactionToProcessRx,
@@ -52,8 +48,6 @@ pub struct TransactionSchedulerState {
     pub transaction_status_tx: TransactionStatusTx,
     pub tasks_tx: ScheduledTasksTx,
 
-    // === Configuration ===
-    pub is_auto_airdrop_lamports_enabled: bool,
     pub shutdown: CancellationToken,
     /// Receives mode transition commands (Primary or Replica) at runtime.
     pub mode_rx: Receiver<SchedulerMode>,
@@ -72,24 +66,8 @@ impl TransactionSchedulerState {
             FORK_GRAPH.get_or_init(|| Arc::new(RwLock::new(SimpleForkGraph))),
         );
 
-        let runtime_v1 = create_program_runtime_environment_v1(
-            &self.environment.feature_set,
-            &Default::default(),
-            false,
-            false,
-        )
-        .map(Into::into)
-        .unwrap_or_else(|_| {
-            Arc::new(BuiltinProgram::new_loader(Default::default()))
-        });
-
-        let runtime_v2 =
-            create_program_runtime_environment_v2(&Default::default(), false);
-
-        let mut cache = ProgramCache::new(self.accountsdb.slot(), 0);
+        let mut cache = ProgramCache::new(self.accountsdb.slot());
         cache.set_fork_graph(forkgraph);
-        cache.environments.program_runtime_v1 = runtime_v1;
-        cache.environments.program_runtime_v2 = runtime_v2.into();
 
         Arc::new(RwLock::new(cache))
     }
@@ -111,14 +89,7 @@ impl TransactionSchedulerState {
         let epoch_schedule = EpochSchedule::new(DEFAULT_SLOTS_PER_EPOCH);
         self.ensure_sysvar(&sysvar::epoch_schedule::ID, &epoch_schedule);
 
-        let rent = self
-            .environment
-            .rent_collector
-            .as_ref()
-            .map(|rc| rc.get_rent());
-        if let Some(rent) = rent {
-            self.ensure_sysvar(&sysvar::rent::ID, rent);
-        }
+        self.ensure_sysvar(&sysvar::rent::ID, &self.environment.rent);
     }
 
     /// Helper to serialize and insert a sysvar if it doesn't exist.

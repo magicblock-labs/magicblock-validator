@@ -1,17 +1,15 @@
 [package]
+edition.workspace = true
 name = "schedulecommit-test-security"
 version.workspace = true
-edition.workspace = true
 
 [dev-dependencies]
-program-schedulecommit = { workspace = true, features = ["no-entrypoint"] }
-program-schedulecommit-security = { workspace = true, features = [
-  "no-entrypoint",
-] }
-schedulecommit-client = { workspace = true }
-magicblock-core = { workspace = true }
-magicblock_magic_program_api = { workspace = true }
+integration-test-tools = { workspace = true }
 magicblock-delegation-program-api = { workspace = true }
+magicblock-magic-program-api = { workspace = true }
+program-schedulecommit = { workspace = true, features = ["no-entrypoint"] }
+program-schedulecommit-security = { workspace = true, features = ["no-entrypoint"] }
+schedulecommit-client = { workspace = true }
 solana-rpc-client-api = { workspace = true }
 solana-sdk = { workspace = true }
-integration-test-tools = { workspace = true }
+solana-system-interface = { workspace = true }

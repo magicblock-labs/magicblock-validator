@@ -31,7 +31,7 @@ use solana_rpc_client_api::{
     custom_error::JSON_RPC_SERVER_ERROR_MIN_CONTEXT_SLOT_NOT_REACHED,
     request::RpcError,
 };
-use solana_sysvar::clock;
+use solana_sdk_ids::sysvar::clock;
 use tokio::{
     sync::{mpsc, oneshot},
     task, time,
@@ -1166,7 +1166,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                             break (slot, value);
                         }
                     }
-                    Ok(Err(err)) => match err.kind {
+                    Ok(Err(err)) => match *err.kind {
                         ErrorKind::RpcError(rpc_err) => {
                             match rpc_err {
                                 RpcError::ForUser(ref rpc_user_err) => {

@@ -1,15 +1,18 @@
 //! Shared utilities for clone account and mutate account instruction processing.
 
-use std::{cell::RefCell, collections::HashSet};
+use std::collections::HashSet;
 
 use magicblock_magic_program_api::instruction::AccountCloneFields;
-use solana_account::{AccountSharedData, ReadableAccount, WritableAccount};
+use solana_account::{ReadableAccount, WritableAccount};
 use solana_instruction::error::InstructionError;
 use solana_loader_v4_interface::state::LoaderV4State;
 use solana_log_collector::ic_msg;
 use solana_program_runtime::invoke_context::InvokeContext;
 use solana_pubkey::Pubkey;
-use solana_transaction_context::TransactionContext;
+use solana_transaction_context::{
+    transaction_accounts::{AccountRefMut, TransactionAccountViewMut},
+    TransactionContext,
+};
 
 use crate::{
     errors::MagicBlockProgramError, validator::effective_validator_authority_id,
@@ -75,21 +78,14 @@ pub fn validate_and_get_index(
     Err(InstructionError::InvalidArgument)
 }
 
-/// Returns true if account is ephemeral (exists locally on ER only).
-pub fn is_ephemeral(account: &RefCell<AccountSharedData>) -> bool {
-    account.borrow().ephemeral()
-}
-
 /// Validates that a delegated account is undelegating (mutation allowed).
 pub fn validate_not_delegated(
-    account: &RefCell<AccountSharedData>,
+    acc: &TransactionAccountViewMut<'_>,
     pubkey: &Pubkey,
     invoke_context: &InvokeContext,
 ) -> Result<(), InstructionError> {
-    let (is_delegated, is_undelegating) = {
-        let acc = account.borrow();
-        (acc.delegated(), acc.undelegating())
-    };
+    let (is_delegated, is_undelegating) =
+        { (acc.delegated(), acc.undelegating()) };
     if is_delegated && !is_undelegating {
         ic_msg!(
             invoke_context,
@@ -103,11 +99,11 @@ pub fn validate_not_delegated(
 
 /// Validates that the account can be mutated (not ephemeral, not active delegated).
 pub fn validate_mutable(
-    account: &RefCell<AccountSharedData>,
+    account: &TransactionAccountViewMut,
     pubkey: &Pubkey,
     invoke_context: &InvokeContext,
 ) -> Result<(), InstructionError> {
-    if is_ephemeral(account) {
+    if account.ephemeral() {
         ic_msg!(
             invoke_context,
             "Account {} is ephemeral and cannot be mutated",
@@ -121,7 +117,7 @@ pub fn validate_mutable(
 /// Validates that incoming remote_slot is not older than current.
 /// Skips check if incoming_remote_slot is None.
 pub fn validate_remote_slot(
-    account: &RefCell<AccountSharedData>,
+    account: &mut TransactionAccountViewMut<'_>,
     pubkey: &Pubkey,
     incoming_remote_slot: Option<u64>,
     invoke_context: &InvokeContext,
@@ -129,7 +125,7 @@ pub fn validate_remote_slot(
     let Some(incoming) = incoming_remote_slot else {
         return Ok(());
     };
-    let current = account.borrow().remote_slot();
+    let current = account.remote_slot();
 
     if incoming < current {
         ic_msg!(
@@ -153,13 +149,13 @@ pub fn validate_remote_slot(
 /// Adjusts validator authority lamports by delta.
 /// Positive delta = debit, negative delta = credit.
 pub fn adjust_authority_lamports(
-    auth_acc: &RefCell<AccountSharedData>,
+    auth_acc: &mut TransactionAccountViewMut,
     delta: i64,
 ) -> Result<(), InstructionError> {
     if delta == 0 {
         return Ok(());
     }
-    let auth_lamports = auth_acc.borrow().lamports();
+    let auth_lamports = auth_acc.lamports();
     let adjusted = if delta > 0 {
         auth_lamports
             .checked_sub(delta as u64)
@@ -169,14 +165,13 @@ pub fn adjust_authority_lamports(
             .checked_add(delta.unsigned_abs())
             .ok_or(InstructionError::ArithmeticOverflow)?
     };
-    auth_acc.borrow_mut().set_lamports(adjusted);
+    auth_acc.set_lamports(adjusted);
     Ok(())
 }
 
 /// Closes a buffer/temporary account by resetting it to default state.
 /// The account will be removed from accountsdb due to the ephemeral flag.
-pub fn close_buffer_account(account: &RefCell<AccountSharedData>) {
-    let mut acc = account.borrow_mut();
+pub fn close_buffer_account(mut acc: AccountRefMut<'_>) {
     acc.set_lamports(0);
     acc.resize(0, 0);
     // Setting ephemeral flag on empty account, forces
@@ -210,7 +205,7 @@ pub fn minimum_balance(
 /// Sets account fields from AccountCloneFields and data.
 pub fn set_account_from_fields(
     invoke_context: &InvokeContext,
-    account: &RefCell<AccountSharedData>,
+    mut acc: AccountRefMut<'_>,
     data: &[u8],
     fields: &AccountCloneFields,
 ) -> Result<(), InstructionError> {
@@ -225,7 +220,6 @@ pub fn set_account_from_fields(
         fields.remote_slot,
         data.len()
     );
-    let mut acc = account.borrow_mut();
     ic_msg!(
         invoke_context,
         "dest account state: lamports={}, owner={}, executable={}, delegated={}, undelegating={} confined={}, remote_slot={}, data_len={}",

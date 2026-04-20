@@ -18,12 +18,12 @@ use rand::{RngCore, SeedableRng};
 use schedulecommit_client::{
     verify, ScheduleCommitTestContext, ScheduleCommitTestContextFields,
 };
+use solana_commitment_config::CommitmentConfig;
 use solana_rpc_client::rpc_client::{RpcClient, SerializableTransaction};
 use solana_rpc_client_api::{
     client_error::Error as ClientError, config::RpcSendTransactionConfig,
 };
 use solana_sdk::{
-    commitment_config::CommitmentConfig,
     instruction::InstructionError,
     pubkey::Pubkey,
     signature::{Keypair, Signature},

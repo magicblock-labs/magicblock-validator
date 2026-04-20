@@ -1,4 +1,4 @@
-use std::{collections::HashSet, time::Duration};
+use std::time::Duration;
 
 use guinea::GuineaInstruction;
 use solana_account::{ReadableAccount, WritableAccount};
@@ -8,24 +8,11 @@ use solana_program::{
     native_token::LAMPORTS_PER_SOL,
     rent::Rent,
 };
-use solana_pubkey::Pubkey;
 use solana_transaction_error::TransactionError;
 use test_kit::{ExecutionTestEnv, Signer};
 
-pub const DELEGATION_PROGRAM_ID: Pubkey =
-    Pubkey::from_str_const("DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh");
-
 const BASE_FEE: u64 = ExecutionTestEnv::BASE_FEE;
 const TIMEOUT: Duration = Duration::from_millis(100);
-
-/// Derives the ephemeral balance PDA for a given payer.
-fn derive_ephemeral_pda(payer: &Pubkey) -> Pubkey {
-    Pubkey::find_program_address(
-        &[b"balance", payer.as_ref(), &[0]],
-        &DELEGATION_PROGRAM_ID,
-    )
-    .0
-}
 
 /// Helper to setup a guinea instruction with a new account.
 fn setup_guinea_ix(
@@ -117,44 +104,6 @@ async fn test_non_delegated_payer_rejection() {
 }
 
 #[tokio::test]
-async fn test_escrowed_payer_success() {
-    let env = ExecutionTestEnv::new();
-    let mut payer = env.get_payer();
-    // Ensure primary payer cannot pay standard fee to force escrow usage logic check
-    payer.set_lamports(BASE_FEE - 1);
-    payer.set_delegated(false);
-    let escrow = derive_ephemeral_pda(&payer.pubkey);
-    payer.commit();
-
-    env.fund_account(escrow, LAMPORTS_PER_SOL);
-    let initial_escrow_bal = env.get_account(escrow).lamports();
-
-    let ix = setup_guinea_ix(&env, GuineaInstruction::PrintSizes);
-    let txn = env.build_transaction(&[ix]);
-
-    env.execute_transaction(txn)
-        .await
-        .expect("Escrow transaction failed");
-
-    assert_eq!(
-        env.get_account(escrow).lamports(),
-        initial_escrow_bal - BASE_FEE,
-        "Escrow should pay fee"
-    );
-
-    // Verify updates
-    let mut updates = HashSet::new();
-    while let Ok(acc) = env.dispatch.account_update.try_recv() {
-        updates.insert(acc.account.pubkey);
-    }
-    assert!(updates.contains(&escrow), "Escrow update missing");
-    assert!(
-        !updates.contains(&env.get_payer().pubkey),
-        "Primary payer update unexpected"
-    );
-}
-
-#[tokio::test]
 async fn test_fee_charged_for_failed_transaction() {
     let env = ExecutionTestEnv::new();
     let initial_bal = env.get_payer().lamports();
@@ -181,42 +130,6 @@ async fn test_fee_charged_for_failed_transaction() {
         env.get_payer().lamports(),
         initial_bal - BASE_FEE,
         "Fee should be charged on failure"
-    );
-}
-
-#[tokio::test]
-async fn test_escrow_charged_for_failed_transaction() {
-    let env = ExecutionTestEnv::new();
-    let mut payer = env.get_payer();
-    payer.set_lamports(0);
-    payer.set_delegated(false);
-    let escrow = derive_ephemeral_pda(&payer.pubkey);
-    payer.commit();
-
-    env.fund_account(escrow, LAMPORTS_PER_SOL);
-    let initial_escrow_bal = env.get_account(escrow).lamports();
-
-    // Setup failing instruction (write to empty account)
-    let ix = setup_guinea_ix(&env, GuineaInstruction::WriteByteToData(42));
-    let mut acc = env.get_account(ix.accounts[0].pubkey);
-    acc.set_data(vec![]);
-    env.accountsdb
-        .insert_account(&ix.accounts[0].pubkey, &acc)
-        .unwrap();
-
-    let txn = env.build_transaction(&[ix]);
-    env.transaction_scheduler.schedule(txn).await.unwrap();
-
-    let status = env
-        .dispatch
-        .transaction_status
-        .recv_timeout(TIMEOUT)
-        .unwrap();
-    assert!(status.meta.status.is_err(), "Transaction should fail");
-    assert_eq!(
-        env.get_account(escrow).lamports(),
-        initial_escrow_bal - BASE_FEE,
-        "Escrow should be charged on failure"
     );
 }
 

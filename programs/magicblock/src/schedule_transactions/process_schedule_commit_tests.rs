@@ -1026,7 +1026,7 @@ mod tests {
             ix.data.as_slice(),
             transaction_accounts,
             ix.accounts,
-            Err(InstructionError::NotEnoughAccountKeys),
+            Err(InstructionError::MissingAccount),
         );
     }
 

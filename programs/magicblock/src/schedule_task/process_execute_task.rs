@@ -20,69 +20,69 @@ pub(crate) fn process_execute_crank(
     const VALIDATOR_IDX: u16 = 0;
     const CRANK_SIGNER_IDX: u16 = 1;
 
-    let transaction_context = &invoke_context.transaction_context.clone();
-    let ix_ctx = transaction_context.get_current_instruction_context()?;
-    let ix_accs_len = ix_ctx.get_number_of_instruction_accounts() as usize;
     const ACCOUNTS_START: usize = CRANK_SIGNER_IDX as usize + 1;
 
-    // Assert crank executor program.
-    ix_ctx
-        .find_index_of_program_account(transaction_context, &crate::id())
-        .or_else(|| {
-            ix_ctx.find_index_of_program_account(
-                transaction_context,
-                &CRANK_PROGRAM_ID,
-            )
-        })
-        .ok_or_else(|| {
+    {
+        let transaction_context = &*invoke_context.transaction_context;
+        let ix_ctx = transaction_context.get_current_instruction_context()?;
+        let ix_accs_len = ix_ctx.get_number_of_instruction_accounts() as usize;
+
+        // Assert crank executor program.
+        let program_key = ix_ctx.get_program_key()?;
+        if program_key != &crate::id() && program_key != &CRANK_PROGRAM_ID {
             ic_msg!(
                 invoke_context,
                 "ExecuteCrank ERR: crank executor program account not found"
             );
-            InstructionError::UnsupportedProgramId
-        })?;
+            return Err(InstructionError::UnsupportedProgramId);
+        }
 
-    // Assert enough accounts
-    if ix_accs_len < ACCOUNTS_START {
-        ic_msg!(
-            invoke_context,
-            "ExecuteCrank ERR: not enough accounts to execute crank ({}), need crank signer and instructions",
-            ix_accs_len
-        );
-        return Err(InstructionError::NotEnoughAccountKeys);
-    }
+        // Assert enough accounts
+        if ix_accs_len < ACCOUNTS_START {
+            ic_msg!(
+                invoke_context,
+                "ExecuteCrank ERR: not enough accounts to execute crank ({}), need crank signer and instructions",
+                ix_accs_len
+            );
+            return Err(InstructionError::MissingAccount);
+        }
 
-    // Assert Validator is signer
-    // Only the validator can execute a crank
-    let validator_pubkey =
-        get_instruction_pubkey_with_idx(transaction_context, VALIDATOR_IDX)?;
-    if validator_pubkey != &validator_authority_id() {
-        ic_msg!(
-            invoke_context,
-            "ExecuteCrank ERR: validator pubkey {} is not the expected validator",
-            validator_pubkey
-        );
-        return Err(InstructionError::IncorrectAuthority);
-    }
-    if !signers.contains(validator_pubkey) {
-        ic_msg!(
-            invoke_context,
-            "ExecuteCrank ERR: validator pubkey {} is not in signers",
-            validator_pubkey
-        );
-        return Err(InstructionError::MissingRequiredSignature);
-    }
+        // Assert Validator is signer
+        // Only the validator can execute a crank
+        let validator_pubkey = get_instruction_pubkey_with_idx(
+            transaction_context,
+            VALIDATOR_IDX,
+        )?;
+        if validator_pubkey != &validator_authority_id() {
+            ic_msg!(
+                invoke_context,
+                "ExecuteCrank ERR: validator pubkey {} is not the expected validator",
+                validator_pubkey
+            );
+            return Err(InstructionError::IncorrectAuthority);
+        }
+        if !signers.contains(validator_pubkey) {
+            ic_msg!(
+                invoke_context,
+                "ExecuteCrank ERR: validator pubkey {} is not in signers",
+                validator_pubkey
+            );
+            return Err(InstructionError::MissingRequiredSignature);
+        }
 
-    // Assert Crank signer is provided
-    let crank_signer_pubkey =
-        get_instruction_pubkey_with_idx(transaction_context, CRANK_SIGNER_IDX)?;
-    if crank_signer_pubkey != &CRANK_SIGNER {
-        ic_msg!(
-            invoke_context,
-            "ExecuteCrank ERR: crank signer pubkey {} is not the expected Crank signer",
-            crank_signer_pubkey
-        );
-        return Err(InstructionError::InvalidSeeds);
+        // Assert Crank signer is provided
+        let crank_signer_pubkey = get_instruction_pubkey_with_idx(
+            transaction_context,
+            CRANK_SIGNER_IDX,
+        )?;
+        if crank_signer_pubkey != &CRANK_SIGNER {
+            ic_msg!(
+                invoke_context,
+                "ExecuteCrank ERR: crank signer pubkey {} is not the expected Crank signer",
+                crank_signer_pubkey
+            );
+            return Err(InstructionError::InvalidSeeds);
+        }
     }
 
     // Already validated when scheduling the task.
@@ -91,7 +91,7 @@ pub(crate) fn process_execute_crank(
 
     let len = instructions.len();
     for ix in instructions {
-        invoke_context.native_invoke(ix.into(), &[CRANK_SIGNER])?;
+        invoke_context.native_invoke(ix, &[CRANK_SIGNER])?;
     }
 
     ic_msg!(invoke_context, "Executed crank with {} instructions", len);
@@ -192,7 +192,7 @@ mod test {
             &ix.data,
             transaction_accounts,
             vec![],
-            Err(InstructionError::NotEnoughAccountKeys),
+            Err(InstructionError::MissingAccount),
         );
     }
 

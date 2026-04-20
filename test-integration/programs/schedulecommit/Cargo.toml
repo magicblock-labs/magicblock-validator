@@ -1,23 +1,24 @@
 [package]
+edition.workspace = true
 name = "program-schedulecommit"
 version.workspace = true
-edition.workspace = true
 
 [dependencies]
 borsh = { workspace = true }
 ephemeral-rollups-sdk = { workspace = true }
-solana-program = { workspace = true }
 magicblock-delegation-program-api = { workspace = true, features = ["instruction"] }
-magicblock_magic_program_api = { workspace = true }
+magicblock-magic-program-api = { workspace = true }
 rkyv = { workspace = true }
+solana-program = { workspace = true }
+solana-system-interface = { workspace = true }
 static_assertions = { workspace = true }
 
 [lib]
 crate-type = ["cdylib", "lib"]
 
 [features]
-no-entrypoint = []
 cpi = ["no-entrypoint"]
-default = []
 custom-heap = []
 custom-panic = []
+default = []
+no-entrypoint = []

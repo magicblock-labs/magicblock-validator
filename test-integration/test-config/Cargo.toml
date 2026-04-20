@@ -13,5 +13,7 @@ program-flexi-counter = { workspace = true, features = ["no-entrypoint"] }
 serial_test = { workspace = true, features = ["file_locks"] }
 solana-rpc-client = { workspace = true }
 solana-sdk = { workspace = true }
+solana-sdk-ids = { workspace = true }
+solana-system-interface = { workspace = true }
 tempfile = { workspace = true }
 test-kit = { workspace = true }

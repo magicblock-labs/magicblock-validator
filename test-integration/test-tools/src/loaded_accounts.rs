@@ -28,7 +28,7 @@ pub struct LoadedAccounts {
 impl Default for LoadedAccounts {
     fn default() -> Self {
         Self {
-            validator_authority_kp: Keypair::from_bytes(&TEST_KEYPAIR_BYTES)
+            validator_authority_kp: Keypair::try_from(&TEST_KEYPAIR_BYTES[..])
                 .expect("Failed to create validator authority keypair"),
             luzid_authority: pubkey!(
                 "LUzidNSiPNjYNkxZcUm5hYHwnWPwsUfh2US1cpWwaBm"
@@ -57,8 +57,8 @@ impl LoadedAccounts {
     /// `cargo build-sbf --features=unit_test_config`
     pub fn with_delegation_program_test_authority() -> Self {
         Self {
-            validator_authority_kp: Keypair::from_bytes(
-                &DLP_TEST_AUTHORITY_BYTES,
+            validator_authority_kp: Keypair::try_from(
+                &DLP_TEST_AUTHORITY_BYTES[..],
             )
             .expect("Failed to create validator authority keypair"),
             luzid_authority: pubkey!(

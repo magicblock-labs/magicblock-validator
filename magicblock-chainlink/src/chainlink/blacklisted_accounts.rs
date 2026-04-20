@@ -6,9 +6,8 @@ use solana_sdk_ids::{
     address_lookup_table, bpf_loader, bpf_loader_deprecated,
     bpf_loader_upgradeable, compute_budget, config, ed25519_program,
     incinerator, loader_v4, native_loader, secp256k1_program, stake,
-    system_program, vote, zk_elgamal_proof_program,
+    system_program, sysvar, vote, zk_elgamal_proof_program,
 };
-use solana_sysvar;
 
 pub fn blacklisted_accounts(
     validator_id: &Pubkey,
@@ -38,19 +37,19 @@ pub fn blacklisted_accounts(
 
 pub fn sysvar_accounts() -> HashSet<Pubkey> {
     let mut blacklisted_sysvars = HashSet::new();
-    blacklisted_sysvars.insert(solana_sdk_ids::sysvar::ID);
-    blacklisted_sysvars.insert(solana_sysvar::clock::ID);
-    blacklisted_sysvars.insert(solana_sysvar::epoch_rewards::ID);
-    blacklisted_sysvars.insert(solana_sysvar::epoch_schedule::ID);
-    blacklisted_sysvars.insert(solana_sysvar::fees::ID);
-    blacklisted_sysvars.insert(solana_sdk_ids::sysvar::instructions::ID);
-    blacklisted_sysvars.insert(solana_sysvar::last_restart_slot::ID);
-    blacklisted_sysvars.insert(solana_sysvar::recent_blockhashes::ID);
-    blacklisted_sysvars.insert(solana_sysvar::rent::ID);
-    blacklisted_sysvars.insert(solana_sysvar::rewards::ID);
-    blacklisted_sysvars.insert(solana_sysvar::slot_hashes::ID);
-    blacklisted_sysvars.insert(solana_sysvar::slot_history::ID);
-    blacklisted_sysvars.insert(solana_sysvar::stake_history::ID);
+    blacklisted_sysvars.insert(sysvar::ID);
+    blacklisted_sysvars.insert(sysvar::clock::ID);
+    blacklisted_sysvars.insert(sysvar::epoch_rewards::ID);
+    blacklisted_sysvars.insert(sysvar::epoch_schedule::ID);
+    blacklisted_sysvars.insert(sysvar::instructions::ID);
+    blacklisted_sysvars.insert(sysvar::fees::ID);
+    blacklisted_sysvars.insert(sysvar::last_restart_slot::ID);
+    blacklisted_sysvars.insert(sysvar::recent_blockhashes::ID);
+    blacklisted_sysvars.insert(sysvar::rent::ID);
+    blacklisted_sysvars.insert(sysvar::rewards::ID);
+    blacklisted_sysvars.insert(sysvar::slot_hashes::ID);
+    blacklisted_sysvars.insert(sysvar::slot_history::ID);
+    blacklisted_sysvars.insert(sysvar::stake_history::ID);
     blacklisted_sysvars
 }
 

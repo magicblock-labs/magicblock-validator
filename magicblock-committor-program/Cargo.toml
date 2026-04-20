@@ -11,8 +11,11 @@ edition.workspace = true
 borsh = { workspace = true }
 paste = { workspace = true }
 solana-account = { workspace = true }
+solana-account-info = { workspace = true }
 solana-program = { workspace = true }
 solana-pubkey = { workspace = true }
+solana-sdk-ids = { workspace = true }
+solana-system-interface = { workspace = true, features = ["bincode"] }
 thiserror = { workspace = true }
 
 [dev-dependencies]

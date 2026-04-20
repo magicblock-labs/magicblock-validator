@@ -237,7 +237,7 @@ impl TransactionScheduler {
         self.index = 0;
 
         // Prune stale programs and re-root to new slot
-        cache.prune(block.slot, 0);
+        cache.prune(block.slot, None);
         cache.latest_root_slot = block.slot;
 
         // Update Clock sysvar

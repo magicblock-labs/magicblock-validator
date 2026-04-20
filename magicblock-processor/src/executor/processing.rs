@@ -13,10 +13,15 @@ use magicblock_core::{
 use magicblock_metrics::metrics::{
     FAILED_TRANSACTIONS_COUNT, TRANSACTION_COUNT,
 };
+use solana_account::AccountSharedData;
+use solana_compute_budget::compute_budget_limits::ComputeBudgetLimits;
+use solana_fee_structure::FeeDetails;
+use solana_program_runtime::execution_budget::SVMTransactionExecutionAndFeeBudgetLimits;
 use solana_pubkey::Pubkey;
 use solana_svm::{
-    account_loader::{AccountsBalances, CheckedTransactionDetails},
+    account_loader::CheckedTransactionDetails,
     rollback_accounts::RollbackAccounts,
+    transaction_balances::BalanceCollector,
     transaction_processing_result::{
         ProcessedTransaction, TransactionProcessingResult,
     },
@@ -169,11 +174,9 @@ impl super::TransactionExecutor {
     fn process(
         &self,
         txn: &[SanitizedTransaction; 1],
-    ) -> (TransactionProcessingResult, AccountsBalances) {
-        let checked = CheckedTransactionDetails::new(
-            None,
-            self.environment.fee_lamports_per_signature,
-        );
+    ) -> (TransactionProcessingResult, Option<BalanceCollector>) {
+        let limits = self.compute_budget_limits(&txn[0]);
+        let checked = CheckedTransactionDetails::new(None, limits);
         let mut output =
             self.processor.load_and_execute_sanitized_transactions(
                 self,
@@ -192,7 +195,7 @@ impl super::TransactionExecutor {
             self.verify_account_states(processed);
         }
 
-        (result, output.balances)
+        (result, output.balance_collector)
     }
 
     /// Common handler for transaction failures (load error or commit error).
@@ -228,8 +231,10 @@ impl super::TransactionExecutor {
         &self,
         txn: IndexedTransaction,
         result: ProcessedTransaction,
-        balances: AccountsBalances,
+        balances: Option<BalanceCollector>,
     ) -> Result<(), Box<dyn std::error::Error>> {
+        let (pre_balances, post_balances) =
+            transaction_balances(&txn, balances);
         let meta = match result {
             ProcessedTransaction::Executed(executed) => TransactionStatusMeta {
                 fee: executed.loaded_transaction.fee_details.total_fee(),
@@ -237,8 +242,8 @@ impl super::TransactionExecutor {
                     executed.execution_details.executed_units,
                 ),
                 status: executed.execution_details.status,
-                pre_balances: balances.pre,
-                post_balances: balances.post,
+                pre_balances,
+                post_balances,
                 log_messages: executed.execution_details.log_messages,
                 loaded_addresses: txn.get_loaded_addresses(),
                 return_data: executed.execution_details.return_data,
@@ -252,8 +257,8 @@ impl super::TransactionExecutor {
             ProcessedTransaction::FeesOnly(fo) => TransactionStatusMeta {
                 fee: fo.fee_details.total_fee(),
                 status: Err(fo.load_error),
-                pre_balances: balances.pre,
-                post_balances: balances.post,
+                pre_balances,
+                post_balances,
                 loaded_addresses: txn.get_loaded_addresses(),
                 ..Default::default()
             },
@@ -346,27 +351,24 @@ impl super::TransactionExecutor {
         let accounts = match result {
             ProcessedTransaction::Executed(executed) => {
                 if succeeded && !executed.programs_modified_by_tx.is_empty() {
-                    self.processor
-                        .program_cache
-                        .write()
-                        .unwrap()
-                        .merge(&executed.programs_modified_by_tx);
+                    self.processor.global_program_cache.write().unwrap().merge(
+                        &self.processor.environments,
+                        &executed.programs_modified_by_tx,
+                    );
                 }
 
                 if !succeeded {
-                    // Only charge fee payer on failure
                     &executed.loaded_transaction.accounts[..1]
                 } else {
                     &executed.loaded_transaction.accounts
                 }
             }
             ProcessedTransaction::FeesOnly(fo) => {
-                if let RollbackAccounts::FeePayerOnly { fee_payer_account } =
+                if let RollbackAccounts::FeePayerOnly { fee_payer: account } =
                     &fo.rollback_accounts
                 {
-                    // Temporary slice construction to match expected type
                     return self.insert_and_notify(
-                        &[(fee_payer, fee_payer_account.clone())],
+                        &[(fee_payer, account.1.clone())],
                         notify,
                         false,
                     );
@@ -385,14 +387,14 @@ impl super::TransactionExecutor {
 
     fn insert_and_notify(
         &self,
-        accounts: &[(Pubkey, solana_account::AccountSharedData)],
+        accounts: &[(Pubkey, AccountSharedData)],
         notify: bool,
         privileged: bool,
     ) -> AccountsDbResult<()> {
         // Filter: Persist only dirty or privileged accounts
         let to_commit = accounts
             .iter()
-            .filter(|(_, acc)| acc.is_dirty() || privileged);
+            .filter(|(_, acc)| privileged || acc.is_dirty());
 
         self.accountsdb.insert_batch(to_commit)?;
 
@@ -400,7 +402,6 @@ impl super::TransactionExecutor {
             return Ok(());
         }
 
-        // Notify downstream
         for (pubkey, account) in accounts {
             let update = AccountWithSlot {
                 slot: self.processor.slot,
@@ -430,39 +431,13 @@ impl super::TransactionExecutor {
             .log_messages
             .get_or_insert_default();
 
-        // 1. Gasless Mode Integrity Check
-        // In gasless mode, non-delegated fee payers must NOT be modified (drained).
-        if self.environment.fee_lamports_per_signature == 0 {
-            let lamports_changed = fee_payer_acc
-                .as_borrowed()
-                .map(|a| a.lamports_changed())
-                .unwrap_or(true); // Owned/resized implies changed
-
-            if !self.is_auto_airdrop_lamports_enabled
-                && lamports_changed
-                && !fee_payer_acc.delegated()
-            {
-                executed.execution_details.status =
-                    Err(TransactionError::InvalidAccountForFee);
-                logs.push(
-                    "Feepayer balance has been illegally modified".into(),
-                );
-                return;
-            }
-        }
-
-        // 2. Confined Account Integrity Check
+        // Confined Account Integrity Check
         // Confined accounts must not have their lamport balance changed.
         for (pubkey, acc) in &txn.accounts {
             if !acc.confined() {
                 continue;
             }
-            let lamports_changed = acc
-                .as_borrowed()
-                .map(|a| a.lamports_changed())
-                .unwrap_or(true);
-
-            if lamports_changed {
+            if acc.lamports_changed() {
                 executed.execution_details.status =
                     Err(TransactionError::UnbalancedTransaction);
                 logs.push(format!(
@@ -472,4 +447,47 @@ impl super::TransactionExecutor {
             }
         }
     }
+
+    fn compute_budget_limits(
+        &self,
+        txn: &SanitizedTransaction,
+    ) -> SVMTransactionExecutionAndFeeBudgetLimits {
+        let limits = ComputeBudgetLimits::default();
+        let signature_fee = signature_fee(
+            txn,
+            self.environment.blockhash_lamports_per_signature,
+        );
+        let fee_details = FeeDetails::new(signature_fee, 0);
+
+        limits.get_compute_budget_and_limits(
+            limits.loaded_accounts_bytes,
+            fee_details,
+            false,
+        )
+    }
+}
+
+fn transaction_balances(
+    txn: &IndexedTransaction,
+    balances: Option<BalanceCollector>,
+) -> (Vec<u64>, Vec<u64>) {
+    let count = txn.message().account_keys().len();
+    let Some(balances) = balances else {
+        return (vec![0; count], vec![0; count]);
+    };
+
+    let (mut pre, mut post, _, _) = balances.into_vecs();
+    (
+        pre.pop().unwrap_or_else(|| vec![0; count]),
+        post.pop().unwrap_or_else(|| vec![0; count]),
+    )
+}
+
+fn signature_fee(
+    txn: &SanitizedTransaction,
+    lamports_per_signature: u64,
+) -> u64 {
+    txn.message()
+        .num_transaction_signatures()
+        .saturating_mul(lamports_per_signature)
 }

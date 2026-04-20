@@ -1,8 +1,9 @@
 use magicblock_magic_program_api::response::MagicResponse;
 use solana_program::{
     account_info::AccountInfo, entrypoint::ProgramResult, msg, program::invoke,
-    program_error::ProgramError, system_instruction,
+    program_error::ProgramError,
 };
+use solana_system_interface::instruction as system_instruction;
 
 /// Discriminator prefix for the transfer callback instruction.
 /// Checked before borsh parsing since the callback carries bincode-encoded
