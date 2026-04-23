@@ -8,6 +8,7 @@ use magicblock_chainlink::{
     remote_account_provider::{
         chain_rpc_client::ChainRpcClientImpl,
         chain_updates_client::ChainUpdatesClient,
+        photon_client::PhotonClientImpl,
     },
     submux::SubMuxClient,
     Chainlink,
@@ -24,6 +25,7 @@ pub type ChainlinkImpl = Chainlink<
     SubMuxClient<ChainUpdatesClient>,
     AccountsDb,
     ChainlinkCloner,
+    PhotonClientImpl,
 >;
 
 /// A container for the shared, global state of the RPC service.

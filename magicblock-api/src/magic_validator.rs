@@ -24,7 +24,8 @@ use magicblock_chainlink::{
     config::ChainlinkConfig,
     remote_account_provider::{
         chain_rpc_client::ChainRpcClientImpl,
-        chain_updates_client::ChainUpdatesClient, Endpoints,
+        chain_updates_client::ChainUpdatesClient,
+        photon_client::PhotonClientImpl, Endpoint, Endpoints,
     },
     submux::SubMuxClient,
     Chainlink,
@@ -109,6 +110,7 @@ type ChainlinkImpl = Chainlink<
     SubMuxClient<ChainUpdatesClient>,
     AccountsDb,
     ChainlinkCloner,
+    PhotonClientImpl,
 >;
 
 // -----------------
@@ -471,12 +473,17 @@ impl MagicValidator {
         accountsdb: &Arc<AccountsDb>,
         faucet_pubkey: Pubkey,
     ) -> ApiResult<ChainlinkImpl> {
-        let endpoints = Endpoints::try_from(config.remotes.as_slice())
+        let mut endpoints = Endpoints::try_from(config.remotes.as_slice())
             .map_err(|e| {
                 ApiError::from(
                     magicblock_chainlink::errors::ChainlinkError::from(e),
                 )
             })?;
+
+        endpoints.push(Endpoint::Compression {
+            label: "photon".to_string(),
+            url: config.compression.photon_url.clone(),
+        });
 
         let cloner = ChainlinkCloner::new(
             committor_service,

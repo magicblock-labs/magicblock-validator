@@ -286,6 +286,41 @@ lazy_static::lazy_static! {
     )
     .unwrap();
 
+    // Account fetch results from network (Photon)
+    pub static ref COMPRESSED_ACCOUNT_FETCHES_SUCCESS_COUNT: IntCounter =
+        IntCounter::new(
+            "compressed_account_fetches_success_count",
+            "Total number of successful network \
+             account fetches",
+        )
+        .unwrap();
+
+    pub static ref COMPRESSED_ACCOUNT_FETCHES_FAILED_COUNT: IntCounter =
+        IntCounter::new(
+            "compressed_account_fetches_failed_count",
+            "Total number of failed network account fetches \
+             (RPC errors)",
+        )
+        .unwrap();
+
+    pub static ref COMPRESSED_ACCOUNT_FETCHES_FOUND_COUNT: IntCounterVec = IntCounterVec::new(
+        Opts::new(
+            "compressed_account_fetches_found_count",
+            "Total number of network account fetches that found an account",
+        ),
+        &["origin"],
+    )
+    .unwrap();
+
+    pub static ref COMPRESSED_ACCOUNT_FETCHES_NOT_FOUND_COUNT: IntCounterVec = IntCounterVec::new(
+        Opts::new(
+            "compressed_account_fetches_not_found_count",
+            "Total number of network account fetches where account was not found",
+        ),
+        &["origin"],
+    )
+    .unwrap();
+
     pub static ref PER_PROGRAM_ACCOUNT_FETCH_STATS: IntCounterVec = IntCounterVec::new(
         Opts::new(
             "per_program_account_fetch_stats",
@@ -815,6 +850,32 @@ pub fn inc_account_fetches_found(fetch_origin: AccountFetchOrigin, count: u64) {
     ACCOUNT_FETCHES_FOUND_COUNT
         .with_label_values(&[fetch_origin.value()])
         .inc_by(count);
+}
+
+pub fn inc_compressed_account_fetches_success(count: u64) {
+    COMPRESSED_ACCOUNT_FETCHES_SUCCESS_COUNT.inc_by(count);
+}
+
+pub fn inc_compressed_account_fetches_found(
+    fetch_origin: AccountFetchOrigin,
+    count: u64,
+) {
+    COMPRESSED_ACCOUNT_FETCHES_FOUND_COUNT
+        .with_label_values(&[fetch_origin.value()])
+        .inc_by(count);
+}
+
+pub fn inc_compressed_account_fetches_not_found(
+    fetch_origin: AccountFetchOrigin,
+    count: u64,
+) {
+    COMPRESSED_ACCOUNT_FETCHES_NOT_FOUND_COUNT
+        .with_label_values(&[fetch_origin.value()])
+        .inc_by(count);
+}
+
+pub fn inc_compressed_account_fetches_failed(count: u64) {
+    COMPRESSED_ACCOUNT_FETCHES_FAILED_COUNT.inc_by(count);
 }
 
 pub fn inc_account_fetches_not_found(

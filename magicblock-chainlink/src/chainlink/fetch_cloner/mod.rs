@@ -12,9 +12,12 @@ use dlp_api::{
 };
 use magicblock_accounts_db::traits::AccountsBank;
 use magicblock_config::config::AllowedProgram;
-use magicblock_core::token_programs::{
-    is_ata, try_derive_ata_address_and_bump, try_derive_eata_address_and_bump,
-    MaybeIntoAta, EATA_PROGRAM_ID,
+use magicblock_core::{
+    token_programs::{
+        is_ata, try_derive_ata_address_and_bump,
+        try_derive_eata_address_and_bump, MaybeIntoAta, EATA_PROGRAM_ID,
+    },
+    traits::PhotonClient,
 };
 use magicblock_metrics::metrics::{self, AccountFetchOrigin};
 use scc::{hash_map::Entry, HashMap};
@@ -32,6 +35,7 @@ use tokio::{
 use tracing::*;
 
 mod ata_projection;
+mod compression;
 mod delegation;
 mod pending_clone_guard;
 mod pipeline;
@@ -71,15 +75,16 @@ use self::pending_clone_guard::{
     CloneClaim, CloneCompletion, CloneKey, PendingCloneGuard,
 };
 
-pub struct FetchCloner<T, U, V, C>
+pub struct FetchCloner<T, U, V, C, P>
 where
     T: ChainRpcClient,
     U: ChainPubsubClient,
     V: AccountsBank,
     C: Cloner,
+    P: PhotonClient,
 {
     /// The RemoteAccountProvider to fetch accounts from
-    remote_account_provider: Arc<RemoteAccountProvider<T, U>>,
+    remote_account_provider: Arc<RemoteAccountProvider<T, U, P>>,
     /// Tracks pending account fetch requests to avoid duplicate fetches in parallel
     /// Once an account is fetched and cloned into the bank, it's removed from here
     pending_requests: Arc<HashMap<Pubkey, RemoteAccountRequests>>,
@@ -109,17 +114,24 @@ where
             hash_map::HashMap<CloneKey, Vec<oneshot::Sender<CloneCompletion>>>,
         >,
     >,
+
+    /// Pubkeys for which the committor called `undelegation_requested`. Until the
+    /// bank reflects delegated+compressed (or a newer merged view), we must not short-circuit
+    /// in [`FetchCloner::fetch_and_clone_accounts_with_dedup`]: RPC may be up to date while
+    /// Photon has the compressed redelegation.
+    post_undelegation_photon_merge_pending: Arc<Mutex<HashSet<Pubkey>>>,
 }
 
 /// Manual Clone impl: `#[derive(Clone)]` would add `V: Clone, C: Clone`
 /// bounds that are not satisfied (`AccountsBank` and `Cloner` don't
 /// require `Clone`). All fields are behind `Arc` so Clone is not needed.
-impl<T, U, V, C> Clone for FetchCloner<T, U, V, C>
+impl<T, U, V, C, P> Clone for FetchCloner<T, U, V, C, P>
 where
     T: ChainRpcClient,
     U: ChainPubsubClient,
     V: AccountsBank,
     C: Cloner,
+    P: PhotonClient,
 {
     fn clone(&self) -> Self {
         Self {
@@ -133,21 +145,48 @@ where
             blacklisted_accounts: self.blacklisted_accounts.clone(),
             allowed_programs: self.allowed_programs.clone(),
             pending_clones: self.pending_clones.clone(),
+            post_undelegation_photon_merge_pending: self
+                .post_undelegation_photon_merge_pending
+                .clone(),
         }
     }
 }
 
-impl<T, U, V, C> FetchCloner<T, U, V, C>
+/// `mark_empty_if_not_found` can materialize a 0-lamport, no-data account. That entry must not
+/// short-circuit [`FetchCloner::fetch_and_clone_accounts_with_dedup`], or a later run might skip
+/// [`RemoteAccountProvider`]'s merged RPC+Photon path and never observe compressed state.
+fn bank_entry_is_tentative_empty_for_refetch(
+    account: &AccountSharedData,
+) -> bool {
+    if account.lamports() != 0
+        || !account.data().is_empty()
+        || account.executable()
+        || account.delegated()
+        || account.undelegating()
+    {
+        return false;
+    }
+    if account.compressed() {
+        // Placeholder that already came from the compressed fetch path; both sides may agree on
+        // not found — nothing further to resolve here.
+        return false;
+    }
+    let owner = account.owner();
+    owner == &Pubkey::default() || owner == &system_program::id()
+}
+
+impl<T, U, V, C, P> FetchCloner<T, U, V, C, P>
 where
     T: ChainRpcClient,
     U: ChainPubsubClient,
     V: AccountsBank,
     C: Cloner,
+    P: PhotonClient,
 {
     /// Create FetchCloner with subscription updates properly connected
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        remote_account_provider: &Arc<RemoteAccountProvider<T, U>>,
+        remote_account_provider: &Arc<RemoteAccountProvider<T, U, P>>,
         accounts_bank: &Arc<V>,
         cloner: &Arc<C>,
         validator_keypair: Keypair,
@@ -172,6 +211,9 @@ where
             blacklisted_accounts,
             allowed_programs,
             pending_clones: Arc::new(Mutex::new(hash_map::HashMap::new())),
+            post_undelegation_photon_merge_pending: Arc::new(Mutex::new(
+                HashSet::new(),
+            )),
         });
 
         me.clone()
@@ -183,6 +225,15 @@ where
     /// Get the current fetch count
     pub fn fetch_count(&self) -> u64 {
         self.fetch_count.load(Ordering::Relaxed)
+    }
+
+    /// Mark an account as needing a merged RPC+Photon refetch after the committor has run
+    /// `undelegation_requested` for this pubkey.
+    pub fn mark_post_undelegation_photon_merge_pending(&self, pubkey: Pubkey) {
+        self.post_undelegation_photon_merge_pending
+            .lock()
+            .expect("post_undelegation_photon_merge_pending lock poisoned")
+            .insert(pubkey);
     }
 
     pub fn cloner(&self) -> &Arc<C> {
@@ -390,7 +441,12 @@ where
             return;
         }
 
-        let (resolved_account, deleg_record, delegation_actions) = self
+        let (
+            resolved_account,
+            deleg_record,
+            delegation_actions,
+            compressed_delegation_slot,
+        ) = self
             .resolve_account_to_clone_from_forwarded_sub_with_unsubscribe(
                 update,
             )
@@ -493,6 +549,7 @@ where
                     in_bank.remote_slot(),
                     deleg_record,
                     &self.validator_pubkey,
+                    compressed_delegation_slot,
                 ) {
                     return;
                 }
@@ -834,6 +891,60 @@ where
         }
     }
 
+    /// If `data` holds a borsh [`CompressedDelegationRecord`], expand to logical owner and
+    /// payload like `resolve_compressed_accounts`. Fetched Photon accounts may already list the
+    /// logical owner; we only require valid record bytes in `data`.
+    /// If the notification has no `data` (e.g. truncated), refetch merged RPC+Photon and retry.
+    /// Second return: [`CompressedDelegationRecord::delegation_slot`] when expanded (see
+    /// [`account_still_undelegating_on_chain`]).
+    async fn decompress_or_refetch_compressed_account(
+        &self,
+        pubkey: Pubkey,
+        account: AccountSharedData,
+    ) -> (AccountSharedData, Option<u64>) {
+        let min_slot = account.remote_slot();
+        if let Some((out, delegation_slot)) =
+            compression::try_decompress_compressed_delegation(
+                self, &account, min_slot,
+            )
+        {
+            return (out, Some(delegation_slot));
+        }
+        if !account.data().is_empty() {
+            return (account, None);
+        }
+        if let Ok(fetched) = self
+            .remote_account_provider
+            .try_get_multi(
+                &[pubkey],
+                None,
+                AccountFetchOrigin::GetAccount,
+                None,
+                Some(min_slot),
+            )
+            .await
+        {
+            if let Some(ra) = fetched.into_iter().next() {
+                if let Some(fresh) = ra.fresh_account() {
+                    if let Some((out, delegation_slot)) =
+                        compression::try_decompress_compressed_delegation(
+                            self,
+                            &fresh,
+                            min_slot.max(fresh.remote_slot()),
+                        )
+                    {
+                        return (out, Some(delegation_slot));
+                    }
+                }
+            }
+        } else {
+            warn!(pubkey = %pubkey, "Refetch for compressed subscription account failed");
+        }
+        (account, None)
+    }
+
+    // Fourth return value: `CompressedDelegationRecord::delegation_slot` for compressed (no DLP)
+    // accounts, used in `account_still_undelegating_on_chain`.
     async fn resolve_account_to_clone_from_forwarded_sub_with_unsubscribe(
         &self,
         update: ForwardedSubscriptionUpdate,
@@ -841,6 +952,7 @@ where
         Option<AccountSharedData>,
         Option<DelegationRecord>,
         DelegationActions,
+        Option<u64>,
     ) {
         let ForwardedSubscriptionUpdate { pubkey, account } = update;
         let owned_by_delegation_program =
@@ -950,12 +1062,13 @@ where
                                     Some(account.into_account_shared_data()),
                                     Some(delegation_record),
                                     delegation_actions.unwrap_or_default(),
+                                    None,
                                 )
                             } else {
                                 // If the delegation record is invalid we cannot clone the account
                                 // since something is corrupt and we wouldn't know what owner to
                                 // use, etc.
-                                (None, None, DelegationActions::default())
+                                (None, None, DelegationActions::default(), None)
                             }
                         } else {
                             // If no delegation record exists we must assume the account itself is
@@ -964,6 +1077,7 @@ where
                                 Some(account.into_account_shared_data()),
                                 None,
                                 DelegationActions::default(),
+                                None,
                             )
                         };
 
@@ -983,7 +1097,7 @@ where
                             error = ?err,
                             "Failed to fetch delegation record"
                         );
-                        (None, None, DelegationActions::default())
+                        (None, None, DelegationActions::default(), None)
                     }
                     Err(err) => {
                         warn!(
@@ -991,10 +1105,13 @@ where
                             error = ?err,
                             "Failed to fetch delegation record"
                         );
-                        (None, None, DelegationActions::default())
+                        (None, None, DelegationActions::default(), None)
                     }
                 }
             } else {
+                let (account, compressed_delegation_slot) = self
+                    .decompress_or_refetch_compressed_account(pubkey, account)
+                    .await;
                 let (account, deleg_record) = self
                     .maybe_project_ata_from_subscription_update(pubkey, account)
                     .await;
@@ -1003,16 +1120,22 @@ where
                         Some(account),
                         Some(deleg_record),
                         actions.unwrap_or_default(),
+                        compressed_delegation_slot,
                     )
                 } else {
-                    (Some(account), None, DelegationActions::default())
+                    (
+                        Some(account),
+                        None,
+                        DelegationActions::default(),
+                        compressed_delegation_slot,
+                    )
                 }
             }
         } else {
             // This should not happen since we call this method with sub updates which always hold
             // a fresh remote account
             error!(pubkey = %pubkey, account = ?account, "BUG: Received subscription update without fresh account");
-            (None, None, DelegationActions::default())
+            (None, None, DelegationActions::default(), None)
         }
     }
 
@@ -1290,6 +1413,7 @@ where
             not_found,
             plain,
             owned_by_deleg,
+            compressed,
             programs,
             atas,
         } = pipeline::classify_remote_accounts(accs, pubkeys);
@@ -1307,6 +1431,10 @@ where
                 .iter()
                 .map(|(pubkey, _, slot)| (pubkey.to_string(), *slot))
                 .collect::<Vec<_>>();
+            let compressed = compressed
+                .iter()
+                .map(|(pubkey, _, slot)| (pubkey.to_string(), *slot))
+                .collect::<Vec<_>>();
             let programs = programs
                 .iter()
                 .map(|(p, _, _)| p.to_string())
@@ -1316,7 +1444,7 @@ where
                 .map(|(a, _, _, _)| a.to_string())
                 .collect::<Vec<_>>();
             trace!(
-                "Fetched accounts: \nnot_found:      {not_found:?} \nplain:          {plain:?} \nowned_by_deleg: {owned_by_deleg:?}\nprograms:       {programs:?} \natas:       {atas:?}",
+                "Fetched accounts: \nnot_found:      {not_found:?} \nplain:          {plain:?} \nowned_by_deleg: {owned_by_deleg:?}\ncompressed: {compressed:?}\nprograms:       {programs:?} \natas:       {atas:?}",
             );
         }
 
@@ -1404,6 +1532,13 @@ where
         .await;
         accounts_to_clone.extend(ata_accounts);
 
+        let compressed_accounts = compression::resolve_compressed_accounts(
+            self,
+            compressed,
+            min_context_slot,
+        );
+        accounts_to_clone.extend(compressed_accounts);
+
         // Ensure all accounts referenced by delegation actions exist and are
         // cloned before we execute those actions as part of account cloning.
         let action_dependencies =
@@ -1458,6 +1593,7 @@ where
                 not_found,
                 plain,
                 owned_by_deleg,
+                compressed,
                 programs,
                 atas,
             } = pipeline::classify_remote_accounts(
@@ -1525,8 +1661,16 @@ where
                 )
                 .await;
 
+            let action_dep_compressed_accounts =
+                compression::resolve_compressed_accounts(
+                    self,
+                    compressed,
+                    min_context_slot,
+                );
+
             accounts_to_clone.extend(action_dep_accounts_to_clone);
             accounts_to_clone.extend(action_dep_ata_accounts);
+            accounts_to_clone.extend(action_dep_compressed_accounts);
             loaded_programs.extend(action_dep_loaded_programs);
             all_requested_pubkeys.extend(action_dependencies_to_fetch);
         }
@@ -1576,6 +1720,12 @@ where
                 undelegating = in_bank.undelegating(),
                 "Fetching undelegating account"
             );
+
+            if in_bank.compressed() {
+                // We must refetch so RPC+Photon see the latest compressed record.
+                debug!(pubkey = %pubkey, "Undelegating compressed account: refresh from chain");
+                return RefreshDecision::Yes;
+            }
 
             if let Some(eata_pubkey) =
                 ata_projection::derive_eata_pubkey_from_ata_layout(
@@ -1629,6 +1779,7 @@ where
                 in_bank.remote_slot(),
                 deleg_record,
                 &self.validator_pubkey,
+                None,
             ) {
                 debug!(
                     "Account {pubkey} marked as undelegating will be overridden since undelegation completed"
@@ -1689,25 +1840,67 @@ where
             {
                 if account_in_bank.undelegating() {
                     undelegating_checks.push((**pubkey, account_in_bank));
+                } else if bank_entry_is_tentative_empty_for_refetch(
+                    &account_in_bank,
+                ) {
+                    // `mark_empty_if_not_found` (RPC/Photon) stores a 0-lamport empty account. If
+                    // the first attempt only had the RPC side, the bank can hold that placeholder
+                    // even when Photon later has the real compressed state — and we would skip
+                    // `try_get_multi` and never merge. Refetch to let consolidation run again.
+                    debug!(
+                        pubkey = %pubkey,
+                        "Tentative empty account in bank; not treating as fetch-complete"
+                    );
                 } else {
-                    if account_in_bank.owner().eq(&dlp_api::id()) {
+                    {
+                        let mut pending = self
+                            .post_undelegation_photon_merge_pending
+                            .lock()
+                            .expect("post_undelegation_photon_merge_pending lock poisoned");
+                        if account_in_bank.delegated()
+                            || account_in_bank.compressed()
+                        {
+                            pending.remove(*pubkey);
+                        }
+                    }
+                    // After undelegation the bank can hold a plain (non-compressed) undelegated
+                    // view while a newer compressed redelegation exists only in Photon. If we
+                    // short-circuited here, we would never run RPC+Photon merge and would miss
+                    // redelegation. `undelegation_requested` marks the pubkey; we refetch until
+                    // the bank shows merged delegated/compressed state.
+                    let may_have_newer_photon = {
+                        self.post_undelegation_photon_merge_pending
+                            .lock()
+                            .expect("post_undelegation_photon_merge_pending lock poisoned")
+                            .contains(*pubkey)
+                    } && self.is_watching(pubkey)
+                        && !account_in_bank.delegated()
+                        && !account_in_bank.compressed();
+                    if may_have_newer_photon {
                         debug!(
                             pubkey = %pubkey,
-                            "Account owned by deleg program not marked as undelegating"
+                            "Post-undelegation, non-delegated, non-compressed in bank; refetching to merge possible Photon state"
                         );
+                    } else {
+                        if account_in_bank.owner().eq(&dlp_api::id()) {
+                            debug!(
+                                pubkey = %pubkey,
+                                "Account owned by deleg program not marked as undelegating"
+                            );
+                        }
+                        if tracing::enabled!(tracing::Level::TRACE) {
+                            let delegated = account_in_bank.delegated();
+                            let owner = account_in_bank.owner();
+                            trace!(
+                                pubkey = %pubkey,
+                                undelegating = false,
+                                delegated,
+                                owner = %owner,
+                                "Account found in bank in valid state, no fetch needed"
+                            );
+                        }
+                        in_bank.insert(**pubkey);
                     }
-                    if tracing::enabled!(tracing::Level::TRACE) {
-                        let delegated = account_in_bank.delegated();
-                        let owner = account_in_bank.owner();
-                        trace!(
-                            pubkey = %pubkey,
-                            undelegating = false,
-                            delegated,
-                            owner = %owner,
-                            "Account found in bank in valid state, no fetch needed"
-                        );
-                    }
-                    in_bank.insert(**pubkey);
                 }
             }
         }

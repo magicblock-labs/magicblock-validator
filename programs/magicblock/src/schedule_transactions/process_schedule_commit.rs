@@ -32,6 +32,7 @@ use crate::{
 #[derive(Default)]
 pub(crate) struct ProcessScheduleCommitOptions {
     pub request_undelegation: bool,
+    pub compressed: bool,
 }
 
 pub(crate) fn process_schedule_commit(

@@ -206,6 +206,8 @@ pub enum MagicBaseIntent {
     CommitAndUndelegate(CommitAndUndelegate),
     CommitFinalize(CommitType),
     CommitFinalizeAndUndelegate(CommitAndUndelegate),
+    CommitFinalizeCompressed(CommitType),
+    CommitFinalizeAndUndelegateCompressed(CommitAndUndelegate),
 }
 
 // Bundle of BaseIntents
@@ -233,6 +235,12 @@ impl From<MagicBaseIntent> for MagicIntentBundle {
                 this.commit_finalize = Some(value)
             }
             MagicBaseIntent::CommitFinalizeAndUndelegate(value) => {
+                this.commit_finalize_and_undelegate = Some(value)
+            }
+            MagicBaseIntent::CommitFinalizeCompressed(value) => {
+                this.commit_finalize = Some(value)
+            }
+            MagicBaseIntent::CommitFinalizeAndUndelegateCompressed(value) => {
                 this.commit_finalize_and_undelegate = Some(value)
             }
         }
@@ -633,6 +641,8 @@ impl MagicBaseIntent {
             MagicBaseIntent::CommitAndUndelegate(_) => true,
             MagicBaseIntent::CommitFinalize(_) => false,
             MagicBaseIntent::CommitFinalizeAndUndelegate(_) => true,
+            MagicBaseIntent::CommitFinalizeCompressed(_) => false,
+            MagicBaseIntent::CommitFinalizeAndUndelegateCompressed(_) => true,
         }
     }
 
@@ -643,6 +653,8 @@ impl MagicBaseIntent {
             MagicBaseIntent::CommitAndUndelegate(_) => false,
             MagicBaseIntent::CommitFinalize(_) => true,
             MagicBaseIntent::CommitFinalizeAndUndelegate(_) => true,
+            MagicBaseIntent::CommitFinalizeCompressed(_) => true,
+            MagicBaseIntent::CommitFinalizeAndUndelegateCompressed(_) => true,
         }
     }
 
@@ -657,6 +669,12 @@ impl MagicBaseIntent {
                 Some(t.get_committed_accounts())
             }
             MagicBaseIntent::CommitFinalizeAndUndelegate(t) => {
+                Some(t.get_committed_accounts())
+            }
+            MagicBaseIntent::CommitFinalizeCompressed(t) => {
+                Some(t.get_committed_accounts())
+            }
+            MagicBaseIntent::CommitFinalizeAndUndelegateCompressed(t) => {
                 Some(t.get_committed_accounts())
             }
         }
@@ -677,6 +695,12 @@ impl MagicBaseIntent {
             MagicBaseIntent::CommitFinalizeAndUndelegate(t) => {
                 Some(t.get_committed_accounts_mut())
             }
+            MagicBaseIntent::CommitFinalizeCompressed(t) => {
+                Some(t.get_committed_accounts_mut())
+            }
+            MagicBaseIntent::CommitFinalizeAndUndelegateCompressed(t) => {
+                Some(t.get_committed_accounts_mut())
+            }
         }
     }
 
@@ -693,6 +717,10 @@ impl MagicBaseIntent {
             MagicBaseIntent::CommitAndUndelegate(t) => t.is_empty(),
             MagicBaseIntent::CommitFinalize(t) => t.is_empty(),
             MagicBaseIntent::CommitFinalizeAndUndelegate(t) => t.is_empty(),
+            MagicBaseIntent::CommitFinalizeCompressed(t) => t.is_empty(),
+            MagicBaseIntent::CommitFinalizeAndUndelegateCompressed(t) => {
+                t.is_empty()
+            }
         }
     }
 }

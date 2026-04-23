@@ -31,6 +31,7 @@ use crate::{
             EATA_PROGRAM_ID,
         },
         init_logger,
+        photon_client_mock::PhotonClientMock,
         rpc_client_mock::{ChainRpcClientMock, ChainRpcClientMockBuilder},
         utils::{create_test_lru_cache, random_pubkey},
     },
@@ -43,6 +44,7 @@ type TestFetchClonerResult = (
             ChainPubsubClientMock,
             AccountsBankStub,
             ClonerStub,
+            PhotonClientMock,
         >,
     >,
     mpsc::Sender<ForwardedSubscriptionUpdate>,
@@ -96,8 +98,13 @@ macro_rules! assert_cloned_undelegated_account {
 }
 
 struct FetcherTestCtx {
-    remote_account_provider:
-        Arc<RemoteAccountProvider<ChainRpcClientMock, ChainPubsubClientMock>>,
+    remote_account_provider: Arc<
+        RemoteAccountProvider<
+            ChainRpcClientMock,
+            ChainPubsubClientMock,
+            PhotonClientMock,
+        >,
+    >,
     accounts_bank: Arc<AccountsBankStub>,
     rpc_client: crate::testing::rpc_client_mock::ChainRpcClientMock,
     #[allow(unused)]
@@ -108,6 +115,7 @@ struct FetcherTestCtx {
             ChainPubsubClientMock,
             AccountsBankStub,
             ClonerStub,
+            PhotonClientMock,
         >,
     >,
     #[allow(unused)]
@@ -138,6 +146,7 @@ where
     let (updates_sender, updates_receiver) = mpsc::channel(1_000);
     let pubsub_client =
         ChainPubsubClientMock::new(updates_sender, updates_receiver);
+    let photon_client = PhotonClientMock::default();
     let accounts_bank = Arc::new(AccountsBankStub::default());
     let rpc_client_clone = rpc_client.clone();
 
@@ -149,6 +158,7 @@ where
         RemoteAccountProvider::new(
             rpc_client,
             pubsub_client,
+            photon_client,
             forward_tx,
             &config,
             subscribed_accounts,
@@ -235,7 +245,11 @@ fn add_delegation_record_with_slot_for(
 /// Returns (FetchCloner, subscription_sender) for simulating subscription updates in tests
 fn init_fetch_cloner(
     remote_account_provider: Arc<
-        RemoteAccountProvider<ChainRpcClientMock, ChainPubsubClientMock>,
+        RemoteAccountProvider<
+            ChainRpcClientMock,
+            ChainPubsubClientMock,
+            PhotonClientMock,
+        >,
     >,
     bank: &Arc<AccountsBankStub>,
     validator_keypair: Keypair,
@@ -991,7 +1005,7 @@ async fn test_delegation_record_unsub_race_condition_prevention() {
 
     // Use a shared FetchCloner to test deduplication
     // Helper function to spawn a fetch_and_clone task with shared FetchCloner
-    let spawn_fetch_task = |fetch_cloner: &Arc<FetchCloner<_, _, _, _>>| {
+    let spawn_fetch_task = |fetch_cloner: &Arc<FetchCloner<_, _, _, _, _>>| {
         let fetch_cloner = fetch_cloner.clone();
         tokio::spawn(async move {
             fetch_cloner
@@ -2083,7 +2097,11 @@ async fn test_no_program_subscription_for_undelegated_account() {
 #[allow(clippy::too_many_arguments)]
 async fn send_subscription_update_and_get_subscribed_programs(
     remote_account_provider: &Arc<
-        RemoteAccountProvider<ChainRpcClientMock, ChainPubsubClientMock>,
+        RemoteAccountProvider<
+            ChainRpcClientMock,
+            ChainPubsubClientMock,
+            PhotonClientMock,
+        >,
     >,
     accounts_bank: &Arc<AccountsBankStub>,
     subscription_tx: &mpsc::Sender<ForwardedSubscriptionUpdate>,

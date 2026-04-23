@@ -311,6 +311,38 @@ pub enum MagicBlockInstruction {
     /// - **1.**   `[]`        Crank signer PDA
     /// - **2..n** `[]`        Accounts required by the embedded instructions
     ExecuteCrank { instructions: Vec<Instruction> },
+
+    /// Schedules the accounts provided at end of accounts Vec to be committed using compression.
+    /// It should be invoked from the program whose PDA accounts are to be
+    /// committed.
+    ///
+    /// This is the first part of scheduling a commit.
+    /// A second transaction [MagicBlockInstruction::AcceptScheduleCommits] has to run in order
+    /// to finish scheduling the commit.
+    ///
+    /// # Account references
+    /// - **0.**   `[WRITE, SIGNER]` Payer requesting the commit to be scheduled
+    /// - **1.**   `[WRITE]`         Magic Context Account containing to which we store
+    ///   the scheduled commits
+    /// - **2..n** `[]`              Accounts to be committed
+    ScheduleCommitCompressed,
+
+    /// This is the exact same instruction as [MagicBlockInstruction::ScheduleCommitCompressed] except
+    /// that the [ScheduledCommit] is flagged such that when accounts are committed,
+    /// they can later be undelegated.
+    /// Additionally the validator will refuse anymore transactions for the specific account
+    /// since they are no longer considered delegated to it.
+    ///
+    /// This is the first part of scheduling a commit.
+    /// A second transaction [MagicBlockInstruction::AcceptScheduleCommits] has to run in order
+    /// to finish scheduling the commit.
+    ///
+    /// # Account references
+    /// - **0.**   `[WRITE, SIGNER]` Payer requesting the commit to be scheduled
+    /// - **1.**   `[WRITE]`         Magic Context Account containing to which we store
+    ///   the scheduled commits
+    /// - **2..n** `[]`              Accounts to be committed and undelegated
+    ScheduleCommitAndUndelegateCompressed,
 }
 
 impl MagicBlockInstruction {
@@ -327,6 +359,7 @@ pub struct AccountModification {
     pub executable: Option<bool>,
     pub data: Option<Vec<u8>>,
     pub delegated: Option<bool>,
+    pub compressed: Option<bool>,
     pub confined: Option<bool>,
     pub remote_slot: Option<u64>,
 }
@@ -338,6 +371,7 @@ pub struct AccountModificationForInstruction {
     pub executable: Option<bool>,
     pub data: Option<Vec<u8>>,
     pub delegated: Option<bool>,
+    pub compressed: Option<bool>,
     pub confined: Option<bool>,
     pub remote_slot: Option<u64>,
 }

@@ -9,6 +9,7 @@ use solana_pubkey::Pubkey;
 pub enum RemoteAccountUpdateSource {
     Fetch,
     Subscription,
+    Compressed,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -27,6 +28,23 @@ pub enum ResolvedAccount {
     Bank((Pubkey, Slot)),
 }
 
+/// The placeholder produced when a pubkey is not on chain but the caller set
+/// `mark_empty_if_not_found` (see [`super::RemoteAccountProvider::fetch_from_rpc`]). The same
+/// structure is used for both RPC and Photon; if both are present, the merged result must not
+/// always be treated as a compressed account or empty bytes may be run through
+/// decompression.
+pub(crate) fn is_synthetic_mark_empty_fresh(resolved: &ResolvedAccount) -> bool {
+    match resolved {
+        ResolvedAccount::Fresh(acc) => {
+            acc.lamports() == 0
+                && acc.data().is_empty()
+                && !acc.executable()
+                && *acc.owner() == Pubkey::default()
+        }
+        ResolvedAccount::Bank(_) => false,
+    }
+}
+
 impl ResolvedAccount {
     pub fn resolved_account_shared_data(
         &self,
@@ -39,6 +57,13 @@ impl ResolvedAccount {
             ResolvedAccount::Bank((pubkey, _)) => bank
                 .get_account(pubkey)
                 .map(ResolvedAccountSharedData::Bank),
+        }
+    }
+
+    pub fn slot(&self) -> u64 {
+        match self {
+            ResolvedAccount::Fresh(account) => account.remote_slot(),
+            ResolvedAccount::Bank((_, slot)) => *slot,
         }
     }
 }
@@ -166,6 +191,10 @@ impl ResolvedAccountSharedData {
             Bank(account) => account.remote_slot(),
         }
     }
+
+    pub fn compressed(&self) -> bool {
+        self.account_shared_data().compressed()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -188,6 +217,8 @@ impl RemoteAccount {
     ) -> Self {
         let mut account_shared_data = AccountSharedData::from(account);
         account_shared_data.set_remote_slot(slot);
+        account_shared_data
+            .set_compressed(source == RemoteAccountUpdateSource::Compressed);
         RemoteAccount::Found(RemoteAccountState {
             account: ResolvedAccount::Fresh(account_shared_data),
             source,
@@ -264,4 +295,10 @@ impl RemoteAccount {
     pub fn is_owned_by_delegation_program(&self) -> bool {
         self.owner().is_some_and(|owner| owner.eq(&dlp_api::id()))
     }
+}
+
+#[derive(Clone, Debug)]
+pub enum FetchedRemoteAccounts {
+    Rpc(Vec<RemoteAccount>),
+    Compressed(Vec<RemoteAccount>),
 }

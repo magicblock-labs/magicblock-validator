@@ -67,6 +67,7 @@ declare_process_instruction!(
                 invoke_context,
                 ProcessScheduleCommitOptions {
                     request_undelegation: false,
+                    compressed: false,
                 },
             ),
             ScheduleCommitAndUndelegate => process_schedule_commit(
@@ -74,6 +75,7 @@ declare_process_instruction!(
                 invoke_context,
                 ProcessScheduleCommitOptions {
                     request_undelegation: true,
+                    compressed: false,
                 },
             ),
             ScheduleCommitFinalize {
@@ -83,6 +85,7 @@ declare_process_instruction!(
                 invoke_context,
                 ProcessScheduleCommitOptions {
                     request_undelegation,
+                    compressed: false,
                 },
             ),
             AcceptScheduleCommits => {
@@ -220,6 +223,24 @@ declare_process_instruction!(
             ),
             ExecuteCrank { instructions } => {
                 process_execute_crank(signers, invoke_context, instructions)
+            }
+            ScheduleCommitCompressed => process_schedule_commit_finalize(
+                signers,
+                invoke_context,
+                ProcessScheduleCommitOptions {
+                    request_undelegation: false,
+                    compressed: true,
+                },
+            ),
+            ScheduleCommitAndUndelegateCompressed => {
+                process_schedule_commit_finalize(
+                    signers,
+                    invoke_context,
+                    ProcessScheduleCommitOptions {
+                        request_undelegation: true,
+                        compressed: true,
+                    },
+                )
             }
         }
     }

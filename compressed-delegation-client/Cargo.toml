@@ -1,0 +1,36 @@
+[package]
+name = "compressed-delegation-client"
+description = "A new Solana program using the Metaplex Project Template"
+version = "0.1.0"
+edition = "2021"
+readme = "README.md"
+license-file = "../../LICENSE"
+repository = "https://github.com/metaplex-foundation/compressed-delegation-program"
+
+[lib]
+crate-type = ["lib"]
+
+[features]
+test-sbf = []
+serde = ["dep:serde", "dep:serde_with"]
+anchor = []
+anchor-idl-build = []
+fetch = []
+
+[dependencies]
+compressed-delegation-api = { workspace = true }
+borsh = { workspace = true }
+light-hasher = { workspace = true }
+light-sdk = { workspace = true, features = ["v2"] }
+light-sdk-types = { workspace = true }
+light-compressed-account = { workspace = true }
+num-derive = { workspace = true }
+num-traits = { workspace = true }
+serde = { workspace = true, features = ["derive"], optional = true }
+serde_with = { workspace = true, optional = true }
+solana-account-info = { workspace = true }
+solana-cpi = { workspace = true }
+solana-program-error = { workspace = true }
+solana-pubkey = { workspace = true }
+solana-instruction = { workspace = true }
+thiserror = { workspace = true }

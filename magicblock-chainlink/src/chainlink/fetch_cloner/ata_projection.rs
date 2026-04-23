@@ -3,9 +3,12 @@ use std::collections::HashSet;
 use dlp_api::state::DelegationRecord;
 use futures_util::future::join_all;
 use magicblock_accounts_db::traits::AccountsBank;
-use magicblock_core::token_programs::{
-    is_ata, try_derive_ata_address_and_bump, try_derive_eata_address_and_bump,
-    AtaInfo,
+use magicblock_core::{
+    token_programs::{
+        is_ata, try_derive_ata_address_and_bump,
+        try_derive_eata_address_and_bump, AtaInfo,
+    },
+    traits::PhotonClient,
 };
 use magicblock_metrics::metrics;
 use solana_account::{AccountSharedData, ReadableAccount};
@@ -69,8 +72,8 @@ fn ata_info_from_layout(
 /// and, if the ATA is delegated to us and the eATA exists, we clone the eATA data
 /// into the ATA in the bank.
 #[instrument(skip(this, atas))]
-pub(crate) async fn resolve_ata_with_eata_projection<T, U, V, C>(
-    this: &FetchCloner<T, U, V, C>,
+pub(crate) async fn resolve_ata_with_eata_projection<T, U, V, C, P>(
+    this: &FetchCloner<T, U, V, C, P>,
     atas: Vec<(
         Pubkey,
         AccountSharedData,
@@ -85,6 +88,7 @@ where
     U: ChainPubsubClient,
     V: AccountsBank,
     C: Cloner,
+    P: PhotonClient,
 {
     if atas.is_empty() {
         return vec![];

@@ -288,15 +288,25 @@ pub(crate) fn process_schedule_commit_finalize(
         InstructionUtils::scheduled_commit_sent(intent_id, blockhash);
     let commit_sent_sig = action_sent_transaction.signatures[0];
 
-    let base_intent = if opts.request_undelegation {
-        MagicBaseIntent::CommitFinalizeAndUndelegate(CommitAndUndelegate {
-            commit_action: CommitType::Standalone(committed_accounts),
-            undelegate_action: UndelegateType::Standalone,
-        })
-    } else {
-        MagicBaseIntent::CommitFinalize(CommitType::Standalone(
-            committed_accounts,
-        ))
+    let base_intent = match (opts.request_undelegation, opts.compressed) {
+        (true, true) => MagicBaseIntent::CommitFinalizeAndUndelegateCompressed(
+            CommitAndUndelegate {
+                commit_action: CommitType::Standalone(committed_accounts),
+                undelegate_action: UndelegateType::Standalone,
+            },
+        ),
+        (true, false) => {
+            MagicBaseIntent::CommitFinalizeAndUndelegate(CommitAndUndelegate {
+                commit_action: CommitType::Standalone(committed_accounts),
+                undelegate_action: UndelegateType::Standalone,
+            })
+        }
+        (false, true) => MagicBaseIntent::CommitFinalizeCompressed(
+            CommitType::Standalone(committed_accounts),
+        ),
+        (false, false) => MagicBaseIntent::CommitFinalize(
+            CommitType::Standalone(committed_accounts),
+        ),
     };
 
     let scheduled_base_intent = ScheduledIntentBundle {

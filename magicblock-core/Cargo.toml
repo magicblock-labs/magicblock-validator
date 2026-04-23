@@ -8,9 +8,14 @@ license.workspace = true
 edition.workspace = true
 
 [dependencies]
-
+async-trait = { workspace = true }
+light-client = { workspace = true }
+light-compressed-account = { workspace = true }
+light-sdk = { workspace = true, features = ["v2"] }
+compressed-delegation-client = { workspace = true }
 console-subscriber = { workspace = true, optional = true }
 tokio = { workspace = true, features = ["sync"] }
+thiserror = { workspace = true }
 flume = { workspace = true }
 bincode = { workspace = true }
 

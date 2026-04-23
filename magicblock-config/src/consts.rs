@@ -73,3 +73,7 @@ pub const DEFAULT_RESUBSCRIPTION_DELAY_MS: u64 = 50;
 
 /// Default capacity for the LRU cache of subscribed accounts
 pub const DEFAULT_MAX_MONITORED_ACCOUNTS: usize = 5_000;
+
+// Compression Defaults
+/// Default URL of the Photon indexer
+pub const DEFAULT_PHOTON_URL: &str = "http://localhost:8784";

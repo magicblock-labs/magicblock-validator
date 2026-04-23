@@ -1,4 +1,5 @@
 use magicblock_accounts_db::traits::AccountsBank;
+use magicblock_core::traits::PhotonClient;
 use magicblock_metrics::metrics::AccountFetchOrigin;
 use solana_account::{AccountSharedData, ReadableAccount};
 use solana_pubkey::Pubkey;
@@ -13,8 +14,8 @@ use crate::{
     },
 };
 
-pub(crate) async fn handle_executable_sub_update<T, U, V, C>(
-    this: &FetchCloner<T, U, V, C>,
+pub(crate) async fn handle_executable_sub_update<T, U, V, C, P>(
+    this: &FetchCloner<T, U, V, C, P>,
     pubkey: Pubkey,
     account: AccountSharedData,
 ) where
@@ -22,6 +23,7 @@ pub(crate) async fn handle_executable_sub_update<T, U, V, C>(
     U: ChainPubsubClient,
     V: AccountsBank,
     C: Cloner,
+    P: PhotonClient,
 {
     if !this.is_program_allowed(&pubkey) {
         debug!(pubkey = %pubkey, "Skipping clone of program, not in allowed_programs");

@@ -2,7 +2,7 @@ use std::{collections::HashSet, sync::atomic::Ordering};
 
 use dlp_api::pda::delegation_record_pda_from_delegated_account;
 use magicblock_accounts_db::traits::AccountsBank;
-use magicblock_core::token_programs::is_ata;
+use magicblock_core::{token_programs::is_ata, traits::PhotonClient};
 use magicblock_metrics::metrics::AccountFetchOrigin;
 use solana_account::{AccountSharedData, ReadableAccount};
 use solana_pubkey::Pubkey;
@@ -28,12 +28,12 @@ use crate::{
             LOADER_V3,
         },
         ChainPubsubClient, ChainRpcClient, MatchSlotsConfig, RemoteAccount,
-        ResolvedAccount,
+        RemoteAccountUpdateSource, ResolvedAccount,
     },
 };
 
-pub(crate) fn build_existing_subs<T, U, V, C>(
-    this: &FetchCloner<T, U, V, C>,
+pub(crate) fn build_existing_subs<T, U, V, C, P>(
+    this: &FetchCloner<T, U, V, C, P>,
     pubkeys: &[Pubkey],
 ) -> ExistingSubs
 where
@@ -41,6 +41,7 @@ where
     U: ChainPubsubClient,
     V: AccountsBank,
     C: Cloner,
+    P: PhotonClient,
 {
     let delegation_records = pubkeys
         .iter()
@@ -84,6 +85,7 @@ pub(crate) fn classify_remote_accounts(
     let mut not_found = Vec::new();
     let mut plain = Vec::new();
     let mut owned_by_deleg = Vec::new();
+    let mut compressed = Vec::new();
     let mut programs = Vec::new();
     let mut atas = Vec::new();
 
@@ -94,6 +96,7 @@ pub(crate) fn classify_remote_accounts(
             &mut not_found,
             &mut plain,
             &mut owned_by_deleg,
+            &mut compressed,
             &mut programs,
             &mut atas,
         );
@@ -103,6 +106,7 @@ pub(crate) fn classify_remote_accounts(
         not_found,
         plain,
         owned_by_deleg,
+        compressed,
         programs,
         atas,
     }
@@ -110,12 +114,14 @@ pub(crate) fn classify_remote_accounts(
 
 /// Helper function to classify a single remote account
 #[inline]
+#[allow(clippy::too_many_arguments)]
 fn classify_single_account(
     acc: RemoteAccount,
     pubkey: Pubkey,
     not_found: &mut Vec<(Pubkey, u64)>,
     plain: &mut Vec<AccountCloneRequest>,
     owned_by_deleg: &mut Vec<(Pubkey, AccountSharedData, u64)>,
+    compressed: &mut Vec<(Pubkey, AccountSharedData, u64)>,
     programs: &mut Vec<(Pubkey, AccountSharedData, u64)>,
     atas: &mut Vec<(
         Pubkey,
@@ -154,6 +160,11 @@ fn classify_single_account(
                     {
                         // Associated Token Account
                         atas.push((pubkey, account_shared_data, ata, slot));
+                    } else if remote_account_state.source
+                        == RemoteAccountUpdateSource::Compressed
+                    {
+                        // Compressed account
+                        compressed.push((pubkey, account_shared_data, slot));
                     } else {
                         // Plain account
                         plain.push(AccountCloneRequest {
@@ -219,8 +230,8 @@ pub(crate) fn partition_not_found(
 
 /// Resolves delegated accounts by fetching their delegation records
 #[instrument(skip(this, owned_by_deleg, plain, pubkeys, existing_subs), fields(pubkey_count = pubkeys.len()))]
-pub(crate) async fn resolve_delegated_accounts<T, U, V, C>(
-    this: &FetchCloner<T, U, V, C>,
+pub(crate) async fn resolve_delegated_accounts<T, U, V, C, P>(
+    this: &FetchCloner<T, U, V, C, P>,
     owned_by_deleg: Vec<(Pubkey, AccountSharedData, u64)>,
     plain: Vec<AccountCloneRequest>,
     min_context_slot: Option<u64>,
@@ -233,6 +244,7 @@ where
     U: ChainPubsubClient,
     V: AccountsBank,
     C: Cloner,
+    P: PhotonClient,
 {
     // For potentially delegated accounts we update the owner and delegation state first
     let mut fetch_with_delegation_record_join_set = JoinSet::new();
@@ -413,8 +425,8 @@ where
 
 /// Resolves program accounts, fetching program data accounts for LoaderV3 programs
 #[instrument(skip(this, programs, pubkeys, existing_subs), fields(pubkey_count = pubkeys.len()))]
-pub(crate) async fn resolve_programs_with_program_data<T, U, V, C>(
-    this: &FetchCloner<T, U, V, C>,
+pub(crate) async fn resolve_programs_with_program_data<T, U, V, C, P>(
+    this: &FetchCloner<T, U, V, C, P>,
     programs: Vec<(Pubkey, AccountSharedData, u64)>,
     min_context_slot: Option<u64>,
     fetch_origin: AccountFetchOrigin,
@@ -426,6 +438,7 @@ where
     U: ChainPubsubClient,
     V: AccountsBank,
     C: Cloner,
+    P: PhotonClient,
 {
     // For LoaderV3 accounts we fetch the program data account
     let (loaderv3_programs, single_account_programs): (Vec<_>, Vec<_>) =
@@ -504,7 +517,7 @@ where
 
                     let account_program = account_pair[0].clone();
                     let account_data = account_pair[1].clone();
-                    let result = FetchCloner::<T, U, V, C>::resolve_account_with_companion(
+                    let result = FetchCloner::<T, U, V, C, P>::resolve_account_with_companion(
                         &this.accounts_bank,
                         pubkey,
                         program_data_pubkey,
@@ -663,10 +676,41 @@ pub(crate) fn compute_cancel_strategy(
     }
 }
 
+/// While the bank still marks a compressed account as `undelegating`, a refetch can return the
+/// prior on-chain/Photon state (still delegated to us at the same or older slot). Cloning that
+/// would clear `undelegating` early. Skip only for that stale same-slot (or older) view; a fetch
+/// with a **newer** `remote_slot` is fresh (e.g. redelegation after undelegation) and must be
+/// applied.
+fn skip_clone_while_compressed_undelegation_not_on_chain_yet(
+    in_bank: Option<AccountSharedData>,
+    request: &AccountCloneRequest,
+) -> bool {
+    let Some(in_bank) = in_bank else {
+        return false;
+    };
+    if !in_bank.undelegating() || !in_bank.compressed() {
+        return false;
+    }
+    if !request.account.compressed() {
+        return false;
+    }
+    if !request.account.delegated() {
+        return false;
+    }
+    if request.account.remote_slot() > in_bank.remote_slot() {
+        return false;
+    }
+    trace!(
+        pubkey = %request.pubkey,
+        "Skipping clone: merged fetch still shows delegation to us at a stale slot while bank is undelegating"
+    );
+    true
+}
+
 /// Clones accounts and programs into the bank
 #[instrument(skip(this, accounts_to_clone, loaded_programs))]
-pub(crate) async fn clone_accounts_and_programs<T, U, V, C>(
-    this: &FetchCloner<T, U, V, C>,
+pub(crate) async fn clone_accounts_and_programs<T, U, V, C, P>(
+    this: &FetchCloner<T, U, V, C, P>,
     accounts_to_clone: Vec<AccountCloneRequest>,
     loaded_programs: Vec<
         crate::remote_account_provider::program_account::LoadedProgram,
@@ -677,7 +721,18 @@ where
     U: ChainPubsubClient,
     V: AccountsBank,
     C: Cloner,
+    P: PhotonClient,
 {
+    let accounts_to_clone = accounts_to_clone
+        .into_iter()
+        .filter(|request| {
+            !skip_clone_while_compressed_undelegation_not_on_chain_yet(
+                this.accounts_bank.get_account(&request.pubkey),
+                request,
+            )
+        })
+        .collect::<Vec<_>>();
+
     // 1) Clone programs first so post-delegation action instructions can load
     // their program accounts when action txs are sent during account cloning.
     let mut program_join_set = JoinSet::new();

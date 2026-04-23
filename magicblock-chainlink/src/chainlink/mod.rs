@@ -11,6 +11,7 @@ use errors::ChainlinkResult;
 use fetch_cloner::FetchCloner;
 use magicblock_accounts_db::{traits::AccountsBank, AccountsDbResult};
 use magicblock_config::config::ChainLinkConfig;
+use magicblock_core::traits::PhotonClient;
 use magicblock_metrics::metrics::AccountFetchOrigin;
 use solana_account::{AccountSharedData, ReadableAccount};
 use solana_commitment_config::CommitmentConfig;
@@ -28,8 +29,9 @@ use crate::{
     fetch_cloner::FetchAndCloneResult,
     filters::is_noop_system_transfer,
     remote_account_provider::{
-        chain_updates_client::ChainUpdatesClient, ChainPubsubClient,
-        ChainRpcClient, ChainRpcClientImpl, Endpoints, RemoteAccountProvider,
+        chain_updates_client::ChainUpdatesClient,
+        photon_client::PhotonClientImpl, ChainPubsubClient, ChainRpcClient,
+        ChainRpcClientImpl, Endpoints, RemoteAccountProvider,
     },
     submux::SubMuxClient,
 };
@@ -42,6 +44,11 @@ pub mod fetch_cloner;
 
 pub use blacklisted_accounts::*;
 
+type OptionalFetchCloner<T, U, V, C, P> =
+    Option<Arc<FetchCloner<T, U, V, C, P>>>;
+type OptionalFetchClonerRef<'a, T, U, V, C, P> =
+    Option<&'a Arc<FetchCloner<T, U, V, C, P>>>;
+
 // -----------------
 // Chainlink
 // -----------------
@@ -50,9 +57,10 @@ pub struct Chainlink<
     U: ChainPubsubClient,
     V: AccountsBank,
     C: Cloner,
+    P: PhotonClient,
 > {
     accounts_bank: Arc<V>,
-    fetch_cloner: Option<Arc<FetchCloner<T, U, V, C>>>,
+    fetch_cloner: OptionalFetchCloner<T, U, V, C, P>,
     /// The subscription to events for each account that is removed from
     /// the accounts tracked by the provider.
     /// In that case we also remove it from the bank since it is no longer
@@ -67,12 +75,17 @@ pub struct Chainlink<
     remove_confined_accounts: bool,
 }
 
-impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
-    Chainlink<T, U, V, C>
+impl<
+        T: ChainRpcClient,
+        U: ChainPubsubClient,
+        V: AccountsBank,
+        C: Cloner,
+        P: PhotonClient,
+    > Chainlink<T, U, V, C, P>
 {
     pub fn try_new(
         accounts_bank: &Arc<V>,
-        fetch_cloner: Option<Arc<FetchCloner<T, U, V, C>>>,
+        fetch_cloner: OptionalFetchCloner<T, U, V, C, P>,
         validator_pubkey: Pubkey,
         faucet_pubkey: Pubkey,
         config: &ChainLinkConfig,
@@ -117,7 +130,13 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
         config: ChainlinkConfig,
         chainlink_config: &ChainLinkConfig,
     ) -> ChainlinkResult<
-        Chainlink<ChainRpcClientImpl, SubMuxClient<ChainUpdatesClient>, V, C>,
+        Chainlink<
+            ChainRpcClientImpl,
+            SubMuxClient<ChainUpdatesClient>,
+            V,
+            C,
+            PhotonClientImpl,
+        >,
     > {
         let validator_pubkey = validator_keypair.pubkey();
         // Extract accounts provider and create fetch cloner while connecting
@@ -288,7 +307,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
     /// does nothing as only existing accounts are affected.
     /// See [lru::LruCache::promote]
     fn promote_accounts(
-        fetch_cloner: &FetchCloner<T, U, V, C>,
+        fetch_cloner: &FetchCloner<T, U, V, C, P>,
         pubkeys: &[&Pubkey],
     ) {
         fetch_cloner.promote_accounts(pubkeys);
@@ -427,7 +446,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
     ))]
     async fn fetch_accounts_common(
         &self,
-        fetch_cloner: &FetchCloner<T, U, V, C>,
+        fetch_cloner: &FetchCloner<T, U, V, C, P>,
         pubkeys: &[Pubkey],
         mark_empty_if_not_found: Option<&[Pubkey]>,
         fetch_origin: AccountFetchOrigin,
@@ -478,12 +497,15 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
         // Subscribe to updates for this account so we can track changes
         // once it's undelegated
         fetch_cloner.subscribe_to_account(&pubkey).await?;
+        fetch_cloner.mark_post_undelegation_photon_merge_pending(pubkey);
 
         debug!(pubkey = %pubkey, "Successfully subscribed for undelegation tracking");
         Ok(())
     }
 
-    pub fn fetch_cloner(&self) -> Option<&Arc<FetchCloner<T, U, V, C>>> {
+    pub fn fetch_cloner<'a>(
+        &'a self,
+    ) -> OptionalFetchClonerRef<'a, T, U, V, C, P> {
         self.fetch_cloner.as_ref()
     }
 

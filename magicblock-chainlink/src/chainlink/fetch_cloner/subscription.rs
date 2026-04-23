@@ -1,5 +1,6 @@
 use std::{collections::HashSet, fmt, sync::Arc};
 
+use magicblock_core::traits::PhotonClient;
 use solana_pubkey::Pubkey;
 use tokio::task::JoinSet;
 use tracing::*;
@@ -102,8 +103,12 @@ impl fmt::Display for CancelStrategy {
 }
 
 #[instrument(skip(provider, strategy))]
-pub(crate) async fn cancel_subs<T: ChainRpcClient, U: ChainPubsubClient>(
-    provider: &Arc<RemoteAccountProvider<T, U>>,
+pub(crate) async fn cancel_subs<
+    T: ChainRpcClient,
+    U: ChainPubsubClient,
+    P: PhotonClient,
+>(
+    provider: &Arc<RemoteAccountProvider<T, U, P>>,
     strategy: CancelStrategy,
 ) {
     if strategy.is_empty() {

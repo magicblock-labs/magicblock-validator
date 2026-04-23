@@ -113,6 +113,76 @@ impl InstructionUtils {
     }
 
     // -----------------
+    // Schedule Commit and Undelegate Compressed
+    // -----------------
+    #[cfg(test)]
+    pub fn schedule_commit_and_undelegate_compressed(
+        payer: &Keypair,
+        pubkeys: Vec<Pubkey>,
+        recent_blockhash: Hash,
+    ) -> Transaction {
+        let ix = Self::schedule_commit_and_undelegate_compressed_instruction(
+            &payer.pubkey(),
+            pubkeys,
+        );
+        Self::into_transaction(payer, ix, recent_blockhash)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn schedule_commit_and_undelegate_compressed_instruction(
+        payer: &Pubkey,
+        pdas: Vec<Pubkey>,
+    ) -> Instruction {
+        let mut account_metas = vec![
+            AccountMeta::new(*payer, true),
+            AccountMeta::new(MAGIC_CONTEXT_PUBKEY, false),
+        ];
+        for pubkey in &pdas {
+            account_metas.push(AccountMeta::new(*pubkey, true));
+        }
+        Instruction::new_with_bincode(
+            crate::id(),
+            &MagicBlockInstruction::ScheduleCommitAndUndelegateCompressed,
+            account_metas,
+        )
+    }
+
+    // -----------------
+    // Schedule Commit Compressed
+    // -----------------
+    #[cfg(test)]
+    pub fn schedule_commit_compressed(
+        payer: &Keypair,
+        pubkeys: Vec<Pubkey>,
+        recent_blockhash: Hash,
+    ) -> Transaction {
+        let ix = Self::schedule_commit_compressed_instruction(
+            &payer.pubkey(),
+            pubkeys,
+        );
+        Self::into_transaction(payer, ix, recent_blockhash)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn schedule_commit_compressed_instruction(
+        payer: &Pubkey,
+        pdas: Vec<Pubkey>,
+    ) -> Instruction {
+        let mut account_metas = vec![
+            AccountMeta::new(*payer, true),
+            AccountMeta::new(MAGIC_CONTEXT_PUBKEY, false),
+        ];
+        for pubkey in &pdas {
+            account_metas.push(AccountMeta::new_readonly(*pubkey, true));
+        }
+        Instruction::new_with_bincode(
+            crate::id(),
+            &MagicBlockInstruction::ScheduleCommitCompressed,
+            account_metas,
+        )
+    }
+
+    // -----------------
     // Scheduled Commit Sent
     // -----------------
     pub fn scheduled_commit_sent(
@@ -200,6 +270,7 @@ impl InstructionUtils {
                     executable: account_modification.executable,
                     data: account_modification.data,
                     delegated: account_modification.delegated,
+                    compressed: account_modification.compressed,
                     confined: account_modification.confined,
                     remote_slot: account_modification.remote_slot,
                 };

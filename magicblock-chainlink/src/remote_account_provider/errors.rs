@@ -122,6 +122,9 @@ pub enum RemoteAccountProviderError {
         "Failed to update gRPC subscription to {0} after {1} retries: {2}"
     )]
     GrpcSubscriptionUpdateFailed(String, usize, String),
+
+    #[error("Photon indexer error: {0}")]
+    PhotonIndexerError(#[from] light_client::indexer::IndexerError),
 }
 impl From<solana_pubsub_client::pubsub_client::PubsubClientError>
     for RemoteAccountProviderError
