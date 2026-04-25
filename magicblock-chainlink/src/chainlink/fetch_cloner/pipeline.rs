@@ -10,6 +10,7 @@ use tokio::task::JoinSet;
 use tracing::*;
 
 use super::{
+    delegation,
     subscription::{cancel_subs, CancelStrategy},
     types::{
         AccountWithCompanion, ClassifiedAccounts, ExistingSubs,
@@ -345,14 +346,7 @@ where
                     let delegated_to_other =
                         this.get_delegated_to_other(&delegation_record);
 
-                    // Log if account is delegated to another validator
-                    if let Some(ref other_validator) = delegated_to_other {
-                        warn!(
-                            pubkey = %pubkey,
-                            other_validator = %other_validator,
-                            "Cloning detected account delegated to another validator"
-                        );
-                    }
+                    delegation::warn_if_delegated_to_other(&pubkey, delegated_to_other.as_ref());
 
                     let commit_freq = this.apply_delegation_record_to_account(
                         pubkey,

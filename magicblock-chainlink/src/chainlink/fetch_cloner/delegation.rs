@@ -160,6 +160,19 @@ where
     (!is_delegated_to_us).then_some(delegation_record.authority)
 }
 
+pub(crate) fn warn_if_delegated_to_other(
+    pubkey: &Pubkey,
+    delegated_to_other: Option<&Pubkey>,
+) {
+    if let Some(other_validator) = delegated_to_other {
+        warn!(
+            pubkey = %pubkey,
+            other_validator = %other_validator,
+            "Cloning detected account delegated to another validator"
+        );
+    }
+}
+
 #[instrument(skip(this))]
 pub(crate) async fn fetch_and_parse_delegation_record<T, U, V, C>(
     this: &FetchCloner<T, U, V, C>,
