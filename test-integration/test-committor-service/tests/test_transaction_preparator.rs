@@ -16,7 +16,8 @@ use magicblock_program::{
     magic_scheduled_base_intent::{BaseAction, ProgramArgs},
 };
 use solana_pubkey::Pubkey;
-use solana_sdk::{signer::Signer, system_program};
+use solana_sdk::signer::Signer;
+use solana_sdk_ids::system_program;
 
 use crate::common::{
     create_buffer_commit_task, create_committed_account, generate_random_bytes,

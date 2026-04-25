@@ -396,7 +396,7 @@ impl Ledger {
         let previous_blockhash = self.get_block_hash(previous_slot)?;
 
         let transactions = {
-            let _lock = self.check_lowest_cleanup_slot(slot);
+            let _lock = self.check_lowest_cleanup_slot(slot)?;
             let index_iterator = self
                 .slot_signatures_cf
                 .iter_current_index_filtered(IteratorMode::From(
@@ -422,9 +422,17 @@ impl Ledger {
                         .transaction_status_cf
                         .get_protobuf((tx_signature, slot))?
                         .ok_or(LedgerError::TransactionStatusMetaNotFound)?;
+                    let meta = TransactionStatusMeta::try_from(meta).map_err(
+                        |e| {
+                            LedgerError::TransactionConversionError(format!(
+                                "failed to convert transaction status meta at slot {}: {}",
+                                slot, e
+                            ))
+                        },
+                    )?;
                     Ok(VersionedTransactionWithStatusMeta {
                         transaction,
-                        meta: TransactionStatusMeta::try_from(meta).unwrap(),
+                        meta,
                     })
                 })
                 .collect::<LedgerResult<Vec<_>>>()
@@ -1535,6 +1543,7 @@ mod tests {
                 loaded_addresses: Default::default(),
                 return_data: Some(test_return_data.clone()),
                 compute_units_consumed: compute_units_consumed_1,
+                cost_units: None,
             },
             writable_keys,
             readonly_keys,

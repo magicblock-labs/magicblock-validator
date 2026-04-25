@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use dlp_api::state::DelegationRecord;
 use solana_account::{Account, AccountSharedData, WritableAccount};
@@ -3119,6 +3119,368 @@ async fn test_delegated_eata_update_does_not_override_delegated_ata_in_bank() {
     assert_eq!(
         ata_amount, LOCAL_ATA_AMOUNT,
         "Delegated ATA amount should keep local state",
+    );
+}
+
+#[tokio::test]
+async fn test_fetch_subscription_race_duplicate_clone() {
+    // This test validates that pending clone ownership prevents duplicate
+    // clone submissions when the fetch and subscription paths race on the
+    // same (pubkey, slot).
+    //
+    // The first caller to claim the (pubkey, slot) becomes the "owner" and
+    // performs the actual clone. The second caller becomes a "waiter" and
+    // receives the result via a oneshot channel without submitting a
+    // duplicate clone transaction.
+
+    init_logger();
+    let validator_keypair = Keypair::new();
+    let account_owner = random_pubkey();
+    const CURRENT_SLOT: u64 = 100;
+
+    let account_pubkey = random_pubkey();
+    // Non-delegated account so the subscription path goes through
+    // resolve → clone_account_with_ownership() independently instead
+    // of being intercepted by greedy clone.
+    let account = Account {
+        lamports: 1_000_000,
+        data: vec![1, 2, 3, 4],
+        owner: account_owner,
+        executable: false,
+        rent_epoch: 0,
+    };
+
+    let FetcherTestCtx {
+        accounts_bank,
+        remote_account_provider,
+        ..
+    } = setup(
+        [(account_pubkey, account.clone())],
+        CURRENT_SLOT,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+
+    // Clone delay ensures both paths enter clone_account_with_ownership
+    // before the owner finishes, so the second caller becomes a waiter.
+    let cloner_stub = Arc::new(ClonerStub::new(accounts_bank.clone()));
+    cloner_stub.set_clone_delay(std::time::Duration::from_millis(200));
+
+    let (subscription_tx, subscription_rx) = mpsc::channel(100);
+    let fetch_cloner = FetchCloner::new(
+        &remote_account_provider,
+        &accounts_bank,
+        &cloner_stub,
+        validator_keypair.insecure_clone(),
+        Pubkey::new_unique(),
+        subscription_rx,
+        None,
+    );
+
+    // Send subscription update (this will become the owner).
+    let subscription_account =
+        crate::remote_account_provider::RemoteAccount::from_fresh_account(
+            account.clone(),
+            CURRENT_SLOT,
+            crate::remote_account_provider::RemoteAccountUpdateSource::Subscription,
+        );
+    subscription_tx
+        .send(ForwardedSubscriptionUpdate {
+            pubkey: account_pubkey,
+            account: subscription_account,
+        })
+        .await
+        .unwrap();
+
+    // Let subscription listener pick up the update and start cloning.
+    tokio::time::sleep(Duration::from_millis(20)).await;
+
+    // Trigger concurrent fetch (becomes a waiter via pending_clones).
+    let fetch_task = {
+        let fc = fetch_cloner.clone();
+        tokio::spawn(async move {
+            fc.fetch_and_clone_accounts_with_dedup(
+                &[account_pubkey],
+                None,
+                None,
+                AccountFetchOrigin::GetAccount,
+                None,
+            )
+            .await
+        })
+    };
+
+    let fetch_result = fetch_task.await.unwrap();
+    assert!(
+        fetch_result.is_ok(),
+        "Fetch should succeed, got: {:?}",
+        fetch_result
+    );
+
+    // Wait for subscription path to finish too.
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    // Only one clone request should have been submitted.
+    let same_account_clones = cloner_stub
+        .clone_requests()
+        .iter()
+        .filter(|r| {
+            r.pubkey == account_pubkey
+                && r.account.remote_slot() == CURRENT_SLOT
+        })
+        .count();
+
+    assert_eq!(
+        same_account_clones, 1,
+        "Expected 1 clone request (ownership should prevent duplicate)"
+    );
+
+    assert!(
+        accounts_bank.get_account(&account_pubkey).is_some(),
+        "Account should be present in bank"
+    );
+}
+
+#[tokio::test]
+async fn test_delegated_account_fetch_subscription_race() {
+    // Validates that pending clone ownership also works for delegated
+    // accounts. A DLP-owned delegated account sent via subscription
+    // and concurrently fetched should produce exactly one clone request.
+
+    init_logger();
+    let validator_keypair = Keypair::new();
+    let validator_pubkey = validator_keypair.pubkey();
+    const CURRENT_SLOT: u64 = 100;
+
+    let account_pubkey = random_pubkey();
+    let account_owner = random_pubkey();
+
+    // Create a DLP-owned account (delegation program owns it).
+    let account = Account {
+        lamports: 1_000_000,
+        data: vec![1, 2, 3, 4],
+        owner: dlp_api::id(),
+        executable: false,
+        rent_epoch: 0,
+    };
+
+    let FetcherTestCtx {
+        accounts_bank,
+        remote_account_provider,
+        rpc_client,
+        ..
+    } = setup(
+        [(account_pubkey, account.clone())],
+        CURRENT_SLOT,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+
+    // Add delegation record so the account resolves as delegated to us.
+    add_delegation_record_with_slot_for(
+        &rpc_client,
+        account_pubkey,
+        validator_pubkey,
+        account_owner,
+        CURRENT_SLOT,
+    );
+
+    let cloner_stub = Arc::new(ClonerStub::new(accounts_bank.clone()));
+    cloner_stub.set_clone_delay(std::time::Duration::from_millis(200));
+
+    let (subscription_tx, subscription_rx) = mpsc::channel(100);
+    let fetch_cloner = FetchCloner::new(
+        &remote_account_provider,
+        &accounts_bank,
+        &cloner_stub,
+        validator_keypair.insecure_clone(),
+        Pubkey::new_unique(),
+        subscription_rx,
+        None,
+    );
+
+    // Send subscription update.
+    let subscription_account =
+        crate::remote_account_provider::RemoteAccount::from_fresh_account(
+            account.clone(),
+            CURRENT_SLOT,
+            crate::remote_account_provider::RemoteAccountUpdateSource::Subscription,
+        );
+    subscription_tx
+        .send(ForwardedSubscriptionUpdate {
+            pubkey: account_pubkey,
+            account: subscription_account,
+        })
+        .await
+        .unwrap();
+
+    tokio::time::sleep(Duration::from_millis(20)).await;
+
+    // Trigger concurrent fetch.
+    let fetch_task = {
+        let fc = fetch_cloner.clone();
+        tokio::spawn(async move {
+            fc.fetch_and_clone_accounts_with_dedup(
+                &[account_pubkey],
+                None,
+                Some(CURRENT_SLOT),
+                AccountFetchOrigin::GetAccount,
+                None,
+            )
+            .await
+        })
+    };
+
+    let fetch_result = fetch_task.await.unwrap();
+    assert!(
+        fetch_result.is_ok(),
+        "Fetch should succeed, got: {:?}",
+        fetch_result
+    );
+
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let same_account_clones = cloner_stub
+        .clone_requests()
+        .iter()
+        .filter(|r| {
+            r.pubkey == account_pubkey
+                && r.account.remote_slot() == CURRENT_SLOT
+        })
+        .count();
+
+    assert_eq!(
+        same_account_clones, 1,
+        "Expected 1 clone request for delegated account"
+    );
+
+    assert!(
+        accounts_bank.get_account(&account_pubkey).is_some(),
+        "Delegated account should be present in bank"
+    );
+}
+
+#[tokio::test]
+async fn test_clone_ownership_failure_propagates_to_waiters() {
+    // Validates that when the clone owner fails, waiters receive the
+    // failure and don't hang. Also verifies that the pending entry is
+    // cleared so a subsequent clone attempt can proceed.
+
+    init_logger();
+    let validator_keypair = Keypair::new();
+    let account_owner = random_pubkey();
+    const CURRENT_SLOT: u64 = 100;
+
+    let account_pubkey = random_pubkey();
+    let account = Account {
+        lamports: 1_000_000,
+        data: vec![1, 2, 3, 4],
+        owner: account_owner,
+        executable: false,
+        rent_epoch: 0,
+    };
+
+    let FetcherTestCtx {
+        accounts_bank,
+        remote_account_provider,
+        ..
+    } = setup(
+        [(account_pubkey, account.clone())],
+        CURRENT_SLOT,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+
+    let cloner_stub = Arc::new(ClonerStub::new(accounts_bank.clone()));
+    cloner_stub.set_clone_delay(std::time::Duration::from_millis(200));
+    // The first clone attempt will fail.
+    cloner_stub.set_fail_next_clone(true);
+
+    let (subscription_tx, subscription_rx) = mpsc::channel(100);
+    let fetch_cloner = FetchCloner::new(
+        &remote_account_provider,
+        &accounts_bank,
+        &cloner_stub,
+        validator_keypair.insecure_clone(),
+        Pubkey::new_unique(),
+        subscription_rx,
+        None,
+    );
+
+    // Send subscription update (becomes owner, will fail).
+    let subscription_account =
+        crate::remote_account_provider::RemoteAccount::from_fresh_account(
+            account.clone(),
+            CURRENT_SLOT,
+            crate::remote_account_provider::RemoteAccountUpdateSource::Subscription,
+        );
+    subscription_tx
+        .send(ForwardedSubscriptionUpdate {
+            pubkey: account_pubkey,
+            account: subscription_account,
+        })
+        .await
+        .unwrap();
+
+    tokio::time::sleep(Duration::from_millis(20)).await;
+
+    // Concurrent fetch (becomes waiter, should receive failure).
+    let fetch_task = {
+        let fc = fetch_cloner.clone();
+        tokio::spawn(async move {
+            fc.fetch_and_clone_accounts_with_dedup(
+                &[account_pubkey],
+                None,
+                None,
+                AccountFetchOrigin::GetAccount,
+                None,
+            )
+            .await
+        })
+    };
+
+    // The fetch task should complete (not hang) even though
+    // the owner failed.
+    let fetch_result = tokio::time::timeout(Duration::from_secs(2), fetch_task)
+        .await
+        .expect("Fetch task should not hang when owner fails")
+        .unwrap();
+
+    // Fetch returns an error since the owner failed.
+    assert!(
+        fetch_result.is_err(),
+        "Fetch should fail when clone owner fails"
+    );
+
+    tokio::time::sleep(Duration::from_millis(300)).await;
+
+    // Only one clone submission was attempted.
+    assert_eq!(
+        cloner_stub.clone_request_count(),
+        1,
+        "Only the owner should have submitted a clone request"
+    );
+
+    // Pending entry is cleared: a subsequent clone can proceed.
+    let retry_result = fetch_cloner
+        .fetch_and_clone_accounts_with_dedup(
+            &[account_pubkey],
+            None,
+            None,
+            AccountFetchOrigin::GetAccount,
+            None,
+        )
+        .await;
+    assert!(
+        retry_result.is_ok(),
+        "Retry after failure should succeed, got: {:?}",
+        retry_result
+    );
+
+    // Now account should be in bank (second clone succeeded).
+    assert!(
+        accounts_bank.get_account(&account_pubkey).is_some(),
+        "Account should be present in bank after retry"
     );
 }
 

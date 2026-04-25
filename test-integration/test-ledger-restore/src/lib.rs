@@ -40,6 +40,7 @@ use solana_sdk::{
     signer::Signer,
     transaction::Transaction,
 };
+use solana_system_interface::instruction as system_instruction;
 use tempfile::TempDir;
 use tracing::*;
 
@@ -331,7 +332,8 @@ pub fn init_validator_fees_vault(
     }
 
     // DLP authority in integration tests
-    let dlp_authority = Keypair::from_bytes(&DLP_TEST_AUTHORITY_BYTES).unwrap();
+    let dlp_authority =
+        Keypair::try_from(&DLP_TEST_AUTHORITY_BYTES[..]).unwrap();
 
     let latest_block_hash = chain_ctx.try_get_latest_blockhash_chain().unwrap();
     let ix = dlp_api::instruction_builder::init_validator_fees_vault(
@@ -481,7 +483,7 @@ pub fn transfer_lamports(
     lamports: u64,
 ) -> Signature {
     let transfer_ix =
-        solana_sdk::system_instruction::transfer(&from.pubkey(), to, lamports);
+        system_instruction::transfer(&from.pubkey(), to, lamports);
     let (sig, confirmed) = expect!(
         ctx.send_and_confirm_instructions_with_payer_ephem(
             &[transfer_ix],

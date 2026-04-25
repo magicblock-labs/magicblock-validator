@@ -11,6 +11,7 @@ use std::{
 use async_trait::async_trait;
 #[cfg(any(test, feature = "dev-context"))]
 use solana_account::Account;
+use solana_clock::Clock;
 #[cfg(any(test, feature = "dev-context"))]
 use solana_commitment_config::CommitmentConfig;
 #[cfg(any(test, feature = "dev-context"))]
@@ -22,7 +23,6 @@ use solana_rpc_client_api::{
     config::RpcAccountInfoConfig,
     response::{Response, RpcResponseContext, RpcResult},
 };
-use solana_sysvar::clock;
 #[cfg(any(test, feature = "dev-context"))]
 use tracing::*;
 
@@ -34,7 +34,7 @@ pub struct ChainRpcClientMockBuilder {
     commitment: CommitmentConfig,
     accounts: HashMap<Pubkey, AccountAtSlot>,
     current_slot: u64,
-    clock_sysvar: Option<clock::Clock>,
+    clock_sysvar: Option<Clock>,
 }
 
 #[cfg(any(test, feature = "dev-context"))]
@@ -74,7 +74,7 @@ impl ChainRpcClientMockBuilder {
     }
 
     pub fn clock_sysvar_for_slot(mut self, slot: u64) -> Self {
-        self.clock_sysvar.replace(clock::Clock {
+        self.clock_sysvar.replace(Clock {
             slot,
             ..Default::default()
         });
@@ -114,6 +114,8 @@ impl ChainRpcClientMockBuilder {
             commitment: self.commitment,
             accounts: Arc::new(Mutex::new(self.accounts)),
             current_slot: Arc::new(AtomicU64::new(self.current_slot)),
+            single_account_fetches: Arc::<AtomicU64>::default(),
+            multi_account_fetches: Arc::<AtomicU64>::default(),
         };
         if let Some(clock_sysvar) = self.clock_sysvar {
             mock.set_clock_sysvar(clock_sysvar);
@@ -135,6 +137,8 @@ pub struct ChainRpcClientMock {
     commitment: CommitmentConfig,
     accounts: Arc<Mutex<HashMap<Pubkey, AccountAtSlot>>>,
     current_slot: Arc<AtomicU64>,
+    single_account_fetches: Arc<AtomicU64>,
+    multi_account_fetches: Arc<AtomicU64>,
 }
 
 #[cfg(any(test, feature = "dev-context"))]
@@ -144,6 +148,8 @@ impl ChainRpcClientMock {
             commitment,
             accounts: Arc::new(Mutex::new(HashMap::new())),
             current_slot: Arc::<AtomicU64>::default(),
+            single_account_fetches: Arc::<AtomicU64>::default(),
+            multi_account_fetches: Arc::<AtomicU64>::default(),
         }
     }
 
@@ -168,17 +174,19 @@ impl ChainRpcClientMock {
         self.set_clock_sysvar_with(slot, 0, 0);
     }
 
-    pub fn set_clock_sysvar(&self, clock: clock::Clock) {
+    pub fn set_clock_sysvar(&self, clock: Clock) {
+        use solana_program::sysvar::SysvarId;
+
         trace!(clock = ?clock, "Setting clock sysvar");
         let clock_data = bincode::serialize(&clock).unwrap();
         let account = Account {
             lamports: 1_000_000_000,
             data: clock_data,
-            owner: clock::id(),
+            owner: Clock::id(),
             ..Default::default()
         };
-        self.add_account(clock::id(), account);
-        self.account_override_slot(&clock::id(), clock.slot);
+        self.add_account(Clock::id(), account);
+        self.account_override_slot(&Clock::id(), clock.slot);
     }
 
     pub fn set_clock_sysvar_with(
@@ -193,7 +201,7 @@ impl ChainRpcClientMock {
             leader_schedule_epoch = leader_schedule_epoch,
             "Adding clock sysvar"
         );
-        let clock = clock::Clock {
+        let clock = Clock {
             slot,
             epoch,
             leader_schedule_epoch,
@@ -244,6 +252,14 @@ impl ChainRpcClientMock {
         trace!(slot = slot, "Setting current slot");
         self.current_slot.store(slot, Ordering::Relaxed);
     }
+
+    pub fn single_account_fetches(&self) -> u64 {
+        self.single_account_fetches.load(Ordering::Relaxed)
+    }
+
+    pub fn multi_account_fetches(&self) -> u64 {
+        self.multi_account_fetches.load(Ordering::Relaxed)
+    }
 }
 
 #[cfg(any(test, feature = "dev-context"))]
@@ -269,6 +285,7 @@ impl ChainRpcClient for ChainRpcClientMock {
         pubkey: &Pubkey,
         _config: RpcAccountInfoConfig,
     ) -> RpcResult<Option<Account>> {
+        self.single_account_fetches.fetch_add(1, Ordering::Relaxed);
         let res = if let Some(AccountAtSlot { account, slot }) =
             self.get_account_at_slot(pubkey)
         {
@@ -297,6 +314,7 @@ impl ChainRpcClient for ChainRpcClientMock {
         pubkeys: &[Pubkey],
         config: RpcAccountInfoConfig,
     ) -> RpcResult<Vec<Option<Account>>> {
+        self.multi_account_fetches.fetch_add(1, Ordering::Relaxed);
         if tracing::enabled!(tracing::Level::TRACE) {
             let pubkeys = pubkeys
                 .iter()

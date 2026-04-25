@@ -722,9 +722,10 @@ where
             );
         };
 
-        let cloner = this.cloner.clone();
-        accounts_join_set
-            .spawn(async move { cloner.clone_account(request).await });
+        let this_clone = this.clone();
+        accounts_join_set.spawn(async move {
+            this_clone.clone_account_with_ownership(request).await
+        });
     }
     accounts_join_set
         .join_all()
@@ -744,9 +745,10 @@ where
             );
         };
 
-        let cloner = this.cloner.clone();
-        action_accounts_join_set
-            .spawn(async move { cloner.clone_account(request).await });
+        let this_clone = this.clone();
+        action_accounts_join_set.spawn(async move {
+            this_clone.clone_account_with_ownership(request).await
+        });
     }
     action_accounts_join_set
         .join_all()

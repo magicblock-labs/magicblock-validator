@@ -3,6 +3,7 @@ use solana_program_runtime::invoke_context::BuiltinFunctionWithContext;
 use solana_pubkey::Pubkey;
 use solana_sdk_ids::{
     bpf_loader_upgradeable, compute_budget, loader_v4, system_program,
+    zk_elgamal_proof_program,
 };
 
 /// Represents a builtin program to be registered with the SVM.
@@ -19,13 +20,14 @@ pub struct Builtin {
 /// - `bpf_loader_upgradeable`: Loads upgradeable BPF programs.
 /// - `loader_v4`: Loads V4 programs.
 /// - `compute_budget`: Manages transaction compute units.
+/// - `zk_elgamal_proof_program`: Verifies native ZK ElGamal proofs.
 /// - `magicblock_program`: Validator-specific logic (e.g., account mutations).
 ///
 /// **Explicitly Unsupported:**
 /// - `vote_program`, `stake_program`: Consensus and staking are not supported.
 /// - `config_program`: On-chain configuration is not supported.
 /// - `bpf_loader_deprecated`, `bpf_loader`: Superseded by `upgradeable`.
-/// - `zk_token_proof_program`: ZK Token SDK features are not yet enabled.
+/// - `zk_token_proof_program`: Legacy ZK Token proof program is not enabled.
 pub static BUILTINS: &[Builtin] = &[
     Builtin {
         program_id: system_program::ID,
@@ -48,8 +50,18 @@ pub static BUILTINS: &[Builtin] = &[
         entrypoint: magicblock_processor::Entrypoint::vm,
     },
     Builtin {
+        program_id: magicblock_program::CRANK_PROGRAM_ID,
+        name: "magicblock_crank_program",
+        entrypoint: magicblock_processor::CrankEntrypoint::vm,
+    },
+    Builtin {
         program_id: compute_budget::ID,
         name: "compute_budget_program",
         entrypoint: solana_compute_budget_program::Entrypoint::vm,
+    },
+    Builtin {
+        program_id: zk_elgamal_proof_program::ID,
+        name: "solana_zk_elgamal_proof_program",
+        entrypoint: solana_zk_elgamal_proof_program::Entrypoint::vm,
     },
 ];

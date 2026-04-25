@@ -9,7 +9,8 @@ use magicblock_magic_program_api::{
         AccountModification, AccountModificationForInstruction,
         MagicBlockInstruction,
     },
-    MAGIC_CONTEXT_PUBKEY,
+    pda::CRANK_SIGNER,
+    CRANK_PROGRAM_ID, MAGIC_CONTEXT_PUBKEY,
 };
 use solana_hash::Hash;
 use solana_instruction::{AccountMeta, Instruction};
@@ -223,23 +224,17 @@ impl InstructionUtils {
     pub fn schedule_task(
         payer: &Keypair,
         args: ScheduleTaskArgs,
-        accounts: &[Pubkey],
         recent_blockhash: Hash,
     ) -> Transaction {
-        let ix =
-            Self::schedule_task_instruction(&payer.pubkey(), args, accounts);
+        let ix = Self::schedule_task_instruction(&payer.pubkey(), args);
         Self::into_transaction(payer, ix, recent_blockhash)
     }
 
     pub fn schedule_task_instruction(
         payer: &Pubkey,
         args: ScheduleTaskArgs,
-        accounts: &[Pubkey],
     ) -> Instruction {
-        let mut account_metas = vec![AccountMeta::new(*payer, true)];
-        for account in accounts {
-            account_metas.push(AccountMeta::new_readonly(*account, false));
-        }
+        let account_metas = vec![AccountMeta::new(*payer, true)];
 
         Instruction::new_with_bincode(
             crate::id(),
@@ -271,6 +266,41 @@ impl InstructionUtils {
             &MagicBlockInstruction::CancelTask { task_id },
             account_metas,
         )
+    }
+
+    // -----------------
+    // Execute Crank
+    // -----------------
+    pub fn execute_task_instruction(
+        instructions: Vec<Instruction>,
+    ) -> Instruction {
+        let mut account_metas = vec![
+            AccountMeta::new_readonly(validator_authority_id(), true),
+            AccountMeta::new_readonly(CRANK_SIGNER, false),
+        ];
+        for instruction in &instructions {
+            account_metas.push(AccountMeta::new(instruction.program_id, false));
+            account_metas.extend(instruction.accounts.iter().map(|account| {
+                AccountMeta {
+                    pubkey: account.pubkey,
+                    is_signer: false,
+                    is_writable: account.is_writable,
+                }
+            }));
+        }
+        Instruction::new_with_bincode(
+            CRANK_PROGRAM_ID,
+            &MagicBlockInstruction::ExecuteCrank { instructions },
+            account_metas,
+        )
+    }
+
+    pub fn execute_task(
+        instructions: Vec<Instruction>,
+        recent_blockhash: Hash,
+    ) -> Transaction {
+        let ix = Self::execute_task_instruction(instructions);
+        Self::into_transaction(&validator_authority(), ix, recent_blockhash)
     }
 
     // -----------------

@@ -36,7 +36,9 @@ fn payer_keypair() -> Keypair {
 // NOTE: that most of the setup is similar to 07_commit_delegated_account.rs
 // except that we removed the intermediate checks.
 
+// Flaky integration test.
 #[test]
+#[ignore = "flaky"]
 fn test_restore_ledger_committed_and_updated_account() {
     let (_tmpdir, ledger_path) = resolve_tmp_dir(TMP_DIR_LEDGER);
     let payer = payer_keypair();

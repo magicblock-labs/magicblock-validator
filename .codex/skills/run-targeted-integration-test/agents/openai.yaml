@@ -1,0 +1,4 @@
+interface:
+  display_name: "Run Targeted Integration Test"
+  short_description: "Run one repo integration test with the right validator setup."
+  default_prompt: "Run a specific integration test in this repo with the full validator setup and verify the result."

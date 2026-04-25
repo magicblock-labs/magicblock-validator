@@ -24,9 +24,9 @@ use solana_program::{
     program_error::ProgramError,
     pubkey::Pubkey,
     rent::Rent,
-    system_instruction,
     sysvar::Sysvar,
 };
+use solana_system_interface::instruction as system_instruction;
 
 use crate::{
     api::{pda_and_bump, pda_seeds, pda_seeds_with_bump},
@@ -219,7 +219,7 @@ impl ScheduleCommitType {
         magic_fee_vault: Option<&'a AccountInfo<'info>>,
     ) -> ProgramResult {
         match self {
-            ScheduleCommitType::Commit => commit_accounts(
+            ScheduleCommitType::Commit => invoke_schedule_commit(
                 payer,
                 accounts,
                 magic_context,
@@ -251,6 +251,53 @@ impl ScheduleCommitType {
             }
         }
     }
+}
+
+fn invoke_schedule_commit<'a, 'info>(
+    payer: &'a AccountInfo<'info>,
+    accounts: Vec<&'a AccountInfo<'info>>,
+    magic_context: &'a AccountInfo<'info>,
+    magic_program: &'a AccountInfo<'info>,
+    magic_fee_vault: Option<&'a AccountInfo<'info>>,
+) -> ProgramResult {
+    let mut account_metas = vec![
+        AccountMeta {
+            pubkey: *payer.key,
+            is_signer: true,
+            is_writable: payer.is_writable,
+        },
+        AccountMeta {
+            pubkey: *magic_context.key,
+            is_signer: false,
+            is_writable: true,
+        },
+    ];
+    if let Some(vault) = magic_fee_vault {
+        account_metas.push(AccountMeta {
+            pubkey: *vault.key,
+            is_signer: false,
+            is_writable: true,
+        });
+    }
+    account_metas.extend(accounts.iter().map(|account| AccountMeta {
+        pubkey: *account.key,
+        is_signer: account.is_signer,
+        is_writable: account.is_writable,
+    }));
+
+    let ix = Instruction::new_with_bincode(
+        *magic_program.key,
+        &MagicBlockInstruction::ScheduleCommit,
+        account_metas,
+    );
+
+    let mut account_infos = vec![payer.clone(), magic_context.clone()];
+    if let Some(vault) = magic_fee_vault {
+        account_infos.push(vault.clone());
+    }
+    account_infos.extend(accounts.into_iter().cloned());
+
+    invoke(&ix, &account_infos)
 }
 
 pub fn process_instruction<'a>(
@@ -481,7 +528,7 @@ fn process_grow_order_book<'a>(
         )?;
     }
 
-    order_book.realloc(new_size, true)?;
+    order_book.resize(new_size)?;
 
     Ok(())
 }

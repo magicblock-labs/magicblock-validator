@@ -6,10 +6,11 @@ use integration_test_tools::{
     validator::cleanup,
 };
 use solana_sdk::{
-    account::Account, instruction::Instruction, loader_v4,
-    native_token::LAMPORTS_PER_SOL, pubkey::Pubkey, signature::Keypair,
-    signer::Signer, transaction::Transaction,
+    account::Account, instruction::Instruction, native_token::LAMPORTS_PER_SOL,
+    pubkey::Pubkey, signature::Keypair, signer::Signer,
+    transaction::Transaction,
 };
+use solana_sdk_ids::loader_v4;
 use test_ledger_restore::{
     setup_validator_with_local_remote, wait_for_ledger_persist, TMP_DIR_LEDGER,
 };
@@ -79,7 +80,7 @@ fn write(ledger_path: &Path) -> (Child, u64) {
     let Account {
         owner, executable, ..
     } = account;
-    assert_eq!(owner, loader_v4::ID, cleanup(&mut validator));
+    assert_eq!(owner, loader_v4::id(), cleanup(&mut validator));
     assert!(executable, cleanup(&mut validator));
 
     let slot = wait_for_ledger_persist(&ctx, &mut validator);
@@ -109,7 +110,7 @@ fn read(ledger_path: &Path) -> Child {
     let Account {
         owner, executable, ..
     } = account;
-    assert_eq!(owner, loader_v4::ID, cleanup(&mut validator));
+    assert_eq!(owner, loader_v4::id(), cleanup(&mut validator));
     assert!(executable, cleanup(&mut validator));
 
     validator

@@ -8,7 +8,7 @@ mod process_schedule_intent_bundle;
 mod process_scheduled_commit_sent;
 pub(crate) mod transaction_scheduler;
 
-use std::{cell::RefCell, sync::Arc};
+use std::sync::Arc;
 
 use magicblock_core::intent::CommittedAccount;
 use magicblock_magic_program_api::MAGIC_CONTEXT_PUBKEY;
@@ -20,7 +20,6 @@ pub(crate) use process_schedule_intent_bundle::process_schedule_intent_bundle;
 pub use process_scheduled_commit_sent::{
     process_scheduled_commit_sent, register_scheduled_commit_sent, SentCommit,
 };
-use solana_account::AccountSharedData;
 use solana_clock::Clock;
 use solana_instruction::error::InstructionError;
 use solana_log_collector::ic_msg;
@@ -35,7 +34,7 @@ use crate::{
     },
     utils::accounts::{
         get_instruction_account_with_idx, get_instruction_pubkey_with_idx,
-        get_writable_with_idx,
+        get_writable_with_idx, InstructionAccount,
     },
 };
 
@@ -46,9 +45,9 @@ pub(crate) const ACCOUNTS_OFFSET: usize = MAGIC_CONTEXT_IDX as usize + 1;
 
 #[cfg(not(test))]
 fn get_parent_program_id(
-    transaction_context: &TransactionContext,
     invoke_context: &mut InvokeContext,
 ) -> Result<Option<Pubkey>, InstructionError> {
+    let transaction_context = &*invoke_context.transaction_context;
     let frames = crate::utils::instruction_context_frames::InstructionContextFrames::try_from(transaction_context)?;
     let parent_program_id =
         frames.find_program_id_of_parent_of_current_instruction();
@@ -65,10 +64,10 @@ fn get_parent_program_id(
 
 #[cfg(test)]
 fn get_parent_program_id(
-    transaction_context: &TransactionContext,
-    _: &mut InvokeContext,
+    invoke_context: &mut InvokeContext,
 ) -> Result<Option<Pubkey>, InstructionError> {
     use solana_account::ReadableAccount;
+    let transaction_context = &*invoke_context.transaction_context;
     let ix_ctx = transaction_context.get_current_instruction_context()?;
 
     // Action-only bundles may legitimately contain only payer + magic context.
@@ -84,7 +83,7 @@ fn get_parent_program_id(
         transaction_context,
         ACCOUNTS_OFFSET as u16,
     )?
-    .borrow()
+    .borrow()?
     .owner();
 
     Ok(Some(first_committee_owner))
@@ -165,16 +164,16 @@ pub(crate) fn magic_fee_vault_pubkey() -> Pubkey {
 ///
 /// Writability is checked eagerly: a payer on the fee-charging path would
 /// otherwise fail later with a less clear error.
-pub(crate) fn try_get_fee_vault<'a>(
-    transaction_context: &'a TransactionContext,
+pub(crate) fn try_get_fee_vault<'a, 'ix_data>(
+    transaction_context: &'a TransactionContext<'ix_data>,
     invoke_context: &InvokeContext,
     payer_idx: u16,
     fee_vault_idx: u16,
-) -> Result<Option<&'a RefCell<AccountSharedData>>, InstructionError> {
+) -> Result<Option<InstructionAccount<'a, 'ix_data>>, InstructionError> {
     let payer_account =
         get_instruction_account_with_idx(transaction_context, payer_idx)?;
     let payer_requires_fee_vault = {
-        let payer = payer_account.borrow();
+        let payer = payer_account.to_account_shared_data()?;
         payer.delegated() && !payer.confined()
     };
     if !payer_requires_fee_vault {
@@ -196,7 +195,9 @@ pub(crate) fn try_get_fee_vault<'a>(
         get_instruction_account_with_idx(transaction_context, fee_vault_idx)?;
     let is_vault_writable =
         get_writable_with_idx(transaction_context, fee_vault_idx)?;
-    if !vault_account.borrow().delegated() || !is_vault_writable {
+    if !vault_account.to_account_shared_data()?.delegated()
+        || !is_vault_writable
+    {
         ic_msg!(
             invoke_context,
             "ScheduleCommit ERR: magic fee vault must be writable and delegated"

@@ -347,18 +347,15 @@ impl TaskSchedulerService {
         let blockhash = self.block.load().blockhash;
         // Execute unsigned transactions
         // We prepend a noop instruction to make each transaction unique.
-        let noop_instruction = InstructionUtils::noop_instruction(
-            self.tx_counter.fetch_add(1, Ordering::Relaxed),
-        );
+        let ixs = [
+            InstructionUtils::noop_instruction(
+                self.tx_counter.fetch_add(1, Ordering::Relaxed),
+            ),
+            InstructionUtils::execute_task_instruction(instructions),
+        ];
         let tx = Transaction::new(
             &[validator_authority()],
-            Message::new(
-                &[noop_instruction]
-                    .into_iter()
-                    .chain(instructions)
-                    .collect::<Vec<_>>(),
-                Some(&validator_authority_id()),
-            ),
+            Message::new(&ixs, Some(&validator_authority_id())),
             blockhash,
         );
 

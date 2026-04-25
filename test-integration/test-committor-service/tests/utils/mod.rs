@@ -29,7 +29,7 @@ pub fn get_validator_auth() -> Keypair {
         42, 110, 181, 98, 158, 222, 194, 130, 93, 175, 100, 190, 106, 9, 69,
         156, 80, 96, 72,
     ];
-    Keypair::from_bytes(&VALIDATOR_AUTHORITY).unwrap()
+    Keypair::try_from(&VALIDATOR_AUTHORITY[..]).unwrap()
 }
 
 pub fn ensure_validator_authority() -> Keypair {

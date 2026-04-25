@@ -6,9 +6,8 @@ use solana_sdk_ids::{
     address_lookup_table, bpf_loader, bpf_loader_deprecated,
     bpf_loader_upgradeable, compute_budget, config, ed25519_program,
     incinerator, loader_v4, native_loader, secp256k1_program, stake,
-    system_program, vote,
+    system_program, sysvar, vote, zk_elgamal_proof_program,
 };
-use solana_sysvar;
 
 pub fn blacklisted_accounts(
     validator_id: &Pubkey,
@@ -28,6 +27,7 @@ pub fn blacklisted_accounts(
     blacklisted_accounts.insert(NATIVE_SOL_ID);
 
     blacklisted_accounts.insert(magic_program::ID);
+    blacklisted_accounts.insert(magic_program::CRANK_PROGRAM_ID);
     blacklisted_accounts.insert(magic_program::MAGIC_CONTEXT_PUBKEY);
     blacklisted_accounts.insert(magic_program::EPHEMERAL_VAULT_PUBKEY);
     blacklisted_accounts.insert(*validator_id);
@@ -37,19 +37,19 @@ pub fn blacklisted_accounts(
 
 pub fn sysvar_accounts() -> HashSet<Pubkey> {
     let mut blacklisted_sysvars = HashSet::new();
-    blacklisted_sysvars.insert(solana_sdk_ids::sysvar::ID);
-    blacklisted_sysvars.insert(solana_sysvar::clock::ID);
-    blacklisted_sysvars.insert(solana_sysvar::epoch_rewards::ID);
-    blacklisted_sysvars.insert(solana_sysvar::epoch_schedule::ID);
-    blacklisted_sysvars.insert(solana_sysvar::fees::ID);
-    blacklisted_sysvars.insert(solana_sdk_ids::sysvar::instructions::ID);
-    blacklisted_sysvars.insert(solana_sysvar::last_restart_slot::ID);
-    blacklisted_sysvars.insert(solana_sysvar::recent_blockhashes::ID);
-    blacklisted_sysvars.insert(solana_sysvar::rent::ID);
-    blacklisted_sysvars.insert(solana_sysvar::rewards::ID);
-    blacklisted_sysvars.insert(solana_sysvar::slot_hashes::ID);
-    blacklisted_sysvars.insert(solana_sysvar::slot_history::ID);
-    blacklisted_sysvars.insert(solana_sysvar::stake_history::ID);
+    blacklisted_sysvars.insert(sysvar::ID);
+    blacklisted_sysvars.insert(sysvar::clock::ID);
+    blacklisted_sysvars.insert(sysvar::epoch_rewards::ID);
+    blacklisted_sysvars.insert(sysvar::epoch_schedule::ID);
+    blacklisted_sysvars.insert(sysvar::instructions::ID);
+    blacklisted_sysvars.insert(sysvar::fees::ID);
+    blacklisted_sysvars.insert(sysvar::last_restart_slot::ID);
+    blacklisted_sysvars.insert(sysvar::recent_blockhashes::ID);
+    blacklisted_sysvars.insert(sysvar::rent::ID);
+    blacklisted_sysvars.insert(sysvar::rewards::ID);
+    blacklisted_sysvars.insert(sysvar::slot_hashes::ID);
+    blacklisted_sysvars.insert(sysvar::slot_history::ID);
+    blacklisted_sysvars.insert(sysvar::stake_history::ID);
     blacklisted_sysvars
 }
 
@@ -69,5 +69,6 @@ pub fn native_program_accounts() -> HashSet<Pubkey> {
     blacklisted_programs.insert(stake::ID);
     blacklisted_programs.insert(system_program::ID);
     blacklisted_programs.insert(vote::ID);
+    blacklisted_programs.insert(zk_elgamal_proof_program::ID);
     blacklisted_programs
 }

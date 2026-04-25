@@ -136,20 +136,20 @@ impl metrics::LabelValue for IntentExecutorError {
 /// Those are the errors that may occur during Commit/Finalize stages on Base layer
 #[derive(thiserror::Error, Debug)]
 pub enum TransactionStrategyExecutionError {
-    #[error("User supplied actions are ill-formed: {0}. {:?}", .1)]
+    #[error("User supplied actions are ill-formed: {0}. {1:?}")]
     ActionsError(#[source] TransactionError, Option<Signature>),
-    #[error("Invalid undelegation: {0}. {:?}", .1)]
+    #[error("Invalid undelegation: {0}. {1:?}")]
     UndelegationError(#[source] TransactionError, Option<Signature>),
-    #[error("Accounts committed with an invalid Commit id: {0}. {:?}", .1)]
+    #[error("Accounts committed with an invalid Commit id: {0}. {1:?}")]
     CommitIDError(#[source] TransactionError, Option<Signature>),
-    #[error("Max instruction trace length exceeded: {0}. {:?}", .1)]
+    #[error("Max instruction trace length exceeded: {0}. {1:?}")]
     CpiLimitError(#[source] TransactionError, Option<Signature>),
-    #[error("Loaded accounts data size exceeded: {0}. {:?}", .1)]
+    #[error("Loaded accounts data size exceeded: {0}. {1:?}")]
     LoadedAccountsDataSizeExceeded(
         #[source] TransactionError,
         Option<Signature>,
     ),
-    #[error("Unfinalized account error: {0}, {:?}", .1)]
+    #[error("Unfinalized account error: {0}, {1:?}")]
     UnfinalizedAccountError(#[source] TransactionError, Option<Signature>),
     #[error("InternalError: {0}")]
     InternalError(#[from] InternalError),

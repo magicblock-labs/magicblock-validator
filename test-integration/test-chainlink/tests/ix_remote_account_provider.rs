@@ -15,10 +15,10 @@ use magicblock_chainlink::{
     AccountFetchOrigin,
 };
 use magicblock_config::config::LifecycleMode;
+use solana_commitment_config::CommitmentConfig;
 use solana_rpc_client_api::{
     client_error::ErrorKind, config::RpcAccountInfoConfig, request::RpcError,
 };
-use solana_sdk::commitment_config::CommitmentConfig;
 use tokio::sync::mpsc;
 use tracing::{debug, info};
 
@@ -37,7 +37,7 @@ async fn init_remote_account_provider(
         },
     ];
     let endpoints = Endpoints::from(endpoints_vec.as_slice());
-    RemoteAccountProvider::<
+    let provider = RemoteAccountProvider::<
         ChainRpcClientImpl,
         SubMuxClient<ChainUpdatesClient>,
     >::try_from_urls_and_config(
@@ -47,7 +47,11 @@ async fn init_remote_account_provider(
         &RemoteAccountProviderConfig::default_with_lifecycle_mode(
             LifecycleMode::Ephemeral,
         ),
-    ).await.expect("Failed to create RemoteAccountProvider").unwrap()
+    )
+    .await
+    .expect("Failed to create RemoteAccountProvider")
+    .unwrap();
+    provider
 }
 
 #[tokio::test]
@@ -78,7 +82,7 @@ async fn ixtest_existing_account_for_future_slot() {
 
     let cs = current_slot(rpc_client).await;
     let res = rpc_client
-        .get_account_with_config(
+        .get_ui_account_with_config(
             &pubkey,
             RpcAccountInfoConfig {
                 commitment: Some(CommitmentConfig::processed()),
@@ -91,7 +95,7 @@ async fn ixtest_existing_account_for_future_slot() {
     assert!(res.is_err(), "Expected error for future slot account fetch");
     let err = res.unwrap_err();
     assert!(matches!(
-        err.kind,
+        *err.kind,
         ErrorKind::RpcError(RpcError::ForUser(_))
     ));
     assert!(err

@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
-use solana_program::pubkey::Pubkey;
+use solana_program::{instruction::Instruction, pubkey::Pubkey};
 
 use crate::args::{
     AddActionCallbackArgs, MagicBaseIntentArgs, MagicIntentBundleArgs,
@@ -303,6 +303,14 @@ pub enum MagicBlockInstruction {
     /// - **0.** `[SIGNER]`  Validator Authority
     /// - **1.** `[WRITE]`   Account to evict
     EvictAccount { pubkey: Pubkey },
+
+    /// Executes a crank
+    ///
+    /// # Account references
+    /// - **0.**   `[SIGNER]`  Validator authority
+    /// - **1.**   `[]`        Crank signer PDA
+    /// - **2..n** `[]`        Accounts required by the embedded instructions
+    ExecuteCrank { instructions: Vec<Instruction> },
 }
 
 impl MagicBlockInstruction {

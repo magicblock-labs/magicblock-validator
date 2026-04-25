@@ -23,9 +23,9 @@ use solana_program::{
     program_error::ProgramError,
     pubkey::Pubkey,
     rent::Rent,
-    system_instruction,
     sysvar::Sysvar,
 };
+use solana_system_interface::instruction as system_instruction;
 
 use crate::{
     instruction::{
@@ -237,7 +237,7 @@ fn process_realloc(
         bytes
     );
 
-    counter_pda_info.realloc(next_alloc_size as usize, true)?;
+    counter_pda_info.resize(next_alloc_size as usize)?;
     Ok(())
 }
 

@@ -7,16 +7,17 @@ integration-test-tools = { workspace = true }
 
 [dev-dependencies]
 tracing = { workspace = true }
-cleanass = { workspace = true }
 magicblock-api = { workspace = true }
 magicblock-config = { workspace = true }
 magicblock-delegation-program-api = { workspace = true }
 magicblock-program = { path = "../../programs/magicblock" }
 magicblock-validator-admin = { path = "../../magicblock-validator-admin" }
 magic-domain-program = { workspace = true }
+solana-commitment-config = { workspace = true }
 solana-rpc-client = { workspace = true }
 solana-rpc-client-api = { workspace = true }
 solana-sdk = { workspace = true }
+solana-system-interface = { workspace = true }
 solana-transaction-status = { workspace = true }
 test-kit = { workspace = true }
 tokio = { workspace = true }

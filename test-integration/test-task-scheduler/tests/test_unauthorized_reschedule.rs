@@ -1,4 +1,6 @@
-use cleanass::{assert, assert_eq};
+use std::time::Duration;
+
+use cleanass::assert_eq;
 use integration_test_tools::{expect, validator::cleanup};
 use magicblock_task_scheduler::{db::DbTask, SchedulerDatabase};
 use program_flexi_counter::{
@@ -8,7 +10,9 @@ use solana_sdk::{
     native_token::LAMPORTS_PER_SOL, signature::Keypair, signer::Signer,
     transaction::Transaction,
 };
-use test_task_scheduler::{create_delegated_counter, setup_validator};
+use test_task_scheduler::{
+    create_delegated_counter, setup_validator, wait_for_incremented_counter,
+};
 use tokio::runtime::Runtime;
 
 #[test]
@@ -103,7 +107,14 @@ fn test_unauthorized_reschedule() {
     );
 
     // Wait for the task to be processed
-    expect!(ctx.wait_for_delta_slot_ephem(6), validator);
+    // Check that the counter was incremented
+    wait_for_incremented_counter(
+        &ctx,
+        &counter_pda,
+        iterations as u64,
+        Duration::from_secs(10),
+        &mut validator,
+    );
 
     // Check that one task is scheduled but another one is failed to schedule
     let db = expect!(SchedulerDatabase::new(db_path), validator);
@@ -149,22 +160,6 @@ fn test_unauthorized_reschedule() {
         last_execution_millis: task.last_execution_millis,
     };
     assert_eq!(task, expected_task, cleanup(&mut validator));
-
-    // Check that the counter was incremented
-    let counter_account = expect!(
-        ctx.try_ephem_client().and_then(|client| client
-            .get_account(&counter_pda)
-            .map_err(|e| anyhow::anyhow!("Failed to get account: {}", e))),
-        validator
-    );
-    let counter =
-        expect!(FlexiCounter::try_decode(&counter_account.data), validator);
-    assert!(
-        counter.count == iterations as u64,
-        cleanup(&mut validator),
-        "counter.count: {}",
-        counter.count
-    );
 
     cleanup(&mut validator);
 }

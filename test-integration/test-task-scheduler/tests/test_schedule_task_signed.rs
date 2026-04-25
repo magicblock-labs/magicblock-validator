@@ -55,7 +55,7 @@ fn test_schedule_task_signed() {
             .transaction
             .meta
             .map(|m| matches!(
-                m.err,
+                m.err.map(TransactionError::from),
                 Some(TransactionError::InstructionError(
                     0,
                     InstructionError::MissingRequiredSignature

@@ -33,6 +33,7 @@ impl HttpDispatcher {
         let account = self
             .read_account_with_ensure(&pubkey)
             .await
+            .filter(|acc| !Self::account_should_render_as_null(acc))
             // `LockedAccount` provides a race-free read of the account data before encoding.
             .map(|acc| {
                 LockedAccount::new(pubkey, acc).ui_encode(encoding, slice)

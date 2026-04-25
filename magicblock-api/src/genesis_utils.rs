@@ -1,131 +1,59 @@
-// NOTE: from runtime/src/genesis_utils.rs
-// heavily updated to remove vote + stake related code as well as cluster type (defaulting to mainnet)
-use std::time::UNIX_EPOCH;
-
 use solana_account::{Account, AccountSharedData};
-use solana_clock::UnixTimestamp;
-use solana_feature_gate_interface::{create_account, Feature};
-use solana_feature_set::FeatureSet;
-use solana_fee_calculator::FeeRateGovernor;
-use solana_genesis_config::{ClusterType, GenesisConfig};
 use solana_keypair::Keypair;
 use solana_native_token::LAMPORTS_PER_SOL;
+use solana_program_option::COption;
+use solana_program_pack::Pack;
 use solana_pubkey::Pubkey;
-use solana_rent::Rent;
 use solana_signer::Signer;
+use spl_token::{native_mint, state::Mint};
 
 // Default amount received by the validator
 const VALIDATOR_LAMPORTS: u64 = u64::MAX / 2;
 
 pub struct GenesisConfigInfo {
-    pub genesis_config: GenesisConfig,
+    pub accounts: Vec<(Pubkey, AccountSharedData)>,
     pub validator_pubkey: Pubkey,
 }
 
 pub fn create_genesis_config_with_leader(
     mint_lamports: u64,
     validator_pubkey: &Pubkey,
-    lamports_per_signature: u64,
 ) -> GenesisConfigInfo {
     let mint_keypair = Keypair::new();
-
-    let genesis_config = create_genesis_config_with_leader_ex(
-        mint_lamports,
-        &mint_keypair.pubkey(),
-        validator_pubkey,
-        VALIDATOR_LAMPORTS,
-        FeeRateGovernor {
-            target_lamports_per_signature: 0,
-            lamports_per_signature,
-            target_signatures_per_slot: 0,
-            ..FeeRateGovernor::default()
-        },
-        Rent::default(),
-        vec![],
-    );
+    let token_program = spl_token::id();
+    let native_mint = native_mint::id();
+    let mut native_mint_data = [0; Mint::LEN];
+    Mint {
+        mint_authority: COption::None,
+        supply: 0,
+        decimals: native_mint::DECIMALS,
+        is_initialized: true,
+        freeze_authority: COption::None,
+    }
+    .pack_into_slice(&mut native_mint_data);
+    let accounts = vec![
+        (
+            mint_keypair.pubkey(),
+            AccountSharedData::new(mint_lamports, 0, &Pubkey::default()),
+        ),
+        (
+            *validator_pubkey,
+            AccountSharedData::new(VALIDATOR_LAMPORTS, 0, &Pubkey::default()),
+        ),
+        (
+            native_mint,
+            AccountSharedData::from(Account {
+                owner: token_program,
+                data: native_mint_data.to_vec(),
+                lamports: LAMPORTS_PER_SOL,
+                executable: false,
+                rent_epoch: 1,
+            }),
+        ),
+    ];
 
     GenesisConfigInfo {
-        genesis_config,
+        accounts,
         validator_pubkey: *validator_pubkey,
     }
-}
-
-pub fn activate_all_features(genesis_config: &mut GenesisConfig) {
-    // Activate all features at genesis in development mode
-    for feature_id in FeatureSet::default().inactive {
-        activate_feature(genesis_config, feature_id);
-    }
-}
-
-pub fn activate_feature(
-    genesis_config: &mut GenesisConfig,
-    feature_id: Pubkey,
-) {
-    genesis_config.accounts.insert(
-        feature_id,
-        Account::from(create_account(
-            &Feature {
-                activated_at: Some(0),
-            },
-            std::cmp::max(
-                genesis_config.rent.minimum_balance(Feature::size_of()),
-                1,
-            ),
-        )),
-    );
-}
-
-#[allow(clippy::too_many_arguments)]
-pub fn create_genesis_config_with_leader_ex(
-    mint_lamports: u64,
-    mint_pubkey: &Pubkey,
-    validator_pubkey: &Pubkey,
-    validator_lamports: u64,
-    fee_rate_governor: FeeRateGovernor,
-    rent: Rent,
-    mut initial_accounts: Vec<(Pubkey, AccountSharedData)>,
-) -> GenesisConfig {
-    initial_accounts.push((
-        *mint_pubkey,
-        AccountSharedData::new(mint_lamports, 0, &Pubkey::default()),
-    ));
-    initial_accounts.push((
-        *validator_pubkey,
-        AccountSharedData::new(validator_lamports, 0, &Pubkey::default()),
-    ));
-
-    // Note that zero lamports for validator stake will result in stake account
-    // not being stored in accounts-db but still cached in bank stakes. This
-    // causes discrepancy between cached stakes accounts in bank and
-    // accounts-db which in particular will break snapshots test.
-    let native_mint_account = AccountSharedData::from(Account {
-        owner: solana_inline_spl::token::id(),
-        data: solana_inline_spl::token::native_mint::ACCOUNT_DATA.to_vec(),
-        lamports: LAMPORTS_PER_SOL,
-        executable: false,
-        rent_epoch: 1,
-    });
-    initial_accounts.push((
-        solana_inline_spl::token::native_mint::id(),
-        native_mint_account,
-    ));
-
-    let mut genesis_config = GenesisConfig {
-        accounts: initial_accounts
-            .iter()
-            .cloned()
-            .map(|(key, account)| (key, Account::from(account)))
-            .collect(),
-        fee_rate_governor,
-        rent,
-        cluster_type: ClusterType::MainnetBeta,
-        creation_time: UNIX_EPOCH.elapsed().unwrap().as_secs() as UnixTimestamp,
-        ..GenesisConfig::default()
-    };
-
-    if genesis_config.cluster_type == ClusterType::Development {
-        activate_all_features(&mut genesis_config);
-    }
-
-    genesis_config
 }
