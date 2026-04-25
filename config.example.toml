@@ -61,9 +61,8 @@ lifecycle = "ephemeral"
 remotes = [
   "https://api.devnet.solana.com",
   "wss://api.devnet.solana.com",
-  "grpcs://laserstream-devnet-ewr.helius-rpc.com?api-key=YOUR_API_KEY",
 ]
-
+#"grpcs://laserstream-devnet-ewr.helius-rpc.com?api-key=YOUR_API_KEY",
 # Root directory for application storage (ledger, accountsdb, snapshots).
 # Default: "magicblock-test-storage" (created in current working directory)
 # CLI: --storage <PATH>
@@ -139,7 +138,7 @@ event-processors = 1
 
 # List of paths to geyser json configuration files
 # Default: empty list (no plugins)
-geyser-plugins = ["config.json"]
+#geyser-plugins = ["config.json"]
 
 # ==============================================================================
 # Chain Commitment Strategy (ER -> BASE)
@@ -290,10 +289,10 @@ min-interval = "10ms"
 # You can specify multiple programs to load at startup.
 # Default: Empty list
 
-[[programs]]
-id = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
-path = "./libs/spl_token.so"
+#[[programs]]
+#id = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+#path = "./libs/spl_token.so"
 
-[[programs]]
-id = "Memo1UhkJRfHyvLMcVucJwxXeuD728EqVDDwQDxFMNo"
-path = "./libs/spl_memo.so"
+#[[programs]]
+#id = "Memo1UhkJRfHyvLMcVucJwxXeuD728EqVDDwQDxFMNo"
+#path = "./libs/spl_memo.so"

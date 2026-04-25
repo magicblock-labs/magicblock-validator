@@ -402,6 +402,15 @@ where
             .as_ref()
             .and_then(|dr| self.get_delegated_to_other(dr));
 
+        // Log if account is delegated to another validator
+        if let Some(ref other_validator) = delegated_to_other {
+            warn!(
+                pubkey = %pubkey,
+                other_validator = %other_validator,
+                "Cloning detected account delegated to another validator"
+            );
+        }
+
         if let Err(err) = self
             .ensure_delegation_action_dependencies(
                 pubkey,
