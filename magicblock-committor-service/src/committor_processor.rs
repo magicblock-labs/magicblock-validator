@@ -4,6 +4,7 @@ use std::{
     sync::Arc,
 };
 
+use light_client::indexer::photon_indexer::PhotonIndexer;
 use magicblock_core::traits::ActionsCallbackScheduler;
 use magicblock_program::magic_scheduled_base_intent::ScheduledIntentBundle;
 use magicblock_rpc_client::MagicblockRpcClient;
@@ -60,6 +61,8 @@ impl CommittorProcessor {
         );
         let rpc_client = Arc::new(rpc_client);
         let magic_block_rpc_client = MagicblockRpcClient::new(rpc_client);
+        let photon_client =
+            Arc::new(PhotonIndexer::new(chain_config.photon_uri.to_string()));
 
         // Create TableMania
         let gc_config = GarbageCollectorConfig::default();
@@ -73,9 +76,11 @@ impl CommittorProcessor {
         let persister = IntentPersisterImpl::try_new(persist_file)?;
 
         // Create commit scheduler
-        let task_info_fetcher = Arc::new(CacheTaskInfoFetcher::new(
-            RpcTaskInfoFetcher::new(magic_block_rpc_client.clone()),
-        ));
+        let task_info_fetcher =
+            Arc::new(CacheTaskInfoFetcher::new(RpcTaskInfoFetcher::new(
+                magic_block_rpc_client.clone(),
+                photon_client,
+            )));
         let commits_scheduler = IntentExecutionManager::new(
             magic_block_rpc_client.clone(),
             DummyDB::new(),
@@ -180,10 +185,11 @@ impl CommittorProcessor {
     pub async fn fetch_current_commit_nonces(
         &self,
         pubkeys: &[Pubkey],
+        compressed: bool,
         min_context_slot: u64,
     ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>> {
         self.task_info_fetcher
-            .fetch_current_commit_nonces(pubkeys, min_context_slot)
+            .fetch_current_commit_nonces(pubkeys, compressed, min_context_slot)
             .await
     }
 }

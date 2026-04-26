@@ -33,6 +33,7 @@ impl MagicSys for MagicSysAdapter {
     fn fetch_current_commit_nonces(
         &self,
         commits: &[CommittedAccount],
+        compressed: bool,
     ) -> Result<HashMap<Pubkey, u64>, InstructionError> {
         if commits.is_empty() {
             return Ok(HashMap::new());
@@ -53,8 +54,11 @@ impl MagicSys for MagicSysAdapter {
             commits.iter().map(|account| account.pubkey).collect();
 
         let _timer = metrics::start_fetch_commit_nonces_wait_timer();
-        let receiver = committor_service
-            .fetch_current_commit_nonces_sync(&pubkeys, min_context_slot);
+        let receiver = committor_service.fetch_current_commit_nonces_sync(
+            &pubkeys,
+            compressed,
+            min_context_slot,
+        );
         receiver
             .recv_timeout(Self::FETCH_TIMEOUT)
             .map_err(|err| match err {

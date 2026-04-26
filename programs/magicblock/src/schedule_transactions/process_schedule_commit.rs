@@ -228,6 +228,18 @@ pub(crate) fn process_schedule_commit(
             committed_accounts.push(committed);
         }
 
+        if opts.compressed
+            && committed_accounts
+                .iter()
+                .any(|acc| acc.account.lamports > 0)
+        {
+            ic_msg!(
+                invoke_context,
+                "ScheduleCommit: compressed accounts with lamports > 0 are not supported",
+            );
+            return Err(InstructionError::InvalidAccountData);
+        }
+
         if opts.request_undelegation {
             // If the account is scheduled to be undelegated then we need to lock it
             // immediately in order to prevent the following actions:
@@ -252,13 +264,18 @@ pub(crate) fn process_schedule_commit(
     }
 
     if let Some(fee_vault) = magic_fee_vault {
-        let nonces = fetch_current_commit_nonces(&committed_accounts)?;
+        let nonces =
+            fetch_current_commit_nonces(&committed_accounts, opts.compressed)?;
         let fee = calculate_commit_fee(&committed_accounts, &nonces)?;
         charge_delegated_payer(&payer_account, &fee_vault, fee)?;
     } else if !opts.request_undelegation {
         // We validate commit nonces only for plain commits.
         // If accounts are undelegated we don't want to fail.
-        check_commit_limits(&committed_accounts, invoke_context)?;
+        check_commit_limits(
+            &committed_accounts,
+            opts.compressed,
+            invoke_context,
+        )?;
     }
 
     // NOTE: this is only protected by all the above checks however if the

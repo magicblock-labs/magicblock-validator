@@ -1,3 +1,28 @@
+use std::sync::Arc;
+
+use light_client::indexer::{
+    photon_indexer::PhotonIndexer, AddressWithTree, Indexer,
+    ValidityProofWithContext,
+};
+use light_sdk::{
+    instruction::{
+        account_meta::CompressedAccountMeta, PackedAccounts,
+        SystemAccountMetaConfig,
+    },
+    sdk_types::PackedAddressTreeInfo,
+};
+use magicblock_core::compression::{
+    derive_cda_from_pda, ADDRESS_TREE, OUTPUT_QUEUE,
+};
+use magicblock_program::validator::validator_authority_id;
+use program_flexi_counter::{
+    instruction::{
+        create_delegate_compressed_ix,
+        create_init_compressed_delegation_record_ix, create_init_ix,
+        DelegateCompressedArgs, InitDelegationRecordArgs,
+    },
+    state::FlexiCounter,
+};
 use solana_pubkey::Pubkey;
 use solana_sdk::{instruction::Instruction, rent::Rent, signature::Keypair};
 use test_kit::Signer;
@@ -16,6 +41,18 @@ pub struct InitAccountAndDelegateIxs {
     pub delegate: Instruction,
     pub pda: Pubkey,
     pub rent_excempt: u64,
+}
+
+pub struct InitAccountAndCompressedRecordIxs {
+    pub init: Instruction,
+    pub init_record: Instruction,
+    pub pda: Pubkey,
+}
+
+pub struct DelegateCompressedIx {
+    pub delegate: Instruction,
+    pub pda: Pubkey,
+    pub address: [u8; 32],
 }
 
 pub fn init_account_and_delegate_ixs(
@@ -48,6 +85,142 @@ pub fn init_account_and_delegate_ixs(
         delegate: delegate_ix,
         pda,
         rent_excempt: rent_exempt,
+    }
+}
+
+pub async fn init_account_and_compressed_record_ixs(
+    payer: Pubkey,
+    photon_indexer: Arc<PhotonIndexer>,
+) -> InitAccountAndCompressedRecordIxs {
+    let (pda, _bump) = FlexiCounter::pda(&payer);
+    let record_address = derive_cda_from_pda(&pda);
+
+    let init_counter_ix = create_init_ix(payer, "COUNTER".to_string());
+
+    let system_account_meta_config = SystemAccountMetaConfig::new(
+        compressed_delegation_client::ID.to_bytes().into(),
+    );
+    let mut remaining_accounts = PackedAccounts::default();
+    remaining_accounts
+        .add_system_accounts_v2(system_account_meta_config)
+        .unwrap();
+
+    let rpc_result: ValidityProofWithContext = photon_indexer
+        .get_validity_proof(
+            vec![],
+            vec![AddressWithTree {
+                address: record_address.to_bytes(),
+                tree: ADDRESS_TREE.to_bytes().into(),
+            }],
+            None,
+        )
+        .await
+        .unwrap()
+        .value;
+
+    // Insert trees in accounts
+    let address_merkle_tree_pubkey_index =
+        remaining_accounts.insert_or_get(ADDRESS_TREE.to_bytes().into());
+    let state_queue_pubkey_index =
+        remaining_accounts.insert_or_get(OUTPUT_QUEUE.to_bytes().into());
+
+    let packed_address_tree_info = PackedAddressTreeInfo {
+        root_index: rpc_result.addresses[0].root_index,
+        address_merkle_tree_pubkey_index,
+        address_queue_pubkey_index: address_merkle_tree_pubkey_index,
+    };
+
+    let (remaining_accounts_metas, _, _) =
+        remaining_accounts.to_account_metas();
+
+    let init_record_ix = create_init_compressed_delegation_record_ix(
+        payer,
+        &remaining_accounts_metas
+            .iter()
+            .map(|meta| solana_sdk::message::AccountMeta {
+                pubkey: meta.pubkey.to_bytes().into(),
+                is_signer: meta.is_signer,
+                is_writable: meta.is_writable,
+            })
+            .collect::<Vec<_>>(),
+        InitDelegationRecordArgs {
+            validity_proof: rpc_result.proof.into(),
+            address_tree_info: packed_address_tree_info.into(),
+            output_state_tree_index: state_queue_pubkey_index,
+        },
+    );
+
+    InitAccountAndCompressedRecordIxs {
+        init: init_counter_ix,
+        init_record: init_record_ix,
+        pda,
+    }
+}
+
+pub async fn delegate_compressed_ixs(
+    payer: Pubkey,
+    photon_indexer: Arc<PhotonIndexer>,
+) -> DelegateCompressedIx {
+    let (pda, _bump) = FlexiCounter::pda(&payer);
+    let record_address = derive_cda_from_pda(&pda);
+
+    let compressed_account = photon_indexer
+        .get_compressed_account(record_address.to_bytes(), None)
+        .await
+        .unwrap()
+        .value
+        .unwrap();
+
+    let system_account_meta_config = SystemAccountMetaConfig::new(
+        compressed_delegation_client::ID.to_bytes().into(),
+    );
+    let mut remaining_accounts = PackedAccounts::default();
+    remaining_accounts
+        .add_system_accounts_v2(system_account_meta_config)
+        .unwrap();
+
+    let rpc_result: ValidityProofWithContext = photon_indexer
+        .get_validity_proof(vec![compressed_account.hash], vec![], None)
+        .await
+        .unwrap()
+        .value;
+
+    // Insert trees in accounts
+    let state_queue_pubkey_index =
+        remaining_accounts.insert_or_get(OUTPUT_QUEUE.to_bytes().into());
+
+    let packed_trees_info = rpc_result.pack_tree_infos(&mut remaining_accounts);
+    let packed_state_tree_info = packed_trees_info.state_trees.unwrap();
+
+    let (remaining_accounts_metas, _, _) =
+        remaining_accounts.to_account_metas();
+
+    let delegate_ix = create_delegate_compressed_ix(
+        payer,
+        &remaining_accounts_metas
+            .iter()
+            .map(|meta| solana_sdk::message::AccountMeta {
+                pubkey: meta.pubkey.to_bytes().into(),
+                is_signer: meta.is_signer,
+                is_writable: meta.is_writable,
+            })
+            .collect::<Vec<_>>(),
+        DelegateCompressedArgs {
+            validator: Some(validator_authority_id()),
+            validity_proof: rpc_result.proof.into(),
+            account_meta: CompressedAccountMeta {
+                tree_info: packed_state_tree_info.packed_tree_infos[0],
+                address: compressed_account.address.unwrap(),
+                output_state_tree_index: state_queue_pubkey_index,
+            }
+            .into(),
+        },
+    );
+
+    DelegateCompressedIx {
+        delegate: delegate_ix,
+        pda,
+        address: record_address.to_bytes(),
     }
 }
 

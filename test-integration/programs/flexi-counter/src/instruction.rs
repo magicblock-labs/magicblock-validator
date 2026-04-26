@@ -1,4 +1,7 @@
 use borsh::{BorshDeserialize, BorshSerialize};
+use compressed_delegation_api::instruction::{
+    CdpCompressedAccountMeta, CdpPackedAddressTreeInfo, CdpValidityProof,
+};
 use ephemeral_rollups_sdk::{
     consts::{MAGIC_CONTEXT_ID, MAGIC_PROGRAM_ID},
     delegate_args::{DelegateAccountMetas, DelegateAccounts},
@@ -30,6 +33,20 @@ pub struct ScheduleArgs {
 #[derive(BorshSerialize, BorshDeserialize, Debug, Clone)]
 pub struct CancelArgs {
     pub task_id: i64,
+}
+
+#[derive(BorshSerialize, BorshDeserialize, Debug, Clone)]
+pub struct InitDelegationRecordArgs {
+    pub validity_proof: CdpValidityProof,
+    pub address_tree_info: CdpPackedAddressTreeInfo,
+    pub output_state_tree_index: u8,
+}
+
+#[derive(BorshSerialize, BorshDeserialize, Debug, Clone)]
+pub struct DelegateCompressedArgs {
+    pub validator: Option<Pubkey>,
+    pub validity_proof: CdpValidityProof,
+    pub account_meta: CdpCompressedAccountMeta,
 }
 
 pub const MAX_ACCOUNT_ALLOC_PER_INSTRUCTION_SIZE: u16 = 10_240;
@@ -267,6 +284,38 @@ pub enum FlexiCounterInstruction {
         num_commit: u8,
         num_commit_finalize: u8,
     },
+
+    /// Initializes a compressed delegation record for the FlexiCounter account
+    ///
+    /// Accounts:
+    /// 0.   `[signer]` The payer that is initializing the delegation record.
+    /// 1.   `[write]`  The counter PDA account that will be initialized.
+    /// 2.   `[]`       The compressed delegation program id
+    /// 3.   `[]`       The CPI signer of the compressed delegation program
+    /// 4.   `[]`       The system program
+    ///
+    /// 5..N `[]`       Remaining accounts using by the Light program
+    InitCompressedDelegationRecord(InitDelegationRecordArgs),
+
+    /// Compressed delegation of the FlexiCounter account to an ephemaral validator
+    ///
+    /// Accounts:
+    /// 0.   `[signer]` The payer that is delegating the account.
+    /// 1.   `[write]`  The counter PDA account that will be delegated.
+    /// 2.   `[]`       The compressed delegation program id
+    /// 3.   `[]`       The CPI signer of the compressed delegation program
+    ///
+    /// 4..N `[]`       Remaining accounts using by the Light program
+    DelegateCompressed(DelegateCompressedArgs),
+
+    /// Commits the compressed FlexiCounter
+    ///
+    /// Accounts:
+    /// 0. `[signer]` The payer that created the account.
+    /// 1. `[write]`  The counter PDA account that will be updated.
+    /// 2. `[]`       MagicContext (used to record scheduled commit)
+    /// 3. `[]`       MagicBlock Program (used to schedule commit)
+    ScheduleCommitCompressed,
 }
 
 pub fn create_init_ix(payer: Pubkey, label: String) -> Instruction {
@@ -684,6 +733,61 @@ pub fn create_intent_bundle_commit_and_finalize_ix(
             num_commit: commit_accounts.len() as u8,
             num_commit_finalize: commit_finalize_accounts.len() as u8,
         },
+        accounts,
+    )
+}
+pub fn create_init_compressed_delegation_record_ix(
+    payer: Pubkey,
+    remaining_accounts: &[AccountMeta],
+    args: InitDelegationRecordArgs,
+) -> Instruction {
+    let program_id = &crate::id();
+    let (pda, _) = FlexiCounter::pda(&payer);
+    let mut accounts = vec![
+        AccountMeta::new(payer, true),
+        AccountMeta::new(pda, false),
+        AccountMeta::new_readonly(compressed_delegation_api::ID, false),
+    ];
+    accounts.extend(remaining_accounts.iter().cloned());
+    Instruction::new_with_borsh(
+        *program_id,
+        &FlexiCounterInstruction::InitCompressedDelegationRecord(args),
+        accounts,
+    )
+}
+
+pub fn create_delegate_compressed_ix(
+    payer: Pubkey,
+    remaining_accounts: &[AccountMeta],
+    args: DelegateCompressedArgs,
+) -> Instruction {
+    let program_id = &crate::id();
+    let (pda, _) = FlexiCounter::pda(&payer);
+    let mut accounts = vec![
+        AccountMeta::new(payer, true),
+        AccountMeta::new(pda, false),
+        AccountMeta::new_readonly(compressed_delegation_api::ID, false),
+    ];
+    accounts.extend(remaining_accounts.iter().cloned());
+    Instruction::new_with_borsh(
+        *program_id,
+        &FlexiCounterInstruction::DelegateCompressed(args),
+        accounts,
+    )
+}
+
+pub fn create_schedule_commit_compressed_ix(payer: Pubkey) -> Instruction {
+    let program_id = &crate::id();
+    let (pda, _) = FlexiCounter::pda(&payer);
+    let accounts = vec![
+        AccountMeta::new(payer, true),
+        AccountMeta::new(pda, false),
+        AccountMeta::new(MAGIC_CONTEXT_ID, false),
+        AccountMeta::new_readonly(MAGIC_PROGRAM_ID, false),
+    ];
+    Instruction::new_with_borsh(
+        *program_id,
+        &FlexiCounterInstruction::ScheduleCommitCompressed,
         accounts,
     )
 }

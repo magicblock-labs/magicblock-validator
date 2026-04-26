@@ -417,6 +417,7 @@ mod tests {
             commit_and_undelegate: None,
             commit_finalize: None,
             commit_finalize_and_undelegate: None,
+            commit_finalize_compressed: None,
             standalone_actions: vec![BaseActionArgs {
                 args: ActionArgs::new(vec![1, 2, 3]).with_escrow_index(0),
                 compute_units: 100_000,

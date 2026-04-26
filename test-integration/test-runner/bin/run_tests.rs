@@ -9,13 +9,16 @@ use integration_test_tools::{
     loaded_accounts::LoadedAccounts,
     toml_to_args::ProgramLoader,
     validator::{
-        resolve_workspace_dir, start_magic_block_validator_with_config,
+        resolve_workspace_dir, start_light_validator_with_config,
+        start_magic_block_validator_with_config,
         start_test_validator_with_config, TestRunnerPaths,
     },
 };
 use teepee::Teepee;
 use test_runner::{
-    cleanup::{cleanup_devnet_only, cleanup_validators},
+    cleanup::{
+        cleanup_devnet_only, cleanup_light_validator, cleanup_validators,
+    },
     env_config::TestConfigViaEnvVars,
     signal::wait_for_ctrlc,
 };
@@ -152,7 +155,7 @@ fn run_restore_ledger_tests(
     } else {
         let devnet_validator =
             config.setup_devnet(TEST_NAME).then(start_devnet_validator);
-        wait_for_ctrlc(devnet_validator, None, success_output())
+        wait_for_ctrlc(devnet_validator, None, None, success_output())
     }
 }
 
@@ -189,7 +192,7 @@ fn run_chainlink_tests(
     };
     let start_devnet_validator = || match start_validator(
         "chainlink-conf.devnet.toml",
-        ValidatorCluster::Chain(None),
+        ValidatorCluster::Light,
         &loaded_chain_accounts,
     ) {
         Some(validator) => validator,
@@ -207,7 +210,7 @@ fn run_chainlink_tests(
             Ok(output) => output,
             Err(err) => {
                 eprintln!("Failed to run chainlink tests: {:?}", err);
-                cleanup_devnet_only(&mut devnet_validator);
+                cleanup_light_validator(&mut devnet_validator, "light");
                 return Err(err.into());
             }
         };
@@ -216,7 +219,7 @@ fn run_chainlink_tests(
     } else {
         let devnet_validator =
             config.setup_devnet(TEST_NAME).then(start_devnet_validator);
-        wait_for_ctrlc(devnet_validator, None, success_output())
+        wait_for_ctrlc(None, None, devnet_validator, success_output())
     }
 }
 
@@ -240,7 +243,7 @@ fn run_table_mania_and_committor_tests(
 
     let start_devnet_validator = || match start_validator(
         "committor-conf.devnet.toml",
-        ValidatorCluster::Chain(None),
+        ValidatorCluster::Light,
         &loaded_chain_accounts,
     ) {
         Some(validator) => validator,
@@ -297,7 +300,7 @@ fn run_table_mania_and_committor_tests(
                 Ok(output) => output,
                 Err(err) => {
                     eprintln!("Failed to run committor: {:?}", err);
-                    cleanup_devnet_only(&mut devnet_validator);
+                    cleanup_light_validator(&mut devnet_validator, "light");
                     return Err(err.into());
                 }
             }
@@ -306,7 +309,7 @@ fn run_table_mania_and_committor_tests(
             success_output()
         };
 
-        cleanup_devnet_only(&mut devnet_validator);
+        cleanup_light_validator(&mut devnet_validator, "light");
 
         Ok((table_mania_test_output, committor_test_output))
     } else {
@@ -314,7 +317,7 @@ fn run_table_mania_and_committor_tests(
             || config.setup_devnet(COMMITTOR_TEST);
         let devnet_validator = setup_needed.then(start_devnet_validator);
         Ok((
-            wait_for_ctrlc(devnet_validator, None, success_output())?,
+            wait_for_ctrlc(None, None, devnet_validator, success_output())?,
             success_output(),
         ))
     }
@@ -409,7 +412,12 @@ fn run_schedule_commit_tests(
         let ephem_validator =
             config.setup_ephem(TEST_NAME).then(start_ephem_validator);
         eprintln!("Setup validator(s)");
-        wait_for_ctrlc(devnet_validator, ephem_validator, success_output())?;
+        wait_for_ctrlc(
+            devnet_validator,
+            ephem_validator,
+            None,
+            success_output(),
+        )?;
         Ok((success_output(), success_output()))
     }
 }
@@ -493,7 +501,12 @@ fn run_cloning_tests(
             config.setup_devnet(TEST_NAME).then(start_devnet_validator);
         let ephem_validator =
             config.setup_ephem(TEST_NAME).then(start_ephem_validator);
-        wait_for_ctrlc(devnet_validator, ephem_validator, success_output())
+        wait_for_ctrlc(
+            devnet_validator,
+            ephem_validator,
+            None,
+            success_output(),
+        )
     }
 }
 
@@ -550,7 +563,12 @@ fn run_magicblock_api_tests(
             config.setup_devnet(TEST_NAME).then(start_devnet_validator);
         let ephem_validator =
             config.setup_ephem(TEST_NAME).then(start_ephem_validator);
-        wait_for_ctrlc(devnet_validator, ephem_validator, success_output())
+        wait_for_ctrlc(
+            devnet_validator,
+            ephem_validator,
+            None,
+            success_output(),
+        )
     }
 }
 
@@ -609,7 +627,12 @@ fn run_magicblock_pubsub_tests(
             config.setup_devnet(TEST_NAME).then(start_devnet_validator);
         let ephem_validator =
             config.setup_ephem(TEST_NAME).then(start_ephem_validator);
-        wait_for_ctrlc(devnet_validator, ephem_validator, success_output())
+        wait_for_ctrlc(
+            devnet_validator,
+            ephem_validator,
+            None,
+            success_output(),
+        )
     }
 }
 
@@ -656,7 +679,7 @@ fn run_config_tests(
     } else {
         let devnet_validator =
             config.setup_devnet(TEST_NAME).then(start_devnet_validator);
-        wait_for_ctrlc(devnet_validator, None, success_output())
+        wait_for_ctrlc(devnet_validator, None, None, success_output())
     }
 }
 
@@ -726,7 +749,12 @@ fn run_schedule_intents_tests(
             config.setup_devnet(TEST_NAME).then(start_devnet_validator);
         let ephem_validator =
             config.setup_ephem(TEST_NAME).then(start_ephem_validator);
-        wait_for_ctrlc(devnet_validator, ephem_validator, success_output())
+        wait_for_ctrlc(
+            devnet_validator,
+            ephem_validator,
+            None,
+            success_output(),
+        )
     }
 }
 
@@ -775,7 +803,7 @@ fn run_task_scheduler_tests(
     } else {
         let devnet_validator =
             config.setup_devnet(TEST_NAME).then(start_devnet_validator);
-        wait_for_ctrlc(devnet_validator, None, success_output())
+        wait_for_ctrlc(devnet_validator, None, None, success_output())
     }
 }
 
@@ -851,6 +879,7 @@ fn resolve_paths(config_file: &str) -> TestRunnerPaths {
 enum ValidatorCluster {
     Chain(Option<ProgramLoader>),
     Ephem,
+    Light,
 }
 
 impl ValidatorCluster {
@@ -858,6 +887,7 @@ impl ValidatorCluster {
         match self {
             ValidatorCluster::Chain(_) => "CHAIN",
             ValidatorCluster::Ephem => "EPHEM",
+            ValidatorCluster::Light => "LIGHT",
         }
     }
 }
@@ -881,6 +911,12 @@ fn start_validator(
                 log_suffix,
             )
         }
+        ValidatorCluster::Light => start_light_validator_with_config(
+            &test_runner_paths,
+            None,
+            loaded_chain_accounts,
+            log_suffix,
+        ),
         _ => start_magic_block_validator_with_config(
             &test_runner_paths,
             log_suffix,

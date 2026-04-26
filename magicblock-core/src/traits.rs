@@ -21,6 +21,7 @@ pub trait MagicSys: Sync + Send + 'static {
     fn fetch_current_commit_nonces(
         &self,
         commits: &[CommittedAccount],
+        compressed: bool,
     ) -> Result<HashMap<Pubkey, u64>, InstructionError>;
 }
 

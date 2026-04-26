@@ -165,6 +165,14 @@ impl ScheduledIntentBundle {
         self.intent_bundle.get_commit_finalize_intent_accounts()
     }
 
+    /// Returns `CommitFinalizeCompressed` intent's accounts
+    pub fn get_commit_finalize_compressed_intent_accounts(
+        &self,
+    ) -> Option<&Vec<CommittedAccount>> {
+        self.intent_bundle
+            .get_commit_finalize_compressed_intent_accounts()
+    }
+
     /// Returns `Commit` intent's accounts
     pub fn get_commit_intent_accounts_mut(
         &mut self,
@@ -217,6 +225,7 @@ pub struct MagicIntentBundle {
     pub commit_and_undelegate: Option<CommitAndUndelegate>,
     pub commit_finalize: Option<CommitType>,
     pub commit_finalize_and_undelegate: Option<CommitAndUndelegate>,
+    pub commit_finalize_compressed: Option<CommitType>,
     pub standalone_actions: Vec<BaseAction>,
 }
 
@@ -276,6 +285,11 @@ impl MagicIntentBundle {
             .map(|value| CommitAndUndelegate::try_from_args(value, context))
             .transpose()?;
 
+        let commit_finalize_compressed = args
+            .commit_finalize_compressed
+            .map(|value| CommitType::try_from_args(value, context))
+            .transpose()?;
+
         let actions = args
             .standalone_actions
             .into_iter()
@@ -287,6 +301,7 @@ impl MagicIntentBundle {
             commit_and_undelegate,
             commit_finalize,
             commit_finalize_and_undelegate,
+            commit_finalize_compressed,
             standalone_actions: actions,
         };
         this.post_validation(context)?;
@@ -445,6 +460,17 @@ impl MagicIntentBundle {
     ) -> Option<&Vec<CommittedAccount>> {
         Some(
             self.commit_finalize_and_undelegate
+                .as_ref()?
+                .get_committed_accounts(),
+        )
+    }
+
+    /// Returns `[CommitType]` intent's accounts
+    pub fn get_commit_finalize_compressed_intent_accounts(
+        &self,
+    ) -> Option<&Vec<CommittedAccount>> {
+        Some(
+            self.commit_finalize_compressed
                 .as_ref()?
                 .get_committed_accounts(),
         )
@@ -630,6 +656,10 @@ impl MagicBaseIntent {
                 Ok(MagicBaseIntent::CommitFinalizeAndUndelegate(
                     commit_and_undelegate,
                 ))
+            }
+            MagicBaseIntentArgs::CommitFinalizeCompressed(type_) => {
+                let commit = CommitType::try_from_args(type_, context)?;
+                Ok(MagicBaseIntent::CommitFinalizeCompressed(commit))
             }
         }
     }
@@ -1402,6 +1432,7 @@ mod tests {
                 }),
                 commit_finalize: None,
                 commit_finalize_and_undelegate: None,
+                commit_finalize_compressed: None,
                 standalone_actions: vec![make_base_action(50_000)],
             },
         };

@@ -68,7 +68,9 @@ use magicblock_metrics::metrics::{
     inc_per_program_account_fetch_stats, set_monitored_accounts_count,
     AccountFetchOrigin, ProgramFetchResult,
 };
-use remote_account::is_synthetic_mark_empty_fresh;
+use remote_account::{
+    is_synthetic_mark_empty_fresh, should_prefer_rpc_over_photon_compressed_shell,
+};
 pub use remote_account::{ResolvedAccount, ResolvedAccountSharedData};
 
 use crate::{
@@ -1589,6 +1591,15 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
                                         // the RPC `Fresh` (not marked compressed) so
                                         // classification and cloning do not run empty
                                         // data through the compressed delegation path.
+                                        Found(rpc_state)
+                                    } else if should_prefer_rpc_over_photon_compressed_shell(
+                                        &rpc_state,
+                                        &comp_state,
+                                    ) {
+                                        trace!(
+                                            pubkey = %pubkey,
+                                            "Photon compressed account has no payload; using RPC ledger account"
+                                        );
                                         Found(rpc_state)
                                     } else {
                                         debug!("Both RPC and Compressed account found for pubkey {}. Using Compressed account.", pubkey);

@@ -31,11 +31,12 @@ pub fn init_magic_sys<T: MagicSys>(magic_sys: Arc<T>) {
 
 pub(crate) fn fetch_current_commit_nonces(
     commits: &[CommittedAccount],
+    compressed: bool,
 ) -> Result<HashMap<Pubkey, u64>, InstructionError> {
     MAGIC_SYS
         .read()
         .expect(MAGIC_SYS_POISONED_MSG)
         .as_ref()
         .ok_or(InstructionError::UninitializedAccount)?
-        .fetch_current_commit_nonces(commits)
+        .fetch_current_commit_nonces(commits, compressed)
 }

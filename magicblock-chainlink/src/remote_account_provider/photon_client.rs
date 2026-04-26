@@ -25,10 +25,10 @@ impl Deref for PhotonClientImpl {
 }
 
 impl PhotonClientImpl {
-    pub(crate) fn new(photon_indexer: Arc<PhotonIndexer>) -> Self {
+    pub fn new(photon_indexer: Arc<PhotonIndexer>) -> Self {
         Self(photon_indexer)
     }
-    pub(crate) fn new_from_url(url: String) -> Self {
+    pub fn new_from_url(url: String) -> Self {
         debug!(url = %url, "Creating PhotonClient");
         Self::new(Arc::new(PhotonIndexer::new(url)))
     }

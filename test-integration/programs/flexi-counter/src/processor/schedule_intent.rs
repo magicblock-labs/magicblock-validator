@@ -396,6 +396,7 @@ pub fn process_create_intent_bundle_commit_and_finalize(
                 .collect(),
         )),
         commit_finalize_and_undelegate: None,
+        commit_finalize_compressed: None,
         standalone_actions: vec![],
     };
 

@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{collections::HashMap, time::Duration};
 
 use async_trait::async_trait;
 use magicblock_core::traits::{
@@ -90,10 +90,24 @@ pub(in crate::intent_executor) async fn handle_commit_id_error<
     // We reset TaskInfoFetcher for all committed accounts
     // We re-fetch them to fix out of sync tasks
     task_info_fetcher.reset(ResetType::Specific(committed_pubkeys));
-    let commit_ids = task_info_fetcher
-        .fetch_next_commit_nonces(committed_pubkeys, min_context_slot)
-        .await
-        .map_err(TaskBuilderError::CommitTasksBuildError)?;
+    let commit_ids = {
+        let regular_nonces = task_info_fetcher
+            .fetch_next_commit_nonces(
+                committed_pubkeys,
+                false,
+                min_context_slot,
+            )
+            .await
+            .map_err(TaskBuilderError::CommitTasksBuildError)?;
+        let compressed_nonces = task_info_fetcher
+            .fetch_next_commit_nonces(committed_pubkeys, true, min_context_slot)
+            .await
+            .map_err(TaskBuilderError::CommitTasksBuildError)?;
+        regular_nonces
+            .into_iter()
+            .chain(compressed_nonces.into_iter())
+            .collect::<HashMap<Pubkey, u64>>()
+    };
 
     // Here we find the broken tasks and reset them
     // Broken tasks are prepared incorrectly so they have to be cleaned up

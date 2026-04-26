@@ -33,7 +33,9 @@ pub enum ResolvedAccount {
 /// structure is used for both RPC and Photon; if both are present, the merged result must not
 /// always be treated as a compressed account or empty bytes may be run through
 /// decompression.
-pub(crate) fn is_synthetic_mark_empty_fresh(resolved: &ResolvedAccount) -> bool {
+pub(crate) fn is_synthetic_mark_empty_fresh(
+    resolved: &ResolvedAccount,
+) -> bool {
     match resolved {
         ResolvedAccount::Fresh(acc) => {
             acc.lamports() == 0
@@ -201,6 +203,28 @@ impl ResolvedAccountSharedData {
 pub struct RemoteAccountState {
     pub account: ResolvedAccount,
     pub source: RemoteAccountUpdateSource,
+}
+
+/// Prefer RPC when Photon returns a compressed-account shell with no payload while RPC has
+/// real ledger state. Empty account data cannot deserialize as a compressed delegation record;
+/// without this, merge would pick Photon and the fetch cloner would drop the account.
+pub(crate) fn should_prefer_rpc_over_photon_compressed_shell(
+    rpc: &RemoteAccountState,
+    photon: &RemoteAccountState,
+) -> bool {
+    if photon.source != RemoteAccountUpdateSource::Compressed {
+        return false;
+    }
+    let ResolvedAccount::Fresh(photon_acc) = &photon.account else {
+        return false;
+    };
+    if !photon_acc.data().is_empty() {
+        return false;
+    }
+    let ResolvedAccount::Fresh(rpc_acc) = &rpc.account else {
+        return false;
+    };
+    rpc_acc.lamports() > 0 || !rpc_acc.data().is_empty()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

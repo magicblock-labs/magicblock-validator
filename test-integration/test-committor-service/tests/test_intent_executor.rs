@@ -103,9 +103,11 @@ impl TestEnv {
             .await;
 
         let transaction_preparator = fixture.create_transaction_preparator();
-        let task_info_fetcher = Arc::new(CacheTaskInfoFetcher::new(
-            RpcTaskInfoFetcher::new(fixture.rpc_client.clone()),
-        ));
+        let task_info_fetcher =
+            Arc::new(CacheTaskInfoFetcher::new(RpcTaskInfoFetcher::new(
+                fixture.rpc_client.clone(),
+                fixture.photon_indexer.clone(),
+            )));
 
         let tm = &fixture.table_mania;
         let mut pre_test_tablemania_state = HashMap::new();
@@ -160,6 +162,7 @@ async fn test_commit_id_error_parsing() {
     task_info_fetcher
         .fetch_next_commit_nonces(
             &intent.get_undelegate_intent_pubkeys().unwrap(),
+            false,
             remote_slot,
         )
         .await
@@ -486,7 +489,11 @@ async fn test_commit_id_error_recovery() {
 
     // Invalidate commit nonce cache
     let res = task_info_fetcher
-        .fetch_next_commit_nonces(&[committed_account.pubkey], remote_slot)
+        .fetch_next_commit_nonces(
+            &[committed_account.pubkey],
+            false,
+            remote_slot,
+        )
         .await;
     assert!(res.is_ok());
     assert!(res.unwrap().contains_key(&committed_account.pubkey));
@@ -696,7 +703,11 @@ async fn test_commit_id_and_action_errors_recovery() {
 
     // Invalidate commit nonce cache
     let res = task_info_fetcher
-        .fetch_next_commit_nonces(&[committed_account.pubkey], remote_slot)
+        .fetch_next_commit_nonces(
+            &[committed_account.pubkey],
+            false,
+            remote_slot,
+        )
         .await;
     assert!(res.is_ok());
     assert!(res.unwrap().contains_key(&committed_account.pubkey));
@@ -917,7 +928,7 @@ async fn test_commit_id_actions_cpi_limit_errors_recovery() {
     // Force CommitIDError by invalidating the commit-nonce cache before running
     let pubkeys: Vec<_> = committed_accounts.iter().map(|c| c.pubkey).collect();
     let mut invalidated_keys = task_info_fetcher
-        .fetch_next_commit_nonces(&pubkeys, Default::default())
+        .fetch_next_commit_nonces(&pubkeys, false, Default::default())
         .await
         .unwrap();
 
@@ -1273,9 +1284,11 @@ async fn test_action_callback_fired_on_timeout() {
 
     // Build executor with zero timeout so actions time out before execution
     let callback_executor = MockActionsCallbackExecutor::default();
-    let task_info_fetcher = Arc::new(CacheTaskInfoFetcher::new(
-        RpcTaskInfoFetcher::new(fixture.rpc_client.clone()),
-    ));
+    let task_info_fetcher =
+        Arc::new(CacheTaskInfoFetcher::new(RpcTaskInfoFetcher::new(
+            fixture.rpc_client.clone(),
+            fixture.photon_indexer.clone(),
+        )));
     let mut intent_executor = IntentExecutorImpl::new(
         fixture.rpc_client.clone(),
         fixture.create_transaction_preparator(),

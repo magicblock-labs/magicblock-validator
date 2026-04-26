@@ -99,30 +99,50 @@ impl TaskBuilderImpl {
 
     async fn fetch_commit_nonces<C: TaskInfoFetcher>(
         task_info_fetcher: &Arc<C>,
-        accounts: &[(bool, bool, CommittedAccount)],
+        accounts: &[(bool, bool, bool, CommittedAccount)],
         min_context_slot: u64,
     ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>> {
-        let committed_pubkeys = accounts
-            .iter()
-            .map(|(_, _, account)| account.pubkey)
+        let (regular_accounts, compressed_accounts): (Vec<_>, Vec<_>) =
+            accounts
+                .iter()
+                .partition(|(_, _, compressed, _)| !compressed);
+        let regular_pubkeys = regular_accounts
+            .into_iter()
+            .map(|(_, _, _, account)| account.pubkey)
+            .collect::<Vec<_>>();
+        let compressed_pubkeys = compressed_accounts
+            .into_iter()
+            .map(|(_, _, _, account)| account.pubkey)
             .collect::<Vec<_>>();
 
-        task_info_fetcher
-            .fetch_next_commit_nonces(&committed_pubkeys, min_context_slot)
-            .await
+        let regular_nonces = task_info_fetcher
+            .fetch_next_commit_nonces(&regular_pubkeys, false, min_context_slot)
+            .await?;
+        let compressed_nonces = task_info_fetcher
+            .fetch_next_commit_nonces(
+                &compressed_pubkeys,
+                true,
+                min_context_slot,
+            )
+            .await?;
+        Ok(regular_nonces
+            .into_iter()
+            .chain(compressed_nonces.into_iter())
+            .collect::<HashMap<Pubkey, u64>>())
     }
 
     async fn fetch_diffable_accounts<C: TaskInfoFetcher>(
         task_info_fetcher: &Arc<C>,
-        accounts: &[(bool, bool, CommittedAccount)],
+        accounts: &[(bool, bool, bool, CommittedAccount)],
         min_context_slot: u64,
     ) -> TaskInfoFetcherResult<HashMap<Pubkey, Account>> {
         let diffable_pubkeys = accounts
             .iter()
-            .filter(|(_, _, account)| {
+            .filter(|(_, _, compressed, account)| {
                 account.account.data.len() > COMMIT_STATE_SIZE_THRESHOLD
+                    && !compressed
             })
-            .map(|(_, _, account)| account.pubkey)
+            .map(|(_, _, _, account)| account.pubkey)
             .collect::<Vec<_>>();
 
         task_info_fetcher
@@ -156,6 +176,19 @@ impl TaskBuilderImpl {
             delivery: delivery_details,
         }
     }
+
+    pub fn create_commit_finalize_compressed_task(
+        commit_id: u64,
+        allow_undelegation: bool,
+        account: CommittedAccount,
+    ) -> CommitFinalizeTask {
+        CommitFinalizeTask {
+            commit_id,
+            allow_undelegation,
+            committed_account: account,
+            delivery: CommitDelivery::StateInArgs,
+        }
+    }
 }
 
 #[async_trait]
@@ -180,26 +213,29 @@ impl TasksBuilder for TaskBuilderImpl {
         let commit_finalize_and_undelegate_accounts = intent_bundle
             .get_commit_finalize_and_undelegate_intent_accounts()
             .cloned();
+        let commit_finalize_compressed_accounts = intent_bundle
+            .get_commit_finalize_compressed_intent_accounts()
+            .cloned();
 
         let flagged_accounts: Vec<_> = [
-            (false, false, committed_accounts),
-            (true, false, undelegated_accounts),
-            (false, true, commit_finalize_accounts),
-            (true, true, commit_finalize_and_undelegate_accounts),
+            (false, false, false, committed_accounts),
+            (true, false, false, undelegated_accounts),
+            (false, true, false, commit_finalize_accounts),
+            (true, true, false, commit_finalize_and_undelegate_accounts),
+            (false, true, true, commit_finalize_compressed_accounts),
         ]
         .into_iter()
-        .flat_map(|(allow_undelegation, finalize, accounts)| {
-            accounts
-                .into_iter()
-                .flatten()
-                .map(move |account| (allow_undelegation, finalize, account))
+        .flat_map(|(allow_undelegation, finalize, compressed, accounts)| {
+            accounts.into_iter().flatten().map(move |account| {
+                (allow_undelegation, finalize, compressed, account)
+            })
         })
         .collect();
 
         // Get commit nonces and base accounts
         let min_context_slot = flagged_accounts
             .iter()
-            .map(|(_, _, account)| account.remote_slot)
+            .map(|(_, _, _, account)| account.remote_slot)
             .max()
             .unwrap_or(0);
         let (commit_ids, base_accounts) = tokio::join!(
@@ -232,7 +268,7 @@ impl TasksBuilder for TaskBuilderImpl {
 
         // Create commit tasks
         let commit_tasks_iter = flagged_accounts.into_iter().map(
-            |(allow_undelegation, finalize, account)| {
+            |(allow_undelegation, finalize, compressed, account)| {
                 let commit_id = commit_ids
                     .get(&account.pubkey)
                     .copied()
@@ -245,11 +281,13 @@ impl TasksBuilder for TaskBuilderImpl {
                     });
                 let base_account = base_accounts.remove(&account.pubkey);
 
-                 if finalize {
-                     Self::create_commit_finalize_task(commit_id, allow_undelegation, account.clone(), base_account).into()
-                 } else {
-                     Self::create_commit_task(commit_id, allow_undelegation, account.clone(), base_account).into()
-                 }
+                if compressed {
+                    Self::create_commit_finalize_compressed_task(commit_id, allow_undelegation, account.clone()).into()
+                } else if finalize {
+                    Self::create_commit_finalize_task(commit_id, allow_undelegation, account.clone(), base_account).into()
+                } else {
+                    Self::create_commit_task(commit_id, allow_undelegation, account.clone(), base_account).into()
+                }
             },
         );
         tasks.extend(commit_tasks_iter);
@@ -372,6 +410,8 @@ pub enum TaskBuilderError {
     CommitTasksBuildError(#[source] TaskInfoFetcherError),
     #[error("FinalizedTasksBuildError: {0}")]
     FinalizedTasksBuildError(#[source] TaskInfoFetcherError),
+    #[error("CommitFinalizeCompressedTasksBuildError: {0}")]
+    CommitFinalizeCompressedTasksBuildError(#[from] std::io::Error),
 }
 
 impl TaskBuilderError {
@@ -379,6 +419,7 @@ impl TaskBuilderError {
         match self {
             Self::CommitTasksBuildError(err) => err.signature(),
             Self::FinalizedTasksBuildError(err) => err.signature(),
+            Self::CommitFinalizeCompressedTasksBuildError(_) => None,
         }
     }
 }

@@ -144,13 +144,13 @@ pub(crate) fn process_schedule_intent_bundle(
     )?;
     if let Some(magic_fee_vault) = magic_fee_vault {
         let chargable_accounts = scheduled_intent.get_all_committed_accounts();
-        let nonces = fetch_current_commit_nonces(&chargable_accounts)?;
+        let nonces = fetch_current_commit_nonces(&chargable_accounts, false)?;
         let fee = scheduled_intent.calculate_fee(&nonces)?;
         charge_delegated_payer(&payer_account, &magic_fee_vault, fee)?;
     } else if let Some(commit_accounts) =
         scheduled_intent.get_commit_intent_accounts()
     {
-        check_commit_limits(commit_accounts, invoke_context)?;
+        check_commit_limits(commit_accounts, false, invoke_context)?;
     }
 
     let action_sent_signature = scheduled_intent.sent_transaction.signatures[0];

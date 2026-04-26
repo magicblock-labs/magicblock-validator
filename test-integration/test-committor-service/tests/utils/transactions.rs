@@ -1,5 +1,9 @@
+use std::sync::Arc;
+
+use light_client::indexer::{photon_indexer::PhotonIndexer, Indexer};
 use solana_account::Account;
 use solana_commitment_config::CommitmentConfig;
+use solana_compute_budget_interface::ComputeBudgetInstruction;
 use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_rpc_client_api::config::{
@@ -14,8 +18,10 @@ use solana_system_interface::instruction as system_instruction;
 use tracing::{debug, error};
 
 use crate::utils::instructions::{
+    delegate_compressed_ixs, init_account_and_compressed_record_ixs,
     init_account_and_delegate_ixs, init_order_book_account_and_delegate_ixs,
-    init_validator_fees_vault_ix, InitAccountAndDelegateIxs,
+    init_validator_fees_vault_ix, DelegateCompressedIx,
+    InitAccountAndCompressedRecordIxs, InitAccountAndDelegateIxs,
     InitOrderBookAndDelegateIxs,
 };
 
@@ -315,6 +321,98 @@ pub async fn init_and_delegate_account_on_chain(
     let pda_acc = get_account!(rpc_client, pda, "pda");
 
     (pda, pda_acc)
+}
+
+/// This needs to be run for each test that required a new counter to be compressed delegated
+#[allow(dead_code)]
+pub async fn init_and_delegate_compressed_record_on_chain(
+    counter_auth: &Keypair,
+) -> (Pubkey, [u8; 32], Account) {
+    let rpc_client = RpcClient::new("http://localhost:7799".to_string());
+    let photon_indexer =
+        Arc::new(PhotonIndexer::new("http://localhost:8784".to_string()));
+
+    rpc_client
+        .request_airdrop(&counter_auth.pubkey(), 777 * LAMPORTS_PER_SOL)
+        .await
+        .unwrap();
+    debug!("Airdropped to counter auth: {} SOL", 777 * LAMPORTS_PER_SOL);
+
+    let InitAccountAndCompressedRecordIxs {
+        init: init_counter_ix,
+        init_record: init_record_ix,
+        pda,
+    } = init_account_and_compressed_record_ixs(
+        counter_auth.pubkey(),
+        photon_indexer.clone(),
+    )
+    .await;
+
+    let latest_block_hash = rpc_client.get_latest_blockhash().await.unwrap();
+    // 1. Init account and record
+    rpc_client
+        .send_and_confirm_transaction_with_spinner_and_config(
+            &Transaction::new_signed_with_payer(
+                &[init_counter_ix, init_record_ix],
+                Some(&counter_auth.pubkey()),
+                &[&counter_auth],
+                latest_block_hash,
+            ),
+            CommitmentConfig::confirmed(),
+            RpcSendTransactionConfig {
+                skip_preflight: true,
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("Failed to init account");
+    debug!("Init account: {:?}", pda);
+
+    let pda_acc = get_account!(rpc_client, pda, "pda");
+
+    // 2. Delegate
+    let DelegateCompressedIx {
+        delegate: delegate_ix,
+        pda,
+        address,
+    } = delegate_compressed_ixs(counter_auth.pubkey(), photon_indexer.clone())
+        .await;
+    let tx = Transaction::new_signed_with_payer(
+        &[
+            ComputeBudgetInstruction::set_compute_unit_limit(250_000),
+            delegate_ix,
+        ],
+        Some(&counter_auth.pubkey()),
+        &[&counter_auth],
+        latest_block_hash,
+    );
+    rpc_client
+        .send_and_confirm_transaction_with_spinner_and_config(
+            &tx,
+            CommitmentConfig::confirmed(),
+            RpcSendTransactionConfig {
+                skip_preflight: true,
+                ..Default::default()
+            },
+        )
+        .await
+        .inspect_err(|err| {
+            error!(
+                "Failed to init compressed record: {err:?}, signature: {:?}",
+                tx.signatures[0]
+            )
+        })
+        .expect("Failed to init compressed record");
+
+    let compressed_account = photon_indexer
+        .get_compressed_account(address, None)
+        .await
+        .unwrap()
+        .value
+        .unwrap();
+    debug!("Compressed record: {:?}", compressed_account);
+
+    (pda, address, pda_acc)
 }
 
 /// This needs to be run for each test that required a new order_book to be delegated

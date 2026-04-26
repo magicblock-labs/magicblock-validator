@@ -6,8 +6,13 @@ edition.workspace = true
 [dev-dependencies]
 async-trait = { workspace = true }
 borsh = { workspace = true }
+compressed-delegation-client = { workspace = true }
 tracing = { workspace = true }
 futures = { workspace = true }
+light-client = { workspace = true, features = ["v2"] }
+light-compressed-account = { workspace = true }
+light-sdk = { workspace = true, features = ["v2"] }
+light-sdk-types = { workspace = true, features = ["v2"] }
 magicblock-core = { workspace = true }
 magicblock-committor-program = { workspace = true, features = [
   "no-entrypoint",
@@ -26,6 +31,7 @@ program-schedulecommit = { workspace = true, features = ["no-entrypoint"] }
 rand = { workspace = true }
 solana-account = { workspace = true }
 solana-commitment-config = { workspace = true }
+solana-compute-budget-interface = { workspace = true }
 solana-pubkey = { workspace = true }
 solana-rpc-client = { workspace = true }
 solana-rpc-client-api = { workspace = true }

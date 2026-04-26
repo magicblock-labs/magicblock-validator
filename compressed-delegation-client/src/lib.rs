@@ -6,8 +6,9 @@ pub use compressed_delegation_api::{
     CommitAndFinalizeArgs, CompressedDelegationInstructionDiscriminator,
     CompressedDelegationProgramInstruction, CompressedDelegationRecord,
     DelegateArgs, ExternalUndelegateArgs, InitDelegationRecordArgs,
-    UndelegateArgs, DCP_DISCRIMINATOR, EXTERNAL_UNDELEGATE_DISCRIMINATOR,
-    EXTERNAL_UNDELEGATE_DISCRIMINATOR_U64,
+    UndelegateArgs, DCP_DISCRIMINATOR,
+    EXTERNAL_UNDELEGATE_DISCRIMINATOR_COMPRESSED,
+    EXTERNAL_UNDELEGATE_DISCRIMINATOR_U64_COMPRESSED,
 };
 use light_sdk::derive_light_cpi_signer;
 use light_sdk_types::CpiSigner;

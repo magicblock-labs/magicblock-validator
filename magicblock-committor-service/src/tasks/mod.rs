@@ -16,6 +16,7 @@ use magicblock_program::magic_scheduled_base_intent::BaseAction;
 use solana_instruction::{AccountMeta, Instruction};
 use solana_pubkey::Pubkey;
 
+pub mod commit_finalize_compressed_task;
 pub mod commit_finalize_task;
 pub mod commit_task;
 pub mod task_builder;
@@ -25,17 +26,9 @@ pub mod utils;
 pub use task_builder::TaskBuilderImpl;
 
 use crate::tasks::{
+    commit_finalize_compressed_task::CommitFinalizeCompressedTask,
     commit_finalize_task::CommitFinalizeTask, commit_task::CommitTask,
 };
-
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum TaskType {
-    Commit,
-    CommitFinalize,
-    Finalize,
-    Undelegate,
-    Action,
-}
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum TaskStrategy {
@@ -50,6 +43,7 @@ pub enum BaseTaskImpl {
     Finalize(FinalizeTask),
     Undelegate(UndelegateTask),
     BaseAction(BaseActionTask),
+    CommitFinalizeCompressed(CommitFinalizeCompressedTask),
 }
 
 impl BaseTask for BaseTaskImpl {
@@ -64,6 +58,9 @@ impl BaseTask for BaseTaskImpl {
             Self::Finalize(value) => value.instruction(validator),
             Self::Undelegate(value) => value.instruction(validator),
             Self::BaseAction(value) => value.instruction(validator),
+            Self::CommitFinalizeCompressed(value) => {
+                value.instruction(validator)
+            }
         }
     }
 
@@ -82,6 +79,7 @@ impl BaseTask for BaseTaskImpl {
             Self::BaseAction(value) => value.compute_units(),
             Self::Finalize(_) => 70_000,
             Self::Undelegate(_) => 70_000,
+            Self::CommitFinalizeCompressed(_) => 250_000,
         }
     }
 
@@ -89,6 +87,11 @@ impl BaseTask for BaseTaskImpl {
         match self {
             Self::Commit(value) => value.accounts_size_budget(),
             Self::CommitFinalize(value) => value.accounts_size_budget(),
+            Self::CommitFinalizeCompressed(_) => {
+                dlp_api::instruction_builder::finalize_size_budget(
+                    AccountSizeClass::Huge,
+                )
+            }
             Self::BaseAction(value) => value.accounts_size_budget(),
             Self::Finalize(_) => {
                 dlp_api::instruction_builder::finalize_size_budget(
@@ -111,7 +114,12 @@ impl BaseTaskImpl {
             Self::CommitFinalize(task) if task.is_buffer() => {
                 TaskStrategy::Buffer
             }
-            _ => TaskStrategy::Args,
+            Self::Commit(_)
+            | Self::CommitFinalize(_)
+            | Self::Finalize(_)
+            | Self::Undelegate(_)
+            | Self::BaseAction(_)
+            | Self::CommitFinalizeCompressed(_) => TaskStrategy::Args,
         }
     }
 }
@@ -137,6 +145,9 @@ impl LabelValue for BaseTaskImpl {
             Self::Undelegate(_) => "args_undelegate",
             Self::BaseAction(BaseActionTask::V1(_)) => "args_action",
             Self::BaseAction(BaseActionTask::V2(_)) => "args_action_v2",
+            Self::CommitFinalizeCompressed(_) => {
+                "args_commit_finalize_compressed"
+            }
         }
     }
 }

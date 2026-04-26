@@ -435,6 +435,7 @@ impl MagicValidator {
             committor_persist_path,
             ChainConfig {
                 rpc_uri: config.rpc_url().to_owned(),
+                photon_uri: config.compression.photon_url.clone(),
                 commitment: CommitmentConfig::confirmed(),
                 compute_budget_config: ComputeBudgetConfig::new(
                     config.commit.compute_unit_price,
