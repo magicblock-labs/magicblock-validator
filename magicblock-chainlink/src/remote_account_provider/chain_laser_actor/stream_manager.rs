@@ -405,7 +405,9 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
     /// current chain slot. Returns `None` if no chain slot
     /// tracker is available
     fn compute_from_slot(&self) -> Option<u64> {
-        self.chain_slot.as_ref().map(ChainSlot::compute_from_slot)
+        self.chain_slot
+            .as_ref()
+            .and_then(ChainSlot::compute_from_slot)
     }
 
     /// Emits the current optimized/unoptimized stream counts as

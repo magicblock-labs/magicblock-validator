@@ -40,8 +40,16 @@ impl ChainSlot {
 
     /// Computes a `from_slot` for backfilling based on the current
     /// chain slot.
-    pub fn compute_from_slot(&self) -> u64 {
+    ///
+    /// Returns `None` while the slot is still `0`, i.e. before any
+    /// real slot update has been observed. In that case the caller
+    /// must treat backfill as temporarily unavailable for this
+    /// subscription instead of sending `from_slot = 0`.
+    pub fn compute_from_slot(&self) -> Option<u64> {
         let current = self.load();
-        current.saturating_sub(Self::MAX_SLOTS_SUB_ACTIVATION)
+        if current == 0 {
+            return None;
+        }
+        Some(current.saturating_sub(Self::MAX_SLOTS_SUB_ACTIVATION))
     }
 }

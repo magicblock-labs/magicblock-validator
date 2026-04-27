@@ -495,12 +495,12 @@ impl<H: StreamHandle, S: StreamFactory<H>> ChainLaserActor<H, S> {
 
     /// Computes a `from_slot` for backfilling based on the
     /// current chain slot. Returns `None` if backfilling is not
-    /// supported or the slot is still 0.
+    /// supported or the slot is still `0` (i.e. uninitialized).
     fn compute_from_slot(&self) -> Option<u64> {
         if !self.slots.supports_backfill {
             return None;
         }
-        Some(self.slots.chain_slot.compute_from_slot())
+        self.slots.chain_slot.compute_from_slot()
     }
 
     /// Handles an update from any subscription stream.
