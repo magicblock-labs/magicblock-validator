@@ -53,3 +53,35 @@ impl ChainSlot {
         Some(current.saturating_sub(Self::MAX_SLOTS_SUB_ACTIVATION))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::{atomic::AtomicU64, Arc};
+
+    use super::*;
+
+    fn make(slot: u64) -> ChainSlot {
+        ChainSlot::new(Arc::new(AtomicU64::new(slot)))
+    }
+
+    #[test]
+    fn returns_none_when_slot_is_zero() {
+        let cs = make(0);
+        assert_eq!(cs.compute_from_slot(), None);
+    }
+
+    #[test]
+    fn returns_subtracted_slot_when_slot_is_nonzero() {
+        let cs = make(1000);
+        assert_eq!(
+            cs.compute_from_slot(),
+            Some(1000 - ChainSlot::MAX_SLOTS_SUB_ACTIVATION),
+        );
+    }
+
+    #[test]
+    fn saturates_at_zero_when_slot_below_window() {
+        let cs = make(1);
+        assert_eq!(cs.compute_from_slot(), Some(0));
+    }
+}

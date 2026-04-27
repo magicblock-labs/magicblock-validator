@@ -1676,6 +1676,43 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    async fn test_optimize_sets_from_slot_none_when_chain_slot_zero() {
+        use std::sync::{atomic::AtomicU64, Arc};
+
+        use crate::remote_account_provider::chain_slot::ChainSlot;
+
+        let chain_slot = ChainSlot::new(Arc::new(AtomicU64::new(0)));
+        let factory = MockStreamFactory::new();
+        let mut mgr = StreamManager::new(
+            test_config(),
+            factory.clone(),
+            Some(chain_slot),
+            "test".to_string(),
+        );
+
+        mgr.account_subscribe(&make_pubkeys(5), &COMMITMENT, Some(42))
+            .await
+            .unwrap();
+
+        let reqs_before = factory.captured_requests().len();
+        mgr.optimize(&COMMITMENT).await.unwrap();
+
+        let optimize_reqs: Vec<_> = factory
+            .captured_requests()
+            .into_iter()
+            .skip(reqs_before)
+            .collect();
+        assert!(!optimize_reqs.is_empty());
+        for req in &optimize_reqs {
+            assert_eq!(
+                req.from_slot, None,
+                "optimized streams should have from_slot=None \
+                 when chain_slot is still 0",
+            );
+        }
+    }
+
     // ---------------------------------------------------------
     // 12. next_update Stream Updates
     // ---------------------------------------------------------
