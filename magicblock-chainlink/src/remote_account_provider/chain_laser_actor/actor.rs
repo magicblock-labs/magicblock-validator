@@ -496,11 +496,38 @@ impl<H: StreamHandle, S: StreamFactory<H>> ChainLaserActor<H, S> {
     /// Computes a `from_slot` for backfilling based on the
     /// current chain slot. Returns `None` if backfilling is not
     /// supported or the slot is still `0` (i.e. uninitialized).
+    ///
+    /// Logs the chosen mode so operators can distinguish:
+    /// - "backfill not supported" (endpoint flag)
+    /// - "backfill skipped (chain_slot still 0)" (bootstrap window)
+    /// - "backfill from <slot>" (normal operation)
     fn compute_from_slot(&self) -> Option<u64> {
         if !self.slots.supports_backfill {
+            trace!(
+                client_id = %self.client_id,
+                "compute_from_slot: backfill not supported by endpoint, \
+                 from_slot=None",
+            );
             return None;
         }
-        self.slots.chain_slot.compute_from_slot()
+        match self.slots.chain_slot.compute_from_slot() {
+            None => {
+                debug!(
+                    client_id = %self.client_id,
+                    "compute_from_slot: chain_slot still 0, creating \
+                     subscription without from_slot (degraded backfill)",
+                );
+                None
+            }
+            Some(slot) => {
+                trace!(
+                    client_id = %self.client_id,
+                    from_slot = slot,
+                    "compute_from_slot: using normal backfill",
+                );
+                Some(slot)
+            }
+        }
     }
 
     /// Handles an update from any subscription stream.
