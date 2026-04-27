@@ -104,7 +104,8 @@ impl TryFrom<&Remote> for Endpoint {
                     ))
                 })?;
 
-                let supports_backfill = is_helius_laser_url(&url);
+                let supports_backfill =
+                    is_helius_laser_url(&url) || is_triton_url(&url);
                 Ok(Endpoint::Grpc {
                     url,
                     label,
