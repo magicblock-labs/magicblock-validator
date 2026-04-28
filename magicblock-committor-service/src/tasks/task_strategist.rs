@@ -128,6 +128,15 @@ impl TaskStrategist {
     ) -> TaskStrategistResult<StrategyExecutionMode> {
         const MAX_UNITED_TASKS_LEN: usize = 22;
 
+        if commit_tasks.is_empty() || finalize_tasks.is_empty() {
+            let strategy = TaskStrategist::build_strategy(
+                [commit_tasks, finalize_tasks].concat(),
+                authority,
+                persister,
+            )?;
+            return Ok(StrategyExecutionMode::SingleStage(strategy));
+        }
+
         // We can unite in 1 tx a lot of commits
         // but then there's a possibility of hitting CPI limit, aka
         // MaxInstructionTraceLengthExceeded error.
@@ -891,8 +900,41 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_build_two_stage_mode_no_alts() {
+    async fn test_build_single_stage_mode_commit_and_undelegate_no_alts() {
         let pubkeys: [_; 3] = std::array::from_fn(|_| Pubkey::new_unique());
+        let intent = create_test_intent(0, &pubkeys, true);
+
+        let info_fetcher = Arc::new(MockInfoFetcher);
+        let commit_task = TaskBuilderImpl::commit_tasks(
+            &info_fetcher,
+            &intent,
+            &None::<IntentPersisterImpl>,
+        )
+        .await
+        .unwrap();
+        let finalize_task =
+            TaskBuilderImpl::finalize_tasks(&info_fetcher, &intent)
+                .await
+                .unwrap();
+
+        let execution_mode = TaskStrategist::build_execution_strategy(
+            commit_task,
+            finalize_task,
+            &Pubkey::new_unique(),
+            &None::<IntentPersisterImpl>,
+        )
+        .expect("Execution mode created");
+
+        let StrategyExecutionMode::SingleStage(value) = execution_mode else {
+            panic!("Unexpected execution mode");
+        };
+        assert!(!value.uses_alts());
+    }
+
+    #[tokio::test]
+    async fn test_build_two_stage_mode_for_large_commit_and_undelegate_bundle()
+    {
+        let pubkeys: [_; 12] = std::array::from_fn(|_| Pubkey::new_unique());
         let intent = create_test_intent(0, &pubkeys, true);
 
         let info_fetcher = Arc::new(MockInfoFetcher);
@@ -923,8 +965,8 @@ mod tests {
         else {
             panic!("Unexpected execution mode");
         };
-        assert!(!commit_stage.uses_alts());
-        assert!(!finalize_stage.uses_alts());
+        assert_eq!(commit_stage.optimized_tasks.len(), 12);
+        assert_eq!(finalize_stage.optimized_tasks.len(), 12);
     }
 
     #[tokio::test]

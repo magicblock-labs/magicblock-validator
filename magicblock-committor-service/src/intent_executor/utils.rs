@@ -70,20 +70,18 @@ pub(in crate::intent_executor) async fn handle_commit_id_error<
     committed_pubkeys: &[Pubkey],
     strategy: &mut TransactionStrategy,
 ) -> Result<TransactionStrategy, TaskBuilderError> {
-    let commit_tasks: Vec<_> = strategy
+    let min_context_slot = strategy
         .optimized_tasks
-        .iter_mut()
-        .filter_map(|task| {
-            if let BaseTaskImpl::Commit(commit_task) = task {
-                Some(commit_task)
-            } else {
-                None
-            }
-        })
-        .collect();
-    let min_context_slot = commit_tasks
         .iter()
-        .map(|task| task.committed_account.remote_slot)
+        .filter_map(|task| match task {
+            BaseTaskImpl::Commit(commit_task) => {
+                Some(commit_task.committed_account.remote_slot)
+            }
+            BaseTaskImpl::CommitFinalize(commit_finalize_task) => {
+                Some(commit_finalize_task.committed_account.remote_slot)
+            }
+            _ => None,
+        })
         .max()
         .unwrap_or_default();
 
@@ -98,18 +96,40 @@ pub(in crate::intent_executor) async fn handle_commit_id_error<
     // Here we find the broken tasks and reset them
     // Broken tasks are prepared incorrectly so they have to be cleaned up
     let mut to_cleanup = Vec::new();
-    for task in commit_tasks {
-        let Some(commit_id) = commit_ids.get(&task.committed_account.pubkey)
-        else {
-            continue;
-        };
-        if commit_id == &task.commit_id {
-            continue;
-        }
+    for task in &mut strategy.optimized_tasks {
+        match task {
+            BaseTaskImpl::Commit(commit_task) => {
+                let Some(commit_id) =
+                    commit_ids.get(&commit_task.committed_account.pubkey)
+                else {
+                    continue;
+                };
+                if commit_id == &commit_task.commit_id {
+                    continue;
+                }
 
-        // Handle invalid tasks
-        to_cleanup.push(BaseTaskImpl::Commit(task.clone()));
-        task.reset_commit_id(*commit_id);
+                // Handle invalid tasks
+                to_cleanup.push(BaseTaskImpl::Commit(commit_task.clone()));
+                commit_task.reset_commit_id(*commit_id);
+            }
+            BaseTaskImpl::CommitFinalize(commit_finalize_task) => {
+                let Some(commit_id) = commit_ids
+                    .get(&commit_finalize_task.committed_account.pubkey)
+                else {
+                    continue;
+                };
+                if commit_id == &commit_finalize_task.commit_id {
+                    continue;
+                }
+
+                // Handle invalid tasks
+                to_cleanup.push(BaseTaskImpl::CommitFinalize(
+                    commit_finalize_task.clone(),
+                ));
+                commit_finalize_task.reset_commit_id(*commit_id);
+            }
+            _ => {}
+        }
     }
 
     let old_alts = strategy.dummy_revaluate_alts(authority);

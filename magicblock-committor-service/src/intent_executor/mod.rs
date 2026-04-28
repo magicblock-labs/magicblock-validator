@@ -373,6 +373,7 @@ where
         execution_report: &mut IntentExecutionReport,
         persister: &Option<P>,
     ) -> IntentExecutorResult<ExecutionOutput> {
+        let skip_finalize_stage = finalize_strategy.optimized_tasks.is_empty();
         let mut executor = TwoStageExecutor::new(
             self.authority.insecure_clone(),
             commit_strategy,
@@ -393,6 +394,10 @@ where
             persister,
         )
         .await?;
+
+        if skip_finalize_stage {
+            return Ok(ExecutionOutput::SingleStage(commit_signature));
+        }
 
         let mut finalize_executor = executor.done(commit_signature);
         let finalize_signature = execute_with_timeout(

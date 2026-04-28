@@ -22,10 +22,7 @@ use crate::{
         IntentExecutionReport,
     },
     persist::{IntentPersister, IntentPersisterImpl},
-    tasks::{
-        commit_task::CommitTask, task_strategist::TransactionStrategy,
-        BaseTaskImpl, FinalizeTask,
-    },
+    tasks::{task_strategist::TransactionStrategy, BaseTaskImpl, FinalizeTask},
     transaction_preparator::TransactionPreparator,
 };
 
@@ -217,12 +214,31 @@ where
             ) => {
                 let optimized_tasks =
                     self.transaction_strategy.optimized_tasks.as_slice();
-                if let Some(BaseTaskImpl::Commit(task)) = err
+                if let Some(task) = err
                     .task_index()
                     .and_then(|index| optimized_tasks.get(index as usize))
                 {
+                    let delegated_account = match task {
+                        BaseTaskImpl::Commit(task) => {
+                            task.committed_account.pubkey
+                        }
+                        BaseTaskImpl::CommitFinalize(task) => {
+                            task.committed_account.pubkey
+                        }
+                        _ => {
+                            error!(
+                                task_index = err.task_index(),
+                                optimized_tasks_len = optimized_tasks.len(),
+                                error = ?err,
+                                "RPC returned unexpected task index"
+                            );
+                            return Ok(ControlFlow::Break(()));
+                        }
+                    };
                     self.handle_unfinalized_account_error(
-                        signature, task, transaction_preparator
+                        signature,
+                        delegated_account,
+                        transaction_preparator,
                     )
                     .await
                 } else {
@@ -262,13 +278,11 @@ where
     async fn handle_unfinalized_account_error<T: TransactionPreparator>(
         &self,
         failed_signature: &Option<Signature>,
-        task: &CommitTask,
+        delegated_account: Pubkey,
         transaction_preparator: &T,
     ) -> IntentExecutorResult<ControlFlow<(), TransactionStrategy>> {
-        let finalize_task: BaseTaskImpl = FinalizeTask {
-            delegated_account: task.committed_account.pubkey,
-        }
-        .into();
+        let finalize_task: BaseTaskImpl =
+            FinalizeTask { delegated_account }.into();
         prepare_and_execute_strategy(
             &self.intent_client,
             &self.authority,
