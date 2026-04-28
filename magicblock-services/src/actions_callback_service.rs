@@ -8,7 +8,12 @@ use magicblock_core::{
         LatestBlockProvider,
     },
 };
-use magicblock_magic_program_api::{instruction::{CallbackInstruction}, pda::CALLBACK_SIGNER, response::{ActionReceipt, MagicResponse, MagicResponseV1}, CALLBACK_PROGRAM_ID};
+use magicblock_magic_program_api::{
+    instruction::CallbackInstruction,
+    pda::CALLBACK_SIGNER,
+    response::{ActionReceipt, MagicResponse, MagicResponseV1},
+    CALLBACK_PROGRAM_ID,
+};
 use solana_instruction::{AccountMeta, Instruction};
 use solana_keypair::Keypair;
 use solana_message::{Message, VersionedMessage};
@@ -96,17 +101,19 @@ impl<L: LatestBlockProvider> ActionsCallbackService<L> {
         let mut account_metas = vec![
             AccountMeta::new_readonly(*authority, true),
             AccountMeta::new_readonly(CALLBACK_SIGNER, false),
-            AccountMeta::new_readonly(inner_instruction.program_id, false)
+            AccountMeta::new_readonly(inner_instruction.program_id, false),
         ];
-        account_metas.extend(inner_instruction.accounts
-            .clone()
-            .into_iter()
-            .map(|mut el| {
-                // CALLBACK_SIGNER may be set to true in inner_instruction
-                // Outer instruction can't have PDA as signer
-                el.is_signer = false;
-                el
-            })
+        account_metas.extend(
+            inner_instruction
+                .accounts
+                .clone()
+                .into_iter()
+                .map(|mut el| {
+                    // CALLBACK_SIGNER may be set to true in inner_instruction
+                    // Outer instruction can't have PDA as signer
+                    el.is_signer = false;
+                    el
+                }),
         );
 
         let data = CallbackInstruction::ExecuteCallback {
@@ -148,7 +155,7 @@ impl<L: LatestBlockProvider> ActionsCallbackService<L> {
                 AccountMeta {
                     pubkey: m.pubkey,
                     is_writable: m.is_writable,
-                    is_signer
+                    is_signer,
                 }
             })
             .collect();
@@ -191,16 +198,19 @@ impl<L: LatestBlockProvider> ActionsCallbackScheduler
                 let send_futs = valid_transactions
                     .iter()
                     .map(|tx| rpc_client.send_transaction(tx));
-                join_all(send_futs).await.into_iter().enumerate().for_each(|(i, result)| {
-                    if let Err(err) = result {
-                        let signature = valid_transactions[i].get_signature();
-                        error!(
-                            error = ?err,
-                            signature = ?signature,
-                            "Failed to send action callback transaction"
-                        );
-                    }
-                });
+                join_all(send_futs).await.into_iter().enumerate().for_each(
+                    |(i, result)| {
+                        if let Err(err) = result {
+                            let signature =
+                                valid_transactions[i].get_signature();
+                            error!(
+                                error = ?err,
+                                signature = ?signature,
+                                "Failed to send action callback transaction"
+                            );
+                        }
+                    },
+                );
             });
         }
 

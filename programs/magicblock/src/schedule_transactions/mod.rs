@@ -25,7 +25,7 @@ pub use process_scheduled_commit_sent::{
     process_scheduled_commit_sent, register_scheduled_commit_sent, SentCommit,
 };
 use solana_clock::Clock;
-use solana_instruction::{error::InstructionError};
+use solana_instruction::error::InstructionError;
 use solana_log_collector::ic_msg;
 use solana_program_runtime::invoke_context::InvokeContext;
 use solana_pubkey::Pubkey;

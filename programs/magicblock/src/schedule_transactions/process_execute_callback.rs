@@ -1,9 +1,6 @@
 use std::collections::HashSet;
 
-use magicblock_magic_program_api::{
-    pda::{CALLBACK_SIGNER},
-    CALLBACK_PROGRAM_ID,
-};
+use magicblock_magic_program_api::{pda::CALLBACK_SIGNER, CALLBACK_PROGRAM_ID};
 use solana_instruction::{error::InstructionError, Instruction};
 use solana_log_collector::ic_msg;
 use solana_program_runtime::invoke_context::InvokeContext;
@@ -23,15 +20,9 @@ pub(crate) fn process_execute_callback(
     invoke_context: &mut InvokeContext,
     instruction: Instruction,
 ) -> Result<(), InstructionError> {
-    ic_msg!(
-            invoke_context,
-            "ExecuteCallback ERR: processing"
-    );
+    ic_msg!(invoke_context, "ExecuteCallback ERR: processing");
     validate(signers, invoke_context)?;
-    ic_msg!(
-        invoke_context,
-        "ExecuteCallback ERR: validated"
-    );
+    ic_msg!(invoke_context, "ExecuteCallback ERR: validated");
     validate_callback_accounts(&invoke_context, &instruction.accounts)?;
 
     invoke_context.native_invoke(instruction, &[CALLBACK_SIGNER])

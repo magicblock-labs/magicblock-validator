@@ -257,10 +257,7 @@ declare_process_instruction!(
     CallbackEntrypoint,
     DEFAULT_COMPUTE_UNITS,
     |invoke_context| {
-        ic_msg!(
-            invoke_context,
-            "ExecuteCallback ERR: entered"
-        );
+        ic_msg!(invoke_context, "ExecuteCallback ERR: entered");
         let instruction: CallbackInstruction =
             deserialize_instruction(invoke_context)?;
         let transaction_context = &invoke_context.transaction_context;
@@ -281,7 +278,7 @@ mod test {
     use magicblock_magic_program_api::args::ScheduleTaskArgs;
     use solana_instruction::{AccountMeta, Instruction};
     use solana_program_runtime::invoke_context::mock_process_instruction;
-    use magicblock_magic_program_api::CRANK_PROGRAM_ID;
+
     use super::*;
 
     #[test]
@@ -311,10 +308,14 @@ mod test {
 
     #[test]
     fn callback_entrypoint_rejects_non_execute_callback_instructions() {
-        let data = bincode::serialize(&CallbackInstruction::ExecuteCallback{
-            instruction: Instruction::new_with_bytes(CRANK_PROGRAM_ID, &[], vec![])
+        let data = bincode::serialize(&CallbackInstruction::ExecuteCallback {
+            instruction: Instruction::new_with_bytes(
+                crate::CRANK_PROGRAM_ID,
+                &[],
+                vec![],
+            ),
         })
-            .unwrap();
+        .unwrap();
 
         mock_process_instruction(
             &crate::CALLBACK_PROGRAM_ID,
