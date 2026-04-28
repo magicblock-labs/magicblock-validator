@@ -20,9 +20,7 @@ pub(crate) fn process_execute_callback(
     invoke_context: &mut InvokeContext,
     instruction: Instruction,
 ) -> Result<(), InstructionError> {
-    ic_msg!(invoke_context, "ExecuteCallback ERR: processing");
     validate(signers, invoke_context)?;
-    ic_msg!(invoke_context, "ExecuteCallback ERR: validated");
     validate_callback_accounts(
         &invoke_context,
         &instruction.accounts,

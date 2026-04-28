@@ -257,7 +257,6 @@ declare_process_instruction!(
     CallbackEntrypoint,
     DEFAULT_COMPUTE_UNITS,
     |invoke_context| {
-        ic_msg!(invoke_context, "ExecuteCallback ERR: entered");
         let instruction: CallbackInstruction =
             deserialize_instruction(invoke_context)?;
         let transaction_context = &invoke_context.transaction_context;
