@@ -71,20 +71,20 @@ jobs:
       - uses: ./magicblock-validator/.github/actions/setup-solana
 
       - name: Install Photon indexer
-        if: matrix.batch_tests == 'table_mania' || matrix.batch_tests == 'committor' || matrix.batch_tests == 'chainlink'
+        if: matrix.batch_tests == 'table_mania' || matrix.batch_tests == 'schedulecommit' || matrix.batch_tests == 'committor' || matrix.batch_tests == 'chainlink'
         shell: bash
         env:
           RUSTFLAGS: "-A dead-code"
         run: cargo install --git https://github.com/lightprotocol/photon.git --rev 3f82b926be6717a07bd41aedb84b4d9e6b0ab0d3 --locked --force
 
       - name: Setup Node.js
-        if: matrix.batch_tests == 'table_mania' || matrix.batch_tests == 'committor' || matrix.batch_tests == 'chainlink'
+        if: matrix.batch_tests == 'table_mania' || matrix.batch_tests == 'schedulecommit' || matrix.batch_tests == 'committor' || matrix.batch_tests == 'chainlink'
         uses: actions/setup-node@v4
         with:
           node-version: "20"
 
       - name: Install zk-compression CLI
-        if: matrix.batch_tests == 'table_mania' || matrix.batch_tests == 'committor' || matrix.batch_tests == 'chainlink'
+        if: matrix.batch_tests == 'table_mania' || matrix.batch_tests == 'schedulecommit' || matrix.batch_tests == 'committor' || matrix.batch_tests == 'chainlink'
         run: |
           npm i -g @lightprotocol/zk-compression-cli@0.28.4
         shell: bash
