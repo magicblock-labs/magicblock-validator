@@ -1,5 +1,6 @@
 mod process_accept_scheduled_commits;
 mod process_add_action_callback;
+mod process_execute_callback;
 mod process_schedule_commit;
 mod process_schedule_commit_finalize;
 #[cfg(test)]
@@ -11,9 +12,12 @@ pub(crate) mod transaction_scheduler;
 use std::sync::Arc;
 
 use magicblock_core::intent::CommittedAccount;
-use magicblock_magic_program_api::MAGIC_CONTEXT_PUBKEY;
+use magicblock_magic_program_api::{
+    pda::CALLBACK_SIGNER, MAGIC_CONTEXT_PUBKEY,
+};
 pub(crate) use process_accept_scheduled_commits::*;
 pub(crate) use process_add_action_callback::process_add_action_callback;
+pub(crate) use process_execute_callback::*;
 pub(crate) use process_schedule_commit::*;
 pub(crate) use process_schedule_commit_finalize::*;
 pub(crate) use process_schedule_intent_bundle::process_schedule_intent_bundle;
@@ -21,7 +25,7 @@ pub use process_scheduled_commit_sent::{
     process_scheduled_commit_sent, register_scheduled_commit_sent, SentCommit,
 };
 use solana_clock::Clock;
-use solana_instruction::error::InstructionError;
+use solana_instruction::{error::InstructionError};
 use solana_log_collector::ic_msg;
 use solana_program_runtime::invoke_context::InvokeContext;
 use solana_pubkey::Pubkey;
@@ -36,6 +40,7 @@ use crate::{
         get_instruction_account_with_idx, get_instruction_pubkey_with_idx,
         get_writable_with_idx, InstructionAccount,
     },
+    validator::validator_authority_id,
 };
 
 pub(crate) const PAYER_IDX: u16 = 0;
@@ -206,4 +211,44 @@ pub(crate) fn try_get_fee_vault<'a, 'ix_data>(
     }
 
     Ok(Some(vault_account))
+}
+
+/// Assert that the callback instructions do not have signers aside from the callback signer
+/// Assert they don't use the validator either
+pub(crate) fn validate_callback_accounts(
+    invoke_context: &&mut InvokeContext,
+    accounts_meta: &[solana_instruction::AccountMeta],
+) -> Result<(), InstructionError> {
+    for solana_instruction::AccountMeta {
+        pubkey,
+        is_signer,
+        is_writable,
+    } in accounts_meta
+    {
+        if *is_writable && pubkey == &CALLBACK_SIGNER {
+            ic_msg!(
+                invoke_context,
+                "ExecuteCallback ERR: the callback signer PDA cannot be a writable account in callbacks",
+            );
+            return Err(InstructionError::Immutable);
+        }
+
+        if *is_signer && pubkey != &CALLBACK_SIGNER {
+            ic_msg!(
+                invoke_context,
+                "ExecuteCallback ERR: only the callback signer PDA can be a signer in callbacks (invalid signer: '{}')",
+                pubkey,
+            );
+            return Err(InstructionError::MissingRequiredSignature);
+        }
+
+        if pubkey == &validator_authority_id() {
+            ic_msg!(
+                invoke_context,
+                "ExecuteCallback ERR: the validator authority cannot be used in callbacks",
+            );
+            return Err(InstructionError::IncorrectAuthority);
+        }
+    }
+    Ok(())
 }

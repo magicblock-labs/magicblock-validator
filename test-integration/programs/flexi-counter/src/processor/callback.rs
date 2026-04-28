@@ -4,6 +4,7 @@ use solana_program::{
     program_error::ProgramError,
 };
 use solana_system_interface::instruction as system_instruction;
+use magicblock_magic_program_api::pda::CALLBACK_SIGNER;
 
 /// Discriminator prefix for the transfer callback instruction.
 /// Checked before borsh parsing since the callback carries bincode-encoded
@@ -93,10 +94,20 @@ pub fn process_transfer_callback(
 ) -> ProgramResult {
     msg!("TransferCallback");
 
-    let [_validator_authority, counter_pda, payer, _system_program] = accounts
+    let [callback_signer, counter_pda, payer, _system_program] = accounts
     else {
         return Err(ProgramError::NotEnoughAccountKeys);
     };
+
+    if !callback_signer.is_signer {
+        msg!("Missing callback signer");
+        return Err(ProgramError::MissingRequiredSignature)
+    }
+
+    if callback_signer.key != &CALLBACK_SIGNER {
+        msg!("Expected callback signer authority: {}, got: {}", CALLBACK_SIGNER, callback_signer.key);
+        return Err(ProgramError::IncorrectAuthority);
+    }
 
     let response: MagicResponse = bincode::deserialize(data)
         .map_err(|_| ProgramError::InvalidInstructionData)?;
