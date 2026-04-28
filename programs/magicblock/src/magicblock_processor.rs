@@ -276,7 +276,7 @@ declare_process_instruction!(
 #[cfg(test)]
 mod test {
     use magicblock_magic_program_api::args::ScheduleTaskArgs;
-    use solana_instruction::{AccountMeta, Instruction};
+    use solana_instruction::AccountMeta;
     use solana_program_runtime::invoke_context::mock_process_instruction;
 
     use super::*;
@@ -307,15 +307,8 @@ mod test {
     }
 
     #[test]
-    fn callback_entrypoint_rejects_non_execute_callback_instructions() {
-        let data = bincode::serialize(&CallbackInstruction::ExecuteCallback {
-            instruction: Instruction::new_with_bytes(
-                crate::CRANK_PROGRAM_ID,
-                &[],
-                vec![],
-            ),
-        })
-        .unwrap();
+    fn callback_entrypoint_rejects_invalid_instruction_data() {
+        let data = vec![0xFF, 0xFF, 0xFF, 0xFF];
 
         mock_process_instruction(
             &crate::CALLBACK_PROGRAM_ID,

@@ -1,10 +1,11 @@
-use magicblock_magic_program_api::response::MagicResponse;
+use magicblock_magic_program_api::{
+    pda::CALLBACK_SIGNER, response::MagicResponse,
+};
 use solana_program::{
     account_info::AccountInfo, entrypoint::ProgramResult, msg, program::invoke,
     program_error::ProgramError,
 };
 use solana_system_interface::instruction as system_instruction;
-use magicblock_magic_program_api::pda::CALLBACK_SIGNER;
 
 /// Discriminator prefix for the transfer callback instruction.
 /// Checked before borsh parsing since the callback carries bincode-encoded
@@ -101,11 +102,15 @@ pub fn process_transfer_callback(
 
     if !callback_signer.is_signer {
         msg!("Missing callback signer");
-        return Err(ProgramError::MissingRequiredSignature)
+        return Err(ProgramError::MissingRequiredSignature);
     }
 
     if callback_signer.key != &CALLBACK_SIGNER {
-        msg!("Expected callback signer authority: {}, got: {}", CALLBACK_SIGNER, callback_signer.key);
+        msg!(
+            "Expected callback signer authority: {}, got: {}",
+            CALLBACK_SIGNER,
+            callback_signer.key
+        );
         return Err(ProgramError::IncorrectAuthority);
     }
 

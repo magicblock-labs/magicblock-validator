@@ -218,6 +218,7 @@ pub(crate) fn try_get_fee_vault<'a, 'ix_data>(
 pub(crate) fn validate_callback_accounts(
     invoke_context: &&mut InvokeContext,
     accounts_meta: &[solana_instruction::AccountMeta],
+    err_prefix: &str,
 ) -> Result<(), InstructionError> {
     for solana_instruction::AccountMeta {
         pubkey,
@@ -228,7 +229,8 @@ pub(crate) fn validate_callback_accounts(
         if *is_writable && pubkey == &CALLBACK_SIGNER {
             ic_msg!(
                 invoke_context,
-                "ExecuteCallback ERR: the callback signer PDA cannot be a writable account in callbacks",
+                "{}: the callback signer PDA cannot be a writable account in callbacks",
+                err_prefix,
             );
             return Err(InstructionError::Immutable);
         }
@@ -236,7 +238,8 @@ pub(crate) fn validate_callback_accounts(
         if *is_signer && pubkey != &CALLBACK_SIGNER {
             ic_msg!(
                 invoke_context,
-                "ExecuteCallback ERR: only the callback signer PDA can be a signer in callbacks (invalid signer: '{}')",
+                "{}: only the callback signer PDA can be a signer in callbacks (invalid signer: '{}')",
+                err_prefix,
                 pubkey,
             );
             return Err(InstructionError::MissingRequiredSignature);
@@ -245,7 +248,8 @@ pub(crate) fn validate_callback_accounts(
         if pubkey == &validator_authority_id() {
             ic_msg!(
                 invoke_context,
-                "ExecuteCallback ERR: the validator authority cannot be used in callbacks",
+                "{}: the validator authority cannot be used in callbacks",
+                err_prefix,
             );
             return Err(InstructionError::IncorrectAuthority);
         }

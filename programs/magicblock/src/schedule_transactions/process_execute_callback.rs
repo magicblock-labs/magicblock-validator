@@ -23,7 +23,11 @@ pub(crate) fn process_execute_callback(
     ic_msg!(invoke_context, "ExecuteCallback ERR: processing");
     validate(signers, invoke_context)?;
     ic_msg!(invoke_context, "ExecuteCallback ERR: validated");
-    validate_callback_accounts(&invoke_context, &instruction.accounts)?;
+    validate_callback_accounts(
+        &invoke_context,
+        &instruction.accounts,
+        "ExecuteCallback ERR",
+    )?;
 
     invoke_context.native_invoke(instruction, &[CALLBACK_SIGNER])
 }

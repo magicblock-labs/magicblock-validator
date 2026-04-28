@@ -183,7 +183,11 @@ pub(crate) fn process_add_action_callback(
             },
         )
         .collect();
-    validate_callback_accounts(&invoke_context, &accounts_meta)?;
+    validate_callback_accounts(
+        &invoke_context,
+        &accounts_meta,
+        "AddActionCallback ERR",
+    )?;
 
     action.callback = Some(BaseActionCallback {
         destination_program: args.destination_program,

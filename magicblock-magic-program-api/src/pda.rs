@@ -9,7 +9,7 @@ const CRANK_SIGNER_PDA: ([u8; 32], u8) =
 pub const CRANK_SIGNER: Pubkey = Pubkey::new_from_array(CRANK_SIGNER_PDA.0);
 pub const CRANK_SIGNER_BUMP: u8 = CRANK_SIGNER_PDA.1;
 
-/// Callback signer PRA info
+/// Callback signer PDA info
 pub const CALLBACK_SEED: &[u8] = b"callback-executor";
 const CALLBACK_SIGNER_PDA: ([u8; 32], u8) =
     const_crypto::ed25519::derive_program_address(

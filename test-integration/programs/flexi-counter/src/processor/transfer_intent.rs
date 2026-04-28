@@ -6,12 +6,13 @@ use ephemeral_rollups_sdk::{
     },
     ActionArgs, ShortAccountMeta,
 };
+use magicblock_magic_program_api::pda::CALLBACK_SIGNER;
 use solana_program::{
     account_info::AccountInfo, entrypoint::ProgramResult, msg, program::invoke,
     program_error::ProgramError,
 };
 use solana_system_interface::instruction as system_instruction;
-use magicblock_magic_program_api::pda::CALLBACK_SIGNER;
+
 use crate::{
     instruction::FlexiCounterInstruction,
     processor::{
