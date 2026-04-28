@@ -25,7 +25,7 @@ pub use process_scheduled_commit_sent::{
     process_scheduled_commit_sent, register_scheduled_commit_sent, SentCommit,
 };
 use solana_clock::Clock;
-use solana_instruction::error::InstructionError;
+use solana_instruction::{error::InstructionError, AccountMeta};
 use solana_log_collector::ic_msg;
 use solana_program_runtime::invoke_context::InvokeContext;
 use solana_pubkey::Pubkey;
@@ -217,10 +217,10 @@ pub(crate) fn try_get_fee_vault<'a, 'ix_data>(
 /// Assert they don't use the validator either
 pub(crate) fn validate_callback_accounts(
     invoke_context: &&mut InvokeContext,
-    accounts_meta: &[solana_instruction::AccountMeta],
+    accounts_meta: &[AccountMeta],
     err_prefix: &str,
 ) -> Result<(), InstructionError> {
-    for solana_instruction::AccountMeta {
+    for AccountMeta {
         pubkey,
         is_signer,
         is_writable,

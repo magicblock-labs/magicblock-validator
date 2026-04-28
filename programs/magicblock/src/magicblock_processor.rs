@@ -2,7 +2,6 @@ use magicblock_magic_program_api::instruction::{
     CallbackInstruction, MagicBlockInstruction,
 };
 use solana_instruction::error::InstructionError;
-use solana_log_collector::ic_msg;
 use solana_program_runtime::{
     declare_process_instruction, invoke_context::InvokeContext,
 };

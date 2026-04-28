@@ -88,3 +88,138 @@ fn validate(
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use magicblock_magic_program_api::{
+        instruction::CallbackInstruction,
+        pda::CALLBACK_SIGNER,
+        CALLBACK_PROGRAM_ID,
+    };
+    use serial_test::serial;
+    use solana_account::AccountSharedData;
+    use solana_instruction::{error::InstructionError, AccountMeta, Instruction};
+    use solana_program_runtime::invoke_context::mock_process_instruction;
+    use solana_pubkey::Pubkey;
+
+    use crate::{
+        magicblock_processor::CallbackEntrypoint,
+        validator::{generate_validator_authority_if_needed, validator_authority_id},
+    };
+
+    fn make_data(inner_accounts: Vec<AccountMeta>) -> Vec<u8> {
+        bincode::serialize(&CallbackInstruction::ExecuteCallback {
+            instruction: Instruction {
+                program_id: Pubkey::new_unique(),
+                accounts: inner_accounts,
+                data: vec![],
+            },
+        })
+        .unwrap()
+    }
+
+    fn setup_validator() -> Pubkey {
+        generate_validator_authority_if_needed();
+        validator_authority_id()
+    }
+
+    fn outer_accounts(
+        validator: Pubkey,
+        callback_signer: Pubkey,
+    ) -> (Vec<(Pubkey, AccountSharedData)>, Vec<AccountMeta>) {
+        (
+            vec![
+                (validator, AccountSharedData::default()),
+                (callback_signer, AccountSharedData::default()),
+            ],
+            vec![
+                AccountMeta::new(validator, true),
+                AccountMeta::new_readonly(callback_signer, false),
+            ],
+        )
+    }
+
+    fn run(
+        data: &[u8],
+        transaction_accounts: Vec<(Pubkey, AccountSharedData)>,
+        instruction_accounts: Vec<AccountMeta>,
+        expected: Result<(), InstructionError>,
+    ) {
+        mock_process_instruction(
+            &CALLBACK_PROGRAM_ID,
+            None,
+            data,
+            transaction_accounts,
+            instruction_accounts,
+            expected,
+            CallbackEntrypoint::vm,
+            |_| {},
+            |_| {},
+        );
+    }
+    
+    #[test]
+    #[serial]
+    fn test_validate_rejects_validator_not_signer() {
+        let validator = setup_validator();
+        let data = make_data(vec![]);
+        let (tx, _) = outer_accounts(validator, CALLBACK_SIGNER);
+        run(
+            &data,
+            tx,
+            vec![
+                AccountMeta::new(validator, false), // not a signer
+                AccountMeta::new_readonly(CALLBACK_SIGNER, false),
+            ],
+            Err(InstructionError::MissingRequiredSignature),
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn test_validate_rejects_wrong_callback_signer() {
+        let validator = setup_validator();
+        let wrong = Pubkey::new_unique();
+        let data = make_data(vec![]);
+        let (tx, _) = outer_accounts(validator, wrong);
+        run(
+            &data,
+            tx,
+            vec![
+                AccountMeta::new(validator, true),
+                AccountMeta::new_readonly(wrong, false), // wrong pubkey at CALLBACK_SIGNER_IDX
+            ],
+            Err(InstructionError::InvalidSeeds),
+        );
+    }
+
+    // validate_callback_accounts() failures
+
+    #[test]
+    #[serial]
+    fn test_callback_accounts_rejects_unauthorized_signer() {
+        let validator = setup_validator();
+        let (tx, ix) = outer_accounts(validator, CALLBACK_SIGNER);
+        let rogue = Pubkey::new_unique();
+        let data = make_data(vec![AccountMeta::new_readonly(rogue, true)]);
+        run(&data, tx, ix, Err(InstructionError::MissingRequiredSignature));
+    }
+
+    #[test]
+    #[serial]
+    fn test_callback_accounts_rejects_writable_callback_signer() {
+        let validator = setup_validator();
+        let (tx, ix) = outer_accounts(validator, CALLBACK_SIGNER);
+        let data = make_data(vec![AccountMeta::new(CALLBACK_SIGNER, false)]);
+        run(&data, tx, ix, Err(InstructionError::Immutable));
+    }
+
+    #[test]
+    #[serial]
+    fn test_callback_accounts_rejects_validator_authority() {
+        let validator = setup_validator();
+        let (tx, ix) = outer_accounts(validator, CALLBACK_SIGNER);
+        let data = make_data(vec![AccountMeta::new_readonly(validator, false)]);
+        run(&data, tx, ix, Err(InstructionError::IncorrectAuthority));
+    }
+}
