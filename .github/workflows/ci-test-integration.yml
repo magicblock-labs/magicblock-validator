@@ -86,7 +86,7 @@ jobs:
       - name: Install zk-compression CLI
         if: matrix.batch_tests == 'table_mania' || matrix.batch_tests == 'committor' || matrix.batch_tests == 'chainlink'
         run: |
-          npm i -g @lightprotocol/zk-compression-cli@0.28.3
+          npm i -g @lightprotocol/zk-compression-cli@0.28.4
         shell: bash
 
       - name: Run integration tests - ${{ matrix.batch_tests }}

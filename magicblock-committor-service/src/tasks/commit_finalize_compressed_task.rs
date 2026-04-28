@@ -2,15 +2,12 @@ use borsh::BorshDeserialize;
 use compressed_delegation_api::{
     CommitAndFinalizeArgs, CompressedDelegationRecord,
 };
-use magicblock_committor_program::Chunks;
 use magicblock_core::intent::CommittedAccount;
 use solana_instruction::Instruction;
 use solana_pubkey::Pubkey;
 
 use crate::{
-    consts::MAX_WRITE_CHUNK_SIZE,
-    intent_executor::task_info_fetcher::CompressedData,
-    tasks::{commit_task::CommitBufferStage, BaseTaskImpl, PreparationTask},
+    intent_executor::task_info_fetcher::CompressedData, tasks::BaseTaskImpl,
 };
 
 /// A task that commits a delegated account's state to the base layer and finalizes it in the same
@@ -63,22 +60,6 @@ impl CommitFinalizeCompressedTask {
         }
         .instruction()
         .expect("The serializing the args should not fail")
-    }
-
-    pub fn state_preparation_stage(&self) -> CommitBufferStage {
-        let data = self.committed_account.account.data.clone();
-        self.preparation_stage(data)
-    }
-
-    fn preparation_stage(&self, buffer_data: Vec<u8>) -> CommitBufferStage {
-        let chunks =
-            Chunks::from_data_length(buffer_data.len(), MAX_WRITE_CHUNK_SIZE);
-        CommitBufferStage::Preparation(PreparationTask {
-            commit_id: self.commit_id,
-            pubkey: self.committed_account.pubkey,
-            buffer_data,
-            chunks,
-        })
     }
 }
 

@@ -26,6 +26,7 @@ use program_flexi_counter::{
 use solana_pubkey::Pubkey;
 use solana_sdk::{instruction::Instruction, rent::Rent, signature::Keypair};
 use test_kit::Signer;
+use tokio::time::{sleep, Duration};
 
 pub fn init_validator_fees_vault_ix(validator_auth: Pubkey) -> Instruction {
     dlp_api::instruction_builder::init_validator_fees_vault(
@@ -164,12 +165,30 @@ pub async fn delegate_compressed_ixs(
     let (pda, _bump) = FlexiCounter::pda(&payer);
     let record_address = derive_cda_from_pda(&pda);
 
-    let compressed_account = photon_indexer
-        .get_compressed_account(record_address.to_bytes(), None)
-        .await
-        .unwrap()
-        .value
-        .unwrap();
+    let compressed_account = {
+        const MAX_ATTEMPTS: u32 = 150;
+        let mut compressed_account = None;
+        for attempt in 0..MAX_ATTEMPTS {
+            if let Ok(resp) = photon_indexer
+                .get_compressed_account(record_address.to_bytes(), None)
+                .await
+            {
+                if let Some(acc) = resp.value {
+                    compressed_account = Some(acc);
+                    break;
+                }
+            }
+            if attempt + 1 == MAX_ATTEMPTS {
+                panic!(
+                    "Photon did not return compressed account for {:?} after {} ms",
+                    record_address,
+                    MAX_ATTEMPTS * 200
+                );
+            }
+            sleep(Duration::from_millis(200)).await;
+        }
+        compressed_account.expect("Photon indexing loop exited without account")
+    };
 
     let system_account_meta_config = SystemAccountMetaConfig::new(
         compressed_delegation_client::ID.to_bytes().into(),

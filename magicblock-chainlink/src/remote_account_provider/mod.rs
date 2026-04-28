@@ -69,7 +69,8 @@ use magicblock_metrics::metrics::{
     AccountFetchOrigin, ProgramFetchResult,
 };
 use remote_account::{
-    is_synthetic_mark_empty_fresh, should_prefer_rpc_over_photon_compressed_shell,
+    is_synthetic_mark_empty_fresh,
+    should_prefer_rpc_over_photon_compressed_shell,
 };
 pub use remote_account::{ResolvedAccount, ResolvedAccountSharedData};
 

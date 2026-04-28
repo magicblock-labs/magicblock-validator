@@ -364,7 +364,14 @@ impl TaskStrategist {
                         &commit_finalize_task.delivery,
                     ),
                 ),
-                _ => continue,
+                BaseTaskImpl::CommitFinalizeCompressed(task) => (
+                    task.commit_id,
+                    task.committed_account.pubkey,
+                    CommitStrategy::StateArgs,
+                ),
+                BaseTaskImpl::Undelegate(_)
+                | BaseTaskImpl::Finalize(_)
+                | BaseTaskImpl::BaseAction(_) => continue,
             };
             if let Err(err) = persistor.set_commit_strategy(
                 commit_id,

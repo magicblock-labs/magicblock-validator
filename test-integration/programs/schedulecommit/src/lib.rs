@@ -9,11 +9,15 @@ use ephemeral_rollups_sdk::{
     ephem::{
         commit_accounts, commit_and_undelegate_accounts,
         commit_finalize_accounts, commit_finalize_and_undelegate_accounts,
-        CallHandler, FoldableIntentBuilder, MagicIntentBundleBuilder,
     },
-    ActionArgs, ShortAccountMeta,
 };
-use magicblock_magic_program_api::instruction::MagicBlockInstruction;
+use magicblock_magic_program_api::{
+    args::{
+        ActionArgs, BaseActionArgs, CommitTypeArgs, MagicIntentBundleArgs,
+        ShortAccountMeta,
+    },
+    instruction::MagicBlockInstruction,
+};
 use solana_program::{
     account_info::{next_account_info, AccountInfo},
     declare_id,
@@ -207,6 +211,8 @@ pub enum ScheduleCommitType {
     CommitAndUndelegate,
     CommitFinalize,
     CommitFinalizeAndUndelegate,
+    CommitFinalizeCompressed,
+    CommitFinalizeCompressedAndUndelegate,
 }
 
 impl ScheduleCommitType {
@@ -248,6 +254,58 @@ impl ScheduleCommitType {
                     magic_context,
                     magic_program,
                 )
+            }
+            ScheduleCommitType::CommitFinalizeCompressed => {
+                let ix = Instruction::new_with_bincode(
+                    magicblock_magic_program_api::ID,
+                    &magicblock_magic_program_api::instruction::MagicBlockInstruction::ScheduleCommitCompressed,
+                    [vec![
+                        AccountMeta {
+                            pubkey: *payer.key,
+                            is_signer: true,
+                            is_writable: true,
+                        },
+                        AccountMeta {
+                            pubkey: *magic_context.key,
+                            is_signer: false,
+                            is_writable: true,
+                        },
+                    ], accounts.iter().map(|account| AccountMeta {
+                        pubkey: *account.key,
+                        is_signer: account.is_signer,
+                        is_writable: account.is_writable,
+                    }).collect()].concat(),
+                );
+                let mut all_accounts =
+                    vec![payer.clone(), magic_context.clone()];
+                all_accounts.extend(accounts.into_iter().cloned());
+                invoke(&ix, &all_accounts)
+            }
+            ScheduleCommitType::CommitFinalizeCompressedAndUndelegate => {
+                let ix = Instruction::new_with_bincode(
+                    magicblock_magic_program_api::ID,
+                    &magicblock_magic_program_api::instruction::MagicBlockInstruction::ScheduleCommitAndUndelegateCompressed,
+                    [vec![
+                        AccountMeta {
+                            pubkey: *payer.key,
+                            is_signer: true,
+                            is_writable: true,
+                        },
+                        AccountMeta {
+                            pubkey: *magic_context.key,
+                            is_signer: false,
+                            is_writable: true,
+                        },
+                    ], accounts.iter().map(|account| AccountMeta {
+                        pubkey: *account.key,
+                        is_signer: account.is_signer,
+                        is_writable: account.is_writable,
+                    }).collect()].concat(),
+                );
+                let mut all_accounts =
+                    vec![payer.clone(), magic_context.clone()];
+                all_accounts.extend(accounts.into_iter().cloned());
+                invoke(&ix, &all_accounts)
             }
         }
     }
@@ -819,16 +877,16 @@ pub fn process_schedulecommit_with_vault_and_order_book_cpi(
         return Err(ProgramError::InvalidArgument);
     }
 
-    let mut builder = MagicIntentBundleBuilder::new(
-        payer.clone(),
-        magic_context.clone(),
-        magic_program.clone(),
-    )
-    .magic_fee_vault(magic_fee_vault.clone())
-    .commit(&committees);
+    let committed_accounts = (0..committees.len())
+        .map(|idx| {
+            // Magic program CPI account layout:
+            // payer, magic_context, magic_fee_vault, then committed accounts.
+            u8::try_from(idx + 3)
+        })
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|_| ProgramError::InvalidInstructionData)?;
 
-    if args.with_actions {
-        // Build the UpdateOrderBook instruction data with one hardcoded bid
+    let commit = if args.with_actions {
         let update_ix_data =
             to_vec(&ScheduleCommitInstruction::UpdateOrderBook(BookUpdate {
                 bids: vec![OrderLevel {
@@ -839,24 +897,63 @@ pub fn process_schedulecommit_with_vault_and_order_book_cpi(
             }))
             .map_err(|_| ProgramError::InvalidInstructionData)?;
 
-        // Post-commit action: call UpdateOrderBook on the order book account
-        let call_handler = CallHandler {
-            args: ActionArgs {
-                data: update_ix_data,
-                escrow_index: 1, // payer/escrow_authority inserted at index 1
-            },
-            compute_units: 50_000,
-            escrow_authority: payer.clone(),
-            destination_program: id(),
-            accounts: vec![ShortAccountMeta {
-                pubkey: *order_book.key,
-                is_writable: true,
+        CommitTypeArgs::WithBaseActions {
+            committed_accounts,
+            base_actions: vec![BaseActionArgs {
+                args: ActionArgs {
+                    data: update_ix_data,
+                    escrow_index: 1,
+                },
+                compute_units: 50_000,
+                escrow_authority: 0,
+                destination_program: id(),
+                accounts: vec![ShortAccountMeta {
+                    pubkey: *order_book.key,
+                    is_writable: true,
+                }],
             }],
-        };
-        builder = builder.add_post_commit_actions([call_handler]);
-    }
+        }
+    } else {
+        CommitTypeArgs::Standalone(committed_accounts)
+    };
 
-    builder.build_and_invoke()
+    let ix = Instruction::new_with_bincode(
+        *magic_program.key,
+        &MagicBlockInstruction::ScheduleIntentBundle(MagicIntentBundleArgs {
+            commit: Some(commit),
+            commit_and_undelegate: None,
+            commit_finalize: None,
+            commit_finalize_and_undelegate: None,
+            commit_finalize_compressed: None,
+            commit_finalize_compressed_and_undelegate: None,
+            standalone_actions: vec![],
+        }),
+        [
+            vec![
+                AccountMeta::new(*payer.key, true),
+                AccountMeta::new(*magic_context.key, false),
+                AccountMeta::new(*magic_fee_vault.key, false),
+            ],
+            committees
+                .iter()
+                .map(|account| AccountMeta {
+                    pubkey: *account.key,
+                    is_signer: account.is_signer,
+                    is_writable: account.is_writable,
+                })
+                .collect(),
+        ]
+        .concat(),
+    );
+
+    let mut cpi_accounts = vec![
+        payer.clone(),
+        magic_context.clone(),
+        magic_fee_vault.clone(),
+    ];
+    cpi_accounts.extend(committees);
+
+    invoke(&ix, &cpi_accounts)
 }
 
 fn process_increase_count(accounts: &[AccountInfo]) -> ProgramResult {

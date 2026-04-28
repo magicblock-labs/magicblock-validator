@@ -8,6 +8,7 @@ use crate::args::{
     ScheduleTaskArgs,
 };
 
+#[allow(clippy::large_enum_variant)]
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
 pub enum MagicBlockInstruction {
     /// Modify one or more accounts

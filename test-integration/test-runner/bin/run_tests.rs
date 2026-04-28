@@ -18,6 +18,7 @@ use teepee::Teepee;
 use test_runner::{
     cleanup::{
         cleanup_devnet_only, cleanup_light_validator, cleanup_validators,
+        cleanup_validators_with_light,
     },
     env_config::TestConfigViaEnvVars,
     signal::wait_for_ctrlc,
@@ -337,7 +338,7 @@ fn run_schedule_commit_tests(
 
     let start_devnet_validator = || match start_validator(
         "schedulecommit-conf.devnet.toml",
-        ValidatorCluster::Chain(None),
+        ValidatorCluster::Light,
         &loaded_chain_accounts,
     ) {
         Some(validator) => validator,
@@ -380,7 +381,7 @@ fn run_schedule_commit_tests(
                 Ok(output) => output,
                 Err(err) => {
                     eprintln!("Failed to run security: {:?}", err);
-                    cleanup_validators(
+                    cleanup_validators_with_light(
                         &mut ephem_validator,
                         &mut devnet_validator,
                     );
@@ -396,7 +397,7 @@ fn run_schedule_commit_tests(
                 Ok(output) => output,
                 Err(err) => {
                     eprintln!("Failed to run scenarios: {:?}", err);
-                    cleanup_validators(
+                    cleanup_validators_with_light(
                         &mut ephem_validator,
                         &mut devnet_validator,
                     );
@@ -404,7 +405,10 @@ fn run_schedule_commit_tests(
                 }
             };
 
-        cleanup_validators(&mut ephem_validator, &mut devnet_validator);
+        cleanup_validators_with_light(
+            &mut ephem_validator,
+            &mut devnet_validator,
+        );
         Ok((test_security_output, test_scenarios_output))
     } else {
         let devnet_validator =
@@ -413,9 +417,9 @@ fn run_schedule_commit_tests(
             config.setup_ephem(TEST_NAME).then(start_ephem_validator);
         eprintln!("Setup validator(s)");
         wait_for_ctrlc(
-            devnet_validator,
-            ephem_validator,
             None,
+            ephem_validator,
+            devnet_validator,
             success_output(),
         )?;
         Ok((success_output(), success_output()))

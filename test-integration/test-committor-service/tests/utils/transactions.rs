@@ -1,5 +1,7 @@
 use std::sync::Arc;
 
+use borsh::BorshDeserialize;
+use compressed_delegation_client::CompressedDelegationRecord;
 use light_client::indexer::{photon_indexer::PhotonIndexer, Indexer};
 use solana_account::Account;
 use solana_commitment_config::CommitmentConfig;
@@ -90,7 +92,7 @@ pub async fn fetch_tx_logs(
     //              line: 0, column: 0))
     //      }
     //      Therefore we retry a few times.
-    const MAX_RETRIES: usize = 5;
+    const MAX_RETRIES: usize = 10;
     let mut retries = MAX_RETRIES;
     let tx = loop {
         match rpc_client
@@ -110,7 +112,7 @@ pub async fn fetch_tx_logs(
                 retries -= 1;
                 if retries == 0 {
                     panic!(
-                        "Failed to get transaction after {} retries",
+                        "Failed to get transaction {signature} after {} retries",
                         MAX_RETRIES
                     );
                 }
@@ -195,6 +197,9 @@ pub async fn tx_logs_contain(
                 log.contains(needle)
                     || log.contains("CommitDiff")
                     || log.contains("CommitFinalize")
+                    || log.contains("CommitAndFinalize")
+            } else if needle == "CommitFinalize" {
+                log.contains(needle) || log.contains("CommitAndFinalize")
             } else {
                 log.contains(needle)
             }
@@ -377,6 +382,7 @@ pub async fn init_and_delegate_compressed_record_on_chain(
         address,
     } = delegate_compressed_ixs(counter_auth.pubkey(), photon_indexer.clone())
         .await;
+    let latest_block_hash = rpc_client.get_latest_blockhash().await.unwrap();
     let tx = Transaction::new_signed_with_payer(
         &[
             ComputeBudgetInstruction::set_compute_unit_limit(250_000),
@@ -404,13 +410,33 @@ pub async fn init_and_delegate_compressed_record_on_chain(
         })
         .expect("Failed to init compressed record");
 
-    let compressed_account = photon_indexer
-        .get_compressed_account(address, None)
-        .await
-        .unwrap()
-        .value
-        .unwrap();
-    debug!("Compressed record: {:?}", compressed_account);
+    // Retry until we get a valid delegation record
+    const MAX_RETRIES: usize = 10;
+    let mut retries = MAX_RETRIES;
+    let compressed_delegation_record = loop {
+        let compressed_account = photon_indexer
+            .get_compressed_account(address, None)
+            .await
+            .unwrap()
+            .value
+            .unwrap();
+        if let Some(compressed_delegation_record) =
+            compressed_account.data.and_then(|data| {
+                CompressedDelegationRecord::try_from_slice(&data.data).ok()
+            })
+        {
+            break compressed_delegation_record;
+        }
+        retries -= 1;
+        if retries == 0 {
+            panic!(
+                "Failed to get compressed account after {} retries",
+                MAX_RETRIES
+            );
+        }
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+    };
+    debug!("Compressed record: {:?}", compressed_delegation_record);
 
     (pda, address, pda_acc)
 }

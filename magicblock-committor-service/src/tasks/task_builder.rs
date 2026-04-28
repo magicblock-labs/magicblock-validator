@@ -14,10 +14,12 @@ use tracing::error;
 
 use crate::{
     intent_executor::task_info_fetcher::{
-        TaskInfoFetcher, TaskInfoFetcherError, TaskInfoFetcherResult,
+        CompressedData, TaskInfoFetcher, TaskInfoFetcherError,
+        TaskInfoFetcherResult,
     },
     persist::IntentPersister,
     tasks::{
+        commit_finalize_compressed_task::CommitFinalizeCompressedTask,
         commit_task::{CommitDelivery, CommitTask},
         BaseActionTask, BaseActionTaskV1, BaseActionTaskV2, BaseTaskImpl,
         CommitFinalizeTask, FinalizeTask, UndelegateTask,
@@ -150,6 +152,30 @@ impl TaskBuilderImpl {
             .await
     }
 
+    async fn fetch_compressed_data<C: TaskInfoFetcher>(
+        task_info_fetcher: &Arc<C>,
+        accounts: &[(bool, bool, bool, CommittedAccount)],
+        min_context_slot: u64,
+    ) -> TaskInfoFetcherResult<HashMap<Pubkey, CompressedData>> {
+        let pubkeys = accounts
+            .iter()
+            .filter(|(_, _, compressed, _)| *compressed)
+            .map(|(_, _, _, account)| account.pubkey)
+            .collect::<Vec<_>>();
+        Ok(pubkeys
+            .iter()
+            .zip(
+                task_info_fetcher
+                    .get_compressed_data_for_accounts(
+                        &pubkeys,
+                        Some(min_context_slot),
+                    )
+                    .await?,
+            )
+            .filter_map(|(pk, data)| data.map(|data| (*pk, data)))
+            .collect())
+    }
+
     pub fn create_commit_finalize_task(
         commit_id: u64,
         allow_undelegation: bool,
@@ -180,13 +206,14 @@ impl TaskBuilderImpl {
     pub fn create_commit_finalize_compressed_task(
         commit_id: u64,
         allow_undelegation: bool,
-        account: CommittedAccount,
-    ) -> CommitFinalizeTask {
-        CommitFinalizeTask {
+        committed_account: CommittedAccount,
+        compressed_data: CompressedData,
+    ) -> CommitFinalizeCompressedTask {
+        CommitFinalizeCompressedTask {
             commit_id,
             allow_undelegation,
-            committed_account: account,
-            delivery: CommitDelivery::StateInArgs,
+            committed_account,
+            compressed_data,
         }
     }
 }
@@ -216,6 +243,9 @@ impl TasksBuilder for TaskBuilderImpl {
         let commit_finalize_compressed_accounts = intent_bundle
             .get_commit_finalize_compressed_intent_accounts()
             .cloned();
+        let commit_finalize_compressed_and_undelegate_accounts = intent_bundle
+            .get_commit_finalize_compressed_and_undelegate_intent_accounts()
+            .cloned();
 
         let flagged_accounts: Vec<_> = [
             (false, false, false, committed_accounts),
@@ -223,6 +253,12 @@ impl TasksBuilder for TaskBuilderImpl {
             (false, true, false, commit_finalize_accounts),
             (true, true, false, commit_finalize_and_undelegate_accounts),
             (false, true, true, commit_finalize_compressed_accounts),
+            (
+                true,
+                true,
+                true,
+                commit_finalize_compressed_and_undelegate_accounts,
+            ),
         ]
         .into_iter()
         .flat_map(|(allow_undelegation, finalize, compressed, accounts)| {
@@ -238,7 +274,7 @@ impl TasksBuilder for TaskBuilderImpl {
             .map(|(_, _, _, account)| account.remote_slot)
             .max()
             .unwrap_or(0);
-        let (commit_ids, base_accounts) = tokio::join!(
+        let (commit_ids, base_accounts, compressed_data) = tokio::join!(
             Self::fetch_commit_nonces(
                 task_info_fetcher,
                 &flagged_accounts,
@@ -248,12 +284,21 @@ impl TasksBuilder for TaskBuilderImpl {
                 task_info_fetcher,
                 &flagged_accounts,
                 min_context_slot
+            ),
+            Self::fetch_compressed_data(
+                task_info_fetcher,
+                &flagged_accounts,
+                min_context_slot
             )
         );
         let commit_ids =
             commit_ids.map_err(TaskBuilderError::CommitTasksBuildError)?;
         let mut base_accounts = base_accounts.unwrap_or_else(|err| {
-            tracing::warn!(intent_id = intent_bundle.id, error = ?err, "Failed to fetch base accounts, falling back to CommitState");
+                tracing::warn!(intent_id = intent_bundle.id, error = ?err, "Failed to fetch base accounts, falling back to CommitState");
+                Default::default()
+            });
+        let compressed_data = compressed_data.unwrap_or_else(|err| {
+            tracing::warn!(intent_id = intent_bundle.id, error = ?err, "Failed to fetch compressed data, falling back to empty compressed data");
             Default::default()
         });
 
@@ -267,7 +312,7 @@ impl TasksBuilder for TaskBuilderImpl {
             });
 
         // Create commit tasks
-        let commit_tasks_iter = flagged_accounts.into_iter().map(
+        let commit_tasks_iter = flagged_accounts.into_iter().filter_map(
             |(allow_undelegation, finalize, compressed, account)| {
                 let commit_id = commit_ids
                     .get(&account.pubkey)
@@ -282,11 +327,15 @@ impl TasksBuilder for TaskBuilderImpl {
                 let base_account = base_accounts.remove(&account.pubkey);
 
                 if compressed {
-                    Self::create_commit_finalize_compressed_task(commit_id, allow_undelegation, account.clone()).into()
+                    let Some(compressed_data) = compressed_data.get(&account.pubkey).cloned() else {
+                        error!(pubkey = %account.pubkey, "Compressed data absent for pubkey");
+                        return None;
+                    };
+                    Some(Self::create_commit_finalize_compressed_task(commit_id, allow_undelegation, account.clone(), compressed_data).into())
                 } else if finalize {
-                    Self::create_commit_finalize_task(commit_id, allow_undelegation, account.clone(), base_account).into()
+                    Some(Self::create_commit_finalize_task(commit_id, allow_undelegation, account.clone(), base_account).into())
                 } else {
-                    Self::create_commit_task(commit_id, allow_undelegation, account.clone(), base_account).into()
+                    Some(Self::create_commit_task(commit_id, allow_undelegation, account.clone(), base_account).into())
                 }
             },
         );

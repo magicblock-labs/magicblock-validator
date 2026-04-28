@@ -33,9 +33,8 @@ use magicblock_processor::{
 use solana_account::AccountSharedData;
 pub use solana_instruction::*;
 use solana_keypair::Keypair;
-use solana_program::{
-    hash::Hasher, native_token::LAMPORTS_PER_SOL, pubkey::Pubkey,
-};
+use solana_program::{hash::Hasher, native_token::LAMPORTS_PER_SOL};
+use solana_pubkey::Pubkey;
 use solana_signature::Signature;
 pub use solana_signer::Signer;
 use solana_transaction::Transaction;

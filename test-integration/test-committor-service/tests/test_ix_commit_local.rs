@@ -38,6 +38,7 @@ use crate::utils::{
     transactions::{
         fund_validator_auth_and_ensure_validator_fees_vault,
         init_and_delegate_account_on_chain,
+        init_and_delegate_compressed_record_on_chain,
     },
 };
 
@@ -242,9 +243,23 @@ async fn commit_single_account(
     let service = CommittorServiceExt::new(Arc::new(service));
 
     let counter_auth = Keypair::new();
-    let (pubkey, mut account) =
-        init_and_delegate_account_on_chain(&counter_auth, bytes as u64, None)
-            .await;
+    let (pubkey, mut account) = match commit_type {
+        ScheduleCommitType::CommitFinalizeCompressed
+        | ScheduleCommitType::CommitFinalizeCompressedAndUndelegate => {
+            let (pubkey, _address, account) =
+                init_and_delegate_compressed_record_on_chain(&counter_auth)
+                    .await;
+            (pubkey, account)
+        }
+        _ => {
+            init_and_delegate_account_on_chain(
+                &counter_auth,
+                bytes as u64,
+                None,
+            )
+            .await
+        }
+    };
 
     let counter = FlexiCounter {
         label: "Counter".to_string(),
@@ -281,6 +296,19 @@ async fn commit_single_account(
                 commit_action: CommitType::Standalone(vec![account]),
                 undelegate_action: UndelegateType::Standalone,
             })
+        }
+        ScheduleCommitType::CommitFinalizeCompressed => {
+            MagicBaseIntent::CommitFinalizeCompressed(CommitType::Standalone(
+                vec![account],
+            ))
+        }
+        ScheduleCommitType::CommitFinalizeCompressedAndUndelegate => {
+            MagicBaseIntent::CommitFinalizeAndUndelegateCompressed(
+                CommitAndUndelegate {
+                    commit_action: CommitType::Standalone(vec![account]),
+                    undelegate_action: UndelegateType::Standalone,
+                },
+            )
         }
     };
 
@@ -361,6 +389,19 @@ async fn commit_book_order_account(
                 commit_action: CommitType::Standalone(vec![account]),
                 undelegate_action: UndelegateType::Standalone,
             })
+        }
+        ScheduleCommitType::CommitFinalizeCompressed => {
+            MagicBaseIntent::CommitFinalizeCompressed(CommitType::Standalone(
+                vec![account],
+            ))
+        }
+        ScheduleCommitType::CommitFinalizeCompressedAndUndelegate => {
+            MagicBaseIntent::CommitFinalizeAndUndelegateCompressed(
+                CommitAndUndelegate {
+                    commit_action: CommitType::Standalone(vec![account]),
+                    undelegate_action: UndelegateType::Standalone,
+                },
+            )
         }
     };
 
@@ -640,6 +681,7 @@ async fn test_ix_execute_intent_bundle_commit_and_cau_simultaneously_union_of_ac
         &[],
         &[1024, 2048],
         expect_strategies(&[(CommitStrategy::DiffBufferWithLookupTable, 4)]),
+        false,
     )
     .await;
 }
@@ -651,6 +693,7 @@ async fn test_ix_execute_intent_bundle_commit_three_accounts_cau_one_account() {
         &[],
         &[512],
         expect_strategies(&[(CommitStrategy::DiffBufferWithLookupTable, 4)]),
+        false,
     )
     .await;
 }
@@ -662,6 +705,7 @@ async fn test_ix_execute_intent_bundle_mixed_fits_in_args() {
         &[],
         &[20],
         expect_strategies(&[(CommitStrategy::StateArgs, 4)]),
+        false,
     )
     .await;
 }
@@ -673,6 +717,7 @@ async fn test_ix_execute_intent_bundle_commit_finalize_only() {
         &[10, 20],
         &[],
         expect_strategies(&[(CommitStrategy::StateArgs, 2)]),
+        false,
     )
     .await;
 }
@@ -684,6 +729,102 @@ async fn test_ix_execute_intent_bundle_commit_and_commit_finalize_mixed() {
         &[1024, 2048],
         &[],
         expect_strategies(&[(CommitStrategy::DiffArgs, 4)]),
+        false,
+    )
+    .await;
+}
+
+// -----------------
+// Compressed Account Commits
+// -----------------
+
+#[tokio::test]
+async fn test_ix_commit_single_compressed_account_100_bytes() {
+    commit_n_accounts_x_bytes::<1, 100>(
+        1,
+        expect_strategies(&[(CommitStrategy::StateArgs, 1)]),
+        ScheduleCommitType::CommitFinalizeCompressed,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn test_ix_commit_single_compressed_account_100_bytes_and_undelegate() {
+    commit_n_accounts_x_bytes::<1, 100>(
+        1,
+        expect_strategies(&[(CommitStrategy::StateArgs, 1)]),
+        ScheduleCommitType::CommitFinalizeCompressedAndUndelegate,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn test_ix_commit_single_compressed_account_500_bytes() {
+    commit_n_accounts_x_bytes::<1, 500>(
+        1,
+        expect_strategies(&[(CommitStrategy::StateArgs, 1)]),
+        ScheduleCommitType::CommitFinalizeCompressed,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn test_ix_commit_single_compressed_account_500_bytes_and_undelegate() {
+    commit_n_accounts_x_bytes::<1, 500>(
+        1,
+        expect_strategies(&[(CommitStrategy::StateArgs, 1)]),
+        ScheduleCommitType::CommitFinalizeCompressedAndUndelegate,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn test_ix_commit_two_compressed_accounts_512_bytes() {
+    commit_n_accounts_x_bytes::<2, 512>(
+        1,
+        expect_strategies(&[(CommitStrategy::StateArgs, 2)]),
+        ScheduleCommitType::CommitFinalizeCompressed,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn test_ix_commit_three_compressed_accounts_512_bytes() {
+    commit_n_accounts_x_bytes::<3, 512>(
+        1,
+        expect_strategies(&[(CommitStrategy::StateArgs, 3)]),
+        ScheduleCommitType::CommitFinalizeCompressed,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn test_ix_commit_six_compressed_accounts_512_bytes() {
+    commit_n_accounts_x_bytes::<6, 512>(
+        1,
+        expect_strategies(&[(CommitStrategy::StateArgs, 6)]),
+        ScheduleCommitType::CommitFinalizeCompressed,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn test_commit_20_compressed_accounts_100bytes_bundle_size_2() {
+    commit_n_accounts_x_bytes::<20, 100>(
+        2,
+        expect_strategies(&[(CommitStrategy::StateArgs, 20)]),
+        ScheduleCommitType::CommitFinalizeCompressed,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn test_commit_5_compressed_accounts_100bytes_bundle_size_2_undelegate_all(
+) {
+    commit_n_accounts_x_bytes::<5, 100>(
+        2,
+        expect_strategies(&[(CommitStrategy::StateArgs, 5)]),
+        ScheduleCommitType::CommitFinalizeCompressedAndUndelegate,
     )
     .await;
 }
@@ -693,13 +834,10 @@ async fn commit_5_accounts_1kb(
     expected_strategies: ExpectedStrategies,
     commit_type: ScheduleCommitType,
 ) {
-    init_logger!();
-    let accs = (0..5).map(|_| 1024).collect::<Vec<_>>();
-    commit_multiple_accounts(
-        &accs,
+    commit_n_accounts_x_bytes::<5, 1024>(
         bundle_size,
-        commit_type,
         expected_strategies,
+        commit_type,
     )
     .await;
 }
@@ -709,13 +847,10 @@ async fn commit_8_accounts_1kb(
     expected_strategies: ExpectedStrategies,
     commit_type: ScheduleCommitType,
 ) {
-    init_logger!();
-    let accs = (0..8).map(|_| 1024).collect::<Vec<_>>();
-    commit_multiple_accounts(
-        &accs,
+    commit_n_accounts_x_bytes::<8, 1024>(
         bundle_size,
-        commit_type,
         expected_strategies,
+        commit_type,
     )
     .await;
 }
@@ -725,8 +860,24 @@ async fn commit_20_accounts_1kb(
     expected_strategies: ExpectedStrategies,
     commit_type: ScheduleCommitType,
 ) {
+    commit_n_accounts_x_bytes::<20, 1024>(
+        bundle_size,
+        expected_strategies,
+        commit_type,
+    )
+    .await;
+}
+
+async fn commit_n_accounts_x_bytes<
+    const ACCOUNTS: usize,
+    const BYTES: usize,
+>(
+    bundle_size: usize,
+    expected_strategies: ExpectedStrategies,
+    commit_type: ScheduleCommitType,
+) {
     init_logger!();
-    let accs = (0..20).map(|_| 1024).collect::<Vec<_>>();
+    let accs = (0..ACCOUNTS).map(|_| BYTES).collect::<Vec<_>>();
     commit_multiple_accounts(
         &accs,
         bundle_size,
@@ -738,38 +889,62 @@ async fn commit_20_accounts_1kb(
 
 async fn create_and_delegate_accounts(
     bytess: &[usize],
+    compressed: bool,
 ) -> Vec<CommittedAccount> {
-    let mut join_set = JoinSet::new();
-    for bytes in bytess {
-        let bytes = *bytes;
-        join_set.spawn(async move {
+    if compressed {
+        let mut out = Vec::with_capacity(bytess.len());
+        for bytes in bytess {
+            let bytes = *bytes;
             let counter_auth = Keypair::new();
-            let (pda, mut pda_acc) = init_and_delegate_account_on_chain(
-                &counter_auth,
-                bytes as u64,
-                None,
-            )
-            .await;
+            let (pda, mut pda_acc) = {
+                let (pubkey, _address, account) =
+                    init_and_delegate_compressed_record_on_chain(&counter_auth)
+                        .await;
+                (pubkey, account)
+            };
 
             pda_acc.owner = program_flexi_counter::id();
             pda_acc.data = vec![0u8; bytes];
-            CommittedAccount {
+            out.push(CommittedAccount {
                 pubkey: pda,
                 account: pda_acc,
                 remote_slot: Default::default(),
-            }
-        });
-    }
+            });
+        }
+        out
+    } else {
+        let mut join_set = JoinSet::new();
+        for bytes in bytess {
+            let bytes = *bytes;
+            join_set.spawn(async move {
+                let counter_auth = Keypair::new();
+                let (pda, mut pda_acc) = init_and_delegate_account_on_chain(
+                    &counter_auth,
+                    bytes as u64,
+                    None,
+                )
+                .await;
 
-    // Wait for all tasks to complete
-    join_set.join_all().await
+                pda_acc.owner = program_flexi_counter::id();
+                pda_acc.data = vec![0u8; bytes];
+                CommittedAccount {
+                    pubkey: pda,
+                    account: pda_acc,
+                    remote_slot: Default::default(),
+                }
+            });
+        }
+
+        join_set.join_all().await
+    }
 }
 
 async fn create_bundles(
     bundle_size: usize,
     bytess: &[usize],
+    compressed: bool,
 ) -> Vec<Vec<CommittedAccount>> {
-    let committed = create_and_delegate_accounts(bytess).await;
+    let committed = create_and_delegate_accounts(bytess, compressed).await;
     committed
         .chunks(bundle_size)
         .map(|chunk| chunk.to_vec())
@@ -797,7 +972,16 @@ async fn commit_multiple_accounts(
     let service = CommittorServiceExt::new(Arc::new(service));
 
     // Create bundles of committed accounts
-    let bundles_of_committees = create_bundles(bundle_size, bytess).await;
+    let bundles_of_committees = create_bundles(
+        bundle_size,
+        bytess,
+        matches!(
+            commit_type,
+            ScheduleCommitType::CommitFinalizeCompressed
+                | ScheduleCommitType::CommitFinalizeCompressedAndUndelegate
+        ),
+    )
+    .await;
     // Create intent for each bundle
     let intents = bundles_of_committees
         .into_iter()
@@ -818,6 +1002,19 @@ async fn commit_multiple_accounts(
             }
             ScheduleCommitType::CommitFinalizeAndUndelegate => {
                 MagicBaseIntent::CommitFinalizeAndUndelegate(
+                    CommitAndUndelegate {
+                        commit_action: CommitType::Standalone(committees),
+                        undelegate_action: UndelegateType::Standalone,
+                    },
+                )
+            }
+            ScheduleCommitType::CommitFinalizeCompressed => {
+                MagicBaseIntent::CommitFinalizeCompressed(
+                    CommitType::Standalone(committees),
+                )
+            }
+            ScheduleCommitType::CommitFinalizeCompressedAndUndelegate => {
+                MagicBaseIntent::CommitFinalizeAndUndelegateCompressed(
                     CommitAndUndelegate {
                         commit_action: CommitType::Standalone(committees),
                         undelegate_action: UndelegateType::Standalone,
@@ -850,6 +1047,7 @@ async fn execute_intent_bundle(
     bytess_to_commit_finalize: &[usize],
     bytes_to_undelegate: &[usize],
     expected_strategies: ExpectedStrategies,
+    compressed: bool,
 ) {
     init_logger!();
 
@@ -866,10 +1064,11 @@ async fn execute_intent_bundle(
     let service = CommittorServiceExt::new(Arc::new(service));
 
     // Create bundles of committed accounts
-    let to_commit = create_and_delegate_accounts(bytess_to_commit);
+    let to_commit = create_and_delegate_accounts(bytess_to_commit, compressed);
     let to_commit_finalize =
-        create_and_delegate_accounts(bytess_to_commit_finalize);
-    let to_undelegate = create_and_delegate_accounts(bytes_to_undelegate);
+        create_and_delegate_accounts(bytess_to_commit_finalize, compressed);
+    let to_undelegate =
+        create_and_delegate_accounts(bytes_to_undelegate, compressed);
     let (committees, commit_finalize_committees, undelegetees) =
         tokio::join!(to_commit, to_commit_finalize, to_undelegate);
 
@@ -999,11 +1198,17 @@ async fn ix_commit_local(
         let undelegated_accounts = base_intent.get_undelegate_intent_accounts();
         let commit_finalized_and_undelegated_accounts =
             base_intent.get_commit_finalize_and_undelegate_intent_accounts();
+        let commit_finalize_compressed_accounts =
+            base_intent.get_commit_finalize_compressed_intent_accounts();
+        let commit_finalize_compressed_and_undelegate_accounts = base_intent
+            .get_commit_finalize_compressed_and_undelegate_intent_accounts();
 
         let has_commit_flow =
             committed_accounts.is_some() || undelegated_accounts.is_some();
         let has_commit_finalize_flow = committed_finalize_accounts.is_some()
-            || commit_finalized_and_undelegated_accounts.is_some();
+            || commit_finalized_and_undelegated_accounts.is_some()
+            || commit_finalize_compressed_accounts.is_some()
+            || commit_finalize_compressed_and_undelegate_accounts.is_some();
         if has_commit_flow {
             assert!(
                 tx_logs_contain(&rpc_client, &commit_signature, "CommitState")
@@ -1025,8 +1230,10 @@ async fn ix_commit_local(
             );
         }
 
+        let has_compressed_undelegate =
+            commit_finalize_compressed_and_undelegate_accounts.is_some();
         let has_undelegate = base_intent.has_undelegate_intent();
-        if has_undelegate {
+        if has_undelegate && !has_compressed_undelegate {
             // Undelegate is part of atomic Finalization Stage
             assert!(
                 tx_logs_contain(&rpc_client, &finalize_signature, "Undelegate")
@@ -1035,15 +1242,21 @@ async fn ix_commit_local(
         }
 
         let mut committed_accounts: HashMap<Pubkey, _> = [
-            (false, committed_accounts),
-            (true, undelegated_accounts),
-            (false, committed_finalize_accounts),
-            (true, commit_finalized_and_undelegated_accounts),
+            (false, false, committed_accounts),
+            (true, false, undelegated_accounts),
+            (false, false, committed_finalize_accounts),
+            (true, false, commit_finalized_and_undelegated_accounts),
+            (false, true, commit_finalize_compressed_accounts),
+            (
+                true,
+                true,
+                commit_finalize_compressed_and_undelegate_accounts,
+            ),
         ]
         .into_iter()
-        .flat_map(|(allow_undelegation, accounts)| {
+        .flat_map(|(allow_undelegation, compressed, accounts)| {
             accounts.into_iter().flatten().map(move |account| {
-                (account.pubkey, (allow_undelegation, account))
+                (account.pubkey, (allow_undelegation, compressed, account))
             })
         })
         .collect();
@@ -1065,35 +1278,37 @@ async fn ix_commit_local(
         assert_eq!(statuses.len(), committed_accounts.len());
 
         for commit_status in statuses {
-            let (is_undelegate, account) = committed_accounts
+            let (is_undelegate, is_compressed, account) = committed_accounts
                 .remove(&commit_status.pubkey)
                 .expect("Account should be persisted");
             println!("account: {}", account.pubkey);
 
-            // When we finalize it is possible to also undelegate the account
-            let expected_owner = if is_undelegate {
-                program_id
-            } else {
-                dlp_api::id()
-            };
+            if !is_compressed {
+                // When we finalize it is possible to also undelegate the account
+                let expected_owner = if is_undelegate {
+                    program_id
+                } else {
+                    dlp_api::id()
+                };
 
-            let lamports = account.account.lamports;
-            get_account!(
-                rpc_client,
-                account.pubkey,
-                "delegated state",
-                |acc: &Account, remaining_tries: u8| {
-                    validate_account(
-                        acc,
-                        remaining_tries,
-                        &account.account.data,
-                        lamports,
-                        expected_owner,
-                        account.pubkey,
-                        has_undelegate,
-                    )
-                }
-            );
+                let lamports = account.account.lamports;
+                get_account!(
+                    rpc_client,
+                    account.pubkey,
+                    "delegated state",
+                    |acc: &Account, remaining_tries: u8| {
+                        validate_account(
+                            acc,
+                            remaining_tries,
+                            &account.account.data,
+                            lamports,
+                            expected_owner,
+                            account.pubkey,
+                            has_undelegate,
+                        )
+                    }
+                );
+            }
 
             // Track the strategy used
             let strategy = commit_status.commit_strategy;
