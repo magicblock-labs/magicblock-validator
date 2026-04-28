@@ -92,19 +92,22 @@ fn validate(
 #[cfg(test)]
 mod tests {
     use magicblock_magic_program_api::{
-        instruction::CallbackInstruction,
-        pda::CALLBACK_SIGNER,
+        instruction::CallbackInstruction, pda::CALLBACK_SIGNER,
         CALLBACK_PROGRAM_ID,
     };
     use serial_test::serial;
     use solana_account::AccountSharedData;
-    use solana_instruction::{error::InstructionError, AccountMeta, Instruction};
+    use solana_instruction::{
+        error::InstructionError, AccountMeta, Instruction,
+    };
     use solana_program_runtime::invoke_context::mock_process_instruction;
     use solana_pubkey::Pubkey;
 
     use crate::{
         magicblock_processor::CallbackEntrypoint,
-        validator::{generate_validator_authority_if_needed, validator_authority_id},
+        validator::{
+            generate_validator_authority_if_needed, validator_authority_id,
+        },
     };
 
     fn make_data(inner_accounts: Vec<AccountMeta>) -> Vec<u8> {
@@ -157,7 +160,7 @@ mod tests {
             |_| {},
         );
     }
-    
+
     #[test]
     #[serial]
     fn test_validate_rejects_validator_not_signer() {
@@ -202,7 +205,12 @@ mod tests {
         let (tx, ix) = outer_accounts(validator, CALLBACK_SIGNER);
         let rogue = Pubkey::new_unique();
         let data = make_data(vec![AccountMeta::new_readonly(rogue, true)]);
-        run(&data, tx, ix, Err(InstructionError::MissingRequiredSignature));
+        run(
+            &data,
+            tx,
+            ix,
+            Err(InstructionError::MissingRequiredSignature),
+        );
     }
 
     #[test]
