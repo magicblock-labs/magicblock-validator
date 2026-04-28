@@ -2,19 +2,10 @@ use std::process::{self, Child};
 
 pub fn cleanup_validators(
     ephem_validator: &mut Child,
-    devnet_validator: &mut Child,
-) {
-    cleanup_validator(ephem_validator, "ephemeral");
-    cleanup_validator(devnet_validator, "devnet");
-    kill_validators();
-}
-
-pub fn cleanup_validators_with_light(
-    ephem_validator: &mut Child,
     light_validator: &mut Child,
 ) {
     cleanup_validator(ephem_validator, "ephemeral");
-    cleanup_light_validator(light_validator, "light");
+    cleanup_light_validator(light_validator);
     kill_validators();
 }
 
@@ -29,9 +20,9 @@ pub fn cleanup_validator(validator: &mut Child, label: &str) {
     });
 }
 
-pub fn cleanup_light_validator(validator: &mut Child, label: &str) {
+pub fn cleanup_light_validator(validator: &mut Child) {
     validator.kill().unwrap_or_else(|err| {
-        panic!("Failed to kill {} validator ({:?})", label, err)
+        panic!("Failed to kill light validator ({:?})", err)
     });
     let command = process::Command::new("light")
         .arg("test-validator")
