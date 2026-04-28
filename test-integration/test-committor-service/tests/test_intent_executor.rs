@@ -106,7 +106,7 @@ impl TestEnv {
         let task_info_fetcher =
             Arc::new(CacheTaskInfoFetcher::new(RpcTaskInfoFetcher::new(
                 fixture.rpc_client.clone(),
-                fixture.photon_indexer.clone(),
+                Some(fixture.photon_indexer.clone()),
             )));
 
         let tm = &fixture.table_mania;
@@ -1287,7 +1287,7 @@ async fn test_action_callback_fired_on_timeout() {
     let task_info_fetcher =
         Arc::new(CacheTaskInfoFetcher::new(RpcTaskInfoFetcher::new(
             fixture.rpc_client.clone(),
-            fixture.photon_indexer.clone(),
+            Some(fixture.photon_indexer.clone()),
         )));
     let mut intent_executor = IntentExecutorImpl::new(
         fixture.rpc_client.clone(),

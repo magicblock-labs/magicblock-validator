@@ -49,6 +49,9 @@ path = "../target/deploy/program_flexi_counter.so"
 id = "DEL2rPzhFaS5qzo8XY9ZNxSzuunWueySq3p2dxJfwPbT"
 path = "../programs/compressed_delegation/compressed_delegation.so"
 
+[compression]
+photon-url = "http://localhost:8784"
+
 [geyser-grpc]
 port = 10001
 

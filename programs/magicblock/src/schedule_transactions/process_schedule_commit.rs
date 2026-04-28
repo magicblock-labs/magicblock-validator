@@ -26,6 +26,7 @@ use crate::{
         },
         instruction_utils::InstructionUtils,
     },
+    validator::is_compression_enabled,
     MagicContext,
 };
 
@@ -40,6 +41,14 @@ pub(crate) fn process_schedule_commit(
     invoke_context: &mut InvokeContext,
     opts: ProcessScheduleCommitOptions,
 ) -> Result<(), InstructionError> {
+    if opts.compressed && !is_compression_enabled() {
+        ic_msg!(
+            invoke_context,
+            "ScheduleCommit: compression is not enabled, but compressed accounts are being committed"
+        );
+        return Err(InstructionError::InvalidInstructionData);
+    }
+
     const PAYER_IDX: u16 = 0;
     const MAGIC_CONTEXT_IDX: u16 = PAYER_IDX + 1;
 

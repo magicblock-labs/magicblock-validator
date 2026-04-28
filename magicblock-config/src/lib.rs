@@ -64,7 +64,7 @@ pub struct ValidatorParams {
     pub chainlink: ChainLinkConfig,
     pub chain_operation: Option<ChainOperationConfig>,
     pub task_scheduler: TaskSchedulerConfig,
-    pub compression: CompressionConfig,
+    pub compression: Option<CompressionConfig>,
     pub programs: Vec<LoadableProgram>,
 }
 

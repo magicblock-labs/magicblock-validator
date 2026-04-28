@@ -1,4 +1,7 @@
-use std::sync::RwLock;
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    RwLock,
+};
 
 use lazy_static::lazy_static;
 use solana_keypair::Keypair;
@@ -9,6 +12,7 @@ lazy_static! {
     static ref VALIDATOR_AUTHORITY: RwLock<Option<Keypair>> = RwLock::new(None);
     static ref VALIDATOR_AUTHORITY_OVERRIDE: RwLock<Option<Pubkey>> =
         RwLock::new(None);
+    static ref IS_COMPRESSION_ENABLED: AtomicBool = AtomicBool::new(false);
 }
 
 pub fn validator_authority() -> Keypair {
@@ -81,4 +85,12 @@ pub fn generate_validator_authority_if_needed() {
         return;
     }
     validator_authority_lock.replace(Keypair::new());
+}
+
+pub fn set_compression_enabled(enabled: bool) {
+    IS_COMPRESSION_ENABLED.store(enabled, Ordering::Relaxed);
+}
+
+pub fn is_compression_enabled() -> bool {
+    IS_COMPRESSION_ENABLED.load(Ordering::Relaxed)
 }

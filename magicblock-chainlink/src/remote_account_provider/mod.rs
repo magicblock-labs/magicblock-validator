@@ -114,7 +114,7 @@ pub struct RemoteAccountProvider<
     /// states up to date
     pubsub_client: U,
     /// The photon client to fetch compressed accounts from
-    photon_client: P,
+    photon_client: Option<P>,
     /// Minimal tracking of accounts currently being fetched to handle race conditions
     /// between fetch and subscription updates. Only used during active fetch operations.
     fetching_accounts: Arc<FetchingAccounts>,
@@ -223,7 +223,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
     pub async fn try_from_clients_and_mode(
         rpc_client: T,
         pubsub_client: U,
-        photon_client: P,
+        photon_client: Option<P>,
         subscription_forwarder: mpsc::Sender<ForwardedSubscriptionUpdate>,
         config: &RemoteAccountProviderConfig,
         lrucache_subscribed_accounts: Arc<AccountsLruCache>,
@@ -283,7 +283,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
     pub(crate) async fn new(
         rpc_client: T,
         pubsub_client: U,
-        photon_client: P,
+        photon_client: Option<P>,
         subscription_forwarder: mpsc::Sender<ForwardedSubscriptionUpdate>,
         config: &RemoteAccountProviderConfig,
         lrucache_subscribed_accounts: Arc<AccountsLruCache>,
@@ -365,12 +365,8 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
         let rpc_client =
             ChainRpcClientImpl::new_from_url(rpc_url.as_str(), commitment);
 
-        let photon_url = endpoints.photon_url().ok_or_else(|| {
-            RemoteAccountProviderError::AccountSubscriptionsTaskFailed(
-                "No compression endpoint found".to_string(),
-            )
-        })?;
-        let photon_client = PhotonClientImpl::new_from_url(photon_url);
+        let photon_client =
+            endpoints.photon_url().map(PhotonClientImpl::new_from_url);
 
         // Create chain_slot to be shared with all pubsub clients
         let chain_slot = Arc::<AtomicU64>::default();
@@ -1442,11 +1438,24 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
     }
 
     async fn fetch_from_photon(
-        photon_client: P,
+        photon_client: Option<P>,
         pubkeys: Vec<Pubkey>,
         mark_empty_if_not_found: &[Pubkey],
         min_context_slot: u64,
     ) -> ChainlinkResult<(FetchedRemoteAccounts, u64, u64)> {
+        let Some(photon_client) = photon_client else {
+            // If no photon client is provided, we return a vector of not found accounts
+            return Ok((
+                FetchedRemoteAccounts::Rpc(vec![
+                    RemoteAccount::NotFound(
+                        min_context_slot
+                    );
+                    pubkeys.len()
+                ]),
+                0,
+                pubkeys.len() as u64,
+            ));
+        };
         if tracing::enabled!(tracing::Level::TRACE) {
             trace!(
                 pubkeys = pubkeys_str(&pubkeys),
@@ -1750,7 +1759,7 @@ mod test {
             RemoteAccountProvider::new(
                 rpc_client,
                 pubsub_client,
-                photon_client,
+                Some(photon_client),
                 fwd_tx,
                 &config,
                 subscribed_accounts,
@@ -1804,7 +1813,7 @@ mod test {
                     RemoteAccountProvider::new(
                         rpc_client.clone(),
                         pubsub_client,
-                        photon_client,
+                        Some(photon_client),
                         fwd_tx,
                         &config,
                         subscribed_accounts,
@@ -1892,7 +1901,7 @@ mod test {
             RemoteAccountProvider::new(
                 rpc_client,
                 pubsub_client,
-                photon_client,
+                Some(photon_client),
                 forward_tx,
                 &config,
                 subscribed_accounts,
@@ -2104,7 +2113,7 @@ mod test {
         let provider = RemoteAccountProvider::new(
             rpc_client,
             pubsub_client,
-            photon_client,
+            Some(photon_client),
             forward_tx,
             &config,
             subscribed_accounts,

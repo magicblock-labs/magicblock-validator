@@ -288,6 +288,14 @@ impl MagicValidator {
         }
         let base_fee = config.validator.basefee;
 
+        if config
+            .compression
+            .as_ref()
+            .is_some_and(|compression| compression.photon_url.is_some())
+        {
+            validator::set_compression_enabled(true);
+        }
+
         // Mode switch channel for transitioning from StartingUp to Primary
         // or Replica mode after ledger replay
         let (mode_tx, mode_rx) = channel(1);
@@ -435,7 +443,10 @@ impl MagicValidator {
             committor_persist_path,
             ChainConfig {
                 rpc_uri: config.rpc_url().to_owned(),
-                photon_uri: config.compression.photon_url.clone(),
+                photon_uri: config
+                    .compression
+                    .as_ref()
+                    .and_then(|compression| compression.photon_url.clone()),
                 commitment: CommitmentConfig::confirmed(),
                 compute_budget_config: ComputeBudgetConfig::new(
                     config.commit.compute_unit_price,
@@ -481,10 +492,16 @@ impl MagicValidator {
                 )
             })?;
 
-        endpoints.push(Endpoint::Compression {
-            label: "photon".to_string(),
-            url: config.compression.photon_url.clone(),
-        });
+        if let Some(photon_url) = config
+            .compression
+            .as_ref()
+            .and_then(|compression| compression.photon_url.clone())
+        {
+            endpoints.push(Endpoint::Compression {
+                label: "photon".to_string(),
+                url: photon_url.clone(),
+            });
+        }
 
         let cloner = ChainlinkCloner::new(
             committor_service,

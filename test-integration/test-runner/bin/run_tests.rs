@@ -10,7 +10,8 @@ use integration_test_tools::{
     toml_to_args::ProgramLoader,
     validator::{
         resolve_workspace_dir, start_light_validator_with_config,
-        start_magic_block_validator_with_config, TestRunnerPaths,
+        start_magic_block_validator_with_config,
+        start_test_validator_with_config, TestRunnerPaths,
     },
 };
 use teepee::Teepee;
@@ -189,7 +190,7 @@ fn run_chainlink_tests(
     };
     let start_devnet_validator = || match start_validator(
         "chainlink-conf.devnet.toml",
-        ValidatorCluster::Chain(None),
+        ValidatorCluster::Light,
         &loaded_chain_accounts,
     ) {
         Some(validator) => validator,
@@ -237,10 +238,15 @@ fn run_table_mania_and_committor_tests(
 
     let loaded_chain_accounts =
         LoadedAccounts::with_delegation_program_test_authority();
+    let cluster = if !config.skip_entirely(COMMITTOR_TEST) {
+        ValidatorCluster::Chain(None)
+    } else {
+        ValidatorCluster::Light
+    };
 
     let start_devnet_validator = || match start_validator(
         "committor-conf.devnet.toml",
-        ValidatorCluster::Chain(None),
+        cluster,
         &loaded_chain_accounts,
     ) {
         Some(validator) => validator,
@@ -334,7 +340,7 @@ fn run_schedule_commit_tests(
 
     let start_devnet_validator = || match start_validator(
         "schedulecommit-conf.devnet.toml",
-        ValidatorCluster::Chain(None),
+        ValidatorCluster::Light,
         &loaded_chain_accounts,
     ) {
         Some(validator) => validator,
@@ -851,6 +857,7 @@ fn resolve_paths(config_file: &str) -> TestRunnerPaths {
 enum ValidatorCluster {
     Chain(Option<ProgramLoader>),
     Ephem,
+    Light,
 }
 
 impl ValidatorCluster {
@@ -858,6 +865,7 @@ impl ValidatorCluster {
         match self {
             ValidatorCluster::Ephem => "EPHEM",
             ValidatorCluster::Chain(_) => "CHAIN",
+            ValidatorCluster::Light => "LIGHT",
         }
     }
 }
@@ -872,13 +880,19 @@ fn start_validator(
 
     match cluster {
         ValidatorCluster::Chain(program_loader) => {
-            start_light_validator_with_config(
+            start_test_validator_with_config(
                 &test_runner_paths,
                 program_loader,
                 loaded_chain_accounts,
                 log_suffix,
             )
         }
+        ValidatorCluster::Light => start_light_validator_with_config(
+            &test_runner_paths,
+            None,
+            loaded_chain_accounts,
+            log_suffix,
+        ),
         _ => start_magic_block_validator_with_config(
             &test_runner_paths,
             log_suffix,

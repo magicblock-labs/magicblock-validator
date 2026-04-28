@@ -112,18 +112,24 @@ pub trait TaskInfoFetcher: Send + Sync + 'static {
 /// Pure RPC implementation of [`TaskInfoFetcher`] — no caching.
 pub struct RpcTaskInfoFetcher {
     rpc_client: MagicblockRpcClient,
-    photon_client: Arc<PhotonIndexer>,
+    photon_client: Option<Arc<PhotonIndexer>>,
 }
 
 impl RpcTaskInfoFetcher {
     pub fn new(
         rpc_client: MagicblockRpcClient,
-        photon_client: Arc<PhotonIndexer>,
+        photon_client: Option<Arc<PhotonIndexer>>,
     ) -> Self {
         Self {
             rpc_client,
             photon_client,
         }
+    }
+
+    fn photon_client(&self) -> TaskInfoFetcherResult<&PhotonIndexer> {
+        self.photon_client
+            .as_deref()
+            .ok_or(TaskInfoFetcherError::CompressionNotConfigured)
     }
 
     /// Fetches [`DelegationMetadata`]s with some num of retries
@@ -215,6 +221,9 @@ impl RpcTaskInfoFetcher {
                     warn!(error = ?err, attempt = i, "Fetch account error");
                 }
                 TaskInfoFetcherError::IndexerError(_) => {
+                    break Err(err);
+                }
+                TaskInfoFetcherError::CompressionNotConfigured => {
                     break Err(err);
                 }
                 TaskInfoFetcherError::CompressedAccountNotFound(_) => {
@@ -325,7 +334,7 @@ impl TaskInfoFetcher for RpcTaskInfoFetcher {
                 .collect::<Vec<_>>();
 
             let nonces = self
-                .photon_client
+                .photon_client()?
                 .get_multiple_compressed_accounts(Some(cdas), None, None)
                 .await?
                 .value
@@ -373,7 +382,7 @@ impl TaskInfoFetcher for RpcTaskInfoFetcher {
                 .collect::<Vec<_>>();
 
             let nonces = self
-                .photon_client
+                .photon_client()?
                 .get_multiple_compressed_accounts(Some(cdas), None, None)
                 .await?
                 .value
@@ -433,7 +442,7 @@ impl TaskInfoFetcher for RpcTaskInfoFetcher {
     ) -> TaskInfoFetcherResult<CompressedData> {
         let cda = derive_cda_from_pda(pubkey);
         let compressed_delegation_record = self
-            .photon_client
+            .photon_client()?
             .get_compressed_account(
                 cda.to_bytes(),
                 min_context_slot.map(|slot| IndexerRpcConfig {
@@ -445,7 +454,7 @@ impl TaskInfoFetcher for RpcTaskInfoFetcher {
             .value
             .ok_or(TaskInfoFetcherError::EmptyCompressedAccount)?;
         let proof_result = self
-            .photon_client
+            .photon_client()?
             .get_validity_proof(
                 vec![compressed_delegation_record.hash],
                 vec![],
@@ -881,6 +890,8 @@ pub enum TaskInfoFetcherError {
     MagicBlockRpcClientError(Box<MagicBlockRpcClientError>),
     #[error("Indexer error: {0}")]
     IndexerError(#[from] light_client::indexer::IndexerError),
+    #[error("Compression is not configured")]
+    CompressionNotConfigured,
     #[error("Compressed account not found for: {0}")]
     CompressedAccountNotFound(Pubkey),
     #[error("Empty compressed account")]
@@ -944,6 +955,7 @@ impl TaskInfoFetcherError {
             Self::MinContextSlotNotReachedError(_, err) => err.signature(),
             Self::MagicBlockRpcClientError(err) => err.signature(),
             Self::IndexerError(_) => None,
+            Self::CompressionNotConfigured => None,
             Self::CompressedAccountNotFound(_) => None,
             Self::EmptyCompressedAccount => None,
             Self::LightSdkError(_) => None,

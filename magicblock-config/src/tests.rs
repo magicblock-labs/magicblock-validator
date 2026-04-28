@@ -295,7 +295,18 @@ fn test_compression_config() {
 
     let config = run_cli(vec![config_path.to_str().unwrap()]);
 
-    assert_eq!(config.compression.photon_url, "http://localhost:8784");
+    assert_eq!(
+        config.compression.as_ref().unwrap().photon_url,
+        Some("http://localhost:8784".to_string())
+    );
+}
+
+#[test]
+#[parallel]
+fn test_compression_config_is_optional() {
+    let config = run_cli(vec![]);
+
+    assert!(config.compression.is_none());
 }
 
 // ============================================================================
@@ -468,7 +479,10 @@ fn test_example_config_full_coverage() {
     );
 
     // Compression config is present
-    assert_eq!(config.compression.photon_url, "http://localhost:8784");
+    assert_eq!(
+        config.compression.as_ref().unwrap().photon_url,
+        Some("http://localhost:8784".to_string())
+    );
 
     // The example file has the programs section with 2 entries
     assert_eq!(

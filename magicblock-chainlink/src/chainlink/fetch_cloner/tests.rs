@@ -158,7 +158,7 @@ where
         RemoteAccountProvider::new(
             rpc_client,
             pubsub_client,
-            photon_client,
+            Some(photon_client),
             forward_tx,
             &config,
             subscribed_accounts,
