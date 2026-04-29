@@ -708,6 +708,16 @@ impl MagicIntentBundle {
 
         self.standalone_actions.get_mut(index.checked_sub(offset)?)
     }
+
+    pub fn is_compressed(&self) -> bool {
+        self.has_committed_accounts()
+            && (self.commit_finalize_compressed_and_undelegate.is_some()
+                || self.commit_finalize_compressed.is_some())
+            && !self.commit_finalize_and_undelegate.is_some()
+            && !self.commit_finalize.is_some()
+            && !self.commit_and_undelegate.is_some()
+            && !self.commit.is_some()
+    }
 }
 
 impl MagicBaseIntent {

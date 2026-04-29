@@ -142,15 +142,17 @@ pub(crate) fn process_schedule_intent_bundle(
         PAYER_IDX,
         MAGIC_CONTEXT_IDX + 1,
     )?;
+    let is_compressed = scheduled_intent.intent_bundle.is_compressed();
     if let Some(magic_fee_vault) = magic_fee_vault {
         let chargable_accounts = scheduled_intent.get_all_committed_accounts();
-        let nonces = fetch_current_commit_nonces(&chargable_accounts, false)?;
+        let nonces =
+            fetch_current_commit_nonces(&chargable_accounts, is_compressed)?;
         let fee = scheduled_intent.calculate_fee(&nonces)?;
         charge_delegated_payer(&payer_account, &magic_fee_vault, fee)?;
     } else if let Some(commit_accounts) =
         scheduled_intent.get_commit_intent_accounts()
     {
-        check_commit_limits(commit_accounts, false, invoke_context)?;
+        check_commit_limits(commit_accounts, is_compressed, invoke_context)?;
     }
 
     let action_sent_signature = scheduled_intent.sent_transaction.signatures[0];
