@@ -334,25 +334,27 @@ impl TaskInfoFetcher for RpcTaskInfoFetcher {
                 .map(|pubkey| derive_cda_from_pda(pubkey).to_bytes())
                 .collect::<Vec<_>>();
 
-            let nonces = self
+            let items = self
                 .photon_client()?
                 .get_multiple_compressed_accounts(Some(cdas), None, None)
                 .await?
                 .value
-                .items
-                .into_iter()
-                .filter_map(|compressed_account| {
-                    let record = compressed_account
-                        .and_then(|acc| acc.data)
-                        .and_then(|compressed_account| {
-                            CompressedDelegationRecord::try_from_slice(
-                                &compressed_account.data,
-                            )
+                .items;
+            let mut result = HashMap::with_capacity(pubkeys.len());
+            for (pubkey, compressed_account) in pubkeys.iter().zip(items) {
+                let nonce = compressed_account
+                    .and_then(|acc| acc.data)
+                    .and_then(|data| {
+                        CompressedDelegationRecord::try_from_slice(&data.data)
                             .ok()
-                        })?;
-                    Some(record.last_update_nonce + 1)
-                });
-            Ok(pubkeys.iter().copied().zip(nonces).collect())
+                    })
+                    .map(|record| record.last_update_nonce + 1)
+                    .ok_or(TaskInfoFetcherError::CompressedAccountNotFound(
+                        *pubkey,
+                    ))?;
+                result.insert(*pubkey, nonce);
+            }
+            Ok(result)
         }
     }
 
@@ -382,25 +384,27 @@ impl TaskInfoFetcher for RpcTaskInfoFetcher {
                 .map(|pubkey| derive_cda_from_pda(pubkey).to_bytes())
                 .collect::<Vec<_>>();
 
-            let nonces = self
+            let items = self
                 .photon_client()?
                 .get_multiple_compressed_accounts(Some(cdas), None, None)
                 .await?
                 .value
-                .items
-                .into_iter()
-                .filter_map(|compressed_account| {
-                    let record = compressed_account
-                        .and_then(|acc| acc.data)
-                        .and_then(|compressed_account| {
-                            CompressedDelegationRecord::try_from_slice(
-                                &compressed_account.data,
-                            )
+                .items;
+            let mut result = HashMap::with_capacity(pubkeys.len());
+            for (pubkey, compressed_account) in pubkeys.iter().zip(items) {
+                let nonce = compressed_account
+                    .and_then(|acc| acc.data)
+                    .and_then(|data| {
+                        CompressedDelegationRecord::try_from_slice(&data.data)
                             .ok()
-                        })?;
-                    Some(record.last_update_nonce)
-                });
-            Ok(pubkeys.iter().copied().zip(nonces).collect())
+                    })
+                    .map(|record| record.last_update_nonce)
+                    .ok_or(TaskInfoFetcherError::CompressedAccountNotFound(
+                        *pubkey,
+                    ))?;
+                result.insert(*pubkey, nonce);
+            }
+            Ok(result)
         }
     }
 
