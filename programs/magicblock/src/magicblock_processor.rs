@@ -1,6 +1,15 @@
-use magicblock_magic_program_api::instruction::MagicBlockInstruction;
+use magicblock_magic_program_api::{
+    args::{
+        BaseActionArgs, CommitAndUndelegateArgs, CommitTypeArgs,
+        MagicIntentBundleArgs,
+    },
+    instruction::{AccountModificationForInstruction, MagicBlockInstruction},
+};
+use serde::Deserialize;
 use solana_instruction::error::InstructionError;
 use solana_program_runtime::declare_process_instruction;
+use solana_pubkey::Pubkey;
+use std::collections::HashMap;
 
 use crate::{
     clone_account::{
@@ -27,16 +36,116 @@ use crate::{
 
 pub const DEFAULT_COMPUTE_UNITS: u64 = 150;
 
+/// This enables the program to still be able to deserialize
+/// instructions despite the changes in instructions introduced
+/// by compressed commits.
+#[allow(dead_code)]
+#[derive(Deserialize)]
+enum LegacyMagicBlockInstruction {
+    ModifyAccounts {
+        accounts: HashMap<Pubkey, AccountModificationForInstruction>,
+        message: Option<String>,
+    },
+    ScheduleCommit,
+    ScheduleCommitAndUndelegate,
+    AcceptScheduleCommits,
+    ScheduledCommitSent((u64, u64)),
+    ScheduleBaseIntent(LegacyMagicBaseIntentArgs),
+    ScheduleTask(magicblock_magic_program_api::args::ScheduleTaskArgs),
+    CancelTask {
+        task_id: i64,
+    },
+    DisableExecutableCheck,
+    EnableExecutableCheck,
+    Noop(u64),
+    ScheduleIntentBundle(LegacyMagicIntentBundleArgs),
+}
+
+#[derive(Deserialize)]
+enum LegacyMagicBaseIntentArgs {
+    BaseActions(Vec<BaseActionArgs>),
+    Commit(CommitTypeArgs),
+    CommitAndUndelegate(CommitAndUndelegateArgs),
+    CommitFinalize(CommitTypeArgs),
+    CommitFinalizeAndUndelegate(CommitAndUndelegateArgs),
+}
+
+impl From<LegacyMagicBaseIntentArgs> for MagicIntentBundleArgs {
+    fn from(value: LegacyMagicBaseIntentArgs) -> Self {
+        let mut args = MagicIntentBundleArgs::default();
+        match value {
+            LegacyMagicBaseIntentArgs::BaseActions(actions) => {
+                args.standalone_actions = actions
+            }
+            LegacyMagicBaseIntentArgs::Commit(commit) => {
+                args.commit = Some(commit)
+            }
+            LegacyMagicBaseIntentArgs::CommitAndUndelegate(cau) => {
+                args.commit_and_undelegate = Some(cau)
+            }
+            LegacyMagicBaseIntentArgs::CommitFinalize(commit) => {
+                args.commit_finalize = Some(commit)
+            }
+            LegacyMagicBaseIntentArgs::CommitFinalizeAndUndelegate(cau) => {
+                args.commit_finalize_and_undelegate = Some(cau)
+            }
+        }
+        args
+    }
+}
+
+#[derive(Deserialize)]
+struct LegacyMagicIntentBundleArgs {
+    commit: Option<CommitTypeArgs>,
+    commit_and_undelegate: Option<CommitAndUndelegateArgs>,
+    commit_finalize: Option<CommitTypeArgs>,
+    commit_finalize_and_undelegate: Option<CommitAndUndelegateArgs>,
+    standalone_actions: Vec<BaseActionArgs>,
+}
+
+impl From<LegacyMagicIntentBundleArgs> for MagicIntentBundleArgs {
+    fn from(value: LegacyMagicIntentBundleArgs) -> Self {
+        Self {
+            commit: value.commit,
+            commit_and_undelegate: value.commit_and_undelegate,
+            commit_finalize: value.commit_finalize,
+            commit_finalize_and_undelegate: value
+                .commit_finalize_and_undelegate,
+            commit_finalize_compressed: None,
+            commit_finalize_compressed_and_undelegate: None,
+            standalone_actions: value.standalone_actions,
+        }
+    }
+}
+
+fn deserialize_legacy_instruction(
+    data: &[u8],
+) -> Result<MagicBlockInstruction, InstructionError> {
+    let legacy = bincode::deserialize::<LegacyMagicBlockInstruction>(data)
+        .map_err(|_| InstructionError::InvalidInstructionData)?;
+
+    match legacy {
+        LegacyMagicBlockInstruction::ScheduleBaseIntent(args) => {
+            Ok(MagicBlockInstruction::ScheduleIntentBundle(args.into()))
+        }
+        LegacyMagicBlockInstruction::ScheduleIntentBundle(args) => {
+            Ok(MagicBlockInstruction::ScheduleIntentBundle(args.into()))
+        }
+        _ => Err(InstructionError::InvalidInstructionData),
+    }
+}
+
 fn deserialize_instruction(
     invoke_context: &mut solana_program_runtime::invoke_context::InvokeContext,
 ) -> Result<MagicBlockInstruction, InstructionError> {
-    bincode::deserialize(
-        invoke_context
-            .transaction_context
-            .get_current_instruction_context()?
-            .get_instruction_data(),
-    )
-    .map_err(|_| InstructionError::InvalidInstructionData)
+    let instruction_context = invoke_context
+        .transaction_context
+        .get_current_instruction_context()?;
+    let data = instruction_context.get_instruction_data();
+
+    bincode::deserialize(data)
+        .or_else(|_| deserialize_legacy_instruction(data))
+        .map_err(|_| InstructionError::InvalidInstructionData)
 }
 
 declare_process_instruction!(
