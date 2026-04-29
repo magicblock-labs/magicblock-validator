@@ -16,7 +16,10 @@ use integration_test_tools::{
 };
 use teepee::Teepee;
 use test_runner::{
-    cleanup::{cleanup_devnet_only, cleanup_validators},
+    cleanup::{
+        cleanup_devnet_only, cleanup_devnet_validator, cleanup_light_validator,
+        cleanup_validators,
+    },
     env_config::TestConfigViaEnvVars,
     signal::wait_for_ctrlc,
 };
@@ -208,11 +211,11 @@ fn run_chainlink_tests(
             Ok(output) => output,
             Err(err) => {
                 eprintln!("Failed to run chainlink tests: {:?}", err);
-                cleanup_devnet_only(&mut devnet_validator);
+                cleanup_light_validator(&mut devnet_validator);
                 return Err(err.into());
             }
         };
-        cleanup_devnet_only(&mut devnet_validator);
+        cleanup_light_validator(&mut devnet_validator);
         Ok(output)
     } else {
         let devnet_validator =
@@ -243,6 +246,7 @@ fn run_table_mania_and_committor_tests(
     } else {
         ValidatorCluster::Light
     };
+    let uses_light_validator = matches!(&cluster, ValidatorCluster::Light);
 
     let start_devnet_validator = || match start_validator(
         "committor-conf.devnet.toml",
@@ -275,7 +279,10 @@ fn run_table_mania_and_committor_tests(
                 Ok(output) => output,
                 Err(err) => {
                     eprintln!("Failed to run table-mania: {:?}", err);
-                    cleanup_devnet_only(&mut devnet_validator);
+                    cleanup_devnet_validator(
+                        &mut devnet_validator,
+                        uses_light_validator,
+                    );
                     return Err(err.into());
                 }
             }
@@ -303,7 +310,10 @@ fn run_table_mania_and_committor_tests(
                 Ok(output) => output,
                 Err(err) => {
                     eprintln!("Failed to run committor: {:?}", err);
-                    cleanup_devnet_only(&mut devnet_validator);
+                    cleanup_devnet_validator(
+                        &mut devnet_validator,
+                        uses_light_validator,
+                    );
                     return Err(err.into());
                 }
             }
@@ -312,7 +322,7 @@ fn run_table_mania_and_committor_tests(
             success_output()
         };
 
-        cleanup_devnet_only(&mut devnet_validator);
+        cleanup_devnet_validator(&mut devnet_validator, uses_light_validator);
 
         Ok((table_mania_test_output, committor_test_output))
     } else {
