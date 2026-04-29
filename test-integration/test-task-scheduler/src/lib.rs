@@ -129,8 +129,14 @@ pub fn create_delegated_counter(
         validator
     );
 
-    // Wait for account to be delegated
-    expect!(ctx.wait_for_delta_slot_ephem(10), validator);
+    let (counter_pda, _) = FlexiCounter::pda(&payer.pubkey());
+    wait_for_incremented_counter(
+        ctx,
+        &counter_pda,
+        0,
+        Duration::from_secs(10),
+        validator,
+    );
 }
 
 pub fn wait_for_incremented_counter(
@@ -141,24 +147,46 @@ pub fn wait_for_incremented_counter(
     validator: &mut Child,
 ) {
     let now = Instant::now();
+    let mut last_count = None;
+    let mut last_error = None;
     while now.elapsed() < max_timeout {
-        let counter_account = expect!(
-            ctx.try_ephem_client().and_then(|client| client
-                .get_account(counter_pda)
-                .map_err(|e| anyhow::anyhow!("Failed to get account: {}", e))),
-            validator
-        );
-        let counter =
-            expect!(FlexiCounter::try_decode(&counter_account.data), validator);
-        if counter.count == expected_count {
-            return;
+        let counter = ctx
+            .try_ephem_client()
+            .and_then(|client| {
+                client.get_account(counter_pda).map_err(|e| {
+                    anyhow::anyhow!("Failed to get account: {}", e)
+                })
+            })
+            .and_then(|counter_account| {
+                FlexiCounter::try_decode(&counter_account.data).map_err(|e| {
+                    anyhow::anyhow!(
+                        "Failed to decode counter account ({} bytes): {}",
+                        counter_account.data.len(),
+                        e
+                    )
+                })
+            });
+        match counter {
+            Ok(counter) => {
+                last_count = Some(counter.count);
+                last_error = None;
+                if counter.count == expected_count {
+                    return;
+                }
+            }
+            Err(err) => {
+                last_error = Some(err.to_string());
+            }
         }
         expect!(ctx.wait_for_next_slot_ephem(), validator);
     }
     assert!(
         false,
         cleanup(validator),
-        "Failed to wait for incremented counter"
+        "Failed to wait for incremented counter; expected_count: {}, last_count: {:?}, last_error: {:?}",
+        expected_count,
+        last_count,
+        last_error
     );
 }
 
@@ -170,27 +198,46 @@ pub fn wait_for_committed_count(
     validator: &mut Child,
 ) {
     let now = Instant::now();
+    let mut last_count = None;
+    let mut last_error = None;
     while now.elapsed() < max_timeout {
-        let account = expect!(
-            ctx.try_chain_client().and_then(|client| client
-                .get_account(committee)
-                .map_err(|e| anyhow::anyhow!(
-                    "Failed to get chain account: {}",
-                    e
-                ))),
-            validator
-        );
-        let state = expect!(MainAccount::try_decode(&account.data), validator);
-        if state.count == expected_count {
-            return;
+        let state = ctx
+            .try_chain_client()
+            .and_then(|client| {
+                client.get_account(committee).map_err(|e| {
+                    anyhow::anyhow!("Failed to get chain account: {}", e)
+                })
+            })
+            .and_then(|account| {
+                MainAccount::try_decode(&account.data).map_err(|e| {
+                    anyhow::anyhow!(
+                        "Failed to decode chain account ({} bytes): {}",
+                        account.data.len(),
+                        e
+                    )
+                })
+            });
+        match state {
+            Ok(state) => {
+                last_count = Some(state.count);
+                last_error = None;
+                if state.count == expected_count {
+                    return;
+                }
+            }
+            Err(err) => {
+                last_error = Some(err.to_string());
+            }
         }
         expect!(ctx.wait_for_next_slot_ephem(), validator);
     }
     assert!(
         false,
         cleanup(validator),
-        "Timed out waiting for committed count {} on {}",
+        "Timed out waiting for committed count {} on {}; last_count: {:?}, last_error: {:?}",
         expected_count,
-        committee
+        committee,
+        last_count,
+        last_error
     );
 }
