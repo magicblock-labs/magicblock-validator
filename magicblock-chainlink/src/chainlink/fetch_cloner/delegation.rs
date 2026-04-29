@@ -15,7 +15,10 @@ use solana_pubkey::Pubkey;
 use solana_signer::Signer;
 use tracing::*;
 
-use super::FetchCloner;
+use super::{
+    subscription::{cancel_subs, CancelStrategy},
+    FetchCloner,
+};
 use crate::{
     chainlink::errors::{ChainlinkError, ChainlinkResult},
     cloner::{Cloner, DelegationActions},
@@ -215,23 +218,15 @@ where
         Err(_) => None,
     };
 
-    if !was_watching_deleg_record
-        // Handle edge case where it was cloned in the meantime.
-        // The small possiblility of a fetch + clone of this delegation record being in process
-        // still exits, but it's negligible
-        && this
-            .accounts_bank
-            .get_account(&delegation_record_pubkey)
-            .is_none()
-    {
-        // We only subscribed to fetch the delegation record, so unsubscribe now
-        if let Err(err) = this
-            .remote_account_provider
-            .unsubscribe(&delegation_record_pubkey)
-            .await
-        {
-            warn!(pubkey = %delegation_record_pubkey, error = %err, "Failed to unsubscribe from delegation record");
-        }
+    if !was_watching_deleg_record {
+        // We only subscribed to fetch the delegation record, so unsubscribe now.
+        // Use the shared cancellation path so a concurrent explicit fetch can keep
+        // the subscription while its request is still pending.
+        cancel_subs(
+            &this.remote_account_provider,
+            CancelStrategy::All([delegation_record_pubkey].into()),
+        )
+        .await;
     }
 
     res

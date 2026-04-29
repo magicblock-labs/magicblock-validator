@@ -437,6 +437,73 @@ async fn test_fetch_and_clone_single_delegated_account_with_valid_delegation_rec
 }
 
 #[tokio::test]
+async fn test_fetch_and_clone_delegated_account_cancels_transient_delegation_record_sub(
+) {
+    let validator_keypair = Keypair::new();
+    let validator_pubkey = validator_keypair.pubkey();
+    let account_pubkey = random_pubkey();
+    let account_owner = random_pubkey();
+    const CURRENT_SLOT: u64 = 100;
+
+    let account = Account {
+        lamports: 1_234,
+        data: vec![1, 2, 3, 4],
+        owner: dlp_api::id(),
+        executable: false,
+        rent_epoch: 0,
+    };
+
+    let FetcherTestCtx {
+        remote_account_provider,
+        accounts_bank,
+        rpc_client,
+        fetch_cloner,
+        ..
+    } = setup(
+        [(account_pubkey, account.clone())],
+        CURRENT_SLOT,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+
+    let deleg_record_pubkey = add_delegation_record_for(
+        &rpc_client,
+        account_pubkey,
+        validator_pubkey,
+        account_owner,
+    );
+
+    remote_account_provider
+        .subscribe(&deleg_record_pubkey)
+        .await
+        .unwrap();
+    assert!(accounts_bank.get_account(&deleg_record_pubkey).is_none());
+
+    let result = fetch_cloner
+        .fetch_and_clone_accounts(
+            &[account_pubkey],
+            None,
+            None,
+            AccountFetchOrigin::GetAccount,
+            None,
+        )
+        .await;
+
+    assert!(result.is_ok());
+    assert_cloned_delegated_account!(
+        accounts_bank,
+        account_pubkey,
+        account,
+        CURRENT_SLOT,
+        account_owner
+    );
+    assert_not_subscribed!(
+        remote_account_provider,
+        &[&account_pubkey, &deleg_record_pubkey]
+    );
+}
+
+#[tokio::test]
 async fn test_fetch_and_clone_single_delegated_account_with_different_authority(
 ) {
     let validator_keypair = Keypair::new();

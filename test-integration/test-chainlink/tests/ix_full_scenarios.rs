@@ -4,7 +4,10 @@ use magicblock_chainlink::{
     assert_not_subscribed, assert_subscribed_without_delegation_record,
     assert_subscribed_without_loaderv3_program_data_account,
     remote_account_provider::program_account::RemoteProgramLoader,
-    testing::{init_logger, utils::random_pubkey},
+    testing::{
+        init_logger,
+        utils::random_pubkey,
+    },
     AccountFetchOrigin,
 };
 use solana_loader_v4_interface::state::LoaderV4Status;
@@ -16,7 +19,6 @@ use test_chainlink::{
     ixtest_context::IxtestContext,
     logging::{stringify_maybe_pubkeys, stringify_pubkeys},
     programs::MEMOV2,
-    sleep_ms,
 };
 use tokio::task;
 use tracing::*;
@@ -207,12 +209,7 @@ async fn ixtest_accounts_for_tx_2_delegated_3_readonly_3_programs_one_native() {
     // After we add the account to chain and run the same request again it will
     // return all accounts
     {
-        ctx.rpc_client
-            .request_airdrop(&new_pubkey, 1_000_000_000)
-            .await
-            .unwrap();
-
-        sleep_ms(500).await;
+        ctx.add_account(&new_pubkey, 1).await;
 
         let (fetched_pubkeys, fetched_strs) = {
             let fetched_accounts = ctx
