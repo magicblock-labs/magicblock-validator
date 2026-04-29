@@ -189,13 +189,16 @@ pub struct ExternalUndelegateArgs {
 )]
 pub struct CdpValidityProof(pub Option<[u8; 128]>);
 
-impl From<CdpValidityProof> for ValidityProof {
-    fn from(cdp_validity_proof: CdpValidityProof) -> Self {
-        Self(
-            cdp_validity_proof
-                .0
-                .and_then(|bytes| CompressedProof::try_from(&bytes[..]).ok()),
-        )
+impl TryFrom<CdpValidityProof> for ValidityProof {
+    type Error = light_compressed_account::CompressedAccountError;
+    fn try_from(
+        cdp_validity_proof: CdpValidityProof,
+    ) -> Result<Self, Self::Error> {
+        let Some(bytes) = cdp_validity_proof.0 else {
+            return Ok(Self(None));
+        };
+        let proof = CompressedProof::try_from(&bytes[..])?;
+        Ok(Self(Some(proof)))
     }
 }
 
