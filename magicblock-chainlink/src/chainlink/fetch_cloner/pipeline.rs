@@ -339,7 +339,9 @@ where
             companion_account: delegation_record,
         } in accounts_fully_resolved.into_iter()
         {
-            record_subs.push(delegation_record_pubkey);
+            if !existing_subs.contains(&delegation_record_pubkey) {
+                record_subs.push(delegation_record_pubkey);
+            }
 
             // If the account is delegated we set the owner and delegation state
             let (commit_frequency_ms, delegated_to_other, delegation_actions) =
