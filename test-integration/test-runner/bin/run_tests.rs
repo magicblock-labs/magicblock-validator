@@ -396,6 +396,7 @@ fn run_schedule_commit_tests(
                     cleanup_validators(
                         &mut ephem_validator,
                         &mut devnet_validator,
+                        true,
                     );
                     return Err(err.into());
                 }
@@ -412,12 +413,13 @@ fn run_schedule_commit_tests(
                     cleanup_validators(
                         &mut ephem_validator,
                         &mut devnet_validator,
+                        true,
                     );
                     return Err(err.into());
                 }
             };
 
-        cleanup_validators(&mut ephem_validator, &mut devnet_validator);
+        cleanup_validators(&mut ephem_validator, &mut devnet_validator, true);
         Ok((test_security_output, test_scenarios_output))
     } else {
         let devnet_validator =
@@ -498,11 +500,15 @@ fn run_cloning_tests(
             Ok(output) => output,
             Err(err) => {
                 eprintln!("Failed to run cloning tests: {:?}", err);
-                cleanup_validators(&mut ephem_validator, &mut devnet_validator);
+                cleanup_validators(
+                    &mut ephem_validator,
+                    &mut devnet_validator,
+                    false,
+                );
                 return Err(err.into());
             }
         };
-        cleanup_validators(&mut ephem_validator, &mut devnet_validator);
+        cleanup_validators(&mut ephem_validator, &mut devnet_validator, false);
         Ok(output)
     } else {
         let devnet_validator =
@@ -555,11 +561,15 @@ fn run_magicblock_api_tests(
 
         let output = run_test(test_dir, Default::default()).map_err(|err| {
             eprintln!("Failed to magicblock api tests: {:?}", err);
-            cleanup_validators(&mut ephem_validator, &mut devnet_validator);
+            cleanup_validators(
+                &mut ephem_validator,
+                &mut devnet_validator,
+                false,
+            );
             err
         })?;
 
-        cleanup_validators(&mut ephem_validator, &mut devnet_validator);
+        cleanup_validators(&mut ephem_validator, &mut devnet_validator, false);
         Ok(output)
     } else {
         let devnet_validator =
@@ -614,11 +624,15 @@ fn run_magicblock_pubsub_tests(
 
         let output = run_test(test_dir, Default::default()).map_err(|err| {
             eprintln!("Failed to magicblock pubsub tests: {:?}", err);
-            cleanup_validators(&mut ephem_validator, &mut devnet_validator);
+            cleanup_validators(
+                &mut ephem_validator,
+                &mut devnet_validator,
+                false,
+            );
             err
         })?;
 
-        cleanup_validators(&mut ephem_validator, &mut devnet_validator);
+        cleanup_validators(&mut ephem_validator, &mut devnet_validator, false);
         Ok(output)
     } else {
         let devnet_validator =
@@ -731,11 +745,15 @@ fn run_schedule_intents_tests(
             Ok(output) => output,
             Err(err) => {
                 eprintln!("Failed to run issues: {:?}", err);
-                cleanup_validators(&mut ephem_validator, &mut devnet_validator);
+                cleanup_validators(
+                    &mut ephem_validator,
+                    &mut devnet_validator,
+                    false,
+                );
                 return Err(err.into());
             }
         };
-        cleanup_validators(&mut ephem_validator, &mut devnet_validator);
+        cleanup_validators(&mut ephem_validator, &mut devnet_validator, false);
         Ok(test_output)
     } else {
         let devnet_validator =
