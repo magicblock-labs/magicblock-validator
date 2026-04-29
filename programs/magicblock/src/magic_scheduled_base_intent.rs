@@ -432,6 +432,12 @@ impl MagicIntentBundle {
         if let Some(ref cau) = self.commit_and_undelegate {
             fee += cau.calculate_fee(commit_nonces)?;
         }
+        if let Some(ref commit) = self.commit_finalize_compressed {
+            fee += commit.calculate_fee(commit_nonces)?;
+        }
+        if let Some(ref cau) = self.commit_finalize_compressed_and_undelegate {
+            fee += cau.calculate_fee(commit_nonces)?;
+        }
         fee += calculate_actions_fee(&self.standalone_actions);
         Ok(fee)
     }
