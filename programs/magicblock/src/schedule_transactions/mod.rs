@@ -242,7 +242,7 @@ pub(crate) fn validate_callback_accounts(
                 err_prefix,
                 pubkey,
             );
-            return Err(InstructionError::MissingRequiredSignature);
+            return Err(InstructionError::IncorrectAuthority);
         }
 
         if pubkey == &validator_authority_id() {
