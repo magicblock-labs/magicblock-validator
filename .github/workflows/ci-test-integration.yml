@@ -39,6 +39,8 @@ jobs:
   run_integration_tests:
     needs: build
     runs-on: ubuntu-latest-m
+    env:
+      NEEDS_COMPRESSION_TOOLS: ${{ contains(fromJSON('["schedulecommit","chainlink","table_mania","committor"]'), matrix.batch_tests) }}
     strategy:
       matrix:
         batch_tests:
@@ -71,20 +73,20 @@ jobs:
       - uses: ./magicblock-validator/.github/actions/setup-solana
 
       - name: Install Photon indexer
-        if: contains(fromJSON('["schedulecommit","chainlink","table_mania","committor"]'), matrix.batch_tests)
+        if: env.NEEDS_COMPRESSION_TOOLS == 'true'
         shell: bash
         env:
           RUSTFLAGS: "-A dead-code"
         run: cargo install --git https://github.com/lightprotocol/photon.git --rev 3f82b926be6717a07bd41aedb84b4d9e6b0ab0d3 --locked --force
 
       - name: Setup Node.js
-        if: contains(fromJSON('["schedulecommit","chainlink","table_mania","committor"]'), matrix.batch_tests)
+        if: env.NEEDS_COMPRESSION_TOOLS == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: "20"
 
       - name: Install zk-compression CLI
-        if: contains(fromJSON('["schedulecommit","chainlink","table_mania","committor"]'), matrix.batch_tests)
+        if: env.NEEDS_COMPRESSION_TOOLS == 'true'
         run: |
           npm i -g @lightprotocol/zk-compression-cli@0.28.4
         shell: bash
