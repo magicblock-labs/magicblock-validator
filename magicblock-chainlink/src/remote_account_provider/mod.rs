@@ -1144,6 +1144,10 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
                         compressed_found_count += fc;
                         compressed_not_found_count += nfc;
                     }
+                    Err(ChainlinkError::CompressionNotEnabled) => {
+                        // Not an error, just skip
+                        continue;
+                    }
                     Err(err) => {
                         error!("Failed to fetch accounts: {err:?}");
                     }
