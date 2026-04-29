@@ -42,6 +42,7 @@ pub const DEFAULT_COMPUTE_UNITS: u64 = 150;
 /// by compressed commits.
 #[allow(dead_code)]
 #[derive(Deserialize)]
+#[cfg_attr(test, derive(serde::Serialize))]
 enum LegacyMagicBlockInstruction {
     ModifyAccounts {
         accounts: HashMap<Pubkey, AccountModificationForInstruction>,
@@ -63,6 +64,7 @@ enum LegacyMagicBlockInstruction {
 }
 
 #[derive(Deserialize)]
+#[cfg_attr(test, derive(serde::Serialize))]
 enum LegacyMagicBaseIntentArgs {
     BaseActions(Vec<BaseActionArgs>),
     Commit(CommitTypeArgs),
@@ -96,6 +98,7 @@ impl From<LegacyMagicBaseIntentArgs> for MagicIntentBundleArgs {
 }
 
 #[derive(Deserialize)]
+#[cfg_attr(test, derive(serde::Serialize))]
 struct LegacyMagicIntentBundleArgs {
     commit: Option<CommitTypeArgs>,
     commit_and_undelegate: Option<CommitAndUndelegateArgs>,
@@ -377,11 +380,217 @@ declare_process_instruction!(
 
 #[cfg(test)]
 mod test {
-    use magicblock_magic_program_api::args::ScheduleTaskArgs;
+    use std::cell::RefCell;
+
+    use magicblock_magic_program_api::args::{
+        CommitAndUndelegateArgs, CommitTypeArgs, MagicBaseIntentArgs,
+        MagicIntentBundleArgs, ScheduleTaskArgs, UndelegateTypeArgs,
+    };
     use solana_instruction::AccountMeta;
-    use solana_program_runtime::invoke_context::mock_process_instruction;
+    use solana_program_runtime::{
+        declare_process_instruction, invoke_context::mock_process_instruction,
+    };
 
     use super::*;
+
+    thread_local! {
+        static EXPECTED_INSTRUCTION: RefCell<Option<MagicBlockInstruction>> =
+            const { RefCell::new(None) };
+    }
+
+    declare_process_instruction!(
+        DecodeOnlyEntrypoint,
+        DEFAULT_COMPUTE_UNITS,
+        |invoke_context| {
+            let decoded = deserialize_instruction(invoke_context)?;
+            EXPECTED_INSTRUCTION.with(|expected| {
+                assert_eq!(
+                    decoded,
+                    expected.borrow().as_ref().unwrap().clone()
+                );
+            });
+            Ok(())
+        }
+    );
+
+    fn assert_deserialize_instruction_decodes(
+        instruction_data: &[u8],
+        expected_instruction: MagicBlockInstruction,
+    ) {
+        EXPECTED_INSTRUCTION.with(|expected| {
+            *expected.borrow_mut() = Some(expected_instruction);
+        });
+
+        mock_process_instruction(
+            &crate::id(),
+            None,
+            instruction_data,
+            Vec::new(),
+            vec![AccountMeta::new_readonly(crate::id(), false)],
+            Ok(()),
+            DecodeOnlyEntrypoint::vm,
+            |_invoke_context| {},
+            |_invoke_context| {},
+        );
+
+        EXPECTED_INSTRUCTION.with(|expected| {
+            assert!(expected.borrow_mut().take().is_some());
+        });
+    }
+
+    fn standalone_commit(accounts: &[u8]) -> CommitTypeArgs {
+        CommitTypeArgs::Standalone(accounts.to_vec())
+    }
+
+    fn standalone_commit_and_undelegate(
+        accounts: &[u8],
+    ) -> CommitAndUndelegateArgs {
+        CommitAndUndelegateArgs {
+            commit_type: standalone_commit(accounts),
+            undelegate_type: UndelegateTypeArgs::Standalone,
+        }
+    }
+
+    fn legacy_base_intent_payload() -> Vec<u8> {
+        bincode::serialize(&LegacyMagicBlockInstruction::ScheduleBaseIntent(
+            LegacyMagicBaseIntentArgs::Commit(standalone_commit(&[2, 3])),
+        ))
+        .unwrap()
+    }
+
+    fn expected_legacy_base_intent_instruction() -> MagicBlockInstruction {
+        MagicBlockInstruction::ScheduleIntentBundle(MagicIntentBundleArgs {
+            commit: Some(standalone_commit(&[2, 3])),
+            ..MagicIntentBundleArgs::default()
+        })
+    }
+
+    fn legacy_intent_bundle_payload() -> Vec<u8> {
+        bincode::serialize(&LegacyMagicBlockInstruction::ScheduleIntentBundle(
+            LegacyMagicIntentBundleArgs {
+                commit: Some(standalone_commit(&[4])),
+                commit_and_undelegate: None,
+                commit_finalize: None,
+                commit_finalize_and_undelegate: Some(
+                    standalone_commit_and_undelegate(&[5]),
+                ),
+                standalone_actions: vec![],
+            },
+        ))
+        .unwrap()
+    }
+
+    fn expected_legacy_intent_bundle_instruction() -> MagicBlockInstruction {
+        MagicBlockInstruction::ScheduleIntentBundle(MagicIntentBundleArgs {
+            commit: Some(standalone_commit(&[4])),
+            commit_finalize_and_undelegate: Some(
+                standalone_commit_and_undelegate(&[5]),
+            ),
+            ..MagicIntentBundleArgs::default()
+        })
+    }
+
+    fn commit_finalize_instruction(
+        compressed: bool,
+        request_undelegation: bool,
+    ) -> MagicBlockInstruction {
+        match (compressed, request_undelegation) {
+            (false, false) => MagicBlockInstruction::ScheduleCommitFinalize {
+                request_undelegation: false,
+            },
+            (false, true) => MagicBlockInstruction::ScheduleCommitFinalize {
+                request_undelegation: true,
+            },
+            (true, false) => MagicBlockInstruction::ScheduleCommitCompressed,
+            (true, true) => {
+                MagicBlockInstruction::ScheduleCommitAndUndelegateCompressed
+            }
+        }
+    }
+
+    #[test]
+    fn deserialize_instruction_decodes_current_format() {
+        let expected = MagicBlockInstruction::ScheduleIntentBundle(
+            MagicIntentBundleArgs {
+                commit_finalize_compressed: Some(standalone_commit(&[1, 2])),
+                ..MagicIntentBundleArgs::default()
+            },
+        );
+        let data = bincode::serialize(&expected).unwrap();
+
+        assert_deserialize_instruction_decodes(&data, expected);
+    }
+
+    #[test]
+    fn deserialize_legacy_schedule_base_intent_remaps_to_intent_bundle() {
+        let decoded =
+            deserialize_legacy_instruction(&legacy_base_intent_payload())
+                .expect("legacy ScheduleBaseIntent should decode");
+
+        assert_eq!(decoded, expected_legacy_base_intent_instruction());
+    }
+
+    #[test]
+    fn deserialize_instruction_decodes_legacy_base_as_current_variant() {
+        assert_deserialize_instruction_decodes(
+            &legacy_base_intent_payload(),
+            MagicBlockInstruction::ScheduleBaseIntent(
+                MagicBaseIntentArgs::Commit(standalone_commit(&[2, 3])),
+            ),
+        );
+    }
+
+    #[test]
+    fn deserialize_legacy_schedule_intent_bundle_remaps_to_intent_bundle() {
+        let decoded =
+            deserialize_legacy_instruction(&legacy_intent_bundle_payload())
+                .expect("legacy ScheduleIntentBundle should decode");
+
+        assert_eq!(decoded, expected_legacy_intent_bundle_instruction());
+    }
+
+    #[test]
+    fn deserialize_instruction_falls_back_to_legacy_schedule_intent_bundle() {
+        assert_deserialize_instruction_decodes(
+            &legacy_intent_bundle_payload(),
+            expected_legacy_intent_bundle_instruction(),
+        );
+    }
+
+    #[test]
+    fn deserialize_instruction_decodes_commit_finalize_routing_matrix() {
+        for compressed in [false, true] {
+            for request_undelegation in [false, true] {
+                let expected = commit_finalize_instruction(
+                    compressed,
+                    request_undelegation,
+                );
+                let data = bincode::serialize(&expected).unwrap();
+
+                assert_deserialize_instruction_decodes(&data, expected);
+            }
+        }
+    }
+
+    #[test]
+    fn crank_entrypoint_decodes_execute_crank_before_account_validation() {
+        let data = bincode::serialize(&MagicBlockInstruction::ExecuteCrank {
+            instructions: vec![],
+        })
+        .unwrap();
+
+        mock_process_instruction(
+            &crate::CRANK_PROGRAM_ID,
+            None,
+            &data,
+            Vec::new(),
+            vec![AccountMeta::new_readonly(crate::CRANK_PROGRAM_ID, false)],
+            Err(InstructionError::MissingAccount),
+            CrankEntrypoint::vm,
+            |_invoke_context| {},
+            |_invoke_context| {},
+        );
+    }
 
     #[test]
     fn crank_entrypoint_rejects_non_execute_crank_instructions() {
