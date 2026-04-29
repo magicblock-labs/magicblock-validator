@@ -630,7 +630,7 @@ where
 }
 
 /// Computes the subscription cancellation strategy based on what accounts were resolved
-#[allow(unused_variables)] // Parameters used in cfg(test) block
+#[allow(unused_variables, clippy::too_many_arguments)] // Parameters used in cfg(test) block
 pub(crate) fn compute_cancel_strategy(
     pubkeys: &[Pubkey],
     accounts_to_clone: &[AccountCloneRequest],

@@ -177,8 +177,8 @@ pub(crate) async fn cancel_subs<
     };
     if tracing::enabled!(tracing::Level::TRACE) {
         let pubkeys_str = subs_to_cancel
-            .iter()
-            .map(|(p, _)| p.to_string())
+            .keys()
+            .map(|p| p.to_string())
             .collect::<Vec<_>>()
             .join(", ");
         trace!(pubkeys = %pubkeys_str, "Canceling subscriptions for");

@@ -87,6 +87,10 @@ use crate::{
 const ACTIVE_SUBSCRIPTIONS_UPDATE_INTERVAL_MS: u64 = 60_000;
 pub(crate) const DEFAULT_SUBSCRIPTION_RETRIES: usize = 5;
 
+fn install_default_rustls_crypto_provider() {
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+}
+
 // Maps pubkey -> (fetch_start_slot, requests_waiting)
 type FetchResult = Result<RemoteAccount, RemoteAccountProviderError>;
 type FetchingAccounts =
@@ -291,6 +295,8 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
         lrucache_subscribed_accounts: Arc<AccountsLruCache>,
         chain_slot: ChainSlot,
     ) -> RemoteAccountProviderResult<Self> {
+        install_default_rustls_crypto_provider();
+
         let (removed_account_tx, removed_account_rx) =
             tokio::sync::mpsc::channel(100);
 
@@ -352,6 +358,8 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
             PhotonClientImpl,
         >,
     > {
+        install_default_rustls_crypto_provider();
+
         if endpoints.is_empty() {
             return Err(
                 RemoteAccountProviderError::AccountSubscriptionsTaskFailed(
