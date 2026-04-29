@@ -500,12 +500,19 @@ impl TaskInfoFetcher for RpcTaskInfoFetcher {
         }
         .into();
 
+        let compressed_delegation_record_bytes = compressed_delegation_record
+            .data
+            .ok_or(TaskInfoFetcherError::MissingCompressedData)?
+            .data;
+        CompressedDelegationRecord::try_from_slice(
+            &compressed_delegation_record_bytes,
+        )
+        .map_err(|_| TaskInfoFetcherError::InvalidAccountDataError(*pubkey))?;
+
         Ok(CompressedData {
             hash: compressed_delegation_record.hash,
-            compressed_delegation_record_bytes: compressed_delegation_record
-                .data
-                .ok_or(TaskInfoFetcherError::MissingCompressedData)?
-                .data,
+            compressed_delegation_record_bytes:
+                compressed_delegation_record_bytes,
             remaining_accounts: remaining_accounts
                 .to_account_metas()
                 .0
