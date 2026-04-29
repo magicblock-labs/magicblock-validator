@@ -1377,6 +1377,69 @@ async fn test_post_undelegation_plain_refresh_clears_photon_merge_marker() {
 }
 
 #[tokio::test]
+async fn test_empty_compressed_subscription_update_skips_when_refetch_cannot_decompress(
+) {
+    init_logger();
+    let validator_keypair = Keypair::new();
+    let account_owner = random_pubkey();
+    const CURRENT_SLOT: u64 = 100;
+
+    let account_pubkey = random_pubkey();
+    let bank_account = Account {
+        lamports: 1_000_000,
+        data: vec![1, 2, 3, 4],
+        owner: account_owner,
+        executable: false,
+        rent_epoch: 0,
+    };
+
+    let FetcherTestCtx {
+        accounts_bank,
+        fetch_cloner,
+        ..
+    } = setup(
+        [(account_pubkey, bank_account.clone())],
+        CURRENT_SLOT + 1,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+
+    let mut expected_bank_account = AccountSharedData::from(bank_account);
+    expected_bank_account.set_remote_slot(CURRENT_SLOT);
+    accounts_bank.insert(account_pubkey, expected_bank_account.clone());
+
+    use crate::remote_account_provider::{
+        RemoteAccount, RemoteAccountUpdateSource,
+    };
+    let empty_compressed_shell = Account {
+        lamports: 0,
+        data: vec![],
+        owner: compressed_delegation_client::ID,
+        executable: false,
+        rent_epoch: 0,
+    };
+    fetch_cloner
+        .process_subscription_update(
+            account_pubkey,
+            ForwardedSubscriptionUpdate {
+                pubkey: account_pubkey,
+                account: RemoteAccount::from_fresh_account(
+                    empty_compressed_shell,
+                    CURRENT_SLOT + 1,
+                    RemoteAccountUpdateSource::Compressed,
+                ),
+            },
+        )
+        .await;
+
+    assert_eq!(
+        accounts_bank.get_account(&account_pubkey),
+        Some(expected_bank_account),
+        "empty compressed shell should be skipped when refetch cannot decompress"
+    );
+}
+
+#[tokio::test]
 async fn test_delegated_authoritative_skip_unsubscribes_subscription() {
     init_logger();
     let validator_keypair = Keypair::new();

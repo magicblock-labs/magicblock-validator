@@ -901,18 +901,19 @@ where
         &self,
         pubkey: Pubkey,
         account: AccountSharedData,
-    ) -> (AccountSharedData, Option<u64>) {
+    ) -> Option<(AccountSharedData, Option<u64>)> {
         let min_slot = account.remote_slot();
         if let Some((out, delegation_slot)) =
             compression::try_decompress_compressed_delegation(
                 self, &account, min_slot,
             )
         {
-            return (out, Some(delegation_slot));
+            return Some((out, Some(delegation_slot)));
         }
         if !account.data().is_empty() {
-            return (account, None);
+            return Some((account, None));
         }
+        let skip_on_failed_refetch = account.compressed();
         if let Ok(fetched) = self
             .remote_account_provider
             .try_get_multi(
@@ -933,14 +934,18 @@ where
                             min_slot.max(fresh.remote_slot()),
                         )
                     {
-                        return (out, Some(delegation_slot));
+                        return Some((out, Some(delegation_slot)));
                     }
                 }
             }
         } else {
             warn!(pubkey = %pubkey, "Refetch for compressed subscription account failed");
         }
-        (account, None)
+        if skip_on_failed_refetch {
+            None
+        } else {
+            Some((account, None))
+        }
     }
 
     // Fourth return value: `CompressedDelegationRecord::delegation_slot` for compressed (no DLP)
@@ -1109,9 +1114,12 @@ where
                     }
                 }
             } else {
-                let (account, compressed_delegation_slot) = self
+                let Some((account, compressed_delegation_slot)) = self
                     .decompress_or_refetch_compressed_account(pubkey, account)
-                    .await;
+                    .await
+                else {
+                    return (None, None, DelegationActions::default(), None);
+                };
                 let (account, deleg_record) = self
                     .maybe_project_ata_from_subscription_update(pubkey, account)
                     .await;
