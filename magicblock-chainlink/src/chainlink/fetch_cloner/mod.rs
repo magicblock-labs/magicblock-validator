@@ -1863,6 +1863,19 @@ where
                             pending.remove(*pubkey);
                         }
                     }
+                    // Subscription updates resolve delegated accounts by fetching the account
+                    // with its delegation record. While that provider fetch is in flight, the
+                    // bank can still hold the older undelegated view; do not short-circuit.
+                    let delegation_record_pubkey =
+                        delegation_record_pda_from_delegated_account(pubkey);
+                    let pending_delegation_update = self.is_watching(pubkey)
+                        && !account_in_bank.delegated()
+                        && !account_in_bank.compressed()
+                        && (self.remote_account_provider.is_pending(pubkey)
+                            || self
+                                .remote_account_provider
+                                .is_pending(&delegation_record_pubkey));
+
                     // After undelegation the bank can hold a plain (non-compressed) undelegated
                     // view while a newer compressed redelegation exists only in Photon. If we
                     // short-circuited here, we would never run RPC+Photon merge and would miss
@@ -1876,7 +1889,12 @@ where
                     } && self.is_watching(pubkey)
                         && !account_in_bank.delegated()
                         && !account_in_bank.compressed();
-                    if may_have_newer_photon {
+                    if pending_delegation_update {
+                        debug!(
+                            pubkey = %pubkey,
+                            "Account has pending delegation update; not treating bank entry as fetch-complete"
+                        );
+                    } else if may_have_newer_photon {
                         debug!(
                             pubkey = %pubkey,
                             "Post-undelegation, non-delegated, non-compressed in bank; refetching to merge possible Photon state"
