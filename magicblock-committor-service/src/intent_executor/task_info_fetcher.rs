@@ -245,6 +245,9 @@ impl RpcTaskInfoFetcher {
                 TaskInfoFetcherError::LightSdkError(_) => {
                     break Err(err);
                 }
+                TaskInfoFetcherError::PhotonItemsMismatch(_, _) => {
+                    break Err(err);
+                }
             }
 
             if i >= max_retries.get() {
@@ -344,6 +347,14 @@ impl TaskInfoFetcher for RpcTaskInfoFetcher {
                 .await?
                 .value
                 .items;
+
+            if items.len() != pubkeys.len() {
+                return Err(TaskInfoFetcherError::PhotonItemsMismatch(
+                    items.len(),
+                    pubkeys.len(),
+                ));
+            }
+
             let mut result = HashMap::with_capacity(pubkeys.len());
             for (pubkey, compressed_account) in pubkeys.iter().zip(items) {
                 let nonce = compressed_account
@@ -398,6 +409,14 @@ impl TaskInfoFetcher for RpcTaskInfoFetcher {
                 .await?
                 .value
                 .items;
+
+            if items.len() != pubkeys.len() {
+                return Err(TaskInfoFetcherError::PhotonItemsMismatch(
+                    items.len(),
+                    pubkeys.len(),
+                ));
+            }
+
             let mut result = HashMap::with_capacity(pubkeys.len());
             for (pubkey, compressed_account) in pubkeys.iter().zip(items) {
                 let nonce = compressed_account
@@ -519,8 +538,7 @@ impl TaskInfoFetcher for RpcTaskInfoFetcher {
 
         Ok(CompressedData {
             hash: compressed_delegation_record.hash,
-            compressed_delegation_record_bytes:
-                compressed_delegation_record_bytes,
+            compressed_delegation_record_bytes,
             remaining_accounts: remaining_accounts
                 .to_account_metas()
                 .0
@@ -924,6 +942,8 @@ pub enum TaskInfoFetcherError {
     MissingCompressedData,
     #[error("LightSdkError: {0}")]
     LightSdkError(Box<light_sdk::error::LightSdkError>),
+    #[error("Photon returned {0} items for {1} pubkeys")]
+    PhotonItemsMismatch(usize, usize),
 }
 
 impl TaskInfoFetcherError {
@@ -982,6 +1002,7 @@ impl TaskInfoFetcherError {
             Self::MissingStateTrees => None,
             Self::MissingAddress => None,
             Self::MissingCompressedData => None,
+            Self::PhotonItemsMismatch(_, _) => None,
         }
     }
 }
