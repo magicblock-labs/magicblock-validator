@@ -205,12 +205,7 @@ mod tests {
         let (tx, ix) = outer_accounts(validator, CALLBACK_SIGNER);
         let rogue = Pubkey::new_unique();
         let data = make_data(vec![AccountMeta::new_readonly(rogue, true)]);
-        run(
-            &data,
-            tx,
-            ix,
-            Err(InstructionError::MissingRequiredSignature),
-        );
+        run(&data, tx, ix, Err(InstructionError::IncorrectAuthority));
     }
 
     #[test]
