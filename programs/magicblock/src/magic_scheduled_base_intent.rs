@@ -713,10 +713,10 @@ impl MagicIntentBundle {
         self.has_committed_accounts()
             && (self.commit_finalize_compressed_and_undelegate.is_some()
                 || self.commit_finalize_compressed.is_some())
-            && !self.commit_finalize_and_undelegate.is_some()
-            && !self.commit_finalize.is_some()
-            && !self.commit_and_undelegate.is_some()
-            && !self.commit.is_some()
+            && self.commit_finalize_and_undelegate.is_none()
+            && self.commit_finalize.is_none()
+            && self.commit_and_undelegate.is_none()
+            && self.commit.is_none()
     }
 }
 
