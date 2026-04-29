@@ -29,7 +29,6 @@ impl PhotonClientImpl {
         Self(photon_indexer)
     }
     pub fn new_from_url(url: String) -> Self {
-        debug!(url = %url, "Creating PhotonClient");
         Self::new(Arc::new(PhotonIndexer::new(url)))
     }
 }
