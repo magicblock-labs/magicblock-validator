@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use magicblock_magic_program_api::{
     args::{
         BaseActionArgs, CommitAndUndelegateArgs, CommitTypeArgs,
@@ -9,7 +11,6 @@ use serde::Deserialize;
 use solana_instruction::error::InstructionError;
 use solana_program_runtime::declare_process_instruction;
 use solana_pubkey::Pubkey;
-use std::collections::HashMap;
 
 use crate::{
     clone_account::{
