@@ -156,7 +156,7 @@ fn run_restore_ledger_tests(
     } else {
         let devnet_validator =
             config.setup_devnet(TEST_NAME).then(start_devnet_validator);
-        wait_for_ctrlc(devnet_validator, None, success_output())
+        wait_for_ctrlc(devnet_validator, None, false, success_output())
     }
 }
 
@@ -220,7 +220,7 @@ fn run_chainlink_tests(
     } else {
         let devnet_validator =
             config.setup_devnet(TEST_NAME).then(start_devnet_validator);
-        wait_for_ctrlc(devnet_validator, None, success_output())
+        wait_for_ctrlc(devnet_validator, None, true, success_output())
     }
 }
 
@@ -330,7 +330,12 @@ fn run_table_mania_and_committor_tests(
             || config.setup_devnet(COMMITTOR_TEST);
         let devnet_validator = setup_needed.then(start_devnet_validator);
         Ok((
-            wait_for_ctrlc(devnet_validator, None, success_output())?,
+            wait_for_ctrlc(
+                devnet_validator,
+                None,
+                uses_light_validator,
+                success_output(),
+            )?,
             success_output(),
         ))
     }
@@ -427,7 +432,12 @@ fn run_schedule_commit_tests(
         let ephem_validator =
             config.setup_ephem(TEST_NAME).then(start_ephem_validator);
         eprintln!("Setup validator(s)");
-        wait_for_ctrlc(devnet_validator, ephem_validator, success_output())?;
+        wait_for_ctrlc(
+            devnet_validator,
+            ephem_validator,
+            true,
+            success_output(),
+        )?;
         Ok((success_output(), success_output()))
     }
 }
@@ -515,7 +525,12 @@ fn run_cloning_tests(
             config.setup_devnet(TEST_NAME).then(start_devnet_validator);
         let ephem_validator =
             config.setup_ephem(TEST_NAME).then(start_ephem_validator);
-        wait_for_ctrlc(devnet_validator, ephem_validator, success_output())
+        wait_for_ctrlc(
+            devnet_validator,
+            ephem_validator,
+            false,
+            success_output(),
+        )
     }
 }
 
@@ -576,7 +591,12 @@ fn run_magicblock_api_tests(
             config.setup_devnet(TEST_NAME).then(start_devnet_validator);
         let ephem_validator =
             config.setup_ephem(TEST_NAME).then(start_ephem_validator);
-        wait_for_ctrlc(devnet_validator, ephem_validator, success_output())
+        wait_for_ctrlc(
+            devnet_validator,
+            ephem_validator,
+            false,
+            success_output(),
+        )
     }
 }
 
@@ -639,7 +659,12 @@ fn run_magicblock_pubsub_tests(
             config.setup_devnet(TEST_NAME).then(start_devnet_validator);
         let ephem_validator =
             config.setup_ephem(TEST_NAME).then(start_ephem_validator);
-        wait_for_ctrlc(devnet_validator, ephem_validator, success_output())
+        wait_for_ctrlc(
+            devnet_validator,
+            ephem_validator,
+            false,
+            success_output(),
+        )
     }
 }
 
@@ -686,7 +711,7 @@ fn run_config_tests(
     } else {
         let devnet_validator =
             config.setup_devnet(TEST_NAME).then(start_devnet_validator);
-        wait_for_ctrlc(devnet_validator, None, success_output())
+        wait_for_ctrlc(devnet_validator, None, false, success_output())
     }
 }
 
@@ -760,7 +785,12 @@ fn run_schedule_intents_tests(
             config.setup_devnet(TEST_NAME).then(start_devnet_validator);
         let ephem_validator =
             config.setup_ephem(TEST_NAME).then(start_ephem_validator);
-        wait_for_ctrlc(devnet_validator, ephem_validator, success_output())
+        wait_for_ctrlc(
+            devnet_validator,
+            ephem_validator,
+            false,
+            success_output(),
+        )
     }
 }
 
@@ -809,7 +839,7 @@ fn run_task_scheduler_tests(
     } else {
         let devnet_validator =
             config.setup_devnet(TEST_NAME).then(start_devnet_validator);
-        wait_for_ctrlc(devnet_validator, None, success_output())
+        wait_for_ctrlc(devnet_validator, None, false, success_output())
     }
 }
 
