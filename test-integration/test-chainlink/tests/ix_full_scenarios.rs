@@ -4,10 +4,7 @@ use magicblock_chainlink::{
     assert_not_subscribed, assert_subscribed_without_delegation_record,
     assert_subscribed_without_loaderv3_program_data_account,
     remote_account_provider::program_account::RemoteProgramLoader,
-    testing::{
-        init_logger,
-        utils::random_pubkey,
-    },
+    testing::{init_logger, utils::random_pubkey},
     AccountFetchOrigin,
 };
 use solana_loader_v4_interface::state::LoaderV4Status;
