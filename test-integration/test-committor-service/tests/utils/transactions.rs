@@ -417,17 +417,17 @@ pub async fn init_and_delegate_compressed_record_on_chain(
     const MAX_RETRIES: usize = 10;
     let mut retries = MAX_RETRIES;
     let compressed_delegation_record = loop {
-        let compressed_account = photon_indexer
+        let maybe_record = photon_indexer
             .get_compressed_account(address, None)
             .await
             .unwrap()
             .value
-            .unwrap();
-        if let Some(compressed_delegation_record) =
-            compressed_account.data.and_then(|data| {
-                CompressedDelegationRecord::try_from_slice(&data.data).ok()
-            })
-        {
+            .and_then(|compressed_account| {
+                compressed_account.data.and_then(|data| {
+                    CompressedDelegationRecord::try_from_slice(&data.data).ok()
+                })
+            });
+        if let Some(compressed_delegation_record) = maybe_record {
             break compressed_delegation_record;
         }
         retries -= 1;
