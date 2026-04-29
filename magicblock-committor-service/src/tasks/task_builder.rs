@@ -297,10 +297,8 @@ impl TasksBuilder for TaskBuilderImpl {
                 tracing::warn!(intent_id = intent_bundle.id, error = ?err, "Failed to fetch base accounts, falling back to CommitState");
                 Default::default()
             });
-        let compressed_data = compressed_data.unwrap_or_else(|err| {
-            tracing::warn!(intent_id = intent_bundle.id, error = ?err, "Failed to fetch compressed data, falling back to empty compressed data");
-            Default::default()
-        });
+        let compressed_data =
+            compressed_data.map_err(TaskBuilderError::CommitTasksBuildError)?;
 
         // Persist commit ids for commitees
         commit_ids
@@ -312,8 +310,10 @@ impl TasksBuilder for TaskBuilderImpl {
             });
 
         // Create commit tasks
-        let commit_tasks_iter = flagged_accounts.into_iter().filter_map(
-            |(allow_undelegation, finalize, compressed, account)| {
+        let commit_tasks = flagged_accounts
+                    .into_iter()
+                    .map(
+                        |(allow_undelegation, finalize, compressed, account)| -> TaskBuilderResult<BaseTaskImpl> {
                 let commit_id = commit_ids
                     .get(&account.pubkey)
                     .copied()
@@ -327,19 +327,34 @@ impl TasksBuilder for TaskBuilderImpl {
                 let base_account = base_accounts.remove(&account.pubkey);
 
                 if compressed {
-                    let Some(compressed_data) = compressed_data.get(&account.pubkey).cloned() else {
-                        error!(pubkey = %account.pubkey, "Compressed data absent for pubkey");
-                        return None;
-                    };
-                    Some(Self::create_commit_finalize_compressed_task(commit_id, allow_undelegation, account.clone(), compressed_data).into())
+                    let compressed_data = compressed_data
+                        .get(&account.pubkey)
+                        .cloned()
+                        .ok_or_else(|| {
+                            TaskBuilderError::CommitFinalizeCompressedTasksBuildError(
+                                std::io::Error::new(
+                                    std::io::ErrorKind::NotFound,
+                                    format!(
+                                        "compressed data absent for pubkey {}",
+                                        account.pubkey
+                                    ),
+                                ),
+                            )
+                        })?;
+                    Ok(Self::create_commit_finalize_compressed_task(
+                        commit_id,
+                        allow_undelegation,
+                        account.clone(),
+                        compressed_data,
+                    ).into())
                 } else if finalize {
-                    Some(Self::create_commit_finalize_task(commit_id, allow_undelegation, account.clone(), base_account).into())
+                    Ok(Self::create_commit_finalize_task(commit_id, allow_undelegation, account.clone(), base_account).into())
                 } else {
-                    Some(Self::create_commit_task(commit_id, allow_undelegation, account.clone(), base_account).into())
+                    Ok(Self::create_commit_task(commit_id, allow_undelegation, account.clone(), base_account).into())
                 }
             },
-        );
-        tasks.extend(commit_tasks_iter);
+        ).collect::<TaskBuilderResult<Vec<_>>>()?;
+        tasks.extend(commit_tasks);
         Ok(tasks)
     }
 
