@@ -734,7 +734,7 @@ fn process_schedule_commit_compressed(
         AccountMeta::new(*payer.key, true),
         AccountMeta::new(*magic_context.key, false),
         AccountMeta::new(*counter.key, false),
-        AccountMeta::new(*magic_program.key, false),
+        AccountMeta::new_readonly(*magic_program.key, false),
     ];
 
     let account_refs = vec![
