@@ -257,7 +257,7 @@ impl ScheduleCommitType {
             }
             ScheduleCommitType::CommitFinalizeCompressed => {
                 let ix = Instruction::new_with_bincode(
-                    magicblock_magic_program_api::ID,
+                    *magic_program.key,
                     &magicblock_magic_program_api::instruction::MagicBlockInstruction::ScheduleCommitCompressed,
                     [vec![
                         AccountMeta {
@@ -283,7 +283,7 @@ impl ScheduleCommitType {
             }
             ScheduleCommitType::CommitFinalizeCompressedAndUndelegate => {
                 let ix = Instruction::new_with_bincode(
-                    magicblock_magic_program_api::ID,
+                    *magic_program.key,
                     &magicblock_magic_program_api::instruction::MagicBlockInstruction::ScheduleCommitAndUndelegateCompressed,
                     [vec![
                         AccountMeta {
