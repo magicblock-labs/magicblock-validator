@@ -53,12 +53,8 @@ where
         .collect::<HashSet<_>>();
     let existing_requested_subs =
         pubkeys.iter().filter(|x| this.is_watching(x)).copied();
-    // A watched companion account only represents a pre-existing subscription if
-    // it is already materialized locally; otherwise it may be a transient fetch.
     let existing_delegation_record_subs =
-        delegation_records.iter().filter(|x| {
-            this.is_watching(x) && this.accounts_bank.get_account(x).is_some()
-        });
+        delegation_records.iter().filter(|x| this.is_watching(x));
     let existing_program_data_subs = program_data_accounts
         .iter()
         .filter(|x| this.is_watching(x))
