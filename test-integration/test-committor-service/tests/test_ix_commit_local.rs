@@ -1155,7 +1155,7 @@ async fn ix_commit_local(
 
     let rpc_client = RpcClient::new("http://localhost:7799".to_string());
     let photon_indexer =
-        PhotonIndexer::new("http://localhost:7799".to_string());
+        PhotonIndexer::new("http://localhost:8784".to_string());
     let mut strategies = ExpectedStrategies::new();
     for (execution_result, base_intent) in execution_outputs
         .into_iter()
