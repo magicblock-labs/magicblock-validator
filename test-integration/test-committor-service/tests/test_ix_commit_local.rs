@@ -4,7 +4,9 @@ use std::{
     time::{Duration, Instant},
 };
 
-use borsh::to_vec;
+use borsh::{to_vec, BorshDeserialize};
+use compressed_delegation_client::CompressedDelegationRecord;
+use light_client::indexer::{photon_indexer::PhotonIndexer, Indexer};
 use magicblock_committor_service::{
     config::ChainConfig,
     intent_executor::{error::IntentExecutorError, ExecutionOutput},
@@ -12,7 +14,9 @@ use magicblock_committor_service::{
     service_ext::{BaseIntentCommittorExt, CommittorServiceExt},
     BaseIntentCommittor, CommittorService, ComputeBudgetConfig,
 };
-use magicblock_core::intent::CommittedAccount;
+use magicblock_core::{
+    compression::derive_cda_from_pda, intent::CommittedAccount,
+};
 use magicblock_program::magic_scheduled_base_intent::{
     CommitAndUndelegate, CommitType, MagicBaseIntent, MagicIntentBundle,
     ScheduledIntentBundle, UndelegateType,
@@ -1150,6 +1154,8 @@ async fn ix_commit_local(
     service.release_common_pubkeys().await.unwrap();
 
     let rpc_client = RpcClient::new("http://localhost:7799".to_string());
+    let photon_indexer =
+        PhotonIndexer::new("http://localhost:7799".to_string());
     let mut strategies = ExpectedStrategies::new();
     for (execution_result, base_intent) in execution_outputs
         .into_iter()
@@ -1308,6 +1314,23 @@ async fn ix_commit_local(
                         )
                     }
                 );
+            } else {
+                let cda = derive_cda_from_pda(&account.pubkey);
+                let compressed_account = photon_indexer
+                    .get_compressed_account(cda.to_bytes(), None)
+                    .await
+                    .unwrap()
+                    .value
+                    .unwrap();
+                let compressed_record =
+                    CompressedDelegationRecord::try_from_slice(
+                        &compressed_account.data.unwrap().data,
+                    )
+                    .unwrap();
+                assert_eq!(compressed_record.owner, program_id);
+                assert_eq!(compressed_record.data, account.account.data);
+                assert_eq!(compressed_record.lamports, 0);
+                assert_eq!(compressed_record.is_undelegatable, is_undelegate);
             }
 
             // Track the strategy used
