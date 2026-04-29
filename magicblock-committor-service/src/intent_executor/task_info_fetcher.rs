@@ -336,7 +336,11 @@ impl TaskInfoFetcher for RpcTaskInfoFetcher {
 
             let items = self
                 .photon_client()?
-                .get_multiple_compressed_accounts(Some(cdas), None, None)
+                .get_multiple_compressed_accounts(
+                    Some(cdas),
+                    None,
+                    Some(IndexerRpcConfig::new(min_context_slot)),
+                )
                 .await?
                 .value
                 .items;
@@ -386,7 +390,11 @@ impl TaskInfoFetcher for RpcTaskInfoFetcher {
 
             let items = self
                 .photon_client()?
-                .get_multiple_compressed_accounts(Some(cdas), None, None)
+                .get_multiple_compressed_accounts(
+                    Some(cdas),
+                    None,
+                    Some(IndexerRpcConfig::new(min_context_slot)),
+                )
                 .await?
                 .value
                 .items;
