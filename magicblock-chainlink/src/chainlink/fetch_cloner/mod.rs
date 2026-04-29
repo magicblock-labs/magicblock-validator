@@ -2060,6 +2060,39 @@ where
         }
         joinset.join_all().await;
 
+        // Clear `post_undelegation_photon_merge_pending` for accounts that were fetched successfully
+        if let Ok(result) = &result {
+            for pubkey in &fetch_new {
+                let fetch_left_pubkey_unresolved = result
+                    .not_found_on_chain
+                    .iter()
+                    .any(|(missing_pubkey, _)| missing_pubkey == pubkey)
+                    || result
+                        .missing_delegation_record
+                        .iter()
+                        .any(|(missing_pubkey, _)| missing_pubkey == pubkey);
+                if fetch_left_pubkey_unresolved {
+                    continue;
+                }
+
+                if let Some(account_in_bank) =
+                    self.accounts_bank.get_account(pubkey)
+                {
+                    if self.is_watching(pubkey)
+                        && !account_in_bank.delegated()
+                        && !account_in_bank.compressed()
+                    {
+                        self.post_undelegation_photon_merge_pending
+                            .lock()
+                            .expect(
+                                "post_undelegation_photon_merge_pending lock poisoned",
+                            )
+                            .remove(pubkey);
+                    }
+                }
+            }
+        }
+
         result
     }
 

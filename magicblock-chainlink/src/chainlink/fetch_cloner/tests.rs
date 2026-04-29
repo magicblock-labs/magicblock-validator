@@ -1304,6 +1304,79 @@ async fn test_undelegation_requested_subscription_behavior() {
 }
 
 #[tokio::test]
+async fn test_post_undelegation_plain_refresh_clears_photon_merge_marker() {
+    init_logger();
+    let validator_keypair = Keypair::new();
+    let account_owner = random_pubkey();
+    const CURRENT_SLOT: u64 = 100;
+
+    let account_pubkey = random_pubkey();
+    let account = Account {
+        lamports: 1_000_000,
+        data: vec![1, 2, 3, 4],
+        owner: account_owner,
+        executable: false,
+        rent_epoch: 0,
+    };
+
+    let FetcherTestCtx {
+        remote_account_provider,
+        accounts_bank,
+        fetch_cloner,
+        ..
+    } = setup(
+        [(account_pubkey, account.clone())],
+        CURRENT_SLOT,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+
+    accounts_bank
+        .insert(account_pubkey, AccountSharedData::from(account.clone()));
+    fetch_cloner
+        .subscribe_to_account(&account_pubkey)
+        .await
+        .expect("failed to subscribe to account");
+    assert_subscribed!(remote_account_provider, &[&account_pubkey]);
+
+    fetch_cloner.mark_post_undelegation_photon_merge_pending(account_pubkey);
+
+    let result = fetch_cloner
+        .fetch_and_clone_accounts_with_dedup(
+            &[account_pubkey],
+            None,
+            None,
+            AccountFetchOrigin::GetAccount,
+            None,
+        )
+        .await;
+    assert!(result.is_ok());
+
+    let marker_still_pending = fetch_cloner
+        .post_undelegation_photon_merge_pending
+        .lock()
+        .expect("post_undelegation_photon_merge_pending lock poisoned")
+        .contains(&account_pubkey);
+    assert!(
+        !marker_still_pending,
+        "plain refresh should clear post-undelegation Photon merge marker"
+    );
+
+    let fetch_count_after_plain_refresh = fetch_cloner.fetch_count();
+    let result = fetch_cloner
+        .fetch_and_clone_accounts_with_dedup(
+            &[account_pubkey],
+            None,
+            None,
+            AccountFetchOrigin::GetAccount,
+            None,
+        )
+        .await;
+    assert!(result.is_ok());
+    assert_eq!(fetch_cloner.fetch_count(), fetch_count_after_plain_refresh);
+}
+
+#[tokio::test]
 async fn test_delegated_authoritative_skip_unsubscribes_subscription() {
     init_logger();
     let validator_keypair = Keypair::new();
