@@ -886,52 +886,36 @@ async fn create_and_delegate_accounts(
     bytess: &[usize],
     compressed: bool,
 ) -> Vec<CommittedAccount> {
-    if compressed {
-        let mut out = Vec::with_capacity(bytess.len());
-        for bytes in bytess {
-            let bytes = *bytes;
+    let mut join_set = JoinSet::new();
+    for bytes in bytess {
+        let bytes = *bytes;
+        join_set.spawn(async move {
             let counter_auth = Keypair::new();
-            let (pda, mut pda_acc) = {
-                let (pubkey, _address, account) =
+            let (pda, mut pda_acc) = if compressed {
+                let (pda, _address, account) =
                     init_and_delegate_compressed_record_on_chain(&counter_auth)
                         .await;
-                (pubkey, account)
-            };
-
-            pda_acc.owner = program_flexi_counter::id();
-            pda_acc.data = vec![0u8; bytes];
-            out.push(CommittedAccount {
-                pubkey: pda,
-                account: pda_acc,
-                remote_slot: Default::default(),
-            });
-        }
-        out
-    } else {
-        let mut join_set = JoinSet::new();
-        for bytes in bytess {
-            let bytes = *bytes;
-            join_set.spawn(async move {
-                let counter_auth = Keypair::new();
-                let (pda, mut pda_acc) = init_and_delegate_account_on_chain(
+                (pda, account)
+            } else {
+                init_and_delegate_account_on_chain(
                     &counter_auth,
                     bytes as u64,
                     None,
                 )
-                .await;
+                .await
+            };
 
-                pda_acc.owner = program_flexi_counter::id();
-                pda_acc.data = vec![0u8; bytes];
-                CommittedAccount {
-                    pubkey: pda,
-                    account: pda_acc,
-                    remote_slot: Default::default(),
-                }
-            });
-        }
-
-        join_set.join_all().await
+            pda_acc.owner = program_flexi_counter::id();
+            pda_acc.data = vec![0u8; bytes];
+            CommittedAccount {
+                pubkey: pda,
+                account: pda_acc,
+                remote_slot: Default::default(),
+            }
+        });
     }
+
+    join_set.join_all().await
 }
 
 async fn create_bundles(
