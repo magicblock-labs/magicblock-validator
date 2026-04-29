@@ -1152,6 +1152,29 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
                 remote_accounts_results,
             );
 
+            if remote_accounts.len() != pubkeys.len() {
+                let msg = format!(
+                    "resolved {} of {} accounts after fetch",
+                    remote_accounts.len(),
+                    pubkeys.len()
+                );
+                let mut fetching = fetching_accounts
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                for pubkey in &pubkeys {
+                    if let Some((_, requests)) = fetching.remove(pubkey) {
+                        for request in requests {
+                            let _ = request.send(Err(
+                                                RemoteAccountProviderError::AccountResolutionsFailed(msg.clone())
+                                            ));
+                        }
+                    }
+                }
+                return Err(
+                    RemoteAccountProviderError::AccountResolutionsFailed(msg),
+                );
+            }
+
             // Update metrics for successful RPC fetch
             inc_account_fetches_success(pubkeys.len() as u64);
             inc_account_fetches_found(fetch_origin, found_cnt);
