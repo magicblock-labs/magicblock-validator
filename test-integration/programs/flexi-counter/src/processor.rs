@@ -714,6 +714,13 @@ fn process_schedule_commit_compressed(
         return Err(ProgramError::NotEnoughAccountKeys);
     };
 
+    assert_keys_equal(magic_program.key, &MAGIC_PROGRAM_ID, || {
+        format!(
+            "Invalid magic program {}, should be {}",
+            magic_program.key, MAGIC_PROGRAM_ID
+        )
+    })?;
+
     let (pda, _bump) = FlexiCounter::pda(payer.key);
     assert_keys_equal(counter.key, &pda, || {
         format!("Invalid counter PDA {}, should be {}", counter.key, pda)
@@ -727,10 +734,15 @@ fn process_schedule_commit_compressed(
         AccountMeta::new(*payer.key, true),
         AccountMeta::new(*magic_context.key, false),
         AccountMeta::new(*counter.key, false),
+        AccountMeta::new(*magic_program.key, false),
     ];
 
-    let account_refs =
-        vec![payer.clone(), magic_context.clone(), counter.clone()];
+    let account_refs = vec![
+        payer.clone(),
+        magic_context.clone(),
+        counter.clone(),
+        magic_program.clone(),
+    ];
 
     let ix = Instruction {
         program_id: *magic_program.key,
