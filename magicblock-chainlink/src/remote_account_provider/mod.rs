@@ -1121,6 +1121,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
             trace!(rpc_accounts = ?rpc_accounts, photon_accounts = ?photon_accounts, "Fetched accounts from RPC and Photon");
 
             let mut remote_accounts_results = Vec::with_capacity(2);
+            let mut rpc_fetch_success = false;
             let mut found_cnt = 0;
             let mut not_found_cnt = 0;
             let mut compressed_found_count = 0;
@@ -1131,6 +1132,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
             for result in results {
                 match result {
                     Ok((FetchedRemoteAccounts::Rpc(accs), fc, nfc)) => {
+                        rpc_fetch_success = true;
                         remote_accounts_results
                             .push(FetchedRemoteAccounts::Rpc(accs));
                         found_cnt += fc;
@@ -1176,9 +1178,11 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
             }
 
             // Update metrics for successful RPC fetch
-            inc_account_fetches_success(pubkeys.len() as u64);
-            inc_account_fetches_found(fetch_origin, found_cnt);
-            inc_account_fetches_not_found(fetch_origin, not_found_cnt);
+            if rpc_fetch_success {
+                inc_account_fetches_success(pubkeys.len() as u64);
+                inc_account_fetches_found(fetch_origin, found_cnt);
+                inc_account_fetches_not_found(fetch_origin, not_found_cnt);
+            }
 
             let compressed_total =
                 compressed_found_count + compressed_not_found_count;
