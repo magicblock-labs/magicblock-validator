@@ -61,6 +61,10 @@ impl CommitFinalizeCompressedTask {
         .instruction()
         .expect("The serializing the args should not fail")
     }
+
+    pub fn reset_commit_id(&mut self, commit_id: u64) {
+        self.commit_id = commit_id;
+    }
 }
 
 impl From<CommitFinalizeCompressedTask> for BaseTaskImpl {

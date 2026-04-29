@@ -10,7 +10,7 @@ use magicblock_committor_program::{
     },
     pdas, ChangesetChunks, Chunks,
 };
-use magicblock_core::intent::BaseActionCallback;
+use magicblock_core::intent::{BaseActionCallback, CommittedAccount};
 use magicblock_metrics::metrics::LabelValue;
 use magicblock_program::magic_scheduled_base_intent::BaseAction;
 use solana_instruction::{AccountMeta, Instruction};
@@ -120,6 +120,37 @@ impl BaseTaskImpl {
             | Self::Undelegate(_)
             | Self::BaseAction(_)
             | Self::CommitFinalizeCompressed(_) => TaskStrategy::Args,
+        }
+    }
+
+    pub fn commit_id(&self) -> Option<u64> {
+        match self {
+            Self::Commit(task) => Some(task.commit_id),
+            Self::CommitFinalize(task) => Some(task.commit_id),
+            Self::CommitFinalizeCompressed(task) => Some(task.commit_id),
+            _ => None,
+        }
+    }
+
+    pub fn reset_commit_id(&mut self, commit_id: u64) {
+        match self {
+            Self::Commit(task) => task.reset_commit_id(commit_id),
+            Self::CommitFinalize(task) => task.reset_commit_id(commit_id),
+            Self::CommitFinalizeCompressed(task) => {
+                task.reset_commit_id(commit_id)
+            }
+            _ => {}
+        }
+    }
+
+    pub fn committed_account(&self) -> Option<&CommittedAccount> {
+        match self {
+            Self::Commit(task) => Some(&task.committed_account),
+            Self::CommitFinalize(task) => Some(&task.committed_account),
+            Self::CommitFinalizeCompressed(task) => {
+                Some(&task.committed_account)
+            }
+            _ => None,
         }
     }
 }
