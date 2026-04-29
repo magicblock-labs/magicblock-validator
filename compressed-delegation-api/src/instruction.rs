@@ -33,7 +33,7 @@ impl CompressedDelegationInstructionDiscriminator {
 
 #[derive(Clone, Debug)]
 pub enum CompressedDelegationProgramInstruction {
-    /// Delegate the compressed account to a validator.
+    /// Initialize a new delegation record.
     InitDelegationRecord { args: InitDelegationRecordArgs },
 
     /// Delegate the compressed account to a validator.
