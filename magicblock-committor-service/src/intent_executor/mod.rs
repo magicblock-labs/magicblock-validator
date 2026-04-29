@@ -45,7 +45,7 @@ use crate::{
     },
     persist::{CommitStatus, CommitStatusSignatures, IntentPersister},
     tasks::{
-        task_builder::{TaskBuilderImpl, TasksBuilder},
+        task_builder::{CommitExecutionMode, TaskBuilderImpl},
         task_strategist::{
             StrategyExecutionMode, TaskStrategist, TransactionStrategy,
         },
@@ -56,6 +56,9 @@ use crate::{
     },
     utils::persist_status_update_by_message_set,
 };
+
+const DEFAULT_COMMIT_EXECUTION_MODE: CommitExecutionMode =
+    CommitExecutionMode::CommitFinalize;
 
 #[derive(Clone, Copy, Debug)]
 pub enum ExecutionOutput {
@@ -214,10 +217,11 @@ where
             // Build tasks for commit stage
             // TODO (snawaz): it's actually MagicBaseIntent::BaseActions scenario, not Commit
             // scenario, so the related code needs little bit of refactoring and proper renaming.
-            let commit_tasks = TaskBuilderImpl::commit_tasks(
+            let commit_tasks = TaskBuilderImpl::commit_tasks_with_mode(
                 &self.task_info_fetcher,
                 &intent_bundle,
                 persister,
+                DEFAULT_COMMIT_EXECUTION_MODE,
             )
             .await?;
 
@@ -239,14 +243,16 @@ where
 
         // Build tasks for commit & finalize stages
         let (commit_tasks, finalize_tasks) = {
-            let commit_tasks_fut = TaskBuilderImpl::commit_tasks(
+            let commit_tasks_fut = TaskBuilderImpl::commit_tasks_with_mode(
                 &self.task_info_fetcher,
                 &intent_bundle,
                 persister,
+                DEFAULT_COMMIT_EXECUTION_MODE,
             );
-            let finalize_tasks_fut = TaskBuilderImpl::finalize_tasks(
+            let finalize_tasks_fut = TaskBuilderImpl::finalize_tasks_with_mode(
                 &self.task_info_fetcher,
                 &intent_bundle,
+                DEFAULT_COMMIT_EXECUTION_MODE,
             );
             let (commit_tasks, finalize_tasks) =
                 join(commit_tasks_fut, finalize_tasks_fut).await;

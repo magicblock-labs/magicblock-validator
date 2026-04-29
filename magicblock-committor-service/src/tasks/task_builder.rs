@@ -20,7 +20,7 @@ use crate::{
     tasks::{
         commit_task::{CommitDelivery, CommitTask},
         BaseActionTask, BaseActionTaskV1, BaseActionTaskV2, BaseTaskImpl,
-        CommitFinalizeTask, UndelegateTask,
+        CommitFinalizeTask, FinalizeTask, UndelegateTask,
     },
 };
 
@@ -40,9 +40,18 @@ pub trait TasksBuilder {
     ) -> TaskBuilderResult<Vec<BaseTaskImpl>>;
 }
 
-/// V1 Task builder
-/// V1: Actions are part of finalize tx
+/// Builds base-layer tasks for scheduled intents.
+/// In [`CommitExecutionMode::SeparateCommitAndFinalize`], commit actions stay in
+/// the finalize stage. In [`CommitExecutionMode::CommitFinalize`], they run
+/// after the combined commit-finalize task.
 pub struct TaskBuilderImpl;
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum CommitExecutionMode {
+    SeparateCommitAndFinalize,
+    #[default]
+    CommitFinalize,
+}
 
 // Accounts larger than COMMIT_STATE_SIZE_THRESHOLD use CommitDiff to
 // reduce instruction size. Below this threshold, the commit is sent
@@ -156,15 +165,16 @@ impl TaskBuilderImpl {
             delivery: delivery_details,
         }
     }
-}
 
-#[async_trait]
-impl TasksBuilder for TaskBuilderImpl {
     /// Returns [`BaseTaskImpl`]s for Commit stage
-    async fn commit_tasks<C: TaskInfoFetcher, P: IntentPersister>(
+    pub async fn commit_tasks_with_mode<
+        C: TaskInfoFetcher,
+        P: IntentPersister,
+    >(
         task_info_fetcher: &Arc<C>,
         intent_bundle: &ScheduledIntentBundle,
         persister: &Option<P>,
+        mode: CommitExecutionMode,
     ) -> TaskBuilderResult<Vec<BaseTaskImpl>> {
         let mut tasks = Vec::new();
         tasks.extend(Self::create_action_tasks(
@@ -242,76 +252,133 @@ impl TasksBuilder for TaskBuilderImpl {
             .into()
         }
 
-        fn extend_commit_finalize_tasks(
+        fn create_commit_task(
+            intent_id: u64,
+            commit_ids: &HashMap<Pubkey, u64>,
+            base_accounts: &mut HashMap<Pubkey, Account>,
+            allow_undelegation: bool,
+            account: &CommittedAccount,
+        ) -> BaseTaskImpl {
+            let commit_id =
+                commit_ids.get(&account.pubkey).copied().unwrap_or_else(|| {
+                    // This shall not ever happen since TaskInfoFetcher
+                    // returns commit ids for all pubkeys or throws
+                    // If it does occur, it will be patched and retried by IntentExecutor
+                    error!(
+                        intent_id,
+                        pubkey = %account.pubkey,
+                        "Commit id absent for pubkey"
+                    );
+                    0
+                });
+            let base_account = base_accounts.remove(&account.pubkey);
+
+            TaskBuilderImpl::create_commit_task(
+                commit_id,
+                allow_undelegation,
+                account.clone(),
+                base_account,
+            )
+            .into()
+        }
+
+        fn extend_commit_tasks(
             tasks: &mut Vec<BaseTaskImpl>,
             commit: &CommitType,
             allow_undelegation: bool,
             intent_id: u64,
             commit_ids: &HashMap<Pubkey, u64>,
             base_accounts: &mut HashMap<Pubkey, Account>,
+            use_commit_finalize: bool,
+            include_base_actions: bool,
         ) {
             let committed_accounts = commit.get_committed_accounts();
             for account in committed_accounts {
-                tasks.push(create_commit_finalize_task(
-                    intent_id,
-                    commit_ids,
-                    base_accounts,
-                    allow_undelegation,
-                    account,
-                ));
+                let task = if use_commit_finalize {
+                    create_commit_finalize_task(
+                        intent_id,
+                        commit_ids,
+                        base_accounts,
+                        allow_undelegation,
+                        account,
+                    )
+                } else {
+                    create_commit_task(
+                        intent_id,
+                        commit_ids,
+                        base_accounts,
+                        allow_undelegation,
+                        account,
+                    )
+                };
+                tasks.push(task);
             }
 
-            if let CommitType::WithBaseActions { base_actions, .. } = commit {
+            if include_base_actions {
+                let CommitType::WithBaseActions { base_actions, .. } = commit
+                else {
+                    return;
+                };
                 tasks
                     .extend(TaskBuilderImpl::create_action_tasks(base_actions));
             }
         }
 
+        let use_commit_finalize = mode == CommitExecutionMode::CommitFinalize;
+
         if let Some(ref value) = intent_bundle.intent_bundle.commit {
-            extend_commit_finalize_tasks(
+            extend_commit_tasks(
                 &mut tasks,
                 value,
                 false,
                 intent_bundle.id,
                 &commit_ids,
                 &mut base_accounts,
+                use_commit_finalize,
+                use_commit_finalize,
             );
         }
 
         if let Some(ref value) =
             intent_bundle.intent_bundle.commit_and_undelegate
         {
-            extend_commit_finalize_tasks(
+            extend_commit_tasks(
                 &mut tasks,
                 &value.commit_action,
                 true,
                 intent_bundle.id,
                 &commit_ids,
                 &mut base_accounts,
+                use_commit_finalize,
+                use_commit_finalize,
             );
         }
 
         if let Some(ref value) = intent_bundle.intent_bundle.commit_finalize {
-            extend_commit_finalize_tasks(
+            extend_commit_tasks(
                 &mut tasks,
                 value,
                 false,
                 intent_bundle.id,
                 &commit_ids,
                 &mut base_accounts,
+                true,
+                true,
             );
         }
 
         if let Some(ref value) =
             intent_bundle.intent_bundle.commit_finalize_and_undelegate
         {
-            extend_commit_finalize_tasks(
+            extend_commit_tasks(
                 &mut tasks,
                 &value.commit_action,
                 true,
                 intent_bundle.id,
                 &commit_ids,
                 &mut base_accounts,
+                true,
+                true,
             );
         }
 
@@ -319,10 +386,19 @@ impl TasksBuilder for TaskBuilderImpl {
     }
 
     /// Returns [`Task`]s for Finalize stage
-    async fn finalize_tasks<C: TaskInfoFetcher>(
+    pub async fn finalize_tasks_with_mode<C: TaskInfoFetcher>(
         info_fetcher: &Arc<C>,
         intent_bundle: &ScheduledIntentBundle,
+        mode: CommitExecutionMode,
     ) -> TaskBuilderResult<Vec<BaseTaskImpl>> {
+        // Helper to create a finalize task
+        fn finalize_task(account: &CommittedAccount) -> BaseTaskImpl {
+            FinalizeTask {
+                delegated_account: account.pubkey,
+            }
+            .into()
+        }
+
         // Helper to create an undelegate task
         fn undelegate_task(
             account: &CommittedAccount,
@@ -334,6 +410,28 @@ impl TasksBuilder for TaskBuilderImpl {
                 rent_reimbursement: *rent_reimbursement,
             }
             .into()
+        }
+
+        // Helper to process commit types
+        fn create_finalize_tasks(commit: &CommitType) -> Vec<BaseTaskImpl> {
+            match commit {
+                CommitType::Standalone(accounts) => {
+                    accounts.iter().map(finalize_task).collect()
+                }
+                CommitType::WithBaseActions {
+                    committed_accounts,
+                    base_actions,
+                } => {
+                    let mut tasks = committed_accounts
+                        .iter()
+                        .map(finalize_task)
+                        .collect::<Vec<_>>();
+                    tasks.extend(TaskBuilderImpl::create_action_tasks(
+                        base_actions,
+                    ));
+                    tasks
+                }
+            }
         }
 
         async fn create_undelegate_tasks<C: TaskInfoFetcher>(
@@ -375,9 +473,18 @@ impl TasksBuilder for TaskBuilderImpl {
         let mut tasks = Vec::new();
         let mut futures = Vec::with_capacity(2);
 
+        if mode == CommitExecutionMode::SeparateCommitAndFinalize {
+            if let Some(ref value) = intent_bundle.intent_bundle.commit {
+                tasks.extend(create_finalize_tasks(value));
+            }
+        }
+
         if let Some(ref value) =
             intent_bundle.intent_bundle.commit_and_undelegate
         {
+            if mode == CommitExecutionMode::SeparateCommitAndFinalize {
+                tasks.extend(create_finalize_tasks(&value.commit_action));
+            }
             futures.push(create_undelegate_tasks(value, info_fetcher));
         }
 
@@ -390,6 +497,35 @@ impl TasksBuilder for TaskBuilderImpl {
         tasks.extend(try_join_all(futures).await?.into_iter().flatten());
 
         Ok(tasks)
+    }
+}
+
+#[async_trait]
+impl TasksBuilder for TaskBuilderImpl {
+    async fn commit_tasks<C: TaskInfoFetcher, P: IntentPersister>(
+        task_info_fetcher: &Arc<C>,
+        intent_bundle: &ScheduledIntentBundle,
+        persister: &Option<P>,
+    ) -> TaskBuilderResult<Vec<BaseTaskImpl>> {
+        Self::commit_tasks_with_mode(
+            task_info_fetcher,
+            intent_bundle,
+            persister,
+            CommitExecutionMode::default(),
+        )
+        .await
+    }
+
+    async fn finalize_tasks<C: TaskInfoFetcher>(
+        info_fetcher: &Arc<C>,
+        intent_bundle: &ScheduledIntentBundle,
+    ) -> TaskBuilderResult<Vec<BaseTaskImpl>> {
+        Self::finalize_tasks_with_mode(
+            info_fetcher,
+            intent_bundle,
+            CommitExecutionMode::default(),
+        )
+        .await
     }
 }
 
@@ -524,6 +660,77 @@ mod tests {
             finalize_tasks.as_slice(),
             [BaseTaskImpl::Undelegate(task)]
                 if task.delegated_account == pubkey
+        ));
+    }
+
+    #[tokio::test]
+    async fn separate_commit_mode_uses_commit_then_finalize_tasks() {
+        let pubkey = Pubkey::new_unique();
+        let intent = create_test_intent(1, &[pubkey], false);
+        let info_fetcher = Arc::new(MockInfoFetcher);
+
+        let commit_tasks = TaskBuilderImpl::commit_tasks_with_mode(
+            &info_fetcher,
+            &intent,
+            &None::<IntentPersisterImpl>,
+            CommitExecutionMode::SeparateCommitAndFinalize,
+        )
+        .await
+        .unwrap();
+        let finalize_tasks = TaskBuilderImpl::finalize_tasks_with_mode(
+            &info_fetcher,
+            &intent,
+            CommitExecutionMode::SeparateCommitAndFinalize,
+        )
+        .await
+        .unwrap();
+
+        assert!(matches!(
+            commit_tasks.as_slice(),
+            [BaseTaskImpl::Commit(task)]
+                if task.committed_account.pubkey == pubkey
+                    && !task.allow_undelegation
+        ));
+        assert!(matches!(
+            finalize_tasks.as_slice(),
+            [BaseTaskImpl::Finalize(task)]
+                if task.delegated_account == pubkey
+        ));
+    }
+
+    #[tokio::test]
+    async fn separate_commit_mode_uses_finalize_then_undelegate() {
+        let pubkey = Pubkey::new_unique();
+        let intent = create_test_intent(1, &[pubkey], true);
+        let info_fetcher = Arc::new(MockInfoFetcher);
+
+        let commit_tasks = TaskBuilderImpl::commit_tasks_with_mode(
+            &info_fetcher,
+            &intent,
+            &None::<IntentPersisterImpl>,
+            CommitExecutionMode::SeparateCommitAndFinalize,
+        )
+        .await
+        .unwrap();
+        let finalize_tasks = TaskBuilderImpl::finalize_tasks_with_mode(
+            &info_fetcher,
+            &intent,
+            CommitExecutionMode::SeparateCommitAndFinalize,
+        )
+        .await
+        .unwrap();
+
+        assert!(matches!(
+            commit_tasks.as_slice(),
+            [BaseTaskImpl::Commit(task)]
+                if task.committed_account.pubkey == pubkey
+                    && task.allow_undelegation
+        ));
+        assert!(matches!(
+            finalize_tasks.as_slice(),
+            [BaseTaskImpl::Finalize(finalize), BaseTaskImpl::Undelegate(undelegate)]
+                if finalize.delegated_account == pubkey
+                    && undelegate.delegated_account == pubkey
         ));
     }
 }
