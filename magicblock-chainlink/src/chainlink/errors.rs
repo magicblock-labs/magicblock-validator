@@ -53,4 +53,7 @@ pub enum ChainlinkError {
 
     #[error("Photon client error: {0}")]
     PhotonClientError(#[from] magicblock_core::traits::PhotonClientError),
+
+    #[error("Compression is not enabled")]
+    CompressionNotEnabled,
 }

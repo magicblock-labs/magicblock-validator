@@ -75,7 +75,7 @@ use remote_account::{
 pub use remote_account::{ResolvedAccount, ResolvedAccountSharedData};
 
 use crate::{
-    errors::ChainlinkResult,
+    errors::{ChainlinkError, ChainlinkResult},
     remote_account_provider::{
         chain_updates_client::ChainUpdatesClient,
         photon_client::PhotonClientImpl, pubsub_common::SubscriptionUpdate,
@@ -1444,17 +1444,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
         min_context_slot: u64,
     ) -> ChainlinkResult<(FetchedRemoteAccounts, u64, u64)> {
         let Some(photon_client) = photon_client else {
-            // If no photon client is provided, we return a vector of not found accounts
-            return Ok((
-                FetchedRemoteAccounts::Rpc(vec![
-                    RemoteAccount::NotFound(
-                        min_context_slot
-                    );
-                    pubkeys.len()
-                ]),
-                0,
-                pubkeys.len() as u64,
-            ));
+            return Err(ChainlinkError::CompressionNotEnabled);
         };
         if tracing::enabled!(tracing::Level::TRACE) {
             trace!(
