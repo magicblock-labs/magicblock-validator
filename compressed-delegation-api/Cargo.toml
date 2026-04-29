@@ -9,7 +9,6 @@ edition.workspace = true
 
 [dependencies]
 borsh = { workspace = true, features = ["derive"] }
-# borsh10 = { workspace = true }
 light-compressed-account = { workspace = true }
 light-hasher = { workspace = true, features = ["solana"] }
 light-sdk = { workspace = true, features = ["v2"] }
