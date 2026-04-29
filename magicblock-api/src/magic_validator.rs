@@ -499,7 +499,7 @@ impl MagicValidator {
         {
             endpoints.push(Endpoint::Compression {
                 label: "photon".to_string(),
-                url: photon_url.clone(),
+                url: photon_url,
             });
         }
 
