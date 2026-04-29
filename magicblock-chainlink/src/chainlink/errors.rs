@@ -48,9 +48,6 @@ pub enum ChainlinkError {
     #[error("Missing accounts required by delegation actions: {0:?}")]
     MissingDelegationActionAccounts(Vec<Pubkey>),
 
-    #[error("Failed to deserialize compressed delegation record: {0}")]
-    FailedToDeserializeCompressedDelegationRecord(#[from] std::io::Error),
-
     #[error("Photon client error: {0}")]
     PhotonClientError(#[from] magicblock_core::traits::PhotonClientError),
 
