@@ -288,13 +288,11 @@ impl MagicValidator {
         }
         let base_fee = config.validator.basefee;
 
-        if config
+        let compression_enabled = config
             .compression
             .as_ref()
-            .is_some_and(|compression| compression.photon_url.is_some())
-        {
-            validator::set_compression_enabled(true);
-        }
+            .is_some_and(|compression| compression.photon_url.is_some());
+        validator::set_compression_enabled(compression_enabled);
 
         // Mode switch channel for transitioning from StartingUp to Primary
         // or Replica mode after ledger replay
