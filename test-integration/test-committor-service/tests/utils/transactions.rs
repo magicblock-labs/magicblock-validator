@@ -337,10 +337,13 @@ pub async fn init_and_delegate_compressed_record_on_chain(
     let photon_indexer =
         Arc::new(PhotonIndexer::new("http://localhost:8784".to_string()));
 
-    rpc_client
-        .request_airdrop(&counter_auth.pubkey(), 777 * LAMPORTS_PER_SOL)
-        .await
-        .unwrap();
+    airdrop_and_confirm(
+        &rpc_client,
+        &counter_auth.pubkey(),
+        777 * LAMPORTS_PER_SOL,
+        "counter auth",
+    )
+    .await;
     debug!("Airdropped to counter auth: {} SOL", 777 * LAMPORTS_PER_SOL);
 
     let InitAccountAndCompressedRecordIxs {
