@@ -1,11 +1,11 @@
 [package]
 name = "compressed-delegation-client"
-description = "A new Solana program using the Metaplex Project Template"
-version = "0.1.0"
-edition = "2021"
-readme = "README.md"
-license-file = "../../LICENSE"
-repository = "https://github.com/metaplex-foundation/compressed-delegation-program"
+version.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+license.workspace = true
+edition.workspace = true
 
 [lib]
 crate-type = ["lib"]
