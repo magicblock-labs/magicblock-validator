@@ -3,7 +3,7 @@ use solana_pubkey::Pubkey;
 
 use crate::{CommitAndFinalizeArgs, DelegationProgramDiscriminator};
 
-/// Instruction builder for `Commit`.
+/// Instruction builder for `CommitAndFinalize`.
 ///
 /// ### Accounts:
 ///
