@@ -47,8 +47,9 @@ pub use self::types::FetchAndCloneResult;
 use self::{
     subscription::{cancel_subs, CancelStrategy},
     types::{
-        AccountWithCompanion, ClassifiedAccounts, PartitionedNotFound,
-        RefreshDecision, ResolvedDelegatedAccounts, ResolvedPrograms,
+        AccountWithCompanion, ClassifiedAccounts, ExistingSubs,
+        PartitionedNotFound, RefreshDecision, ResolvedDelegatedAccounts,
+        ResolvedPrograms,
     },
 };
 use super::errors::{ChainlinkError, ChainlinkResult};
@@ -1383,8 +1384,10 @@ where
 
         // We keep all existing subscriptions including delegation records and program data
         // accounts that were directly requested
-        let mut existing_subs =
-            pipeline::build_existing_subs(self, pubkeys).existing_subs;
+        let ExistingSubs {
+            mut existing_subs,
+            existing_sub_generations,
+        } = pipeline::build_existing_subs(self, pubkeys);
 
         // Track all new subscriptions created during this call
         let mut new_subs: HashSet<Pubkey> = HashSet::new();
@@ -1691,6 +1694,7 @@ where
             record_subs,
             program_data_subs,
             existing_subs,
+            existing_sub_generations,
             new_subs,
         );
 

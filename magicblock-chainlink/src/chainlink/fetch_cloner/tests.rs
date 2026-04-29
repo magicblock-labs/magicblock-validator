@@ -1440,6 +1440,92 @@ async fn test_empty_compressed_subscription_update_skips_when_refetch_cannot_dec
 }
 
 #[tokio::test]
+async fn test_only_if_unchanged_cancellation_preserves_newer_subscription() {
+    init_logger();
+    let validator_keypair = Keypair::new();
+    const CURRENT_SLOT: u64 = 100;
+
+    let FetcherTestCtx {
+        remote_account_provider,
+        ..
+    } = setup(
+        Vec::<(Pubkey, Account)>::new(),
+        CURRENT_SLOT,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+
+    use super::subscription::{cancel_subs, CancelStrategy};
+
+    let pubkey = random_pubkey();
+    let generation_before_temporary_subscription =
+        remote_account_provider.subscription_generation(&pubkey);
+
+    remote_account_provider
+        .subscribe_for_fetch(&pubkey)
+        .await
+        .expect("temporary subscription should succeed");
+    remote_account_provider
+        .subscribe(&pubkey)
+        .await
+        .expect("newer subscription should succeed");
+
+    cancel_subs(
+        &remote_account_provider,
+        CancelStrategy::OnlyIfUnchanged {
+            pubkeys: HashMap::from([(
+                pubkey,
+                generation_before_temporary_subscription,
+            )]),
+        },
+    )
+    .await;
+
+    assert_subscribed!(remote_account_provider, &[&pubkey]);
+}
+
+#[tokio::test]
+async fn test_only_if_unchanged_cancellation_removes_temporary_subscription() {
+    init_logger();
+    let validator_keypair = Keypair::new();
+    const CURRENT_SLOT: u64 = 100;
+
+    let FetcherTestCtx {
+        remote_account_provider,
+        ..
+    } = setup(
+        Vec::<(Pubkey, Account)>::new(),
+        CURRENT_SLOT,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+
+    use super::subscription::{cancel_subs, CancelStrategy};
+
+    let pubkey = random_pubkey();
+    let generation_before_temporary_subscription =
+        remote_account_provider.subscription_generation(&pubkey);
+
+    remote_account_provider
+        .subscribe_for_fetch(&pubkey)
+        .await
+        .expect("temporary subscription should succeed");
+
+    cancel_subs(
+        &remote_account_provider,
+        CancelStrategy::OnlyIfUnchanged {
+            pubkeys: HashMap::from([(
+                pubkey,
+                generation_before_temporary_subscription,
+            )]),
+        },
+    )
+    .await;
+
+    assert_not_subscribed!(remote_account_provider, &[&pubkey]);
+}
+
+#[tokio::test]
 async fn test_delegated_authoritative_skip_unsubscribes_subscription() {
     init_logger();
     let validator_keypair = Keypair::new();

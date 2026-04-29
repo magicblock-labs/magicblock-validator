@@ -1,4 +1,8 @@
-use std::{collections::HashSet, fmt, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    fmt,
+    sync::Arc,
+};
 
 use magicblock_core::traits::PhotonClient;
 use solana_pubkey::Pubkey;
@@ -23,7 +27,11 @@ pub(crate) enum CancelStrategy {
         new_subs: HashSet<Pubkey>,
         existing_subs: HashSet<Pubkey>,
         all: HashSet<Pubkey>,
+        only_if_unchanged: HashMap<Pubkey, u64>,
     },
+    /// Cancel subscriptions for accounts that are explicitly subscribed to
+    /// and have not changed since the last snapshot.
+    OnlyIfUnchanged { pubkeys: HashMap<Pubkey, u64> },
 }
 
 impl CancelStrategy {
@@ -38,11 +46,14 @@ impl CancelStrategy {
                 new_subs,
                 existing_subs,
                 all,
+                only_if_unchanged,
             } => {
                 new_subs.is_empty()
                     && existing_subs.is_empty()
                     && all.is_empty()
+                    && only_if_unchanged.is_empty()
             }
+            CancelStrategy::OnlyIfUnchanged { pubkeys } => pubkeys.is_empty(),
         }
     }
 }
@@ -80,9 +91,10 @@ impl fmt::Display for CancelStrategy {
                 new_subs,
                 existing_subs,
                 all,
+                only_if_unchanged,
             } => write!(
                 f,
-                "Hybrid(New: {}, Existing: {}, All: {})",
+                "Hybrid(New: {}, Existing: {}, All: {}, OnlyIfUnchanged: {})",
                 new_subs
                     .iter()
                     .map(|p| p.to_string())
@@ -94,6 +106,20 @@ impl fmt::Display for CancelStrategy {
                     .collect::<Vec<_>>()
                     .join(", "),
                 all.iter()
+                    .map(|p| p.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                only_if_unchanged
+                    .keys()
+                    .map(|p| p.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+            CancelStrategy::OnlyIfUnchanged { pubkeys } => write!(
+                f,
+                "OnlyIfUnchanged({})",
+                pubkeys
+                    .keys()
                     .map(|p| p.to_string())
                     .collect::<Vec<_>>()
                     .join(", ")
@@ -118,32 +144,47 @@ pub(crate) async fn cancel_subs<
     let mut joinset = JoinSet::new();
 
     trace!("Canceling subscriptions");
-    let subs_to_cancel = match strategy {
-        CancelStrategy::All(pubkeys) => pubkeys,
+    let subs_to_cancel: HashMap<Pubkey, Option<u64>> = match strategy {
+        CancelStrategy::All(pubkeys) => {
+            pubkeys.into_iter().map(|pubkey| (pubkey, None)).collect()
+        }
         CancelStrategy::New {
             new_subs,
             existing_subs,
-        } => new_subs.difference(&existing_subs).cloned().collect(),
+        } => new_subs
+            .difference(&existing_subs)
+            .map(|pubkey| (*pubkey, None))
+            .collect(),
         CancelStrategy::Hybrid {
             new_subs,
             existing_subs,
             all,
+            only_if_unchanged,
         } => new_subs
             .difference(&existing_subs)
-            .cloned()
-            .chain(all.into_iter())
+            .map(|pubkey| (*pubkey, None))
+            .chain(all.into_iter().map(|pubkey| (pubkey, None)))
+            .chain(
+                only_if_unchanged
+                    .into_iter()
+                    .map(|(pubkey, generation)| (pubkey, Some(generation))),
+            )
+            .collect(),
+        CancelStrategy::OnlyIfUnchanged { pubkeys } => pubkeys
+            .into_iter()
+            .map(|(pubkey, generation)| (pubkey, Some(generation)))
             .collect(),
     };
     if tracing::enabled!(tracing::Level::TRACE) {
         let pubkeys_str = subs_to_cancel
             .iter()
-            .map(|p| p.to_string())
+            .map(|(p, _)| p.to_string())
             .collect::<Vec<_>>()
             .join(", ");
         trace!(pubkeys = %pubkeys_str, "Canceling subscriptions for");
     }
 
-    for pubkey in subs_to_cancel {
+    for (pubkey, expected_generation) in subs_to_cancel {
         let provider_clone = provider.clone();
         joinset.spawn(async move {
             // Check if there are pending requests for this account before unsubscribing
@@ -151,6 +192,14 @@ pub(crate) async fn cancel_subs<
             if provider_clone.is_pending(&pubkey) {
                 debug!(pubkey = %pubkey, "Skipping unsubscribe - has pending requests");
                 return;
+            }
+            if let Some(expected_generation) = expected_generation {
+                if provider_clone.subscription_generation(&pubkey)
+                    != expected_generation
+                {
+                    debug!(pubkey = %pubkey, "Skipping unsubscribe - subscription changed");
+                    return;
+                }
             }
 
             if let Err(err) = provider_clone.unsubscribe(&pubkey).await {

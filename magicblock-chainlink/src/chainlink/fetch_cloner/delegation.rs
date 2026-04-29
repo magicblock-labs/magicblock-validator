@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use dlp_api::{
     args::PostDelegationActions, decrypt::Decrypt,
     pda::delegation_record_pda_from_delegated_account, state::DelegationRecord,
@@ -187,6 +189,9 @@ where
     let was_watching_deleg_record = this
         .remote_account_provider
         .is_watching(&delegation_record_pubkey);
+    let deleg_record_generation = this
+        .remote_account_provider
+        .subscription_generation(&delegation_record_pubkey);
 
     let res = match this
         .remote_account_provider
@@ -224,7 +229,12 @@ where
         // the subscription while its request is still pending.
         cancel_subs(
             &this.remote_account_provider,
-            CancelStrategy::All([delegation_record_pubkey].into()),
+            CancelStrategy::OnlyIfUnchanged {
+                pubkeys: HashMap::from([(
+                    delegation_record_pubkey,
+                    deleg_record_generation,
+                )]),
+            },
         )
         .await;
     }

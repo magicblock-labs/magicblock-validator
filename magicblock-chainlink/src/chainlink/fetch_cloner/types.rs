@@ -1,4 +1,7 @@
-use std::{collections::HashSet, fmt};
+use std::{
+    collections::{HashMap, HashSet},
+    fmt,
+};
 
 use solana_account::AccountSharedData;
 use solana_pubkey::Pubkey;
@@ -26,6 +29,7 @@ pub(crate) enum RefreshDecision {
 // Pipeline helper types
 pub(crate) struct ExistingSubs {
     pub(crate) existing_subs: HashSet<Pubkey>,
+    pub(crate) existing_sub_generations: HashMap<Pubkey, u64>,
 }
 
 pub(crate) struct ClassifiedAccounts {

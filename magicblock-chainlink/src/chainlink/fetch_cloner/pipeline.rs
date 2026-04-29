@@ -1,4 +1,7 @@
-use std::{collections::HashSet, sync::atomic::Ordering};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::atomic::Ordering,
+};
 
 use dlp_api::pda::delegation_record_pda_from_delegated_account;
 use magicblock_accounts_db::traits::AccountsBank;
@@ -63,8 +66,20 @@ where
         .chain(existing_delegation_record_subs.copied())
         .chain(existing_program_data_subs)
         .collect();
+    let existing_sub_generations = existing_subs
+        .iter()
+        .map(|pubkey| {
+            (
+                *pubkey,
+                this.remote_account_provider.subscription_generation(pubkey),
+            )
+        })
+        .collect();
 
-    ExistingSubs { existing_subs }
+    ExistingSubs {
+        existing_subs,
+        existing_sub_generations,
+    }
 }
 
 pub(crate) fn collect_delegation_action_dependencies(
@@ -623,6 +638,7 @@ pub(crate) fn compute_cancel_strategy(
     record_subs: Vec<Pubkey>,
     program_data_subs: HashSet<Pubkey>,
     existing_subs: HashSet<Pubkey>,
+    existing_sub_generations: HashMap<Pubkey, u64>,
     new_subs: HashSet<Pubkey>,
 ) -> CancelStrategy {
     // Cancel subs for delegated accounts (accounts we clone but don't need to watch)
@@ -650,6 +666,16 @@ pub(crate) fn compute_cancel_strategy(
 
     let new_subs_to_cancel: HashSet<Pubkey> =
         new_subs.difference(&accounts_to_keep).copied().collect();
+    let existing_temporary_record_subs = record_subs
+        .iter()
+        .filter_map(|pubkey| {
+            existing_sub_generations
+                .get(pubkey)
+                .copied()
+                .filter(|generation| *generation == 0)
+                .map(|generation| (*pubkey, generation))
+        })
+        .collect();
 
     // Safety check: under test, verify new approach matches old approach
     #[cfg(test)]
@@ -678,6 +704,7 @@ pub(crate) fn compute_cancel_strategy(
         new_subs: new_subs_to_cancel,
         existing_subs,
         all: delegated_accounts_to_cancel,
+        only_if_unchanged: existing_temporary_record_subs,
     }
 }
 

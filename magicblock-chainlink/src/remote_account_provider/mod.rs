@@ -118,6 +118,9 @@ pub struct RemoteAccountProvider<
     /// Minimal tracking of accounts currently being fetched to handle race conditions
     /// between fetch and subscription updates. Only used during active fetch operations.
     fetching_accounts: Arc<FetchingAccounts>,
+    /// Tracking of accounts used to distinguish between "the fetch still owns this sub"
+    /// from "another caller started watching after the fetch began".
+    subscription_generations: Arc<Mutex<HashMap<Pubkey, u64>>>,
     /// The current slot on chain.
     ///
     /// This value is updated from two sources and always stores the maximum
@@ -142,7 +145,6 @@ pub struct RemoteAccountProvider<
 
     /// Tracks which accounts are currently subscribed to
     lrucache_subscribed_accounts: Arc<AccountsLruCache>,
-
     /// Channel to notify when an account is removed from the cache and thus no
     /// longer being watched
     removed_account_tx: mpsc::Sender<Pubkey>,
@@ -312,6 +314,8 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
             last_update_slot: Arc::<AtomicU64>::default(),
             received_updates_count: Arc::<AtomicU64>::default(),
             lrucache_subscribed_accounts,
+            subscription_generations:
+                Arc::<Mutex<HashMap<Pubkey, u64>>>::default(),
             subscription_forwarder: Arc::new(subscription_forwarder),
             removed_account_tx,
             removed_account_rx: Mutex::new(Some(removed_account_rx)),
@@ -906,7 +910,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
         let subscription_results = join_all(
             subscribe_and_fetch
                 .iter()
-                .map(|(pubkey, _)| self.subscribe(pubkey)),
+                .map(|(pubkey, _)| self.subscribe_for_fetch(pubkey)),
         )
         .await;
 
@@ -1020,6 +1024,34 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
         self.lrucache_subscribed_accounts.contains(pubkey)
     }
 
+    /// Returns the current explicit-watcher generation for `pubkey`.
+    ///
+    /// Callers that create temporary fetch subscriptions can snapshot this
+    /// value and later cancel only if it is unchanged, preserving any explicit
+    /// watcher that subscribed concurrently.
+    pub(crate) fn subscription_generation(&self, pubkey: &Pubkey) -> u64 {
+        self.subscription_generations
+            .lock()
+            .expect("subscription_generations lock poisoned")
+            .get(pubkey)
+            .copied()
+            .unwrap_or_default()
+    }
+
+    /// Marks that an explicit watcher subscribed or renewed interest in
+    /// `pubkey`.
+    ///
+    /// This is deliberately separate from fetch-owned subscriptions: fetches may
+    /// subscribe only to resolve an account and should not prevent their own
+    /// cleanup from removing that temporary subscription.
+    fn bump_subscription_generation(&self, pubkey: &Pubkey) {
+        let mut generations = self
+            .subscription_generations
+            .lock()
+            .expect("subscription_generations lock poisoned");
+        *generations.entry(*pubkey).or_default() += 1;
+    }
+
     /// Check if an account is currently pending (being fetched)
     pub fn is_pending(&self, pubkey: &Pubkey) -> bool {
         let fetching = self.fetching_accounts.lock().unwrap();
@@ -1035,11 +1067,32 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
         if self.is_watching(pubkey) {
             // Promote in LRU cache even if already subscribed
             self.lrucache_subscribed_accounts.add(*pubkey);
+            self.bump_subscription_generation(pubkey);
             return Ok(());
         }
 
         self.register_subscription(pubkey).await?;
+        self.bump_subscription_generation(pubkey);
         Ok(())
+    }
+
+    /// Subscribe while resolving a fetch without claiming explicit watcher
+    /// ownership.
+    ///
+    /// Fetch-created subscriptions are cleaned up by `cancel_subs`; because they
+    /// do not bump `subscription_generations`, generation-aware cleanup can still
+    /// remove them even if the fetch path internally retries or promotes the
+    /// same subscription.
+    pub(crate) async fn subscribe_for_fetch(
+        &self,
+        pubkey: &Pubkey,
+    ) -> RemoteAccountProviderResult<()> {
+        if self.is_watching(pubkey) {
+            self.lrucache_subscribed_accounts.add(*pubkey);
+            return Ok(());
+        }
+
+        self.register_subscription(pubkey).await
     }
 
     /// Subscribe to program account updates
