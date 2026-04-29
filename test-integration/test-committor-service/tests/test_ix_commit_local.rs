@@ -394,18 +394,9 @@ async fn commit_book_order_account(
                 undelegate_action: UndelegateType::Standalone,
             })
         }
-        ScheduleCommitType::CommitFinalizeCompressed => {
-            MagicBaseIntent::CommitFinalizeCompressed(CommitType::Standalone(
-                vec![account],
-            ))
-        }
-        ScheduleCommitType::CommitFinalizeCompressedAndUndelegate => {
-            MagicBaseIntent::CommitFinalizeAndUndelegateCompressed(
-                CommitAndUndelegate {
-                    commit_action: CommitType::Standalone(vec![account]),
-                    undelegate_action: UndelegateType::Standalone,
-                },
-            )
+        ScheduleCommitType::CommitFinalizeCompressed
+        | ScheduleCommitType::CommitFinalizeCompressedAndUndelegate => {
+            unimplemented!("Order book compressed delegation not yet supported")
         }
     };
 
