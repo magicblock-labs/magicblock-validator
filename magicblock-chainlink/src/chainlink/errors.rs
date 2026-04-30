@@ -47,4 +47,7 @@ pub enum ChainlinkError {
 
     #[error("Missing accounts required by delegation actions: {0:?}")]
     MissingDelegationActionAccounts(Vec<Pubkey>),
+
+    #[error("{0}")]
+    Custom(String),
 }

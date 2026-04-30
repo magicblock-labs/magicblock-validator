@@ -34,6 +34,7 @@ use tracing::*;
 mod ata_projection;
 mod delegation;
 mod pending_clone_guard;
+mod pending_request_guard;
 mod pipeline;
 mod program_loader;
 mod subscription;
@@ -41,6 +42,13 @@ mod types;
 
 pub use self::types::FetchAndCloneResult;
 use self::{
+    pending_clone_guard::{
+        CloneClaim, CloneCompletion, CloneKey, PendingCloneGuard,
+    },
+    pending_request_guard::{
+        PendingRequestClaim, PendingRequestCompletion, PendingRequestGuard,
+        PendingRequestState,
+    },
     subscription::{cancel_subs, CancelStrategy},
     types::{
         AccountWithCompanion, ClassifiedAccounts, PartitionedNotFound,
@@ -65,12 +73,6 @@ use crate::{
     },
 };
 
-type RemoteAccountRequests = Vec<oneshot::Sender<()>>;
-
-use self::pending_clone_guard::{
-    CloneClaim, CloneCompletion, CloneKey, PendingCloneGuard,
-};
-
 pub struct FetchCloner<T, U, V, C>
 where
     T: ChainRpcClient,
@@ -82,7 +84,7 @@ where
     remote_account_provider: Arc<RemoteAccountProvider<T, U>>,
     /// Tracks pending account fetch requests to avoid duplicate fetches in parallel
     /// Once an account is fetched and cloned into the bank, it's removed from here
-    pending_requests: Arc<HashMap<Pubkey, RemoteAccountRequests>>,
+    pending_requests: Arc<HashMap<Pubkey, PendingRequestState>>,
     /// Counter to track the number of fetch operations for testing deduplication
     fetch_count: Arc<AtomicU64>,
 
@@ -248,6 +250,53 @@ where
         };
         for tx in waiters {
             let _ = tx.send(result);
+        }
+    }
+
+    /// Attempt to claim ownership of a pending request for a pubkey.
+    /// Returns `PendingRequestClaim::Owner` if this caller is the first and should
+    /// perform the fetch. Returns `PendingRequestClaim::Waiter(rx)` if another
+    /// caller already owns this request and this caller should wait.
+    fn claim_pending_request(&self, pubkey: Pubkey) -> PendingRequestClaim {
+        match self.pending_requests.entry(pubkey) {
+            Entry::Vacant(e) => {
+                e.insert_entry(PendingRequestState {
+                    created_at: std::time::Instant::now(),
+                    waiters: vec![],
+                });
+                PendingRequestClaim::Owner(PendingRequestGuard::new(
+                    self.pending_requests.clone(),
+                    pubkey,
+                ))
+            }
+            Entry::Occupied(mut entry) => {
+                let (tx, rx) = oneshot::channel();
+                entry.get_mut().waiters.push(tx);
+                PendingRequestClaim::Waiter(rx)
+            }
+        }
+    }
+
+    /// Called by the owner when the pending request completes.
+    /// Removes the pending entry and notifies all waiters.
+    fn finish_pending_request(
+        &self,
+        pubkey: Pubkey,
+        completion: PendingRequestCompletion,
+    ) {
+        let result = self.pending_requests.remove(&pubkey);
+        if let Some((_, state)) = result {
+            let waiters_len = state.waiters.len();
+            for tx in state.waiters {
+                let _ = tx.send(completion.clone());
+            }
+            if waiters_len > 0 {
+                debug!(
+                    pubkey = %pubkey,
+                    waiter_count = waiters_len,
+                    "Finished FetchCloner pending request entry"
+                );
+            }
         }
     }
 
@@ -1771,19 +1820,15 @@ where
         pubkeys.retain(|p| !in_bank.contains(p));
 
         // Check pending requests and bank synchronously
+        let mut owner_guards: Vec<(Pubkey, PendingRequestGuard)> = vec![];
         for pubkey in pubkeys {
-            // Check if account fetch is already pending
-            match self.pending_requests.entry(*pubkey) {
-                Entry::Occupied(mut requests) => {
-                    let (sender, receiver) = oneshot::channel();
-                    requests.get_mut().push(sender);
-                    await_pending.push((*pubkey, receiver));
-                }
-                Entry::Vacant(e) => {
-                    // Reserve an entry for the new fetch request
-                    e.insert_entry(vec![]);
-                    // Account needs to be fetched - add to fetch list
+            match self.claim_pending_request(*pubkey) {
+                PendingRequestClaim::Owner(guard) => {
                     fetch_new.push(*pubkey);
+                    owner_guards.push((*pubkey, guard));
+                }
+                PendingRequestClaim::Waiter(receiver) => {
+                    await_pending.push((*pubkey, receiver));
                 }
             }
         }
@@ -1816,38 +1861,37 @@ where
             })
         };
 
-        // Clear pending requests for fetched accounts - pending requesters can get
-        // the accounts from the bank now since fetch_and_clone_accounts succeeded
-        for &pubkey in &fetch_new {
-            if let Some((_, requests)) = self.pending_requests.remove(&pubkey) {
-                // We signal completion but don't send the actual account data since:
-                // 1. The account is now in the bank if it was successfully cloned
-                // 2. If there was an error, the result will contain the error info
-                // 3. Pending requesters can check the bank or result as needed
-                for sender in requests {
-                    let _ = sender.send(());
+        // Finish pending requests and dismiss owner guards
+        let completion = match &result {
+            Ok(_) => PendingRequestCompletion::Success,
+            Err(err) => PendingRequestCompletion::Failed(err.to_string()),
+        };
+        for (pubkey, mut guard) in owner_guards {
+            self.finish_pending_request(pubkey, completion.clone());
+            guard.dismiss();
+        }
+
+        // Wait for any pending waiter requests to complete
+        for (pubkey, receiver) in await_pending {
+            match tokio::time::timeout(Duration::from_secs(5), receiver).await {
+                Ok(Ok(PendingRequestCompletion::Success)) => {
+                    // Owner completed successfully
+                }
+                Ok(Ok(PendingRequestCompletion::Failed(msg))) => {
+                    return Err(ChainlinkError::Custom(msg));
+                }
+                Ok(Err(err)) => {
+                    return Err(ChainlinkError::Custom(format!(
+                        "pending request owner disappeared for {pubkey}: {err}"
+                    )));
+                }
+                Err(_) => {
+                    return Err(ChainlinkError::Custom(format!(
+                        "timeout waiting for pending request for {pubkey}"
+                    )));
                 }
             }
         }
-
-        // Wait for any pending requests to complete
-        let mut joinset = JoinSet::new();
-        for (pubkey, receiver) in await_pending {
-            joinset.spawn(async move {
-                if let Err(err) = receiver
-                    .await
-                    .inspect_err(|err| {
-                        warn!(pubkey = %pubkey, error = ?err, "FetchCloner::clone_accounts - RecvError awaiting account, sender dropped without sending value");
-                    })
-                {
-                    // The sender was dropped, likely due to an error in the other request
-                    warn!(
-                        "Failed to receive account from pending request: {err}"
-                    );
-                }
-            });
-        }
-        joinset.join_all().await;
 
         result
     }
