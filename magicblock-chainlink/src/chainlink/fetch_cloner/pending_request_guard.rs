@@ -6,6 +6,7 @@ use tokio::sync::oneshot;
 use tracing::warn;
 
 pub(super) struct PendingRequestState {
+    #[allow(dead_code)]
     pub created_at: Instant,
     pub waiters: Vec<oneshot::Sender<PendingRequestCompletion>>,
 }

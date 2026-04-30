@@ -191,6 +191,11 @@ where
         &self.cloner
     }
 
+    #[cfg(test)]
+    fn has_pending_request(&self, pubkey: &Pubkey) -> bool {
+        self.pending_requests.contains(pubkey)
+    }
+
     /// Check if a program is allowed to be cloned.
     /// Returns true if:
     /// - No allowed_programs restriction is set (None), OR
