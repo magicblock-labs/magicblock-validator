@@ -4,7 +4,7 @@ use std::{
         atomic::{AtomicU64, Ordering},
         Arc, Mutex,
     },
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use dlp_api::{
@@ -30,6 +30,9 @@ use tokio::{
     task::JoinSet,
 };
 use tracing::*;
+
+pub(crate) const PENDING_REQUEST_STALE_AFTER: Duration =
+    Duration::from_secs(15);
 
 mod ata_projection;
 mod delegation;
@@ -266,7 +269,7 @@ where
         match self.pending_requests.entry(pubkey) {
             Entry::Vacant(e) => {
                 e.insert_entry(PendingRequestState {
-                    created_at: std::time::Instant::now(),
+                    created_at: Instant::now(),
                     waiters: vec![],
                 });
                 PendingRequestClaim::Owner(PendingRequestGuard::new(
@@ -275,9 +278,50 @@ where
                 ))
             }
             Entry::Occupied(mut entry) => {
-                let (tx, rx) = oneshot::channel();
-                entry.get_mut().waiters.push(tx);
-                PendingRequestClaim::Waiter(rx)
+                let age = entry.get().created_at.elapsed();
+
+                // Check if entry is stale
+                if age > PENDING_REQUEST_STALE_AFTER {
+                    // Evict stale entry and notify old waiters
+                    let stale_state = entry.remove();
+                    let waiters_len = stale_state.waiters.len();
+                    for tx in stale_state.waiters {
+                        let _ = tx.send(
+                            PendingRequestCompletion::Failed(
+                                format!(
+                                    "stale pending request evicted for {} after {:?}",
+                                    pubkey, age
+                                ),
+                            ),
+                        );
+                    }
+                    if waiters_len > 0 {
+                        warn!(
+                            pubkey = %pubkey,
+                            age_ms = age.as_millis() as u64,
+                            waiter_count = waiters_len,
+                            "Evicting stale FetchCloner pending request entry"
+                        );
+                    }
+
+                    // Insert fresh owner entry
+                    let _ = self.pending_requests.insert(
+                        pubkey,
+                        PendingRequestState {
+                            created_at: Instant::now(),
+                            waiters: vec![],
+                        },
+                    );
+                    PendingRequestClaim::Owner(PendingRequestGuard::new(
+                        self.pending_requests.clone(),
+                        pubkey,
+                    ))
+                } else {
+                    // Normal path: join the queue
+                    let (tx, rx) = oneshot::channel();
+                    entry.get_mut().waiters.push(tx);
+                    PendingRequestClaim::Waiter(rx)
+                }
             }
         }
     }

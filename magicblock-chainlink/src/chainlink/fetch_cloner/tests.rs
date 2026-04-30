@@ -3979,3 +3979,77 @@ async fn test_pending_request_waiter_gets_failure_when_owner_aborts() {
         "Error should mention owner cancellation, got: {error_str}"
     );
 }
+
+#[tokio::test]
+async fn test_stale_pending_request_is_evicted_and_replaced() {
+    init_logger();
+    let validator_keypair = Keypair::new();
+    let account_owner = random_pubkey();
+    const CURRENT_SLOT: u64 = 100;
+
+    let account_pubkey = random_pubkey();
+    let account = Account {
+        lamports: 1_000_000,
+        data: vec![1, 2, 3, 4],
+        owner: account_owner,
+        executable: false,
+        rent_epoch: 0,
+    };
+
+    let FetcherTestCtx {
+        accounts_bank,
+        fetch_cloner,
+        ..
+    } = setup(
+        [(account_pubkey, account.clone())],
+        CURRENT_SLOT,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+
+    // Directly insert a stale PendingRequestState into the map
+    // Use 16 seconds (stale threshold is 15)
+    let stale_created_at = std::time::Instant::now() - Duration::from_secs(16);
+    {
+        fetch_cloner
+            .pending_requests
+            .insert(
+                account_pubkey,
+                PendingRequestState {
+                    created_at: stale_created_at,
+                    waiters: vec![],
+                },
+            )
+            .ok();
+    }
+
+    // Verify stale entry is in the map
+    assert!(fetch_cloner.has_pending_request(&account_pubkey));
+
+    // Call fetch_and_clone_accounts_with_dedup which should evict the stale entry
+    let result = fetch_cloner
+        .fetch_and_clone_accounts_with_dedup(
+            &[account_pubkey],
+            None,
+            None,
+            AccountFetchOrigin::GetAccount,
+            None,
+        )
+        .await;
+
+    debug!(result = ?result, "Test completed");
+    assert!(result.is_ok());
+    assert!(result.unwrap().is_ok());
+
+    // Verify the account was cloned
+    assert_cloned_undelegated_account!(
+        accounts_bank,
+        account_pubkey,
+        account,
+        CURRENT_SLOT,
+        account_owner
+    );
+
+    // Verify stale entry is gone
+    assert!(!fetch_cloner.has_pending_request(&account_pubkey));
+}

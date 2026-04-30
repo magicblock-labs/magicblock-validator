@@ -866,6 +866,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
 
         // Dismiss all guards — the fetch task now owns cleanup
         for mut guard in owner_guards {
+            debug!("Ownership of fetching_accounts entry transferred to fetch task");
             guard.dismiss();
         }
 
