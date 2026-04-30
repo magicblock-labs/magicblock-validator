@@ -1302,6 +1302,8 @@ async fn ix_commit_local(
                         &compressed_account.data.unwrap().data,
                     )
                     .unwrap();
+                // Compressed accounts never have lamports when delegated/committed
+                // and they are not delegated by the validator, just marked as undelegatable
                 assert_eq!(compressed_record.owner, program_id);
                 assert_eq!(compressed_record.data, account.account.data);
                 assert_eq!(compressed_record.lamports, 0);
