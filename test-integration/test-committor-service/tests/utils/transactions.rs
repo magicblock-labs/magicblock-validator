@@ -340,11 +340,11 @@ pub async fn init_and_delegate_compressed_record_on_chain(
     airdrop_and_confirm(
         &rpc_client,
         &counter_auth.pubkey(),
-        777 * LAMPORTS_PER_SOL,
+        LAMPORTS_PER_SOL,
         "counter auth",
     )
     .await;
-    debug!("Airdropped to counter auth: {} SOL", 777 * LAMPORTS_PER_SOL);
+    debug!("Airdropped to counter auth: {} SOL", LAMPORTS_PER_SOL);
 
     let InitAccountAndCompressedRecordIxs {
         init: init_counter_ix,
