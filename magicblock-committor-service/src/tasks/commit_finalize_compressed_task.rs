@@ -29,23 +29,12 @@ impl CommitFinalizeCompressedTask {
         let old_record = CompressedDelegationRecord::try_from_slice(
             &self.compressed_data.compressed_delegation_record_bytes,
         ).expect("The record should have been valid because it was already used to clone the account");
-        let new_record = CompressedDelegationRecord {
-            pda: self.committed_account.pubkey,
-            authority: *validator,
-            last_update_nonce: self.commit_id + 1,
-            is_undelegatable: self.allow_undelegation,
-            owner: old_record.owner,
-            delegation_slot: old_record.delegation_slot,
-            lamports: self.committed_account.account.lamports,
-            data: self.committed_account.account.data.clone(),
-        };
         let args = CommitAndFinalizeArgs {
             current_compressed_delegated_account_data: self
                 .compressed_data
                 .compressed_delegation_record_bytes
                 .clone(),
-            new_data: borsh::to_vec(&new_record)
-                .expect("The serializing the new record should not fail"),
+            new_data: self.committed_account.account.data.clone(),
             account_meta: self.compressed_data.account_meta,
             validity_proof: self.compressed_data.proof,
             update_nonce: self.commit_id,
