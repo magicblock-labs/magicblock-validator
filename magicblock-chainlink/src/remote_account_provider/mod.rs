@@ -5,7 +5,7 @@ use std::{
         atomic::{AtomicU64, Ordering},
         Arc, Mutex,
     },
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 pub(crate) use chain_pubsub_client::{
@@ -57,6 +57,9 @@ pub mod pubsub_connection_pool;
 mod remote_account;
 mod subscription_reconciler;
 
+#[cfg(test)]
+mod tests;
+
 pub use endpoint::{Endpoint, Endpoints};
 use magicblock_metrics::{
     metrics,
@@ -80,11 +83,18 @@ use crate::{
 
 const ACTIVE_SUBSCRIPTIONS_UPDATE_INTERVAL_MS: u64 = 60_000;
 pub(crate) const DEFAULT_SUBSCRIPTION_RETRIES: usize = 5;
+const FETCHING_ACCOUNT_STALE_AFTER: Duration = Duration::from_secs(15);
 
 // Maps pubkey -> (fetch_start_slot, requests_waiting)
 type FetchResult = Result<RemoteAccount, RemoteAccountProviderError>;
-type FetchingAccounts =
-    Mutex<HashMap<Pubkey, (u64, Vec<oneshot::Sender<FetchResult>>)>>;
+
+struct FetchingAccountState {
+    created_at: Instant,
+    fetch_start_slot: u64,
+    waiters: Vec<oneshot::Sender<FetchResult>>,
+}
+
+type FetchingAccounts = Mutex<HashMap<Pubkey, FetchingAccountState>>;
 
 pub struct ForwardedSubscriptionUpdate {
     pub pubkey: Pubkey,
@@ -195,6 +205,67 @@ impl
             Ok(Some(provider))
         } else {
             Ok(None)
+        }
+    }
+}
+
+// Owns a fetching_accounts entry and cleans it up on drop
+struct FetchingAccountGuard {
+    fetching_accounts: Arc<Mutex<HashMap<Pubkey, FetchingAccountState>>>,
+    pubkey: Pubkey,
+    dismissed: bool,
+}
+
+impl FetchingAccountGuard {
+    fn new(
+        fetching_accounts: Arc<Mutex<HashMap<Pubkey, FetchingAccountState>>>,
+        pubkey: Pubkey,
+    ) -> Self {
+        Self {
+            fetching_accounts,
+            pubkey,
+            dismissed: false,
+        }
+    }
+
+    /// Mark the guard as dismissed so `Drop` becomes a no-op.
+    fn dismiss(&mut self) {
+        self.dismissed = true;
+    }
+}
+
+impl Drop for FetchingAccountGuard {
+    fn drop(&mut self) {
+        if self.dismissed {
+            return;
+        }
+        let waiters = {
+            if let Some(state) =
+                self.fetching_accounts.lock().unwrap().remove(&self.pubkey)
+            {
+                state.waiters
+            } else {
+                vec![]
+            }
+        };
+        let waiters_len = waiters.len();
+        for tx in waiters {
+            let _ = tx.send(Err(
+                RemoteAccountProviderError::AccountSubscriptionsTaskFailed(
+                    format!(
+                        "{}: owner future dropped before setup_subscriptions \
+                         completed",
+                        self.pubkey
+                    ),
+                ),
+            ));
+        }
+        if waiters_len > 0 {
+            warn!(
+                pubkey = %self.pubkey,
+                waiter_count = waiters_len,
+                "Cleaning up fetching_accounts entry after owner cancellation"
+            );
         }
     }
 }
@@ -496,27 +567,22 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                     // Check if we're currently fetching this account
                     let forward_update = {
                         let mut fetching = fetching_accounts.lock().unwrap();
-                        if let Some((fetch_start_slot, pending_requests)) =
-                            fetching.remove(&update.pubkey)
-                        {
+                        if let Some(state) = fetching.remove(&update.pubkey) {
                             // If subscription update is newer than when we started fetching,
                             // resolve with the subscription data instead
-                            if slot >= fetch_start_slot {
-                                trace!(pubkey = %update.pubkey, slot = slot, fetch_start_slot = fetch_start_slot, "Using subscription update instead of fetch");
+                            if slot >= state.fetch_start_slot {
+                                trace!(pubkey = %update.pubkey, slot = slot, fetch_start_slot = state.fetch_start_slot, "Using subscription update instead of fetch");
 
                                 // Resolve all pending requests with subscription data
-                                for sender in pending_requests {
+                                for sender in state.waiters {
                                     let _ =
                                         sender.send(Ok(remote_account.clone()));
                                 }
                                 None
                             } else {
                                 // Subscription is stale, put the fetch tracking back
-                                warn!(pubkey = %update.pubkey, slot = slot, fetch_start_slot = fetch_start_slot, "Received stale subscription update");
-                                fetching.insert(
-                                    update.pubkey,
-                                    (fetch_start_slot, pending_requests),
-                                );
+                                warn!(pubkey = %update.pubkey, slot = slot, fetch_start_slot = state.fetch_start_slot, "Received stale subscription update");
+                                fetching.insert(update.pubkey, state);
                                 None
                             }
                         } else {
@@ -715,9 +781,9 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         let fetch_start_slot =
             fetch_start_slot.unwrap_or_else(|| self.chain_slot.load());
 
-        // Track which pubkeys we created new entries for (Vacant)
-        // so we can roll them back if setup_subscriptions fails.
-        let mut newly_inserted = Vec::new();
+        // Track owner guards for entries we create (Vacant or stale).
+        // Guards own the entries and will clean them up on drop if not dismissed.
+        let mut owner_guards: Vec<FetchingAccountGuard> = Vec::new();
 
         {
             let mut fetching = self.fetching_accounts.lock().unwrap();
@@ -725,11 +791,60 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                 let (sender, receiver) = oneshot::channel();
                 match fetching.entry(pubkey) {
                     Entry::Occupied(mut entry) => {
-                        entry.get_mut().1.push(sender);
+                        let age = entry.get().created_at.elapsed();
+
+                        // Check if entry is stale
+                        if age > FETCHING_ACCOUNT_STALE_AFTER {
+                            // Evict stale entry and notify old waiters
+                            let stale_state = entry.remove();
+                            let waiters_len = stale_state.waiters.len();
+                            for tx in stale_state.waiters {
+                                let _ = tx.send(Err(
+                                    RemoteAccountProviderError::AccountResolutionsFailed(
+                                        format!(
+                                            "{}: stale fetching_accounts entry evicted after {:?}",
+                                            pubkey, age
+                                        ),
+                                    ),
+                                ));
+                            }
+                            if waiters_len > 0 {
+                                warn!(
+                                    pubkey = %pubkey,
+                                    age_ms = age.as_millis() as u64,
+                                    waiter_count = waiters_len,
+                                    "Evicting stale RemoteAccountProvider fetching_accounts entry"
+                                );
+                            }
+
+                            // Insert fresh entry and create a guard for it
+                            let _ = fetching.insert(
+                                pubkey,
+                                FetchingAccountState {
+                                    created_at: Instant::now(),
+                                    fetch_start_slot,
+                                    waiters: vec![sender],
+                                },
+                            );
+                            owner_guards.push(FetchingAccountGuard::new(
+                                self.fetching_accounts.clone(),
+                                pubkey,
+                            ));
+                        } else {
+                            // Normal path: join the queue
+                            entry.get_mut().waiters.push(sender);
+                        }
                     }
                     Entry::Vacant(entry) => {
-                        entry.insert((fetch_start_slot, vec![sender]));
-                        newly_inserted.push(pubkey);
+                        entry.insert(FetchingAccountState {
+                            created_at: Instant::now(),
+                            fetch_start_slot,
+                            waiters: vec![sender],
+                        });
+                        owner_guards.push(FetchingAccountGuard::new(
+                            self.fetching_accounts.clone(),
+                            pubkey,
+                        ));
                     }
                 }
                 subscription_overrides.push((pubkey, receiver));
@@ -737,60 +852,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         }
 
         // Setup subscriptions first (to catch updates during fetch)
-        if let Err(err) =
-            self.setup_subscriptions(&subscription_overrides).await
-        {
-            // Rollback fetching_accounts entries we created to prevent
-            // accounts being stuck as pending indefinitely. We only
-            // remove entries we created (Vacant); entries that already
-            // existed (Occupied) belong to other callers whose fetch
-            // will clean them up.
-            let mut fetching = self
-                .fetching_accounts
-                .lock()
-                .expect("fetching_accounts lock poisoned");
-            for pubkey in &newly_inserted {
-                let make_err = || {
-                    Err(
-                        RemoteAccountProviderError::AccountSubscriptionsTaskFailed(
-                            format!(
-                                "{}: subscription setup failed, \
-                                 rolling back",
-                                pubkey
-                            ),
-                        ),
-                    )
-                };
-                match fetching.entry(*pubkey) {
-                    Entry::Occupied(mut occ) => {
-                        let (_, senders) = occ.get_mut();
-                        if senders.len() <= 1 {
-                            // Only our sender — remove the whole
-                            // entry.
-                            let (_, senders) = occ.remove();
-                            for sender in senders {
-                                let _ = sender.send(make_err());
-                            }
-                        } else {
-                            // Another caller appended its sender
-                            // after we released the lock. Remove
-                            // only the first sender (ours) and
-                            // leave the entry for the other
-                            // caller's fetch to complete.
-                            let our_sender = senders.remove(0);
-                            let _ = our_sender.send(make_err());
-                        }
-                    }
-                    Entry::Vacant(_) => {
-                        // Already removed by someone else, nothing
-                        // to do.
-                    }
-                }
-            }
-            // Receivers in subscription_overrides are dropped here,
-            // closing any pending channels
-            return Err(err);
-        }
+        self.setup_subscriptions(&subscription_overrides).await?;
 
         // Start the fetch
         let min_context_slot = fetch_start_slot;
@@ -801,6 +863,11 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             fetch_origin,
             program_ids,
         );
+
+        // Dismiss all guards — the fetch task now owns cleanup
+        for mut guard in owner_guards {
+            guard.dismiss();
+        }
 
         // Wait for all accounts to resolve (either from fetch or subscription override)
         let mut resolved_accounts = vec![];
@@ -1101,8 +1168,8 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                 for pubkey in &pubkeys {
                     // Update metrics
                     // Remove pending requests and send error
-                    if let Some((_, requests)) = fetching.remove(pubkey) {
-                        for sender in requests {
+                    if let Some(state) = fetching.remove(pubkey) {
+                        for sender in state.waiters {
                             let error = RemoteAccountProviderError::AccountResolutionsFailed(
                                 format!("{}: {}", pubkey, error_msg)
                             );
@@ -1319,12 +1386,12 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             for (pubkey, remote_account) in
                 pubkeys.iter().zip(remote_accounts.iter())
             {
-                let requests = {
+                let waiters = {
                     let mut fetching = fetching_accounts.lock().unwrap();
                     // Remove from fetching and get pending requests
                     // Note: the account might have been resolved by subscription update already
-                    if let Some((_, requests)) = fetching.remove(pubkey) {
-                        requests
+                    if let Some(state) = fetching.remove(pubkey) {
+                        state.waiters
                     } else {
                         // Account was resolved by subscription update, skip
                         if tracing::enabled!(tracing::Level::TRACE) {
@@ -1337,7 +1404,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                 };
 
                 // Send the fetch result to all waiting requests
-                for request in requests {
+                for request in waiters {
                     let _ = request.send(Ok(remote_account.clone()));
                 }
             }

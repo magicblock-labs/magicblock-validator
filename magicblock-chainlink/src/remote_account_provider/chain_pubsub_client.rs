@@ -284,7 +284,11 @@ impl ReconnectableClient for ChainPubsubClientImpl {
 // -----------------
 #[cfg(any(test, feature = "dev-context"))]
 pub mod mock {
-    use std::{collections::HashSet, time::Duration};
+    use std::{
+        collections::HashSet,
+        sync::atomic::{AtomicU64, Ordering as AtomicOrdering},
+        time::Duration,
+    };
 
     use parking_lot::Mutex;
     use solana_account::Account;
@@ -293,6 +297,7 @@ pub mod mock {
     use solana_rpc_client_api::response::{
         Response as RpcResponse, RpcResponseContext,
     };
+    use tokio::sync::Notify;
     use tracing::*;
 
     use super::*;
@@ -310,6 +315,9 @@ pub mod mock {
         connected: Arc<Mutex<bool>>,
         pending_resubscribe_failures: Arc<Mutex<usize>>,
         reconnectable: Arc<Mutex<bool>>,
+        subscribe_blocked: Arc<Mutex<bool>>,
+        subscribe_attempts: Arc<AtomicU64>,
+        subscribe_notify: Arc<Notify>,
     }
 
     impl ChainPubsubClientMock {
@@ -326,6 +334,9 @@ pub mod mock {
                 connected: Arc::new(Mutex::new(true)),
                 pending_resubscribe_failures: Arc::new(Mutex::new(0)),
                 reconnectable: Arc::new(Mutex::new(true)),
+                subscribe_blocked: Arc::new(Mutex::new(false)),
+                subscribe_attempts: Arc::new(AtomicU64::new(0)),
+                subscribe_notify: Arc::new(Notify::new()),
             }
         }
 
@@ -384,6 +395,30 @@ pub mod mock {
             *self.reconnectable.lock() = true;
         }
 
+        /// Block the `subscribe()` method from completing. Used for testing.
+        pub fn block_subscribe(&self) {
+            *self.subscribe_blocked.lock() = true;
+        }
+
+        /// Release the `subscribe()` method to complete. Used for testing.
+        pub fn release_subscribe(&self) {
+            *self.subscribe_blocked.lock() = false;
+            self.subscribe_notify.notify_waiters();
+        }
+
+        /// Wait until at least `min_attempts` subscribe attempts have been made.
+        /// Used for testing to ensure subscribes are being called.
+        pub async fn wait_for_subscribe_attempts(&self, min_attempts: u64) {
+            loop {
+                let current =
+                    self.subscribe_attempts.load(AtomicOrdering::SeqCst);
+                if current >= min_attempts {
+                    break;
+                }
+                self.subscribe_notify.notified().await;
+            }
+        }
+
         pub fn is_connected_and_resubscribed(&self) -> bool {
             *self.connected.lock()
                 && self.subscribed_pubkeys.lock().len()
@@ -417,6 +452,15 @@ pub mod mock {
             pubkey: Pubkey,
             _retries: Option<usize>,
         ) -> RemoteAccountProviderResult<()> {
+            // Increment attempt counter and notify waiters
+            self.subscribe_attempts.fetch_add(1, AtomicOrdering::SeqCst);
+            self.subscribe_notify.notify_waiters();
+
+            // Wait until subscribe is released if it's blocked
+            while *self.subscribe_blocked.lock() {
+                self.subscribe_notify.notified().await;
+            }
+
             if !*self.connected.lock() {
                 return Err(
                     RemoteAccountProviderError::AccountSubscriptionsTaskFailed(
