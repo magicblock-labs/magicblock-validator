@@ -389,3 +389,15 @@ pub struct AccountCloneFields {
     pub confined: bool,
     pub remote_slot: u64,
 }
+
+/// Instruction(s) for Callback Executor builtin-program
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
+pub enum CallbackInstruction {
+    /// Executes a callback
+    ///
+    /// # Account references
+    /// - **0.**   `[SIGNER]`  Validator authority
+    /// - **1.**   `[]`        Callback signer PDA
+    /// - **2..n** `[]`        Accounts required by the embedded instructions
+    ExecuteCallback { instruction: Instruction },
+}

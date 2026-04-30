@@ -1,4 +1,6 @@
-use magicblock_magic_program_api::response::MagicResponse;
+use magicblock_magic_program_api::{
+    pda::CALLBACK_SIGNER, response::MagicResponse,
+};
 use solana_program::{
     account_info::AccountInfo, entrypoint::ProgramResult, msg, program::invoke,
     program_error::ProgramError,
@@ -93,10 +95,24 @@ pub fn process_transfer_callback(
 ) -> ProgramResult {
     msg!("TransferCallback");
 
-    let [_validator_authority, counter_pda, payer, _system_program] = accounts
+    let [callback_signer, counter_pda, payer, _system_program] = accounts
     else {
         return Err(ProgramError::NotEnoughAccountKeys);
     };
+
+    if !callback_signer.is_signer {
+        msg!("Missing callback signer");
+        return Err(ProgramError::MissingRequiredSignature);
+    }
+
+    if callback_signer.key != &CALLBACK_SIGNER {
+        msg!(
+            "Expected callback signer authority: {}, got: {}",
+            CALLBACK_SIGNER,
+            callback_signer.key
+        );
+        return Err(ProgramError::IncorrectAuthority);
+    }
 
     let response: MagicResponse = bincode::deserialize(data)
         .map_err(|_| ProgramError::InvalidInstructionData)?;
