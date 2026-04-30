@@ -6,6 +6,7 @@ use ephemeral_rollups_sdk::{
     },
     ActionArgs, ShortAccountMeta,
 };
+use magicblock_magic_program_api::pda::CALLBACK_SIGNER;
 use solana_program::{
     account_info::AccountInfo, entrypoint::ProgramResult, msg, program::invoke,
     program_error::ProgramError,
@@ -93,6 +94,10 @@ pub fn process_create_transfer_intent(
         payload: amount.to_le_bytes().to_vec(),
         compute_units: 20_000,
         accounts: vec![
+            ShortAccountMeta {
+                pubkey: CALLBACK_SIGNER,
+                is_writable: false,
+            },
             ShortAccountMeta {
                 pubkey: *counter_pda.key,
                 is_writable: true,

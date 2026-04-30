@@ -1,7 +1,10 @@
 use std::collections::HashSet;
 
 use magicblock_core::intent::BaseActionCallback;
-use magicblock_magic_program_api::args::AddActionCallbackArgs;
+use magicblock_magic_program_api::{
+    args::{AddActionCallbackArgs, ShortAccountMeta},
+    pda::CALLBACK_SIGNER,
+};
 use solana_account::{ReadableAccount, WritableAccount};
 use solana_instruction::error::InstructionError;
 use solana_log_collector::ic_msg;
@@ -11,7 +14,8 @@ use solana_pubkey::Pubkey;
 use crate::{
     schedule_transactions::{
         check_magic_context_id, get_clock, get_parent_program_id,
-        try_get_fee_vault, MAGIC_CONTEXT_IDX, PAYER_IDX,
+        try_get_fee_vault, validate_callback_accounts, MAGIC_CONTEXT_IDX,
+        PAYER_IDX,
     },
     utils::{
         account_actions::charge_delegated_payer,
@@ -89,7 +93,7 @@ pub(crate) fn process_add_action_callback(
         .map_err(|err| {
         ic_msg!(
             invoke_context,
-            "Failed to deserialize MagicContext: {}",
+            "AddActionCallback ERR: Failed to deserialize MagicContext: {}",
             err
         );
         InstructionError::GenericError
@@ -162,6 +166,29 @@ pub(crate) fn process_add_action_callback(
         return Err(InstructionError::InvalidInstructionData);
     }
 
+    // Validate account metas
+    let accounts_meta: Vec<_> = args
+        .accounts
+        .iter()
+        .map(
+            |ShortAccountMeta {
+                 pubkey,
+                 is_writable,
+             }| {
+                solana_instruction::AccountMeta {
+                    pubkey: *pubkey,
+                    is_signer: pubkey == &CALLBACK_SIGNER,
+                    is_writable: *is_writable,
+                }
+            },
+        )
+        .collect();
+    validate_callback_accounts(
+        &invoke_context,
+        &accounts_meta,
+        "AddActionCallback ERR",
+    )?;
+
     action.callback = Some(BaseActionCallback {
         destination_program: args.destination_program,
         discriminator: args.discriminator,
@@ -174,7 +201,7 @@ pub(crate) fn process_add_action_callback(
 
     ic_msg!(
         invoke_context,
-        "Attached callback to action at index {}",
+        "AddActionCallback ERR: Attached callback to action at index {}",
         args.action_index
     );
 

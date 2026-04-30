@@ -1,6 +1,10 @@
-use magicblock_magic_program_api::instruction::MagicBlockInstruction;
+use magicblock_magic_program_api::instruction::{
+    CallbackInstruction, MagicBlockInstruction,
+};
 use solana_instruction::error::InstructionError;
-use solana_program_runtime::declare_process_instruction;
+use solana_program_runtime::{
+    declare_process_instruction, invoke_context::InvokeContext,
+};
 
 use crate::{
     clone_account::{
@@ -20,16 +24,20 @@ use crate::{
     },
     schedule_transactions::{
         process_accept_scheduled_commits, process_add_action_callback,
-        process_schedule_commit, process_schedule_commit_finalize,
-        process_schedule_intent_bundle, ProcessScheduleCommitOptions,
+        process_execute_callback, process_schedule_commit,
+        process_schedule_commit_finalize, process_schedule_intent_bundle,
+        ProcessScheduleCommitOptions,
     },
 };
 
 pub const DEFAULT_COMPUTE_UNITS: u64 = 150;
 
-fn deserialize_instruction(
-    invoke_context: &mut solana_program_runtime::invoke_context::InvokeContext,
-) -> Result<MagicBlockInstruction, InstructionError> {
+fn deserialize_instruction<T>(
+    invoke_context: &mut InvokeContext,
+) -> Result<T, InstructionError>
+where
+    T: for<'de> serde::de::Deserialize<'de>,
+{
     bincode::deserialize(
         invoke_context
             .transaction_context
@@ -244,6 +252,25 @@ declare_process_instruction!(
     }
 );
 
+declare_process_instruction!(
+    CallbackEntrypoint,
+    DEFAULT_COMPUTE_UNITS,
+    |invoke_context| {
+        let instruction: CallbackInstruction =
+            deserialize_instruction(invoke_context)?;
+        let transaction_context = &invoke_context.transaction_context;
+        let instruction_context =
+            transaction_context.get_current_instruction_context()?;
+        let signers = instruction_context.get_signers()?;
+
+        match instruction {
+            CallbackInstruction::ExecuteCallback { instruction } => {
+                process_execute_callback(signers, invoke_context, instruction)
+            }
+        }
+    }
+);
+
 #[cfg(test)]
 mod test {
     use magicblock_magic_program_api::args::ScheduleTaskArgs;
@@ -272,6 +299,23 @@ mod test {
             vec![AccountMeta::new_readonly(crate::CRANK_PROGRAM_ID, false)],
             Err(InstructionError::InvalidInstructionData),
             CrankEntrypoint::vm,
+            |_invoke_context| {},
+            |_invoke_context| {},
+        );
+    }
+
+    #[test]
+    fn callback_entrypoint_rejects_invalid_instruction_data() {
+        let data = vec![0xFF, 0xFF, 0xFF, 0xFF];
+
+        mock_process_instruction(
+            &crate::CALLBACK_PROGRAM_ID,
+            None,
+            &data,
+            Vec::new(),
+            vec![AccountMeta::new_readonly(crate::CALLBACK_PROGRAM_ID, false)],
+            Err(InstructionError::InvalidInstructionData),
+            CallbackEntrypoint::vm,
             |_invoke_context| {},
             |_invoke_context| {},
         );
