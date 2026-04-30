@@ -17,8 +17,7 @@ use integration_test_tools::{
 use teepee::Teepee;
 use test_runner::{
     cleanup::{
-        cleanup_devnet_only, cleanup_devnet_validator, cleanup_light_validator,
-        cleanup_validators,
+        cleanup_devnet_only, cleanup_light_validator, cleanup_validators,
     },
     env_config::TestConfigViaEnvVars,
     signal::wait_for_ctrlc,
@@ -156,7 +155,7 @@ fn run_restore_ledger_tests(
     } else {
         let devnet_validator =
             config.setup_devnet(TEST_NAME).then(start_devnet_validator);
-        wait_for_ctrlc(devnet_validator, None, false, success_output())
+        wait_for_ctrlc(devnet_validator, None, None, success_output())
     }
 }
 
@@ -191,7 +190,7 @@ fn run_chainlink_tests(
         ]);
         loaded_chain_accounts
     };
-    let start_devnet_validator = || match start_validator(
+    let start_light_validator = || match start_validator(
         "chainlink-conf.devnet.toml",
         ValidatorCluster::Light,
         &loaded_chain_accounts,
@@ -203,7 +202,7 @@ fn run_chainlink_tests(
     };
     if config.run_test(TEST_NAME) {
         eprintln!("======== RUNNING CHAINLINK TESTS ========");
-        let mut devnet_validator = start_devnet_validator();
+        let mut light_validator = start_light_validator();
         let test_chainlink_dir =
             format!("{}/../{}", manifest_dir, "test-chainlink");
         eprintln!("Running chainlink tests in {}", test_chainlink_dir);
@@ -211,16 +210,16 @@ fn run_chainlink_tests(
             Ok(output) => output,
             Err(err) => {
                 eprintln!("Failed to run chainlink tests: {:?}", err);
-                cleanup_light_validator(&mut devnet_validator);
+                cleanup_light_validator(&mut light_validator);
                 return Err(err.into());
             }
         };
-        cleanup_light_validator(&mut devnet_validator);
+        cleanup_light_validator(&mut light_validator);
         Ok(output)
     } else {
-        let devnet_validator =
-            config.setup_devnet(TEST_NAME).then(start_devnet_validator);
-        wait_for_ctrlc(devnet_validator, None, true, success_output())
+        let light_validator =
+            config.setup_devnet(TEST_NAME).then(start_light_validator);
+        wait_for_ctrlc(None, light_validator, None, success_output())
     }
 }
 
@@ -241,16 +240,9 @@ fn run_table_mania_and_committor_tests(
 
     let loaded_chain_accounts =
         LoadedAccounts::with_delegation_program_test_authority();
-    let cluster = if !config.skip_entirely(COMMITTOR_TEST) {
-        ValidatorCluster::Chain(None)
-    } else {
-        ValidatorCluster::Light
-    };
-    let uses_light_validator = matches!(&cluster, ValidatorCluster::Light);
-
-    let start_devnet_validator = || match start_validator(
+    let start_light_validator = || match start_validator(
         "committor-conf.devnet.toml",
-        cluster,
+        ValidatorCluster::Light,
         &loaded_chain_accounts,
     ) {
         Some(validator) => validator,
@@ -266,7 +258,7 @@ fn run_table_mania_and_committor_tests(
     if run_table_mania || run_committor {
         eprintln!("======== Starting DEVNET Validator for TableMania and Committor ========");
 
-        let mut devnet_validator = start_devnet_validator();
+        let mut light_validator = start_light_validator();
 
         // NOTE: the table mania and committor tests run directly against
         // a chain validator therefore no ephemeral validator needs to be started
@@ -279,10 +271,7 @@ fn run_table_mania_and_committor_tests(
                 Ok(output) => output,
                 Err(err) => {
                     eprintln!("Failed to run table-mania: {:?}", err);
-                    cleanup_devnet_validator(
-                        &mut devnet_validator,
-                        uses_light_validator,
-                    );
+                    cleanup_light_validator(&mut light_validator);
                     return Err(err.into());
                 }
             }
@@ -310,10 +299,7 @@ fn run_table_mania_and_committor_tests(
                 Ok(output) => output,
                 Err(err) => {
                     eprintln!("Failed to run committor: {:?}", err);
-                    cleanup_devnet_validator(
-                        &mut devnet_validator,
-                        uses_light_validator,
-                    );
+                    cleanup_light_validator(&mut light_validator);
                     return Err(err.into());
                 }
             }
@@ -322,20 +308,15 @@ fn run_table_mania_and_committor_tests(
             success_output()
         };
 
-        cleanup_devnet_validator(&mut devnet_validator, uses_light_validator);
+        cleanup_light_validator(&mut light_validator);
 
         Ok((table_mania_test_output, committor_test_output))
     } else {
         let setup_needed = config.setup_devnet(TABLE_MANIA_TEST)
             || config.setup_devnet(COMMITTOR_TEST);
-        let devnet_validator = setup_needed.then(start_devnet_validator);
+        let light_validator = setup_needed.then(start_light_validator);
         Ok((
-            wait_for_ctrlc(
-                devnet_validator,
-                None,
-                uses_light_validator,
-                success_output(),
-            )?,
+            wait_for_ctrlc(None, light_validator, None, success_output())?,
             success_output(),
         ))
     }
@@ -353,7 +334,7 @@ fn run_schedule_commit_tests(
     let loaded_chain_accounts =
         LoadedAccounts::with_delegation_program_test_authority();
 
-    let start_devnet_validator = || match start_validator(
+    let start_light_validator = || match start_validator(
         "schedulecommit-conf.devnet.toml",
         ValidatorCluster::Light,
         &loaded_chain_accounts,
@@ -380,7 +361,7 @@ fn run_schedule_commit_tests(
             "======== Starting DEVNET Validator for Scenarios + Security ========"
         );
 
-        let mut devnet_validator = start_devnet_validator();
+        let mut light_validator = start_light_validator();
 
         // These share a common config that includes the program to schedule commits
         // Thus they can run against the same validator instances
@@ -400,7 +381,7 @@ fn run_schedule_commit_tests(
                     eprintln!("Failed to run security: {:?}", err);
                     cleanup_validators(
                         &mut ephem_validator,
-                        &mut devnet_validator,
+                        &mut light_validator,
                         true,
                     );
                     return Err(err.into());
@@ -417,25 +398,25 @@ fn run_schedule_commit_tests(
                     eprintln!("Failed to run scenarios: {:?}", err);
                     cleanup_validators(
                         &mut ephem_validator,
-                        &mut devnet_validator,
+                        &mut light_validator,
                         true,
                     );
                     return Err(err.into());
                 }
             };
 
-        cleanup_validators(&mut ephem_validator, &mut devnet_validator, true);
+        cleanup_validators(&mut ephem_validator, &mut light_validator, true);
         Ok((test_security_output, test_scenarios_output))
     } else {
-        let devnet_validator =
-            config.setup_devnet(TEST_NAME).then(start_devnet_validator);
+        let light_validator =
+            config.setup_devnet(TEST_NAME).then(start_light_validator);
         let ephem_validator =
             config.setup_ephem(TEST_NAME).then(start_ephem_validator);
         eprintln!("Setup validator(s)");
         wait_for_ctrlc(
-            devnet_validator,
+            None,
+            light_validator,
             ephem_validator,
-            true,
             success_output(),
         )?;
         Ok((success_output(), success_output()))
@@ -527,8 +508,8 @@ fn run_cloning_tests(
             config.setup_ephem(TEST_NAME).then(start_ephem_validator);
         wait_for_ctrlc(
             devnet_validator,
+            None,
             ephem_validator,
-            false,
             success_output(),
         )
     }
@@ -593,8 +574,8 @@ fn run_magicblock_api_tests(
             config.setup_ephem(TEST_NAME).then(start_ephem_validator);
         wait_for_ctrlc(
             devnet_validator,
+            None,
             ephem_validator,
-            false,
             success_output(),
         )
     }
@@ -661,8 +642,8 @@ fn run_magicblock_pubsub_tests(
             config.setup_ephem(TEST_NAME).then(start_ephem_validator);
         wait_for_ctrlc(
             devnet_validator,
+            None,
             ephem_validator,
-            false,
             success_output(),
         )
     }
@@ -711,7 +692,7 @@ fn run_config_tests(
     } else {
         let devnet_validator =
             config.setup_devnet(TEST_NAME).then(start_devnet_validator);
-        wait_for_ctrlc(devnet_validator, None, false, success_output())
+        wait_for_ctrlc(devnet_validator, None, None, success_output())
     }
 }
 
@@ -787,8 +768,8 @@ fn run_schedule_intents_tests(
             config.setup_ephem(TEST_NAME).then(start_ephem_validator);
         wait_for_ctrlc(
             devnet_validator,
+            None,
             ephem_validator,
-            false,
             success_output(),
         )
     }
@@ -839,7 +820,7 @@ fn run_task_scheduler_tests(
     } else {
         let devnet_validator =
             config.setup_devnet(TEST_NAME).then(start_devnet_validator);
-        wait_for_ctrlc(devnet_validator, None, false, success_output())
+        wait_for_ctrlc(devnet_validator, None, None, success_output())
     }
 }
 

@@ -14,17 +14,6 @@ pub fn cleanup_validators(
     kill_validators();
 }
 
-pub fn cleanup_devnet_validator(
-    devnet_validator: &mut process::Child,
-    uses_light_validator: bool,
-) {
-    if uses_light_validator {
-        cleanup_light_validator(devnet_validator);
-    } else {
-        cleanup_devnet_only(devnet_validator);
-    }
-}
-
 pub fn cleanup_devnet_only(devnet_validator: &mut Child) {
     cleanup_validator(devnet_validator, "devnet");
     kill_validators();
