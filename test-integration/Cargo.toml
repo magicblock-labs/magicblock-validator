@@ -38,7 +38,7 @@ color-backtrace = { version = "0.7" }
 compressed-delegation-api = { path = "../compressed-delegation-api" }
 compressed-delegation-client = { path = "../compressed-delegation-client" }
 ctrlc = "3.4.7"
-ephemeral-rollups-sdk = { git = "https://github.com/magicblock-labs/ephemeral-rollups-sdk.git", rev = "ccfc9f924dc40", default-features = false, features = [
+ephemeral-rollups-sdk = { git = "https://github.com/magicblock-labs/ephemeral-rollups-sdk.git", rev = "1e2da4393273e", default-features = false, features = [
     "disable-realloc",
     "modular-sdk",
 ] }
