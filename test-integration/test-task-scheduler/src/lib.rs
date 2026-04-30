@@ -32,9 +32,7 @@ use program_flexi_counter::{
     state::FlexiCounter,
 };
 use program_schedulecommit::MainAccount;
-use solana_sdk::{
-    signature::Keypair, signer::Signer, transaction::Transaction,
-};
+use solana_sdk::{signature::Keypair, signer::Signer};
 use tempfile::TempDir;
 
 pub const TASK_SCHEDULER_TICK_MILLIS: u64 = 50;

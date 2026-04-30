@@ -262,12 +262,7 @@ impl ScheduleCommitType {
                     magic_context.clone(),
                     magic_program.clone(),
                 )
-                .commit(
-                    &accounts
-                        .into_iter()
-                        .map(|account| account.clone())
-                        .collect::<Vec<_>>(),
-                )
+                .commit(&accounts.into_iter().cloned().collect::<Vec<_>>())
                 .compressed()
                 .build_and_invoke()
             }
@@ -278,10 +273,7 @@ impl ScheduleCommitType {
                     magic_program.clone(),
                 )
                 .commit_and_undelegate(
-                    &accounts
-                        .into_iter()
-                        .map(|account| account.clone())
-                        .collect::<Vec<_>>(),
+                    &accounts.into_iter().cloned().collect::<Vec<_>>(),
                 )
                 .compressed()
                 .build_and_invoke()
