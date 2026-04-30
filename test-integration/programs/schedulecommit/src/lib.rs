@@ -9,6 +9,7 @@ use ephemeral_rollups_sdk::{
     ephem::{
         commit_accounts, commit_and_undelegate_accounts,
         commit_finalize_accounts, commit_finalize_and_undelegate_accounts,
+        FoldableIntentBuilder, MagicIntentBundleBuilder,
     },
 };
 use magicblock_magic_program_api::{
@@ -256,56 +257,34 @@ impl ScheduleCommitType {
                 )
             }
             ScheduleCommitType::CommitFinalizeCompressed => {
-                let ix = Instruction::new_with_bincode(
-                    *magic_program.key,
-                    &magicblock_magic_program_api::instruction::MagicBlockInstruction::ScheduleCommitCompressed,
-                    [vec![
-                        AccountMeta {
-                            pubkey: *payer.key,
-                            is_signer: true,
-                            is_writable: true,
-                        },
-                        AccountMeta {
-                            pubkey: *magic_context.key,
-                            is_signer: false,
-                            is_writable: true,
-                        },
-                    ], accounts.iter().map(|account| AccountMeta {
-                        pubkey: *account.key,
-                        is_signer: account.is_signer,
-                        is_writable: account.is_writable,
-                    }).collect()].concat(),
-                );
-                let mut all_accounts =
-                    vec![payer.clone(), magic_context.clone()];
-                all_accounts.extend(accounts.into_iter().cloned());
-                invoke(&ix, &all_accounts)
+                MagicIntentBundleBuilder::new(
+                    payer.clone(),
+                    magic_context.clone(),
+                    magic_program.clone(),
+                )
+                .commit(
+                    &accounts
+                        .into_iter()
+                        .map(|account| account.clone())
+                        .collect::<Vec<_>>(),
+                )
+                .compressed()
+                .build_and_invoke()
             }
             ScheduleCommitType::CommitFinalizeCompressedAndUndelegate => {
-                let ix = Instruction::new_with_bincode(
-                    *magic_program.key,
-                    &magicblock_magic_program_api::instruction::MagicBlockInstruction::ScheduleCommitAndUndelegateCompressed,
-                    [vec![
-                        AccountMeta {
-                            pubkey: *payer.key,
-                            is_signer: true,
-                            is_writable: true,
-                        },
-                        AccountMeta {
-                            pubkey: *magic_context.key,
-                            is_signer: false,
-                            is_writable: true,
-                        },
-                    ], accounts.iter().map(|account| AccountMeta {
-                        pubkey: *account.key,
-                        is_signer: account.is_signer,
-                        is_writable: account.is_writable,
-                    }).collect()].concat(),
-                );
-                let mut all_accounts =
-                    vec![payer.clone(), magic_context.clone()];
-                all_accounts.extend(accounts.into_iter().cloned());
-                invoke(&ix, &all_accounts)
+                MagicIntentBundleBuilder::new(
+                    payer.clone(),
+                    magic_context.clone(),
+                    magic_program.clone(),
+                )
+                .commit_and_undelegate(
+                    &accounts
+                        .into_iter()
+                        .map(|account| account.clone())
+                        .collect::<Vec<_>>(),
+                )
+                .compressed()
+                .build_and_invoke()
             }
         }
     }
