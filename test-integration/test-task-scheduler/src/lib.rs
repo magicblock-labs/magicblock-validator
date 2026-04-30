@@ -88,43 +88,16 @@ pub fn create_delegated_counter(
     validator: &mut Child,
     commit_frequency_ms: u32,
 ) {
-    // Initialize the counter
-    let blockhash = expect!(
-        ctx.try_chain_client().and_then(|client| client
-            .get_latest_blockhash()
-            .map_err(|e| anyhow::anyhow!(
-                "Failed to get latest blockhash: {}",
-                e
-            ))),
-        validator
-    );
-    expect!(
-        ctx.send_transaction_chain(
-            &mut Transaction::new_signed_with_payer(
-                &[create_init_ix(payer.pubkey(), "test".to_string())],
-                Some(&payer.pubkey()),
-                &[&payer],
-                blockhash,
-            ),
-            &[payer]
-        ),
-        format!("Failed to send init transaction: blockhash {:?}", blockhash),
-        validator
+    let init_ix = create_init_ix(payer.pubkey(), "test".to_string());
+    let delegate_ix = create_delegate_ix_with_commit_frequency_ms(
+        payer.pubkey(),
+        commit_frequency_ms,
     );
 
-    // Delegate the counter to the ephem validator
     expect!(
-        ctx.send_transaction_chain(
-            &mut Transaction::new_signed_with_payer(
-                &[create_delegate_ix_with_commit_frequency_ms(
-                    payer.pubkey(),
-                    commit_frequency_ms
-                )],
-                Some(&payer.pubkey()),
-                &[&payer],
-                blockhash,
-            ),
-            &[payer]
+        ctx.send_and_confirm_instructions_with_payer_chain(
+            &[init_ix, delegate_ix],
+            payer,
         ),
         validator
     );
