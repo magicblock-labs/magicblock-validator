@@ -1,7 +1,4 @@
-use borsh::BorshDeserialize;
-use compressed_delegation_api::{
-    CommitAndFinalizeArgs, CompressedDelegationRecord,
-};
+use compressed_delegation_api::CommitAndFinalizeArgs;
 use magicblock_core::intent::CommittedAccount;
 use solana_instruction::Instruction;
 use solana_pubkey::Pubkey;
@@ -26,9 +23,6 @@ pub struct CommitFinalizeCompressedTask {
 impl CommitFinalizeCompressedTask {
     #[inline(always)]
     pub fn instruction(&self, validator: &Pubkey) -> Instruction {
-        let old_record = CompressedDelegationRecord::try_from_slice(
-            &self.compressed_data.compressed_delegation_record_bytes,
-        ).expect("The record should have been valid because it was already used to clone the account");
         let args = CommitAndFinalizeArgs {
             current_compressed_delegated_account_data: self
                 .compressed_data
