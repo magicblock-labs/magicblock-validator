@@ -21,6 +21,7 @@ struct ProviderTestCtx {
     provider:
         Arc<RemoteAccountProvider<ChainRpcClientMock, ChainPubsubClientMock>>,
     _pubsub_client: ChainPubsubClientMock,
+    _forward_rx: mpsc::Receiver<ForwardedSubscriptionUpdate>,
 }
 
 async fn setup_provider(
@@ -37,7 +38,7 @@ async fn setup_provider(
     let pubsub_client =
         ChainPubsubClientMock::new(updates_sender, updates_receiver);
 
-    let (forward_tx, _forward_rx) = mpsc::channel(1_000);
+    let (forward_tx, forward_rx) = mpsc::channel(1_000);
     let (subscribed_accounts, config) = create_test_lru_cache(1000);
     let chain_slot = Arc::<AtomicU64>::default();
 
@@ -57,6 +58,7 @@ async fn setup_provider(
     ProviderTestCtx {
         provider,
         _pubsub_client: pubsub_client,
+        _forward_rx: forward_rx,
     }
 }
 
@@ -75,6 +77,7 @@ async fn test_try_get_multi_abort_during_setup_subscriptions_rolls_back_pending_
     let ProviderTestCtx {
         provider,
         _pubsub_client,
+        _forward_rx,
     } = setup_provider(pubkey, account).await;
 
     // Block subscribe to hang the setup_subscriptions() call
@@ -166,6 +169,7 @@ async fn test_try_get_multi_waiter_receives_error_when_owner_aborts_in_setup_sub
     let ProviderTestCtx {
         provider,
         _pubsub_client,
+        _forward_rx,
     } = setup_provider(pubkey, account).await;
 
     // Block subscribe to hang the setup_subscriptions() call
@@ -261,8 +265,11 @@ async fn test_stale_fetching_account_entry_is_evicted_and_replaced() {
         rent_epoch: 0,
     };
 
-    let ProviderTestCtx { provider, .. } =
-        setup_provider(pubkey, account.clone()).await;
+    let ProviderTestCtx {
+        provider,
+        _forward_rx,
+        ..
+    } = setup_provider(pubkey, account.clone()).await;
 
     // Directly insert a stale FetchingAccountState into the map
     // Use 35 seconds (stale threshold is 30)
