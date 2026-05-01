@@ -2,7 +2,10 @@
 use std::{
     collections::HashMap,
     fmt,
-    sync::{Arc, Mutex},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    },
     time::Duration,
 };
 
@@ -12,6 +15,7 @@ use solana_instruction::error::InstructionError;
 use solana_loader_v4_interface::state::LoaderV4State;
 use solana_pubkey::Pubkey;
 use solana_signature::Signature;
+use tokio::sync::Notify;
 
 #[cfg(any(test, feature = "dev-context"))]
 use crate::cloner::AccountCloneRequest;
@@ -32,6 +36,8 @@ pub struct ClonerStub {
     clone_requests: Arc<Mutex<Vec<AccountCloneRequest>>>,
     clone_delay: Arc<Mutex<Option<Duration>>>,
     fail_next_clone: Arc<Mutex<bool>>,
+    block_clone_completion: Arc<AtomicBool>,
+    clone_completion_notify: Arc<Notify>,
 }
 
 #[cfg(any(test, feature = "dev-context"))]
@@ -44,6 +50,8 @@ impl ClonerStub {
             clone_requests: Arc::new(Mutex::new(Vec::new())),
             clone_delay: Arc::new(Mutex::new(None)),
             fail_next_clone: Arc::new(Mutex::new(false)),
+            block_clone_completion: Arc::new(AtomicBool::new(false)),
+            clone_completion_notify: Arc::new(Notify::new()),
         }
     }
 
@@ -53,6 +61,15 @@ impl ClonerStub {
 
     pub fn set_clone_delay(&self, delay: Duration) {
         *self.clone_delay.lock().unwrap() = Some(delay);
+    }
+
+    pub fn block_clone_completion(&self) {
+        self.block_clone_completion.store(true, Ordering::SeqCst);
+    }
+
+    pub fn allow_clone_completion(&self) {
+        self.block_clone_completion.store(false, Ordering::SeqCst);
+        self.clone_completion_notify.notify_waiters();
     }
 
     #[allow(dead_code)]
@@ -116,6 +133,9 @@ impl Cloner for ClonerStub {
                     ),
                 );
             }
+        }
+        while self.block_clone_completion.load(Ordering::SeqCst) {
+            self.clone_completion_notify.notified().await;
         }
         self.accounts_bank.insert(request.pubkey, request.account);
         Ok(Signature::default())

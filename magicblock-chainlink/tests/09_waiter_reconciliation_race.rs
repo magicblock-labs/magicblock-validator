@@ -7,7 +7,7 @@ use solana_account::Account;
 use solana_program::clock::Slot;
 use solana_pubkey::Pubkey;
 use tracing::*;
-use utils::test_context::TestContext;
+use utils::test_context::{TestChainlink, TestContext};
 
 mod utils;
 
@@ -16,6 +16,33 @@ const CURRENT_SLOT: u64 = 11;
 async fn setup(slot: Slot) -> TestContext {
     init_logger();
     TestContext::init(slot).await
+}
+
+async fn wait_for_registered_waiters(
+    chainlink: &TestChainlink,
+    account_pubkey: &Pubkey,
+    expected_waiters: usize,
+) {
+    let fetch_cloner = chainlink
+        .fetch_cloner()
+        .expect("fetch cloner should be configured");
+    let waiter_registration_start = tokio::time::Instant::now();
+    let waiter_registration_timeout = tokio::time::Duration::from_secs(2);
+
+    loop {
+        if fetch_cloner
+            .pending_request_waiter_count(account_pubkey)
+            .is_some_and(|count| count >= expected_waiters)
+        {
+            break;
+        }
+
+        assert!(
+            waiter_registration_start.elapsed() < waiter_registration_timeout,
+            "pending_request_waiter_count for {account_pubkey} did not reach {expected_waiters} within {waiter_registration_timeout:?}"
+        );
+        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+    }
 }
 
 /// Integration test for waiter_reconciliation_check() race condition recovery.
@@ -56,6 +83,7 @@ async fn test_waiter_reconciliation_detects_valid_delegated_state() {
     );
 
     cloner.set_clone_delay(std::time::Duration::from_millis(200));
+    cloner.block_clone_completion();
 
     let chainlink1 = chainlink.clone();
     let chainlink2 = chainlink.clone();
@@ -75,7 +103,6 @@ async fn test_waiter_reconciliation_detects_valid_delegated_state() {
 
     let task2 = tokio::spawn(async move {
         info!("Task2: Starting fetch");
-        tokio::time::sleep(tokio::time::Duration::from_millis(25)).await;
         chainlink2
             .ensure_accounts(
                 &[account_pubkey],
@@ -88,7 +115,6 @@ async fn test_waiter_reconciliation_detects_valid_delegated_state() {
 
     let task3 = tokio::spawn(async move {
         info!("Task3: Starting fetch");
-        tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
         chainlink3
             .ensure_accounts(
                 &[account_pubkey],
@@ -98,6 +124,9 @@ async fn test_waiter_reconciliation_detects_valid_delegated_state() {
             )
             .await
     });
+
+    wait_for_registered_waiters(chainlink.as_ref(), &account_pubkey, 2).await;
+    cloner.allow_clone_completion();
 
     let (result1, result2, result3) =
         tokio::try_join!(task1, task2, task3).expect("Tasks should complete");
@@ -152,6 +181,7 @@ async fn test_multiple_concurrent_requests_with_valid_delegated_state() {
     );
 
     cloner.set_clone_delay(std::time::Duration::from_millis(200));
+    cloner.block_clone_completion();
 
     let chainlink1 = chainlink.clone();
     let chainlink2 = chainlink.clone();
@@ -169,7 +199,6 @@ async fn test_multiple_concurrent_requests_with_valid_delegated_state() {
     });
 
     let task2 = tokio::spawn(async move {
-        tokio::time::sleep(tokio::time::Duration::from_millis(25)).await;
         chainlink2
             .ensure_accounts(
                 &[account_pubkey],
@@ -181,7 +210,6 @@ async fn test_multiple_concurrent_requests_with_valid_delegated_state() {
     });
 
     let task3 = tokio::spawn(async move {
-        tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
         chainlink3
             .ensure_accounts(
                 &[account_pubkey],
@@ -191,6 +219,9 @@ async fn test_multiple_concurrent_requests_with_valid_delegated_state() {
             )
             .await
     });
+
+    wait_for_registered_waiters(chainlink.as_ref(), &account_pubkey, 2).await;
+    cloner.allow_clone_completion();
 
     let (result1, result2, result3) =
         tokio::try_join!(task1, task2, task3).expect("Tasks should complete");

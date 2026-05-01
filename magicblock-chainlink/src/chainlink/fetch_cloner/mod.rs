@@ -226,8 +226,11 @@ where
     /// fetch+clone request keyed by `pubkey`, or `None` if no pending
     /// request exists for that pubkey. Used by tests to deterministically
     /// observe waiter registration without relying on fixed sleeps.
-    #[cfg(test)]
-    fn pending_request_waiter_count(&self, pubkey: &Pubkey) -> Option<usize> {
+    #[cfg(any(test, feature = "dev-context"))]
+    pub fn pending_request_waiter_count(
+        &self,
+        pubkey: &Pubkey,
+    ) -> Option<usize> {
         self.pending_requests
             .read(pubkey, |_, state| state.waiters.len())
     }
