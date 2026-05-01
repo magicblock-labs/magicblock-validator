@@ -3780,6 +3780,7 @@ async fn test_project_ata_skips_repeat_fetch_for_known_empty_eata() {
         remote_account_provider,
         rpc_client,
         subscription_tx,
+        fetch_cloner,
         ..
     } = setup(
         [(ata_pubkey, ata_account.clone())],
@@ -3815,16 +3816,18 @@ async fn test_project_ata_skips_repeat_fetch_for_known_empty_eata() {
     const TIMEOUT: std::time::Duration = Duration::from_millis(500);
 
     // First update: triggers a real eATA fetch which returns NotFound and
-    // marks the eATA as known-empty.
+    // marks the eATA as known-empty. We poll the cache predicate itself
+    // rather than the fetch counter so the readiness signal cannot fire
+    // before `mark_eata_empty` has run.
     let baseline_fetches = rpc_client.single_account_fetches();
     send_update().await;
     tokio::time::timeout(TIMEOUT, async {
-        while rpc_client.single_account_fetches() == baseline_fetches {
+        while !fetch_cloner.is_known_empty_eata(&eata_pubkey) {
             tokio::time::sleep(POLL_INTERVAL).await;
         }
     })
     .await
-    .expect("timed out waiting for initial eATA fetch");
+    .expect("timed out waiting for known-empty eATA cache entry");
     let after_first = rpc_client.single_account_fetches();
     assert!(
         after_first > baseline_fetches,
