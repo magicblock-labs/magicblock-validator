@@ -735,10 +735,17 @@ pub fn wait_for_cloned_accounts_hydration(
 /// Send SIGTERM and wait for the process to exit so its Drop handlers (RocksDB
 /// flush, mmap msync, in-flight snapshot threads) can run before we proceed.
 /// Falls back to SIGKILL if the validator does not exit within the deadline.
+///
+/// Idempotent: once the child has been reaped its PID can be recycled by the
+/// OS, so we must never signal `validator.id()` again. `try_wait` returns the
+/// cached exit status after a prior reap, which we use as the guard.
 pub fn shutdown_and_wait(validator: &mut Child) {
     const DEADLINE: Duration = Duration::from_secs(15);
     const POLL_INTERVAL: Duration = Duration::from_millis(50);
 
+    if matches!(validator.try_wait(), Ok(Some(_)) | Err(_)) {
+        return;
+    }
     unsafe {
         libc::kill(validator.id() as i32, libc::SIGTERM);
     }
@@ -747,7 +754,7 @@ pub fn shutdown_and_wait(validator: &mut Child) {
         match validator.try_wait() {
             Ok(Some(_)) => return,
             Ok(None) => sleep(POLL_INTERVAL),
-            Err(_) => break,
+            Err(_) => return,
         }
     }
     let _ = validator.kill();
