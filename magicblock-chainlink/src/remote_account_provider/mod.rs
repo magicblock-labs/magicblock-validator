@@ -1202,19 +1202,24 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         &self,
         pubkey: &Pubkey,
     ) -> RemoteAccountProviderResult<SubscribeResult> {
-        let mut rollback_owners =
-            self.subscription_rollback_owners.lock().await;
         if self.is_watching(pubkey) {
             // Promote in LRU cache even if already subscribed
             self.lrucache_subscribed_accounts.add(*pubkey);
-            rollback_owners.remove(pubkey);
+            self.subscription_rollback_owners
+                .lock()
+                .await
+                .remove(pubkey);
             return Ok(SubscribeResult::AlreadyWatching);
         }
 
-        if let Some(evicted) = self.register_subscription(pubkey).await? {
+        let evicted = self.register_subscription(pubkey).await?;
+        let rollback_token = self.next_subscription_rollback_token();
+
+        let mut rollback_owners =
+            self.subscription_rollback_owners.lock().await;
+        if let Some(evicted) = evicted {
             rollback_owners.remove(&evicted);
         }
-        let rollback_token = self.next_subscription_rollback_token();
         rollback_owners.insert(*pubkey, rollback_token);
         Ok(SubscribeResult::Created(rollback_token))
     }
@@ -1250,8 +1255,6 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             return Ok(());
         }
 
-        let mut rollback_owners =
-            self.subscription_rollback_owners.lock().await;
         let success = subscription_reconciler::unsubscribe_and_notify_removal(
             *pubkey,
             &self.pubsub_client,
@@ -1261,7 +1264,10 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
 
         if success {
             self.lrucache_subscribed_accounts.remove(pubkey);
-            rollback_owners.remove(pubkey);
+            self.subscription_rollback_owners
+                .lock()
+                .await
+                .remove(pubkey);
         }
 
         Ok(())
@@ -1276,9 +1282,12 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             return Ok(false);
         }
 
-        let mut rollback_owners =
-            self.subscription_rollback_owners.lock().await;
-        if rollback_owners.get(pubkey).copied() != Some(rollback_token) {
+        let is_sole_owner = {
+            let rollback_owners =
+                self.subscription_rollback_owners.lock().await;
+            rollback_owners.get(pubkey).copied() == Some(rollback_token)
+        };
+        if !is_sole_owner {
             return Ok(false);
         }
 
@@ -1291,7 +1300,11 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
 
         if success {
             self.lrucache_subscribed_accounts.remove(pubkey);
-            rollback_owners.remove(pubkey);
+            let mut rollback_owners =
+                self.subscription_rollback_owners.lock().await;
+            if rollback_owners.get(pubkey).copied() == Some(rollback_token) {
+                rollback_owners.remove(pubkey);
+            }
         }
 
         Ok(success)
