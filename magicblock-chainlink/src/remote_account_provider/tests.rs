@@ -4,6 +4,7 @@ use std::{
 };
 
 use solana_account::Account;
+use solana_system_interface::program as system_program;
 use tokio::sync::mpsc;
 
 use super::*;
@@ -12,8 +13,10 @@ use crate::{
         chain_pubsub_client::mock::ChainPubsubClientMock, chain_slot::ChainSlot,
     },
     testing::{
+        init_logger,
+        rpc_client_mock::AccountAtSlot,
         rpc_client_mock::{ChainRpcClientMock, ChainRpcClientMockBuilder},
-        utils::create_test_lru_cache,
+        utils::{create_test_lru_cache, random_pubkey},
     },
 };
 
@@ -60,6 +63,69 @@ async fn setup_provider(
         _pubsub_client: pubsub_client,
         _forward_rx: forward_rx,
     }
+}
+
+struct TestSlotConfig {
+    current_slot: u64,
+    account1_slot: u64,
+    account2_slot: u64,
+}
+
+async fn setup_matching_slots(
+    config: TestSlotConfig,
+    pubkey1: Pubkey,
+    pubkey2: Pubkey,
+) -> (
+    RemoteAccountProvider<ChainRpcClientMock, ChainPubsubClientMock>,
+    mpsc::Receiver<ForwardedSubscriptionUpdate>,
+) {
+    init_logger();
+
+    let rpc_client = ChainRpcClientMockBuilder::new()
+        .slot(config.current_slot)
+        .account(
+            pubkey1,
+            Account {
+                lamports: 555,
+                data: vec![],
+                owner: system_program::id(),
+                executable: false,
+                rent_epoch: 0,
+            },
+        )
+        .account(
+            pubkey2,
+            Account {
+                lamports: 666,
+                data: vec![],
+                owner: system_program::id(),
+                executable: false,
+                rent_epoch: 0,
+            },
+        )
+        .account_override_slot(&pubkey1, config.account1_slot)
+        .account_override_slot(&pubkey2, config.account2_slot)
+        .build();
+    let (tx, rx) = mpsc::channel(1);
+    let pubsub_client = ChainPubsubClientMock::new(tx, rx);
+
+    let (forward_tx, forward_rx) = mpsc::channel(100);
+    let (subscribed_accounts, config) = create_test_lru_cache(1000);
+    let chain_slot = Arc::<AtomicU64>::default();
+
+    (
+        RemoteAccountProvider::new(
+            rpc_client,
+            pubsub_client,
+            forward_tx,
+            &config,
+            subscribed_accounts,
+            ChainSlot::new(chain_slot),
+        )
+        .await
+        .unwrap(),
+        forward_rx,
+    )
 }
 
 #[tokio::test]
@@ -336,4 +402,259 @@ async fn test_stale_fetching_account_entry_is_evicted_and_replaced() {
 
     // Verify stale entry is gone
     assert!(!provider.is_pending(&pubkey));
+}
+
+#[tokio::test]
+async fn test_get_non_existing_account() {
+    init_logger();
+
+    let remote_account_provider = {
+        let (tx, rx) = mpsc::channel(1);
+        let rpc_client = ChainRpcClientMockBuilder::new()
+            .slot(1)
+            .clock_sysvar_for_slot(1)
+            .build();
+        let pubsub_client =
+            chain_pubsub_client::mock::ChainPubsubClientMock::new(tx, rx);
+        let (fwd_tx, _fwd_rx) = mpsc::channel(100);
+        let (subscribed_accounts, config) = create_test_lru_cache(1000);
+        let chain_slot = Arc::<AtomicU64>::default();
+
+        RemoteAccountProvider::new(
+            rpc_client,
+            pubsub_client,
+            fwd_tx,
+            &config,
+            subscribed_accounts,
+            ChainSlot::new(chain_slot),
+        )
+        .await
+        .unwrap()
+    };
+
+    let pubkey = random_pubkey();
+    let remote_account = remote_account_provider
+        .try_get(pubkey, AccountFetchOrigin::GetAccount)
+        .await
+        .unwrap();
+    assert!(!remote_account.is_found());
+}
+
+#[tokio::test]
+async fn test_get_existing_account_for_valid_slot() {
+    init_logger();
+
+    const CURRENT_SLOT: u64 = 42;
+    let pubkey = random_pubkey();
+
+    let (remote_account_provider, rpc_client) = {
+        let rpc_client = ChainRpcClientMockBuilder::new()
+            .account(
+                pubkey,
+                Account {
+                    lamports: 555,
+                    data: vec![],
+                    owner: system_program::id(),
+                    executable: false,
+                    rent_epoch: 0,
+                },
+            )
+            .clock_sysvar_for_slot(CURRENT_SLOT)
+            .slot(CURRENT_SLOT)
+            .build();
+        let (tx, rx) = mpsc::channel(1);
+        let pubsub_client =
+            chain_pubsub_client::mock::ChainPubsubClientMock::new(tx, rx);
+        (
+            {
+                let (fwd_tx, _fwd_rx) = mpsc::channel(100);
+                let (subscribed_accounts, config) = create_test_lru_cache(1000);
+                let chain_slot = Arc::<AtomicU64>::default();
+
+                RemoteAccountProvider::new(
+                    rpc_client.clone(),
+                    pubsub_client,
+                    fwd_tx,
+                    &config,
+                    subscribed_accounts,
+                    ChainSlot::new(chain_slot),
+                )
+                .await
+                .unwrap()
+            },
+            rpc_client,
+        )
+    };
+
+    let remote_account = remote_account_provider
+        .try_get(pubkey, AccountFetchOrigin::GetAccount)
+        .await
+        .unwrap();
+    let AccountAtSlot { account, slot } =
+        rpc_client.get_account_at_slot(&pubkey).unwrap();
+    assert_eq!(
+        remote_account,
+        RemoteAccount::from_fresh_account(
+            account,
+            slot,
+            RemoteAccountUpdateSource::Fetch,
+        )
+    );
+    assert_eq!(rpc_client.single_account_fetches(), 2);
+    assert_eq!(rpc_client.multi_account_fetches(), 0);
+}
+
+#[tokio::test]
+async fn test_get_accounts_until_slots_match_finding_matching_slot() {
+    const CURRENT_SLOT: u64 = 42;
+    let pubkey1 = random_pubkey();
+    let pubkey2 = random_pubkey();
+    let (remote_account_provider, _) = setup_matching_slots(
+        TestSlotConfig {
+            current_slot: CURRENT_SLOT,
+            account1_slot: CURRENT_SLOT,
+            account2_slot: CURRENT_SLOT + 1,
+        },
+        pubkey1,
+        pubkey2,
+    )
+    .await;
+
+    let remote_accounts = remote_account_provider
+        .try_get_multi_until_slots_match(
+            &[pubkey1, pubkey2],
+            Some(MatchSlotsConfig {
+                max_retries: 10,
+                retry_interval_ms: 50,
+                min_context_slot: None,
+            }),
+            AccountFetchOrigin::GetAccount,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(remote_accounts.len(), 2);
+    assert!(remote_accounts[0].is_found());
+    assert!(remote_accounts[1].is_found());
+    assert_eq!(remote_accounts[0].fresh_lamports(), Some(555));
+    assert_eq!(remote_accounts[1].fresh_lamports(), Some(666));
+}
+
+#[tokio::test]
+async fn test_get_accounts_until_slots_match_not_finding_matching_slot() {
+    const CURRENT_SLOT: u64 = 42;
+    let pubkey1 = random_pubkey();
+    let pubkey2 = random_pubkey();
+    let (remote_account_provider, _) = setup_matching_slots(
+        TestSlotConfig {
+            current_slot: CURRENT_SLOT,
+            account1_slot: CURRENT_SLOT,
+            account2_slot: CURRENT_SLOT - 1,
+        },
+        pubkey1,
+        pubkey2,
+    )
+    .await;
+
+    let res = remote_account_provider
+        .try_get_multi_until_slots_match(
+            &[pubkey1, pubkey2],
+            Some(MatchSlotsConfig {
+                max_retries: 10,
+                retry_interval_ms: 50,
+                min_context_slot: None,
+            }),
+            AccountFetchOrigin::GetAccount,
+        )
+        .await;
+
+    debug!(result = ?res, "Result");
+    assert!(res.is_ok());
+    let accs = res.unwrap();
+
+    assert_eq!(accs.len(), 2);
+    assert!(accs[0].is_found());
+    assert!(!accs[1].is_found());
+}
+
+#[tokio::test]
+async fn test_get_accounts_until_slots_match_finding_matching_slot_but_chain_slot_smaller_than_min_context_slot(
+) {
+    const CURRENT_SLOT: u64 = 42;
+    let pubkey1 = random_pubkey();
+    let pubkey2 = random_pubkey();
+    let (remote_account_provider, _) = setup_matching_slots(
+        TestSlotConfig {
+            current_slot: CURRENT_SLOT,
+            account1_slot: CURRENT_SLOT,
+            account2_slot: CURRENT_SLOT,
+        },
+        pubkey1,
+        pubkey2,
+    )
+    .await;
+
+    let res = remote_account_provider
+        .try_get_multi_until_slots_match(
+            &[pubkey1, pubkey2],
+            Some(MatchSlotsConfig {
+                max_retries: 10,
+                retry_interval_ms: 50,
+                min_context_slot: Some(CURRENT_SLOT + 1),
+            }),
+            AccountFetchOrigin::GetAccount,
+        )
+        .await;
+
+    debug!(result = ?res, "Result");
+
+    assert!(res.is_err());
+    assert!(matches!(
+        res.unwrap_err(),
+        RemoteAccountProviderError::MatchingSlotsNotSatisfyingMinContextSlot(
+            _pubkeys,
+            _slots,
+            slot,
+            _
+        ) if slot == CURRENT_SLOT + 1
+    ));
+}
+
+#[tokio::test]
+async fn test_get_accounts_until_slots_match_finding_matching_slot_but_one_account_slot_smaller_than_min_context_slot(
+) {
+    const CURRENT_SLOT: u64 = 42;
+    let pubkey1 = random_pubkey();
+    let pubkey2 = random_pubkey();
+    let (remote_account_provider, _) = setup_matching_slots(
+        TestSlotConfig {
+            current_slot: CURRENT_SLOT,
+            account1_slot: CURRENT_SLOT,
+            account2_slot: CURRENT_SLOT - 1,
+        },
+        pubkey1,
+        pubkey2,
+    )
+    .await;
+
+    let res = remote_account_provider
+        .try_get_multi_until_slots_match(
+            &[pubkey1, pubkey2],
+            Some(MatchSlotsConfig {
+                max_retries: 10,
+                retry_interval_ms: 50,
+                min_context_slot: Some(CURRENT_SLOT),
+            }),
+            AccountFetchOrigin::GetAccount,
+        )
+        .await;
+
+    debug!(result = ?res, "Result");
+
+    assert!(res.is_ok());
+    let accs = res.unwrap();
+
+    assert_eq!(accs.len(), 2);
+    assert!(accs[0].is_found());
+    assert!(!accs[1].is_found());
 }

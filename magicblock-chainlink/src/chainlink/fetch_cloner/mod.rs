@@ -57,6 +57,8 @@ mod pending_request_guard;
 mod pipeline;
 mod program_loader;
 mod subscription;
+#[cfg(test)]
+mod tests;
 mod types;
 
 pub use self::types::FetchAndCloneResult;
@@ -2258,9 +2260,3 @@ where
         Ok(())
     }
 }
-
-// -----------------
-// Tests
-// -----------------
-#[cfg(test)]
-mod tests;
