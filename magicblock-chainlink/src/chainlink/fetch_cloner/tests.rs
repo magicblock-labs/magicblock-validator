@@ -4260,8 +4260,6 @@ async fn test_waiter_reconciliation_succeeds_when_account_in_valid_terminal_stat
             .await
     });
 
-    tokio::time::sleep(Duration::from_millis(20)).await;
-
     let waiter_fetch_cloner = fetch_cloner.clone();
     let waiter_task = tokio::spawn(async move {
         waiter_fetch_cloner
@@ -4274,6 +4272,23 @@ async fn test_waiter_reconciliation_succeeds_when_account_in_valid_terminal_stat
             )
             .await
     });
+
+    let waiter_registration_start = tokio::time::Instant::now();
+    let waiter_registration_timeout = Duration::from_secs(2);
+    loop {
+        if fetch_cloner
+            .pending_request_waiter_count(&account_pubkey)
+            .is_some_and(|n| n > 0)
+        {
+            break;
+        }
+        assert!(
+            waiter_registration_start.elapsed() < waiter_registration_timeout,
+            "waiter task did not register in fetch_cloner.pending_requests for \
+             {account_pubkey} within {waiter_registration_timeout:?}"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
 
     let owner_result = owner_task.await.expect("owner task should complete");
     let waiter_result = waiter_task.await.expect("waiter task should complete");
