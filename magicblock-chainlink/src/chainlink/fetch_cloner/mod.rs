@@ -133,7 +133,15 @@ where
 /// Capacity of the negative cache for known-empty eATAs.
 /// Sized to comfortably cover the working set of unique ATAs a busy
 /// validator clones over its lifetime while keeping memory bounded.
-const KNOWN_EMPTY_EATAS_CAPACITY: usize = 100_000;
+/// Built as a `NonZeroUsize` at compile time so the constructor does
+/// not need a runtime `.expect`.
+const KNOWN_EMPTY_EATAS_CAPACITY: NonZeroUsize =
+    match NonZeroUsize::new(100_000) {
+        Some(n) => n,
+        // SAFETY: 100_000 is a non-zero literal so this branch is unreachable
+        // and the compiler evaluates the `match` at build time.
+        None => panic!("KNOWN_EMPTY_EATAS_CAPACITY must be non-zero"),
+    };
 
 /// Manual Clone impl: `#[derive(Clone)]` would add `V: Clone, C: Clone`
 /// bounds that are not satisfied (`AccountsBank` and `Cloner` don't
@@ -199,8 +207,7 @@ where
             allowed_programs,
             programs_not_to_subscribe: programs_not_to_subscribe(),
             known_empty_eatas: Arc::new(PlMutex::new(LruCache::new(
-                NonZeroUsize::new(KNOWN_EMPTY_EATAS_CAPACITY)
-                    .expect("KNOWN_EMPTY_EATAS_CAPACITY must be non-zero"),
+                KNOWN_EMPTY_EATAS_CAPACITY,
             ))),
             pending_clones: Arc::new(Mutex::new(hash_map::HashMap::new())),
         });
