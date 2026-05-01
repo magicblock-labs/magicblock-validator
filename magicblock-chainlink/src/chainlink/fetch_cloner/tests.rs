@@ -4007,9 +4007,12 @@ async fn test_stale_pending_request_is_evicted_and_replaced() {
     )
     .await;
 
-    // Directly insert a stale PendingRequestState into the map
-    // Use 16 seconds (stale threshold is 15)
-    let stale_created_at = std::time::Instant::now() - Duration::from_secs(16);
+    // Directly insert a stale PendingRequestState into the map.
+    // Use a timestamp safely older than the stale threshold so the entry
+    // is unambiguously evicted regardless of the configured threshold.
+    let stale_created_at = std::time::Instant::now()
+        - PENDING_REQUEST_STALE_AFTER
+        - Duration::from_secs(1);
     {
         fetch_cloner
             .pending_requests

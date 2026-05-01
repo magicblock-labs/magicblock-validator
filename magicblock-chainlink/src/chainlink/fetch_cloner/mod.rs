@@ -31,8 +31,15 @@ use tokio::{
 };
 use tracing::*;
 
+/// How long a pending fetch+clone request may remain in the dedup map before
+/// it is considered stale and evicted. This must be large enough to cover the
+/// full retry/backoff budget of an in-flight fetch+clone operation (which
+/// itself can take tens of seconds across multiple RPC retries) so that
+/// healthy live requests are never prematurely evicted while waiters are
+/// still attached. A safe default of 2 minutes is well above any realistic
+/// fetch+clone latency observed in practice.
 pub(crate) const PENDING_REQUEST_STALE_AFTER: Duration =
-    Duration::from_secs(15);
+    Duration::from_secs(120);
 
 mod ata_projection;
 mod delegation;
