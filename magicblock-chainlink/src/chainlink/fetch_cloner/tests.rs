@@ -4200,3 +4200,115 @@ async fn test_stale_pending_request_replacement_ignores_old_owner_drop() {
     );
     assert!(!fetch_cloner.has_pending_request(&account_pubkey));
 }
+
+#[tokio::test]
+async fn test_waiter_reconciliation_succeeds_when_account_in_valid_terminal_state(
+) {
+    // Regression test for stuck pubkey delegation race condition.
+    // This test verifies that the waiter's post-wait reconciliation correctly
+    // handles the case where an account transitions to a valid delegated terminal
+    // state in the bank before the waiter completes its wait.
+    //
+    // The race condition being tested:
+    // 1. Multiple concurrent fetch requests happen (owner and waiter)
+    // 2. Account is cloned into bank (via subscription or owner fetch) as delegated
+    // 3. Owner notifies waiter of success
+    // 4. Waiter's post-wait reconciliation checks and accepts the delegated terminal state
+    // 5. Waiter returns successfully
+    //
+    // This exercises the waiter_reconciliation_check logic that validates the
+    // account is in a terminal state (delegated and not undelegating, or not undelegating)
+    // and allows the waiter to complete without a fresh fetch.
+    //
+    init_logger();
+    let validator_keypair = Keypair::new();
+    let validator_pubkey = validator_keypair.pubkey();
+    let account_owner = random_pubkey();
+    const CURRENT_SLOT: u64 = 100;
+
+    let account_pubkey = random_pubkey();
+    let account = Account {
+        lamports: 1_000_000,
+        data: vec![1, 2, 3, 4],
+        owner: account_owner,
+        executable: false,
+        rent_epoch: 0,
+    };
+
+    let FetcherTestCtx {
+        accounts_bank,
+        rpc_client,
+        fetch_cloner,
+        ..
+    } = setup(
+        [(account_pubkey, account.clone())],
+        CURRENT_SLOT,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+
+    let fetch_cloner = Arc::new(fetch_cloner);
+
+    // Add delegation record
+    add_delegation_record_for(
+        &rpc_client,
+        account_pubkey,
+        validator_pubkey,
+        account_owner,
+    );
+
+    // Pre-populate the bank with a delegated account to simulate the race scenario
+    let delegated_account_shared =
+        delegated_account_shared_with_owner(&account, account_owner);
+    accounts_bank.insert(account_pubkey, delegated_account_shared.clone());
+
+    // Delay cloning so owner takes time to complete
+    fetch_cloner
+        .cloner()
+        .set_clone_delay(Duration::from_millis(200));
+
+    // Spawn owner task
+    let owner_fetch_cloner = fetch_cloner.clone();
+    let owner_task = tokio::spawn(async move {
+        owner_fetch_cloner
+            .fetch_and_clone_accounts_with_dedup(
+                &[account_pubkey],
+                None,
+                None,
+                AccountFetchOrigin::GetAccount,
+                None,
+            )
+            .await
+    });
+
+    // Give owner time to claim pending request
+    tokio::time::sleep(Duration::from_millis(20)).await;
+
+    // Spawn waiter task while owner is still cloning
+    let waiter_fetch_cloner = fetch_cloner.clone();
+    let waiter_task = tokio::spawn(async move {
+        waiter_fetch_cloner
+            .fetch_and_clone_accounts_with_dedup(
+                &[account_pubkey],
+                None,
+                None,
+                AccountFetchOrigin::GetAccount,
+                None,
+            )
+            .await
+    });
+
+    // Let both complete
+    let owner_result = owner_task.await.expect("owner task should complete");
+    let waiter_result = waiter_task.await.expect("waiter task should complete");
+
+    // Both should succeed
+    assert!(owner_result.is_ok(), "Owner result should be ok");
+    assert!(waiter_result.is_ok(), "Waiter result should be ok");
+
+    // Verify account is still delegated
+    let final_account = accounts_bank
+        .get_account(&account_pubkey)
+        .expect("Account should be in bank");
+    assert!(final_account.delegated(), "Account should be delegated");
+}
