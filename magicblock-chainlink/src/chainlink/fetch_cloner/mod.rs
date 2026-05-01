@@ -1926,9 +1926,12 @@ where
             })
         };
 
-        // Finish pending requests and dismiss owner guards
+        // Finish pending requests and dismiss owner guards. On success we
+        // propagate the owner's `FetchAndCloneResult` to all waiters so they
+        // can observe `not_found_on_chain` / `missing_delegation_record`
+        // metadata for the pubkey they were waiting on.
         let completion = match &result {
-            Ok(_) => PendingRequestCompletion::Success,
+            Ok(r) => PendingRequestCompletion::Success(r.clone()),
             Err(err) => PendingRequestCompletion::Failed(err.to_string()),
         };
         for (pubkey, mut guard) in owner_guards {
@@ -1936,12 +1939,15 @@ where
             guard.dismiss();
         }
 
-        // Wait for any pending waiter requests to complete
+        // Wait for any pending waiter requests to complete and collect any
+        // carried `FetchAndCloneResult` payloads so we can merge entries
+        // matching our waiter pubkey into the final returned result.
+        let mut waiter_results: Vec<(Pubkey, FetchAndCloneResult)> = vec![];
         for (pubkey, receiver) in await_pending {
             match tokio::time::timeout(PENDING_REQUEST_TIMEOUT, receiver).await
             {
-                Ok(Ok(PendingRequestCompletion::Success)) => {
-                    // Owner completed successfully
+                Ok(Ok(PendingRequestCompletion::Success(owner_result))) => {
+                    waiter_results.push((pubkey, owner_result));
                 }
                 Ok(Ok(PendingRequestCompletion::Failed(msg))) => {
                     return Err(ChainlinkError::Custom(msg));
@@ -1959,7 +1965,24 @@ where
             }
         }
 
-        result
+        // Merge waiter-carried results into our owner result so the caller
+        // observes metadata for every pubkey it asked for, regardless of
+        // whether it was the owner or a waiter for that pubkey.
+        let mut final_result = result?;
+        for (waiter_pubkey, owner_result) in waiter_results {
+            for entry in owner_result.not_found_on_chain {
+                if entry.0 == waiter_pubkey {
+                    final_result.not_found_on_chain.push(entry);
+                }
+            }
+            for entry in owner_result.missing_delegation_record {
+                if entry.0 == waiter_pubkey {
+                    final_result.missing_delegation_record.push(entry);
+                }
+            }
+        }
+
+        Ok(final_result)
     }
 
     fn task_to_fetch_with_delegation_record(

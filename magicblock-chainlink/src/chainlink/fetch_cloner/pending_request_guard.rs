@@ -5,6 +5,8 @@ use solana_pubkey::Pubkey;
 use tokio::sync::oneshot;
 use tracing::warn;
 
+use super::types::FetchAndCloneResult;
+
 pub(super) struct PendingRequestState {
     pub created_at: Instant,
     pub waiters: Vec<oneshot::Sender<PendingRequestCompletion>>,
@@ -12,7 +14,7 @@ pub(super) struct PendingRequestState {
 
 #[derive(Debug, Clone)]
 pub(super) enum PendingRequestCompletion {
-    Success,
+    Success(FetchAndCloneResult),
     Failed(String),
 }
 
