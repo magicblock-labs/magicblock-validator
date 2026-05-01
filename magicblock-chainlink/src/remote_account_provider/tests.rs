@@ -343,6 +343,74 @@ async fn test_try_get_multi_waiter_receives_error_when_owner_aborts_in_setup_sub
 }
 
 #[tokio::test]
+async fn test_try_unsubscribe_if_sole_owner_skips_shared_subscription() {
+    let pubkey = solana_pubkey::Pubkey::new_unique();
+    let account = Account {
+        lamports: 1_000_000,
+        data: vec![1, 2, 3, 4],
+        owner: solana_pubkey::Pubkey::new_unique(),
+        executable: false,
+        rent_epoch: 0,
+    };
+
+    let ProviderTestCtx {
+        provider,
+        _pubsub_client,
+        _forward_rx,
+    } = setup_provider(pubkey, account).await;
+
+    let rollback_token = match provider.subscribe(&pubkey).await.unwrap() {
+        SubscribeResult::Created(token) => token,
+        other => panic!("expected Created, got {other:?}"),
+    };
+    assert_eq!(
+        provider.subscribe(&pubkey).await.unwrap(),
+        SubscribeResult::AlreadyWatching
+    );
+
+    let unsubscribed = provider
+        .try_unsubscribe_if_sole_owner(&pubkey, rollback_token)
+        .await
+        .unwrap();
+
+    assert!(!unsubscribed);
+    assert!(provider.is_watching(&pubkey));
+    assert!(_pubsub_client.subscriptions_union().contains(&pubkey));
+}
+
+#[tokio::test]
+async fn test_try_unsubscribe_if_sole_owner_removes_created_subscription() {
+    let pubkey = solana_pubkey::Pubkey::new_unique();
+    let account = Account {
+        lamports: 1_000_000,
+        data: vec![1, 2, 3, 4],
+        owner: solana_pubkey::Pubkey::new_unique(),
+        executable: false,
+        rent_epoch: 0,
+    };
+
+    let ProviderTestCtx {
+        provider,
+        _pubsub_client,
+        _forward_rx,
+    } = setup_provider(pubkey, account).await;
+
+    let rollback_token = match provider.subscribe(&pubkey).await.unwrap() {
+        SubscribeResult::Created(token) => token,
+        other => panic!("expected Created, got {other:?}"),
+    };
+
+    let unsubscribed = provider
+        .try_unsubscribe_if_sole_owner(&pubkey, rollback_token)
+        .await
+        .unwrap();
+
+    assert!(unsubscribed);
+    assert!(!provider.is_watching(&pubkey));
+    assert!(!_pubsub_client.subscriptions_union().contains(&pubkey));
+}
+
+#[tokio::test]
 async fn test_stale_fetching_account_entry_is_evicted_and_replaced() {
     let pubkey = solana_pubkey::Pubkey::new_unique();
     let account = Account {
