@@ -3777,6 +3777,7 @@ async fn test_project_ata_skips_repeat_fetch_for_known_empty_eata() {
     // upstream fetch returns NotFound, which is the case the negative
     // cache must short-circuit on subsequent updates.
     let FetcherTestCtx {
+        remote_account_provider,
         rpc_client,
         subscription_tx,
         ..
@@ -3786,6 +3787,7 @@ async fn test_project_ata_skips_repeat_fetch_for_known_empty_eata() {
         validator_keypair.insecure_clone(),
     )
     .await;
+    let eata_pubkey = derive_eata(&wallet_owner, &mint);
 
     use crate::remote_account_provider::{
         RemoteAccount, RemoteAccountUpdateSource,
@@ -3829,14 +3831,27 @@ async fn test_project_ata_skips_repeat_fetch_for_known_empty_eata() {
         "first ATA update should trigger an upstream eATA fetch"
     );
 
+    // After the first update the eATA must be subscribed so that we get
+    // notified if it ever materialises on chain.
+    assert!(
+        remote_account_provider.is_watching(&eata_pubkey),
+        "eATA must be subscribed after the first ATA update"
+    );
+
     // Second update for the same ATA: must be served by the negative
-    // cache without issuing any new upstream fetch.
+    // cache without issuing any new upstream fetch, but must keep the
+    // eATA subscription alive (idempotent re-subscribe promotes the LRU
+    // entry so it does not get evicted under churn).
     send_update().await;
     tokio::time::sleep(Duration::from_millis(150)).await;
     assert_eq!(
         rpc_client.single_account_fetches(),
         after_first,
         "subsequent ATA updates for an already-known-empty eATA must not refetch"
+    );
+    assert!(
+        remote_account_provider.is_watching(&eata_pubkey),
+        "eATA subscription must persist across cache-hit ATA updates"
     );
 }
 

@@ -1129,21 +1129,27 @@ where
             return (ata_account, None);
         };
 
-        // If we have already observed this eATA to be non-existent, skip
-        // the upstream RPC fetch. The eATA-side subscription update path
-        // (see `maybe_build_projected_ata_clone_request_from_eata_sub_update`)
-        // will project the ATA on its own if the eATA materialises later,
-        // so this cache does not need explicit invalidation.
-        if self.is_known_empty_eata(&eata_pubkey) {
-            return (ata_account, None);
-        }
-
+        // Always (re)subscribe to the derived eATA. The call is idempotent
+        // and, importantly, promotes the entry in the subscription LRU so it
+        // does not get evicted under churn. We need the subscription to stay
+        // alive even when the negative cache below short-circuits the fetch:
+        // if the eATA is created later, the eATA-side subscription update
+        // path (`maybe_build_projected_ata_clone_request_from_eata_sub_update`)
+        // is what projects the ATA, so losing the subscription would mean
+        // missing that creation event.
         if let Err(err) = self.subscribe_to_account(&eata_pubkey).await {
             warn!(
                 pubkey = %eata_pubkey,
                 error = ?err,
                 "Failed to subscribe to derived eATA"
             );
+        }
+
+        // If we have already observed this eATA to be non-existent, skip
+        // the upstream RPC fetch. The subscription above keeps us live to
+        // any future creation, so this cache needs no explicit invalidation.
+        if self.is_known_empty_eata(&eata_pubkey) {
+            return (ata_account, None);
         }
 
         let eata_account = match self
