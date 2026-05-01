@@ -240,9 +240,17 @@ impl Drop for FetchingAccountGuard {
             return;
         }
         let waiters = {
-            if let Some(state) =
-                self.fetching_accounts.lock().unwrap().remove(&self.pubkey)
-            {
+            let mut guard = match self.fetching_accounts.lock() {
+                Ok(guard) => guard,
+                Err(poisoned) => {
+                    warn!(
+                        pubkey = %self.pubkey,
+                        "fetching_accounts mutex poisoned in FetchingAccountGuard::drop; recovering"
+                    );
+                    poisoned.into_inner()
+                }
+            };
+            if let Some(state) = guard.remove(&self.pubkey) {
                 state.waiters
             } else {
                 vec![]
