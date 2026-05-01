@@ -866,15 +866,26 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                         if age > FETCHING_ACCOUNT_STALE_AFTER {
                             // Evict stale entry and notify old waiters
                             let stale_generation = entry.get().generation;
-                            let stale_state =
-                                remove_fetching_account_if_generation_matches(
-                                    &mut fetching,
-                                    &pubkey,
-                                    stale_generation,
-                                )
-                                .expect(
-                                    "occupied fetching_accounts entry disappeared during stale eviction",
-                                );
+                            let stale_state = match remove_fetching_account_if_generation_matches(
+                                &mut fetching,
+                                &pubkey,
+                                stale_generation,
+                            ) {
+                                Some(stale_state) => stale_state,
+                                None => {
+                                    warn!(
+                                        pubkey = %pubkey,
+                                        stale_generation,
+                                        "Skipping stale fetching_accounts eviction because the entry no longer matches the expected generation"
+                                    );
+                                    return Err(RemoteAccountProviderError::AccountResolutionsFailed(
+                                        format!(
+                                            "{}: stale fetching_accounts entry disappeared before eviction for generation {}",
+                                            pubkey, stale_generation
+                                        ),
+                                    ));
+                                }
+                            };
                             let waiters_len = stale_state.waiters.len();
                             for tx in stale_state.waiters {
                                 let _ = tx.send(Err(
