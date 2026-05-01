@@ -265,8 +265,8 @@ async fn test_stale_fetching_account_entry_is_evicted_and_replaced() {
         setup_provider(pubkey, account.clone()).await;
 
     // Directly insert a stale FetchingAccountState into the map
-    // Use 16 seconds (stale threshold is 15)
-    let stale_created_at = std::time::Instant::now() - Duration::from_secs(16);
+    // Use 35 seconds (stale threshold is 30)
+    let stale_created_at = std::time::Instant::now() - Duration::from_secs(35);
     {
         let mut fetching = provider.fetching_accounts.lock().unwrap();
         fetching.insert(
