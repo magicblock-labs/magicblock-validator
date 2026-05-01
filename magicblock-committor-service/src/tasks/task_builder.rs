@@ -48,9 +48,9 @@ pub struct TaskBuilderImpl;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum CommitExecutionMode {
-    SeparateCommitAndFinalize,
     #[default]
     CommitFinalize,
+    SeparateCommitAndFinalize,
 }
 
 // Accounts larger than COMMIT_STATE_SIZE_THRESHOLD use CommitDiff to
@@ -282,6 +282,7 @@ impl TaskBuilderImpl {
             .into()
         }
 
+        #[allow(clippy::too_many_arguments)]
         fn extend_commit_tasks(
             tasks: &mut Vec<BaseTaskImpl>,
             commit: &CommitType,
