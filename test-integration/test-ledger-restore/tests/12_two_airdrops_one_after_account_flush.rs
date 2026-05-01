@@ -8,10 +8,9 @@ use integration_test_tools::{
 use solana_sdk::{pubkey::Pubkey, signature::Keypair, signer::Signer};
 use test_kit::init_logger;
 use test_ledger_restore::{
-    shutdown_and_wait,
     airdrop_and_delegate_accounts, setup_validator_with_local_remote,
-    transfer_lamports, wait_for_ledger_persist, SNAPSHOT_FREQUENCY,
-    TMP_DIR_LEDGER,
+    shutdown_and_wait, transfer_lamports, wait_for_ledger_persist,
+    SNAPSHOT_FREQUENCY, TMP_DIR_LEDGER,
 };
 use tracing::*;
 

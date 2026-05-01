@@ -4,8 +4,8 @@ use integration_test_tools::{
     loaded_accounts::LoadedAccounts, tmpdir::resolve_tmp_dir,
 };
 use test_ledger_restore::{
-    shutdown_and_wait,
-    setup_validator_with_local_remote, wait_for_ledger_persist, TMP_DIR_LEDGER,
+    setup_validator_with_local_remote, shutdown_and_wait,
+    wait_for_ledger_persist, TMP_DIR_LEDGER,
 };
 
 // Here we test that we can restore a ledger of a validator that did not run any

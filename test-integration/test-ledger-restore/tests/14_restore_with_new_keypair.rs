@@ -12,8 +12,8 @@ use solana_sdk::{
 };
 use solana_sdk_ids::loader_v4;
 use test_ledger_restore::{
-    shutdown_and_wait,
-    setup_validator_with_local_remote, wait_for_ledger_persist, TMP_DIR_LEDGER,
+    setup_validator_with_local_remote, shutdown_and_wait,
+    wait_for_ledger_persist, TMP_DIR_LEDGER,
 };
 
 const MEMO_PROGRAM_PK: Pubkey = Pubkey::new_from_array([

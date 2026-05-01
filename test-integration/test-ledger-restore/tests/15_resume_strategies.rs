@@ -10,11 +10,11 @@ use solana_sdk::{
 };
 use test_kit::init_logger;
 use test_ledger_restore::{
-    shutdown_and_wait,
     airdrop_and_delegate_accounts, setup_validator_with_local_remote,
-    setup_validator_with_local_remote_and_resume_strategy, transfer_lamports,
-    wait_for_ledger_persist, wait_for_next_slot_after_account_snapshot,
-    SNAPSHOT_FREQUENCY, TMP_DIR_LEDGER,
+    setup_validator_with_local_remote_and_resume_strategy, shutdown_and_wait,
+    transfer_lamports, wait_for_ledger_persist,
+    wait_for_next_slot_after_account_snapshot, SNAPSHOT_FREQUENCY,
+    TMP_DIR_LEDGER,
 };
 use tracing::*;
 

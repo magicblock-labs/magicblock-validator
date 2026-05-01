@@ -12,11 +12,10 @@ use program_flexi_counter::{
 use solana_sdk::{pubkey::Pubkey, signer::Signer};
 use test_kit::init_logger;
 use test_ledger_restore::{
-    shutdown_and_wait,
     confirm_tx_with_payer_ephem, fetch_counter_ephem,
     init_and_delegate_counter_and_payer, setup_offline_validator,
     setup_offline_validator_with_authority_override,
-    setup_validator_with_local_remote_and_resume_strategy,
+    setup_validator_with_local_remote_and_resume_strategy, shutdown_and_wait,
     wait_for_ledger_persist, TMP_DIR_LEDGER,
 };
 use tracing::*;

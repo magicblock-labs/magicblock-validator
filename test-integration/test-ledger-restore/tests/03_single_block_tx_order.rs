@@ -10,9 +10,8 @@ use solana_sdk::{
     signature::{Keypair, Signer},
 };
 use test_ledger_restore::{
-    shutdown_and_wait,
     airdrop_and_delegate_accounts, setup_offline_validator,
-    setup_validator_with_local_remote, transfer_lamports,
+    setup_validator_with_local_remote, shutdown_and_wait, transfer_lamports,
     wait_for_ledger_persist, TMP_DIR_LEDGER,
 };
 

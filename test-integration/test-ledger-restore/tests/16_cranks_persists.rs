@@ -14,10 +14,9 @@ use program_flexi_counter::instruction::create_schedule_task_ix;
 use solana_sdk::{pubkey::Pubkey, signature::Keypair, signer::Signer};
 use test_kit::init_logger;
 use test_ledger_restore::{
-    shutdown_and_wait,
     confirm_tx_with_payer_ephem, fetch_counter_ephem,
     init_and_delegate_counter_and_payer, setup_validator_with_local_remote,
-    setup_validator_with_local_remote_and_resume_strategy,
+    setup_validator_with_local_remote_and_resume_strategy, shutdown_and_wait,
     wait_for_ledger_persist, TMP_DIR_LEDGER,
 };
 use tracing::*;

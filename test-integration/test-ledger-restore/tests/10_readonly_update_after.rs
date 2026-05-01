@@ -17,12 +17,12 @@ use solana_sdk::{
 };
 use test_kit::init_logger;
 use test_ledger_restore::{
-    shutdown_and_wait,
     assert_counter_state, confirm_tx_with_payer_chain,
     confirm_tx_with_payer_ephem, delegate_accounts, fetch_counter_chain,
     fetch_counter_ephem, get_programs_with_flexi_counter,
-    setup_validator_with_local_remote, wait_for_counter_ephem_state,
-    wait_for_ledger_persist, Counter, State, TMP_DIR_LEDGER,
+    setup_validator_with_local_remote, shutdown_and_wait,
+    wait_for_counter_ephem_state, wait_for_ledger_persist, Counter, State,
+    TMP_DIR_LEDGER,
 };
 use tracing::*;
 
