@@ -1,4 +1,8 @@
-use std::{collections::HashMap, sync::Arc, time::Duration};
+use std::{
+    collections::HashMap,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 use dlp_api::state::DelegationRecord;
 use solana_account::{Account, AccountSharedData, WritableAccount};
@@ -4041,6 +4045,7 @@ async fn test_stale_pending_request_is_evicted_and_replaced() {
             .insert(
                 account_pubkey,
                 PendingRequestState {
+                    generation: 0,
                     created_at: stale_created_at,
                     waiters: vec![],
                 },
@@ -4076,5 +4081,122 @@ async fn test_stale_pending_request_is_evicted_and_replaced() {
     );
 
     // Verify stale entry is gone
+    assert!(!fetch_cloner.has_pending_request(&account_pubkey));
+}
+
+#[tokio::test]
+async fn test_stale_pending_request_replacement_ignores_old_owner_finish() {
+    init_logger();
+    let validator_keypair = Keypair::new();
+    let account_pubkey = random_pubkey();
+
+    let FetcherTestCtx { fetch_cloner, .. } = setup(
+        [(account_pubkey, Account::default())],
+        100,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+
+    let first_guard = match fetch_cloner.claim_pending_request(account_pubkey) {
+        PendingRequestClaim::Owner(guard) => guard,
+        PendingRequestClaim::Waiter(_) => {
+            panic!("first claimant should own the pending request")
+        }
+    };
+    let first_generation = first_guard.generation();
+
+    fetch_cloner
+        .pending_requests
+        .update(&account_pubkey, |_, state| {
+            state.created_at = Instant::now()
+                - PENDING_REQUEST_STALE_AFTER
+                - Duration::from_secs(1);
+        });
+
+    let replacement_guard =
+        match fetch_cloner.claim_pending_request(account_pubkey) {
+            PendingRequestClaim::Owner(guard) => guard,
+            PendingRequestClaim::Waiter(_) => {
+                panic!("stale entry should be replaced by a new owner")
+            }
+        };
+    let replacement_generation = replacement_guard.generation();
+    assert_ne!(first_generation, replacement_generation);
+
+    fetch_cloner.finish_pending_request(
+        account_pubkey,
+        first_generation,
+        PendingRequestCompletion::Failed("stale owner finished".to_string()),
+    );
+
+    let stored_generation = fetch_cloner
+        .pending_requests
+        .read(&account_pubkey, |_, state| state.generation);
+    assert_eq!(stored_generation, Some(replacement_generation));
+
+    drop(replacement_guard);
+    assert!(!fetch_cloner.has_pending_request(&account_pubkey));
+
+    drop(first_guard);
+}
+
+#[tokio::test]
+async fn test_stale_pending_request_replacement_ignores_old_owner_drop() {
+    init_logger();
+    let validator_keypair = Keypair::new();
+    let account_pubkey = random_pubkey();
+
+    let FetcherTestCtx { fetch_cloner, .. } = setup(
+        [(account_pubkey, Account::default())],
+        100,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+
+    let first_guard = match fetch_cloner.claim_pending_request(account_pubkey) {
+        PendingRequestClaim::Owner(guard) => guard,
+        PendingRequestClaim::Waiter(_) => {
+            panic!("first claimant should own the pending request")
+        }
+    };
+    let first_generation = first_guard.generation();
+
+    fetch_cloner
+        .pending_requests
+        .update(&account_pubkey, |_, state| {
+            state.created_at = Instant::now()
+                - PENDING_REQUEST_STALE_AFTER
+                - Duration::from_secs(1);
+        });
+
+    let mut replacement_guard =
+        match fetch_cloner.claim_pending_request(account_pubkey) {
+            PendingRequestClaim::Owner(guard) => guard,
+            PendingRequestClaim::Waiter(_) => {
+                panic!("stale entry should be replaced by a new owner")
+            }
+        };
+    let replacement_generation = replacement_guard.generation();
+    assert_ne!(first_generation, replacement_generation);
+
+    drop(first_guard);
+
+    let stored_generation = fetch_cloner
+        .pending_requests
+        .read(&account_pubkey, |_, state| state.generation);
+    assert_eq!(stored_generation, Some(replacement_generation));
+
+    replacement_guard.dismiss();
+    drop(replacement_guard);
+    assert!(fetch_cloner.has_pending_request(&account_pubkey));
+
+    fetch_cloner.finish_pending_request(
+        account_pubkey,
+        replacement_generation,
+        PendingRequestCompletion::Success(FetchAndCloneResult {
+            not_found_on_chain: vec![],
+            missing_delegation_record: vec![],
+        }),
+    );
     assert!(!fetch_cloner.has_pending_request(&account_pubkey));
 }

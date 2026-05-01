@@ -8,6 +8,7 @@ use tracing::warn;
 use super::types::FetchAndCloneResult;
 
 pub(super) struct PendingRequestState {
+    pub generation: u64,
     pub created_at: Instant,
     pub waiters: Vec<oneshot::Sender<PendingRequestCompletion>>,
 }
@@ -26,6 +27,7 @@ pub(super) enum PendingRequestClaim {
 pub(super) struct PendingRequestGuard {
     pending_requests: Arc<HashMap<Pubkey, PendingRequestState>>,
     pubkey: Pubkey,
+    generation: u64,
     dismissed: bool,
 }
 
@@ -33,12 +35,18 @@ impl PendingRequestGuard {
     pub(super) fn new(
         pending_requests: Arc<HashMap<Pubkey, PendingRequestState>>,
         pubkey: Pubkey,
+        generation: u64,
     ) -> Self {
         Self {
             pending_requests,
             pubkey,
+            generation,
             dismissed: false,
         }
+    }
+
+    pub(super) fn generation(&self) -> u64 {
+        self.generation
     }
 
     /// Mark the guard as dismissed so `Drop` becomes a no-op.
@@ -53,7 +61,10 @@ impl Drop for PendingRequestGuard {
             return;
         }
         let waiters = {
-            if let Some((_, state)) = self.pending_requests.remove(&self.pubkey)
+            if let Some((_, state)) =
+                self.pending_requests.remove_if(&self.pubkey, |state| {
+                    state.generation == self.generation
+                })
             {
                 state.waiters
             } else {

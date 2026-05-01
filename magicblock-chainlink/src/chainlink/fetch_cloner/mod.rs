@@ -104,6 +104,9 @@ where
     /// Tracks pending account fetch requests to avoid duplicate fetches in parallel
     /// Once an account is fetched and cloned into the bank, it's removed from here
     pending_requests: Arc<HashMap<Pubkey, PendingRequestState>>,
+    /// Monotonic generation for pending request ownership. Guards must match
+    /// the stored generation before they can complete or clean up an entry.
+    pending_request_generation: Arc<AtomicU64>,
     /// Counter to track the number of fetch operations for testing deduplication
     fetch_count: Arc<AtomicU64>,
 
@@ -146,6 +149,7 @@ where
         Self {
             remote_account_provider: self.remote_account_provider.clone(),
             pending_requests: self.pending_requests.clone(),
+            pending_request_generation: self.pending_request_generation.clone(),
             fetch_count: self.fetch_count.clone(),
             accounts_bank: self.accounts_bank.clone(),
             cloner: self.cloner.clone(),
@@ -189,6 +193,7 @@ where
             validator_pubkey,
             validator_keypair: Arc::new(validator_keypair),
             pending_requests: Arc::new(HashMap::new()),
+            pending_request_generation: Arc::new(AtomicU64::new(1)),
             fetch_count: Arc::new(AtomicU64::new(0)),
             blacklisted_accounts,
             allowed_programs,
@@ -294,13 +299,16 @@ where
     fn claim_pending_request(&self, pubkey: Pubkey) -> PendingRequestClaim {
         match self.pending_requests.entry(pubkey) {
             Entry::Vacant(e) => {
+                let generation = self.next_pending_request_generation();
                 e.insert_entry(PendingRequestState {
+                    generation,
                     created_at: Instant::now(),
                     waiters: vec![],
                 });
                 PendingRequestClaim::Owner(PendingRequestGuard::new(
                     self.pending_requests.clone(),
                     pubkey,
+                    generation,
                 ))
             }
             Entry::Occupied(mut entry) => {
@@ -331,9 +339,11 @@ where
                     }
 
                     // Insert fresh owner entry
+                    let generation = self.next_pending_request_generation();
                     let _ = self.pending_requests.insert(
                         pubkey,
                         PendingRequestState {
+                            generation,
                             created_at: Instant::now(),
                             waiters: vec![],
                         },
@@ -341,6 +351,7 @@ where
                     PendingRequestClaim::Owner(PendingRequestGuard::new(
                         self.pending_requests.clone(),
                         pubkey,
+                        generation,
                     ))
                 } else {
                     // Normal path: join the queue
@@ -357,9 +368,12 @@ where
     fn finish_pending_request(
         &self,
         pubkey: Pubkey,
+        generation: u64,
         completion: PendingRequestCompletion,
     ) {
-        let result = self.pending_requests.remove(&pubkey);
+        let result = self
+            .pending_requests
+            .remove_if(&pubkey, |state| state.generation == generation);
         if let Some((_, state)) = result {
             let waiters_len = state.waiters.len();
             for tx in state.waiters {
@@ -373,6 +387,11 @@ where
                 );
             }
         }
+    }
+
+    fn next_pending_request_generation(&self) -> u64 {
+        self.pending_request_generation
+            .fetch_add(1, Ordering::Relaxed)
     }
 
     /// Submits a clone request through ownership coordination.
@@ -1945,7 +1964,11 @@ where
             Err(err) => PendingRequestCompletion::Failed(err.to_string()),
         };
         for (pubkey, mut guard) in owner_guards {
-            self.finish_pending_request(pubkey, completion.clone());
+            self.finish_pending_request(
+                pubkey,
+                guard.generation(),
+                completion.clone(),
+            );
             guard.dismiss();
         }
 
