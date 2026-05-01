@@ -795,10 +795,23 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             trace!("Fetching accounts");
         }
 
-        // Create channels for potential subscription updates to override fetch results
-        let mut subscription_overrides = vec![];
         let fetch_start_slot =
             fetch_start_slot.unwrap_or_else(|| self.chain_slot.load());
+
+        // Receivers awaited by this call. One entry per input pubkey, in
+        // input order. Each receiver corresponds to a sender that was
+        // pushed into the FetchingAccountState.waiters queue (either
+        // because this call inserted/replaced the entry, or because it
+        // joined an existing in-flight fetch as a waiter).
+        let mut await_receivers: Vec<(Pubkey, oneshot::Receiver<FetchResult>)> =
+            Vec::with_capacity(pubkeys.len());
+
+        // Pubkeys this call actually inserted (Vacant) or replaced (stale).
+        // Only these pubkeys cause side effects (subscription setup, fetch,
+        // owner guard cleanup) by this call. Waiter-only pubkeys already
+        // have a subscription owned by the original claimer and are being
+        // fetched by them.
+        let mut claimed_pubkeys: Vec<Pubkey> = Vec::new();
 
         // Track owner guards for entries we create (Vacant or stale).
         // Guards own the entries and will clean them up on drop if not dismissed.
@@ -808,6 +821,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             let mut fetching = self.fetching_accounts.lock().unwrap();
             for &pubkey in pubkeys {
                 let (sender, receiver) = oneshot::channel();
+                let mut claimed = false;
                 match fetching.entry(pubkey) {
                     Entry::Occupied(mut entry) => {
                         let age = entry.get().created_at.elapsed();
@@ -849,8 +863,10 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                                 self.fetching_accounts.clone(),
                                 pubkey,
                             ));
+                            claimed = true;
                         } else {
-                            // Normal path: join the queue
+                            // Waiter path: join the existing in-flight fetch
+                            // owned by another caller.
                             entry.get_mut().waiters.push(sender);
                         }
                     }
@@ -864,37 +880,48 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                             self.fetching_accounts.clone(),
                             pubkey,
                         ));
+                        claimed = true;
                     }
                 }
-                subscription_overrides.push((pubkey, receiver));
+                if claimed {
+                    claimed_pubkeys.push(pubkey);
+                }
+                await_receivers.push((pubkey, receiver));
             }
         }
 
-        // Setup subscriptions first (to catch updates during fetch)
-        self.setup_subscriptions(&subscription_overrides).await?;
+        // Setup subscriptions and trigger the fetch only for pubkeys this
+        // call actually claimed. Waiter-only pubkeys already have a
+        // subscription and an in-flight fetch owned by the original
+        // claimer; doing it again here would duplicate work and (for
+        // setup_subscriptions) double-count subscription side effects.
+        if !claimed_pubkeys.is_empty() {
+            self.setup_subscriptions(&claimed_pubkeys).await?;
 
-        // Start the fetch
-        let min_context_slot = fetch_start_slot;
-        self.fetch(
-            pubkeys.to_vec(),
-            mark_empty_if_not_found,
-            min_context_slot,
-            fetch_origin,
-            program_ids,
-        );
+            // Start the fetch for the claimed pubkeys only.
+            let min_context_slot = fetch_start_slot;
+            self.fetch(
+                claimed_pubkeys.clone(),
+                mark_empty_if_not_found,
+                min_context_slot,
+                fetch_origin,
+                program_ids,
+            );
 
-        // Dismiss all guards — the fetch task now owns cleanup
-        for mut guard in owner_guards {
-            debug!("Ownership of fetching_accounts entry transferred to fetch task");
-            guard.dismiss();
+            // Dismiss all guards — the fetch task now owns cleanup
+            for mut guard in owner_guards {
+                debug!("Ownership of fetching_accounts entry transferred to fetch task");
+                guard.dismiss();
+            }
         }
 
-        // Wait for all accounts to resolve (either from fetch or subscription override)
+        // Wait for all accounts to resolve (either from fetch or
+        // subscription override). We await receivers in input pubkey
+        // order so the returned Vec is index-aligned with `pubkeys`.
         let mut resolved_accounts = vec![];
         let mut errors = vec![];
 
-        for (idx, (pubkey, receiver)) in
-            subscription_overrides.into_iter().enumerate()
+        for (idx, (pubkey, receiver)) in await_receivers.into_iter().enumerate()
         {
             match receiver.await {
                 Ok(result) => match result {
@@ -944,15 +971,15 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
 
     async fn setup_subscriptions(
         &self,
-        subscribe_and_fetch: &[(Pubkey, oneshot::Receiver<FetchResult>)],
+        pubkeys: &[Pubkey],
     ) -> RemoteAccountProviderResult<()> {
         if tracing::enabled!(tracing::Level::TRACE) {
-            let pubkeys = subscribe_and_fetch
+            let pubkeys_str = pubkeys
                 .iter()
-                .map(|(pk, _)| pk.to_string())
+                .map(|pk| pk.to_string())
                 .collect::<Vec<_>>()
                 .join(", ");
-            trace!(pubkeys = pubkeys, "Subscribing to accounts");
+            trace!(pubkeys = pubkeys_str, "Subscribing to accounts");
         }
         // Send all subscription requests in parallel (non-fail-fast)
         // We use join_all instead of try_join_all to ensure ALL
@@ -960,12 +987,8 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         // prevents resource leaks in fetching_accounts and ensures
         // all oneshot receivers get a response (either success or
         // error).
-        let subscription_results = join_all(
-            subscribe_and_fetch
-                .iter()
-                .map(|(pubkey, _)| self.subscribe(pubkey)),
-        )
-        .await;
+        let subscription_results =
+            join_all(pubkeys.iter().map(|pubkey| self.subscribe(pubkey))).await;
 
         // Collect errors and track only subscriptions that were newly
         // created by this call. Pre-existing subscriptions
@@ -973,8 +996,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         // because other callers are relying on them.
         let mut errors = Vec::new();
         let mut created = Vec::new();
-        for (result, (pubkey, _)) in
-            subscription_results.iter().zip(subscribe_and_fetch.iter())
+        for (result, pubkey) in subscription_results.iter().zip(pubkeys.iter())
         {
             match result {
                 Err(err) => {
