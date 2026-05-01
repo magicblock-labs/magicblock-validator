@@ -41,6 +41,15 @@ use tracing::*;
 pub(crate) const PENDING_REQUEST_STALE_AFTER: Duration =
     Duration::from_secs(120);
 
+/// How long a waiter will block on a pending fetch+clone request owned by
+/// another task before giving up. This must be long enough to cover the
+/// full retry/backoff budget of the owner's in-flight fetch+clone operation
+/// so that healthy live requests do not produce spurious
+/// `ChainlinkError::Custom("timeout waiting...")` failures for waiters.
+/// Kept strictly less than `PENDING_REQUEST_STALE_AFTER` so that stale
+/// eviction remains the outer bound.
+pub(crate) const PENDING_REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
+
 mod ata_projection;
 mod delegation;
 mod pending_clone_guard;
@@ -1929,7 +1938,8 @@ where
 
         // Wait for any pending waiter requests to complete
         for (pubkey, receiver) in await_pending {
-            match tokio::time::timeout(Duration::from_secs(5), receiver).await {
+            match tokio::time::timeout(PENDING_REQUEST_TIMEOUT, receiver).await
+            {
                 Ok(Ok(PendingRequestCompletion::Success)) => {
                     // Owner completed successfully
                 }
