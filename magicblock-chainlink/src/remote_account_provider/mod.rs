@@ -96,6 +96,17 @@ struct FetchingAccountState {
 
 type FetchingAccounts = Mutex<HashMap<Pubkey, FetchingAccountState>>;
 
+/// Outcome of a successful [`RemoteAccountProvider::subscribe`] call,
+/// distinguishing whether a new pubsub subscription was created or the
+/// account was already being watched.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SubscribeResult {
+    /// A new subscription was created by this call.
+    Created,
+    /// The account was already being watched; no new subscription was created.
+    AlreadyWatching,
+}
+
 pub struct ForwardedSubscriptionUpdate {
     pub pubkey: Pubkey,
     pub account: RemoteAccount,
@@ -956,9 +967,12 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         )
         .await;
 
-        // Collect errors and successes
+        // Collect errors and track only subscriptions that were newly
+        // created by this call. Pre-existing subscriptions
+        // (`AlreadyWatching`) must NOT be rolled back on partial failure
+        // because other callers are relying on them.
         let mut errors = Vec::new();
-        let mut succeeded = Vec::new();
+        let mut created = Vec::new();
         for (result, (pubkey, _)) in
             subscription_results.iter().zip(subscribe_and_fetch.iter())
         {
@@ -970,16 +984,21 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                     );
                     errors.push(format!("{}: {}", pubkey, err));
                 }
-                Ok(()) => {
-                    succeeded.push(*pubkey);
+                Ok(SubscribeResult::Created) => {
+                    created.push(*pubkey);
+                }
+                Ok(SubscribeResult::AlreadyWatching) => {
+                    // Pre-existing subscription; do not roll back.
                 }
             }
         }
 
-        // If ANY subscription failed, unsubscribe the ones that
-        // succeeded to avoid leaking orphan subscriptions.
+        // If ANY subscription failed, unsubscribe only the ones that
+        // were newly created by this call to avoid leaking orphan
+        // subscriptions while preserving subscriptions other callers
+        // already established.
         if !errors.is_empty() {
-            for pubkey in &succeeded {
+            for pubkey in &created {
                 if let Err(unsub_err) = self.unsubscribe(pubkey).await {
                     if matches!(
                         unsub_err,
@@ -1077,15 +1096,15 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
     pub async fn subscribe(
         &self,
         pubkey: &Pubkey,
-    ) -> RemoteAccountProviderResult<()> {
+    ) -> RemoteAccountProviderResult<SubscribeResult> {
         if self.is_watching(pubkey) {
             // Promote in LRU cache even if already subscribed
             self.lrucache_subscribed_accounts.add(*pubkey);
-            return Ok(());
+            return Ok(SubscribeResult::AlreadyWatching);
         }
 
         self.register_subscription(pubkey).await?;
-        Ok(())
+        Ok(SubscribeResult::Created)
     }
 
     /// Subscribe to program account updates

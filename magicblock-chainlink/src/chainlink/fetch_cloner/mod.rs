@@ -2167,6 +2167,7 @@ where
         self.remote_account_provider
             .subscribe(pubkey)
             .await
+            .map(|_| ())
             .map_err(|err| {
                 ChainlinkError::FailedToSubscribeToAccount(*pubkey, err)
             })
