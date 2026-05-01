@@ -410,12 +410,17 @@ pub mod mock {
         /// Used for testing to ensure subscribes are being called.
         pub async fn wait_for_subscribe_attempts(&self, min_attempts: u64) {
             loop {
+                // Register the waiter BEFORE checking the condition to avoid
+                // lost notifications: if we checked first and a notification
+                // arrived between the check and the await, we would miss it.
+                let notified = self.subscribe_notify.notified();
+                tokio::pin!(notified);
                 let current =
                     self.subscribe_attempts.load(AtomicOrdering::SeqCst);
                 if current >= min_attempts {
                     break;
                 }
-                self.subscribe_notify.notified().await;
+                notified.await;
             }
         }
 
@@ -456,9 +461,17 @@ pub mod mock {
             self.subscribe_attempts.fetch_add(1, AtomicOrdering::SeqCst);
             self.subscribe_notify.notify_waiters();
 
-            // Wait until subscribe is released if it's blocked
-            while *self.subscribe_blocked.lock() {
-                self.subscribe_notify.notified().await;
+            // Wait until subscribe is released if it's blocked.
+            // Register the waiter BEFORE re-checking the condition so that a
+            // `release_subscribe()` notification fired between the check and
+            // the await is not lost.
+            loop {
+                let notified = self.subscribe_notify.notified();
+                tokio::pin!(notified);
+                if !*self.subscribe_blocked.lock() {
+                    break;
+                }
+                notified.await;
             }
 
             if !*self.connected.lock() {
