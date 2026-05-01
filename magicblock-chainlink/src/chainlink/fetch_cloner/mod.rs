@@ -215,6 +215,16 @@ where
         self.pending_requests.contains(pubkey)
     }
 
+    /// Returns the number of waiters currently registered for the pending
+    /// fetch+clone request keyed by `pubkey`, or `None` if no pending
+    /// request exists for that pubkey. Used by tests to deterministically
+    /// observe waiter registration without relying on fixed sleeps.
+    #[cfg(test)]
+    fn pending_request_waiter_count(&self, pubkey: &Pubkey) -> Option<usize> {
+        self.pending_requests
+            .read(pubkey, |_, state| state.waiters.len())
+    }
+
     /// Check if a program is allowed to be cloned.
     /// Returns true if:
     /// - No allowed_programs restriction is set (None), OR

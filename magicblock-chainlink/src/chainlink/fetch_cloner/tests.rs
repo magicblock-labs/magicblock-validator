@@ -3958,6 +3958,28 @@ async fn test_pending_request_waiter_gets_failure_when_owner_aborts() {
             .await
     });
 
+    // Poll fetch_cloner.pending_requests until task_waiter has registered as
+    // a waiter on the pending request keyed by account_pubkey before aborting
+    // task_owner; this avoids the race where task_owner.abort() runs before
+    // fetch_and_clone_accounts_with_dedup in task_waiter has had a chance to
+    // attach itself to the entry's waiters list.
+    let waiter_registration_start = tokio::time::Instant::now();
+    let waiter_registration_timeout = Duration::from_secs(2);
+    loop {
+        if fetch_cloner
+            .pending_request_waiter_count(&account_pubkey)
+            .is_some_and(|n| n > 0)
+        {
+            break;
+        }
+        assert!(
+            waiter_registration_start.elapsed() < waiter_registration_timeout,
+            "task_waiter did not register as a waiter in fetch_cloner.pending_requests \
+             for {account_pubkey} within {waiter_registration_timeout:?}"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+
     // Abort owner task before delayed clone finishes
     task_owner.abort();
 
