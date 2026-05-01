@@ -213,8 +213,29 @@ async fn test_try_get_multi_waiter_receives_error_when_owner_aborts_in_setup_sub
         }
     });
 
-    // Give the second task time to queue as a waiter
-    tokio::time::sleep(Duration::from_millis(50)).await;
+    // Poll provider.fetching_accounts until the second task has registered
+    // as a waiter on the entry keyed by pubkey before aborting the owner;
+    // this avoids the race where first_task_handle.abort() runs before
+    // second_task_handle has had a chance to attach itself to the entry's
+    // waiters list.
+    let waiter_registration_start = tokio::time::Instant::now();
+    let waiter_registration_timeout = Duration::from_secs(2);
+    loop {
+        let waiter_count = {
+            let fetching = provider.fetching_accounts.lock().unwrap();
+            fetching.get(&pubkey).map(|s| s.waiters.len()).unwrap_or(0)
+        };
+        if waiter_count > 0 {
+            break;
+        }
+        assert!(
+            waiter_registration_start.elapsed() < waiter_registration_timeout,
+            "second_task_handle did not register as a waiter in \
+             provider.fetching_accounts for {pubkey} within \
+             {waiter_registration_timeout:?}"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
 
     // Abort the first (owner) task which should trigger FetchingAccountGuard::Drop
     // and fail all waiters with an explicit error
