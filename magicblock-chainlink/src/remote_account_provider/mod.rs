@@ -87,8 +87,10 @@ const FETCHING_ACCOUNT_STALE_AFTER: Duration = Duration::from_secs(30);
 
 // Maps pubkey -> (fetch_start_slot, requests_waiting)
 type FetchResult = Result<RemoteAccount, RemoteAccountProviderError>;
+type FetchingAccountGeneration = u64;
 
 struct FetchingAccountState {
+    generation: FetchingAccountGeneration,
     created_at: Instant,
     fetch_start_slot: u64,
     waiters: Vec<oneshot::Sender<FetchResult>>,
@@ -127,6 +129,8 @@ pub struct RemoteAccountProvider<T: ChainRpcClient, U: ChainPubsubClient> {
     /// Minimal tracking of accounts currently being fetched to handle race conditions
     /// between fetch and subscription updates. Only used during active fetch operations.
     fetching_accounts: Arc<FetchingAccounts>,
+    /// Monotonic generation for claimed fetching_accounts ownership.
+    next_fetching_account_generation: AtomicU64,
     /// The current slot on chain.
     ///
     /// This value is updated from two sources and always stores the maximum
@@ -224,6 +228,7 @@ impl
 struct FetchingAccountGuard {
     fetching_accounts: Arc<Mutex<HashMap<Pubkey, FetchingAccountState>>>,
     pubkey: Pubkey,
+    generation: FetchingAccountGeneration,
     dismissed: bool,
 }
 
@@ -231,10 +236,12 @@ impl FetchingAccountGuard {
     fn new(
         fetching_accounts: Arc<Mutex<HashMap<Pubkey, FetchingAccountState>>>,
         pubkey: Pubkey,
+        generation: FetchingAccountGeneration,
     ) -> Self {
         Self {
             fetching_accounts,
             pubkey,
+            generation,
             dismissed: false,
         }
     }
@@ -261,7 +268,11 @@ impl Drop for FetchingAccountGuard {
                     poisoned.into_inner()
                 }
             };
-            if let Some(state) = guard.remove(&self.pubkey) {
+            if let Some(state) = remove_fetching_account_if_generation_matches(
+                &mut guard,
+                &self.pubkey,
+                self.generation,
+            ) {
                 state.waiters
             } else {
                 vec![]
@@ -290,6 +301,12 @@ impl Drop for FetchingAccountGuard {
 }
 
 impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
+    fn next_fetching_account_generation(&self) -> FetchingAccountGeneration {
+        self.next_fetching_account_generation
+            .fetch_add(1, Ordering::Relaxed)
+            .wrapping_add(1)
+    }
+
     pub async fn try_from_clients_and_mode(
         rpc_client: T,
         pubsub_client: U,
@@ -372,6 +389,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
 
         let me = Self {
             fetching_accounts: Arc::<FetchingAccounts>::default(),
+            next_fetching_account_generation: AtomicU64::default(),
             rpc_client,
             pubsub_client,
             chain_slot,
@@ -586,22 +604,35 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                     // Check if we're currently fetching this account
                     let forward_update = {
                         let mut fetching = fetching_accounts.lock().unwrap();
-                        if let Some(state) = fetching.remove(&update.pubkey) {
-                            // If subscription update is newer than when we started fetching,
-                            // resolve with the subscription data instead
-                            if slot >= state.fetch_start_slot {
-                                trace!(pubkey = %update.pubkey, slot = slot, fetch_start_slot = state.fetch_start_slot, "Using subscription update instead of fetch");
+                        if let Some(generation) = fetching
+                            .get(&update.pubkey)
+                            .map(|state| state.generation)
+                        {
+                            if let Some(state) =
+                                remove_fetching_account_if_generation_matches(
+                                    &mut fetching,
+                                    &update.pubkey,
+                                    generation,
+                                )
+                            {
+                                // If subscription update is newer than when we started fetching,
+                                // resolve with the subscription data instead
+                                if slot >= state.fetch_start_slot {
+                                    trace!(pubkey = %update.pubkey, slot = slot, fetch_start_slot = state.fetch_start_slot, generation, "Using subscription update instead of fetch");
 
-                                // Resolve all pending requests with subscription data
-                                for sender in state.waiters {
-                                    let _ =
-                                        sender.send(Ok(remote_account.clone()));
+                                    // Resolve all pending requests with subscription data
+                                    for sender in state.waiters {
+                                        let _ = sender
+                                            .send(Ok(remote_account.clone()));
+                                    }
+                                    None
+                                } else {
+                                    // Subscription is stale, put the fetch tracking back
+                                    warn!(pubkey = %update.pubkey, slot = slot, fetch_start_slot = state.fetch_start_slot, generation, "Received stale subscription update");
+                                    fetching.insert(update.pubkey, state);
+                                    None
                                 }
-                                None
                             } else {
-                                // Subscription is stale, put the fetch tracking back
-                                warn!(pubkey = %update.pubkey, slot = slot, fetch_start_slot = state.fetch_start_slot, "Received stale subscription update");
-                                fetching.insert(update.pubkey, state);
                                 None
                             }
                         } else {
@@ -682,6 +713,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             }
             self.fetch(
                 pubkeys.to_vec(),
+                HashMap::new(),
                 None,
                 self.chain_slot(),
                 fetch_origin,
@@ -812,6 +844,10 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         // have a subscription owned by the original claimer and are being
         // fetched by them.
         let mut claimed_pubkeys: Vec<Pubkey> = Vec::new();
+        let mut claimed_generations: HashMap<
+            Pubkey,
+            FetchingAccountGeneration,
+        > = HashMap::new();
 
         // Track owner guards for entries we create (Vacant or stale).
         // Guards own the entries and will clean them up on drop if not dismissed.
@@ -829,7 +865,16 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                         // Check if entry is stale
                         if age > FETCHING_ACCOUNT_STALE_AFTER {
                             // Evict stale entry and notify old waiters
-                            let stale_state = entry.remove();
+                            let stale_generation = entry.get().generation;
+                            let stale_state =
+                                remove_fetching_account_if_generation_matches(
+                                    &mut fetching,
+                                    &pubkey,
+                                    stale_generation,
+                                )
+                                .expect(
+                                    "occupied fetching_accounts entry disappeared during stale eviction",
+                                );
                             let waiters_len = stale_state.waiters.len();
                             for tx in stale_state.waiters {
                                 let _ = tx.send(Err(
@@ -851,9 +896,12 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                             }
 
                             // Insert fresh entry and create a guard for it
+                            let generation =
+                                self.next_fetching_account_generation();
                             let _ = fetching.insert(
                                 pubkey,
                                 FetchingAccountState {
+                                    generation,
                                     created_at: Instant::now(),
                                     fetch_start_slot,
                                     waiters: vec![sender],
@@ -862,7 +910,9 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                             owner_guards.push(FetchingAccountGuard::new(
                                 self.fetching_accounts.clone(),
                                 pubkey,
+                                generation,
                             ));
+                            claimed_generations.insert(pubkey, generation);
                             claimed = true;
                         } else {
                             // Waiter path: join the existing in-flight fetch
@@ -871,7 +921,10 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                         }
                     }
                     Entry::Vacant(entry) => {
+                        let generation =
+                            self.next_fetching_account_generation();
                         entry.insert(FetchingAccountState {
+                            generation,
                             created_at: Instant::now(),
                             fetch_start_slot,
                             waiters: vec![sender],
@@ -879,7 +932,9 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                         owner_guards.push(FetchingAccountGuard::new(
                             self.fetching_accounts.clone(),
                             pubkey,
+                            generation,
                         ));
+                        claimed_generations.insert(pubkey, generation);
                         claimed = true;
                     }
                 }
@@ -902,6 +957,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             let min_context_slot = fetch_start_slot;
             self.fetch(
                 claimed_pubkeys.clone(),
+                claimed_generations,
                 mark_empty_if_not_found,
                 min_context_slot,
                 fetch_origin,
@@ -1183,6 +1239,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
     fn fetch(
         &self,
         pubkeys: Vec<Pubkey>,
+        generations: HashMap<Pubkey, FetchingAccountGeneration>,
         mark_empty_if_not_found: Option<&[Pubkey]>,
         min_context_slot: u64,
         fetch_origin: AccountFetchOrigin,
@@ -1218,12 +1275,20 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                 for pubkey in &pubkeys {
                     // Update metrics
                     // Remove pending requests and send error
-                    if let Some(state) = fetching.remove(pubkey) {
-                        for sender in state.waiters {
-                            let error = RemoteAccountProviderError::AccountResolutionsFailed(
-                                format!("{}: {}", pubkey, error_msg)
-                            );
-                            let _ = sender.send(Err(error));
+                    if let Some(generation) = generations.get(pubkey).copied() {
+                        if let Some(state) =
+                            remove_fetching_account_if_generation_matches(
+                                &mut fetching,
+                                pubkey,
+                                generation,
+                            )
+                        {
+                            for sender in state.waiters {
+                                let error = RemoteAccountProviderError::AccountResolutionsFailed(
+                                    format!("{}: {}", pubkey, error_msg)
+                                );
+                                let _ = sender.send(Err(error));
+                            }
                         }
                     }
                 }
@@ -1439,14 +1504,25 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                 let waiters = {
                     let mut fetching = fetching_accounts.lock().unwrap();
                     // Remove from fetching and get pending requests
-                    // Note: the account might have been resolved by subscription update already
-                    if let Some(state) = fetching.remove(pubkey) {
+                    // Note: the account might have been resolved by a
+                    // subscription update already or replaced by a newer owner.
+                    let Some(generation) = generations.get(pubkey).copied()
+                    else {
+                        continue;
+                    };
+                    if let Some(state) =
+                        remove_fetching_account_if_generation_matches(
+                            &mut fetching,
+                            pubkey,
+                            generation,
+                        )
+                    {
                         state.waiters
                     } else {
-                        // Account was resolved by subscription update, skip
+                        // Account was already resolved or replaced, skip.
                         if tracing::enabled!(tracing::Level::TRACE) {
                             trace!(
-                                "Account {pubkey} was already resolved by subscription update"
+                                "Account {pubkey} generation {generation} was already resolved or replaced"
                             );
                         }
                         continue;
@@ -1459,6 +1535,19 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                 }
             }
         });
+    }
+}
+
+fn remove_fetching_account_if_generation_matches(
+    fetching: &mut HashMap<Pubkey, FetchingAccountState>,
+    pubkey: &Pubkey,
+    generation: FetchingAccountGeneration,
+) -> Option<FetchingAccountState> {
+    match fetching.entry(*pubkey) {
+        Entry::Occupied(entry) if entry.get().generation == generation => {
+            Some(entry.remove())
+        }
+        _ => None,
     }
 }
 

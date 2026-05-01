@@ -367,6 +367,7 @@ async fn test_stale_fetching_account_entry_is_evicted_and_replaced() {
         fetching.insert(
             pubkey,
             FetchingAccountState {
+                generation: 1,
                 created_at: stale_created_at,
                 fetch_start_slot: 100,
                 waiters: vec![],
@@ -403,6 +404,41 @@ async fn test_stale_fetching_account_entry_is_evicted_and_replaced() {
 
     // Verify stale entry is gone
     assert!(!provider.is_pending(&pubkey));
+}
+
+#[test]
+fn test_fetching_account_guard_drop_does_not_remove_replacement_entry() {
+    let pubkey = solana_pubkey::Pubkey::new_unique();
+    let fetching_accounts = Arc::<FetchingAccounts>::default();
+
+    let old_generation = 1;
+    let new_generation = 2;
+    let guard = FetchingAccountGuard::new(
+        fetching_accounts.clone(),
+        pubkey,
+        old_generation,
+    );
+
+    {
+        let mut fetching = fetching_accounts.lock().unwrap();
+        fetching.insert(
+            pubkey,
+            FetchingAccountState {
+                generation: new_generation,
+                created_at: std::time::Instant::now(),
+                fetch_start_slot: 200,
+                waiters: vec![],
+            },
+        );
+    }
+
+    drop(guard);
+
+    let fetching = fetching_accounts.lock().unwrap();
+    let state = fetching
+        .get(&pubkey)
+        .expect("replacement entry should remain after stale guard drop");
+    assert_eq!(state.generation, new_generation);
 }
 
 #[tokio::test]
