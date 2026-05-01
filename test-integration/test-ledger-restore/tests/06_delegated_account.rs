@@ -9,6 +9,7 @@ use program_flexi_counter::{instruction::create_add_ix, state::FlexiCounter};
 use solana_sdk::{pubkey::Pubkey, signature::Keypair, signer::Signer};
 use test_kit::init_logger;
 use test_ledger_restore::{
+    shutdown_and_wait,
     confirm_tx_with_payer_ephem, fetch_counter_ephem,
     init_and_delegate_counter_and_payer, setup_validator_with_local_remote,
     wait_for_counter_ephem_state, wait_for_ledger_persist, TMP_DIR_LEDGER,
@@ -21,10 +22,10 @@ fn test_restore_ledger_containing_delegated_account() {
     init_logger!();
     let (_tmpdir, ledger_path) = resolve_tmp_dir(TMP_DIR_LEDGER);
     let (mut validator, _, payer) = write(&ledger_path);
-    validator.kill().unwrap();
+    shutdown_and_wait(&mut validator);
 
     let mut validator = read(&ledger_path, &payer.pubkey());
-    validator.kill().unwrap();
+    shutdown_and_wait(&mut validator);
 }
 
 fn write(ledger_path: &Path) -> (Child, u64, Keypair) {

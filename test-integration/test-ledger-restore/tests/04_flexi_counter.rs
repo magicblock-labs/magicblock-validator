@@ -12,6 +12,7 @@ use program_flexi_counter::{
 use solana_sdk::{pubkey::Pubkey, signer::Signer};
 use test_kit::init_logger;
 use test_ledger_restore::{
+    shutdown_and_wait,
     confirm_tx_with_payer_ephem, fetch_counter_ephem,
     init_and_delegate_counter_and_payer, setup_offline_validator,
     setup_offline_validator_with_authority_override,
@@ -36,10 +37,10 @@ fn test_restore_ledger_with_flexi_counter_same_slot() {
     let (_tmpdir, ledger_path) = resolve_tmp_dir(TMP_DIR_LEDGER);
 
     let (mut validator, _, payer1, payer2) = write(&ledger_path, false);
-    validator.kill().unwrap();
+    shutdown_and_wait(&mut validator);
 
     let mut validator = read(&ledger_path, &payer1, &payer2, None);
-    validator.kill().unwrap();
+    shutdown_and_wait(&mut validator);
 }
 
 #[test]
@@ -49,10 +50,10 @@ fn test_restore_ledger_with_flexi_counter_separate_slot() {
     let (_tmpdir, ledger_path) = resolve_tmp_dir(TMP_DIR_LEDGER);
 
     let (mut validator, _, payer1, payer2) = write(&ledger_path, true);
-    validator.kill().unwrap();
+    shutdown_and_wait(&mut validator);
 
     let mut validator = read(&ledger_path, &payer1, &payer2, None);
-    validator.kill().unwrap();
+    shutdown_and_wait(&mut validator);
 }
 
 #[test]
@@ -65,11 +66,11 @@ fn test_restore_ledger_with_flexi_counter_authority_override() {
             .validator_authority();
 
     let (mut validator, _, payer1, payer2) = write(&ledger_path, true);
-    validator.kill().unwrap();
+    shutdown_and_wait(&mut validator);
 
     let mut validator =
         read(&ledger_path, &payer1, &payer2, Some(original_authority));
-    validator.kill().unwrap();
+    shutdown_and_wait(&mut validator);
 }
 
 fn write(

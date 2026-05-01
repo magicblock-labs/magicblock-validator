@@ -634,15 +634,28 @@ pub fn assert_counter_commits_on_chain(
     payer: &Pubkey,
     expected_count: usize,
 ) {
-    // Wait long enough for scheduled commits to have been handled
-    expect!(ctx.wait_for_next_slot_ephem(), validator);
-    expect!(ctx.wait_for_next_slot_ephem(), validator);
-    expect!(ctx.wait_for_next_slot_ephem(), validator);
+    const TIMEOUT: Duration = Duration::from_secs(15);
+    const POLL_INTERVAL: Duration = Duration::from_millis(200);
 
     let (pda, _) = FlexiCounter::pda(payer);
-    let stats =
-        expect!(ctx.get_signaturestats_for_address_chain(&pda), validator);
-    assert_eq!(stats.len(), expected_count, cleanup(validator));
+    let started = Instant::now();
+    let mut last_len;
+    loop {
+        let stats =
+            expect!(ctx.get_signaturestats_for_address_chain(&pda), validator);
+        last_len = stats.len();
+        if last_len == expected_count {
+            return;
+        }
+        if started.elapsed() >= TIMEOUT {
+            break;
+        }
+        sleep(POLL_INTERVAL);
+    }
+    cleanup(validator);
+    panic!(
+        "Timed out waiting for {expected_count} on-chain commits for {pda}, last observed {last_len}"
+    );
 }
 
 // -----------------
@@ -697,10 +710,48 @@ macro_rules! assert_counter_state {
     };
 }
 
-pub fn wait_for_cloned_accounts_hydration() {
-    // NOTE: account hydration runs in the background _after_ the validator starts up
-    // thus we need to wait for that to complete before we can send this transaction
-    sleep(Duration::from_secs(5));
+pub fn wait_for_cloned_accounts_hydration(
+    ctx: &IntegrationTestContext,
+    validator: &mut Child,
+    pubkey: &Pubkey,
+) {
+    // Account hydration runs in the background after the validator starts up.
+    // Poll for the account to become readable instead of sleeping a fixed
+    // duration, which is both slower on the happy path and unreliable on slow CI.
+    const TIMEOUT: Duration = Duration::from_secs(15);
+    const POLL_INTERVAL: Duration = Duration::from_millis(100);
+    let ephem_client = expect!(ctx.try_ephem_client(), validator);
+    let started = Instant::now();
+    while started.elapsed() < TIMEOUT {
+        if ephem_client.get_account(pubkey).is_ok() {
+            return;
+        }
+        sleep(POLL_INTERVAL);
+    }
+    cleanup(validator);
+    panic!("Timed out waiting for cloned account {pubkey} to hydrate");
+}
+
+/// Send SIGTERM and wait for the process to exit so its Drop handlers (RocksDB
+/// flush, mmap msync, in-flight snapshot threads) can run before we proceed.
+/// Falls back to SIGKILL if the validator does not exit within the deadline.
+pub fn shutdown_and_wait(validator: &mut Child) {
+    const DEADLINE: Duration = Duration::from_secs(15);
+    const POLL_INTERVAL: Duration = Duration::from_millis(50);
+
+    unsafe {
+        libc::kill(validator.id() as i32, libc::SIGTERM);
+    }
+    let started = Instant::now();
+    while started.elapsed() < DEADLINE {
+        match validator.try_wait() {
+            Ok(Some(_)) => return,
+            Ok(None) => sleep(POLL_INTERVAL),
+            Err(_) => break,
+        }
+    }
+    let _ = validator.kill();
+    let _ = validator.wait();
 }
 
 pub fn wait_for_counter_ephem_state(

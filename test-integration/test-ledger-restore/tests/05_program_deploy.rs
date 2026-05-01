@@ -21,6 +21,7 @@ use solana_sdk::{
     signer::{EncodableKey, Signer},
 };
 use test_ledger_restore::{
+    shutdown_and_wait,
     confirm_tx_with_payer_ephem, fetch_counter_ephem, setup_offline_validator,
     wait_for_ledger_persist, FLEXI_COUNTER_ID, TMP_DIR_LEDGER,
 };
@@ -49,10 +50,10 @@ fn test_restore_ledger_with_flexi_counter_deploy() {
     );
 
     let (mut validator, _) = write(&ledger_path, &payer, &flexi_counter_paths);
-    validator.kill().unwrap();
+    shutdown_and_wait(&mut validator);
 
     let mut validator = read(&ledger_path, &payer.pubkey());
-    validator.kill().unwrap();
+    shutdown_and_wait(&mut validator);
 }
 
 fn write(

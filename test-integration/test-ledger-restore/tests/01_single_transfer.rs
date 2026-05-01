@@ -13,6 +13,7 @@ use solana_sdk::{
 };
 use test_kit::init_logger;
 use test_ledger_restore::{
+    shutdown_and_wait,
     airdrop_and_delegate_accounts, setup_offline_validator,
     setup_offline_validator_with_authority_override,
     setup_validator_with_local_remote, transfer_lamports,
@@ -28,7 +29,7 @@ fn test_restore_ledger_with_transferred_account() {
 
     let (mut validator, transfer_sig, _slot, _keypair1, keypair2) =
         write_ledger(&ledger_path);
-    validator.kill().unwrap();
+    shutdown_and_wait(&mut validator);
     debug!("Transfer sig: {transfer_sig}");
 
     let mut validator = read_ledger(
@@ -37,7 +38,7 @@ fn test_restore_ledger_with_transferred_account() {
         Some(&transfer_sig),
         None,
     );
-    validator.kill().unwrap();
+    shutdown_and_wait(&mut validator);
 }
 
 #[test]
@@ -49,7 +50,7 @@ fn test_restore_ledger_with_transferred_account_authority_override() {
 
     let (mut validator, transfer_sig, _slot, _keypair1, keypair2) =
         write_ledger(&ledger_path);
-    validator.kill().unwrap();
+    shutdown_and_wait(&mut validator);
 
     let mut validator = read_ledger(
         &ledger_path,
@@ -57,7 +58,7 @@ fn test_restore_ledger_with_transferred_account_authority_override() {
         Some(&transfer_sig),
         Some(original_authority),
     );
-    validator.kill().unwrap();
+    shutdown_and_wait(&mut validator);
 }
 
 fn write_ledger(
@@ -99,7 +100,7 @@ fn write_ledger(
 
     let slot = wait_for_ledger_persist(&ctx, &mut validator);
 
-    validator.kill().unwrap();
+    shutdown_and_wait(&mut validator);
     (validator, sig, slot, keypair1, keypair2)
 }
 

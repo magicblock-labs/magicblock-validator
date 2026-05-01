@@ -19,6 +19,7 @@ use solana_sdk::{
 };
 use test_kit::init_logger;
 use test_ledger_restore::{
+    shutdown_and_wait,
     airdrop_accounts_on_chain, assert_counter_state,
     confirm_tx_with_payer_chain, confirm_tx_with_payer_ephem,
     delegate_accounts, get_programs_with_flexi_counter,
@@ -49,16 +50,16 @@ fn test_restore_ledger_with_account_undelegated_before_restart() {
 
     // Original instance delegates and updates account
     let (mut validator, _, payer) = write(&ledger_path);
-    validator.kill().unwrap();
+    shutdown_and_wait(&mut validator);
 
     // Undelegate account while validator is down (note we do this by starting
     // another instance, to use the same validator auth)
     let mut validator = update_counter_between_restarts(&payer);
-    validator.kill().unwrap();
+    shutdown_and_wait(&mut validator);
 
     // Now we restart the validator pointing at the original ledger path
     let mut validator = read(&ledger_path, &payer);
-    validator.kill().unwrap();
+    shutdown_and_wait(&mut validator);
 }
 
 fn write(ledger_path: &Path) -> (Child, u64, Keypair) {

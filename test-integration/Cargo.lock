@@ -10950,6 +10950,7 @@ dependencies = [
  "anyhow",
  "cleanass",
  "integration-test-tools",
+ "libc",
  "magicblock-accounts-db",
  "magicblock-config",
  "magicblock-delegation-program-api 0.3.0 (git+https://github.com/magicblock-labs/delegation-program.git?rev=25386a7c1d406d06b8d07a4d5b0fd37d5e74213b)",

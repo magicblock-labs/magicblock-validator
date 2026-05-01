@@ -8,6 +8,7 @@ use integration_test_tools::{
 use solana_sdk::{pubkey::Pubkey, signature::Keypair, signer::Signer};
 use test_kit::init_logger;
 use test_ledger_restore::{
+    shutdown_and_wait,
     airdrop_and_delegate_accounts, setup_validator_with_local_remote,
     transfer_lamports, wait_for_ledger_persist, SNAPSHOT_FREQUENCY,
     TMP_DIR_LEDGER,
@@ -29,12 +30,12 @@ fn test_restore_ledger_with_two_airdrops_with_account_flush_in_between() {
     let (_tmpdir, ledger_path) = resolve_tmp_dir(TMP_DIR_LEDGER);
 
     let (mut validator, slot, keypair) = write(&ledger_path);
-    validator.kill().unwrap();
+    shutdown_and_wait(&mut validator);
 
     assert!(slot > SNAPSHOT_FREQUENCY);
 
     let mut validator = read(&ledger_path, &keypair.pubkey());
-    validator.kill().unwrap();
+    shutdown_and_wait(&mut validator);
 }
 
 fn write(ledger_path: &Path) -> (Child, u64, Keypair) {

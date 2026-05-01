@@ -13,6 +13,7 @@ use solana_sdk::{
 use solana_transaction_status::UiTransactionEncoding;
 use test_kit::init_logger;
 use test_ledger_restore::{
+    shutdown_and_wait,
     airdrop_and_delegate_accounts, setup_offline_validator,
     setup_offline_validator_with_authority_override,
     setup_validator_with_local_remote, transfer_lamports,
@@ -31,12 +32,12 @@ fn test_restore_preserves_timestamps() {
 
     let (mut validator, slot, signature, block_time, _payer) =
         write(&ledger_path);
-    validator.kill().unwrap();
+    shutdown_and_wait(&mut validator);
 
     assert!(slot > SNAPSHOT_FREQUENCY);
 
     let mut validator = read(&ledger_path, signature, block_time, None);
-    validator.kill().unwrap();
+    shutdown_and_wait(&mut validator);
 }
 
 #[test]
@@ -48,7 +49,7 @@ fn test_restore_preserves_timestamps_with_authority_override() {
 
     let (mut validator, slot, signature, block_time, _payer) =
         write(&ledger_path);
-    validator.kill().unwrap();
+    shutdown_and_wait(&mut validator);
 
     assert!(slot > SNAPSHOT_FREQUENCY);
 
@@ -58,7 +59,7 @@ fn test_restore_preserves_timestamps_with_authority_override() {
         block_time,
         Some(original_authority),
     );
-    validator.kill().unwrap();
+    shutdown_and_wait(&mut validator);
 }
 
 fn write(ledger_path: &Path) -> (Child, u64, Signature, i64, Keypair) {

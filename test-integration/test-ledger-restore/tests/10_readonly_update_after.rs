@@ -17,6 +17,7 @@ use solana_sdk::{
 };
 use test_kit::init_logger;
 use test_ledger_restore::{
+    shutdown_and_wait,
     assert_counter_state, confirm_tx_with_payer_chain,
     confirm_tx_with_payer_ephem, delegate_accounts, fetch_counter_chain,
     fetch_counter_ephem, get_programs_with_flexi_counter,
@@ -130,7 +131,7 @@ fn test_restore_ledger_using_readonly() {
     let payer_readonly = payer_keypair();
 
     let (mut validator, _) = write(&ledger_path, &payer_main, &payer_readonly);
-    validator.kill().unwrap();
+    shutdown_and_wait(&mut validator);
 
     // While the validator is down we update the readonly counter on main chain
     add_to_readonly!(
@@ -145,7 +146,7 @@ fn test_restore_ledger_using_readonly() {
     );
 
     let mut validator = read(&ledger_path, &payer_main, &payer_readonly);
-    validator.kill().unwrap();
+    shutdown_and_wait(&mut validator);
 }
 
 fn write(

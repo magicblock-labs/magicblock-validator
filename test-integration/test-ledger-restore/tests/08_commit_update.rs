@@ -16,6 +16,7 @@ use solana_sdk::{
     native_token::LAMPORTS_PER_SOL, signature::Keypair, signer::Signer,
 };
 use test_ledger_restore::{
+    shutdown_and_wait,
     assert_counter_commits_on_chain, confirm_tx_with_payer_chain,
     confirm_tx_with_payer_ephem, fetch_counter_chain, fetch_counter_ephem,
     get_programs_with_flexi_counter, setup_validator_with_local_remote,
@@ -44,10 +45,10 @@ fn test_restore_ledger_committed_and_updated_account() {
     let payer = payer_keypair();
 
     let (mut validator, _) = write(&ledger_path, &payer);
-    validator.kill().unwrap();
+    shutdown_and_wait(&mut validator);
 
     let mut validator = read(&ledger_path, &payer);
-    validator.kill().unwrap();
+    shutdown_and_wait(&mut validator);
 }
 
 fn write(ledger_path: &Path, payer: &Keypair) -> (Child, u64) {

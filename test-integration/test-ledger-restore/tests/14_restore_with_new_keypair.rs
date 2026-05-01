@@ -12,6 +12,7 @@ use solana_sdk::{
 };
 use solana_sdk_ids::loader_v4;
 use test_ledger_restore::{
+    shutdown_and_wait,
     setup_validator_with_local_remote, wait_for_ledger_persist, TMP_DIR_LEDGER,
 };
 
@@ -30,11 +31,11 @@ fn test_restore_ledger_with_new_validator_authority() {
 
     // Write a transaction that clones the memo program
     let (mut validator, _) = write(&ledger_path);
-    validator.kill().unwrap();
+    shutdown_and_wait(&mut validator);
 
     // Read the ledger and verify that the memo program is cloned
     let mut validator = read(&ledger_path);
-    validator.kill().unwrap();
+    shutdown_and_wait(&mut validator);
 }
 
 fn write(ledger_path: &Path) -> (Child, u64) {

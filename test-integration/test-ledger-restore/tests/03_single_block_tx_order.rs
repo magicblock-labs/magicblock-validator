@@ -10,6 +10,7 @@ use solana_sdk::{
     signature::{Keypair, Signer},
 };
 use test_ledger_restore::{
+    shutdown_and_wait,
     airdrop_and_delegate_accounts, setup_offline_validator,
     setup_validator_with_local_remote, transfer_lamports,
     wait_for_ledger_persist, TMP_DIR_LEDGER,
@@ -22,10 +23,10 @@ fn test_restore_ledger_with_multiple_dependent_transactions_same_slot() {
     let (_tmpdir, ledger_path) = resolve_tmp_dir(TMP_DIR_LEDGER);
 
     let (mut validator, _, keypairs) = write(&ledger_path, false);
-    validator.kill().unwrap();
+    shutdown_and_wait(&mut validator);
 
     let mut validator = read(&ledger_path, &keypairs);
-    validator.kill().unwrap();
+    shutdown_and_wait(&mut validator);
 }
 
 #[test]
@@ -33,10 +34,10 @@ fn test_restore_ledger_with_multiple_dependent_transactions_separate_slot() {
     let (_tmpdir, ledger_path) = resolve_tmp_dir(TMP_DIR_LEDGER);
 
     let (mut validator, _, keypairs) = write(&ledger_path, true);
-    validator.kill().unwrap();
+    shutdown_and_wait(&mut validator);
 
     let mut validator = read(&ledger_path, &keypairs);
-    validator.kill().unwrap();
+    shutdown_and_wait(&mut validator);
 }
 
 fn write(

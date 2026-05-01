@@ -15,6 +15,7 @@ use solana_sdk::{
 };
 use test_kit::init_logger;
 use test_ledger_restore::{
+    shutdown_and_wait,
     confirm_tx_with_payer_chain, confirm_tx_with_payer_ephem,
     fetch_counter_chain, fetch_counter_ephem,
     init_and_delegate_counter_and_payer, setup_validator_with_local_remote,
@@ -49,7 +50,7 @@ fn test_restore_ledger_different_accounts_multiple_times() {
 
     let (mut validator, _, payer_main_lamports, payer_main) =
         write(&ledger_path, &payer_readonly);
-    validator.kill().unwrap();
+    shutdown_and_wait(&mut validator);
 
     for _ in 0..5 {
         let mut validator = read(
@@ -59,7 +60,7 @@ fn test_restore_ledger_different_accounts_multiple_times() {
             payer_main_lamports,
             None,
         );
-        validator.kill().unwrap();
+        shutdown_and_wait(&mut validator);
     }
 }
 
@@ -75,7 +76,7 @@ fn test_restore_different_accounts_multiple_times_authority_override() {
 
     let (mut validator, _, payer_main_lamports, payer_main) =
         write(&ledger_path, &payer_readonly);
-    validator.kill().unwrap();
+    shutdown_and_wait(&mut validator);
 
     for _ in 0..5 {
         let mut validator = read(
@@ -85,7 +86,7 @@ fn test_restore_different_accounts_multiple_times_authority_override() {
             payer_main_lamports,
             Some(original_authority),
         );
-        validator.kill().unwrap();
+        shutdown_and_wait(&mut validator);
     }
 }
 

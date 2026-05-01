@@ -4,6 +4,7 @@ use integration_test_tools::{
     loaded_accounts::LoadedAccounts, tmpdir::resolve_tmp_dir,
 };
 use test_ledger_restore::{
+    shutdown_and_wait,
     setup_validator_with_local_remote, wait_for_ledger_persist, TMP_DIR_LEDGER,
 };
 
@@ -16,10 +17,10 @@ fn test_restore_ledger_empty_validator() {
     let (_tmpdir, ledger_path) = resolve_tmp_dir(TMP_DIR_LEDGER);
 
     let (mut validator, _) = write(&ledger_path);
-    validator.kill().unwrap();
+    shutdown_and_wait(&mut validator);
 
     let mut validator = read(&ledger_path);
-    validator.kill().unwrap();
+    shutdown_and_wait(&mut validator);
 }
 
 fn write(ledger_path: &Path) -> (Child, u64) {
@@ -34,7 +35,7 @@ fn write(ledger_path: &Path) -> (Child, u64) {
 
     let slot = wait_for_ledger_persist(&ctx, &mut validator);
 
-    validator.kill().unwrap();
+    shutdown_and_wait(&mut validator);
     (validator, slot)
 }
 

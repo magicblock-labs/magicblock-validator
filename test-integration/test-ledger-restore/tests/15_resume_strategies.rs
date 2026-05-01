@@ -10,6 +10,7 @@ use solana_sdk::{
 };
 use test_kit::init_logger;
 use test_ledger_restore::{
+    shutdown_and_wait,
     airdrop_and_delegate_accounts, setup_validator_with_local_remote,
     setup_validator_with_local_remote_and_resume_strategy, transfer_lamports,
     wait_for_ledger_persist, wait_for_next_slot_after_account_snapshot,
@@ -35,10 +36,10 @@ pub fn test_resume_strategy(reset: bool) {
     let mut kp = Keypair::new();
 
     let (mut validator, slot, signature) = write(&ledger_path, &mut kp);
-    validator.kill().unwrap();
+    shutdown_and_wait(&mut validator);
 
     let mut validator = read(&ledger_path, &kp, &signature, slot, reset);
-    validator.kill().unwrap();
+    shutdown_and_wait(&mut validator);
 }
 
 pub fn write(ledger_path: &Path, kp: &mut Keypair) -> (Child, u64, Signature) {

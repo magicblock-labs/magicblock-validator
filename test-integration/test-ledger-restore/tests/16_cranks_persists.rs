@@ -14,6 +14,7 @@ use program_flexi_counter::instruction::create_schedule_task_ix;
 use solana_sdk::{pubkey::Pubkey, signature::Keypair, signer::Signer};
 use test_kit::init_logger;
 use test_ledger_restore::{
+    shutdown_and_wait,
     confirm_tx_with_payer_ephem, fetch_counter_ephem,
     init_and_delegate_counter_and_payer, setup_validator_with_local_remote,
     setup_validator_with_local_remote_and_resume_strategy,
@@ -27,10 +28,10 @@ fn test_crank_persistence() {
     let (_tmpdir, ledger_path) = resolve_tmp_dir(TMP_DIR_LEDGER);
 
     let (mut validator, payer, count) = write(&ledger_path);
-    validator.kill().unwrap();
+    shutdown_and_wait(&mut validator);
 
     let mut validator = read(&ledger_path, &payer, count);
-    validator.kill().unwrap();
+    shutdown_and_wait(&mut validator);
 }
 
 fn write(ledger_path: &Path) -> (Child, Keypair, u64) {
