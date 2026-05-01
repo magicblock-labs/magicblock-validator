@@ -718,6 +718,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                 self.chain_slot(),
                 fetch_origin,
                 None,
+                vec![],
             );
         }
 
@@ -973,13 +974,8 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                 min_context_slot,
                 fetch_origin,
                 program_ids,
+                owner_guards,
             );
-
-            // Dismiss all guards — the fetch task now owns cleanup
-            for mut guard in owner_guards {
-                debug!("Ownership of fetching_accounts entry transferred to fetch task");
-                guard.dismiss();
-            }
         }
 
         // Wait for all accounts to resolve (either from fetch or
@@ -1247,6 +1243,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
     /// Any action that depends on those accounts to be there will fail.
     /// NOTE: this is not used during subscription updates since we receive the data
     ///       as part of that update, thus we won't have stale data issues.
+    #[allow(clippy::too_many_arguments)]
     fn fetch(
         &self,
         pubkeys: Vec<Pubkey>,
@@ -1255,6 +1252,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         min_context_slot: u64,
         fetch_origin: AccountFetchOrigin,
         program_ids: Option<&[Pubkey]>,
+        owner_guards: Vec<FetchingAccountGuard>,
     ) {
         const MAX_RETRIES: u64 = 10;
         const RPC_CALL_TIMEOUT: Duration = Duration::from_secs(2);
@@ -1265,11 +1263,15 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         let mark_empty_if_not_found =
             mark_empty_if_not_found.unwrap_or(&[]).to_vec();
         let program_ids = program_ids.map(|ids| ids.to_vec());
+        let mut owner_guards = owner_guards
+            .into_iter()
+            .map(|guard| (guard.pubkey, guard))
+            .collect::<HashMap<_, _>>();
         tokio::spawn(async move {
             use RemoteAccount::*;
 
             // Helper to notify all pending requests of fetch failure
-            let notify_error = |error_msg: &str| {
+            let mut notify_error = |error_msg: &str| {
                 let mut fetching = fetching_accounts.lock().unwrap();
                 warn!("{error_msg}");
                 inc_account_fetches_failed(pubkeys.len() as u64);
@@ -1301,6 +1303,9 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                                 let _ = sender.send(Err(error));
                             }
                         }
+                    }
+                    if let Some(mut guard) = owner_guards.remove(pubkey) {
+                        guard.dismiss();
                     }
                 }
             };
@@ -1543,6 +1548,9 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                 // Send the fetch result to all waiting requests
                 for request in waiters {
                     let _ = request.send(Ok(remote_account.clone()));
+                }
+                if let Some(mut guard) = owner_guards.remove(pubkey) {
+                    guard.dismiss();
                 }
             }
         });
