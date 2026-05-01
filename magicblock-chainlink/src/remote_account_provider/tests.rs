@@ -14,8 +14,9 @@ use crate::{
     },
     testing::{
         init_logger,
-        rpc_client_mock::AccountAtSlot,
-        rpc_client_mock::{ChainRpcClientMock, ChainRpcClientMockBuilder},
+        rpc_client_mock::{
+            AccountAtSlot, ChainRpcClientMock, ChainRpcClientMockBuilder,
+        },
         utils::{create_test_lru_cache, random_pubkey},
     },
 };

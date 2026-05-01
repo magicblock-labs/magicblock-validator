@@ -2263,7 +2263,8 @@ where
         }
 
         // Check for stale subscriptions for the account itself
-        if self.is_watching(pubkey) && tracing::enabled!(tracing::Level::TRACE) {
+        if self.is_watching(pubkey) && tracing::enabled!(tracing::Level::TRACE)
+        {
             trace!(
                 pubkey = %pubkey,
                 "Waiter reconciliation: account still being watched, may have stale subscriptions"
