@@ -1,5 +1,8 @@
 use std::collections::HashSet;
 
+use magicblock_core::token_programs::{
+    ASSOCIATED_TOKEN_PROGRAM_ID, TOKEN_PROGRAM_ID,
+};
 use magicblock_magic_program_api::{self as magic_program};
 use solana_pubkey::Pubkey;
 use solana_sdk_ids::{
@@ -72,4 +75,15 @@ pub fn native_program_accounts() -> HashSet<Pubkey> {
     blacklisted_programs.insert(vote::ID);
     blacklisted_programs.insert(zk_elgamal_proof_program::ID);
     blacklisted_programs
+}
+
+/// Programs that must never be subscribed to via `subscribe_program`.
+/// They own a vast number of accounts on chain and a program-wide
+/// subscription would flood the validator with unrelated updates.
+pub fn programs_not_to_subscribe() -> HashSet<Pubkey> {
+    let mut programs = HashSet::new();
+    programs.insert(TOKEN_PROGRAM_ID);
+    programs.insert(spl_token_2022::id());
+    programs.insert(ASSOCIATED_TOKEN_PROGRAM_ID);
+    programs
 }

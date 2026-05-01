@@ -1,5 +1,6 @@
 use std::{
     collections::{hash_map, HashSet},
+    num::NonZeroUsize,
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc, Mutex,
@@ -10,6 +11,7 @@ use std::{
 use dlp_api::{
     pda::delegation_record_pda_from_delegated_account, state::DelegationRecord,
 };
+use lru::LruCache;
 use magicblock_accounts_db::traits::AccountsBank;
 use magicblock_config::config::AllowedProgram;
 use magicblock_core::token_programs::{
@@ -51,7 +53,9 @@ use super::errors::{ChainlinkError, ChainlinkResult};
 use crate::{
     chainlink::{
         account_still_undelegating_on_chain::account_still_undelegating_on_chain,
-        blacklisted_accounts::blacklisted_accounts,
+        blacklisted_accounts::{
+            blacklisted_accounts, programs_not_to_subscribe,
+        },
     },
     cloner::{
         errors::{ClonerError, ClonerResult},
@@ -99,6 +103,18 @@ where
     /// all programs are allowed.
     allowed_programs: Option<HashSet<Pubkey>>,
 
+    /// Programs that must never be passed to `subscribe_program` because
+    /// they own enough accounts to flood the validator with updates
+    /// (SPL Token, Token-2022, Associated Token Account program).
+    programs_not_to_subscribe: HashSet<Pubkey>,
+
+    /// Bounded negative cache of derived eATA pubkeys that we already
+    /// observed to be non-existent on chain. Used by the ATA-side
+    /// projection path to skip redundant RPC fetches for ATAs that have
+    /// no corresponding eATA. Real eATAs that materialise later are
+    /// still picked up through the eATA-side subscription update path.
+    known_empty_eatas: Arc<Mutex<LruCache<Pubkey, ()>>>,
+
     /// Tracks in-flight clone operations per (pubkey, slot).
     /// The first caller to claim a key becomes the owner and performs
     /// the actual clone. Subsequent callers become waiters and receive
@@ -110,6 +126,11 @@ where
         >,
     >,
 }
+
+/// Capacity of the negative cache for known-empty eATAs.
+/// Sized to comfortably cover the working set of unique ATAs a busy
+/// validator clones over its lifetime while keeping memory bounded.
+const KNOWN_EMPTY_EATAS_CAPACITY: usize = 100_000;
 
 /// Manual Clone impl: `#[derive(Clone)]` would add `V: Clone, C: Clone`
 /// bounds that are not satisfied (`AccountsBank` and `Cloner` don't
@@ -132,6 +153,8 @@ where
             validator_keypair: Arc::clone(&self.validator_keypair),
             blacklisted_accounts: self.blacklisted_accounts.clone(),
             allowed_programs: self.allowed_programs.clone(),
+            programs_not_to_subscribe: self.programs_not_to_subscribe.clone(),
+            known_empty_eatas: self.known_empty_eatas.clone(),
             pending_clones: self.pending_clones.clone(),
         }
     }
@@ -171,6 +194,11 @@ where
             fetch_count: Arc::new(AtomicU64::new(0)),
             blacklisted_accounts,
             allowed_programs,
+            programs_not_to_subscribe: programs_not_to_subscribe(),
+            known_empty_eatas: Arc::new(Mutex::new(LruCache::new(
+                NonZeroUsize::new(KNOWN_EMPTY_EATAS_CAPACITY)
+                    .expect("KNOWN_EMPTY_EATAS_CAPACITY must be non-zero"),
+            ))),
             pending_clones: Arc::new(Mutex::new(hash_map::HashMap::new())),
         });
 
@@ -928,7 +956,11 @@ where
 
                                 // For accounts delegated to us, subscribe to the original owner
                                 // program for undelegation update resilience.
-                                if account.delegated() {
+                                if account.delegated()
+                                    && !self
+                                        .programs_not_to_subscribe
+                                        .contains(&delegation_record.owner)
+                                {
                                     // Fire-and-forget to avoid blocking subscription updates.
                                     let provider =
                                         self.remote_account_provider.clone();
@@ -1062,6 +1094,23 @@ where
         })
     }
 
+    fn is_known_empty_eata(&self, eata_pubkey: &Pubkey) -> bool {
+        let mut cache = self
+            .known_empty_eatas
+            .lock()
+            .expect("known_empty_eatas mutex poisoned");
+        // `get` promotes on hit so frequently revisited entries stay warm.
+        cache.get(eata_pubkey).is_some()
+    }
+
+    fn mark_eata_empty(&self, eata_pubkey: Pubkey) {
+        let mut cache = self
+            .known_empty_eatas
+            .lock()
+            .expect("known_empty_eatas mutex poisoned");
+        cache.put(eata_pubkey, ());
+    }
+
     async fn maybe_project_ata_from_subscription_update(
         &self,
         ata_pubkey: Pubkey,
@@ -1079,6 +1128,15 @@ where
         else {
             return (ata_account, None);
         };
+
+        // If we have already observed this eATA to be non-existent, skip
+        // the upstream RPC fetch. The eATA-side subscription update path
+        // (see `maybe_build_projected_ata_clone_request_from_eata_sub_update`)
+        // will project the ATA on its own if the eATA materialises later,
+        // so this cache does not need explicit invalidation.
+        if self.is_known_empty_eata(&eata_pubkey) {
+            return (ata_account, None);
+        }
 
         if let Err(err) = self.subscribe_to_account(&eata_pubkey).await {
             warn!(
@@ -1114,6 +1172,7 @@ where
         };
 
         let Some(eata_account) = eata_account else {
+            self.mark_eata_empty(eata_pubkey);
             return (ata_account, None);
         };
 
