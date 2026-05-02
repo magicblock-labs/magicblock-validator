@@ -126,11 +126,17 @@ setup-table-mania-devnet:
 	$(MAKE) test
 
 test-committor:
+	RUN_TESTS=committor,committor_intent_executor \
+	$(MAKE) test
+test-committor-light:
 	RUN_TESTS=committor \
+	$(MAKE) test
+test-committor-intent-executor:
+	RUN_TESTS=committor_intent_executor \
 	$(MAKE) test
 setup-committor-devnet:
 	RUST_LOG_STYLE=none \
-	RUN_TESTS=committor \
+	RUN_TESTS=committor,committor_intent_executor \
 	SETUP_ONLY=devnet \
 	$(MAKE) test
 
@@ -254,6 +260,8 @@ ci-lint: lint
 	test-chainlink \
 	test-cloning \
 	test-committor \
+	test-committor-light \
+	test-committor-intent-executor \
 	test-config \
 	test-force-mb \
 	test-magicblock-api \

@@ -7,8 +7,22 @@ concurrency:
 on:
   push:
     branches: [master, dev]
+    paths:
+      - '**/*.rs'
+      - '**/Cargo.toml'
+      - '**/Cargo.lock'
+      - 'rustfmt*.toml'
+      - '.github/workflows/ci-fmt.yml'
+      - '.github/actions/setup-build-env/**'
   pull_request:
     types: [opened, reopened, synchronize, ready_for_review]
+    paths:
+      - '**/*.rs'
+      - '**/Cargo.toml'
+      - '**/Cargo.lock'
+      - 'rustfmt*.toml'
+      - '.github/workflows/ci-fmt.yml'
+      - '.github/actions/setup-build-env/**'
 
 jobs:
   run_make_ci_format:

@@ -32,26 +32,44 @@ pub fn start_magic_block_validator_with_config(
     } = test_runner_paths;
 
     let port = rpc_port_from_config(config_path);
-
-    // First build so that the validator can start fast
-    let mut command = process::Command::new("cargo");
     let keypair_base58 = loaded_chain_accounts.validator_authority_base58();
-    command.arg("build");
-    let build_res = command.current_dir(root_dir.clone()).output();
 
-    if build_res.is_ok_and(|output| !output.status.success()) {
-        eprintln!("Failed to build validator");
-        return None;
-    }
+    // In CI we ship a prebuilt validator binary as an artifact so we never
+    // pay for `cargo build` here. Locally we keep the convenient
+    // `cargo build` + `cargo run` flow so source changes are picked up.
+    let prebuilt =
+        std::env::var("MAGICBLOCK_VALIDATOR_BIN").ok().filter(|p| {
+            let exists = Path::new(p).is_file();
+            if !exists {
+                eprintln!(
+                    "MAGICBLOCK_VALIDATOR_BIN={} does not exist, falling back to cargo run",
+                    p
+                );
+            }
+            exists
+        });
 
-    // Start validator via `cargo run -- <path to config>`
-    let mut command = process::Command::new("cargo");
-    command.arg("run");
+    let mut command = if let Some(bin) = prebuilt.as_deref() {
+        let mut c = process::Command::new(bin);
+        c.arg(config_path);
+        c
+    } else {
+        let mut build_cmd = process::Command::new("cargo");
+        build_cmd.arg("build");
+        let build_res = build_cmd.current_dir(root_dir.clone()).output();
+        if build_res.is_ok_and(|output| !output.status.success()) {
+            eprintln!("Failed to build validator");
+            return None;
+        }
+
+        let mut c = process::Command::new("cargo");
+        c.arg("run").arg("--").arg(config_path);
+        c
+    };
+
     let rust_log_style =
         std::env::var("RUST_LOG_STYLE").unwrap_or(log_suffix.to_string());
     command
-        .arg("--")
-        .arg(config_path)
         .env("RUST_LOG_STYLE", rust_log_style)
         .env("MBV_VALIDATOR__KEYPAIR", keypair_base58.clone())
         .current_dir(root_dir);
