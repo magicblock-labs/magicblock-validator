@@ -181,6 +181,23 @@ impl SchedulerDatabase {
         Ok(())
     }
 
+    pub async fn move_task_to_failed(
+        &self,
+        task_id: i64,
+        error: String,
+    ) -> TaskSchedulerResult<()> {
+        let mut conn = self.conn.lock().await;
+        let tx = conn.transaction()?;
+        tx.execute("DELETE FROM tasks WHERE id = ?", [task_id])?;
+        tx.execute(
+            "INSERT INTO failed_tasks (timestamp, task_id, error) VALUES (?, ?, ?)",
+            params![Utc::now().timestamp_millis(), task_id, error],
+        )?;
+        tx.commit()?;
+
+        Ok(())
+    }
+
     pub async fn unschedule_task(
         &self,
         task_id: i64,

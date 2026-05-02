@@ -394,12 +394,11 @@ impl TaskSchedulerService {
         task: &DbTask,
         error: TaskSchedulerError,
     ) -> TaskSchedulerResult<()> {
+        self.db
+            .move_task_to_failed(task.id, format!("{:?}", error))
+            .await?;
         self.task_execution_retries.remove(&task.id);
         self.remove_task_from_queue(task.id);
-        self.db.remove_task(task.id).await?;
-        self.db
-            .insert_failed_task(task.id, format!("{:?}", error))
-            .await?;
 
         Ok(())
     }
