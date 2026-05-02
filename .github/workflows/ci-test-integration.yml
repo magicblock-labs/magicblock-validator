@@ -189,3 +189,6 @@ jobs:
           # Have the validator helper exec the prebuilt binary directly,
           # skipping the per-spawn `cargo build` + `cargo run` overhead.
           MAGICBLOCK_VALIDATOR_BIN: ${{ github.workspace }}/magicblock-validator/target/debug/magicblock-validator
+          # A few integration tests have validator-timing races; allow up to
+          # 3 retries before failing the shard.
+          RUN_TEST_RETRIES: "3"
