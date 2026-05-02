@@ -61,12 +61,13 @@ jobs:
         # (cargo build-sbf, separate toolchain) don't share a compilation
         # cache, so we kick them off concurrently. SBF programs build serially
         # within `make programs` because parallel `cargo-build-sbf` invocations
-        # race on the shared platform-tools install (~/.cache/solana/...) and
-        # corrupt each other on first install.
+        # race on the shared platform-tools install (~/.cache/solana/...).
+        # `-fuse-ld=lld` is scoped to the host build only; the BPF target's
+        # `rust-lld` invocation does not accept that argument.
         run: |
-          export RUSTFLAGS="${RUSTFLAGS:-} -C link-arg=-fuse-ld=lld"
           set +e
-          cargo build --locked --bin magicblock-validator >validator.log 2>&1 &
+          RUSTFLAGS="-C link-arg=-fuse-ld=lld" \
+            cargo build --locked --bin magicblock-validator >validator.log 2>&1 &
           validator_pid=$!
           make -C test-integration programs >programs.log 2>&1 &
           programs_pid=$!
