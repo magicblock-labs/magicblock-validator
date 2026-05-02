@@ -46,10 +46,12 @@ jobs:
             magicblock-validator/test-integration/target/deploy
           # Include Cargo.lock and shared sources so the cache invalidates on
           # workspace dependency / shared-crate changes that the program
-          # source dirs alone don't capture.
-          key: sbf-programs-${{ runner.os }}-${{ hashFiles('magicblock-validator/Cargo.lock', 'magicblock-validator/test-integration/programs/**', 'magicblock-validator/magicblock-committor-program/**', 'magicblock-validator/programs/**', 'magicblock-validator/magicblock-magic-program-api/**', 'magicblock-validator/magicblock-core/**') }}
+          # source dirs alone don't capture. Also include rustc + solana
+          # versions in the key so a toolchain bump invalidates stale .so
+          # artifacts produced by the previous compiler.
+          key: sbf-programs-${{ runner.os }}-${{ runner.arch }}-rust1.94.1-solanav3.1.5-${{ hashFiles('magicblock-validator/Cargo.lock', 'magicblock-validator/test-integration/programs/**', 'magicblock-validator/magicblock-committor-program/**', 'magicblock-validator/programs/**', 'magicblock-validator/magicblock-magic-program-api/**', 'magicblock-validator/magicblock-core/**') }}
           restore-keys: |
-            sbf-programs-${{ runner.os }}-
+            sbf-programs-${{ runner.os }}-${{ runner.arch }}-rust1.94.1-solanav3.1.5-
 
       # lld typically halves the link step on large rust workspaces.
       - name: Install lld linker

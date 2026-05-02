@@ -944,12 +944,14 @@ fn run_test(
     config: RunTestConfig,
 ) -> io::Result<process::Output> {
     // Integration tests against a live validator can hit timing-related
-    // flakes. Allow up to RUN_TEST_RETRIES extra attempts for the same
-    // command before propagating the failure.
+    // flakes. RUN_TEST_RETRIES is the number of EXTRA attempts on failure
+    // (so total attempts = RUN_TEST_RETRIES + 1). Default is 0: retries
+    // are strictly opt-in, so a local `make test-...` doesn't silently
+    // mask a freshly introduced flake. CI sets it to 3.
     let max_attempts = std::env::var("RUN_TEST_RETRIES")
         .ok()
         .and_then(|s| s.parse::<u32>().ok())
-        .unwrap_or(1)
+        .unwrap_or(0)
         .saturating_add(1);
 
     let mut last: Option<process::Output> = None;
