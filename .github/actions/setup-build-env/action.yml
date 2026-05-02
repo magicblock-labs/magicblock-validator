@@ -51,3 +51,6 @@ runs:
       cache-targets: true
       cache-all-crates: true
       cache-on-failure: true
+      # Only the protected branches are allowed to write the shared cache.
+      # PR runs read but never push, eliminating cross-shard write contention.
+      save-if: ${{ github.ref == 'refs/heads/master' || github.ref == 'refs/heads/dev' }}

@@ -220,16 +220,28 @@ fn run_chainlink_tests(
     }
 }
 
+// The committor suite is split across two CI shards to keep wall-clock down.
+// `committor` runs the lighter test files; `committor_intent_executor` owns the
+// heaviest file. Locally (no RUN_TESTS), both subsets execute back-to-back
+// against the same devnet validator.
+const COMMITTOR_LIGHT_FILES: &[&str] = &[
+    "test_ix_commit_local",
+    "test_delivery_preparator",
+    "test_transaction_preparator",
+];
+const COMMITTOR_HEAVY_FILES: &[&str] = &["test_intent_executor"];
+
 fn run_table_mania_and_committor_tests(
     manifest_dir: &str,
     config: &TestConfigViaEnvVars,
 ) -> Result<(Output, Output), Box<dyn Error>> {
     const TABLE_MANIA_TEST: &str = "table_mania";
     const COMMITTOR_TEST: &str = "committor";
+    const COMMITTOR_INTENT_EXECUTOR_TEST: &str = "committor_intent_executor";
 
-    // Continue if either test is not skipped entirely
     if config.skip_entirely(TABLE_MANIA_TEST)
         && config.skip_entirely(COMMITTOR_TEST)
+        && config.skip_entirely(COMMITTOR_INTENT_EXECUTOR_TEST)
     {
         eprintln!("Skipping table mania and committor tests");
         return Ok((success_output(), success_output()));
@@ -249,11 +261,11 @@ fn run_table_mania_and_committor_tests(
         }
     };
 
-    // Check if we should run tests or just setup
     let run_table_mania = config.run_test(TABLE_MANIA_TEST);
-    let run_committor = config.run_test(COMMITTOR_TEST);
+    let run_committor_light = config.run_test(COMMITTOR_TEST);
+    let run_committor_heavy = config.run_test(COMMITTOR_INTENT_EXECUTOR_TEST);
 
-    if run_table_mania || run_committor {
+    if run_table_mania || run_committor_light || run_committor_heavy {
         eprintln!("======== Starting DEVNET Validator for TableMania and Committor ========");
 
         let mut devnet_validator = start_devnet_validator();
@@ -278,40 +290,72 @@ fn run_table_mania_and_committor_tests(
             success_output()
         };
 
-        let committor_test_output = if run_committor {
-            let test_committor_dir =
-                format!("{}/../{}", manifest_dir, "test-committor-service");
-            eprintln!("Running committor tests in {}", test_committor_dir);
-            match run_test(
-                test_committor_dir,
-                RunTestConfig::default(),
-                // RunTestConfig {
-                //     package: Some("schedulecommit-committor-service"),
-                //     test_file: Some("test_ix_commit_local"),
-                //     test_fn_name: Some(
-                //         "test_ix_execute_intent_bundle_commit_and_commit_finalize_mixed",
-                //         //"test_ix_execute_intent_bundle_commit_and_cau_simultaneously_union_of_accounts",
-                //     ),
-                // },
-            ) {
-                Ok(output) => output,
-                Err(err) => {
-                    eprintln!("Failed to run committor: {:?}", err);
-                    cleanup_devnet_only(&mut devnet_validator);
-                    return Err(err.into());
+        let committor_test_output =
+            if run_committor_light || run_committor_heavy {
+                let test_committor_dir =
+                    format!("{}/../{}", manifest_dir, "test-committor-service");
+                let mut combined_status_ok = true;
+                let mut combined_stdout = Vec::new();
+                let mut combined_stderr = Vec::new();
+
+                let mut subsets: Vec<(&str, &[&str])> = Vec::new();
+                if run_committor_light {
+                    subsets.push(("committor (light)", COMMITTOR_LIGHT_FILES));
                 }
-            }
-        } else {
-            eprintln!("Skipping committor tests");
-            success_output()
-        };
+                if run_committor_heavy {
+                    subsets.push((
+                        "committor (intent_executor)",
+                        COMMITTOR_HEAVY_FILES,
+                    ));
+                }
+
+                for (label, files) in subsets {
+                    eprintln!(
+                        "Running {} tests in {} (files: {:?})",
+                        label, test_committor_dir, files
+                    );
+                    let cfg = RunTestConfig {
+                        test_files: files,
+                        ..Default::default()
+                    };
+                    match run_test(test_committor_dir.clone(), cfg) {
+                        Ok(output) => {
+                            combined_status_ok &= output.status.success();
+                            combined_stdout.extend_from_slice(&output.stdout);
+                            combined_stderr.extend_from_slice(&output.stderr);
+                        }
+                        Err(err) => {
+                            eprintln!("Failed to run {}: {:?}", label, err);
+                            cleanup_devnet_only(&mut devnet_validator);
+                            return Err(err.into());
+                        }
+                    }
+                }
+
+                Output {
+                    status: if combined_status_ok {
+                        process::ExitStatus::default()
+                    } else {
+                        // Force a non-zero exit by running `false`.
+                        process::Command::new("false")
+                            .status()
+                            .unwrap_or_else(|_| process::ExitStatus::default())
+                    },
+                    stdout: combined_stdout,
+                    stderr: combined_stderr,
+                }
+            } else {
+                eprintln!("Skipping committor tests");
+                success_output()
+            };
 
         cleanup_devnet_only(&mut devnet_validator);
 
         Ok((table_mania_test_output, committor_test_output))
     } else {
         let setup_needed = config.setup_devnet(TABLE_MANIA_TEST)
-            || config.setup_devnet(COMMITTOR_TEST);
+            || config.setup_devnet(COMMITTOR_TEST)
+            || config.setup_devnet(COMMITTOR_INTENT_EXECUTOR_TEST);
         let devnet_validator = setup_needed.then(start_devnet_validator);
         Ok((
             wait_for_ctrlc(devnet_validator, None, success_output())?,
@@ -475,7 +519,7 @@ fn run_cloning_tests(
             RunTestConfig::default(),
             // RunTestConfig {
             //     package: Some("test-cloning"),
-            //     test_file: Some("10_post_delegation_token_transfer"),
+            //     test_files: &["10_post_delegation_token_transfer"],
             //     test_fn_name: None,
             // },
         ) {
@@ -706,7 +750,7 @@ fn run_schedule_intents_tests(
             RunTestConfig::default(),
             // RunTestConfig {
             //     package: Some("test-schedule-intent"),
-            //     test_file: Some("test_schedule_intents"),
+            //     test_files: &["test_schedule_intents"],
             //     test_fn_name: Some(
             //         "test_intent_bundle_commit_and_commit_finalize",
             //     ),
@@ -800,7 +844,7 @@ fn assert_cargo_tests_passed(output: process::Output, test_name: &str) {
 #[derive(Default)]
 struct RunTestConfig<'a> {
     package: Option<&'a str>,
-    test_file: Option<&'a str>,
+    test_files: &'a [&'a str],
     test_fn_name: Option<&'a str>,
 }
 
@@ -817,7 +861,7 @@ fn run_test(
     if let Some(package) = config.package {
         cmd.arg("-p").arg(package);
     }
-    if let Some(test_file) = config.test_file {
+    for test_file in config.test_files {
         cmd.arg("--test").arg(test_file);
     }
     if let Some(test_fn_name) = config.test_fn_name {

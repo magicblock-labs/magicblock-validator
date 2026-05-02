@@ -50,6 +50,7 @@ jobs:
           - "config"
           - "table_mania"
           - "committor"
+          - "committor_intent_executor"
           - "pubsub"
           - "schedule_intents"
           - "task-scheduler"
