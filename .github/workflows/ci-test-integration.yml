@@ -88,7 +88,10 @@ jobs:
           - "pubsub"
           - "schedule_intents"
           - "task-scheduler"
-      fail-fast: false
+      # While we iterate on this branch we want a single shard failure to
+      # cancel the rest of the matrix so we don't burn ~50 min of runner time
+      # on every false start. Flip back to `false` once it's green & stable.
+      fail-fast: true
     name: Integration Tests - ${{ matrix.batch_tests }}
     steps:
       - name: Checkout this magicblock-validator
