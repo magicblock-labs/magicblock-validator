@@ -14,10 +14,10 @@ runs:
         id: cache-solana
         uses: actions/cache@v4
         with:
-          path: |
-            ~/.local/share/solana/install/releases/${{ inputs.solana_version }}
-            ~/.local/share/solana/install/active_release
-          key: solana-cli-${{ runner.os }}-${{ inputs.solana_version }}
+          # Cache the entire install root. Bumping `v2` whenever the cache
+          # layout needs to be invalidated.
+          path: ~/.local/share/solana
+          key: solana-cli-v2-${{ runner.os }}-${{ inputs.solana_version }}
 
       - name: Install Solana Test Validator
         if: steps.cache-solana.outputs.cache-hit != 'true'
@@ -33,5 +33,13 @@ runs:
       - name: Ensure Solana Test Validator is Installed
         shell: "bash"
         run: |
+          # If the cache restored an incomplete install (path layout changed
+          # upstream, partial upload, etc.) reinstall in-place rather than
+          # failing the workflow.
+          if ! command -v solana-test-validator >/dev/null 2>&1; then
+            echo "solana-test-validator not found after cache restore; reinstalling"
+            sh -c "$(curl -sSfL https://release.anza.xyz/${{ inputs.solana_version }}/install)"
+            export PATH="$HOME/.local/share/solana/install/active_release/bin:$PATH"
+          fi
           solana-test-validator --version
 
