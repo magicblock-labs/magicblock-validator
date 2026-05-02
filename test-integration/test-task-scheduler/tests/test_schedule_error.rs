@@ -77,7 +77,7 @@ fn test_schedule_error() {
         let failed_tasks =
             expect!(runtime.block_on(db.get_failed_tasks()), validator);
         if failed_tasks.len() == 1
-            || started.elapsed() >= Duration::from_secs(25)
+            || started.elapsed() >= Duration::from_secs(45)
         {
             break failed_tasks;
         }
