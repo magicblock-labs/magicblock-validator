@@ -220,12 +220,12 @@ fn run_chainlink_tests(
     }
 }
 
-// The committor suite is split across four CI shards to keep wall-clock down.
-// The `test_ix_commit_local` file alone takes ~33 min; we slice it into two
-// subsets via libtest name filters. The other test files are distributed
-// across the shards to keep them roughly balanced.
+// The committor suite is split across five CI shards to keep wall-clock down.
+// The `test_ix_commit_local` file alone takes ~33 min and is sliced into four
+// subsets via libtest name filters; the dedicated `test_intent_executor`
+// file is its own shard.
 //
-// Locally (no RUN_TESTS), all subsets execute back-to-back against the same
+// Locally (no RUN_TESTS), every subset executes back-to-back against the same
 // devnet validator so total coverage is unchanged.
 struct CommittorSubset {
     label: &'static str,
@@ -233,24 +233,46 @@ struct CommittorSubset {
     name_filters: &'static [&'static str],
 }
 
-// Singles + multi-account commits (everything in test_ix_commit_local whose
-// name starts with `test_ix_commit_`). Plus the small preparator files.
-const COMMITTOR_SUBSET_IX_COMMIT: CommittorSubset = CommittorSubset {
-    label: "committor (ix_commit)",
+// Single-account & order-book commits (lighter half of `test_ix_*`).
+// Also owns the two small preparator files.
+const COMMITTOR_SUBSET_IX_SINGLES: CommittorSubset = CommittorSubset {
+    label: "committor (ix_singles)",
     files: &[
         "test_ix_commit_local",
         "test_delivery_preparator",
         "test_transaction_preparator",
     ],
-    name_filters: &["test_ix_commit_"],
+    name_filters: &[
+        "test_ix_commit_single_",
+        "test_ix_commit_order_",
+        "test_ix_commit_finalize_order_",
+    ],
 };
-// Bundle / commitfinalize / intent-bundle tests in test_ix_commit_local.
+// Multi-account commits (`test_ix_commit_two/three/four/six_*`) — heavier
+// per-test than the singles.
+const COMMITTOR_SUBSET_IX_MULTI: CommittorSubset = CommittorSubset {
+    label: "committor (ix_multi)",
+    files: &["test_ix_commit_local"],
+    name_filters: &[
+        "test_ix_commit_two_",
+        "test_ix_commit_three_",
+        "test_ix_commit_four_",
+        "test_ix_commit_six_",
+    ],
+};
+// 20-account bundle tests + commitfinalize variants (the heaviest cluster).
+const COMMITTOR_SUBSET_BUNDLES_HEAVY: CommittorSubset = CommittorSubset {
+    label: "committor (bundles_heavy)",
+    files: &["test_ix_commit_local"],
+    name_filters: &["test_commit_20_", "test_commitfinalize_"],
+};
+// Smaller bundle tests + intent-bundle composition tests.
 const COMMITTOR_SUBSET_BUNDLES: CommittorSubset = CommittorSubset {
     label: "committor (bundles)",
     files: &["test_ix_commit_local"],
     name_filters: &[
-        "test_commit_",
-        "test_commitfinalize_",
+        "test_commit_5_",
+        "test_commit_8_",
         "test_ix_execute_intent_bundle_",
     ],
 };
@@ -269,8 +291,10 @@ fn run_table_mania_and_committor_tests(
     // Each entry is one CI shard / RUN_TESTS value paired with the subset of
     // committor tests it owns.
     let committor_shards: &[(&str, &CommittorSubset)] = &[
-        ("committor", &COMMITTOR_SUBSET_IX_COMMIT),
+        ("committor", &COMMITTOR_SUBSET_IX_SINGLES),
+        ("committor_ix_multi", &COMMITTOR_SUBSET_IX_MULTI),
         ("committor_bundles", &COMMITTOR_SUBSET_BUNDLES),
+        ("committor_bundles_heavy", &COMMITTOR_SUBSET_BUNDLES_HEAVY),
         (
             "committor_intent_executor",
             &COMMITTOR_SUBSET_INTENT_EXECUTOR,

@@ -126,20 +126,26 @@ setup-table-mania-devnet:
 	$(MAKE) test
 
 test-committor:
-	RUN_TESTS=committor,committor_bundles,committor_intent_executor \
+	RUN_TESTS=committor,committor_ix_multi,committor_bundles,committor_bundles_heavy,committor_intent_executor \
 	$(MAKE) test
-test-committor-ix-commit:
+test-committor-ix-singles:
 	RUN_TESTS=committor \
+	$(MAKE) test
+test-committor-ix-multi:
+	RUN_TESTS=committor_ix_multi \
 	$(MAKE) test
 test-committor-bundles:
 	RUN_TESTS=committor_bundles \
+	$(MAKE) test
+test-committor-bundles-heavy:
+	RUN_TESTS=committor_bundles_heavy \
 	$(MAKE) test
 test-committor-intent-executor:
 	RUN_TESTS=committor_intent_executor \
 	$(MAKE) test
 setup-committor-devnet:
 	RUST_LOG_STYLE=none \
-	RUN_TESTS=committor,committor_bundles,committor_intent_executor \
+	RUN_TESTS=committor,committor_ix_multi,committor_bundles,committor_bundles_heavy,committor_intent_executor \
 	SETUP_ONLY=devnet \
 	$(MAKE) test
 
@@ -263,8 +269,10 @@ ci-lint: lint
 	test-chainlink \
 	test-cloning \
 	test-committor \
-	test-committor-ix-commit \
+	test-committor-ix-singles \
+	test-committor-ix-multi \
 	test-committor-bundles \
+	test-committor-bundles-heavy \
 	test-committor-intent-executor \
 	test-config \
 	test-force-mb \
