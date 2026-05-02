@@ -16,7 +16,10 @@ jobs:
   # invoke `cargo build` for those, nor `cargo build-sbf`. That removes minutes
   # of redundant work from each shard.
   build:
-    runs-on: ubuntu-latest-m
+    # `extra-large` is more expensive per minute but the build job is the
+    # hard serialization point in front of the 15-shard matrix; every minute
+    # we save here saves a minute on the critical path.
+    runs-on: extra-large
     name: Build Artifacts
     steps:
       - name: Checkout this magicblock-validator
@@ -48,10 +51,32 @@ jobs:
           restore-keys: |
             sbf-programs-${{ runner.os }}-
 
-      - name: Build validator binary and SBF programs
+      # lld typically halves the link step on large rust workspaces.
+      - name: Install lld linker
+        run: sudo apt-get update && sudo apt-get install -y lld
+        shell: bash
+
+      - name: Build validator binary and SBF programs (parallel)
+        # The host-arch validator build (rustc) and the BPF program builds
+        # (cargo build-sbf, separate toolchain) don't share a compilation
+        # cache, so we kick them off concurrently. SBF programs themselves
+        # build in parallel via `make -j`.
         run: |
-          cargo build --locked --bin magicblock-validator
-          make -C test-integration programs
+          export RUSTFLAGS="${RUSTFLAGS:-} -C link-arg=-fuse-ld=lld"
+          cargo build --locked --bin magicblock-validator >validator.log 2>&1 &
+          validator_pid=$!
+          make -C test-integration -j "$(nproc)" programs >programs.log 2>&1 &
+          programs_pid=$!
+          wait $validator_pid; validator_rc=$?
+          wait $programs_pid; programs_rc=$?
+          echo "===== validator build (rc=$validator_rc) ====="
+          tail -n 200 validator.log
+          echo "===== SBF program builds (rc=$programs_rc) ====="
+          tail -n 200 programs.log
+          if [ $validator_rc -ne 0 ] || [ $programs_rc -ne 0 ]; then
+            echo "validator_rc=$validator_rc programs_rc=$programs_rc"
+            exit 1
+          fi
         shell: bash
         working-directory: magicblock-validator
 
