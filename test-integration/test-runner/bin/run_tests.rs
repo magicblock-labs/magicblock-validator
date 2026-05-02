@@ -229,24 +229,27 @@ fn run_chainlink_tests(
 // devnet validator so total coverage is unchanged.
 struct CommittorSubset {
     label: &'static str,
+    /// Test files whose names are filtered down via `name_filters`.
     files: &'static [&'static str],
     name_filters: &'static [&'static str],
+    /// Test files run end-to-end with no name filter. Used to bundle small,
+    /// independent files (e.g. the preparator suites) onto a shard without
+    /// their tests being unintentionally excluded by `name_filters`.
+    extra_files: &'static [&'static str],
 }
 
 // Single-account & order-book commits (lighter half of `test_ix_*`).
-// Also owns the two small preparator files.
+// Also owns the two small preparator files (run unfiltered so we don't drop
+// `test_prepare_*` / `test_lookup_tables` etc).
 const COMMITTOR_SUBSET_IX_SINGLES: CommittorSubset = CommittorSubset {
     label: "committor (ix_singles)",
-    files: &[
-        "test_ix_commit_local",
-        "test_delivery_preparator",
-        "test_transaction_preparator",
-    ],
+    files: &["test_ix_commit_local"],
     name_filters: &[
         "test_ix_commit_single_",
         "test_ix_commit_order_",
         "test_ix_commit_finalize_order_",
     ],
+    extra_files: &["test_delivery_preparator", "test_transaction_preparator"],
 };
 // Multi-account commits (`test_ix_commit_two/three/four/six_*`) — heavier
 // per-test than the singles.
@@ -259,12 +262,14 @@ const COMMITTOR_SUBSET_IX_MULTI: CommittorSubset = CommittorSubset {
         "test_ix_commit_four_",
         "test_ix_commit_six_",
     ],
+    extra_files: &[],
 };
 // 20-account bundle tests + commitfinalize variants (the heaviest cluster).
 const COMMITTOR_SUBSET_BUNDLES_HEAVY: CommittorSubset = CommittorSubset {
     label: "committor (bundles_heavy)",
     files: &["test_ix_commit_local"],
     name_filters: &["test_commit_20_", "test_commitfinalize_"],
+    extra_files: &[],
 };
 // Smaller bundle tests + intent-bundle composition tests.
 const COMMITTOR_SUBSET_BUNDLES: CommittorSubset = CommittorSubset {
@@ -275,12 +280,14 @@ const COMMITTOR_SUBSET_BUNDLES: CommittorSubset = CommittorSubset {
         "test_commit_8_",
         "test_ix_execute_intent_bundle_",
     ],
+    extra_files: &[],
 };
 // The dedicated intent_executor file (already a separate CI shard).
 const COMMITTOR_SUBSET_INTENT_EXECUTOR: CommittorSubset = CommittorSubset {
     label: "committor (intent_executor)",
     files: &["test_intent_executor"],
     name_filters: &[],
+    extra_files: &[],
 };
 
 fn run_table_mania_and_committor_tests(
@@ -363,19 +370,40 @@ fn run_table_mania_and_committor_tests(
             let mut combined_stdout = Vec::new();
             let mut combined_stderr = Vec::new();
 
-            for subset in active_committor_subsets {
+            // Each subset may produce up to two `cargo test` invocations:
+            // one for `files` with the libtest name filters applied, and one
+            // for `extra_files` run unfiltered (e.g. the preparator suites).
+            let mut invocations: Vec<(String, RunTestConfig)> = Vec::new();
+            for subset in &active_committor_subsets {
+                if !subset.files.is_empty() {
+                    invocations.push((
+                        format!("{} [files]", subset.label),
+                        RunTestConfig {
+                            test_files: subset.files,
+                            test_name_filters: subset.name_filters,
+                            ..Default::default()
+                        },
+                    ));
+                }
+                if !subset.extra_files.is_empty() {
+                    invocations.push((
+                        format!("{} [extra_files]", subset.label),
+                        RunTestConfig {
+                            test_files: subset.extra_files,
+                            ..Default::default()
+                        },
+                    ));
+                }
+            }
+
+            for (label, cfg) in invocations {
                 eprintln!(
                     "Running {} tests in {} (files: {:?}, filters: {:?})",
-                    subset.label,
+                    label,
                     test_committor_dir,
-                    subset.files,
-                    subset.name_filters,
+                    cfg.test_files,
+                    cfg.test_name_filters,
                 );
-                let cfg = RunTestConfig {
-                    test_files: subset.files,
-                    test_name_filters: subset.name_filters,
-                    ..Default::default()
-                };
                 match run_test(test_committor_dir.clone(), cfg) {
                     Ok(output) => {
                         combined_status_ok &= output.status.success();
@@ -383,7 +411,7 @@ fn run_table_mania_and_committor_tests(
                         combined_stderr.extend_from_slice(&output.stderr);
                     }
                     Err(err) => {
-                        eprintln!("Failed to run {}: {:?}", subset.label, err);
+                        eprintln!("Failed to run {}: {:?}", label, err);
                         cleanup_devnet_only(&mut devnet_validator);
                         return Err(err.into());
                     }

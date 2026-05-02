@@ -44,9 +44,19 @@ impl TestConfigViaEnvVars {
     }
 
     fn include_test(&self, test_name: &str) -> bool {
-        (self.selected_tests.is_empty()
-            && !self.skipped_tests.contains(&test_name.to_string()))
+        (self.selected_tests.is_empty() && !self.is_skipped(test_name))
             || self.selected_tests.contains(&test_name.to_string())
+    }
+
+    /// Returns true if `test_name` is in `SKIP_TESTS`, either as an exact
+    /// match or via an umbrella alias (see `umbrella_aliases_for`).
+    /// Preserves backwards-compatible behavior of e.g. `SKIP_TESTS=committor`
+    /// suppressing every committor_* shard.
+    fn is_skipped(&self, test_name: &str) -> bool {
+        self.skipped_tests.iter().any(|skipped| {
+            skipped == test_name
+                || umbrella_aliases_for(skipped).contains(&test_name)
+        })
     }
 
     pub fn setup_devnet(&self, test_name: &str) -> bool {
@@ -61,6 +71,25 @@ impl TestConfigViaEnvVars {
             .as_ref()
             .is_none_or(|setup| setup.ephem())
             && self.include_test(test_name)
+    }
+}
+
+/// Map a SKIP_TESTS umbrella name to the concrete shard names it should also
+/// suppress. Pre-split, `committor` referred to the entire committor suite;
+/// after the split the suite became five shards (`committor`,
+/// `committor_ix_multi`, `committor_bundles`, `committor_bundles_heavy`,
+/// `committor_intent_executor`). Honor the historical name here so existing
+/// automation that says `SKIP_TESTS=committor` keeps doing what it always did.
+fn umbrella_aliases_for(name: &str) -> &'static [&'static str] {
+    match name {
+        "committor" => &[
+            "committor",
+            "committor_ix_multi",
+            "committor_bundles",
+            "committor_bundles_heavy",
+            "committor_intent_executor",
+        ],
+        _ => &[],
     }
 }
 

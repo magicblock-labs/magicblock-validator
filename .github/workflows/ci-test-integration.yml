@@ -65,7 +65,10 @@ jobs:
           path: |
             magicblock-validator/target/deploy
             magicblock-validator/test-integration/target/deploy
-          key: sbf-programs-${{ runner.os }}-${{ hashFiles('magicblock-validator/test-integration/programs/**', 'magicblock-validator/magicblock-committor-program/**') }}
+          # Include Cargo.lock and shared sources so the cache invalidates on
+          # workspace dependency / shared-crate changes that the program
+          # source dirs alone don't capture.
+          key: sbf-programs-${{ runner.os }}-${{ hashFiles('magicblock-validator/Cargo.lock', 'magicblock-validator/test-integration/programs/**', 'magicblock-validator/magicblock-committor-program/**', 'magicblock-validator/programs/**', 'magicblock-validator/magicblock-magic-program-api/**', 'magicblock-validator/magicblock-core/**') }}
           restore-keys: |
             sbf-programs-${{ runner.os }}-
 
