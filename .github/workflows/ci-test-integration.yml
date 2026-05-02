@@ -59,16 +59,16 @@ jobs:
       - name: Build validator binary and SBF programs (parallel)
         # The host-arch validator build (rustc) and the BPF program builds
         # (cargo build-sbf, separate toolchain) don't share a compilation
-        # cache, so we kick them off concurrently. SBF programs themselves
-        # build in parallel via `make -j`.
+        # cache, so we kick them off concurrently. SBF programs build serially
+        # within `make programs` because parallel `cargo-build-sbf` invocations
+        # race on the shared platform-tools install (~/.cache/solana/...) and
+        # corrupt each other on first install.
         run: |
           export RUSTFLAGS="${RUSTFLAGS:-} -C link-arg=-fuse-ld=lld"
-          # Disable -e while we collect both background exit codes; we want to
-          # always print both build logs even if one side failed.
           set +e
           cargo build --locked --bin magicblock-validator >validator.log 2>&1 &
           validator_pid=$!
-          make -C test-integration -j "$(nproc)" programs >programs.log 2>&1 &
+          make -C test-integration programs >programs.log 2>&1 &
           programs_pid=$!
           wait $validator_pid
           validator_rc=$?

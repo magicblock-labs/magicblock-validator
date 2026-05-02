@@ -19,6 +19,15 @@ runs:
           path: ~/.local/share/solana
           key: solana-cli-v2-${{ runner.os }}-${{ inputs.solana_version }}
 
+      # Platform-tools (the BPF toolchain) is downloaded by `cargo build-sbf`
+      # into ~/.cache/solana/<tools-version>/ on first use. Cache it so we
+      # don't re-fetch it (and so concurrent builds don't race on install).
+      - name: Cache cargo-build-sbf platform-tools
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/solana
+          key: solana-platform-tools-v1-${{ runner.os }}-${{ inputs.solana_version }}
+
       - name: Install Solana Test Validator
         if: steps.cache-solana.outputs.cache-hit != 'true'
         shell: "bash"
