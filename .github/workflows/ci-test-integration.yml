@@ -84,6 +84,7 @@ jobs:
           - "config"
           - "table_mania"
           - "committor"
+          - "committor_bundles"
           - "committor_intent_executor"
           - "pubsub"
           - "schedule_intents"
