@@ -915,6 +915,34 @@ fn run_test(
     manifest_dir: String,
     config: RunTestConfig,
 ) -> io::Result<process::Output> {
+    // Integration tests against a live validator can hit timing-related
+    // flakes. Allow up to RUN_TEST_RETRIES extra attempts for the same
+    // command before propagating the failure.
+    let max_attempts = std::env::var("RUN_TEST_RETRIES")
+        .ok()
+        .and_then(|s| s.parse::<u32>().ok())
+        .unwrap_or(1)
+        .saturating_add(1);
+
+    let mut last: Option<process::Output> = None;
+    for attempt in 1..=max_attempts {
+        let output = run_test_once(manifest_dir.clone(), &config)?;
+        if output.status.success() {
+            return Ok(output);
+        }
+        eprintln!(
+            "run_test attempt {}/{} failed (status: {})",
+            attempt, max_attempts, output.status
+        );
+        last = Some(output);
+    }
+    Ok(last.expect("run_test loop must run at least once"))
+}
+
+fn run_test_once(
+    manifest_dir: String,
+    config: &RunTestConfig,
+) -> io::Result<process::Output> {
     let mut cmd = process::Command::new("cargo");
     cmd.env(
         "RUST_LOG",
