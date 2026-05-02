@@ -63,17 +63,23 @@ jobs:
         # build in parallel via `make -j`.
         run: |
           export RUSTFLAGS="${RUSTFLAGS:-} -C link-arg=-fuse-ld=lld"
+          # Disable -e while we collect both background exit codes; we want to
+          # always print both build logs even if one side failed.
+          set +e
           cargo build --locked --bin magicblock-validator >validator.log 2>&1 &
           validator_pid=$!
           make -C test-integration -j "$(nproc)" programs >programs.log 2>&1 &
           programs_pid=$!
-          wait $validator_pid; validator_rc=$?
-          wait $programs_pid; programs_rc=$?
+          wait $validator_pid
+          validator_rc=$?
+          wait $programs_pid
+          programs_rc=$?
+          set -e
           echo "===== validator build (rc=$validator_rc) ====="
-          tail -n 200 validator.log
+          tail -n 400 validator.log || true
           echo "===== SBF program builds (rc=$programs_rc) ====="
-          tail -n 200 programs.log
-          if [ $validator_rc -ne 0 ] || [ $programs_rc -ne 0 ]; then
+          tail -n 400 programs.log || true
+          if [ "$validator_rc" -ne 0 ] || [ "$programs_rc" -ne 0 ]; then
             echo "validator_rc=$validator_rc programs_rc=$programs_rc"
             exit 1
           fi
