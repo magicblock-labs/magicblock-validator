@@ -11,67 +11,12 @@ on:
     types: [opened, reopened, synchronize, ready_for_review]
 
 jobs:
-  # The build job exists purely to produce reusable artifacts (the validator
-  # binary and the SBF program `.so` files) so the matrix shards never have to
-  # invoke `cargo build` for those, nor `cargo build-sbf`. That removes minutes
-  # of redundant work from each shard.
-  build:
-    runs-on: ubuntu-latest-m
-    name: Build Artifacts
-    steps:
-      - name: Checkout this magicblock-validator
-        uses: actions/checkout@v5
-        with:
-          path: magicblock-validator
-
-      - uses: ./magicblock-validator/.github/actions/setup-build-env
-        with:
-          build_cache_key_name: "magicblock-validator-ci-test-integration-${{ hashFiles('magicblock-validator/Cargo.lock') }}"
-          rust_toolchain_release: "1.94.1"
-          github_access_token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-
-      - uses: ./magicblock-validator/.github/actions/setup-solana
-
-      # SBF programs only depend on a small set of source dirs; cache them
-      # directly so we skip cargo-build-sbf entirely on cache hits.
-      - name: Cache SBF program artifacts
-        uses: actions/cache@v4
-        with:
-          path: |
-            magicblock-validator/target/deploy
-            magicblock-validator/test-integration/target/deploy
-          key: sbf-programs-${{ runner.os }}-${{ hashFiles('magicblock-validator/test-integration/programs/**', 'magicblock-validator/magicblock-committor-program/**') }}
-          restore-keys: |
-            sbf-programs-${{ runner.os }}-
-
-      - name: Build validator binary and SBF programs
-        run: |
-          cargo build --locked --bin magicblock-validator
-          make -C test-integration programs
-        shell: bash
-        working-directory: magicblock-validator
-
-      - name: Upload validator binary
-        uses: actions/upload-artifact@v4
-        with:
-          name: magicblock-validator-bin
-          path: magicblock-validator/target/debug/magicblock-validator
-          retention-days: 1
-          if-no-files-found: error
-
-      - name: Upload SBF programs
-        uses: actions/upload-artifact@v4
-        with:
-          name: sbf-programs
-          path: |
-            magicblock-validator/target/deploy/*.so
-            magicblock-validator/test-integration/target/deploy/*.so
-          retention-days: 1
-          if-no-files-found: error
-
+  # Each shard is self-contained: it restores the shared rust-cache, builds the
+  # validator binary + SBF programs (no-ops on warm cache), and runs its slice
+  # of the tests. There is no upstream serial build job; all shards fan out at
+  # t=0 so the critical path is `max(shard wall-clock)` instead of
+  # `serial_build + max(shard)`.
   run_integration_tests:
-    needs: build
     runs-on: ubuntu-latest-m
     strategy:
       matrix:
@@ -111,44 +56,31 @@ jobs:
 
       - uses: ./magicblock-validator/.github/actions/setup-solana
 
-      - name: Download prebuilt validator binary
-        uses: actions/download-artifact@v4
+      # SBF programs are deterministic outputs of the program source dirs; cache
+      # the .so files keyed on those sources so make-programs is a no-op when
+      # nothing relevant changed.
+      - name: Cache SBF program artifacts
+        uses: actions/cache@v4
         with:
-          name: magicblock-validator-bin
-          path: magicblock-validator/target/debug
+          path: |
+            magicblock-validator/target/deploy
+            magicblock-validator/test-integration/target/deploy
+          key: sbf-programs-${{ runner.os }}-${{ hashFiles('magicblock-validator/test-integration/programs/**', 'magicblock-validator/magicblock-committor-program/**') }}
+          restore-keys: |
+            sbf-programs-${{ runner.os }}-
 
-      - name: Download prebuilt SBF programs
-        uses: actions/download-artifact@v4
-        with:
-          name: sbf-programs
-          path: magicblock-validator/_sbf_artifact
-
-      - name: Stage SBF programs into deploy dirs
+      - name: Build validator binary and SBF programs
         run: |
-          set -euxo pipefail
-          mkdir -p magicblock-validator/target/deploy
-          mkdir -p magicblock-validator/test-integration/target/deploy
-          # The artifact preserves directory structure relative to the upload
-          # paths; copy the .so files into the locations the validator and the
-          # tests expect, then make them executable for cargo's mtime checks.
-          if [ -d magicblock-validator/_sbf_artifact/target/deploy ]; then
-            cp magicblock-validator/_sbf_artifact/target/deploy/*.so \
-              magicblock-validator/target/deploy/ 2>/dev/null || true
-          fi
-          if [ -d magicblock-validator/_sbf_artifact/test-integration/target/deploy ]; then
-            cp magicblock-validator/_sbf_artifact/test-integration/target/deploy/*.so \
-              magicblock-validator/test-integration/target/deploy/ 2>/dev/null || true
-          fi
-          chmod +x magicblock-validator/target/debug/magicblock-validator
+          cargo build --locked --bin magicblock-validator
+          make -C test-integration programs
         shell: bash
+        working-directory: magicblock-validator
 
       - name: Run integration tests - ${{ matrix.batch_tests }}
         run: |
           sudo prlimit --pid $$ --nofile=1048576:1048576
           sudo sysctl fs.inotify.max_user_instances=1280
           sudo sysctl fs.inotify.max_user_watches=655360
-          # Force make to reuse the staged .so files instead of rebuilding.
-          touch test-integration/target/deploy/*.so target/deploy/*.so 2>/dev/null || true
           make ci-test-integration
         shell: bash
         working-directory: magicblock-validator
