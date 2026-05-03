@@ -351,9 +351,7 @@ where
                         &delegation_record,
                     );
 
-                    // Collect unique owner programs to subscribe concurrently after the loop.
-                    // Skip programs that own too many accounts to safely receive program-wide
-                    // updates (e.g. SPL Token), since that would flood the validator.
+                    // Skip high-cardinality owner programs such as SPL Token.
                     if account.delegated()
                         && !this
                             .programs_not_to_subscribe

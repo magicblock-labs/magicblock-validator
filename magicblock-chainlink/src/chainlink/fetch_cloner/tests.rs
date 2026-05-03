@@ -3773,9 +3773,7 @@ async fn test_project_ata_skips_repeat_fetch_for_known_empty_eata() {
     let ata_pubkey = derive_ata(&wallet_owner, &mint);
     let ata_account = create_ata_account(&wallet_owner, &mint);
 
-    // Note: the eATA is intentionally NOT present in the mock RPC so the
-    // upstream fetch returns NotFound, which is the case the negative
-    // cache must short-circuit on subsequent updates.
+    // Leave the eATA absent so the first fetch returns NotFound.
     let FetcherTestCtx {
         remote_account_provider,
         rpc_client,
@@ -3815,10 +3813,7 @@ async fn test_project_ata_skips_repeat_fetch_for_known_empty_eata() {
     const POLL_INTERVAL: std::time::Duration = Duration::from_millis(10);
     const TIMEOUT: std::time::Duration = Duration::from_millis(500);
 
-    // First update: triggers a real eATA fetch which returns NotFound and
-    // marks the eATA as known-empty. We poll the cache predicate itself
-    // rather than the fetch counter so the readiness signal cannot fire
-    // before `mark_eata_empty` has run.
+    // Poll the cache entry, not the fetch counter, to avoid racing mark_eata_empty.
     let baseline_fetches = rpc_client.single_account_fetches();
     send_update().await;
     tokio::time::timeout(TIMEOUT, async {
@@ -3834,17 +3829,13 @@ async fn test_project_ata_skips_repeat_fetch_for_known_empty_eata() {
         "first ATA update should trigger an upstream eATA fetch"
     );
 
-    // After the first update the eATA must be subscribed so that we get
-    // notified if it ever materialises on chain.
+    // The subscription must still catch later eATA creation.
     assert!(
         remote_account_provider.is_watching(&eata_pubkey),
         "eATA must be subscribed after the first ATA update"
     );
 
-    // Second update for the same ATA: must be served by the negative
-    // cache without issuing any new upstream fetch, but must keep the
-    // eATA subscription alive (idempotent re-subscribe promotes the LRU
-    // entry so it does not get evicted under churn).
+    // Cache hits should avoid refetching while preserving the subscription.
     send_update().await;
     tokio::time::sleep(Duration::from_millis(150)).await;
     assert_eq!(
@@ -3889,7 +3880,7 @@ async fn test_delegated_account_owned_by_token_program_does_not_subscribe_progra
     )
     .await;
 
-    // Delegation record reports SPL Token as the original owner program.
+    // Use SPL Token as the delegated owner.
     add_delegation_record_for(
         &rpc_client,
         account_pubkey,
@@ -3908,7 +3899,7 @@ async fn test_delegated_account_owned_by_token_program_does_not_subscribe_progra
         .await;
     assert!(result.is_ok());
 
-    // Give the fire-and-forget subscribe task a chance to run.
+    // Let the spawned subscription task run.
     tokio::time::sleep(Duration::from_millis(100)).await;
 
     let pubsub_client = remote_account_provider.pubsub_client();

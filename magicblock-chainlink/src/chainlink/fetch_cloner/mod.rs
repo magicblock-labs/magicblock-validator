@@ -104,18 +104,10 @@ where
     /// all programs are allowed.
     allowed_programs: Option<HashSet<Pubkey>>,
 
-    /// Programs that must never be passed to `subscribe_program` because
-    /// they own enough accounts to flood the validator with updates
-    /// (SPL Token, Token-2022, Associated Token Account program).
+    /// Programs too broad for `subscribe_program`.
     programs_not_to_subscribe: HashSet<Pubkey>,
 
-    /// Bounded negative cache of derived eATA pubkeys that we already
-    /// observed to be non-existent on chain. Used by the ATA-side
-    /// projection path to skip redundant RPC fetches for ATAs that have
-    /// no corresponding eATA. Real eATAs that materialise later are
-    /// still picked up through the eATA-side subscription update path.
-    /// Wrapped in a `parking_lot::Mutex` to avoid poisoning semantics on
-    /// the hot path.
+    /// Negative cache for derived eATAs confirmed missing on chain.
     known_empty_eatas: Arc<PlMutex<LruCache<Pubkey, ()>>>,
 
     /// Tracks in-flight clone operations per (pubkey, slot).
@@ -130,16 +122,10 @@ where
     >,
 }
 
-/// Capacity of the negative cache for known-empty eATAs.
-/// Sized to comfortably cover the working set of unique ATAs a busy
-/// validator clones over its lifetime while keeping memory bounded.
-/// Built as a `NonZeroUsize` at compile time so the constructor does
-/// not need a runtime `.expect`.
+/// Negative-cache capacity for known-empty eATAs.
 const KNOWN_EMPTY_EATAS_CAPACITY: NonZeroUsize =
     match NonZeroUsize::new(100_000) {
         Some(n) => n,
-        // SAFETY: 100_000 is a non-zero literal so this branch is unreachable
-        // and the compiler evaluates the `match` at build time.
         None => panic!("KNOWN_EMPTY_EATAS_CAPACITY must be non-zero"),
     };
 
@@ -1105,9 +1091,6 @@ where
     }
 
     fn is_known_empty_eata(&self, eata_pubkey: &Pubkey) -> bool {
-        // `parking_lot::Mutex` does not poison; `lock()` returns the guard
-        // directly so no `unwrap`/`expect` is needed on the hot path.
-        // `get` promotes on hit so frequently revisited entries stay warm.
         self.known_empty_eatas.lock().get(eata_pubkey).is_some()
     }
 
@@ -1133,14 +1116,8 @@ where
             return (ata_account, None);
         };
 
-        // Always (re)subscribe to the derived eATA. The call is idempotent
-        // and, importantly, promotes the entry in the subscription LRU so it
-        // does not get evicted under churn. We need the subscription to stay
-        // alive even when the negative cache below short-circuits the fetch:
-        // if the eATA is created later, the eATA-side subscription update
-        // path (`maybe_build_projected_ata_clone_request_from_eata_sub_update`)
-        // is what projects the ATA, so losing the subscription would mean
-        // missing that creation event.
+        // Re-subscribe before cache checks; this keeps the subscription LRU
+        // warm and lets later eATA creation reach the projection path.
         let subscribed = match self.subscribe_to_account(&eata_pubkey).await {
             Ok(()) => true,
             Err(err) => {
@@ -1153,9 +1130,7 @@ where
             }
         };
 
-        // If we have already observed this eATA to be non-existent, skip
-        // the upstream RPC fetch. The subscription above keeps us live to
-        // any future creation, so this cache needs no explicit invalidation.
+        // Known-empty eATAs skip the fetch; the live subscription covers later creation.
         if self.is_known_empty_eata(&eata_pubkey) {
             return (ata_account, None);
         }
@@ -1174,11 +1149,7 @@ where
         {
             Ok(mut accounts) => {
                 let popped = accounts.pop();
-                // Only a `NotFound` from a successful fetch is authoritative
-                // evidence that the eATA does not exist on chain. Any other
-                // shape (`Found` whose freshness check fails, missing entry,
-                // or a fetch error below) is treated as transient so we keep
-                // retrying on subsequent updates.
+                // Only `NotFound` proves absence; stale, missing, or failed fetches retry later.
                 let nf = matches!(popped, Some(RemoteAccount::NotFound(_)));
                 let fresh = popped.and_then(|a| a.fresh_account());
                 (fresh, nf)
@@ -1194,11 +1165,7 @@ where
         };
 
         let Some(eata_account) = eata_account else {
-            // Cache the eATA as empty only when we are confident:
-            //   1. the upstream confirmed it as `NotFound` (not a transient
-            //      RPC/timeout error), and
-            //   2. our subscription is actually live, so the eATA-side path
-            //      will deliver any future creation event.
+            // Cache absence only after a confirmed NotFound and live subscription.
             if definitively_not_found && subscribed {
                 self.mark_eata_empty(eata_pubkey);
             }

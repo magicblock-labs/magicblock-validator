@@ -77,9 +77,7 @@ pub fn native_program_accounts() -> HashSet<Pubkey> {
     blacklisted_programs
 }
 
-/// Programs that must never be subscribed to via `subscribe_program`.
-/// They own a vast number of accounts on chain and a program-wide
-/// subscription would flood the validator with unrelated updates.
+/// High-cardinality programs skipped for program-wide subscriptions.
 pub fn programs_not_to_subscribe() -> HashSet<Pubkey> {
     let mut programs = HashSet::new();
     programs.insert(TOKEN_PROGRAM_ID);
