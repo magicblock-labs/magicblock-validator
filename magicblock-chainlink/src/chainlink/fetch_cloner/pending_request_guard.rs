@@ -1,13 +1,11 @@
 use std::{sync::Arc, time::Instant};
 
-use super::super::errors::ChainlinkError;
-
 use scc::HashMap;
 use solana_pubkey::Pubkey;
 use tokio::sync::oneshot;
 use tracing::warn;
 
-use super::types::FetchAndCloneResult;
+use super::{super::errors::ChainlinkError, types::FetchAndCloneResult};
 
 pub(super) struct PendingRequestState {
     pub generation: u64,
