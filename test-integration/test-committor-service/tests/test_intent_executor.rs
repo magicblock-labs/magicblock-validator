@@ -341,7 +341,7 @@ async fn test_action_error_parsing() {
 #[tokio::test]
 async fn test_cpi_limits_error_parsing() {
     const COUNTER_SIZE: u64 = 102;
-    const COUNTER_NUM: u64 = 10;
+    const COUNTER_NUM: u64 = 12;
 
     let TestEnv {
         fixture,
@@ -761,7 +761,7 @@ async fn test_commit_id_and_action_errors_recovery() {
 #[tokio::test]
 async fn test_cpi_limits_error_recovery() {
     const COUNTER_SIZE: u64 = 102;
-    const COUNTER_NUM: u64 = 10;
+    const COUNTER_NUM: u64 = 12;
 
     let TestEnv {
         fixture,
@@ -860,8 +860,8 @@ async fn test_cpi_limits_error_recovery() {
 #[tokio::test]
 async fn test_commit_id_actions_cpi_limit_errors_recovery() {
     const COUNTER_SIZE: u64 = 102;
-    // COUNTER_NUM = 10 or larger result in CpiLimitError even with 2 stage execution
-    const COUNTER_NUM: u64 = 9;
+    // COUNTER_NUM = 13 or larger result in FailedToFitError
+    const COUNTER_NUM: u64 = 12;
 
     let TestEnv {
         fixture,
@@ -947,7 +947,12 @@ async fn test_commit_id_actions_cpi_limit_errors_recovery() {
         res.is_ok(),
         "Expected recovery from CommitID, Actions, and CpiLimit errors"
     );
-    assert_eq!(patched_errors.len(), 3, "Only 3 patches expected");
+    assert_eq!(
+        patched_errors.len(),
+        3,
+        "Only 3 patches expected: {:?}",
+        patched_errors
+    );
     assert!(matches!(
         res.unwrap(),
         ExecutionOutput::TwoStage {
@@ -1012,6 +1017,7 @@ async fn test_commit_id_actions_cpi_limit_errors_recovery() {
 }
 
 #[tokio::test]
+#[ignore = "CommitFinalize cannot have unfinalized account"]
 async fn test_commit_unfinalized_account_recovery() {
     let TestEnv {
         fixture,
@@ -1091,6 +1097,7 @@ async fn test_commit_unfinalized_account_recovery() {
 }
 
 #[tokio::test]
+#[ignore = "CommitFinalize cannot have unfinalized account"]
 async fn test_commit_unfinalized_account_recovery_two_stage() {
     let TestEnv {
         fixture,

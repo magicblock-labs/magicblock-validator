@@ -178,24 +178,23 @@ async fn test_ix_commit_order_book_change_100_bytes() {
 }
 
 #[tokio::test]
-async fn test_ix_commit_order_book_change_671_bytes() {
+async fn test_ix_commit_order_book_change_switch_strategy_at_n_bytes() {
     commit_book_order_account(
-        671,
-        CommitStrategy::DiffArgs,
+        794, // this can change such that strategy == CommitStrategy::DiffArgs
+        CommitStrategy::DiffArgs, // this must NOT change
         ScheduleCommitType::Commit,
     )
     .await;
-}
 
-#[tokio::test]
-async fn test_ix_commit_order_book_change_681_bytes() {
-    // We cannot use 680 as changed_len because that both 680 and 681 produce encoded tx
-    // of size 1644 (which is the max limit), but while the size of raw bytes for 680 is within
-    // 1232 limit, the size for 681 exceeds by 1 (1233). That is why we used
-    // 681 as changed_len where CommitStrategy goes from Args to FromBuffer.
+    // We cannot use 795 as changed_len even though it is the minimum number at which it should switch
+    // from DiffArgs (794) to DiffBuffer (795). Both 794 and 795 produce encoded-tx of size 1644 which
+    // is within limit (MAX_ENCODED_TRANSACTION_SIZE) but 795 is later rejected because the actual
+    // tx-size is 1233 (that indicates MAX_ENCODED_TRANSACTION_SIZE is an incorrect threashold).
+    // Anyway, 796 produces encoded-tx of size > 1644, and thus it becomes DiffBuffer.
+
     commit_book_order_account(
-        681,
-        CommitStrategy::DiffBuffer,
+        796, // this can change such thatu strategy == CommitStrategy::DiffBuffer
+        CommitStrategy::DiffBuffer, // this must NOT change
         ScheduleCommitType::Commit,
     )
     .await;
@@ -486,10 +485,7 @@ async fn test_commit_5_accounts_1kb_bundle_size_3_undelegate_all() {
 async fn test_commit_5_accounts_1kb_bundle_size_4() {
     commit_5_accounts_1kb(
         4,
-        expect_strategies(&[
-            (CommitStrategy::DiffArgs, 1),
-            (CommitStrategy::DiffBufferWithLookupTable, 4),
-        ]),
+        expect_strategies(&[(CommitStrategy::DiffArgs, 5)]),
         ScheduleCommitType::Commit,
     )
     .await;
@@ -499,10 +495,7 @@ async fn test_commit_5_accounts_1kb_bundle_size_4() {
 async fn test_commit_5_accounts_1kb_bundle_size_4_undelegate_all() {
     commit_5_accounts_1kb(
         4,
-        expect_strategies(&[
-            (CommitStrategy::DiffArgs, 1),
-            (CommitStrategy::DiffBufferWithLookupTable, 4),
-        ]),
+        expect_strategies(&[(CommitStrategy::DiffArgs, 5)]),
         ScheduleCommitType::CommitAndUndelegate,
     )
     .await;
@@ -512,7 +505,7 @@ async fn test_commit_5_accounts_1kb_bundle_size_4_undelegate_all() {
 async fn test_commit_5_accounts_1kb_bundle_size_5_undelegate_all() {
     commit_5_accounts_1kb(
         5,
-        expect_strategies(&[(CommitStrategy::DiffBufferWithLookupTable, 5)]),
+        expect_strategies(&[(CommitStrategy::DiffArgs, 5)]),
         ScheduleCommitType::CommitAndUndelegate,
     )
     .await;
@@ -532,7 +525,7 @@ async fn test_commit_20_accounts_1kb_bundle_size_3() {
 async fn test_commit_20_accounts_1kb_bundle_size_4() {
     commit_20_accounts_1kb(
         4,
-        expect_strategies(&[(CommitStrategy::DiffBufferWithLookupTable, 20)]),
+        expect_strategies(&[(CommitStrategy::DiffArgs, 20)]),
         ScheduleCommitType::Commit,
     )
     .await;
@@ -597,7 +590,8 @@ async fn test_commit_20_accounts_1kb_bundle_size_8() {
         expect_strategies(&[
             // Four accounts don't make it into the bundles of size 8, but
             // that bundle also needs lookup tables
-            (CommitStrategy::DiffBufferWithLookupTable, 20),
+            (CommitStrategy::DiffArgs, 4),
+            (CommitStrategy::DiffBufferWithLookupTable, 16),
         ]),
         ScheduleCommitType::Commit,
     )
@@ -639,7 +633,7 @@ async fn test_ix_execute_intent_bundle_commit_and_cau_simultaneously_union_of_ac
         &[1024, 2048],
         &[],
         &[1024, 2048],
-        expect_strategies(&[(CommitStrategy::DiffBufferWithLookupTable, 4)]),
+        expect_strategies(&[(CommitStrategy::DiffArgs, 4)]),
     )
     .await;
 }
@@ -650,7 +644,7 @@ async fn test_ix_execute_intent_bundle_commit_three_accounts_cau_one_account() {
         &[512, 512, 512],
         &[],
         &[512],
-        expect_strategies(&[(CommitStrategy::DiffBufferWithLookupTable, 4)]),
+        expect_strategies(&[(CommitStrategy::DiffArgs, 4)]),
     )
     .await;
 }
@@ -1004,6 +998,24 @@ async fn ix_commit_local(
             committed_accounts.is_some() || undelegated_accounts.is_some();
         let has_commit_finalize_flow = committed_finalize_accounts.is_some()
             || commit_finalized_and_undelegated_accounts.is_some();
+
+        debug!("has_commit_flow: {}", has_commit_flow);
+        debug!("has_commit_finalize_flow: {}", has_commit_finalize_flow);
+
+        //
+        // Workaround:
+        //
+        // Since now all Commits default to CommitFinalize (see #1174) even if from
+        // user's perspective it is ScheduleCommit (or ScheduleCommitAndUndelegate),
+        // has_commit_flow == true actually means has_commit_finalize_flow == true
+        // and has_commit_flow is always false.
+        //
+        let has_commit_finalize_flow =
+            has_commit_finalize_flow || has_commit_flow;
+        let has_commit_flow = false;
+
+        // if-block is logicall here for the time being, even though it will not
+        // be executed.
         if has_commit_flow {
             assert!(
                 tx_logs_contain(&rpc_client, &commit_signature, "CommitState")
