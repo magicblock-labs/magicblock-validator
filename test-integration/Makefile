@@ -33,9 +33,16 @@ test: $(PROGRAMS_SO)
 	if [ -z "$(RUN_TESTS)" ] || printf ',%s,' "$(RUN_TESTS)" | grep -Eq ',(chainlink|cloning),'; then \
 		$(MAKE) chainlink-prep-programs -C ./test-chainlink; \
 	fi && \
-	RUST_BACKTRACE=1 \
-	RUST_LOG=$(RUST_LOG) \
-	cargo run --package test-runner --bin run-tests
+	if [ -n "$(INTEGRATION_TEST_RUNNER_BIN)" ] && [ -x "$(INTEGRATION_TEST_RUNNER_BIN)" ]; then \
+		RUST_BACKTRACE=1 \
+		RUST_LOG=$(RUST_LOG) \
+		CARGO_MANIFEST_DIR="$(DIR)test-runner" \
+		"$(INTEGRATION_TEST_RUNNER_BIN)"; \
+	else \
+		RUST_BACKTRACE=1 \
+		RUST_LOG=$(RUST_LOG) \
+		cargo run --package test-runner --bin run-tests; \
+	fi
 
 test-force-mb: $(PROGRAMS_SO)
 	RUST_LOG=$(RUST_LOG) \
@@ -126,10 +133,13 @@ setup-table-mania-devnet:
 	$(MAKE) test
 
 test-committor:
-	RUN_TESTS=committor,committor_ix_order,committor_ix_multi,committor_bundles,committor_bundles_heavy,committor_intent_executor,committor_intent_executor_recovery \
+	RUN_TESTS=committor,committor_preparators,committor_ix_order,committor_ix_multi,committor_bundles,committor_intent_bundles,committor_bundles_heavy,committor_commitfinalize,committor_intent_executor,committor_intent_executor_recovery \
 	$(MAKE) test
 test-committor-ix-singles:
 	RUN_TESTS=committor \
+	$(MAKE) test
+test-committor-preparators:
+	RUN_TESTS=committor_preparators \
 	$(MAKE) test
 test-committor-ix-order:
 	RUN_TESTS=committor_ix_order \
@@ -140,8 +150,14 @@ test-committor-ix-multi:
 test-committor-bundles:
 	RUN_TESTS=committor_bundles \
 	$(MAKE) test
+test-committor-intent-bundles:
+	RUN_TESTS=committor_intent_bundles \
+	$(MAKE) test
 test-committor-bundles-heavy:
 	RUN_TESTS=committor_bundles_heavy \
+	$(MAKE) test
+test-committor-commitfinalize:
+	RUN_TESTS=committor_commitfinalize \
 	$(MAKE) test
 test-committor-intent-executor:
 	RUN_TESTS=committor_intent_executor,committor_intent_executor_recovery \
@@ -154,7 +170,7 @@ test-committor-intent-executor-recovery:
 	$(MAKE) test
 setup-committor-devnet:
 	RUST_LOG_STYLE=none \
-	RUN_TESTS=committor,committor_ix_order,committor_ix_multi,committor_bundles,committor_bundles_heavy,committor_intent_executor,committor_intent_executor_recovery \
+	RUN_TESTS=committor,committor_preparators,committor_ix_order,committor_ix_multi,committor_bundles,committor_intent_bundles,committor_bundles_heavy,committor_commitfinalize,committor_intent_executor,committor_intent_executor_recovery \
 	SETUP_ONLY=devnet \
 	$(MAKE) test
 
@@ -279,9 +295,13 @@ ci-lint: lint
 	test-cloning \
 	test-committor \
 	test-committor-ix-singles \
+	test-committor-preparators \
+	test-committor-ix-order \
 	test-committor-ix-multi \
 	test-committor-bundles \
+	test-committor-intent-bundles \
 	test-committor-bundles-heavy \
+	test-committor-commitfinalize \
 	test-committor-intent-executor \
 	test-config \
 	test-force-mb \

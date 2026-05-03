@@ -17,7 +17,7 @@ jobs:
   # of redundant work from each shard.
   build:
     # `extra-large` is more expensive per minute but the build job is the
-    # hard serialization point in front of the 15-shard matrix; every minute
+    # hard serialization point in front of the matrix; every minute
     # we save here saves a minute on the critical path.
     runs-on: extra-large
     name: Build Artifacts
@@ -114,6 +114,18 @@ jobs:
         shell: bash
         working-directory: magicblock-validator
 
+      - name: Build test runner binary
+        run: |
+          set -euo pipefail
+          mkdir -p _integration_test_bins/test-runner
+          RUSTFLAGS="-C link-arg=-fuse-ld=lld" \
+          CARGO_PROFILE_DEV_DEBUG=0 \
+            cargo build --manifest-path test-integration/Cargo.toml --locked -p test-runner --bin run-tests
+          cp test-integration/target/debug/run-tests _integration_test_bins/test-runner/run-tests
+          strip _integration_test_bins/test-runner/run-tests || true
+        shell: bash
+        working-directory: magicblock-validator
+
       - name: Collect integration test binaries
         run: |
           set -euxo pipefail
@@ -158,12 +170,14 @@ jobs:
           copy_package_tests test-integration/test-config config
           copy_package_tests test-integration/test-table-mania table_mania
           copy_test_bin test-integration/test-committor-service/tests/test_ix_commit_local.rs committor
-          copy_test_bin test-integration/test-committor-service/tests/test_delivery_preparator.rs committor
-          copy_test_bin test-integration/test-committor-service/tests/test_transaction_preparator.rs committor
+          copy_test_bin test-integration/test-committor-service/tests/test_delivery_preparator.rs committor_preparators
+          copy_test_bin test-integration/test-committor-service/tests/test_transaction_preparator.rs committor_preparators
           copy_test_bin test-integration/test-committor-service/tests/test_ix_commit_local.rs committor_ix_order
           copy_test_bin test-integration/test-committor-service/tests/test_ix_commit_local.rs committor_ix_multi
           copy_test_bin test-integration/test-committor-service/tests/test_ix_commit_local.rs committor_bundles
+          copy_test_bin test-integration/test-committor-service/tests/test_ix_commit_local.rs committor_intent_bundles
           copy_test_bin test-integration/test-committor-service/tests/test_ix_commit_local.rs committor_bundles_heavy
+          copy_test_bin test-integration/test-committor-service/tests/test_ix_commit_local.rs committor_commitfinalize
           copy_test_bin test-integration/test-committor-service/tests/test_intent_executor.rs committor_intent_executor
           copy_test_bin test-integration/test-committor-service/tests/test_intent_executor.rs committor_intent_executor_recovery
           copy_package_tests test-integration/test-pubsub pubsub
@@ -180,6 +194,14 @@ jobs:
         with:
           name: magicblock-validator-bin
           path: magicblock-validator/target/debug/magicblock-validator
+          retention-days: 1
+          if-no-files-found: error
+
+      - name: Upload test runner binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-test-runner-bin
+          path: magicblock-validator/_integration_test_bins/test-runner/run-tests
           retention-days: 1
           if-no-files-found: error
 
@@ -257,6 +279,14 @@ jobs:
           retention-days: 1
           if-no-files-found: error
 
+      - name: Upload integration test binaries - committor_preparators
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-test-bins-committor_preparators
+          path: magicblock-validator/_integration_test_bins/shards/committor_preparators/*
+          retention-days: 1
+          if-no-files-found: error
+
       - name: Upload integration test binaries - committor_ix_order
         uses: actions/upload-artifact@v4
         with:
@@ -281,11 +311,27 @@ jobs:
           retention-days: 1
           if-no-files-found: error
 
+      - name: Upload integration test binaries - committor_intent_bundles
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-test-bins-committor_intent_bundles
+          path: magicblock-validator/_integration_test_bins/shards/committor_intent_bundles/*
+          retention-days: 1
+          if-no-files-found: error
+
       - name: Upload integration test binaries - committor_bundles_heavy
         uses: actions/upload-artifact@v4
         with:
           name: integration-test-bins-committor_bundles_heavy
           path: magicblock-validator/_integration_test_bins/shards/committor_bundles_heavy/*
+          retention-days: 1
+          if-no-files-found: error
+
+      - name: Upload integration test binaries - committor_commitfinalize
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-test-bins-committor_commitfinalize
+          path: magicblock-validator/_integration_test_bins/shards/committor_commitfinalize/*
           retention-days: 1
           if-no-files-found: error
 
@@ -345,10 +391,13 @@ jobs:
           - "config"
           - "table_mania"
           - "committor"
+          - "committor_preparators"
           - "committor_ix_order"
           - "committor_ix_multi"
           - "committor_bundles"
+          - "committor_intent_bundles"
           - "committor_bundles_heavy"
+          - "committor_commitfinalize"
           - "committor_intent_executor"
           - "committor_intent_executor_recovery"
           - "pubsub"
@@ -382,6 +431,12 @@ jobs:
           name: magicblock-validator-bin
           path: magicblock-validator/target/debug
 
+      - name: Download prebuilt test runner binary
+        uses: actions/download-artifact@v4
+        with:
+          name: integration-test-runner-bin
+          path: magicblock-validator/_integration_test_runner
+
       - name: Download prebuilt SBF programs
         uses: actions/download-artifact@v4
         with:
@@ -408,6 +463,7 @@ jobs:
               magicblock-validator/test-integration/target/deploy/
           fi
           chmod +x magicblock-validator/target/debug/magicblock-validator
+          chmod +x magicblock-validator/_integration_test_runner/run-tests
           chmod +x magicblock-validator/_integration_test_bins/*
         shell: bash
 
@@ -426,6 +482,8 @@ jobs:
           # Have the validator helper exec the prebuilt binary directly,
           # skipping the per-spawn `cargo build` + `cargo run` overhead.
           MAGICBLOCK_VALIDATOR_BIN: ${{ github.workspace }}/magicblock-validator/target/debug/magicblock-validator
+          # Execute the prebuilt runner instead of compiling it in every shard.
+          INTEGRATION_TEST_RUNNER_BIN: ${{ github.workspace }}/magicblock-validator/_integration_test_runner/run-tests
           # Run uploaded libtest binaries directly instead of recompiling them
           # with `cargo test` in every shard.
           INTEGRATION_TEST_BIN_DIR: ${{ github.workspace }}/magicblock-validator/_integration_test_bins
