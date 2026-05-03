@@ -395,12 +395,12 @@ pub mod mock {
             *self.reconnectable.lock() = true;
         }
 
-        /// Block the `subscribe()` method from completing. Used for testing.
+        /// Block the `subscribe()` method from completing.
         pub fn block_subscribe(&self) {
             *self.subscribe_blocked.lock() = true;
         }
 
-        /// Release the `subscribe()` method to complete. Used for testing.
+        /// Release the `subscribe()` method to complete.
         pub fn release_subscribe(&self) {
             *self.subscribe_blocked.lock() = false;
             self.subscribe_notify.notify_waiters();
