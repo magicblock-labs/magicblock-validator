@@ -46,12 +46,21 @@ pub trait TasksBuilder {
 /// after the combined commit-finalize task.
 pub struct TaskBuilderImpl;
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum CommitExecutionMode {
-    #[default]
+    ///
+    /// Execute CommitFinalize as single instruction
+    ///
     CommitFinalize,
+
+    ///
+    /// Execute Commit and Finalize as two separate instructions
+    ///
     SeparateCommitAndFinalize,
 }
+
+pub const DEFAULT_COMMIT_EXECUTION_MODE: CommitExecutionMode =
+    CommitExecutionMode::CommitFinalize;
 
 // Accounts larger than COMMIT_STATE_SIZE_THRESHOLD use CommitDiff to
 // reduce instruction size. Below this threshold, the commit is sent
@@ -512,7 +521,7 @@ impl TasksBuilder for TaskBuilderImpl {
             task_info_fetcher,
             intent_bundle,
             persister,
-            CommitExecutionMode::default(),
+            DEFAULT_COMMIT_EXECUTION_MODE,
         )
         .await
     }
@@ -524,7 +533,7 @@ impl TasksBuilder for TaskBuilderImpl {
         Self::finalize_tasks_with_mode(
             info_fetcher,
             intent_bundle,
-            CommitExecutionMode::default(),
+            DEFAULT_COMMIT_EXECUTION_MODE,
         )
         .await
     }
