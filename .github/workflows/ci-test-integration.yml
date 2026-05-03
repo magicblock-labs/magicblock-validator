@@ -121,25 +121,18 @@ jobs:
           copy_test_bin() {
             local test_file="$1"
             local shard="$2"
+            local matches_file
             local src_path
             src_path="$(realpath "$test_file")"
-            matches="$(
-              jq -r --arg src_path "$src_path" '
-                select(
-                  .reason == "compiler-artifact"
-                  and .executable != null
-                  and (.target.kind | index("test"))
-                  and .target.src_path == $src_path
-                )
-                | .executable
-              ' _integration_test_bins/no-run.jsonl
-            )
-            match_count="$(printf '%s\n' "$matches" | awk 'NF { count++ } END { print count + 0 }')"
+            matches_file="_integration_test_bins/matches.txt"
+            jq -r --arg src_path "$src_path" 'select(.reason == "compiler-artifact" and .executable != null and (.target.kind | index("test")) and .target.src_path == $src_path) | .executable' _integration_test_bins/no-run.jsonl > "$matches_file"
+            match_count="$(awk 'END { print NR }' "$matches_file")"
             if [ "$match_count" -ne 1 ]; then
-              echo "expected one binary for ${test_file}, found ${match_count}: ${matches}"
+              matches_text="$(tr '\n' ' ' < "$matches_file")"
+              echo "expected one binary for ${test_file}, found ${match_count}: ${matches_text}"
               exit 1
             fi
-            test_bin="$(printf '%s\n' "$matches" | awk 'NF { print; exit }')"
+            test_bin="$(sed -n '1p' "$matches_file")"
             mkdir -p "_integration_test_bins/shards/${shard}"
             dest="_integration_test_bins/shards/${shard}/$(basename "$test_bin")"
             cp "$test_bin" "$dest"
