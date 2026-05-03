@@ -92,10 +92,6 @@ fn umbrella_aliases_for(name: &str) -> &'static [&'static str] {
             "committor_intent_executor",
             "committor_intent_executor_recovery",
         ],
-        "committor_intent_executor" => &[
-            "committor_intent_executor",
-            "committor_intent_executor_recovery",
-        ],
         _ => &[],
     }
 }

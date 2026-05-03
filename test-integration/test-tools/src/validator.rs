@@ -253,12 +253,17 @@ fn wait_for_required_accounts(
         format!("http://127.0.0.1:{}", port),
         CommitmentConfig::processed(),
     );
+    let mut last_rpc_error = None;
 
     for _ in 0..max_retries {
-        if let Ok(accounts) = rpc_client.get_multiple_accounts(pubkeys) {
-            if accounts.iter().all(Option::is_some) {
-                return true;
+        match rpc_client.get_multiple_accounts(pubkeys) {
+            Ok(accounts) => {
+                last_rpc_error = None;
+                if accounts.iter().all(Option::is_some) {
+                    return true;
+                }
             }
+            Err(err) => last_rpc_error = Some(err.to_string()),
         }
 
         if let Some(status) = validator
@@ -266,8 +271,8 @@ fn wait_for_required_accounts(
             .expect("Failed to poll validator process")
         {
             eprintln!(
-                "Validator RPC on port {} listened, but required accounts never became ready; process exited with {}",
-                port, status
+                "Validator RPC on port {} listened, but required accounts never became ready; process exited with {}; last RPC error: {:?}",
+                port, status, last_rpc_error
             );
             return false;
         }
@@ -276,9 +281,10 @@ fn wait_for_required_accounts(
     }
 
     eprintln!(
-        "Required validator accounts on port {} failed to become ready after {:.1} seconds",
+        "Required validator accounts on port {} failed to become ready after {:.1} seconds; last RPC error: {:?}",
         port,
-        max_retries as f32 * SLEEP_DURATION.as_secs_f32()
+        max_retries as f32 * SLEEP_DURATION.as_secs_f32(),
+        last_rpc_error
     );
     validator.kill().expect("Failed to kill validator");
     validator.wait().expect("Failed to reap validator");

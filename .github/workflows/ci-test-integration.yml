@@ -21,6 +21,8 @@ jobs:
     # we save here saves a minute on the critical path.
     runs-on: extra-large
     name: Build Artifacts
+    env:
+      SOLANA_VERSION: v3.1.5
     steps:
       - name: Checkout this magicblock-validator
         uses: actions/checkout@v5
@@ -35,6 +37,8 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: ./magicblock-validator/.github/actions/setup-solana
+        with:
+          solana_version: ${{ env.SOLANA_VERSION }}
 
       # SBF programs only depend on a small set of source dirs; cache them
       # directly so we skip cargo-build-sbf entirely on cache hits.
@@ -49,9 +53,7 @@ jobs:
           # source dirs alone don't capture. Also include rustc + solana
           # versions in the key so a toolchain bump invalidates stale .so
           # artifacts produced by the previous compiler.
-          key: sbf-programs-${{ runner.os }}-${{ runner.arch }}-rust1.94.1-solanav3.1.5-${{ hashFiles('magicblock-validator/Cargo.lock', 'magicblock-validator/test-integration/programs/**', 'magicblock-validator/magicblock-committor-program/**', 'magicblock-validator/programs/**', 'magicblock-validator/magicblock-magic-program-api/**', 'magicblock-validator/magicblock-core/**') }}
-          restore-keys: |
-            sbf-programs-${{ runner.os }}-${{ runner.arch }}-rust1.94.1-solanav3.1.5-
+          key: sbf-programs-${{ runner.os }}-${{ runner.arch }}-rust1.94.1-solana${{ env.SOLANA_VERSION }}-${{ hashFiles('magicblock-validator/Cargo.lock', 'magicblock-validator/test-integration/programs/**', 'magicblock-validator/magicblock-committor-program/**', 'magicblock-validator/programs/**', 'magicblock-validator/magicblock-magic-program-api/**', 'magicblock-validator/magicblock-core/**') }}
 
       # lld typically halves the link step on large rust workspaces.
       - name: Install lld linker
@@ -330,6 +332,8 @@ jobs:
   run_integration_tests:
     needs: build
     runs-on: ubuntu-latest-m
+    env:
+      SOLANA_VERSION: v3.1.5
     strategy:
       matrix:
         batch_tests:
@@ -369,6 +373,8 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: ./magicblock-validator/.github/actions/setup-solana
+        with:
+          solana_version: ${{ env.SOLANA_VERSION }}
 
       - name: Download prebuilt validator binary
         uses: actions/download-artifact@v4

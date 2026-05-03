@@ -99,7 +99,6 @@ fn write_ledger(
 
     let slot = wait_for_ledger_persist(&ctx, &mut validator);
 
-    test_ledger_restore::kill_validator(&mut validator);
     (validator, sig, slot, keypair1, keypair2)
 }
 
