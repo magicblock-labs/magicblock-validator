@@ -76,18 +76,25 @@ impl TestConfigViaEnvVars {
 
 /// Map a SKIP_TESTS umbrella name to the concrete shard names it should also
 /// suppress. Pre-split, `committor` referred to the entire committor suite;
-/// after the split the suite became five shards (`committor`,
-/// `committor_ix_multi`, `committor_bundles`, `committor_bundles_heavy`,
-/// `committor_intent_executor`). Honor the historical name here so existing
+/// after the split the suite became multiple shards (`committor`,
+/// `committor_ix_order`, `committor_ix_multi`, `committor_bundles`,
+/// `committor_bundles_heavy`, `committor_intent_executor`,
+/// `committor_intent_executor_recovery`). Honor the historical name here so existing
 /// automation that says `SKIP_TESTS=committor` keeps doing what it always did.
 fn umbrella_aliases_for(name: &str) -> &'static [&'static str] {
     match name {
         "committor" => &[
             "committor",
+            "committor_ix_order",
             "committor_ix_multi",
             "committor_bundles",
             "committor_bundles_heavy",
             "committor_intent_executor",
+            "committor_intent_executor_recovery",
+        ],
+        "committor_intent_executor" => &[
+            "committor_intent_executor",
+            "committor_intent_executor_recovery",
         ],
         _ => &[],
     }

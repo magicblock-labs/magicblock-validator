@@ -1,7 +1,7 @@
 use std::{
     error::Error,
-    io,
-    path::Path,
+    fs, io,
+    path::{Path, PathBuf},
     process::{self, Output},
 };
 
@@ -220,10 +220,10 @@ fn run_chainlink_tests(
     }
 }
 
-// The committor suite is split across five CI shards to keep wall-clock down.
-// The `test_ix_commit_local` file alone takes ~33 min and is sliced into four
+// The committor suite is split across seven CI shards to keep wall-clock down.
+// The `test_ix_commit_local` file alone takes ~33 min and is sliced into five
 // subsets via libtest name filters; the dedicated `test_intent_executor`
-// file is its own shard.
+// file is sliced into two more shards.
 //
 // Locally (no RUN_TESTS), every subset executes back-to-back against the same
 // devnet validator so total coverage is unchanged.
@@ -238,18 +238,20 @@ struct CommittorSubset {
     extra_files: &'static [&'static str],
 }
 
-// Single-account & order-book commits (lighter half of `test_ix_*`).
-// Also owns the two small preparator files (run unfiltered so we don't drop
-// `test_prepare_*` / `test_lookup_tables` etc).
+// Single-account commits. Also owns the two small preparator files (run
+// unfiltered so we don't drop `test_prepare_*` / `test_lookup_tables` etc).
 const COMMITTOR_SUBSET_IX_SINGLES: CommittorSubset = CommittorSubset {
     label: "committor (ix_singles)",
     files: &["test_ix_commit_local"],
-    name_filters: &[
-        "test_ix_commit_single_",
-        "test_ix_commit_order_",
-        "test_ix_commit_finalize_order_",
-    ],
+    name_filters: &["test_ix_commit_single_"],
     extra_files: &["test_delivery_preparator", "test_transaction_preparator"],
+};
+// Order-book commit/finalize tests.
+const COMMITTOR_SUBSET_IX_ORDER: CommittorSubset = CommittorSubset {
+    label: "committor (ix_order)",
+    files: &["test_ix_commit_local"],
+    name_filters: &["test_ix_commit_order_", "test_ix_commit_finalize_order_"],
+    extra_files: &[],
 };
 // Multi-account commits (`test_ix_commit_two/three/four/six_*`) — heavier
 // per-test than the singles.
@@ -282,13 +284,33 @@ const COMMITTOR_SUBSET_BUNDLES: CommittorSubset = CommittorSubset {
     ],
     extra_files: &[],
 };
-// The dedicated intent_executor file (already a separate CI shard).
-const COMMITTOR_SUBSET_INTENT_EXECUTOR: CommittorSubset = CommittorSubset {
-    label: "committor (intent_executor)",
-    files: &["test_intent_executor"],
-    name_filters: &[],
-    extra_files: &[],
-};
+// The dedicated intent_executor file is split by test-name groups.
+const COMMITTOR_SUBSET_INTENT_EXECUTOR_ERRORS: CommittorSubset =
+    CommittorSubset {
+        label: "committor (intent_executor_errors)",
+        files: &["test_intent_executor"],
+        name_filters: &[
+            "test_commit_id_error_",
+            "test_undelegation_error_",
+            "test_action_error_",
+            "test_cpi_limits_error_",
+            "test_min_context_slot_not_reached_error_",
+        ],
+        extra_files: &[],
+    };
+const COMMITTOR_SUBSET_INTENT_EXECUTOR_RECOVERY: CommittorSubset =
+    CommittorSubset {
+        label: "committor (intent_executor_recovery)",
+        files: &["test_intent_executor"],
+        name_filters: &[
+            "test_commit_id_and_action_errors_recovery",
+            "test_commit_id_actions_cpi_limit_errors_recovery",
+            "test_commit_unfinalized_account_recovery",
+            "test_action_callback_fired_",
+            "test_callbacks_fired_in_two_stage",
+        ],
+        extra_files: &[],
+    };
 
 fn run_table_mania_and_committor_tests(
     manifest_dir: &str,
@@ -299,12 +321,17 @@ fn run_table_mania_and_committor_tests(
     // committor tests it owns.
     let committor_shards: &[(&str, &CommittorSubset)] = &[
         ("committor", &COMMITTOR_SUBSET_IX_SINGLES),
+        ("committor_ix_order", &COMMITTOR_SUBSET_IX_ORDER),
         ("committor_ix_multi", &COMMITTOR_SUBSET_IX_MULTI),
         ("committor_bundles", &COMMITTOR_SUBSET_BUNDLES),
         ("committor_bundles_heavy", &COMMITTOR_SUBSET_BUNDLES_HEAVY),
         (
             "committor_intent_executor",
-            &COMMITTOR_SUBSET_INTENT_EXECUTOR,
+            &COMMITTOR_SUBSET_INTENT_EXECUTOR_ERRORS,
+        ),
+        (
+            "committor_intent_executor_recovery",
+            &COMMITTOR_SUBSET_INTENT_EXECUTOR_RECOVERY,
         ),
     ];
 
@@ -973,6 +1000,11 @@ fn run_test_once(
     manifest_dir: String,
     config: &RunTestConfig,
 ) -> io::Result<process::Output> {
+    if let Some(bin_dir) = std::env::var_os("INTEGRATION_TEST_BIN_DIR") {
+        let bin_dir = PathBuf::from(bin_dir);
+        return run_prebuilt_tests(Path::new(&manifest_dir), config, &bin_dir);
+    }
+
     let mut cmd = process::Command::new("cargo");
     cmd.env(
         "RUST_LOG",
@@ -995,6 +1027,142 @@ fn run_test_once(
     cmd.current_dir(manifest_dir.clone());
     println!("RUNNING: {:?}", cmd);
     Teepee::new(cmd).output()
+}
+
+fn run_prebuilt_tests(
+    manifest_dir: &Path,
+    config: &RunTestConfig,
+    bin_dir: &Path,
+) -> io::Result<process::Output> {
+    let test_targets = resolve_test_targets(manifest_dir, config)?;
+    let mut combined_status_ok = true;
+    let mut combined_stdout = Vec::new();
+    let mut combined_stderr = Vec::new();
+
+    for test_target in test_targets {
+        let test_bin = resolve_prebuilt_test_bin(bin_dir, &test_target)?;
+        let mut cmd = process::Command::new(test_bin);
+        cmd.env(
+            "RUST_LOG",
+            std::env::var("RUST_LOG").unwrap_or_else(|_| "info".to_string()),
+        )
+        .arg("--test-threads=1")
+        .arg("--nocapture");
+
+        if let Some(test_fn_name) = config.test_fn_name {
+            cmd.arg(test_fn_name);
+        }
+        for filter in config.test_name_filters {
+            cmd.arg(filter);
+        }
+
+        cmd.current_dir(manifest_dir);
+        println!("RUNNING: {:?}", cmd);
+        let output = Teepee::new(cmd).output()?;
+        combined_status_ok &= output.status.success();
+        combined_stdout.extend_from_slice(&output.stdout);
+        combined_stderr.extend_from_slice(&output.stderr);
+
+        if !output.status.success() {
+            break;
+        }
+    }
+
+    Ok(Output {
+        status: if combined_status_ok {
+            process::ExitStatus::default()
+        } else {
+            process::Command::new("false")
+                .status()
+                .unwrap_or_else(|_| process::ExitStatus::default())
+        },
+        stdout: combined_stdout,
+        stderr: combined_stderr,
+    })
+}
+
+fn resolve_test_targets(
+    manifest_dir: &Path,
+    config: &RunTestConfig,
+) -> io::Result<Vec<String>> {
+    if !config.test_files.is_empty() {
+        return Ok(config.test_files.iter().map(|s| s.to_string()).collect());
+    }
+
+    let tests_dir = manifest_dir.join("tests");
+    let mut test_targets = Vec::new();
+    for entry in fs::read_dir(&tests_dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("rs") {
+            continue;
+        }
+        let Some(stem) = path.file_stem().and_then(|stem| stem.to_str()) else {
+            continue;
+        };
+        test_targets.push(stem.to_string());
+    }
+    test_targets.sort();
+
+    if test_targets.is_empty() {
+        return Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            format!(
+                "no integration test targets found in {}",
+                tests_dir.display()
+            ),
+        ));
+    }
+
+    Ok(test_targets)
+}
+
+fn resolve_prebuilt_test_bin(
+    bin_dir: &Path,
+    test_target: &str,
+) -> io::Result<PathBuf> {
+    let normalized = test_target.replace('-', "_");
+    let mut prefixes = vec![format!("{}-", test_target)];
+    if normalized != test_target {
+        prefixes.push(format!("{}-", normalized));
+    }
+
+    let mut matches = Vec::new();
+    for entry in fs::read_dir(bin_dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        let Some(file_name) = path.file_name().and_then(|name| name.to_str())
+        else {
+            continue;
+        };
+        if prefixes.iter().any(|prefix| file_name.starts_with(prefix)) {
+            matches.push(path);
+        }
+    }
+
+    match matches.len() {
+        1 => Ok(matches.remove(0)),
+        0 => Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            format!(
+                "no prebuilt test binary for '{}' in {}",
+                test_target,
+                bin_dir.display()
+            ),
+        )),
+        _ => Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "multiple prebuilt test binaries for '{}' in {}: {:?}",
+                test_target,
+                bin_dir.display(),
+                matches
+            ),
+        )),
+    }
 }
 
 // -----------------

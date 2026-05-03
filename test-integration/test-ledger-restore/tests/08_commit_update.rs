@@ -44,10 +44,10 @@ fn test_restore_ledger_committed_and_updated_account() {
     let payer = payer_keypair();
 
     let (mut validator, _) = write(&ledger_path, &payer);
-    validator.kill().unwrap();
+    test_ledger_restore::kill_validator(&mut validator);
 
     let mut validator = read(&ledger_path, &payer);
-    validator.kill().unwrap();
+    test_ledger_restore::kill_validator(&mut validator);
 }
 
 fn write(ledger_path: &Path, payer: &Keypair) -> (Child, u64) {

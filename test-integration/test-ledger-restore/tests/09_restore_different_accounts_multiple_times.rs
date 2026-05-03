@@ -49,7 +49,7 @@ fn test_restore_ledger_different_accounts_multiple_times() {
 
     let (mut validator, _, payer_main_lamports, payer_main) =
         write(&ledger_path, &payer_readonly);
-    validator.kill().unwrap();
+    test_ledger_restore::kill_validator(&mut validator);
 
     for _ in 0..5 {
         let mut validator = read(
@@ -59,7 +59,7 @@ fn test_restore_ledger_different_accounts_multiple_times() {
             payer_main_lamports,
             None,
         );
-        validator.kill().unwrap();
+        test_ledger_restore::kill_validator(&mut validator);
     }
 }
 
@@ -75,7 +75,7 @@ fn test_restore_different_accounts_multiple_times_authority_override() {
 
     let (mut validator, _, payer_main_lamports, payer_main) =
         write(&ledger_path, &payer_readonly);
-    validator.kill().unwrap();
+    test_ledger_restore::kill_validator(&mut validator);
 
     for _ in 0..5 {
         let mut validator = read(
@@ -85,7 +85,7 @@ fn test_restore_different_accounts_multiple_times_authority_override() {
             payer_main_lamports,
             Some(original_authority),
         );
-        validator.kill().unwrap();
+        test_ledger_restore::kill_validator(&mut validator);
     }
 }
 

@@ -31,12 +31,12 @@ fn test_restore_preserves_timestamps() {
 
     let (mut validator, slot, signature, block_time, _payer) =
         write(&ledger_path);
-    validator.kill().unwrap();
+    test_ledger_restore::kill_validator(&mut validator);
 
     assert!(slot > SNAPSHOT_FREQUENCY);
 
     let mut validator = read(&ledger_path, signature, block_time, None);
-    validator.kill().unwrap();
+    test_ledger_restore::kill_validator(&mut validator);
 }
 
 #[test]
@@ -48,7 +48,7 @@ fn test_restore_preserves_timestamps_with_authority_override() {
 
     let (mut validator, slot, signature, block_time, _payer) =
         write(&ledger_path);
-    validator.kill().unwrap();
+    test_ledger_restore::kill_validator(&mut validator);
 
     assert!(slot > SNAPSHOT_FREQUENCY);
 
@@ -58,7 +58,7 @@ fn test_restore_preserves_timestamps_with_authority_override() {
         block_time,
         Some(original_authority),
     );
-    validator.kill().unwrap();
+    test_ledger_restore::kill_validator(&mut validator);
 }
 
 fn write(ledger_path: &Path) -> (Child, u64, Signature, i64, Keypair) {

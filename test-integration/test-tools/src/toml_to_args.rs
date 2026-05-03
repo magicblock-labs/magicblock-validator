@@ -103,6 +103,14 @@ pub fn config_to_args(
     args
 }
 
+pub fn program_ids_from_config(config_path: &PathBuf) -> Vec<String> {
+    parse_config(config_path)
+        .programs
+        .into_iter()
+        .map(|program| program.id)
+        .collect()
+}
+
 pub fn rpc_port_from_config(config_path: &PathBuf) -> u16 {
     let config = parse_config(config_path);
     let listen = config

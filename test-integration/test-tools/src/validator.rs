@@ -11,12 +11,18 @@ use magicblock_config::{
     config::LoadableProgram, types::BindAddress, ValidatorParams,
 };
 use rand::{thread_rng, Rng};
+use solana_commitment_config::CommitmentConfig;
+use solana_pubkey::Pubkey;
+use solana_rpc_client::rpc_client::RpcClient;
 use tempfile::TempDir;
 
 use crate::{
     loaded_accounts::LoadedAccounts,
     tmpdir::resolve_tmp_dir,
-    toml_to_args::{config_to_args, rpc_port_from_config, ProgramLoader},
+    toml_to_args::{
+        config_to_args, program_ids_from_config, rpc_port_from_config,
+        ProgramLoader,
+    },
     workspace_paths::path_relative_to_workspace,
 };
 
@@ -141,9 +147,31 @@ pub fn start_test_validator_with_config(
     ];
     let resolved_extra_accounts =
         loaded_accounts.extra_accounts(workspace_dir, &accounts_dir);
-    let accounts = accounts.iter().chain(&resolved_extra_accounts);
+    let readiness_pubkeys = program_ids_from_config(config_path)
+        .into_iter()
+        .chain(
+            accounts
+                .iter()
+                .chain(&resolved_extra_accounts)
+                .map(|(account, _)| account.clone()),
+        )
+        .filter_map(|pubkey| {
+            pubkey.parse::<Pubkey>().map_or_else(
+                |err| {
+                    eprintln!(
+                        "Skipping invalid readiness pubkey {}: {:?}",
+                        pubkey, err
+                    );
+                    None
+                },
+                Some,
+            )
+        })
+        .collect::<Vec<_>>();
 
     let account_args = accounts
+        .iter()
+        .chain(&resolved_extra_accounts)
         .flat_map(|(account, file)| {
             let account_path = accounts_dir.join(file).canonicalize().unwrap();
             vec![
@@ -172,20 +200,29 @@ pub fn start_test_validator_with_config(
     eprintln!("Starting test validator with {:?}", command);
     eprintln!("{}", script);
     let validator = command.spawn().expect("Failed to start validator");
-    wait_for_validator(validator, port)
+    let mut validator = wait_for_validator(validator, port)?;
+    wait_for_required_accounts(&mut validator, port, &readiness_pubkeys)
+        .then_some(validator)
 }
 
 pub fn wait_for_validator(mut validator: Child, port: u16) -> Option<Child> {
     const SLEEP_DURATION: Duration = Duration::from_millis(400);
-    let max_retries = if std::env::var("CI").is_ok() {
-        1500
-    } else {
-        800
-    };
+    let max_retries = validator_startup_max_retries();
 
     for _ in 0..max_retries {
         if TcpStream::connect(format!("0.0.0.0:{}", port)).is_ok() {
             return Some(validator);
+        }
+
+        if let Some(status) = validator
+            .try_wait()
+            .expect("Failed to poll validator process")
+        {
+            eprintln!(
+                "Validator RPC on port {} never listened; process exited early with {}",
+                port, status
+            );
+            return None;
         }
 
         sleep(SLEEP_DURATION);
@@ -197,7 +234,63 @@ pub fn wait_for_validator(mut validator: Child, port: u16) -> Option<Child> {
         max_retries as f32 * SLEEP_DURATION.as_secs_f32()
     );
     validator.kill().expect("Failed to kill validator");
+    validator.wait().expect("Failed to reap validator");
     None
+}
+
+fn wait_for_required_accounts(
+    validator: &mut Child,
+    port: u16,
+    pubkeys: &[Pubkey],
+) -> bool {
+    if pubkeys.is_empty() {
+        return true;
+    }
+
+    const SLEEP_DURATION: Duration = Duration::from_millis(400);
+    let max_retries = validator_startup_max_retries();
+    let rpc_client = RpcClient::new_with_commitment(
+        format!("http://127.0.0.1:{}", port),
+        CommitmentConfig::processed(),
+    );
+
+    for _ in 0..max_retries {
+        if let Ok(accounts) = rpc_client.get_multiple_accounts(pubkeys) {
+            if accounts.iter().all(Option::is_some) {
+                return true;
+            }
+        }
+
+        if let Some(status) = validator
+            .try_wait()
+            .expect("Failed to poll validator process")
+        {
+            eprintln!(
+                "Validator RPC on port {} listened, but required accounts never became ready; process exited with {}",
+                port, status
+            );
+            return false;
+        }
+
+        sleep(SLEEP_DURATION);
+    }
+
+    eprintln!(
+        "Required validator accounts on port {} failed to become ready after {:.1} seconds",
+        port,
+        max_retries as f32 * SLEEP_DURATION.as_secs_f32()
+    );
+    validator.kill().expect("Failed to kill validator");
+    validator.wait().expect("Failed to reap validator");
+    false
+}
+
+fn validator_startup_max_retries() -> usize {
+    if std::env::var("CI").is_ok() {
+        1500
+    } else {
+        800
+    }
 }
 
 pub const TMP_DIR_CONFIG: &str = "TMP_DIR_CONFIG";
@@ -325,6 +418,9 @@ pub fn start_magicblock_validator_with_config_struct_and_temp_dir(
 pub fn cleanup(validator: &mut Child) {
     let _ = validator.kill().inspect_err(|e| {
         eprintln!("ERR: Failed to kill validator: {:?}", e);
+    });
+    let _ = validator.wait().inspect_err(|e| {
+        eprintln!("ERR: Failed to reap validator: {:?}", e);
     });
 }
 

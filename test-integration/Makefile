@@ -126,10 +126,13 @@ setup-table-mania-devnet:
 	$(MAKE) test
 
 test-committor:
-	RUN_TESTS=committor,committor_ix_multi,committor_bundles,committor_bundles_heavy,committor_intent_executor \
+	RUN_TESTS=committor,committor_ix_order,committor_ix_multi,committor_bundles,committor_bundles_heavy,committor_intent_executor,committor_intent_executor_recovery \
 	$(MAKE) test
 test-committor-ix-singles:
 	RUN_TESTS=committor \
+	$(MAKE) test
+test-committor-ix-order:
+	RUN_TESTS=committor_ix_order \
 	$(MAKE) test
 test-committor-ix-multi:
 	RUN_TESTS=committor_ix_multi \
@@ -141,11 +144,17 @@ test-committor-bundles-heavy:
 	RUN_TESTS=committor_bundles_heavy \
 	$(MAKE) test
 test-committor-intent-executor:
+	RUN_TESTS=committor_intent_executor,committor_intent_executor_recovery \
+	$(MAKE) test
+test-committor-intent-executor-errors:
 	RUN_TESTS=committor_intent_executor \
+	$(MAKE) test
+test-committor-intent-executor-recovery:
+	RUN_TESTS=committor_intent_executor_recovery \
 	$(MAKE) test
 setup-committor-devnet:
 	RUST_LOG_STYLE=none \
-	RUN_TESTS=committor,committor_ix_multi,committor_bundles,committor_bundles_heavy,committor_intent_executor \
+	RUN_TESTS=committor,committor_ix_order,committor_ix_multi,committor_bundles,committor_bundles_heavy,committor_intent_executor,committor_intent_executor_recovery \
 	SETUP_ONLY=devnet \
 	$(MAKE) test
 
