@@ -45,7 +45,7 @@ pub(crate) const PENDING_REQUEST_STALE_AFTER: Duration =
 /// another task before giving up. This must be long enough to cover the
 /// full retry/backoff budget of the owner's in-flight fetch+clone operation
 /// so that healthy live requests do not produce spurious
-/// `ChainlinkError::Custom("timeout waiting...")` failures for waiters.
+/// `ChainlinkError::PendingRequestTimeout(...)` failures for waiters.
 /// Kept strictly less than `PENDING_REQUEST_STALE_AFTER` so that stale
 /// eviction remains the outer bound.
 pub(crate) const PENDING_REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
@@ -325,14 +325,11 @@ where
                     let stale_state = entry.remove();
                     let waiters_len = stale_state.waiters.len();
                     for tx in stale_state.waiters {
-                        let _ = tx.send(
-                            PendingRequestCompletion::Failed(
-                                format!(
-                                    "stale pending request evicted for {} after {:?}",
-                                    pubkey, age
-                                ),
+                        let _ = tx.send(PendingRequestCompletion::Failed(
+                            ChainlinkError::StalePendingRequestEvicted(
+                                pubkey, age,
                             ),
-                        );
+                        ));
                     }
                     if waiters_len > 0 {
                         warn!(
@@ -1964,16 +1961,17 @@ where
         // propagate the owner's `FetchAndCloneResult` to all waiters so they
         // can observe `not_found_on_chain` / `missing_delegation_record`
         // metadata for the pubkey they were waiting on.
-        let completion = match &result {
-            Ok(r) => PendingRequestCompletion::Success(r.clone()),
-            Err(err) => PendingRequestCompletion::Failed(err.to_string()),
-        };
         for (pubkey, mut guard) in owner_guards {
-            self.finish_pending_request(
-                pubkey,
-                guard.generation(),
-                completion.clone(),
-            );
+            let completion = match &result {
+                Ok(r) => PendingRequestCompletion::Success(r.clone()),
+                Err(err) => PendingRequestCompletion::Failed(
+                    ChainlinkError::PendingRequestOwnerFailed(
+                        pubkey,
+                        err.to_string(),
+                    ),
+                ),
+            };
+            self.finish_pending_request(pubkey, guard.generation(), completion);
             guard.dismiss();
         }
 
@@ -2019,18 +2017,19 @@ where
                         waiter_results.push((pubkey, owner_result));
                     }
                 }
-                Ok(Ok(PendingRequestCompletion::Failed(msg))) => {
-                    return Err(ChainlinkError::Custom(msg));
+                Ok(Ok(PendingRequestCompletion::Failed(err))) => {
+                    return Err(err);
                 }
                 Ok(Err(err)) => {
-                    return Err(ChainlinkError::Custom(format!(
-                        "pending request owner disappeared for {pubkey}: {err}"
-                    )));
+                    return Err(
+                        ChainlinkError::PendingRequestOwnerDisappeared(
+                            pubkey,
+                            err.to_string(),
+                        ),
+                    );
                 }
                 Err(_) => {
-                    return Err(ChainlinkError::Custom(format!(
-                        "timeout waiting for pending request for {pubkey}"
-                    )));
+                    return Err(ChainlinkError::PendingRequestTimeout(pubkey));
                 }
             }
         }

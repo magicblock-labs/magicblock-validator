@@ -3999,11 +3999,11 @@ async fn test_pending_request_waiter_gets_failure_when_owner_aborts() {
         "Waiter should return error when owner aborts"
     );
 
-    let error_str = format!("{:?}", waiter_result.unwrap_err());
-    assert!(
-        error_str.contains("owner future dropped before cleanup"),
-        "Error should mention owner cancellation, got: {error_str}"
-    );
+    let err = waiter_result.unwrap_err();
+    assert!(matches!(
+        err,
+        ChainlinkError::PendingRequestOwnerDropped(p) if p == account_pubkey
+    ));
 }
 
 #[tokio::test]
@@ -4126,7 +4126,12 @@ async fn test_stale_pending_request_replacement_ignores_old_owner_finish() {
     fetch_cloner.finish_pending_request(
         account_pubkey,
         first_generation,
-        PendingRequestCompletion::Failed("stale owner finished".to_string()),
+        PendingRequestCompletion::Failed(
+            ChainlinkError::PendingRequestOwnerFailed(
+                account_pubkey,
+                "stale owner finished".to_string(),
+            ),
+        ),
     );
 
     let stored_generation = fetch_cloner

@@ -1,5 +1,7 @@
 use std::{sync::Arc, time::Instant};
 
+use super::super::errors::ChainlinkError;
+
 use scc::HashMap;
 use solana_pubkey::Pubkey;
 use tokio::sync::oneshot;
@@ -13,10 +15,40 @@ pub(super) struct PendingRequestState {
     pub waiters: Vec<oneshot::Sender<PendingRequestCompletion>>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub(super) enum PendingRequestCompletion {
     Success(FetchAndCloneResult),
-    Failed(String),
+    Failed(ChainlinkError),
+}
+
+impl Clone for PendingRequestCompletion {
+    fn clone(&self) -> Self {
+        match self {
+            Self::Success(result) => Self::Success(result.clone()),
+            Self::Failed(err) => Self::Failed(clone_pending_request_error(err)),
+        }
+    }
+}
+
+fn clone_pending_request_error(err: &ChainlinkError) -> ChainlinkError {
+    match err {
+        ChainlinkError::PendingRequestTimeout(pubkey) => {
+            ChainlinkError::PendingRequestTimeout(*pubkey)
+        }
+        ChainlinkError::PendingRequestOwnerDropped(pubkey) => {
+            ChainlinkError::PendingRequestOwnerDropped(*pubkey)
+        }
+        ChainlinkError::PendingRequestOwnerDisappeared(pubkey, msg) => {
+            ChainlinkError::PendingRequestOwnerDisappeared(*pubkey, msg.clone())
+        }
+        ChainlinkError::StalePendingRequestEvicted(pubkey, age) => {
+            ChainlinkError::StalePendingRequestEvicted(*pubkey, *age)
+        }
+        ChainlinkError::PendingRequestOwnerFailed(pubkey, msg) => {
+            ChainlinkError::PendingRequestOwnerFailed(*pubkey, msg.clone())
+        }
+        _ => unreachable!("PendingRequestCompletion::Failed must only hold pending-request error variants"),
+    }
 }
 
 pub(super) enum PendingRequestClaim {
@@ -74,7 +106,7 @@ impl Drop for PendingRequestGuard {
         let waiters_len = waiters.len();
         for tx in waiters {
             let _ = tx.send(PendingRequestCompletion::Failed(
-                "owner future dropped before cleanup".to_string(),
+                ChainlinkError::PendingRequestOwnerDropped(self.pubkey),
             ));
         }
         if waiters_len > 0 {
