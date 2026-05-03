@@ -23,6 +23,7 @@ jobs:
     name: Build Artifacts
     env:
       SOLANA_VERSION: v3.1.5
+      HOST_CARGO_JOBS: "8"
     steps:
       - name: Checkout this magicblock-validator
         uses: actions/checkout@v5
@@ -60,69 +61,66 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y lld
         shell: bash
 
-      - name: Build validator binary and SBF programs (parallel)
-        # The host-arch validator build (rustc) and the BPF program builds
-        # (cargo build-sbf, separate toolchain) don't share a compilation
-        # cache, so we kick them off concurrently. SBF programs build serially
-        # within `make programs` because parallel `cargo-build-sbf` invocations
-        # race on the shared platform-tools install (~/.cache/solana/...).
-        # `-fuse-ld=lld` is scoped to the host build only; the BPF target's
-        # `rust-lld` invocation does not accept that argument.
+      - name: Build reusable artifacts (parallel)
+        # The extra-large runner has enough CPU/RAM to overlap independent
+        # build products. Keep SBF builds serial inside `make programs` because
+        # parallel `cargo-build-sbf` invocations race on the shared
+        # platform-tools install (~/.cache/solana/...).
         run: |
           set +e
+          mkdir -p _integration_test_bins/test-runner
+
           RUSTFLAGS="-C link-arg=-fuse-ld=lld" \
-            cargo build --locked --bin magicblock-validator >validator.log 2>&1 &
+            cargo build --locked --bin magicblock-validator -j "$HOST_CARGO_JOBS" >validator.log 2>&1 &
           validator_pid=$!
+
           make -C test-integration programs >programs.log 2>&1 &
           programs_pid=$!
+
+          (
+            set -euo pipefail
+            RUSTFLAGS="-C link-arg=-fuse-ld=lld" \
+            CARGO_PROFILE_TEST_DEBUG=0 \
+              cargo test --manifest-path test-integration/Cargo.toml --locked --no-run --message-format=json -j "$HOST_CARGO_JOBS" \
+                -p schedulecommit-test-security \
+                -p schedulecommit-test-scenarios \
+                -p test-chainlink \
+                -p test-cloning \
+                -p test-ledger-restore \
+                -p test-magicblock-api \
+                -p test-config \
+                -p test-table-mania \
+                -p schedulecommit-committor-service \
+                -p test-pubsub \
+                -p test-schedule-intent \
+                -p test-task-scheduler \
+                > _integration_test_bins/no-run.jsonl
+            RUSTFLAGS="-C link-arg=-fuse-ld=lld" \
+            CARGO_PROFILE_DEV_DEBUG=0 \
+              cargo build --manifest-path test-integration/Cargo.toml --locked -p test-runner --bin run-tests -j "$HOST_CARGO_JOBS"
+            cp test-integration/target/debug/run-tests _integration_test_bins/test-runner/run-tests
+            strip _integration_test_bins/test-runner/run-tests || true
+          ) >integration-build.log 2>&1 &
+          integration_pid=$!
+
           wait $validator_pid
           validator_rc=$?
           wait $programs_pid
           programs_rc=$?
+          wait $integration_pid
+          integration_rc=$?
+
           set -e
           echo "===== validator build (rc=$validator_rc) ====="
           tail -n 400 validator.log || true
           echo "===== SBF program builds (rc=$programs_rc) ====="
           tail -n 400 programs.log || true
-          if [ "$validator_rc" -ne 0 ] || [ "$programs_rc" -ne 0 ]; then
-            echo "validator_rc=$validator_rc programs_rc=$programs_rc"
+          echo "===== integration test binary builds (rc=$integration_rc) ====="
+          tail -n 400 integration-build.log || true
+          if [ "$validator_rc" -ne 0 ] || [ "$programs_rc" -ne 0 ] || [ "$integration_rc" -ne 0 ]; then
+            echo "validator_rc=$validator_rc programs_rc=$programs_rc integration_rc=$integration_rc"
             exit 1
           fi
-        shell: bash
-        working-directory: magicblock-validator
-
-      - name: Precompile integration test binaries
-        run: |
-          set -euo pipefail
-          mkdir -p _integration_test_bins
-          RUSTFLAGS="-C link-arg=-fuse-ld=lld" \
-          CARGO_PROFILE_TEST_DEBUG=0 \
-            cargo test --manifest-path test-integration/Cargo.toml --locked --no-run --message-format=json \
-              -p schedulecommit-test-security \
-              -p schedulecommit-test-scenarios \
-              -p test-chainlink \
-              -p test-cloning \
-              -p test-ledger-restore \
-              -p test-magicblock-api \
-              -p test-config \
-              -p test-table-mania \
-              -p schedulecommit-committor-service \
-              -p test-pubsub \
-              -p test-schedule-intent \
-              -p test-task-scheduler \
-              > _integration_test_bins/no-run.jsonl
-        shell: bash
-        working-directory: magicblock-validator
-
-      - name: Build test runner binary
-        run: |
-          set -euo pipefail
-          mkdir -p _integration_test_bins/test-runner
-          RUSTFLAGS="-C link-arg=-fuse-ld=lld" \
-          CARGO_PROFILE_DEV_DEBUG=0 \
-            cargo build --manifest-path test-integration/Cargo.toml --locked -p test-runner --bin run-tests
-          cp test-integration/target/debug/run-tests _integration_test_bins/test-runner/run-tests
-          strip _integration_test_bins/test-runner/run-tests || true
         shell: bash
         working-directory: magicblock-validator
 
@@ -383,26 +381,26 @@ jobs:
     strategy:
       matrix:
         batch_tests:
+          - "committor"
+          - "committor_bundles"
+          - "committor_intent_executor"
+          - "committor_bundles_heavy"
+          - "committor_intent_executor_recovery"
+          - "committor_ix_order"
+          - "table_mania"
+          - "committor_intent_bundles"
+          - "committor_ix_multi"
           - "schedulecommit"
-          - "chainlink"
-          - "cloning"
+          - "committor_preparators"
           - "restore_ledger"
+          - "committor_commitfinalize"
+          - "chainlink"
+          - "schedule_intents"
+          - "cloning"
+          - "task-scheduler"
+          - "pubsub"
           - "magicblock_api"
           - "config"
-          - "table_mania"
-          - "committor"
-          - "committor_preparators"
-          - "committor_ix_order"
-          - "committor_ix_multi"
-          - "committor_bundles"
-          - "committor_intent_bundles"
-          - "committor_bundles_heavy"
-          - "committor_commitfinalize"
-          - "committor_intent_executor"
-          - "committor_intent_executor_recovery"
-          - "pubsub"
-          - "schedule_intents"
-          - "task-scheduler"
       # While we iterate on this branch we want a single shard failure to
       # cancel the rest of the matrix so we don't burn ~50 min of runner time
       # on every false start. Flip back to `false` once it's green & stable.
@@ -413,13 +411,6 @@ jobs:
         uses: actions/checkout@v5
         with:
           path: magicblock-validator
-
-      - uses: ./magicblock-validator/.github/actions/setup-build-env
-        with:
-          build_cache_key_name: "magicblock-validator-ci-test-integration-${{ hashFiles('magicblock-validator/Cargo.lock') }}"
-          rust_toolchain_release: "1.94.1"
-          github_access_token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
-          github_token: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: ./magicblock-validator/.github/actions/setup-solana
         with:
