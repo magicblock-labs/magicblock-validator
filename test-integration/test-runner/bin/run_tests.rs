@@ -220,10 +220,10 @@ fn run_chainlink_tests(
     }
 }
 
-// The committor suite is split across ten CI shards to keep wall-clock down.
-// The `test_ix_commit_local` file alone takes ~33 min and is sliced into seven
-// subsets via libtest name filters; the small preparator files and dedicated
-// `test_intent_executor` file are split into separate shards too.
+// The committor suite is split across CI shards to keep wall-clock down.
+// The `test_ix_commit_local` file alone takes ~33 min and is sliced into
+// smaller subsets; exact filters are used for the split shards whose names
+// would otherwise overlap under libtest substring matching.
 //
 // Locally (no RUN_TESTS), every subset executes back-to-back against the same
 // devnet validator so total coverage is unchanged.
@@ -232,6 +232,7 @@ struct CommittorSubset {
     /// Test files whose names are filtered down via `name_filters`.
     files: &'static [&'static str],
     name_filters: &'static [&'static str],
+    exact_name_filters: &'static [&'static str],
     /// Test files run end-to-end with no name filter. Used to bundle small,
     /// independent files (e.g. the preparator suites) onto a shard without
     /// their tests being unintentionally excluded by `name_filters`.
@@ -240,9 +241,29 @@ struct CommittorSubset {
 
 // Single-account commits.
 const COMMITTOR_SUBSET_IX_SINGLES: CommittorSubset = CommittorSubset {
-    label: "committor (ix_singles)",
+    label: "committor (ix_singles_core)",
     files: &["test_ix_commit_local"],
-    name_filters: &["test_ix_commit_single_"],
+    name_filters: &[],
+    exact_name_filters: &[
+        "test_ix_commit_single_account_100_bytes",
+        "test_ix_commit_single_account_256_bytes",
+        "test_ix_commit_single_account_257_bytes",
+        "test_ix_commit_single_account_800_bytes",
+        "test_ix_commit_single_account_one_kb",
+    ],
+    extra_files: &[],
+};
+const COMMITTOR_SUBSET_IX_SINGLES_LARGE: CommittorSubset = CommittorSubset {
+    label: "committor (ix_singles_large)",
+    files: &["test_ix_commit_local"],
+    name_filters: &[],
+    exact_name_filters: &[
+        "test_ix_commit_single_account_100_bytes_and_undelegate",
+        "test_ix_commit_single_account_256_bytes_and_undelegate",
+        "test_ix_commit_single_account_257_bytes_and_undelegate",
+        "test_ix_commit_single_account_800_bytes_and_undelegate",
+        "test_ix_commit_single_account_ten_kb",
+    ],
     extra_files: &[],
 };
 // Small preparator files, run unfiltered so we don't drop `test_prepare_*` /
@@ -251,6 +272,7 @@ const COMMITTOR_SUBSET_PREPARATORS: CommittorSubset = CommittorSubset {
     label: "committor (preparators)",
     files: &[],
     name_filters: &[],
+    exact_name_filters: &[],
     extra_files: &["test_delivery_preparator", "test_transaction_preparator"],
 };
 // Order-book commit/finalize tests.
@@ -258,6 +280,7 @@ const COMMITTOR_SUBSET_IX_ORDER: CommittorSubset = CommittorSubset {
     label: "committor (ix_order)",
     files: &["test_ix_commit_local"],
     name_filters: &["test_ix_commit_order_", "test_ix_commit_finalize_order_"],
+    exact_name_filters: &[],
     extra_files: &[],
 };
 // Multi-account commits (`test_ix_commit_two/three/four/six_*`) — heavier
@@ -271,13 +294,30 @@ const COMMITTOR_SUBSET_IX_MULTI: CommittorSubset = CommittorSubset {
         "test_ix_commit_four_",
         "test_ix_commit_six_",
     ],
+    exact_name_filters: &[],
     extra_files: &[],
 };
 // 20-account bundle tests.
 const COMMITTOR_SUBSET_BUNDLES_HEAVY: CommittorSubset = CommittorSubset {
-    label: "committor (bundles_heavy)",
+    label: "committor (bundles_heavy_head)",
     files: &["test_ix_commit_local"],
-    name_filters: &["test_commit_20_"],
+    name_filters: &[],
+    exact_name_filters: &[
+        "test_commit_20_accounts_1kb_bundle_size_2",
+        "test_commit_20_accounts_1kb_bundle_size_3",
+        "test_commit_20_accounts_1kb_bundle_size_4",
+    ],
+    extra_files: &[],
+};
+const COMMITTOR_SUBSET_BUNDLES_HEAVY_TAIL: CommittorSubset = CommittorSubset {
+    label: "committor (bundles_heavy_tail)",
+    files: &["test_ix_commit_local"],
+    name_filters: &[],
+    exact_name_filters: &[
+        "test_commit_20_accounts_1kb_bundle_size_6",
+        "test_commit_20_accounts_1kb_bundle_size_8",
+        "test_commit_20_accounts_1kb_bundle_size_20",
+    ],
     extra_files: &[],
 };
 // Commitfinalize variants.
@@ -285,13 +325,36 @@ const COMMITTOR_SUBSET_COMMITFINALIZE: CommittorSubset = CommittorSubset {
     label: "committor (commitfinalize)",
     files: &["test_ix_commit_local"],
     name_filters: &["test_commitfinalize_"],
+    exact_name_filters: &[],
     extra_files: &[],
 };
 // Smaller bundle tests.
 const COMMITTOR_SUBSET_BUNDLES: CommittorSubset = CommittorSubset {
-    label: "committor (bundles)",
+    label: "committor (bundles_base)",
     files: &["test_ix_commit_local"],
-    name_filters: &["test_commit_5_", "test_commit_8_"],
+    name_filters: &[],
+    exact_name_filters: &[
+        "test_commit_5_accounts_1kb_bundle_size_3",
+        "test_commit_5_accounts_1kb_bundle_size_4",
+    ],
+    extra_files: &[],
+};
+const COMMITTOR_SUBSET_BUNDLES_UNDELEGATE: CommittorSubset = CommittorSubset {
+    label: "committor (bundles_undelegate)",
+    files: &["test_ix_commit_local"],
+    name_filters: &[],
+    exact_name_filters: &[
+        "test_commit_5_accounts_1kb_bundle_size_3_undelegate_all",
+        "test_commit_5_accounts_1kb_bundle_size_4_undelegate_all",
+        "test_commit_5_accounts_1kb_bundle_size_5_undelegate_all",
+    ],
+    extra_files: &[],
+};
+const COMMITTOR_SUBSET_BUNDLES_8: CommittorSubset = CommittorSubset {
+    label: "committor (bundles_8)",
+    files: &["test_ix_commit_local"],
+    name_filters: &[],
+    exact_name_filters: &["test_commit_8_accounts_1kb_bundle_size_8"],
     extra_files: &[],
 };
 // Intent-bundle composition tests.
@@ -299,19 +362,34 @@ const COMMITTOR_SUBSET_INTENT_BUNDLES: CommittorSubset = CommittorSubset {
     label: "committor (intent_bundles)",
     files: &["test_ix_commit_local"],
     name_filters: &["test_ix_execute_intent_bundle_"],
+    exact_name_filters: &[],
     extra_files: &[],
 };
 // The dedicated intent_executor file is split by test-name groups.
 const COMMITTOR_SUBSET_INTENT_EXECUTOR_ERRORS: CommittorSubset =
     CommittorSubset {
-        label: "committor (intent_executor_errors)",
+        label: "committor (intent_executor_parsing)",
         files: &["test_intent_executor"],
-        name_filters: &[
-            "test_commit_id_error_",
-            "test_undelegation_error_",
-            "test_action_error_",
-            "test_cpi_limits_error_",
-            "test_min_context_slot_not_reached_error_",
+        name_filters: &[],
+        exact_name_filters: &[
+            "test_commit_id_error_parsing",
+            "test_undelegation_error_parsing",
+            "test_action_error_parsing",
+            "test_cpi_limits_error_parsing",
+            "test_min_context_slot_not_reached_error_parsing",
+        ],
+        extra_files: &[],
+    };
+const COMMITTOR_SUBSET_INTENT_EXECUTOR_BASIC_RECOVERY: CommittorSubset =
+    CommittorSubset {
+        label: "committor (intent_executor_basic_recovery)",
+        files: &["test_intent_executor"],
+        name_filters: &[],
+        exact_name_filters: &[
+            "test_commit_id_error_recovery",
+            "test_undelegation_error_recovery",
+            "test_action_error_recovery",
+            "test_cpi_limits_error_recovery",
         ],
         extra_files: &[],
     };
@@ -319,11 +397,23 @@ const COMMITTOR_SUBSET_INTENT_EXECUTOR_RECOVERY: CommittorSubset =
     CommittorSubset {
         label: "committor (intent_executor_recovery)",
         files: &["test_intent_executor"],
-        name_filters: &[
+        name_filters: &[],
+        exact_name_filters: &[
             "test_commit_id_and_action_errors_recovery",
             "test_commit_id_actions_cpi_limit_errors_recovery",
             "test_commit_unfinalized_account_recovery",
-            "test_action_callback_fired_",
+            "test_commit_unfinalized_account_recovery_two_stage",
+        ],
+        extra_files: &[],
+    };
+const COMMITTOR_SUBSET_INTENT_EXECUTOR_CALLBACKS: CommittorSubset =
+    CommittorSubset {
+        label: "committor (intent_executor_callbacks)",
+        files: &["test_intent_executor"],
+        name_filters: &[],
+        exact_name_filters: &[
+            "test_action_callback_fired_on_failure",
+            "test_action_callback_fired_on_timeout",
             "test_callbacks_fired_in_two_stage",
         ],
         extra_files: &[],
@@ -338,20 +428,38 @@ fn run_table_mania_and_committor_tests(
     // committor tests it owns.
     let committor_shards: &[(&str, &CommittorSubset)] = &[
         ("committor", &COMMITTOR_SUBSET_IX_SINGLES),
+        ("committor_single_large", &COMMITTOR_SUBSET_IX_SINGLES_LARGE),
         ("committor_preparators", &COMMITTOR_SUBSET_PREPARATORS),
         ("committor_ix_order", &COMMITTOR_SUBSET_IX_ORDER),
         ("committor_ix_multi", &COMMITTOR_SUBSET_IX_MULTI),
         ("committor_bundles", &COMMITTOR_SUBSET_BUNDLES),
+        (
+            "committor_bundles_undelegate",
+            &COMMITTOR_SUBSET_BUNDLES_UNDELEGATE,
+        ),
+        ("committor_bundles_8", &COMMITTOR_SUBSET_BUNDLES_8),
         ("committor_intent_bundles", &COMMITTOR_SUBSET_INTENT_BUNDLES),
         ("committor_bundles_heavy", &COMMITTOR_SUBSET_BUNDLES_HEAVY),
+        (
+            "committor_bundles_heavy_tail",
+            &COMMITTOR_SUBSET_BUNDLES_HEAVY_TAIL,
+        ),
         ("committor_commitfinalize", &COMMITTOR_SUBSET_COMMITFINALIZE),
         (
             "committor_intent_executor",
             &COMMITTOR_SUBSET_INTENT_EXECUTOR_ERRORS,
         ),
         (
+            "committor_intent_executor_recovery_basic",
+            &COMMITTOR_SUBSET_INTENT_EXECUTOR_BASIC_RECOVERY,
+        ),
+        (
             "committor_intent_executor_recovery",
             &COMMITTOR_SUBSET_INTENT_EXECUTOR_RECOVERY,
+        ),
+        (
+            "committor_intent_executor_callbacks",
+            &COMMITTOR_SUBSET_INTENT_EXECUTOR_CALLBACKS,
         ),
     ];
 
@@ -428,6 +536,7 @@ fn run_table_mania_and_committor_tests(
                         RunTestConfig {
                             test_files: subset.files,
                             test_name_filters: subset.name_filters,
+                            exact_name_filters: subset.exact_name_filters,
                             ..Default::default()
                         },
                     ));
@@ -445,11 +554,12 @@ fn run_table_mania_and_committor_tests(
 
             for (label, cfg) in invocations {
                 eprintln!(
-                    "Running {} tests in {} (files: {:?}, filters: {:?})",
+                    "Running {} tests in {} (files: {:?}, filters: {:?}, exact_filters: {:?})",
                     label,
                     test_committor_dir,
                     cfg.test_files,
                     cfg.test_name_filters,
+                    cfg.exact_name_filters,
                 );
                 match run_test(test_committor_dir.clone(), cfg) {
                     Ok(output) => {
@@ -984,6 +1094,9 @@ struct RunTestConfig<'a> {
     /// tests whose name *contains* it (libtest semantics, OR'd across entries).
     /// Used to slice a heavy test binary across multiple CI shards.
     test_name_filters: &'a [&'a str],
+    /// Exact libtest names. Each exact name is executed as a separate libtest
+    /// invocation so similarly named tests cannot be pulled into the shard.
+    exact_name_filters: &'a [&'a str],
 }
 
 fn run_test(
@@ -1025,6 +1138,41 @@ fn run_test_once(
         return run_prebuilt_tests(Path::new(&manifest_dir), config, &bin_dir);
     }
 
+    if !config.exact_name_filters.is_empty() {
+        let mut combined_status_ok = true;
+        let mut combined_stdout = Vec::new();
+        let mut combined_stderr = Vec::new();
+
+        for exact_filter in config.exact_name_filters {
+            let output = run_cargo_test_command(
+                manifest_dir.clone(),
+                config,
+                Some(exact_filter),
+            )?;
+            combined_status_ok &= output.status.success();
+            combined_stdout.extend_from_slice(&output.stdout);
+            combined_stderr.extend_from_slice(&output.stderr);
+
+            if !output.status.success() {
+                break;
+            }
+        }
+
+        return Ok(combined_output(
+            combined_status_ok,
+            combined_stdout,
+            combined_stderr,
+        ));
+    }
+
+    run_cargo_test_command(manifest_dir, config, None)
+}
+
+fn run_cargo_test_command(
+    manifest_dir: String,
+    config: &RunTestConfig,
+    exact_filter: Option<&str>,
+) -> io::Result<process::Output> {
     let mut cmd = process::Command::new("cargo");
     cmd.env(
         "RUST_LOG",
@@ -1041,8 +1189,12 @@ fn run_test_once(
         cmd.arg(test_fn_name);
     }
     cmd.arg("--").arg("--test-threads=1").arg("--nocapture");
-    for filter in config.test_name_filters {
-        cmd.arg(filter);
+    if let Some(exact_filter) = exact_filter {
+        cmd.arg("--exact").arg(exact_filter);
+    } else {
+        for filter in config.test_name_filters {
+            cmd.arg(filter);
+        }
     }
     cmd.current_dir(manifest_dir.clone());
     println!("RUNNING: {:?}", cmd);
@@ -1061,44 +1213,95 @@ fn run_prebuilt_tests(
 
     for test_target in test_targets {
         let test_bin = resolve_prebuilt_test_bin(bin_dir, &test_target)?;
-        let mut cmd = process::Command::new(test_bin);
-        cmd.env(
-            "RUST_LOG",
-            std::env::var("RUST_LOG").unwrap_or_else(|_| "info".to_string()),
-        )
-        .arg("--test-threads=1")
-        .arg("--nocapture");
+        if config.exact_name_filters.is_empty() {
+            let output = run_prebuilt_test_command(
+                &test_bin,
+                manifest_dir,
+                config,
+                None,
+            )?;
+            combined_status_ok &= output.status.success();
+            combined_stdout.extend_from_slice(&output.stdout);
+            combined_stderr.extend_from_slice(&output.stderr);
 
-        if let Some(test_fn_name) = config.test_fn_name {
-            cmd.arg(test_fn_name);
-        }
-        for filter in config.test_name_filters {
-            cmd.arg(filter);
-        }
+            if !output.status.success() {
+                break;
+            }
+        } else {
+            for exact_filter in config.exact_name_filters {
+                let output = run_prebuilt_test_command(
+                    &test_bin,
+                    manifest_dir,
+                    config,
+                    Some(exact_filter),
+                )?;
+                combined_status_ok &= output.status.success();
+                combined_stdout.extend_from_slice(&output.stdout);
+                combined_stderr.extend_from_slice(&output.stderr);
 
-        cmd.current_dir(manifest_dir);
-        println!("RUNNING: {:?}", cmd);
-        let output = Teepee::new(cmd).output()?;
-        combined_status_ok &= output.status.success();
-        combined_stdout.extend_from_slice(&output.stdout);
-        combined_stderr.extend_from_slice(&output.stderr);
-
-        if !output.status.success() {
-            break;
+                if !output.status.success() {
+                    break;
+                }
+            }
+            if !combined_status_ok {
+                break;
+            }
         }
     }
 
-    Ok(Output {
-        status: if combined_status_ok {
+    Ok(combined_output(
+        combined_status_ok,
+        combined_stdout,
+        combined_stderr,
+    ))
+}
+
+fn run_prebuilt_test_command(
+    test_bin: &Path,
+    manifest_dir: &Path,
+    config: &RunTestConfig,
+    exact_filter: Option<&str>,
+) -> io::Result<process::Output> {
+    let mut cmd = process::Command::new(test_bin);
+    cmd.env(
+        "RUST_LOG",
+        std::env::var("RUST_LOG").unwrap_or_else(|_| "info".to_string()),
+    )
+    .arg("--test-threads=1")
+    .arg("--nocapture");
+
+    if let Some(test_fn_name) = config.test_fn_name {
+        cmd.arg(test_fn_name);
+    }
+    if let Some(exact_filter) = exact_filter {
+        cmd.arg("--exact").arg(exact_filter);
+    } else {
+        for filter in config.test_name_filters {
+            cmd.arg(filter);
+        }
+    }
+
+    cmd.current_dir(manifest_dir);
+    println!("RUNNING: {:?}", cmd);
+    Teepee::new(cmd).output()
+}
+
+fn combined_output(
+    status_ok: bool,
+    stdout: Vec<u8>,
+    stderr: Vec<u8>,
+) -> Output {
+    Output {
+        status: if status_ok {
             process::ExitStatus::default()
         } else {
             process::Command::new("false")
                 .status()
                 .unwrap_or_else(|_| process::ExitStatus::default())
         },
-        stdout: combined_stdout,
-        stderr: combined_stderr,
-    })
+        stdout,
+        stderr,
+    }
 }
 
 fn resolve_test_targets(

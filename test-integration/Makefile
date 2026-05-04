@@ -21,6 +21,11 @@ SCHEDULECOMMIT_SECURITY_SO := $(DEPLOY_DIR)/program_schedulecommit_security.so
 COMMITTOR_PROGRAM_SO := $(ROOT_DEPLOY_DIR)/magicblock_committor_program.so
 
 PROGRAMS_SO := $(FLEXI_COUNTER_SO) $(SCHEDULECOMMIT_SO) $(SCHEDULECOMMIT_SECURITY_SO) $(COMMITTOR_PROGRAM_SO)
+COMMITTOR_IX_SINGLE_TESTS := committor,committor_single_large
+COMMITTOR_BUNDLE_TESTS := committor_bundles,committor_bundles_undelegate,committor_bundles_8
+COMMITTOR_BUNDLE_HEAVY_TESTS := committor_bundles_heavy,committor_bundles_heavy_tail
+COMMITTOR_INTENT_EXECUTOR_TESTS := committor_intent_executor,committor_intent_executor_recovery_basic,committor_intent_executor_recovery,committor_intent_executor_callbacks
+COMMITTOR_TESTS := $(COMMITTOR_IX_SINGLE_TESTS),committor_preparators,committor_ix_order,committor_ix_multi,$(COMMITTOR_BUNDLE_TESTS),committor_intent_bundles,$(COMMITTOR_BUNDLE_HEAVY_TESTS),committor_commitfinalize,$(COMMITTOR_INTENT_EXECUTOR_TESTS)
 
 list:
 	@cat Makefile | grep "^[a-z].*:" | sed 's/:.*//g'
@@ -133,10 +138,10 @@ setup-table-mania-devnet:
 	$(MAKE) test
 
 test-committor:
-	RUN_TESTS=committor,committor_preparators,committor_ix_order,committor_ix_multi,committor_bundles,committor_intent_bundles,committor_bundles_heavy,committor_commitfinalize,committor_intent_executor,committor_intent_executor_recovery \
+	RUN_TESTS=$(COMMITTOR_TESTS) \
 	$(MAKE) test
 test-committor-ix-singles:
-	RUN_TESTS=committor \
+	RUN_TESTS=$(COMMITTOR_IX_SINGLE_TESTS) \
 	$(MAKE) test
 test-committor-preparators:
 	RUN_TESTS=committor_preparators \
@@ -148,29 +153,29 @@ test-committor-ix-multi:
 	RUN_TESTS=committor_ix_multi \
 	$(MAKE) test
 test-committor-bundles:
-	RUN_TESTS=committor_bundles \
+	RUN_TESTS=$(COMMITTOR_BUNDLE_TESTS) \
 	$(MAKE) test
 test-committor-intent-bundles:
 	RUN_TESTS=committor_intent_bundles \
 	$(MAKE) test
 test-committor-bundles-heavy:
-	RUN_TESTS=committor_bundles_heavy \
+	RUN_TESTS=$(COMMITTOR_BUNDLE_HEAVY_TESTS) \
 	$(MAKE) test
 test-committor-commitfinalize:
 	RUN_TESTS=committor_commitfinalize \
 	$(MAKE) test
 test-committor-intent-executor:
-	RUN_TESTS=committor_intent_executor,committor_intent_executor_recovery \
+	RUN_TESTS=$(COMMITTOR_INTENT_EXECUTOR_TESTS) \
 	$(MAKE) test
 test-committor-intent-executor-errors:
 	RUN_TESTS=committor_intent_executor \
 	$(MAKE) test
 test-committor-intent-executor-recovery:
-	RUN_TESTS=committor_intent_executor_recovery \
+	RUN_TESTS=committor_intent_executor_recovery_basic,committor_intent_executor_recovery,committor_intent_executor_callbacks \
 	$(MAKE) test
 setup-committor-devnet:
 	RUST_LOG_STYLE=none \
-	RUN_TESTS=committor,committor_preparators,committor_ix_order,committor_ix_multi,committor_bundles,committor_intent_bundles,committor_bundles_heavy,committor_commitfinalize,committor_intent_executor,committor_intent_executor_recovery \
+	RUN_TESTS=$(COMMITTOR_TESTS) \
 	SETUP_ONLY=devnet \
 	$(MAKE) test
 

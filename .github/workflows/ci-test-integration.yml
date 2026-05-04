@@ -11,19 +11,55 @@ on:
     types: [opened, reopened, synchronize, ready_for_review]
 
 jobs:
-  # The build job exists purely to produce reusable artifacts (the validator
-  # binary and the SBF program `.so` files) so the matrix shards never have to
-  # invoke `cargo build` for those, nor `cargo build-sbf`. That removes minutes
-  # of redundant work from each shard.
-  build:
-    # `extra-large` is more expensive per minute but the build job is the
-    # hard serialization point in front of the matrix; every minute
-    # we save here saves a minute on the critical path.
+  # These producer jobs exist purely to produce reusable artifacts so matrix
+  # shards never invoke `cargo build` / `cargo build-sbf`. Keep the two host
+  # Rust builds on extra-large runners because the slowest producer gates the
+  # whole matrix.
+  build_validator:
     runs-on: extra-large
-    name: Build Artifacts
+    name: Build Validator Artifact
+    env:
+      HOST_CARGO_JOBS: "8"
+    steps:
+      - name: Checkout this magicblock-validator
+        uses: actions/checkout@v5
+        with:
+          path: magicblock-validator
+
+      - uses: ./magicblock-validator/.github/actions/setup-build-env
+        with:
+          build_cache_key_name: "magicblock-validator-ci-test-integration-${{ hashFiles('magicblock-validator/Cargo.lock') }}"
+          rust_toolchain_release: "1.94.1"
+          github_access_token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+      # lld typically halves the link step on large rust workspaces.
+      - name: Install lld linker
+        run: sudo apt-get update && sudo apt-get install -y lld
+        shell: bash
+
+      - name: Build validator binary
+        run: |
+          RUSTFLAGS="-C link-arg=-fuse-ld=lld" \
+            cargo build --locked --bin magicblock-validator -j "$HOST_CARGO_JOBS"
+          strip target/debug/magicblock-validator || true
+        shell: bash
+        working-directory: magicblock-validator
+
+      - name: Upload validator binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: magicblock-validator-bin
+          path: magicblock-validator/target/debug/magicblock-validator
+          retention-days: 1
+          if-no-files-found: error
+          compression-level: 0
+
+  build_sbf:
+    runs-on: ubuntu-latest-m
+    name: Build SBF Artifacts
     env:
       SOLANA_VERSION: v3.1.5
-      HOST_CARGO_JOBS: "8"
     steps:
       - name: Checkout this magicblock-validator
         uses: actions/checkout@v5
@@ -56,83 +92,81 @@ jobs:
           # artifacts produced by the previous compiler.
           key: sbf-programs-${{ runner.os }}-${{ runner.arch }}-rust1.94.1-solana${{ env.SOLANA_VERSION }}-${{ hashFiles('magicblock-validator/Cargo.lock', 'magicblock-validator/test-integration/programs/**', 'magicblock-validator/magicblock-committor-program/**', 'magicblock-validator/programs/**', 'magicblock-validator/magicblock-magic-program-api/**', 'magicblock-validator/magicblock-core/**') }}
 
+      - name: Build SBF programs
+        run: make -C test-integration programs
+        shell: bash
+        working-directory: magicblock-validator
+
+      - name: Upload SBF programs
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbf-programs
+          path: |
+            magicblock-validator/target/deploy/*.so
+            magicblock-validator/test-integration/target/deploy/*.so
+          retention-days: 1
+          if-no-files-found: error
+
+  build_integration_tests:
+    runs-on: extra-large
+    name: Build Integration Test Artifacts
+    env:
+      HOST_CARGO_JOBS: "8"
+    steps:
+      - name: Checkout this magicblock-validator
+        uses: actions/checkout@v5
+        with:
+          path: magicblock-validator
+
+      - uses: ./magicblock-validator/.github/actions/setup-build-env
+        with:
+          build_cache_key_name: "magicblock-validator-ci-test-integration-${{ hashFiles('magicblock-validator/Cargo.lock') }}"
+          rust_toolchain_release: "1.94.1"
+          github_access_token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
       # lld typically halves the link step on large rust workspaces.
       - name: Install lld linker
         run: sudo apt-get update && sudo apt-get install -y lld
         shell: bash
 
-      - name: Build reusable artifacts (parallel)
-        # The extra-large runner has enough CPU/RAM to overlap independent
-        # build products. Keep SBF builds serial inside `make programs` because
-        # parallel `cargo-build-sbf` invocations race on the shared
-        # platform-tools install (~/.cache/solana/...).
+      - name: Build integration test binaries
         run: |
-          set +e
+          set -euxo pipefail
           mkdir -p _integration_test_bins/test-runner
-
           RUSTFLAGS="-C link-arg=-fuse-ld=lld" \
-            cargo build --locked --bin magicblock-validator -j "$HOST_CARGO_JOBS" >validator.log 2>&1 &
-          validator_pid=$!
-
-          make -C test-integration programs >programs.log 2>&1 &
-          programs_pid=$!
-
-          (
-            set -euo pipefail
-            RUSTFLAGS="-C link-arg=-fuse-ld=lld" \
-            CARGO_PROFILE_TEST_DEBUG=0 \
-              cargo test --manifest-path test-integration/Cargo.toml --locked --no-run --message-format=json -j "$HOST_CARGO_JOBS" \
-                -p schedulecommit-test-security \
-                -p schedulecommit-test-scenarios \
-                -p test-chainlink \
-                -p test-cloning \
-                -p test-ledger-restore \
-                -p test-magicblock-api \
-                -p test-config \
-                -p test-table-mania \
-                -p schedulecommit-committor-service \
-                -p test-pubsub \
-                -p test-schedule-intent \
-                -p test-task-scheduler \
-                > _integration_test_bins/no-run.jsonl
-            RUSTFLAGS="-C link-arg=-fuse-ld=lld" \
-            CARGO_PROFILE_DEV_DEBUG=0 \
-              cargo build --manifest-path test-integration/Cargo.toml --locked -p test-runner --bin run-tests -j "$HOST_CARGO_JOBS"
-            cp test-integration/target/debug/run-tests _integration_test_bins/test-runner/run-tests
-            strip _integration_test_bins/test-runner/run-tests || true
-          ) >integration-build.log 2>&1 &
-          integration_pid=$!
-
-          wait $validator_pid
-          validator_rc=$?
-          wait $programs_pid
-          programs_rc=$?
-          wait $integration_pid
-          integration_rc=$?
-
-          set -e
-          echo "===== validator build (rc=$validator_rc) ====="
-          tail -n 400 validator.log || true
-          echo "===== SBF program builds (rc=$programs_rc) ====="
-          tail -n 400 programs.log || true
-          echo "===== integration test binary builds (rc=$integration_rc) ====="
-          tail -n 400 integration-build.log || true
-          if [ "$validator_rc" -ne 0 ] || [ "$programs_rc" -ne 0 ] || [ "$integration_rc" -ne 0 ]; then
-            echo "validator_rc=$validator_rc programs_rc=$programs_rc integration_rc=$integration_rc"
-            exit 1
-          fi
+          CARGO_PROFILE_TEST_DEBUG=0 \
+            cargo test --manifest-path test-integration/Cargo.toml --locked --no-run --message-format=json -j "$HOST_CARGO_JOBS" \
+              -p schedulecommit-test-security \
+              -p schedulecommit-test-scenarios \
+              -p test-chainlink \
+              -p test-cloning \
+              -p test-ledger-restore \
+              -p test-magicblock-api \
+              -p test-config \
+              -p test-table-mania \
+              -p schedulecommit-committor-service \
+              -p test-pubsub \
+              -p test-schedule-intent \
+              -p test-task-scheduler \
+              > _integration_test_bins/no-run.jsonl
+          RUSTFLAGS="-C link-arg=-fuse-ld=lld" \
+          CARGO_PROFILE_DEV_DEBUG=0 \
+            cargo build --manifest-path test-integration/Cargo.toml --locked -p test-runner --bin run-tests -j "$HOST_CARGO_JOBS"
+          cp test-integration/target/debug/run-tests _integration_test_bins/test-runner/run-tests
+          strip _integration_test_bins/test-runner/run-tests || true
         shell: bash
         working-directory: magicblock-validator
 
       - name: Collect integration test binaries
         run: |
           set -euxo pipefail
-          rm -rf _integration_test_bins/shards
-          mkdir -p _integration_test_bins/shards
+          rm -rf _integration_test_bins/artifacts
+          mkdir -p _integration_test_bins/artifacts
 
           copy_test_bin() {
             local test_file="$1"
-            local shard="$2"
+            local artifact="$2"
             local matches_file
             local src_path
             src_path="$(realpath "$test_file")"
@@ -145,17 +179,17 @@ jobs:
               exit 1
             fi
             test_bin="$(sed -n '1p' "$matches_file")"
-            mkdir -p "_integration_test_bins/shards/${shard}"
-            dest="_integration_test_bins/shards/${shard}/$(basename "$test_bin")"
+            mkdir -p "_integration_test_bins/artifacts/${artifact}"
+            dest="_integration_test_bins/artifacts/${artifact}/$(basename "$test_bin")"
             cp "$test_bin" "$dest"
             strip "$dest" || true
           }
 
           copy_package_tests() {
             local package_dir="$1"
-            local shard="$2"
+            local artifact="$2"
             while IFS= read -r test_file; do
-              copy_test_bin "$test_file" "$shard"
+              copy_test_bin "$test_file" "$artifact"
             done < <(find "$package_dir/tests" -maxdepth 1 -name '*.rs' | sort)
           }
 
@@ -167,33 +201,18 @@ jobs:
           copy_package_tests test-integration/test-magicblock-api magicblock_api
           copy_package_tests test-integration/test-config config
           copy_package_tests test-integration/test-table-mania table_mania
-          copy_test_bin test-integration/test-committor-service/tests/test_ix_commit_local.rs committor
-          copy_test_bin test-integration/test-committor-service/tests/test_delivery_preparator.rs committor_preparators
-          copy_test_bin test-integration/test-committor-service/tests/test_transaction_preparator.rs committor_preparators
-          copy_test_bin test-integration/test-committor-service/tests/test_ix_commit_local.rs committor_ix_order
-          copy_test_bin test-integration/test-committor-service/tests/test_ix_commit_local.rs committor_ix_multi
-          copy_test_bin test-integration/test-committor-service/tests/test_ix_commit_local.rs committor_bundles
-          copy_test_bin test-integration/test-committor-service/tests/test_ix_commit_local.rs committor_intent_bundles
-          copy_test_bin test-integration/test-committor-service/tests/test_ix_commit_local.rs committor_bundles_heavy
-          copy_test_bin test-integration/test-committor-service/tests/test_ix_commit_local.rs committor_commitfinalize
-          copy_test_bin test-integration/test-committor-service/tests/test_intent_executor.rs committor_intent_executor
-          copy_test_bin test-integration/test-committor-service/tests/test_intent_executor.rs committor_intent_executor_recovery
+          copy_test_bin test-integration/test-committor-service/tests/test_ix_commit_local.rs committor-ix
+          copy_test_bin test-integration/test-committor-service/tests/test_delivery_preparator.rs committor-preparators
+          copy_test_bin test-integration/test-committor-service/tests/test_transaction_preparator.rs committor-preparators
+          copy_test_bin test-integration/test-committor-service/tests/test_intent_executor.rs committor-intent-executor
           copy_package_tests test-integration/test-pubsub pubsub
           copy_package_tests test-integration/test-schedule-intent schedule_intents
           copy_package_tests test-integration/test-task-scheduler task-scheduler
 
-          find _integration_test_bins/shards -mindepth 2 -type f | wc -l
-          du -sh _integration_test_bins/shards/*
+          find _integration_test_bins/artifacts -mindepth 2 -type f | wc -l
+          du -sh _integration_test_bins/artifacts/*
         shell: bash
         working-directory: magicblock-validator
-
-      - name: Upload validator binary
-        uses: actions/upload-artifact@v4
-        with:
-          name: magicblock-validator-bin
-          path: magicblock-validator/target/debug/magicblock-validator
-          retention-days: 1
-          if-no-files-found: error
 
       - name: Upload test runner binary
         uses: actions/upload-artifact@v4
@@ -203,21 +222,11 @@ jobs:
           retention-days: 1
           if-no-files-found: error
 
-      - name: Upload SBF programs
-        uses: actions/upload-artifact@v4
-        with:
-          name: sbf-programs
-          path: |
-            magicblock-validator/target/deploy/*.so
-            magicblock-validator/test-integration/target/deploy/*.so
-          retention-days: 1
-          if-no-files-found: error
-
       - name: Upload integration test binaries - schedulecommit
         uses: actions/upload-artifact@v4
         with:
           name: integration-test-bins-schedulecommit
-          path: magicblock-validator/_integration_test_bins/shards/schedulecommit/*
+          path: magicblock-validator/_integration_test_bins/artifacts/schedulecommit/*
           retention-days: 1
           if-no-files-found: error
 
@@ -225,7 +234,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: integration-test-bins-chainlink
-          path: magicblock-validator/_integration_test_bins/shards/chainlink/*
+          path: magicblock-validator/_integration_test_bins/artifacts/chainlink/*
           retention-days: 1
           if-no-files-found: error
 
@@ -233,7 +242,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: integration-test-bins-cloning
-          path: magicblock-validator/_integration_test_bins/shards/cloning/*
+          path: magicblock-validator/_integration_test_bins/artifacts/cloning/*
           retention-days: 1
           if-no-files-found: error
 
@@ -241,7 +250,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: integration-test-bins-restore_ledger
-          path: magicblock-validator/_integration_test_bins/shards/restore_ledger/*
+          path: magicblock-validator/_integration_test_bins/artifacts/restore_ledger/*
           retention-days: 1
           if-no-files-found: error
 
@@ -249,7 +258,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: integration-test-bins-magicblock_api
-          path: magicblock-validator/_integration_test_bins/shards/magicblock_api/*
+          path: magicblock-validator/_integration_test_bins/artifacts/magicblock_api/*
           retention-days: 1
           if-no-files-found: error
 
@@ -257,7 +266,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: integration-test-bins-config
-          path: magicblock-validator/_integration_test_bins/shards/config/*
+          path: magicblock-validator/_integration_test_bins/artifacts/config/*
           retention-days: 1
           if-no-files-found: error
 
@@ -265,87 +274,31 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: integration-test-bins-table_mania
-          path: magicblock-validator/_integration_test_bins/shards/table_mania/*
+          path: magicblock-validator/_integration_test_bins/artifacts/table_mania/*
           retention-days: 1
           if-no-files-found: error
 
-      - name: Upload integration test binaries - committor
+      - name: Upload integration test binaries - committor-ix
         uses: actions/upload-artifact@v4
         with:
-          name: integration-test-bins-committor
-          path: magicblock-validator/_integration_test_bins/shards/committor/*
+          name: integration-test-bins-committor-ix
+          path: magicblock-validator/_integration_test_bins/artifacts/committor-ix/*
           retention-days: 1
           if-no-files-found: error
 
-      - name: Upload integration test binaries - committor_preparators
+      - name: Upload integration test binaries - committor-preparators
         uses: actions/upload-artifact@v4
         with:
-          name: integration-test-bins-committor_preparators
-          path: magicblock-validator/_integration_test_bins/shards/committor_preparators/*
+          name: integration-test-bins-committor-preparators
+          path: magicblock-validator/_integration_test_bins/artifacts/committor-preparators/*
           retention-days: 1
           if-no-files-found: error
 
-      - name: Upload integration test binaries - committor_ix_order
+      - name: Upload integration test binaries - committor-intent-executor
         uses: actions/upload-artifact@v4
         with:
-          name: integration-test-bins-committor_ix_order
-          path: magicblock-validator/_integration_test_bins/shards/committor_ix_order/*
-          retention-days: 1
-          if-no-files-found: error
-
-      - name: Upload integration test binaries - committor_ix_multi
-        uses: actions/upload-artifact@v4
-        with:
-          name: integration-test-bins-committor_ix_multi
-          path: magicblock-validator/_integration_test_bins/shards/committor_ix_multi/*
-          retention-days: 1
-          if-no-files-found: error
-
-      - name: Upload integration test binaries - committor_bundles
-        uses: actions/upload-artifact@v4
-        with:
-          name: integration-test-bins-committor_bundles
-          path: magicblock-validator/_integration_test_bins/shards/committor_bundles/*
-          retention-days: 1
-          if-no-files-found: error
-
-      - name: Upload integration test binaries - committor_intent_bundles
-        uses: actions/upload-artifact@v4
-        with:
-          name: integration-test-bins-committor_intent_bundles
-          path: magicblock-validator/_integration_test_bins/shards/committor_intent_bundles/*
-          retention-days: 1
-          if-no-files-found: error
-
-      - name: Upload integration test binaries - committor_bundles_heavy
-        uses: actions/upload-artifact@v4
-        with:
-          name: integration-test-bins-committor_bundles_heavy
-          path: magicblock-validator/_integration_test_bins/shards/committor_bundles_heavy/*
-          retention-days: 1
-          if-no-files-found: error
-
-      - name: Upload integration test binaries - committor_commitfinalize
-        uses: actions/upload-artifact@v4
-        with:
-          name: integration-test-bins-committor_commitfinalize
-          path: magicblock-validator/_integration_test_bins/shards/committor_commitfinalize/*
-          retention-days: 1
-          if-no-files-found: error
-
-      - name: Upload integration test binaries - committor_intent_executor
-        uses: actions/upload-artifact@v4
-        with:
-          name: integration-test-bins-committor_intent_executor
-          path: magicblock-validator/_integration_test_bins/shards/committor_intent_executor/*
-          retention-days: 1
-          if-no-files-found: error
-
-      - name: Upload integration test binaries - committor_intent_executor_recovery
-        uses: actions/upload-artifact@v4
-        with:
-          name: integration-test-bins-committor_intent_executor_recovery
-          path: magicblock-validator/_integration_test_bins/shards/committor_intent_executor_recovery/*
+          name: integration-test-bins-committor-intent-executor
+          path: magicblock-validator/_integration_test_bins/artifacts/committor-intent-executor/*
           retention-days: 1
           if-no-files-found: error
 
@@ -353,7 +306,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: integration-test-bins-pubsub
-          path: magicblock-validator/_integration_test_bins/shards/pubsub/*
+          path: magicblock-validator/_integration_test_bins/artifacts/pubsub/*
           retention-days: 1
           if-no-files-found: error
 
@@ -361,7 +314,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: integration-test-bins-schedule_intents
-          path: magicblock-validator/_integration_test_bins/shards/schedule_intents/*
+          path: magicblock-validator/_integration_test_bins/artifacts/schedule_intents/*
           retention-days: 1
           if-no-files-found: error
 
@@ -369,38 +322,70 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: integration-test-bins-task-scheduler
-          path: magicblock-validator/_integration_test_bins/shards/task-scheduler/*
+          path: magicblock-validator/_integration_test_bins/artifacts/task-scheduler/*
           retention-days: 1
           if-no-files-found: error
 
   run_integration_tests:
-    needs: build
+    needs: [build_validator, build_sbf, build_integration_tests]
     runs-on: ubuntu-latest-m
     env:
       SOLANA_VERSION: v3.1.5
     strategy:
       matrix:
-        batch_tests:
-          - "committor"
-          - "committor_bundles"
-          - "committor_intent_executor"
-          - "committor_bundles_heavy"
-          - "committor_intent_executor_recovery"
-          - "committor_ix_order"
-          - "table_mania"
-          - "committor_intent_bundles"
-          - "committor_ix_multi"
-          - "schedulecommit"
-          - "committor_preparators"
-          - "restore_ledger"
-          - "committor_commitfinalize"
-          - "chainlink"
-          - "schedule_intents"
-          - "cloning"
-          - "task-scheduler"
-          - "pubsub"
-          - "magicblock_api"
-          - "config"
+        include:
+          - batch_tests: "committor_single_large"
+            test_bins_artifact: "committor-ix"
+          - batch_tests: "committor_bundles_heavy_tail"
+            test_bins_artifact: "committor-ix"
+          - batch_tests: "committor_intent_executor_recovery"
+            test_bins_artifact: "committor-intent-executor"
+          - batch_tests: "committor_bundles_undelegate"
+            test_bins_artifact: "committor-ix"
+          - batch_tests: "committor"
+            test_bins_artifact: "committor-ix"
+          - batch_tests: "committor_bundles_heavy"
+            test_bins_artifact: "committor-ix"
+          - batch_tests: "committor_intent_executor_recovery_basic"
+            test_bins_artifact: "committor-intent-executor"
+          - batch_tests: "committor_intent_executor_callbacks"
+            test_bins_artifact: "committor-intent-executor"
+          - batch_tests: "committor_ix_multi"
+            test_bins_artifact: "committor-ix"
+          - batch_tests: "committor_bundles"
+            test_bins_artifact: "committor-ix"
+          - batch_tests: "table_mania"
+            test_bins_artifact: "table_mania"
+          - batch_tests: "committor_ix_order"
+            test_bins_artifact: "committor-ix"
+          - batch_tests: "committor_intent_bundles"
+            test_bins_artifact: "committor-ix"
+          - batch_tests: "schedulecommit"
+            test_bins_artifact: "schedulecommit"
+          - batch_tests: "restore_ledger"
+            test_bins_artifact: "restore_ledger"
+          - batch_tests: "chainlink"
+            test_bins_artifact: "chainlink"
+          - batch_tests: "cloning"
+            test_bins_artifact: "cloning"
+          - batch_tests: "task-scheduler"
+            test_bins_artifact: "task-scheduler"
+          - batch_tests: "pubsub"
+            test_bins_artifact: "pubsub"
+          - batch_tests: "magicblock_api"
+            test_bins_artifact: "magicblock_api"
+          - batch_tests: "schedule_intents"
+            test_bins_artifact: "schedule_intents"
+          - batch_tests: "config"
+            test_bins_artifact: "config"
+          - batch_tests: "committor_preparators"
+            test_bins_artifact: "committor-preparators"
+          - batch_tests: "committor_bundles_8"
+            test_bins_artifact: "committor-ix"
+          - batch_tests: "committor_commitfinalize"
+            test_bins_artifact: "committor-ix"
+          - batch_tests: "committor_intent_executor"
+            test_bins_artifact: "committor-intent-executor"
       # While we iterate on this branch we want a single shard failure to
       # cancel the rest of the matrix so we don't burn ~50 min of runner time
       # on every false start. Flip back to `false` once it's green & stable.
@@ -437,7 +422,7 @@ jobs:
       - name: Download prebuilt integration test binaries
         uses: actions/download-artifact@v4
         with:
-          name: integration-test-bins-${{ matrix.batch_tests }}
+          name: integration-test-bins-${{ matrix.test_bins_artifact }}
           path: magicblock-validator/_integration_test_bins
 
       - name: Stage SBF programs into deploy dirs
