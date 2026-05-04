@@ -1,3 +1,8 @@
+use std::{
+    thread::sleep,
+    time::{Duration, Instant},
+};
+
 use cleanass::{assert, assert_eq};
 use integration_test_tools::{expect, validator::cleanup};
 use magicblock_task_scheduler::SchedulerDatabase;
@@ -64,12 +69,20 @@ fn test_schedule_error() {
         validator
     );
 
-    // Wait for the task to be scheduled and executed
-    expect!(ctx.wait_for_delta_slot_ephem(10), validator);
-
-    // Check that the task was scheduled in the database
+    // Check that the task eventually exhausts retries
     let db = expect!(SchedulerDatabase::new(db_path), validator);
     let runtime = expect!(Runtime::new(), validator);
+    let started = Instant::now();
+    let failed_tasks = loop {
+        let failed_tasks =
+            expect!(runtime.block_on(db.get_failed_tasks()), validator);
+        if failed_tasks.len() == 1
+            || started.elapsed() >= Duration::from_secs(45)
+        {
+            break failed_tasks;
+        }
+        sleep(Duration::from_millis(200));
+    };
 
     let failed_scheduling =
         expect!(runtime.block_on(db.get_failed_schedulings()), validator);
@@ -81,8 +94,6 @@ fn test_schedule_error() {
         failed_scheduling,
     );
 
-    let failed_tasks =
-        expect!(runtime.block_on(db.get_failed_tasks()), validator);
     assert_eq!(
         failed_tasks.len(),
         1,
@@ -122,6 +133,8 @@ fn test_schedule_error() {
     );
 
     // Cancel the task
+    let ephem_blockhash =
+        expect!(ctx.try_get_latest_blockhash_ephem(), validator);
     let sig = expect!(
         ctx.send_transaction_ephem_with_preflight(
             &mut Transaction::new_signed_with_payer(
