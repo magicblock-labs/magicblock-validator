@@ -104,6 +104,7 @@ jobs:
           path: |
             magicblock-validator/target/deploy/*.so
             magicblock-validator/test-integration/target/deploy/*.so
+            magicblock-validator/test-integration/schedulecommit/elfs/*.so
           retention-days: 1
           if-no-files-found: error
 
@@ -437,6 +438,11 @@ jobs:
           if [ -d magicblock-validator/_sbf_artifact/test-integration/target/deploy ]; then
             cp magicblock-validator/_sbf_artifact/test-integration/target/deploy/*.so \
               magicblock-validator/test-integration/target/deploy/
+          fi
+          mkdir -p magicblock-validator/test-integration/schedulecommit/elfs
+          if [ -d magicblock-validator/_sbf_artifact/test-integration/schedulecommit/elfs ]; then
+            cp magicblock-validator/_sbf_artifact/test-integration/schedulecommit/elfs/*.so \
+              magicblock-validator/test-integration/schedulecommit/elfs/
           fi
           chmod +x magicblock-validator/target/debug/magicblock-validator
           chmod +x magicblock-validator/_integration_test_runner/run-tests
