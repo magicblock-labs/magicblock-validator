@@ -1116,6 +1116,9 @@ where
             return (ata_account, None);
         };
 
+        let was_watching =
+            self.remote_account_provider.is_watching(&eata_pubkey);
+
         // Re-subscribe before cache checks; this keeps the subscription LRU
         // warm and lets later eATA creation reach the projection path.
         let subscribed = match self.subscribe_to_account(&eata_pubkey).await {
@@ -1130,8 +1133,9 @@ where
             }
         };
 
-        // Known-empty eATAs skip the fetch; the live subscription covers later creation.
-        if self.is_known_empty_eata(&eata_pubkey) {
+        // Known-empty eATAs skip the fetch only if the subscription was already live.
+        if was_watching && subscribed && self.is_known_empty_eata(&eata_pubkey)
+        {
             return (ata_account, None);
         }
 

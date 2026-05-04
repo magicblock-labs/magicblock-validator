@@ -3776,6 +3776,7 @@ async fn test_project_ata_skips_repeat_fetch_for_known_empty_eata() {
     // Leave the eATA absent so the first fetch returns NotFound.
     let FetcherTestCtx {
         remote_account_provider,
+        accounts_bank,
         rpc_client,
         subscription_tx,
         fetch_cloner,
@@ -3792,7 +3793,7 @@ async fn test_project_ata_skips_repeat_fetch_for_known_empty_eata() {
         RemoteAccount, RemoteAccountUpdateSource,
     };
 
-    let send_update = || {
+    let send_update = |slot| {
         let ata_account = ata_account.clone();
         let subscription_tx = subscription_tx.clone();
         async move {
@@ -3801,7 +3802,7 @@ async fn test_project_ata_skips_repeat_fetch_for_known_empty_eata() {
                     pubkey: ata_pubkey,
                     account: RemoteAccount::from_fresh_account(
                         ata_account,
-                        CURRENT_SLOT,
+                        slot,
                         RemoteAccountUpdateSource::Subscription,
                     ),
                 })
@@ -3815,7 +3816,7 @@ async fn test_project_ata_skips_repeat_fetch_for_known_empty_eata() {
 
     // Poll the cache entry, not the fetch counter, to avoid racing mark_eata_empty.
     let baseline_fetches = rpc_client.single_account_fetches();
-    send_update().await;
+    send_update(CURRENT_SLOT).await;
     tokio::time::timeout(TIMEOUT, async {
         while !fetch_cloner.is_known_empty_eata(&eata_pubkey) {
             tokio::time::sleep(POLL_INTERVAL).await;
@@ -3836,8 +3837,18 @@ async fn test_project_ata_skips_repeat_fetch_for_known_empty_eata() {
     );
 
     // Cache hits should avoid refetching while preserving the subscription.
-    send_update().await;
-    tokio::time::sleep(Duration::from_millis(150)).await;
+    const SECOND_SLOT: u64 = CURRENT_SLOT + 1;
+    send_update(SECOND_SLOT).await;
+    tokio::time::timeout(TIMEOUT, async {
+        while accounts_bank
+            .get_account(&ata_pubkey)
+            .is_none_or(|account| account.remote_slot() < SECOND_SLOT)
+        {
+            tokio::time::sleep(POLL_INTERVAL).await;
+        }
+    })
+    .await
+    .expect("timed out waiting for banked ATA subscription update");
     assert_eq!(
         rpc_client.single_account_fetches(),
         after_first,
