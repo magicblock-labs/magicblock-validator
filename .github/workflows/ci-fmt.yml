@@ -11,7 +11,7 @@ on:
       - '**/*.rs'
       - '**/Cargo.toml'
       - '**/Cargo.lock'
-      - 'rustfmt*.toml'
+      - '**/rustfmt*.toml'
       - '.github/workflows/ci-fmt.yml'
       - '.github/actions/setup-build-env/**'
   pull_request:
@@ -20,7 +20,7 @@ on:
       - '**/*.rs'
       - '**/Cargo.toml'
       - '**/Cargo.lock'
-      - 'rustfmt*.toml'
+      - '**/rustfmt*.toml'
       - '.github/workflows/ci-fmt.yml'
       - '.github/actions/setup-build-env/**'
 
