@@ -212,6 +212,17 @@ jobs:
 
           find _integration_test_bins/artifacts -mindepth 2 -type f | wc -l
           du -sh _integration_test_bins/artifacts/*
+
+          rm -rf _integration_test_bins/artifact-archives
+          mkdir -p _integration_test_bins/artifact-archives
+          for artifact_dir in _integration_test_bins/artifacts/*; do
+            artifact="$(basename "$artifact_dir")"
+            tar -C "$artifact_dir" \
+              --use-compress-program="zstd -T0 -6" \
+              -cf "_integration_test_bins/artifact-archives/${artifact}.tar.zst" \
+              .
+          done
+          du -sh _integration_test_bins/artifact-archives/*
         shell: bash
         working-directory: magicblock-validator
 
@@ -227,105 +238,118 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: integration-test-bins-schedulecommit
-          path: magicblock-validator/_integration_test_bins/artifacts/schedulecommit/*
+          path: magicblock-validator/_integration_test_bins/artifact-archives/schedulecommit.tar.zst
           retention-days: 1
           if-no-files-found: error
+          compression-level: 0
 
       - name: Upload integration test binaries - chainlink
         uses: actions/upload-artifact@v4
         with:
           name: integration-test-bins-chainlink
-          path: magicblock-validator/_integration_test_bins/artifacts/chainlink/*
+          path: magicblock-validator/_integration_test_bins/artifact-archives/chainlink.tar.zst
           retention-days: 1
           if-no-files-found: error
+          compression-level: 0
 
       - name: Upload integration test binaries - cloning
         uses: actions/upload-artifact@v4
         with:
           name: integration-test-bins-cloning
-          path: magicblock-validator/_integration_test_bins/artifacts/cloning/*
+          path: magicblock-validator/_integration_test_bins/artifact-archives/cloning.tar.zst
           retention-days: 1
           if-no-files-found: error
+          compression-level: 0
 
       - name: Upload integration test binaries - restore_ledger
         uses: actions/upload-artifact@v4
         with:
           name: integration-test-bins-restore_ledger
-          path: magicblock-validator/_integration_test_bins/artifacts/restore_ledger/*
+          path: magicblock-validator/_integration_test_bins/artifact-archives/restore_ledger.tar.zst
           retention-days: 1
           if-no-files-found: error
+          compression-level: 0
 
       - name: Upload integration test binaries - magicblock_api
         uses: actions/upload-artifact@v4
         with:
           name: integration-test-bins-magicblock_api
-          path: magicblock-validator/_integration_test_bins/artifacts/magicblock_api/*
+          path: magicblock-validator/_integration_test_bins/artifact-archives/magicblock_api.tar.zst
           retention-days: 1
           if-no-files-found: error
+          compression-level: 0
 
       - name: Upload integration test binaries - config
         uses: actions/upload-artifact@v4
         with:
           name: integration-test-bins-config
-          path: magicblock-validator/_integration_test_bins/artifacts/config/*
+          path: magicblock-validator/_integration_test_bins/artifact-archives/config.tar.zst
           retention-days: 1
           if-no-files-found: error
+          compression-level: 0
 
       - name: Upload integration test binaries - table_mania
         uses: actions/upload-artifact@v4
         with:
           name: integration-test-bins-table_mania
-          path: magicblock-validator/_integration_test_bins/artifacts/table_mania/*
+          path: magicblock-validator/_integration_test_bins/artifact-archives/table_mania.tar.zst
           retention-days: 1
           if-no-files-found: error
+          compression-level: 0
 
       - name: Upload integration test binaries - committor-ix
         uses: actions/upload-artifact@v4
         with:
           name: integration-test-bins-committor-ix
-          path: magicblock-validator/_integration_test_bins/artifacts/committor-ix/*
+          path: magicblock-validator/_integration_test_bins/artifact-archives/committor-ix.tar.zst
           retention-days: 1
           if-no-files-found: error
+          compression-level: 0
 
       - name: Upload integration test binaries - committor-preparators
         uses: actions/upload-artifact@v4
         with:
           name: integration-test-bins-committor-preparators
-          path: magicblock-validator/_integration_test_bins/artifacts/committor-preparators/*
+          path: magicblock-validator/_integration_test_bins/artifact-archives/committor-preparators.tar.zst
           retention-days: 1
           if-no-files-found: error
+          compression-level: 0
 
       - name: Upload integration test binaries - committor-intent-executor
         uses: actions/upload-artifact@v4
         with:
           name: integration-test-bins-committor-intent-executor
-          path: magicblock-validator/_integration_test_bins/artifacts/committor-intent-executor/*
+          path: magicblock-validator/_integration_test_bins/artifact-archives/committor-intent-executor.tar.zst
           retention-days: 1
           if-no-files-found: error
+          compression-level: 0
 
       - name: Upload integration test binaries - pubsub
         uses: actions/upload-artifact@v4
         with:
           name: integration-test-bins-pubsub
-          path: magicblock-validator/_integration_test_bins/artifacts/pubsub/*
+          path: magicblock-validator/_integration_test_bins/artifact-archives/pubsub.tar.zst
           retention-days: 1
           if-no-files-found: error
+          compression-level: 0
 
       - name: Upload integration test binaries - schedule_intents
         uses: actions/upload-artifact@v4
         with:
           name: integration-test-bins-schedule_intents
-          path: magicblock-validator/_integration_test_bins/artifacts/schedule_intents/*
+          path: magicblock-validator/_integration_test_bins/artifact-archives/schedule_intents.tar.zst
           retention-days: 1
           if-no-files-found: error
+          compression-level: 0
 
       - name: Upload integration test binaries - task-scheduler
         uses: actions/upload-artifact@v4
         with:
           name: integration-test-bins-task-scheduler
-          path: magicblock-validator/_integration_test_bins/artifacts/task-scheduler/*
+          path: magicblock-validator/_integration_test_bins/artifact-archives/task-scheduler.tar.zst
           retention-days: 1
           if-no-files-found: error
+          compression-level: 0
 
   run_integration_tests:
     needs: [build_validator, build_sbf, build_integration_tests]
@@ -433,6 +457,19 @@ jobs:
         with:
           name: integration-test-bins-${{ matrix.test_bins_artifact }}
           path: magicblock-validator/_integration_test_bins
+
+      - name: Extract prebuilt integration test binaries
+        run: |
+          set -euxo pipefail
+          archive="$(find magicblock-validator/_integration_test_bins -type f -name '${{ matrix.test_bins_artifact }}.tar.zst' -print -quit)"
+          test -n "$archive"
+          archive_dir="$(dirname "$archive")"
+          tar -C magicblock-validator/_integration_test_bins \
+            --use-compress-program="zstd -T0 -d" \
+            -xf "$archive"
+          rm "$archive"
+          rmdir "$archive_dir" 2>/dev/null || true
+        shell: bash
 
       - name: Stage SBF programs into deploy dirs
         run: |
