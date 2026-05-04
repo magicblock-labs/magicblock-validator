@@ -362,17 +362,18 @@ impl TaskSchedulerService {
             return self.record_failed_task(task, error).await;
         }
 
-        let retries = self
-            .task_execution_retries
-            .get(&task.id)
-            .copied()
-            .unwrap_or_default();
-        if retries >= MAX_TASK_EXECUTION_RETRIES {
+        let Some(retries) = ({
+            let retries =
+                self.task_execution_retries.entry(task.id).or_default();
+            if *retries >= MAX_TASK_EXECUTION_RETRIES {
+                None
+            } else {
+                *retries += 1;
+                Some(*retries)
+            }
+        }) else {
             return self.record_failed_task(task, error).await;
-        }
-
-        let retries = retries + 1;
-        self.task_execution_retries.insert(task.id, retries);
+        };
         let delay = self.task_execution_retry_delay(retries);
         debug!(
             task_id = task.id,
