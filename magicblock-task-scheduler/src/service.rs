@@ -30,6 +30,10 @@ use crate::{
     errors::{TaskSchedulerError, TaskSchedulerResult},
 };
 
+const MAX_TASK_EXECUTION_RETRIES: u32 = 10;
+const TASK_EXECUTION_RETRY_BASE_DELAY: Duration = Duration::from_millis(100);
+const TASK_EXECUTION_RETRY_MAX_DELAY: Duration = Duration::from_secs(5);
+
 pub struct TaskSchedulerService {
     /// Database for persisting tasks
     db: SchedulerDatabase,
@@ -43,6 +47,8 @@ pub struct TaskSchedulerService {
     task_queue: DelayQueue<DbTask>,
     /// Map of task IDs to their corresponding keys in the task queue
     task_queue_keys: HashMap<i64, Key>,
+    /// Number of consecutive failed execution attempts for each task
+    task_execution_retries: HashMap<i64, u32>,
     /// Counter used to make each transaction unique
     tx_counter: AtomicU64,
     /// Token used to cancel the task scheduler
@@ -96,6 +102,7 @@ impl TaskSchedulerService {
             block,
             task_queue: DelayQueue::new(),
             task_queue_keys: HashMap::new(),
+            task_execution_retries: HashMap::new(),
             tx_counter: AtomicU64::default(),
             token,
             min_interval: config.min_interval,
@@ -209,6 +216,7 @@ impl TaskSchedulerService {
         let Some(task) = self.db.get_task(cancel_request.task_id).await? else {
             // Task not found in the database, cleanup the queue
             self.remove_task_from_queue(cancel_request.task_id);
+            self.task_execution_retries.remove(&cancel_request.task_id);
             return Ok(());
         };
 
@@ -234,7 +242,7 @@ impl TaskSchedulerService {
         // we would have to fetch the transaction via its signature to see
         // if it succeeded or failed.
         // However that should not happen here, but on a separate task
-        // If any instruction fails, the task is cancelled
+        // If sending the transaction fails, the task is retried in run().
         debug!("Executed task {} with signature {}", task.id, sig);
 
         if task.executions_left > 1 {
@@ -277,6 +285,7 @@ impl TaskSchedulerService {
 
         self.db.insert_task(&task).await?;
         self.remove_task_from_queue(task.id);
+        self.task_execution_retries.remove(&task.id);
         let key = self
             .task_queue
             .insert(task.clone(), Duration::from_millis(0));
@@ -291,6 +300,7 @@ impl TaskSchedulerService {
         task_id: i64,
     ) -> TaskSchedulerResult<()> {
         self.remove_task_from_queue(task_id);
+        self.task_execution_retries.remove(&task_id);
         self.db.remove_task(task_id).await?;
         debug!("Removed task {} from database", task_id);
 
@@ -303,12 +313,13 @@ impl TaskSchedulerService {
                 Some(task) = self.task_queue.next() => {
                     let task = task.get_ref();
                     self.task_queue_keys.remove(&task.id);
-                    if let Err(e) = self.execute_task(task).await {
-                        error!("Failed to execute task {}: {}", task.id, e);
-
-                        // If any instruction fails, the task is cancelled
-                        self.db.remove_task(task.id).await?;
-                        self.db.insert_failed_task(task.id, format!("{:?}", e)).await?;
+                    match self.execute_task(task).await {
+                        Ok(()) => {
+                            self.task_execution_retries.remove(&task.id);
+                        }
+                        Err(e) => {
+                            self.handle_failed_task_execution(task, e).await?;
+                        }
                     }
                 }
                 Some(task) = self.scheduled_tasks.recv() => {
@@ -338,6 +349,69 @@ impl TaskSchedulerService {
         if let Some(key) = self.task_queue_keys.remove(&task_id) {
             self.task_queue.remove(&key);
         }
+    }
+
+    async fn handle_failed_task_execution(
+        &mut self,
+        task: &DbTask,
+        error: TaskSchedulerError,
+    ) -> TaskSchedulerResult<()> {
+        debug!("Failed to execute task {}: {}", task.id, error);
+
+        if !is_retryable_task_execution_error(&error) {
+            return self.record_failed_task(task, error).await;
+        }
+
+        let retries = self
+            .task_execution_retries
+            .get(&task.id)
+            .copied()
+            .unwrap_or_default();
+        if retries >= MAX_TASK_EXECUTION_RETRIES {
+            return self.record_failed_task(task, error).await;
+        }
+
+        let retries = retries + 1;
+        self.task_execution_retries.insert(task.id, retries);
+        let delay = self.task_execution_retry_delay(retries);
+        debug!(
+            task_id = task.id,
+            retry = retries,
+            max_retries = MAX_TASK_EXECUTION_RETRIES,
+            delay_ms = delay.as_millis(),
+            error = %error,
+            "Retrying failed task execution"
+        );
+
+        let key = self.task_queue.insert(task.clone(), delay);
+        self.task_queue_keys.insert(task.id, key);
+
+        Ok(())
+    }
+
+    async fn record_failed_task(
+        &mut self,
+        task: &DbTask,
+        error: TaskSchedulerError,
+    ) -> TaskSchedulerResult<()> {
+        self.db
+            .move_task_to_failed(task.id, format!("{:?}", error))
+            .await?;
+        self.task_execution_retries.remove(&task.id);
+        self.remove_task_from_queue(task.id);
+
+        Ok(())
+    }
+
+    fn task_execution_retry_delay(&self, retry: u32) -> Duration {
+        let multiplier = 1u32
+            .checked_shl(retry.saturating_sub(1))
+            .unwrap_or(u32::MAX);
+        self.slot_interval
+            .max(TASK_EXECUTION_RETRY_BASE_DELAY)
+            .checked_mul(multiplier)
+            .unwrap_or(TASK_EXECUTION_RETRY_MAX_DELAY)
+            .min(TASK_EXECUTION_RETRY_MAX_DELAY)
     }
 
     async fn process_transaction(
@@ -371,6 +445,11 @@ fn is_valid_task_interval(interval: i64) -> bool {
     interval > 0 && interval < u32::MAX as i64
 }
 
+fn is_retryable_task_execution_error(error: &TaskSchedulerError) -> bool {
+    // `process_transaction` maps Solana send and verification failures to Rpc.
+    matches!(error, TaskSchedulerError::Rpc(_))
+}
+
 #[cfg(test)]
 mod tests {
     use magicblock_program::{
@@ -396,6 +475,7 @@ mod tests {
             block: LatestBlock::default(),
             task_queue: DelayQueue::new(),
             task_queue_keys: HashMap::new(),
+            task_execution_retries: HashMap::new(),
             tx_counter: AtomicU64::default(),
             token: CancellationToken::new(),
             min_interval: Duration::from_millis(1000),
@@ -477,6 +557,7 @@ mod tests {
             block: LatestBlock::default(),
             task_queue: DelayQueue::new(),
             task_queue_keys: HashMap::new(),
+            task_execution_retries: HashMap::new(),
             tx_counter: AtomicU64::default(),
             token: CancellationToken::new(),
             min_interval: Duration::from_millis(1000),
