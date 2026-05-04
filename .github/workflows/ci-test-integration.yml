@@ -393,8 +393,10 @@ jobs:
             test_bins_artifact: "restore_ledger"
           - batch_tests: "chainlink"
             test_bins_artifact: "chainlink"
+            needs_build_env: true
           - batch_tests: "cloning"
             test_bins_artifact: "cloning"
+            needs_build_env: true
           - batch_tests: "task-scheduler"
             test_bins_artifact: "task-scheduler"
             runner: "ubuntu-latest"
@@ -429,6 +431,14 @@ jobs:
         uses: actions/checkout@v5
         with:
           path: magicblock-validator
+
+      - uses: ./magicblock-validator/.github/actions/setup-build-env
+        if: ${{ matrix.needs_build_env == true }}
+        with:
+          build_cache_key_name: "magicblock-validator-ci-test-integration-${{ hashFiles('magicblock-validator/Cargo.lock') }}"
+          rust_toolchain_release: "1.94.1"
+          github_access_token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: ./magicblock-validator/.github/actions/setup-solana
         with:
