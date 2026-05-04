@@ -147,20 +147,30 @@ pub fn start_test_validator_with_config(
     ];
     let resolved_extra_accounts =
         loaded_accounts.extra_accounts(workspace_dir, &accounts_dir);
-    let readiness_pubkeys = program_ids_from_config(config_path)
+    let readiness_program_pubkeys = program_ids_from_config(config_path)
         .into_iter()
-        .chain(
-            accounts
-                .iter()
-                .chain(&resolved_extra_accounts)
-                .map(|(account, _)| account.clone()),
-        )
         .filter_map(|pubkey| {
             pubkey.parse::<Pubkey>().map_or_else(
                 |err| {
                     eprintln!(
-                        "Skipping invalid readiness pubkey {}: {:?}",
+                        "Skipping invalid readiness program pubkey {}: {:?}",
                         pubkey, err
+                    );
+                    None
+                },
+                Some,
+            )
+        })
+        .collect::<Vec<_>>();
+    let readiness_account_pubkeys = accounts
+        .iter()
+        .chain(&resolved_extra_accounts)
+        .filter_map(|(account, _)| {
+            account.parse::<Pubkey>().map_or_else(
+                |err| {
+                    eprintln!(
+                        "Skipping invalid readiness account pubkey {}: {:?}",
+                        account, err
                     );
                     None
                 },
@@ -201,8 +211,13 @@ pub fn start_test_validator_with_config(
     eprintln!("{}", script);
     let validator = command.spawn().expect("Failed to start validator");
     let mut validator = wait_for_validator(validator, port)?;
-    wait_for_required_accounts(&mut validator, port, &readiness_pubkeys)
-        .then_some(validator)
+    wait_for_required_accounts(
+        &mut validator,
+        port,
+        &readiness_program_pubkeys,
+        &readiness_account_pubkeys,
+    )
+    .then_some(validator)
 }
 
 pub fn wait_for_validator(mut validator: Child, port: u16) -> Option<Child> {
@@ -241,9 +256,10 @@ pub fn wait_for_validator(mut validator: Child, port: u16) -> Option<Child> {
 fn wait_for_required_accounts(
     validator: &mut Child,
     port: u16,
-    pubkeys: &[Pubkey],
+    program_pubkeys: &[Pubkey],
+    account_pubkeys: &[Pubkey],
 ) -> bool {
-    if pubkeys.is_empty() {
+    if program_pubkeys.is_empty() && account_pubkeys.is_empty() {
         return true;
     }
 
@@ -254,12 +270,26 @@ fn wait_for_required_accounts(
         CommitmentConfig::processed(),
     );
     let mut last_rpc_error = None;
+    let pubkeys = program_pubkeys
+        .iter()
+        .chain(account_pubkeys)
+        .copied()
+        .collect::<Vec<_>>();
 
     for _ in 0..max_retries {
-        match rpc_client.get_multiple_accounts(pubkeys) {
+        match rpc_client.get_multiple_accounts(&pubkeys) {
             Ok(accounts) => {
                 last_rpc_error = None;
-                if accounts.iter().all(Option::is_some) {
+                let programs_ready =
+                    accounts[..program_pubkeys.len()].iter().all(|account| {
+                        account
+                            .as_ref()
+                            .is_some_and(|account| account.executable)
+                    });
+                let accounts_ready = accounts[program_pubkeys.len()..]
+                    .iter()
+                    .all(Option::is_some);
+                if programs_ready && accounts_ready {
                     return true;
                 }
             }
