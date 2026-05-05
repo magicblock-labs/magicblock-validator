@@ -1,5 +1,8 @@
 use std::collections::HashSet;
 
+use magicblock_core::token_programs::{
+    ASSOCIATED_TOKEN_PROGRAM_ID, TOKEN_PROGRAM_ID,
+};
 use magicblock_magic_program_api::{self as magic_program};
 use solana_pubkey::Pubkey;
 use solana_sdk_ids::{
@@ -72,4 +75,13 @@ pub fn native_program_accounts() -> HashSet<Pubkey> {
     blacklisted_programs.insert(vote::ID);
     blacklisted_programs.insert(zk_elgamal_proof_program::ID);
     blacklisted_programs
+}
+
+/// High-cardinality programs skipped for program-wide subscriptions.
+pub fn programs_not_to_subscribe() -> HashSet<Pubkey> {
+    let mut programs = HashSet::new();
+    programs.insert(TOKEN_PROGRAM_ID);
+    programs.insert(spl_token_2022::id());
+    programs.insert(ASSOCIATED_TOKEN_PROGRAM_ID);
+    programs
 }

@@ -1,5 +1,6 @@
 use std::{
     collections::{hash_map, HashSet},
+    num::NonZeroUsize,
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc, Mutex,
@@ -10,6 +11,7 @@ use std::{
 use dlp_api::{
     pda::delegation_record_pda_from_delegated_account, state::DelegationRecord,
 };
+use lru::LruCache;
 use magicblock_accounts_db::traits::AccountsBank;
 use magicblock_config::config::AllowedProgram;
 use magicblock_core::token_programs::{
@@ -17,6 +19,7 @@ use magicblock_core::token_programs::{
     MaybeIntoAta, EATA_PROGRAM_ID,
 };
 use magicblock_metrics::metrics::{self, AccountFetchOrigin};
+use parking_lot::Mutex as PlMutex;
 use scc::{hash_map::Entry, HashMap};
 use solana_account::{AccountSharedData, ReadableAccount};
 use solana_keypair::Keypair;
@@ -80,7 +83,9 @@ use super::errors::{ChainlinkError, ChainlinkResult};
 use crate::{
     chainlink::{
         account_still_undelegating_on_chain::account_still_undelegating_on_chain,
-        blacklisted_accounts::blacklisted_accounts,
+        blacklisted_accounts::{
+            blacklisted_accounts, programs_not_to_subscribe,
+        },
     },
     cloner::{
         errors::{ClonerError, ClonerResult},
@@ -125,6 +130,12 @@ where
     /// all programs are allowed.
     allowed_programs: Option<HashSet<Pubkey>>,
 
+    /// Programs too broad for `subscribe_program`.
+    programs_not_to_subscribe: HashSet<Pubkey>,
+
+    /// Negative cache for derived eATAs confirmed missing on chain.
+    known_empty_eatas: Arc<PlMutex<LruCache<Pubkey, ()>>>,
+
     /// Tracks in-flight clone operations per (pubkey, slot).
     /// The first caller to claim a key becomes the owner and performs
     /// the actual clone. Subsequent callers become waiters and receive
@@ -136,6 +147,13 @@ where
         >,
     >,
 }
+
+/// Negative-cache capacity for known-empty eATAs.
+const KNOWN_EMPTY_EATAS_CAPACITY: NonZeroUsize =
+    match NonZeroUsize::new(100_000) {
+        Some(n) => n,
+        None => panic!("KNOWN_EMPTY_EATAS_CAPACITY must be non-zero"),
+    };
 
 /// Manual Clone impl: `#[derive(Clone)]` would add `V: Clone, C: Clone`
 /// bounds that are not satisfied (`AccountsBank` and `Cloner` don't
@@ -159,6 +177,8 @@ where
             validator_keypair: Arc::clone(&self.validator_keypair),
             blacklisted_accounts: self.blacklisted_accounts.clone(),
             allowed_programs: self.allowed_programs.clone(),
+            programs_not_to_subscribe: self.programs_not_to_subscribe.clone(),
+            known_empty_eatas: self.known_empty_eatas.clone(),
             pending_clones: self.pending_clones.clone(),
         }
     }
@@ -199,6 +219,10 @@ where
             fetch_count: Arc::new(AtomicU64::new(0)),
             blacklisted_accounts,
             allowed_programs,
+            programs_not_to_subscribe: programs_not_to_subscribe(),
+            known_empty_eatas: Arc::new(PlMutex::new(LruCache::new(
+                KNOWN_EMPTY_EATAS_CAPACITY,
+            ))),
             pending_clones: Arc::new(Mutex::new(hash_map::HashMap::new())),
         });
 
@@ -1073,7 +1097,11 @@ where
 
                                 // For accounts delegated to us, subscribe to the original owner
                                 // program for undelegation update resilience.
-                                if account.delegated() {
+                                if account.delegated()
+                                    && !self
+                                        .programs_not_to_subscribe
+                                        .contains(&delegation_record.owner)
+                                {
                                     // Fire-and-forget to avoid blocking subscription updates.
                                     let provider =
                                         self.remote_account_provider.clone();
@@ -1207,6 +1235,14 @@ where
         })
     }
 
+    fn is_known_empty_eata(&self, eata_pubkey: &Pubkey) -> bool {
+        self.known_empty_eatas.lock().get(eata_pubkey).is_some()
+    }
+
+    fn mark_eata_empty(&self, eata_pubkey: Pubkey) {
+        self.known_empty_eatas.lock().put(eata_pubkey, ());
+    }
+
     async fn maybe_project_ata_from_subscription_update(
         &self,
         ata_pubkey: Pubkey,
@@ -1225,15 +1261,30 @@ where
             return (ata_account, None);
         };
 
-        if let Err(err) = self.subscribe_to_account(&eata_pubkey).await {
-            warn!(
-                pubkey = %eata_pubkey,
-                error = ?err,
-                "Failed to subscribe to derived eATA"
-            );
+        let was_watching =
+            self.remote_account_provider.is_watching(&eata_pubkey);
+
+        // Re-subscribe before cache checks; this keeps the subscription LRU
+        // warm and lets later eATA creation reach the projection path.
+        let subscribed = match self.subscribe_to_account(&eata_pubkey).await {
+            Ok(()) => true,
+            Err(err) => {
+                warn!(
+                    pubkey = %eata_pubkey,
+                    error = ?err,
+                    "Failed to subscribe to derived eATA"
+                );
+                false
+            }
+        };
+
+        // Known-empty eATAs skip the fetch only if the subscription was already live.
+        if was_watching && subscribed && self.is_known_empty_eata(&eata_pubkey)
+        {
+            return (ata_account, None);
         }
 
-        let eata_account = match self
+        let (eata_account, definitively_not_found) = match self
             .remote_account_provider
             .try_get_multi_until_slots_match(
                 &[eata_pubkey],
@@ -1246,7 +1297,11 @@ where
             .await
         {
             Ok(mut accounts) => {
-                accounts.pop().and_then(|account| account.fresh_account())
+                let popped = accounts.pop();
+                // Only `NotFound` proves absence; stale, missing, or failed fetches retry later.
+                let nf = matches!(popped, Some(RemoteAccount::NotFound(_)));
+                let fresh = popped.and_then(|a| a.fresh_account());
+                (fresh, nf)
             }
             Err(err) => {
                 debug!(
@@ -1254,11 +1309,15 @@ where
                     error = ?err,
                     "Failed to fetch eATA for projection"
                 );
-                None
+                (None, false)
             }
         };
 
         let Some(eata_account) = eata_account else {
+            // Cache absence only after a confirmed NotFound and live subscription.
+            if definitively_not_found && subscribed {
+                self.mark_eata_empty(eata_pubkey);
+            }
             return (ata_account, None);
         };
 
