@@ -343,7 +343,8 @@ async fn test_try_get_multi_waiter_receives_error_when_owner_aborts_in_setup_sub
 }
 
 #[tokio::test]
-async fn test_try_unsubscribe_if_sole_owner_skips_shared_subscription() {
+async fn test_try_unsubscribe_if_sole_owner_preserves_created_subscription_ownership(
+) {
     let pubkey = solana_pubkey::Pubkey::new_unique();
     let account = Account {
         lamports: 1_000_000,
@@ -373,9 +374,9 @@ async fn test_try_unsubscribe_if_sole_owner_skips_shared_subscription() {
         .await
         .unwrap();
 
-    assert!(!unsubscribed);
-    assert!(provider.is_watching(&pubkey));
-    assert!(_pubsub_client.subscriptions_union().contains(&pubkey));
+    assert!(unsubscribed);
+    assert!(!provider.is_watching(&pubkey));
+    assert!(!_pubsub_client.subscriptions_union().contains(&pubkey));
 }
 
 #[tokio::test]

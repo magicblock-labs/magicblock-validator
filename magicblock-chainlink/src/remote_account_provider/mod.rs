@@ -1203,12 +1203,10 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         pubkey: &Pubkey,
     ) -> RemoteAccountProviderResult<SubscribeResult> {
         if self.is_watching(pubkey) {
-            // Promote in LRU cache even if already subscribed
+            // Promote in LRU cache even if already subscribed.
+            // Preserve any existing rollback ownership so the creator can
+            // still roll back this subscription if its batch later fails.
             self.lrucache_subscribed_accounts.add(*pubkey);
-            self.subscription_rollback_owners
-                .lock()
-                .await
-                .remove(pubkey);
             return Ok(SubscribeResult::AlreadyWatching);
         }
 
