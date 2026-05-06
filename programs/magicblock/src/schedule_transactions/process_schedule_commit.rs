@@ -26,7 +26,6 @@ use crate::{
         },
         instruction_utils::InstructionUtils,
     },
-    validator::is_compression_enabled,
     MagicContext,
 };
 
@@ -41,11 +40,8 @@ pub(crate) fn process_schedule_commit(
     invoke_context: &mut InvokeContext,
     opts: ProcessScheduleCommitOptions,
 ) -> Result<(), InstructionError> {
-    if opts.compressed && !is_compression_enabled() {
-        ic_msg!(
-            invoke_context,
-            "ScheduleCommit: compression is not enabled, but compressed accounts are being committed"
-        );
+    if opts.compressed {
+        ic_msg!(invoke_context, "ScheduleCommit: compressed accounts are not supported for regular commits");
         return Err(InstructionError::InvalidInstructionData);
     }
 
@@ -235,18 +231,6 @@ pub(crate) fn process_schedule_commit(
             }
 
             committed_accounts.push(committed);
-        }
-
-        if opts.compressed
-            && committed_accounts
-                .iter()
-                .any(|acc| acc.account.lamports > 0)
-        {
-            ic_msg!(
-                invoke_context,
-                "ScheduleCommit: compressed accounts with lamports > 0 are not supported",
-            );
-            return Err(InstructionError::InvalidAccountData);
         }
 
         if opts.request_undelegation {
