@@ -4116,3 +4116,163 @@ async fn test_delegated_eata_update_does_not_override_undelegating_ata_in_bank()
         "Undelegating ATA amount should keep local state",
     );
 }
+
+#[tokio::test]
+async fn test_project_ata_skips_repeat_fetch_for_known_empty_eata() {
+    init_logger();
+    let validator_keypair = Keypair::new();
+    let wallet_owner = random_pubkey();
+    let mint = random_pubkey();
+    const CURRENT_SLOT: u64 = 100;
+
+    let ata_pubkey = derive_ata(&wallet_owner, &mint);
+    let ata_account = create_ata_account(&wallet_owner, &mint);
+
+    // Leave the eATA absent so the first fetch returns NotFound.
+    let FetcherTestCtx {
+        remote_account_provider,
+        accounts_bank,
+        rpc_client,
+        subscription_tx,
+        fetch_cloner,
+        ..
+    } = setup(
+        [(ata_pubkey, ata_account.clone())],
+        CURRENT_SLOT,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+    let eata_pubkey = derive_eata(&wallet_owner, &mint);
+
+    use crate::remote_account_provider::{
+        RemoteAccount, RemoteAccountUpdateSource,
+    };
+
+    let send_update = |slot| {
+        let ata_account = ata_account.clone();
+        let subscription_tx = subscription_tx.clone();
+        async move {
+            subscription_tx
+                .send(ForwardedSubscriptionUpdate {
+                    pubkey: ata_pubkey,
+                    account: RemoteAccount::from_fresh_account(
+                        ata_account,
+                        slot,
+                        RemoteAccountUpdateSource::Subscription,
+                    ),
+                })
+                .await
+                .unwrap();
+        }
+    };
+
+    const POLL_INTERVAL: std::time::Duration = Duration::from_millis(10);
+    const TIMEOUT: std::time::Duration = Duration::from_millis(500);
+
+    // Poll the cache entry, not the fetch counter, to avoid racing mark_eata_empty.
+    let baseline_fetches = rpc_client.single_account_fetches();
+    send_update(CURRENT_SLOT).await;
+    tokio::time::timeout(TIMEOUT, async {
+        while !fetch_cloner.is_known_empty_eata(&eata_pubkey) {
+            tokio::time::sleep(POLL_INTERVAL).await;
+        }
+    })
+    .await
+    .expect("timed out waiting for known-empty eATA cache entry");
+    let after_first = rpc_client.single_account_fetches();
+    assert!(
+        after_first > baseline_fetches,
+        "first ATA update should trigger an upstream eATA fetch"
+    );
+
+    // The subscription must still catch later eATA creation.
+    assert!(
+        remote_account_provider.is_watching(&eata_pubkey),
+        "eATA must be subscribed after the first ATA update"
+    );
+
+    // Cache hits should avoid refetching while preserving the subscription.
+    const SECOND_SLOT: u64 = CURRENT_SLOT + 1;
+    send_update(SECOND_SLOT).await;
+    tokio::time::timeout(TIMEOUT, async {
+        while accounts_bank
+            .get_account(&ata_pubkey)
+            .is_none_or(|account| account.remote_slot() < SECOND_SLOT)
+        {
+            tokio::time::sleep(POLL_INTERVAL).await;
+        }
+    })
+    .await
+    .expect("timed out waiting for banked ATA subscription update");
+    assert_eq!(
+        rpc_client.single_account_fetches(),
+        after_first,
+        "subsequent ATA updates for an already-known-empty eATA must not refetch"
+    );
+    assert!(
+        remote_account_provider.is_watching(&eata_pubkey),
+        "eATA subscription must persist across cache-hit ATA updates"
+    );
+}
+
+#[tokio::test]
+async fn test_delegated_account_owned_by_token_program_does_not_subscribe_program(
+) {
+    use magicblock_core::token_programs::TOKEN_PROGRAM_ID;
+
+    init_logger();
+    let validator_keypair = Keypair::new();
+    let validator_pubkey = validator_keypair.pubkey();
+    const CURRENT_SLOT: u64 = 100;
+
+    let account_pubkey = random_pubkey();
+    let account = Account {
+        lamports: 1_000_000,
+        data: vec![1, 2, 3, 4],
+        owner: dlp_api::id(),
+        executable: false,
+        rent_epoch: 0,
+    };
+
+    let FetcherTestCtx {
+        remote_account_provider,
+        rpc_client,
+        fetch_cloner,
+        ..
+    } = setup(
+        [(account_pubkey, account.clone())],
+        CURRENT_SLOT,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+
+    // Use SPL Token as the delegated owner.
+    add_delegation_record_for(
+        &rpc_client,
+        account_pubkey,
+        validator_pubkey,
+        TOKEN_PROGRAM_ID,
+    );
+
+    let result = fetch_cloner
+        .fetch_and_clone_accounts(
+            &[account_pubkey],
+            None,
+            None,
+            AccountFetchOrigin::GetAccount,
+            None,
+        )
+        .await;
+    assert!(result.is_ok());
+
+    // Let the spawned subscription task run.
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    let pubsub_client = remote_account_provider.pubsub_client();
+    let subscribed_programs = pubsub_client.subscribed_program_ids();
+    assert!(
+        !subscribed_programs.contains(&TOKEN_PROGRAM_ID),
+        "must never subscribe to SPL Token program (owns too many accounts), got: {:?}",
+        subscribed_programs
+    );
+}

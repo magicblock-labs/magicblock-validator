@@ -385,8 +385,12 @@ where
                         &delegation_record,
                     );
 
-                    // Collect unique owner programs to subscribe concurrently after the loop
-                    if account.delegated() {
+                    // Skip high-cardinality owner programs such as SPL Token.
+                    if account.delegated()
+                        && !this
+                            .programs_not_to_subscribe
+                            .contains(&delegation_record.owner)
+                    {
                         owner_programs_to_subscribe
                             .insert(delegation_record.owner);
                     }
