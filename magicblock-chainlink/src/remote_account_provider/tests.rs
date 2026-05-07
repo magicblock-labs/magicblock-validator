@@ -24,6 +24,7 @@ use crate::{
 struct ProviderTestCtx {
     provider:
         Arc<RemoteAccountProvider<ChainRpcClientMock, ChainPubsubClientMock>>,
+    rpc_client: ChainRpcClientMock,
     _pubsub_client: ChainPubsubClientMock,
     _forward_rx: mpsc::Receiver<ForwardedSubscriptionUpdate>,
 }
@@ -48,7 +49,7 @@ async fn setup_provider(
 
     let provider = Arc::new(
         RemoteAccountProvider::new(
-            rpc_client,
+            rpc_client.clone(),
             pubsub_client.clone(),
             forward_tx,
             &config,
@@ -61,6 +62,7 @@ async fn setup_provider(
 
     ProviderTestCtx {
         provider,
+        rpc_client,
         _pubsub_client: pubsub_client,
         _forward_rx: forward_rx,
     }
@@ -130,7 +132,7 @@ async fn setup_matching_slots(
 }
 
 #[tokio::test]
-async fn test_try_get_multi_abort_during_setup_subscriptions_rolls_back_pending_entry(
+async fn test_try_get_multi_setup_subscriptions_failure_cleans_up_pending_entry(
 ) {
     let pubkey = solana_pubkey::Pubkey::new_unique();
     let account = Account {
@@ -145,12 +147,11 @@ async fn test_try_get_multi_abort_during_setup_subscriptions_rolls_back_pending_
         provider,
         _pubsub_client,
         _forward_rx,
+        ..
     } = setup_provider(pubkey, account).await;
 
-    // Block subscribe to hang the setup_subscriptions() call
     _pubsub_client.block_subscribe();
 
-    // Spawn the first try_get_multi call which will block in setup_subscriptions
     let task_handle = tokio::spawn({
         let provider = provider.clone();
         async move {
@@ -166,64 +167,37 @@ async fn test_try_get_multi_abort_during_setup_subscriptions_rolls_back_pending_
         }
     });
 
-    // Wait for at least one subscribe attempt to ensure we're blocked in
-    // setup_subscriptions
     _pubsub_client.wait_for_subscribe_attempts(1).await;
-
-    // Give a small delay to ensure the entry is inserted in fetching_accounts
     tokio::time::sleep(Duration::from_millis(50)).await;
-
-    // Verify that the entry is pending
     assert!(provider.is_pending(&pubkey));
 
-    // Abort the task which should trigger FetchingAccountGuard::Drop
-    task_handle.abort();
-
-    // Poll for at most 1 second until the pending entry is cleaned up by Drop
-    let start = tokio::time::Instant::now();
-    loop {
-        if !provider.is_pending(&pubkey) {
-            break;
-        }
-        if start.elapsed() > Duration::from_secs(1) {
-            panic!("pending entry was not cleaned up within 1 second");
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-
-    // Release the subscribe block
+    _pubsub_client.simulate_disconnect();
     _pubsub_client.release_subscribe();
 
-    // Issue a second try_get_multi for the same pubkey
-    // This should succeed since the first one's stale entry is gone
-    let result = tokio::time::timeout(
-        Duration::from_secs(2),
-        provider.try_get_multi(
+    let result = tokio::time::timeout(Duration::from_secs(2), task_handle)
+        .await
+        .expect("owner task should complete")
+        .expect("owner task should not panic");
+    let err = result.expect_err("setup_subscriptions should fail");
+    assert!(err.to_string().contains("subscription(s) failed"));
+    assert!(!provider.is_pending(&pubkey));
+
+    _pubsub_client.try_reconnect().await.unwrap();
+    let retry = provider
+        .try_get_multi(
             &[pubkey],
             None,
             AccountFetchOrigin::GetAccount,
             None,
             None,
-        ),
-    )
-    .await;
-
-    assert!(
-        result.is_ok(),
-        "second try_get_multi should complete without hanging"
-    );
-    let result = result.unwrap();
-    assert!(
-        result.is_ok(),
-        "second try_get_multi should succeed, got: {:?}",
-        result
-    );
-    assert_eq!(result.unwrap().len(), 1);
+        )
+        .await
+        .expect("retry after cleanup should succeed");
+    assert_eq!(retry.len(), 1);
 }
 
 #[tokio::test]
-async fn test_try_get_multi_waiter_receives_error_when_owner_aborts_in_setup_subscriptions(
-) {
+async fn test_try_get_multi_waiter_receives_setup_subscriptions_failure() {
     let pubkey = solana_pubkey::Pubkey::new_unique();
     let account = Account {
         lamports: 1_000_000,
@@ -237,12 +211,11 @@ async fn test_try_get_multi_waiter_receives_error_when_owner_aborts_in_setup_sub
         provider,
         _pubsub_client,
         _forward_rx,
+        ..
     } = setup_provider(pubkey, account).await;
 
-    // Block subscribe to hang the setup_subscriptions() call
     _pubsub_client.block_subscribe();
 
-    // Spawn the first try_get_multi call (the "owner")
     let first_task_handle = tokio::spawn({
         let provider = provider.clone();
         async move {
@@ -258,13 +231,9 @@ async fn test_try_get_multi_waiter_receives_error_when_owner_aborts_in_setup_sub
         }
     });
 
-    // Wait for the first subscribe attempt
     _pubsub_client.wait_for_subscribe_attempts(1).await;
-
-    // Give a small delay to ensure the first task is blocked in setup_subscriptions
     tokio::time::sleep(Duration::from_millis(50)).await;
 
-    // Spawn a second try_get_multi call for the same pubkey (a "waiter")
     let second_task_handle = tokio::spawn({
         let provider = provider.clone();
         async move {
@@ -280,11 +249,6 @@ async fn test_try_get_multi_waiter_receives_error_when_owner_aborts_in_setup_sub
         }
     });
 
-    // Poll provider.fetching_accounts until the second task has registered
-    // as a waiter on the entry keyed by pubkey before aborting the owner;
-    // this avoids the race where first_task_handle.abort() runs before
-    // second_task_handle has had a chance to attach itself to the entry's
-    // waiters list.
     let waiter_registration_start = tokio::time::Instant::now();
     let waiter_registration_timeout = Duration::from_secs(2);
     loop {
@@ -292,7 +256,7 @@ async fn test_try_get_multi_waiter_receives_error_when_owner_aborts_in_setup_sub
             let fetching = provider.fetching_accounts.lock().unwrap();
             fetching.get(&pubkey).map(|s| s.waiters.len()).unwrap_or(0)
         };
-        if waiter_count > 0 {
+        if waiter_count >= 2 {
             break;
         }
         assert!(
@@ -304,42 +268,25 @@ async fn test_try_get_multi_waiter_receives_error_when_owner_aborts_in_setup_sub
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
 
-    // Abort the first (owner) task which should trigger FetchingAccountGuard::Drop
-    // and fail all waiters with an explicit error
-    first_task_handle.abort();
-
-    // Release the subscribe block so any further calls can proceed
+    _pubsub_client.simulate_disconnect();
     _pubsub_client.release_subscribe();
 
-    // Await the second task under timeout
-    let result =
-        tokio::time::timeout(Duration::from_secs(2), second_task_handle).await;
+    let first_result =
+        tokio::time::timeout(Duration::from_secs(2), first_task_handle)
+            .await
+            .expect("owner task should complete")
+            .expect("owner task should not panic");
+    let second_result =
+        tokio::time::timeout(Duration::from_secs(2), second_task_handle)
+            .await
+            .expect("waiter task should complete")
+            .expect("waiter task should not panic");
 
-    assert!(
-        result.is_ok(),
-        "second task should complete without hanging"
-    );
-    let task_result = result.unwrap();
-    assert!(
-        task_result.is_ok(),
-        "task should not panic, got: {:?}",
-        task_result
-    );
-    let fetch_result = task_result.unwrap();
-    assert!(
-        fetch_result.is_err(),
-        "second try_get_multi should return Err since owner was aborted, \
-         got: {:?}",
-        fetch_result
-    );
-    let err = fetch_result.unwrap_err();
-    assert!(
-        err.to_string().contains(
-            "owner future dropped before setup_subscriptions completed"
-        ),
-        "error message should indicate owner cancellation, got: {}",
-        err
-    );
+    let first_err = first_result.expect_err("owner should fail");
+    let second_err = second_result.expect_err("waiter should fail");
+    assert!(first_err.to_string().contains("subscription(s) failed"));
+    assert!(second_err.to_string().contains("subscription(s) failed"));
+    assert!(!provider.is_pending(&pubkey));
 }
 
 #[tokio::test]
@@ -358,6 +305,7 @@ async fn test_release_subscription_reason_keeps_watching_until_last_direct_refco
         provider,
         _pubsub_client,
         _forward_rx,
+        ..
     } = setup_provider(pubkey, account).await;
 
     provider
@@ -403,6 +351,7 @@ async fn test_release_subscription_reason_unsubscribes_after_final_release() {
         provider,
         _pubsub_client,
         _forward_rx,
+        ..
     } = setup_provider(pubkey, account).await;
 
     provider
@@ -435,6 +384,7 @@ async fn test_subscription_reasons_do_not_release_each_other() {
         provider,
         _pubsub_client,
         _forward_rx,
+        ..
     } = setup_provider(pubkey, account).await;
 
     provider
@@ -487,6 +437,7 @@ async fn test_concurrent_reason_changes_do_not_unsubscribe_until_final_release()
         provider,
         _pubsub_client,
         _forward_rx,
+        ..
     } = setup_provider(pubkey, account).await;
 
     provider
@@ -525,7 +476,7 @@ async fn test_concurrent_reason_changes_do_not_unsubscribe_until_final_release()
 }
 
 #[tokio::test]
-async fn test_stale_fetching_account_entry_is_evicted_and_replaced() {
+async fn test_try_get_multi_owner_success_cleans_up_pending_entry() {
     let pubkey = solana_pubkey::Pubkey::new_unique();
     let account = Account {
         lamports: 1_000_000,
@@ -537,90 +488,49 @@ async fn test_stale_fetching_account_entry_is_evicted_and_replaced() {
 
     let ProviderTestCtx {
         provider,
+        rpc_client,
         _forward_rx,
         ..
     } = setup_provider(pubkey, account.clone()).await;
 
-    // Directly insert a stale FetchingAccountState into the map
-    // Use 35 seconds (stale threshold is 30)
-    let stale_created_at = std::time::Instant::now() - Duration::from_secs(35);
-    {
-        let mut fetching = provider.fetching_accounts.lock().unwrap();
-        fetching.insert(
-            pubkey,
-            FetchingAccountState {
-                generation: 1,
-                created_at: stale_created_at,
-                fetch_start_slot: 100,
-                waiters: vec![],
-            },
+    rpc_client.block_fetches();
+    let task_handle = tokio::spawn({
+        let provider = provider.clone();
+        async move {
+            provider
+                .try_get_multi(
+                    &[pubkey],
+                    None,
+                    AccountFetchOrigin::GetAccount,
+                    None,
+                    None,
+                )
+                .await
+        }
+    });
+
+    let pending_start = tokio::time::Instant::now();
+    let pending_timeout = Duration::from_secs(2);
+    loop {
+        if provider.is_pending(&pubkey) {
+            break;
+        }
+        assert!(
+            pending_start.elapsed() < pending_timeout,
+            "owner did not claim pending entry for {pubkey} within {pending_timeout:?}"
         );
+        tokio::time::sleep(Duration::from_millis(10)).await;
     }
 
-    // Verify stale entry is in the map
-    assert!(provider.is_pending(&pubkey));
+    rpc_client.allow_fetches();
 
-    // Call try_get_multi which should evict the stale entry
-    let result = tokio::time::timeout(
-        Duration::from_secs(2),
-        provider.try_get_multi(
-            &[pubkey],
-            None,
-            AccountFetchOrigin::GetAccount,
-            None,
-            None,
-        ),
-    )
-    .await;
-
-    assert!(
-        result.is_ok(),
-        "try_get_multi should complete without hanging"
-    );
-    let result = result.unwrap();
-    assert!(
-        result.is_ok(),
-        "try_get_multi should succeed, got: {:?}",
-        result
-    );
-
-    // Verify stale entry is gone
+    let result = tokio::time::timeout(Duration::from_secs(2), task_handle)
+        .await
+        .expect("owner task should complete")
+        .expect("owner task should not panic")
+        .expect("fetch should succeed");
+    assert_eq!(result.len(), 1);
     assert!(!provider.is_pending(&pubkey));
-}
-
-#[test]
-fn test_fetching_account_guard_drop_does_not_remove_replacement_entry() {
-    let pubkey = solana_pubkey::Pubkey::new_unique();
-    let fetching_accounts = Arc::<FetchingAccounts>::default();
-
-    let old_generation = 1;
-    let new_generation = 2;
-    let guard = FetchingAccountGuard::new(
-        fetching_accounts.clone(),
-        pubkey,
-        old_generation,
-    );
-
-    {
-        let mut fetching = fetching_accounts.lock().unwrap();
-        fetching.insert(
-            pubkey,
-            FetchingAccountState {
-                generation: new_generation,
-                created_at: std::time::Instant::now(),
-                fetch_start_slot: 200,
-                waiters: vec![],
-            },
-        );
-    }
-
-    drop(guard);
-
-    let fetching = fetching_accounts.lock().unwrap();
-    let state = fetching
-        .get(&pubkey)
-        .expect("replacement entry should remain after stale guard drop");
-    assert_eq!(state.generation, new_generation);
 }
 
 #[tokio::test]
