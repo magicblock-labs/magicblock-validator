@@ -3,6 +3,7 @@ use dlp_api::{
 };
 use solana_pubkey::Pubkey;
 use solana_rpc_client_api::config::RpcAccountInfoConfig;
+use tracing::{debug, trace};
 
 use crate::remote_account_provider::ChainRpcClient;
 
@@ -51,4 +52,316 @@ pub(crate) async fn fetch_delegation_record_header<T: ChainRpcClient>(
         .value?;
 
     parse_delegation_record_header(&account.data)
+}
+
+#[allow(dead_code)]
+pub(crate) async fn should_forward_dlp_program_update<T: ChainRpcClient>(
+    rpc_client: &T,
+    validator_pubkey: &Pubkey,
+    delegated_account_pubkey: Pubkey,
+    owner: &Pubkey,
+    is_internal_dlp_account: bool,
+    min_context_slot: u64,
+    is_directly_subscribed: bool,
+) -> bool {
+    if is_directly_subscribed {
+        return true;
+    }
+    if owner != &dlp_api::id() {
+        trace!(pubkey = %delegated_account_pubkey, owner = %owner, "Dropping non-DLP program update");
+        return false;
+    }
+    if is_internal_dlp_account {
+        trace!(pubkey = %delegated_account_pubkey, "Dropping internal DLP program update");
+        return false;
+    }
+
+    let Some(record) = fetch_delegation_record_header(
+        rpc_client,
+        delegated_account_pubkey,
+        min_context_slot,
+    )
+    .await
+    else {
+        trace!(pubkey = %delegated_account_pubkey, slot = min_context_slot, "Dropping DLP program update without delegation record");
+        return false;
+    };
+
+    if is_delegated_to_validator_or_confined(
+        &record.authority,
+        validator_pubkey,
+    ) {
+        true
+    } else {
+        debug!(pubkey = %delegated_account_pubkey, authority = %record.authority, "Dropping DLP program update delegated elsewhere");
+        false
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use dlp_api::pda::delegation_record_pda_from_delegated_account;
+    use solana_account::Account;
+    use solana_pubkey::Pubkey;
+
+    use super::*;
+    use crate::testing::rpc_client_mock::ChainRpcClientMockBuilder;
+
+    fn serialize_valid_delegation_record(authority: Pubkey) -> Vec<u8> {
+        let record = DelegationRecord {
+            owner: Pubkey::new_unique(),
+            authority,
+            commit_frequency_ms: 1_000,
+            delegation_slot: 42,
+            lamports: 1_000_000,
+        };
+        let mut data = vec![0; DelegationRecord::size_with_discriminator()];
+        record.to_bytes_with_discriminator(&mut data).unwrap();
+        data
+    }
+
+    fn append_trailing_bytes(mut data: Vec<u8>, trailing: &[u8]) -> Vec<u8> {
+        data.extend_from_slice(trailing);
+        data
+    }
+
+    fn make_dlp_owned_non_internal_account_data() -> Vec<u8> {
+        vec![0xde, 0xad, 0xbe, 0xef]
+    }
+
+    fn make_dlp_owned_delegated_account_payload() -> Account {
+        Account {
+            lamports: 1,
+            data: make_dlp_owned_non_internal_account_data(),
+            owner: dlp_api::id(),
+            executable: false,
+            rent_epoch: 0,
+        }
+    }
+
+    #[test]
+    fn predicate_matrix() {
+        let validator_pubkey = Pubkey::new_unique();
+        assert!(is_delegated_to_validator_or_confined(
+            &validator_pubkey,
+            &validator_pubkey
+        ));
+        assert!(is_delegated_to_validator_or_confined(
+            &Pubkey::default(),
+            &validator_pubkey
+        ));
+        assert!(!is_delegated_to_validator_or_confined(
+            &Pubkey::new_unique(),
+            &validator_pubkey
+        ));
+    }
+
+    #[test]
+    fn parse_header_accepts_trailing_bytes() {
+        let authority = Pubkey::new_unique();
+        let record = DelegationRecord {
+            owner: Pubkey::new_unique(),
+            authority,
+            commit_frequency_ms: 7,
+            delegation_slot: 9,
+            lamports: 11,
+        };
+        let mut data = vec![0; DelegationRecord::size_with_discriminator()];
+        record.to_bytes_with_discriminator(&mut data).unwrap();
+        let data = append_trailing_bytes(data, &[1, 2, 3, 4]);
+
+        assert_eq!(parse_delegation_record_header(&data), Some(record));
+    }
+
+    #[tokio::test]
+    async fn fetch_header_handles_missing_stale_short_and_invalid() {
+        let delegated_account_pubkey = Pubkey::new_unique();
+        let delegation_record_pubkey =
+            delegation_record_pda_from_delegated_account(
+                &delegated_account_pubkey,
+            );
+        let validator_pubkey = Pubkey::new_unique();
+        let valid_record = serialize_valid_delegation_record(validator_pubkey);
+        let valid_account = Account {
+            lamports: 1,
+            data: valid_record.clone(),
+            owner: dlp_api::id(),
+            executable: false,
+            rent_epoch: 0,
+        };
+
+        let missing_client = ChainRpcClientMockBuilder::new().slot(10).build();
+        assert_eq!(
+            fetch_delegation_record_header(
+                &missing_client,
+                delegated_account_pubkey,
+                10,
+            )
+            .await,
+            None
+        );
+
+        let stale_client = ChainRpcClientMockBuilder::new()
+            .slot(5)
+            .account(delegation_record_pubkey, valid_account.clone())
+            .build();
+        assert_eq!(
+            fetch_delegation_record_header(
+                &stale_client,
+                delegated_account_pubkey,
+                10,
+            )
+            .await,
+            None
+        );
+
+        let short_client = ChainRpcClientMockBuilder::new()
+            .slot(10)
+            .account(
+                delegation_record_pubkey,
+                Account {
+                    lamports: 1,
+                    data: vec![1, 2, 3],
+                    owner: dlp_api::id(),
+                    executable: false,
+                    rent_epoch: 0,
+                },
+            )
+            .build();
+        assert_eq!(
+            fetch_delegation_record_header(
+                &short_client,
+                delegated_account_pubkey,
+                10,
+            )
+            .await,
+            None
+        );
+
+        let invalid_client = ChainRpcClientMockBuilder::new()
+            .slot(10)
+            .account(
+                delegation_record_pubkey,
+                Account {
+                    lamports: 1,
+                    data: {
+                        let mut data = valid_record;
+                        data[0] ^= 0xff;
+                        data
+                    },
+                    owner: dlp_api::id(),
+                    executable: false,
+                    rent_epoch: 0,
+                },
+            )
+            .build();
+        assert_eq!(
+            fetch_delegation_record_header(
+                &invalid_client,
+                delegated_account_pubkey,
+                10,
+            )
+            .await,
+            None
+        );
+    }
+
+    #[tokio::test]
+    async fn transport_gate_matrix() {
+        let delegated_account_pubkey = Pubkey::new_unique();
+        let delegation_record_pubkey =
+            delegation_record_pda_from_delegated_account(
+                &delegated_account_pubkey,
+            );
+        let validator_pubkey = Pubkey::new_unique();
+        let delegated_elsewhere = Pubkey::new_unique();
+
+        let rpc_client = ChainRpcClientMockBuilder::new()
+            .slot(10)
+            .account(
+                delegation_record_pubkey,
+                Account {
+                    lamports: 1,
+                    data: serialize_valid_delegation_record(validator_pubkey),
+                    owner: dlp_api::id(),
+                    executable: false,
+                    rent_epoch: 0,
+                },
+            )
+            .build();
+
+        let delegated_account = make_dlp_owned_delegated_account_payload();
+
+        assert!(
+            should_forward_dlp_program_update(
+                &rpc_client,
+                &validator_pubkey,
+                delegated_account_pubkey,
+                &delegated_account.owner,
+                false,
+                10,
+                true,
+            )
+            .await
+        );
+        assert_eq!(rpc_client.single_account_fetches(), 0);
+
+        assert!(
+            should_forward_dlp_program_update(
+                &rpc_client,
+                &validator_pubkey,
+                delegated_account_pubkey,
+                &delegated_account.owner,
+                false,
+                10,
+                false,
+            )
+            .await
+        );
+        assert_eq!(rpc_client.single_account_fetches(), 1);
+
+        let elsewhere_rpc = ChainRpcClientMockBuilder::new()
+            .slot(10)
+            .account(
+                delegation_record_pubkey,
+                Account {
+                    lamports: 1,
+                    data: serialize_valid_delegation_record(
+                        delegated_elsewhere,
+                    ),
+                    owner: dlp_api::id(),
+                    executable: false,
+                    rent_epoch: 0,
+                },
+            )
+            .build();
+        assert!(
+            !should_forward_dlp_program_update(
+                &elsewhere_rpc,
+                &validator_pubkey,
+                delegated_account_pubkey,
+                &delegated_account.owner,
+                false,
+                10,
+                false,
+            )
+            .await
+        );
+        assert_eq!(elsewhere_rpc.single_account_fetches(), 1);
+
+        let internal_rpc = ChainRpcClientMockBuilder::new().slot(10).build();
+        assert!(
+            !should_forward_dlp_program_update(
+                &internal_rpc,
+                &validator_pubkey,
+                delegated_account_pubkey,
+                &delegated_account.owner,
+                true,
+                10,
+                false,
+            )
+            .await
+        );
+        assert_eq!(internal_rpc.single_account_fetches(), 0);
+    }
 }

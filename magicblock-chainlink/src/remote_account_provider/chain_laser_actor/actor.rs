@@ -772,10 +772,21 @@ impl<H: StreamHandle, S: StreamFactory<H>> ChainLaserActor<H, S> {
             );
         }
 
-        let should_forward = self.stream_manager.is_subscribed(&pubkey)
-            || matches!(source, AccountUpdateSource::Program)
-                && owner.eq(&dlp_api::id())
-                && !is_internal_dlp_account_data(&account.data);
+        let should_forward = if self.stream_manager.is_subscribed(&pubkey) {
+            true
+        } else {
+            matches!(source, AccountUpdateSource::Program)
+                && crate::delegation_record::should_forward_dlp_program_update(
+                    &self.rpc_client,
+                    &self.validator_pubkey,
+                    pubkey,
+                    &owner,
+                    is_internal_dlp_account_data(&account.data),
+                    slot,
+                    false,
+                )
+                .await
+        };
         if !should_forward {
             return;
         }

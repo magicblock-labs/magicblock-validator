@@ -751,21 +751,16 @@ impl ChainPubsubActor {
                                 } else if !program_pubkey.eq(&dlp_api::id()) {
                                     false
                                 } else if let Some(account) = sub_update.account.as_ref() {
-                                    if is_internal_dlp_account_data(&account.data) {
-                                        false
-                                    } else {
-                                        match crate::delegation_record::fetch_delegation_record_header(&rpc_client, acc_pubkey, sub_update.slot).await {
-                                            Some(record) if crate::delegation_record::is_delegated_to_validator_or_confined(&record.authority, &validator_pubkey) => true,
-                                            Some(record) => {
-                                                debug!(pubkey = %acc_pubkey, authority = %record.authority, "Dropping DLP program update delegated elsewhere");
-                                                false
-                                            }
-                                            None => {
-                                                debug!(pubkey = %acc_pubkey, slot = sub_update.slot, "Dropping DLP program update without delegation record");
-                                                false
-                                            }
-                                        }
-                                    }
+                                    crate::delegation_record::should_forward_dlp_program_update(
+                                        &rpc_client,
+                                        &validator_pubkey,
+                                        acc_pubkey,
+                                        &account.owner,
+                                        is_internal_dlp_account_data(&account.data),
+                                        sub_update.slot,
+                                        false,
+                                    )
+                                    .await
                                 } else {
                                     false
                                 };
