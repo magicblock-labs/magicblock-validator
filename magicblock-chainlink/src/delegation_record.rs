@@ -2,8 +2,8 @@ use dlp_api::{
     pda::delegation_record_pda_from_delegated_account, state::DelegationRecord,
 };
 use solana_pubkey::Pubkey;
-use solana_rpc_client_api::config::RpcAccountInfoConfig;
-use tracing::{debug, trace};
+use solana_rpc_client_api::{client_error, config::RpcAccountInfoConfig};
+use tracing::{debug, trace, warn};
 
 use crate::remote_account_provider::{
     pubsub_common::is_internal_dlp_account_data, ChainRpcClient,
@@ -31,14 +31,20 @@ pub(crate) fn parse_delegation_record_header(
     .ok()
 }
 
+#[derive(Debug)]
+pub(crate) enum FetchError {
+    Transport(client_error::Error),
+    Deserialize,
+}
+
 pub(crate) async fn fetch_delegation_record_header<T: ChainRpcClient>(
     rpc_client: &T,
     delegated_account_pubkey: Pubkey,
     min_context_slot: u64,
-) -> Option<DelegationRecord> {
+) -> Result<Option<DelegationRecord>, FetchError> {
     let delegation_record_pubkey =
         delegation_record_pda_from_delegated_account(&delegated_account_pubkey);
-    let account = rpc_client
+    let Some(account) = rpc_client
         .get_account_with_config(
             &delegation_record_pubkey,
             RpcAccountInfoConfig {
@@ -48,14 +54,19 @@ pub(crate) async fn fetch_delegation_record_header<T: ChainRpcClient>(
             },
         )
         .await
-        .ok()?
-        .value?;
+        .map_err(FetchError::Transport)?
+        .value
+    else {
+        return Ok(None);
+    };
 
     if account.data.len() < DelegationRecord::size_with_discriminator() {
-        return None;
+        return Ok(None);
     }
 
     parse_delegation_record_header(&account.data)
+        .map(Some)
+        .ok_or(FetchError::Deserialize)
 }
 
 pub(crate) async fn should_forward_dlp_program_update<T: ChainRpcClient>(
@@ -75,15 +86,26 @@ pub(crate) async fn should_forward_dlp_program_update<T: ChainRpcClient>(
         return false;
     }
 
-    let Some(record) = fetch_delegation_record_header(
+    let record = match fetch_delegation_record_header(
         rpc_client,
         delegated_account_pubkey,
         min_context_slot,
     )
     .await
-    else {
-        trace!(pubkey = %delegated_account_pubkey, slot = min_context_slot, "Dropping DLP program update without delegation record");
-        return false;
+    {
+        Ok(Some(record)) => record,
+        Ok(None) => {
+            trace!(pubkey = %delegated_account_pubkey, slot = min_context_slot, "Dropping DLP program update without delegation record");
+            return false;
+        }
+        Err(FetchError::Transport(err)) => {
+            warn!(pubkey = %delegated_account_pubkey, slot = min_context_slot, error = %err, "Dropping DLP program update after delegation record fetch error");
+            return false;
+        }
+        Err(FetchError::Deserialize) => {
+            warn!(pubkey = %delegated_account_pubkey, slot = min_context_slot, "Dropping DLP program update after invalid delegation record data");
+            return false;
+        }
     };
 
     if is_delegated_to_validator_or_confined(
@@ -190,29 +212,29 @@ mod tests {
         };
 
         let missing_client = ChainRpcClientMockBuilder::new().slot(10).build();
-        assert_eq!(
+        assert!(matches!(
             fetch_delegation_record_header(
                 &missing_client,
                 delegated_account_pubkey,
                 10,
             )
             .await,
-            None
-        );
+            Ok(None)
+        ));
 
         let stale_client = ChainRpcClientMockBuilder::new()
             .slot(5)
             .account(delegation_record_pubkey, valid_account.clone())
             .build();
-        assert_eq!(
+        assert!(matches!(
             fetch_delegation_record_header(
                 &stale_client,
                 delegated_account_pubkey,
                 10,
             )
             .await,
-            None
-        );
+            Err(FetchError::Transport(_))
+        ));
 
         let short_client = ChainRpcClientMockBuilder::new()
             .slot(10)
@@ -227,15 +249,15 @@ mod tests {
                 },
             )
             .build();
-        assert_eq!(
+        assert!(matches!(
             fetch_delegation_record_header(
                 &short_client,
                 delegated_account_pubkey,
                 10,
             )
             .await,
-            None
-        );
+            Ok(None)
+        ));
 
         let invalid_client = ChainRpcClientMockBuilder::new()
             .slot(10)
@@ -254,15 +276,15 @@ mod tests {
                 },
             )
             .build();
-        assert_eq!(
+        assert!(matches!(
             fetch_delegation_record_header(
                 &invalid_client,
                 delegated_account_pubkey,
                 10,
             )
             .await,
-            None
-        );
+            Err(FetchError::Deserialize)
+        ));
     }
 
     #[tokio::test]
