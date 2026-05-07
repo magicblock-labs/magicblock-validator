@@ -49,10 +49,10 @@ fn test_restore_ledger_with_flexi_counter_deploy() {
     );
 
     let (mut validator, _) = write(&ledger_path, &payer, &flexi_counter_paths);
-    validator.kill().unwrap();
+    test_ledger_restore::kill_validator(&mut validator);
 
     let mut validator = read(&ledger_path, &payer.pubkey());
-    validator.kill().unwrap();
+    test_ledger_restore::kill_validator(&mut validator);
 }
 
 fn write(

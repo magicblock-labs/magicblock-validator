@@ -703,6 +703,15 @@ pub fn wait_for_cloned_accounts_hydration() {
     sleep(Duration::from_secs(5));
 }
 
+pub fn kill_validator(validator: &mut Child) {
+    let _ = validator.kill().inspect_err(|err| {
+        eprintln!("ERR: Failed to kill validator: {:?}", err);
+    });
+    let _ = validator.wait().inspect_err(|err| {
+        eprintln!("ERR: Failed to reap validator: {:?}", err);
+    });
+}
+
 pub fn wait_for_counter_ephem_state(
     ctx: &IntegrationTestContext,
     validator: &mut Child,

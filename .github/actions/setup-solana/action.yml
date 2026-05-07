@@ -1,17 +1,56 @@
 name: 'MagicBlock - Setup Solana'
 description: 'Install Solana Test Validator and ensure it works'
 
+inputs:
+  solana_version:
+    description: 'Anza Solana release version to install'
+    required: false
+    default: 'v3.1.5'
+
 runs:
   using: "composite"
   steps:
+      - name: Cache Solana CLI install
+        id: cache-solana
+        uses: actions/cache@v4
+        with:
+          # Cache the entire install root. Bumping `v2` whenever the cache
+          # layout needs to be invalidated. `runner.arch` keeps x64 and arm64
+          # caches separate — the build job and matrix shards may run on
+          # different runner labels with different architectures.
+          path: ~/.local/share/solana
+          key: solana-cli-v2-${{ runner.os }}-${{ runner.arch }}-${{ inputs.solana_version }}
+
+      # Platform-tools (the BPF toolchain) is downloaded by `cargo build-sbf`
+      # into ~/.cache/solana/<tools-version>/ on first use. Cache it so we
+      # don't re-fetch it (and so concurrent builds don't race on install).
+      - name: Cache cargo-build-sbf platform-tools
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/solana
+          key: solana-platform-tools-v1-${{ runner.os }}-${{ runner.arch }}-${{ inputs.solana_version }}
+
       - name: Install Solana Test Validator
+        if: steps.cache-solana.outputs.cache-hit != 'true'
         shell: "bash"
         run: |
-          sh -c "$(curl -sSfL https://release.anza.xyz/v3.1.5/install)"
+          sh -c "$(curl -sSfL https://release.anza.xyz/${{ inputs.solana_version }}/install)"
+
+      - name: Add Solana to PATH
+        shell: "bash"
+        run: |
           echo "$HOME/.local/share/solana/install/active_release/bin" >> $GITHUB_PATH
 
       - name: Ensure Solana Test Validator is Installed
         shell: "bash"
         run: |
+          # If the cache restored an incomplete install (path layout changed
+          # upstream, partial upload, etc.) reinstall in-place rather than
+          # failing the workflow.
+          if ! command -v solana-test-validator >/dev/null 2>&1; then
+            echo "solana-test-validator not found after cache restore; reinstalling"
+            sh -c "$(curl -sSfL https://release.anza.xyz/${{ inputs.solana_version }}/install)"
+            export PATH="$HOME/.local/share/solana/install/active_release/bin:$PATH"
+          fi
           solana-test-validator --version
 

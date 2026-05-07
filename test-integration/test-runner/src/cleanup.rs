@@ -18,6 +18,9 @@ pub fn cleanup_validator(validator: &mut Child, label: &str) {
     validator.kill().unwrap_or_else(|err| {
         panic!("Failed to kill {} validator ({:?})", label, err)
     });
+    validator.wait().unwrap_or_else(|err| {
+        panic!("Failed to reap {} validator ({:?})", label, err)
+    });
 }
 
 fn kill_process(name: &str) {
