@@ -1,8 +1,4 @@
-use std::{
-    collections::HashMap,
-    sync::Arc,
-    time::{Duration, Instant},
-};
+use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use dlp_api::state::DelegationRecord;
 use solana_account::{Account, AccountSharedData, WritableAccount};
@@ -257,6 +253,77 @@ fn init_fetch_cloner(
         None,
     );
     (fetch_cloner, subscription_tx)
+}
+
+async fn wait_for_pending_request(
+    fetch_cloner: &Arc<
+        FetchCloner<
+            ChainRpcClientMock,
+            ChainPubsubClientMock,
+            AccountsBankStub,
+            ClonerStub,
+        >,
+    >,
+    pubkey: Pubkey,
+) {
+    let start = tokio::time::Instant::now();
+    let timeout = Duration::from_secs(2);
+    while !fetch_cloner.has_pending_request(&pubkey)
+        && start.elapsed() < timeout
+    {
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert!(
+        fetch_cloner.has_pending_request(&pubkey),
+        "pending request should exist for {pubkey}"
+    );
+}
+
+async fn wait_for_pending_waiter_count(
+    fetch_cloner: &Arc<
+        FetchCloner<
+            ChainRpcClientMock,
+            ChainPubsubClientMock,
+            AccountsBankStub,
+            ClonerStub,
+        >,
+    >,
+    pubkey: Pubkey,
+    expected: usize,
+) {
+    let start = tokio::time::Instant::now();
+    let timeout = Duration::from_secs(2);
+    while fetch_cloner.pending_request_waiter_count(&pubkey) != Some(expected)
+        && start.elapsed() < timeout
+    {
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert_eq!(
+        fetch_cloner.pending_request_waiter_count(&pubkey),
+        Some(expected),
+        "pending waiter count for {pubkey} should be {expected}"
+    );
+}
+
+async fn wait_for_rpc_fetch_activity(
+    rpc_client: &ChainRpcClientMock,
+    expected_minimum: u64,
+) {
+    let start = tokio::time::Instant::now();
+    let timeout = Duration::from_secs(2);
+    while rpc_client.single_account_fetches()
+        + rpc_client.multi_account_fetches()
+        < expected_minimum
+        && start.elapsed() < timeout
+    {
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert!(
+        rpc_client.single_account_fetches()
+            + rpc_client.multi_account_fetches()
+            >= expected_minimum,
+        "rpc fetch activity should be at least {expected_minimum}"
+    );
 }
 
 // -----------------
@@ -3767,7 +3834,7 @@ async fn test_delegated_eata_update_does_not_override_undelegating_ata_in_bank()
 }
 
 #[tokio::test]
-async fn test_pending_request_owner_abort_cleans_up_and_allows_retry() {
+async fn test_owned_operation_concurrent_calls_spawn_one_owner_fetch() {
     init_logger();
     let validator_keypair = Keypair::new();
     let account_owner = random_pubkey();
@@ -3784,420 +3851,6 @@ async fn test_pending_request_owner_abort_cleans_up_and_allows_retry() {
 
     let FetcherTestCtx {
         accounts_bank,
-        fetch_cloner,
-        ..
-    } = setup(
-        [(account_pubkey, account.clone())],
-        CURRENT_SLOT,
-        validator_keypair.insecure_clone(),
-    )
-    .await;
-
-    let delayed_cloner = Arc::new(ClonerStub::new(accounts_bank.clone()));
-    delayed_cloner.set_clone_delay(Duration::from_millis(500));
-
-    let (_subscription_tx, subscription_rx) = mpsc::channel(100);
-    let fetch_cloner = FetchCloner::new(
-        &fetch_cloner.remote_account_provider.clone(),
-        &accounts_bank,
-        &delayed_cloner,
-        validator_keypair.insecure_clone(),
-        Pubkey::new_unique(),
-        subscription_rx,
-        None,
-    );
-
-    let fetch_cloner_clone = fetch_cloner.clone();
-    let task1 = tokio::spawn(async move {
-        fetch_cloner_clone
-            .fetch_and_clone_accounts_with_dedup(
-                &[account_pubkey],
-                None,
-                None,
-                AccountFetchOrigin::GetAccount,
-                None,
-            )
-            .await
-    });
-
-    let start = tokio::time::Instant::now();
-    let timeout = Duration::from_secs(1);
-    while !fetch_cloner.has_pending_request(&account_pubkey)
-        && start.elapsed() < timeout
-    {
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-    assert!(
-        fetch_cloner.has_pending_request(&account_pubkey),
-        "Pending request should exist after task spawn"
-    );
-
-    task1.abort();
-
-    let start = tokio::time::Instant::now();
-    let timeout = Duration::from_secs(1);
-    while fetch_cloner.has_pending_request(&account_pubkey)
-        && start.elapsed() < timeout
-    {
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-    assert!(
-        !fetch_cloner.has_pending_request(&account_pubkey),
-        "Pending request should be cleaned up after abort"
-    );
-
-    let fetch_cloner_clone = fetch_cloner.clone();
-    let task2 = tokio::spawn(async move {
-        fetch_cloner_clone
-            .fetch_and_clone_accounts_with_dedup(
-                &[account_pubkey],
-                None,
-                None,
-                AccountFetchOrigin::GetAccount,
-                None,
-            )
-            .await
-    });
-
-    let result = tokio::time::timeout(Duration::from_secs(2), task2)
-        .await
-        .expect("Second fetch should not timeout")
-        .expect("Second fetch task join should succeed");
-
-    assert!(result.is_ok(), "Second fetch should succeed: {result:?}");
-    assert_cloned_undelegated_account!(
-        accounts_bank,
-        account_pubkey,
-        account,
-        CURRENT_SLOT,
-        account_owner
-    );
-}
-
-#[tokio::test]
-async fn test_pending_request_waiter_gets_failure_when_owner_aborts() {
-    init_logger();
-    let validator_keypair = Keypair::new();
-    let account_owner = random_pubkey();
-    const CURRENT_SLOT: u64 = 100;
-
-    let account_pubkey = random_pubkey();
-    let account = Account {
-        lamports: 2_000_000,
-        data: vec![5, 6, 7, 8],
-        owner: account_owner,
-        executable: false,
-        rent_epoch: 0,
-    };
-
-    let FetcherTestCtx {
-        accounts_bank,
-        fetch_cloner,
-        ..
-    } = setup(
-        [(account_pubkey, account.clone())],
-        CURRENT_SLOT,
-        validator_keypair.insecure_clone(),
-    )
-    .await;
-
-    let delayed_cloner = Arc::new(ClonerStub::new(accounts_bank.clone()));
-    delayed_cloner.set_clone_delay(Duration::from_millis(500));
-
-    let (_subscription_tx, subscription_rx) = mpsc::channel(100);
-    let fetch_cloner = FetchCloner::new(
-        &fetch_cloner.remote_account_provider.clone(),
-        &accounts_bank,
-        &delayed_cloner,
-        validator_keypair.insecure_clone(),
-        Pubkey::new_unique(),
-        subscription_rx,
-        None,
-    );
-
-    let fetch_cloner_clone = fetch_cloner.clone();
-    let task_owner = tokio::spawn(async move {
-        fetch_cloner_clone
-            .fetch_and_clone_accounts_with_dedup(
-                &[account_pubkey],
-                None,
-                None,
-                AccountFetchOrigin::GetAccount,
-                None,
-            )
-            .await
-    });
-
-    let start = tokio::time::Instant::now();
-    let timeout = Duration::from_secs(1);
-    while !fetch_cloner.has_pending_request(&account_pubkey)
-        && start.elapsed() < timeout
-    {
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-
-    let fetch_cloner_clone = fetch_cloner.clone();
-    let task_waiter = tokio::spawn(async move {
-        fetch_cloner_clone
-            .fetch_and_clone_accounts_with_dedup(
-                &[account_pubkey],
-                None,
-                None,
-                AccountFetchOrigin::GetAccount,
-                None,
-            )
-            .await
-    });
-
-    let waiter_registration_start = tokio::time::Instant::now();
-    let waiter_registration_timeout = Duration::from_secs(2);
-    loop {
-        if fetch_cloner
-            .pending_request_waiter_count(&account_pubkey)
-            .is_some_and(|n| n > 0)
-        {
-            break;
-        }
-        assert!(
-            waiter_registration_start.elapsed() < waiter_registration_timeout,
-            "task_waiter did not register as a waiter in fetch_cloner.pending_requests \
-             for {account_pubkey} within {waiter_registration_timeout:?}"
-        );
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-
-    task_owner.abort();
-
-    let waiter_result =
-        tokio::time::timeout(Duration::from_secs(2), task_waiter)
-            .await
-            .expect("Waiter should not timeout")
-            .expect("Waiter task join should succeed");
-
-    assert!(
-        waiter_result.is_err(),
-        "Waiter should return error when owner aborts"
-    );
-
-    let err = waiter_result.unwrap_err();
-    assert!(matches!(
-        err,
-        ChainlinkError::PendingRequestOwnerDropped(p) if p == account_pubkey
-    ));
-}
-
-#[tokio::test]
-async fn test_stale_pending_request_is_evicted_and_replaced() {
-    init_logger();
-    let validator_keypair = Keypair::new();
-    let account_owner = random_pubkey();
-    const CURRENT_SLOT: u64 = 100;
-
-    let account_pubkey = random_pubkey();
-    let account = Account {
-        lamports: 1_000_000,
-        data: vec![1, 2, 3, 4],
-        owner: account_owner,
-        executable: false,
-        rent_epoch: 0,
-    };
-
-    let FetcherTestCtx {
-        accounts_bank,
-        fetch_cloner,
-        ..
-    } = setup(
-        [(account_pubkey, account.clone())],
-        CURRENT_SLOT,
-        validator_keypair.insecure_clone(),
-    )
-    .await;
-
-    let stale_created_at = std::time::Instant::now()
-        - PENDING_REQUEST_STALE_AFTER
-        - Duration::from_secs(1);
-    {
-        fetch_cloner
-            .pending_requests
-            .insert(
-                account_pubkey,
-                PendingRequestState {
-                    generation: 0,
-                    created_at: stale_created_at,
-                    waiters: vec![],
-                },
-            )
-            .ok();
-    }
-
-    assert!(fetch_cloner.has_pending_request(&account_pubkey));
-
-    let result = fetch_cloner
-        .fetch_and_clone_accounts_with_dedup(
-            &[account_pubkey],
-            None,
-            None,
-            AccountFetchOrigin::GetAccount,
-            None,
-        )
-        .await;
-
-    debug!(result = ?result, "Test completed");
-    assert!(result.is_ok());
-    assert!(result.unwrap().is_ok());
-    assert_cloned_undelegated_account!(
-        accounts_bank,
-        account_pubkey,
-        account,
-        CURRENT_SLOT,
-        account_owner
-    );
-    assert!(!fetch_cloner.has_pending_request(&account_pubkey));
-}
-
-#[tokio::test]
-async fn test_stale_pending_request_replacement_ignores_old_owner_finish() {
-    init_logger();
-    let validator_keypair = Keypair::new();
-    let account_pubkey = random_pubkey();
-
-    let FetcherTestCtx { fetch_cloner, .. } = setup(
-        [(account_pubkey, Account::default())],
-        100,
-        validator_keypair.insecure_clone(),
-    )
-    .await;
-
-    let first_guard = match fetch_cloner.claim_pending_request(account_pubkey) {
-        PendingRequestClaim::Owner(guard) => guard,
-        PendingRequestClaim::Waiter(_) => {
-            panic!("first claimant should own the pending request")
-        }
-    };
-    let first_generation = first_guard.generation();
-
-    fetch_cloner
-        .pending_requests
-        .update(&account_pubkey, |_, state| {
-            state.created_at = Instant::now()
-                - PENDING_REQUEST_STALE_AFTER
-                - Duration::from_secs(1);
-        });
-
-    let replacement_guard =
-        match fetch_cloner.claim_pending_request(account_pubkey) {
-            PendingRequestClaim::Owner(guard) => guard,
-            PendingRequestClaim::Waiter(_) => {
-                panic!("stale entry should be replaced by a new owner")
-            }
-        };
-    let replacement_generation = replacement_guard.generation();
-    assert_ne!(first_generation, replacement_generation);
-
-    fetch_cloner.finish_pending_request(
-        account_pubkey,
-        first_generation,
-        PendingRequestCompletion::Failed(
-            ChainlinkError::PendingRequestOwnerFailed(
-                account_pubkey,
-                "stale owner finished".to_string(),
-            ),
-        ),
-    );
-
-    let stored_generation = fetch_cloner
-        .pending_requests
-        .read(&account_pubkey, |_, state| state.generation);
-    assert_eq!(stored_generation, Some(replacement_generation));
-
-    drop(replacement_guard);
-    assert!(!fetch_cloner.has_pending_request(&account_pubkey));
-
-    drop(first_guard);
-}
-
-#[tokio::test]
-async fn test_stale_pending_request_replacement_ignores_old_owner_drop() {
-    init_logger();
-    let validator_keypair = Keypair::new();
-    let account_pubkey = random_pubkey();
-
-    let FetcherTestCtx { fetch_cloner, .. } = setup(
-        [(account_pubkey, Account::default())],
-        100,
-        validator_keypair.insecure_clone(),
-    )
-    .await;
-
-    let first_guard = match fetch_cloner.claim_pending_request(account_pubkey) {
-        PendingRequestClaim::Owner(guard) => guard,
-        PendingRequestClaim::Waiter(_) => {
-            panic!("first claimant should own the pending request")
-        }
-    };
-    let first_generation = first_guard.generation();
-
-    fetch_cloner
-        .pending_requests
-        .update(&account_pubkey, |_, state| {
-            state.created_at = Instant::now()
-                - PENDING_REQUEST_STALE_AFTER
-                - Duration::from_secs(1);
-        });
-
-    let mut replacement_guard =
-        match fetch_cloner.claim_pending_request(account_pubkey) {
-            PendingRequestClaim::Owner(guard) => guard,
-            PendingRequestClaim::Waiter(_) => {
-                panic!("stale entry should be replaced by a new owner")
-            }
-        };
-    let replacement_generation = replacement_guard.generation();
-    assert_ne!(first_generation, replacement_generation);
-
-    drop(first_guard);
-
-    let stored_generation = fetch_cloner
-        .pending_requests
-        .read(&account_pubkey, |_, state| state.generation);
-    assert_eq!(stored_generation, Some(replacement_generation));
-
-    replacement_guard.dismiss();
-    drop(replacement_guard);
-    assert!(fetch_cloner.has_pending_request(&account_pubkey));
-
-    fetch_cloner.finish_pending_request(
-        account_pubkey,
-        replacement_generation,
-        PendingRequestCompletion::Success(FetchAndCloneResult {
-            not_found_on_chain: vec![],
-            missing_delegation_record: vec![],
-        }),
-    );
-    assert!(!fetch_cloner.has_pending_request(&account_pubkey));
-}
-
-#[tokio::test]
-async fn test_waiter_reconciliation_succeeds_when_account_in_valid_terminal_state(
-) {
-    init_logger();
-    let validator_keypair = Keypair::new();
-    let validator_pubkey = validator_keypair.pubkey();
-    let account_owner = random_pubkey();
-    const CURRENT_SLOT: u64 = 100;
-
-    let account_pubkey = random_pubkey();
-    let account = Account {
-        lamports: 1_000_000,
-        data: vec![1, 2, 3, 4],
-        owner: dlp_api::id(),
-        executable: false,
-        rent_epoch: 0,
-    };
-
-    let FetcherTestCtx {
-        accounts_bank,
-        rpc_client,
         fetch_cloner,
         ..
     } = setup(
@@ -4208,68 +3861,286 @@ async fn test_waiter_reconciliation_succeeds_when_account_in_valid_terminal_stat
     .await;
 
     let fetch_cloner = Arc::new(fetch_cloner);
+    let spawn_fetch_task = || {
+        let fetch_cloner = fetch_cloner.clone();
+        tokio::spawn(async move {
+            fetch_cloner
+                .fetch_and_clone_accounts_with_dedup(
+                    &[account_pubkey],
+                    None,
+                    None,
+                    AccountFetchOrigin::GetAccount,
+                    None,
+                )
+                .await
+        })
+    };
 
-    add_delegation_record_for(
-        &rpc_client,
+    let (result1, result2) =
+        tokio::try_join!(spawn_fetch_task(), spawn_fetch_task()).unwrap();
+
+    assert!(result1.is_ok(), "first concurrent fetch should succeed");
+    assert!(result2.is_ok(), "second concurrent fetch should succeed");
+    assert_eq!(fetch_cloner.fetch_count(), 1);
+    assert_cloned_undelegated_account!(
+        accounts_bank,
         account_pubkey,
-        validator_pubkey,
-        account_owner,
+        account,
+        CURRENT_SLOT,
+        account_owner
+    );
+}
+
+#[tokio::test]
+async fn test_owned_operation_waiter_cancellation_is_local() {
+    init_logger();
+    let validator_keypair = Keypair::new();
+    let account_owner = random_pubkey();
+    const CURRENT_SLOT: u64 = 100;
+
+    let account_pubkey = random_pubkey();
+    let account = Account {
+        lamports: 2_000_000,
+        data: vec![5, 6, 7, 8],
+        owner: account_owner,
+        executable: false,
+        rent_epoch: 0,
+    };
+
+    let FetcherTestCtx {
+        accounts_bank,
+        fetch_cloner,
+        rpc_client,
+        ..
+    } = setup(
+        [(account_pubkey, account.clone())],
+        CURRENT_SLOT,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+
+    let fetch_cloner = Arc::new(fetch_cloner);
+    rpc_client.block_fetches();
+
+    let owner_task = {
+        let fetch_cloner = fetch_cloner.clone();
+        tokio::spawn(async move {
+            fetch_cloner
+                .fetch_and_clone_accounts_with_dedup(
+                    &[account_pubkey],
+                    None,
+                    None,
+                    AccountFetchOrigin::GetAccount,
+                    None,
+                )
+                .await
+        })
+    };
+
+    wait_for_pending_request(&fetch_cloner, account_pubkey).await;
+    wait_for_rpc_fetch_activity(&rpc_client, 1).await;
+
+    let waiter_task = {
+        let fetch_cloner = fetch_cloner.clone();
+        tokio::spawn(async move {
+            fetch_cloner
+                .fetch_and_clone_accounts_with_dedup(
+                    &[account_pubkey],
+                    None,
+                    None,
+                    AccountFetchOrigin::GetAccount,
+                    None,
+                )
+                .await
+        })
+    };
+
+    wait_for_pending_waiter_count(&fetch_cloner, account_pubkey, 2).await;
+    waiter_task.abort();
+    let _ = waiter_task.await;
+    wait_for_pending_waiter_count(&fetch_cloner, account_pubkey, 1).await;
+
+    rpc_client.allow_fetches();
+
+    let owner_result =
+        owner_task.await.expect("owner task join should succeed");
+    assert!(
+        owner_result.is_ok(),
+        "owner fetch should complete successfully"
+    );
+    assert!(!fetch_cloner.has_pending_request(&account_pubkey));
+    assert_cloned_undelegated_account!(
+        accounts_bank,
+        account_pubkey,
+        account,
+        CURRENT_SLOT,
+        account_owner
+    );
+}
+
+#[tokio::test]
+async fn test_owned_operation_owner_timeout_cleans_up_pending() {
+    init_logger();
+    let validator_keypair = Keypair::new();
+    let account_owner = random_pubkey();
+    const CURRENT_SLOT: u64 = 100;
+
+    let account_pubkey = random_pubkey();
+    let account = Account {
+        lamports: 2_000_000,
+        data: vec![5, 6, 7, 8],
+        owner: account_owner,
+        executable: false,
+        rent_epoch: 0,
+    };
+
+    let FetcherTestCtx {
+        accounts_bank,
+        fetch_cloner,
+        ..
+    } = setup(
+        [(account_pubkey, account)],
+        CURRENT_SLOT,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+
+    let blocking_cloner = Arc::new(ClonerStub::new(accounts_bank.clone()));
+    blocking_cloner.block_clone_completion();
+
+    let (_subscription_tx, subscription_rx) = mpsc::channel(100);
+    let fetch_cloner = FetchCloner::new(
+        &fetch_cloner.remote_account_provider.clone(),
+        &accounts_bank,
+        &blocking_cloner,
+        validator_keypair.insecure_clone(),
+        Pubkey::new_unique(),
+        subscription_rx,
+        None,
     );
 
-    fetch_cloner
-        .cloner()
-        .set_clone_delay(Duration::from_millis(200));
+    let fetch_task = {
+        let fetch_cloner = fetch_cloner.clone();
+        tokio::spawn(async move {
+            fetch_cloner
+                .fetch_and_clone_accounts_with_dedup(
+                    &[account_pubkey],
+                    None,
+                    None,
+                    AccountFetchOrigin::GetAccount,
+                    None,
+                )
+                .await
+        })
+    };
 
-    let owner_fetch_cloner = fetch_cloner.clone();
-    let owner_task = tokio::spawn(async move {
-        owner_fetch_cloner
-            .fetch_and_clone_accounts_with_dedup(
-                &[account_pubkey],
-                None,
-                None,
-                AccountFetchOrigin::GetAccount,
-                None,
-            )
-            .await
-    });
-
-    let waiter_fetch_cloner = fetch_cloner.clone();
-    let waiter_task = tokio::spawn(async move {
-        waiter_fetch_cloner
-            .fetch_and_clone_accounts_with_dedup(
-                &[account_pubkey],
-                None,
-                None,
-                AccountFetchOrigin::GetAccount,
-                None,
-            )
-            .await
-    });
-
-    let waiter_registration_start = tokio::time::Instant::now();
-    let waiter_registration_timeout = Duration::from_secs(2);
-    loop {
-        if fetch_cloner
-            .pending_request_waiter_count(&account_pubkey)
-            .is_some_and(|n| n > 0)
-        {
-            break;
-        }
-        assert!(
-            waiter_registration_start.elapsed() < waiter_registration_timeout,
-            "waiter task did not register in fetch_cloner.pending_requests for \
-             {account_pubkey} within {waiter_registration_timeout:?}"
-        );
+    wait_for_pending_request(&fetch_cloner, account_pubkey).await;
+    let start = tokio::time::Instant::now();
+    let timeout = Duration::from_secs(2);
+    while blocking_cloner.clone_request_count() < 1 && start.elapsed() < timeout
+    {
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
+    assert_eq!(blocking_cloner.clone_request_count(), 1);
 
-    let owner_result = owner_task.await.expect("owner task should complete");
-    let waiter_result = waiter_task.await.expect("waiter task should complete");
+    let result = tokio::time::timeout(
+        FETCH_CLONE_OPERATION_TIMEOUT + Duration::from_secs(5),
+        fetch_task,
+    )
+    .await
+    .expect("owner timeout test should complete within the outer timeout")
+    .expect("fetch task join should succeed");
+    assert!(matches!(
+        result,
+        Err(ChainlinkError::PendingRequestTimeout(pubkey))
+            if pubkey == account_pubkey
+    ));
+    assert!(!fetch_cloner.has_pending_request(&account_pubkey));
 
-    assert!(owner_result.is_ok(), "Owner result should be ok");
-    assert!(waiter_result.is_ok(), "Waiter result should be ok");
-    assert_eq!(fetch_cloner.cloner().clone_request_count(), 1);
-    assert_cloned_delegated_account!(
+    blocking_cloner.allow_clone_completion();
+}
+
+#[tokio::test]
+async fn test_owned_operation_waiters_do_not_refetch_after_owner_success() {
+    init_logger();
+    let validator_keypair = Keypair::new();
+    let account_owner = random_pubkey();
+    const CURRENT_SLOT: u64 = 100;
+
+    let account_pubkey = random_pubkey();
+    let account = Account {
+        lamports: 2_000_000,
+        data: vec![5, 6, 7, 8],
+        owner: account_owner,
+        executable: false,
+        rent_epoch: 0,
+    };
+
+    let FetcherTestCtx {
+        accounts_bank,
+        fetch_cloner,
+        rpc_client,
+        ..
+    } = setup(
+        [(account_pubkey, account.clone())],
+        CURRENT_SLOT,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+
+    let fetch_cloner = Arc::new(fetch_cloner);
+    rpc_client.block_fetches();
+
+    let owner_task = {
+        let fetch_cloner = fetch_cloner.clone();
+        tokio::spawn(async move {
+            fetch_cloner
+                .fetch_and_clone_accounts_with_dedup(
+                    &[account_pubkey],
+                    None,
+                    None,
+                    AccountFetchOrigin::GetAccount,
+                    None,
+                )
+                .await
+        })
+    };
+
+    wait_for_pending_request(&fetch_cloner, account_pubkey).await;
+    wait_for_rpc_fetch_activity(&rpc_client, 1).await;
+
+    let waiter_task = {
+        let fetch_cloner = fetch_cloner.clone();
+        tokio::spawn(async move {
+            fetch_cloner
+                .fetch_and_clone_accounts_with_dedup(
+                    &[account_pubkey],
+                    None,
+                    None,
+                    AccountFetchOrigin::GetAccount,
+                    None,
+                )
+                .await
+        })
+    };
+
+    wait_for_pending_waiter_count(&fetch_cloner, account_pubkey, 2).await;
+    rpc_client.allow_fetches();
+
+    let owner_result =
+        owner_task.await.expect("owner task join should succeed");
+    let waiter_result =
+        waiter_task.await.expect("waiter task join should succeed");
+
+    assert!(owner_result.is_ok(), "owner fetch should succeed");
+    assert!(waiter_result.is_ok(), "waiter fetch should succeed");
+    assert_eq!(fetch_cloner.fetch_count(), 1);
+    assert!(
+        rpc_client.single_account_fetches()
+            + rpc_client.multi_account_fetches()
+            >= 1
+    );
+    assert_cloned_undelegated_account!(
         accounts_bank,
         account_pubkey,
         account,
