@@ -374,9 +374,9 @@ async fn test_try_unsubscribe_if_sole_owner_preserves_created_subscription_owner
         .await
         .unwrap();
 
-    assert!(unsubscribed);
-    assert!(!provider.is_watching(&pubkey));
-    assert!(!_pubsub_client.subscriptions_union().contains(&pubkey));
+    assert!(!unsubscribed);
+    assert!(provider.is_watching(&pubkey));
+    assert!(_pubsub_client.subscriptions_union().contains(&pubkey));
 }
 
 #[tokio::test]

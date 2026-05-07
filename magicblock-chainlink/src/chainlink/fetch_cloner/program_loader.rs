@@ -4,12 +4,18 @@ use solana_account::{AccountSharedData, ReadableAccount};
 use solana_pubkey::Pubkey;
 use tracing::*;
 
-use super::FetchCloner;
+use super::{
+    subscription::{release_subs, SubscriptionRelease},
+    FetchCloner,
+};
 use crate::{
     cloner::Cloner,
     remote_account_provider::{
-        program_account::{ProgramAccountResolver, LOADER_V1, LOADER_V3},
-        ChainPubsubClient, ChainRpcClient,
+        program_account::{
+            get_loaderv3_get_program_data_address, ProgramAccountResolver,
+            LOADER_V1, LOADER_V3,
+        },
+        ChainPubsubClient, ChainRpcClient, SubscriptionReason,
     },
 };
 
@@ -37,6 +43,25 @@ pub(crate) async fn handle_executable_sub_update<T, U, V, C>(
     }
 
     // For LoaderV3 programs we need to fetch the program data account
+    let program_data_pubkey = get_loaderv3_get_program_data_address(&pubkey);
+    let acquired_program_data_reason = if account.owner().eq(&LOADER_V3) {
+        this.acquire_subscription_reason(
+            &program_data_pubkey,
+            SubscriptionReason::ProgramData,
+        )
+        .await
+        .map(|_| true)
+        .unwrap_or_else(|err| {
+            warn!(
+                pubkey = %program_data_pubkey,
+                error = ?err,
+                "Failed to acquire program data subscription reason"
+            );
+            false
+        })
+    } else {
+        false
+    };
     let (program_account, program_data_account) = if account
         .owner()
         .eq(&LOADER_V3)
@@ -57,10 +82,42 @@ pub(crate) async fn handle_executable_sub_update<T, U, V, C>(
             ),
             Ok(Err(err)) => {
                 error!(pubkey = %pubkey, error = %err, "Failed to fetch program data account");
+                if acquired_program_data_reason {
+                    release_subs(
+                        &this.remote_account_provider,
+                        [
+                            SubscriptionRelease::Pubkey {
+                                pubkey: program_data_pubkey,
+                                reason: SubscriptionReason::DirectAccount,
+                            },
+                            SubscriptionRelease::Pubkey {
+                                pubkey: program_data_pubkey,
+                                reason: SubscriptionReason::ProgramData,
+                            },
+                        ],
+                    )
+                    .await;
+                }
                 return;
             }
             Err(err) => {
                 error!(pubkey = %pubkey, error = %err, "Failed to fetch program data account");
+                if acquired_program_data_reason {
+                    release_subs(
+                        &this.remote_account_provider,
+                        [
+                            SubscriptionRelease::Pubkey {
+                                pubkey: program_data_pubkey,
+                                reason: SubscriptionReason::DirectAccount,
+                            },
+                            SubscriptionRelease::Pubkey {
+                                pubkey: program_data_pubkey,
+                                reason: SubscriptionReason::ProgramData,
+                            },
+                        ],
+                    )
+                    .await;
+                }
                 return;
             }
         }
@@ -82,5 +139,22 @@ pub(crate) async fn handle_executable_sub_update<T, U, V, C>(
     };
     if let Err(err) = this.cloner.clone_program(loaded_program).await {
         warn!(pubkey = %pubkey, error = %err, "Failed to clone program into bank");
+    }
+
+    if acquired_program_data_reason {
+        release_subs(
+            &this.remote_account_provider,
+            [
+                SubscriptionRelease::Pubkey {
+                    pubkey: program_data_pubkey,
+                    reason: SubscriptionReason::DirectAccount,
+                },
+                SubscriptionRelease::Pubkey {
+                    pubkey: program_data_pubkey,
+                    reason: SubscriptionReason::ProgramData,
+                },
+            ],
+        )
+        .await;
     }
 }

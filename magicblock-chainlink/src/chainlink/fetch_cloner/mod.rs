@@ -80,7 +80,7 @@ use self::{
         claim_or_join_pending, finish_pending, Pending, PendingClaim,
         PendingFailure, PendingTerminal, PendingWaiter,
     },
-    subscription::{cancel_subs, CancelStrategy},
+    subscription::{release_subs, SubscriptionRelease},
     types::{
         AccountWithCompanion, ClassifiedAccounts, PartitionedNotFound,
         RefreshDecision, ResolvedDelegatedAccounts, ResolvedPrograms,
@@ -102,7 +102,7 @@ use crate::{
         program_account::get_loaderv3_get_program_data_address,
         ChainPubsubClient, ChainRpcClient, ForwardedSubscriptionUpdate,
         MatchSlotsConfig, RemoteAccount, RemoteAccountProvider,
-        ResolvedAccountSharedData,
+        ResolvedAccountSharedData, SubscriptionReason,
     },
 };
 
@@ -356,14 +356,14 @@ where
         let this = self.clone();
         let pending = self.pending_requests.clone();
         task::spawn(async move {
-            let mark_empty = mark_empty_if_not_found.then_some([pubkey]);
-            let mark_empty_ref =
-                mark_empty.as_ref().map(|pubkeys| pubkeys.as_slice());
+            let pubkeys = vec![pubkey];
+            let mark_empty = mark_empty_if_not_found.then_some(vec![pubkey]);
+            let mark_empty_ref = mark_empty.as_deref();
             let program_ids_ref = program_ids.as_deref();
             let terminal = match timeout(
                 FETCH_CLONE_OPERATION_TIMEOUT,
                 this.fetch_and_clone_accounts(
-                    &[pubkey],
+                    &pubkeys,
                     mark_empty_ref,
                     slot,
                     fetch_origin,
@@ -964,15 +964,11 @@ where
     }
 
     async fn unsubscribe_from_delegated_account(&self, pubkey: Pubkey) {
-        if let Err(err) =
-            self.remote_account_provider.unsubscribe(&pubkey).await
-        {
-            warn!(
-                pubkey = %pubkey,
-                error = %err,
-                "Failed to unsubscribe from delegated account"
-            );
-        }
+        self.release_subscription_reason(
+            &pubkey,
+            SubscriptionReason::UndelegationTracking,
+        )
+        .await;
     }
 
     async fn resolve_account_to_clone_from_forwarded_sub_with_unsubscribe(
@@ -998,6 +994,21 @@ where
                 let was_delegation_record_subscribed = self
                     .remote_account_provider
                     .is_watching(&delegation_record_pubkey);
+                let acquired_delegation_record_reason = self
+                    .acquire_subscription_reason(
+                        &delegation_record_pubkey,
+                        SubscriptionReason::DelegationRecord,
+                    )
+                    .await
+                    .map(|_| true)
+                    .unwrap_or_else(|err| {
+                        warn!(
+                            pubkey = %delegation_record_pubkey,
+                            error = ?err,
+                            "Failed to acquire delegation record subscription reason"
+                        );
+                        false
+                    });
 
                 match self
                     .task_to_fetch_with_companion(
@@ -1016,11 +1027,19 @@ where
                     })) => {
                         // We may need to remove temporary subscriptions created
                         // while resolving this update.
-                        let mut subs_to_remove = HashSet::new();
+                        let mut subs_to_remove = Vec::new();
 
-                        // Always unsubscribe from delegation record if it was a new subscription
                         if !was_delegation_record_subscribed {
-                            subs_to_remove.insert(delegation_record_pubkey);
+                            subs_to_remove.push(SubscriptionRelease::Pubkey {
+                                pubkey: delegation_record_pubkey,
+                                reason: SubscriptionReason::DirectAccount,
+                            });
+                        }
+                        if acquired_delegation_record_reason {
+                            subs_to_remove.push(SubscriptionRelease::Pubkey {
+                                pubkey: delegation_record_pubkey,
+                                reason: SubscriptionReason::DelegationRecord,
+                            });
                         }
 
                         let account = if let Some(delegation_record) =
@@ -1113,9 +1132,9 @@ where
                         };
 
                         if !subs_to_remove.is_empty() {
-                            cancel_subs(
+                            release_subs(
                                 &self.remote_account_provider,
-                                CancelStrategy::All(subs_to_remove),
+                                subs_to_remove,
                             )
                             .await;
                         }
@@ -1238,7 +1257,13 @@ where
 
         // Re-subscribe before cache checks; this keeps the subscription LRU
         // warm and lets later eATA creation reach the projection path.
-        let subscribed = match self.subscribe_to_account(&eata_pubkey).await {
+        let subscribed = match self
+            .acquire_subscription_reason(
+                &eata_pubkey,
+                SubscriptionReason::AtaProjection,
+            )
+            .await
+        {
             Ok(()) => true,
             Err(err) => {
                 warn!(
@@ -1426,14 +1451,6 @@ where
             trace!(count = pubkeys_count, "Fetching and cloning accounts");
         }
 
-        // We keep all existing subscriptions including delegation records and program data
-        // accounts that were directly requested
-        let mut existing_subs =
-            pipeline::build_existing_subs(self, pubkeys).existing_subs;
-
-        // Track all new subscriptions created during this call
-        let mut new_subs: HashSet<Pubkey> = HashSet::new();
-
         // Increment fetch counter for testing deduplication (count per account being fetched)
         self.fetch_count
             .fetch_add(pubkeys.len() as u64, Ordering::Relaxed);
@@ -1453,9 +1470,6 @@ where
                 min_context_slot,
             )
             .await?;
-
-        // Fetching accounts creates subscriptions for all requested pubkeys
-        new_subs.extend(pubkeys.iter().copied());
 
         if tracing::enabled!(tracing::Level::TRACE) {
             let accs_count = accs.len();
@@ -1537,13 +1551,8 @@ where
             plain,
             min_context_slot,
             fetch_origin,
-            pubkeys,
-            existing_subs.clone(),
         )
         .await?;
-
-        // Track delegation record subscriptions
-        new_subs.extend(record_subs.iter().copied());
 
         let ResolvedPrograms {
             loaded_programs,
@@ -1553,16 +1562,13 @@ where
             programs,
             min_context_slot,
             fetch_origin,
-            pubkeys,
-            existing_subs.clone(),
         )
         .await?;
 
-        // Track program data account subscriptions
-        new_subs.extend(program_data_subs.iter().copied());
-
         let mut loaded_programs = loaded_programs;
         let mut all_requested_pubkeys = pubkeys.to_vec();
+        all_requested_pubkeys.extend(record_subs.iter().copied());
+        all_requested_pubkeys.extend(program_data_subs.iter().copied());
 
         // We will compute subscription cancellations after ATA handling, once accounts_to_clone is finalized
 
@@ -1607,13 +1613,6 @@ where
                 );
             }
 
-            existing_subs.extend(
-                action_dependencies_to_fetch
-                    .iter()
-                    .filter(|dependency| self.is_watching(dependency))
-                    .copied(),
-            );
-
             self.fetch_count.fetch_add(
                 action_dependencies_to_fetch.len() as u64,
                 Ordering::Relaxed,
@@ -1628,7 +1627,8 @@ where
                     min_context_slot,
                 )
                 .await?;
-            new_subs.extend(action_dependencies_to_fetch.iter().copied());
+            all_requested_pubkeys
+                .extend(action_dependencies_to_fetch.iter().copied());
 
             let ClassifiedAccounts {
                 not_found,
@@ -1659,12 +1659,22 @@ where
                 plain,
                 min_context_slot,
                 fetch_origin,
-                &action_dependencies_to_fetch,
-                existing_subs.clone(),
             )
             .await?;
 
             if !action_dep_missing_delegation_record.is_empty() {
+                let releases = pipeline::compute_subscription_releases(
+                    &all_requested_pubkeys,
+                    &accounts_to_clone,
+                    &loaded_programs,
+                    record_subs
+                        .iter()
+                        .copied()
+                        .chain(action_dep_record_subs.iter().copied())
+                        .collect(),
+                    program_data_subs.clone(),
+                );
+                release_subs(&self.remote_account_provider, releases).await;
                 return Err(ChainlinkError::MissingDelegationActionAccounts(
                     action_dep_missing_delegation_record
                         .iter()
@@ -1673,7 +1683,8 @@ where
                 ));
             }
 
-            new_subs.extend(action_dep_record_subs.iter().copied());
+            all_requested_pubkeys
+                .extend(action_dep_record_subs.iter().copied());
             record_subs.extend(action_dep_record_subs);
 
             let ResolvedPrograms {
@@ -1684,12 +1695,11 @@ where
                 programs,
                 min_context_slot,
                 fetch_origin,
-                &action_dependencies_to_fetch,
-                existing_subs.clone(),
             )
             .await?;
 
-            new_subs.extend(action_dep_program_data_subs.iter().copied());
+            all_requested_pubkeys
+                .extend(action_dep_program_data_subs.iter().copied());
             program_data_subs.extend(action_dep_program_data_subs);
 
             let action_dep_ata_accounts =
@@ -1704,21 +1714,18 @@ where
             accounts_to_clone.extend(action_dep_accounts_to_clone);
             accounts_to_clone.extend(action_dep_ata_accounts);
             loaded_programs.extend(action_dep_loaded_programs);
-            all_requested_pubkeys.extend(action_dependencies_to_fetch);
         }
 
-        // Compute sub cancellations now since we may potentially fail during a cloning step
-        let cancel_strategy = pipeline::compute_cancel_strategy(
+        // Compute subscription releases now since we may potentially fail during a cloning step
+        let releases = pipeline::compute_subscription_releases(
             &all_requested_pubkeys,
             &accounts_to_clone,
             &loaded_programs,
             record_subs,
             program_data_subs,
-            existing_subs,
-            new_subs,
         );
 
-        cancel_subs(&self.remote_account_provider, cancel_strategy).await;
+        release_subs(&self.remote_account_provider, releases).await;
 
         pipeline::clone_accounts_and_programs(
             self,
@@ -2252,19 +2259,44 @@ where
     /// This is typically used when an account is about to be undelegated
     /// and we need to start watching for changes
     #[instrument(skip(self))]
+    pub(crate) async fn acquire_subscription_reason(
+        &self,
+        pubkey: &Pubkey,
+        reason: SubscriptionReason,
+    ) -> ChainlinkResult<()> {
+        self.remote_account_provider
+            .acquire_subscription_reason(pubkey, reason)
+            .await
+            .map_err(|err| {
+                ChainlinkError::FailedToSubscribeToAccount(*pubkey, err)
+            })
+    }
+
+    pub(crate) async fn release_subscription_reason(
+        &self,
+        pubkey: &Pubkey,
+        reason: SubscriptionReason,
+    ) {
+        if let Err(err) = self
+            .remote_account_provider
+            .release_subscription_reason(pubkey, reason)
+            .await
+        {
+            warn!(pubkey = %pubkey, ?reason, error = %err, "Failed to release subscription reason");
+        }
+    }
+
+    #[instrument(skip(self))]
     pub async fn subscribe_to_account(
         &self,
         pubkey: &Pubkey,
     ) -> ChainlinkResult<()> {
         trace!(pubkey = %pubkey, "Subscribing to account");
-
-        self.remote_account_provider
-            .subscribe(pubkey)
-            .await
-            .map(|_| ())
-            .map_err(|err| {
-                ChainlinkError::FailedToSubscribeToAccount(*pubkey, err)
-            })
+        self.acquire_subscription_reason(
+            pubkey,
+            SubscriptionReason::UndelegationTracking,
+        )
+        .await
     }
 
     pub fn chain_slot(&self) -> u64 {

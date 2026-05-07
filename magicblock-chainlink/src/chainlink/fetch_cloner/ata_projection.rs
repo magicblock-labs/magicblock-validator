@@ -13,11 +13,17 @@ use solana_pubkey::Pubkey;
 use tokio::task::JoinSet;
 use tracing::*;
 
-use super::{delegation, types::AccountWithCompanion, FetchCloner};
+use super::{
+    delegation,
+    subscription::{acquire_subs, release_subs, SubscriptionRelease},
+    types::AccountWithCompanion,
+    FetchCloner,
+};
 use crate::{
     cloner::{AccountCloneRequest, Cloner, DelegationActions},
     remote_account_provider::{
         ChainPubsubClient, ChainRpcClient, ResolvedAccountSharedData,
+        SubscriptionReason,
     },
 };
 
@@ -141,25 +147,17 @@ where
         .into_iter()
         .collect();
 
-    // Subscribe to all ATA and eATA accounts in parallel
-    let subscription_results = join_all(
-        pubkeys_to_subscribe
-            .iter()
-            .map(|pk| this.subscribe_to_account(pk)),
+    let acquired_projection_subs = acquire_subs(
+        &this.remote_account_provider,
+        pubkeys_to_subscribe.clone(),
+        SubscriptionReason::AtaProjection,
     )
-    .await;
-
-    for (pubkey, result) in
-        pubkeys_to_subscribe.iter().zip(subscription_results)
-    {
-        if let Err(err) = result {
-            warn!(
-                pubkey = %pubkey,
-                err = ?err,
-                "Failed to subscribe to ATA/eATA account"
-            );
-        }
-    }
+    .await
+    .map(|_| true)
+    .unwrap_or_else(|err| {
+        warn!(error = ?err, "Failed to subscribe to ATA/eATA account");
+        false
+    });
 
     let ata_results = ata_join_set.join_all().await;
 
@@ -253,6 +251,29 @@ where
             delegated_to_other,
         });
     }
+
+    let ata_pubkeys = atas
+        .iter()
+        .map(|(ata_pubkey, _, _, _)| *ata_pubkey)
+        .collect::<HashSet<_>>();
+    let mut releases = pubkeys_to_subscribe
+        .iter()
+        .filter(|pubkey| !ata_pubkeys.contains(pubkey))
+        .copied()
+        .map(|pubkey| SubscriptionRelease::Pubkey {
+            pubkey,
+            reason: SubscriptionReason::DirectAccount,
+        })
+        .collect::<Vec<_>>();
+    if acquired_projection_subs {
+        releases.extend(pubkeys_to_subscribe.iter().copied().map(|pubkey| {
+            SubscriptionRelease::Pubkey {
+                pubkey,
+                reason: SubscriptionReason::AtaProjection,
+            }
+        }));
+    }
+    release_subs(&this.remote_account_provider, releases).await;
 
     accounts_to_clone
 }

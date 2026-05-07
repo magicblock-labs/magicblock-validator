@@ -23,11 +23,6 @@ pub(crate) enum RefreshDecision {
     YesAndMarkEmptyIfNotFound,
 }
 
-// Pipeline helper types
-pub(crate) struct ExistingSubs {
-    pub(crate) existing_subs: HashSet<Pubkey>,
-}
-
 pub(crate) struct ClassifiedAccounts {
     pub(crate) not_found: Vec<(Pubkey, u64)>,
     pub(crate) plain: Vec<AccountCloneRequest>,
