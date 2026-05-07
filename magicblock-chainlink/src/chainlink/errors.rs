@@ -1,5 +1,3 @@
-use std::time::Duration;
-
 use solana_program::program_error::ProgramError;
 use solana_pubkey::Pubkey;
 use thiserror::Error;
@@ -53,14 +51,8 @@ pub enum ChainlinkError {
     #[error("timeout waiting for pending request for {0}")]
     PendingRequestTimeout(Pubkey),
 
-    #[error("owner future dropped before cleanup for {0}")]
-    PendingRequestOwnerDropped(Pubkey),
-
     #[error("pending request owner disappeared for {0}: {1}")]
     PendingRequestOwnerDisappeared(Pubkey, String),
-
-    #[error("stale pending request evicted for {0} after {1:?}")]
-    StalePendingRequestEvicted(Pubkey, Duration),
 
     #[error("pending request owner failed for {0}: {1}")]
     PendingRequestOwnerFailed(Pubkey, String),

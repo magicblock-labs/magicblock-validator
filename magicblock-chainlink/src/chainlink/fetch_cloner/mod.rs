@@ -35,26 +35,6 @@ use tokio::{
 };
 use tracing::*;
 
-/// How long a pending fetch+clone request may remain in the dedup map before
-/// it is considered stale and evicted. This must be large enough to cover the
-/// full retry/backoff budget of an in-flight fetch+clone operation (which
-/// itself can take tens of seconds across multiple RPC retries) so that
-/// healthy live requests are never prematurely evicted while waiters are
-/// still attached. A safe default of 2 minutes is well above any realistic
-/// fetch+clone latency observed in practice.
-#[allow(dead_code)]
-pub(crate) const PENDING_REQUEST_STALE_AFTER: Duration =
-    Duration::from_secs(120);
-
-/// How long a waiter will block on a pending fetch+clone request owned by
-/// another task before giving up. This must be long enough to cover the
-/// full retry/backoff budget of the owner's in-flight fetch+clone operation
-/// so that healthy live requests do not produce spurious
-/// `ChainlinkError::PendingRequestTimeout(...)` failures for waiters.
-/// Kept strictly less than `PENDING_REQUEST_STALE_AFTER` so that stale
-/// eviction remains the outer bound.
-#[allow(dead_code)]
-pub(crate) const PENDING_REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
 pub(crate) const FETCH_CLONE_OPERATION_TIMEOUT: Duration =
     Duration::from_secs(60);
 
@@ -62,8 +42,6 @@ mod ata_projection;
 mod delegation;
 mod pending_clone_guard;
 mod pending_operation;
-#[allow(dead_code)]
-mod pending_request_guard;
 mod pipeline;
 mod program_loader;
 mod subscription;
@@ -2162,97 +2140,6 @@ where
     /// remote account provider
     pub fn is_watching(&self, pubkey: &Pubkey) -> bool {
         self.remote_account_provider.is_watching(pubkey)
-    }
-
-    /// Check if a waiter's bank and subscription state is valid after the owner completes.
-    /// Returns Ok(true) if the account is in a terminal valid state and can be accepted as-is.
-    /// Returns Ok(false) if a fresh ownership attempt should be made.
-    /// Returns Err if the check itself fails.
-    ///
-    /// A waiter can accept the owner's success without a second fetch if:
-    /// - The account exists in the bank
-    /// - The bank state is a valid terminal state (delegated() for delegation flow,
-    ///   or valid non-undelegating for plain flow)
-    /// - There is no stale subscription left behind for the account or its delegation-record sidecar
-    #[allow(dead_code)]
-    fn waiter_reconciliation_check(
-        &self,
-        pubkey: &Pubkey,
-    ) -> ChainlinkResult<bool> {
-        // Read the current bank state
-        let account_in_bank = match self.accounts_bank.get_account(pubkey) {
-            Some(acc) => acc,
-            None => {
-                // Account not in bank yet — waiter needs a fresh fetch
-                if tracing::enabled!(tracing::Level::TRACE) {
-                    trace!(
-                        pubkey = %pubkey,
-                        "Waiter reconciliation: account not in bank, needs fresh fetch"
-                    );
-                }
-                return Ok(false);
-            }
-        };
-
-        // Check if the account is in a valid terminal state
-        let is_terminal = if account_in_bank.owner().eq(&dlp_api::id()) {
-            // Delegation program owned — must be delegated() and not undelegating()
-            account_in_bank.delegated() && !account_in_bank.undelegating()
-        } else {
-            // Plain account — must not be undelegating()
-            !account_in_bank.undelegating()
-        };
-
-        if !is_terminal {
-            if tracing::enabled!(tracing::Level::TRACE) {
-                trace!(
-                    pubkey = %pubkey,
-                    delegated = account_in_bank.delegated(),
-                    undelegating = account_in_bank.undelegating(),
-                    owner = %account_in_bank.owner(),
-                    "Waiter reconciliation: account in intermediate state, needs fresh fetch"
-                );
-            }
-            return Ok(false);
-        }
-
-        // Check for stale subscriptions for the account itself
-        if self.is_watching(pubkey) && tracing::enabled!(tracing::Level::TRACE)
-        {
-            trace!(
-                pubkey = %pubkey,
-                "Waiter reconciliation: account still being watched, may have stale subscriptions"
-            );
-            // Still being watched — this is not stale, it's an active subscription that
-            // will deliver future updates. We can accept this.
-        }
-
-        // Check for stale subscriptions for the delegation-record sidecar
-        if account_in_bank.owner().eq(&dlp_api::id()) {
-            let delegation_record_pubkey =
-                delegation_record_pda_from_delegated_account(pubkey);
-            if self.is_watching(&delegation_record_pubkey)
-                && tracing::enabled!(tracing::Level::TRACE)
-            {
-                trace!(
-                    pubkey = %pubkey,
-                    delegation_record_pubkey = %delegation_record_pubkey,
-                    "Waiter reconciliation: delegation record still being watched"
-                );
-                // Still being watched — this is fine.
-            }
-        }
-
-        if tracing::enabled!(tracing::Level::TRACE) {
-            trace!(
-                pubkey = %pubkey,
-                delegated = account_in_bank.delegated(),
-                undelegating = account_in_bank.undelegating(),
-                owner = %account_in_bank.owner(),
-                "Waiter reconciliation: account in valid terminal state, accepting without fresh fetch"
-            );
-        }
-        Ok(true)
     }
 
     /// Subscribe to updates for a specific account
