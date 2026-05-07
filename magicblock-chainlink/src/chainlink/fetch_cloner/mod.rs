@@ -20,7 +20,7 @@ use magicblock_core::token_programs::{
 };
 use magicblock_metrics::metrics::{self, AccountFetchOrigin};
 use parking_lot::Mutex as PlMutex;
-use scc::{hash_map::Entry, HashMap};
+use scc::HashMap;
 use solana_account::{AccountSharedData, ReadableAccount};
 use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
@@ -31,6 +31,7 @@ use tokio::{
     sync::{mpsc, oneshot},
     task,
     task::JoinSet,
+    time::timeout,
 };
 use tracing::*;
 
@@ -41,6 +42,7 @@ use tracing::*;
 /// healthy live requests are never prematurely evicted while waiters are
 /// still attached. A safe default of 2 minutes is well above any realistic
 /// fetch+clone latency observed in practice.
+#[allow(dead_code)]
 pub(crate) const PENDING_REQUEST_STALE_AFTER: Duration =
     Duration::from_secs(120);
 
@@ -51,12 +53,16 @@ pub(crate) const PENDING_REQUEST_STALE_AFTER: Duration =
 /// `ChainlinkError::PendingRequestTimeout(...)` failures for waiters.
 /// Kept strictly less than `PENDING_REQUEST_STALE_AFTER` so that stale
 /// eviction remains the outer bound.
+#[allow(dead_code)]
 pub(crate) const PENDING_REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
+pub(crate) const FETCH_CLONE_OPERATION_TIMEOUT: Duration =
+    Duration::from_secs(60);
 
 mod ata_projection;
 mod delegation;
 mod pending_clone_guard;
 mod pending_operation;
+#[allow(dead_code)]
 mod pending_request_guard;
 mod pipeline;
 mod program_loader;
@@ -70,9 +76,9 @@ use self::{
     pending_clone_guard::{
         CloneClaim, CloneCompletion, CloneKey, PendingCloneGuard,
     },
-    pending_request_guard::{
-        PendingRequestClaim, PendingRequestCompletion, PendingRequestGuard,
-        PendingRequestState,
+    pending_operation::{
+        claim_or_join_pending, finish_pending, Pending, PendingClaim,
+        PendingFailure, PendingTerminal, PendingWaiter,
     },
     subscription::{cancel_subs, CancelStrategy},
     types::{
@@ -111,7 +117,7 @@ where
     remote_account_provider: Arc<RemoteAccountProvider<T, U>>,
     /// Tracks pending account fetch requests to avoid duplicate fetches in parallel
     /// Once an account is fetched and cloned into the bank, it's removed from here
-    pending_requests: Arc<HashMap<Pubkey, PendingRequestState>>,
+    pending_requests: Arc<HashMap<Pubkey, Pending>>,
     /// Monotonic generation for pending request ownership. Guards must match
     /// the stored generation before they can complete or clean up an entry.
     pending_request_generation: Arc<AtomicU64>,
@@ -325,98 +331,55 @@ where
         }
     }
 
-    /// Attempt to claim ownership of a pending request for a pubkey.
-    /// Returns `PendingRequestClaim::Owner` if this caller is the first and should
-    /// perform the fetch. Returns `PendingRequestClaim::Waiter(rx)` if another
-    /// caller already owns this request and this caller should wait.
-    fn claim_pending_request(&self, pubkey: Pubkey) -> PendingRequestClaim {
-        match self.pending_requests.entry(pubkey) {
-            Entry::Vacant(e) => {
-                let generation = self.next_pending_request_generation();
-                e.insert_entry(PendingRequestState {
-                    generation,
-                    created_at: Instant::now(),
-                    waiters: vec![],
-                });
-                PendingRequestClaim::Owner(PendingRequestGuard::new(
-                    self.pending_requests.clone(),
-                    pubkey,
-                    generation,
-                ))
-            }
-            Entry::Occupied(mut entry) => {
-                let age = entry.get().created_at.elapsed();
-
-                // Check if entry is stale
-                if age > PENDING_REQUEST_STALE_AFTER {
-                    // Evict stale entry and notify old waiters
-                    let stale_state = entry.remove();
-                    let waiters_len = stale_state.waiters.len();
-                    for tx in stale_state.waiters {
-                        let _ = tx.send(PendingRequestCompletion::Failed(
-                            ChainlinkError::StalePendingRequestEvicted(
-                                pubkey, age,
-                            ),
-                        ));
-                    }
-                    if waiters_len > 0 {
-                        warn!(
-                            pubkey = %pubkey,
-                            age_ms = age.as_millis() as u64,
-                            waiter_count = waiters_len,
-                            "Evicting stale FetchCloner pending request entry"
-                        );
-                    }
-
-                    // Insert fresh owner entry
-                    let generation = self.next_pending_request_generation();
-                    let _ = self.pending_requests.insert(
-                        pubkey,
-                        PendingRequestState {
-                            generation,
-                            created_at: Instant::now(),
-                            waiters: vec![],
-                        },
-                    );
-                    PendingRequestClaim::Owner(PendingRequestGuard::new(
-                        self.pending_requests.clone(),
-                        pubkey,
-                        generation,
-                    ))
-                } else {
-                    // Normal path: join the queue
-                    let (tx, rx) = oneshot::channel();
-                    entry.get_mut().waiters.push(tx);
-                    PendingRequestClaim::Waiter(rx)
-                }
-            }
-        }
+    fn claim_or_join_owned_operation(&self, pubkey: Pubkey) -> PendingClaim {
+        let generation = self.next_pending_request_generation();
+        let waiter_id = self.next_pending_waiter_id();
+        let deadline = Instant::now() + FETCH_CLONE_OPERATION_TIMEOUT;
+        claim_or_join_pending(
+            self.pending_requests.clone(),
+            pubkey,
+            generation,
+            waiter_id,
+            deadline,
+        )
     }
 
-    /// Called by the owner when the pending request completes.
-    /// Removes the pending entry and notifies all waiters.
-    fn finish_pending_request(
+    fn spawn_owned_operation(
         &self,
         pubkey: Pubkey,
         generation: u64,
-        completion: PendingRequestCompletion,
+        mark_empty_if_not_found: bool,
+        slot: Option<u64>,
+        fetch_origin: AccountFetchOrigin,
+        program_ids: Option<Vec<Pubkey>>,
     ) {
-        let result = self
-            .pending_requests
-            .remove_if(&pubkey, |state| state.generation == generation);
-        if let Some((_, state)) = result {
-            let waiters_len = state.waiters.len();
-            for tx in state.waiters {
-                let _ = tx.send(completion.clone());
-            }
-            if waiters_len > 0 {
-                debug!(
-                    pubkey = %pubkey,
-                    waiter_count = waiters_len,
-                    "Finished FetchCloner pending request entry"
-                );
-            }
-        }
+        let this = self.clone();
+        let pending = self.pending_requests.clone();
+        task::spawn(async move {
+            let mark_empty = mark_empty_if_not_found.then_some([pubkey]);
+            let mark_empty_ref =
+                mark_empty.as_ref().map(|pubkeys| pubkeys.as_slice());
+            let program_ids_ref = program_ids.as_deref();
+            let terminal = match timeout(
+                FETCH_CLONE_OPERATION_TIMEOUT,
+                this.fetch_and_clone_accounts(
+                    &[pubkey],
+                    mark_empty_ref,
+                    slot,
+                    fetch_origin,
+                    program_ids_ref,
+                ),
+            )
+            .await
+            {
+                Ok(Ok(result)) => PendingTerminal::Success(result),
+                Ok(Err(err)) => PendingTerminal::Failed(
+                    PendingFailure::OwnerFailed(err.to_string()),
+                ),
+                Err(_) => PendingTerminal::Failed(PendingFailure::TimedOut),
+            };
+            finish_pending(&pending, pubkey, generation, terminal);
+        });
     }
 
     fn next_pending_request_generation(&self) -> u64 {
@@ -424,7 +387,6 @@ where
             .fetch_add(1, Ordering::Relaxed)
     }
 
-    #[allow(dead_code)]
     fn next_pending_waiter_id(&self) -> u64 {
         self.pending_waiter_generation
             .fetch_add(1, Ordering::Relaxed)
@@ -1888,8 +1850,6 @@ where
             trace!(count, "Fetching and cloning accounts with dedup");
         }
 
-        let mut await_pending = vec![];
-        let mut fetch_new = vec![];
         let mut in_bank = HashSet::new();
         let mut extra_mark_empty = vec![];
 
@@ -1984,138 +1944,53 @@ where
         }
         pubkeys.retain(|p| !in_bank.contains(p));
 
-        // Check pending requests and bank synchronously
-        let mut owner_guards: Vec<(Pubkey, PendingRequestGuard)> = vec![];
+        let mut mark_empty_set = mark_empty_if_not_found
+            .unwrap_or(&[])
+            .iter()
+            .copied()
+            .collect::<HashSet<_>>();
+        mark_empty_set.extend(extra_mark_empty);
+
+        let mut waiters: Vec<PendingWaiter> = vec![];
         for pubkey in pubkeys {
-            match self.claim_pending_request(*pubkey) {
-                PendingRequestClaim::Owner(guard) => {
-                    fetch_new.push(*pubkey);
-                    owner_guards.push((*pubkey, guard));
+            match self.claim_or_join_owned_operation(*pubkey) {
+                PendingClaim::Created(waiter) => {
+                    let waiter_pubkey = waiter.pubkey();
+                    self.spawn_owned_operation(
+                        waiter_pubkey,
+                        waiter.generation(),
+                        mark_empty_set.contains(&waiter_pubkey),
+                        slot,
+                        fetch_origin,
+                        program_ids.map(|p| p.to_vec()),
+                    );
+                    waiters.push(waiter);
                 }
-                PendingRequestClaim::Waiter(receiver) => {
-                    await_pending.push((*pubkey, receiver));
-                }
+                PendingClaim::Joined(waiter) => waiters.push(waiter),
             }
         }
 
-        // If we have accounts to fetch, delegate to the existing implementation
-        // but notify all pending requests when done
-        let result = if !fetch_new.is_empty() {
-            let mut all_mark_empty = mark_empty_if_not_found
-                .map(|x| x.to_vec())
-                .unwrap_or_default();
-            all_mark_empty.extend(extra_mark_empty);
-            let mark_empty_ref = if all_mark_empty.is_empty() {
-                None
-            } else {
-                Some(all_mark_empty.as_slice())
-            };
-
-            self.fetch_and_clone_accounts(
-                &fetch_new,
-                mark_empty_ref,
-                slot,
-                fetch_origin,
-                program_ids,
-            )
-            .await
-        } else {
-            Ok(FetchAndCloneResult {
-                not_found_on_chain: vec![],
-                missing_delegation_record: vec![],
-            })
+        let mut final_result = FetchAndCloneResult {
+            not_found_on_chain: vec![],
+            missing_delegation_record: vec![],
         };
-
-        // Finish pending requests and dismiss owner guards. On success we
-        // propagate the owner's `FetchAndCloneResult` to all waiters so they
-        // can observe `not_found_on_chain` / `missing_delegation_record`
-        // metadata for the pubkey they were waiting on.
-        for (pubkey, mut guard) in owner_guards {
-            let completion = match &result {
-                Ok(r) => PendingRequestCompletion::Success(r.clone()),
-                Err(err) => PendingRequestCompletion::Failed(
-                    ChainlinkError::PendingRequestOwnerFailed(
-                        pubkey,
-                        err.to_string(),
-                    ),
-                ),
-            };
-            self.finish_pending_request(pubkey, guard.generation(), completion);
-            guard.dismiss();
-        }
-
-        // Wait for any pending waiter requests to complete and collect any
-        // carried `FetchAndCloneResult` payloads so we can merge entries
-        // matching our waiter pubkey into the final returned result.
-        let mut waiter_results: Vec<(Pubkey, FetchAndCloneResult)> = vec![];
-        for (pubkey, receiver) in await_pending {
-            match tokio::time::timeout(PENDING_REQUEST_TIMEOUT, receiver).await
-            {
-                Ok(Ok(PendingRequestCompletion::Success(owner_result))) => {
-                    // Post-wait reconciliation: check if the account is in a valid terminal
-                    // state. If not, perform a fresh ownership attempt for this waiter pubkey.
-                    let should_refetch =
-                        match self.waiter_reconciliation_check(&pubkey) {
-                            Ok(is_valid) => !is_valid,
-                            Err(err) => {
-                                // Reconciliation check itself failed — return the error
-                                return Err(err);
-                            }
-                        };
-
-                    if should_refetch {
-                        if tracing::enabled!(tracing::Level::DEBUG) {
-                            debug!(
-                                pubkey = %pubkey,
-                                "Waiter reconciliation failed; attempting fresh fetch for this waiter"
-                            );
+        for waiter in waiters {
+            let pubkey = waiter.pubkey();
+            match waiter.wait().await? {
+                PendingTerminal::Success(owner_result) => {
+                    for entry in owner_result.not_found_on_chain {
+                        if entry.0 == pubkey {
+                            final_result.not_found_on_chain.push(entry);
                         }
-                        // Re-enter the fetch path for this waiter pubkey only
-                        let fetch_result = self
-                            .fetch_and_clone_accounts(
-                                &[pubkey],
-                                None,
-                                slot,
-                                fetch_origin,
-                                program_ids,
-                            )
-                            .await?;
-                        waiter_results.push((pubkey, fetch_result));
-                    } else {
-                        // Account is in a valid terminal state — accept the owner's result
-                        waiter_results.push((pubkey, owner_result));
+                    }
+                    for entry in owner_result.missing_delegation_record {
+                        if entry.0 == pubkey {
+                            final_result.missing_delegation_record.push(entry);
+                        }
                     }
                 }
-                Ok(Ok(PendingRequestCompletion::Failed(err))) => {
-                    return Err(err);
-                }
-                Ok(Err(err)) => {
-                    return Err(
-                        ChainlinkError::PendingRequestOwnerDisappeared(
-                            pubkey,
-                            err.to_string(),
-                        ),
-                    );
-                }
-                Err(_) => {
-                    return Err(ChainlinkError::PendingRequestTimeout(pubkey));
-                }
-            }
-        }
-
-        // Merge waiter-carried results into our owner result so the caller
-        // observes metadata for every pubkey it asked for, regardless of
-        // whether it was the owner or a waiter for that pubkey.
-        let mut final_result = result?;
-        for (waiter_pubkey, owner_result) in waiter_results {
-            for entry in owner_result.not_found_on_chain {
-                if entry.0 == waiter_pubkey {
-                    final_result.not_found_on_chain.push(entry);
-                }
-            }
-            for entry in owner_result.missing_delegation_record {
-                if entry.0 == waiter_pubkey {
-                    final_result.missing_delegation_record.push(entry);
+                PendingTerminal::Failed(failure) => {
+                    return Err(failure.into_chainlink_error(pubkey));
                 }
             }
         }
@@ -2292,6 +2167,7 @@ where
     /// - The bank state is a valid terminal state (delegated() for delegation flow,
     ///   or valid non-undelegating for plain flow)
     /// - There is no stale subscription left behind for the account or its delegation-record sidecar
+    #[allow(dead_code)]
     fn waiter_reconciliation_check(
         &self,
         pubkey: &Pubkey,
