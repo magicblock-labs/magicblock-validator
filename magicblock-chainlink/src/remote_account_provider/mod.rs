@@ -1198,6 +1198,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
             let mut not_found_cnt = 0;
             let mut compressed_found_count = 0;
             let mut compressed_not_found_count = 0;
+            let mut fetch_errors = vec![];
 
             for result in results {
                 match result {
@@ -1216,9 +1217,35 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
                     }
                     Err(err) => {
                         error!("Failed to fetch accounts: {err:?}");
+                        fetch_errors.push(err.to_string());
                     }
                 }
             }
+
+            if !fetch_errors.is_empty() {
+                let msg = format!(
+                    "failed to fetch accounts: {}",
+                    fetch_errors.join(", ")
+                );
+                let mut fetching = fetching_accounts
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                for pubkey in &pubkeys {
+                    if let Some((_, requests)) = fetching.remove(pubkey) {
+                        for request in requests {
+                            let _ = request.send(Err(
+                                RemoteAccountProviderError::AccountResolutionsFailed(
+                                    msg.clone(),
+                                ),
+                            ));
+                        }
+                    }
+                }
+                return Err(
+                    RemoteAccountProviderError::AccountResolutionsFailed(msg),
+                );
+            }
+
             let remote_accounts = Self::consolidate_fetched_remote_accounts(
                 &pubkeys,
                 remote_accounts_results,
@@ -1808,6 +1835,11 @@ fn pubkeys_str(pubkeys: &[Pubkey]) -> String {
 
 #[cfg(test)]
 mod test {
+    use light_client::indexer::IndexerError;
+    use magicblock_core::{
+        traits::{PhotonClientError, PhotonClientResult},
+        Slot,
+    };
     use solana_system_interface::program as system_program;
 
     use super::*;
@@ -1822,6 +1854,45 @@ mod test {
             utils::{create_test_lru_cache, random_pubkey},
         },
     };
+
+    #[derive(Clone)]
+    struct FailingPhotonClient {
+        fail_pubkey: Pubkey,
+    }
+
+    #[tonic::async_trait]
+    impl PhotonClient for FailingPhotonClient {
+        async fn get_account(
+            &self,
+            pubkey: &Pubkey,
+            _min_context_slot: Option<Slot>,
+        ) -> PhotonClientResult<Option<(Account, Slot)>> {
+            if *pubkey == self.fail_pubkey {
+                Err(photon_failure())
+            } else {
+                Ok(None)
+            }
+        }
+
+        async fn get_multiple_accounts(
+            &self,
+            pubkeys: &[Pubkey],
+            min_context_slot: Option<Slot>,
+        ) -> PhotonClientResult<(Vec<Option<Account>>, Slot)> {
+            if pubkeys.contains(&self.fail_pubkey) {
+                Err(photon_failure())
+            } else {
+                Ok((vec![None; pubkeys.len()], min_context_slot.unwrap_or(0)))
+            }
+        }
+    }
+
+    fn photon_failure() -> PhotonClientError {
+        PhotonClientError::IndexerError(IndexerError::PhotonError {
+            context: "test".to_string(),
+            message: "forced photon failure".to_string(),
+        })
+    }
 
     #[tokio::test]
     async fn test_get_non_existing_account() {
@@ -1859,6 +1930,50 @@ mod test {
             .await
             .unwrap();
         assert!(!remote_account.is_found());
+    }
+
+    #[tokio::test]
+    async fn test_photon_failure_is_returned_instead_of_rpc_not_found() {
+        init_logger();
+        let pubkey = random_pubkey();
+
+        let remote_account_provider = {
+            let (tx, rx) = mpsc::channel(1);
+            let rpc_client = ChainRpcClientMockBuilder::new()
+                .slot(1)
+                .clock_sysvar_for_slot(1)
+                .build();
+            let pubsub_client =
+                chain_pubsub_client::mock::ChainPubsubClientMock::new(tx, rx);
+            let (fwd_tx, _fwd_rx) = mpsc::channel(100);
+            let (subscribed_accounts, config) = create_test_lru_cache(1000);
+            let chain_slot = Arc::<AtomicU64>::default();
+
+            RemoteAccountProvider::new(
+                rpc_client,
+                pubsub_client,
+                Some(FailingPhotonClient {
+                    fail_pubkey: pubkey,
+                }),
+                fwd_tx,
+                &config,
+                subscribed_accounts,
+                ChainSlot::new(chain_slot),
+            )
+            .await
+            .unwrap()
+        };
+
+        let err = remote_account_provider
+            .try_get(pubkey, AccountFetchOrigin::GetAccount)
+            .await
+            .expect_err("Photon failure should not fall back to RPC NotFound");
+
+        assert!(matches!(
+            err,
+            RemoteAccountProviderError::AccountResolutionsFailed(_)
+        ));
+        assert!(err.to_string().contains("forced photon failure"));
     }
 
     #[tokio::test]
