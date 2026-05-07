@@ -6,7 +6,9 @@ use std::{
 
 use borsh::{to_vec, BorshDeserialize};
 use compressed_delegation_client::CompressedDelegationRecord;
-use light_client::indexer::{photon_indexer::PhotonIndexer, Indexer};
+use light_client::indexer::{
+    photon_indexer::PhotonIndexer, Indexer, IndexerRpcConfig,
+};
 use magicblock_committor_service::{
     config::ChainConfig,
     intent_executor::{error::IntentExecutorError, ExecutionOutput},
@@ -28,6 +30,7 @@ use solana_account::{Account, ReadableAccount};
 use solana_commitment_config::CommitmentConfig;
 use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
+use solana_rpc_client_api::config::RpcTransactionConfig;
 use solana_sdk::{
     hash::Hash, signature::Keypair, signer::Signer, transaction::Transaction,
 };
@@ -1290,9 +1293,25 @@ async fn ix_commit_local(
                     }
                 );
             } else {
+                let min_context_slot = rpc_client
+                    .get_transaction_with_config(
+                        &commit_signature,
+                        RpcTransactionConfig {
+                            commitment: Some(CommitmentConfig::confirmed()),
+                            max_supported_transaction_version: Some(0),
+                            ..Default::default()
+                        },
+                    )
+                    .await
+                    .unwrap()
+                    .slot;
+
                 let cda = derive_cda_from_pda(&account.pubkey);
                 let compressed_account = photon_indexer
-                    .get_compressed_account(cda.to_bytes(), None)
+                    .get_compressed_account(
+                        cda.to_bytes(),
+                        Some(IndexerRpcConfig::new(min_context_slot)),
+                    )
                     .await
                     .unwrap()
                     .value
