@@ -60,6 +60,10 @@ pub(crate) async fn fetch_delegation_record_header<T: ChainRpcClient>(
         return Ok(None);
     };
 
+    if account.data.len() < DelegationRecord::size_with_discriminator() {
+        return Ok(None);
+    }
+
     parse_delegation_record_header(&account.data)
         .map(Some)
         .ok_or(FetchError::Deserialize)
