@@ -56,6 +56,7 @@ pub(crate) const PENDING_REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
 mod ata_projection;
 mod delegation;
 mod pending_clone_guard;
+mod pending_operation;
 mod pending_request_guard;
 mod pipeline;
 mod program_loader;
@@ -114,6 +115,7 @@ where
     /// Monotonic generation for pending request ownership. Guards must match
     /// the stored generation before they can complete or clean up an entry.
     pending_request_generation: Arc<AtomicU64>,
+    pending_waiter_generation: Arc<AtomicU64>,
     /// Counter to track the number of fetch operations for testing deduplication
     fetch_count: Arc<AtomicU64>,
 
@@ -170,6 +172,7 @@ where
             remote_account_provider: self.remote_account_provider.clone(),
             pending_requests: self.pending_requests.clone(),
             pending_request_generation: self.pending_request_generation.clone(),
+            pending_waiter_generation: self.pending_waiter_generation.clone(),
             fetch_count: self.fetch_count.clone(),
             accounts_bank: self.accounts_bank.clone(),
             cloner: self.cloner.clone(),
@@ -216,6 +219,7 @@ where
             validator_keypair: Arc::new(validator_keypair),
             pending_requests: Arc::new(HashMap::new()),
             pending_request_generation: Arc::new(AtomicU64::new(1)),
+            pending_waiter_generation: Arc::new(AtomicU64::new(1)),
             fetch_count: Arc::new(AtomicU64::new(0)),
             blacklisted_accounts,
             allowed_programs,
@@ -417,6 +421,12 @@ where
 
     fn next_pending_request_generation(&self) -> u64 {
         self.pending_request_generation
+            .fetch_add(1, Ordering::Relaxed)
+    }
+
+    #[allow(dead_code)]
+    fn next_pending_waiter_id(&self) -> u64 {
+        self.pending_waiter_generation
             .fetch_add(1, Ordering::Relaxed)
     }
 
