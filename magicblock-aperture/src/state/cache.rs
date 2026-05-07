@@ -1,7 +1,11 @@
 use std::{
+    collections::VecDeque,
     hash::Hash,
     time::{Duration, Instant},
 };
+
+use parking_lot::Mutex;
+use scc::hash_map::Entry;
 
 /// A thread-safe, expiring cache with lazy eviction.
 ///
@@ -18,7 +22,7 @@ pub(crate) struct ExpiringCache<K, V> {
     ///
     /// This allows for efficient, ordered checks to find and evict the oldest
     /// (and therefore most likely to be expired) entries.
-    queue: scc::Queue<ExpiringRecord<K>>,
+    queue: Mutex<VecDeque<ExpiringRecord<K>>>,
     /// The time-to-live for each entry from its moment of creation.
     ttl: Duration,
 }
@@ -36,7 +40,7 @@ impl<K: Hash + Eq + Copy + 'static, V: Clone> ExpiringCache<K, V> {
     pub(crate) fn new(ttl: Duration) -> Self {
         Self {
             index: scc::HashMap::default(),
-            queue: scc::Queue::default(),
+            queue: Default::default(),
             ttl,
         }
     }
@@ -55,20 +59,21 @@ impl<K: Hash + Eq + Copy + 'static, V: Clone> ExpiringCache<K, V> {
     /// Returns `true` if the key was newly inserted, or `false` if the key
     /// already existed and its value was updated.
     pub(crate) fn push(&self, key: K, value: V) -> bool {
+        let mut queue = self.queue.lock();
         // Lazily evict expired entries from the front of the queue.
-        while let Ok(Some(expired)) = self.queue.pop_if(|e| e.expired(self.ttl))
-        {
+        while let Some(expired) = queue.pop_front_if(|e| e.expired(self.ttl)) {
             self.index.remove(&expired.key);
         }
 
         // Insert or update the key-value pair.
-        let is_new = self.index.upsert(key, value).is_none();
-
-        // If the key is new, add a corresponding record to the expiration queue.
-        if is_new {
-            self.queue.push(ExpiringRecord::new(key));
+        match self.index.entry(key) {
+            Entry::Occupied(_) => false,
+            Entry::Vacant(v) => {
+                v.insert_entry(value);
+                queue.push_back(ExpiringRecord::new(key));
+                true
+            }
         }
-        is_new
     }
 
     /// Retrieves a clone of the value associated with the given key, if it exists.
