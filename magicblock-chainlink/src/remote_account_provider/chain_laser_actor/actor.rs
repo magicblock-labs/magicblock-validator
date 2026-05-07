@@ -783,7 +783,6 @@ impl<H: StreamHandle, S: StreamFactory<H>> ChainLaserActor<H, S> {
                     &owner,
                     &account.data,
                     slot,
-                    false,
                 )
                 .await
         };

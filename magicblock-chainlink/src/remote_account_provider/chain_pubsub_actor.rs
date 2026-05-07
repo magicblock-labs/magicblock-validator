@@ -758,7 +758,6 @@ impl ChainPubsubActor {
                                         &account.owner,
                                         &account.data,
                                         sub_update.slot,
-                                        false,
                                     )
                                     .await
                                 } else {

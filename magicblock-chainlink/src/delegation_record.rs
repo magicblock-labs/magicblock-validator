@@ -65,11 +65,7 @@ pub(crate) async fn should_forward_dlp_program_update<T: ChainRpcClient>(
     owner: &Pubkey,
     account_data: &[u8],
     min_context_slot: u64,
-    is_directly_subscribed: bool,
 ) -> bool {
-    if is_directly_subscribed {
-        return true;
-    }
     if owner != &dlp_api::id() {
         trace!(pubkey = %delegated_account_pubkey, owner = %owner, "Dropping non-DLP program update");
         return false;
@@ -304,21 +300,6 @@ mod tests {
                 &delegated_account.owner,
                 delegated_account.data.as_slice(),
                 10,
-                true,
-            )
-            .await
-        );
-        assert_eq!(rpc_client.single_account_fetches(), 0);
-
-        assert!(
-            should_forward_dlp_program_update(
-                &rpc_client,
-                &validator_pubkey,
-                delegated_account_pubkey,
-                &delegated_account.owner,
-                delegated_account.data.as_slice(),
-                10,
-                false,
             )
             .await
         );
@@ -347,7 +328,6 @@ mod tests {
                 &delegated_account.owner,
                 delegated_account.data.as_slice(),
                 10,
-                false,
             )
             .await
         );
@@ -362,7 +342,6 @@ mod tests {
                 &delegated_account.owner,
                 internal_data.as_slice(),
                 10,
-                false,
             )
             .await
         );
