@@ -75,7 +75,7 @@ use remote_account::{
 pub use remote_account::{ResolvedAccount, ResolvedAccountSharedData};
 
 use crate::{
-    errors::{ChainlinkError, ChainlinkResult},
+    errors::ChainlinkResult,
     remote_account_provider::{
         chain_updates_client::ChainUpdatesClient,
         photon_client::PhotonClientImpl, pubsub_common::SubscriptionUpdate,
@@ -1163,23 +1163,34 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
             mark_empty_if_not_found.unwrap_or(&[]).to_vec();
         let program_ids = program_ids.map(|ids| ids.to_vec());
         tokio::spawn(async move {
-            // Fetch accounts from RPC
-            // If any are owned by the compressed delegation program then we also fetch from Photon with retries
-            let (rpc_accounts, photon_accounts) = tokio::join!(
-                Self::fetch_from_rpc(
+            let results = if let Some(photon_client) = photon_client {
+                let (rpc_accounts, photon_accounts) = tokio::join!(
+                    Self::fetch_from_rpc(
+                        rpc_client,
+                        pubkeys.clone(),
+                        &mark_empty_if_not_found,
+                        min_context_slot,
+                    ),
+                    Self::fetch_from_photon(
+                        photon_client,
+                        pubkeys.clone(),
+                        &mark_empty_if_not_found,
+                        min_context_slot,
+                    )
+                );
+                trace!(rpc_accounts = ?rpc_accounts, photon_accounts = ?photon_accounts, "Fetched accounts from RPC and Photon");
+                vec![rpc_accounts, photon_accounts]
+            } else {
+                let rpc_accounts = Self::fetch_from_rpc(
                     rpc_client,
                     pubkeys.clone(),
                     &mark_empty_if_not_found,
                     min_context_slot,
-                ),
-                Self::fetch_from_photon(
-                    photon_client,
-                    pubkeys.clone(),
-                    &mark_empty_if_not_found,
-                    min_context_slot,
                 )
-            );
-            trace!(rpc_accounts = ?rpc_accounts, photon_accounts = ?photon_accounts, "Fetched accounts from RPC and Photon");
+                .await;
+                trace!(rpc_accounts = ?rpc_accounts, "Fetched accounts from RPC");
+                vec![rpc_accounts]
+            };
 
             let mut remote_accounts_results = Vec::with_capacity(2);
             let mut rpc_fetch_success = false;
@@ -1187,8 +1198,6 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
             let mut not_found_cnt = 0;
             let mut compressed_found_count = 0;
             let mut compressed_not_found_count = 0;
-
-            let results = vec![rpc_accounts, photon_accounts];
 
             for result in results {
                 match result {
@@ -1204,10 +1213,6 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
                             .push(FetchedRemoteAccounts::Compressed(accs));
                         compressed_found_count += fc;
                         compressed_not_found_count += nfc;
-                    }
-                    Err(ChainlinkError::CompressionNotEnabled) => {
-                        // Not an error, just skip
-                        continue;
                     }
                     Err(err) => {
                         error!("Failed to fetch accounts: {err:?}");
@@ -1530,14 +1535,11 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
     }
 
     async fn fetch_from_photon(
-        photon_client: Option<P>,
+        photon_client: P,
         pubkeys: Vec<Pubkey>,
         mark_empty_if_not_found: &[Pubkey],
         min_context_slot: u64,
     ) -> ChainlinkResult<(FetchedRemoteAccounts, u64, u64)> {
-        let Some(photon_client) = photon_client else {
-            return Err(ChainlinkError::CompressionNotEnabled);
-        };
         if tracing::enabled!(tracing::Level::TRACE) {
             trace!(
                 pubkeys = pubkeys_str(&pubkeys),
