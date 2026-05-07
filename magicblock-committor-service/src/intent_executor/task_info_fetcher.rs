@@ -95,12 +95,9 @@ pub trait TaskInfoFetcher: Send + Sync + 'static {
         &self,
         pubkeys: &[Pubkey],
         min_context_slot: Option<u64>,
-    ) -> TaskInfoFetcherResult<Vec<Option<CompressedData>>> {
+    ) -> TaskInfoFetcherResult<Vec<TaskInfoFetcherResult<CompressedData>>> {
         try_join_all(pubkeys.iter().map(|pubkey| async move {
-            Ok(self
-                .get_compressed_data(pubkey, min_context_slot)
-                .await
-                .ok())
+            Ok(self.get_compressed_data(pubkey, min_context_slot).await)
         }))
         .await
     }

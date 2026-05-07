@@ -156,7 +156,9 @@ impl TaskBuilderImpl {
         task_info_fetcher: &Arc<C>,
         accounts: &[(bool, bool, bool, CommittedAccount)],
         min_context_slot: u64,
-    ) -> TaskInfoFetcherResult<HashMap<Pubkey, CompressedData>> {
+    ) -> TaskInfoFetcherResult<
+        HashMap<Pubkey, TaskInfoFetcherResult<CompressedData>>,
+    > {
         let pubkeys = accounts
             .iter()
             .filter(|(_, _, compressed, _)| *compressed)
@@ -172,7 +174,7 @@ impl TaskBuilderImpl {
                     )
                     .await?,
             )
-            .filter_map(|(pk, data)| data.map(|data| (*pk, data)))
+            .map(|(pk, data)| (*pk, data))
             .collect())
     }
 
@@ -297,7 +299,7 @@ impl TasksBuilder for TaskBuilderImpl {
                 tracing::warn!(intent_id = intent_bundle.id, error = ?err, "Failed to fetch base accounts, falling back to CommitState");
                 Default::default()
             });
-        let compressed_data =
+        let mut compressed_data =
             compressed_data.map_err(TaskBuilderError::CommitTasksBuildError)?;
 
         // Persist commit ids for commitees
@@ -328,19 +330,13 @@ impl TasksBuilder for TaskBuilderImpl {
 
                 if compressed {
                     let compressed_data = compressed_data
-                        .get(&account.pubkey)
-                        .cloned()
+                        .remove(&account.pubkey)
                         .ok_or_else(|| {
                             TaskBuilderError::CommitFinalizeCompressedTasksBuildError(
-                                std::io::Error::new(
-                                    std::io::ErrorKind::NotFound,
-                                    format!(
-                                        "compressed data absent for pubkey {}",
-                                        account.pubkey
-                                    ),
-                                ),
+                                TaskInfoFetcherError::CompressedAccountNotFound(account.pubkey),
                             )
-                        })?;
+                        })?
+                        .map_err(TaskBuilderError::CommitFinalizeCompressedTasksBuildError)?;
                     Ok(Self::create_commit_finalize_compressed_task(
                         commit_id,
                         allow_undelegation,
@@ -475,7 +471,7 @@ pub enum TaskBuilderError {
     #[error("FinalizedTasksBuildError: {0}")]
     FinalizedTasksBuildError(#[source] TaskInfoFetcherError),
     #[error("CommitFinalizeCompressedTasksBuildError: {0}")]
-    CommitFinalizeCompressedTasksBuildError(#[from] std::io::Error),
+    CommitFinalizeCompressedTasksBuildError(#[from] TaskInfoFetcherError),
 }
 
 impl TaskBuilderError {
