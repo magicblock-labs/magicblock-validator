@@ -127,6 +127,20 @@ impl ScheduledIntentBundle {
         self.intent_bundle.get_all_committed_accounts()
     }
 
+    /// Returns all regular accounts that will be committed on Base layer,
+    /// including the one scheduled for undelegation
+    pub fn get_all_regular_committed_accounts(&self) -> Vec<CommittedAccount> {
+        self.intent_bundle.get_all_regular_committed_accounts()
+    }
+
+    /// Returns all compressed accounts that will be committed on Base layer,
+    /// including the one scheduled for undelegation
+    pub fn get_all_compressed_committed_accounts(
+        &self,
+    ) -> Vec<CommittedAccount> {
+        self.intent_bundle.get_all_compressed_committed_accounts()
+    }
+
     /// Returns pubkeys of all accounts that will be committed on Base layer,
     /// including the one scheduled for undelegation
     pub fn get_all_committed_pubkeys(&self) -> Vec<Pubkey> {
@@ -563,6 +577,49 @@ impl MagicIntentBundle {
             undelegated,
             commit_finalize,
             commit_finalize_and_undelegate,
+            commit_finalize_compressed,
+            commit_finalize_compressed_and_unde,
+        ]
+        .into_iter()
+        .flatten()
+        .flatten()
+        .cloned()
+        .collect()
+    }
+
+    /// Returns all the compressed accounts that will be committed,
+    /// including the ones that will be undelegated as well
+    pub fn get_all_regular_committed_accounts(&self) -> Vec<CommittedAccount> {
+        let committed = self.get_commit_intent_accounts();
+        let undelegated = self.get_undelegate_intent_accounts();
+        let commit_finalize = self.get_commit_finalize_intent_accounts();
+        let commit_finalize_and_undelegate =
+            self.get_commit_finalize_and_undelegate_intent_accounts();
+
+        [
+            committed,
+            undelegated,
+            commit_finalize,
+            commit_finalize_and_undelegate,
+        ]
+        .into_iter()
+        .flatten()
+        .flatten()
+        .cloned()
+        .collect()
+    }
+
+    /// Returns all the compressed accounts that will be committed,
+    /// including the ones that will be undelegated as well
+    pub fn get_all_compressed_committed_accounts(
+        &self,
+    ) -> Vec<CommittedAccount> {
+        let commit_finalize_compressed =
+            self.get_commit_finalize_compressed_intent_accounts();
+        let commit_finalize_compressed_and_unde = self
+            .get_commit_finalize_compressed_and_undelegate_intent_accounts();
+
+        [
             commit_finalize_compressed,
             commit_finalize_compressed_and_unde,
         ]

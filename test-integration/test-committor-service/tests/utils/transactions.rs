@@ -92,7 +92,7 @@ pub async fn fetch_tx_logs(
     //              line: 0, column: 0))
     //      }
     //      Therefore we retry a few times.
-    const MAX_RETRIES: usize = 10;
+    const MAX_RETRIES: usize = 50;
     let mut retries = MAX_RETRIES;
     let tx = loop {
         match rpc_client
