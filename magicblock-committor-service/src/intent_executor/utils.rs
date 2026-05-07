@@ -170,7 +170,9 @@ pub(in crate::intent_executor) fn handle_cpi_limit_error(
     let last_commit_ind = strategy.optimized_tasks.iter().rposition(|el| {
         matches!(
             el,
-            BaseTaskImpl::Commit(_) | BaseTaskImpl::CommitFinalize(_)
+            BaseTaskImpl::Commit(_)
+                | BaseTaskImpl::CommitFinalize(_)
+                | BaseTaskImpl::CommitFinalizeCompressed(_)
         )
     });
     let (mut commit_stage_tasks, mut finalize_stage_tasks) = (vec![], vec![]);
