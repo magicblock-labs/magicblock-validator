@@ -98,17 +98,6 @@ struct FetchingAccountState {
 
 type FetchingAccounts = Mutex<HashMap<Pubkey, FetchingAccountState>>;
 
-/// Outcome of a successful [`RemoteAccountProvider::subscribe`] call,
-/// distinguishing whether a new pubsub subscription was created or the
-/// account was already being watched.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SubscribeResult {
-    /// A new subscription was created by this call.
-    Created(u64),
-    /// The account was already being watched; no new subscription was created.
-    AlreadyWatching,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SubscriptionReason {
     DirectAccount,
@@ -1086,21 +1075,21 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                 .join(", ");
             trace!(pubkeys = pubkeys_str, "Subscribing to accounts");
         }
-        // Send all subscription requests in parallel (non-fail-fast)
-        // We use join_all instead of try_join_all to ensure ALL
-        // subscribe attempts complete, even if some fail. This
-        // prevents resource leaks in fetching_accounts and ensures
-        // all oneshot receivers get a response (either success or
-        // error).
+        // Send all subscription requests in parallel (non-fail-fast).
+        // We use join_all instead of try_join_all to ensure ALL acquire
+        // attempts complete, even if some fail.
         let subscription_results =
-            join_all(pubkeys.iter().map(|pubkey| self.subscribe(pubkey))).await;
+            join_all(pubkeys.iter().map(|pubkey| async {
+                self.acquire_subscription_reason(
+                    pubkey,
+                    SubscriptionReason::DirectAccount,
+                )
+                .await
+            }))
+            .await;
 
-        // Collect errors and track only subscriptions that were newly
-        // created by this call. Pre-existing subscriptions
-        // (`AlreadyWatching`) must NOT be rolled back on partial failure
-        // because other callers are relying on them.
         let mut errors = Vec::new();
-        let mut created = Vec::new();
+        let mut acquired = Vec::new();
         for (result, pubkey) in subscription_results.iter().zip(pubkeys.iter())
         {
             match result {
@@ -1111,23 +1100,17 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                     );
                     errors.push(format!("{}: {}", pubkey, err));
                 }
-                Ok(SubscribeResult::Created(rollback_token)) => {
-                    created.push((*pubkey, *rollback_token));
-                }
-                Ok(SubscribeResult::AlreadyWatching) => {
-                    // Pre-existing subscription; do not roll back.
-                }
+                Ok(()) => acquired.push(*pubkey),
             }
         }
 
-        // If ANY subscription failed, unsubscribe only the ones that
-        // were newly created by this call to avoid leaking orphan
-        // subscriptions while preserving subscriptions other callers
-        // already established.
         if !errors.is_empty() {
-            for (pubkey, rollback_token) in &created {
+            for pubkey in &acquired {
                 if let Err(unsub_err) = self
-                    .try_unsubscribe_if_sole_owner(pubkey, *rollback_token)
+                    .release_subscription_reason(
+                        pubkey,
+                        SubscriptionReason::DirectAccount,
+                    )
                     .await
                 {
                     if matches!(
@@ -1293,28 +1276,6 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         Ok(success)
     }
 
-    /// Subscribe to an account for updates
-    #[instrument(skip(self))]
-    pub async fn subscribe(
-        &self,
-        pubkey: &Pubkey,
-    ) -> RemoteAccountProviderResult<SubscribeResult> {
-        let already_watching = {
-            let ownership = self.subscription_ownership.lock().await;
-            ownership.contains_key(pubkey)
-        };
-        self.acquire_subscription_reason(
-            pubkey,
-            SubscriptionReason::DirectAccount,
-        )
-        .await?;
-        if already_watching {
-            Ok(SubscribeResult::AlreadyWatching)
-        } else {
-            Ok(SubscribeResult::Created(0))
-        }
-    }
-
     /// Subscribe to program account updates
     #[instrument(skip(self))]
     pub async fn subscribe_program(
@@ -1359,18 +1320,6 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         }
 
         Ok(())
-    }
-
-    async fn try_unsubscribe_if_sole_owner(
-        &self,
-        pubkey: &Pubkey,
-        _rollback_token: u64,
-    ) -> RemoteAccountProviderResult<bool> {
-        self.release_subscription_reason(
-            pubkey,
-            SubscriptionReason::DirectAccount,
-        )
-        .await
     }
 
     /// Tries to fetch the given accounts from RPC.

@@ -343,7 +343,7 @@ async fn test_try_get_multi_waiter_receives_error_when_owner_aborts_in_setup_sub
 }
 
 #[tokio::test]
-async fn test_try_unsubscribe_if_sole_owner_preserves_created_subscription_ownership(
+async fn test_release_subscription_reason_keeps_watching_until_last_direct_refcount(
 ) {
     let pubkey = solana_pubkey::Pubkey::new_unique();
     let account = Account {
@@ -360,27 +360,36 @@ async fn test_try_unsubscribe_if_sole_owner_preserves_created_subscription_owner
         _forward_rx,
     } = setup_provider(pubkey, account).await;
 
-    let rollback_token = match provider.subscribe(&pubkey).await.unwrap() {
-        SubscribeResult::Created(token) => token,
-        other => panic!("expected Created, got {other:?}"),
-    };
-    assert_eq!(
-        provider.subscribe(&pubkey).await.unwrap(),
-        SubscribeResult::AlreadyWatching
-    );
+    provider
+        .acquire_subscription_reason(&pubkey, SubscriptionReason::DirectAccount)
+        .await
+        .unwrap();
+    provider
+        .acquire_subscription_reason(&pubkey, SubscriptionReason::DirectAccount)
+        .await
+        .unwrap();
 
     let unsubscribed = provider
-        .try_unsubscribe_if_sole_owner(&pubkey, rollback_token)
+        .release_subscription_reason(&pubkey, SubscriptionReason::DirectAccount)
         .await
         .unwrap();
 
     assert!(!unsubscribed);
     assert!(provider.is_watching(&pubkey));
     assert!(_pubsub_client.subscriptions_union().contains(&pubkey));
+
+    let unsubscribed = provider
+        .release_subscription_reason(&pubkey, SubscriptionReason::DirectAccount)
+        .await
+        .unwrap();
+
+    assert!(unsubscribed);
+    assert!(!provider.is_watching(&pubkey));
+    assert!(!_pubsub_client.subscriptions_union().contains(&pubkey));
 }
 
 #[tokio::test]
-async fn test_try_unsubscribe_if_sole_owner_removes_created_subscription() {
+async fn test_release_subscription_reason_unsubscribes_after_final_release() {
     let pubkey = solana_pubkey::Pubkey::new_unique();
     let account = Account {
         lamports: 1_000_000,
@@ -396,13 +405,117 @@ async fn test_try_unsubscribe_if_sole_owner_removes_created_subscription() {
         _forward_rx,
     } = setup_provider(pubkey, account).await;
 
-    let rollback_token = match provider.subscribe(&pubkey).await.unwrap() {
-        SubscribeResult::Created(token) => token,
-        other => panic!("expected Created, got {other:?}"),
-    };
+    provider
+        .acquire_subscription_reason(&pubkey, SubscriptionReason::DirectAccount)
+        .await
+        .unwrap();
 
     let unsubscribed = provider
-        .try_unsubscribe_if_sole_owner(&pubkey, rollback_token)
+        .release_subscription_reason(&pubkey, SubscriptionReason::DirectAccount)
+        .await
+        .unwrap();
+
+    assert!(unsubscribed);
+    assert!(!provider.is_watching(&pubkey));
+    assert!(!_pubsub_client.subscriptions_union().contains(&pubkey));
+}
+
+#[tokio::test]
+async fn test_subscription_reasons_do_not_release_each_other() {
+    let pubkey = solana_pubkey::Pubkey::new_unique();
+    let account = Account {
+        lamports: 1_000_000,
+        data: vec![1, 2, 3, 4],
+        owner: solana_pubkey::Pubkey::new_unique(),
+        executable: false,
+        rent_epoch: 0,
+    };
+
+    let ProviderTestCtx {
+        provider,
+        _pubsub_client,
+        _forward_rx,
+    } = setup_provider(pubkey, account).await;
+
+    provider
+        .acquire_subscription_reason(&pubkey, SubscriptionReason::DirectAccount)
+        .await
+        .unwrap();
+    provider
+        .acquire_subscription_reason(
+            &pubkey,
+            SubscriptionReason::DelegationRecord,
+        )
+        .await
+        .unwrap();
+
+    let unsubscribed = provider
+        .release_subscription_reason(&pubkey, SubscriptionReason::DirectAccount)
+        .await
+        .unwrap();
+
+    assert!(!unsubscribed);
+    assert!(provider.is_watching(&pubkey));
+    assert!(_pubsub_client.subscriptions_union().contains(&pubkey));
+
+    let unsubscribed = provider
+        .release_subscription_reason(
+            &pubkey,
+            SubscriptionReason::DelegationRecord,
+        )
+        .await
+        .unwrap();
+
+    assert!(unsubscribed);
+    assert!(!provider.is_watching(&pubkey));
+    assert!(!_pubsub_client.subscriptions_union().contains(&pubkey));
+}
+
+#[tokio::test]
+async fn test_concurrent_reason_changes_do_not_unsubscribe_until_final_release()
+{
+    let pubkey = solana_pubkey::Pubkey::new_unique();
+    let account = Account {
+        lamports: 1_000_000,
+        data: vec![1, 2, 3, 4],
+        owner: solana_pubkey::Pubkey::new_unique(),
+        executable: false,
+        rent_epoch: 0,
+    };
+
+    let ProviderTestCtx {
+        provider,
+        _pubsub_client,
+        _forward_rx,
+    } = setup_provider(pubkey, account).await;
+
+    provider
+        .acquire_subscription_reason(&pubkey, SubscriptionReason::DirectAccount)
+        .await
+        .unwrap();
+
+    let (acquire_result, release_result) = tokio::join!(
+        provider.acquire_subscription_reason(
+            &pubkey,
+            SubscriptionReason::DelegationRecord,
+        ),
+        provider.release_subscription_reason(
+            &pubkey,
+            SubscriptionReason::DirectAccount,
+        )
+    );
+    acquire_result.unwrap();
+    let unsubscribed = release_result.unwrap();
+
+    assert!(!unsubscribed);
+    assert!(provider.is_watching(&pubkey));
+    assert!(_pubsub_client.subscriptions_union().contains(&pubkey));
+
+    let unsubscribed = provider
+        .release_subscription_reason(
+            &pubkey,
+            SubscriptionReason::DelegationRecord,
+        )
         .await
         .unwrap();
 
