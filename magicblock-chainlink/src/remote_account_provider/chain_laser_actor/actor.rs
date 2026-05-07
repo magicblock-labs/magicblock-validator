@@ -253,8 +253,6 @@ impl<H: StreamHandle, S: StreamFactory<H>> ChainLaserActor<H, S> {
             validator_pubkey,
             optimization_interval_duration,
         };
-        let _ = me.validator_pubkey;
-
         (
             me,
             messages_sender,
