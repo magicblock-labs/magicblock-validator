@@ -37,9 +37,9 @@ use super::{
 use crate::remote_account_provider::{
     chain_rpc_client::ChainRpcClientImpl,
     pubsub_common::{
-        is_internal_dlp_account_data, AccountSubscription,
-        ChainPubsubActorMessage, PubsubClientConfig, SubscriptionUpdate,
-        MESSAGE_CHANNEL_SIZE, SUBSCRIPTION_UPDATE_CHANNEL_SIZE,
+        AccountSubscription, ChainPubsubActorMessage, PubsubClientConfig,
+        SubscriptionUpdate, MESSAGE_CHANNEL_SIZE,
+        SUBSCRIPTION_UPDATE_CHANNEL_SIZE,
     },
     pubsub_connection::PubsubConnectionImpl,
     DEFAULT_SUBSCRIPTION_RETRIES,
@@ -756,7 +756,7 @@ impl ChainPubsubActor {
                                         &validator_pubkey,
                                         acc_pubkey,
                                         &account.owner,
-                                        is_internal_dlp_account_data(&account.data),
+                                        &account.data,
                                         sub_update.slot,
                                         false,
                                     )

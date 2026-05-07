@@ -5,7 +5,9 @@ use solana_pubkey::Pubkey;
 use solana_rpc_client_api::config::RpcAccountInfoConfig;
 use tracing::{debug, trace};
 
-use crate::remote_account_provider::ChainRpcClient;
+use crate::remote_account_provider::{
+    pubsub_common::is_internal_dlp_account_data, ChainRpcClient,
+};
 
 pub(crate) fn is_delegated_to_validator_or_confined(
     authority: &Pubkey,
@@ -14,7 +16,6 @@ pub(crate) fn is_delegated_to_validator_or_confined(
     authority == validator_pubkey || authority == &Pubkey::default()
 }
 
-#[allow(dead_code)]
 pub(crate) fn parse_delegation_record_header(
     data: &[u8],
 ) -> Option<DelegationRecord> {
@@ -30,7 +31,6 @@ pub(crate) fn parse_delegation_record_header(
     .ok()
 }
 
-#[allow(dead_code)]
 pub(crate) async fn fetch_delegation_record_header<T: ChainRpcClient>(
     rpc_client: &T,
     delegated_account_pubkey: Pubkey,
@@ -54,13 +54,12 @@ pub(crate) async fn fetch_delegation_record_header<T: ChainRpcClient>(
     parse_delegation_record_header(&account.data)
 }
 
-#[allow(dead_code)]
 pub(crate) async fn should_forward_dlp_program_update<T: ChainRpcClient>(
     rpc_client: &T,
     validator_pubkey: &Pubkey,
     delegated_account_pubkey: Pubkey,
     owner: &Pubkey,
-    is_internal_dlp_account: bool,
+    account_data: &[u8],
     min_context_slot: u64,
     is_directly_subscribed: bool,
 ) -> bool {
@@ -71,7 +70,7 @@ pub(crate) async fn should_forward_dlp_program_update<T: ChainRpcClient>(
         trace!(pubkey = %delegated_account_pubkey, owner = %owner, "Dropping non-DLP program update");
         return false;
     }
-    if is_internal_dlp_account {
+    if is_internal_dlp_account_data(account_data) {
         trace!(pubkey = %delegated_account_pubkey, "Dropping internal DLP program update");
         return false;
     }
@@ -291,6 +290,7 @@ mod tests {
             .build();
 
         let delegated_account = make_dlp_owned_delegated_account_payload();
+        let internal_data = serialize_valid_delegation_record(validator_pubkey);
 
         assert!(
             should_forward_dlp_program_update(
@@ -298,7 +298,7 @@ mod tests {
                 &validator_pubkey,
                 delegated_account_pubkey,
                 &delegated_account.owner,
-                false,
+                delegated_account.data.as_slice(),
                 10,
                 true,
             )
@@ -312,7 +312,7 @@ mod tests {
                 &validator_pubkey,
                 delegated_account_pubkey,
                 &delegated_account.owner,
-                false,
+                delegated_account.data.as_slice(),
                 10,
                 false,
             )
@@ -341,7 +341,7 @@ mod tests {
                 &validator_pubkey,
                 delegated_account_pubkey,
                 &delegated_account.owner,
-                false,
+                delegated_account.data.as_slice(),
                 10,
                 false,
             )
@@ -356,7 +356,7 @@ mod tests {
                 &validator_pubkey,
                 delegated_account_pubkey,
                 &delegated_account.owner,
-                true,
+                internal_data.as_slice(),
                 10,
                 false,
             )

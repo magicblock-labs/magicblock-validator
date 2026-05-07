@@ -35,8 +35,8 @@ use crate::remote_account_provider::{
     chain_rpc_client::{ChainRpcClient, ChainRpcClientImpl},
     chain_slot::ChainSlot,
     pubsub_common::{
-        is_internal_dlp_account_data, ChainPubsubActorMessage,
-        MESSAGE_CHANNEL_SIZE, SUBSCRIPTION_UPDATE_CHANNEL_SIZE,
+        ChainPubsubActorMessage, MESSAGE_CHANNEL_SIZE,
+        SUBSCRIPTION_UPDATE_CHANNEL_SIZE,
     },
     RemoteAccountProviderError, RemoteAccountProviderResult,
     SubscriptionUpdate,
@@ -781,7 +781,7 @@ impl<H: StreamHandle, S: StreamFactory<H>> ChainLaserActor<H, S> {
                     &self.validator_pubkey,
                     pubkey,
                     &owner,
-                    is_internal_dlp_account_data(&account.data),
+                    &account.data,
                     slot,
                     false,
                 )
