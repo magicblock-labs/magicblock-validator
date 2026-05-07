@@ -170,6 +170,7 @@ impl
         endpoints: &Endpoints,
         commitment: CommitmentConfig,
         subscription_forwarder: mpsc::Sender<ForwardedSubscriptionUpdate>,
+        validator_pubkey: Pubkey,
         config: &RemoteAccountProviderConfig,
     ) -> ChainlinkResult<
         Option<
@@ -189,6 +190,7 @@ impl
                 endpoints,
                 commitment,
                 subscription_forwarder,
+                validator_pubkey,
                 config,
             )
             .await?;
@@ -316,6 +318,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         endpoints: &Endpoints,
         commitment: CommitmentConfig,
         subscription_forwarder: mpsc::Sender<ForwardedSubscriptionUpdate>,
+        validator_pubkey: Pubkey,
         config: &RemoteAccountProviderConfig,
     ) -> RemoteAccountProviderResult<
         RemoteAccountProvider<
@@ -359,6 +362,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                     abort_tx,
                     chain_slot,
                     resubscription_delay,
+                    validator_pubkey,
                     rpc_client,
                     &grpc_cfg,
                 )

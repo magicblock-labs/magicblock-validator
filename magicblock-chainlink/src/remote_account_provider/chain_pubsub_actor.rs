@@ -35,6 +35,7 @@ use super::{
     pubsub_connection_pool::PubSubConnectionPool,
 };
 use crate::remote_account_provider::{
+    chain_rpc_client::ChainRpcClientImpl,
     pubsub_common::{
         is_internal_dlp_account_data, AccountSubscription,
         ChainPubsubActorMessage, PubsubClientConfig, SubscriptionUpdate,
@@ -75,6 +76,10 @@ pub struct ChainPubsubActor {
     is_connected: Arc<AtomicBool>,
     /// Channel used to signal connection issues to the submux
     abort_sender: mpsc::Sender<()>,
+    /// Validator identity used for delegated-to-us gating
+    validator_pubkey: Pubkey,
+    /// RPC client used for delegation-record lookups
+    rpc_client: ChainRpcClientImpl,
 }
 
 impl Drop for ChainPubsubActor {
@@ -89,16 +94,27 @@ impl ChainPubsubActor {
         client_id: &str,
         abort_sender: mpsc::Sender<()>,
         commitment: CommitmentConfig,
+        validator_pubkey: Pubkey,
+        rpc_client: ChainRpcClientImpl,
     ) -> RemoteAccountProviderResult<(Self, mpsc::Receiver<SubscriptionUpdate>)>
     {
         let config = PubsubClientConfig::from_url(pubsub_url, commitment);
-        Self::new(client_id, abort_sender, config).await
+        Self::new(
+            client_id,
+            abort_sender,
+            config,
+            validator_pubkey,
+            rpc_client,
+        )
+        .await
     }
 
     pub async fn new(
         client_id: &str,
         abort_sender: mpsc::Sender<()>,
         pubsub_client_config: PubsubClientConfig,
+        validator_pubkey: Pubkey,
+        rpc_client: ChainRpcClientImpl,
     ) -> RemoteAccountProviderResult<(Self, mpsc::Receiver<SubscriptionUpdate>)>
     {
         let url = pubsub_client_config.pubsub_url.clone();
@@ -136,6 +152,8 @@ impl ChainPubsubActor {
             client_id: client_id.to_string(),
             is_connected: Arc::new(AtomicBool::new(true)),
             abort_sender,
+            validator_pubkey,
+            rpc_client,
         };
         me.start_worker(messages_receiver);
 
@@ -213,6 +231,8 @@ impl ChainPubsubActor {
         let client_id = self.client_id.clone();
         let is_connected = self.is_connected.clone();
         let abort_sender = self.abort_sender.clone();
+        let validator_pubkey = self.validator_pubkey;
+        let rpc_client = self.rpc_client.clone();
         tokio::spawn(async move {
             let mut pending_messages = FuturesUnordered::new();
             loop {
@@ -236,6 +256,8 @@ impl ChainPubsubActor {
                                 &client_id,
                                 is_connected,
                                 shutdown_token.clone(),
+                                validator_pubkey,
+                                rpc_client.clone(),
                                 msg
                             ));
                         } else {
@@ -252,7 +274,7 @@ impl ChainPubsubActor {
     }
 
     #[allow(clippy::too_many_arguments)]
-    #[instrument(skip(subscriptions, program_subs, pubsub_connection, subscription_updates_sender, pubsub_client_config, abort_sender, is_connected, shutdown_token, msg), fields(client_id = %client_id))]
+    #[instrument(skip(subscriptions, program_subs, pubsub_connection, subscription_updates_sender, pubsub_client_config, abort_sender, is_connected, shutdown_token, validator_pubkey, rpc_client, msg), fields(client_id = %client_id))]
     async fn handle_msg(
         subscriptions: Arc<Mutex<HashMap<Pubkey, AccountSubscription>>>,
         program_subs: Arc<Mutex<HashMap<Pubkey, AccountSubscription>>>,
@@ -263,6 +285,8 @@ impl ChainPubsubActor {
         client_id: &str,
         is_connected: Arc<AtomicBool>,
         shutdown_token: CancellationToken,
+        validator_pubkey: Pubkey,
+        rpc_client: ChainRpcClientImpl,
         msg: ChainPubsubActorMessage,
     ) {
         fn send_ok(
@@ -379,6 +403,8 @@ impl ChainPubsubActor {
                     is_connected,
                     commitment_config,
                     client_id,
+                    validator_pubkey,
+                    rpc_client,
                 )
                 .await;
             }
@@ -607,6 +633,8 @@ impl ChainPubsubActor {
         is_connected: Arc<AtomicBool>,
         commitment_config: CommitmentConfig,
         client_id: &str,
+        validator_pubkey: Pubkey,
+        rpc_client: ChainRpcClientImpl,
     ) {
         if program_subs
             .lock()
@@ -718,15 +746,29 @@ impl ChainPubsubActor {
                                     acc_pubkey,
                                     rpc_response,
                                 ));
-                                let should_forward = is_directly_subscribed
-                                    || program_pubkey.eq(&dlp_api::id())
-                                        && sub_update.account.as_ref().is_some_and(
-                                            |account| {
-                                                !is_internal_dlp_account_data(
-                                                    &account.data,
-                                                )
-                                            },
-                                        );
+                                let should_forward = if is_directly_subscribed {
+                                    true
+                                } else if !program_pubkey.eq(&dlp_api::id()) {
+                                    false
+                                } else if let Some(account) = sub_update.account.as_ref() {
+                                    if is_internal_dlp_account_data(&account.data) {
+                                        false
+                                    } else {
+                                        match crate::delegation_record::fetch_delegation_record_header(&rpc_client, acc_pubkey, sub_update.slot).await {
+                                            Some(record) if crate::delegation_record::is_delegated_to_validator_or_confined(&record.authority, &validator_pubkey) => true,
+                                            Some(record) => {
+                                                debug!(pubkey = %acc_pubkey, authority = %record.authority, "Dropping DLP program update delegated elsewhere");
+                                                false
+                                            }
+                                            None => {
+                                                debug!(pubkey = %acc_pubkey, slot = sub_update.slot, "Dropping DLP program update without delegation record");
+                                                false
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    false
+                                };
 
                                 if should_forward {
                                     if acc_pubkey != clock::ID {
