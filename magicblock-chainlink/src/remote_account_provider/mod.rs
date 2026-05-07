@@ -88,7 +88,6 @@ const FETCHING_ACCOUNT_STALE_AFTER: Duration = Duration::from_secs(30);
 // Maps pubkey -> (fetch_start_slot, requests_waiting)
 type FetchResult = Result<RemoteAccount, RemoteAccountProviderError>;
 type FetchingAccountGeneration = u64;
-type SubscriptionRollbackToken = u64;
 
 struct FetchingAccountState {
     generation: FetchingAccountGeneration,
@@ -105,9 +104,47 @@ type FetchingAccounts = Mutex<HashMap<Pubkey, FetchingAccountState>>;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SubscribeResult {
     /// A new subscription was created by this call.
-    Created(SubscriptionRollbackToken),
+    Created(u64),
     /// The account was already being watched; no new subscription was created.
     AlreadyWatching,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum SubscriptionReason {
+    DirectAccount,
+    DelegationRecord,
+    ProgramData,
+    UndelegationTracking,
+    AtaProjection,
+}
+
+#[derive(Debug, Default, Clone)]
+struct SubscriptionOwnership {
+    reasons: HashMap<SubscriptionReason, usize>,
+}
+
+impl SubscriptionOwnership {
+    fn acquire(&mut self, reason: SubscriptionReason) {
+        *self.reasons.entry(reason).or_default() += 1;
+    }
+
+    fn release(&mut self, reason: SubscriptionReason) -> bool {
+        match self.reasons.entry(reason) {
+            Entry::Occupied(mut entry) => {
+                let count = entry.get_mut();
+                *count -= 1;
+                if *count == 0 {
+                    entry.remove();
+                }
+            }
+            Entry::Vacant(_) => {}
+        }
+        self.reasons.is_empty()
+    }
+
+    fn is_empty(&self) -> bool {
+        self.reasons.is_empty()
+    }
 }
 
 pub struct ForwardedSubscriptionUpdate {
@@ -132,11 +169,9 @@ pub struct RemoteAccountProvider<T: ChainRpcClient, U: ChainPubsubClient> {
     fetching_accounts: Arc<FetchingAccounts>,
     /// Monotonic generation for claimed fetching_accounts ownership.
     next_fetching_account_generation: AtomicU64,
-    /// Sole-owner rollback tokens for subscriptions created by this provider.
-    subscription_rollback_owners:
-        Arc<AsyncMutex<HashMap<Pubkey, SubscriptionRollbackToken>>>,
-    /// Monotonic generation for subscription rollback ownership.
-    next_subscription_rollback_token: AtomicU64,
+    /// Subscription ownership reasons tracked per pubkey.
+    subscription_ownership:
+        Arc<AsyncMutex<HashMap<Pubkey, SubscriptionOwnership>>>,
     /// The current slot on chain.
     ///
     /// This value is updated from two sources and always stores the maximum
@@ -313,12 +348,6 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             .wrapping_add(1)
     }
 
-    fn next_subscription_rollback_token(&self) -> SubscriptionRollbackToken {
-        self.next_subscription_rollback_token
-            .fetch_add(1, Ordering::Relaxed)
-            .wrapping_add(1)
-    }
-
     pub async fn try_from_clients_and_mode(
         rpc_client: T,
         pubsub_client: U,
@@ -402,10 +431,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         let me = Self {
             fetching_accounts: Arc::<FetchingAccounts>::default(),
             next_fetching_account_generation: AtomicU64::default(),
-            subscription_rollback_owners: Arc::new(AsyncMutex::new(
-                HashMap::new(),
-            )),
-            next_subscription_rollback_token: AtomicU64::default(),
+            subscription_ownership: Arc::new(AsyncMutex::new(HashMap::new())),
             rpc_client,
             pubsub_client,
             chain_slot,
@@ -1196,30 +1222,97 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         fetching.contains_key(pubkey)
     }
 
+    pub async fn acquire_subscription_reason(
+        &self,
+        pubkey: &Pubkey,
+        reason: SubscriptionReason,
+    ) -> RemoteAccountProviderResult<()> {
+        let mut ownership = self.subscription_ownership.lock().await;
+        if let Some(existing) = ownership.get_mut(pubkey) {
+            existing.acquire(reason);
+            self.lrucache_subscribed_accounts.add(*pubkey);
+            return Ok(());
+        }
+        drop(ownership);
+
+        let evicted = self.register_subscription(pubkey).await?;
+
+        let mut ownership = self.subscription_ownership.lock().await;
+        if let Some(evicted) = evicted {
+            ownership.remove(&evicted);
+        }
+        ownership.entry(*pubkey).or_default().acquire(reason);
+        Ok(())
+    }
+
+    pub async fn release_subscription_reason(
+        &self,
+        pubkey: &Pubkey,
+        reason: SubscriptionReason,
+    ) -> RemoteAccountProviderResult<bool> {
+        if !self.lrucache_subscribed_accounts.can_evict(pubkey) {
+            return Ok(false);
+        }
+
+        let should_unsubscribe = {
+            let mut ownership = self.subscription_ownership.lock().await;
+            let is_empty = match ownership.get_mut(pubkey) {
+                Some(existing) => existing.release(reason),
+                None => return Ok(false),
+            };
+            if !is_empty {
+                return Ok(false);
+            }
+            ownership.remove(pubkey);
+            true
+        };
+
+        if !should_unsubscribe {
+            return Ok(false);
+        }
+
+        let success = subscription_reconciler::unsubscribe_and_notify_removal(
+            *pubkey,
+            &self.pubsub_client,
+            &self.removed_account_tx,
+        )
+        .await;
+
+        if success {
+            self.lrucache_subscribed_accounts.remove(pubkey);
+        } else {
+            let mut ownership = self.subscription_ownership.lock().await;
+            if ownership
+                .get(pubkey)
+                .is_none_or(SubscriptionOwnership::is_empty)
+            {
+                ownership.entry(*pubkey).or_default().acquire(reason);
+            }
+        }
+
+        Ok(success)
+    }
+
     /// Subscribe to an account for updates
     #[instrument(skip(self))]
     pub async fn subscribe(
         &self,
         pubkey: &Pubkey,
     ) -> RemoteAccountProviderResult<SubscribeResult> {
-        if self.is_watching(pubkey) {
-            // Promote in LRU cache even if already subscribed.
-            // Preserve any existing rollback ownership so the creator can
-            // still roll back this subscription if its batch later fails.
-            self.lrucache_subscribed_accounts.add(*pubkey);
-            return Ok(SubscribeResult::AlreadyWatching);
+        let already_watching = {
+            let ownership = self.subscription_ownership.lock().await;
+            ownership.contains_key(pubkey)
+        };
+        self.acquire_subscription_reason(
+            pubkey,
+            SubscriptionReason::DirectAccount,
+        )
+        .await?;
+        if already_watching {
+            Ok(SubscribeResult::AlreadyWatching)
+        } else {
+            Ok(SubscribeResult::Created(0))
         }
-
-        let evicted = self.register_subscription(pubkey).await?;
-        let rollback_token = self.next_subscription_rollback_token();
-
-        let mut rollback_owners =
-            self.subscription_rollback_owners.lock().await;
-        if let Some(evicted) = evicted {
-            rollback_owners.remove(&evicted);
-        }
-        rollback_owners.insert(*pubkey, rollback_token);
-        Ok(SubscribeResult::Created(rollback_token))
     }
 
     /// Subscribe to program account updates
@@ -1262,10 +1355,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
 
         if success {
             self.lrucache_subscribed_accounts.remove(pubkey);
-            self.subscription_rollback_owners
-                .lock()
-                .await
-                .remove(pubkey);
+            self.subscription_ownership.lock().await.remove(pubkey);
         }
 
         Ok(())
@@ -1274,38 +1364,13 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
     async fn try_unsubscribe_if_sole_owner(
         &self,
         pubkey: &Pubkey,
-        rollback_token: SubscriptionRollbackToken,
+        _rollback_token: u64,
     ) -> RemoteAccountProviderResult<bool> {
-        if !self.lrucache_subscribed_accounts.can_evict(pubkey) {
-            return Ok(false);
-        }
-
-        let is_sole_owner = {
-            let rollback_owners =
-                self.subscription_rollback_owners.lock().await;
-            rollback_owners.get(pubkey).copied() == Some(rollback_token)
-        };
-        if !is_sole_owner {
-            return Ok(false);
-        }
-
-        let success = subscription_reconciler::unsubscribe_and_notify_removal(
-            *pubkey,
-            &self.pubsub_client,
-            &self.removed_account_tx,
+        self.release_subscription_reason(
+            pubkey,
+            SubscriptionReason::DirectAccount,
         )
-        .await;
-
-        if success {
-            self.lrucache_subscribed_accounts.remove(pubkey);
-            let mut rollback_owners =
-                self.subscription_rollback_owners.lock().await;
-            if rollback_owners.get(pubkey).copied() == Some(rollback_token) {
-                rollback_owners.remove(pubkey);
-            }
-        }
-
-        Ok(success)
+        .await
     }
 
     /// Tries to fetch the given accounts from RPC.
