@@ -3892,6 +3892,146 @@ async fn test_owned_operation_concurrent_calls_spawn_one_owner_fetch() {
 }
 
 #[tokio::test]
+async fn test_owned_operation_waiters_share_not_found_metadata() {
+    init_logger();
+    let validator_keypair = Keypair::new();
+    let validator_pubkey = validator_keypair.pubkey();
+    let account_owner = random_pubkey();
+    const CURRENT_SLOT: u64 = 100;
+    const INITIAL_ACC_SLOT: u64 = CURRENT_SLOT - 10;
+
+    let account_pubkey = random_pubkey();
+    let account = Account {
+        lamports: 1_000_000,
+        data: vec![1, 2, 3, 4],
+        owner: dlp_api::id(),
+        executable: false,
+        rent_epoch: 0,
+    };
+    let FetcherTestCtx {
+        rpc_client,
+        fetch_cloner,
+        ..
+    } = setup(
+        [(account_pubkey, account.clone())],
+        CURRENT_SLOT,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+
+    rpc_client.account_override_slot(&account_pubkey, INITIAL_ACC_SLOT);
+    add_delegation_record_for(
+        &rpc_client,
+        account_pubkey,
+        validator_pubkey,
+        account_owner,
+    );
+
+    let fetch_cloner = Arc::new(fetch_cloner);
+    let spawn_fetch_task = || {
+        let fetch_cloner = fetch_cloner.clone();
+        tokio::spawn(async move {
+            fetch_cloner
+                .fetch_and_clone_accounts_with_dedup(
+                    &[account_pubkey],
+                    None,
+                    None,
+                    AccountFetchOrigin::GetAccount,
+                    None,
+                )
+                .await
+        })
+    };
+
+    let (result1, result2) =
+        tokio::try_join!(spawn_fetch_task(), spawn_fetch_task()).unwrap();
+    let result1 = result1.expect("first concurrent fetch should succeed");
+    let result2 = result2.expect("second concurrent fetch should succeed");
+
+    assert_eq!(
+        result1.not_found_on_chain,
+        vec![(account_pubkey, CURRENT_SLOT)]
+    );
+    assert_eq!(
+        result2.not_found_on_chain,
+        vec![(account_pubkey, CURRENT_SLOT)]
+    );
+    assert!(result1.missing_delegation_record.is_empty());
+    assert!(result2.missing_delegation_record.is_empty());
+}
+
+#[tokio::test]
+async fn test_owned_operation_waiters_share_missing_delegation_record_metadata()
+{
+    init_logger();
+    let validator_keypair = Keypair::new();
+    let validator_pubkey = validator_keypair.pubkey();
+    let account_owner = random_pubkey();
+    const CURRENT_SLOT: u64 = 100;
+    const INITIAL_DELEG_RECORD_SLOT: u64 = CURRENT_SLOT - 10;
+
+    let account_pubkey = random_pubkey();
+    let account = Account {
+        lamports: 1_000_000,
+        data: vec![1, 2, 3, 4],
+        owner: dlp_api::id(),
+        executable: false,
+        rent_epoch: 0,
+    };
+    let FetcherTestCtx {
+        rpc_client,
+        fetch_cloner,
+        ..
+    } = setup(
+        [(account_pubkey, account.clone())],
+        CURRENT_SLOT,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+
+    let deleg_record_pubkey = add_delegation_record_for(
+        &rpc_client,
+        account_pubkey,
+        validator_pubkey,
+        account_owner,
+    );
+    rpc_client
+        .account_override_slot(&deleg_record_pubkey, INITIAL_DELEG_RECORD_SLOT);
+
+    let fetch_cloner = Arc::new(fetch_cloner);
+    let spawn_fetch_task = || {
+        let fetch_cloner = fetch_cloner.clone();
+        tokio::spawn(async move {
+            fetch_cloner
+                .fetch_and_clone_accounts_with_dedup(
+                    &[account_pubkey],
+                    None,
+                    None,
+                    AccountFetchOrigin::GetAccount,
+                    None,
+                )
+                .await
+        })
+    };
+
+    let (result1, result2) =
+        tokio::try_join!(spawn_fetch_task(), spawn_fetch_task()).unwrap();
+    let result1 = result1.expect("first concurrent fetch should succeed");
+    let result2 = result2.expect("second concurrent fetch should succeed");
+
+    assert_eq!(
+        result1.missing_delegation_record,
+        vec![(account_pubkey, CURRENT_SLOT)]
+    );
+    assert_eq!(
+        result2.missing_delegation_record,
+        vec![(account_pubkey, CURRENT_SLOT)]
+    );
+    assert!(result1.not_found_on_chain.is_empty());
+    assert!(result2.not_found_on_chain.is_empty());
+}
+
+#[tokio::test]
 async fn test_owned_operation_waiter_cancellation_is_local() {
     init_logger();
     let validator_keypair = Keypair::new();
@@ -4019,7 +4159,7 @@ async fn test_owned_operation_owner_timeout_cleans_up_pending() {
         None,
     );
 
-    let fetch_task = {
+    let owner_task = {
         let fetch_cloner = fetch_cloner.clone();
         tokio::spawn(async move {
             fetch_cloner
@@ -4035,6 +4175,22 @@ async fn test_owned_operation_owner_timeout_cleans_up_pending() {
     };
 
     wait_for_pending_request(&fetch_cloner, account_pubkey).await;
+    let waiter_task = {
+        let fetch_cloner = fetch_cloner.clone();
+        tokio::spawn(async move {
+            fetch_cloner
+                .fetch_and_clone_accounts_with_dedup(
+                    &[account_pubkey],
+                    None,
+                    None,
+                    AccountFetchOrigin::GetAccount,
+                    None,
+                )
+                .await
+        })
+    };
+
+    wait_for_pending_waiter_count(&fetch_cloner, account_pubkey, 2).await;
     let start = tokio::time::Instant::now();
     let timeout = Duration::from_secs(2);
     while blocking_cloner.clone_request_count() < 1 && start.elapsed() < timeout
@@ -4043,15 +4199,25 @@ async fn test_owned_operation_owner_timeout_cleans_up_pending() {
     }
     assert_eq!(blocking_cloner.clone_request_count(), 1);
 
-    let result = tokio::time::timeout(
+    let owner_result = tokio::time::timeout(
         FETCH_CLONE_OPERATION_TIMEOUT + Duration::from_secs(5),
-        fetch_task,
+        owner_task,
     )
     .await
     .expect("owner timeout test should complete within the outer timeout")
-    .expect("fetch task join should succeed");
+    .expect("owner task join should succeed");
+    let waiter_result =
+        tokio::time::timeout(Duration::from_secs(5), waiter_task)
+            .await
+            .expect("waiter should complete after owner timeout")
+            .expect("waiter task join should succeed");
     assert!(matches!(
-        result,
+        owner_result,
+        Err(ChainlinkError::PendingRequestTimeout(pubkey))
+            if pubkey == account_pubkey
+    ));
+    assert!(matches!(
+        waiter_result,
         Err(ChainlinkError::PendingRequestTimeout(pubkey))
             if pubkey == account_pubkey
     ));

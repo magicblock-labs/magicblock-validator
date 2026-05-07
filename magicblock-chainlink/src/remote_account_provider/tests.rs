@@ -1,4 +1,5 @@
 use std::{
+    path::{Path, PathBuf},
     sync::{atomic::AtomicU64, Arc},
     time::Duration,
 };
@@ -967,4 +968,87 @@ async fn test_multiple_evictions_in_sequence() {
         let removed_accounts = drain_removed_account_rx(&mut removed_rx);
         assert_eq!(removed_accounts, vec![expected_evicted]);
     }
+}
+
+#[test]
+fn test_removed_stuck_pubkey_symbols_are_absent_from_production_code() {
+    // Audit command kept here for manual spot checks:
+    // rg -n 'pending_request_guard|PendingRequestGuard|PendingRequestClaim|PendingRequestCompletion|claim_pending_request|finish_pending_request|PENDING_REQUEST_STALE_AFTER|PENDING_REQUEST_TIMEOUT|waiter_reconciliation_check|subscription_rollback_owners|try_unsubscribe_if_sole_owner|CancelStrategy|existing_subs|new_subs|is_pending\(&pubkey\)|FETCHING_ACCOUNT_STALE_AFTER|FetchingAccountGuard' magicblock-chainlink/src --glob '!**/tests.rs'
+    fn visit_rs_files(dir: &Path, files: &mut Vec<PathBuf>) {
+        for entry in std::fs::read_dir(dir).expect("read_dir should succeed") {
+            let entry = entry.expect("dir entry should succeed");
+            let path = entry.path();
+            if path.is_dir() {
+                visit_rs_files(&path, files);
+            } else if path.extension().and_then(|ext| ext.to_str())
+                == Some("rs")
+                && path.file_name().and_then(|name| name.to_str())
+                    != Some("tests.rs")
+            {
+                files.push(path);
+            }
+        }
+    }
+
+    fn is_ident_char(ch: char) -> bool {
+        ch.is_ascii_alphanumeric() || ch == '_'
+    }
+
+    fn contains_ident(content: &str, ident: &str) -> bool {
+        content.match_indices(ident).any(|(idx, _)| {
+            let before = content[..idx].chars().next_back();
+            let after = content[idx + ident.len()..].chars().next();
+            !before.is_some_and(is_ident_char)
+                && !after.is_some_and(is_ident_char)
+        })
+    }
+
+    let ident_symbols = [
+        "pending_request_guard",
+        "PendingRequestGuard",
+        "PendingRequestClaim",
+        "PendingRequestCompletion",
+        "claim_pending_request",
+        "finish_pending_request",
+        "PENDING_REQUEST_STALE_AFTER",
+        "PENDING_REQUEST_TIMEOUT",
+        "waiter_reconciliation_check",
+        "subscription_rollback_owners",
+        "try_unsubscribe_if_sole_owner",
+        "CancelStrategy",
+        "existing_subs",
+        "new_subs",
+        "FETCHING_ACCOUNT_STALE_AFTER",
+        "FetchingAccountGuard",
+    ];
+    let exact_symbols = ["is_pending(&pubkey)"];
+
+    let mut files = Vec::new();
+    visit_rs_files(
+        &Path::new(env!("CARGO_MANIFEST_DIR")).join("src"),
+        &mut files,
+    );
+
+    let mut hits = Vec::new();
+    for path in files {
+        let content = std::fs::read_to_string(&path).unwrap_or_else(|err| {
+            panic!("failed to read {}: {err}", path.display())
+        });
+        for symbol in ident_symbols {
+            if contains_ident(&content, symbol) {
+                hits.push(format!("{} contains {symbol}", path.display()));
+            }
+        }
+        for symbol in exact_symbols {
+            if content.contains(symbol) {
+                hits.push(format!("{} contains {symbol}", path.display()));
+            }
+        }
+    }
+
+    assert!(
+        hits.is_empty(),
+        "forbidden production symbols remain:\n{}",
+        hits.join("\n")
+    );
 }
