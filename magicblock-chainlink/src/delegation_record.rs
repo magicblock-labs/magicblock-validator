@@ -355,6 +355,32 @@ mod tests {
         );
         assert_eq!(elsewhere_rpc.single_account_fetches(), 1);
 
+        let unconfined_rpc = ChainRpcClientMockBuilder::new()
+            .slot(10)
+            .account(
+                delegation_record_pubkey,
+                Account {
+                    lamports: 1,
+                    data: serialize_valid_delegation_record(Pubkey::default()),
+                    owner: dlp_api::id(),
+                    executable: false,
+                    rent_epoch: 0,
+                },
+            )
+            .build();
+        assert!(
+            should_forward_dlp_program_update(
+                &unconfined_rpc,
+                &validator_pubkey,
+                delegated_account_pubkey,
+                &delegated_account.owner,
+                delegated_account.data.as_slice(),
+                10,
+            )
+            .await
+        );
+        assert_eq!(unconfined_rpc.single_account_fetches(), 1);
+
         let internal_rpc = ChainRpcClientMockBuilder::new().slot(10).build();
         assert!(
             !should_forward_dlp_program_update(
