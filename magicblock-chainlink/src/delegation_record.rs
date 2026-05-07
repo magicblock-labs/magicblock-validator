@@ -270,7 +270,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn transport_gate_matrix() {
+    async fn should_forward_dlp_program_update_matrix() {
         let delegated_account_pubkey = Pubkey::new_unique();
         let delegation_record_pubkey =
             delegation_record_pda_from_delegated_account(
