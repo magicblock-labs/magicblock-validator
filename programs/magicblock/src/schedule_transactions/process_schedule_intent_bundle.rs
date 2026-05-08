@@ -152,17 +152,17 @@ pub(crate) fn process_schedule_intent_bundle(
             scheduled_intent.get_all_compressed_committed_accounts();
         let compressed_nonces =
             fetch_current_commit_nonces(&compressed_chargable_accounts, true)?;
-        let fee = scheduled_intent.calculate_fee(&regular_nonces)?
-            + scheduled_intent.calculate_fee(&compressed_nonces)?;
+        let mut commit_nonces = regular_nonces;
+        commit_nonces.extend(compressed_nonces);
+        let fee = scheduled_intent.calculate_fee(&commit_nonces)?;
         charge_delegated_payer(&payer_account, &magic_fee_vault, fee)?;
     } else if let Some(commit_accounts) =
         scheduled_intent.get_commit_intent_accounts()
     {
-        check_commit_limits(
-            commit_accounts,
-            scheduled_intent.intent_bundle.is_compressed(),
-            invoke_context,
-        )?;
+        // TODO(dode): Add commit limits for compressed commits
+        // Cost for compressed commits is small (~5000 lamports)
+        // but since compressed accounts have 0 lamports, we never take fees for them
+        check_commit_limits(commit_accounts, false, invoke_context)?;
     }
 
     let action_sent_signature = scheduled_intent.sent_transaction.signatures[0];
