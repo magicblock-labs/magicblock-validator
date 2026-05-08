@@ -6,6 +6,8 @@ use std::{
 
 use parking_lot::Mutex;
 
+type CacheInner<K, V> = (HashMap<K, V>, VecDeque<ExpiringRecord<K>>);
+
 /// A thread-safe, expiring cache with lazy eviction.
 ///
 /// This cache stores key-value pairs for a specified duration (time-to-live).
@@ -14,7 +16,7 @@ use parking_lot::Mutex;
 /// when a new element is inserted via the [`push`] method. There is no background
 /// thread for cleanup.
 pub(crate) struct ExpiringCache<K, V> {
-    inner: Mutex<(HashMap<K, V>, VecDeque<ExpiringRecord<K>>)>,
+    inner: Mutex<CacheInner<K, V>>,
     /// The time-to-live for each entry from its moment of creation.
     ttl: Duration,
 }
