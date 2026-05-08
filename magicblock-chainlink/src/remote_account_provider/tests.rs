@@ -310,16 +310,16 @@ async fn test_release_subscription_reason_keeps_watching_until_last_direct_refco
     } = setup_provider(pubkey, account).await;
 
     provider
-        .acquire_subscription_reason(&pubkey, SubscriptionReason::DirectAccount)
+        .acquire_subscription(&pubkey, SubscriptionReason::DirectAccount)
         .await
         .unwrap();
     provider
-        .acquire_subscription_reason(&pubkey, SubscriptionReason::DirectAccount)
+        .acquire_subscription(&pubkey, SubscriptionReason::DirectAccount)
         .await
         .unwrap();
 
     let unsubscribed = provider
-        .release_subscription_reason(&pubkey, SubscriptionReason::DirectAccount)
+        .release_subscription(&pubkey, SubscriptionReason::DirectAccount)
         .await
         .unwrap();
 
@@ -328,7 +328,7 @@ async fn test_release_subscription_reason_keeps_watching_until_last_direct_refco
     assert!(_pubsub_client.subscriptions_union().contains(&pubkey));
 
     let unsubscribed = provider
-        .release_subscription_reason(&pubkey, SubscriptionReason::DirectAccount)
+        .release_subscription(&pubkey, SubscriptionReason::DirectAccount)
         .await
         .unwrap();
 
@@ -356,12 +356,12 @@ async fn test_release_subscription_reason_unsubscribes_after_final_release() {
     } = setup_provider(pubkey, account).await;
 
     provider
-        .acquire_subscription_reason(&pubkey, SubscriptionReason::DirectAccount)
+        .acquire_subscription(&pubkey, SubscriptionReason::DirectAccount)
         .await
         .unwrap();
 
     let unsubscribed = provider
-        .release_subscription_reason(&pubkey, SubscriptionReason::DirectAccount)
+        .release_subscription(&pubkey, SubscriptionReason::DirectAccount)
         .await
         .unwrap();
 
@@ -389,11 +389,11 @@ async fn test_subscription_reasons_do_not_release_each_other() {
     } = setup_provider(pubkey, account).await;
 
     provider
-        .acquire_subscription_reason(&pubkey, SubscriptionReason::DirectAccount)
+        .acquire_subscription(&pubkey, SubscriptionReason::DirectAccount)
         .await
         .unwrap();
     provider
-        .acquire_subscription_reason(
+        .acquire_subscription(
             &pubkey,
             SubscriptionReason::DelegationRecord,
         )
@@ -401,7 +401,7 @@ async fn test_subscription_reasons_do_not_release_each_other() {
         .unwrap();
 
     let unsubscribed = provider
-        .release_subscription_reason(&pubkey, SubscriptionReason::DirectAccount)
+        .release_subscription(&pubkey, SubscriptionReason::DirectAccount)
         .await
         .unwrap();
 
@@ -410,10 +410,7 @@ async fn test_subscription_reasons_do_not_release_each_other() {
     assert!(_pubsub_client.subscriptions_union().contains(&pubkey));
 
     let unsubscribed = provider
-        .release_subscription_reason(
-            &pubkey,
-            SubscriptionReason::DelegationRecord,
-        )
+        .release_subscription(&pubkey, SubscriptionReason::DelegationRecord)
         .await
         .unwrap();
 
@@ -442,19 +439,17 @@ async fn test_concurrent_reason_changes_do_not_unsubscribe_until_final_release()
     } = setup_provider(pubkey, account).await;
 
     provider
-        .acquire_subscription_reason(&pubkey, SubscriptionReason::DirectAccount)
+        .acquire_subscription(&pubkey, SubscriptionReason::DirectAccount)
         .await
         .unwrap();
 
     let (acquire_result, release_result) = tokio::join!(
-        provider.acquire_subscription_reason(
+        provider.acquire_subscription(
             &pubkey,
             SubscriptionReason::DelegationRecord,
         ),
-        provider.release_subscription_reason(
-            &pubkey,
-            SubscriptionReason::DirectAccount,
-        )
+        provider
+            .release_subscription(&pubkey, SubscriptionReason::DirectAccount,)
     );
     acquire_result.unwrap();
     let unsubscribed = release_result.unwrap();
@@ -464,10 +459,7 @@ async fn test_concurrent_reason_changes_do_not_unsubscribe_until_final_release()
     assert!(_pubsub_client.subscriptions_union().contains(&pubkey));
 
     let unsubscribed = provider
-        .release_subscription_reason(
-            &pubkey,
-            SubscriptionReason::DelegationRecord,
-        )
+        .release_subscription(&pubkey, SubscriptionReason::DelegationRecord)
         .await
         .unwrap();
 

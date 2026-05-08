@@ -2151,7 +2151,7 @@ where
         reason: SubscriptionReason,
     ) -> ChainlinkResult<()> {
         self.remote_account_provider
-            .acquire_subscription_reason(pubkey, reason)
+            .acquire_subscription(pubkey, reason)
             .await
             .map_err(|err| {
                 ChainlinkError::FailedToSubscribeToAccount(*pubkey, err)
@@ -2165,7 +2165,7 @@ where
     ) {
         if let Err(err) = self
             .remote_account_provider
-            .release_subscription_reason(pubkey, reason)
+            .release_subscription(pubkey, reason)
             .await
         {
             warn!(pubkey = %pubkey, ?reason, error = %err, "Failed to release subscription reason");

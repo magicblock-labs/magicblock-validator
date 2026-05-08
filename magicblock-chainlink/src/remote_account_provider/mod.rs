@@ -949,7 +949,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         // attempts complete, even if some fail.
         let subscription_results =
             join_all(pubkeys.iter().map(|pubkey| async {
-                self.acquire_subscription_reason(
+                self.acquire_subscription(
                     pubkey,
                     SubscriptionReason::DirectAccount,
                 )
@@ -976,7 +976,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         if !errors.is_empty() {
             for pubkey in &acquired {
                 if let Err(unsub_err) = self
-                    .release_subscription_reason(
+                    .release_subscription(
                         pubkey,
                         SubscriptionReason::DirectAccount,
                     )
@@ -1074,7 +1074,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         fetching.contains_key(pubkey)
     }
 
-    pub async fn acquire_subscription_reason(
+    pub async fn acquire_subscription(
         &self,
         pubkey: &Pubkey,
         reason: SubscriptionReason,
@@ -1097,7 +1097,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         Ok(())
     }
 
-    pub async fn release_subscription_reason(
+    pub async fn release_subscription(
         &self,
         pubkey: &Pubkey,
         reason: SubscriptionReason,
