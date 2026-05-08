@@ -5,7 +5,7 @@ use std::{
         atomic::{AtomicU64, Ordering},
         Arc, Mutex,
     },
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 use dlp_api::{
@@ -312,13 +312,11 @@ where
     fn claim_or_join_owned_operation(&self, pubkey: Pubkey) -> PendingClaim {
         let generation = self.next_pending_request_generation();
         let waiter_id = self.next_pending_waiter_id();
-        let deadline = Instant::now() + FETCH_CLONE_OPERATION_TIMEOUT;
         claim_or_join_pending(
             self.pending_requests.clone(),
             pubkey,
             generation,
             waiter_id,
-            deadline,
         )
     }
 
