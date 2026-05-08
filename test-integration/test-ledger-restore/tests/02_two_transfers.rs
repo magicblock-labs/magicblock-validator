@@ -29,7 +29,7 @@ fn test_restore_ledger_with_two_airdropped_accounts_same_slot() {
         keypair2,
         keypair3,
     ) = write(&ledger_path, false);
-    validator.kill().unwrap();
+    test_ledger_restore::kill_validator(&mut validator);
 
     let mut validator = read(
         &ledger_path,
@@ -38,7 +38,7 @@ fn test_restore_ledger_with_two_airdropped_accounts_same_slot() {
         Some(&transfer_sig1),
         Some(&transfer_sig2),
     );
-    validator.kill().unwrap();
+    test_ledger_restore::kill_validator(&mut validator);
 }
 
 #[test]
@@ -54,7 +54,7 @@ fn test_restore_ledger_with_two_airdropped_accounts_separate_slot() {
         keypair2,
         keypair3,
     ) = write(&ledger_path, true);
-    validator.kill().unwrap();
+    test_ledger_restore::kill_validator(&mut validator);
 
     let mut validator = read(
         &ledger_path,
@@ -63,7 +63,7 @@ fn test_restore_ledger_with_two_airdropped_accounts_separate_slot() {
         Some(&transfer_sig1),
         Some(&transfer_sig2),
     );
-    validator.kill().unwrap();
+    test_ledger_restore::kill_validator(&mut validator);
 }
 
 fn write(
@@ -193,7 +193,7 @@ fn _diagnose_write() {
     eprintln!("{} -> {}: {:?}", kp1.pubkey(), kp3.pubkey(), transfer_sig2);
     eprintln!("slot: {}", slot);
 
-    validator.kill().unwrap();
+    test_ledger_restore::kill_validator(&mut validator);
 }
 
 // #[test]

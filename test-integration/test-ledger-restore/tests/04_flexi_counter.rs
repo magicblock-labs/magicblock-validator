@@ -36,10 +36,10 @@ fn test_restore_ledger_with_flexi_counter_same_slot() {
     let (_tmpdir, ledger_path) = resolve_tmp_dir(TMP_DIR_LEDGER);
 
     let (mut validator, _, payer1, payer2) = write(&ledger_path, false);
-    validator.kill().unwrap();
+    test_ledger_restore::kill_validator(&mut validator);
 
     let mut validator = read(&ledger_path, &payer1, &payer2, None);
-    validator.kill().unwrap();
+    test_ledger_restore::kill_validator(&mut validator);
 }
 
 #[test]
@@ -49,10 +49,10 @@ fn test_restore_ledger_with_flexi_counter_separate_slot() {
     let (_tmpdir, ledger_path) = resolve_tmp_dir(TMP_DIR_LEDGER);
 
     let (mut validator, _, payer1, payer2) = write(&ledger_path, true);
-    validator.kill().unwrap();
+    test_ledger_restore::kill_validator(&mut validator);
 
     let mut validator = read(&ledger_path, &payer1, &payer2, None);
-    validator.kill().unwrap();
+    test_ledger_restore::kill_validator(&mut validator);
 }
 
 #[test]
@@ -65,11 +65,11 @@ fn test_restore_ledger_with_flexi_counter_authority_override() {
             .validator_authority();
 
     let (mut validator, _, payer1, payer2) = write(&ledger_path, true);
-    validator.kill().unwrap();
+    test_ledger_restore::kill_validator(&mut validator);
 
     let mut validator =
         read(&ledger_path, &payer1, &payer2, Some(original_authority));
-    validator.kill().unwrap();
+    test_ledger_restore::kill_validator(&mut validator);
 }
 
 fn write(

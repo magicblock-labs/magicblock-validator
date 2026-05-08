@@ -11,9 +11,15 @@ on:
     types: [opened, reopened, synchronize, ready_for_review]
 
 jobs:
-  build:
-    runs-on: ubuntu-latest-m
-    name: Build Project
+  # These producer jobs exist purely to produce reusable artifacts so matrix
+  # shards never invoke `cargo build` / `cargo build-sbf`. Keep the two host
+  # Rust builds on extra-large runners because the slowest producer gates the
+  # whole matrix.
+  build_validator:
+    runs-on: extra-large
+    name: Build Validator Artifact
+    env:
+      HOST_CARGO_JOBS: "8"
     steps:
       - name: Checkout this magicblock-validator
         uses: actions/checkout@v5
@@ -22,40 +28,404 @@ jobs:
 
       - uses: ./magicblock-validator/.github/actions/setup-build-env
         with:
-          build_cache_key_name: "magicblock-validator-ci-test-integration-${{ github.ref_name }}-${{ hashFiles('magicblock-validator/Cargo.lock') }}"
+          build_cache_key_name: "magicblock-validator-ci-test-integration-${{ hashFiles('magicblock-validator/Cargo.lock') }}"
+          rust_toolchain_release: "1.94.1"
+          github_access_token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+      # lld typically halves the link step on large rust workspaces.
+      - name: Install lld linker
+        run: sudo apt-get update && sudo apt-get install -y lld
+        shell: bash
+
+      - name: Build validator binary
+        run: |
+          RUSTFLAGS="-C link-arg=-fuse-ld=lld" \
+            cargo build --locked --bin magicblock-validator -j "$HOST_CARGO_JOBS"
+          strip target/debug/magicblock-validator || true
+        shell: bash
+        working-directory: magicblock-validator
+
+      - name: Upload validator binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: magicblock-validator-bin
+          path: magicblock-validator/target/debug/magicblock-validator
+          retention-days: 1
+          if-no-files-found: error
+          compression-level: 0
+
+  build_sbf:
+    runs-on: ubuntu-latest-m
+    name: Build SBF Artifacts
+    env:
+      SOLANA_VERSION: v3.1.5
+    steps:
+      - name: Checkout this magicblock-validator
+        uses: actions/checkout@v5
+        with:
+          path: magicblock-validator
+
+      - uses: ./magicblock-validator/.github/actions/setup-build-env
+        with:
+          build_cache_key_name: "magicblock-validator-ci-test-integration-${{ hashFiles('magicblock-validator/Cargo.lock') }}"
           rust_toolchain_release: "1.94.1"
           github_access_token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: ./magicblock-validator/.github/actions/setup-solana
+        with:
+          solana_version: ${{ env.SOLANA_VERSION }}
 
-      - name: Build project and test programs
-        run: |
-          cargo build --locked
-          make -C test-integration programs
+      # SBF programs only depend on a small set of source dirs; cache them
+      # directly so we skip cargo-build-sbf entirely on cache hits.
+      - name: Cache SBF program artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            magicblock-validator/target/deploy
+            magicblock-validator/test-integration/target/deploy
+          # Include Cargo.lock and shared sources so the cache invalidates on
+          # workspace dependency / shared-crate changes that the program
+          # source dirs alone don't capture. Also include rustc + solana
+          # versions in the key so a toolchain bump invalidates stale .so
+          # artifacts produced by the previous compiler.
+          key: sbf-programs-${{ runner.os }}-${{ runner.arch }}-rust1.94.1-solana${{ env.SOLANA_VERSION }}-${{ hashFiles('magicblock-validator/Cargo.lock', 'magicblock-validator/test-integration/programs/**', 'magicblock-validator/magicblock-committor-program/**', 'magicblock-validator/programs/**', 'magicblock-validator/magicblock-magic-program-api/**', 'magicblock-validator/magicblock-core/**') }}
+
+      - name: Build SBF programs
+        run: make -C test-integration programs
         shell: bash
         working-directory: magicblock-validator
 
-  run_integration_tests:
-    needs: build
-    runs-on: ubuntu-latest-m
+      - name: Upload SBF programs
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbf-programs
+          path: |
+            magicblock-validator/target/deploy/*.so
+            magicblock-validator/test-integration/target/deploy/*.so
+            magicblock-validator/test-integration/schedulecommit/elfs/*.so
+          retention-days: 1
+          if-no-files-found: error
+
+  build_integration_tests:
+    runs-on: extra-large
+    name: Build Integration Test Artifacts
     env:
+      HOST_CARGO_JOBS: "8"
+    steps:
+      - name: Checkout this magicblock-validator
+        uses: actions/checkout@v5
+        with:
+          path: magicblock-validator
+
+      - uses: ./magicblock-validator/.github/actions/setup-build-env
+        with:
+          build_cache_key_name: "magicblock-validator-ci-test-integration-${{ hashFiles('magicblock-validator/Cargo.lock') }}"
+          rust_toolchain_release: "1.94.1"
+          github_access_token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+      # lld typically halves the link step on large rust workspaces.
+      - name: Install lld linker
+        run: sudo apt-get update && sudo apt-get install -y lld
+        shell: bash
+
+      - name: Build integration test binaries
+        run: |
+          set -euxo pipefail
+          mkdir -p _integration_test_bins/test-runner
+          RUSTFLAGS="-C link-arg=-fuse-ld=lld" \
+          CARGO_PROFILE_TEST_DEBUG=0 \
+            cargo test --manifest-path test-integration/Cargo.toml --locked --no-run --message-format=json -j "$HOST_CARGO_JOBS" \
+              -p schedulecommit-test-security \
+              -p schedulecommit-test-scenarios \
+              -p test-chainlink \
+              -p test-cloning \
+              -p test-ledger-restore \
+              -p test-magicblock-api \
+              -p test-config \
+              -p test-table-mania \
+              -p schedulecommit-committor-service \
+              -p test-pubsub \
+              -p test-schedule-intent \
+              -p test-task-scheduler \
+              > _integration_test_bins/no-run.jsonl
+          RUSTFLAGS="-C link-arg=-fuse-ld=lld" \
+          CARGO_PROFILE_DEV_DEBUG=0 \
+            cargo build --manifest-path test-integration/Cargo.toml --locked -p test-runner --bin run-tests -j "$HOST_CARGO_JOBS"
+          cp test-integration/target/debug/run-tests _integration_test_bins/test-runner/run-tests
+          strip _integration_test_bins/test-runner/run-tests || true
+        shell: bash
+        working-directory: magicblock-validator
+
+      - name: Collect integration test binaries
+        run: |
+          set -euxo pipefail
+          rm -rf _integration_test_bins/artifacts
+          mkdir -p _integration_test_bins/artifacts
+
+          copy_test_bin() {
+            local test_file="$1"
+            local artifact="$2"
+            local matches_file
+            local src_path
+            src_path="$(realpath "$test_file")"
+            matches_file="_integration_test_bins/matches.txt"
+            jq -r --arg src_path "$src_path" 'select(.reason == "compiler-artifact" and .executable != null and (.target.kind | index("test")) and .target.src_path == $src_path) | .executable' _integration_test_bins/no-run.jsonl > "$matches_file"
+            match_count="$(awk 'END { print NR }' "$matches_file")"
+            if [ "$match_count" -ne 1 ]; then
+              matches_text="$(tr '\n' ' ' < "$matches_file")"
+              echo "expected one binary for ${test_file}, found ${match_count}: ${matches_text}"
+              exit 1
+            fi
+            test_bin="$(sed -n '1p' "$matches_file")"
+            mkdir -p "_integration_test_bins/artifacts/${artifact}"
+            dest="_integration_test_bins/artifacts/${artifact}/$(basename "$test_bin")"
+            cp "$test_bin" "$dest"
+            strip "$dest" || true
+          }
+
+          copy_package_tests() {
+            local package_dir="$1"
+            local artifact="$2"
+            while IFS= read -r test_file; do
+              copy_test_bin "$test_file" "$artifact"
+            done < <(find "$package_dir/tests" -maxdepth 1 -name '*.rs' | sort)
+          }
+
+          copy_package_tests test-integration/schedulecommit/test-security schedulecommit
+          copy_package_tests test-integration/schedulecommit/test-scenarios schedulecommit
+          copy_package_tests test-integration/test-chainlink chainlink
+          copy_package_tests test-integration/test-cloning cloning
+          copy_package_tests test-integration/test-ledger-restore restore_ledger
+          copy_package_tests test-integration/test-magicblock-api magicblock_api
+          copy_package_tests test-integration/test-config config
+          copy_package_tests test-integration/test-table-mania table_mania
+          copy_test_bin test-integration/test-committor-service/tests/test_ix_commit_local.rs committor-ix
+          copy_test_bin test-integration/test-committor-service/tests/test_delivery_preparator.rs committor-preparators
+          copy_test_bin test-integration/test-committor-service/tests/test_transaction_preparator.rs committor-preparators
+          copy_test_bin test-integration/test-committor-service/tests/test_intent_executor.rs committor-intent-executor
+          copy_package_tests test-integration/test-pubsub pubsub
+          copy_package_tests test-integration/test-schedule-intent schedule_intents
+          copy_package_tests test-integration/test-task-scheduler task-scheduler
+
+          find _integration_test_bins/artifacts -mindepth 2 -type f | wc -l
+          du -sh _integration_test_bins/artifacts/*
+
+          rm -rf _integration_test_bins/artifact-archives
+          mkdir -p _integration_test_bins/artifact-archives
+          for artifact_dir in _integration_test_bins/artifacts/*; do
+            artifact="$(basename "$artifact_dir")"
+            tar -C "$artifact_dir" \
+              --use-compress-program="zstd -T0 -6" \
+              -cf "_integration_test_bins/artifact-archives/${artifact}.tar.zst" \
+              .
+          done
+          du -sh _integration_test_bins/artifact-archives/*
+        shell: bash
+        working-directory: magicblock-validator
+
+      - name: Upload test runner binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-test-runner-bin
+          path: magicblock-validator/_integration_test_bins/test-runner/run-tests
+          retention-days: 1
+          if-no-files-found: error
+
+      - name: Upload integration test binaries - schedulecommit
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-test-bins-schedulecommit
+          path: magicblock-validator/_integration_test_bins/artifact-archives/schedulecommit.tar.zst
+          retention-days: 1
+          if-no-files-found: error
+          compression-level: 0
+
+      - name: Upload integration test binaries - chainlink
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-test-bins-chainlink
+          path: magicblock-validator/_integration_test_bins/artifact-archives/chainlink.tar.zst
+          retention-days: 1
+          if-no-files-found: error
+          compression-level: 0
+
+      - name: Upload integration test binaries - cloning
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-test-bins-cloning
+          path: magicblock-validator/_integration_test_bins/artifact-archives/cloning.tar.zst
+          retention-days: 1
+          if-no-files-found: error
+          compression-level: 0
+
+      - name: Upload integration test binaries - restore_ledger
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-test-bins-restore_ledger
+          path: magicblock-validator/_integration_test_bins/artifact-archives/restore_ledger.tar.zst
+          retention-days: 1
+          if-no-files-found: error
+          compression-level: 0
+
+      - name: Upload integration test binaries - magicblock_api
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-test-bins-magicblock_api
+          path: magicblock-validator/_integration_test_bins/artifact-archives/magicblock_api.tar.zst
+          retention-days: 1
+          if-no-files-found: error
+          compression-level: 0
+
+      - name: Upload integration test binaries - config
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-test-bins-config
+          path: magicblock-validator/_integration_test_bins/artifact-archives/config.tar.zst
+          retention-days: 1
+          if-no-files-found: error
+          compression-level: 0
+
+      - name: Upload integration test binaries - table_mania
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-test-bins-table_mania
+          path: magicblock-validator/_integration_test_bins/artifact-archives/table_mania.tar.zst
+          retention-days: 1
+          if-no-files-found: error
+          compression-level: 0
+
+      - name: Upload integration test binaries - committor-ix
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-test-bins-committor-ix
+          path: magicblock-validator/_integration_test_bins/artifact-archives/committor-ix.tar.zst
+          retention-days: 1
+          if-no-files-found: error
+          compression-level: 0
+
+      - name: Upload integration test binaries - committor-preparators
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-test-bins-committor-preparators
+          path: magicblock-validator/_integration_test_bins/artifact-archives/committor-preparators.tar.zst
+          retention-days: 1
+          if-no-files-found: error
+          compression-level: 0
+
+      - name: Upload integration test binaries - committor-intent-executor
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-test-bins-committor-intent-executor
+          path: magicblock-validator/_integration_test_bins/artifact-archives/committor-intent-executor.tar.zst
+          retention-days: 1
+          if-no-files-found: error
+          compression-level: 0
+
+      - name: Upload integration test binaries - pubsub
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-test-bins-pubsub
+          path: magicblock-validator/_integration_test_bins/artifact-archives/pubsub.tar.zst
+          retention-days: 1
+          if-no-files-found: error
+          compression-level: 0
+
+      - name: Upload integration test binaries - schedule_intents
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-test-bins-schedule_intents
+          path: magicblock-validator/_integration_test_bins/artifact-archives/schedule_intents.tar.zst
+          retention-days: 1
+          if-no-files-found: error
+          compression-level: 0
+
+      - name: Upload integration test binaries - task-scheduler
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-test-bins-task-scheduler
+          path: magicblock-validator/_integration_test_bins/artifact-archives/task-scheduler.tar.zst
+          retention-days: 1
+          if-no-files-found: error
+          compression-level: 0
+
+  run_integration_tests:
+    needs: [build_validator, build_sbf, build_integration_tests]
+    runs-on: ${{ matrix.runner || 'ubuntu-latest-m' }}
+    env:
+      SOLANA_VERSION: v3.1.5
       NEEDS_COMPRESSION_TOOLS: ${{ contains(fromJSON('["schedulecommit","chainlink","table_mania","committor"]'), matrix.batch_tests) }}
     strategy:
       matrix:
-        batch_tests:
-          - "schedulecommit"
-          - "chainlink"
-          - "cloning"
-          - "restore_ledger"
-          - "magicblock_api"
-          - "config"
-          - "table_mania"
-          - "committor"
-          - "pubsub"
-          - "schedule_intents"
-          - "task-scheduler"
-      fail-fast: false
+        include:
+          - batch_tests: "committor_single_large"
+            test_bins_artifact: "committor-ix"
+          - batch_tests: "committor_bundles_heavy_tail"
+            test_bins_artifact: "committor-ix"
+          - batch_tests: "committor_intent_executor_recovery"
+            test_bins_artifact: "committor-intent-executor"
+          - batch_tests: "committor_bundles_undelegate"
+            test_bins_artifact: "committor-ix"
+          - batch_tests: "committor"
+            test_bins_artifact: "committor-ix"
+          - batch_tests: "committor_bundles_heavy"
+            test_bins_artifact: "committor-ix"
+          - batch_tests: "committor_intent_executor_recovery_basic"
+            test_bins_artifact: "committor-intent-executor"
+          - batch_tests: "committor_intent_executor_callbacks"
+            test_bins_artifact: "committor-intent-executor"
+            runner: "ubuntu-latest"
+          - batch_tests: "committor_ix_multi"
+            test_bins_artifact: "committor-ix"
+          - batch_tests: "committor_bundles"
+            test_bins_artifact: "committor-ix"
+            runner: "ubuntu-latest"
+          - batch_tests: "table_mania"
+            test_bins_artifact: "table_mania"
+          - batch_tests: "committor_ix_order"
+            test_bins_artifact: "committor-ix"
+          - batch_tests: "committor_intent_bundles"
+            test_bins_artifact: "committor-ix"
+          - batch_tests: "schedulecommit"
+            test_bins_artifact: "schedulecommit"
+          - batch_tests: "restore_ledger"
+            test_bins_artifact: "restore_ledger"
+          - batch_tests: "chainlink"
+            test_bins_artifact: "chainlink"
+            needs_build_env: true
+          - batch_tests: "cloning"
+            test_bins_artifact: "cloning"
+            needs_build_env: true
+          - batch_tests: "task-scheduler"
+            test_bins_artifact: "task-scheduler"
+            runner: "ubuntu-latest"
+          - batch_tests: "pubsub"
+            test_bins_artifact: "pubsub"
+            runner: "ubuntu-latest"
+          - batch_tests: "magicblock_api"
+            test_bins_artifact: "magicblock_api"
+            runner: "ubuntu-latest"
+          - batch_tests: "schedule_intents"
+            test_bins_artifact: "schedule_intents"
+            runner: "ubuntu-latest"
+          - batch_tests: "config"
+            test_bins_artifact: "config"
+            runner: "ubuntu-latest"
+          - batch_tests: "committor_preparators"
+            test_bins_artifact: "committor-preparators"
+          - batch_tests: "committor_bundles_8"
+            test_bins_artifact: "committor-ix"
+            runner: "ubuntu-latest"
+          - batch_tests: "committor_commitfinalize"
+            test_bins_artifact: "committor-ix"
+          - batch_tests: "committor_intent_executor"
+            test_bins_artifact: "committor-intent-executor"
+      # While we iterate on this branch we want a single shard failure to
+      # cancel the rest of the matrix so we don't burn ~50 min of runner time
+      # on every false start. Flip back to `false` once it's green & stable.
+      fail-fast: true
     name: Integration Tests - ${{ matrix.batch_tests }}
     steps:
       - name: Checkout this magicblock-validator
@@ -64,13 +434,76 @@ jobs:
           path: magicblock-validator
 
       - uses: ./magicblock-validator/.github/actions/setup-build-env
+        if: ${{ matrix.needs_build_env == true }}
         with:
-          build_cache_key_name: "magicblock-validator-ci-test-integration-${{ github.ref_name }}-${{ hashFiles('magicblock-validator/Cargo.lock') }}"
+          build_cache_key_name: "magicblock-validator-ci-test-integration-${{ hashFiles('magicblock-validator/Cargo.lock') }}"
           rust_toolchain_release: "1.94.1"
           github_access_token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: ./magicblock-validator/.github/actions/setup-solana
+        with:
+          solana_version: ${{ env.SOLANA_VERSION }}
+
+      - name: Download prebuilt validator binary
+        uses: actions/download-artifact@v4
+        with:
+          name: magicblock-validator-bin
+          path: magicblock-validator/target/debug
+
+      - name: Download prebuilt test runner binary
+        uses: actions/download-artifact@v4
+        with:
+          name: integration-test-runner-bin
+          path: magicblock-validator/_integration_test_runner
+
+      - name: Download prebuilt SBF programs
+        uses: actions/download-artifact@v4
+        with:
+          name: sbf-programs
+          path: magicblock-validator/_sbf_artifact
+
+      - name: Download prebuilt integration test binaries
+        uses: actions/download-artifact@v4
+        with:
+          name: integration-test-bins-${{ matrix.test_bins_artifact }}
+          path: magicblock-validator/_integration_test_bins
+
+      - name: Extract prebuilt integration test binaries
+        run: |
+          set -euxo pipefail
+          archive="$(find magicblock-validator/_integration_test_bins -type f -name '${{ matrix.test_bins_artifact }}.tar.zst' -print -quit)"
+          test -n "$archive"
+          archive_dir="$(dirname "$archive")"
+          tar -C magicblock-validator/_integration_test_bins \
+            --use-compress-program="zstd -T0 -d" \
+            -xf "$archive"
+          rm "$archive"
+          rmdir "$archive_dir" 2>/dev/null || true
+        shell: bash
+
+      - name: Stage SBF programs into deploy dirs
+        run: |
+          set -euxo pipefail
+          mkdir -p magicblock-validator/target/deploy
+          mkdir -p magicblock-validator/test-integration/target/deploy
+          if [ -d magicblock-validator/_sbf_artifact/target/deploy ]; then
+            cp magicblock-validator/_sbf_artifact/target/deploy/*.so \
+              magicblock-validator/target/deploy/
+          fi
+          if [ -d magicblock-validator/_sbf_artifact/test-integration/target/deploy ]; then
+            cp magicblock-validator/_sbf_artifact/test-integration/target/deploy/*.so \
+              magicblock-validator/test-integration/target/deploy/
+          fi
+          mkdir -p magicblock-validator/test-integration/schedulecommit/elfs
+          if [ -d magicblock-validator/_sbf_artifact/test-integration/schedulecommit/elfs ]; then
+            cp magicblock-validator/_sbf_artifact/test-integration/schedulecommit/elfs/*.so \
+              magicblock-validator/test-integration/schedulecommit/elfs/
+          fi
+          chmod +x magicblock-validator/target/debug/magicblock-validator
+          chmod +x magicblock-validator/_integration_test_runner/run-tests
+          chmod +x magicblock-validator/_integration_test_bins/*
+        shell: bash
 
       - name: Install Photon indexer
         if: env.NEEDS_COMPRESSION_TOOLS == 'true'
@@ -96,8 +529,23 @@ jobs:
           sudo prlimit --pid $$ --nofile=1048576:1048576
           sudo sysctl fs.inotify.max_user_instances=1280
           sudo sysctl fs.inotify.max_user_watches=655360
+          # Force make to reuse the staged .so files instead of rebuilding.
+          touch test-integration/target/deploy/*.so target/deploy/*.so 2>/dev/null || true
           make ci-test-integration
         shell: bash
         working-directory: magicblock-validator
         env:
           RUN_TESTS: ${{ matrix.batch_tests }}
+          # Have the validator helper exec the prebuilt binary directly,
+          # skipping the per-spawn `cargo build` + `cargo run` overhead.
+          MAGICBLOCK_VALIDATOR_BIN: ${{ github.workspace }}/magicblock-validator/target/debug/magicblock-validator
+          # Execute the prebuilt runner instead of compiling it in every shard.
+          INTEGRATION_TEST_RUNNER_BIN: ${{ github.workspace }}/magicblock-validator/_integration_test_runner/run-tests
+          # Run uploaded libtest binaries directly instead of recompiling them
+          # with `cargo test` in every shard.
+          INTEGRATION_TEST_BIN_DIR: ${{ github.workspace }}/magicblock-validator/_integration_test_bins
+          CARGO_PROFILE_DEV_DEBUG: "0"
+          CARGO_PROFILE_TEST_DEBUG: "0"
+          # A few integration tests have validator-timing races; allow up to
+          # 3 retries before failing the shard.
+          RUN_TEST_RETRIES: "3"

@@ -30,11 +30,11 @@ fn test_restore_ledger_with_new_validator_authority() {
 
     // Write a transaction that clones the memo program
     let (mut validator, _) = write(&ledger_path);
-    validator.kill().unwrap();
+    test_ledger_restore::kill_validator(&mut validator);
 
     // Read the ledger and verify that the memo program is cloned
     let mut validator = read(&ledger_path);
-    validator.kill().unwrap();
+    test_ledger_restore::kill_validator(&mut validator);
 }
 
 fn write(ledger_path: &Path) -> (Child, u64) {

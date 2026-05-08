@@ -29,12 +29,12 @@ fn test_restore_ledger_with_two_airdrops_with_account_flush_in_between() {
     let (_tmpdir, ledger_path) = resolve_tmp_dir(TMP_DIR_LEDGER);
 
     let (mut validator, slot, keypair) = write(&ledger_path);
-    validator.kill().unwrap();
+    test_ledger_restore::kill_validator(&mut validator);
 
     assert!(slot > SNAPSHOT_FREQUENCY);
 
     let mut validator = read(&ledger_path, &keypair.pubkey());
-    validator.kill().unwrap();
+    test_ledger_restore::kill_validator(&mut validator);
 }
 
 fn write(ledger_path: &Path) -> (Child, u64, Keypair) {

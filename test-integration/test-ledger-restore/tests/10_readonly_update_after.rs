@@ -130,7 +130,7 @@ fn test_restore_ledger_using_readonly() {
     let payer_readonly = payer_keypair();
 
     let (mut validator, _) = write(&ledger_path, &payer_main, &payer_readonly);
-    validator.kill().unwrap();
+    test_ledger_restore::kill_validator(&mut validator);
 
     // While the validator is down we update the readonly counter on main chain
     add_to_readonly!(
@@ -145,7 +145,7 @@ fn test_restore_ledger_using_readonly() {
     );
 
     let mut validator = read(&ledger_path, &payer_main, &payer_readonly);
-    validator.kill().unwrap();
+    test_ledger_restore::kill_validator(&mut validator);
 }
 
 fn write(
