@@ -129,6 +129,11 @@ impl SubscriptionOwnership {
         self.reasons.is_empty()
     }
 
+    fn release_all(&mut self, reason: SubscriptionReason) -> bool {
+        self.reasons.remove(&reason);
+        self.reasons.is_empty()
+    }
+
     fn is_empty(&self) -> bool {
         self.reasons.is_empty()
     }
@@ -1128,6 +1133,57 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             let mut ownership = self.subscription_ownership.lock().await;
             let is_empty = match ownership.get_mut(pubkey) {
                 Some(existing) => existing.release(reason),
+                None => return Ok(false),
+            };
+            if !is_empty {
+                return Ok(false);
+            }
+            ownership.remove(pubkey);
+            true
+        };
+
+        if !should_unsubscribe {
+            return Ok(false);
+        }
+
+        let success = subscription_reconciler::unsubscribe_and_notify_removal(
+            *pubkey,
+            &self.pubsub_client,
+            &self.removed_account_tx,
+        )
+        .await;
+
+        if success {
+            self.lrucache_subscribed_accounts.remove(pubkey);
+        } else {
+            let mut ownership = self.subscription_ownership.lock().await;
+            if ownership
+                .get(pubkey)
+                .is_none_or(SubscriptionOwnership::is_empty)
+            {
+                ownership.entry(*pubkey).or_default().acquire(reason);
+            }
+        }
+
+        Ok(success)
+    }
+
+    pub async fn release_subscription_reason_all(
+        &self,
+        pubkey: &Pubkey,
+        reason: SubscriptionReason,
+    ) -> RemoteAccountProviderResult<bool> {
+        let subscription_key_lock = self.subscription_key_lock(pubkey).await;
+        let _subscription_guard = subscription_key_lock.lock().await;
+
+        if !self.lrucache_subscribed_accounts.can_evict(pubkey) {
+            return Ok(false);
+        }
+
+        let should_unsubscribe = {
+            let mut ownership = self.subscription_ownership.lock().await;
+            let is_empty = match ownership.get_mut(pubkey) {
+                Some(existing) => existing.release_all(reason),
                 None => return Ok(false),
             };
             if !is_empty {

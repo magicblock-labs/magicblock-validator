@@ -338,6 +338,62 @@ async fn test_release_subscription_reason_keeps_watching_until_last_direct_refco
 }
 
 #[tokio::test]
+async fn test_release_subscription_reason_all_clears_duplicate_reason_counts() {
+    let pubkey = solana_pubkey::Pubkey::new_unique();
+    let account = Account {
+        lamports: 1_000_000,
+        data: vec![],
+        owner: solana_pubkey::Pubkey::new_unique(),
+        executable: false,
+        rent_epoch: 0,
+    };
+
+    let ProviderTestCtx {
+        provider,
+        _pubsub_client,
+        _forward_rx,
+        ..
+    } = setup_provider(pubkey, account).await;
+
+    provider
+        .acquire_subscription(&pubkey, SubscriptionReason::DirectAccount)
+        .await
+        .unwrap();
+    provider
+        .acquire_subscription(&pubkey, SubscriptionReason::DirectAccount)
+        .await
+        .unwrap();
+    provider
+        .acquire_subscription(&pubkey, SubscriptionReason::UndelegationTracking)
+        .await
+        .unwrap();
+
+    assert!(provider.is_watching(&pubkey));
+
+    let unsubscribed = provider
+        .release_subscription_reason_all(
+            &pubkey,
+            SubscriptionReason::DirectAccount,
+        )
+        .await
+        .unwrap();
+
+    assert!(!unsubscribed);
+    assert!(provider.is_watching(&pubkey));
+
+    let unsubscribed = provider
+        .release_subscription_reason_all(
+            &pubkey,
+            SubscriptionReason::UndelegationTracking,
+        )
+        .await
+        .unwrap();
+
+    assert!(unsubscribed);
+    assert!(!provider.is_watching(&pubkey));
+}
+
+#[tokio::test]
 async fn test_release_subscription_reason_unsubscribes_after_final_release() {
     let pubkey = solana_pubkey::Pubkey::new_unique();
     let account = Account {
