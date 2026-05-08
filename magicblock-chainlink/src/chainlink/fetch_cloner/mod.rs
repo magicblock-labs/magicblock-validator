@@ -246,6 +246,18 @@ where
             .read(pubkey, |_, state| state.waiters.len())
     }
 
+    /// Cancels the in-flight fetch+clone owner for `pubkey`, if one exists.
+    pub fn cancel_pending(&self, pubkey: &Pubkey) {
+        self.pending_requests
+            .read(pubkey, |_, pending| pending.cancel.notify_one());
+    }
+
+    /// Cancels all in-flight fetch+clone owners.
+    pub fn cancel_all_pending(&self) {
+        self.pending_requests
+            .scan(|_pubkey, pending| pending.cancel.notify_one());
+    }
+
     /// Check if a program is allowed to be cloned.
     /// Returns true if:
     /// - No allowed_programs restriction is set (None), OR
