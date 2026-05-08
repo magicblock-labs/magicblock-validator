@@ -47,13 +47,13 @@ async fn wait_for_registered_waiters(
 
 /// Integration test for waiter_reconciliation_check() race condition recovery.
 ///
-/// Tests the stuck pubkey scenario where:
-/// 1. The account is empty in the bank at the start
-/// 2. Multiple concurrent tasks try to fetch the same delegated account
-/// 3. The owner clones a delegated terminal state into the bank
-/// 4. Waiters accept that terminal state after the owner completes
+/// Covers:
+/// - concurrent delegated fetches
+/// - deduped owner / pending-operation behavior
+/// - the regression race where the owner clones the delegated terminal state
+///   while waiters are already queued
 #[tokio::test]
-async fn test_waiter_reconciliation_detects_valid_delegated_state() {
+async fn test_owned_pending_operation_dedups_concurrent_delegated_fetches() {
     let TestContext {
         chainlink,
         rpc_client,
