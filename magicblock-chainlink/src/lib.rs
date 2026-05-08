@@ -3,6 +3,7 @@
 pub mod accounts_bank;
 pub mod chainlink;
 pub mod cloner;
+pub mod delegation_record;
 pub mod remote_account_provider;
 pub mod submux;
 

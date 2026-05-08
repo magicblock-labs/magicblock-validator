@@ -146,6 +146,7 @@ impl<
             endpoints,
             commitment,
             tx,
+            validator_pubkey,
             &config.remote_account_provider,
         )
         .await?;
