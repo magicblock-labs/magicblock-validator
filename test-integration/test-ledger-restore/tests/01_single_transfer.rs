@@ -28,7 +28,7 @@ fn test_restore_ledger_with_transferred_account() {
 
     let (mut validator, transfer_sig, _slot, _keypair1, keypair2) =
         write_ledger(&ledger_path);
-    validator.kill().unwrap();
+    test_ledger_restore::kill_validator(&mut validator);
     debug!("Transfer sig: {transfer_sig}");
 
     let mut validator = read_ledger(
@@ -37,7 +37,7 @@ fn test_restore_ledger_with_transferred_account() {
         Some(&transfer_sig),
         None,
     );
-    validator.kill().unwrap();
+    test_ledger_restore::kill_validator(&mut validator);
 }
 
 #[test]
@@ -49,7 +49,7 @@ fn test_restore_ledger_with_transferred_account_authority_override() {
 
     let (mut validator, transfer_sig, _slot, _keypair1, keypair2) =
         write_ledger(&ledger_path);
-    validator.kill().unwrap();
+    test_ledger_restore::kill_validator(&mut validator);
 
     let mut validator = read_ledger(
         &ledger_path,
@@ -57,7 +57,7 @@ fn test_restore_ledger_with_transferred_account_authority_override() {
         Some(&transfer_sig),
         Some(original_authority),
     );
-    validator.kill().unwrap();
+    test_ledger_restore::kill_validator(&mut validator);
 }
 
 fn write_ledger(
@@ -99,7 +99,6 @@ fn write_ledger(
 
     let slot = wait_for_ledger_persist(&ctx, &mut validator);
 
-    validator.kill().unwrap();
     (validator, sig, slot, keypair1, keypair2)
 }
 

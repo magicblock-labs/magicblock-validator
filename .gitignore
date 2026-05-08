@@ -29,6 +29,8 @@ magicblock-test-storage/
 .github/packages/npm-package/lib
 .github/packages/npm-package/node_modules
 .github/packages/npm-package/package-lock.json
+_integration_test_bins/
 
 # AI related
 **/CLAUDE.md
+.claude/
