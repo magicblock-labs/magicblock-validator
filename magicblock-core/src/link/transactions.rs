@@ -90,6 +90,7 @@ pub struct ProcessableTransaction {
 /// Block boundaries are part of the replay stream. Keeping them in the same FIFO
 /// channel as transactions prevents a block from overtaking transactions that
 /// were replicated before it.
+#[allow(clippy::large_enum_variant)]
 pub enum SchedulerCommand {
     /// Schedule or replay one transaction.
     Transaction(ProcessableTransaction),

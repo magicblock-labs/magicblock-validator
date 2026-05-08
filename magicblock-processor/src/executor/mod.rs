@@ -50,6 +50,7 @@ pub(crate) struct IndexedTransaction {
     pub(crate) txn: ProcessableTransaction,
 }
 
+#[allow(clippy::large_enum_variant)]
 pub(crate) enum ExecutorCommand {
     Transaction(IndexedTransaction),
     Block {
