@@ -393,10 +393,7 @@ async fn test_subscription_reasons_do_not_release_each_other() {
         .await
         .unwrap();
     provider
-        .acquire_subscription(
-            &pubkey,
-            SubscriptionReason::DelegationRecord,
-        )
+        .acquire_subscription(&pubkey, SubscriptionReason::DelegationRecord)
         .await
         .unwrap();
 
