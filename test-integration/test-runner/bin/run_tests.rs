@@ -571,7 +571,7 @@ fn run_table_mania_and_committor_tests(
                     }
                     Err(err) => {
                         eprintln!("Failed to run {}: {:?}", label, err);
-                        cleanup_devnet_only(&mut devnet_validator);
+                        cleanup_light_validator(&mut light_validator);
                         return Err(err.into());
                     }
                 }
