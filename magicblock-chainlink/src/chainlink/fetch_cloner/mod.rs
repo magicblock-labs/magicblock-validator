@@ -940,9 +940,14 @@ where
     }
 
     async fn unsubscribe_from_delegated_account(&self, pubkey: Pubkey) {
-        self.release_subscription_reason(
+        self.release_subscription_reason_all(
             &pubkey,
             SubscriptionReason::UndelegationTracking,
+        )
+        .await;
+        self.release_subscription_reason_all(
+            &pubkey,
+            SubscriptionReason::DirectAccount,
         )
         .await;
     }
@@ -2156,17 +2161,17 @@ where
             })
     }
 
-    pub(crate) async fn release_subscription_reason(
+    pub(crate) async fn release_subscription_reason_all(
         &self,
         pubkey: &Pubkey,
         reason: SubscriptionReason,
     ) {
         if let Err(err) = self
             .remote_account_provider
-            .release_subscription(pubkey, reason)
+            .release_subscription_reason_all(pubkey, reason)
             .await
         {
-            warn!(pubkey = %pubkey, ?reason, error = %err, "Failed to release subscription reason");
+            warn!(pubkey = %pubkey, ?reason, error = %err, "Failed to release all subscription reason ownership");
         }
     }
 
