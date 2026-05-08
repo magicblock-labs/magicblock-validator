@@ -4032,6 +4032,76 @@ async fn test_owned_operation_waiters_share_missing_delegation_record_metadata()
 }
 
 #[tokio::test]
+async fn test_pending_deadline_is_not_extended_by_late_joiners() {
+    let pending = Arc::new(scc::HashMap::<Pubkey, Pending>::new());
+    let pubkey = random_pubkey();
+    let owner_budget = Duration::from_millis(200);
+    let joiner_budget = Duration::from_secs(10);
+
+    let owner_handles = match claim_or_join_pending(
+        pending.clone(),
+        pubkey,
+        1,
+        1,
+        owner_budget,
+    ) {
+        PendingClaim::Created(handles) => handles,
+        PendingClaim::Joined(_) => panic!("expected owner to create pending"),
+    };
+
+    tokio::time::sleep(Duration::from_millis(20)).await;
+
+    let joiner_handles = match claim_or_join_pending(
+        pending.clone(),
+        pubkey,
+        2,
+        2,
+        joiner_budget,
+    ) {
+        PendingClaim::Joined(handles) => handles,
+        PendingClaim::Created(_) => {
+            panic!("expected late joiner to join pending")
+        }
+    };
+
+    assert_eq!(owner_handles.deadline, joiner_handles.deadline);
+    assert!(Arc::ptr_eq(&owner_handles.cancel, &joiner_handles.cancel));
+    assert_eq!(
+        joiner_handles.waiter.generation(),
+        owner_handles.waiter.generation()
+    );
+
+    let generation = owner_handles.waiter.generation();
+    let count = finish_pending(
+        &pending,
+        pubkey,
+        generation,
+        PendingTerminal::Failed(PendingFailure::TimedOut),
+    );
+    assert_eq!(count, 2);
+
+    let owner_terminal = owner_handles
+        .waiter
+        .wait()
+        .await
+        .expect("owner waiter should receive terminal result");
+    let joiner_terminal = joiner_handles
+        .waiter
+        .wait()
+        .await
+        .expect("joiner waiter should receive terminal result");
+
+    assert!(matches!(
+        owner_terminal,
+        PendingTerminal::Failed(PendingFailure::TimedOut)
+    ));
+    assert!(matches!(
+        joiner_terminal,
+        PendingTerminal::Failed(PendingFailure::TimedOut)
+    ));
+}
+
+#[tokio::test]
 async fn test_owned_operation_waiter_cancellation_is_local() {
     init_logger();
     let validator_keypair = Keypair::new();
