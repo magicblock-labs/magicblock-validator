@@ -21,7 +21,7 @@ use tokio::sync::{
     oneshot, OwnedSemaphorePermit, Semaphore,
 };
 
-use super::blocks::BlockHash;
+use super::{blocks::BlockHash, replication};
 use crate::{Slot, TransactionIndex};
 
 /// The receiver end of the multi-producer, multi-consumer
@@ -31,10 +31,10 @@ pub type TransactionStatusRx = MpmcReceiver<TransactionStatus>;
 /// channel for communicating final transaction statuses.
 pub type TransactionStatusTx = MpmcSender<TransactionStatus>;
 
-/// The receiver end of the channel used to send new transactions to the scheduler for processing.
-pub type TransactionToProcessRx = Receiver<ProcessableTransaction>;
-/// The sender end of the channel used to send new transactions to the scheduler for processing.
-type TransactionToProcessTx = Sender<ProcessableTransaction>;
+/// The receiver end of the ordered command channel used to drive the scheduler.
+pub type TransactionToProcessRx = Receiver<SchedulerCommand>;
+/// The sender end of the ordered command channel used to drive the scheduler.
+type TransactionToProcessTx = Sender<SchedulerCommand>;
 
 /// The receiver end of the channel used to send scheduled tasks (cranking)
 pub type ScheduledTasksRx = UnboundedReceiver<TaskRequest>;
@@ -61,6 +61,8 @@ pub type TxnSimulationResultTx = oneshot::Sender<TransactionSimulationResult>;
 pub type TxnExecutionResultTx = Option<oneshot::Sender<TransactionResult<()>>>;
 /// The sender half of a one-shot channel used to return the result of a transaction replay.
 pub type TxnReplayResultTx = oneshot::Sender<TransactionResult<()>>;
+/// Result returned by scheduler commands that are not transaction executions.
+pub type SchedulerCommandResult = Result<(), String>;
 
 /// Contains the final, committed status of an executed
 /// transaction, including its result and metadata.
@@ -81,6 +83,22 @@ pub struct ProcessableTransaction {
     /// Pre-encoded bincode bytes for the transaction.
     /// Used by the replicator to avoid redundant serialization.
     pub encoded: Option<Bytes>,
+}
+
+/// Ordered scheduler command.
+///
+/// Block boundaries are part of the replay stream. Keeping them in the same FIFO
+/// channel as transactions prevents a block from overtaking transactions that
+/// were replicated before it.
+pub enum SchedulerCommand {
+    /// Schedule or replay one transaction.
+    Transaction(ProcessableTransaction),
+    /// Finalize a replicated block after all preceding replay transactions have
+    /// been scheduled and applied.
+    Block {
+        block: replication::Block,
+        ack: oneshot::Sender<SchedulerCommandResult>,
+    },
 }
 
 /// Specifies the position and persistence behavior for replaying a transaction.
@@ -256,7 +274,7 @@ impl TransactionSchedulerHandle {
             mode,
             encoded,
         };
-        let r = self.tx.send(txn).await;
+        let r = self.tx.send(SchedulerCommand::Transaction(txn)).await;
         r.map_err(|_| TransactionError::ClusterMaintenance)
     }
 
@@ -304,9 +322,28 @@ impl TransactionSchedulerHandle {
             encoded,
         };
         self.tx
-            .send(txn)
+            .send(SchedulerCommand::Transaction(txn))
             .await
             .map_err(|_| TransactionError::ClusterMaintenance)
+    }
+
+    /// Applies a replicated block boundary through the scheduler.
+    ///
+    /// The command is ordered with replay transactions in the same queue. The
+    /// returned future completes after the scheduler has applied the block and
+    /// every executor has acknowledged the resulting slot transition.
+    pub async fn replay_block(
+        &self,
+        block: replication::Block,
+    ) -> SchedulerCommandResult {
+        let (ack, rx) = oneshot::channel();
+        self.tx
+            .send(SchedulerCommand::Block { block, ack })
+            .await
+            .map_err(|_| "scheduler command channel closed".to_string())?;
+        rx.await.map_err(|_| {
+            "scheduler dropped block acknowledgement".to_string()
+        })?
     }
 
     /// A private helper that handles the common logic of sanitizing, sending a
@@ -325,7 +362,7 @@ impl TransactionSchedulerHandle {
             encoded,
         };
         self.tx
-            .send(txn)
+            .send(SchedulerCommand::Transaction(txn))
             .await
             .map_err(|_| TransactionError::ClusterMaintenance)?;
         rx.await.map_err(|_| TransactionError::ClusterMaintenance)

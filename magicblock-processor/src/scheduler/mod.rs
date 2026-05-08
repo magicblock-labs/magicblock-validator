@@ -58,8 +58,8 @@ use magicblock_core::{
     link::{
         replication::{self, Message, SuperBlock},
         transactions::{
-            ProcessableTransaction, SchedulerMode, TransactionProcessingMode,
-            TransactionToProcessRx,
+            ProcessableTransaction, SchedulerCommand, SchedulerCommandResult,
+            SchedulerMode, TransactionProcessingMode, TransactionToProcessRx,
         },
     },
     Slot,
@@ -75,7 +75,7 @@ use tokio::{
     runtime::Builder,
     sync::{
         mpsc::{channel, Receiver, Sender},
-        OwnedSemaphorePermit, Semaphore,
+        oneshot, OwnedSemaphorePermit, Semaphore,
     },
     time::{interval, Interval},
 };
@@ -83,7 +83,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::{error, info, instrument, warn};
 
 use crate::executor::{
-    IndexedTransaction, SimpleForkGraph, TransactionExecutor,
+    ExecutorCommand, IndexedTransaction, SimpleForkGraph, TransactionExecutor,
 };
 
 // Capacity of 1 ensures executor processes one transaction at a time
@@ -95,12 +95,12 @@ const EXECUTOR_QUEUE_CAPACITY: usize = 1;
 pub struct TransactionScheduler {
     /// Manages executor pool, account locking, and coordination mode
     coordinator: ExecutionCoordinator,
-    /// Incoming transaction queue from global processor
+    /// Ordered command queue from global processor
     transactions_rx: TransactionToProcessRx,
     /// Executor readiness notifications (workers signal when idle)
     ready_rx: Receiver<ExecutorId>,
     /// Sender channels to each executor worker
-    executors: Vec<Sender<IndexedTransaction>>,
+    executors: Vec<Sender<ExecutorCommand>>,
     /// Shared BPF program cache
     program_cache: Arc<RwLock<ProgramCache<SimpleForkGraph>>>,
     /// Accounts database (for sysvar updates on slot transition)
@@ -214,11 +214,36 @@ impl TransactionScheduler {
         // Holds the scheduling permit while transactions are being processed.
         // Released when idle so external callers can acquire exclusive access.
         let mut scheduling_permit = None;
+        let mut pending_command = None;
         loop {
+            if let Some(command) = pending_command.take() {
+                match command {
+                    SchedulerCommand::Transaction(txn) => {
+                        if self.coordinator.is_ready() {
+                            self.handle_new_transaction(
+                                txn,
+                                &mut scheduling_permit,
+                            )
+                            .await;
+                            continue;
+                        }
+                        pending_command =
+                            Some(SchedulerCommand::Transaction(txn));
+                    }
+                    SchedulerCommand::Block { block, ack } => {
+                        if self.coordinator.is_idle() {
+                            self.handle_replayed_block(block, ack).await;
+                            continue;
+                        }
+                        pending_command =
+                            Some(SchedulerCommand::Block { block, ack });
+                    }
+                }
+            }
             tokio::select! {
                 biased;
                 Ok(latest) = block_produced.recv() => {
-                    if !self.coordinator.is_primary() {
+                    if !self.coordinator.is_primary() && latest.slot >= self.slot {
                         self.transition_to_new_slot(Some(latest)).await;
                     }
                 }
@@ -245,8 +270,8 @@ impl TransactionScheduler {
                         }
                     }
                 }
-                Some(txn) = self.transactions_rx.recv(), if self.coordinator.is_ready() => {
-                    self.handle_new_transaction(txn, &mut scheduling_permit).await;
+                Some(command) = self.transactions_rx.recv(), if pending_command.is_none() && self.coordinator.is_ready() => {
+                    pending_command = Some(command);
                 }
                 _ = self.shutdown.cancelled() => break,
                 else => break,
@@ -297,6 +322,69 @@ impl TransactionScheduler {
     async fn handle_ready_executor(&mut self, executor: ExecutorId) {
         self.coordinator.unlock_accounts(executor);
         self.reschedule_blocked_transactions(executor).await;
+    }
+
+    async fn handle_replayed_block(
+        &mut self,
+        block: replication::Block,
+        ack: oneshot::Sender<SchedulerCommandResult>,
+    ) {
+        let result = self.apply_replayed_block(block).await;
+        let _ = ack.send(result);
+    }
+
+    async fn apply_replayed_block(
+        &mut self,
+        block: replication::Block,
+    ) -> SchedulerCommandResult {
+        if self.coordinator.is_primary() {
+            return Err(
+                "replicated block received while in primary mode".into()
+            );
+        }
+
+        let _permit = self
+            .pause_permit
+            .clone()
+            .acquire_owned()
+            .await
+            .map_err(|_| "scheduler semaphore closed".to_string())?;
+
+        let block =
+            LatestBlockInner::new(block.slot, block.hash, block.timestamp);
+        self.verify_block_as_replica(&block);
+        self.accountsdb.set_slot(block.slot);
+        self.ledger
+            .write_block(block.clone())
+            .map_err(|error| error.to_string())?;
+        self.update_sysvars(&block);
+        self.notify_executors_of_block(block).await
+    }
+
+    async fn notify_executors_of_block(
+        &mut self,
+        block: LatestBlockInner,
+    ) -> SchedulerCommandResult {
+        let mut acks = Vec::with_capacity(self.executors.len());
+        for (executor, tx) in self.executors.iter().enumerate() {
+            let (ack, rx) = oneshot::channel();
+            tx.send(ExecutorCommand::Block {
+                block: block.clone(),
+                ack,
+            })
+            .await
+            .map_err(|error| {
+                format!("executor {executor} block command failed: {error}")
+            })?;
+            acks.push((executor, rx));
+        }
+
+        for (executor, ack) in acks {
+            ack.await.map_err(|_| {
+                format!("executor {executor} dropped block acknowledgement")
+            })?;
+        }
+        Ok(())
     }
 
     async fn handle_new_transaction(
@@ -390,9 +478,12 @@ impl TransactionScheduler {
             });
         let txn = IndexedTransaction { slot, index, txn };
 
-        let sent = self.executors[executor as usize].try_send(txn).inspect_err(
-            |error| error!(executor, %error, "Executor channel send failed"),
-        ).is_ok();
+        let sent = self.executors[executor as usize]
+            .try_send(ExecutorCommand::Transaction(txn))
+            .inspect_err(
+                |error| error!(executor, %error, "Executor channel send failed"),
+            )
+            .is_ok();
         if let Some(msg) = msg.filter(|_| sent) {
             self.send_replication(msg).await;
         }

@@ -30,8 +30,9 @@ use solana_transaction::sanitized::SanitizedTransaction;
 use tokio::{
     runtime::Builder,
     sync::{
+        broadcast,
         mpsc::{Receiver, Sender},
-        Semaphore,
+        oneshot, Semaphore,
     },
 };
 use tracing::{info, instrument, warn};
@@ -47,6 +48,14 @@ pub(crate) struct IndexedTransaction {
     pub(crate) slot: Slot,
     pub(crate) index: u32,
     pub(crate) txn: ProcessableTransaction,
+}
+
+pub(crate) enum ExecutorCommand {
+    Transaction(IndexedTransaction),
+    Block {
+        block: LatestBlockInner,
+        ack: oneshot::Sender<()>,
+    },
 }
 
 impl Deref for IndexedTransaction {
@@ -74,7 +83,7 @@ pub(super) struct TransactionExecutor {
     feature_set: FeatureSet,
 
     // Channels
-    rx: Receiver<IndexedTransaction>,
+    rx: Receiver<ExecutorCommand>,
     transaction_tx: TransactionStatusTx,
     accounts_tx: AccountUpdateTx,
     tasks_tx: ScheduledTasksTx,
@@ -85,7 +94,7 @@ impl TransactionExecutor {
     pub(super) fn new(
         id: ExecutorId,
         state: &TransactionSchedulerState,
-        rx: Receiver<IndexedTransaction>,
+        rx: Receiver<ExecutorCommand>,
         ready_tx: Sender<ExecutorId>,
         execution_permits: Arc<Semaphore>,
         programs_cache: Arc<RwLock<ProgramCache<SimpleForkGraph>>>,
@@ -168,27 +177,41 @@ impl TransactionExecutor {
         loop {
             tokio::select! {
                 biased;
-                txn = self.rx.recv() => {
-                    let Some(transaction) = txn else { break };
-                    if transaction.slot != self.processor.slot {
-                        self.transition_to_slot(transaction.slot);
+                result = block_updated.recv() => {
+                    match result {
+                        Ok(latest) => self.register_new_block(latest),
+                        Err(broadcast::error::RecvError::Lagged(_)) => {
+                            self.register_new_block(self.block.load().as_ref().clone());
+                        }
+                        Err(broadcast::error::RecvError::Closed) => break,
                     }
-                    let _permit = self.execution_permits.acquire().await;
-                    match transaction.txn.mode {
-                        TransactionProcessingMode::Execution(_) => {
-                            self.execute(transaction, None);
-                        }
-                        TransactionProcessingMode::Simulation(tx) => {
-                            self.simulate([transaction.txn.transaction], tx);
-                        }
-                        TransactionProcessingMode::Replay(ctx) => {
-                            self.execute(transaction, Some(ctx.persist));
-                        }
-                    }
-                    let _ = self.ready_tx.try_send(self.id);
                 }
-                Ok(latest) = block_updated.recv() => {
-                    self.register_new_block(latest);
+                command = self.rx.recv() => {
+                    let Some(command) = command else { break };
+                    match command {
+                        ExecutorCommand::Transaction(transaction) => {
+                            if transaction.slot != self.processor.slot {
+                                self.transition_to_slot(transaction.slot);
+                            }
+                            let _permit = self.execution_permits.acquire().await;
+                            match transaction.txn.mode {
+                                TransactionProcessingMode::Execution(_) => {
+                                    self.execute(transaction, None);
+                                }
+                                TransactionProcessingMode::Simulation(tx) => {
+                                    self.simulate([transaction.txn.transaction], tx);
+                                }
+                                TransactionProcessingMode::Replay(ctx) => {
+                                    self.execute(transaction, Some(ctx.persist));
+                                }
+                            }
+                            let _ = self.ready_tx.try_send(self.id);
+                        }
+                        ExecutorCommand::Block { block, ack } => {
+                            self.apply_block(block);
+                            let _ = ack.send(());
+                        }
+                    }
                 }
                 else => break,
             }
@@ -201,6 +224,14 @@ impl TransactionExecutor {
             self.block_history.pop_first();
         }
         self.block_history.insert(block.slot, block);
+    }
+
+    fn apply_block(&mut self, block: LatestBlockInner) {
+        let slot = block.clock.slot;
+        self.register_new_block(block.clone());
+        self.environment.blockhash = block.blockhash;
+        self.processor.slot = slot;
+        self.set_sysvars(&block);
     }
 
     fn transition_to_slot(&mut self, slot: Slot) {

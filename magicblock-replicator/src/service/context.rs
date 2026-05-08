@@ -12,7 +12,7 @@ use magicblock_core::{
     },
     Slot, TransactionIndex,
 };
-use magicblock_ledger::{LatestBlockInner, Ledger};
+use magicblock_ledger::Ledger;
 use tokio::{
     fs::File,
     sync::mpsc::{Receiver, Sender},
@@ -100,14 +100,12 @@ impl ReplicationContext {
         self.index = index;
     }
 
-    /// Writes block to ledger.
+    /// Applies a replicated block boundary through the scheduler.
     pub async fn write_block(&self, block: &Block) -> Result<()> {
-        // wait for the scheduler to accept all of the previous block transactions
-        let _guard = self.scheduler.wait_for_idle().await;
-        let block =
-            LatestBlockInner::new(block.slot, block.hash, block.timestamp);
-        self.ledger.write_block(block)?;
-        Ok(())
+        self.scheduler
+            .replay_block(block.clone())
+            .await
+            .map_err(Error::Internal)
     }
 
     /// Verifies superblock checksum.
