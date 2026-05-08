@@ -203,26 +203,13 @@ where
                 let optimized_tasks =
                     self.state.commit_strategy.optimized_tasks.as_slice();
                 let task_index = err.task_index();
-                if let Some(task) = task_index
+                if let Some(delegated_account) = task_index
                     .and_then(|index| optimized_tasks.get(index as usize))
-                {
-                    let delegated_account = match task {
-                        BaseTaskImpl::Commit(task) => {
-                            task.committed_account.pubkey
-                        }
-                        BaseTaskImpl::CommitFinalize(task) => {
-                            task.committed_account.pubkey
-                        }
-                        _ => {
-                            error!(
-                                task_index = ?task_index,
-                                optimized_tasks_len = optimized_tasks.len(),
-                                error = ?err,
-                                "RPC returned unexpected task index"
-                            );
-                            return Ok(ControlFlow::Break(()));
-                        }
-                    };
+                    .and_then(|task| match task {
+                        BaseTaskImpl::Commit(task) => Some(task.committed_account.pubkey),
+                        BaseTaskImpl::CommitFinalize(task) => Some(task.committed_account.pubkey),
+                        _ => None,
+                    }) {
                     self.handle_unfinalized_account_error(
                         signature,
                         delegated_account,

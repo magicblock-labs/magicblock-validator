@@ -128,7 +128,8 @@ impl TaskStrategist {
     ) -> TaskStrategistResult<StrategyExecutionMode> {
         const MAX_UNITED_TASKS_LEN: usize = 22;
 
-        if commit_tasks.is_empty() || finalize_tasks.is_empty() {
+        // CommitFinalize mode already performs finalization in the commit stage.
+        if finalize_tasks.is_empty() {
             let strategy = TaskStrategist::build_strategy(
                 [commit_tasks, finalize_tasks].concat(),
                 authority,
