@@ -356,7 +356,7 @@ jobs:
     runs-on: ${{ matrix.runner || 'ubuntu-latest-m' }}
     env:
       SOLANA_VERSION: v3.1.5
-      NEEDS_COMPRESSION_TOOLS: ${{ contains(fromJSON('["schedulecommit","chainlink","table_mania","committor"]'), matrix.batch_tests) }}
+      NEEDS_COMPRESSION_TOOLS: ${{ contains(fromJSON('["schedulecommit","chainlink","table_mania"]'), matrix.batch_tests) || startsWith(matrix.batch_tests, 'committor') }}
     strategy:
       matrix:
         include:
