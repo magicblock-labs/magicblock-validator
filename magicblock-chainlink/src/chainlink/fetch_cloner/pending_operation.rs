@@ -1,8 +1,11 @@
-use std::{collections::HashMap as StdHashMap, sync::Arc};
+use std::{collections::HashMap as StdHashMap, sync::Arc, time::Duration};
 
 use scc::HashMap;
 use solana_pubkey::Pubkey;
-use tokio::sync::oneshot;
+use tokio::{
+    sync::{oneshot, Notify},
+    time::Instant,
+};
 
 use super::{super::errors::ChainlinkError, types::FetchAndCloneResult};
 
@@ -11,7 +14,9 @@ pub(super) type WaiterId = u64;
 
 pub(super) struct Pending {
     pub generation: PendingGeneration,
+    pub deadline: Instant,
     pub waiters: StdHashMap<WaiterId, oneshot::Sender<PendingTerminal>>,
+    pub cancel: Arc<Notify>,
 }
 
 #[derive(Debug, Clone)]
@@ -24,6 +29,7 @@ pub(super) enum PendingTerminal {
 pub(super) enum PendingFailure {
     OwnerFailed(String),
     TimedOut,
+    Cancelled,
 }
 
 impl PendingFailure {
@@ -33,6 +39,7 @@ impl PendingFailure {
                 ChainlinkError::PendingRequestOwnerFailed(pubkey, msg)
             }
             Self::TimedOut => ChainlinkError::PendingRequestTimeout(pubkey),
+            Self::Cancelled => ChainlinkError::PendingRequestCancelled(pubkey),
         }
     }
 }
@@ -107,9 +114,15 @@ impl Drop for PendingWaiter {
     }
 }
 
+pub(super) struct PendingHandles {
+    pub waiter: PendingWaiter,
+    pub deadline: Instant,
+    pub cancel: Arc<Notify>,
+}
+
 pub(super) enum PendingClaim {
-    Created(PendingWaiter),
-    Joined(PendingWaiter),
+    Created(PendingHandles),
+    Joined(PendingHandles),
 }
 
 pub(super) fn claim_or_join_pending(
@@ -117,33 +130,48 @@ pub(super) fn claim_or_join_pending(
     pubkey: Pubkey,
     generation: PendingGeneration,
     waiter_id: WaiterId,
+    total_budget: Duration,
 ) -> PendingClaim {
     let (tx, rx) = oneshot::channel();
 
     let claim = match pending.entry(pubkey) {
         scc::hash_map::Entry::Vacant(entry) => {
+            let deadline = Instant::now() + total_budget;
+            let cancel = Arc::new(Notify::new());
             entry.insert_entry(Pending {
                 generation,
+                deadline,
                 waiters: StdHashMap::from([(waiter_id, tx)]),
+                cancel: Arc::clone(&cancel),
             });
-            PendingClaim::Created(PendingWaiter::new(
-                pending.clone(),
-                pubkey,
-                generation,
-                waiter_id,
-                rx,
-            ))
+            PendingClaim::Created(PendingHandles {
+                waiter: PendingWaiter::new(
+                    pending.clone(),
+                    pubkey,
+                    generation,
+                    waiter_id,
+                    rx,
+                ),
+                deadline,
+                cancel,
+            })
         }
         scc::hash_map::Entry::Occupied(mut entry) => {
             let generation = entry.get().generation;
+            let deadline = entry.get().deadline;
+            let cancel = Arc::clone(&entry.get().cancel);
             entry.get_mut().waiters.insert(waiter_id, tx);
-            PendingClaim::Joined(PendingWaiter::new(
-                pending.clone(),
-                pubkey,
-                generation,
-                waiter_id,
-                rx,
-            ))
+            PendingClaim::Joined(PendingHandles {
+                waiter: PendingWaiter::new(
+                    pending.clone(),
+                    pubkey,
+                    generation,
+                    waiter_id,
+                    rx,
+                ),
+                deadline,
+                cancel,
+            })
         }
     };
 

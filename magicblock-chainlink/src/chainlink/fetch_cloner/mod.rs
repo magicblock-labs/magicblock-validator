@@ -31,7 +31,6 @@ use tokio::{
     sync::{mpsc, oneshot},
     task,
     task::JoinSet,
-    time::timeout,
 };
 use tracing::*;
 
@@ -317,13 +316,17 @@ where
             pubkey,
             generation,
             waiter_id,
+            FETCH_CLONE_OPERATION_TIMEOUT,
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn spawn_owned_operation(
         &self,
         pubkey: Pubkey,
         generation: u64,
+        deadline: tokio::time::Instant,
+        cancel: Arc<tokio::sync::Notify>,
         mark_empty_if_not_found: bool,
         slot: Option<u64>,
         fetch_origin: AccountFetchOrigin,
@@ -336,23 +339,26 @@ where
             let mark_empty = mark_empty_if_not_found.then_some(vec![pubkey]);
             let mark_empty_ref = mark_empty.as_deref();
             let program_ids_ref = program_ids.as_deref();
-            let terminal = match timeout(
-                FETCH_CLONE_OPERATION_TIMEOUT,
-                this.fetch_and_clone_accounts(
-                    &pubkeys,
-                    mark_empty_ref,
-                    slot,
-                    fetch_origin,
-                    program_ids_ref,
-                ),
-            )
-            .await
-            {
-                Ok(Ok(result)) => PendingTerminal::Success(result),
-                Ok(Err(err)) => PendingTerminal::Failed(
-                    PendingFailure::OwnerFailed(err.to_string()),
-                ),
-                Err(_) => PendingTerminal::Failed(PendingFailure::TimedOut),
+            let work = this.fetch_and_clone_accounts(
+                &pubkeys,
+                mark_empty_ref,
+                slot,
+                fetch_origin,
+                program_ids_ref,
+            );
+            let terminal = tokio::select! {
+                _ = cancel.notified() => {
+                    PendingTerminal::Failed(PendingFailure::Cancelled)
+                }
+                result = tokio::time::timeout_at(deadline, work) => {
+                    match result {
+                        Ok(Ok(result)) => PendingTerminal::Success(result),
+                        Ok(Err(err)) => PendingTerminal::Failed(
+                            PendingFailure::OwnerFailed(err.to_string()),
+                        ),
+                        Err(_) => PendingTerminal::Failed(PendingFailure::TimedOut),
+                    }
+                }
             };
             finish_pending(&pending, pubkey, generation, terminal);
         });
@@ -1941,11 +1947,14 @@ where
         let mut waiters: Vec<PendingWaiter> = vec![];
         for pubkey in pubkeys {
             match self.claim_or_join_owned_operation(*pubkey) {
-                PendingClaim::Created(waiter) => {
+                PendingClaim::Created(handles) => {
+                    let waiter = handles.waiter;
                     let waiter_pubkey = waiter.pubkey();
                     self.spawn_owned_operation(
                         waiter_pubkey,
                         waiter.generation(),
+                        handles.deadline,
+                        handles.cancel,
                         mark_empty_set.contains(&waiter_pubkey),
                         slot,
                         fetch_origin,
@@ -1953,7 +1962,7 @@ where
                     );
                     waiters.push(waiter);
                 }
-                PendingClaim::Joined(waiter) => waiters.push(waiter),
+                PendingClaim::Joined(handles) => waiters.push(handles.waiter),
             }
         }
 
