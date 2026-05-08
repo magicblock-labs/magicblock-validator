@@ -1,10 +1,8 @@
-#![allow(dead_code)]
-
-use std::{collections::HashMap as StdHashMap, sync::Arc, time::Instant};
+use std::{collections::HashMap as StdHashMap, sync::Arc};
 
 use scc::HashMap;
 use solana_pubkey::Pubkey;
-use tokio::sync::{oneshot, watch};
+use tokio::sync::oneshot;
 
 use super::{super::errors::ChainlinkError, types::FetchAndCloneResult};
 
@@ -13,9 +11,7 @@ pub(super) type WaiterId = u64;
 
 pub(super) struct Pending {
     pub generation: PendingGeneration,
-    pub deadline: Instant,
     pub waiters: StdHashMap<WaiterId, oneshot::Sender<PendingTerminal>>,
-    pub cancel: watch::Sender<bool>,
 }
 
 #[derive(Debug, Clone)]
@@ -27,7 +23,6 @@ pub(super) enum PendingTerminal {
 #[derive(Debug, Clone)]
 pub(super) enum PendingFailure {
     OwnerFailed(String),
-    OwnerJoinFailed(String),
     TimedOut,
 }
 
@@ -36,9 +31,6 @@ impl PendingFailure {
         match self {
             Self::OwnerFailed(msg) => {
                 ChainlinkError::PendingRequestOwnerFailed(pubkey, msg)
-            }
-            Self::OwnerJoinFailed(msg) => {
-                ChainlinkError::PendingRequestOwnerDisappeared(pubkey, msg)
             }
             Self::TimedOut => ChainlinkError::PendingRequestTimeout(pubkey),
         }
@@ -125,18 +117,14 @@ pub(super) fn claim_or_join_pending(
     pubkey: Pubkey,
     generation: PendingGeneration,
     waiter_id: WaiterId,
-    deadline: Instant,
 ) -> PendingClaim {
     let (tx, rx) = oneshot::channel();
 
     let claim = match pending.entry(pubkey) {
         scc::hash_map::Entry::Vacant(entry) => {
-            let (cancel, _) = watch::channel(false);
             entry.insert_entry(Pending {
                 generation,
-                deadline,
                 waiters: StdHashMap::from([(waiter_id, tx)]),
-                cancel,
             });
             PendingClaim::Created(PendingWaiter::new(
                 pending.clone(),

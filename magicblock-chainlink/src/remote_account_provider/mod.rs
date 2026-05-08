@@ -5,7 +5,7 @@ use std::{
         atomic::{AtomicU64, Ordering},
         Arc, Mutex,
     },
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 pub(crate) use chain_pubsub_client::{
@@ -90,8 +90,6 @@ type FetchingAccountGeneration = u64;
 
 struct FetchingAccountState {
     generation: FetchingAccountGeneration,
-    #[allow(dead_code)]
-    created_at: Instant,
     fetch_start_slot: u64,
     waiters: Vec<oneshot::Sender<FetchResult>>,
 }
@@ -817,7 +815,6 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                             self.next_fetching_account_generation();
                         entry.insert(FetchingAccountState {
                             generation,
-                            created_at: Instant::now(),
                             fetch_start_slot,
                             waiters: vec![sender],
                         });
