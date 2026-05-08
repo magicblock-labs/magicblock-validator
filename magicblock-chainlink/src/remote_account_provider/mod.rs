@@ -159,6 +159,9 @@ pub struct RemoteAccountProvider<T: ChainRpcClient, U: ChainPubsubClient> {
     /// Subscription ownership reasons tracked per pubkey.
     subscription_ownership:
         Arc<AsyncMutex<HashMap<Pubkey, SubscriptionOwnership>>>,
+    /// Per-pubkey locks serializing subscription acquire/release transitions.
+    subscription_key_locks:
+        Arc<AsyncMutex<HashMap<Pubkey, Arc<AsyncMutex<()>>>>>,
     /// The current slot on chain.
     ///
     /// This value is updated from two sources and always stores the maximum
@@ -343,6 +346,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             fetching_accounts: Arc::<FetchingAccounts>::default(),
             next_fetching_account_generation: AtomicU64::default(),
             subscription_ownership: Arc::new(AsyncMutex::new(HashMap::new())),
+            subscription_key_locks: Arc::new(AsyncMutex::new(HashMap::new())),
             rpc_client,
             pubsub_client,
             chain_slot,
@@ -1071,11 +1075,25 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         fetching.contains_key(pubkey)
     }
 
+    async fn subscription_key_lock(
+        &self,
+        pubkey: &Pubkey,
+    ) -> Arc<AsyncMutex<()>> {
+        let mut locks = self.subscription_key_locks.lock().await;
+        locks
+            .entry(*pubkey)
+            .or_insert_with(|| Arc::new(AsyncMutex::new(())))
+            .clone()
+    }
+
     pub async fn acquire_subscription(
         &self,
         pubkey: &Pubkey,
         reason: SubscriptionReason,
     ) -> RemoteAccountProviderResult<()> {
+        let subscription_key_lock = self.subscription_key_lock(pubkey).await;
+        let _subscription_guard = subscription_key_lock.lock().await;
+
         let mut ownership = self.subscription_ownership.lock().await;
         if let Some(existing) = ownership.get_mut(pubkey) {
             existing.acquire(reason);
@@ -1099,6 +1117,9 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         pubkey: &Pubkey,
         reason: SubscriptionReason,
     ) -> RemoteAccountProviderResult<bool> {
+        let subscription_key_lock = self.subscription_key_lock(pubkey).await;
+        let _subscription_guard = subscription_key_lock.lock().await;
+
         if !self.lrucache_subscribed_accounts.can_evict(pubkey) {
             return Ok(false);
         }
@@ -1163,6 +1184,9 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         &self,
         pubkey: &Pubkey,
     ) -> RemoteAccountProviderResult<()> {
+        let subscription_key_lock = self.subscription_key_lock(pubkey).await;
+        let _subscription_guard = subscription_key_lock.lock().await;
+
         if !self.lrucache_subscribed_accounts.can_evict(pubkey) {
             warn!(pubkey = %pubkey, "Tried to unsubscribe from account that should never be evicted");
             return Ok(());
