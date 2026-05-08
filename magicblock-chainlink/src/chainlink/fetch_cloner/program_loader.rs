@@ -4,10 +4,7 @@ use solana_account::{AccountSharedData, ReadableAccount};
 use solana_pubkey::Pubkey;
 use tracing::*;
 
-use super::{
-    subscription::{release_subs, SubscriptionRelease},
-    FetchCloner,
-};
+use super::{subscription::release_program_data_subs, FetchCloner};
 use crate::{
     cloner::Cloner,
     remote_account_provider::{
@@ -83,18 +80,10 @@ pub(crate) async fn handle_executable_sub_update<T, U, V, C>(
             Ok(Err(err)) => {
                 error!(pubkey = %pubkey, error = %err, "Failed to fetch program data account");
                 if acquired_program_data_reason {
-                    release_subs(
+                    // Both refs exist for LoaderV3 program-data cleanup.
+                    release_program_data_subs(
                         &this.remote_account_provider,
-                        [
-                            SubscriptionRelease::Pubkey {
-                                pubkey: program_data_pubkey,
-                                reason: SubscriptionReason::DirectAccount,
-                            },
-                            SubscriptionRelease::Pubkey {
-                                pubkey: program_data_pubkey,
-                                reason: SubscriptionReason::ProgramData,
-                            },
-                        ],
+                        program_data_pubkey,
                     )
                     .await;
                 }
@@ -103,18 +92,10 @@ pub(crate) async fn handle_executable_sub_update<T, U, V, C>(
             Err(err) => {
                 error!(pubkey = %pubkey, error = %err, "Failed to fetch program data account");
                 if acquired_program_data_reason {
-                    release_subs(
+                    // Both refs exist for LoaderV3 program-data cleanup.
+                    release_program_data_subs(
                         &this.remote_account_provider,
-                        [
-                            SubscriptionRelease::Pubkey {
-                                pubkey: program_data_pubkey,
-                                reason: SubscriptionReason::DirectAccount,
-                            },
-                            SubscriptionRelease::Pubkey {
-                                pubkey: program_data_pubkey,
-                                reason: SubscriptionReason::ProgramData,
-                            },
-                        ],
+                        program_data_pubkey,
                     )
                     .await;
                 }
@@ -142,18 +123,10 @@ pub(crate) async fn handle_executable_sub_update<T, U, V, C>(
     }
 
     if acquired_program_data_reason {
-        release_subs(
+        // Both refs exist for LoaderV3 program-data cleanup.
+        release_program_data_subs(
             &this.remote_account_provider,
-            [
-                SubscriptionRelease::Pubkey {
-                    pubkey: program_data_pubkey,
-                    reason: SubscriptionReason::DirectAccount,
-                },
-                SubscriptionRelease::Pubkey {
-                    pubkey: program_data_pubkey,
-                    reason: SubscriptionReason::ProgramData,
-                },
-            ],
+            program_data_pubkey,
         )
         .await;
     }

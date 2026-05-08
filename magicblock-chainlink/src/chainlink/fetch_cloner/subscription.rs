@@ -26,9 +26,7 @@ pub(crate) async fn acquire_subs<T: ChainRpcClient, U: ChainPubsubClient>(
     let mut acquired = Vec::new();
 
     for pubkey in pubkeys {
-        if let Err(err) =
-            provider.acquire_subscription(&pubkey, reason).await
-        {
+        if let Err(err) = provider.acquire_subscription(&pubkey, reason).await {
             release_subs(
                 provider,
                 acquired.into_iter().map(|pubkey| {
@@ -57,4 +55,27 @@ pub(crate) async fn release_subs<T: ChainRpcClient, U: ChainPubsubClient>(
             warn!(pubkey = %pubkey, ?reason, error = ?err, "Failed to release subscription reason");
         }
     }
+}
+
+pub(crate) async fn release_program_data_subs<
+    T: ChainRpcClient,
+    U: ChainPubsubClient,
+>(
+    provider: &Arc<RemoteAccountProvider<T, U>>,
+    program_data_pubkey: Pubkey,
+) {
+    release_subs(
+        provider,
+        [
+            SubscriptionRelease::Pubkey {
+                pubkey: program_data_pubkey,
+                reason: SubscriptionReason::DirectAccount,
+            },
+            SubscriptionRelease::Pubkey {
+                pubkey: program_data_pubkey,
+                reason: SubscriptionReason::ProgramData,
+            },
+        ],
+    )
+    .await;
 }
