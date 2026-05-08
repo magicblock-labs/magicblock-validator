@@ -8,7 +8,10 @@ use std::{
     time::Duration,
 };
 
-use notify::{Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
+use notify::{
+    event::ModifyKind, Event, EventKind, RecommendedWatcher, RecursiveMode,
+    Watcher,
+};
 use tokio::{fs::File, sync::mpsc};
 use tracing::{error, info};
 
@@ -80,7 +83,10 @@ impl SnapshotWatcher {
 
     /// Process a filesystem event and extract snapshot path if relevant.
     fn process_event(event: &Event) -> Option<PathBuf> {
-        if !matches!(event.kind, EventKind::Create(_)) {
+        if !matches!(
+            event.kind,
+            EventKind::Create(_) | EventKind::Modify(ModifyKind::Name(_))
+        ) {
             return None;
         }
 

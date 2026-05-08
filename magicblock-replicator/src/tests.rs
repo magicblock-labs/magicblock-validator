@@ -30,6 +30,32 @@ async fn test_watcher_detects_new_snapshot() {
 }
 
 #[tokio::test]
+async fn test_watcher_detects_renamed_snapshot() {
+    let temp_dir = TempDir::new().unwrap();
+    let mut watcher = SnapshotWatcher::new(temp_dir.path()).unwrap();
+
+    let test_data = b"test archive contents";
+    let tmp_path = temp_dir.path().join("snapshot-000000000001.tar.tmp");
+    let snapshot_path = temp_dir.path().join("snapshot-000000000001.tar.gz");
+    std::fs::File::create(&tmp_path)
+        .unwrap()
+        .write_all(test_data)
+        .unwrap();
+    std::fs::rename(&tmp_path, &snapshot_path).unwrap();
+
+    let (mut file, slot) =
+        tokio::time::timeout(Duration::from_secs(2), watcher.recv())
+            .await
+            .expect("Timeout waiting for snapshot")
+            .expect("Channel closed");
+
+    assert_eq!(slot, 1);
+    let mut contents = Vec::new();
+    file.read_to_end(&mut contents).await.unwrap();
+    assert_eq!(contents, test_data);
+}
+
+#[tokio::test]
 async fn test_watcher_ignores_non_snapshots() {
     let temp_dir = TempDir::new().unwrap();
     let mut watcher = SnapshotWatcher::new(temp_dir.path()).unwrap();
