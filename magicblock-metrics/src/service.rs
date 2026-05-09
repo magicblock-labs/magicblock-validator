@@ -221,7 +221,12 @@ mod tests {
         try_start_metrics_service(addr, cancel.clone())
             .expect("Expected service to start");
 
-        tokio::time::sleep(Duration::from_millis(150)).await;
+        for _ in 0..20 {
+            if TcpStream::connect(addr).await.is_ok() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
 
         async fn first_response_line(
             addr: std::net::SocketAddr,
@@ -232,9 +237,19 @@ mod tests {
                 "GET {path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n",
             );
             stream.write_all(req.as_bytes()).await.unwrap();
-            let mut buf = vec![0u8; 512];
-            let n = stream.read(&mut buf).await.unwrap();
-            String::from_utf8_lossy(&buf[..n])
+            let mut buf = Vec::with_capacity(256);
+            let mut chunk = [0u8; 64];
+            loop {
+                let n = stream.read(&mut chunk).await.unwrap();
+                if n == 0 {
+                    break;
+                }
+                buf.extend_from_slice(&chunk[..n]);
+                if buf.windows(2).any(|w| w == b"\r\n") {
+                    break;
+                }
+            }
+            String::from_utf8_lossy(&buf)
                 .lines()
                 .next()
                 .unwrap_or("")
