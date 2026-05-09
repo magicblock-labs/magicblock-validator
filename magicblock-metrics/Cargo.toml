@@ -8,6 +8,7 @@ license.workspace = true
 edition.workspace = true
 
 [dependencies]
+magicblock-core = { workspace = true }
 solana-signature = { workspace = true }
 tracing = { workspace = true }
 http-body-util = { workspace = true }
@@ -15,5 +16,13 @@ hyper = { workspace = true, features = ["http1", "server"] }
 hyper-util = { workspace = true, features = ["tokio"] }
 lazy_static = { workspace = true }
 prometheus = { workspace = true }
-tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread"] }
+tokio = { workspace = true, features = [
+    "io-util",
+    "macros",
+    "net",
+    "rt-multi-thread",
+] }
 tokio-util = { workspace = true }
+
+[dev-dependencies]
+serial_test = { workspace = true }
