@@ -186,26 +186,6 @@ mod tests {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::{TcpListener, TcpStream};
 
-    #[test]
-    fn primary_health_status_ok_when_primary() {
-        assert_eq!(
-            primary_health_status(CoordinationMode::Primary),
-            StatusCode::OK
-        );
-    }
-
-    #[test]
-    fn primary_health_status_unavailable_when_starting_up_or_replica() {
-        assert_eq!(
-            primary_health_status(CoordinationMode::StartingUp),
-            StatusCode::SERVICE_UNAVAILABLE
-        );
-        assert_eq!(
-            primary_health_status(CoordinationMode::Replica),
-            StatusCode::SERVICE_UNAVAILABLE
-        );
-    }
-
     #[tokio::test]
     #[serial]
     async fn http_get_health_primary_follows_coordination_mode() {
