@@ -135,8 +135,6 @@ pub struct DelegateArgs {
     pub owner_program_id: Pubkey,
     /// Validator
     pub validator: Pubkey,
-    /// Original lamports of the account
-    pub lamports: u64,
     /// Account data before delegation
     pub account_data: Vec<u8>,
     /// PDA seeds
