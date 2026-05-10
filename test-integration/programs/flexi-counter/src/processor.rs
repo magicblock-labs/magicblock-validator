@@ -690,7 +690,6 @@ fn process_delegate_compressed(
             validator: args.validator.unwrap_or(DEFAULT_VALIDATOR_IDENTITY),
             validity_proof: args.validity_proof,
             account_meta: args.account_meta,
-            lamports: 0,
             account_data,
             pda_seeds: pda_seeds
                 .iter()
