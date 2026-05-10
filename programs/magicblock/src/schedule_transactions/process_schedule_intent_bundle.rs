@@ -24,6 +24,7 @@ use crate::{
             get_instruction_account_with_idx, get_instruction_pubkey_with_idx,
         },
     },
+    validator::is_compression_enabled,
     MagicContext,
 };
 
@@ -33,6 +34,17 @@ pub(crate) fn process_schedule_intent_bundle(
     args: MagicIntentBundleArgs,
     secure: bool,
 ) -> Result<(), InstructionError> {
+    if !is_compression_enabled()
+        && (args.commit_finalize_compressed.is_some()
+            || args.commit_finalize_compressed_and_undelegate.is_some())
+    {
+        ic_msg!(
+            invoke_context,
+            "ScheduleIntentBundle: compression is not enabled"
+        );
+        return Err(InstructionError::InvalidInstructionData);
+    }
+
     check_magic_context_id(invoke_context, MAGIC_CONTEXT_IDX)?;
 
     let parent_program_id = get_parent_program_id(invoke_context)?;
