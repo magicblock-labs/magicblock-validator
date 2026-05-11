@@ -96,6 +96,14 @@ struct FetchingAccountState {
 
 type FetchingAccounts = Mutex<HashMap<Pubkey, FetchingAccountState>>;
 
+/// Internal ownership/refcount key for shared pubsub subscriptions.
+///
+/// A single pubkey can be watched for multiple independent purposes
+/// (direct account access, delegation records, program data, undelegation
+/// tracking, ATA projection, etc.). Tracking the reason prevents one
+/// subsystem from accidentally unsubscribing an account that another subsystem
+/// still needs. The provider only tears down the actual pubsub subscription
+/// once all reasons/counts for that pubkey have been released.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SubscriptionReason {
     DirectAccount,
