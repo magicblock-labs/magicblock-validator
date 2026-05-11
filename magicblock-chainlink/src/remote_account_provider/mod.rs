@@ -102,8 +102,14 @@ type FetchingAccounts = Mutex<HashMap<Pubkey, FetchingAccountState>>;
 /// (direct account access, delegation records, program data, undelegation
 /// tracking, ATA projection, etc.). Tracking the reason prevents one
 /// subsystem from accidentally unsubscribing an account that another subsystem
-/// still needs. The provider only tears down the actual pubsub subscription
-/// once all reasons/counts for that pubkey have been released.
+/// still needs. For explicit reason-based releases, the provider only tears
+/// down the actual pubsub subscription once all reasons/counts for that pubkey
+/// have been released.
+///
+/// This ownership tracking does not protect the account from LRU capacity
+/// eviction. If the subscribed-accounts LRU evicts a pubkey, that eviction is
+/// treated as a forced full unsubscribe/removal regardless of the reasons still
+/// recorded for that pubkey.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SubscriptionReason {
     DirectAccount,
