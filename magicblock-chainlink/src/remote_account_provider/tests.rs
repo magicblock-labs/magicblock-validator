@@ -34,6 +34,14 @@ async fn setup_provider(
     pubkey: solana_pubkey::Pubkey,
     account: Account,
 ) -> ProviderTestCtx {
+    setup_provider_with_lru_capacity(pubkey, account, 1000).await
+}
+
+async fn setup_provider_with_lru_capacity(
+    pubkey: solana_pubkey::Pubkey,
+    account: Account,
+    lru_capacity: usize,
+) -> ProviderTestCtx {
     let rpc_client = ChainRpcClientMockBuilder::new()
         .slot(100)
         .clock_sysvar_for_slot(100)
@@ -45,7 +53,7 @@ async fn setup_provider(
         ChainPubsubClientMock::new(updates_sender, updates_receiver);
 
     let (forward_tx, forward_rx) = mpsc::channel(1_000);
-    let (subscribed_accounts, config) = create_test_lru_cache(1000);
+    let (subscribed_accounts, config) = create_test_lru_cache(lru_capacity);
     let chain_slot = Arc::<AtomicU64>::default();
 
     let provider = Arc::new(
@@ -529,6 +537,124 @@ async fn test_concurrent_reason_changes_do_not_unsubscribe_until_final_release()
     assert!(unsubscribed);
     assert!(!provider.is_watching(&pubkey));
     assert!(!_pubsub_client.subscriptions_union().contains(&pubkey));
+}
+
+#[tokio::test]
+async fn test_lru_eviction_clears_all_subscription_reasons_for_evicted_pubkey()
+{
+    let pubkey1 = solana_pubkey::Pubkey::new_unique();
+    let pubkey2 = solana_pubkey::Pubkey::new_unique();
+    let account = Account {
+        lamports: 1_000_000,
+        data: vec![1, 2, 3, 4],
+        owner: solana_pubkey::Pubkey::new_unique(),
+        executable: false,
+        rent_epoch: 0,
+    };
+
+    let ProviderTestCtx {
+        provider,
+        _pubsub_client,
+        _forward_rx,
+        ..
+    } = setup_provider_with_lru_capacity(pubkey1, account, 1).await;
+
+    provider
+        .acquire_subscription(&pubkey1, SubscriptionReason::DirectAccount)
+        .await
+        .unwrap();
+    provider
+        .acquire_subscription(&pubkey1, SubscriptionReason::DirectAccount)
+        .await
+        .unwrap();
+    provider
+        .acquire_subscription(&pubkey1, SubscriptionReason::DelegationRecord)
+        .await
+        .unwrap();
+
+    assert!(provider.is_watching(&pubkey1));
+    assert!(_pubsub_client.subscriptions_union().contains(&pubkey1));
+    assert!(provider
+        .subscription_ownership
+        .lock()
+        .await
+        .contains_key(&pubkey1));
+
+    provider
+        .acquire_subscription(&pubkey2, SubscriptionReason::DirectAccount)
+        .await
+        .unwrap();
+
+    assert!(!provider.is_watching(&pubkey1));
+    assert!(provider.is_watching(&pubkey2));
+    assert!(!_pubsub_client.subscriptions_union().contains(&pubkey1));
+    assert!(_pubsub_client.subscriptions_union().contains(&pubkey2));
+    assert!(!provider
+        .subscription_ownership
+        .lock()
+        .await
+        .contains_key(&pubkey1));
+    assert!(provider
+        .subscription_ownership
+        .lock()
+        .await
+        .contains_key(&pubkey2));
+}
+
+#[tokio::test]
+async fn test_lru_eviction_and_reason_release_are_serialized() {
+    let pubkey1 = solana_pubkey::Pubkey::new_unique();
+    let pubkey2 = solana_pubkey::Pubkey::new_unique();
+    let account = Account {
+        lamports: 1_000_000,
+        data: vec![1, 2, 3, 4],
+        owner: solana_pubkey::Pubkey::new_unique(),
+        executable: false,
+        rent_epoch: 0,
+    };
+
+    let ProviderTestCtx {
+        provider,
+        _pubsub_client,
+        _forward_rx,
+        ..
+    } = setup_provider_with_lru_capacity(pubkey1, account, 1).await;
+
+    provider
+        .acquire_subscription(&pubkey1, SubscriptionReason::DirectAccount)
+        .await
+        .unwrap();
+    provider
+        .acquire_subscription(&pubkey1, SubscriptionReason::DelegationRecord)
+        .await
+        .unwrap();
+
+    let (acquire_result, release_result) = tokio::join!(
+        provider
+            .acquire_subscription(&pubkey2, SubscriptionReason::DirectAccount,),
+        provider.release_single_subscription(
+            &pubkey1,
+            SubscriptionReason::DelegationRecord,
+        )
+    );
+
+    acquire_result.unwrap();
+    release_result.unwrap();
+
+    assert!(!provider.is_watching(&pubkey1));
+    assert!(provider.is_watching(&pubkey2));
+    assert!(!_pubsub_client.subscriptions_union().contains(&pubkey1));
+    assert!(_pubsub_client.subscriptions_union().contains(&pubkey2));
+    assert!(!provider
+        .subscription_ownership
+        .lock()
+        .await
+        .contains_key(&pubkey1));
+    assert!(provider
+        .subscription_ownership
+        .lock()
+        .await
+        .contains_key(&pubkey2));
 }
 
 #[tokio::test]
