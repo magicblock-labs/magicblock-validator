@@ -1043,7 +1043,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
     async fn register_subscription(
         &self,
         pubkey: &Pubkey,
-    ) -> RemoteAccountProviderResult<Option<Pubkey>> {
+    ) -> RemoteAccountProviderResult<()> {
         // 1. First realize subscription
         self.pubsub_client.subscribe(*pubkey, None).await?;
 
@@ -1052,6 +1052,11 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         // and then inform upstream that we are no longer tracking it
         if let Some(evicted) = self.lrucache_subscribed_accounts.add(*pubkey) {
             trace!(evicted = %evicted, "Evicting account");
+
+            // LRU eviction is a forced full removal. Drop all ownership reasons
+            // before awaiting on pubsub unsubscribe or removal notification so stale
+            // reasons cannot survive a later failure on this cold path.
+            self.subscription_ownership.lock().await.remove(&evicted);
 
             // 1. Unsubscribe from the account directly (LRU has already removed it)
             if let Err(err) = self.pubsub_client.unsubscribe(evicted).await {
@@ -1070,10 +1075,10 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
 
             // 2. Inform upstream so it can remove it from the store
             self.send_removal_update(evicted).await?;
-            return Ok(Some(evicted));
+            return Ok(());
         }
 
-        Ok(None)
+        Ok(())
     }
 
     async fn send_removal_update(
@@ -1127,12 +1132,9 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         }
         drop(ownership);
 
-        let evicted = self.register_subscription(pubkey).await?;
+        self.register_subscription(pubkey).await?;
 
         let mut ownership = self.subscription_ownership.lock().await;
-        if let Some(evicted) = evicted {
-            ownership.remove(&evicted);
-        }
         ownership.entry(*pubkey).or_default().acquire(reason);
         Ok(())
     }
