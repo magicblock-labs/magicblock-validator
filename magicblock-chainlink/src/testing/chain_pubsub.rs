@@ -17,11 +17,18 @@ pub async fn setup_actor_and_client() -> (
     RpcClient,
 ) {
     let (tx, _) = mpsc::channel(10);
+    let validator_pubkey = Pubkey::new_unique();
+    let rpc_client = crate::remote_account_provider::chain_rpc_client::ChainRpcClientImpl::new_from_url(
+        RPC_URL,
+        CommitmentConfig::confirmed(),
+    );
     let (actor, updates_rx) = ChainPubsubActor::new_from_url(
         PUBSUB_URL,
         "test-client",
         tx,
         CommitmentConfig::confirmed(),
+        validator_pubkey,
+        rpc_client,
     )
     .await
     .expect("failed to create ChainPubsubActor");

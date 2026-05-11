@@ -1,24 +1,22 @@
 use std::{
+    collections::{HashMap, VecDeque},
     hash::Hash,
     time::{Duration, Instant},
 };
 
+use parking_lot::Mutex;
+
+type CacheInner<K, V> = (HashMap<K, V>, VecDeque<ExpiringRecord<K>>);
+
 /// A thread-safe, expiring cache with lazy eviction.
 ///
 /// This cache stores key-value pairs for a specified duration (time-to-live).
-/// It is designed for concurrent access using lock-free data structures.
 ///
 /// Eviction of expired entries is performed **lazily**: the cache is only cleaned
 /// when a new element is inserted via the [`push`] method. There is no background
 /// thread for cleanup.
 pub(crate) struct ExpiringCache<K, V> {
-    /// A concurrent hash map providing fast, thread-safe key-value lookups.
-    index: scc::HashMap<K, V>,
-    /// A concurrent FIFO queue tracking the creation order of entries.
-    ///
-    /// This allows for efficient, ordered checks to find and evict the oldest
-    /// (and therefore most likely to be expired) entries.
-    queue: scc::Queue<ExpiringRecord<K>>,
+    inner: Mutex<CacheInner<K, V>>,
     /// The time-to-live for each entry from its moment of creation.
     ttl: Duration,
 }
@@ -31,12 +29,11 @@ struct ExpiringRecord<K> {
     genesis: Instant,
 }
 
-impl<K: Hash + Eq + Copy + 'static, V: Clone> ExpiringCache<K, V> {
+impl<K: Hash + Eq + Clone, V: Clone> ExpiringCache<K, V> {
     /// Creates a new `ExpiringCache` with a specified time-to-live (TTL) for all entries.
     pub(crate) fn new(ttl: Duration) -> Self {
         Self {
-            index: scc::HashMap::default(),
-            queue: scc::Queue::default(),
+            inner: Mutex::new((HashMap::new(), VecDeque::new())),
             ttl,
         }
     }
@@ -55,30 +52,31 @@ impl<K: Hash + Eq + Copy + 'static, V: Clone> ExpiringCache<K, V> {
     /// Returns `true` if the key was newly inserted, or `false` if the key
     /// already existed and its value was updated.
     pub(crate) fn push(&self, key: K, value: V) -> bool {
+        let mut guard = self.inner.lock();
+        let (index, queue) = &mut *guard;
+
         // Lazily evict expired entries from the front of the queue.
-        while let Ok(Some(expired)) = self.queue.pop_if(|e| e.expired(self.ttl))
-        {
-            self.index.remove(&expired.key);
+        while let Some(record) = queue.pop_front_if(|e| e.expired(self.ttl)) {
+            index.remove(&record.key);
         }
 
         // Insert or update the key-value pair.
-        let is_new = self.index.upsert(key, value).is_none();
-
+        let is_new = index.insert(key.clone(), value).is_none();
         // If the key is new, add a corresponding record to the expiration queue.
         if is_new {
-            self.queue.push(ExpiringRecord::new(key));
+            queue.push_back(ExpiringRecord::new(key));
         }
         is_new
     }
 
     /// Retrieves a clone of the value associated with the given key, if it exists.
     pub(crate) fn get(&self, key: &K) -> Option<V> {
-        self.index.read(key, |_, v| v.clone())
+        self.inner.lock().0.get(key).cloned()
     }
 
     /// Checks if the cache contains a value for the specified key.
     pub(crate) fn contains(&self, key: &K) -> bool {
-        self.index.contains(key)
+        self.inner.lock().0.contains_key(key)
     }
 }
 
@@ -86,8 +84,10 @@ impl<K> ExpiringRecord<K> {
     /// Creates a new record, capturing the current time as its genesis timestamp.
     #[inline]
     fn new(key: K) -> Self {
-        let genesis = Instant::now();
-        Self { key, genesis }
+        Self {
+            key,
+            genesis: Instant::now(),
+        }
     }
 
     /// Returns `true` if the time elapsed since creation is greater than or equal to the TTL.

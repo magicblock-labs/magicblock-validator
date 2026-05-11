@@ -113,6 +113,7 @@ impl IxtestContext {
                     &endpoints,
                     commitment,
                     tx,
+                    validator_kp.pubkey(),
                     &config.remote_account_provider,
                 )
                 .await;

@@ -811,9 +811,11 @@ where
             return false;
         };
 
-        let is_delegated_to_us = deleg_record.authority
-            == self.validator_pubkey
-            || deleg_record.authority == Pubkey::default();
+        let is_delegated_to_us =
+            crate::delegation_record::is_delegated_to_validator_or_confined(
+                &deleg_record.authority,
+                &self.validator_pubkey,
+            );
         if !is_delegated_to_us {
             trace!(
                 pubkey = %pubkey,
@@ -1800,8 +1802,10 @@ where
 
             let delegated_on_chain =
                 deleg_record.as_ref().is_some_and(|(dr, _)| {
-                    dr.authority.eq(&self.validator_pubkey)
-                        || dr.authority.eq(&Pubkey::default())
+                    crate::delegation_record::is_delegated_to_validator_or_confined(
+                        &dr.authority,
+                        &self.validator_pubkey,
+                    )
                 });
             let deleg_record = deleg_record.map(|el| el.0);
             if !account_still_undelegating_on_chain(

@@ -35,8 +35,8 @@ use crate::remote_account_provider::{
     chain_rpc_client::{ChainRpcClient, ChainRpcClientImpl},
     chain_slot::ChainSlot,
     pubsub_common::{
-        is_internal_dlp_account_data, ChainPubsubActorMessage,
-        MESSAGE_CHANNEL_SIZE, SUBSCRIPTION_UPDATE_CHANNEL_SIZE,
+        ChainPubsubActorMessage, MESSAGE_CHANNEL_SIZE,
+        SUBSCRIPTION_UPDATE_CHANNEL_SIZE,
     },
     RemoteAccountProviderError, RemoteAccountProviderResult,
     SubscriptionUpdate,
@@ -122,6 +122,8 @@ pub struct ChainLaserActor<H: StreamHandle, S: StreamFactory<H>> {
     /// RPC client for diagnostics (e.g., fetching slot when
     /// falling behind)
     rpc_client: ChainRpcClientImpl,
+    /// Validator identity used for delegated-to-us gating
+    validator_pubkey: Pubkey,
     /// Duration for the time-based optimization interval
     optimization_interval_duration: Duration,
 }
@@ -135,6 +137,7 @@ impl ChainLaserActor<super::StreamHandleImpl, super::StreamFactoryImpl> {
         commitment: SolanaCommitmentLevel,
         abort_sender: mpsc::Sender<()>,
         slots: Slots,
+        validator_pubkey: Pubkey,
         rpc_client: ChainRpcClientImpl,
         grpc_config: &GrpcConfig,
     ) -> (
@@ -162,17 +165,20 @@ impl ChainLaserActor<super::StreamHandleImpl, super::StreamFactoryImpl> {
             commitment,
             abort_sender,
             slots,
+            validator_pubkey,
             rpc_client,
             grpc_config,
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         client_id: &str,
         laser_client_config: LaserstreamConfig,
         commitment: SolanaCommitmentLevel,
         abort_sender: mpsc::Sender<()>,
         slots: Slots,
+        validator_pubkey: Pubkey,
         rpc_client: ChainRpcClientImpl,
         grpc_config: &GrpcConfig,
     ) -> (
@@ -188,6 +194,7 @@ impl ChainLaserActor<super::StreamHandleImpl, super::StreamFactoryImpl> {
             commitment,
             abort_sender,
             slots,
+            validator_pubkey,
             rpc_client,
             grpc_config,
         )
@@ -196,12 +203,14 @@ impl ChainLaserActor<super::StreamHandleImpl, super::StreamFactoryImpl> {
 
 impl<H: StreamHandle, S: StreamFactory<H>> ChainLaserActor<H, S> {
     /// Create actor with a custom stream factory (for testing)
+    #[allow(clippy::too_many_arguments)]
     pub fn with_stream_factory(
         client_id: &str,
         stream_factory: S,
         commitment: SolanaCommitmentLevel,
         abort_sender: mpsc::Sender<()>,
         slots: Slots,
+        validator_pubkey: Pubkey,
         rpc_client: ChainRpcClientImpl,
         grpc_config: &GrpcConfig,
     ) -> (
@@ -241,9 +250,9 @@ impl<H: StreamHandle, S: StreamFactory<H>> ChainLaserActor<H, S> {
             slots,
             client_id: client_id.to_string(),
             rpc_client,
+            validator_pubkey,
             optimization_interval_duration,
         };
-
         (
             me,
             messages_sender,
@@ -754,10 +763,20 @@ impl<H: StreamHandle, S: StreamFactory<H>> ChainLaserActor<H, S> {
             );
         }
 
-        let should_forward = self.stream_manager.is_subscribed(&pubkey)
-            || matches!(source, AccountUpdateSource::Program)
-                && owner.eq(&dlp_api::id())
-                && !is_internal_dlp_account_data(&account.data);
+        let should_forward = if self.stream_manager.is_subscribed(&pubkey) {
+            true
+        } else {
+            matches!(source, AccountUpdateSource::Program)
+                && crate::delegation_record::should_forward_dlp_program_update(
+                    &self.rpc_client,
+                    &self.validator_pubkey,
+                    pubkey,
+                    &owner,
+                    &account.data,
+                    slot,
+                )
+                .await
+        };
         if !should_forward {
             return;
         }
