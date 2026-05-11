@@ -2197,7 +2197,7 @@ where
     }
 
     #[instrument(skip(self))]
-    pub async fn subscribe_to_account(
+    pub async fn subscribe_to_account_to_track_undelegation(
         &self,
         pubkey: &Pubkey,
     ) -> ChainlinkResult<()> {

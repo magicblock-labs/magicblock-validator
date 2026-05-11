@@ -1238,7 +1238,7 @@ async fn test_undelegation_requested_subscription_behavior() {
 
     // Now simulate undelegation request - this should start subscription
     fetch_cloner
-        .subscribe_to_account(&account_pubkey)
+        .subscribe_to_account_to_track_undelegation(&account_pubkey)
         .await
         .expect("Failed to subscribe to account for undelegation");
 
@@ -1304,7 +1304,7 @@ async fn test_delegated_authoritative_skip_unsubscribes_subscription() {
 
     // Simulate undelegation-tracking subscription being active.
     fetch_cloner
-        .subscribe_to_account(&account_pubkey)
+        .subscribe_to_account_to_track_undelegation(&account_pubkey)
         .await
         .expect("failed to subscribe delegated account");
     assert_subscribed!(remote_account_provider, &[&account_pubkey]);
