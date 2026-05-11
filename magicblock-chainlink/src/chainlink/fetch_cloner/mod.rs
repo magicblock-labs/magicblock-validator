@@ -79,7 +79,7 @@ use crate::{
         program_account::get_loaderv3_get_program_data_address,
         ChainPubsubClient, ChainRpcClient, ForwardedSubscriptionUpdate,
         MatchSlotsConfig, RemoteAccount, RemoteAccountProvider,
-        ResolvedAccountSharedData, SubscriptionReason,
+        ResolvedAccountSharedData, SubscriptionReason, SubscriptionReleaseMode,
     },
 };
 
@@ -2189,7 +2189,11 @@ where
     ) {
         if let Err(err) = self
             .remote_account_provider
-            .release_subscription_reason_all(pubkey, reason)
+            .release_subscription_with_mode(
+                pubkey,
+                reason,
+                SubscriptionReleaseMode::All,
+            )
             .await
         {
             warn!(pubkey = %pubkey, ?reason, error = %err, "Failed to release all subscription reason ownership");

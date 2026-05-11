@@ -147,7 +147,7 @@ impl SubscriptionOwnership {
     }
 }
 
-enum SubscriptionReleaseMode {
+pub(crate) enum SubscriptionReleaseMode {
     Single,
     All,
 }
@@ -1143,20 +1143,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         .await
     }
 
-    pub async fn release_subscription_reason_all(
-        &self,
-        pubkey: &Pubkey,
-        reason: SubscriptionReason,
-    ) -> RemoteAccountProviderResult<bool> {
-        self.release_subscription_with_mode(
-            pubkey,
-            reason,
-            SubscriptionReleaseMode::All,
-        )
-        .await
-    }
-
-    async fn release_subscription_with_mode(
+    pub(crate) async fn release_subscription_with_mode(
         &self,
         pubkey: &Pubkey,
         reason: SubscriptionReason,

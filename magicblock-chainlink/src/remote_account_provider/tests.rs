@@ -371,9 +371,10 @@ async fn test_release_subscription_reason_all_clears_duplicate_reason_counts() {
     assert!(provider.is_watching(&pubkey));
 
     let unsubscribed = provider
-        .release_subscription_reason_all(
+        .release_subscription_with_mode(
             &pubkey,
             SubscriptionReason::DirectAccount,
+            SubscriptionReleaseMode::All,
         )
         .await
         .unwrap();
@@ -382,9 +383,10 @@ async fn test_release_subscription_reason_all_clears_duplicate_reason_counts() {
     assert!(provider.is_watching(&pubkey));
 
     let unsubscribed = provider
-        .release_subscription_reason_all(
+        .release_subscription_with_mode(
             &pubkey,
             SubscriptionReason::UndelegationTracking,
+            SubscriptionReleaseMode::All,
         )
         .await
         .unwrap();
