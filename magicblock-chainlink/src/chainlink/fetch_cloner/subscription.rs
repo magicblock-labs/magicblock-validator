@@ -51,7 +51,9 @@ pub(crate) async fn release_subs<T: ChainRpcClient, U: ChainPubsubClient>(
 ) {
     for release in releases {
         let SubscriptionRelease::Pubkey { pubkey, reason } = release;
-        if let Err(err) = provider.release_subscription(&pubkey, reason).await {
+        if let Err(err) =
+            provider.release_single_subscription(&pubkey, reason).await
+        {
             warn!(pubkey = %pubkey, ?reason, error = ?err, "Failed to release subscription reason");
         }
     }

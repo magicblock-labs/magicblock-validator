@@ -995,7 +995,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         if !errors.is_empty() {
             for pubkey in &acquired {
                 if let Err(unsub_err) = self
-                    .release_subscription(
+                    .release_single_subscription(
                         pubkey,
                         SubscriptionReason::DirectAccount,
                     )
@@ -1130,7 +1130,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         Ok(())
     }
 
-    pub async fn release_subscription(
+    pub async fn release_single_subscription(
         &self,
         pubkey: &Pubkey,
         reason: SubscriptionReason,
