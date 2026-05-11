@@ -177,6 +177,11 @@ pub struct RemoteAccountProvider<T: ChainRpcClient, U: ChainPubsubClient> {
     /// Subscription ownership reasons tracked per pubkey.
     subscription_ownership:
         Arc<AsyncMutex<HashMap<Pubkey, SubscriptionOwnership>>>,
+    /// Serializes subscription transitions that can affect more than one
+    /// pubkey. Acquiring one pubkey can evict and unsubscribe another pubkey
+    /// from the LRU, so per-pubkey locks alone are not enough to keep
+    /// ownership reasons and LRU membership in sync.
+    subscription_transition_lock: Arc<AsyncMutex<()>>,
     /// Per-pubkey locks serializing subscription acquire/release transitions.
     subscription_key_locks:
         Arc<AsyncMutex<HashMap<Pubkey, Arc<AsyncMutex<()>>>>>,
@@ -364,6 +369,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             fetching_accounts: Arc::<FetchingAccounts>::default(),
             next_fetching_account_generation: AtomicU64::default(),
             subscription_ownership: Arc::new(AsyncMutex::new(HashMap::new())),
+            subscription_transition_lock: Arc::new(AsyncMutex::new(())),
             subscription_key_locks: Arc::new(AsyncMutex::new(HashMap::new())),
             rpc_client,
             pubsub_client,
@@ -1109,6 +1115,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         pubkey: &Pubkey,
         reason: SubscriptionReason,
     ) -> RemoteAccountProviderResult<()> {
+        let _transition_guard = self.subscription_transition_lock.lock().await;
         let subscription_key_lock = self.subscription_key_lock(pubkey).await;
         let _subscription_guard = subscription_key_lock.lock().await;
 
@@ -1149,6 +1156,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         reason: SubscriptionReason,
         mode: SubscriptionReleaseMode,
     ) -> RemoteAccountProviderResult<bool> {
+        let _transition_guard = self.subscription_transition_lock.lock().await;
         let subscription_key_lock = self.subscription_key_lock(pubkey).await;
         let _subscription_guard = subscription_key_lock.lock().await;
 
@@ -1216,6 +1224,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         &self,
         pubkey: &Pubkey,
     ) -> RemoteAccountProviderResult<()> {
+        let _transition_guard = self.subscription_transition_lock.lock().await;
         let subscription_key_lock = self.subscription_key_lock(pubkey).await;
         let _subscription_guard = subscription_key_lock.lock().await;
 
