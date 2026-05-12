@@ -3185,6 +3185,72 @@ async fn test_projected_ata_clone_request_from_eata_update_keeps_actions() {
 }
 
 #[tokio::test]
+async fn test_fetch_and_parse_delegation_record_releases_direct_ref_when_already_watched(
+) {
+    init_logger();
+    let validator_keypair = Keypair::new();
+    let validator_pubkey = validator_keypair.pubkey();
+    let wallet_owner = random_pubkey();
+    let mint = random_pubkey();
+    const CURRENT_SLOT: u64 = 100;
+
+    let eata_pubkey = derive_eata(&wallet_owner, &mint);
+    let eata_account = create_eata_account(&wallet_owner, &mint, 777, true);
+
+    let FetcherTestCtx {
+        remote_account_provider,
+        rpc_client,
+        fetch_cloner,
+        ..
+    } = setup(
+        [(eata_pubkey, eata_account)],
+        CURRENT_SLOT,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+
+    let delegation_record_pubkey = add_delegation_record_for(
+        &rpc_client,
+        eata_pubkey,
+        validator_pubkey,
+        EATA_PROGRAM_ID,
+    );
+
+    remote_account_provider
+        .acquire_subscription(
+            &delegation_record_pubkey,
+            SubscriptionReason::DelegationRecord,
+        )
+        .await
+        .unwrap();
+
+    let (delegation_record, _) = fetch_cloner
+        .fetch_and_parse_delegation_record(
+            eata_pubkey,
+            CURRENT_SLOT,
+            AccountFetchOrigin::GetAccount,
+        )
+        .await
+        .expect("delegation record should resolve");
+
+    assert_eq!(delegation_record.authority, validator_pubkey);
+    assert_eq!(delegation_record.owner, EATA_PROGRAM_ID);
+
+    remote_account_provider
+        .release_single_subscription(
+            &delegation_record_pubkey,
+            SubscriptionReason::DelegationRecord,
+        )
+        .await
+        .unwrap();
+
+    assert!(
+        !remote_account_provider.is_watching(&delegation_record_pubkey),
+        "delegation record direct ref should not leak"
+    );
+}
+
+#[tokio::test]
 async fn test_delegated_eata_update_does_not_override_delegated_ata_in_bank() {
     init_logger();
     let validator_keypair = Keypair::new();

@@ -183,9 +183,6 @@ where
 {
     let delegation_record_pubkey =
         delegation_record_pda_from_delegated_account(&account_pubkey);
-    let was_watching_deleg_record = this
-        .remote_account_provider
-        .is_watching(&delegation_record_pubkey);
 
     let acquired_delegation_record_reason = this
         .acquire_subscription_reason(
@@ -234,14 +231,13 @@ where
     };
 
     let mut releases = Vec::new();
-    if !was_watching_deleg_record
-        // Handle edge case where it was cloned in the meantime.
-        // The small possiblility of a fetch + clone of this delegation record being in process
-        // still exits, but it's negligible
-        && this
-            .accounts_bank
-            .get_account(&delegation_record_pubkey)
-            .is_none()
+    // Handle edge case where it was cloned in the meantime.
+    // The small possibility of a fetch + clone of this delegation record being in process
+    // still exists, but it's negligible.
+    if this
+        .accounts_bank
+        .get_account(&delegation_record_pubkey)
+        .is_none()
     {
         releases.push(SubscriptionRelease::Pubkey {
             pubkey: delegation_record_pubkey,
