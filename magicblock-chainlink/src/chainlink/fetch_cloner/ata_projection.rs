@@ -252,13 +252,8 @@ where
         });
     }
 
-    let ata_pubkeys = atas
-        .iter()
-        .map(|(ata_pubkey, _, _, _)| *ata_pubkey)
-        .collect::<HashSet<_>>();
     let mut releases = pubkeys_to_subscribe
         .iter()
-        .filter(|pubkey| !ata_pubkeys.contains(pubkey))
         .copied()
         .map(|pubkey| SubscriptionRelease::Pubkey {
             pubkey,

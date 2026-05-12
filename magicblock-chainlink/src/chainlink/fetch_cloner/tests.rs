@@ -3556,6 +3556,63 @@ async fn test_clone_ownership_failure_propagates_to_waiters() {
 }
 
 #[tokio::test]
+async fn test_ata_projection_releases_ata_direct_ref_after_fetch() {
+    init_logger();
+    let validator_keypair = Keypair::new();
+    let validator_pubkey = validator_keypair.pubkey();
+    let wallet_owner = random_pubkey();
+    let mint = random_pubkey();
+    const CURRENT_SLOT: u64 = 100;
+    const AMOUNT: u64 = 777;
+
+    let ata_pubkey = derive_ata(&wallet_owner, &mint);
+    let eata_pubkey = derive_eata(&wallet_owner, &mint);
+    let ata_account = create_ata_account(&wallet_owner, &mint);
+    let eata_account = create_eata_account(&wallet_owner, &mint, AMOUNT, true);
+
+    let FetcherTestCtx {
+        remote_account_provider,
+        fetch_cloner,
+        rpc_client,
+        ..
+    } = setup(
+        [(ata_pubkey, ata_account), (eata_pubkey, eata_account)],
+        CURRENT_SLOT,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+
+    add_delegation_record_with_slot_for(
+        &rpc_client,
+        eata_pubkey,
+        validator_pubkey,
+        EATA_PROGRAM_ID,
+        CURRENT_SLOT + 1,
+    );
+
+    let result = fetch_cloner
+        .fetch_and_clone_accounts_with_dedup(
+            &[ata_pubkey],
+            None,
+            None,
+            AccountFetchOrigin::GetAccount,
+            None,
+        )
+        .await
+        .expect("ATA projection fetch should not fail");
+    assert!(result.is_ok(), "ATA projection fetch should succeed");
+
+    assert!(
+        !remote_account_provider.is_watching(&ata_pubkey),
+        "ATA direct subscription must be released after projection fetch"
+    );
+    assert!(
+        !remote_account_provider.is_watching(&eata_pubkey),
+        "eATA direct/projection subscriptions must be released after projection fetch"
+    );
+}
+
+#[tokio::test]
 async fn test_fetch_keeps_undelegating_projected_ata_in_bank() {
     init_logger();
     let validator_keypair = Keypair::new();
