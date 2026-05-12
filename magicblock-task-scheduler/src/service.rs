@@ -1,10 +1,14 @@
 use std::{
     collections::HashMap,
     path::Path,
-    sync::atomic::{AtomicU64, Ordering},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
+    task::{Context, Poll},
 };
 
-use futures_util::StreamExt;
+use futures_util::{task::noop_waker, StreamExt};
 use magicblock_config::config::TaskSchedulerConfig;
 use magicblock_core::link::transactions::ScheduledTasksRx;
 use magicblock_ledger::LatestBlock;
@@ -13,12 +17,16 @@ use magicblock_program::{
     instruction_utils::InstructionUtils,
     validator::{validator_authority, validator_authority_id},
 };
-use solana_instruction::Instruction;
 use solana_message::Message;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_signature::Signature;
 use solana_transaction::Transaction;
-use tokio::{select, task::JoinHandle, time::Duration};
+use tokio::{
+    select,
+    sync::mpsc,
+    task::{JoinHandle, JoinSet},
+    time::Duration,
+};
 use tokio_util::{
     sync::CancellationToken,
     time::{delay_queue::Key, DelayQueue},
@@ -38,7 +46,7 @@ pub struct TaskSchedulerService {
     /// Database for persisting tasks
     db: SchedulerDatabase,
     /// RPC client used to send transactions
-    rpc_client: RpcClient,
+    rpc_client: Arc<RpcClient>,
     /// Used to receive scheduled tasks from the transaction executor
     scheduled_tasks: ScheduledTasksRx,
     /// Provides latest blockhash for signing transactions
@@ -49,14 +57,14 @@ pub struct TaskSchedulerService {
     task_queue_keys: HashMap<i64, Key>,
     /// Number of consecutive failed execution attempts for each task
     task_execution_retries: HashMap<i64, u32>,
-    /// Counter used to make each transaction unique
-    tx_counter: AtomicU64,
     /// Token used to cancel the task scheduler
     token: CancellationToken,
     /// Minimum interval between task executions
     min_interval: Duration,
     /// Slot interval of the validator
     slot_interval: Duration,
+    /// Shared counter for noop instructions (unique crank transactions).
+    tx_counter: Arc<AtomicU64>,
 }
 
 enum ProcessingOutcome {
@@ -97,13 +105,13 @@ impl TaskSchedulerService {
         let db = SchedulerDatabase::new(path)?;
         Ok(Self {
             db,
-            rpc_client: RpcClient::new(rpc_url),
+            rpc_client: Arc::new(RpcClient::new(rpc_url)),
             scheduled_tasks,
             block,
             task_queue: DelayQueue::new(),
             task_queue_keys: HashMap::new(),
             task_execution_retries: HashMap::new(),
-            tx_counter: AtomicU64::default(),
+            tx_counter: Arc::new(AtomicU64::default()),
             token,
             min_interval: config.min_interval,
             slot_interval,
@@ -235,28 +243,14 @@ impl TaskSchedulerService {
         Ok(())
     }
 
-    async fn execute_task(&mut self, task: &DbTask) -> TaskSchedulerResult<()> {
-        let sig = self.process_transaction(task.instructions.clone()).await?;
-
-        // TODO(Dodecahedr0x): we don't get any output directly at this point
-        // we would have to fetch the transaction via its signature to see
-        // if it succeeded or failed.
-        // However that should not happen here, but on a separate task
-        // If sending the transaction fails, the task is retried in run().
-        debug!("Executed task {} with signature {}", task.id, sig);
-
-        if task.executions_left > 1 {
-            // Reschedule the task
-            let new_task = DbTask {
-                executions_left: task.executions_left - 1,
-                ..task.clone()
-            };
-            let key = self.task_queue.insert(
-                new_task,
-                Duration::from_millis(task.execution_interval_millis as u64),
-            );
-            self.task_queue_keys.insert(task.id, key);
-        }
+    async fn apply_successful_execution(
+        &mut self,
+        task: &DbTask,
+    ) -> TaskSchedulerResult<()> {
+        let Some(current) = self.db.get_task(task.id).await? else {
+            self.task_execution_retries.remove(&task.id);
+            return Ok(());
+        };
 
         if task.executions_left <= 1 {
             self.db.remove_task(task.id).await?;
@@ -267,10 +261,55 @@ impl TaskSchedulerService {
                 .await?;
         }
 
+        if current.executions_left > 1 {
+            let new_task = DbTask {
+                executions_left: current.executions_left - 1,
+                ..current
+            };
+            let key = self.task_queue.insert(
+                new_task,
+                Duration::from_millis(current.execution_interval_millis as u64),
+            );
+            self.task_queue_keys.insert(task.id, key);
+        }
+
+        self.task_execution_retries.remove(&task.id);
         Ok(())
     }
 
-    pub async fn register_task(
+    async fn on_crank_batch_completed(
+        &mut self,
+        batch: Vec<DbTask>,
+        result: TaskSchedulerResult<Vec<TaskSchedulerResult<Signature>>>,
+    ) -> TaskSchedulerResult<()> {
+        match result {
+            Ok(sigs) => {
+                debug!(
+                    "Executed crank batch ({} tasks) with signatures {:?}",
+                    batch.len(),
+                    sigs
+                );
+                // Note: batch and sigs have the same length by design
+                for (task, res) in batch.iter().zip(sigs) {
+                    // Handle tasks individually if they failed
+                    if let Err(e) = res {
+                        self.handle_failed_task_execution(task, &e).await?;
+                    } else {
+                        self.apply_successful_execution(task).await?;
+                    }
+                }
+            }
+            Err(ref e) => {
+                // The whole batch failed
+                for task in &batch {
+                    self.handle_failed_task_execution(task, e).await?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    async fn register_task(
         &mut self,
         task: impl Into<DbTask>,
     ) -> TaskSchedulerResult<()> {
@@ -299,7 +338,7 @@ impl TaskSchedulerService {
         Ok(())
     }
 
-    pub async fn unregister_task(
+    async fn unregister_task(
         &mut self,
         task_id: i64,
     ) -> TaskSchedulerResult<()> {
@@ -312,19 +351,34 @@ impl TaskSchedulerService {
     }
 
     pub async fn run(mut self) -> TaskSchedulerResult<()> {
+        let (crank_tx, mut crank_rx) = mpsc::unbounded_channel();
+
         loop {
             select! {
-                Some(task) = self.task_queue.next() => {
-                    let task = task.get_ref();
-                    self.task_queue_keys.remove(&task.id);
-                    match self.execute_task(task).await {
-                        Ok(()) => {
-                            self.task_execution_retries.remove(&task.id);
-                        }
-                        Err(e) => {
-                            self.handle_failed_task_execution(task, e).await?;
-                        }
+                Some(expired) = self.task_queue.next() => {
+                    let first = expired.into_inner();
+                    self.task_queue_keys.remove(&first.id);
+                    let mut batch = vec![first];
+                    let waker = noop_waker();
+                    let mut cx = Context::from_waker(&waker);
+                    while let Poll::Ready(Some(expired)) = self.task_queue.poll_expired(&mut cx) {
+                        let task = expired.into_inner();
+                        self.task_queue_keys.remove(&task.id);
+                        batch.push(task);
                     }
+
+                    let rpc_client = self.rpc_client.clone();
+                    let block = self.block.clone();
+                    let tx_counter = self.tx_counter.clone();
+                    let crank_tx = crank_tx.clone();
+                    tokio::spawn(async move {
+                        let result =
+                            send_crank_batch(rpc_client, &block, tx_counter, &batch).await;
+                        let _ = crank_tx.send((batch, result));
+                    });
+                }
+                Some((batch, result)) = crank_rx.recv() => {
+                    self.on_crank_batch_completed(batch, result).await?;
                 }
                 Some(task) = self.scheduled_tasks.recv() => {
                     let id = task.id();
@@ -358,12 +412,12 @@ impl TaskSchedulerService {
     async fn handle_failed_task_execution(
         &mut self,
         task: &DbTask,
-        error: TaskSchedulerError,
+        error: &TaskSchedulerError,
     ) -> TaskSchedulerResult<()> {
         debug!("Failed to execute task {}: {}", task.id, error);
 
-        if !is_retryable_task_execution_error(&error) {
-            return self.record_failed_task(task, error).await;
+        if !is_retryable_task_execution_error(error) {
+            return self.record_failed_task(task, error.to_string()).await;
         }
 
         let Some(retries) = ({
@@ -376,7 +430,7 @@ impl TaskSchedulerService {
                 Some(*retries)
             }
         }) else {
-            return self.record_failed_task(task, error).await;
+            return self.record_failed_task(task, error.to_string()).await;
         };
         let delay = self.task_execution_retry_delay(retries);
         debug!(
@@ -397,11 +451,9 @@ impl TaskSchedulerService {
     async fn record_failed_task(
         &mut self,
         task: &DbTask,
-        error: TaskSchedulerError,
+        error: String,
     ) -> TaskSchedulerResult<()> {
-        self.db
-            .move_task_to_failed(task.id, format!("{:?}", error))
-            .await?;
+        self.db.move_task_to_failed(task.id, error).await?;
         self.task_execution_retries.remove(&task.id);
         self.remove_task_from_queue(task.id);
 
@@ -418,32 +470,42 @@ impl TaskSchedulerService {
             .unwrap_or(TASK_EXECUTION_RETRY_MAX_DELAY)
             .min(TASK_EXECUTION_RETRY_MAX_DELAY)
     }
+}
 
-    async fn process_transaction(
-        &self,
-        instructions: Vec<Instruction>,
-    ) -> TaskSchedulerResult<Signature> {
-        let blockhash = self.block.load().blockhash;
-        // Execute unsigned transactions
-        // We prepend a noop instruction to make each transaction unique.
-        let ixs = [
-            InstructionUtils::noop_instruction(
-                self.tx_counter.fetch_add(1, Ordering::Relaxed),
-            ),
-            InstructionUtils::execute_task_instruction(instructions),
-        ];
-        let tx = Transaction::new(
-            &[validator_authority()],
-            Message::new(&ixs, Some(&validator_authority_id())),
-            blockhash,
-        );
-
-        Ok(self
-            .rpc_client
-            .send_transaction(&tx)
-            .await
-            .map_err(Box::new)?)
+async fn send_crank_batch(
+    rpc_client: Arc<RpcClient>,
+    block: &LatestBlock,
+    tx_counter: Arc<AtomicU64>,
+    tasks: &[DbTask],
+) -> TaskSchedulerResult<Vec<TaskSchedulerResult<Signature>>> {
+    let mut join_set: JoinSet<TaskSchedulerResult<Signature>> = JoinSet::new();
+    let blockhash = block.load().blockhash;
+    for task in tasks {
+        let rpc_client = rpc_client.clone();
+        let tx_counter = tx_counter.clone();
+        let task = task.clone();
+        join_set.spawn(async move {
+            let ixs = vec![
+                InstructionUtils::noop_instruction(
+                    tx_counter.fetch_add(1, Ordering::Relaxed),
+                ),
+                InstructionUtils::execute_task_instruction(
+                    task.instructions.clone(),
+                ),
+            ];
+            let tx = Transaction::new(
+                &[validator_authority()],
+                Message::new(&ixs, Some(&validator_authority_id())),
+                blockhash,
+            );
+            Ok(rpc_client.send_transaction(&tx).await.map_err(Box::new)?)
+        });
     }
+    let results = join_set.join_all().await;
+    let sigs = results
+        .into_iter()
+        .collect::<Vec<TaskSchedulerResult<Signature>>>();
+    Ok(sigs)
 }
 
 fn is_valid_task_interval(interval: i64) -> bool {
@@ -451,12 +513,14 @@ fn is_valid_task_interval(interval: i64) -> bool {
 }
 
 fn is_retryable_task_execution_error(error: &TaskSchedulerError) -> bool {
-    // `process_transaction` maps Solana send and verification failures to Rpc.
+    // `send_crank_batch` maps Solana send and verification failures to Rpc.
     matches!(error, TaskSchedulerError::Rpc(_))
 }
 
 #[cfg(test)]
 mod tests {
+    use std::sync;
+
     use magicblock_program::{
         args::ScheduleTaskRequest,
         validator::generate_validator_authority_if_needed,
@@ -476,12 +540,14 @@ mod tests {
 
         let service = TaskSchedulerService {
             db: db.clone(),
-            rpc_client: RpcClient::new("http://localhost:8899".to_string()),
+            rpc_client: Arc::new(RpcClient::new(
+                "http://localhost:8899".to_string(),
+            )),
             block: LatestBlock::default(),
             task_queue: DelayQueue::new(),
             task_queue_keys: HashMap::new(),
             task_execution_retries: HashMap::new(),
-            tx_counter: AtomicU64::default(),
+            tx_counter: sync::Arc::new(AtomicU64::default()),
             token: CancellationToken::new(),
             min_interval: Duration::from_millis(1000),
             slot_interval: Duration::from_millis(1000),
@@ -558,12 +624,14 @@ mod tests {
         .unwrap();
         let service = TaskSchedulerService {
             db: db.clone(),
-            rpc_client: RpcClient::new("http://localhost:8899".to_string()),
+            rpc_client: Arc::new(RpcClient::new(
+                "http://localhost:8899".to_string(),
+            )),
             block: LatestBlock::default(),
             task_queue: DelayQueue::new(),
             task_queue_keys: HashMap::new(),
             task_execution_retries: HashMap::new(),
-            tx_counter: AtomicU64::default(),
+            tx_counter: sync::Arc::new(AtomicU64::default()),
             token: CancellationToken::new(),
             min_interval: Duration::from_millis(1000),
             slot_interval: Duration::from_millis(1000),
@@ -617,12 +685,14 @@ mod tests {
 
         let service = TaskSchedulerService {
             db: db.clone(),
-            rpc_client: RpcClient::new("http://localhost:8899".to_string()),
+            rpc_client: Arc::new(RpcClient::new(
+                "http://localhost:8899".to_string(),
+            )),
             block: LatestBlock::default(),
             task_queue: DelayQueue::new(),
             task_queue_keys: HashMap::new(),
             task_execution_retries: HashMap::new(),
-            tx_counter: AtomicU64::default(),
+            tx_counter: Arc::new(AtomicU64::default()),
             token: CancellationToken::new(),
             min_interval: Duration::from_millis(10),
             slot_interval: Duration::from_millis(1000),

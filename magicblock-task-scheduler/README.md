@@ -20,12 +20,12 @@
 
 ## Configuration
 
-The task scheduler can be configured via the validator configuration:
+The task scheduler can be configured via the validator configuration (`TaskSchedulerConfig`):
 
 ```toml
 [task_scheduler]
 reset = false
-millis_per_tick = 100
+min-interval = "10ms"
 ```
 
 ## Security Considerations
@@ -35,7 +35,5 @@ millis_per_tick = 100
 
 ## Performance Considerations
 
-- Database is indexed for efficient task retrieval
-- Tasks are executed in batches to minimize overhead
-- Failed task executions are logged but don't block other tasks
-- Database operations are optimized for high-frequency access 
+- Same-tick delay-queue draining; bounded parallel `send_transaction` via semaphore.
+- `Arc` for stored instructions; configurable `RpcSendTransactionConfig` for crank sends.
