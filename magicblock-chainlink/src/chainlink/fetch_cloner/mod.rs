@@ -55,7 +55,8 @@ use self::{
     },
     pending_operation::{
         claim_or_join_pending, finish_pending, Pending, PendingClaim,
-        PendingFailure, PendingTerminal, PendingWaiter,
+        PendingFailure, PendingHandles, PendingOwner, PendingTerminal,
+        PendingWaiter,
     },
     subscription::{release_subs, SubscriptionRelease},
     types::{
@@ -339,6 +340,7 @@ where
         generation: u64,
         deadline: tokio::time::Instant,
         cancel: Arc<tokio::sync::Notify>,
+        owner: PendingOwner,
         mark_empty_if_not_found: bool,
         slot: Option<u64>,
         fetch_origin: AccountFetchOrigin,
@@ -347,6 +349,7 @@ where
         let this = self.clone();
         let pending = self.pending_requests.clone();
         task::spawn(async move {
+            let mut owner = owner;
             let pubkeys = vec![pubkey];
             let mark_empty = mark_empty_if_not_found.then_some(vec![pubkey]);
             let mark_empty_ref = mark_empty.as_deref();
@@ -375,6 +378,7 @@ where
                 }
             };
             finish_pending(&pending, pubkey, generation, terminal);
+            owner.dismiss();
         });
     }
 
@@ -1982,13 +1986,22 @@ where
         for pubkey in pubkeys {
             match self.claim_or_join_owned_operation(*pubkey) {
                 PendingClaim::Created(handles) => {
-                    let waiter = handles.waiter;
+                    let PendingHandles {
+                        waiter,
+                        deadline,
+                        cancel,
+                        owner,
+                    } = handles;
+                    let owner = owner.expect(
+                        "created pending claim must include owner guard",
+                    );
                     let waiter_pubkey = waiter.pubkey();
                     self.spawn_owned_operation(
                         waiter_pubkey,
                         waiter.generation(),
-                        handles.deadline,
-                        handles.cancel,
+                        deadline,
+                        cancel,
+                        owner,
                         mark_empty_set.contains(&waiter_pubkey),
                         slot,
                         fetch_origin,

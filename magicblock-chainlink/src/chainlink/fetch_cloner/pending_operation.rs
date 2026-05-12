@@ -114,10 +114,52 @@ impl Drop for PendingWaiter {
     }
 }
 
+pub(super) struct PendingOwner {
+    pending: Arc<HashMap<Pubkey, Pending>>,
+    pubkey: Pubkey,
+    generation: PendingGeneration,
+    completed: bool,
+}
+
+impl PendingOwner {
+    fn new(
+        pending: Arc<HashMap<Pubkey, Pending>>,
+        pubkey: Pubkey,
+        generation: PendingGeneration,
+    ) -> Self {
+        Self {
+            pending,
+            pubkey,
+            generation,
+            completed: false,
+        }
+    }
+
+    pub(super) fn dismiss(&mut self) {
+        self.completed = true;
+    }
+}
+
+impl Drop for PendingOwner {
+    fn drop(&mut self) {
+        if self.completed {
+            return;
+        }
+
+        let _ = finish_pending_cleanup(
+            &self.pending,
+            self.pubkey,
+            self.generation,
+            None,
+        );
+    }
+}
+
 pub(super) struct PendingHandles {
     pub waiter: PendingWaiter,
     pub deadline: Instant,
     pub cancel: Arc<Notify>,
+    pub owner: Option<PendingOwner>,
 }
 
 pub(super) enum PendingClaim {
@@ -154,6 +196,11 @@ pub(super) fn claim_or_join_pending(
                 ),
                 deadline,
                 cancel,
+                owner: Some(PendingOwner::new(
+                    pending.clone(),
+                    pubkey,
+                    generation,
+                )),
             })
         }
         scc::hash_map::Entry::Occupied(mut entry) => {
@@ -171,11 +218,33 @@ pub(super) fn claim_or_join_pending(
                 ),
                 deadline,
                 cancel,
+                owner: None,
             })
         }
     };
 
     claim
+}
+
+fn finish_pending_cleanup(
+    pending: &Arc<HashMap<Pubkey, Pending>>,
+    pubkey: Pubkey,
+    generation: PendingGeneration,
+    terminal: Option<PendingTerminal>,
+) -> usize {
+    if let Some((_, pending)) =
+        pending.remove_if(&pubkey, |pending| pending.generation == generation)
+    {
+        let waiter_count = pending.waiters.len();
+        if let Some(terminal) = terminal {
+            for (_, waiter) in pending.waiters {
+                let _ = waiter.send(terminal.clone());
+            }
+        }
+        waiter_count
+    } else {
+        0
+    }
 }
 
 pub(super) fn finish_pending(
@@ -184,15 +253,5 @@ pub(super) fn finish_pending(
     generation: PendingGeneration,
     terminal: PendingTerminal,
 ) -> usize {
-    if let Some((_, pending)) =
-        pending.remove_if(&pubkey, |pending| pending.generation == generation)
-    {
-        let waiter_count = pending.waiters.len();
-        for (_, waiter) in pending.waiters {
-            let _ = waiter.send(terminal.clone());
-        }
-        waiter_count
-    } else {
-        0
-    }
+    finish_pending_cleanup(pending, pubkey, generation, Some(terminal))
 }
