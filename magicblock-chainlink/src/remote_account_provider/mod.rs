@@ -143,9 +143,8 @@ impl SubscriptionOwnership {
         self.reasons.is_empty()
     }
 
-    fn release_all(&mut self, reason: SubscriptionReason) -> bool {
-        self.reasons.remove(&reason);
-        self.reasons.is_empty()
+    fn release_all(&mut self, reason: SubscriptionReason) -> usize {
+        self.reasons.remove(&reason).unwrap_or_default()
     }
 
     fn is_empty(&self) -> bool {
@@ -1176,22 +1175,27 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             return Ok(false);
         }
 
-        {
+        let released_count = {
             let mut ownership = self.subscription_ownership.lock().await;
-            let is_empty = match ownership.get_mut(pubkey) {
-                Some(existing) => match mode {
-                    SubscriptionReleaseMode::Single => existing.release(reason),
-                    SubscriptionReleaseMode::All => {
-                        existing.release_all(reason)
-                    }
-                },
+            let (is_empty, released_count) = match ownership.get_mut(pubkey) {
+                Some(existing) => {
+                    let released_count = match mode {
+                        SubscriptionReleaseMode::Single => {
+                            existing.release(reason);
+                            1
+                        }
+                        SubscriptionReleaseMode::All => existing.release_all(reason),
+                    };
+                    (existing.is_empty(), released_count)
+                }
                 None => return Ok(false),
             };
             if !is_empty {
                 return Ok(false);
             }
             ownership.remove(pubkey);
-        }
+            released_count
+        };
 
         let success = subscription_reconciler::unsubscribe_and_notify_removal(
             *pubkey,
@@ -1208,7 +1212,10 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                 .get(pubkey)
                 .is_none_or(SubscriptionOwnership::is_empty)
             {
-                ownership.entry(*pubkey).or_default().acquire(reason);
+                let ownership = ownership.entry(*pubkey).or_default();
+                for _ in 0..released_count {
+                    ownership.acquire(reason);
+                }
             }
         }
 
