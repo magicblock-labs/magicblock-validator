@@ -359,9 +359,8 @@ where
                 program_ids_ref,
             );
             let terminal = tokio::select! {
-                _ = cancel.notified() => {
-                    PendingTerminal::Failed(PendingFailure::Cancelled)
-                }
+                biased;
+
                 result = tokio::time::timeout_at(deadline, work) => {
                     match result {
                         Ok(Ok(result)) => PendingTerminal::Success(result),
@@ -370,6 +369,9 @@ where
                         ),
                         Err(_) => PendingTerminal::Failed(PendingFailure::TimedOut),
                     }
+                }
+                _ = cancel.notified() => {
+                    PendingTerminal::Failed(PendingFailure::Cancelled)
                 }
             };
             finish_pending(&pending, pubkey, generation, terminal);
@@ -1147,7 +1149,8 @@ where
                                 &self.remote_account_provider,
                                 [SubscriptionRelease::Pubkey {
                                     pubkey: delegation_record_pubkey,
-                                    reason: SubscriptionReason::DelegationRecord,
+                                    reason:
+                                        SubscriptionReason::DelegationRecord,
                                 }],
                             )
                             .await;
@@ -1165,7 +1168,8 @@ where
                                 &self.remote_account_provider,
                                 [SubscriptionRelease::Pubkey {
                                     pubkey: delegation_record_pubkey,
-                                    reason: SubscriptionReason::DelegationRecord,
+                                    reason:
+                                        SubscriptionReason::DelegationRecord,
                                 }],
                             )
                             .await;
