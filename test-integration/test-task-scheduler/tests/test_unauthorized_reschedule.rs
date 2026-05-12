@@ -1,6 +1,6 @@
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
-use cleanass::assert_eq;
+use cleanass::{assert, assert_eq};
 use integration_test_tools::{expect, validator::cleanup};
 use magicblock_task_scheduler::{db::DbTask, SchedulerDatabase};
 use program_flexi_counter::{
@@ -120,11 +120,28 @@ fn test_unauthorized_reschedule() {
     let db = expect!(SchedulerDatabase::new(db_path), validator);
     let runtime = expect!(Runtime::new(), validator);
 
-    let failed_scheduling =
-        expect!(runtime.block_on(db.get_failed_schedulings()), validator);
+    let failed_scheduling = wait_for_failed_schedulings(
+        &db,
+        &runtime,
+        1,
+        Duration::from_secs(10),
+        &ctx,
+        &mut validator,
+    );
     assert_eq!(
         failed_scheduling.len(),
         1,
+        cleanup(&mut validator),
+        "failed_scheduling: {:?}",
+        failed_scheduling,
+    );
+    assert_eq!(
+        failed_scheduling[0].task_id, task_id,
+        cleanup(&mut validator),
+        "failed_scheduling: {:?}", failed_scheduling,
+    );
+    assert!(
+        failed_scheduling[0].error.contains("UnauthorizedReplacing"),
         cleanup(&mut validator),
         "failed_scheduling: {:?}",
         failed_scheduling,
@@ -162,4 +179,35 @@ fn test_unauthorized_reschedule() {
     assert_eq!(task, expected_task, cleanup(&mut validator));
 
     cleanup(&mut validator);
+}
+
+fn wait_for_failed_schedulings(
+    db: &SchedulerDatabase,
+    runtime: &Runtime,
+    expected_len: usize,
+    timeout: Duration,
+    ctx: &integration_test_tools::IntegrationTestContext,
+    validator: &mut std::process::Child,
+) -> Vec<magicblock_task_scheduler::db::FailedScheduling> {
+    let start = Instant::now();
+    while start.elapsed() < timeout {
+        let failed_scheduling =
+            expect!(runtime.block_on(db.get_failed_schedulings()), validator);
+        if failed_scheduling.len() == expected_len {
+            return failed_scheduling;
+        }
+
+        expect!(ctx.wait_for_next_slot_ephem(), validator);
+    }
+
+    let failed_scheduling =
+        expect!(runtime.block_on(db.get_failed_schedulings()), validator);
+    assert_eq!(
+        failed_scheduling.len(),
+        expected_len,
+        cleanup(validator),
+        "failed_scheduling: {:?}",
+        failed_scheduling,
+    );
+    failed_scheduling
 }

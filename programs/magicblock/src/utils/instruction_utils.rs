@@ -170,15 +170,6 @@ impl InstructionUtils {
     // -----------------
     // ModifyAccounts
     // -----------------
-    pub fn modify_accounts(
-        account_modifications: Vec<AccountModification>,
-        message: Option<String>,
-        recent_blockhash: Hash,
-    ) -> Transaction {
-        let ix =
-            Self::modify_accounts_instruction(account_modifications, message);
-        Self::into_transaction(&validator_authority(), ix, recent_blockhash)
-    }
 
     pub fn modify_accounts_instruction(
         account_modifications: Vec<AccountModification>,
@@ -195,13 +186,9 @@ impl InstructionUtils {
                 .push(AccountMeta::new(account_modification.pubkey, false));
             let account_mod_for_instruction =
                 AccountModificationForInstruction {
-                    lamports: account_modification.lamports,
                     owner: account_modification.owner,
-                    executable: account_modification.executable,
-                    data: account_modification.data,
                     delegated: account_modification.delegated,
                     confined: account_modification.confined,
-                    remote_slot: account_modification.remote_slot,
                 };
             account_mods.insert(
                 account_modification.pubkey,

@@ -6,7 +6,7 @@ use solana_keypair::Keypair;
 use tempfile::TempDir;
 
 use crate::{
-    config::{BlockSize, LifecycleMode},
+    config::{validator::ReplicationConfig, BlockSize, LifecycleMode},
     consts::{self, DEFAULT_VALIDATOR_KEYPAIR},
     types::network::{BindAddress, Remote},
     ValidatorParams,
@@ -266,7 +266,6 @@ fn test_chainlink_config() {
     let (_dir, config_path) = create_temp_config(
         r#"
         [chainlink]
-        prepare-lookup-tables = true
         max-monitored-accounts = 5000
         resubscription-delay = "50ms"
         "#,
@@ -274,7 +273,6 @@ fn test_chainlink_config() {
 
     let config = run_cli(vec![config_path.to_str().unwrap()]);
 
-    assert!(config.chainlink.prepare_lookup_tables);
     assert_eq!(config.chainlink.max_monitored_accounts, 5000);
     assert_eq!(
         config.chainlink.resubscription_delay,
@@ -379,9 +377,20 @@ fn test_example_config_full_coverage() {
     // 3. Core & Network
     // ========================================================================
     assert_eq!(config.lifecycle, LifecycleMode::Ephemeral);
-    // Example config has 3 remotes: devnet HTTP, devnet WebSocket, and Helius gRPC
+    // Example config has 3 remotes: Helius gRPC, devnet HTTP, and devnet WebSocket.
     assert_eq!(config.remotes.len(), 3);
-    assert_eq!(config.remotes[0].url_str(), consts::DEVNET_URL);
+    assert!(config.remotes.iter().any(|r| {
+        matches!(r, Remote::Grpc(_))
+            && r.url_str()
+                == "https://laserstream-devnet-ewr.helius-rpc.com/?api-key=YOUR_API_KEY"
+    }));
+    assert!(config.remotes.iter().any(|r| {
+        matches!(r, Remote::Http(_)) && r.url_str() == consts::DEVNET_URL
+    }));
+    assert!(config.remotes.iter().any(|r| {
+        matches!(r, Remote::Websocket(_))
+            && r.url_str() == "wss://api.devnet.solana.com/"
+    }));
     assert_eq!(config.aperture.listen.0.port(), 8899);
     // Check that storage path is set (contains the expected folder name)
     assert!(config
@@ -404,6 +413,10 @@ fn test_example_config_full_coverage() {
         config.validator.keypair.0.to_base58_string(),
         DEFAULT_VALIDATOR_KEYPAIR
     );
+    assert!(matches!(
+        config.validator.replication_mode,
+        crate::config::validator::ReplicationMode::Standalone
+    ));
 
     // ========================================================================
     // 6. Chain Commitment
@@ -417,7 +430,6 @@ fn test_example_config_full_coverage() {
     assert!(matches!(config.accountsdb.block_size, BlockSize::Block256));
     assert_eq!(config.accountsdb.index_size, 16_777_216);
     assert_eq!(config.accountsdb.max_snapshots, 4);
-    assert_eq!(config.accountsdb.snapshot_frequency, 1024);
     assert!(!config.accountsdb.reset);
 
     // ========================================================================
@@ -432,7 +444,6 @@ fn test_example_config_full_coverage() {
     // ========================================================================
     // 9. Chainlink (Cloning)
     // ========================================================================
-    assert!(!config.chainlink.prepare_lookup_tables);
     assert_eq!(config.chainlink.max_monitored_accounts, 5000);
 
     // ========================================================================
@@ -505,7 +516,6 @@ fn test_env_vars_full_coverage() {
         EnvVarGuard::new("MBV_ACCOUNTSDB__BLOCK_SIZE", "block512"),
         EnvVarGuard::new("MBV_ACCOUNTSDB__INDEX_SIZE", "2048"),
         EnvVarGuard::new("MBV_ACCOUNTSDB__MAX_SNAPSHOTS", "10"),
-        EnvVarGuard::new("MBV_ACCOUNTSDB__SNAPSHOT_FREQUENCY", "500"),
         EnvVarGuard::new("MBV_ACCOUNTSDB__RESET", "true"),
         // --- Ledger ---
         EnvVarGuard::new("MBV_LEDGER__BLOCK_TIME", "200ms"),
@@ -513,7 +523,6 @@ fn test_env_vars_full_coverage() {
         EnvVarGuard::new("MBV_LEDGER__VERIFY_KEYPAIR", "false"),
         EnvVarGuard::new("MBV_LEDGER__RESET", "true"),
         // --- Chainlink ---
-        EnvVarGuard::new("MBV_CHAINLINK__PREPARE_LOOKUP_TABLES", "true"),
         EnvVarGuard::new("MBV_CHAINLINK__MAX_MONITORED_ACCOUNTS", "123"),
         EnvVarGuard::new("MBV_CHAINLINK__RESUBSCRIPTION_DELAY", "150ms"),
         // --- Task Scheduler ---
@@ -566,7 +575,6 @@ fn test_env_vars_full_coverage() {
     assert!(matches!(config.accountsdb.block_size, BlockSize::Block512));
     assert_eq!(config.accountsdb.index_size, 2048);
     assert_eq!(config.accountsdb.max_snapshots, 10);
-    assert_eq!(config.accountsdb.snapshot_frequency, 500);
     assert!(config.accountsdb.reset);
 
     // Ledger
@@ -576,7 +584,6 @@ fn test_env_vars_full_coverage() {
     assert!(config.ledger.reset);
 
     // Chainlink
-    assert!(config.chainlink.prepare_lookup_tables);
     assert_eq!(config.chainlink.max_monitored_accounts, 123);
     assert_eq!(
         config.chainlink.resubscription_delay,
@@ -709,4 +716,17 @@ fn test_bind_address_toml_deserialize_port_out_of_range_errors() {
         "unexpected error: {}",
         msg
     );
+}
+
+#[test]
+#[parallel]
+fn test_replication_config_debug_redacts_secret() {
+    let cfg = ReplicationConfig {
+        url: "nats://0.0.0.0:4222".parse().unwrap(),
+        secret: "SUASECRET".into(),
+    };
+
+    let dbg = format!("{cfg:?}");
+    assert!(dbg.contains("<redacted>"));
+    assert!(!dbg.contains("SUASECRET"));
 }

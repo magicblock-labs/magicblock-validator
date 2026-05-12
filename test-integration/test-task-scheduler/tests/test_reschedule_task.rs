@@ -1,4 +1,6 @@
-use cleanass::{assert, assert_eq};
+use std::time::Duration;
+
+use cleanass::assert_eq;
 use integration_test_tools::{expect, validator::cleanup};
 use magicblock_task_scheduler::{db::DbTask, SchedulerDatabase};
 use program_flexi_counter::{
@@ -9,7 +11,9 @@ use solana_sdk::{
     native_token::LAMPORTS_PER_SOL, signature::Keypair, signer::Signer,
     transaction::Transaction,
 };
-use test_task_scheduler::{create_delegated_counter, setup_validator};
+use test_task_scheduler::{
+    create_delegated_counter, setup_validator, wait_for_incremented_counter,
+};
 use tokio::runtime::Runtime;
 
 #[test]
@@ -97,8 +101,14 @@ fn test_reschedule_task() {
         validator
     );
 
-    // Wait for the task to be rescheduled
-    expect!(ctx.wait_for_delta_slot_ephem(6), validator);
+    // Wait for the rescheduled task to finish all remaining executions.
+    wait_for_incremented_counter(
+        &ctx,
+        &counter_pda,
+        2 * iterations as u64,
+        Duration::from_secs(10),
+        &mut validator,
+    );
 
     // Check that the task was scheduled in the database
     let db = expect!(SchedulerDatabase::new(db_path), validator);
@@ -127,13 +137,14 @@ fn test_reschedule_task() {
     let tasks = expect!(runtime.block_on(db.get_task_ids()), validator);
     assert_eq!(tasks.len(), 1, cleanup(&mut validator));
 
-    let task = expect!(
-        runtime
-            .block_on(db.get_task(task_id))
-            .ok()
-            .flatten()
-            .ok_or(anyhow::anyhow!("Task not found")),
-        validator
+    let task = wait_for_task_executions_left(
+        &db,
+        &runtime,
+        task_id,
+        0,
+        Duration::from_secs(10),
+        &ctx,
+        &mut validator,
     );
     let expected_task = DbTask {
         id: task_id,
@@ -144,22 +155,6 @@ fn test_reschedule_task() {
         last_execution_millis: task.last_execution_millis,
     };
     assert_eq!(task, expected_task, cleanup(&mut validator));
-
-    // Check that the counter was incremented
-    let counter_account = expect!(
-        ctx.try_ephem_client().and_then(|client| client
-            .get_account(&counter_pda)
-            .map_err(|e| anyhow::anyhow!("Failed to get account: {}", e))),
-        validator
-    );
-    let counter =
-        expect!(FlexiCounter::try_decode(&counter_account.data), validator);
-    assert!(
-        counter.count == 2 * iterations as u64,
-        cleanup(&mut validator),
-        "counter.count: {}",
-        counter.count
-    );
 
     // Cancel the task
     let sig = expect!(
@@ -191,4 +186,46 @@ fn test_reschedule_task() {
     assert_eq!(tasks.len(), 0, cleanup(&mut validator));
 
     cleanup(&mut validator);
+}
+
+fn wait_for_task_executions_left(
+    db: &SchedulerDatabase,
+    runtime: &Runtime,
+    task_id: i64,
+    expected: i64,
+    timeout: Duration,
+    ctx: &integration_test_tools::IntegrationTestContext,
+    validator: &mut std::process::Child,
+) -> DbTask {
+    let start = std::time::Instant::now();
+    while start.elapsed() < timeout {
+        let task = expect!(
+            runtime
+                .block_on(db.get_task(task_id))
+                .ok()
+                .flatten()
+                .ok_or(anyhow::anyhow!("Task not found")),
+            validator
+        );
+        if task.executions_left == expected {
+            return task;
+        }
+
+        expect!(ctx.wait_for_next_slot_ephem(), validator);
+    }
+
+    let task = expect!(
+        runtime
+            .block_on(db.get_task(task_id))
+            .ok()
+            .flatten()
+            .ok_or(anyhow::anyhow!("Task not found")),
+        validator
+    );
+    assert_eq!(
+        task.executions_left, expected,
+        cleanup(validator),
+        "task {} executions_left: {}", task_id, task.executions_left,
+    );
+    task
 }
