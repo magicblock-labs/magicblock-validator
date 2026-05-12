@@ -22,9 +22,7 @@ pub(crate) fn validate_cranks_instructions(
     let crank_signer = crank_signer_pda(task_id);
     for instruction in instructions {
         for account in &instruction.accounts {
-            if account.is_signer
-                && account.pubkey.ne(&crank_signer_pda(task_id))
-            {
+            if account.is_signer && account.pubkey.ne(&crank_signer) {
                 ic_msg!(
                     invoke_context,
                     "Crank ERR: only the crank signer PDA can be a signer in cranks (invalid signer: '{}')",
