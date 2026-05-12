@@ -1142,6 +1142,16 @@ where
                             error = ?err,
                             "Failed to fetch delegation record"
                         );
+                        if acquired_delegation_record_reason {
+                            release_subs(
+                                &self.remote_account_provider,
+                                [SubscriptionRelease::Pubkey {
+                                    pubkey: delegation_record_pubkey,
+                                    reason: SubscriptionReason::DelegationRecord,
+                                }],
+                            )
+                            .await;
+                        }
                         (None, None, DelegationActions::default())
                     }
                     Err(err) => {
@@ -1150,6 +1160,16 @@ where
                             error = ?err,
                             "Failed to fetch delegation record"
                         );
+                        if acquired_delegation_record_reason {
+                            release_subs(
+                                &self.remote_account_provider,
+                                [SubscriptionRelease::Pubkey {
+                                    pubkey: delegation_record_pubkey,
+                                    reason: SubscriptionReason::DelegationRecord,
+                                }],
+                            )
+                            .await;
+                        }
                         (None, None, DelegationActions::default())
                     }
                 }
