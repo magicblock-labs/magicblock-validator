@@ -278,8 +278,12 @@ impl ChainRpcClientMock {
     }
 
     async fn wait_if_fetches_blocked(&self) {
-        while self.block_fetches.load(Ordering::SeqCst) {
-            self.fetch_block_notify.notified().await;
+        loop {
+            let notified = self.fetch_block_notify.notified();
+            if !self.block_fetches.load(Ordering::SeqCst) {
+                break;
+            }
+            notified.await;
         }
     }
 }
