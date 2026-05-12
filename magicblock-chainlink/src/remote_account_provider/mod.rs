@@ -96,6 +96,75 @@ struct FetchingAccountState {
 
 type FetchingAccounts = Mutex<HashMap<Pubkey, FetchingAccountState>>;
 
+struct ClaimedSubscriptionSetupGuard {
+    fetching_accounts: Arc<FetchingAccounts>,
+    claimed_pubkeys: Vec<Pubkey>,
+    claimed_generations: HashMap<Pubkey, FetchingAccountGeneration>,
+    cancellation_error_text: Option<String>,
+}
+
+impl ClaimedSubscriptionSetupGuard {
+    fn new(
+        fetching_accounts: Arc<FetchingAccounts>,
+        claimed_pubkeys: Vec<Pubkey>,
+        claimed_generations: HashMap<Pubkey, FetchingAccountGeneration>,
+    ) -> Self {
+        Self {
+            fetching_accounts,
+            claimed_pubkeys,
+            claimed_generations,
+            cancellation_error_text: Some(
+                "account subscription setup cancelled".to_string(),
+            ),
+        }
+    }
+
+    fn cleanup_with_error(&mut self, waiter_error_text: String) {
+        {
+            let mut fetching = self.fetching_accounts.lock().unwrap();
+            for pubkey in &self.claimed_pubkeys {
+                let Some(generation) =
+                    self.claimed_generations.get(pubkey).copied()
+                else {
+                    continue;
+                };
+                if let Some(state) =
+                    remove_fetching_account_if_generation_matches(
+                        &mut fetching,
+                        pubkey,
+                        generation,
+                    )
+                {
+                    for sender in state.waiters {
+                        let _ = sender.send(Err(
+                            RemoteAccountProviderError::AccountSubscriptionsTaskFailed(
+                                waiter_error_text.clone(),
+                            ),
+                        ));
+                    }
+                }
+            }
+        }
+        self.disarm();
+    }
+
+    fn disarm(&mut self) {
+        self.claimed_pubkeys.clear();
+        self.claimed_generations.clear();
+        self.cancellation_error_text = None;
+    }
+}
+
+impl Drop for ClaimedSubscriptionSetupGuard {
+    fn drop(&mut self) {
+        let Some(waiter_error_text) = self.cancellation_error_text.take()
+        else {
+            return;
+        };
+        self.cleanup_with_error(waiter_error_text);
+    }
+}
+
 /// Internal ownership/refcount key for shared pubsub subscriptions.
 ///
 /// A single pubkey can be watched for multiple independent purposes
@@ -872,33 +941,17 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         // claimer; doing it again here would duplicate work and (for
         // setup_subscriptions) double-count subscription side effects.
         if !claimed_pubkeys.is_empty() {
+            let mut subscription_setup_guard =
+                ClaimedSubscriptionSetupGuard::new(
+                    self.fetching_accounts.clone(),
+                    claimed_pubkeys.clone(),
+                    claimed_generations.clone(),
+                );
             if let Err(err) = self.setup_subscriptions(&claimed_pubkeys).await {
-                let waiter_error_text = err.to_string();
-                let mut fetching = self.fetching_accounts.lock().unwrap();
-                for pubkey in &claimed_pubkeys {
-                    let Some(generation) =
-                        claimed_generations.get(pubkey).copied()
-                    else {
-                        continue;
-                    };
-                    if let Some(state) =
-                        remove_fetching_account_if_generation_matches(
-                            &mut fetching,
-                            pubkey,
-                            generation,
-                        )
-                    {
-                        for sender in state.waiters {
-                            let _ = sender.send(Err(
-                                RemoteAccountProviderError::AccountSubscriptionsTaskFailed(
-                                    waiter_error_text.clone(),
-                                ),
-                            ));
-                        }
-                    }
-                }
+                subscription_setup_guard.cleanup_with_error(err.to_string());
                 return Err(err);
             }
+            subscription_setup_guard.disarm();
 
             // Start the fetch for the claimed pubkeys only.
             let min_context_slot = fetch_start_slot;
@@ -1184,7 +1237,9 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                             existing.release(reason);
                             1
                         }
-                        SubscriptionReleaseMode::All => existing.release_all(reason),
+                        SubscriptionReleaseMode::All => {
+                            existing.release_all(reason)
+                        }
                     };
                     (existing.is_empty(), released_count)
                 }
