@@ -644,6 +644,8 @@ pub(crate) fn compute_subscription_releases(
         })
         .collect::<HashSet<_>>();
     direct_releases.extend(delegated_cloned_accounts);
+    direct_releases.extend(record_subs.iter().copied());
+    direct_releases.extend(program_data_subs.iter().copied());
 
     let mut releases = direct_releases
         .into_iter()
