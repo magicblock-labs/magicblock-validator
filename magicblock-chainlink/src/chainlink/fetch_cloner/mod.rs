@@ -991,10 +991,6 @@ where
                 let delegation_record_pubkey =
                     delegation_record_pda_from_delegated_account(&pubkey);
 
-                // Check existing subscriptions before fetching
-                let was_delegation_record_subscribed = self
-                    .remote_account_provider
-                    .is_watching(&delegation_record_pubkey);
                 let acquired_delegation_record_reason = self
                     .acquire_subscription_reason(
                         &delegation_record_pubkey,
@@ -1030,12 +1026,10 @@ where
                         // while resolving this update.
                         let mut subs_to_remove = Vec::new();
 
-                        if !was_delegation_record_subscribed {
-                            subs_to_remove.push(SubscriptionRelease::Pubkey {
-                                pubkey: delegation_record_pubkey,
-                                reason: SubscriptionReason::DirectAccount,
-                            });
-                        }
+                        subs_to_remove.push(SubscriptionRelease::Pubkey {
+                            pubkey: delegation_record_pubkey,
+                            reason: SubscriptionReason::DirectAccount,
+                        });
                         if acquired_delegation_record_reason {
                             subs_to_remove.push(SubscriptionRelease::Pubkey {
                                 pubkey: delegation_record_pubkey,

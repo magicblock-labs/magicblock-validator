@@ -15,6 +15,7 @@ use crate::{
     remote_account_provider::{
         chain_pubsub_client::mock::ChainPubsubClientMock,
         chain_slot::ChainSlot, RemoteAccountProvider,
+        RemoteAccountUpdateSource,
     },
     testing::{
         accounts::{
@@ -490,6 +491,84 @@ async fn test_fetch_and_clone_single_delegated_account_with_valid_delegation_rec
     assert_not_subscribed!(
         remote_account_provider,
         &[&account_pubkey, &deleg_record_pubkey]
+    );
+}
+
+#[tokio::test]
+async fn test_get_account_releases_delegation_record_direct_ref_when_already_watched(
+) {
+    let validator_keypair = Keypair::new();
+    let validator_pubkey = validator_keypair.pubkey();
+    let account_pubkey = random_pubkey();
+    let account_owner = random_pubkey();
+    const CURRENT_SLOT: u64 = 100;
+
+    let account = Account {
+        lamports: 1_234,
+        data: vec![1, 2, 3, 4],
+        owner: dlp_api::id(),
+        executable: false,
+        rent_epoch: 0,
+    };
+
+    let FetcherTestCtx {
+        remote_account_provider,
+        rpc_client,
+        fetch_cloner,
+        ..
+    } = setup(
+        [(account_pubkey, account.clone())],
+        CURRENT_SLOT,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+
+    let deleg_record_pubkey = add_delegation_record_for(
+        &rpc_client,
+        account_pubkey,
+        validator_pubkey,
+        account_owner,
+    );
+
+    remote_account_provider
+        .acquire_subscription(
+            &deleg_record_pubkey,
+            SubscriptionReason::DelegationRecord,
+        )
+        .await
+        .unwrap();
+
+    let (resolved_account, delegation_record, _actions) = fetch_cloner
+        .resolve_account_to_clone_from_forwarded_sub_with_unsubscribe(
+            ForwardedSubscriptionUpdate {
+                pubkey: account_pubkey,
+                account: RemoteAccount::from_fresh_account(
+                    account.clone(),
+                    CURRENT_SLOT,
+                    RemoteAccountUpdateSource::Subscription,
+                ),
+            },
+        )
+        .await;
+
+    let resolved_account = resolved_account.expect("account should resolve");
+    let mut expected_account =
+        delegated_account_shared_with_owner(&account, account_owner);
+    expected_account.set_remote_slot(CURRENT_SLOT);
+    assert_eq!(resolved_account, expected_account);
+    assert!(delegation_record.is_some());
+
+    remote_account_provider
+        .release_single_subscription(
+            &deleg_record_pubkey,
+            SubscriptionReason::DelegationRecord,
+        )
+        .await
+        .unwrap();
+
+    assert!(
+        !remote_account_provider.is_watching(&deleg_record_pubkey),
+        "delegation record direct ref should not leak"
     );
 }
 
