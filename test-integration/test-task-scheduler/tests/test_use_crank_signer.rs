@@ -3,7 +3,7 @@ use std::time::Duration;
 use integration_test_tools::{expect, validator::cleanup};
 use magicblock_program::{
     args::ScheduleTaskArgs, instruction_utils::InstructionUtils,
-    pda::CRANK_SIGNER,
+    pda::crank_signer_pda,
 };
 use program_flexi_counter::{
     instruction::FlexiCounterInstruction, state::FlexiCounter,
@@ -40,6 +40,7 @@ fn test_use_crank_signer() {
     let task_id = 9;
     let execution_interval_millis = 10;
     let iterations = 5;
+    let crank_signer = crank_signer_pda(task_id);
     let sig = expect!(
         ctx.send_transaction_ephem_with_preflight(
             &mut Transaction::new_signed_with_payer(
@@ -54,7 +55,7 @@ fn test_use_crank_signer() {
                             &FlexiCounterInstruction::AddUnsigned { count: 1 },
                             vec![
                                 AccountMeta::new(counter_pda, false),
-                                AccountMeta::new_readonly(CRANK_SIGNER, true)
+                                AccountMeta::new_readonly(crank_signer, true)
                             ],
                         )],
                     }

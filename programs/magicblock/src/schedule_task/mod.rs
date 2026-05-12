@@ -2,7 +2,7 @@ mod process_cancel_task;
 mod process_execute_task;
 mod process_schedule_task;
 
-use magicblock_magic_program_api::pda::CRANK_SIGNER;
+use magicblock_magic_program_api::pda::crank_signer_pda;
 pub(crate) use process_cancel_task::*;
 pub(crate) use process_execute_task::*;
 pub(crate) use process_schedule_task::*;
@@ -16,18 +16,22 @@ use crate::validator::validator_authority_id;
 // Assert they don't use the validator either
 pub(crate) fn validate_cranks_instructions(
     invoke_context: &mut InvokeContext,
+    task_id: i64,
     instructions: &[Instruction],
 ) -> Result<(), InstructionError> {
+    let crank_signer = crank_signer_pda(task_id);
     for instruction in instructions {
         for account in &instruction.accounts {
-            if account.is_signer && account.pubkey.ne(&CRANK_SIGNER) {
+            if account.is_signer
+                && account.pubkey.ne(&crank_signer_pda(task_id))
+            {
                 ic_msg!(
                     invoke_context,
                     "Crank ERR: only the crank signer PDA can be a signer in cranks (invalid signer: '{}')",
                     account.pubkey,
                 );
                 return Err(InstructionError::MissingRequiredSignature);
-            } else if account.is_writable && account.pubkey.eq(&CRANK_SIGNER) {
+            } else if account.is_writable && account.pubkey.eq(&crank_signer) {
                 ic_msg!(
                     invoke_context,
                     "Crank ERR: the crank signer PDA cannot be a writable account in cranks",

@@ -1,13 +1,13 @@
 use solana_program::pubkey::Pubkey;
 
 pub const CRANK_SEED: &[u8] = b"crank-executor";
-const CRANK_SIGNER_PDA: ([u8; 32], u8) =
-    const_crypto::ed25519::derive_program_address(
-        &[CRANK_SEED],
-        crate::CRANK_PROGRAM_ID.as_array(),
-    );
-pub const CRANK_SIGNER: Pubkey = Pubkey::new_from_array(CRANK_SIGNER_PDA.0);
-pub const CRANK_SIGNER_BUMP: u8 = CRANK_SIGNER_PDA.1;
+pub fn crank_signer_pda(task_id: i64) -> Pubkey {
+    Pubkey::find_program_address(
+        &[CRANK_SEED, task_id.to_le_bytes().as_ref()],
+        &crate::CRANK_PROGRAM_ID,
+    )
+    .0
+}
 
 /// Callback signer PDA info
 pub const CALLBACK_SEED: &[u8] = b"callback-executor";

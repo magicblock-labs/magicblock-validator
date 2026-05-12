@@ -310,7 +310,10 @@ pub enum MagicBlockInstruction {
     /// - **0.**   `[SIGNER]`  Validator authority
     /// - **1.**   `[]`        Crank signer PDA
     /// - **2..n** `[]`        Accounts required by the embedded instructions
-    ExecuteCrank { instructions: Vec<Instruction> },
+    ExecuteCrank {
+        task_id: i64,
+        instructions: Vec<Instruction>,
+    },
 }
 
 impl MagicBlockInstruction {

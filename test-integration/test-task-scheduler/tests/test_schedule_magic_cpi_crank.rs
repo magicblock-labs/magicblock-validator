@@ -3,7 +3,7 @@ use std::time::Duration;
 use integration_test_tools::{expect, validator::cleanup};
 use magicblock_program::{
     args::ScheduleTaskArgs, instruction_utils::InstructionUtils,
-    pda::CRANK_SIGNER, MAGIC_CONTEXT_PUBKEY,
+    pda::crank_signer_pda, MAGIC_CONTEXT_PUBKEY,
 };
 use program_schedulecommit::{
     api::{
@@ -85,8 +85,10 @@ fn test_crank_can_execute_program_that_cpis_into_magic() {
 
     let ephem_blockhash =
         expect!(ctx.try_get_latest_blockhash_ephem(), validator);
+    let task_id = 17;
+    let crank_signer = crank_signer_pda(task_id);
     let mut crank_ix = schedule_commit_cpi_instruction(
-        CRANK_SIGNER,
+        crank_signer,
         magicblock_program::ID,
         MAGIC_CONTEXT_PUBKEY,
         None,
@@ -102,7 +104,7 @@ fn test_crank_can_execute_program_that_cpis_into_magic() {
                 &[InstructionUtils::schedule_task_instruction(
                     &player.pubkey(),
                     ScheduleTaskArgs {
-                        task_id: 17,
+                        task_id,
                         execution_interval_millis: 10,
                         iterations: 1,
                         instructions: vec![crank_ix],

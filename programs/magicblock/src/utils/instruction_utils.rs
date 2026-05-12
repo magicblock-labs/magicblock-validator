@@ -9,7 +9,7 @@ use magicblock_magic_program_api::{
         AccountModification, AccountModificationForInstruction,
         MagicBlockInstruction,
     },
-    pda::CRANK_SIGNER,
+    pda::crank_signer_pda,
     CRANK_PROGRAM_ID, MAGIC_CONTEXT_PUBKEY,
 };
 use solana_hash::Hash;
@@ -259,11 +259,12 @@ impl InstructionUtils {
     // Execute Crank
     // -----------------
     pub fn execute_task_instruction(
+        task_id: i64,
         instructions: Vec<Instruction>,
     ) -> Instruction {
         let mut account_metas = vec![
             AccountMeta::new_readonly(validator_authority_id(), true),
-            AccountMeta::new_readonly(CRANK_SIGNER, false),
+            AccountMeta::new_readonly(crank_signer_pda(task_id), false),
         ];
         for instruction in &instructions {
             account_metas.push(AccountMeta::new(instruction.program_id, false));
@@ -277,16 +278,20 @@ impl InstructionUtils {
         }
         Instruction::new_with_bincode(
             CRANK_PROGRAM_ID,
-            &MagicBlockInstruction::ExecuteCrank { instructions },
+            &MagicBlockInstruction::ExecuteCrank {
+                task_id,
+                instructions,
+            },
             account_metas,
         )
     }
 
     pub fn execute_task(
+        task_id: i64,
         instructions: Vec<Instruction>,
         recent_blockhash: Hash,
     ) -> Transaction {
-        let ix = Self::execute_task_instruction(instructions);
+        let ix = Self::execute_task_instruction(task_id, instructions);
         Self::into_transaction(&validator_authority(), ix, recent_blockhash)
     }
 

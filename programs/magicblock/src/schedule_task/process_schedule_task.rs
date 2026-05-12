@@ -93,7 +93,11 @@ pub(crate) fn process_schedule_task(
         return Err(InstructionError::InvalidInstructionData);
     }
 
-    validate_cranks_instructions(invoke_context, &args.instructions)?;
+    validate_cranks_instructions(
+        invoke_context,
+        args.task_id,
+        &args.instructions,
+    )?;
 
     let schedule_request = ScheduleTaskRequest {
         id: args.task_id,

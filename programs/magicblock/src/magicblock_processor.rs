@@ -226,9 +226,15 @@ declare_process_instruction!(
                 remote_slot,
                 authority,
             ),
-            ExecuteCrank { instructions } => {
-                process_execute_crank(signers, invoke_context, instructions)
-            }
+            ExecuteCrank {
+                task_id,
+                instructions,
+            } => process_execute_crank(
+                signers,
+                invoke_context,
+                task_id,
+                instructions,
+            ),
         }
     }
 );
@@ -244,9 +250,15 @@ declare_process_instruction!(
         let signers = instruction_context.get_signers()?;
 
         match instruction {
-            MagicBlockInstruction::ExecuteCrank { instructions } => {
-                process_execute_crank(signers, invoke_context, instructions)
-            }
+            MagicBlockInstruction::ExecuteCrank {
+                task_id,
+                instructions,
+            } => process_execute_crank(
+                signers,
+                invoke_context,
+                task_id,
+                instructions,
+            ),
             _ => Err(InstructionError::InvalidInstructionData),
         }
     }

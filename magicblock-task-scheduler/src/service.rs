@@ -236,7 +236,9 @@ impl TaskSchedulerService {
     }
 
     async fn execute_task(&mut self, task: &DbTask) -> TaskSchedulerResult<()> {
-        let sig = self.process_transaction(task.instructions.clone()).await?;
+        let sig = self
+            .process_transaction(task.id, task.instructions.clone())
+            .await?;
 
         // TODO(Dodecahedr0x): we don't get any output directly at this point
         // we would have to fetch the transaction via its signature to see
@@ -417,6 +419,7 @@ impl TaskSchedulerService {
 
     async fn process_transaction(
         &self,
+        task_id: i64,
         instructions: Vec<Instruction>,
     ) -> TaskSchedulerResult<Signature> {
         let blockhash = self.block.load().blockhash;
@@ -426,7 +429,7 @@ impl TaskSchedulerService {
             InstructionUtils::noop_instruction(
                 self.tx_counter.fetch_add(1, Ordering::Relaxed),
             ),
-            InstructionUtils::execute_task_instruction(instructions),
+            InstructionUtils::execute_task_instruction(task_id, instructions),
         ];
         let tx = Transaction::new(
             &[validator_authority()],
