@@ -1858,6 +1858,64 @@ async fn test_auto_airdrop_uses_chain_slot_when_account_not_in_bank() {
     assert_eq!(*payer_after.owner(), system_program::id());
 }
 
+#[tokio::test]
+async fn test_program_loader_resolver_error_releases_program_data_refs() {
+    use crate::remote_account_provider::program_account::{
+        get_loaderv3_get_program_data_address, LOADER_V3,
+    };
+
+    init_logger();
+    let validator_keypair = Keypair::new();
+    let program_pubkey = random_pubkey();
+    let program_data_pubkey =
+        get_loaderv3_get_program_data_address(&program_pubkey);
+    const CURRENT_SLOT: u64 = 100;
+
+    let program_account = Account {
+        lamports: 1_000_000,
+        data: vec![1, 2, 3, 4],
+        owner: LOADER_V3,
+        executable: true,
+        rent_epoch: 0,
+    };
+    let invalid_program_data_account = Account {
+        lamports: 1_000_000,
+        data: vec![0],
+        owner: LOADER_V3,
+        executable: false,
+        rent_epoch: 0,
+    };
+
+    let FetcherTestCtx {
+        remote_account_provider,
+        fetch_cloner,
+        ..
+    } = setup(
+        [
+            (program_pubkey, program_account.clone()),
+            (program_data_pubkey, invalid_program_data_account),
+        ],
+        CURRENT_SLOT,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+
+    let mut program_account_shared = AccountSharedData::from(program_account);
+    program_account_shared.set_remote_slot(CURRENT_SLOT);
+
+    program_loader::handle_executable_sub_update(
+        &fetch_cloner,
+        program_pubkey,
+        program_account_shared,
+    )
+    .await;
+
+    assert!(
+        !remote_account_provider.is_watching(&program_data_pubkey),
+        "resolver errors must release LoaderV3 program-data subscription refs"
+    );
+}
+
 // -----------------
 // Allowed Programs Tests
 // -----------------

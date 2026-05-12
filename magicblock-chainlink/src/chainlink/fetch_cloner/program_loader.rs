@@ -115,6 +115,14 @@ pub(crate) async fn handle_executable_sub_update<T, U, V, C>(
         Ok(x) => x.into_loaded_program(),
         Err(err) => {
             warn!(pubkey = %pubkey, error = %err, "Failed to resolve program account into bank");
+            if acquired_program_data_reason {
+                // Both refs exist for LoaderV3 program-data cleanup.
+                release_program_data_subs(
+                    &this.remote_account_provider,
+                    program_data_pubkey,
+                )
+                .await;
+            }
             return;
         }
     };
