@@ -134,8 +134,12 @@ impl Cloner for ClonerStub {
                 );
             }
         }
-        while self.block_clone_completion.load(Ordering::SeqCst) {
-            self.clone_completion_notify.notified().await;
+        loop {
+            let notified = self.clone_completion_notify.notified();
+            if !self.block_clone_completion.load(Ordering::SeqCst) {
+                break;
+            }
+            notified.await;
         }
         self.accounts_bank.insert(request.pubkey, request.account);
         Ok(Signature::default())
