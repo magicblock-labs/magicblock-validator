@@ -21,8 +21,6 @@ block-size = "block256" # possible values block128 | block256 | block512
 index-size = 20485760
 # max number of snapshots to keep around
 max-snapshots = 7
-# how frequently (slot-wise) we should take snapshots
-snapshot-frequency = 1024
 
 [ledger]
 reset = true

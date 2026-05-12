@@ -322,24 +322,16 @@ impl MagicBlockInstruction {
 #[derive(Default, Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
 pub struct AccountModification {
     pub pubkey: Pubkey,
-    pub lamports: Option<u64>,
     pub owner: Option<Pubkey>,
-    pub executable: Option<bool>,
-    pub data: Option<Vec<u8>>,
     pub delegated: Option<bool>,
     pub confined: Option<bool>,
-    pub remote_slot: Option<u64>,
 }
 
 #[derive(Default, Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
 pub struct AccountModificationForInstruction {
-    pub lamports: Option<u64>,
     pub owner: Option<Pubkey>,
-    pub executable: Option<bool>,
-    pub data: Option<Vec<u8>>,
     pub delegated: Option<bool>,
     pub confined: Option<bool>,
-    pub remote_slot: Option<u64>,
 }
 
 /// Common fields for cloning an account.

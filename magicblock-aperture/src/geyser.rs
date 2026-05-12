@@ -8,9 +8,9 @@ use agave_geyser_plugin_interface::geyser_plugin_interface::{
 use json::{JsonValueTrait, Value};
 use libloading::{Library, Symbol};
 use magicblock_core::link::{
-    accounts::AccountWithSlot, blocks::BlockUpdate,
-    transactions::TransactionStatus,
+    accounts::AccountWithSlot, transactions::TransactionStatus,
 };
+use magicblock_ledger::LatestBlockInner;
 use solana_account::ReadableAccount;
 
 const ENTRYPOINT_SYMBOL: &[u8] = b"_create_plugin";
@@ -153,21 +153,21 @@ impl GeyserPluginManager {
 
     pub fn notify_block(
         &self,
-        block: &BlockUpdate,
+        block: &LatestBlockInner,
     ) -> Result<(), GeyserPluginError> {
         check_if_enabled!(self);
-        let blockhash = block.hash.to_string();
+        let blockhash = block.blockhash.to_string();
         let rewards = solana_transaction_status::RewardsAndNumPartitions {
             rewards: Vec::new(),
             num_partitions: None,
         };
         let block = ReplicaBlockInfoV4 {
-            slot: block.meta.slot,
-            parent_slot: block.meta.slot.saturating_sub(1),
+            slot: block.slot,
+            parent_slot: block.slot.saturating_sub(1),
             blockhash: &blockhash,
-            block_height: Some(block.meta.slot),
+            block_height: Some(block.slot),
             rewards: &rewards,
-            block_time: Some(block.meta.time),
+            block_time: Some(block.clock.unix_timestamp),
             // TODO(bmuddha): register proper values with the new ledger
             parent_blockhash: "11111111111111111111111111111111",
             executed_transaction_count: 0,

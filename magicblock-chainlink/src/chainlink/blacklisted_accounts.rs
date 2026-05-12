@@ -8,14 +8,12 @@ use solana_pubkey::Pubkey;
 use solana_sdk_ids::{
     address_lookup_table, bpf_loader, bpf_loader_deprecated,
     bpf_loader_upgradeable, compute_budget, config, ed25519_program,
-    incinerator, loader_v4, native_loader, secp256k1_program, stake,
-    system_program, sysvar, vote, zk_elgamal_proof_program,
+    incinerator, loader_v4, native_loader, secp256k1_program,
+    secp256r1_program, stake, system_program, sysvar, vote,
+    zk_elgamal_proof_program,
 };
 
-pub fn blacklisted_accounts(
-    validator_id: &Pubkey,
-    faucet_id: &Pubkey,
-) -> HashSet<Pubkey> {
+pub fn blacklisted_accounts(validator_id: &Pubkey) -> HashSet<Pubkey> {
     // This is buried in the accounts_db::native_mint module and we don't
     // want to take a dependency on that crate just for this ID which won't change
     const NATIVE_SOL_ID: Pubkey =
@@ -35,7 +33,6 @@ pub fn blacklisted_accounts(
     blacklisted_accounts.insert(magic_program::MAGIC_CONTEXT_PUBKEY);
     blacklisted_accounts.insert(magic_program::EPHEMERAL_VAULT_PUBKEY);
     blacklisted_accounts.insert(*validator_id);
-    blacklisted_accounts.insert(*faucet_id);
     blacklisted_accounts
 }
 
@@ -70,6 +67,7 @@ pub fn native_program_accounts() -> HashSet<Pubkey> {
     blacklisted_programs.insert(loader_v4::ID);
     blacklisted_programs.insert(native_loader::ID);
     blacklisted_programs.insert(secp256k1_program::ID);
+    blacklisted_programs.insert(secp256r1_program::ID);
     blacklisted_programs.insert(stake::ID);
     blacklisted_programs.insert(system_program::ID);
     blacklisted_programs.insert(vote::ID);

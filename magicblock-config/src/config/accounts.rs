@@ -18,9 +18,6 @@ pub struct AccountsDbConfig {
     /// Maximum number of historical snapshots to retain.
     pub max_snapshots: u16,
 
-    /// Number of slots between generating a new snapshot.
-    pub snapshot_frequency: u64,
-
     /// If true, wipes the accounts database on startup.
     pub reset: bool,
 }
@@ -32,7 +29,6 @@ impl Default for AccountsDbConfig {
             database_size: consts::DEFAULT_ACCOUNTS_DB_SIZE,
             index_size: consts::DEFAULT_ACCOUNTS_INDEX_SIZE,
             max_snapshots: consts::DEFAULT_ACCOUNTS_MAX_SNAPSHOTS,
-            snapshot_frequency: consts::DEFAULT_ACCOUNTS_SNAPSHOT_FREQUENCY,
             reset: false,
         }
     }

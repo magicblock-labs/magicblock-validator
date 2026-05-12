@@ -10,8 +10,7 @@ use solana_sdk_ids::system_program;
 use solana_transaction_context::TransactionContext;
 
 use crate::{
-    clone_account::{validate_not_delegated, validate_remote_slot},
-    errors::MagicBlockProgramError,
+    clone_account::validate_not_delegated, errors::MagicBlockProgramError,
     validator::effective_validator_authority_id,
 };
 
@@ -31,7 +30,7 @@ pub(crate) fn process_mutate_accounts(
     let account_mods_len = account_mods.len() as u64;
 
     // 1. Checks
-    let mut validator_authority_acc = {
+    {
         // 1.1. MagicBlock authority must sign
         let validator_authority_id = effective_validator_authority_id();
         if !signers.contains(&validator_authority_id) {
@@ -90,10 +89,7 @@ pub(crate) fn process_mutate_accounts(
                     .into(),
             );
         }
-        magicblock_authority_acc
-    };
-
-    let mut lamports_to_debit: i128 = 0;
+    }
 
     // 2. Apply account modifications
     for idx in 0..account_mods_len {
@@ -121,7 +117,7 @@ pub(crate) fn process_mutate_accounts(
         let account_key = transaction_context
             .get_key_of_account_at_index(account_transaction_index)?;
 
-        let mut modification = account_mods.remove(account_key).ok_or_else(|| {
+        let modification = account_mods.remove(account_key).ok_or_else(|| {
             ic_msg!(
                 invoke_context,
                 "MutateAccounts: account modification for the provided key {} is missing",
@@ -143,29 +139,12 @@ pub(crate) fn process_mutate_accounts(
 
         // Validate account is mutable
         validate_not_delegated(&account, account_key, invoke_context)?;
-        validate_remote_slot(
-            &mut account,
-            account_key,
-            modification.remote_slot,
-            invoke_context,
-        )?;
 
         // While an account is undelegating and the delegation is not completed,
         // we will never clone/mutate it. Thus we can safely untoggle this flag
         // here AFTER validation passes.
         account.set_undelegating(false);
 
-        if let Some(lamports) = modification.lamports {
-            ic_msg!(
-                invoke_context,
-                "MutateAccounts: setting lamports to {}",
-                lamports
-            );
-            let current_lamports = account.lamports();
-            lamports_to_debit += lamports as i128 - current_lamports as i128;
-
-            account.set_lamports(lamports);
-        }
         if let Some(owner) = modification.owner {
             ic_msg!(
                 invoke_context,
@@ -173,22 +152,6 @@ pub(crate) fn process_mutate_accounts(
                 owner
             );
             account.set_owner(owner);
-        }
-        if let Some(executable) = modification.executable {
-            ic_msg!(
-                invoke_context,
-                "MutateAccounts: setting executable to {}",
-                executable
-            );
-            account.set_executable(executable);
-        }
-        if let Some(data) = modification.data.take() {
-            ic_msg!(
-                invoke_context,
-                "MutateAccounts: setting data to len {}",
-                data.len()
-            );
-            account.set_data_from_slice(&data);
         }
         if let Some(delegated) = modification.delegated {
             ic_msg!(
@@ -206,54 +169,6 @@ pub(crate) fn process_mutate_accounts(
             );
             account.set_confined(confined);
         }
-        if let Some(remote_slot) = modification.remote_slot {
-            ic_msg!(
-                invoke_context,
-                "MutateAccounts: setting remote_slot to {}",
-                remote_slot
-            );
-            account.set_remote_slot(remote_slot);
-        }
-    }
-
-    if lamports_to_debit != 0 {
-        let authority_lamports = validator_authority_acc.lamports();
-        let adjusted_authority_lamports = if lamports_to_debit > 0 {
-            (authority_lamports as u128)
-                .checked_sub(lamports_to_debit as u128)
-                .ok_or(InstructionError::InsufficientFunds)
-                .map_err(|err| {
-                    ic_msg!(
-                        invoke_context,
-                        "MutateAccounts: not enough lamports in authority to debit: {}",
-                        err
-                    );
-                    err
-                })?
-        } else {
-            (authority_lamports as u128)
-                .checked_add(lamports_to_debit.unsigned_abs())
-                .ok_or(InstructionError::ArithmeticOverflow)
-                .map_err(|err| {
-                    ic_msg!(
-                        invoke_context,
-                        "MutateAccounts: too many lamports in authority to credit: {}",
-                        err
-                    );
-                    err
-                })?
-        };
-
-        validator_authority_acc.set_lamports(
-            u64::try_from(adjusted_authority_lamports).map_err(|err| {
-                ic_msg!(
-                    invoke_context,
-                    "MutateAccounts: adjusted authority lamports overflow: {}",
-                    err
-                );
-                InstructionError::ArithmeticOverflow
-            })?,
-        );
     }
 
     Ok(())
@@ -280,7 +195,7 @@ mod tests {
     // ModifyAccounts
     // -----------------
     #[test]
-    fn test_mod_all_fields_of_one_account() {
+    fn test_mod_supported_fields_of_one_account() {
         init_logger!();
 
         let owner_key = Pubkey::from([9; 32]);
@@ -292,18 +207,13 @@ mod tests {
         };
         ensure_started_validator(&mut account_data, None);
 
-        let modification = AccountModification {
-            pubkey: mod_key,
-            lamports: Some(200),
-            owner: Some(owner_key),
-            executable: Some(true),
-            data: Some(vec![1, 2, 3, 4, 5]),
-            delegated: Some(true),
-            confined: Some(true),
-            remote_slot: None,
-        };
         let ix = InstructionUtils::modify_accounts_instruction(
-            vec![modification.clone()],
+            vec![AccountModification {
+                pubkey: mod_key,
+                owner: Some(owner_key),
+                delegated: Some(true),
+                confined: Some(true),
+            }],
             None,
         );
         let transaction_accounts = ix
@@ -338,7 +248,7 @@ mod tests {
                 data,
                 rent_epoch: u64::MAX,
             } => {
-                assert_eq!(lamports, AUTHORITY_BALANCE - 100);
+                assert_eq!(lamports, AUTHORITY_BALANCE);
                 assert_eq!(owner, system_program::id());
                 assert!(data.is_empty());
             }
@@ -350,28 +260,31 @@ mod tests {
         assert_matches!(
             modified_account.into(),
             Account {
-                lamports: 200,
-                owner: owner_key,
-                executable: true,
+                lamports: 100,
+                owner,
+                executable: false,
                 data,
                 rent_epoch: u64::MAX,
             } => {
-                assert_eq!(data, modification.data.unwrap());
-                assert_eq!(owner_key, modification.owner.unwrap());
+                assert_eq!(owner, owner_key);
+                assert!(data.is_empty());
             }
         );
     }
 
     #[test]
-    fn test_mod_lamports_of_two_accounts() {
+    fn test_mod_supported_fields_of_two_accounts() {
         init_logger!();
 
         let mod_key1 = Pubkey::new_unique();
         let mod_key2 = Pubkey::new_unique();
+        let mod_2_owner = Pubkey::from([9; 32]);
+        let mut account2 = AccountSharedData::new(200, 0, &mod_key2);
+        account2.set_confined(true);
         let mut account_data = {
             let mut map = HashMap::new();
             map.insert(mod_key1, AccountSharedData::new(100, 0, &mod_key1));
-            map.insert(mod_key2, AccountSharedData::new(200, 0, &mod_key2));
+            map.insert(mod_key2, account2);
             map
         };
         ensure_started_validator(&mut account_data, None);
@@ -380,12 +293,14 @@ mod tests {
             vec![
                 AccountModification {
                     pubkey: mod_key1,
-                    lamports: Some(300),
+                    delegated: Some(true),
+                    confined: Some(true),
                     ..AccountModification::default()
                 },
                 AccountModification {
                     pubkey: mod_key2,
-                    lamports: Some(400),
+                    owner: Some(mod_2_owner),
+                    confined: Some(false),
                     ..AccountModification::default()
                 },
             ],
@@ -421,36 +336,40 @@ mod tests {
                 data,
                 rent_epoch: u64::MAX,
             } => {
-                assert_eq!(lamports, AUTHORITY_BALANCE - 400);
+                assert_eq!(lamports, AUTHORITY_BALANCE);
                 assert_eq!(owner, system_program::id());
                 assert!(data.is_empty());
             }
         );
         let modified_account1 = accounts.drain(0..1).next().unwrap();
-        assert!(!modified_account1.delegated());
+        assert!(modified_account1.delegated());
+        assert!(modified_account1.confined());
         assert_matches!(
             modified_account1.into(),
             Account {
-                lamports: 300,
-                owner: _,
+                lamports: 100,
+                owner,
                 executable: false,
                 data,
                 rent_epoch: u64::MAX,
             } => {
+                assert_eq!(owner, mod_key1);
                 assert!(data.is_empty());
             }
         );
         let modified_account2 = accounts.drain(0..1).next().unwrap();
         assert!(!modified_account2.delegated());
+        assert!(!modified_account2.confined());
         assert_matches!(
             modified_account2.into(),
             Account {
-                lamports: 400,
-                owner: _,
+                lamports: 200,
+                owner,
                 executable: false,
                 data,
                 rent_epoch: u64::MAX,
             } => {
+                assert_eq!(owner, mod_2_owner);
                 assert!(data.is_empty());
             }
         );
@@ -474,7 +393,7 @@ mod tests {
         let ix = InstructionUtils::modify_accounts_instruction(
             vec![AccountModification {
                 pubkey: mod_key,
-                lamports: Some(200),
+                confined: Some(true),
                 ..AccountModification::default()
             }],
             None,
@@ -516,7 +435,7 @@ mod tests {
         let ix = InstructionUtils::modify_accounts_instruction(
             vec![AccountModification {
                 pubkey: mod_key,
-                lamports: Some(200),
+                confined: Some(true),
                 ..AccountModification::default()
             }],
             None,
@@ -546,10 +465,11 @@ mod tests {
 
         assert!(modified_account.delegated());
         assert!(!modified_account.undelegating());
+        assert!(modified_account.confined());
         assert_matches!(
             modified_account.into(),
             Account {
-                lamports: 200,
+                lamports: 100,
                 owner,
                 executable: false,
                 data,
@@ -559,282 +479,5 @@ mod tests {
                 assert!(data.is_empty());
             }
         );
-    }
-
-    #[test]
-    fn test_mod_different_properties_of_four_accounts() {
-        init_logger!();
-
-        let mod_key1 = Pubkey::new_unique();
-        let mod_key2 = Pubkey::new_unique();
-        let mod_key3 = Pubkey::new_unique();
-        let mod_key4 = Pubkey::new_unique();
-        let mod_2_owner = Pubkey::from([9; 32]);
-
-        let mut account_data = {
-            let mut map = HashMap::new();
-            map.insert(mod_key1, AccountSharedData::new(100, 0, &mod_key1));
-            map.insert(mod_key2, AccountSharedData::new(200, 0, &mod_key2));
-            map.insert(mod_key3, AccountSharedData::new(300, 0, &mod_key3));
-            map.insert(mod_key4, AccountSharedData::new(400, 0, &mod_key4));
-            map
-        };
-        ensure_started_validator(&mut account_data, None);
-
-        let ix = InstructionUtils::modify_accounts_instruction(
-            vec![
-                AccountModification {
-                    pubkey: mod_key1,
-                    lamports: Some(1000),
-                    data: Some(vec![1, 2, 3, 4, 5]),
-                    delegated: Some(true),
-                    ..Default::default()
-                },
-                AccountModification {
-                    pubkey: mod_key2,
-                    owner: Some(mod_2_owner),
-                    ..Default::default()
-                },
-                AccountModification {
-                    pubkey: mod_key3,
-                    lamports: Some(3000),
-                    ..Default::default()
-                },
-                AccountModification {
-                    pubkey: mod_key4,
-                    lamports: Some(100),
-                    executable: Some(true),
-                    data: Some(vec![16, 17, 18, 19, 20]),
-                    delegated: Some(true),
-                    ..Default::default()
-                },
-            ],
-            None,
-        );
-
-        let transaction_accounts = ix
-            .accounts
-            .iter()
-            .flat_map(|acc| {
-                account_data
-                    .remove(&acc.pubkey)
-                    .map(|shared_data| (acc.pubkey, shared_data))
-            })
-            .collect();
-
-        let mut accounts = process_instruction(
-            ix.data.as_slice(),
-            transaction_accounts,
-            ix.accounts,
-            Ok(()),
-        );
-
-        let account_authority = accounts.drain(0..1).next().unwrap();
-        assert!(!account_authority.delegated());
-        assert_matches!(
-            account_authority.into(),
-            Account {
-                lamports,
-                owner,
-                executable: false,
-                data,
-                rent_epoch: u64::MAX,
-            } => {
-                assert_eq!(lamports, AUTHORITY_BALANCE - 3300);
-                assert_eq!(owner, system_program::id());
-                assert!(data.is_empty());
-            }
-        );
-
-        let modified_account1 = accounts.drain(0..1).next().unwrap();
-        assert!(modified_account1.delegated());
-        assert_matches!(
-            modified_account1.into(),
-            Account {
-                lamports: 1000,
-                owner: _,
-                executable: false,
-                data,
-                rent_epoch: u64::MAX,
-            } => {
-                assert_eq!(data, vec![1, 2, 3, 4, 5]);
-            }
-        );
-
-        let modified_account2 = accounts.drain(0..1).next().unwrap();
-        assert!(!modified_account2.delegated());
-        assert_matches!(
-            modified_account2.into(),
-            Account {
-                lamports: 200,
-                owner,
-                executable: false,
-                data,
-                rent_epoch: u64::MAX,
-            } => {
-                assert_eq!(owner, mod_2_owner);
-                assert!(data.is_empty());
-            }
-        );
-
-        let modified_account3 = accounts.drain(0..1).next().unwrap();
-        assert!(!modified_account3.delegated());
-        assert_matches!(
-            modified_account3.into(),
-            Account {
-                lamports: 3000,
-                owner: _,
-                executable: false,
-                data,
-                rent_epoch: u64::MAX,
-            } => {
-                assert!(data.is_empty());
-            }
-        );
-
-        let modified_account4 = accounts.drain(0..1).next().unwrap();
-        assert!(modified_account4.delegated());
-        assert_matches!(
-            modified_account4.into(),
-            Account {
-                lamports: 100,
-                owner: _,
-                executable: true,
-                data,
-                rent_epoch: u64::MAX,
-            } => {
-                assert_eq!(data, vec![16, 17, 18, 19, 20]);
-            }
-        );
-    }
-
-    #[test]
-    fn test_mod_remote_slot() {
-        init_logger!();
-
-        let mod_key = Pubkey::new_unique();
-        let remote_slot = 12345u64;
-        let mut account_data = {
-            let mut map = HashMap::new();
-            map.insert(mod_key, AccountSharedData::new(100, 0, &mod_key));
-            map
-        };
-        ensure_started_validator(&mut account_data, None);
-
-        let ix = InstructionUtils::modify_accounts_instruction(
-            vec![AccountModification {
-                pubkey: mod_key,
-                remote_slot: Some(remote_slot),
-                ..Default::default()
-            }],
-            None,
-        );
-        let transaction_accounts = ix
-            .accounts
-            .iter()
-            .flat_map(|acc| {
-                account_data
-                    .remove(&acc.pubkey)
-                    .map(|shared_data| (acc.pubkey, shared_data))
-            })
-            .collect();
-
-        let mut accounts = process_instruction(
-            ix.data.as_slice(),
-            transaction_accounts,
-            ix.accounts,
-            Ok(()),
-        );
-
-        let _account_authority = accounts.drain(0..1).next().unwrap();
-        let modified_account = accounts.drain(0..1).next().unwrap();
-        assert_eq!(modified_account.remote_slot(), remote_slot);
-    }
-
-    #[test]
-    fn test_mod_remote_slot_rejects_stale_update() {
-        init_logger!();
-
-        let mod_key = Pubkey::new_unique();
-        let mut account = AccountSharedData::new(100, 0, &mod_key);
-        account.set_remote_slot(100);
-        let mut account_data = {
-            let mut map = HashMap::new();
-            map.insert(mod_key, account);
-            map
-        };
-        ensure_started_validator(&mut account_data, None);
-
-        let ix = InstructionUtils::modify_accounts_instruction(
-            vec![AccountModification {
-                pubkey: mod_key,
-                lamports: Some(200),
-                remote_slot: Some(99),
-                ..Default::default()
-            }],
-            None,
-        );
-        let transaction_accounts = ix
-            .accounts
-            .iter()
-            .flat_map(|acc| {
-                account_data
-                    .remove(&acc.pubkey)
-                    .map(|shared_data| (acc.pubkey, shared_data))
-            })
-            .collect();
-
-        let _accounts = process_instruction(
-            ix.data.as_slice(),
-            transaction_accounts,
-            ix.accounts,
-            Err(MagicBlockProgramError::OutOfOrderUpdate.into()),
-        );
-    }
-
-    #[test]
-    fn test_mod_remote_slot_allows_equal_update() {
-        init_logger!();
-
-        let mod_key = Pubkey::new_unique();
-        let mut account = AccountSharedData::new(100, 0, &mod_key);
-        account.set_remote_slot(100);
-        let mut account_data = {
-            let mut map = HashMap::new();
-            map.insert(mod_key, account);
-            map
-        };
-        ensure_started_validator(&mut account_data, None);
-
-        let ix = InstructionUtils::modify_accounts_instruction(
-            vec![AccountModification {
-                pubkey: mod_key,
-                lamports: Some(200),
-                remote_slot: Some(100),
-                ..Default::default()
-            }],
-            None,
-        );
-        let transaction_accounts = ix
-            .accounts
-            .iter()
-            .flat_map(|acc| {
-                account_data
-                    .remove(&acc.pubkey)
-                    .map(|shared_data| (acc.pubkey, shared_data))
-            })
-            .collect();
-
-        let mut accounts = process_instruction(
-            ix.data.as_slice(),
-            transaction_accounts,
-            ix.accounts,
-            Ok(()),
-        );
-
-        accounts.remove(0); // authority
-        let account = accounts.remove(0);
-        assert_eq!(account.lamports(), 200);
-        assert_eq!(account.remote_slot(), 100);
     }
 }
