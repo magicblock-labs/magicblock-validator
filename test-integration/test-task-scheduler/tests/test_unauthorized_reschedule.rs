@@ -8,9 +8,7 @@ use solana_sdk::{
     native_token::LAMPORTS_PER_SOL, signature::Keypair, signer::Signer,
     transaction::Transaction,
 };
-use test_task_scheduler::{
-    create_delegated_counter, setup_validator,
-};
+use test_task_scheduler::{create_delegated_counter, setup_validator};
 use tokio::runtime::Runtime;
 
 #[test]
@@ -157,8 +155,7 @@ fn test_unauthorized_reschedule() {
     );
     assert_eq!(task.authority, payer.pubkey(), cleanup(&mut validator));
     assert_eq!(
-        task.execution_interval_millis,
-        execution_interval_millis,
+        task.execution_interval_millis, execution_interval_millis,
         cleanup(&mut validator)
     );
     assert!(
