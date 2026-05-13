@@ -278,9 +278,7 @@ impl TaskSchedulerService {
 
         // Check if the task already exists in the database
         if let Some(db_task) = self.db.get_task(task.id).await? {
-            if db_task.executions_left > 0
-                && db_task.authority != task.authority
-            {
+            if db_task.authority != task.authority {
                 return Err(TaskSchedulerError::UnauthorizedReplacing(
                     task.id,
                     db_task.authority.to_string(),
@@ -588,56 +586,6 @@ mod tests {
         .unwrap()
         .unwrap();
         handle.abort();
-    }
-
-    #[tokio::test]
-    async fn test_completed_task_does_not_block_reuse_by_different_authority() {
-        magicblock_core::logger::init_for_tests();
-        generate_validator_authority_if_needed();
-
-        let (_tx, rx) = mpsc::unbounded_channel();
-        let db = SchedulerDatabase::new(":memory:").unwrap();
-        let task_id = 44;
-        db.insert_task(&DbTask {
-            id: task_id,
-            authority: Pubkey::new_unique(),
-            execution_interval_millis: 50,
-            executions_left: 0,
-            last_execution_millis: chrono::Utc::now().timestamp_millis(),
-            instructions: vec![],
-        })
-        .await
-        .unwrap();
-
-        let mut service = TaskSchedulerService {
-            db: db.clone(),
-            rpc_client: RpcClient::new("http://localhost:8899".to_string()),
-            block: LatestBlock::default(),
-            task_queue: DelayQueue::new(),
-            task_queue_keys: HashMap::new(),
-            task_execution_retries: HashMap::new(),
-            tx_counter: AtomicU64::default(),
-            token: CancellationToken::new(),
-            min_interval: Duration::from_millis(10),
-            slot_interval: Duration::from_millis(1000),
-            scheduled_tasks: rx,
-        };
-
-        let replacement_authority = Pubkey::new_unique();
-        service
-            .register_task(&ScheduleTaskRequest {
-                id: task_id,
-                authority: replacement_authority,
-                execution_interval_millis: 50,
-                iterations: 1,
-                instructions: vec![],
-            })
-            .await
-            .unwrap();
-
-        let task = db.get_task(task_id).await.unwrap().unwrap();
-        assert_eq!(task.authority, replacement_authority);
-        assert_eq!(task.executions_left, 1);
     }
 
     #[tokio::test]
