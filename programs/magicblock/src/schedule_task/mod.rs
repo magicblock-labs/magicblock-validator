@@ -9,6 +9,7 @@ pub(crate) use process_schedule_task::*;
 use solana_instruction::{error::InstructionError, Instruction};
 use solana_log_collector::ic_msg;
 use solana_program_runtime::invoke_context::InvokeContext;
+use solana_pubkey::Pubkey;
 
 use crate::validator::validator_authority_id;
 
@@ -16,10 +17,10 @@ use crate::validator::validator_authority_id;
 // Assert they don't use the validator either
 pub(crate) fn validate_cranks_instructions(
     invoke_context: &mut InvokeContext,
-    task_id: i64,
+    authority: &Pubkey,
     instructions: &[Instruction],
 ) -> Result<(), InstructionError> {
-    let crank_signer = crank_signer_pda(task_id);
+    let crank_signer = crank_signer_pda(authority);
     for instruction in instructions {
         for account in &instruction.accounts {
             if account.is_signer && account.pubkey.ne(&crank_signer) {

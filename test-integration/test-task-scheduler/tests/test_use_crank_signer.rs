@@ -40,7 +40,7 @@ fn test_use_crank_signer() {
     let task_id = 9;
     let execution_interval_millis = 10;
     let iterations = 5;
-    let crank_signer = crank_signer_pda(task_id);
+    let crank_signer = crank_signer_pda(&payer.pubkey());
     let sig = expect!(
         ctx.send_transaction_ephem_with_preflight(
             &mut Transaction::new_signed_with_payer(

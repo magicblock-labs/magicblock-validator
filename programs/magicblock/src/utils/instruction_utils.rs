@@ -259,12 +259,12 @@ impl InstructionUtils {
     // Execute Crank
     // -----------------
     pub fn execute_task_instruction(
-        task_id: i64,
+        authority: Pubkey,
         instructions: Vec<Instruction>,
     ) -> Instruction {
         let mut account_metas = vec![
             AccountMeta::new_readonly(validator_authority_id(), true),
-            AccountMeta::new_readonly(crank_signer_pda(task_id), false),
+            AccountMeta::new_readonly(crank_signer_pda(&authority), false),
         ];
         for instruction in &instructions {
             account_metas.push(AccountMeta::new(instruction.program_id, false));
@@ -279,7 +279,7 @@ impl InstructionUtils {
         Instruction::new_with_bincode(
             CRANK_PROGRAM_ID,
             &MagicBlockInstruction::ExecuteCrank {
-                task_id,
+                authority,
                 instructions,
             },
             account_metas,
@@ -287,11 +287,11 @@ impl InstructionUtils {
     }
 
     pub fn execute_task(
-        task_id: i64,
+        authority: Pubkey,
         instructions: Vec<Instruction>,
         recent_blockhash: Hash,
     ) -> Transaction {
-        let ix = Self::execute_task_instruction(task_id, instructions);
+        let ix = Self::execute_task_instruction(authority, instructions);
         Self::into_transaction(&validator_authority(), ix, recent_blockhash)
     }
 

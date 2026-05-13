@@ -15,6 +15,7 @@ use magicblock_program::{
 };
 use solana_instruction::Instruction;
 use solana_message::Message;
+use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_signature::Signature;
 use solana_transaction::Transaction;
@@ -237,7 +238,7 @@ impl TaskSchedulerService {
 
     async fn execute_task(&mut self, task: &DbTask) -> TaskSchedulerResult<()> {
         let sig = self
-            .process_transaction(task.id, task.instructions.clone())
+            .process_transaction(task.authority, task.instructions.clone())
             .await?;
 
         // TODO(Dodecahedr0x): we don't get any output directly at this point
@@ -419,7 +420,7 @@ impl TaskSchedulerService {
 
     async fn process_transaction(
         &self,
-        task_id: i64,
+        authority: Pubkey,
         instructions: Vec<Instruction>,
     ) -> TaskSchedulerResult<Signature> {
         let blockhash = self.block.load().blockhash;
@@ -429,7 +430,7 @@ impl TaskSchedulerService {
             InstructionUtils::noop_instruction(
                 self.tx_counter.fetch_add(1, Ordering::Relaxed),
             ),
-            InstructionUtils::execute_task_instruction(task_id, instructions),
+            InstructionUtils::execute_task_instruction(authority, instructions),
         ];
         let tx = Transaction::new(
             &[validator_authority()],

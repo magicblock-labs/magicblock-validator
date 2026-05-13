@@ -311,7 +311,7 @@ pub enum MagicBlockInstruction {
     /// - **1.**   `[]`        Crank signer PDA
     /// - **2..n** `[]`        Accounts required by the embedded instructions
     ExecuteCrank {
-        task_id: i64,
+        authority: Pubkey,
         instructions: Vec<Instruction>,
     },
 }

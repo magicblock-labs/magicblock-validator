@@ -1,9 +1,9 @@
 use solana_program::pubkey::Pubkey;
 
 pub const CRANK_SEED: &[u8] = b"crank-executor";
-pub fn crank_signer_pda(task_id: i64) -> Pubkey {
+pub fn crank_signer_pda(authority: &Pubkey) -> Pubkey {
     Pubkey::find_program_address(
-        &[CRANK_SEED, task_id.to_le_bytes().as_ref()],
+        &[CRANK_SEED, authority.as_ref()],
         &crate::CRANK_PROGRAM_ID,
     )
     .0

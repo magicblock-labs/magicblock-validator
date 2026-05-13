@@ -227,12 +227,12 @@ declare_process_instruction!(
                 authority,
             ),
             ExecuteCrank {
-                task_id,
+                authority,
                 instructions,
             } => process_execute_crank(
                 signers,
                 invoke_context,
-                task_id,
+                &authority,
                 instructions,
             ),
         }
@@ -251,12 +251,12 @@ declare_process_instruction!(
 
         match instruction {
             MagicBlockInstruction::ExecuteCrank {
-                task_id,
+                authority,
                 instructions,
             } => process_execute_crank(
                 signers,
                 invoke_context,
-                task_id,
+                &authority,
                 instructions,
             ),
             _ => Err(InstructionError::InvalidInstructionData),

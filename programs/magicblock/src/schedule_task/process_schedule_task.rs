@@ -95,7 +95,7 @@ pub(crate) fn process_schedule_task(
 
     validate_cranks_instructions(
         invoke_context,
-        args.task_id,
+        &payer_pubkey,
         &args.instructions,
     )?;
 

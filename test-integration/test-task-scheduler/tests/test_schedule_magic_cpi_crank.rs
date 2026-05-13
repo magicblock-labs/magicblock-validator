@@ -86,7 +86,7 @@ fn test_crank_can_execute_program_that_cpis_into_magic() {
     let ephem_blockhash =
         expect!(ctx.try_get_latest_blockhash_ephem(), validator);
     let task_id = 17;
-    let crank_signer = crank_signer_pda(task_id);
+    let crank_signer = crank_signer_pda(&player.pubkey());
     let mut crank_ix = schedule_commit_cpi_instruction(
         crank_signer,
         magicblock_program::ID,
