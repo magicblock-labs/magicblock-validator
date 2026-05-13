@@ -21,7 +21,8 @@ pub enum MagicBlockInstruction {
         message: Option<String>,
     },
 
-    /// Schedules the accounts provided at end of accounts Vec to be committed.
+    /// Schedules the accounts provided at end of accounts Vec to be committed
+    /// and finalized in a single DLP instruction.
     /// It should be invoked from the program whose PDA accounts are to be
     /// committed.
     ///
@@ -37,8 +38,8 @@ pub enum MagicBlockInstruction {
     ScheduleCommit,
 
     /// This is the exact same instruction as [MagicBlockInstruction::ScheduleCommit] except
-    /// that the [ScheduledCommit] is flagged such that when accounts are committed, a request
-    /// to undelegate them is included with the same transaction.
+    /// that the scheduled intent is flagged such that when accounts are committed and finalized,
+    /// a request to undelegate them is included with the same transaction.
     /// Additionally the validator will refuse anymore transactions for the specific account
     /// since they are no longer considered delegated to it.
     ///
