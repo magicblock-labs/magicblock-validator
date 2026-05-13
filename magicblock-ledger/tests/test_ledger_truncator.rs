@@ -41,6 +41,43 @@ fn verify_transactions_state(
     }
 }
 
+async fn wait_for_transactions_state(
+    ledger: &Ledger,
+    start_slot: u64,
+    signatures: &[Signature],
+    shall_exist: bool,
+) {
+    let timeout = tokio::time::Instant::now() + Duration::from_secs(10);
+
+    loop {
+        let all_in_expected_state =
+            signatures.iter().enumerate().all(|(offset, signature)| {
+                let slot = start_slot + offset as u64;
+                ledger.read_slot_signature((slot, 0)).unwrap().is_some()
+                    == shall_exist
+                    && ledger
+                        .read_transaction((*signature, slot))
+                        .unwrap()
+                        .is_some()
+                        == shall_exist
+                    && ledger
+                        .read_transaction_status((*signature, slot))
+                        .unwrap()
+                        .is_some()
+                        == shall_exist
+            });
+        if all_in_expected_state {
+            return;
+        }
+
+        assert!(
+            tokio::time::Instant::now() < timeout,
+            "timed out waiting for transactions state"
+        );
+        tokio::time::sleep(TEST_TRUNCATION_TIME_INTERVAL).await;
+    }
+}
+
 // Tests that ledger is not truncated while there is still enough space
 #[tokio::test]
 async fn test_truncator_not_purged_size() {
@@ -159,22 +196,24 @@ async fn test_truncator_with_tx_spammer() {
     ledger_truncator.start();
     let handle = tokio::spawn(transaction_spammer(ledger.clone(), 10, 20));
 
-    // Sleep some time
-    tokio::time::sleep(Duration::from_secs(3)).await;
-
     let signatures_result = handle.await;
-    assert!(ledger.flush().is_ok());
     assert!(signatures_result.is_ok());
     let signatures = signatures_result.unwrap();
+    let last_signature_slot = signatures.len() as u64 - 1;
+    ledger
+        .write_block(LatestBlockInner::new(
+            last_signature_slot + 1,
+            Hash::new_unique(),
+            0,
+        ))
+        .unwrap();
+    assert!(ledger.flush().is_ok());
+    wait_for_transactions_state(&ledger, 0, &signatures, false).await;
 
-    // Stop truncator assuming that complete after sleep
     ledger_truncator.stop();
     assert!(ledger_truncator.join().is_ok());
 
-    assert_eq!(
-        ledger.get_lowest_cleanup_slot(),
-        signatures.len() as u64 - 1
-    );
+    assert!(ledger.get_lowest_cleanup_slot() >= last_signature_slot);
     verify_transactions_state(&ledger, 0, &signatures, false);
 }
 
