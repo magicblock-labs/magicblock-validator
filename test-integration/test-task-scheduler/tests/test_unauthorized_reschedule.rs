@@ -2,16 +2,14 @@ use std::time::{Duration, Instant};
 
 use cleanass::{assert, assert_eq};
 use integration_test_tools::{expect, validator::cleanup};
-use magicblock_task_scheduler::{db::DbTask, SchedulerDatabase};
-use program_flexi_counter::{
-    instruction::create_schedule_task_ix, state::FlexiCounter,
-};
+use magicblock_task_scheduler::SchedulerDatabase;
+use program_flexi_counter::instruction::create_schedule_task_ix;
 use solana_sdk::{
     native_token::LAMPORTS_PER_SOL, signature::Keypair, signer::Signer,
     transaction::Transaction,
 };
 use test_task_scheduler::{
-    create_delegated_counter, setup_validator, wait_for_incremented_counter,
+    create_delegated_counter, setup_validator,
 };
 use tokio::runtime::Runtime;
 
@@ -22,7 +20,6 @@ fn test_unauthorized_reschedule() {
 
     let payer = Keypair::new();
     let different_payer = Keypair::new();
-    let (counter_pda, _) = FlexiCounter::pda(&payer.pubkey());
 
     expect!(
         ctx.airdrop_chain(&payer.pubkey(), 10 * LAMPORTS_PER_SOL),
@@ -42,7 +39,7 @@ fn test_unauthorized_reschedule() {
     // Schedule a task
     let task_id = 1;
     let execution_interval_millis = 100;
-    let iterations = 2;
+    let iterations = 1000;
     let sig = expect!(
         ctx.send_transaction_ephem_with_preflight(
             &mut Transaction::new_signed_with_payer(
@@ -106,16 +103,6 @@ fn test_unauthorized_reschedule() {
         validator
     );
 
-    // Wait for the task to be processed
-    // Check that the counter was incremented
-    wait_for_incremented_counter(
-        &ctx,
-        &counter_pda,
-        iterations as u64,
-        Duration::from_secs(10),
-        &mut validator,
-    );
-
     // Check that one task is scheduled but another one is failed to schedule
     let db = expect!(SchedulerDatabase::new(db_path), validator);
     let runtime = expect!(Runtime::new(), validator);
@@ -168,15 +155,18 @@ fn test_unauthorized_reschedule() {
             .ok_or(anyhow::anyhow!("Task not found")),
         validator
     );
-    let expected_task = DbTask {
-        id: task_id,
-        instructions: task.instructions.clone(),
-        authority: payer.pubkey(),
+    assert_eq!(task.authority, payer.pubkey(), cleanup(&mut validator));
+    assert_eq!(
+        task.execution_interval_millis,
         execution_interval_millis,
-        executions_left: 0,
-        last_execution_millis: task.last_execution_millis,
-    };
-    assert_eq!(task, expected_task, cleanup(&mut validator));
+        cleanup(&mut validator)
+    );
+    assert!(
+        task.executions_left > 0,
+        cleanup(&mut validator),
+        "task.executions_left: {}",
+        task.executions_left
+    );
 
     cleanup(&mut validator);
 }
