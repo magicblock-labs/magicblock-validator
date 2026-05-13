@@ -247,30 +247,31 @@ impl TaskSchedulerService {
         &mut self,
         task: &DbTask,
     ) -> TaskSchedulerResult<()> {
-        let Some(current) = self.db.get_task(task.id).await? else {
-            self.task_execution_retries.remove(&task.id);
-            return Ok(());
-        };
+        let executed_at = next_execution_millis(
+            task.last_execution_millis,
+            task.execution_interval_millis,
+            chrono::Utc::now().timestamp_millis(),
+        );
 
-        if task.executions_left <= 1 {
-            self.db.remove_task(task.id).await?;
-        } else {
-            let current_time = chrono::Utc::now().timestamp_millis();
-            self.db
-                .update_task_after_execution(task.id, current_time)
-                .await?;
-        }
-
-        if current.executions_left > 1 {
-            let new_task = DbTask {
-                executions_left: current.executions_left - 1,
-                ..current
-            };
-            let key = self.task_queue.insert(
-                new_task,
-                Duration::from_millis(current.execution_interval_millis as u64),
+        if task.executions_left > 1 {
+            let next_execution = executed_at + task.execution_interval_millis;
+            let delay = delay_until_millis(
+                next_execution,
+                chrono::Utc::now().timestamp_millis(),
             );
+            let new_task = DbTask {
+                executions_left: task.executions_left - 1,
+                last_execution_millis: executed_at,
+                ..task.clone()
+            };
+            let key = self.task_queue.insert(new_task, delay);
             self.task_queue_keys.insert(task.id, key);
+
+            self.db
+                .update_task_after_execution(task.id, executed_at)
+                .await?;
+        } else {
+            self.db.remove_task(task.id).await?;
         }
 
         self.task_execution_retries.remove(&task.id);
@@ -512,6 +513,22 @@ fn is_valid_task_interval(interval: i64) -> bool {
     interval > 0 && interval < u32::MAX as i64
 }
 
+fn next_execution_millis(
+    last_execution_millis: i64,
+    execution_interval_millis: i64,
+    now: i64,
+) -> i64 {
+    if last_execution_millis == 0 {
+        now
+    } else {
+        last_execution_millis + execution_interval_millis
+    }
+}
+
+fn delay_until_millis(execution_millis: i64, now: i64) -> Duration {
+    Duration::from_millis(execution_millis.saturating_sub(now).max(0) as u64)
+}
+
 fn is_retryable_task_execution_error(error: &TaskSchedulerError) -> bool {
     // `send_crank_batch` maps Solana send and verification failures to Rpc.
     matches!(error, TaskSchedulerError::Rpc(_))
@@ -529,6 +546,25 @@ mod tests {
     use tokio::{sync::mpsc, time::timeout};
 
     use super::*;
+
+    #[test]
+    fn test_first_execution_anchors_cadence_at_now() {
+        assert_eq!(next_execution_millis(0, 50, 1_000), 1_000);
+    }
+
+    #[test]
+    fn test_recurring_execution_preserves_fixed_rate_cadence() {
+        let executed_at = next_execution_millis(1_000, 50, 1_090);
+        assert_eq!(executed_at, 1_050);
+
+        let delay = delay_until_millis(executed_at + 50, 1_090);
+        assert_eq!(delay, Duration::from_millis(10));
+    }
+
+    #[test]
+    fn test_overdue_execution_is_rescheduled_immediately() {
+        assert_eq!(delay_until_millis(1_100, 1_150), Duration::from_millis(0));
+    }
 
     #[tokio::test]
     async fn test_schedule_invalid_tasks() {
