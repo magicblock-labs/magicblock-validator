@@ -53,9 +53,7 @@ fn test_post_delegation_action_is_picked_up_by_greedy_clone() {
     run_post_delegation_action_executes_spl_token_transfer(false);
 }
 
-fn run_post_delegation_action_executes_spl_token_transfer(
-    trigger_fetch: bool,
-) {
+fn run_post_delegation_action_executes_spl_token_transfer(trigger_fetch: bool) {
     init_logger!();
     let ctx = IntegrationTestContext::try_new().unwrap();
 
