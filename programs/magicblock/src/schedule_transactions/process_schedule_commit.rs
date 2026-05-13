@@ -296,12 +296,14 @@ pub(crate) fn process_schedule_commit(
     let commit_sent_sig = action_sent_transaction.signatures[0];
 
     let base_intent = if opts.request_undelegation {
-        MagicBaseIntent::CommitAndUndelegate(CommitAndUndelegate {
+        MagicBaseIntent::CommitFinalizeAndUndelegate(CommitAndUndelegate {
             commit_action: CommitType::Standalone(committed_accounts),
             undelegate_action: UndelegateType::Standalone,
         })
     } else {
-        MagicBaseIntent::Commit(CommitType::Standalone(committed_accounts))
+        MagicBaseIntent::CommitFinalize(CommitType::Standalone(
+            committed_accounts,
+        ))
     }
     .into();
 
