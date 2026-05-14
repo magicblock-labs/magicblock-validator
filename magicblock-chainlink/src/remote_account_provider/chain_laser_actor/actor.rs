@@ -252,13 +252,6 @@ impl<H: StreamHandle, S: StreamFactory<H>> ChainLaserActor<H, S> {
         )
     }
 
-    #[allow(dead_code)]
-    #[instrument(skip(self), fields(client_id = %self.client_id))]
-    fn shutdown(&mut self) {
-        info!("Shutting down laser actor");
-        Self::clear_subscriptions(&mut self.stream_manager);
-    }
-
     #[instrument(skip(self), fields(client_id = %self.client_id))]
     pub async fn run(mut self) {
         let mut optimization_interval =
