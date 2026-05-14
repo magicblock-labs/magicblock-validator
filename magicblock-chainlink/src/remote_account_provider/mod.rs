@@ -121,7 +121,10 @@ impl ClaimedSubscriptionSetupGuard {
 
     fn cleanup_with_error(&mut self, waiter_error_text: String) {
         {
-            let mut fetching = self.fetching_accounts.lock().unwrap();
+            let mut fetching = self
+                .fetching_accounts
+                .lock()
+                .expect("accounts mutex poisoned");
             for pubkey in &self.claimed_pubkeys {
                 let Some(generation) =
                     self.claimed_generations.get(pubkey).copied()
