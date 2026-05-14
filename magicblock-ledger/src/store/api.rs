@@ -42,7 +42,7 @@ use crate::{
     errors::{LedgerError, LedgerResult},
     metrics::LedgerRpcApiMetrics,
     store::utils::adjust_ulimit_nofile,
-    LatestBlock,
+    LatestBlock, LatestBlockInner,
 };
 
 #[derive(Default, Debug)]
@@ -168,7 +168,8 @@ impl Ledger {
         };
         let (slot, blockhash) = ledger.get_max_blockhash()?;
         let time = ledger.get_block_time(slot)?.unwrap_or_default();
-        ledger.latest_block.store(slot, blockhash, time);
+        let block = LatestBlockInner::new(slot, blockhash, time);
+        ledger.latest_block.store(block);
         ledger.initialize_lowest_cleanup_slot()?;
 
         Ok(ledger)
@@ -366,18 +367,14 @@ impl Ledger {
     // NOTE: we kept the term block time even tough we don't produce blocks.
     // As far as we are concerned these are just the time when we advanced to
     // a specific slot.
-    pub fn write_block(
-        &self,
-        slot: Slot,
-        timestamp: UnixTimestamp,
-        blockhash: Hash,
-    ) -> LedgerResult<()> {
-        self.blocktime_cf.put(slot, &timestamp)?;
+    pub fn write_block(&self, block: LatestBlockInner) -> LedgerResult<()> {
+        self.blocktime_cf
+            .put(block.slot, &block.clock.unix_timestamp)?;
         self.blocktime_cf.try_increase_entry_counter(1);
 
-        self.blockhash_cf.put(slot, &blockhash)?;
+        self.blockhash_cf.put(block.slot, &block.blockhash)?;
         self.blockhash_cf.try_increase_entry_counter(1);
-        self.latest_block.store(slot, blockhash, timestamp);
+        self.latest_block.store(block);
         Ok(())
     }
 
@@ -1807,7 +1804,11 @@ mod tests {
             )
             .is_ok());
         assert!(store
-            .write_block(slot_uno, block_time_uno, block_hash_uno)
+            .write_block(LatestBlockInner::new(
+                slot_uno,
+                block_hash_uno,
+                block_time_uno
+            ))
             .is_ok());
 
         // Get first transaction by signature providing high enough slot
@@ -1839,7 +1840,11 @@ mod tests {
             )
             .is_ok());
         assert!(store
-            .write_block(slot_dos, block_time_dos, block_hash_dos)
+            .write_block(LatestBlockInner::new(
+                slot_dos,
+                block_hash_dos,
+                block_time_dos
+            ))
             .is_ok());
 
         // Get second transaction by signature providing slot at which it was stored
@@ -1859,7 +1864,11 @@ mod tests {
         // 1. Add some transaction statuses
         let (signature_uno, slot_uno) = (Signature::new_unique(), 10);
         store
-            .write_block(slot_uno, 0, BlockHash::new_unique())
+            .write_block(LatestBlockInner::new(
+                slot_uno,
+                BlockHash::new_unique(),
+                0,
+            ))
             .unwrap();
 
         let (read_uno, write_uno) = {
@@ -1882,7 +1891,11 @@ mod tests {
 
         let (signature_dos, slot_dos) = (Signature::new_unique(), 20);
         store
-            .write_block(slot_dos, 0, BlockHash::new_unique())
+            .write_block(LatestBlockInner::new(
+                slot_dos,
+                BlockHash::new_unique(),
+                0,
+            ))
             .unwrap();
         let signature_dos_2 = Signature::new_unique();
         let (read_dos, write_dos) = {
@@ -1926,7 +1939,11 @@ mod tests {
 
         let (signature_tres, slot_tres) = (Signature::new_unique(), 30);
         store
-            .write_block(slot_tres, 0, BlockHash::new_unique())
+            .write_block(LatestBlockInner::new(
+                slot_tres,
+                BlockHash::new_unique(),
+                0,
+            ))
             .unwrap();
         let (_read_tres, _write_tres) = {
             let (meta, mut writable_keys, mut readonly_keys) =
@@ -1953,7 +1970,11 @@ mod tests {
 
         let (signature_cuatro, slot_cuatro) = (Signature::new_unique(), 31);
         store
-            .write_block(slot_cuatro, 0, BlockHash::new_unique())
+            .write_block(LatestBlockInner::new(
+                slot_cuatro,
+                BlockHash::new_unique(),
+                0,
+            ))
             .unwrap();
         let (read_cuatro, _write_cuatro) = {
             let (meta, writable_keys, readonly_keys) =
@@ -1975,7 +1996,11 @@ mod tests {
 
         let (signature_cinco, slot_cinco) = (Signature::new_unique(), 31);
         store
-            .write_block(slot_cinco, 0, BlockHash::new_unique())
+            .write_block(LatestBlockInner::new(
+                slot_cinco,
+                BlockHash::new_unique(),
+                0,
+            ))
             .unwrap();
         let (_read_cinco, _write_cinco) = {
             let (meta, writable_keys, readonly_keys) =
@@ -1997,7 +2022,11 @@ mod tests {
 
         let (signature_seis, slot_seis) = (Signature::new_unique(), 32);
         store
-            .write_block(slot_seis, 0, BlockHash::new_unique())
+            .write_block(LatestBlockInner::new(
+                slot_seis,
+                BlockHash::new_unique(),
+                0,
+            ))
             .unwrap();
         let (_read_seis, _write_seis) = {
             let (meta, mut writable_keys, mut readonly_keys) =
@@ -2039,14 +2068,40 @@ mod tests {
         //  read_seis | write_seis    : signature_seis
 
         // 2. Fill in block times
-        assert!(store.write_block(slot_uno, 1, Hash::new_unique()).is_ok());
-        assert!(store.write_block(slot_dos, 2, Hash::new_unique()).is_ok());
-        assert!(store.write_block(slot_tres, 3, Hash::new_unique()).is_ok());
         assert!(store
-            .write_block(slot_cuatro, 4, Hash::new_unique())
+            .write_block(LatestBlockInner::new(slot_uno, Hash::new_unique(), 1))
             .is_ok());
-        assert!(store.write_block(slot_cinco, 5, Hash::new_unique()).is_ok());
-        assert!(store.write_block(slot_seis, 6, Hash::new_unique()).is_ok());
+        assert!(store
+            .write_block(LatestBlockInner::new(slot_dos, Hash::new_unique(), 2))
+            .is_ok());
+        assert!(store
+            .write_block(LatestBlockInner::new(
+                slot_tres,
+                Hash::new_unique(),
+                3
+            ))
+            .is_ok());
+        assert!(store
+            .write_block(LatestBlockInner::new(
+                slot_cuatro,
+                Hash::new_unique(),
+                4
+            ))
+            .is_ok());
+        assert!(store
+            .write_block(LatestBlockInner::new(
+                slot_cinco,
+                Hash::new_unique(),
+                5
+            ))
+            .is_ok());
+        assert!(store
+            .write_block(LatestBlockInner::new(
+                slot_seis,
+                Hash::new_unique(),
+                6
+            ))
+            .is_ok());
 
         // 3. Find signatures for address with default limits
         let res = store
@@ -2249,9 +2304,27 @@ mod tests {
             let (meta, writable_keys, readonly_keys) =
                 create_transaction_status_meta(5);
             let read_uno = readonly_keys[0];
-            assert!(store.write_block(slot1, 1, Hash::new_unique()).is_ok());
-            assert!(store.write_block(slot2, 2, Hash::new_unique()).is_ok());
-            assert!(store.write_block(slot3, 3, Hash::new_unique()).is_ok());
+            assert!(store
+                .write_block(LatestBlockInner::new(
+                    slot1,
+                    Hash::new_unique(),
+                    1
+                ))
+                .is_ok());
+            assert!(store
+                .write_block(LatestBlockInner::new(
+                    slot2,
+                    Hash::new_unique(),
+                    2
+                ))
+                .is_ok());
+            assert!(store
+                .write_block(LatestBlockInner::new(
+                    slot3,
+                    Hash::new_unique(),
+                    3
+                ))
+                .is_ok());
             for (slot, signature) in &[
                 (slot1, sig1),
                 (slot1, sig2),
@@ -2496,7 +2569,11 @@ mod tests {
                 .is_ok());
 
             assert!(store
-                .write_block(slot_uno, 100, Hash::new_unique())
+                .write_block(LatestBlockInner::new(
+                    slot_uno,
+                    Hash::new_unique(),
+                    100
+                ))
                 .is_ok());
 
             assert!(store
@@ -2524,7 +2601,11 @@ mod tests {
                 )
                 .is_ok());
             assert!(store
-                .write_block(slot_dos, 100, Hash::new_unique())
+                .write_block(LatestBlockInner::new(
+                    slot_dos,
+                    Hash::new_unique(),
+                    100
+                ))
                 .is_ok());
             assert!(store
                 .write_transaction_memos(
@@ -2617,7 +2698,9 @@ mod tests {
                 meta,
             )
             .unwrap();
-        store.write_block(slot, 100, Hash::new_unique()).unwrap();
+        store
+            .write_block(LatestBlockInner::new(slot, Hash::new_unique(), 100))
+            .unwrap();
 
         // Verify a properly signed transaction returns Some(true)
         let result = store.verify_transaction_signature(&signature).unwrap();
@@ -2684,7 +2767,9 @@ mod tests {
                 meta,
             )
             .unwrap();
-        store.write_block(slot, 100, Hash::new_unique()).unwrap();
+        store
+            .write_block(LatestBlockInner::new(slot, Hash::new_unique(), 100))
+            .unwrap();
 
         // The corrupted signature should fail verification
         let result = store.verify_transaction_signature(&bad_sig).unwrap();

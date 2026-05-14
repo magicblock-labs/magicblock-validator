@@ -111,7 +111,7 @@ mod test {
     use crate::{
         test_utils::process_instruction,
         utils::instruction_utils::InstructionUtils,
-        validator::init_validator_authority_if_needed,
+        validator::init_validator_authority,
     };
 
     pub fn complex_ix(payer: Pubkey) -> Instruction {
@@ -122,7 +122,7 @@ mod test {
 
     #[test]
     fn test_execute_task_simple() {
-        init_validator_authority_if_needed(Keypair::new());
+        init_validator_authority(Keypair::new());
         let ix = InstructionUtils::execute_task_instruction(vec![
             InstructionUtils::noop_instruction(0),
         ]);
@@ -146,7 +146,7 @@ mod test {
 
     #[test]
     fn test_execute_task_complex() {
-        init_validator_authority_if_needed(Keypair::new());
+        init_validator_authority(Keypair::new());
         let payer = Pubkey::new_unique();
         let ix =
             InstructionUtils::execute_task_instruction(vec![complex_ix(payer)]);
@@ -174,7 +174,7 @@ mod test {
 
     #[test]
     fn fail_execute_task_without_crank_signer() {
-        init_validator_authority_if_needed(Keypair::new());
+        init_validator_authority(Keypair::new());
         let ix = InstructionUtils::execute_task_instruction(vec![
             InstructionUtils::noop_instruction(0),
         ]);
@@ -198,7 +198,7 @@ mod test {
 
     #[test]
     fn fail_execute_task_wrong_validator() {
-        init_validator_authority_if_needed(Keypair::new());
+        init_validator_authority(Keypair::new());
         let ix = InstructionUtils::execute_task_instruction(vec![
             InstructionUtils::noop_instruction(0),
         ]);
@@ -223,7 +223,7 @@ mod test {
 
     #[test]
     fn fail_execute_task_validator_not_in_signers() {
-        init_validator_authority_if_needed(Keypair::new());
+        init_validator_authority(Keypair::new());
         let mut ix = InstructionUtils::execute_task_instruction(vec![
             InstructionUtils::noop_instruction(0),
         ]);
@@ -248,7 +248,7 @@ mod test {
 
     #[test]
     fn fail_execute_task_wrong_crank_signer() {
-        init_validator_authority_if_needed(Keypair::new());
+        init_validator_authority(Keypair::new());
         let ix = InstructionUtils::execute_task_instruction(vec![
             InstructionUtils::noop_instruction(0),
         ]);
@@ -273,7 +273,7 @@ mod test {
 
     #[test]
     fn fail_execute_task_missing_accounts() {
-        init_validator_authority_if_needed(Keypair::new());
+        init_validator_authority(Keypair::new());
         let payer = Pubkey::new_unique();
         let ix =
             InstructionUtils::execute_task_instruction(vec![complex_ix(payer)]);
@@ -297,7 +297,7 @@ mod test {
 
     #[test]
     fn fail_execute_task_with_invalid_instructions() {
-        init_validator_authority_if_needed(Keypair::new());
+        init_validator_authority(Keypair::new());
         let payer = Pubkey::new_unique();
         let mut inner_ix = InstructionUtils::schedule_task_instruction(
             &payer,

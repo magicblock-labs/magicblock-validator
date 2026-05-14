@@ -1,7 +1,8 @@
 use std::sync::Arc;
 
-use magicblock_core::{link::transactions::TransactionResult, Slot};
+use magicblock_core::Slot;
 use solana_signature::Signature;
+use solana_transaction_error::TransactionResult;
 
 use super::ExpiringCache;
 
@@ -18,5 +19,5 @@ pub(crate) struct SignatureResult {
     /// The slot in which the transaction was processed.
     pub slot: Slot,
     /// The result of the transaction (e.g., success or an error).
-    pub result: TransactionResult,
+    pub result: TransactionResult<()>,
 }

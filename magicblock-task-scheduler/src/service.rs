@@ -124,7 +124,7 @@ impl TaskSchedulerService {
         for task in tasks {
             debug!("Task: {:?}", task);
             if !is_valid_task_interval(task.execution_interval_millis)
-                || task.executions_left < 0
+                || task.executions_left <= 0
             {
                 warn!(
                     "Task {} has an invalid parameters: (interval={}, executions_left={}). Skipping.",
@@ -258,10 +258,14 @@ impl TaskSchedulerService {
             self.task_queue_keys.insert(task.id, key);
         }
 
-        let current_time = chrono::Utc::now().timestamp_millis();
-        self.db
-            .update_task_after_execution(task.id, current_time)
-            .await?;
+        if task.executions_left <= 1 {
+            self.db.remove_task(task.id).await?;
+        } else {
+            let current_time = chrono::Utc::now().timestamp_millis();
+            self.db
+                .update_task_after_execution(task.id, current_time)
+                .await?;
+        }
 
         Ok(())
     }
@@ -573,6 +577,64 @@ mod tests {
             loop {
                 let tasks = db.get_tasks().await?;
                 if tasks.len() == 1 {
+                    return Ok::<_, TaskSchedulerError>(());
+                }
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+        })
+        .await
+        .unwrap()
+        .unwrap();
+        handle.abort();
+    }
+
+    #[tokio::test]
+    async fn test_completed_tasks_are_removed_on_startup() {
+        magicblock_core::logger::init_for_tests();
+
+        let (_tx, rx) = mpsc::unbounded_channel();
+        let db = SchedulerDatabase::new(":memory:").unwrap();
+        db.insert_task(&DbTask {
+            id: 1,
+            authority: Pubkey::new_unique(),
+            execution_interval_millis: 50,
+            executions_left: 0,
+            last_execution_millis: chrono::Utc::now().timestamp_millis(),
+            instructions: vec![],
+        })
+        .await
+        .unwrap();
+        db.insert_task(&DbTask {
+            id: 2,
+            authority: Pubkey::new_unique(),
+            execution_interval_millis: 50,
+            executions_left: 1,
+            last_execution_millis: chrono::Utc::now().timestamp_millis(),
+            instructions: vec![],
+        })
+        .await
+        .unwrap();
+
+        let service = TaskSchedulerService {
+            db: db.clone(),
+            rpc_client: RpcClient::new("http://localhost:8899".to_string()),
+            block: LatestBlock::default(),
+            task_queue: DelayQueue::new(),
+            task_queue_keys: HashMap::new(),
+            task_execution_retries: HashMap::new(),
+            tx_counter: AtomicU64::default(),
+            token: CancellationToken::new(),
+            min_interval: Duration::from_millis(10),
+            slot_interval: Duration::from_millis(1000),
+            scheduled_tasks: rx,
+        };
+
+        let handle = service.start().await.unwrap();
+
+        timeout(Duration::from_secs(1), async move {
+            loop {
+                let tasks = db.get_task_ids().await?;
+                if tasks == vec![2] {
                     return Ok::<_, TaskSchedulerError>(());
                 }
                 tokio::time::sleep(Duration::from_millis(100)).await;

@@ -84,6 +84,7 @@ fn setup_replay_scenario_replica(
 pub async fn test_replay_state_transition() {
     // Run in Replica mode (scheduler starts in Replica, no mode switch)
     let env = ExecutionTestEnv::new_replica_mode(1, false);
+    env.yield_to_scheduler().await;
 
     let (txn, pubkeys) = setup_replay_scenario_replica(
         &env,

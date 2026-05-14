@@ -95,12 +95,15 @@ pub(crate) async fn should_forward_dlp_program_update<T: ChainRpcClient>(
     {
         Ok(Some(record)) => record,
         Ok(None) => {
-            trace!(pubkey = %delegated_account_pubkey, slot = min_context_slot, "Dropping DLP program update without delegation record");
-            return false;
+            // Preserve greedy cloning when the subscription update wins the race
+            // against delegation-record visibility. FetchCloner refetches the
+            // record before cloning and only receives actions for this validator.
+            trace!(pubkey = %delegated_account_pubkey, slot = min_context_slot, "Forwarding DLP program update without visible delegation record");
+            return true;
         }
         Err(FetchError::Transport(err)) => {
-            warn!(pubkey = %delegated_account_pubkey, slot = min_context_slot, error = %err, "Dropping DLP program update after delegation record fetch error");
-            return false;
+            debug!(pubkey = %delegated_account_pubkey, slot = min_context_slot, error = %err, "Forwarding DLP program update after delegation record fetch error");
+            return true;
         }
         Err(FetchError::Deserialize) => {
             warn!(pubkey = %delegated_account_pubkey, slot = min_context_slot, "Dropping DLP program update after invalid delegation record data");
@@ -354,6 +357,47 @@ mod tests {
             .await
         );
         assert_eq!(elsewhere_rpc.single_account_fetches(), 1);
+
+        let missing_record_rpc =
+            ChainRpcClientMockBuilder::new().slot(10).build();
+        assert!(
+            should_forward_dlp_program_update(
+                &missing_record_rpc,
+                &validator_pubkey,
+                delegated_account_pubkey,
+                &delegated_account.owner,
+                delegated_account.data.as_slice(),
+                10,
+            )
+            .await
+        );
+        assert_eq!(missing_record_rpc.single_account_fetches(), 1);
+
+        let stale_record_rpc = ChainRpcClientMockBuilder::new()
+            .slot(5)
+            .account(
+                delegation_record_pubkey,
+                Account {
+                    lamports: 1,
+                    data: serialize_valid_delegation_record(validator_pubkey),
+                    owner: dlp_api::id(),
+                    executable: false,
+                    rent_epoch: 0,
+                },
+            )
+            .build();
+        assert!(
+            should_forward_dlp_program_update(
+                &stale_record_rpc,
+                &validator_pubkey,
+                delegated_account_pubkey,
+                &delegated_account.owner,
+                delegated_account.data.as_slice(),
+                10,
+            )
+            .await
+        );
+        assert_eq!(stale_record_rpc.single_account_fetches(), 1);
 
         let unconfined_rpc = ChainRpcClientMockBuilder::new()
             .slot(10)

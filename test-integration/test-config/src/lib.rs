@@ -37,7 +37,6 @@ fn get_programs() -> Vec<LoadableProgram> {
 
 /// Starts a validator with the given clone configuration
 pub fn start_validator_with_clone_config(
-    prepare_lookup_tables: bool,
     loaded_chain_accounts: &LoadedAccounts,
 ) -> (TempDir, Child, IntegrationTestContext) {
     let programs = get_programs();
@@ -50,7 +49,6 @@ pub fn start_validator_with_clone_config(
             Remote::from_str(IntegrationTestContext::ws_url_chain()).unwrap(),
         ],
         chainlink: ChainLinkConfig {
-            prepare_lookup_tables,
             ..Default::default()
         },
         accountsdb: AccountsDbConfig {

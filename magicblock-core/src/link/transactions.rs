@@ -1,3 +1,6 @@
+use std::sync::Arc;
+
+use bytes::Bytes;
 use flume::{Receiver as MpmcReceiver, Sender as MpmcSender};
 use magicblock_magic_program_api::args::TaskRequest;
 use serde::Serialize;
@@ -11,17 +14,15 @@ use solana_transaction::{
     Transaction,
 };
 use solana_transaction_context::TransactionReturnData;
-use solana_transaction_error::{
-    TransactionError, TransactionResult as SolanaTransactionResult,
-};
+use solana_transaction_error::{TransactionError, TransactionResult};
 use solana_transaction_status_client_types::TransactionStatusMeta;
 use tokio::sync::{
     mpsc::{Receiver, Sender, UnboundedReceiver, UnboundedSender},
-    oneshot,
+    oneshot, OwnedSemaphorePermit, Semaphore,
 };
 
-use super::blocks::BlockHash;
-use crate::Slot;
+use super::{blocks::BlockHash, replication};
+use crate::{Slot, TransactionIndex};
 
 /// The receiver end of the multi-producer, multi-consumer
 /// channel for communicating final transaction statuses.
@@ -30,10 +31,10 @@ pub type TransactionStatusRx = MpmcReceiver<TransactionStatus>;
 /// channel for communicating final transaction statuses.
 pub type TransactionStatusTx = MpmcSender<TransactionStatus>;
 
-/// The receiver end of the channel used to send new transactions to the scheduler for processing.
-pub type TransactionToProcessRx = Receiver<ProcessableTransaction>;
-/// The sender end of the channel used to send new transactions to the scheduler for processing.
-type TransactionToProcessTx = Sender<ProcessableTransaction>;
+/// The receiver end of the ordered command channel used to drive the scheduler.
+pub type TransactionToProcessRx = Receiver<SchedulerCommand>;
+/// The sender end of the ordered command channel used to drive the scheduler.
+type TransactionToProcessTx = Sender<SchedulerCommand>;
 
 /// The receiver end of the channel used to send scheduled tasks (cranking)
 pub type ScheduledTasksRx = UnboundedReceiver<TaskRequest>;
@@ -46,17 +47,22 @@ pub type ScheduledTasksTx = UnboundedSender<TaskRequest>;
 /// This is the primary entry point for all transaction-related
 /// operations like execution, simulation, and replay.
 #[derive(Clone)]
-pub struct TransactionSchedulerHandle(pub(super) TransactionToProcessTx);
+pub struct TransactionSchedulerHandle {
+    pub(super) tx: TransactionToProcessTx,
+    /// Semaphore for coordinating exclusive access with the scheduler.
+    /// See [`Self::wait_for_idle`] for usage.
+    pub(super) pause_permit: Arc<Semaphore>,
+}
 
-/// The standard result of a transaction execution, indicating success or a `TransactionError`.
-pub type TransactionResult = SolanaTransactionResult<()>;
 /// The sender half of a one-shot channel used to return the result of a transaction simulation.
 pub type TxnSimulationResultTx = oneshot::Sender<TransactionSimulationResult>;
 /// An optional sender half of a one-shot channel for returning a transaction execution result.
 /// `None` is used for "fire-and-forget" scheduling.
-pub type TxnExecutionResultTx = Option<oneshot::Sender<TransactionResult>>;
+pub type TxnExecutionResultTx = Option<oneshot::Sender<TransactionResult<()>>>;
 /// The sender half of a one-shot channel used to return the result of a transaction replay.
-pub type TxnReplayResultTx = oneshot::Sender<TransactionResult>;
+pub type TxnReplayResultTx = oneshot::Sender<TransactionResult<()>>;
+/// Result returned by scheduler commands that are not transaction executions.
+pub type SchedulerCommandResult = Result<(), String>;
 
 /// Contains the final, committed status of an executed
 /// transaction, including its result and metadata.
@@ -66,7 +72,7 @@ pub struct TransactionStatus {
     pub slot: Slot,
     pub txn: SanitizedTransaction,
     pub meta: TransactionStatusMeta,
-    pub index: u32,
+    pub index: TransactionIndex,
 }
 
 /// An internal message that bundles a sanitized transaction with its requested processing mode.
@@ -76,7 +82,24 @@ pub struct ProcessableTransaction {
     pub mode: TransactionProcessingMode,
     /// Pre-encoded bincode bytes for the transaction.
     /// Used by the replicator to avoid redundant serialization.
-    pub encoded: Option<Vec<u8>>,
+    pub encoded: Option<Bytes>,
+}
+
+/// Ordered scheduler command.
+///
+/// Block boundaries are part of the replay stream. Keeping them in the same FIFO
+/// channel as transactions prevents a block from overtaking transactions that
+/// were replicated before it.
+#[allow(clippy::large_enum_variant)]
+pub enum SchedulerCommand {
+    /// Schedule or replay one transaction.
+    Transaction(ProcessableTransaction),
+    /// Finalize a replicated block after all preceding replay transactions have
+    /// been scheduled and applied.
+    Block {
+        block: replication::Block,
+        ack: oneshot::Sender<SchedulerCommandResult>,
+    },
 }
 
 /// Specifies the position and persistence behavior for replaying a transaction.
@@ -88,7 +111,7 @@ pub struct ReplayPosition {
     /// The slot in which the transaction was originally included.
     pub slot: Slot,
     /// The transaction's index within that slot (0-based).
-    pub index: u32,
+    pub index: TransactionIndex,
     /// Whether to persist the replay to the ledger and broadcast status.
     /// - `true`: Record to ledger + broadcast (for replay from primary/replicator)
     /// - `false`: No recording, no broadcast (for local ledger replay during startup)
@@ -116,7 +139,7 @@ pub enum TransactionProcessingMode {
 /// Contains extra information not available in a standard
 /// execution, like compute units and return data.
 pub struct TransactionSimulationResult {
-    pub result: TransactionResult,
+    pub result: TransactionResult<()>,
     pub logs: Option<Vec<String>>,
     pub post_simulation_accounts: Vec<(Pubkey, AccountSharedData)>,
     pub units_consumed: u64,
@@ -155,7 +178,7 @@ pub trait SanitizeableTransaction {
     fn sanitize_with_encoded(
         self,
         verify: bool,
-    ) -> Result<(SanitizedTransaction, Option<Vec<u8>>), TransactionError>
+    ) -> TransactionResult<(SanitizedTransaction, Option<Bytes>)>
     where
         Self: Sized,
     {
@@ -168,7 +191,7 @@ pub trait SanitizeableTransaction {
 /// Use for internally-constructed transactions that need encoded bytes.
 pub struct WithEncoded<T> {
     pub txn: T,
-    pub encoded: Vec<u8>,
+    pub encoded: Bytes,
 }
 
 impl<T: SanitizeableTransaction> SanitizeableTransaction for WithEncoded<T> {
@@ -182,7 +205,7 @@ impl<T: SanitizeableTransaction> SanitizeableTransaction for WithEncoded<T> {
     fn sanitize_with_encoded(
         self,
         verify: bool,
-    ) -> Result<(SanitizedTransaction, Option<Vec<u8>>), TransactionError> {
+    ) -> TransactionResult<(SanitizedTransaction, Option<Bytes>)> {
         let txn = self.txn.sanitize(verify)?;
         Ok((txn, Some(self.encoded)))
     }
@@ -195,7 +218,8 @@ where
     T: Serialize,
 {
     let encoded = bincode::serialize(&txn)
-        .map_err(|_| TransactionError::SanitizeFailure)?;
+        .map_err(|_| TransactionError::SanitizeFailure)?
+        .into();
     Ok(WithEncoded { txn, encoded })
 }
 
@@ -243,7 +267,7 @@ impl TransactionSchedulerHandle {
     pub async fn schedule(
         &self,
         txn: impl SanitizeableTransaction,
-    ) -> TransactionResult {
+    ) -> TransactionResult<()> {
         let (transaction, encoded) = txn.sanitize_with_encoded(true)?;
         let mode = TransactionProcessingMode::Execution(None);
         let txn = ProcessableTransaction {
@@ -251,7 +275,7 @@ impl TransactionSchedulerHandle {
             mode,
             encoded,
         };
-        let r = self.0.send(txn).await;
+        let r = self.tx.send(SchedulerCommand::Transaction(txn)).await;
         r.map_err(|_| TransactionError::ClusterMaintenance)
     }
 
@@ -263,7 +287,7 @@ impl TransactionSchedulerHandle {
     pub async fn execute(
         &self,
         txn: impl SanitizeableTransaction,
-    ) -> TransactionResult {
+    ) -> TransactionResult<()> {
         let mode = |tx| TransactionProcessingMode::Execution(Some(tx));
         self.send(txn, mode).await?
     }
@@ -272,7 +296,7 @@ impl TransactionSchedulerHandle {
     pub async fn simulate(
         &self,
         txn: impl SanitizeableTransaction,
-    ) -> Result<TransactionSimulationResult, TransactionError> {
+    ) -> TransactionResult<TransactionSimulationResult> {
         let mode = TransactionProcessingMode::Simulation;
         self.send(txn, mode).await
     }
@@ -290,18 +314,37 @@ impl TransactionSchedulerHandle {
         &self,
         position: ReplayPosition,
         txn: impl SanitizeableTransaction,
-    ) -> TransactionResult {
+    ) -> TransactionResult<()> {
         let mode = TransactionProcessingMode::Replay(position);
-        let transaction = txn.sanitize(true)?;
+        let (transaction, encoded) = txn.sanitize_with_encoded(true)?;
         let txn = ProcessableTransaction {
             transaction,
             mode,
-            encoded: None,
+            encoded,
         };
-        self.0
-            .send(txn)
+        self.tx
+            .send(SchedulerCommand::Transaction(txn))
             .await
             .map_err(|_| TransactionError::ClusterMaintenance)
+    }
+
+    /// Applies a replicated block boundary through the scheduler.
+    ///
+    /// The command is ordered with replay transactions in the same queue. The
+    /// returned future completes after the scheduler has applied the block and
+    /// every executor has acknowledged the resulting slot transition.
+    pub async fn replay_block(
+        &self,
+        block: replication::Block,
+    ) -> SchedulerCommandResult {
+        let (ack, rx) = oneshot::channel();
+        self.tx
+            .send(SchedulerCommand::Block { block, ack })
+            .await
+            .map_err(|_| "scheduler command channel closed".to_string())?;
+        rx.await.map_err(|_| {
+            "scheduler dropped block acknowledgement".to_string()
+        })?
     }
 
     /// A private helper that handles the common logic of sanitizing, sending a
@@ -310,7 +353,7 @@ impl TransactionSchedulerHandle {
         &self,
         txn: impl SanitizeableTransaction,
         mode: fn(oneshot::Sender<R>) -> TransactionProcessingMode,
-    ) -> Result<R, TransactionError> {
+    ) -> TransactionResult<R> {
         let (transaction, encoded) = txn.sanitize_with_encoded(true)?;
         let (tx, rx) = oneshot::channel();
         let mode = mode(tx);
@@ -319,10 +362,38 @@ impl TransactionSchedulerHandle {
             mode,
             encoded,
         };
-        self.0
-            .send(txn)
+        self.tx
+            .send(SchedulerCommand::Transaction(txn))
             .await
             .map_err(|_| TransactionError::ClusterMaintenance)?;
         rx.await.map_err(|_| TransactionError::ClusterMaintenance)
     }
+
+    /// Waits for the scheduler to become idle and returns a permit that keeps it paused.
+    ///
+    /// This acquires the scheduling semaphore, blocking until the scheduler releases it
+    /// (which happens when all executors finish their current work and there are no
+    /// pending transactions). While holding the permit, the scheduler will not accept
+    /// or process new transactions.
+    ///
+    /// Use this to perform operations that require exclusive access to `AccountsDb`,
+    /// such as computing checksums or taking snapshots.
+    pub async fn wait_for_idle(&self) -> OwnedSemaphorePermit {
+        self.pause_permit
+            .clone()
+            .acquire_owned()
+            .await
+            .expect("scheduler semaphore can never be closed")
+    }
+}
+
+/// Scheduler execution mode (used in mode switching).
+///
+/// Send via channel to transition the scheduler between modes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SchedulerMode {
+    /// Accept client transactions with concurrent execution.
+    Primary,
+    /// Replay transactions with strict ordering.
+    Replica,
 }

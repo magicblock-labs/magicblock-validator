@@ -125,8 +125,6 @@ where
 {
     init_logger();
 
-    let faucet_pubkey = Pubkey::new_unique();
-
     // Setup mock RPC client with the accounts and clock sysvar
     let accounts_map: HashMap<Pubkey, Account> = accounts.into_iter().collect();
     let rpc_client = ChainRpcClientMockBuilder::new()
@@ -162,7 +160,6 @@ where
         remote_account_provider.clone(),
         &accounts_bank,
         validator_keypair,
-        faucet_pubkey,
     );
 
     FetcherTestCtx {
@@ -240,7 +237,6 @@ fn init_fetch_cloner(
     >,
     bank: &Arc<AccountsBankStub>,
     validator_keypair: Keypair,
-    faucet_pubkey: Pubkey,
 ) -> TestFetchClonerResult {
     let (subscription_tx, subscription_rx) = mpsc::channel(100);
     let cloner = Arc::new(ClonerStub::new(bank.clone()));
@@ -249,7 +245,6 @@ fn init_fetch_cloner(
         bank,
         &cloner,
         validator_keypair,
-        faucet_pubkey,
         subscription_rx,
         None,
     );
@@ -1972,7 +1967,6 @@ async fn test_allowed_programs_filters_programs() {
         &accounts_bank,
         &cloner,
         validator_keypair.insecure_clone(),
-        random_pubkey(),
         subscription_rx,
         allowed_programs,
     );
@@ -2045,7 +2039,6 @@ async fn test_allowed_programs_none_allows_all() {
         &accounts_bank,
         &cloner,
         validator_keypair.insecure_clone(),
-        random_pubkey(),
         subscription_rx,
         None, // No restriction
     );
@@ -2117,7 +2110,6 @@ async fn test_allowed_programs_empty_allows_all() {
         &accounts_bank,
         &cloner,
         validator_keypair.insecure_clone(),
-        random_pubkey(),
         subscription_rx,
         allowed_programs,
     );
@@ -3446,7 +3438,6 @@ async fn test_fetch_subscription_race_duplicate_clone() {
         &accounts_bank,
         &cloner_stub,
         validator_keypair.insecure_clone(),
-        Pubkey::new_unique(),
         subscription_rx,
         None,
     );
@@ -3568,7 +3559,6 @@ async fn test_delegated_account_fetch_subscription_race() {
         &accounts_bank,
         &cloner_stub,
         validator_keypair.insecure_clone(),
-        Pubkey::new_unique(),
         subscription_rx,
         None,
     );
@@ -3676,7 +3666,6 @@ async fn test_clone_ownership_failure_propagates_to_waiters() {
         &accounts_bank,
         &cloner_stub,
         validator_keypair.insecure_clone(),
-        Pubkey::new_unique(),
         subscription_rx,
         None,
     );

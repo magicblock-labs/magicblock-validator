@@ -11,6 +11,7 @@ edition.workspace = true
 agave-precompiles = { workspace = true, features = ["agave-unstable-api"] }
 agave-syscalls = { workspace = true }
 bincode = { workspace = true }
+blake3 = { workspace = true }
 tracing = { workspace = true }
 parking_lot = { workspace = true }
 serde = { workspace = true }
