@@ -1568,25 +1568,62 @@ where
             mut accounts_to_clone,
             mut record_subs,
             missing_delegation_record,
-        } = pipeline::resolve_delegated_accounts(
+        } = match pipeline::resolve_delegated_accounts(
             self,
             owned_by_deleg,
             plain,
             min_context_slot,
             fetch_origin,
         )
-        .await?;
+        .await
+        {
+            Ok(resolved) => resolved,
+            Err(err) => {
+                release_subs(
+                    &self.remote_account_provider,
+                    pubkeys.iter().copied().map(|pubkey| {
+                        SubscriptionRelease::Pubkey {
+                            pubkey,
+                            reason: SubscriptionReason::DirectAccount,
+                        }
+                    }),
+                )
+                .await;
+                return Err(err);
+            }
+        };
 
         let ResolvedPrograms {
             loaded_programs,
             mut program_data_subs,
-        } = pipeline::resolve_programs_with_program_data(
+        } = match pipeline::resolve_programs_with_program_data(
             self,
             programs,
             min_context_slot,
             fetch_origin,
         )
-        .await?;
+        .await
+        {
+            Ok(resolved) => resolved,
+            Err(err) => {
+                let releases = pubkeys
+                    .iter()
+                    .copied()
+                    .map(|pubkey| SubscriptionRelease::Pubkey {
+                        pubkey,
+                        reason: SubscriptionReason::DirectAccount,
+                    })
+                    .chain(record_subs.iter().copied().map(|pubkey| {
+                        SubscriptionRelease::Pubkey {
+                            pubkey,
+                            reason: SubscriptionReason::DelegationRecord,
+                        }
+                    }))
+                    .collect::<Vec<_>>();
+                release_subs(&self.remote_account_provider, releases).await;
+                return Err(err);
+            }
+        };
 
         let mut loaded_programs = loaded_programs;
         let mut all_requested_pubkeys = pubkeys.to_vec();
