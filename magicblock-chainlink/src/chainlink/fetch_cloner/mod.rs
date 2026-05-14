@@ -1629,6 +1629,12 @@ where
                     .chain(record_subs.iter().copied().map(|pubkey| {
                         SubscriptionRelease::Pubkey {
                             pubkey,
+                            reason: SubscriptionReason::DirectAccount,
+                        }
+                    }))
+                    .chain(record_subs.iter().copied().map(|pubkey| {
+                        SubscriptionRelease::Pubkey {
+                            pubkey,
                             reason: SubscriptionReason::DelegationRecord,
                         }
                     }))
