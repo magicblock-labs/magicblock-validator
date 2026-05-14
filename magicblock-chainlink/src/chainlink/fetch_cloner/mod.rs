@@ -1710,14 +1710,28 @@ where
                 accounts_to_clone: action_dep_accounts_to_clone,
                 record_subs: action_dep_record_subs,
                 missing_delegation_record: action_dep_missing_delegation_record,
-            } = pipeline::resolve_delegated_accounts(
+            } = match pipeline::resolve_delegated_accounts(
                 self,
                 owned_by_deleg,
                 plain,
                 min_context_slot,
                 fetch_origin,
             )
-            .await?;
+            .await
+            {
+                Ok(resolved) => resolved,
+                Err(err) => {
+                    let releases = pipeline::compute_subscription_releases(
+                        &all_requested_pubkeys,
+                        &accounts_to_clone,
+                        &loaded_programs,
+                        record_subs.clone(),
+                        program_data_subs.clone(),
+                    );
+                    release_subs(&self.remote_account_provider, releases).await;
+                    return Err(err);
+                }
+            };
 
             if !action_dep_missing_delegation_record.is_empty() {
                 let releases = pipeline::compute_subscription_releases(
@@ -1747,13 +1761,31 @@ where
             let ResolvedPrograms {
                 loaded_programs: action_dep_loaded_programs,
                 program_data_subs: action_dep_program_data_subs,
-            } = pipeline::resolve_programs_with_program_data(
+            } = match pipeline::resolve_programs_with_program_data(
                 self,
                 programs,
                 min_context_slot,
                 fetch_origin,
             )
-            .await?;
+            .await
+            {
+                Ok(resolved) => resolved,
+                Err(err) => {
+                    let mut cleanup_accounts_to_clone =
+                        accounts_to_clone.clone();
+                    cleanup_accounts_to_clone
+                        .extend(action_dep_accounts_to_clone.clone());
+                    let releases = pipeline::compute_subscription_releases(
+                        &all_requested_pubkeys,
+                        &cleanup_accounts_to_clone,
+                        &loaded_programs,
+                        record_subs.clone(),
+                        program_data_subs.clone(),
+                    );
+                    release_subs(&self.remote_account_provider, releases).await;
+                    return Err(err);
+                }
+            };
 
             all_requested_pubkeys
                 .extend(action_dep_program_data_subs.iter().copied());
