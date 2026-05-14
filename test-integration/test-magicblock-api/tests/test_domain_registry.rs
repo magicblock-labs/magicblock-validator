@@ -96,7 +96,7 @@ async fn test_unregister() {
     assert!(actual.is_none());
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn test_domain_registry() {
     let client = RpcClient::new_with_commitment(
         DEVNET_URL,
