@@ -4473,7 +4473,6 @@ async fn test_owned_operation_owner_timeout_cleans_up_pending() {
         &accounts_bank,
         &blocking_cloner,
         validator_keypair.insecure_clone(),
-        Pubkey::new_unique(),
         subscription_rx,
         None,
     );
@@ -4581,7 +4580,6 @@ async fn test_cancel_pending_terminates_owner_and_all_waiters() {
         &accounts_bank,
         &blocking_cloner,
         validator_keypair.insecure_clone(),
-        Pubkey::new_unique(),
         subscription_rx,
         None,
     );
@@ -4705,7 +4703,6 @@ async fn test_cancel_all_pending_on_shutdown() {
         &accounts_bank,
         &blocking_cloner,
         validator_keypair.insecure_clone(),
-        Pubkey::new_unique(),
         subscription_rx,
         None,
     );
