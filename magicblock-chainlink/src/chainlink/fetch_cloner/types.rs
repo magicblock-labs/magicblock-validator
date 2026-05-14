@@ -23,11 +23,6 @@ pub(crate) enum RefreshDecision {
     YesAndMarkEmptyIfNotFound,
 }
 
-// Pipeline helper types
-pub(crate) struct ExistingSubs {
-    pub(crate) existing_subs: HashSet<Pubkey>,
-}
-
 pub(crate) struct ClassifiedAccounts {
     pub(crate) not_found: Vec<(Pubkey, u64)>,
     pub(crate) plain: Vec<AccountCloneRequest>,
@@ -57,7 +52,7 @@ pub(crate) struct PartitionedNotFound {
     pub(crate) not_found: Vec<(Pubkey, u64)>,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct FetchAndCloneResult {
     pub not_found_on_chain: Vec<(Pubkey, u64)>,
     pub missing_delegation_record: Vec<(Pubkey, u64)>,

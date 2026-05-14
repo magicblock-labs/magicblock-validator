@@ -123,7 +123,6 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
             endpoints,
             commitment,
             tx,
-            validator_pubkey,
             &config.remote_account_provider,
         )
         .await?;
@@ -460,7 +459,9 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
 
         // Subscribe to updates for this account so we can track changes
         // once it's undelegated
-        fetch_cloner.subscribe_to_account(&pubkey).await?;
+        fetch_cloner
+            .subscribe_to_account_to_track_undelegation(&pubkey)
+            .await?;
 
         debug!(pubkey = %pubkey, "Successfully subscribed for undelegation tracking");
         Ok(())
