@@ -34,7 +34,10 @@ use tokio_util::{
 use tracing::*;
 
 use crate::{
-    db::{DbTask, SchedulerDatabase},
+    db::{
+        CrankFailedMove, CrankRetryCheck, CrankSuccessRemoval,
+        CrankSuccessUpdate, DbTask, SchedulerDatabase,
+    },
     errors::{TaskSchedulerError, TaskSchedulerResult},
 };
 
@@ -55,6 +58,8 @@ pub struct TaskSchedulerService {
     task_queue: DelayQueue<DbTask>,
     /// Map of task IDs to their corresponding keys in the task queue
     task_queue_keys: HashMap<i64, Key>,
+    /// Latest in-memory instance version for queued or in-flight tasks
+    task_versions: HashMap<i64, i64>,
     /// Number of consecutive failed execution attempts for each task
     task_execution_retries: HashMap<i64, u32>,
     /// Token used to cancel the task scheduler
@@ -111,6 +116,7 @@ impl TaskSchedulerService {
             block,
             task_queue: DelayQueue::new(),
             task_queue_keys: HashMap::new(),
+            task_versions: HashMap::new(),
             task_execution_retries: HashMap::new(),
             tx_counter: Arc::new(AtomicU64::default()),
             token,
@@ -154,6 +160,7 @@ impl TaskSchedulerService {
                     as u64,
             );
             let task_id = task.id;
+            self.task_versions.insert(task_id, task.updated_at);
             let key = self.task_queue.insert(task, timeout);
             self.task_queue_keys.insert(task_id, key);
         }
@@ -271,7 +278,7 @@ impl TaskSchedulerService {
             .execution_interval_millis
             .clamp(self.min_interval.as_millis() as i64, u32::MAX as i64);
 
-        let task = DbTask::from(task);
+        let mut task = DbTask::from(task);
         let task_id = task.id;
 
         // Check if the task already exists in the database
@@ -285,9 +292,10 @@ impl TaskSchedulerService {
             }
         }
 
-        self.db.insert_task(&task).await?;
+        task.updated_at = self.db.insert_task(&task).await?;
         self.remove_task_from_queue(task_id);
         self.task_execution_retries.remove(&task_id);
+        self.task_versions.insert(task_id, task.updated_at);
         let key = self.task_queue.insert(task, Duration::from_millis(0));
         self.task_queue_keys.insert(task_id, key);
         debug!("Registered task {} from context", task_id);
@@ -317,7 +325,7 @@ impl TaskSchedulerService {
         }
 
         // Remove task from queue and database
-        self.remove_task_from_queue(task.id);
+        self.remove_task_runtime_state(task.id);
         self.task_execution_retries.remove(&task.id);
         self.db.remove_task(task.id).await?;
         debug!("Removed task {} from database", task.id);
@@ -374,21 +382,23 @@ impl TaskSchedulerService {
         >,
     ) -> TaskSchedulerResult<()> {
         let now_millis = chrono::Utc::now().timestamp_millis();
-        let mut success_updates: Vec<(i64, i64)> = Vec::new();
-        let mut success_removals: Vec<i64> = Vec::new();
-        let mut failed_records: Vec<(i64, String)> = Vec::new();
+        let mut success_updates: Vec<CrankSuccessUpdate> = Vec::new();
+        let mut success_removals: Vec<CrankSuccessRemoval> = Vec::new();
+        let mut failed_records: Vec<CrankFailedMove> = Vec::new();
+        let mut retry_checks: Vec<CrankRetryCheck> = Vec::new();
 
         match result {
-            Ok(result) => {
-                for (task, res) in &result {
+            Ok(ref result) => {
+                for (task, res) in result {
                     if let Err(e) = res {
-                        self.apply_crank_failure_outcome(
+                        self.prepare_crank_failure_outcome(
                             task,
                             &e,
                             &mut failed_records,
+                            &mut retry_checks,
                         )?;
                     } else {
-                        self.apply_crank_success_outcome(
+                        Self::prepare_crank_success_outcome(
                             task,
                             now_millis,
                             &mut success_updates,
@@ -399,33 +409,78 @@ impl TaskSchedulerService {
             }
             Err(ref e) => {
                 for task in &batch {
-                    self.apply_crank_failure_outcome(
+                    self.prepare_crank_failure_outcome(
                         task,
                         e,
                         &mut failed_records,
+                        &mut retry_checks,
                     )?;
                 }
             }
         }
 
-        self.db
+        let completion = self
+            .db
             .apply_crank_batch_completion(
                 &success_updates,
                 &success_removals,
                 &failed_records,
+                &retry_checks,
             )
             .await?;
+
+        match result {
+            Ok(result) => {
+                for (task, res) in &result {
+                    if let Err(e) = res {
+                        if completion.failed_moves.get(&task.id)
+                            == Some(&task.updated_at)
+                            || completion.retry_checks.get(&task.id)
+                                == Some(&task.updated_at)
+                        {
+                            self.apply_crank_failure_outcome(task, e)?;
+                        }
+                    } else if let Some(&(expected, updated_at)) =
+                        completion.success_updates.get(&task.id)
+                    {
+                        if expected == task.updated_at {
+                            self.apply_crank_success_outcome(
+                                task,
+                                now_millis,
+                                Some(updated_at),
+                            )?;
+                        }
+                    } else if completion.success_removals.get(&task.id)
+                        == Some(&task.updated_at)
+                    {
+                        self.apply_crank_success_outcome(
+                            task, now_millis, None,
+                        )?;
+                    }
+                }
+            }
+            Err(ref e) => {
+                for task in &batch {
+                    if completion.failed_moves.get(&task.id)
+                        == Some(&task.updated_at)
+                        || completion.retry_checks.get(&task.id)
+                            == Some(&task.updated_at)
+                    {
+                        self.apply_crank_failure_outcome(task, e)?;
+                    }
+                }
+            }
+        }
 
         Ok(())
     }
 
-    /// Updates the delay queue for the next firing and queues SQLite work for [`SchedulerDatabase::apply_crank_completion_batch`].
-    fn apply_crank_success_outcome(
-        &mut self,
+    /// Queues SQLite work for [`SchedulerDatabase::apply_crank_batch_completion`].
+    fn prepare_crank_success_outcome(
         task: &DbTask,
         now_millis: i64,
-        success_updates: &mut Vec<(i64, i64)>,
-        success_removals: &mut Vec<i64>,
+        success_updates: &mut Vec<CrankSuccessUpdate>,
+        success_removals: &mut Vec<CrankSuccessRemoval>,
     ) -> TaskSchedulerResult<()> {
         let executed_at = next_execution_millis(
             task.last_execution_millis,
@@ -434,19 +489,57 @@ impl TaskSchedulerService {
         );
 
         if task.executions_left > 1 {
+            success_updates.push(CrankSuccessUpdate {
+                task_id: task.id,
+                last_execution_millis: executed_at,
+                expected_updated_at: task.updated_at,
+            });
+        } else {
+            success_removals.push(CrankSuccessRemoval {
+                task_id: task.id,
+                expected_updated_at: task.updated_at,
+            });
+        }
+
+        Ok(())
+    }
+
+    /// Updates the delay queue for the next firing after SQLite confirms the same task instance.
+    fn apply_crank_success_outcome(
+        &mut self,
+        task: &DbTask,
+        now_millis: i64,
+        updated_at: Option<i64>,
+    ) -> TaskSchedulerResult<()> {
+        if !self.task_version_matches(task) {
+            debug!(
+                task_id = task.id,
+                expected_updated_at = task.updated_at,
+                "Skipping stale successful crank completion"
+            );
+            return Ok(());
+        }
+
+        let executed_at = next_execution_millis(
+            task.last_execution_millis,
+            task.execution_interval_millis,
+            now_millis,
+        );
+
+        if let Some(updated_at) = updated_at {
             let next_execution = executed_at + task.execution_interval_millis;
             let delay = delay_until_millis(next_execution, now_millis);
             let new_task = DbTask {
                 executions_left: task.executions_left - 1,
                 last_execution_millis: executed_at,
+                updated_at,
                 ..task.clone()
             };
             let key = self.task_queue.insert(new_task, delay);
             self.task_queue_keys.insert(task.id, key);
-
-            success_updates.push((task.id, executed_at));
+            self.task_versions.insert(task.id, updated_at);
         } else {
-            success_removals.push(task.id);
+            self.remove_task_runtime_state(task.id);
         }
 
         self.task_execution_retries.remove(&task.id);
@@ -456,32 +549,62 @@ impl TaskSchedulerService {
     /// Either:
     /// - re-queues for retry
     /// - queues a permanent failure for SQLite along with clearing retry counters and stale queue keys.
+    fn prepare_crank_failure_outcome(
+        &self,
+        task: &DbTask,
+        error: &TaskSchedulerError,
+        failed_records: &mut Vec<CrankFailedMove>,
+        retry_checks: &mut Vec<CrankRetryCheck>,
+    ) -> TaskSchedulerResult<()> {
+        debug!("Failed to execute task {}: {}", task.id, error);
+
+        if !is_retryable_task_execution_error(error) {
+            failed_records.push(CrankFailedMove {
+                task_id: task.id,
+                expected_updated_at: task.updated_at,
+                error: error.to_string(),
+            });
+            return Ok(());
+        }
+
+        let retries = *self.task_execution_retries.get(&task.id).unwrap_or(&0);
+        if retries >= MAX_TASK_EXECUTION_RETRIES {
+            failed_records.push(CrankFailedMove {
+                task_id: task.id,
+                expected_updated_at: task.updated_at,
+                error: error.to_string(),
+            });
+            return Ok(());
+        }
+
+        retry_checks.push(CrankRetryCheck {
+            task_id: task.id,
+            expected_updated_at: task.updated_at,
+        });
+
+        Ok(())
+    }
+
+    /// Either:
+    /// - re-queues for retry
+    /// - records a permanent failure in runtime state after SQLite confirms the same task instance.
     fn apply_crank_failure_outcome(
         &mut self,
         task: &DbTask,
         error: &TaskSchedulerError,
-        failed_records: &mut Vec<(i64, String)>,
     ) -> TaskSchedulerResult<()> {
-        debug!("Failed to execute task {}: {}", task.id, error);
-
-        fn buffer_permanent_failure_and_clear_runtime_state(
-            this: &mut TaskSchedulerService,
-            task_id: i64,
-            error: String,
-            failed_records: &mut Vec<(i64, String)>,
-        ) {
-            failed_records.push((task_id, error));
-            this.task_execution_retries.remove(&task_id);
-            this.remove_task_from_queue(task_id);
+        if !self.task_version_matches(task) {
+            debug!(
+                task_id = task.id,
+                expected_updated_at = task.updated_at,
+                "Skipping stale failed crank completion"
+            );
+            return Ok(());
         }
 
         if !is_retryable_task_execution_error(error) {
-            buffer_permanent_failure_and_clear_runtime_state(
-                self,
-                task.id,
-                error.to_string(),
-                failed_records,
-            );
+            self.task_execution_retries.remove(&task.id);
+            self.remove_task_runtime_state(task.id);
             return Ok(());
         }
 
@@ -495,12 +618,8 @@ impl TaskSchedulerService {
                 Some(*retries)
             }
         }) else {
-            buffer_permanent_failure_and_clear_runtime_state(
-                self,
-                task.id,
-                error.to_string(),
-                failed_records,
-            );
+            self.task_execution_retries.remove(&task.id);
+            self.remove_task_runtime_state(task.id);
             return Ok(());
         };
 
@@ -516,8 +635,13 @@ impl TaskSchedulerService {
 
         let key = self.task_queue.insert(task.clone(), delay);
         self.task_queue_keys.insert(task.id, key);
+        self.task_versions.insert(task.id, task.updated_at);
 
         Ok(())
+    }
+
+    fn task_version_matches(&self, task: &DbTask) -> bool {
+        self.task_versions.get(&task.id) == Some(&task.updated_at)
     }
 
     /// Removes a task from the queue.
@@ -525,6 +649,11 @@ impl TaskSchedulerService {
         if let Some(key) = self.task_queue_keys.remove(&task_id) {
             self.task_queue.remove(&key);
         }
+    }
+
+    fn remove_task_runtime_state(&mut self, task_id: i64) {
+        self.remove_task_from_queue(task_id);
+        self.task_versions.remove(&task_id);
     }
 
     /// Calculates the retry delay for the next task execution.
@@ -613,6 +742,7 @@ mod tests {
             block: LatestBlock::default(),
             task_queue: DelayQueue::new(),
             task_queue_keys: HashMap::new(),
+            task_versions: HashMap::new(),
             task_execution_retries: HashMap::new(),
             tx_counter: sync::Arc::new(AtomicU64::default()),
             token: CancellationToken::new(),
@@ -674,6 +804,7 @@ mod tests {
             execution_interval_millis: u32::MAX as i64,
             executions_left: 1,
             last_execution_millis: chrono::Utc::now().timestamp_millis(),
+            updated_at: 0,
             instructions: vec![],
         })
         .await
@@ -685,6 +816,7 @@ mod tests {
             execution_interval_millis: u32::MAX as i64 - 1,
             executions_left: 1,
             last_execution_millis: chrono::Utc::now().timestamp_millis(),
+            updated_at: 0,
             instructions: vec![],
         })
         .await
@@ -697,6 +829,7 @@ mod tests {
             block: LatestBlock::default(),
             task_queue: DelayQueue::new(),
             task_queue_keys: HashMap::new(),
+            task_versions: HashMap::new(),
             task_execution_retries: HashMap::new(),
             tx_counter: sync::Arc::new(AtomicU64::default()),
             token: CancellationToken::new(),
@@ -735,6 +868,7 @@ mod tests {
             execution_interval_millis: 50,
             executions_left: 0,
             last_execution_millis: chrono::Utc::now().timestamp_millis(),
+            updated_at: 0,
             instructions: vec![],
         })
         .await
@@ -745,6 +879,7 @@ mod tests {
             execution_interval_millis: 50,
             executions_left: 1,
             last_execution_millis: chrono::Utc::now().timestamp_millis(),
+            updated_at: 0,
             instructions: vec![],
         })
         .await
@@ -758,6 +893,7 @@ mod tests {
             block: LatestBlock::default(),
             task_queue: DelayQueue::new(),
             task_queue_keys: HashMap::new(),
+            task_versions: HashMap::new(),
             task_execution_retries: HashMap::new(),
             tx_counter: Arc::new(AtomicU64::default()),
             token: CancellationToken::new(),
@@ -781,5 +917,71 @@ mod tests {
         .unwrap()
         .unwrap();
         handle.abort();
+    }
+
+    #[tokio::test]
+    async fn test_stale_crank_completion_does_not_mutate_replaced_task() {
+        magicblock_core::logger::init_for_tests();
+
+        let (_tx, rx) = mpsc::unbounded_channel();
+        let db = SchedulerDatabase::new(":memory:").unwrap();
+        let authority = Pubkey::new_unique();
+        let mut old_task = DbTask {
+            id: 1,
+            authority,
+            execution_interval_millis: 50,
+            executions_left: 2,
+            last_execution_millis: 0,
+            updated_at: 0,
+            instructions: vec![],
+        };
+        old_task.updated_at = db.insert_task(&old_task).await.unwrap();
+
+        let mut service = TaskSchedulerService {
+            db: db.clone(),
+            rpc_client: Arc::new(RpcClient::new(
+                "http://localhost:8899".to_string(),
+            )),
+            block: LatestBlock::default(),
+            task_queue: DelayQueue::new(),
+            task_queue_keys: HashMap::new(),
+            task_versions: HashMap::from([(old_task.id, old_task.updated_at)]),
+            task_execution_retries: HashMap::new(),
+            tx_counter: Arc::new(AtomicU64::default()),
+            token: CancellationToken::new(),
+            min_interval: Duration::from_millis(10),
+            slot_interval: Duration::from_millis(1000),
+            scheduled_tasks: rx,
+        };
+
+        let mut replacement = DbTask {
+            executions_left: 5,
+            ..old_task.clone()
+        };
+        replacement.updated_at = db.insert_task(&replacement).await.unwrap();
+        let key = service
+            .task_queue
+            .insert(replacement.clone(), Duration::from_secs(10));
+        service.task_queue_keys.insert(replacement.id, key);
+        service
+            .task_versions
+            .insert(replacement.id, replacement.updated_at);
+
+        service
+            .on_crank_batch_completed(
+                vec![old_task.clone()],
+                Ok(vec![(old_task, Ok(Signature::new_unique()))]),
+            )
+            .await
+            .unwrap();
+
+        let persisted = db.get_task(replacement.id).await.unwrap().unwrap();
+        assert_eq!(persisted.executions_left, replacement.executions_left);
+        assert_eq!(persisted.updated_at, replacement.updated_at);
+
+        let key = service.task_queue_keys.remove(&replacement.id).unwrap();
+        let queued = service.task_queue.remove(&key).into_inner();
+        assert_eq!(queued.updated_at, replacement.updated_at);
+        assert_eq!(queued.executions_left, replacement.executions_left);
     }
 }
