@@ -3,7 +3,7 @@ use std::{
     num::NonZeroUsize,
     sync::{
         atomic::{AtomicU64, Ordering},
-        Arc, Mutex,
+        Arc, Mutex, Weak,
     },
     time::Duration,
 };
@@ -260,8 +260,11 @@ pub struct RemoteAccountProvider<T: ChainRpcClient, U: ChainPubsubClient> {
     /// ownership reasons and LRU membership in sync.
     subscription_transition_lock: Arc<AsyncMutex<()>>,
     /// Per-pubkey locks serializing subscription acquire/release transitions.
+    ///
+    /// Values are weak references so pubkeys do not accumulate forever after
+    /// their transient transition lock is no longer in use.
     subscription_key_locks:
-        Arc<AsyncMutex<HashMap<Pubkey, Arc<AsyncMutex<()>>>>>,
+        Arc<AsyncMutex<HashMap<Pubkey, Weak<AsyncMutex<()>>>>>,
     /// The current slot on chain.
     ///
     /// This value is updated from two sources and always stores the maximum
@@ -1178,10 +1181,15 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         pubkey: &Pubkey,
     ) -> Arc<AsyncMutex<()>> {
         let mut locks = self.subscription_key_locks.lock().await;
-        locks
-            .entry(*pubkey)
-            .or_insert_with(|| Arc::new(AsyncMutex::new(())))
-            .clone()
+        locks.retain(|_, lock| lock.strong_count() > 0);
+
+        if let Some(lock) = locks.get(pubkey).and_then(Weak::upgrade) {
+            return lock;
+        }
+
+        let lock = Arc::new(AsyncMutex::new(()));
+        locks.insert(*pubkey, Arc::downgrade(&lock));
+        lock
     }
 
     pub async fn acquire_subscription(
