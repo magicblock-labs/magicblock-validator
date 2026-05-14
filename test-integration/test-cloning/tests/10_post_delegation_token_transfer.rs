@@ -42,6 +42,18 @@ fn token_balance_ephem(
 
 #[test]
 fn test_post_delegation_action_executes_spl_token_transfer_100() {
+    run_post_delegation_action_executes_spl_token_transfer(true);
+}
+
+#[test]
+fn test_post_delegation_action_is_picked_up_by_greedy_clone() {
+    // Do not fetch the delegated account from the ER. The validator should
+    // greedily clone it from the base-layer subscription update and execute
+    // the post-delegation action.
+    run_post_delegation_action_executes_spl_token_transfer(false);
+}
+
+fn run_post_delegation_action_executes_spl_token_transfer(trigger_fetch: bool) {
     init_logger!();
     let ctx = IntegrationTestContext::try_new().unwrap();
 
@@ -202,16 +214,18 @@ fn test_post_delegation_action_executes_spl_token_transfer_100() {
         .unwrap();
     assert!(confirmed);
 
-    // Trigger delegated account clone; this is where post-delegation actions
-    // are executed on ephem.
-    ctx.fetch_ephem_account(delegated_account.pubkey()).unwrap();
+    if trigger_fetch {
+        // Trigger delegated account clone; this is where post-delegation actions
+        // are executed on ephem.
+        ctx.fetch_ephem_account(delegated_account.pubkey()).unwrap();
+    }
 
     // Poll briefly because clone + action execution is async relative to fetch.
     let mut found = None;
-    for _ in 0..30 {
+    for _ in 0..60 {
         let bx = token_balance_ephem(&ctx, &token_x);
         let by = token_balance_ephem(&ctx, &token_y);
-        if bx == Some(0) && by == Some(100) {
+        if bx == Some(0) && by == Some(300) {
             found = Some((bx, by));
             break;
         }
