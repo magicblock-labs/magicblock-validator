@@ -201,6 +201,10 @@ impl SubscriptionOwnership {
         *self.reasons.entry(reason).or_default() += 1;
     }
 
+    fn contains(&self, reason: SubscriptionReason) -> bool {
+        self.reasons.contains_key(&reason)
+    }
+
     fn release(&mut self, reason: SubscriptionReason) -> bool {
         match self.reasons.entry(reason) {
             Entry::Occupied(mut entry) => {
@@ -1197,13 +1201,34 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         pubkey: &Pubkey,
         reason: SubscriptionReason,
     ) -> RemoteAccountProviderResult<()> {
+        self.acquire_subscription_with_mode(pubkey, reason, false)
+            .await
+    }
+
+    pub async fn ensure_subscription(
+        &self,
+        pubkey: &Pubkey,
+        reason: SubscriptionReason,
+    ) -> RemoteAccountProviderResult<()> {
+        self.acquire_subscription_with_mode(pubkey, reason, true)
+            .await
+    }
+
+    async fn acquire_subscription_with_mode(
+        &self,
+        pubkey: &Pubkey,
+        reason: SubscriptionReason,
+        skip_existing_reason: bool,
+    ) -> RemoteAccountProviderResult<()> {
         let _transition_guard = self.subscription_transition_lock.lock().await;
         let subscription_key_lock = self.subscription_key_lock(pubkey).await;
         let _subscription_guard = subscription_key_lock.lock().await;
 
         let mut ownership = self.subscription_ownership.lock().await;
         if let Some(existing) = ownership.get_mut(pubkey) {
-            existing.acquire(reason);
+            if !skip_existing_reason || !existing.contains(reason) {
+                existing.acquire(reason);
+            }
             self.lrucache_subscribed_accounts.add(*pubkey);
             return Ok(());
         }

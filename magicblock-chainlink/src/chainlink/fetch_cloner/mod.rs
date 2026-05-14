@@ -1291,10 +1291,10 @@ where
         let was_watching =
             self.remote_account_provider.is_watching(&eata_pubkey);
 
-        // Re-subscribe before cache checks; this keeps the subscription LRU
-        // warm and lets later eATA creation reach the projection path.
+        // Ensure before cache checks; this keeps the subscription LRU warm
+        // without refcounting the projection reason on every ATA update.
         let subscribed = match self
-            .acquire_subscription_reason(
+            .ensure_subscription(
                 &eata_pubkey,
                 SubscriptionReason::AtaProjection,
             )
@@ -2303,6 +2303,19 @@ where
     ) -> ChainlinkResult<()> {
         self.remote_account_provider
             .acquire_subscription(pubkey, reason)
+            .await
+            .map_err(|err| {
+                ChainlinkError::FailedToSubscribeToAccount(*pubkey, err)
+            })
+    }
+
+    pub(crate) async fn ensure_subscription(
+        &self,
+        pubkey: &Pubkey,
+        reason: SubscriptionReason,
+    ) -> ChainlinkResult<()> {
+        self.remote_account_provider
+            .ensure_subscription(pubkey, reason)
             .await
             .map_err(|err| {
                 ChainlinkError::FailedToSubscribeToAccount(*pubkey, err)

@@ -299,6 +299,37 @@ async fn test_try_get_multi_waiter_receives_setup_subscriptions_failure() {
 }
 
 #[tokio::test]
+async fn test_ensure_subscription_does_not_duplicate_existing_reason() {
+    let pubkey = solana_pubkey::Pubkey::new_unique();
+    let account = Account {
+        lamports: 1_000_000,
+        data: vec![],
+        owner: system_program::id(),
+        executable: false,
+        rent_epoch: 0,
+    };
+    let ProviderTestCtx { provider, .. } =
+        setup_provider(pubkey, account).await;
+
+    provider
+        .ensure_subscription(&pubkey, SubscriptionReason::AtaProjection)
+        .await
+        .unwrap();
+    provider
+        .ensure_subscription(&pubkey, SubscriptionReason::AtaProjection)
+        .await
+        .unwrap();
+
+    let unsubscribed = provider
+        .release_single_subscription(&pubkey, SubscriptionReason::AtaProjection)
+        .await
+        .unwrap();
+
+    assert!(unsubscribed);
+    assert!(!provider.is_watching(&pubkey));
+}
+
+#[tokio::test]
 async fn test_release_subscription_reason_keeps_watching_until_last_direct_refcount(
 ) {
     let pubkey = solana_pubkey::Pubkey::new_unique();
