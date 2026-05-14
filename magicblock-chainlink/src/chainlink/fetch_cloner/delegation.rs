@@ -106,10 +106,7 @@ where
 {
     let is_confined = delegation_record.authority.eq(&Pubkey::default());
     let is_delegated_to_us =
-        crate::delegation_record::is_delegated_to_validator_or_confined(
-            &delegation_record.authority,
-            &this.validator_pubkey,
-        );
+        delegation_record.authority.eq(&this.validator_pubkey) || is_confined;
     let is_raw_eata = parse_raw_eata_pda(
         &account_pubkey,
         account.data(),
@@ -160,10 +157,8 @@ where
     C: Cloner,
 {
     let is_delegated_to_us =
-        crate::delegation_record::is_delegated_to_validator_or_confined(
-            &delegation_record.authority,
-            &this.validator_pubkey,
-        );
+        delegation_record.authority.eq(&this.validator_pubkey)
+            || delegation_record.authority.eq(&Pubkey::default());
 
     (!is_delegated_to_us).then_some(delegation_record.authority)
 }

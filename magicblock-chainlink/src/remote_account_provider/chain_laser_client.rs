@@ -67,7 +67,6 @@ impl ChainLaserClientImpl {
         commitment: CommitmentLevel,
         abort_sender: mpsc::Sender<()>,
         slots: Slots,
-        validator_pubkey: Pubkey,
         rpc_client: ChainRpcClientImpl,
         grpc_config: &GrpcConfig,
     ) -> Self {
@@ -80,7 +79,6 @@ impl ChainLaserClientImpl {
                 commitment,
                 abort_sender,
                 slots,
-                validator_pubkey,
                 rpc_client,
                 grpc_config,
             );

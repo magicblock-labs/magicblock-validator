@@ -98,16 +98,12 @@ impl ChainPubsubClientImpl {
         abort_sender: mpsc::Sender<()>,
         commitment: CommitmentConfig,
         resubscription_delay: Duration,
-        validator_pubkey: Pubkey,
-        rpc_client: crate::remote_account_provider::chain_rpc_client::ChainRpcClientImpl,
     ) -> RemoteAccountProviderResult<Self> {
         let (actor, updates) = ChainPubsubActor::new_from_url(
             pubsub_url,
             &client_id,
             abort_sender,
             commitment,
-            validator_pubkey,
-            rpc_client,
         )
         .await?;
         let current_resub_delay_ms =

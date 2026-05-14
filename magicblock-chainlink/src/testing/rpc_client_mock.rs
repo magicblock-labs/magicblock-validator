@@ -324,34 +324,26 @@ impl ChainRpcClient for ChainRpcClientMock {
             }
         }
 
-        let Some(AccountAtSlot { account, slot }) =
+        let res = if let Some(AccountAtSlot { account, slot }) =
             self.get_account_at_slot(pubkey)
-        else {
-            return Ok(Response {
+        {
+            Response {
+                context: RpcResponseContext {
+                    slot,
+                    api_version: None,
+                },
+                value: Some(account),
+            }
+        } else {
+            Response {
                 context: RpcResponseContext {
                     slot: current_slot,
                     api_version: None,
                 },
                 value: None,
-            });
-        };
-
-        if let Some(min_context_slot) = config.min_context_slot {
-            if slot < min_context_slot {
-                return Err(client_error::ErrorKind::Custom(
-                    "minimum context slot not reached".to_string(),
-                )
-                .into());
             }
-        }
-
-        Ok(Response {
-            context: RpcResponseContext {
-                slot,
-                api_version: None,
-            },
-            value: Some(account),
-        })
+        };
+        Ok(res)
     }
 
     async fn get_multiple_accounts_with_config(
