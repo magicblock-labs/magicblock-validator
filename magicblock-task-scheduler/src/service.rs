@@ -13,7 +13,7 @@ use magicblock_config::config::TaskSchedulerConfig;
 use magicblock_core::link::transactions::ScheduledTasksRx;
 use magicblock_ledger::LatestBlock;
 use magicblock_program::{
-    args::{CancelTaskRequest, TaskRequest},
+    args::{CancelTaskRequest, ScheduleTaskRequest, TaskRequest},
     instruction_utils::InstructionUtils,
     validator::{validator_authority, validator_authority_id},
 };
@@ -79,6 +79,7 @@ enum ProcessingOutcome {
 unsafe impl Send for TaskSchedulerService {}
 unsafe impl Sync for TaskSchedulerService {}
 impl TaskSchedulerService {
+    /// Creates a new `TaskSchedulerService` with the given configuration.
     pub fn new(
         path: &Path,
         config: &TaskSchedulerConfig,
@@ -118,6 +119,7 @@ impl TaskSchedulerService {
         })
     }
 
+    /// Starts the `TaskSchedulerService` and returns a handle to the task.
     pub async fn start(
         mut self,
     ) -> TaskSchedulerResult<JoinHandle<TaskSchedulerResult<()>>> {
@@ -130,7 +132,6 @@ impl TaskSchedulerService {
             tasks.len()
         );
         for task in tasks {
-            debug!("Task: {:?}", task);
             if !is_valid_task_interval(task.execution_interval_millis)
                 || task.executions_left <= 0
             {
@@ -160,35 +161,77 @@ impl TaskSchedulerService {
         Ok(tokio::spawn(self.run()))
     }
 
+    /// Main loop of the task scheduler.
+    async fn run(mut self) -> TaskSchedulerResult<()> {
+        let (crank_tx, mut crank_rx) = mpsc::unbounded_channel();
+
+        loop {
+            select! {
+                Some(expired) = self.task_queue.next() => {
+                    let first = expired.into_inner();
+                    self.task_queue_keys.remove(&first.id);
+                    let mut batch = vec![first];
+                    let waker = noop_waker();
+                    let mut cx = Context::from_waker(&waker);
+                    while let Poll::Ready(Some(expired)) = self.task_queue.poll_expired(&mut cx) {
+                        let task = expired.into_inner();
+                        self.task_queue_keys.remove(&task.id);
+                        batch.push(task);
+                    }
+
+                    let rpc_client = self.rpc_client.clone();
+                    let block = self.block.clone();
+                    let tx_counter = self.tx_counter.clone();
+                    let crank_tx = crank_tx.clone();
+                    tokio::spawn(async move {
+                        let result =
+                            Self::send_crank_batch(rpc_client, &block, tx_counter, &batch).await;
+                        let _ = crank_tx.send((batch, result));
+                    });
+                }
+                Some((batch, result)) = crank_rx.recv() => {
+                    self.on_crank_batch_completed(batch, result).await?;
+                }
+                Some(task) = self.scheduled_tasks.recv() => {
+                    let id = task.id();
+                    match self.process_request(task).await {
+                        Ok(ProcessingOutcome::Success) => {}
+                        Ok(ProcessingOutcome::Recoverable(e)) => {
+                            warn!("Failed to process request ID={}: {e:?}", id);
+                        }
+                        Err(e) => {
+                            error!("Failed to process request: {}", e);
+                            return Err(e);
+                        }
+                    }
+                }
+                _ = self.token.cancelled() => {
+                    break;
+                }
+            }
+        }
+
+        info!("TaskSchedulerService shutdown!");
+        Ok(())
+    }
+
+    /// Processes [TaskRequest] provided by the transaction executor.
     async fn process_request(
         &mut self,
         request: TaskRequest,
     ) -> TaskSchedulerResult<ProcessingOutcome> {
+        let task_id = request.id();
         match request {
-            TaskRequest::Schedule(mut schedule_request) => {
-                if !is_valid_task_interval(
-                    schedule_request.execution_interval_millis,
-                ) {
-                    // If the interval is too large or zero, we don't schedule the task
-                    return Ok(ProcessingOutcome::Success);
-                }
-
-                schedule_request.execution_interval_millis =
-                    schedule_request.execution_interval_millis.clamp(
-                        self.min_interval.as_millis() as i64,
-                        u32::MAX as i64,
-                    );
-
-                if let Err(e) = self.register_task(&schedule_request).await {
+            TaskRequest::Schedule(schedule_request) => {
+                if let Err(e) =
+                    self.process_schedule_request(schedule_request).await
+                {
                     self.db
-                        .insert_failed_scheduling(
-                            schedule_request.id,
-                            format!("{:?}", e),
-                        )
+                        .insert_failed_scheduling(task_id, format!("{:?}", e))
                         .await?;
                     error!(
                         "Failed to process schedule request {}: {}",
-                        schedule_request.id, e
+                        task_id, e
                     );
 
                     return Ok(ProcessingOutcome::Recoverable(Box::new(e)));
@@ -199,14 +242,11 @@ impl TaskSchedulerService {
                     self.process_cancel_request(&cancel_request).await
                 {
                     self.db
-                        .insert_failed_scheduling(
-                            cancel_request.task_id,
-                            format!("{:?}", e),
-                        )
+                        .insert_failed_scheduling(task_id, format!("{:?}", e))
                         .await?;
                     error!(
                         "Failed to process cancel request for task {}: {}",
-                        cancel_request.task_id, e
+                        task_id, e
                     );
 
                     return Ok(ProcessingOutcome::Recoverable(Box::new(e)));
@@ -217,6 +257,45 @@ impl TaskSchedulerService {
         Ok(ProcessingOutcome::Success)
     }
 
+    /// Processes [ScheduleTaskRequest] provided by the transaction executor.
+    async fn process_schedule_request(
+        &mut self,
+        mut task: ScheduleTaskRequest,
+    ) -> TaskSchedulerResult<()> {
+        if !is_valid_task_interval(task.execution_interval_millis) {
+            // If the interval is too large or zero, we don't schedule the task
+            return Ok(());
+        }
+
+        task.execution_interval_millis = task
+            .execution_interval_millis
+            .clamp(self.min_interval.as_millis() as i64, u32::MAX as i64);
+
+        let task = DbTask::from(task);
+        let task_id = task.id;
+
+        // Check if the task already exists in the database
+        if let Some(db_task) = self.db.get_task(task_id).await? {
+            if db_task.authority != task.authority {
+                return Err(TaskSchedulerError::UnauthorizedReplacing(
+                    task_id,
+                    db_task.authority.to_string(),
+                    task.authority.to_string(),
+                ));
+            }
+        }
+
+        self.db.insert_task(&task).await?;
+        self.remove_task_from_queue(task_id);
+        self.task_execution_retries.remove(&task_id);
+        let key = self.task_queue.insert(task, Duration::from_millis(0));
+        self.task_queue_keys.insert(task_id, key);
+        debug!("Registered task {} from context", task_id);
+
+        Ok(())
+    }
+
+    /// Processes [CancelTaskRequest] provided by the transaction executor.
     async fn process_cancel_request(
         &mut self,
         cancel_request: &CancelTaskRequest,
@@ -238,7 +317,105 @@ impl TaskSchedulerService {
         }
 
         // Remove task from queue and database
-        self.unregister_task(cancel_request.task_id).await?;
+        self.remove_task_from_queue(task.id);
+        self.task_execution_retries.remove(&task.id);
+        self.db.remove_task(task.id).await?;
+        debug!("Removed task {} from database", task.id);
+
+        Ok(())
+    }
+
+    /// Sends a batch of crank transactions to the RPC client.
+    async fn send_crank_batch(
+        rpc_client: Arc<RpcClient>,
+        block: &LatestBlock,
+        tx_counter: Arc<AtomicU64>,
+        tasks: &[DbTask],
+    ) -> TaskSchedulerResult<Vec<TaskSchedulerResult<Signature>>> {
+        let mut join_set: JoinSet<TaskSchedulerResult<Signature>> =
+            JoinSet::new();
+        let blockhash = block.load().blockhash;
+        for task in tasks {
+            let rpc_client = rpc_client.clone();
+            let tx_counter = tx_counter.clone();
+            let task = task.clone();
+            join_set.spawn(async move {
+                let ixs = vec![
+                    InstructionUtils::noop_instruction(
+                        tx_counter.fetch_add(1, Ordering::Relaxed),
+                    ),
+                    InstructionUtils::execute_task_instruction(
+                        task.instructions.clone(),
+                    ),
+                ];
+                let tx = Transaction::new(
+                    &[validator_authority()],
+                    Message::new(&ixs, Some(&validator_authority_id())),
+                    blockhash,
+                );
+                Ok(rpc_client.send_transaction(&tx).await.map_err(Box::new)?)
+            });
+        }
+        let results = join_set.join_all().await;
+        let sigs = results
+            .into_iter()
+            .collect::<Vec<TaskSchedulerResult<Signature>>>();
+        Ok(sigs)
+    }
+
+    /// Called when a crank batch is completed.
+    async fn on_crank_batch_completed(
+        &mut self,
+        batch: Vec<DbTask>,
+        result: TaskSchedulerResult<Vec<TaskSchedulerResult<Signature>>>,
+    ) -> TaskSchedulerResult<()> {
+        let now_millis = chrono::Utc::now().timestamp_millis();
+        let mut success_updates: Vec<(i64, i64)> = Vec::new();
+        let mut success_removals: Vec<i64> = Vec::new();
+        let mut failed_records: Vec<(i64, String)> = Vec::new();
+
+        match result {
+            Ok(sigs) => {
+                debug!(
+                    "Executed crank batch ({} tasks) with signatures {:?}",
+                    batch.len(),
+                    sigs
+                );
+                for (task, res) in batch.iter().zip(sigs) {
+                    if let Err(e) = res {
+                        self.apply_crank_failure_outcome(
+                            task,
+                            &e,
+                            &mut failed_records,
+                        )?;
+                    } else {
+                        self.apply_crank_success_outcome(
+                            task,
+                            now_millis,
+                            &mut success_updates,
+                            &mut success_removals,
+                        )?;
+                    }
+                }
+            }
+            Err(ref e) => {
+                for task in &batch {
+                    self.apply_crank_failure_outcome(
+                        task,
+                        e,
+                        &mut failed_records,
+                    )?;
+                }
+            }
+        }
+
+        self.db
+            .apply_crank_batch_completion(
+                &success_updates,
+                &success_removals,
+                &failed_records,
+            )
+            .await?;
 
         Ok(())
     }
@@ -344,162 +521,14 @@ impl TaskSchedulerService {
         Ok(())
     }
 
-    async fn on_crank_batch_completed(
-        &mut self,
-        batch: Vec<DbTask>,
-        result: TaskSchedulerResult<Vec<TaskSchedulerResult<Signature>>>,
-    ) -> TaskSchedulerResult<()> {
-        let now_millis = chrono::Utc::now().timestamp_millis();
-        let mut success_updates: Vec<(i64, i64)> = Vec::new();
-        let mut success_removals: Vec<i64> = Vec::new();
-        let mut failed_records: Vec<(i64, String)> = Vec::new();
-
-        match result {
-            Ok(sigs) => {
-                debug!(
-                    "Executed crank batch ({} tasks) with signatures {:?}",
-                    batch.len(),
-                    sigs
-                );
-                for (task, res) in batch.iter().zip(sigs) {
-                    if let Err(e) = res {
-                        self.apply_crank_failure_outcome(
-                            task,
-                            &e,
-                            &mut failed_records,
-                        )?;
-                    } else {
-                        self.apply_crank_success_outcome(
-                            task,
-                            now_millis,
-                            &mut success_updates,
-                            &mut success_removals,
-                        )?;
-                    }
-                }
-            }
-            Err(ref e) => {
-                for task in &batch {
-                    self.apply_crank_failure_outcome(
-                        task,
-                        e,
-                        &mut failed_records,
-                    )?;
-                }
-            }
-        }
-
-        self.db
-            .apply_crank_batch_completion(
-                &success_updates,
-                &success_removals,
-                &failed_records,
-            )
-            .await?;
-
-        Ok(())
-    }
-
-    async fn register_task(
-        &mut self,
-        task: impl Into<DbTask>,
-    ) -> TaskSchedulerResult<()> {
-        let task = task.into();
-
-        // Check if the task already exists in the database
-        if let Some(db_task) = self.db.get_task(task.id).await? {
-            if db_task.authority != task.authority {
-                return Err(TaskSchedulerError::UnauthorizedReplacing(
-                    task.id,
-                    db_task.authority.to_string(),
-                    task.authority.to_string(),
-                ));
-            }
-        }
-
-        self.db.insert_task(&task).await?;
-        self.remove_task_from_queue(task.id);
-        self.task_execution_retries.remove(&task.id);
-        let key = self
-            .task_queue
-            .insert(task.clone(), Duration::from_millis(0));
-        self.task_queue_keys.insert(task.id, key);
-        debug!("Registered task {} from context", task.id);
-
-        Ok(())
-    }
-
-    async fn unregister_task(
-        &mut self,
-        task_id: i64,
-    ) -> TaskSchedulerResult<()> {
-        self.remove_task_from_queue(task_id);
-        self.task_execution_retries.remove(&task_id);
-        self.db.remove_task(task_id).await?;
-        debug!("Removed task {} from database", task_id);
-
-        Ok(())
-    }
-
-    pub async fn run(mut self) -> TaskSchedulerResult<()> {
-        let (crank_tx, mut crank_rx) = mpsc::unbounded_channel();
-
-        loop {
-            select! {
-                Some(expired) = self.task_queue.next() => {
-                    let first = expired.into_inner();
-                    self.task_queue_keys.remove(&first.id);
-                    let mut batch = vec![first];
-                    let waker = noop_waker();
-                    let mut cx = Context::from_waker(&waker);
-                    while let Poll::Ready(Some(expired)) = self.task_queue.poll_expired(&mut cx) {
-                        let task = expired.into_inner();
-                        self.task_queue_keys.remove(&task.id);
-                        batch.push(task);
-                    }
-
-                    let rpc_client = self.rpc_client.clone();
-                    let block = self.block.clone();
-                    let tx_counter = self.tx_counter.clone();
-                    let crank_tx = crank_tx.clone();
-                    tokio::spawn(async move {
-                        let result =
-                            send_crank_batch(rpc_client, &block, tx_counter, &batch).await;
-                        let _ = crank_tx.send((batch, result));
-                    });
-                }
-                Some((batch, result)) = crank_rx.recv() => {
-                    self.on_crank_batch_completed(batch, result).await?;
-                }
-                Some(task) = self.scheduled_tasks.recv() => {
-                    let id = task.id();
-                    match self.process_request(task).await {
-                        Ok(ProcessingOutcome::Success) => {}
-                        Ok(ProcessingOutcome::Recoverable(e)) => {
-                            warn!("Failed to process request ID={}: {e:?}", id);
-                        }
-                        Err(e) => {
-                            error!("Failed to process request: {}", e);
-                            return Err(e);
-                        }
-                    }
-                }
-                _ = self.token.cancelled() => {
-                    break;
-                }
-            }
-        }
-
-        info!("TaskSchedulerService shutdown!");
-        Ok(())
-    }
-
+    /// Removes a task from the queue.
     fn remove_task_from_queue(&mut self, task_id: i64) {
         if let Some(key) = self.task_queue_keys.remove(&task_id) {
             self.task_queue.remove(&key);
         }
     }
 
+    /// Calculates the retry delay for the next task execution.
     fn task_execution_retry_delay(&self, retry: u32) -> Duration {
         let multiplier = 1u32
             .checked_shl(retry.saturating_sub(1))
@@ -510,42 +539,6 @@ impl TaskSchedulerService {
             .unwrap_or(TASK_EXECUTION_RETRY_MAX_DELAY)
             .min(TASK_EXECUTION_RETRY_MAX_DELAY)
     }
-}
-
-async fn send_crank_batch(
-    rpc_client: Arc<RpcClient>,
-    block: &LatestBlock,
-    tx_counter: Arc<AtomicU64>,
-    tasks: &[DbTask],
-) -> TaskSchedulerResult<Vec<TaskSchedulerResult<Signature>>> {
-    let mut join_set: JoinSet<TaskSchedulerResult<Signature>> = JoinSet::new();
-    let blockhash = block.load().blockhash;
-    for task in tasks {
-        let rpc_client = rpc_client.clone();
-        let tx_counter = tx_counter.clone();
-        let task = task.clone();
-        join_set.spawn(async move {
-            let ixs = vec![
-                InstructionUtils::noop_instruction(
-                    tx_counter.fetch_add(1, Ordering::Relaxed),
-                ),
-                InstructionUtils::execute_task_instruction(
-                    task.instructions.clone(),
-                ),
-            ];
-            let tx = Transaction::new(
-                &[validator_authority()],
-                Message::new(&ixs, Some(&validator_authority_id())),
-                blockhash,
-            );
-            Ok(rpc_client.send_transaction(&tx).await.map_err(Box::new)?)
-        });
-    }
-    let results = join_set.join_all().await;
-    let sigs = results
-        .into_iter()
-        .collect::<Vec<TaskSchedulerResult<Signature>>>();
-    Ok(sigs)
 }
 
 fn is_valid_task_interval(interval: i64) -> bool {

@@ -30,11 +30,11 @@ pub struct DbTask {
     pub last_execution_millis: i64,
 }
 
-impl<'a> From<&'a ScheduleTaskRequest> for DbTask {
-    fn from(task: &'a ScheduleTaskRequest) -> Self {
+impl From<ScheduleTaskRequest> for DbTask {
+    fn from(task: ScheduleTaskRequest) -> Self {
         Self {
             id: task.id,
-            instructions: task.instructions.clone(),
+            instructions: task.instructions,
             authority: task.authority,
             execution_interval_millis: task.execution_interval_millis,
             executions_left: task.iterations,
