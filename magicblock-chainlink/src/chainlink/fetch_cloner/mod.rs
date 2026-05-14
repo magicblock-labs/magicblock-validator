@@ -132,6 +132,7 @@ where
             hash_map::HashMap<CloneKey, Vec<oneshot::Sender<CloneCompletion>>>,
         >,
     >,
+    pending_operation_timeout_ms: Arc<AtomicU64>,
 }
 
 /// Negative-cache capacity for known-empty eATAs.
@@ -167,6 +168,9 @@ where
             programs_not_to_subscribe: self.programs_not_to_subscribe.clone(),
             known_empty_eatas: self.known_empty_eatas.clone(),
             pending_clones: self.pending_clones.clone(),
+            pending_operation_timeout_ms: self
+                .pending_operation_timeout_ms
+                .clone(),
         }
     }
 }
@@ -210,6 +214,9 @@ where
                 KNOWN_EMPTY_EATAS_CAPACITY,
             ))),
             pending_clones: Arc::new(Mutex::new(hash_map::HashMap::new())),
+            pending_operation_timeout_ms: Arc::new(AtomicU64::new(
+                FETCH_CLONE_OPERATION_TIMEOUT.as_millis() as u64,
+            )),
         });
 
         me.clone()
@@ -230,6 +237,12 @@ where
     #[cfg(test)]
     fn has_pending_request(&self, pubkey: &Pubkey) -> bool {
         self.pending_requests.contains(pubkey)
+    }
+
+    #[cfg(test)]
+    fn set_pending_operation_timeout(&self, timeout: Duration) {
+        self.pending_operation_timeout_ms
+            .store(timeout.as_millis() as u64, Ordering::Relaxed);
     }
 
     /// Returns the number of waiters currently registered for the pending
@@ -327,7 +340,9 @@ where
             pubkey,
             generation,
             waiter_id,
-            FETCH_CLONE_OPERATION_TIMEOUT,
+            Duration::from_millis(
+                self.pending_operation_timeout_ms.load(Ordering::Relaxed),
+            ),
         )
     }
 

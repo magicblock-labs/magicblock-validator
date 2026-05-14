@@ -37,6 +37,9 @@ use crate::{
     },
 };
 
+const TEST_FETCH_CLONE_TIMEOUT: Duration = Duration::from_secs(5);
+const TEST_PENDING_REQUEST_TIMEOUT: Duration = Duration::from_millis(100);
+
 type TestFetchClonerResult = (
     Arc<
         FetchCloner<
@@ -4476,6 +4479,7 @@ async fn test_owned_operation_owner_timeout_cleans_up_pending() {
         subscription_rx,
         None,
     );
+    fetch_cloner.set_pending_operation_timeout(TEST_PENDING_REQUEST_TIMEOUT);
 
     let owner_task = {
         let fetch_cloner = fetch_cloner.clone();
@@ -4517,15 +4521,13 @@ async fn test_owned_operation_owner_timeout_cleans_up_pending() {
     }
     assert_eq!(blocking_cloner.clone_request_count(), 1);
 
-    let owner_result = tokio::time::timeout(
-        FETCH_CLONE_OPERATION_TIMEOUT + Duration::from_secs(5),
-        owner_task,
-    )
-    .await
-    .expect("owner timeout test should complete within the outer timeout")
-    .expect("owner task join should succeed");
+    let owner_result =
+        tokio::time::timeout(TEST_FETCH_CLONE_TIMEOUT, owner_task)
+            .await
+            .expect("owner timeout test should complete within test timeout")
+            .expect("owner task join should succeed");
     let waiter_result =
-        tokio::time::timeout(Duration::from_secs(5), waiter_task)
+        tokio::time::timeout(TEST_FETCH_CLONE_TIMEOUT, waiter_task)
             .await
             .expect("waiter should complete after owner timeout")
             .expect("waiter task join should succeed");
