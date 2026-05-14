@@ -331,8 +331,9 @@ impl TaskSchedulerService {
         block: &LatestBlock,
         tx_counter: Arc<AtomicU64>,
         tasks: &[DbTask],
-    ) -> TaskSchedulerResult<Vec<TaskSchedulerResult<Signature>>> {
-        let mut join_set: JoinSet<TaskSchedulerResult<Signature>> =
+    ) -> TaskSchedulerResult<Vec<(DbTask, TaskSchedulerResult<Signature>)>>
+    {
+        let mut join_set: JoinSet<(DbTask, TaskSchedulerResult<Signature>)> =
             JoinSet::new();
         let blockhash = block.load().blockhash;
         for task in tasks {
@@ -353,21 +354,24 @@ impl TaskSchedulerService {
                     Message::new(&ixs, Some(&validator_authority_id())),
                     blockhash,
                 );
-                Ok(rpc_client.send_transaction(&tx).await.map_err(Box::new)?)
+                let res = rpc_client
+                    .send_transaction(&tx)
+                    .await
+                    .map_err(Box::new)
+                    .map_err(TaskSchedulerError::from);
+                (task, res)
             });
         }
-        let results = join_set.join_all().await;
-        let sigs = results
-            .into_iter()
-            .collect::<Vec<TaskSchedulerResult<Signature>>>();
-        Ok(sigs)
+        Ok(join_set.join_all().await)
     }
 
     /// Called when a crank batch is completed.
     async fn on_crank_batch_completed(
         &mut self,
         batch: Vec<DbTask>,
-        result: TaskSchedulerResult<Vec<TaskSchedulerResult<Signature>>>,
+        result: TaskSchedulerResult<
+            Vec<(DbTask, TaskSchedulerResult<Signature>)>,
+        >,
     ) -> TaskSchedulerResult<()> {
         let now_millis = chrono::Utc::now().timestamp_millis();
         let mut success_updates: Vec<(i64, i64)> = Vec::new();
@@ -375,13 +379,8 @@ impl TaskSchedulerService {
         let mut failed_records: Vec<(i64, String)> = Vec::new();
 
         match result {
-            Ok(sigs) => {
-                debug!(
-                    "Executed crank batch ({} tasks) with signatures {:?}",
-                    batch.len(),
-                    sigs
-                );
-                for (task, res) in batch.iter().zip(sigs) {
+            Ok(result) => {
+                for (task, res) in &result {
                     if let Err(e) = res {
                         self.apply_crank_failure_outcome(
                             task,
