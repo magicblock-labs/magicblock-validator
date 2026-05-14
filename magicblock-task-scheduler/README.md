@@ -35,5 +35,6 @@ min-interval = "10ms"
 
 ## Performance Considerations
 
-- Same-tick delay-queue draining; bounded parallel `send_transaction` via semaphore.
+- Same-tick delay-queue draining; crank sends parallelize `send_transaction` (consider bounding concurrency under heavy load).
 - `Arc` for stored instructions; configurable `RpcSendTransactionConfig` for crank sends.
+- SQLite: WAL journal, `NORMAL` synchronous mode, enlarged page cache; after each crank RPC batch completes, success/failure persistence uses one transaction (`apply_crank_completion_batch`) instead of one commit per task.

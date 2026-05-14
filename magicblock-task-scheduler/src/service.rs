@@ -243,22 +243,23 @@ impl TaskSchedulerService {
         Ok(())
     }
 
-    async fn apply_successful_execution(
+    /// Updates the delay queue for the next firing and queues SQLite work for [`SchedulerDatabase::apply_crank_completion_batch`].
+    fn apply_crank_success_outcome(
         &mut self,
         task: &DbTask,
+        now_millis: i64,
+        success_updates: &mut Vec<(i64, i64)>,
+        success_removals: &mut Vec<i64>,
     ) -> TaskSchedulerResult<()> {
         let executed_at = next_execution_millis(
             task.last_execution_millis,
             task.execution_interval_millis,
-            chrono::Utc::now().timestamp_millis(),
+            now_millis,
         );
 
         if task.executions_left > 1 {
             let next_execution = executed_at + task.execution_interval_millis;
-            let delay = delay_until_millis(
-                next_execution,
-                chrono::Utc::now().timestamp_millis(),
-            );
+            let delay = delay_until_millis(next_execution, now_millis);
             let new_task = DbTask {
                 executions_left: task.executions_left - 1,
                 last_execution_millis: executed_at,
@@ -267,14 +268,79 @@ impl TaskSchedulerService {
             let key = self.task_queue.insert(new_task, delay);
             self.task_queue_keys.insert(task.id, key);
 
-            self.db
-                .update_task_after_execution(task.id, executed_at)
-                .await?;
+            success_updates.push((task.id, executed_at));
         } else {
-            self.db.remove_task(task.id).await?;
+            success_removals.push(task.id);
         }
 
         self.task_execution_retries.remove(&task.id);
+        Ok(())
+    }
+
+    /// Either:
+    /// - re-queues for retry
+    /// - queues a permanent failure for SQLite along with clearing retry counters and stale queue keys.
+    fn apply_crank_failure_outcome(
+        &mut self,
+        task: &DbTask,
+        error: &TaskSchedulerError,
+        failed_records: &mut Vec<(i64, String)>,
+    ) -> TaskSchedulerResult<()> {
+        debug!("Failed to execute task {}: {}", task.id, error);
+
+        fn buffer_permanent_failure_and_clear_runtime_state(
+            this: &mut TaskSchedulerService,
+            task_id: i64,
+            error: String,
+            failed_records: &mut Vec<(i64, String)>,
+        ) {
+            failed_records.push((task_id, error));
+            this.task_execution_retries.remove(&task_id);
+            this.remove_task_from_queue(task_id);
+        }
+
+        if !is_retryable_task_execution_error(error) {
+            buffer_permanent_failure_and_clear_runtime_state(
+                self,
+                task.id,
+                error.to_string(),
+                failed_records,
+            );
+            return Ok(());
+        }
+
+        let Some(retries) = ({
+            let retries =
+                self.task_execution_retries.entry(task.id).or_default();
+            if *retries >= MAX_TASK_EXECUTION_RETRIES {
+                None
+            } else {
+                *retries += 1;
+                Some(*retries)
+            }
+        }) else {
+            buffer_permanent_failure_and_clear_runtime_state(
+                self,
+                task.id,
+                error.to_string(),
+                failed_records,
+            );
+            return Ok(());
+        };
+
+        let delay = self.task_execution_retry_delay(retries);
+        debug!(
+            task_id = task.id,
+            retry = retries,
+            max_retries = MAX_TASK_EXECUTION_RETRIES,
+            delay_ms = delay.as_millis(),
+            error = %error,
+            "Retrying failed task execution"
+        );
+
+        let key = self.task_queue.insert(task.clone(), delay);
+        self.task_queue_keys.insert(task.id, key);
+
         Ok(())
     }
 
@@ -283,6 +349,11 @@ impl TaskSchedulerService {
         batch: Vec<DbTask>,
         result: TaskSchedulerResult<Vec<TaskSchedulerResult<Signature>>>,
     ) -> TaskSchedulerResult<()> {
+        let now_millis = chrono::Utc::now().timestamp_millis();
+        let mut success_updates: Vec<(i64, i64)> = Vec::new();
+        let mut success_removals: Vec<i64> = Vec::new();
+        let mut failed_records: Vec<(i64, String)> = Vec::new();
+
         match result {
             Ok(sigs) => {
                 debug!(
@@ -290,23 +361,42 @@ impl TaskSchedulerService {
                     batch.len(),
                     sigs
                 );
-                // Note: batch and sigs have the same length by design
                 for (task, res) in batch.iter().zip(sigs) {
-                    // Handle tasks individually if they failed
                     if let Err(e) = res {
-                        self.handle_failed_task_execution(task, &e).await?;
+                        self.apply_crank_failure_outcome(
+                            task,
+                            &e,
+                            &mut failed_records,
+                        )?;
                     } else {
-                        self.apply_successful_execution(task).await?;
+                        self.apply_crank_success_outcome(
+                            task,
+                            now_millis,
+                            &mut success_updates,
+                            &mut success_removals,
+                        )?;
                     }
                 }
             }
             Err(ref e) => {
-                // The whole batch failed
                 for task in &batch {
-                    self.handle_failed_task_execution(task, e).await?;
+                    self.apply_crank_failure_outcome(
+                        task,
+                        e,
+                        &mut failed_records,
+                    )?;
                 }
             }
         }
+
+        self.db
+            .apply_crank_batch_completion(
+                &success_updates,
+                &success_removals,
+                &failed_records,
+            )
+            .await?;
+
         Ok(())
     }
 
@@ -408,57 +498,6 @@ impl TaskSchedulerService {
         if let Some(key) = self.task_queue_keys.remove(&task_id) {
             self.task_queue.remove(&key);
         }
-    }
-
-    async fn handle_failed_task_execution(
-        &mut self,
-        task: &DbTask,
-        error: &TaskSchedulerError,
-    ) -> TaskSchedulerResult<()> {
-        debug!("Failed to execute task {}: {}", task.id, error);
-
-        if !is_retryable_task_execution_error(error) {
-            return self.record_failed_task(task, error.to_string()).await;
-        }
-
-        let Some(retries) = ({
-            let retries =
-                self.task_execution_retries.entry(task.id).or_default();
-            if *retries >= MAX_TASK_EXECUTION_RETRIES {
-                None
-            } else {
-                *retries += 1;
-                Some(*retries)
-            }
-        }) else {
-            return self.record_failed_task(task, error.to_string()).await;
-        };
-        let delay = self.task_execution_retry_delay(retries);
-        debug!(
-            task_id = task.id,
-            retry = retries,
-            max_retries = MAX_TASK_EXECUTION_RETRIES,
-            delay_ms = delay.as_millis(),
-            error = %error,
-            "Retrying failed task execution"
-        );
-
-        let key = self.task_queue.insert(task.clone(), delay);
-        self.task_queue_keys.insert(task.id, key);
-
-        Ok(())
-    }
-
-    async fn record_failed_task(
-        &mut self,
-        task: &DbTask,
-        error: String,
-    ) -> TaskSchedulerResult<()> {
-        self.db.move_task_to_failed(task.id, error).await?;
-        self.task_execution_retries.remove(&task.id);
-        self.remove_task_from_queue(task.id);
-
-        Ok(())
     }
 
     fn task_execution_retry_delay(&self, retry: u32) -> Duration {

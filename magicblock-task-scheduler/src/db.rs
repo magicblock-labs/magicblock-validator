@@ -71,6 +71,14 @@ impl SchedulerDatabase {
 
     pub fn new<P: AsRef<Path>>(path: P) -> TaskSchedulerResult<Self> {
         let conn = Connection::open(path)?;
+        conn.execute_batch(
+            "
+            PRAGMA journal_mode=WAL;
+            PRAGMA synchronous=NORMAL;
+            PRAGMA busy_timeout=5000;
+            PRAGMA cache_size=-65536;
+            ",
+        )?;
 
         // Create tables
         conn.execute(
@@ -177,23 +185,6 @@ impl SchedulerDatabase {
             "INSERT INTO failed_tasks (timestamp, task_id, error) VALUES (?, ?, ?)",
             params![Utc::now().timestamp_millis(), task_id, error],
         )?;
-
-        Ok(())
-    }
-
-    pub async fn move_task_to_failed(
-        &self,
-        task_id: i64,
-        error: String,
-    ) -> TaskSchedulerResult<()> {
-        let mut conn = self.conn.lock().await;
-        let tx = conn.transaction()?;
-        tx.execute("DELETE FROM tasks WHERE id = ?", [task_id])?;
-        tx.execute(
-            "INSERT INTO failed_tasks (timestamp, task_id, error) VALUES (?, ?, ?)",
-            params![Utc::now().timestamp_millis(), task_id, error],
-        )?;
-        tx.commit()?;
 
         Ok(())
     }
@@ -353,5 +344,51 @@ impl SchedulerDatabase {
         })?;
 
         Ok(rows.collect::<Result<Vec<FailedTask>, rusqlite::Error>>()?)
+    }
+
+    /// One transaction for a crank completion batch — replaces N separate commits from
+    /// per-task `update_task_after_execution` / `remove_task` / `move_task_to_failed` calls.
+    pub async fn apply_crank_batch_completion(
+        &self,
+        success_updates: &[(i64, i64)],
+        success_removals: &[i64],
+        failed_moves: &[(i64, String)],
+    ) -> TaskSchedulerResult<()> {
+        if success_updates.is_empty()
+            && success_removals.is_empty()
+            && failed_moves.is_empty()
+        {
+            return Ok(());
+        }
+
+        let now = Utc::now().timestamp_millis();
+        let mut conn = self.conn.lock().await;
+        let tx = conn.transaction()?;
+
+        // Continued executions — decrement executions_left via existing UPDATE semantics
+        for &(task_id, last_execution) in success_updates {
+            tx.execute(
+                "UPDATE tasks SET executions_left = executions_left - 1,
+                     last_execution_millis = ?, updated_at = ?
+                 WHERE id = ?",
+                params![last_execution, now, task_id],
+            )?;
+        }
+
+        for &task_id in success_removals {
+            tx.execute("DELETE FROM tasks WHERE id = ?", [task_id])?;
+        }
+
+        for (task_id, error) in failed_moves {
+            tx.execute("DELETE FROM tasks WHERE id = ?", [*task_id])?;
+            tx.execute(
+                "INSERT INTO failed_tasks (timestamp, task_id, error)
+                 VALUES (?, ?, ?)",
+                params![now, task_id, error],
+            )?;
+        }
+
+        tx.commit()?;
+        Ok(())
     }
 }
