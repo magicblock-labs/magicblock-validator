@@ -258,7 +258,6 @@ where
             let releases = owned_by_deleg
                 .iter()
                 .map(|(pubkey, _, _)| *pubkey)
-                .chain(owned_by_deleg.iter().map(|(pubkey, _, _)| *pubkey))
                 .chain(record_subs.iter().copied())
                 .map(|pubkey| SubscriptionRelease::Pubkey {
                     pubkey,
