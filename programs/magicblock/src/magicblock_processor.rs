@@ -83,15 +83,13 @@ declare_process_instruction!(
                     request_undelegation: true,
                 },
             ),
-            ScheduleCommitFinalize {
-                request_undelegation,
-            } => process_schedule_commit(
-                signers,
-                invoke_context,
-                ProcessScheduleCommitOptions {
-                    request_undelegation,
-                },
-            ),
+            Unused => {
+                solana_log_collector::ic_msg!(
+                    invoke_context,
+                    "MagicBlockInstruction ERR: Unused instruction slot"
+                );
+                Err(InstructionError::InvalidInstructionData)
+            }
             AcceptScheduleCommits => {
                 process_accept_scheduled_commits(signers, invoke_context)
             }
