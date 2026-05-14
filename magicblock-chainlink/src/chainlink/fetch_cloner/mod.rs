@@ -2027,10 +2027,21 @@ where
                         cancel,
                         owner,
                     } = handles;
-                    let owner = owner.expect(
-                        "created pending claim must include owner guard",
-                    );
                     let waiter_pubkey = waiter.pubkey();
+                    let Some(owner) = owner else {
+                        cancel.notify_waiters();
+                        finish_pending(
+                            &self.pending_requests,
+                            waiter_pubkey,
+                            waiter.generation(),
+                            PendingTerminal::Failed(PendingFailure::Cancelled),
+                        );
+                        return Err(
+                            ChainlinkError::MissingPendingRequestOwner(
+                                waiter_pubkey,
+                            ),
+                        );
+                    };
                     self.spawn_owned_operation(
                         waiter_pubkey,
                         waiter.generation(),

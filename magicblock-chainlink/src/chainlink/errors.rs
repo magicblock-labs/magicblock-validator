@@ -57,6 +57,9 @@ pub enum ChainlinkError {
     #[error("pending request owner disappeared for {0}: {1}")]
     PendingRequestOwnerDisappeared(Pubkey, String),
 
+    #[error("missing pending request owner for {0}")]
+    MissingPendingRequestOwner(Pubkey),
+
     #[error("pending request owner failed for {0}: {1}")]
     PendingRequestOwnerFailed(Pubkey, String),
 }
