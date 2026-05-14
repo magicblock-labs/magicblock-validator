@@ -672,7 +672,9 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
 
                     // Check if we're currently fetching this account
                     let forward_update = {
-                        let mut fetching = fetching_accounts.lock().unwrap();
+                        let mut fetching = fetching_accounts
+                            .lock()
+                            .expect("fetching_accounts lock poisoned");
                         if let Some(generation) = fetching
                             .get(&update.pubkey)
                             .map(|state| state.generation)
