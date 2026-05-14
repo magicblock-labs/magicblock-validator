@@ -1135,8 +1135,12 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                 }
             }
 
-            // 2. Inform upstream so it can remove it from the store
-            self.send_removal_update(evicted).await?;
+            // 2. Inform upstream so it can remove it from the store. Failure
+            // to notify is non-fatal here because the LRU and pubsub state have
+            // already been updated consistently.
+            if let Err(err) = self.send_removal_update(evicted).await {
+                warn!(evicted = %evicted, error = ?err, "Failed to send removal update for evicted account");
+            }
             return Ok(());
         }
 
