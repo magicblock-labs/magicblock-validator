@@ -124,7 +124,7 @@ impl ClaimedSubscriptionSetupGuard {
             let mut fetching = self
                 .fetching_accounts
                 .lock()
-                .expect("accounts mutex poisoned");
+                .unwrap_or_else(|err| err.into_inner());
             for pubkey in &self.claimed_pubkeys {
                 let Some(generation) =
                     self.claimed_generations.get(pubkey).copied()
