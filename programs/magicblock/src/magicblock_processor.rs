@@ -25,8 +25,7 @@ use crate::{
     schedule_transactions::{
         process_accept_scheduled_commits, process_add_action_callback,
         process_execute_callback, process_schedule_commit,
-        process_schedule_commit_finalize, process_schedule_intent_bundle,
-        ProcessScheduleCommitOptions,
+        process_schedule_intent_bundle, ProcessScheduleCommitOptions,
     },
 };
 
@@ -86,7 +85,7 @@ declare_process_instruction!(
             ),
             ScheduleCommitFinalize {
                 request_undelegation,
-            } => process_schedule_commit_finalize(
+            } => process_schedule_commit(
                 signers,
                 invoke_context,
                 ProcessScheduleCommitOptions {
