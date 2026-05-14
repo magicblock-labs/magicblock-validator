@@ -4811,6 +4811,8 @@ async fn test_owned_operation_waiters_do_not_refetch_after_owner_success() {
     .await;
 
     let fetch_cloner = Arc::new(fetch_cloner);
+    let baseline_rpc_fetches = rpc_client.single_account_fetches()
+        + rpc_client.multi_account_fetches();
     rpc_client.block_fetches();
 
     let owner_task = {
@@ -4857,10 +4859,11 @@ async fn test_owned_operation_waiters_do_not_refetch_after_owner_success() {
     assert!(owner_result.is_ok(), "owner fetch should succeed");
     assert!(waiter_result.is_ok(), "waiter fetch should succeed");
     assert_eq!(fetch_cloner.fetch_count(), 1);
-    assert!(
+    assert_eq!(
         rpc_client.single_account_fetches()
             + rpc_client.multi_account_fetches()
-            >= 1
+            - baseline_rpc_fetches,
+        1
     );
     assert_cloned_undelegated_account!(
         accounts_bank,
