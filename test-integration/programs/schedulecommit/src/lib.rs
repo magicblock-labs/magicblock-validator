@@ -7,9 +7,8 @@ use ephemeral_rollups_sdk::{
         delegate_account, undelegate_account, DelegateAccounts, DelegateConfig,
     },
     ephem::{
-        commit_accounts, commit_and_undelegate_accounts,
-        commit_finalize_accounts, commit_finalize_and_undelegate_accounts,
-        CallHandler, FoldableIntentBuilder, MagicIntentBundleBuilder,
+        commit_accounts, commit_and_undelegate_accounts, CallHandler,
+        FoldableIntentBuilder, MagicIntentBundleBuilder,
     },
     ActionArgs, ShortAccountMeta,
 };
@@ -205,8 +204,6 @@ pub enum ScheduleCommitInstruction {
 pub enum ScheduleCommitType {
     Commit,
     CommitAndUndelegate,
-    CommitFinalize,
-    CommitFinalizeAndUndelegate,
 }
 
 impl ScheduleCommitType {
@@ -233,20 +230,6 @@ impl ScheduleCommitType {
                     magic_context,
                     magic_program,
                     magic_fee_vault,
-                )
-            }
-            ScheduleCommitType::CommitFinalize => commit_finalize_accounts(
-                payer,
-                accounts,
-                magic_context,
-                magic_program,
-            ),
-            ScheduleCommitType::CommitFinalizeAndUndelegate => {
-                commit_finalize_and_undelegate_accounts(
-                    payer,
-                    accounts,
-                    magic_context,
-                    magic_program,
                 )
             }
         }
