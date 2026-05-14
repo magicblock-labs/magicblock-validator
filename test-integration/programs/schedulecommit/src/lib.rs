@@ -200,6 +200,10 @@ pub enum ScheduleCommitInstruction {
     ScheduleCommitForOrderBook(ScheduleCommitType),
 }
 
+///
+/// ScheduleCommitType members always imply Finalize, as it simulates
+/// "user-facing" schedule commit intent.
+///
 #[derive(BorshSerialize, BorshDeserialize, Debug, Clone, Copy)]
 pub enum ScheduleCommitType {
     Commit,
