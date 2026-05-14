@@ -1,4 +1,7 @@
-use std::sync::Arc;
+use std::sync::{
+    atomic::{AtomicU64, Ordering},
+    Arc,
+};
 
 use futures_util::future::join_all;
 use magicblock_core::{
@@ -9,7 +12,7 @@ use magicblock_core::{
     },
 };
 use magicblock_magic_program_api::{
-    instruction::CallbackInstruction,
+    instruction::{CallbackInstruction, MagicBlockInstruction},
     pda::CALLBACK_SIGNER,
     response::{ActionReceipt, MagicResponse, MagicResponseV1},
     CALLBACK_PROGRAM_ID,
@@ -61,6 +64,9 @@ impl<L: LatestBlockProvider> ActionsCallbackService<L> {
         signature: Option<Signature>,
         result: ActionResult,
     ) -> Vec<Result<VersionedTransaction, CallbackScheduleError>> {
+        /// Counter used to make each callback transaction unique
+        static TX_COUNTER: AtomicU64 = AtomicU64::new(0);
+
         let authority_pubkey = self.authority.pubkey();
         let blockhash = self.latest_block.blockhash();
         let result: Result<(), String> = result.map_err(|e| e.to_string());
@@ -68,14 +74,22 @@ impl<L: LatestBlockProvider> ActionsCallbackService<L> {
         callbacks
             .into_iter()
             .map(|callback| {
-                let ix = Self::build_instruction(
+                // Make each callback TX unique
+                let counter = TX_COUNTER.fetch_add(1, Ordering::Relaxed);
+                let noop_ix = Instruction::new_with_bincode(
+                    magicblock_magic_program_api::ID,
+                    &MagicBlockInstruction::Noop(counter),
+                    vec![],
+                );
+
+                let callback_ix = Self::build_callback_instruction(
                     callback,
                     &authority_pubkey,
                     signature,
                     result.clone(),
                 )?;
                 let message = Message::new_with_blockhash(
-                    &[ix],
+                    &[noop_ix, callback_ix],
                     Some(&authority_pubkey),
                     &blockhash,
                 );
@@ -88,7 +102,7 @@ impl<L: LatestBlockProvider> ActionsCallbackService<L> {
             .collect()
     }
 
-    fn build_instruction(
+    fn build_callback_instruction(
         callback: BaseActionCallback,
         authority: &Pubkey,
         signature: Option<Signature>,
