@@ -1820,7 +1820,6 @@ where
             loaded_programs.extend(action_dep_loaded_programs);
         }
 
-        // Compute subscription releases now since we may potentially fail during a cloning step
         let releases = pipeline::compute_subscription_releases(
             &all_requested_pubkeys,
             &accounts_to_clone,
@@ -1829,14 +1828,14 @@ where
             program_data_subs,
         );
 
-        release_subs(&self.remote_account_provider, releases).await;
-
         pipeline::clone_accounts_and_programs(
             self,
             accounts_to_clone,
             loaded_programs,
         )
         .await?;
+
+        release_subs(&self.remote_account_provider, releases).await;
 
         Ok(FetchAndCloneResult {
             not_found_on_chain: not_found,
