@@ -20,7 +20,7 @@
 
 ## Configuration
 
-The task scheduler can be configured via the validator configuration (`TaskSchedulerConfig`):
+The task scheduler can be configured via the validator configuration:
 
 ```toml
 [task_scheduler]

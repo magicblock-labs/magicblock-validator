@@ -175,6 +175,7 @@ impl TaskSchedulerService {
         loop {
             select! {
                 Some(expired) = self.task_queue.next() => {
+                    // A task expired, batch all expired tasks
                     let first = expired.into_inner();
                     self.task_queue_keys.remove(&first.id);
                     let mut batch = vec![first];
@@ -197,9 +198,11 @@ impl TaskSchedulerService {
                     });
                 }
                 Some((batch, result)) = crank_rx.recv() => {
+                    // The batch has been sent, updates queue and db
                     self.on_crank_batch_completed(batch, result).await?;
                 }
                 Some(task) = self.scheduled_tasks.recv() => {
+                    // Received a new request from the transaction executor
                     let id = task.id();
                     match self.process_request(task).await {
                         Ok(ProcessingOutcome::Success) => {}
@@ -387,8 +390,10 @@ impl TaskSchedulerService {
         let mut failed_records: Vec<CrankFailedMove> = Vec::new();
         let mut retry_checks: Vec<CrankRetryCheck> = Vec::new();
 
+        // Decide what must happen to cranks
         match result {
             Ok(ref result) => {
+                // Batch completed, update individual crank based on tx status
                 for (task, res) in result {
                     if let Err(e) = res {
                         self.prepare_crank_failure_outcome(
@@ -398,7 +403,7 @@ impl TaskSchedulerService {
                             &mut retry_checks,
                         )?;
                     } else {
-                        Self::prepare_crank_success_outcome(
+                        self.prepare_crank_success_outcome(
                             task,
                             now_millis,
                             &mut success_updates,
@@ -408,6 +413,7 @@ impl TaskSchedulerService {
                 }
             }
             Err(ref e) => {
+                // Whole batch failed, fail all cranks
                 for task in &batch {
                     self.prepare_crank_failure_outcome(
                         task,
@@ -419,6 +425,7 @@ impl TaskSchedulerService {
             }
         }
 
+        // Apply db updates for the whole batch
         let completion = self
             .db
             .apply_crank_batch_completion(
@@ -429,6 +436,7 @@ impl TaskSchedulerService {
             )
             .await?;
 
+        // Update queue, retries and versions based on decisions
         match result {
             Ok(result) => {
                 for (task, res) in &result {
@@ -475,8 +483,11 @@ impl TaskSchedulerService {
         Ok(())
     }
 
-    /// Queues SQLite work for [`SchedulerDatabase::apply_crank_batch_completion`].
+    /// Either:
+    /// - reschedules crank with remaining iterations
+    /// - remove exhausted cranks
     fn prepare_crank_success_outcome(
+        &self,
         task: &DbTask,
         now_millis: i64,
         success_updates: &mut Vec<CrankSuccessUpdate>,
@@ -500,6 +511,48 @@ impl TaskSchedulerService {
                 expected_updated_at: task.updated_at,
             });
         }
+
+        Ok(())
+    }
+
+    /// Either:
+    /// - re-queues for retry
+    /// - queues a permanent failure for SQLite along with clearing retry counters and stale queue keys.
+    fn prepare_crank_failure_outcome(
+        &self,
+        task: &DbTask,
+        error: &TaskSchedulerError,
+        failed_records: &mut Vec<CrankFailedMove>,
+        retry_checks: &mut Vec<CrankRetryCheck>,
+    ) -> TaskSchedulerResult<()> {
+        debug!("Failed to execute task {}: {}", task.id, error);
+
+        if !is_retryable_task_execution_error(error) {
+            // Unretryable crank are moved to failed cranks
+            failed_records.push(CrankFailedMove {
+                task_id: task.id,
+                expected_updated_at: task.updated_at,
+                error: error.to_string(),
+            });
+            return Ok(());
+        }
+
+        let retries = *self.task_execution_retries.get(&task.id).unwrap_or(&0);
+        if retries >= MAX_TASK_EXECUTION_RETRIES {
+            // Crank exhausted retries, fail it
+            failed_records.push(CrankFailedMove {
+                task_id: task.id,
+                expected_updated_at: task.updated_at,
+                error: error.to_string(),
+            });
+            return Ok(());
+        }
+
+        // Schedule for retry
+        retry_checks.push(CrankRetryCheck {
+            task_id: task.id,
+            expected_updated_at: task.updated_at,
+        });
 
         Ok(())
     }
@@ -543,45 +596,6 @@ impl TaskSchedulerService {
         }
 
         self.task_execution_retries.remove(&task.id);
-        Ok(())
-    }
-
-    /// Either:
-    /// - re-queues for retry
-    /// - queues a permanent failure for SQLite along with clearing retry counters and stale queue keys.
-    fn prepare_crank_failure_outcome(
-        &self,
-        task: &DbTask,
-        error: &TaskSchedulerError,
-        failed_records: &mut Vec<CrankFailedMove>,
-        retry_checks: &mut Vec<CrankRetryCheck>,
-    ) -> TaskSchedulerResult<()> {
-        debug!("Failed to execute task {}: {}", task.id, error);
-
-        if !is_retryable_task_execution_error(error) {
-            failed_records.push(CrankFailedMove {
-                task_id: task.id,
-                expected_updated_at: task.updated_at,
-                error: error.to_string(),
-            });
-            return Ok(());
-        }
-
-        let retries = *self.task_execution_retries.get(&task.id).unwrap_or(&0);
-        if retries >= MAX_TASK_EXECUTION_RETRIES {
-            failed_records.push(CrankFailedMove {
-                task_id: task.id,
-                expected_updated_at: task.updated_at,
-                error: error.to_string(),
-            });
-            return Ok(());
-        }
-
-        retry_checks.push(CrankRetryCheck {
-            task_id: task.id,
-            expected_updated_at: task.updated_at,
-        });
-
         Ok(())
     }
 
