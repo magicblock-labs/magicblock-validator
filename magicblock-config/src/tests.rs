@@ -463,7 +463,7 @@ fn test_example_config_full_coverage() {
     );
     assert_eq!(
         config.task_scheduler.failed_task_retention,
-        Duration::from_secs(7 * 24 * 60 * 60)
+        Duration::from_secs(14 * 24 * 60 * 60)
     );
     assert_eq!(
         config.task_scheduler.failed_task_cleanup_interval,
