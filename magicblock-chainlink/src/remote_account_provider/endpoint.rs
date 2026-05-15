@@ -316,11 +316,10 @@ mod tests {
     }
 
     #[test]
-    fn test_unknown_grpc_endpoint_with_api_key_is_accepted() {
-        let remote: Remote =
-            "grpc://custom.provider.example:50051?api-key=secret"
-                .parse()
-                .unwrap();
+    fn test_generic_grpc_endpoint_with_api_key_is_accepted() {
+        let remote: Remote = "grpcs://generic.example.com/path?api-key=secret"
+            .parse()
+            .unwrap();
 
         let endpoint = Endpoint::try_from(&remote).unwrap();
 
@@ -330,8 +329,8 @@ mod tests {
                 label,
                 api_key,
             } => {
-                assert_eq!(url, "http://custom.provider.example:50051/");
-                assert_eq!(label, "provider");
+                assert_eq!(url, "https://generic.example.com/path");
+                assert_eq!(label, "example");
                 assert_eq!(api_key, "secret");
             }
             other => panic!("expected gRPC endpoint, got {other:?}"),

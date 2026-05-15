@@ -75,8 +75,7 @@ impl fmt::Display for AccountUpdateSource {
 // -----------------
 // ChainLaserActor
 // -----------------
-/// ChainLaserActor manages gRPC subscriptions to Helius Laser
-/// or Triton endpoints.
+/// ChainLaserActor manages subscriptions to gRPC Laser endpoints.
 ///
 /// ## Subscription Lifecycle
 ///
