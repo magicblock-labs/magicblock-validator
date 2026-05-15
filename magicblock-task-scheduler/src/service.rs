@@ -393,7 +393,7 @@ impl TaskSchedulerService {
                     if let Err(e) = res {
                         self.prepare_crank_failure_outcome(
                             task,
-                            &e,
+                            e,
                             &mut failed_records,
                             &mut retry_checks,
                         )?;
