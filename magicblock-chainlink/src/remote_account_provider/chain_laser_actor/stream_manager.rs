@@ -126,10 +126,10 @@ pub struct StreamManager<S: StreamHandle, SF: StreamFactory<S>> {
     stream_map: StreamMap<StreamKey, LaserStream>,
 
     /// Optional chain slot tracker for computing `from_slot`
-    /// during optimization. When set, optimized streams will
+    /// during optimization and program subscriptions. When set, streams will
     /// request backfill from a lookback window before the
     /// current chain slot so that no updates are missed while
-    /// the old streams are being replaced.
+    /// the old streams are being replaced or program subscriptions are created.
     /// For [Self::account_subscribe], `from_slot` is provided by
     /// the caller (actor).
     chain_slot: Option<ChainSlot>,
@@ -405,7 +405,9 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
     /// current chain slot. Returns `None` if no chain slot
     /// tracker is available
     fn compute_from_slot(&self) -> Option<u64> {
-        self.chain_slot.as_ref().map(ChainSlot::compute_from_slot)
+        self.chain_slot
+            .as_ref()
+            .and_then(ChainSlot::compute_from_slot)
     }
 
     /// Emits the current optimized/unoptimized stream counts as
@@ -648,11 +650,15 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
             return Ok(());
         }
 
+        let from_slot = self.compute_from_slot();
         if let Some((mut subscribed_programs, handle)) = self.program_sub.take()
         {
             subscribed_programs.insert(program_id);
-            let request =
-                Self::build_program_request(&subscribed_programs, commitment);
+            let request = Self::build_program_request(
+                &subscribed_programs,
+                commitment,
+                from_slot,
+            );
             match write_with_retry(&handle, "program_subscribe", request).await
             {
                 Ok(()) => {
@@ -667,7 +673,11 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
             let mut subscribed_programs = HashSet::new();
             subscribed_programs.insert(program_id);
             let LaserStreamWithHandle { stream, handle } = self
-                .create_program_stream(&subscribed_programs, commitment)
+                .create_program_stream(
+                    &subscribed_programs,
+                    commitment,
+                    from_slot,
+                )
                 .await?;
             self.stream_map.insert(StreamKey::Program, stream);
             self.program_sub = Some((subscribed_programs, handle));
@@ -693,6 +703,7 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
     fn build_program_request(
         program_ids: &HashSet<Pubkey>,
         commitment: &CommitmentLevel,
+        from_slot: Option<u64>,
     ) -> SubscribeRequest {
         let mut accounts = HashMap::new();
         accounts.insert(
@@ -706,6 +717,7 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
         SubscribeRequest {
             accounts,
             commitment: Some((*commitment).into()),
+            from_slot,
             ..Default::default()
         }
     }
@@ -715,8 +727,10 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
         &mut self,
         program_ids: &HashSet<Pubkey>,
         commitment: &CommitmentLevel,
+        from_slot: Option<u64>,
     ) -> RemoteAccountProviderResult<LaserStreamWithHandle<S>> {
-        let request = Self::build_program_request(program_ids, commitment);
+        let request =
+            Self::build_program_request(program_ids, commitment, from_slot);
         self.stream_factory.subscribe(request).await
     }
 }
@@ -1609,6 +1623,36 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_program_subscribe_uses_from_slot_with_chain_slot() {
+        use std::sync::{atomic::AtomicU64, Arc};
+
+        let current_slot: u64 = 1000;
+        let chain_slot = ChainSlot::new(Arc::new(AtomicU64::new(current_slot)));
+        let factory = MockStreamFactory::new();
+        let mut mgr = StreamManager::new(
+            test_config(),
+            factory.clone(),
+            Some(chain_slot),
+            "test".to_string(),
+        );
+        let program_id = Pubkey::new_unique();
+
+        mgr.add_program_subscription(program_id, &COMMITMENT)
+            .await
+            .unwrap();
+
+        let expected_from_slot =
+            current_slot - ChainSlot::MAX_SLOTS_SUB_ACTIVATION;
+        let reqs = factory.captured_requests();
+        assert_eq!(reqs.len(), 1);
+        assert_eq!(reqs[0].from_slot, Some(expected_from_slot));
+
+        let handle_reqs = factory.handle_requests();
+        assert_eq!(handle_reqs.len(), 1);
+        assert_eq!(handle_reqs[0].from_slot, Some(expected_from_slot));
+    }
+
+    #[tokio::test]
     async fn test_optimize_sets_from_slot_none_without_chain_slot() {
         let (mut mgr, factory) = create_manager();
         mgr.account_subscribe(&make_pubkeys(5), &COMMITMENT, Some(42))
@@ -1670,6 +1714,43 @@ mod tests {
                 Some(expected_from_slot),
                 "optimized streams should backfill from \
                  chain_slot - MAX_SLOTS_SUB_ACTIVATION",
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_optimize_sets_from_slot_none_when_chain_slot_zero() {
+        use std::sync::{atomic::AtomicU64, Arc};
+
+        use crate::remote_account_provider::chain_slot::ChainSlot;
+
+        let chain_slot = ChainSlot::new(Arc::new(AtomicU64::new(0)));
+        let factory = MockStreamFactory::new();
+        let mut mgr = StreamManager::new(
+            test_config(),
+            factory.clone(),
+            Some(chain_slot),
+            "test".to_string(),
+        );
+
+        mgr.account_subscribe(&make_pubkeys(5), &COMMITMENT, Some(42))
+            .await
+            .unwrap();
+
+        let reqs_before = factory.captured_requests().len();
+        mgr.optimize(&COMMITMENT).await.unwrap();
+
+        let optimize_reqs: Vec<_> = factory
+            .captured_requests()
+            .into_iter()
+            .skip(reqs_before)
+            .collect();
+        assert!(!optimize_reqs.is_empty());
+        for req in &optimize_reqs {
+            assert_eq!(
+                req.from_slot, None,
+                "optimized streams should have from_slot=None \
+                 when chain_slot is still 0",
             );
         }
     }

@@ -12,6 +12,7 @@ use solana_sdk::{
     signer::Signer,
     transaction::Transaction,
 };
+use solana_system_interface::instruction as system_instruction;
 
 use crate::utils::{
     create_nested_schedule_cpis_instruction,
@@ -190,11 +191,8 @@ fn test_schedule_commit_directly_with_commit_ix_sandwiched() {
     let (_, rcvr_pda) = committees[0];
 
     // 1. Transfer to rcvr
-    let transfer_ix_1 = solana_sdk::system_instruction::transfer(
-        &payer.pubkey(),
-        &rcvr_pda,
-        1_000_000,
-    );
+    let transfer_ix_1 =
+        system_instruction::transfer(&payer.pubkey(), &rcvr_pda, 1_000_000);
 
     // 2. Schedule commit
     let ix = create_schedule_commit_ix(
@@ -206,11 +204,8 @@ fn test_schedule_commit_directly_with_commit_ix_sandwiched() {
     );
 
     // 3. Transfer to rcvr again
-    let transfer_ix_2 = solana_sdk::system_instruction::transfer(
-        &payer.pubkey(),
-        &rcvr_pda,
-        2_000_000,
-    );
+    let transfer_ix_2 =
+        system_instruction::transfer(&payer.pubkey(), &rcvr_pda, 2_000_000);
 
     let tx = Transaction::new_signed_with_payer(
         &[transfer_ix_1, ix, transfer_ix_2],

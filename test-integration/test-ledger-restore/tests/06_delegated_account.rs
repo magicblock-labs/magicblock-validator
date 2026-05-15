@@ -21,10 +21,10 @@ fn test_restore_ledger_containing_delegated_account() {
     init_logger!();
     let (_tmpdir, ledger_path) = resolve_tmp_dir(TMP_DIR_LEDGER);
     let (mut validator, _, payer) = write(&ledger_path);
-    validator.kill().unwrap();
+    test_ledger_restore::kill_validator(&mut validator);
 
     let mut validator = read(&ledger_path, &payer.pubkey());
-    validator.kill().unwrap();
+    test_ledger_restore::kill_validator(&mut validator);
 }
 
 fn write(ledger_path: &Path) -> (Child, u64, Keypair) {

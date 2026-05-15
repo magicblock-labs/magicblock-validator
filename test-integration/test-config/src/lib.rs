@@ -20,9 +20,10 @@ use program_flexi_counter::instruction::{
     create_add_ix, create_delegate_ix, create_init_ix,
 };
 use solana_sdk::{
-    address_lookup_table, native_token::LAMPORTS_PER_SOL, signature::Keypair,
-    signer::Signer, transaction::Transaction,
+    native_token::LAMPORTS_PER_SOL, signature::Keypair, signer::Signer,
+    transaction::Transaction,
 };
+use solana_sdk_ids::address_lookup_table;
 use tempfile::TempDir;
 use tracing::*;
 
@@ -36,7 +37,6 @@ fn get_programs() -> Vec<LoadableProgram> {
 
 /// Starts a validator with the given clone configuration
 pub fn start_validator_with_clone_config(
-    prepare_lookup_tables: bool,
     loaded_chain_accounts: &LoadedAccounts,
 ) -> (TempDir, Child, IntegrationTestContext) {
     let programs = get_programs();
@@ -49,8 +49,6 @@ pub fn start_validator_with_clone_config(
             Remote::from_str(IntegrationTestContext::ws_url_chain()).unwrap(),
         ],
         chainlink: ChainLinkConfig {
-            prepare_lookup_tables,
-            auto_airdrop_lamports: 0,
             ..Default::default()
         },
         accountsdb: AccountsDbConfig {
@@ -169,7 +167,7 @@ pub fn delegate_and_clone(
 pub fn count_lookup_table_transactions_on_chain(
     ctx: &IntegrationTestContext,
 ) -> anyhow::Result<usize> {
-    let lookup_table_program_id = address_lookup_table::program::id();
+    let lookup_table_program_id = address_lookup_table::id();
 
     let sigs =
         ctx.get_signaturestats_for_address_chain(&lookup_table_program_id)?;

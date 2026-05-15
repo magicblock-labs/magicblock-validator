@@ -1,6 +1,15 @@
+#![allow(deprecated)]
+
+use std::sync::Arc;
+
+use agave_syscalls::{
+    create_program_runtime_environment_v1,
+    create_program_runtime_environment_v2,
+};
 use magicblock_accounts_db::{traits::AccountsBank, AccountsDb};
 use magicblock_core::link::blocks::BlockHash;
 use solana_account::{AccountSharedData, WritableAccount};
+use solana_feature_gate_interface::state::Feature;
 use solana_feature_set::{
     curve25519_restrict_msm_length, curve25519_syscall_enabled,
     disable_rent_fees_collection, ed25519_program_enabled,
@@ -8,21 +17,30 @@ use solana_feature_set::{
     enable_transaction_loading_failure_fees, get_sysvar_syscall_enabled,
     secp256k1_program_enabled, FeatureSet,
 };
-use solana_program::{feature, pubkey::Pubkey};
-#[allow(deprecated)]
-use solana_rent_collector::RentCollector;
+use solana_program::{pubkey::Pubkey, rent::Rent};
+use solana_program_runtime::{
+    execution_budget::SVMTransactionExecutionBudget,
+    loaded_programs::ProgramRuntimeEnvironments,
+    solana_sbpf::program::BuiltinProgram,
+};
 use solana_sdk_ids::{
     ed25519_program, native_loader, secp256k1_program, secp256r1_program,
 };
 use solana_svm::transaction_processor::TransactionProcessingEnvironment;
 use tracing::error;
 
-/// Initialize an SVM environment for transaction processing.
+/// Transaction processing environment plus the exact active Agave feature set.
+pub struct SvmEnv {
+    pub environment: TransactionProcessingEnvironment,
+    pub feature_set: FeatureSet,
+}
+
+/// Initialize an SVM environment for transaction processing and retain the active feature set.
 pub fn build_svm_env(
     accountsdb: &AccountsDb,
     blockhash: BlockHash,
     fee_per_signature: u64,
-) -> TransactionProcessingEnvironment<'static> {
+) -> SvmEnv {
     let mut feature_set = FeatureSet::default();
 
     // Activate features relevant to ER operations:
@@ -46,25 +64,48 @@ pub fn build_svm_env(
 
     // Persist active features to AccountsDb if they don't already exist.
     // This ensures programs checking for these features find them.
-    for (id, &slot) in &feature_set.active {
+    for (id, &slot) in feature_set.active() {
         ensure_feature_account(accountsdb, id, Some(slot));
     }
 
     ensure_precompile_account(accountsdb, &ed25519_program::ID);
     ensure_precompile_account(accountsdb, &secp256k1_program::ID);
     ensure_precompile_account(accountsdb, &secp256r1_program::ID);
+    ensure_builtin_accounts(accountsdb);
 
-    // Initialize static RentCollector (leaked for 'static lifetime as it never changes).
-    #[allow(deprecated)]
-    let rent_collector = Box::leak(Box::new(RentCollector::default()));
+    let budget = SVMTransactionExecutionBudget::new_with_defaults(false);
+    let runtime_features = feature_set.runtime_features();
+    let runtime_v1 = create_program_runtime_environment_v1(
+        &runtime_features,
+        &budget,
+        false,
+        false,
+    )
+    .map(Into::into)
+    .unwrap_or_else(|_| {
+        Arc::new(BuiltinProgram::new_loader(Default::default()))
+    });
+    let runtime_v2 =
+        create_program_runtime_environment_v2(&budget, false).into();
+    let runtime_environments = ProgramRuntimeEnvironments {
+        program_runtime_v1: runtime_v1,
+        program_runtime_v2: runtime_v2,
+    };
 
-    TransactionProcessingEnvironment {
+    let environment = TransactionProcessingEnvironment {
         blockhash,
         blockhash_lamports_per_signature: fee_per_signature,
-        feature_set: feature_set.into(),
-        fee_lamports_per_signature: fee_per_signature,
-        rent_collector: Some(rent_collector),
+        feature_set: runtime_features,
         epoch_total_stake: 0,
+        program_runtime_environments_for_execution: runtime_environments
+            .clone(),
+        program_runtime_environments_for_deployment: runtime_environments,
+        rent: Rent::default(),
+    };
+
+    SvmEnv {
+        environment,
+        feature_set,
     }
 }
 
@@ -78,11 +119,8 @@ fn ensure_feature_account(
         return;
     }
 
-    let feature = feature::Feature { activated_at };
-    let Ok(account) = AccountSharedData::new_data(1, &feature, &feature::id())
-    else {
-        return;
-    };
+    let feature = Feature { activated_at };
+    let account = solana_feature_gate_interface::create_account(&feature, 1);
     let _ = accountsdb.insert_account(id, &account);
 }
 
@@ -95,6 +133,25 @@ fn ensure_precompile_account(accountsdb: &AccountsDb, id: &Pubkey) {
     account.set_executable(true);
     if let Err(e) = accountsdb.insert_account(id, &account) {
         error!("Failed to insert precompile account {}: {:?}", id, e);
+    }
+}
+
+fn ensure_builtin_accounts(accountsdb: &AccountsDb) {
+    for builtin in builtins::BUILTINS {
+        if accountsdb.get_account(&builtin.program_id).is_some() {
+            continue;
+        }
+
+        let mut account = AccountSharedData::new(1, 0, &native_loader::ID);
+        account.set_executable(true);
+        if let Err(err) =
+            accountsdb.insert_account(&builtin.program_id, &account)
+        {
+            error!(
+                "Failed to insert builtin account {}: {:?}",
+                builtin.program_id, err
+            );
+        }
     }
 }
 

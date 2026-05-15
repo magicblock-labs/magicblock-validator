@@ -13,13 +13,14 @@ rayon = { workspace = true }
 serde = { workspace = true }
 ureq = { workspace = true }
 url = { workspace = true }
-magicblock-core = { workspace = true }
 magicblock-config = { workspace = true }
 magicblock-delegation-program-api = { workspace = true, features = ["instruction"] }
+solana-commitment-config = { workspace = true }
 solana-pubkey = { workspace = true }
 solana-rpc-client = { workspace = true }
 solana-rpc-client-api = { workspace = true }
 solana-sdk = { workspace = true }
+solana-system-interface = { workspace = true }
 solana-transaction-status = { workspace = true }
 tempfile = { workspace = true }
 toml = { workspace = true }

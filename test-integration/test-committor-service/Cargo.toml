@@ -25,10 +25,13 @@ program-flexi-counter = { workspace = true, features = ["no-entrypoint"] }
 program-schedulecommit = { workspace = true, features = ["no-entrypoint"] }
 rand = { workspace = true }
 solana-account = { workspace = true }
+solana-commitment-config = { workspace = true }
 solana-pubkey = { workspace = true }
 solana-rpc-client = { workspace = true }
 solana-rpc-client-api = { workspace = true }
 solana-sdk = { workspace = true }
+solana-sdk-ids = { workspace = true }
+solana-system-interface = { workspace = true }
 test-kit = { workspace = true }
 tokio = { workspace = true }
 

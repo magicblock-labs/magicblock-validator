@@ -1,8 +1,11 @@
 use std::collections::HashSet;
 
 use magicblock_core::intent::BaseActionCallback;
-use magicblock_magic_program_api::args::AddActionCallbackArgs;
-use solana_account::state_traits::StateMut;
+use magicblock_magic_program_api::{
+    args::{AddActionCallbackArgs, ShortAccountMeta},
+    pda::CALLBACK_SIGNER,
+};
+use solana_account::{ReadableAccount, WritableAccount};
 use solana_instruction::error::InstructionError;
 use solana_log_collector::ic_msg;
 use solana_program_runtime::invoke_context::InvokeContext;
@@ -11,7 +14,8 @@ use solana_pubkey::Pubkey;
 use crate::{
     schedule_transactions::{
         check_magic_context_id, get_clock, get_parent_program_id,
-        try_get_fee_vault, MAGIC_CONTEXT_IDX, PAYER_IDX,
+        try_get_fee_vault, validate_callback_accounts, MAGIC_CONTEXT_IDX,
+        PAYER_IDX,
     },
     utils::{
         account_actions::charge_delegated_payer,
@@ -34,18 +38,19 @@ pub(crate) fn process_add_action_callback(
 
     check_magic_context_id(invoke_context, MAGIC_CONTEXT_IDX)?;
 
-    let transaction_context = &invoke_context.transaction_context.clone();
+    let clock = get_clock(invoke_context)?;
+    let parent_program_id = get_parent_program_id(invoke_context)?;
+
+    let transaction_context = &*invoke_context.transaction_context;
     let ix_ctx = transaction_context.get_current_instruction_context()?;
     // Assert MagicBlock program
-    ix_ctx
-        .find_index_of_program_account(transaction_context, &crate::id())
-        .ok_or_else(|| {
-            ic_msg!(
-                invoke_context,
-                "Schedule ERR: Magic program account not found"
-            );
-            InstructionError::UnsupportedProgramId
-        })?;
+    if ix_ctx.get_program_key()? != &crate::id() {
+        ic_msg!(
+            invoke_context,
+            "Schedule ERR: Magic program account not found"
+        );
+        return Err(InstructionError::UnsupportedProgramId);
+    }
 
     let payer_pubkey =
         get_instruction_pubkey_with_idx(transaction_context, PAYER_IDX)?;
@@ -78,18 +83,21 @@ pub(crate) fn process_add_action_callback(
     })?;
 
     // Charge User for callback
-    charge_delegated_payer(payer_acc, magic_fee_vault, CALLBACK_FEE_LAMPORTS)?;
+    charge_delegated_payer(
+        &payer_acc,
+        &magic_fee_vault,
+        CALLBACK_FEE_LAMPORTS,
+    )?;
 
-    let context_data = &mut context_acc.borrow_mut();
-    let mut context =
-        MagicContext::deserialize(context_data).map_err(|err| {
-            ic_msg!(
-                invoke_context,
-                "Failed to deserialize MagicContext: {}",
-                err
-            );
-            InstructionError::GenericError
-        })?;
+    let mut context = MagicContext::deserialize(context_acc.borrow()?.data())
+        .map_err(|err| {
+        ic_msg!(
+            invoke_context,
+            "AddActionCallback ERR: Failed to deserialize MagicContext: {}",
+            err
+        );
+        InstructionError::GenericError
+    })?;
 
     let latest_intent =
         context.scheduled_base_intents.last_mut().ok_or_else(|| {
@@ -138,9 +146,6 @@ pub(crate) fn process_add_action_callback(
         );
         return Err(InstructionError::InvalidAccountData);
     };
-    let clock = get_clock(invoke_context)?;
-    let parent_program_id =
-        get_parent_program_id(transaction_context, invoke_context)?;
     if Some(source_program) != parent_program_id {
         ic_msg!(
             invoke_context,
@@ -161,6 +166,29 @@ pub(crate) fn process_add_action_callback(
         return Err(InstructionError::InvalidInstructionData);
     }
 
+    // Validate account metas
+    let accounts_meta: Vec<_> = args
+        .accounts
+        .iter()
+        .map(
+            |ShortAccountMeta {
+                 pubkey,
+                 is_writable,
+             }| {
+                solana_instruction::AccountMeta {
+                    pubkey: *pubkey,
+                    is_signer: pubkey == &CALLBACK_SIGNER,
+                    is_writable: *is_writable,
+                }
+            },
+        )
+        .collect();
+    validate_callback_accounts(
+        &invoke_context,
+        &accounts_meta,
+        "AddActionCallback ERR",
+    )?;
+
     action.callback = Some(BaseActionCallback {
         destination_program: args.destination_program,
         discriminator: args.discriminator,
@@ -169,11 +197,11 @@ pub(crate) fn process_add_action_callback(
         account_metas_per_program: args.accounts,
     });
 
-    context_data.set_state(&context)?;
+    context.write_to(context_acc.borrow_mut()?.data_as_mut_slice())?;
 
     ic_msg!(
         invoke_context,
-        "Attached callback to action at index {}",
+        "AddActionCallback ERR: Attached callback to action at index {}",
         args.action_index
     );
 

@@ -1,5 +1,4 @@
-#![allow(unused)]
-use std::{fmt, sync::Arc};
+use std::fmt;
 
 use solana_account::{AccountSharedData, ReadableAccount};
 use solana_instruction::{AccountMeta, Instruction};
@@ -12,14 +11,12 @@ use solana_loader_v4_interface::{
     state::{LoaderV4State, LoaderV4Status},
 };
 use solana_pubkey::{pubkey, Pubkey};
-use solana_system_interface::instruction as system_instruction;
-use solana_sysvar::rent::Rent;
+use solana_rent::Rent;
 use tracing::*;
 
 use crate::{
     cloner::errors::ClonerResult,
     remote_account_provider::{
-        ChainPubsubClient, ChainRpcClient, RemoteAccountProvider,
         RemoteAccountProviderError, RemoteAccountProviderResult,
     },
 };
@@ -147,7 +144,6 @@ impl LoadedProgram {
             program_id,
             authority,
             program_data,
-            loader,
             ..
         } = self;
         let five_slots_ago = ephem_slot.saturating_sub(5).max(1);
@@ -166,7 +162,6 @@ impl LoadedProgram {
         let post_deploy_state_data =
             state_data_v4(&post_deploy_loader_state, &program_data)?;
 
-        let size = pre_deploy_state_data.len();
         let deploy_instruction = {
             let loader_instruction = LoaderInstructionV4::Deploy;
 

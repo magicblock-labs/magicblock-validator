@@ -9,11 +9,12 @@ use hyper::{
         ACCESS_CONTROL_ALLOW_METHODS, ACCESS_CONTROL_ALLOW_ORIGIN,
         ACCESS_CONTROL_MAX_AGE,
     },
-    Method, Request, Response,
+    Method, Request, Response, StatusCode,
 };
 use magicblock_accounts_db::AccountsDb;
-use magicblock_core::link::{
-    transactions::TransactionSchedulerHandle, DispatchEndpoints,
+use magicblock_core::{
+    coordination_mode::CoordinationMode,
+    link::{transactions::TransactionSchedulerHandle, DispatchEndpoints},
 };
 use magicblock_ledger::Ledger;
 use magicblock_metrics::metrics::{
@@ -95,9 +96,7 @@ impl HttpDispatcher {
         self: Arc<Self>,
         request: Request<Incoming>,
     ) -> Result<Response<JsonBody>, Infallible> {
-        if request.method() == Method::OPTIONS {
-            let mut response = Response::new(JsonBody::from(""));
-            Self::set_access_control_headers(&mut response);
+        if let Some(response) = Self::handle_special_request(&request) {
             return Ok(response);
         }
         // A local macro to simplify error handling. If a Result is an Err,
@@ -233,16 +232,35 @@ impl HttpDispatcher {
         }
     }
 
+    fn handle_special_request(
+        request: &Request<Incoming>,
+    ) -> Option<Response<JsonBody>> {
+        if request.method() == Method::OPTIONS {
+            let mut response = Response::new(JsonBody::from(""));
+            Self::set_access_control_headers(&mut response);
+            return Some(response);
+        } else if request.uri() == "/health/primary" {
+            let mut response = Response::new(JsonBody::from(""));
+            Self::set_access_control_headers(&mut response);
+            if CoordinationMode::current() != CoordinationMode::Primary {
+                *response.status_mut() = StatusCode::SERVICE_UNAVAILABLE
+            }
+            return Some(response);
+        }
+        None
+    }
+
     /// Set CORS/Access control related headers (required by explorers/web apps)
     fn set_access_control_headers(response: &mut Response<JsonBody>) {
-        static HV: fn(&'static str) -> HeaderValue =
-            |v| HeaderValue::from_static(v);
+        const fn hv(v: &'static str) -> HeaderValue {
+            HeaderValue::from_static(v)
+        }
 
         let headers = response.headers_mut();
 
-        headers.insert(ACCESS_CONTROL_ALLOW_ORIGIN, HV("*"));
-        headers.insert(ACCESS_CONTROL_ALLOW_METHODS, HV("POST, OPTIONS, GET"));
-        headers.insert(ACCESS_CONTROL_ALLOW_HEADERS, HV("*"));
-        headers.insert(ACCESS_CONTROL_MAX_AGE, HV("86400"));
+        headers.insert(ACCESS_CONTROL_ALLOW_ORIGIN, hv("*"));
+        headers.insert(ACCESS_CONTROL_ALLOW_METHODS, hv("POST, OPTIONS, GET"));
+        headers.insert(ACCESS_CONTROL_ALLOW_HEADERS, hv("*"));
+        headers.insert(ACCESS_CONTROL_MAX_AGE, hv("86400"));
     }
 }

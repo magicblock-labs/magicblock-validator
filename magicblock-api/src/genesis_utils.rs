@@ -1,37 +1,32 @@
-// NOTE: from runtime/src/genesis_utils.rs
-// heavily updated to remove vote + stake related code as well as cluster type (defaulting to mainnet)
 use std::time::UNIX_EPOCH;
 
 use solana_account::{Account, AccountSharedData};
 use solana_clock::UnixTimestamp;
+use solana_cluster_type::ClusterType;
 use solana_feature_gate_interface::{create_account, Feature};
 use solana_feature_set::FeatureSet;
 use solana_fee_calculator::FeeRateGovernor;
-use solana_genesis_config::{ClusterType, GenesisConfig};
-use solana_keypair::Keypair;
+use solana_genesis_config::GenesisConfig;
 use solana_native_token::LAMPORTS_PER_SOL;
+use solana_program_option::COption;
+use solana_program_pack::Pack;
 use solana_pubkey::Pubkey;
 use solana_rent::Rent;
-use solana_signer::Signer;
+use spl_token::{native_mint, state::Mint};
 
-// Default amount received by the validator
+// Default amount received by the validator.
 const VALIDATOR_LAMPORTS: u64 = u64::MAX / 2;
 
 pub struct GenesisConfigInfo {
-    pub genesis_config: GenesisConfig,
+    pub accounts: Vec<(Pubkey, AccountSharedData)>,
     pub validator_pubkey: Pubkey,
 }
 
 pub fn create_genesis_config_with_leader(
-    mint_lamports: u64,
     validator_pubkey: &Pubkey,
     lamports_per_signature: u64,
 ) -> GenesisConfigInfo {
-    let mint_keypair = Keypair::new();
-
     let genesis_config = create_genesis_config_with_leader_ex(
-        mint_lamports,
-        &mint_keypair.pubkey(),
         validator_pubkey,
         VALIDATOR_LAMPORTS,
         FeeRateGovernor {
@@ -45,15 +40,19 @@ pub fn create_genesis_config_with_leader(
     );
 
     GenesisConfigInfo {
-        genesis_config,
+        accounts: genesis_config
+            .accounts
+            .into_iter()
+            .map(|(key, account)| (key, AccountSharedData::from(account)))
+            .collect(),
         validator_pubkey: *validator_pubkey,
     }
 }
 
 pub fn activate_all_features(genesis_config: &mut GenesisConfig) {
-    // Activate all features at genesis in development mode
-    for feature_id in FeatureSet::default().inactive {
-        activate_feature(genesis_config, feature_id);
+    // Activate all features at genesis in development mode.
+    for feature_id in FeatureSet::default().inactive() {
+        activate_feature(genesis_config, *feature_id);
     }
 }
 
@@ -77,8 +76,6 @@ pub fn activate_feature(
 
 #[allow(clippy::too_many_arguments)]
 pub fn create_genesis_config_with_leader_ex(
-    mint_lamports: u64,
-    mint_pubkey: &Pubkey,
     validator_pubkey: &Pubkey,
     validator_lamports: u64,
     fee_rate_governor: FeeRateGovernor,
@@ -86,29 +83,29 @@ pub fn create_genesis_config_with_leader_ex(
     mut initial_accounts: Vec<(Pubkey, AccountSharedData)>,
 ) -> GenesisConfig {
     initial_accounts.push((
-        *mint_pubkey,
-        AccountSharedData::new(mint_lamports, 0, &Pubkey::default()),
-    ));
-    initial_accounts.push((
         *validator_pubkey,
         AccountSharedData::new(validator_lamports, 0, &Pubkey::default()),
     ));
 
-    // Note that zero lamports for validator stake will result in stake account
-    // not being stored in accounts-db but still cached in bank stakes. This
-    // causes discrepancy between cached stakes accounts in bank and
-    // accounts-db which in particular will break snapshots test.
+    // Native mint must be stable across primary and replica genesis state.
+    let mut native_mint_data = vec![0; Mint::LEN];
+    Mint {
+        mint_authority: COption::None,
+        supply: 0,
+        decimals: native_mint::DECIMALS,
+        is_initialized: true,
+        freeze_authority: COption::None,
+    }
+    .pack_into_slice(&mut native_mint_data);
+
     let native_mint_account = AccountSharedData::from(Account {
-        owner: solana_inline_spl::token::id(),
-        data: solana_inline_spl::token::native_mint::ACCOUNT_DATA.to_vec(),
+        owner: spl_token::id(),
+        data: native_mint_data,
         lamports: LAMPORTS_PER_SOL,
         executable: false,
         rent_epoch: 1,
     });
-    initial_accounts.push((
-        solana_inline_spl::token::native_mint::id(),
-        native_mint_account,
-    ));
+    initial_accounts.push((native_mint::id(), native_mint_account));
 
     let mut genesis_config = GenesisConfig {
         accounts: initial_accounts

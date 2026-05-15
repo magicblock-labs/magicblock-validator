@@ -6,6 +6,7 @@ use solana_sdk::{
     instruction::{AccountMeta, Instruction},
     transaction::{SanitizedTransaction, Transaction},
 };
+use solana_sdk_ids::system_program;
 
 pub fn account_shared_with_owner_and_slot(
     acc: &Account,
@@ -29,7 +30,7 @@ impl Default for TransactionAccounts {
         Self {
             readonly_accounts: Default::default(),
             writable_accounts: Default::default(),
-            programs: vec![solana_sdk::system_program::id()],
+            programs: vec![system_program::id()],
         }
     }
 }

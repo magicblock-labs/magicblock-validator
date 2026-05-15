@@ -88,7 +88,7 @@ fn resize_account(
     let feepayer_balance = feepayer.try_lamports()? as i64;
     **feepayer.try_borrow_mut_lamports()? = (feepayer_balance - delta) as u64;
 
-    account.realloc(size, false)?;
+    account.resize(size)?;
     Ok(())
 }
 

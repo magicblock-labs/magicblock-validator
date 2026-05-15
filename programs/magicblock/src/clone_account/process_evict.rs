@@ -27,10 +27,9 @@ pub(crate) fn process_evict_account(
         "EvictAccount",
         invoke_context,
     )?;
-    let account = transaction_context.get_account_at_index(tx_idx)?;
+    let mut acc = transaction_context.accounts().try_borrow_mut(tx_idx)?;
 
     {
-        let acc = account.borrow();
         if acc.delegated() || acc.undelegating() {
             ic_msg!(
                 invoke_context,
@@ -44,19 +43,18 @@ pub(crate) fn process_evict_account(
         }
     }
 
-    let evicted_lamports = account.borrow().lamports();
+    let evicted_lamports = acc.lamports();
     if evicted_lamports > 0 {
         let delta = i64::try_from(evicted_lamports)
             .map_err(|_| InstructionError::ArithmeticOverflow)?;
         let ctx = transaction_context.get_current_instruction_context()?;
-        let auth_acc = transaction_context.get_account_at_index(
+        let mut auth_acc = transaction_context.accounts().try_borrow_mut(
             ctx.get_index_of_instruction_account_in_transaction(0)?,
         )?;
-        adjust_authority_lamports(auth_acc, -delta)?;
+        adjust_authority_lamports(&mut auth_acc, -delta)?;
     }
 
     {
-        let mut acc = account.borrow_mut();
         acc.set_lamports(0);
         acc.set_owner(Pubkey::default());
         acc.resize(0, 0);

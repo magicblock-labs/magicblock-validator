@@ -40,6 +40,7 @@ use solana_sdk::{
     signer::Signer,
     transaction::Transaction,
 };
+use solana_system_interface::instruction as system_instruction;
 use tempfile::TempDir;
 use tracing::*;
 
@@ -58,10 +59,7 @@ pub fn setup_offline_validator(
     reset_ledger: bool,
     skip_keypair_match_check: bool,
 ) -> (TempDir, Child, IntegrationTestContext) {
-    let accountsdb_config = AccountsDbConfig {
-        snapshot_frequency: SNAPSHOT_FREQUENCY,
-        ..Default::default()
-    };
+    let accountsdb_config = AccountsDbConfig::default();
 
     let validator_config = ValidatorConfig::default();
 
@@ -134,7 +132,6 @@ pub fn setup_validator_with_local_remote_and_resume_strategy(
     loaded_accounts: &LoadedAccounts,
 ) -> (TempDir, Child, IntegrationTestContext) {
     let accountsdb_config = AccountsDbConfig {
-        snapshot_frequency: SNAPSHOT_FREQUENCY,
         reset: reset_ledger,
         ..Default::default()
     };
@@ -178,6 +175,11 @@ pub fn setup_validator_with_local_remote_and_resume_strategy(
             &chain_only_ctx,
             loaded_accounts.validator_authority_keypair(),
         );
+        chain_only_ctx
+            .ensure_magic_fee_vault_delegated_on_chain(
+                loaded_accounts.validator_authority_keypair(),
+            )
+            .unwrap();
     }
 
     let (default_tmpdir_config, Some(mut validator), port) =
@@ -202,10 +204,7 @@ pub fn setup_offline_validator_with_authority_override(
     reset_ledger: bool,
     replay_authority_override: Pubkey,
 ) -> (TempDir, Child, IntegrationTestContext) {
-    let accountsdb_config = AccountsDbConfig {
-        snapshot_frequency: SNAPSHOT_FREQUENCY,
-        ..Default::default()
-    };
+    let accountsdb_config = AccountsDbConfig::default();
 
     let validator_config = ValidatorConfig::default();
     let programs = resolve_programs(programs);
@@ -256,7 +255,6 @@ pub fn setup_validator_with_local_remote_and_authority_override(
     replay_authority_override: Pubkey,
 ) -> (TempDir, Child, IntegrationTestContext) {
     let accountsdb_config = AccountsDbConfig {
-        snapshot_frequency: SNAPSHOT_FREQUENCY,
         reset: reset_ledger,
         ..Default::default()
     };
@@ -331,7 +329,8 @@ pub fn init_validator_fees_vault(
     }
 
     // DLP authority in integration tests
-    let dlp_authority = Keypair::from_bytes(&DLP_TEST_AUTHORITY_BYTES).unwrap();
+    let dlp_authority =
+        Keypair::try_from(&DLP_TEST_AUTHORITY_BYTES[..]).unwrap();
 
     let latest_block_hash = chain_ctx.try_get_latest_blockhash_chain().unwrap();
     let ix = dlp_api::instruction_builder::init_validator_fees_vault(
@@ -481,7 +480,7 @@ pub fn transfer_lamports(
     lamports: u64,
 ) -> Signature {
     let transfer_ix =
-        solana_sdk::system_instruction::transfer(&from.pubkey(), to, lamports);
+        system_instruction::transfer(&from.pubkey(), to, lamports);
     let (sig, confirmed) = expect!(
         ctx.send_and_confirm_instructions_with_payer_ephem(
             &[transfer_ix],
@@ -699,6 +698,15 @@ pub fn wait_for_cloned_accounts_hydration() {
     // NOTE: account hydration runs in the background _after_ the validator starts up
     // thus we need to wait for that to complete before we can send this transaction
     sleep(Duration::from_secs(5));
+}
+
+pub fn kill_validator(validator: &mut Child) {
+    let _ = validator.kill().inspect_err(|err| {
+        eprintln!("ERR: Failed to kill validator: {:?}", err);
+    });
+    let _ = validator.wait().inspect_err(|err| {
+        eprintln!("ERR: Failed to reap validator: {:?}", err);
+    });
 }
 
 pub fn wait_for_counter_ephem_state(

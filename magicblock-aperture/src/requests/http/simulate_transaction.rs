@@ -69,7 +69,6 @@ impl HttpDispatcher {
             return_data,
             inner_instructions: recorded_inner_instructions,
         } = result;
-        let result_err = result.as_ref().err().cloned();
         let accounts = if let Some(config_accounts) = accounts_config {
             let accounts_encoding = config_accounts
                 .encoding
@@ -89,7 +88,7 @@ impl HttpDispatcher {
                 )));
             }
 
-            if result_err.is_some() {
+            if result.is_err() {
                 Some(vec![None; config_accounts.addresses.len()])
             } else {
                 let pubkeys = config_accounts
@@ -153,13 +152,20 @@ impl HttpDispatcher {
         });
 
         let result = RpcSimulateTransactionResult {
-            err: result_err,
             logs,
             accounts,
             units_consumed: Some(units_consumed),
             return_data: return_data.map(Into::into),
+            err: result.err().map(Into::into),
+            loaded_accounts_data_size: None,
             inner_instructions,
             replacement_blockhash,
+            fee: None,
+            pre_balances: None,
+            post_balances: None,
+            pre_token_balances: None,
+            post_token_balances: None,
+            loaded_addresses: None,
         };
 
         let slot = self.blocks.block_height();

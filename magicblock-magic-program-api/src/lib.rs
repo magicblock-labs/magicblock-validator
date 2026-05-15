@@ -7,6 +7,12 @@ pub use solana_program::{declare_id, pubkey, pubkey::Pubkey};
 
 declare_id!("Magic11111111111111111111111111111111111111");
 
+pub const CRANK_PROGRAM_ID: Pubkey =
+    pubkey!("Crank11111111111111111111111111111111111111");
+
+pub const CALLBACK_PROGRAM_ID: Pubkey =
+    pubkey!("CaLLback11111111111111111111111111111111111");
+
 pub const MAGIC_CONTEXT_PUBKEY: Pubkey =
     pubkey!("MagicContext1111111111111111111111111111111");
 

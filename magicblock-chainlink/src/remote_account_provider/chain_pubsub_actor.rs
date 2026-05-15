@@ -21,7 +21,7 @@ use solana_rpc_client_api::{
     config::{RpcAccountInfoConfig, RpcProgramAccountsConfig},
     response::Response as RpcResponse,
 };
-use solana_sysvar::clock;
+use solana_sdk_ids::sysvar::clock;
 use tokio::{
     sync::{mpsc, oneshot},
     time::Duration,

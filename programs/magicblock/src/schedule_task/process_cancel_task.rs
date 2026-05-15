@@ -16,7 +16,7 @@ pub(crate) fn process_cancel_task(
 ) -> Result<(), InstructionError> {
     const TASK_AUTHORITY_IDX: u16 = 0;
 
-    let transaction_context = &invoke_context.transaction_context.clone();
+    let transaction_context = &*invoke_context.transaction_context;
 
     // Validate that the task authority is a signer
     let task_authority_pubkey = get_instruction_pubkey_with_idx(

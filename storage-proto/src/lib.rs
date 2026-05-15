@@ -1,3 +1,5 @@
+#![allow(deprecated)]
+
 use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
@@ -6,7 +8,6 @@ use solana_account_decoder::{
     StringAmount,
 };
 use solana_message::v0::LoadedAddresses;
-use solana_transaction_context::TransactionReturnData;
 use solana_transaction_error::TransactionResult;
 use solana_transaction_status::{
     InnerInstructions, Reward, RewardType, TransactionStatusMeta,
@@ -185,9 +186,17 @@ pub struct StoredTransactionStatusMeta {
     #[serde(deserialize_with = "default_on_eof")]
     pub rewards: Option<Vec<StoredExtendedReward>>,
     #[serde(deserialize_with = "default_on_eof")]
-    pub return_data: Option<TransactionReturnData>,
+    pub return_data: Option<StoredTransactionReturnData>,
     #[serde(deserialize_with = "default_on_eof")]
     pub compute_units_consumed: Option<u64>,
+    #[serde(deserialize_with = "default_on_eof")]
+    pub cost_units: Option<u64>,
+}
+
+#[derive(Default, Serialize, Deserialize)]
+pub struct StoredTransactionReturnData {
+    pub program_id: solana_pubkey::Pubkey,
+    pub data: Vec<u8>,
 }
 
 impl From<StoredTransactionStatusMeta> for TransactionStatusMeta {
@@ -204,8 +213,9 @@ impl From<StoredTransactionStatusMeta> for TransactionStatusMeta {
             rewards,
             return_data,
             compute_units_consumed,
+            cost_units,
         } = value;
-        Self {
+        let mut meta = Self {
             status,
             fee,
             pre_balances,
@@ -222,9 +232,16 @@ impl From<StoredTransactionStatusMeta> for TransactionStatusMeta {
                 rewards.into_iter().map(|reward| reward.into()).collect()
             }),
             loaded_addresses: LoadedAddresses::default(),
-            return_data,
+            return_data: None,
             compute_units_consumed,
+            cost_units,
+        };
+        if let Some(return_data) = return_data {
+            let data = meta.return_data.get_or_insert_with(Default::default);
+            data.program_id = return_data.program_id;
+            data.data = return_data.data;
         }
+        meta
     }
 }
 
@@ -246,6 +263,8 @@ impl TryFrom<TransactionStatusMeta> for StoredTransactionStatusMeta {
             loaded_addresses,
             return_data,
             compute_units_consumed,
+            cost_units,
+            ..
         } = value;
 
         if !loaded_addresses.is_empty() {
@@ -273,8 +292,14 @@ impl TryFrom<TransactionStatusMeta> for StoredTransactionStatusMeta {
             rewards: rewards.map(|rewards| {
                 rewards.into_iter().map(|reward| reward.into()).collect()
             }),
-            return_data,
+            return_data: return_data.map(|return_data| {
+                StoredTransactionReturnData {
+                    program_id: return_data.program_id,
+                    data: return_data.data,
+                }
+            }),
             compute_units_consumed,
+            cost_units,
         })
     }
 }

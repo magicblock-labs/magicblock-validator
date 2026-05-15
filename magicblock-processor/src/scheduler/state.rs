@@ -4,34 +4,37 @@
 //! `TransactionSchedulerState` is constructed externally and passed to
 //! `TransactionScheduler::new()` for initialization.
 
-use std::sync::{Arc, OnceLock, RwLock};
+use std::{
+    sync::{Arc, OnceLock, RwLock},
+    time::Duration,
+};
 
-use magicblock_accounts_db::{traits::AccountsBank, AccountsDb};
+use magicblock_accounts_db::AccountsDb;
 use magicblock_core::link::{
     accounts::AccountUpdateTx,
+    replication::Message,
     transactions::{
-        ScheduledTasksTx, TransactionStatusTx, TransactionToProcessRx,
+        ScheduledTasksTx, SchedulerMode, TransactionStatusTx,
+        TransactionToProcessRx,
     },
 };
 use magicblock_ledger::Ledger;
 use serde::Serialize;
 use solana_account::AccountSharedData;
-use solana_bpf_loader_program::syscalls::{
-    create_program_runtime_environment_v1,
-    create_program_runtime_environment_v2,
-};
+use solana_feature_set::FeatureSet;
 use solana_program::{
     clock::DEFAULT_SLOTS_PER_EPOCH,
     epoch_schedule::EpochSchedule,
     slot_hashes::{SlotHashes, MAX_ENTRIES},
     sysvar,
 };
-use solana_program_runtime::{
-    loaded_programs::ProgramCache, solana_sbpf::program::BuiltinProgram,
-};
+use solana_program_runtime::loaded_programs::ProgramCache;
 use solana_pubkey::Pubkey;
 use solana_svm::transaction_processor::TransactionProcessingEnvironment;
-use tokio::sync::mpsc::Receiver;
+use tokio::sync::{
+    mpsc::{Receiver, Sender},
+    Semaphore,
+};
 use tokio_util::sync::CancellationToken;
 
 use crate::executor::SimpleForkGraph;
@@ -44,17 +47,22 @@ pub struct TransactionSchedulerState {
     // === Global State Handles ===
     pub accountsdb: Arc<AccountsDb>,
     pub ledger: Arc<Ledger>,
-    pub environment: TransactionProcessingEnvironment<'static>,
+    pub environment: TransactionProcessingEnvironment,
+    pub feature_set: FeatureSet,
 
     // === Communication Channels ===
     pub txn_to_process_rx: TransactionToProcessRx,
     pub account_update_tx: AccountUpdateTx,
     pub transaction_status_tx: TransactionStatusTx,
     pub tasks_tx: ScheduledTasksTx,
+    pub replication_tx: Sender<Message>,
+    /// Semaphore for pausing scheduling during exclusive DB access.
+    pub pause_permit: Arc<Semaphore>,
 
-    // === Configuration ===
-    pub is_auto_airdrop_lamports_enabled: bool,
     pub shutdown: CancellationToken,
+    pub block_time: Duration,
+    pub superblock_size: u64,
+
     /// Receives mode transition commands (Primary or Replica) at runtime.
     pub mode_rx: Receiver<SchedulerMode>,
 }
@@ -72,24 +80,8 @@ impl TransactionSchedulerState {
             FORK_GRAPH.get_or_init(|| Arc::new(RwLock::new(SimpleForkGraph))),
         );
 
-        let runtime_v1 = create_program_runtime_environment_v1(
-            &self.environment.feature_set,
-            &Default::default(),
-            false,
-            false,
-        )
-        .map(Into::into)
-        .unwrap_or_else(|_| {
-            Arc::new(BuiltinProgram::new_loader(Default::default()))
-        });
-
-        let runtime_v2 =
-            create_program_runtime_environment_v2(&Default::default(), false);
-
-        let mut cache = ProgramCache::new(self.accountsdb.slot(), 0);
+        let mut cache = ProgramCache::new(self.accountsdb.slot());
         cache.set_fork_graph(forkgraph);
-        cache.environments.program_runtime_v1 = runtime_v1;
-        cache.environments.program_runtime_v2 = runtime_v2.into();
 
         Arc::new(RwLock::new(cache))
     }
@@ -100,25 +92,15 @@ impl TransactionSchedulerState {
 
         // Mutable sysvars (updated on each slot transition)
         self.ensure_sysvar(&sysvar::clock::ID, &block.clock);
-
         let slot_hashes =
             SlotHashes::new(&[(block.slot, block.blockhash); MAX_ENTRIES]);
-        // Remove first to avoid "account already exists" errors
-        self.accountsdb.remove_account(&sysvar::slot_hashes::ID);
         self.ensure_sysvar(&sysvar::slot_hashes::ID, &slot_hashes);
 
         // Immutable/Static sysvars (initialized once)
         let epoch_schedule = EpochSchedule::new(DEFAULT_SLOTS_PER_EPOCH);
         self.ensure_sysvar(&sysvar::epoch_schedule::ID, &epoch_schedule);
 
-        let rent = self
-            .environment
-            .rent_collector
-            .as_ref()
-            .map(|rc| rc.get_rent());
-        if let Some(rent) = rent {
-            self.ensure_sysvar(&sysvar::rent::ID, rent);
-        }
+        self.ensure_sysvar(&sysvar::rent::ID, &self.environment.rent);
     }
 
     /// Helper to serialize and insert a sysvar if it doesn't exist.
@@ -130,16 +112,4 @@ impl TransactionSchedulerState {
             let _ = self.accountsdb.insert_account(id, &account);
         }
     }
-}
-
-/// Scheduler execution mode command.
-///
-/// Send via channel to transition the scheduler between modes.
-/// See [`CoordinationMode`](super::coordinator::CoordinationMode) for internal state.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum SchedulerMode {
-    /// Accept client transactions with concurrent execution.
-    Primary,
-    /// Replay transactions with strict ordering.
-    Replica,
 }

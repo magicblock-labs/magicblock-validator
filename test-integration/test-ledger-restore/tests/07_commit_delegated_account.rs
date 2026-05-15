@@ -33,10 +33,10 @@ fn test_restore_ledger_containing_delegated_and_committed_account() {
     let (_tmpdir, ledger_path) = resolve_tmp_dir(TMP_DIR_LEDGER);
 
     let (mut validator, _, payer) = write(&ledger_path);
-    validator.kill().unwrap();
+    test_ledger_restore::kill_validator(&mut validator);
 
     let mut validator = read(&ledger_path, &payer.pubkey());
-    validator.kill().unwrap();
+    test_ledger_restore::kill_validator(&mut validator);
 }
 
 fn write(ledger_path: &Path) -> (Child, u64, Keypair) {
@@ -100,6 +100,11 @@ fn write(ledger_path: &Path) -> (Child, u64, Keypair) {
         let magic_fee_vault = dlp_api::pda::magic_fee_vault_pda_from_validator(
             &validator_identity,
         );
+        expect!(
+            ctx.wait_for_chain_delegation_record(magic_fee_vault),
+            validator
+        );
+        expect!(ctx.fetch_ephem_account(magic_fee_vault), validator);
         let ix = create_add_and_schedule_commit_ix(
             payer.pubkey(),
             4,

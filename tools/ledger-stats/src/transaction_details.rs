@@ -6,9 +6,8 @@ use pretty_hex::*;
 use solana_message::VersionedMessage;
 use solana_signature::Signature;
 use solana_transaction_status::ConfirmedTransactionWithStatusMeta;
-use tabular::{Row, Table};
 
-use crate::utils::render_logs;
+use crate::utils::{print_two_col_table, render_logs};
 
 pub(crate) fn print_transaction_details(
     ledger: &Ledger,
@@ -111,51 +110,33 @@ pub(crate) fn print_transaction_details(
     let compute_units_consumed =
         status_meta.compute_units_consumed.map_or(0, |c| c as usize);
 
-    let table = Table::new("{:<}  {:>}")
-        .with_heading("\n++++ Transaction Status ++++\n")
-        .with_row(Row::new().with_cell("Field").with_cell("Value"))
-        .with_row(
-            Row::new()
-                .with_cell("=====================")
-                .with_cell("====================="),
-        )
-        .with_row(Row::new().with_cell("Status").with_cell(status))
-        .with_row(Row::new().with_cell("Fee").with_cell(status_meta.fee))
-        .with_row(Row::new().with_cell("Pre-balances").with_cell(pre_balances))
-        .with_row(
-            Row::new()
-                .with_cell("Post-balances")
-                .with_cell(post_balances),
-        )
-        .with_row(
-            Row::new()
-                .with_cell("Inner Instructions")
-                .with_cell(inner_instructions),
-        )
-        .with_row(
-            Row::new()
-                .with_cell("Pre-token Balances")
-                .with_cell(pre_token_balances),
-        )
-        .with_row(
-            Row::new()
-                .with_cell("Post-token Balances")
-                .with_cell(post_token_balances),
-        )
-        .with_row(Row::new().with_cell("Rewards").with_cell(rewards))
-        .with_row(Row::new().with_cell("Loaded Addresses").with_cell(format!(
-            "writable: {}, readonly: {}",
-            status_meta.loaded_addresses.writable.len(),
-            status_meta.loaded_addresses.readonly.len()
-        )))
-        .with_row(Row::new().with_cell("Return Data").with_cell(return_data))
-        .with_row(
-            Row::new()
-                .with_cell("Compute Units Consumed")
-                .with_cell(compute_units_consumed),
-        );
-
-    println!("{}", table);
+    let rows = vec![
+        ("Status".to_string(), status),
+        ("Fee".to_string(), status_meta.fee.to_string()),
+        ("Pre-balances".to_string(), pre_balances),
+        ("Post-balances".to_string(), post_balances),
+        (
+            "Inner Instructions".to_string(),
+            inner_instructions.to_string(),
+        ),
+        ("Pre-token Balances".to_string(), pre_token_balances),
+        ("Post-token Balances".to_string(), post_token_balances),
+        ("Rewards".to_string(), rewards),
+        (
+            "Loaded Addresses".to_string(),
+            format!(
+                "writable: {}, readonly: {}",
+                status_meta.loaded_addresses.writable.len(),
+                status_meta.loaded_addresses.readonly.len()
+            ),
+        ),
+        ("Return Data".to_string(), return_data),
+        (
+            "Compute Units Consumed".to_string(),
+            compute_units_consumed.to_string(),
+        ),
+    ];
+    print_two_col_table(Some("Transaction Status"), ["Field", "Value"], &rows);
 
     match status_meta.log_messages {
         None => {}
@@ -180,32 +161,25 @@ pub(crate) fn print_transaction_details(
         if let VersionedMessage::V0(message) =
             tx_with_meta.get_transaction().message
         {
-            let table = Table::new("{:<}  {:>}")
-                .with_heading("\n++++ Transaction ++++\n")
-                .with_row(
-                    Row::new()
-                        .with_cell("num_required_signatures")
-                        .with_cell(message.header.num_required_signatures),
-                )
-                .with_row(
-                    Row::new()
-                        .with_cell("num_readonly_signed_accounts")
-                        .with_cell(message.header.num_readonly_signed_accounts),
-                )
-                .with_row(
-                    Row::new()
-                        .with_cell("num_readonly_unsigned_accounts")
-                        .with_cell(
-                            message.header.num_readonly_unsigned_accounts,
-                        ),
-                )
-                .with_row(
-                    Row::new()
-                        .with_cell("block_time")
-                        .with_cell(block_time.unwrap_or_default().to_string()),
-                );
-
-            println!("{}", table);
+            let rows = vec![
+                (
+                    "num_required_signatures".to_string(),
+                    message.header.num_required_signatures.to_string(),
+                ),
+                (
+                    "num_readonly_signed_accounts".to_string(),
+                    message.header.num_readonly_signed_accounts.to_string(),
+                ),
+                (
+                    "num_readonly_unsigned_accounts".to_string(),
+                    message.header.num_readonly_unsigned_accounts.to_string(),
+                ),
+                (
+                    "block_time".to_string(),
+                    block_time.unwrap_or_default().to_string(),
+                ),
+            ];
+            print_two_col_table(Some("Transaction"), ["Field", "Value"], &rows);
 
             println!("++++ Account Keys ++++\n");
             for account_key in &message.account_keys {

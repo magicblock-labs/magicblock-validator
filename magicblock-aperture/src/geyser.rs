@@ -3,16 +3,15 @@ use std::{fs, path::PathBuf};
 use agave_geyser_plugin_interface::geyser_plugin_interface::{
     GeyserPlugin, GeyserPluginError, ReplicaAccountInfoV3,
     ReplicaAccountInfoVersions, ReplicaBlockInfoV4, ReplicaBlockInfoVersions,
-    ReplicaTransactionInfoV2, ReplicaTransactionInfoVersions, SlotStatus,
+    ReplicaTransactionInfoV3, ReplicaTransactionInfoVersions, SlotStatus,
 };
 use json::{JsonValueTrait, Value};
 use libloading::{Library, Symbol};
 use magicblock_core::link::{
-    accounts::AccountWithSlot, blocks::BlockUpdate,
-    transactions::TransactionStatus,
+    accounts::AccountWithSlot, transactions::TransactionStatus,
 };
+use magicblock_ledger::LatestBlockInner;
 use solana_account::ReadableAccount;
-use solana_transaction_status::RewardsAndNumPartitions;
 
 const ENTRYPOINT_SYMBOL: &[u8] = b"_create_plugin";
 #[allow(improper_ctypes_definitions)]
@@ -133,10 +132,12 @@ impl GeyserPluginManager {
     ) -> Result<(), GeyserPluginError> {
         check_if_enabled!(self);
         let slot = txn.slot;
-        let txn = ReplicaTransactionInfoV2 {
+        let versioned = txn.txn.to_versioned_transaction();
+        let txn = ReplicaTransactionInfoV3 {
             signature: txn.txn.signature(),
+            message_hash: txn.txn.message_hash(),
             is_vote: false,
-            transaction: &txn.txn,
+            transaction: &versioned,
             transaction_status_meta: &txn.meta,
             index: txn.index as usize,
         };
@@ -144,7 +145,7 @@ impl GeyserPluginManager {
             if !plugin.transaction_notifications_enabled() {
                 continue;
             }
-            let txn = ReplicaTransactionInfoVersions::V0_0_2(&txn);
+            let txn = ReplicaTransactionInfoVersions::V0_0_3(&txn);
             plugin.notify_transaction(txn, slot)?;
         }
         Ok(())
@@ -152,19 +153,21 @@ impl GeyserPluginManager {
 
     pub fn notify_block(
         &self,
-        block: &BlockUpdate,
+        block: &LatestBlockInner,
     ) -> Result<(), GeyserPluginError> {
         check_if_enabled!(self);
+        let blockhash = block.blockhash.to_string();
+        let rewards = solana_transaction_status::RewardsAndNumPartitions {
+            rewards: Vec::new(),
+            num_partitions: None,
+        };
         let block = ReplicaBlockInfoV4 {
-            slot: block.meta.slot,
-            parent_slot: block.meta.slot.saturating_sub(1),
-            blockhash: &block.hash.to_string(),
-            block_height: Some(block.meta.slot),
-            rewards: &RewardsAndNumPartitions {
-                rewards: Vec::new(),
-                num_partitions: None,
-            },
-            block_time: Some(block.meta.time),
+            slot: block.slot,
+            parent_slot: block.slot.saturating_sub(1),
+            blockhash: &blockhash,
+            block_height: Some(block.slot),
+            rewards: &rewards,
+            block_time: Some(block.clock.unix_timestamp),
             // TODO(bmuddha): register proper values with the new ledger
             parent_blockhash: "11111111111111111111111111111111",
             executed_transaction_count: 0,

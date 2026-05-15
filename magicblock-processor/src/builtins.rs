@@ -50,6 +50,16 @@ pub static BUILTINS: &[Builtin] = &[
         entrypoint: magicblock_processor::Entrypoint::vm,
     },
     Builtin {
+        program_id: magicblock_program::CRANK_PROGRAM_ID,
+        name: "magicblock_crank_program",
+        entrypoint: magicblock_processor::CrankEntrypoint::vm,
+    },
+    Builtin {
+        program_id: magicblock_program::CALLBACK_PROGRAM_ID,
+        name: "magicblock_callback_program",
+        entrypoint: magicblock_processor::CallbackEntrypoint::vm,
+    },
+    Builtin {
         program_id: compute_budget::ID,
         name: "compute_budget_program",
         entrypoint: solana_compute_budget_program::Entrypoint::vm,

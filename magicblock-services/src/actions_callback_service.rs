@@ -1,4 +1,7 @@
-use std::sync::Arc;
+use std::sync::{
+    atomic::{AtomicU64, Ordering},
+    Arc,
+};
 
 use futures_util::future::join_all;
 use magicblock_core::{
@@ -8,8 +11,11 @@ use magicblock_core::{
         LatestBlockProvider,
     },
 };
-use magicblock_magic_program_api::response::{
-    ActionReceipt, MagicResponse, MagicResponseV1,
+use magicblock_magic_program_api::{
+    instruction::{CallbackInstruction, MagicBlockInstruction},
+    pda::CALLBACK_SIGNER,
+    response::{ActionReceipt, MagicResponse, MagicResponseV1},
+    CALLBACK_PROGRAM_ID,
 };
 use solana_instruction::{AccountMeta, Instruction};
 use solana_keypair::Keypair;
@@ -58,6 +64,9 @@ impl<L: LatestBlockProvider> ActionsCallbackService<L> {
         signature: Option<Signature>,
         result: ActionResult,
     ) -> Vec<Result<VersionedTransaction, CallbackScheduleError>> {
+        /// Counter used to make each callback transaction unique
+        static TX_COUNTER: AtomicU64 = AtomicU64::new(0);
+
         let authority_pubkey = self.authority.pubkey();
         let blockhash = self.latest_block.blockhash();
         let result: Result<(), String> = result.map_err(|e| e.to_string());
@@ -65,14 +74,22 @@ impl<L: LatestBlockProvider> ActionsCallbackService<L> {
         callbacks
             .into_iter()
             .map(|callback| {
-                let ix = Self::build_instruction(
+                // Make each callback TX unique
+                let counter = TX_COUNTER.fetch_add(1, Ordering::Relaxed);
+                let noop_ix = Instruction::new_with_bincode(
+                    magicblock_magic_program_api::ID,
+                    &MagicBlockInstruction::Noop(counter),
+                    vec![],
+                );
+
+                let callback_ix = Self::build_callback_instruction(
                     callback,
                     &authority_pubkey,
                     signature,
                     result.clone(),
                 )?;
                 let message = Message::new_with_blockhash(
-                    &[ix],
+                    &[noop_ix, callback_ix],
                     Some(&authority_pubkey),
                     &blockhash,
                 );
@@ -85,9 +102,48 @@ impl<L: LatestBlockProvider> ActionsCallbackService<L> {
             .collect()
     }
 
-    fn build_instruction(
+    fn build_callback_instruction(
         callback: BaseActionCallback,
         authority: &Pubkey,
+        signature: Option<Signature>,
+        result: Result<(), String>,
+    ) -> Result<Instruction, CallbackScheduleError> {
+        let inner_instruction =
+            Self::build_inner_instruction(callback, signature, result)?;
+
+        // Mandatory accounts for magic-program
+        let mut account_metas = vec![
+            AccountMeta::new_readonly(*authority, true),
+            AccountMeta::new_readonly(CALLBACK_SIGNER, false),
+            AccountMeta::new_readonly(inner_instruction.program_id, false),
+        ];
+        account_metas.extend(
+            inner_instruction
+                .accounts
+                .clone()
+                .into_iter()
+                .map(|mut el| {
+                    // CALLBACK_SIGNER may be set to true in inner_instruction
+                    // Outer instruction can't have PDA as signer
+                    el.is_signer = false;
+                    el
+                }),
+        );
+
+        let data = CallbackInstruction::ExecuteCallback {
+            instruction: inner_instruction,
+        };
+        let instruction = Instruction::new_with_bincode(
+            CALLBACK_PROGRAM_ID,
+            &data,
+            account_metas,
+        );
+
+        Ok(instruction)
+    }
+
+    fn build_inner_instruction(
+        callback: BaseActionCallback,
         signature: Option<Signature>,
         result: Result<(), String>,
     ) -> Result<Instruction, CallbackScheduleError> {
@@ -102,23 +158,21 @@ impl<L: LatestBlockProvider> ActionsCallbackService<L> {
             bincode::serialize(&response)
                 .map_err(CallbackScheduleError::SerializationError)?,
         );
-        let account_metas =
-            std::iter::once(AccountMeta::new_readonly(*authority, true))
-                .chain(callback.account_metas_per_program.into_iter().map(
-                    |m| {
-                        if m.is_writable {
-                            AccountMeta {
-                                pubkey: m.pubkey,
-                                // Can be writable only if not the validator
-                                is_writable: &m.pubkey != authority,
-                                is_signer: false,
-                            }
-                        } else {
-                            AccountMeta::new_readonly(m.pubkey, false)
-                        }
-                    },
-                ))
-                .collect();
+
+        let account_metas = callback
+            .account_metas_per_program
+            .into_iter()
+            .map(|m| {
+                // account invariants checked within magic-program & callback-prpgram
+                // here we just propagate
+                let is_signer = m.pubkey == CALLBACK_SIGNER;
+                AccountMeta {
+                    pubkey: m.pubkey,
+                    is_writable: m.is_writable,
+                    is_signer,
+                }
+            })
+            .collect();
         Ok(Instruction::new_with_bytes(
             callback.destination_program,
             &data,
@@ -158,14 +212,19 @@ impl<L: LatestBlockProvider> ActionsCallbackScheduler
                 let send_futs = valid_transactions
                     .iter()
                     .map(|tx| rpc_client.send_transaction(tx));
-                join_all(send_futs).await.into_iter().for_each(|result| {
-                    if let Err(err) = result {
-                        error!(
-                            error = ?err,
-                            "Failed to send action callback transaction"
-                        );
-                    }
-                });
+                join_all(send_futs).await.into_iter().enumerate().for_each(
+                    |(i, result)| {
+                        if let Err(err) = result {
+                            let signature =
+                                valid_transactions[i].get_signature();
+                            error!(
+                                error = ?err,
+                                signature = ?signature,
+                                "Failed to send action callback transaction"
+                            );
+                        }
+                    },
+                );
             });
         }
 

@@ -1,3 +1,4 @@
+#![allow(deprecated)]
 #![allow(clippy::result_large_err)]
 pub mod accounts_bank;
 pub mod chainlink;

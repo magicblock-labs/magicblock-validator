@@ -11,8 +11,11 @@ use magicblock_chainlink::{
 };
 use solana_account::ReadableAccount;
 use solana_pubkey::{pubkey, Pubkey};
-use solana_sdk::signature::{Keypair, Signer};
-use spl_token::{solana_program::program_pack::Pack, state::AccountState};
+use solana_sdk::{
+    program_pack::Pack,
+    signature::{Keypair, Signer},
+};
+use spl_token::state::AccountState;
 use test_chainlink::test_context::TestContext;
 use tracing::debug;
 

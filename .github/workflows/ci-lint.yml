@@ -7,22 +7,40 @@ concurrency:
 on:
   push:
     branches: [master, dev]
+    paths:
+      - '**/*.rs'
+      - '**/Cargo.toml'
+      - '**/Cargo.lock'
+      - 'clippy.toml'
+      - 'Makefile'
+      - 'test-integration/Makefile'
+      - '.github/workflows/ci-lint.yml'
+      - '.github/actions/setup-build-env/**'
   pull_request:
     types: [opened, reopened, synchronize, ready_for_review]
+    paths:
+      - '**/*.rs'
+      - '**/Cargo.toml'
+      - '**/Cargo.lock'
+      - 'clippy.toml'
+      - 'Makefile'
+      - 'test-integration/Makefile'
+      - '.github/workflows/ci-lint.yml'
+      - '.github/actions/setup-build-env/**'
 
 jobs:
   run_make_ci_lint:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout this magicblock-validator
-        uses: actions/checkout@v2
+        uses: actions/checkout@v5
         with:
           path: magicblock-validator
 
       - uses: ./magicblock-validator/.github/actions/setup-build-env
         with:
           build_cache_key_name: "magicblock-validator-ci-lint-v002"
-          rust_toolchain_release: "1.91.1"
+          rust_toolchain_release: "1.94.1"
           github_access_token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
 

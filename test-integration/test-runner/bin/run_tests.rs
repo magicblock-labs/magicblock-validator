@@ -1,7 +1,7 @@
 use std::{
     error::Error,
-    io,
-    path::Path,
+    fs, io,
+    path::{Path, PathBuf},
     process::{self, Output},
 };
 
@@ -220,17 +220,254 @@ fn run_chainlink_tests(
     }
 }
 
+// The committor suite is split across CI shards to keep wall-clock down.
+// The `test_ix_commit_local` file alone takes ~33 min and is sliced into
+// smaller subsets; exact filters are used for the split shards whose names
+// would otherwise overlap under libtest substring matching.
+//
+// Locally (no RUN_TESTS), every subset executes back-to-back against the same
+// devnet validator so total coverage is unchanged.
+struct CommittorSubset {
+    label: &'static str,
+    /// Test files whose names are filtered down via `name_filters`.
+    files: &'static [&'static str],
+    name_filters: &'static [&'static str],
+    exact_name_filters: &'static [&'static str],
+    /// Test files run end-to-end with no name filter. Used to bundle small,
+    /// independent files (e.g. the preparator suites) onto a shard without
+    /// their tests being unintentionally excluded by `name_filters`.
+    extra_files: &'static [&'static str],
+}
+
+// Single-account commits.
+const COMMITTOR_SUBSET_IX_SINGLES: CommittorSubset = CommittorSubset {
+    label: "committor (ix_singles_core)",
+    files: &["test_ix_commit_local"],
+    name_filters: &[],
+    exact_name_filters: &[
+        "test_ix_commit_single_account_100_bytes",
+        "test_ix_commit_single_account_256_bytes",
+        "test_ix_commit_single_account_257_bytes",
+        "test_ix_commit_single_account_800_bytes",
+        "test_ix_commit_single_account_one_kb",
+    ],
+    extra_files: &[],
+};
+const COMMITTOR_SUBSET_IX_SINGLES_LARGE: CommittorSubset = CommittorSubset {
+    label: "committor (ix_singles_large)",
+    files: &["test_ix_commit_local"],
+    name_filters: &[],
+    exact_name_filters: &[
+        "test_ix_commit_single_account_100_bytes_and_undelegate",
+        "test_ix_commit_single_account_256_bytes_and_undelegate",
+        "test_ix_commit_single_account_257_bytes_and_undelegate",
+        "test_ix_commit_single_account_800_bytes_and_undelegate",
+        "test_ix_commit_single_account_ten_kb",
+    ],
+    extra_files: &[],
+};
+// Small preparator files, run unfiltered so we don't drop `test_prepare_*` /
+// `test_lookup_tables` etc.
+const COMMITTOR_SUBSET_PREPARATORS: CommittorSubset = CommittorSubset {
+    label: "committor (preparators)",
+    files: &[],
+    name_filters: &[],
+    exact_name_filters: &[],
+    extra_files: &["test_delivery_preparator", "test_transaction_preparator"],
+};
+// Order-book commit/finalize tests.
+const COMMITTOR_SUBSET_IX_ORDER: CommittorSubset = CommittorSubset {
+    label: "committor (ix_order)",
+    files: &["test_ix_commit_local"],
+    name_filters: &["test_ix_commit_order_", "test_ix_commit_finalize_order_"],
+    exact_name_filters: &[],
+    extra_files: &[],
+};
+// Multi-account commits (`test_ix_commit_two/three/four/six_*`) — heavier
+// per-test than the singles.
+const COMMITTOR_SUBSET_IX_MULTI: CommittorSubset = CommittorSubset {
+    label: "committor (ix_multi)",
+    files: &["test_ix_commit_local"],
+    name_filters: &[
+        "test_ix_commit_two_",
+        "test_ix_commit_three_",
+        "test_ix_commit_four_",
+        "test_ix_commit_six_",
+    ],
+    exact_name_filters: &[],
+    extra_files: &[],
+};
+// 20-account bundle tests.
+const COMMITTOR_SUBSET_BUNDLES_HEAVY: CommittorSubset = CommittorSubset {
+    label: "committor (bundles_heavy_head)",
+    files: &["test_ix_commit_local"],
+    name_filters: &[],
+    exact_name_filters: &[
+        "test_commit_20_accounts_1kb_bundle_size_2",
+        "test_commit_20_accounts_1kb_bundle_size_3",
+        "test_commit_20_accounts_1kb_bundle_size_4",
+    ],
+    extra_files: &[],
+};
+const COMMITTOR_SUBSET_BUNDLES_HEAVY_TAIL: CommittorSubset = CommittorSubset {
+    label: "committor (bundles_heavy_tail)",
+    files: &["test_ix_commit_local"],
+    name_filters: &[],
+    exact_name_filters: &[
+        "test_commit_20_accounts_1kb_bundle_size_6",
+        "test_commit_20_accounts_1kb_bundle_size_8",
+        "test_commit_20_accounts_1kb_bundle_size_20",
+    ],
+    extra_files: &[],
+};
+// Commitfinalize variants.
+const COMMITTOR_SUBSET_COMMITFINALIZE: CommittorSubset = CommittorSubset {
+    label: "committor (commitfinalize)",
+    files: &["test_ix_commit_local"],
+    name_filters: &["test_commitfinalize_"],
+    exact_name_filters: &[],
+    extra_files: &[],
+};
+// Smaller bundle tests.
+const COMMITTOR_SUBSET_BUNDLES: CommittorSubset = CommittorSubset {
+    label: "committor (bundles_base)",
+    files: &["test_ix_commit_local"],
+    name_filters: &[],
+    exact_name_filters: &[
+        "test_commit_5_accounts_1kb_bundle_size_3",
+        "test_commit_5_accounts_1kb_bundle_size_4",
+    ],
+    extra_files: &[],
+};
+const COMMITTOR_SUBSET_BUNDLES_UNDELEGATE: CommittorSubset = CommittorSubset {
+    label: "committor (bundles_undelegate)",
+    files: &["test_ix_commit_local"],
+    name_filters: &[],
+    exact_name_filters: &[
+        "test_commit_5_accounts_1kb_bundle_size_3_undelegate_all",
+        "test_commit_5_accounts_1kb_bundle_size_4_undelegate_all",
+        "test_commit_5_accounts_1kb_bundle_size_5_undelegate_all",
+    ],
+    extra_files: &[],
+};
+const COMMITTOR_SUBSET_BUNDLES_8: CommittorSubset = CommittorSubset {
+    label: "committor (bundles_8)",
+    files: &["test_ix_commit_local"],
+    name_filters: &[],
+    exact_name_filters: &["test_commit_8_accounts_1kb_bundle_size_8"],
+    extra_files: &[],
+};
+// Intent-bundle composition tests.
+const COMMITTOR_SUBSET_INTENT_BUNDLES: CommittorSubset = CommittorSubset {
+    label: "committor (intent_bundles)",
+    files: &["test_ix_commit_local"],
+    name_filters: &["test_ix_execute_intent_bundle_"],
+    exact_name_filters: &[],
+    extra_files: &[],
+};
+// The dedicated intent_executor file is split by test-name groups.
+const COMMITTOR_SUBSET_INTENT_EXECUTOR_ERRORS: CommittorSubset =
+    CommittorSubset {
+        label: "committor (intent_executor_parsing)",
+        files: &["test_intent_executor"],
+        name_filters: &[],
+        exact_name_filters: &[
+            "test_commit_id_error_parsing",
+            "test_undelegation_error_parsing",
+            "test_action_error_parsing",
+            "test_cpi_limits_error_parsing",
+            "test_min_context_slot_not_reached_error_parsing",
+        ],
+        extra_files: &[],
+    };
+const COMMITTOR_SUBSET_INTENT_EXECUTOR_BASIC_RECOVERY: CommittorSubset =
+    CommittorSubset {
+        label: "committor (intent_executor_basic_recovery)",
+        files: &["test_intent_executor"],
+        name_filters: &[],
+        exact_name_filters: &[
+            "test_commit_id_error_recovery",
+            "test_undelegation_error_recovery",
+            "test_action_error_recovery",
+            "test_cpi_limits_error_recovery",
+        ],
+        extra_files: &[],
+    };
+const COMMITTOR_SUBSET_INTENT_EXECUTOR_RECOVERY: CommittorSubset =
+    CommittorSubset {
+        label: "committor (intent_executor_recovery)",
+        files: &["test_intent_executor"],
+        name_filters: &[],
+        exact_name_filters: &[
+            "test_commit_id_and_action_errors_recovery",
+            "test_commit_id_actions_cpi_limit_errors_recovery",
+            "test_commit_unfinalized_account_recovery",
+            "test_commit_unfinalized_account_recovery_two_stage",
+        ],
+        extra_files: &[],
+    };
+const COMMITTOR_SUBSET_INTENT_EXECUTOR_CALLBACKS: CommittorSubset =
+    CommittorSubset {
+        label: "committor (intent_executor_callbacks)",
+        files: &["test_intent_executor"],
+        name_filters: &[],
+        exact_name_filters: &[
+            "test_action_callback_fired_on_failure",
+            "test_action_callback_fired_on_timeout",
+            "test_callbacks_fired_in_two_stage",
+        ],
+        extra_files: &[],
+    };
+
 fn run_table_mania_and_committor_tests(
     manifest_dir: &str,
     config: &TestConfigViaEnvVars,
 ) -> Result<(Output, Output), Box<dyn Error>> {
     const TABLE_MANIA_TEST: &str = "table_mania";
-    const COMMITTOR_TEST: &str = "committor";
+    // Each entry is one CI shard / RUN_TESTS value paired with the subset of
+    // committor tests it owns.
+    let committor_shards: &[(&str, &CommittorSubset)] = &[
+        ("committor", &COMMITTOR_SUBSET_IX_SINGLES),
+        ("committor_single_large", &COMMITTOR_SUBSET_IX_SINGLES_LARGE),
+        ("committor_preparators", &COMMITTOR_SUBSET_PREPARATORS),
+        ("committor_ix_order", &COMMITTOR_SUBSET_IX_ORDER),
+        ("committor_ix_multi", &COMMITTOR_SUBSET_IX_MULTI),
+        ("committor_bundles", &COMMITTOR_SUBSET_BUNDLES),
+        (
+            "committor_bundles_undelegate",
+            &COMMITTOR_SUBSET_BUNDLES_UNDELEGATE,
+        ),
+        ("committor_bundles_8", &COMMITTOR_SUBSET_BUNDLES_8),
+        ("committor_intent_bundles", &COMMITTOR_SUBSET_INTENT_BUNDLES),
+        ("committor_bundles_heavy", &COMMITTOR_SUBSET_BUNDLES_HEAVY),
+        (
+            "committor_bundles_heavy_tail",
+            &COMMITTOR_SUBSET_BUNDLES_HEAVY_TAIL,
+        ),
+        ("committor_commitfinalize", &COMMITTOR_SUBSET_COMMITFINALIZE),
+        (
+            "committor_intent_executor",
+            &COMMITTOR_SUBSET_INTENT_EXECUTOR_ERRORS,
+        ),
+        (
+            "committor_intent_executor_recovery_basic",
+            &COMMITTOR_SUBSET_INTENT_EXECUTOR_BASIC_RECOVERY,
+        ),
+        (
+            "committor_intent_executor_recovery",
+            &COMMITTOR_SUBSET_INTENT_EXECUTOR_RECOVERY,
+        ),
+        (
+            "committor_intent_executor_callbacks",
+            &COMMITTOR_SUBSET_INTENT_EXECUTOR_CALLBACKS,
+        ),
+    ];
 
-    // Continue if either test is not skipped entirely
-    if config.skip_entirely(TABLE_MANIA_TEST)
-        && config.skip_entirely(COMMITTOR_TEST)
-    {
+    let any_committor_active = committor_shards
+        .iter()
+        .any(|(name, _)| !config.skip_entirely(name));
+
+    if config.skip_entirely(TABLE_MANIA_TEST) && !any_committor_active {
         eprintln!("Skipping table mania and committor tests");
         return Ok((success_output(), success_output()));
     }
@@ -249,11 +486,14 @@ fn run_table_mania_and_committor_tests(
         }
     };
 
-    // Check if we should run tests or just setup
     let run_table_mania = config.run_test(TABLE_MANIA_TEST);
-    let run_committor = config.run_test(COMMITTOR_TEST);
+    let active_committor_subsets: Vec<&CommittorSubset> = committor_shards
+        .iter()
+        .filter(|(name, _)| config.run_test(name))
+        .map(|(_, subset)| *subset)
+        .collect();
 
-    if run_table_mania || run_committor {
+    if run_table_mania || !active_committor_subsets.is_empty() {
         eprintln!("======== Starting DEVNET Validator for TableMania and Committor ========");
 
         let mut devnet_validator = start_devnet_validator();
@@ -278,28 +518,74 @@ fn run_table_mania_and_committor_tests(
             success_output()
         };
 
-        let committor_test_output = if run_committor {
+        let committor_test_output = if !active_committor_subsets.is_empty() {
             let test_committor_dir =
                 format!("{}/../{}", manifest_dir, "test-committor-service");
-            eprintln!("Running committor tests in {}", test_committor_dir);
-            match run_test(
-                test_committor_dir,
-                RunTestConfig::default(),
-                // RunTestConfig {
-                //     package: Some("schedulecommit-committor-service"),
-                //     test_file: Some("test_ix_commit_local"),
-                //     test_fn_name: Some(
-                //         "test_ix_execute_intent_bundle_commit_and_commit_finalize_mixed",
-                //         //"test_ix_execute_intent_bundle_commit_and_cau_simultaneously_union_of_accounts",
-                //     ),
-                // },
-            ) {
-                Ok(output) => output,
-                Err(err) => {
-                    eprintln!("Failed to run committor: {:?}", err);
-                    cleanup_devnet_only(&mut devnet_validator);
-                    return Err(err.into());
+            let mut combined_status_ok = true;
+            let mut combined_stdout = Vec::new();
+            let mut combined_stderr = Vec::new();
+
+            // Each subset may produce up to two `cargo test` invocations:
+            // one for `files` with the libtest name filters applied, and one
+            // for `extra_files` run unfiltered (e.g. the preparator suites).
+            let mut invocations: Vec<(String, RunTestConfig)> = Vec::new();
+            for subset in &active_committor_subsets {
+                if !subset.files.is_empty() {
+                    invocations.push((
+                        format!("{} [files]", subset.label),
+                        RunTestConfig {
+                            test_files: subset.files,
+                            test_name_filters: subset.name_filters,
+                            exact_name_filters: subset.exact_name_filters,
+                            ..Default::default()
+                        },
+                    ));
                 }
+                if !subset.extra_files.is_empty() {
+                    invocations.push((
+                        format!("{} [extra_files]", subset.label),
+                        RunTestConfig {
+                            test_files: subset.extra_files,
+                            ..Default::default()
+                        },
+                    ));
+                }
+            }
+
+            for (label, cfg) in invocations {
+                eprintln!(
+                    "Running {} tests in {} (files: {:?}, filters: {:?}, exact_filters: {:?})",
+                    label,
+                    test_committor_dir,
+                    cfg.test_files,
+                    cfg.test_name_filters,
+                    cfg.exact_name_filters,
+                );
+                match run_test(test_committor_dir.clone(), cfg) {
+                    Ok(output) => {
+                        combined_status_ok &= output.status.success();
+                        combined_stdout.extend_from_slice(&output.stdout);
+                        combined_stderr.extend_from_slice(&output.stderr);
+                    }
+                    Err(err) => {
+                        eprintln!("Failed to run {}: {:?}", label, err);
+                        cleanup_devnet_only(&mut devnet_validator);
+                        return Err(err.into());
+                    }
+                }
+            }
+
+            Output {
+                status: if combined_status_ok {
+                    process::ExitStatus::default()
+                } else {
+                    // Force a non-zero exit by running `false`.
+                    process::Command::new("false")
+                        .status()
+                        .unwrap_or_else(|_| process::ExitStatus::default())
+                },
+                stdout: combined_stdout,
+                stderr: combined_stderr,
             }
         } else {
             eprintln!("Skipping committor tests");
@@ -311,7 +597,9 @@ fn run_table_mania_and_committor_tests(
         Ok((table_mania_test_output, committor_test_output))
     } else {
         let setup_needed = config.setup_devnet(TABLE_MANIA_TEST)
-            || config.setup_devnet(COMMITTOR_TEST);
+            || committor_shards
+                .iter()
+                .any(|(name, _)| config.setup_devnet(name));
         let devnet_validator = setup_needed.then(start_devnet_validator);
         Ok((
             wait_for_ctrlc(devnet_validator, None, success_output())?,
@@ -475,7 +763,7 @@ fn run_cloning_tests(
             RunTestConfig::default(),
             // RunTestConfig {
             //     package: Some("test-cloning"),
-            //     test_file: Some("10_post_delegation_token_transfer"),
+            //     test_files: &["10_post_delegation_token_transfer"],
             //     test_fn_name: None,
             // },
         ) {
@@ -706,7 +994,7 @@ fn run_schedule_intents_tests(
             RunTestConfig::default(),
             // RunTestConfig {
             //     package: Some("test-schedule-intent"),
-            //     test_file: Some("test_schedule_intents"),
+            //     test_files: &["test_schedule_intents"],
             //     test_fn_name: Some(
             //         "test_intent_bundle_commit_and_commit_finalize",
             //     ),
@@ -800,13 +1088,90 @@ fn assert_cargo_tests_passed(output: process::Output, test_name: &str) {
 #[derive(Default)]
 struct RunTestConfig<'a> {
     package: Option<&'a str>,
-    test_file: Option<&'a str>,
+    test_files: &'a [&'a str],
     test_fn_name: Option<&'a str>,
+    /// Positional name filters passed to libtest after `--`. Each entry runs
+    /// tests whose name *contains* it (libtest semantics, OR'd across entries).
+    /// Used to slice a heavy test binary across multiple CI shards.
+    test_name_filters: &'a [&'a str],
+    /// Exact libtest names. Each exact name is executed as a separate libtest
+    /// invocation so similarly named tests cannot be pulled into the shard.
+    exact_name_filters: &'a [&'a str],
 }
 
 fn run_test(
     manifest_dir: String,
     config: RunTestConfig,
+) -> io::Result<process::Output> {
+    // Integration tests against a live validator can hit timing-related
+    // flakes. RUN_TEST_RETRIES is the number of EXTRA attempts on failure
+    // (so total attempts = RUN_TEST_RETRIES + 1). Default is 0: retries
+    // are strictly opt-in, so a local `make test-...` doesn't silently
+    // mask a freshly introduced flake. CI sets it to 3.
+    let max_attempts = std::env::var("RUN_TEST_RETRIES")
+        .ok()
+        .and_then(|s| s.parse::<u32>().ok())
+        .unwrap_or(0)
+        .saturating_add(1);
+
+    let mut last: Option<process::Output> = None;
+    for attempt in 1..=max_attempts {
+        let output = run_test_once(manifest_dir.clone(), &config)?;
+        if output.status.success() {
+            return Ok(output);
+        }
+        eprintln!(
+            "run_test attempt {}/{} failed (status: {})",
+            attempt, max_attempts, output.status
+        );
+        last = Some(output);
+    }
+    Ok(last.expect("run_test loop must run at least once"))
+}
+
+fn run_test_once(
+    manifest_dir: String,
+    config: &RunTestConfig,
+) -> io::Result<process::Output> {
+    if let Some(bin_dir) = std::env::var_os("INTEGRATION_TEST_BIN_DIR") {
+        let bin_dir = PathBuf::from(bin_dir);
+        return run_prebuilt_tests(Path::new(&manifest_dir), config, &bin_dir);
+    }
+
+    if !config.exact_name_filters.is_empty() {
+        let mut combined_status_ok = true;
+        let mut combined_stdout = Vec::new();
+        let mut combined_stderr = Vec::new();
+
+        for exact_filter in config.exact_name_filters {
+            let output = run_cargo_test_command(
+                manifest_dir.clone(),
+                config,
+                Some(exact_filter),
+            )?;
+            combined_status_ok &= output.status.success();
+            combined_stdout.extend_from_slice(&output.stdout);
+            combined_stderr.extend_from_slice(&output.stderr);
+
+            if !output.status.success() {
+                break;
+            }
+        }
+
+        return Ok(combined_output(
+            combined_status_ok,
+            combined_stdout,
+            combined_stderr,
+        ));
+    }
+
+    run_cargo_test_command(manifest_dir, config, None)
+}
+
+fn run_cargo_test_command(
+    manifest_dir: String,
+    config: &RunTestConfig,
+    exact_filter: Option<&str>,
 ) -> io::Result<process::Output> {
     let mut cmd = process::Command::new("cargo");
     cmd.env(
@@ -817,16 +1182,210 @@ fn run_test(
     if let Some(package) = config.package {
         cmd.arg("-p").arg(package);
     }
-    if let Some(test_file) = config.test_file {
+    for test_file in config.test_files {
         cmd.arg("--test").arg(test_file);
     }
     if let Some(test_fn_name) = config.test_fn_name {
         cmd.arg(test_fn_name);
     }
     cmd.arg("--").arg("--test-threads=1").arg("--nocapture");
+    if let Some(exact_filter) = exact_filter {
+        cmd.arg("--exact").arg(exact_filter);
+    } else {
+        for filter in config.test_name_filters {
+            cmd.arg(filter);
+        }
+    }
     cmd.current_dir(manifest_dir.clone());
     println!("RUNNING: {:?}", cmd);
     Teepee::new(cmd).output()
+}
+
+fn run_prebuilt_tests(
+    manifest_dir: &Path,
+    config: &RunTestConfig,
+    bin_dir: &Path,
+) -> io::Result<process::Output> {
+    let test_targets = resolve_test_targets(manifest_dir, config)?;
+    let mut combined_status_ok = true;
+    let mut combined_stdout = Vec::new();
+    let mut combined_stderr = Vec::new();
+
+    for test_target in test_targets {
+        let test_bin = resolve_prebuilt_test_bin(bin_dir, &test_target)?;
+        if config.exact_name_filters.is_empty() {
+            let output = run_prebuilt_test_command(
+                &test_bin,
+                manifest_dir,
+                config,
+                None,
+            )?;
+            combined_status_ok &= output.status.success();
+            combined_stdout.extend_from_slice(&output.stdout);
+            combined_stderr.extend_from_slice(&output.stderr);
+
+            if !output.status.success() {
+                break;
+            }
+        } else {
+            for exact_filter in config.exact_name_filters {
+                let output = run_prebuilt_test_command(
+                    &test_bin,
+                    manifest_dir,
+                    config,
+                    Some(exact_filter),
+                )?;
+                combined_status_ok &= output.status.success();
+                combined_stdout.extend_from_slice(&output.stdout);
+                combined_stderr.extend_from_slice(&output.stderr);
+
+                if !output.status.success() {
+                    break;
+                }
+            }
+            if !combined_status_ok {
+                break;
+            }
+        }
+    }
+
+    Ok(combined_output(
+        combined_status_ok,
+        combined_stdout,
+        combined_stderr,
+    ))
+}
+
+fn run_prebuilt_test_command(
+    test_bin: &Path,
+    manifest_dir: &Path,
+    config: &RunTestConfig,
+    exact_filter: Option<&str>,
+) -> io::Result<process::Output> {
+    let mut cmd = process::Command::new(test_bin);
+    cmd.env(
+        "RUST_LOG",
+        std::env::var("RUST_LOG").unwrap_or_else(|_| "info".to_string()),
+    )
+    .arg("--test-threads=1")
+    .arg("--nocapture");
+
+    if let Some(test_fn_name) = config.test_fn_name {
+        cmd.arg(test_fn_name);
+    }
+    if let Some(exact_filter) = exact_filter {
+        cmd.arg("--exact").arg(exact_filter);
+    } else {
+        for filter in config.test_name_filters {
+            cmd.arg(filter);
+        }
+    }
+
+    cmd.current_dir(manifest_dir);
+    println!("RUNNING: {:?}", cmd);
+    Teepee::new(cmd).output()
+}
+
+fn combined_output(
+    status_ok: bool,
+    stdout: Vec<u8>,
+    stderr: Vec<u8>,
+) -> Output {
+    Output {
+        status: if status_ok {
+            process::ExitStatus::default()
+        } else {
+            process::Command::new("false")
+                .status()
+                .unwrap_or_else(|_| process::ExitStatus::default())
+        },
+        stdout,
+        stderr,
+    }
+}
+
+fn resolve_test_targets(
+    manifest_dir: &Path,
+    config: &RunTestConfig,
+) -> io::Result<Vec<String>> {
+    if !config.test_files.is_empty() {
+        return Ok(config.test_files.iter().map(|s| s.to_string()).collect());
+    }
+
+    let tests_dir = manifest_dir.join("tests");
+    let mut test_targets = Vec::new();
+    for entry in fs::read_dir(&tests_dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("rs") {
+            continue;
+        }
+        let Some(stem) = path.file_stem().and_then(|stem| stem.to_str()) else {
+            continue;
+        };
+        test_targets.push(stem.to_string());
+    }
+    test_targets.sort();
+
+    if test_targets.is_empty() {
+        return Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            format!(
+                "no integration test targets found in {}",
+                tests_dir.display()
+            ),
+        ));
+    }
+
+    Ok(test_targets)
+}
+
+fn resolve_prebuilt_test_bin(
+    bin_dir: &Path,
+    test_target: &str,
+) -> io::Result<PathBuf> {
+    let normalized = test_target.replace('-', "_");
+    let mut prefixes = vec![format!("{}-", test_target)];
+    if normalized != test_target {
+        prefixes.push(format!("{}-", normalized));
+    }
+
+    let mut matches = Vec::new();
+    for entry in fs::read_dir(bin_dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        let Some(file_name) = path.file_name().and_then(|name| name.to_str())
+        else {
+            continue;
+        };
+        if prefixes.iter().any(|prefix| file_name.starts_with(prefix)) {
+            matches.push(path);
+        }
+    }
+
+    match matches.len() {
+        1 => Ok(matches.remove(0)),
+        0 => Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            format!(
+                "no prebuilt test binary for '{}' in {}",
+                test_target,
+                bin_dir.display()
+            ),
+        )),
+        _ => Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "multiple prebuilt test binaries for '{}' in {}: {:?}",
+                test_target,
+                bin_dir.display(),
+                matches
+            ),
+        )),
+    }
 }
 
 // -----------------

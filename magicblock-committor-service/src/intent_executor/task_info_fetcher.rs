@@ -669,7 +669,7 @@ impl TaskInfoFetcherError {
             return Self::MagicBlockRpcClientError(Box::new(orig));
         };
 
-        match &err.kind {
+        match &*err.kind {
             ErrorKind::RpcError(rpc_err) => match rpc_err {
                 RpcError::ForUser(msg)
                 if msg.contains(MIN_CONTEXT_SLOT_MSG1) => {

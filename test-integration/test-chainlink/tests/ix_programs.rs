@@ -10,11 +10,10 @@ use magicblock_chainlink::{
     AccountFetchOrigin,
 };
 use program_mini::common::IdlType;
+use solana_commitment_config::CommitmentConfig;
 use solana_loader_v4_interface::state::LoaderV4Status;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
-use solana_sdk::{
-    commitment_config::CommitmentConfig, signature::Keypair, signer::Signer,
-};
+use solana_sdk::{signature::Keypair, signer::Signer};
 use test_chainlink::{
     assert_program_owned_by_loader, fetch_and_assert_loaded_program_v1_v2_v4,
     fetch_and_assert_loaded_program_v3,

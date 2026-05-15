@@ -12,6 +12,7 @@ test-chainlink = { workspace = true }
 magicblock-delegation-program-api = { workspace = true, features = ["encryption"] }
 solana-loader-v4-interface = { workspace = true, features = ["serde"] }
 solana-sdk = { workspace = true }
+solana-system-interface = { workspace = true }
 spl-token = { workspace = true }
 spl-memo-interface = { workspace = true }
 test-kit = { workspace = true }

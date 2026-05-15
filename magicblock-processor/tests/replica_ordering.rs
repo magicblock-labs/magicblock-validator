@@ -9,7 +9,7 @@ use std::{
 };
 
 use guinea::GuineaInstruction;
-use magicblock_core::link::transactions::ReplayPosition;
+use magicblock_core::link::{replication::Block, transactions::ReplayPosition};
 use solana_account::ReadableAccount;
 use solana_program::{
     instruction::{AccountMeta, Instruction},
@@ -171,6 +171,49 @@ async fn test_replica_stress_single_account_writes() {
         ((count - 1) % 256) as u8,
         "[{ctx}] Final data value mismatch"
     );
+}
+
+#[tokio::test]
+async fn test_replay_block_waits_for_queued_transactions() {
+    let mut env = setup_replica_env(4);
+    let slot = env.advance_slot();
+    env.run_scheduler();
+    env.yield_to_scheduler().await;
+
+    let acc = create_accounts(&mut env, 1)[0];
+    let tx = tx_write(&mut env, acc, 77);
+    let sig = tx.signatures[0];
+    let prev_hash = env.ledger.latest_block().load().blockhash;
+
+    env.transaction_scheduler
+        .replay(
+            ReplayPosition {
+                slot,
+                index: 0,
+                persist: true,
+            },
+            tx,
+        )
+        .await
+        .expect("failed to queue replay transaction");
+
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(prev_hash.as_ref());
+    hasher.update(sig.as_ref());
+    let hash = (*hasher.finalize().as_bytes()).into();
+
+    env.transaction_scheduler
+        .replay_block(Block {
+            slot,
+            hash,
+            timestamp: slot as i64,
+        })
+        .await
+        .expect("failed to apply replayed block");
+
+    assert_eq!(env.get_account(acc).data()[0], 77);
+    assert_eq!(env.ledger.latest_block().load().slot, slot);
+    assert_eq!(env.accountsdb.slot(), slot);
 }
 
 /// Stress test: Multiple accounts with cross-conflicts.

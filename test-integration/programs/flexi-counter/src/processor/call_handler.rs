@@ -4,8 +4,9 @@ use ephemeral_rollups_sdk::cpi::{
 };
 use solana_program::{
     account_info::AccountInfo, entrypoint::ProgramResult, msg, program::invoke,
-    program_error::ProgramError, system_instruction::transfer,
+    program_error::ProgramError,
 };
+use solana_system_interface::instruction::transfer;
 
 use crate::state::FlexiCounter;
 

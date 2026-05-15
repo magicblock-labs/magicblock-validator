@@ -1,26 +1,28 @@
 use std::{fmt, ops::Deref};
 
-use anyhow::{Context, Result};
-use integration_test_tools::IntegrationTestContext;
+use anyhow::{ensure, Context, Result};
+use integration_test_tools::{
+    loaded_accounts::DLP_TEST_AUTHORITY_BYTES, IntegrationTestContext,
+};
 use program_schedulecommit::api::{
     delegate_account_cpi_instruction, init_account_instruction,
     init_order_book_instruction, init_payer_escrow, UserSeeds,
 };
+use solana_commitment_config::CommitmentConfig;
+use solana_compute_budget_interface::ComputeBudgetInstruction;
 use solana_rpc_client::rpc_client::{RpcClient, SerializableTransaction};
 use solana_rpc_client_api::config::RpcSendTransactionConfig;
 #[allow(unused_imports)]
 use solana_sdk::signer::SeedDerivable;
 use solana_sdk::{
-    commitment_config::CommitmentConfig,
-    compute_budget::ComputeBudgetInstruction,
     hash::Hash,
     native_token::LAMPORTS_PER_SOL,
     pubkey::Pubkey,
     signature::{Keypair, Signature},
     signer::Signer,
-    system_program,
     transaction::Transaction,
 };
+use solana_system_interface::program as system_program;
 use tracing::*;
 
 pub struct ScheduleCommitTestContext {
@@ -149,6 +151,26 @@ impl ScheduleCommitTestContext {
             payer_ephem_on_chain.lamports
         );
         assert_eq!(payer_ephem_on_ephem.owner, system_program::id());
+
+        let validator_identity = ictx
+            .ephem_validator_identity
+            .context("Ephemeral validator identity missing")?;
+        let validator_keypair =
+            Keypair::try_from(&DLP_TEST_AUTHORITY_BYTES[..])
+                .context("Failed to create validator authority keypair")?;
+        ensure!(
+            validator_keypair.pubkey() == validator_identity,
+            "Unexpected validator identity {}",
+            validator_identity
+        );
+        let magic_fee_vault =
+            ictx.ensure_magic_fee_vault_delegated_on_chain(&validator_keypair)?;
+        ictx.fetch_ephem_account(magic_fee_vault).with_context(|| {
+            format!(
+                "Failed to fetch magic fee vault account {}",
+                magic_fee_vault
+            )
+        })?;
 
         Ok(Self {
             payer_chain,

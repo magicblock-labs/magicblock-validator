@@ -41,7 +41,7 @@ pub(crate) fn process_cleanup_partial_clone(
     }
 
     let ctx = transaction_context.get_current_instruction_context()?;
-    let auth_acc = transaction_context.get_account_at_index(
+    let mut auth_acc = transaction_context.accounts().try_borrow_mut(
         ctx.get_index_of_instruction_account_in_transaction(0)?,
     )?;
 
@@ -52,7 +52,7 @@ pub(crate) fn process_cleanup_partial_clone(
         "CleanupPartialClone",
         invoke_context,
     )?;
-    let account = transaction_context.get_account_at_index(tx_idx)?;
+    let account = transaction_context.accounts().try_borrow_mut(tx_idx)?;
 
     ic_msg!(
         invoke_context,
@@ -60,12 +60,12 @@ pub(crate) fn process_cleanup_partial_clone(
         pubkey
     );
 
-    let current_lamports = account.borrow().lamports();
+    let current_lamports = account.lamports();
     let lamports_delta = -(current_lamports as i64);
 
     close_buffer_account(account);
 
-    adjust_authority_lamports(auth_acc, lamports_delta)?;
+    adjust_authority_lamports(&mut auth_acc, lamports_delta)?;
     remove_pending_clone(&pubkey);
     Ok(())
 }

@@ -18,12 +18,12 @@ use rand::{RngCore, SeedableRng};
 use schedulecommit_client::{
     verify, ScheduleCommitTestContext, ScheduleCommitTestContextFields,
 };
+use solana_commitment_config::CommitmentConfig;
 use solana_rpc_client::rpc_client::{RpcClient, SerializableTransaction};
 use solana_rpc_client_api::{
     client_error::Error as ClientError, config::RpcSendTransactionConfig,
 };
 use solana_sdk::{
-    commitment_config::CommitmentConfig,
     instruction::InstructionError,
     pubkey::Pubkey,
     signature::{Keypair, Signature},
@@ -312,20 +312,6 @@ fn test_commit_and_undelegate_huge_order_book_account() {
     );
 }
 
-#[test]
-fn test_commit_finalize_huge_order_book_account() {
-    run_test_for_commit_huge_order_book_account(
-        ScheduleCommitType::CommitFinalize,
-    );
-}
-
-#[test]
-fn test_commit_finalize_and_undelegate_huge_order_book_account() {
-    run_test_for_commit_huge_order_book_account(
-        ScheduleCommitType::CommitFinalizeAndUndelegate,
-    );
-}
-
 fn run_test_for_commit_huge_order_book_account(
     commit_type: ScheduleCommitType,
 ) {
@@ -391,11 +377,10 @@ fn run_test_for_commit_huge_order_book_account(
 
         assert_one_committee_was_committed(&ctx, &res, true);
         match commit_type {
-            ScheduleCommitType::Commit | ScheduleCommitType::CommitFinalize => {
+            ScheduleCommitType::Commit => {
                 assert_one_committee_account_was_not_undelegated_on_chain(&ctx);
             }
-            ScheduleCommitType::CommitAndUndelegate
-            | ScheduleCommitType::CommitFinalizeAndUndelegate => {
+            ScheduleCommitType::CommitAndUndelegate => {
                 assert_one_committee_account_was_undelegated_on_chain(&ctx);
             }
         }

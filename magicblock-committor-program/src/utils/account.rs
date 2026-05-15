@@ -1,6 +1,6 @@
+use solana_account_info::AccountInfo;
 use solana_program::{
-    account_info::AccountInfo, entrypoint::ProgramResult, msg,
-    program_error::ProgramError,
+    entrypoint::ProgramResult, msg, program_error::ProgramError,
 };
 
 pub fn close_and_refund_authority(
@@ -11,7 +11,7 @@ pub fn close_and_refund_authority(
     // the account around in an instruction that is appended as part of this
     // transaction
     // https://www.helius.dev/blog/a-hitchhikers-guide-to-solana-program-security
-    account.realloc(0, false)?;
+    account.resize(0)?;
 
     // Transfer all lamports to authority
     **authority.lamports.borrow_mut() = authority

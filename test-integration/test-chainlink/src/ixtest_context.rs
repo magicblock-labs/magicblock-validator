@@ -19,12 +19,13 @@ use magicblock_chainlink::{
 use magicblock_config::config::{ChainLinkConfig, LifecycleMode};
 use program_flexi_counter::state::FlexiCounter;
 use solana_account::AccountSharedData;
+use solana_commitment_config::CommitmentConfig;
 use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_rpc_client_api::config::RpcSendTransactionConfig;
 use solana_sdk::{
-    commitment_config::CommitmentConfig, native_token::LAMPORTS_PER_SOL,
-    signature::Keypair, signer::Signer, transaction::Transaction,
+    native_token::LAMPORTS_PER_SOL, signature::Keypair, signer::Signer,
+    transaction::Transaction,
 };
 use solana_sdk_ids::native_loader;
 use tokio::task;
@@ -72,8 +73,7 @@ impl IxtestContext {
     }
 
     pub async fn init_with_config(config: ChainlinkConfig) -> Self {
-        let validator_kp = Keypair::from_bytes(&TEST_AUTHORITY[..]).unwrap();
-        let faucet_kp = Keypair::new();
+        let validator_kp = Keypair::try_from(&TEST_AUTHORITY[..]).unwrap();
 
         let commitment = CommitmentConfig::confirmed();
         let bank = Arc::<AccountsBankStub>::default();
@@ -126,7 +126,6 @@ impl IxtestContext {
                             &bank,
                             &cloner,
                             validator_kp.insecure_clone(),
-                            faucet_kp.pubkey(),
                             rx,
                             None,
                             None,
@@ -144,7 +143,6 @@ impl IxtestContext {
             &bank,
             fetch_cloner,
             validator_kp.pubkey(),
-            faucet_kp.pubkey(),
             &ChainLinkConfig::default(),
         )
         .unwrap();

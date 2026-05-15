@@ -1,6 +1,7 @@
 use dlp_api::pda::ephemeral_balance_pda_from_payer;
 use integration_test_tools::{
-    conversions::stringify_simulation_result, IntegrationTestContext,
+    conversions::stringify_simulation_result,
+    loaded_accounts::DLP_TEST_AUTHORITY_BYTES, IntegrationTestContext,
 };
 use program_flexi_counter::{
     delegation_program_id,
@@ -882,10 +883,19 @@ fn schedule_transfer_intent(
 ) {
     ctx.wait_for_next_slot_ephem().unwrap();
 
+    let validator = ctx.ephem_validator_identity.unwrap();
+    let validator_keypair =
+        Keypair::try_from(&DLP_TEST_AUTHORITY_BYTES[..]).unwrap();
+    assert_eq!(validator_keypair.pubkey(), validator);
+    let magic_fee_vault = ctx
+        .ensure_magic_fee_vault_delegated_on_chain(&validator_keypair)
+        .unwrap();
+    ctx.fetch_ephem_account(magic_fee_vault).unwrap();
+
     let ix = create_transfer_intent_ix(
         payer.pubkey(),
         destination,
-        ctx.ephem_validator_identity.unwrap(),
+        validator,
         amount,
         fail,
         100_000,

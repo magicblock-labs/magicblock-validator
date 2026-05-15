@@ -17,7 +17,7 @@ use solana_program::{
             get_instruction_relative, load_current_index_checked,
             load_instruction_at_checked,
         },
-        Sysvar,
+        Sysvar, SysvarSerialize,
     },
 };
 

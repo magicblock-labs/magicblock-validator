@@ -10,10 +10,10 @@ use tokio::task::JoinSet;
 use tracing::*;
 
 use super::{
-    subscription::{cancel_subs, CancelStrategy},
+    subscription::{acquire_subs, release_subs, SubscriptionRelease},
     types::{
-        AccountWithCompanion, ClassifiedAccounts, ExistingSubs,
-        PartitionedNotFound, ResolvedDelegatedAccounts, ResolvedPrograms,
+        AccountWithCompanion, ClassifiedAccounts, PartitionedNotFound,
+        ResolvedDelegatedAccounts, ResolvedPrograms,
     },
     FetchCloner,
 };
@@ -28,38 +28,9 @@ use crate::{
             LOADER_V3,
         },
         ChainPubsubClient, ChainRpcClient, MatchSlotsConfig, RemoteAccount,
-        ResolvedAccount,
+        ResolvedAccount, SubscriptionReason,
     },
 };
-
-pub(crate) fn build_existing_subs<T, U, V, C>(
-    this: &FetchCloner<T, U, V, C>,
-    pubkeys: &[Pubkey],
-) -> ExistingSubs
-where
-    T: ChainRpcClient,
-    U: ChainPubsubClient,
-    V: AccountsBank,
-    C: Cloner,
-{
-    let delegation_records = pubkeys
-        .iter()
-        .map(delegation_record_pda_from_delegated_account)
-        .collect::<HashSet<_>>();
-    let program_data_accounts = pubkeys
-        .iter()
-        .map(get_loaderv3_get_program_data_address)
-        .collect::<HashSet<_>>();
-    let existing_subs: HashSet<Pubkey> = pubkeys
-        .iter()
-        .chain(delegation_records.iter())
-        .chain(program_data_accounts.iter())
-        .filter(|x| this.is_watching(x))
-        .copied()
-        .collect();
-
-    ExistingSubs { existing_subs }
-}
 
 pub(crate) fn collect_delegation_action_dependencies(
     accounts_to_clone: &[AccountCloneRequest],
@@ -218,15 +189,13 @@ pub(crate) fn partition_not_found(
 }
 
 /// Resolves delegated accounts by fetching their delegation records
-#[instrument(skip(this, owned_by_deleg, plain, pubkeys, existing_subs), fields(pubkey_count = pubkeys.len()))]
+#[instrument(skip(this, owned_by_deleg, plain), fields(pubkey_count = owned_by_deleg.len()))]
 pub(crate) async fn resolve_delegated_accounts<T, U, V, C>(
     this: &FetchCloner<T, U, V, C>,
     owned_by_deleg: Vec<(Pubkey, AccountSharedData, u64)>,
     plain: Vec<AccountCloneRequest>,
     min_context_slot: Option<u64>,
     fetch_origin: AccountFetchOrigin,
-    pubkeys: &[Pubkey],
-    existing_subs: HashSet<Pubkey>,
 ) -> ChainlinkResult<ResolvedDelegatedAccounts>
 where
     T: ChainRpcClient,
@@ -234,6 +203,19 @@ where
     V: AccountsBank,
     C: Cloner,
 {
+    let record_subs = owned_by_deleg
+        .iter()
+        .map(|(pubkey, _, _)| {
+            delegation_record_pda_from_delegated_account(pubkey)
+        })
+        .collect::<Vec<_>>();
+    acquire_subs(
+        &this.remote_account_provider,
+        record_subs.clone(),
+        SubscriptionReason::DelegationRecord,
+    )
+    .await?;
+
     // For potentially delegated accounts we update the owner and delegation state first
     let mut fetch_with_delegation_record_join_set = JoinSet::new();
     for (pubkey, _, account_slot) in &owned_by_deleg {
@@ -253,8 +235,7 @@ where
 
     let mut missing_delegation_record = vec![];
 
-    // We remove all new subs for accounts that were not found or already in the bank
-    let (accounts_to_clone, record_subs) = {
+    let accounts_to_clone = {
         let joined = fetch_with_delegation_record_join_set.join_all().await;
         let (errors, accounts_fully_resolved) = joined.into_iter().fold(
             (vec![], vec![]),
@@ -274,15 +255,22 @@ where
         // we have to abort as we cannot resume without the ability to sync
         // with the remote
         if !errors.is_empty() {
-            // Cancel all new subs since we won't clone any accounts
-            cancel_subs(
-                &this.remote_account_provider,
-                CancelStrategy::New {
-                    new_subs: pubkeys.iter().cloned().collect(),
-                    existing_subs,
-                },
-            )
-            .await;
+            let releases = owned_by_deleg
+                .iter()
+                .map(|(pubkey, _, _)| *pubkey)
+                .chain(record_subs.iter().copied())
+                .map(|pubkey| SubscriptionRelease::Pubkey {
+                    pubkey,
+                    reason: SubscriptionReason::DirectAccount,
+                })
+                .chain(record_subs.iter().copied().map(|pubkey| {
+                    SubscriptionRelease::Pubkey {
+                        pubkey,
+                        reason: SubscriptionReason::DelegationRecord,
+                    }
+                }))
+                .collect::<Vec<_>>();
+            release_subs(&this.remote_account_provider, releases).await;
             return Err(ChainlinkError::DelegatedAccountResolutionsFailed(
                 errors
                     .iter()
@@ -292,8 +280,6 @@ where
             ));
         }
 
-        // Cancel new delegation record subs
-        let mut record_subs = Vec::with_capacity(accounts_fully_resolved.len());
         let mut accounts_to_clone = plain;
 
         // Collect unique owner programs to subscribe to concurrently
@@ -307,8 +293,6 @@ where
             companion_account: delegation_record,
         } in accounts_fully_resolved.into_iter()
         {
-            record_subs.push(delegation_record_pubkey);
-
             // If the account is delegated we set the owner and delegation state
             let (commit_frequency_ms, delegated_to_other, delegation_actions) =
                 if let Some(delegation_record_data) = delegation_record {
@@ -323,17 +307,24 @@ where
                         ) {
                         Ok(x) => x,
                         Err(err) => {
-                            // Cancel all new subs since we won't clone any accounts
-                            cancel_subs(
+                            let releases = owned_by_deleg
+                                .iter()
+                                .map(|(pubkey, _, _)| *pubkey)
+                                .chain(record_subs.iter().copied())
+                                .map(|pubkey| SubscriptionRelease::Pubkey {
+                                    pubkey,
+                                    reason: SubscriptionReason::DirectAccount,
+                                })
+                                .chain(record_subs.iter().copied().map(|pubkey| {
+                                    SubscriptionRelease::Pubkey {
+                                        pubkey,
+                                        reason: SubscriptionReason::DelegationRecord,
+                                    }
+                                }))
+                                .collect::<Vec<_>>();
+                            release_subs(
                                 &this.remote_account_provider,
-                                CancelStrategy::New {
-                                    new_subs: pubkeys
-                                        .iter()
-                                        .cloned()
-                                        .chain(record_subs.iter().cloned())
-                                        .collect(),
-                                    existing_subs: existing_subs.clone(),
-                                },
+                                releases,
                             )
                             .await;
                             return Err(err);
@@ -351,8 +342,12 @@ where
                         &delegation_record,
                     );
 
-                    // Collect unique owner programs to subscribe concurrently after the loop
-                    if account.delegated() {
+                    // Skip high-cardinality owner programs such as SPL Token.
+                    if account.delegated()
+                        && !this
+                            .programs_not_to_subscribe
+                            .contains(&delegation_record.owner)
+                    {
                         owner_programs_to_subscribe
                             .insert(delegation_record.owner);
                     }
@@ -378,6 +373,18 @@ where
             });
         }
 
+        release_subs(
+            &this.remote_account_provider,
+            owned_by_deleg
+                .iter()
+                .map(|(pubkey, _, _)| SubscriptionRelease::Pubkey {
+                    pubkey: *pubkey,
+                    reason: SubscriptionReason::DirectAccount,
+                })
+                .collect::<Vec<_>>(),
+        )
+        .await;
+
         // Subscribe to owner programs concurrently in background (best-effort)
         if !owner_programs_to_subscribe.is_empty() {
             let remote_account_provider = this.remote_account_provider.clone();
@@ -401,7 +408,7 @@ where
             });
         }
 
-        (accounts_to_clone, record_subs)
+        accounts_to_clone
     };
 
     Ok(ResolvedDelegatedAccounts {
@@ -412,14 +419,12 @@ where
 }
 
 /// Resolves program accounts, fetching program data accounts for LoaderV3 programs
-#[instrument(skip(this, programs, pubkeys, existing_subs), fields(pubkey_count = pubkeys.len()))]
+#[instrument(skip(this, programs), fields(pubkey_count = programs.len()))]
 pub(crate) async fn resolve_programs_with_program_data<T, U, V, C>(
     this: &FetchCloner<T, U, V, C>,
     programs: Vec<(Pubkey, AccountSharedData, u64)>,
     min_context_slot: Option<u64>,
     fetch_origin: AccountFetchOrigin,
-    pubkeys: &[Pubkey],
-    existing_subs: HashSet<Pubkey>,
 ) -> ChainlinkResult<ResolvedPrograms>
 where
     T: ChainRpcClient,
@@ -451,6 +456,17 @@ where
         pubkeys_to_fetch.push(*pubkey);
         pubkeys_to_fetch.push(program_data_pubkey);
     }
+
+    let program_data_subs = loaderv3_programs
+        .iter()
+        .map(|(pubkey, _, _)| get_loaderv3_get_program_data_address(pubkey))
+        .collect::<HashSet<_>>();
+    acquire_subs(
+        &this.remote_account_provider,
+        program_data_subs.iter().copied().collect::<Vec<_>>(),
+        SubscriptionReason::ProgramData,
+    )
+    .await?;
 
     let fetch_result = if !pubkeys_to_fetch.is_empty() {
         this.fetch_count
@@ -524,12 +540,6 @@ where
 
     let mut loaded_programs = vec![];
 
-    // Cancel subs for program data accounts
-    let program_data_subs = accounts_with_program_data
-        .iter()
-        .map(|a| a.companion_pubkey)
-        .collect::<HashSet<_>>();
-
     for AccountWithCompanion {
         pubkey: program_id,
         account: program_account,
@@ -568,19 +578,21 @@ where
     }
 
     if !errors.is_empty() {
-        // Cancel all new subs since we won't clone any accounts
-        cancel_subs(
-            &this.remote_account_provider,
-            CancelStrategy::New {
-                new_subs: pubkeys
-                    .iter()
-                    .cloned()
-                    .chain(program_data_subs.iter().cloned())
-                    .collect(),
-                existing_subs: existing_subs.clone(),
-            },
-        )
-        .await;
+        let releases = pubkeys_to_fetch
+            .iter()
+            .copied()
+            .map(|pubkey| SubscriptionRelease::Pubkey {
+                pubkey,
+                reason: SubscriptionReason::DirectAccount,
+            })
+            .chain(program_data_subs.iter().copied().map(|pubkey| {
+                SubscriptionRelease::Pubkey {
+                    pubkey,
+                    reason: SubscriptionReason::ProgramData,
+                }
+            }))
+            .collect::<Vec<_>>();
+        release_subs(&this.remote_account_provider, releases).await;
         return Err(ChainlinkError::ProgramAccountResolutionsFailed(
             errors
                 .iter()
@@ -596,71 +608,59 @@ where
     })
 }
 
-/// Computes the subscription cancellation strategy based on what accounts were resolved
-#[allow(unused_variables)] // Parameters used in cfg(test) block
-pub(crate) fn compute_cancel_strategy(
-    pubkeys: &[Pubkey],
+pub(crate) fn compute_subscription_releases(
+    all_requested_pubkeys: &[Pubkey],
     accounts_to_clone: &[AccountCloneRequest],
     loaded_programs: &[crate::remote_account_provider::program_account::LoadedProgram],
     record_subs: Vec<Pubkey>,
     program_data_subs: HashSet<Pubkey>,
-    existing_subs: HashSet<Pubkey>,
-    new_subs: HashSet<Pubkey>,
-) -> CancelStrategy {
-    // Cancel subs for delegated accounts (accounts we clone but don't need to watch)
-    let delegated_accounts_to_cancel: HashSet<Pubkey> = accounts_to_clone
-        .iter()
-        .filter_map(|request| {
-            if request.account.delegated() {
-                Some(request.pubkey)
-            } else {
-                None
-            }
-        })
-        .collect();
-
-    // New approach: compute which subscriptions from new_subs should be cancelled
-    // We want to cancel all new subscriptions except for:
-    // - Accounts we cloned (both delegated and non-delegated are kept in new_subs)
-    // - Programs we loaded
-    // Note: Delegated accounts are cancelled separately via the 'all' field
-    let accounts_to_keep: HashSet<Pubkey> = accounts_to_clone
+) -> Vec<SubscriptionRelease> {
+    let cloned_accounts = accounts_to_clone
         .iter()
         .map(|request| request.pubkey)
-        .chain(loaded_programs.iter().map(|p| p.program_id))
-        .collect();
+        .collect::<HashSet<_>>();
+    let loaded_program_ids = loaded_programs
+        .iter()
+        .map(|program| program.program_id)
+        .collect::<HashSet<_>>();
+    let delegated_cloned_accounts = accounts_to_clone
+        .iter()
+        .filter(|request| request.account.delegated())
+        .map(|request| request.pubkey)
+        .collect::<HashSet<_>>();
 
-    let new_subs_to_cancel: HashSet<Pubkey> =
-        new_subs.difference(&accounts_to_keep).copied().collect();
+    let mut direct_releases = all_requested_pubkeys
+        .iter()
+        .copied()
+        .filter(|pubkey| {
+            !cloned_accounts.contains(pubkey)
+                && !loaded_program_ids.contains(pubkey)
+        })
+        .collect::<HashSet<_>>();
+    direct_releases.extend(delegated_cloned_accounts);
+    direct_releases.extend(record_subs.iter().copied());
+    direct_releases.extend(program_data_subs.iter().copied());
 
-    // Safety check: under test, verify new approach matches old approach
-    #[cfg(test)]
-    {
-        // Old approach for comparison
-        let accounts_not_cloned = pubkeys.iter().filter(|pubkey| {
-            !accounts_to_clone
-                .iter()
-                .any(|request| request.pubkey.eq(pubkey))
-                && !loaded_programs.iter().any(|p| p.program_id.eq(pubkey))
-        });
-        let old_new_subs_to_cancel: HashSet<Pubkey> = record_subs
-            .iter()
-            .cloned()
-            .chain(accounts_not_cloned.into_iter().cloned().collect::<Vec<_>>())
-            .chain(program_data_subs.iter().cloned())
-            .collect();
-
-        assert_eq!(
-            new_subs_to_cancel, old_new_subs_to_cancel,
-            "New subscription cancellation logic produces different result than old logic"
-        );
-    }
-
-    CancelStrategy::Hybrid {
-        new_subs: new_subs_to_cancel,
-        existing_subs,
-        all: delegated_accounts_to_cancel,
-    }
+    let mut releases = direct_releases
+        .into_iter()
+        .map(|pubkey| SubscriptionRelease::Pubkey {
+            pubkey,
+            reason: SubscriptionReason::DirectAccount,
+        })
+        .collect::<Vec<_>>();
+    releases.extend(record_subs.into_iter().map(|pubkey| {
+        SubscriptionRelease::Pubkey {
+            pubkey,
+            reason: SubscriptionReason::DelegationRecord,
+        }
+    }));
+    releases.extend(program_data_subs.into_iter().map(|pubkey| {
+        SubscriptionRelease::Pubkey {
+            pubkey,
+            reason: SubscriptionReason::ProgramData,
+        }
+    }));
+    releases
 }
 
 /// Clones accounts and programs into the bank

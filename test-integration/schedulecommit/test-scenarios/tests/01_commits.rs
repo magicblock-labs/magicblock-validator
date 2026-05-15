@@ -219,7 +219,13 @@ fn test_undelegating_account_delegated_to_another_validator() {
 
         // We expect InvalidWritableAccount error since account isn't delegated to our validator
         let (_, tx_err) = extract_transaction_error(res);
-        assert_eq!(tx_err.unwrap(), TransactionError::InvalidWritableAccount);
+        assert_eq!(
+            tx_err.unwrap(),
+            TransactionError::InstructionError(
+                0,
+                InstructionError::ReadonlyDataModified
+            )
+        );
     });
 }
 

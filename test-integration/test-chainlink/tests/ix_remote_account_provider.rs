@@ -15,10 +15,10 @@ use magicblock_chainlink::{
     AccountFetchOrigin,
 };
 use magicblock_config::config::LifecycleMode;
+use solana_commitment_config::CommitmentConfig;
 use solana_rpc_client_api::{
     client_error::ErrorKind, config::RpcAccountInfoConfig, request::RpcError,
 };
-use solana_sdk::commitment_config::CommitmentConfig;
 use tokio::sync::mpsc;
 use tracing::{debug, info};
 
@@ -82,7 +82,7 @@ async fn ixtest_existing_account_for_future_slot() {
 
     let cs = current_slot(rpc_client).await;
     let res = rpc_client
-        .get_account_with_config(
+        .get_ui_account_with_config(
             &pubkey,
             RpcAccountInfoConfig {
                 commitment: Some(CommitmentConfig::processed()),
@@ -95,7 +95,7 @@ async fn ixtest_existing_account_for_future_slot() {
     assert!(res.is_err(), "Expected error for future slot account fetch");
     let err = res.unwrap_err();
     assert!(matches!(
-        err.kind,
+        *err.kind,
         ErrorKind::RpcError(RpcError::ForUser(_))
     ));
     assert!(err

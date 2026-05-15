@@ -1,28 +1,29 @@
 mod process_accept_scheduled_commits;
 mod process_add_action_callback;
+mod process_execute_callback;
 mod process_schedule_commit;
-mod process_schedule_commit_finalize;
 #[cfg(test)]
 mod process_schedule_commit_tests;
 mod process_schedule_intent_bundle;
 mod process_scheduled_commit_sent;
 pub(crate) mod transaction_scheduler;
 
-use std::{cell::RefCell, sync::Arc};
+use std::sync::Arc;
 
 use magicblock_core::intent::CommittedAccount;
-use magicblock_magic_program_api::MAGIC_CONTEXT_PUBKEY;
+use magicblock_magic_program_api::{
+    pda::CALLBACK_SIGNER, MAGIC_CONTEXT_PUBKEY,
+};
 pub(crate) use process_accept_scheduled_commits::*;
 pub(crate) use process_add_action_callback::process_add_action_callback;
+pub(crate) use process_execute_callback::*;
 pub(crate) use process_schedule_commit::*;
-pub(crate) use process_schedule_commit_finalize::*;
 pub(crate) use process_schedule_intent_bundle::process_schedule_intent_bundle;
 pub use process_scheduled_commit_sent::{
     process_scheduled_commit_sent, register_scheduled_commit_sent, SentCommit,
 };
-use solana_account::AccountSharedData;
 use solana_clock::Clock;
-use solana_instruction::error::InstructionError;
+use solana_instruction::{error::InstructionError, AccountMeta};
 use solana_log_collector::ic_msg;
 use solana_program_runtime::invoke_context::InvokeContext;
 use solana_pubkey::Pubkey;
@@ -35,8 +36,9 @@ use crate::{
     },
     utils::accounts::{
         get_instruction_account_with_idx, get_instruction_pubkey_with_idx,
-        get_writable_with_idx,
+        get_writable_with_idx, InstructionAccount,
     },
+    validator::validator_authority_id,
 };
 
 pub(crate) const PAYER_IDX: u16 = 0;
@@ -46,9 +48,9 @@ pub(crate) const ACCOUNTS_OFFSET: usize = MAGIC_CONTEXT_IDX as usize + 1;
 
 #[cfg(not(test))]
 fn get_parent_program_id(
-    transaction_context: &TransactionContext,
     invoke_context: &mut InvokeContext,
 ) -> Result<Option<Pubkey>, InstructionError> {
+    let transaction_context = &*invoke_context.transaction_context;
     let frames = crate::utils::instruction_context_frames::InstructionContextFrames::try_from(transaction_context)?;
     let parent_program_id =
         frames.find_program_id_of_parent_of_current_instruction();
@@ -65,10 +67,10 @@ fn get_parent_program_id(
 
 #[cfg(test)]
 fn get_parent_program_id(
-    transaction_context: &TransactionContext,
-    _: &mut InvokeContext,
+    invoke_context: &mut InvokeContext,
 ) -> Result<Option<Pubkey>, InstructionError> {
     use solana_account::ReadableAccount;
+    let transaction_context = &*invoke_context.transaction_context;
     let ix_ctx = transaction_context.get_current_instruction_context()?;
 
     // Action-only bundles may legitimately contain only payer + magic context.
@@ -84,7 +86,7 @@ fn get_parent_program_id(
         transaction_context,
         ACCOUNTS_OFFSET as u16,
     )?
-    .borrow()
+    .borrow()?
     .owner();
 
     Ok(Some(first_committee_owner))
@@ -165,16 +167,16 @@ pub(crate) fn magic_fee_vault_pubkey() -> Pubkey {
 ///
 /// Writability is checked eagerly: a payer on the fee-charging path would
 /// otherwise fail later with a less clear error.
-pub(crate) fn try_get_fee_vault<'a>(
-    transaction_context: &'a TransactionContext,
+pub(crate) fn try_get_fee_vault<'a, 'ix_data>(
+    transaction_context: &'a TransactionContext<'ix_data>,
     invoke_context: &InvokeContext,
     payer_idx: u16,
     fee_vault_idx: u16,
-) -> Result<Option<&'a RefCell<AccountSharedData>>, InstructionError> {
+) -> Result<Option<InstructionAccount<'a, 'ix_data>>, InstructionError> {
     let payer_account =
         get_instruction_account_with_idx(transaction_context, payer_idx)?;
     let payer_requires_fee_vault = {
-        let payer = payer_account.borrow();
+        let payer = payer_account.to_account_shared_data()?;
         payer.delegated() && !payer.confined()
     };
     if !payer_requires_fee_vault {
@@ -196,7 +198,9 @@ pub(crate) fn try_get_fee_vault<'a>(
         get_instruction_account_with_idx(transaction_context, fee_vault_idx)?;
     let is_vault_writable =
         get_writable_with_idx(transaction_context, fee_vault_idx)?;
-    if !vault_account.borrow().delegated() || !is_vault_writable {
+    if !vault_account.to_account_shared_data()?.delegated()
+        || !is_vault_writable
+    {
         ic_msg!(
             invoke_context,
             "ScheduleCommit ERR: magic fee vault must be writable and delegated"
@@ -205,4 +209,48 @@ pub(crate) fn try_get_fee_vault<'a>(
     }
 
     Ok(Some(vault_account))
+}
+
+/// Assert that the callback instructions do not have signers aside from the callback signer
+/// Assert they don't use the validator either
+pub(crate) fn validate_callback_accounts(
+    invoke_context: &&mut InvokeContext,
+    accounts_meta: &[AccountMeta],
+    err_prefix: &str,
+) -> Result<(), InstructionError> {
+    for AccountMeta {
+        pubkey,
+        is_signer,
+        is_writable,
+    } in accounts_meta
+    {
+        if *is_writable && pubkey == &CALLBACK_SIGNER {
+            ic_msg!(
+                invoke_context,
+                "{}: the callback signer PDA cannot be a writable account in callbacks",
+                err_prefix,
+            );
+            return Err(InstructionError::Immutable);
+        }
+
+        if *is_signer && pubkey != &CALLBACK_SIGNER {
+            ic_msg!(
+                invoke_context,
+                "{}: only the callback signer PDA can be a signer in callbacks (invalid signer: '{}')",
+                err_prefix,
+                pubkey,
+            );
+            return Err(InstructionError::IncorrectAuthority);
+        }
+
+        if pubkey == &validator_authority_id() {
+            ic_msg!(
+                invoke_context,
+                "{}: the validator authority cannot be used in callbacks",
+                err_prefix,
+            );
+            return Err(InstructionError::IncorrectAuthority);
+        }
+    }
+    Ok(())
 }

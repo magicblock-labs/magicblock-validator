@@ -251,6 +251,15 @@ fn assert_first_commit(
             assert_eq!(slot, &test_clock.slot);
             assert_eq!(actual_payer, payer);
             assert_eq!(intent_bundle.get_all_committed_pubkeys().as_slice(), committees);
+            assert!(intent_bundle.commit.is_none());
+            assert!(intent_bundle.commit_and_undelegate.is_none());
+            if expected_request_undelegation {
+                assert!(intent_bundle.commit_finalize.is_none());
+                assert!(intent_bundle.commit_finalize_and_undelegate.is_some());
+            } else {
+                assert!(intent_bundle.commit_finalize.is_some());
+                assert!(intent_bundle.commit_finalize_and_undelegate.is_none());
+            }
             let _instruction = MagicBlockInstruction::ScheduledCommitSent((*id, 0));
             // TODO(edwin) @@@ this fails in CI only with the similar to the below
             //   left: [4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0]
@@ -1026,7 +1035,7 @@ mod tests {
             ix.data.as_slice(),
             transaction_accounts,
             ix.accounts,
-            Err(InstructionError::NotEnoughAccountKeys),
+            Err(InstructionError::MissingAccount),
         );
     }
 
