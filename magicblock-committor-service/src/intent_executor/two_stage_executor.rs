@@ -23,10 +23,7 @@ use crate::{
         IntentExecutionReport,
     },
     persist::{IntentPersister, IntentPersisterImpl},
-    tasks::{
-        commit_task::CommitTask, task_strategist::TransactionStrategy,
-        BaseTaskImpl, FinalizeTask,
-    },
+    tasks::{task_strategist::TransactionStrategy, BaseTaskImpl, FinalizeTask},
     transaction_preparator::TransactionPreparator,
 };
 
@@ -206,10 +203,23 @@ where
                 let optimized_tasks =
                     self.state.commit_strategy.optimized_tasks.as_slice();
                 let task_index = err.task_index();
-                if let Some(BaseTaskImpl::Commit(task)) = task_index
+                if let Some(delegated_account) = task_index
                     .and_then(|index| optimized_tasks.get(index as usize))
+                    .and_then(|task| match task {
+                        BaseTaskImpl::Commit(task) => {
+                            Some(task.committed_account.pubkey)
+                        }
+                        BaseTaskImpl::CommitFinalize(task) => {
+                            Some(task.committed_account.pubkey)
+                        }
+                        _ => None,
+                    })
                 {
-                    self.handle_unfinalized_account_error(signature, task, transaction_preparator)
+                    self.handle_unfinalized_account_error(
+                        signature,
+                        delegated_account,
+                        transaction_preparator,
+                    )
                     .await
                 } else {
                     error!(
@@ -261,13 +271,11 @@ where
     async fn handle_unfinalized_account_error<T: TransactionPreparator>(
         &self,
         failed_signature: &Option<Signature>,
-        task: &CommitTask,
+        delegated_account: Pubkey,
         transaction_preparator: &T,
     ) -> IntentExecutorResult<ControlFlow<(), TransactionStrategy>> {
-        let finalize_task: BaseTaskImpl = FinalizeTask {
-            delegated_account: task.committed_account.pubkey,
-        }
-        .into();
+        let finalize_task: BaseTaskImpl =
+            FinalizeTask { delegated_account }.into();
         prepare_and_execute_strategy(
             &self.intent_client,
             &self.authority,
