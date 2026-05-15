@@ -49,36 +49,96 @@ impl From<ScheduleTaskRequest> for DbTask {
 
 #[derive(Debug, Clone, Copy)]
 pub struct CrankSuccessUpdate {
+    /// Task whose successful execution should be persisted.
     pub task_id: i64,
+    /// Actual execution timestamp to store in `tasks.last_execution_millis`.
     pub last_execution_millis: i64,
+    /// Optimistic concurrency token. The update is applied only if the current
+    /// row still has this `tasks.updated_at` value.
     pub expected_updated_at: i64,
 }
 
 #[derive(Debug, Clone, Copy)]
 pub struct CrankSuccessRemoval {
+    /// Task whose final successful execution should remove it from `tasks`.
     pub task_id: i64,
+    /// Optimistic concurrency token. The removal is applied only if the current
+    /// row still has this `tasks.updated_at` value.
     pub expected_updated_at: i64,
 }
 
 #[derive(Debug, Clone)]
 pub struct CrankFailedMove {
+    /// Task to remove from `tasks` and append to `failed_tasks`.
     pub task_id: i64,
+    /// Optimistic concurrency token. The move is applied only if the current
+    /// row still has this `tasks.updated_at` value.
     pub expected_updated_at: i64,
+    /// Error text persisted in `failed_tasks.error` when the move succeeds.
     pub error: String,
 }
 
 #[derive(Debug, Clone, Copy)]
 pub struct CrankRetryCheck {
+    /// Task that failed but remains retryable.
     pub task_id: i64,
+    /// Optimistic concurrency token. The retry is considered valid only if the
+    /// current row still has this `tasks.updated_at` value.
     pub expected_updated_at: i64,
 }
 
+/// Applied metadata for a successful task execution that remains scheduled.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CrankSuccessUpdateCompletion {
+    /// Optimistic token supplied by the caller and matched against the previous
+    /// `tasks.updated_at` value.
+    pub expected_updated_at: i64,
+    /// New `tasks.updated_at` value written by the database transaction.
+    pub new_updated_at: i64,
+}
+
+/// Applied metadata for a task removed after its final successful execution.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CrankSuccessRemovalCompletion {
+    /// Optimistic token supplied by the caller and matched against the previous
+    /// `tasks.updated_at` value before deleting the row.
+    pub expected_updated_at: i64,
+}
+
+/// Applied metadata for a task moved from `tasks` to `failed_tasks`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CrankFailedMoveCompletion {
+    /// Optimistic token supplied by the caller and matched against the previous
+    /// `tasks.updated_at` value before moving the task.
+    pub expected_updated_at: i64,
+}
+
+/// Applied metadata for a retryable failed task that still matches its DB row.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CrankRetryCheckCompletion {
+    /// Actual `tasks.updated_at` value read from the database. This equals the
+    /// requested optimistic token when the retry check succeeds.
+    pub current_updated_at: i64,
+}
+
+/// Results for a crank batch transaction keyed by task ID.
+///
+/// Each map contains only entries whose optimistic `expected_updated_at` token
+/// matched the database state and whose corresponding DB operation succeeded.
 #[derive(Debug, Default)]
 pub struct CrankBatchCompletion {
-    pub success_updates: HashMap<i64, (i64, i64)>,
-    pub success_removals: HashMap<i64, i64>,
-    pub failed_moves: HashMap<i64, i64>,
-    pub retry_checks: HashMap<i64, i64>,
+    /// Continued successful executions. Values include both the matched
+    /// optimistic token and the new `tasks.updated_at` written by the DB.
+    pub success_updates: HashMap<i64, CrankSuccessUpdateCompletion>,
+    /// Final successful executions removed from `tasks`. Values contain the
+    /// matched optimistic token used for the delete.
+    pub success_removals: HashMap<i64, CrankSuccessRemovalCompletion>,
+    /// Failed executions moved to `failed_tasks`. Values contain the matched
+    /// optimistic token used for the move.
+    pub failed_moves: HashMap<i64, CrankFailedMoveCompletion>,
+    /// Retryable failed executions whose `tasks` row still exists unchanged.
+    /// Values contain the actual `tasks.updated_at` read from the DB.
+    pub retry_checks: HashMap<i64, CrankRetryCheckCompletion>,
 }
 
 #[derive(Debug, Clone)]
@@ -436,9 +496,13 @@ impl SchedulerDatabase {
                 ],
             )?;
             if affected == 1 {
-                completion
-                    .success_updates
-                    .insert(update.task_id, (update.expected_updated_at, now));
+                completion.success_updates.insert(
+                    update.task_id,
+                    CrankSuccessUpdateCompletion {
+                        expected_updated_at: update.expected_updated_at,
+                        new_updated_at: now,
+                    },
+                );
             }
         }
 
@@ -448,9 +512,12 @@ impl SchedulerDatabase {
                 params![removal.task_id, removal.expected_updated_at],
             )?;
             if affected == 1 {
-                completion
-                    .success_removals
-                    .insert(removal.task_id, removal.expected_updated_at);
+                completion.success_removals.insert(
+                    removal.task_id,
+                    CrankSuccessRemovalCompletion {
+                        expected_updated_at: removal.expected_updated_at,
+                    },
+                );
             }
         }
 
@@ -466,9 +533,12 @@ impl SchedulerDatabase {
                      VALUES (?, ?, ?)",
                     params![now, failed.task_id, failed.error],
                 )?;
-                completion
-                    .failed_moves
-                    .insert(failed.task_id, failed.expected_updated_at);
+                completion.failed_moves.insert(
+                    failed.task_id,
+                    CrankFailedMoveCompletion {
+                        expected_updated_at: failed.expected_updated_at,
+                    },
+                );
             }
         }
 
@@ -482,7 +552,12 @@ impl SchedulerDatabase {
                 )
                 .optional()?;
             if let Some(updated_at) = matched {
-                completion.retry_checks.insert(check.task_id, updated_at);
+                completion.retry_checks.insert(
+                    check.task_id,
+                    CrankRetryCheckCompletion {
+                        current_updated_at: updated_at,
+                    },
+                );
             }
         }
 

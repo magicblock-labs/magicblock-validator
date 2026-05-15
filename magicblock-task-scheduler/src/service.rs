@@ -441,25 +441,33 @@ impl TaskSchedulerService {
             Ok(result) => {
                 for (task, res) in &result {
                     if let Err(e) = res {
-                        if completion.failed_moves.get(&task.id)
-                            == Some(&task.updated_at)
-                            || completion.retry_checks.get(&task.id)
-                                == Some(&task.updated_at)
+                        if completion.failed_moves.get(&task.id).is_some_and(
+                            |m| m.expected_updated_at == task.updated_at,
+                        ) || completion
+                            .retry_checks
+                            .get(&task.id)
+                            .is_some_and(|c| {
+                                c.current_updated_at == task.updated_at
+                            })
                         {
                             self.apply_crank_failure_outcome(task, e)?;
                         }
-                    } else if let Some(&(expected, updated_at)) =
+                    } else if let Some(update) =
                         completion.success_updates.get(&task.id)
                     {
-                        if expected == task.updated_at {
+                        if update.expected_updated_at == task.updated_at {
                             self.apply_crank_success_outcome(
                                 task,
                                 now_millis,
-                                Some(updated_at),
+                                Some(update.new_updated_at),
                             )?;
                         }
-                    } else if completion.success_removals.get(&task.id)
-                        == Some(&task.updated_at)
+                    } else if completion
+                        .success_removals
+                        .get(&task.id)
+                        .is_some_and(|r| {
+                            r.expected_updated_at == task.updated_at
+                        })
                     {
                         self.apply_crank_success_outcome(
                             task, now_millis, None,
@@ -469,11 +477,11 @@ impl TaskSchedulerService {
             }
             Err(ref e) => {
                 for task in &batch {
-                    if completion.failed_moves.get(&task.id)
-                        == Some(&task.updated_at)
-                        || completion.retry_checks.get(&task.id)
-                            == Some(&task.updated_at)
-                    {
+                    if completion.failed_moves.get(&task.id).is_some_and(|m| {
+                        m.expected_updated_at == task.updated_at
+                    }) || completion.retry_checks.get(&task.id).is_some_and(
+                        |c| c.current_updated_at == task.updated_at,
+                    ) {
                         self.apply_crank_failure_outcome(task, e)?;
                     }
                 }
