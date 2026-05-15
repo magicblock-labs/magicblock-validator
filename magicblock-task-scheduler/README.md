@@ -23,10 +23,15 @@
 The task scheduler can be configured via the validator configuration:
 
 ```toml
-[task_scheduler]
+[task-scheduler]
 reset = false
-millis_per_tick = 100
+min-interval = "10ms"
+failed-task-retention = "7d"
+failed-task-cleanup-interval = "1h"
 ```
+
+Failed task execution records and failed scheduling records older than
+`failed-task-retention` are deleted every `failed-task-cleanup-interval`.
 
 ## Security Considerations
 
@@ -38,4 +43,4 @@ millis_per_tick = 100
 - Database is indexed for efficient task retrieval
 - Tasks are executed in batches to minimize overhead
 - Failed task executions are logged but don't block other tasks
-- Database operations are optimized for high-frequency access 
+- Database operations are optimized for high-frequency access
