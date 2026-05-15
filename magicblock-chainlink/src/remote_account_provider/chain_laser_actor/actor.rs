@@ -52,8 +52,6 @@ pub struct Slots {
     /// Updated via `update()` when slot updates are received from GRPC.
     /// Metrics are automatically captured on updates.
     pub chain_slot: ChainSlot,
-    /// Whether this GRPC endpoint supports backfilling subscription updates.
-    pub supports_backfill: bool,
 }
 
 // -----------------
@@ -216,11 +214,7 @@ impl<H: StreamHandle, S: StreamFactory<H>> ChainLaserActor<H, S> {
             mpsc::channel(MESSAGE_CHANNEL_SIZE);
         let commitment = grpc_commitment_from_solana(commitment);
 
-        let chain_slot = if slots.supports_backfill {
-            Some(slots.chain_slot.clone())
-        } else {
-            None
-        };
+        let chain_slot = Some(slots.chain_slot.clone());
         let stream_manager = StreamManager::new(
             StreamManagerConfig::from(grpc_config),
             stream_factory,
@@ -487,22 +481,13 @@ impl<H: StreamHandle, S: StreamFactory<H>> ChainLaserActor<H, S> {
     }
 
     /// Computes a `from_slot` for backfilling based on the
-    /// current chain slot. Returns `None` if backfilling is not
-    /// supported or the slot is still `0` (i.e. uninitialized).
+    /// current chain slot. Returns `None` if the slot is still
+    /// `0` (i.e. uninitialized).
     ///
     /// Logs the chosen mode so operators can distinguish:
-    /// - "backfill not supported" (endpoint flag)
     /// - "backfill skipped (chain_slot still 0)" (bootstrap window)
     /// - "backfill from <slot>" (normal operation)
     fn compute_from_slot(&self) -> Option<u64> {
-        if !self.slots.supports_backfill {
-            trace!(
-                client_id = %self.client_id,
-                "compute_from_slot: backfill not supported by endpoint, \
-                 from_slot=None",
-            );
-            return None;
-        }
         match self.slots.chain_slot.compute_from_slot() {
             None => {
                 debug!(

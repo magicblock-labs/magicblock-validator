@@ -61,10 +61,9 @@ impl ChainUpdatesClient {
             Grpc {
                 url,
                 label,
-                supports_backfill,
                 api_key,
             } => {
-                debug!(url = %url, "Initializing Helius Laser client for gRPC endpoint");
+                debug!(url = %url, "Initializing gRPC client");
                 let client_id = format!(
                     "grpc:{label}-{}",
                     CLIENT_ID.fetch_add(1, Ordering::SeqCst)
@@ -72,7 +71,6 @@ impl ChainUpdatesClient {
 
                 let slots = Slots {
                     chain_slot: ChainSlot::new(chain_slot),
-                    supports_backfill: *supports_backfill,
                 };
                 Ok(ChainUpdatesClient::Laser(
                     ChainLaserClientImpl::new_from_url(
