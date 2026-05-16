@@ -1,9 +1,6 @@
 use serde::{Deserialize, Serialize};
-use solana_program::{
-    account_info::AccountInfo,
-    instruction::{AccountMeta, Instruction},
-};
 
+use crate::compat::{AccountInfo, AccountMeta, Instruction};
 use crate::Pubkey;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

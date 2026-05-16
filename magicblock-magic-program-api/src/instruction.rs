@@ -1,12 +1,13 @@
 use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
-use solana_program::{instruction::Instruction, pubkey::Pubkey};
 
 use crate::args::{
     AddActionCallbackArgs, MagicBaseIntentArgs, MagicIntentBundleArgs,
     ScheduleTaskArgs,
 };
+use crate::compat::Instruction;
+use crate::Pubkey;
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
 pub enum MagicBlockInstruction {
