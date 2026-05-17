@@ -29,9 +29,13 @@ jobs:
         with:
           script: |
             const slackUserIdByGithub = JSON.parse(process.env.SLACK_USER_ID_BY_GITHUB);
+            const escapeMrkdwn = (value) => String(value ?? "")
+              .replace(/&/g, "&amp;")
+              .replace(/</g, "&lt;")
+              .replace(/>/g, "&gt;");
             const mention = (login) => {
               const slackUserId = slackUserIdByGithub[(login || "").toLowerCase()];
-              return slackUserId ? `<@${slackUserId}>` : `*${login}*`;
+              return slackUserId ? `<@${slackUserId}>` : `*${escapeMrkdwn(login)}*`;
             };
 
             const pr = context.payload.pull_request;
@@ -65,10 +69,10 @@ jobs:
 
             const reviewers = [
               ...userReviewers.map(mention),
-              ...teamReviewers.map((team) => `*${team}*`),
+              ...teamReviewers.map((team) => `*${escapeMrkdwn(team)}*`),
             ];
             const reviewerText = reviewers.length > 0 ? reviewers.join(", ") : "No reviewers found";
-            const text = `👀 Review requested from ${reviewerText} on PR #${pr.number}: <${pr.html_url}|${pr.title}> by *${pr.user.login}*.`;
+            const text = `👀 Review requested from ${reviewerText} on PR #${pr.number}: <${pr.html_url}|${escapeMrkdwn(pr.title)}> by *${escapeMrkdwn(pr.user.login)}*.`;
 
             core.setOutput("text", text);
 
@@ -89,7 +93,7 @@ jobs:
               ]
             }
         env:
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_PR_REVIEW_WEBHOOK_URL }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
 
   notify-review:
     if: github.event_name == 'pull_request_review' && github.event.action == 'submitted'
@@ -101,9 +105,13 @@ jobs:
         with:
           script: |
             const slackUserIdByGithub = JSON.parse(process.env.SLACK_USER_ID_BY_GITHUB);
+            const escapeMrkdwn = (value) => String(value ?? "")
+              .replace(/&/g, "&amp;")
+              .replace(/</g, "&lt;")
+              .replace(/>/g, "&gt;");
             const mention = (login) => {
               const slackUserId = slackUserIdByGithub[(login || "").toLowerCase()];
-              return slackUserId ? `<@${slackUserId}>` : `*${login}*`;
+              return slackUserId ? `<@${slackUserId}>` : `*${escapeMrkdwn(login)}*`;
             };
 
             const pr = context.payload.pull_request;
@@ -115,7 +123,7 @@ jobs:
               commented: "commented",
             };
             const state = states[context.payload.review.state] || context.payload.review.state || "submitted";
-            const text = `📝 ${mention(author)} *${reviewer}* submitted a *${state}* review for PR #${pr.number}: <${pr.html_url}|${pr.title}>.`;
+            const text = `📝 ${mention(author)} *${escapeMrkdwn(reviewer)}* submitted a *${escapeMrkdwn(state)}* review for PR #${pr.number}: <${pr.html_url}|${escapeMrkdwn(pr.title)}>.`;
 
             core.setOutput("text", text);
 
@@ -136,4 +144,4 @@ jobs:
               ]
             }
         env:
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_PR_REVIEW_WEBHOOK_URL }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
