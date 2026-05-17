@@ -39,39 +39,13 @@ jobs:
             };
 
             const pr = context.payload.pull_request;
-            const owner = context.repo.owner;
-            const repo = context.repo.repo;
-            let userReviewers = [];
-            let teamReviewers = [];
-
-            try {
-              const { data } = await github.rest.pulls.listRequestedReviewers({
-                owner,
-                repo,
-                pull_number: pr.number,
-              });
-
-              userReviewers = (data.users || []).map((reviewer) => reviewer.login).filter(Boolean);
-              teamReviewers = (data.teams || [])
-                .map((team) => team.name || team.slug)
-                .filter(Boolean);
-            } catch (error) {
-              core.warning(`Unable to fetch requested reviewers from GitHub API: ${error.message}`);
-            }
-
-            if (userReviewers.length === 0 && context.payload.requested_reviewer?.login) {
-              userReviewers = [context.payload.requested_reviewer.login];
-            }
-
-            if (teamReviewers.length === 0 && context.payload.requested_team?.slug) {
-              teamReviewers = [context.payload.requested_team.name || context.payload.requested_team.slug];
-            }
-
-            const reviewers = [
-              ...userReviewers.map(mention),
-              ...teamReviewers.map((team) => `*${escapeMrkdwn(team)}*`),
-            ];
-            const reviewerText = reviewers.length > 0 ? reviewers.join(", ") : "No reviewers found";
+            const requestedReviewer = context.payload.requested_reviewer?.login;
+            const requestedTeam = context.payload.requested_team;
+            const reviewerText = requestedReviewer
+              ? mention(requestedReviewer)
+              : requestedTeam
+                ? `*${escapeMrkdwn(requestedTeam.name || requestedTeam.slug)}*`
+                : "No reviewers found";
             const text = `👀 Review requested from ${reviewerText} on PR #${pr.number}: <${pr.html_url}|${escapeMrkdwn(pr.title)}> by *${escapeMrkdwn(pr.user.login)}*.`;
 
             core.setOutput("text", text);
