@@ -80,7 +80,6 @@ pub mod mock {
             self
         }
 
-        #[allow(dead_code)]
         pub fn dump_account_keys(&self, include_blacklisted: bool) -> String {
             let mut output = String::new();
             output.push_str("AccountsBank {\n");

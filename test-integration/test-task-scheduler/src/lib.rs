@@ -170,6 +170,7 @@ pub fn wait_for_committed_count(
     validator: &mut Child,
 ) {
     let now = Instant::now();
+    let mut last_status: Option<String> = None;
     while now.elapsed() < max_timeout {
         let account = expect!(
             ctx.try_chain_client().and_then(|client| client
@@ -180,17 +181,42 @@ pub fn wait_for_committed_count(
                 ))),
             validator
         );
-        let state = expect!(MainAccount::try_decode(&account.data), validator);
-        if state.count == expected_count {
-            return;
+        match MainAccount::try_decode(&account.data) {
+            Ok(state) => {
+                if state.count == expected_count {
+                    return;
+                }
+                last_status = Some(format!(
+                    "committee={} observed_count={} expected_count={}",
+                    committee, state.count, expected_count
+                ));
+            }
+            Err(err) => {
+                eprintln!(
+                    "Failed to decode committed account for committee {}: {} (data_len={})",
+                    committee,
+                    err,
+                    account.data.len()
+                );
+                last_status = Some(format!(
+                    "committee={} decode_error={} data_len={} expected_count={}",
+                    committee,
+                    err,
+                    account.data.len(),
+                    expected_count
+                ));
+            }
         }
         expect!(ctx.wait_for_next_slot_ephem(), validator);
     }
     assert!(
         false,
         cleanup(validator),
-        "Timed out waiting for committed count {} on {}",
+        "Timed out waiting to observe committed count {} for committee {} before timeout; last observed status: {}",
         expected_count,
-        committee
+        committee,
+        last_status
+            .as_deref()
+            .unwrap_or("no successful poll result recorded")
     );
 }
