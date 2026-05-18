@@ -23,7 +23,7 @@ jobs:
     if: github.event_name == 'pull_request' && github.event.action == 'review_requested'
     runs-on: ubuntu-latest
     steps:
-      - name: Build Slack review request message
+      - name: Build Slack review message
         id: message
         uses: actions/github-script@v7
         with:
