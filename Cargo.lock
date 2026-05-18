@@ -4217,6 +4217,7 @@ dependencies = [
 name = "magicblock-rpc-client"
 version = "0.10.0"
 dependencies = [
+ "futures-util",
  "solana-account",
  "solana-account-decoder-client-types",
  "solana-address-lookup-table-interface",
