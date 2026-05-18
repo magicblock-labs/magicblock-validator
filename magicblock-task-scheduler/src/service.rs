@@ -5,10 +5,9 @@ use std::{
         atomic::{AtomicU64, Ordering},
         Arc,
     },
-    task::{Context, Poll},
 };
 
-use futures_util::{task::noop_waker, StreamExt};
+use futures_util::{future::poll_fn, FutureExt, StreamExt};
 use magicblock_config::config::TaskSchedulerConfig;
 use magicblock_core::link::transactions::ScheduledTasksRx;
 use magicblock_ledger::LatestBlock;
@@ -179,9 +178,10 @@ impl TaskSchedulerService {
                     let first = expired.into_inner();
                     self.task_queue_keys.remove(&first.id);
                     let mut batch = vec![first];
-                    let waker = noop_waker();
-                    let mut cx = Context::from_waker(&waker);
-                    while let Poll::Ready(Some(expired)) = self.task_queue.poll_expired(&mut cx) {
+                    while let Some(expired) = poll_fn(|cx| self.task_queue.poll_expired(cx))
+                        .now_or_never()
+                        .flatten()
+                    {
                         let task = expired.into_inner();
                         self.task_queue_keys.remove(&task.id);
                         batch.push(task);
