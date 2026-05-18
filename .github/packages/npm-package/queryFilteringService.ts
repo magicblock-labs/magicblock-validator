@@ -98,13 +98,13 @@ function trySystemQueryFilteringService(): void {
 
   if (error !== null) {
     console.error(`Failed to get version of global binary: ${error}`);
-    return;
+    process.exit(1);
   }
   if (binaryVersion !== PACKAGE_VERSION) {
     console.error(
       `Globally installed query-filtering-service version is not correct. Expected "${PACKAGE_VERSION}", found "${binaryVersion}".`,
     );
-    return;
+    process.exit(1);
   }
 
   runQueryFilteringService(absoluteBinaryPath);
