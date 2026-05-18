@@ -66,6 +66,10 @@ pub const DEFAULT_METRICS_COLLECT_FREQUENCY_SEC: u64 = 30;
 
 // Task Scheduler Defaults
 pub const DEFAULT_TASK_SCHEDULER_MIN_INTERVAL_MILLIS: u64 = 10;
+pub const DEFAULT_TASK_SCHEDULER_FAILED_TASK_RETENTION_SECS: u64 =
+    14 * 24 * 60 * 60; // 14 days
+pub const DEFAULT_TASK_SCHEDULER_FAILED_TASK_CLEANUP_INTERVAL_SECS: u64 =
+    60 * 60; // 1 hour
 
 // ChainLink Defaults
 /// Default delay in milliseconds between resubscribing to accounts after a pubsub reconnection
