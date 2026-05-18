@@ -54,7 +54,10 @@ enum AppEvent {
     Log(LogEntry),
 }
 
-pub async fn run_tui(config: TuiConfig) -> io::Result<()> {
+pub async fn run_tui(
+    config: TuiConfig,
+    validator_log_rx: Option<UnboundedReceiver<LogEntry>>,
+) -> io::Result<()> {
     let cancel = CancellationToken::new();
     setup_panic_hook();
     let mut terminal = init_terminal()?;
@@ -116,7 +119,20 @@ pub async fn run_tui(config: TuiConfig) -> io::Result<()> {
             )));
         }
     }
-    spawn_logs_subscription(local_ws_url, event_tx.clone(), cancel.clone());
+    if let Some(validator_log_rx) = validator_log_rx {
+        spawn_transaction_subscription(
+            local_ws_url,
+            event_tx.clone(),
+            cancel.clone(),
+        );
+        spawn_validator_log_feed(
+            validator_log_rx,
+            event_tx.clone(),
+            cancel.clone(),
+        );
+    } else {
+        spawn_logs_subscription(local_ws_url, event_tx.clone(), cancel.clone());
+    }
 
     let result = run_event_loop(
         &mut terminal,
@@ -527,6 +543,92 @@ fn spawn_logs_subscription(
 
             if !cancel.is_cancelled() {
                 tokio::time::sleep(Duration::from_millis(800)).await;
+            }
+        }
+    });
+}
+
+fn spawn_transaction_subscription(
+    ws_url: String,
+    event_tx: UnboundedSender<AppEvent>,
+    cancel: CancellationToken,
+) {
+    tokio::spawn(async move {
+        while !cancel.is_cancelled() {
+            match PubsubClient::new(&ws_url).await {
+                Ok(client) => match client
+                    .logs_subscribe(
+                        RpcTransactionLogsFilter::All,
+                        RpcTransactionLogsConfig { commitment: None },
+                    )
+                    .await
+                {
+                    Ok((mut stream, unsubscribe)) => {
+                        loop {
+                            tokio::select! {
+                                _ = cancel.cancelled() => break,
+                                item = stream.next() => {
+                                    match item {
+                                        Some(update) => {
+                                            let _ = event_tx.send(AppEvent::Transaction(
+                                                TransactionSource::Local,
+                                                TransactionEntry {
+                                                    signature: update.value.signature,
+                                                    slot: update.context.slot,
+                                                    success: update.value.err.is_none(),
+                                                    timestamp: Local::now(),
+                                                    accounts: vec![],
+                                                },
+                                            ));
+                                        }
+                                        None => break,
+                                    }
+                                }
+                            }
+                        }
+                        let _ = unsubscribe().await;
+                    }
+                    Err(err) => {
+                        let _ = event_tx.send(AppEvent::Log(LogEntry::new(
+                            Level::ERROR,
+                            "tx_subscribe".to_string(),
+                            format!("Subscription failed: {}", err),
+                        )));
+                    }
+                },
+                Err(err) => {
+                    let _ = event_tx.send(AppEvent::Log(LogEntry::new(
+                        Level::ERROR,
+                        "tx_subscribe".to_string(),
+                        format!("Connection failed: {}", err),
+                    )));
+                }
+            }
+
+            if !cancel.is_cancelled() {
+                tokio::time::sleep(Duration::from_millis(800)).await;
+            }
+        }
+    });
+}
+
+fn spawn_validator_log_feed(
+    mut log_rx: UnboundedReceiver<LogEntry>,
+    event_tx: UnboundedSender<AppEvent>,
+    cancel: CancellationToken,
+) {
+    tokio::spawn(async move {
+        loop {
+            tokio::select! {
+                _ = cancel.cancelled() => break,
+                maybe_log = log_rx.recv() => {
+                    match maybe_log {
+                        Some(log) => {
+                            let _ = event_tx.send(AppEvent::Log(log));
+                        }
+                        None => break,
+                    }
+                }
             }
         }
     });

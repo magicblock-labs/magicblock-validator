@@ -9,9 +9,9 @@ use solana_sdk::{
     native_token::LAMPORTS_PER_SOL,
     signature::{Keypair, Signature},
     signer::Signer,
-    system_instruction,
     transaction::Transaction,
 };
+use solana_system_interface::instruction as system_instruction;
 use tracing::*;
 
 const VALIDATOR_WS: &str = "ws://127.0.0.1:8900";

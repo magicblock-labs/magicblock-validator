@@ -203,7 +203,16 @@ fn handle_key(
         KeyCode::Char('3') => state.select_tab_by_shortcut(3),
         KeyCode::Char('4') => state.select_tab_by_shortcut(4),
         KeyCode::Up | KeyCode::Char('k') => state.scroll_up(),
-        KeyCode::Down | KeyCode::Char('j') => state.scroll_down(visible_height),
+        KeyCode::Down | KeyCode::Char('j') => match state.active_tab {
+            Tab::Logs => state.scroll_logs_down_for_terminal(
+                terminal_area.width,
+                terminal_area.height,
+            ),
+            Tab::Transactions | Tab::RemoteTransactions => {
+                state.scroll_down(visible_height)
+            }
+            Tab::Config => {}
+        },
         KeyCode::PageUp => {
             for _ in 0..10 {
                 state.scroll_up();
@@ -211,7 +220,16 @@ fn handle_key(
         }
         KeyCode::PageDown => {
             for _ in 0..10 {
-                state.scroll_down(visible_height);
+                match state.active_tab {
+                    Tab::Logs => state.scroll_logs_down_for_terminal(
+                        terminal_area.width,
+                        terminal_area.height,
+                    ),
+                    Tab::Transactions | Tab::RemoteTransactions => {
+                        state.scroll_down(visible_height)
+                    }
+                    Tab::Config => {}
+                }
             }
         }
         KeyCode::Home => match state.active_tab {
@@ -222,10 +240,10 @@ fn handle_key(
             Tab::Config => {}
         },
         KeyCode::End => match state.active_tab {
-            Tab::Logs => {
-                state.log_scroll =
-                    state.logs.len().saturating_sub(visible_height);
-            }
+            Tab::Logs => state.scroll_logs_end_for_terminal(
+                terminal_area.width,
+                terminal_area.height,
+            ),
             Tab::Transactions | Tab::RemoteTransactions => {
                 state.scroll_transactions_end(visible_height);
             }

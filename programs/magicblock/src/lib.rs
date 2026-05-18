@@ -6,7 +6,6 @@ pub mod magic_sys;
 mod mutate_accounts;
 mod schedule_task;
 mod schedule_transactions;
-mod toggle_executable_check;
 pub use magic_context::MagicContext;
 pub mod magic_scheduled_base_intent;
 pub mod magicblock_processor;

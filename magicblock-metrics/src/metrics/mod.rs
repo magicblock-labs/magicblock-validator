@@ -35,8 +35,8 @@ const SECONDS_1_9: [f64; 9] = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0];
 lazy_static::lazy_static! {
     pub (crate) static ref REGISTRY: Registry = Registry::new_custom(Some("mbv".to_string()), None).unwrap();
 
-    static ref SLOT_COUNT: IntCounter = IntCounter::new(
-        "slot_count", "Slot Count",
+    static ref SLOT_GAUGE: IntGauge = IntGauge::new(
+        "slot_gauge", "Validator slot"
     ).unwrap();
 
     // Needs to be a gauge so we can set it directly
@@ -497,6 +497,26 @@ lazy_static::lazy_static! {
         &["client_id"],
     ).unwrap();
 
+    static ref PUBSUB_UNSUBSCRIBE_TIMEOUT_COUNT: IntCounterVec =
+        IntCounterVec::new(
+            Opts::new(
+                "pubsub_unsubscribe_timeout_count",
+                "Number of unsubscribe calls that timed out",
+            ),
+            &["client_id", "scope"],
+        )
+        .unwrap();
+
+    static ref PUBSUB_IDLE_CONNECTIONS_PRUNED_COUNT: IntCounterVec =
+        IntCounterVec::new(
+            Opts::new(
+                "pubsub_idle_connections_pruned_count",
+                "Number of idle pooled connections pruned",
+            ),
+            &["client_id"],
+        )
+        .unwrap();
+
     // -----------------
     // GRPC Streams
     // -----------------
@@ -541,7 +561,7 @@ pub(crate) fn register() {
                     .expect("collector can't be registered");
             };
         }
-        register!(SLOT_COUNT);
+        register!(SLOT_GAUGE);
         register!(CHAIN_SLOT_GAUGE);
         register!(CACHED_CLONE_OUTPUTS_COUNT);
         register!(LEDGER_SIZE_GAUGE);
@@ -608,14 +628,16 @@ pub(crate) fn register() {
         register!(PUBSUB_CLIENT_RESUBSCRIBE_DELAY_MILLISECONDS_GAUGE);
         register!(PUBSUB_CLIENT_RESUBSCRIBED_GAUGE);
         register!(PUBSUB_CLIENT_CONNECTIONS_GAUGE);
+        register!(PUBSUB_UNSUBSCRIBE_TIMEOUT_COUNT);
+        register!(PUBSUB_IDLE_CONNECTIONS_PRUNED_COUNT);
         register!(GRPC_OPTIMIZED_STREAMS_GAUGE);
         register!(GRPC_UNOPTIMIZED_STREAMS_GAUGE);
         register!(GRPC_TOTAL_STREAMS_GAUGE);
     });
 }
 
-pub fn inc_slot() {
-    SLOT_COUNT.inc();
+pub fn set_slot(slot: u64) {
+    SLOT_GAUGE.set(slot as i64);
 }
 
 pub fn set_chain_slot(value: u64) {
@@ -925,6 +947,18 @@ pub fn set_pubsub_client_connections_count(client_id: &str, count: usize) {
     PUBSUB_CLIENT_CONNECTIONS_GAUGE
         .with_label_values(&[client_id])
         .set(count as i64);
+}
+
+pub fn inc_pubsub_unsubscribe_timeout_count(client_id: &str, scope: &str) {
+    PUBSUB_UNSUBSCRIBE_TIMEOUT_COUNT
+        .with_label_values(&[client_id, scope])
+        .inc();
+}
+
+pub fn inc_pubsub_idle_connections_pruned_count(client_id: &str, count: u64) {
+    PUBSUB_IDLE_CONNECTIONS_PRUNED_COUNT
+        .with_label_values(&[client_id])
+        .inc_by(count);
 }
 
 pub fn set_grpc_optimized_streams_gauge(client_id: &str, count: usize) {

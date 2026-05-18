@@ -30,7 +30,14 @@ pub(crate) async fn unsubscribe_and_notify_removal<T: ChainPubsubClient>(
             true
         }
         Err(err) => {
-            warn!(error = ?err, "Failed to unsubscribe");
+            if matches!(
+                err,
+                RemoteAccountProviderError::AccountSubscriptionDoesNotExist(_)
+            ) {
+                debug!(error = ?err, "Failed to unsubscribe");
+            } else {
+                warn!(error = ?err, "Failed to unsubscribe");
+            }
             false
         }
     }

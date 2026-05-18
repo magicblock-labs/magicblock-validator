@@ -1,81 +1,45 @@
-use std::ffi::OsStr;
-
+use clap::ValueEnum;
 use magicblock_accounts_db::AccountsDb;
 use num_format::{Locale, ToFormattedString};
 use solana_account::ReadableAccount;
 use solana_clock::Epoch;
 use solana_pubkey::Pubkey;
-use structopt::StructOpt;
-use tabular::{Row, Table};
 
 // -----------------
 // SortAccounts
 // -----------------
-#[derive(Debug, Default, StructOpt)]
+#[derive(Clone, Copy, Debug, Default, ValueEnum)]
 pub enum SortAccounts {
     #[default]
+    #[value(alias = "p")]
     Pubkey,
+    #[value(alias = "o")]
     Owner,
+    #[value(alias = "l")]
     Lamports,
+    #[value(alias = "e")]
     Executable,
+    #[value(alias = "d")]
     DataLen,
+    #[value(alias = "r")]
     RentEpoch,
-}
-
-impl From<&OsStr> for SortAccounts {
-    fn from(s: &OsStr) -> Self {
-        use SortAccounts::*;
-        let lower_case = s.to_str().unwrap().to_lowercase();
-        let s = lower_case.as_str();
-        if s.starts_with('o') {
-            Owner
-        } else if s.starts_with('l') {
-            Lamports
-        } else if s.starts_with('e') {
-            Executable
-        } else if s.starts_with('d') {
-            DataLen
-        } else if s.starts_with('r') {
-            RentEpoch
-        } else {
-            Pubkey
-        }
-    }
 }
 
 // -----------------
 // FilterAccounts
 // -----------------
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, ValueEnum)]
 pub enum FilterAccounts {
     Executable,
     NonExecutable,
+    #[value(alias = "on")]
     OnCurve,
+    #[value(alias = "off")]
     OffCurve,
 }
 
-impl From<&str> for FilterAccounts {
-    fn from(s: &str) -> Self {
-        use FilterAccounts::*;
-        match s {
-            "executable" => Executable,
-            "non-executable" => NonExecutable,
-            _ if s.starts_with("on") => OnCurve,
-            _ if s.starts_with("off") => OffCurve,
-            _ => panic!("Invalid filter {}", s),
-        }
-    }
-}
-
 impl FilterAccounts {
-    pub(crate) fn from_strings(s: &[String]) -> Vec<Self> {
-        let filters =
-            s.iter().map(|s| Self::from(s.as_str())).collect::<Vec<_>>();
-        Self::sanitize(&filters);
-        filters
-    }
-
-    fn sanitize(filters: &[Self]) {
+    pub(crate) fn sanitize(filters: &[Self]) {
         if filters.contains(&Self::OnCurve) && filters.contains(&Self::OffCurve)
         {
             panic!("Cannot filter by both curve and pda");
@@ -181,43 +145,69 @@ pub fn print_accounts(
         return;
     }
 
-    let table_alignment = if print_rent_epoch {
-        "{:<}  {:<}  {:>}  {:<}  {:>}  {:<}  {:>}"
-    } else {
-        "{:<}  {:<}  {:>}  {:<}  {:>}  {:<}"
-    };
-    let mut table = Table::new(table_alignment);
-    let mut row = Row::new()
-        .with_cell("Pubkey")
-        .with_cell("Owner")
-        .with_cell("Lamports")
-        .with_cell("Executable")
-        .with_cell("Data(Bytes)")
-        .with_cell("Curve");
+    let mut headers = vec![
+        "Pubkey",
+        "Owner",
+        "Lamports",
+        "Executable",
+        "Data(Bytes)",
+        "Curve",
+    ];
     if print_rent_epoch {
-        row.add_cell("Rent Epoch");
+        headers.push("Rent Epoch");
     }
-    table.add_row(row);
-
-    fn add_row(table: &mut Table, meta: AccountInfo, include_rent_epoch: bool) {
-        let oncurve = meta.pubkey.is_on_curve();
-        let mut row = Row::new()
-            .with_cell(meta.pubkey.to_string())
-            .with_cell(meta.owner.to_string())
-            .with_cell(meta.lamports.to_formatted_string(&Locale::en))
-            .with_cell(meta.executable)
-            .with_cell(meta.data.len())
-            .with_cell(if oncurve { "On" } else { "Off" });
-        if include_rent_epoch {
-            row.add_cell(meta.rent_epoch.to_formatted_string(&Locale::en));
-        }
-        table.add_row(row);
-    }
-
-    for acc in accounts {
-        add_row(&mut table, acc, print_rent_epoch);
-    }
-
+    let rows = accounts
+        .into_iter()
+        .map(|acc| {
+            let mut row = vec![
+                acc.pubkey.to_string(),
+                acc.owner.to_string(),
+                acc.lamports.to_formatted_string(&Locale::en),
+                acc.executable.to_string(),
+                acc.data.len().to_string(),
+                if acc.pubkey.is_on_curve() {
+                    "On".to_string()
+                } else {
+                    "Off".to_string()
+                },
+            ];
+            if print_rent_epoch {
+                row.push(acc.rent_epoch.to_formatted_string(&Locale::en));
+            }
+            row
+        })
+        .collect::<Vec<_>>();
     println!("Accounts at slot {}", slot);
-    println!("{}", table);
+    print_rows(&headers, &rows);
+}
+
+fn print_rows(headers: &[&str], rows: &[Vec<String>]) {
+    let mut widths = headers
+        .iter()
+        .map(|header| header.len())
+        .collect::<Vec<_>>();
+    for row in rows {
+        for (idx, cell) in row.iter().enumerate() {
+            widths[idx] = widths[idx].max(cell.len());
+        }
+    }
+
+    print_row(headers.iter().copied(), &widths);
+    print_row(widths.iter().map(|width| "-".repeat(*width)), &widths);
+    for row in rows {
+        print_row(row.iter().map(String::as_str), &widths);
+    }
+}
+
+fn print_row<'a>(
+    cells: impl IntoIterator<Item = impl AsRef<str> + 'a>,
+    widths: &[usize],
+) {
+    for (idx, (cell, width)) in cells.into_iter().zip(widths).enumerate() {
+        if idx > 0 {
+            print!("  ");
+        }
+        print!("{:<width$}", cell.as_ref(), width = *width);
+    }
+    println!();
 }

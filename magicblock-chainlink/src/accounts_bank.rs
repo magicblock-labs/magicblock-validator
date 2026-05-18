@@ -62,8 +62,7 @@ pub mod mock {
             // NOTE: that the validator will also have to set flip the delegated flag like
             //       we do here.
             //       See programs/magicblock/src/schedule_transactions/process_schedule_commit.rs :172
-            self.set_owner(pubkey, dlp_api::dlp::id())
-                .undelegate(pubkey);
+            self.set_owner(pubkey, dlp_api::id()).undelegate(pubkey);
         }
 
         pub fn set_undelegating(
@@ -81,12 +80,10 @@ pub mod mock {
             self
         }
 
-        #[allow(dead_code)]
         pub fn dump_account_keys(&self, include_blacklisted: bool) -> String {
             let mut output = String::new();
             output.push_str("AccountsBank {\n");
-            let blacklisted_accounts =
-                blacklisted_accounts(&Pubkey::default(), &Pubkey::default());
+            let blacklisted_accounts = blacklisted_accounts(&Pubkey::default());
             for pubkey in self.accounts.lock().unwrap().keys() {
                 if !include_blacklisted && blacklisted_accounts.contains(pubkey)
                 {
@@ -112,7 +109,7 @@ pub mod mock {
         }
         fn remove_where(
             &self,
-            predicate: impl Fn(&Pubkey, &AccountSharedData) -> bool,
+            mut predicate: impl FnMut(&Pubkey, &AccountSharedData) -> bool,
         ) -> AccountsDbResult<usize> {
             let mut accounts = self.accounts.lock().unwrap();
             let initial_len = accounts.len();

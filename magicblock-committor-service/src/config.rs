@@ -1,12 +1,17 @@
+use std::time::Duration;
+
 use solana_commitment_config::CommitmentConfig;
 
 use crate::compute_budget::ComputeBudgetConfig;
+
+pub const DEFAULT_ACTIONS_TIMEOUT: Duration = Duration::from_secs(60);
 
 #[derive(Debug, Clone)]
 pub struct ChainConfig {
     pub rpc_uri: String,
     pub commitment: CommitmentConfig,
     pub compute_budget_config: ComputeBudgetConfig,
+    pub actions_timeout: Duration,
 }
 
 impl ChainConfig {
@@ -15,6 +20,7 @@ impl ChainConfig {
             rpc_uri: "https://api.devnet.solana.com".to_string(),
             commitment: CommitmentConfig::confirmed(),
             compute_budget_config,
+            actions_timeout: DEFAULT_ACTIONS_TIMEOUT,
         }
     }
 
@@ -23,6 +29,7 @@ impl ChainConfig {
             rpc_uri: "https://api.mainnet-beta.solana.com".to_string(),
             commitment: CommitmentConfig::confirmed(),
             compute_budget_config,
+            actions_timeout: DEFAULT_ACTIONS_TIMEOUT,
         }
     }
 
@@ -31,6 +38,7 @@ impl ChainConfig {
             rpc_uri: "http://localhost:7799".to_string(),
             commitment: CommitmentConfig::processed(),
             compute_budget_config,
+            actions_timeout: DEFAULT_ACTIONS_TIMEOUT,
         }
     }
 }

@@ -4,7 +4,7 @@ pub use magicblock_core::token_programs::{
 use solana_account::Account;
 use solana_program::{program_option::COption, program_pack::Pack};
 use solana_pubkey::Pubkey;
-use solana_sysvar::rent::Rent;
+use solana_rent::Rent;
 use spl_token::state::{Account as SplAccount, AccountState};
 
 /// Creates a test ATA (Associated Token Account) with initialized state and zero balance.
@@ -50,7 +50,7 @@ pub fn create_eata_account(
     let lamports = Rent::default().minimum_balance(data.len());
 
     let account_owner = if delegate {
-        dlp_api::dlp::id()
+        dlp_api::id()
     } else {
         EATA_PROGRAM_ID
     };

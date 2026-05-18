@@ -14,14 +14,6 @@
   </p>
 </div>
 
----
-
-## 🚧 Status: Under Construction
-
-> **⚠️ Warning:** The Ephemeral Validator is in **active development**. All APIs are subject to change. This code is **unaudited**. Use at your own risk.
-
----
-
 ## 📖 Overview
 
 The **MagicBlock Validator** is a specialized Solana Virtual Machine (SVM) runtime designed to power **Ephemeral Rollups**. It enables seamless scaling by cloning accounts and programs just-in-time from a reference cluster (like Solana Mainnet or Devnet), executing transactions in a high-performance environment, and settling state changes back to the base chain.
@@ -31,6 +23,15 @@ The **MagicBlock Validator** is a specialized Solana Virtual Machine (SVM) runti
 - **Just-in-Time Cloning**: Automatically fetches accounts from a remote cluster when accessed.
 - **State Settlement**: Batches and commits state transitions back to the reference chain.
 - **Developer Friendly**: Can be used as a super-charged development environment compatible with standard Solana tooling.
+
+## Packages
+
+| Package                                                                              | Description                                                    | Version                                                                                                                                                            | Docs                                                                                         |
+|:-------------------------------------------------------------------------------------|:---------------------------------------------------------------|:-------------------------------------------------------------------------------------------------------------------------------------------------------------------|:---------------------------------------------------------------------------------------------|
+| `@magicblock-labs/ephemeral-validator`                                               | Released binaries of the ephemeral validator                   | [![npm](https://img.shields.io/npm/v/@magicblock-labs/ephemeral-validator.svg?color=blue)](https://www.npmjs.com/package/@magicblock-labs/ephemeral-validator) | [![Docs](https://img.shields.io/badge/docs-tutorials-blue)](https://docs.magicblock.xyz)     |
+| `ephemeral-rollups-sdk`                                                              | Rust SDK for integrating with the Ephemeral Rollups            | [![Crates.io](https://img.shields.io/crates/v/ephemeral-rollups-sdk?color=blue)](https://crates.io/crates/ephemeral-rollups-sdk)                                   | [![Docs.rs](https://img.shields.io/badge/docs-tutorials-blue)](https://docs.magicblock.xyz/) |
+| `@magicblock-labs/ephemeral-rollups-sdk`                                             | TypeScript helper for preparing transactions (@solana/web3.js) | [![npm](https://img.shields.io/npm/v/@magicblock-labs/ephemeral-rollups-sdk.svg?color=blue)](https://www.npmjs.com/package/@magicblock-labs/ephemeral-rollups-sdk) | [![Docs](https://img.shields.io/badge/docs-tutorials-blue)](https://docs.magicblock.xyz)     |
+| `@magicblock-labs/ephemeral-rollups-kit`                                             | TypeScript helper for preparing transactions (@solana/kit)     | [![npm](https://img.shields.io/npm/v/@magicblock-labs/ephemeral-rollups-kit.svg?color=blue)](https://www.npmjs.com/package/@magicblock-labs/ephemeral-rollups-kit) | [![Docs](https://img.shields.io/badge/docs-tutorials-blue)](https://docs.magicblock.xyz)     |
 
 ## 🚀 Getting Started
 
@@ -156,6 +157,15 @@ Open Source is at the heart of what we do at MagicBlock. We believe building sof
 ## 📄 License
 
 This project is licensed under the **Business Source License 1.1**. See [LICENSE.md](./LICENSE.md) for details.
+
+
+---
+
+## 🚧 Status: Under Construction
+
+> **⚠️ Warning:** The Ephemeral Validator is in **active development**. All APIs are subject to change. This code is **unaudited**. Use at your own risk.
+
+---
 
 ---
 

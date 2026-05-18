@@ -5,6 +5,7 @@ pub mod intent_scheduler;
 use std::sync::Arc;
 
 pub use intent_execution_engine::BroadcastedIntentExecutionResult;
+use magicblock_core::traits::ActionsCallbackScheduler;
 use magicblock_program::magic_scheduled_base_intent::ScheduledIntentBundle;
 use magicblock_rpc_client::MagicblockRpcClient;
 use magicblock_table_mania::TableMania;
@@ -16,11 +17,10 @@ use crate::{
         intent_execution_engine::{IntentExecutionEngine, ResultSubscriber},
     },
     intent_executor::{
-        intent_executor_factory::IntentExecutorFactoryImpl,
+        intent_executor_factory::{ExecutorConfig, IntentExecutorFactoryImpl},
         task_info_fetcher::{CacheTaskInfoFetcher, RpcTaskInfoFetcher},
     },
     persist::IntentPersister,
-    ComputeBudgetConfig,
 };
 
 pub struct IntentExecutionManager<D: DB> {
@@ -30,21 +30,27 @@ pub struct IntentExecutionManager<D: DB> {
 }
 
 impl<D: DB> IntentExecutionManager<D> {
-    pub fn new<P: IntentPersister>(
+    pub fn new<P, A>(
         rpc_client: MagicblockRpcClient,
         db: D,
         task_info_fetcher: Arc<CacheTaskInfoFetcher<RpcTaskInfoFetcher>>,
         intent_persister: Option<P>,
         table_mania: TableMania,
-        compute_budget_config: ComputeBudgetConfig,
-    ) -> Self {
+        executor_config: ExecutorConfig,
+        actions_callback_executor: A,
+    ) -> Self
+    where
+        A: ActionsCallbackScheduler,
+        P: IntentPersister,
+    {
         let db = Arc::new(db);
 
         let executor_factory = IntentExecutorFactoryImpl {
             rpc_client,
             table_mania,
-            compute_budget_config,
+            executor_config,
             task_info_fetcher,
+            actions_callback_executor,
         };
 
         let (sender, receiver) = mpsc::channel(1000);

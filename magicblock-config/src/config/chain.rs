@@ -37,20 +37,18 @@ pub struct ChainOperationConfig {
     pub fqdn: Url,
 
     /// Frequency at which the validator claims accrued fees from the chain.
-    #[serde(with = "humantime")]
+    #[serde(default = "default_claim_fees_frequency", with = "humantime")]
     pub claim_fees_frequency: Duration,
+}
+
+fn default_claim_fees_frequency() -> Duration {
+    Duration::from_secs(24 * 60 * 60)
 }
 
 /// Configuration for ChainLink (Cloning/BaseChain synchronization)
 #[derive(Deserialize, Serialize, Debug, Clone)]
 #[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
 pub struct ChainLinkConfig {
-    /// If true, initializes address lookup tables for oracle accounts.
-    pub prepare_lookup_tables: bool,
-
-    /// Amount of lamports to automatically airdrop to feepayer accounts on clone.
-    pub auto_airdrop_lamports: u64,
-
     /// The maximum number of non-delegated accounts to track simultaneously for
     /// updates.
     pub max_monitored_accounts: usize,
@@ -72,8 +70,6 @@ pub struct ChainLinkConfig {
 impl Default for ChainLinkConfig {
     fn default() -> Self {
         Self {
-            prepare_lookup_tables: false,
-            auto_airdrop_lamports: 0,
             max_monitored_accounts: consts::DEFAULT_MAX_MONITORED_ACCOUNTS,
             remove_confined_accounts: false,
             allowed_programs: None,

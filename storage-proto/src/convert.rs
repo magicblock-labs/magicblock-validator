@@ -18,7 +18,6 @@ use solana_message::{
 use solana_pubkey::Pubkey;
 use solana_signature::Signature;
 use solana_transaction::{versioned::VersionedTransaction, Transaction};
-use solana_transaction_context::TransactionReturnData;
 use solana_transaction_error::TransactionError;
 use solana_transaction_status::{
     ConfirmedBlock, EntrySummary, InnerInstruction, InnerInstructions, Reward,
@@ -27,7 +26,10 @@ use solana_transaction_status::{
     VersionedConfirmedBlock, VersionedTransactionWithStatusMeta,
 };
 
-use crate::{StoredExtendedRewards, StoredTransactionStatusMeta};
+use crate::{
+    StoredExtendedRewards, StoredTransactionReturnData,
+    StoredTransactionStatusMeta,
+};
 
 pub mod generated {
     include!(concat!(
@@ -442,6 +444,7 @@ impl From<TransactionStatusMeta> for generated::TransactionStatusMeta {
             loaded_addresses,
             return_data,
             compute_units_consumed,
+            cost_units: _,
         } = value;
         let err = match status {
             Ok(()) => None,
@@ -484,7 +487,14 @@ impl From<TransactionStatusMeta> for generated::TransactionStatusMeta {
             .map(|key| <Pubkey as AsRef<[u8]>>::as_ref(&key).into())
             .collect();
         let return_data_none = return_data.is_none();
-        let return_data = return_data.map(|return_data| return_data.into());
+        let return_data =
+            return_data.map(|return_data| generated::ReturnData {
+                program_id: <Pubkey as AsRef<[u8]>>::as_ref(
+                    &return_data.program_id,
+                )
+                .into(),
+                data: return_data.data,
+            });
 
         Self {
             err,
@@ -589,12 +599,7 @@ impl TryFrom<generated::TransactionStatusMeta> for TransactionStatusMeta {
                     Self::Error::new(bincode::ErrorKind::Custom(err))
                 })?,
         };
-        let return_data = if return_data_none {
-            None
-        } else {
-            return_data.map(|return_data| return_data.into())
-        };
-        Ok(Self {
+        let mut meta = Self {
             status,
             fee,
             pre_balances,
@@ -605,9 +610,20 @@ impl TryFrom<generated::TransactionStatusMeta> for TransactionStatusMeta {
             post_token_balances,
             rewards,
             loaded_addresses,
-            return_data,
+            return_data: None,
             compute_units_consumed,
-        })
+            cost_units: None,
+        };
+        if !return_data_none {
+            if let Some(return_data) = return_data {
+                let data =
+                    meta.return_data.get_or_insert_with(Default::default);
+                data.program_id =
+                    Pubkey::try_from(return_data.program_id).unwrap();
+                data.data = return_data.data;
+            }
+        }
+        Ok(meta)
     }
 }
 
@@ -710,8 +726,8 @@ impl From<generated::MessageAddressTableLookup> for MessageAddressTableLookup {
     }
 }
 
-impl From<TransactionReturnData> for generated::ReturnData {
-    fn from(value: TransactionReturnData) -> Self {
+impl From<StoredTransactionReturnData> for generated::ReturnData {
+    fn from(value: StoredTransactionReturnData) -> Self {
         Self {
             program_id: <Pubkey as AsRef<[u8]>>::as_ref(&value.program_id)
                 .into(),
@@ -720,7 +736,7 @@ impl From<TransactionReturnData> for generated::ReturnData {
     }
 }
 
-impl From<generated::ReturnData> for TransactionReturnData {
+impl From<generated::ReturnData> for StoredTransactionReturnData {
     fn from(value: generated::ReturnData) -> Self {
         Self {
             program_id: Pubkey::try_from(value.program_id).unwrap(),
@@ -773,6 +789,7 @@ impl From<generated::InnerInstruction> for InnerInstruction {
     }
 }
 
+#[allow(deprecated)]
 impl TryFrom<tx_by_addr::TransactionError> for TransactionError {
     type Error = &'static str;
 
@@ -833,7 +850,7 @@ impl TryFrom<tx_by_addr::TransactionError> for TransactionError {
                     41 => InstructionError::ProgramFailedToCompile,
                     42 => InstructionError::Immutable,
                     43 => InstructionError::IncorrectAuthority,
-                    44 => InstructionError::BorshIoError(String::new()),
+                    44 => InstructionError::BorshIoError,
                     45 => InstructionError::AccountNotRentExempt,
                     46 => InstructionError::InvalidAccountOwner,
                     47 => InstructionError::ArithmeticOverflow,
@@ -918,6 +935,7 @@ impl TryFrom<tx_by_addr::TransactionError> for TransactionError {
     }
 }
 
+#[allow(deprecated)]
 impl From<TransactionError> for tx_by_addr::TransactionError {
     fn from(transaction_error: TransactionError) -> Self {
         Self {
@@ -1173,7 +1191,7 @@ impl From<TransactionError> for tx_by_addr::TransactionError {
                             InstructionError::IncorrectAuthority => {
                                 tx_by_addr::InstructionErrorType::IncorrectAuthority
                             }
-                            InstructionError::BorshIoError(_) => {
+                            InstructionError::BorshIoError => {
                                 tx_by_addr::InstructionErrorType::BorshIoError
                             }
                             InstructionError::AccountNotRentExempt => {
@@ -1849,7 +1867,7 @@ mod test {
 
         let transaction_error = TransactionError::InstructionError(
             10,
-            InstructionError::MissingAccount,
+            InstructionError::AccountBorrowFailed,
         );
         let tx_by_addr_transaction_error: tx_by_addr::TransactionError =
             transaction_error.clone().into();
@@ -1883,6 +1901,17 @@ mod test {
         let transaction_error = TransactionError::InstructionError(
             10,
             InstructionError::NotEnoughAccountKeys,
+        );
+        let tx_by_addr_transaction_error: tx_by_addr::TransactionError =
+            transaction_error.clone().into();
+        assert_eq!(
+            transaction_error,
+            tx_by_addr_transaction_error.try_into().unwrap()
+        );
+
+        let transaction_error = TransactionError::InstructionError(
+            10,
+            InstructionError::MissingAccount,
         );
         let tx_by_addr_transaction_error: tx_by_addr::TransactionError =
             transaction_error.clone().into();
@@ -2066,7 +2095,6 @@ mod test {
                         }),
                     };
                     let transaction_error: TransactionError = tx_by_addr_error
-                        .clone()
                         .try_into()
                         .unwrap_or_else(|_| panic!("{error:?} conversion implemented?"));
                     assert_eq!(tx_by_addr_error, transaction_error.into());
@@ -2084,7 +2112,6 @@ mod test {
                                 transaction_details: None,
                             };
                             let transaction_error: TransactionError = tx_by_addr_error
-                                .clone()
                                 .try_into()
                                 .unwrap_or_else(|_| panic!("{ix_error:?} conversion implemented?"));
                             assert_eq!(tx_by_addr_error, transaction_error.into());
@@ -2101,7 +2128,7 @@ mod test {
                                 transaction_details: None,
                             };
                             let transaction_error: TransactionError =
-                                tx_by_addr_error.clone().try_into().unwrap();
+                                tx_by_addr_error.try_into().unwrap();
                             assert_eq!(tx_by_addr_error, transaction_error.into());
                         }
                     }
@@ -2113,7 +2140,6 @@ mod test {
                         transaction_details: None,
                     };
                     let transaction_error: TransactionError = tx_by_addr_error
-                        .clone()
                         .try_into()
                         .unwrap_or_else(|_| panic!("{error:?} conversion implemented?"));
                     assert_eq!(tx_by_addr_error, transaction_error.into());

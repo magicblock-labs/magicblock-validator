@@ -4,12 +4,13 @@ use magicblock_table_mania::{
     CREATE_AND_EXTEND_TABLE_CUS, DEACTIVATE_TABLE_CUS, EXTEND_TABLE_CUS,
     MAX_ENTRIES_AS_PART_OF_EXTEND,
 };
+use solana_address_lookup_table_interface::state::LookupTableMeta;
+use solana_commitment_config::CommitmentConfig;
 use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_sdk::{
-    address_lookup_table::state::LookupTableMeta, clock::Slot,
-    commitment_config::CommitmentConfig, native_token::LAMPORTS_PER_SOL,
-    signature::Keypair, signer::Signer,
+    clock::Slot, native_token::LAMPORTS_PER_SOL, signature::Keypair,
+    signer::Signer,
 };
 use test_kit::init_logger;
 use tracing::*;

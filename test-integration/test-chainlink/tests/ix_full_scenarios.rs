@@ -10,6 +10,7 @@ use magicblock_chainlink::{
 use solana_loader_v4_interface::state::LoaderV4Status;
 use solana_pubkey::Pubkey;
 use solana_sdk::{signature::Keypair, signer::Signer};
+use solana_sdk_ids::system_program;
 use test_chainlink::{
     accounts::{sanitized_transaction_with_accounts, TransactionAccounts},
     ixtest_context::IxtestContext,
@@ -71,7 +72,7 @@ async fn ixtest_accounts_for_tx_2_delegated_3_readonly_3_programs_one_native() {
 
     // Programs
     let program_flexi_counter = program_flexi_counter::id();
-    let program_system = solana_sdk::system_program::id();
+    let program_system = system_program::id();
 
     let tx_accounts = TransactionAccounts {
         readonly_accounts: vec![

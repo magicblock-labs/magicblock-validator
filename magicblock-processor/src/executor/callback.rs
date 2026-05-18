@@ -1,59 +1,44 @@
 use magicblock_accounts_db::traits::AccountsBank;
-use solana_account::{AccountSharedData, WritableAccount};
-use solana_feature_set::FeatureSet;
-use solana_fee::FeeFeatures;
-use solana_fee_structure::FeeDetails;
+use solana_account::AccountSharedData;
+use solana_precompile_error::PrecompileError;
 use solana_pubkey::Pubkey;
-use solana_sdk_ids::native_loader;
 use solana_svm::transaction_processing_callback::TransactionProcessingCallback;
-use solana_svm_transaction::svm_message::SVMMessage;
+use solana_svm_callback::InvokeContextCallback;
 
 use super::TransactionExecutor;
 
-/// Required implementation to use the executor within the SVM.
-impl TransactionProcessingCallback for TransactionExecutor {
-    fn account_matches_owners(
-        &self,
-        account: &Pubkey,
-        owners: &[Pubkey],
-    ) -> Option<usize> {
-        self.accountsdb.account_matches_owners(account, owners)
+impl InvokeContextCallback for TransactionExecutor {
+    fn is_precompile(&self, program_id: &Pubkey) -> bool {
+        agave_precompiles::is_precompile(program_id, |feature_id| {
+            self.feature_set.is_active(feature_id)
+        })
     }
 
+    fn process_precompile(
+        &self,
+        program_id: &Pubkey,
+        data: &[u8],
+        instruction_datas: Vec<&[u8]>,
+    ) -> Result<(), PrecompileError> {
+        let Some(precompile) =
+            agave_precompiles::get_precompile(program_id, |feature_id| {
+                self.feature_set.is_active(feature_id)
+            })
+        else {
+            return Err(PrecompileError::InvalidPublicKey);
+        };
+
+        precompile.verify(data, &instruction_datas, &self.feature_set)
+    }
+}
+
+impl TransactionProcessingCallback for TransactionExecutor {
     fn get_account_shared_data(
         &self,
         pubkey: &Pubkey,
-    ) -> Option<AccountSharedData> {
-        self.accountsdb.get_account(pubkey)
-    }
-
-    fn add_builtin_account(&self, name: &str, program_id: &Pubkey) {
-        if self.accountsdb.contains_account(program_id) {
-            return;
-        }
-
-        // Create a placeholder executable account for the builtin.
-        let mut account =
-            AccountSharedData::new(1, name.len(), &native_loader::ID);
-        account.set_data_from_slice(name.as_bytes());
-        account.set_executable(true);
-
-        let _ = self.accountsdb.insert_account(program_id, &account);
-    }
-
-    fn calculate_fee(
-        &self,
-        message: &impl SVMMessage,
-        lamports_per_signature: u64,
-        prioritization_fee: u64,
-        feature_set: &FeatureSet,
-    ) -> FeeDetails {
-        solana_fee::calculate_fee_details(
-            message,
-            lamports_per_signature == 0, // has_fee_waiver
-            lamports_per_signature,
-            prioritization_fee,
-            FeeFeatures::from(feature_set),
-        )
+    ) -> Option<(AccountSharedData, u64)> {
+        self.accountsdb
+            .get_account(pubkey)
+            .map(|account| (account, self.accountsdb.slot()))
     }
 }

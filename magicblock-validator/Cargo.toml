@@ -22,5 +22,5 @@ tokio = { workspace = true, features = ["rt-multi-thread"] }
 
 [features]
 default = []
-tokio-console = ["console-subscriber", "tokio/tracing"]
+tokio-console = ["console-subscriber", "tokio/tracing", "magicblock-core/tokio-console"]
 tui = ["magicblock-tui-client"]

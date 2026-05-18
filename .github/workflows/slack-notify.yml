@@ -1,199 +1,54 @@
-name: Notify Ready PR on Slack
+name: Notify PR Reviews on Slack
+
+env:
+  SLACK_USER_ID_BY_GITHUB: >-
+    {"gabrielepicco":"U05KBBGBNR2","bmuddha":"U07UA8EMWUB","thlorenz":"U07JZ8TNDCM","taco-paco":"U08EV480NBD","snawaz":"U09F31XPU9H","lucacillario":"U08P8EL2SUU","crypto-vincent":"U08NN43TV6Y","kuldotha":"U087F2UMJC9","sporicle":"U08UP615N9X","dodecahedr0x":"U08LDC1L81Z","jonasxchen":"U08L7DK6UAJ"}
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}-${{ github.event.review.id || github.event.requested_reviewer.login || github.event.requested_team.slug || github.run_id }}
+  cancel-in-progress: false
 
 permissions:
   contents: read
   pull-requests: read
-  checks: read
-  statuses: read
 
 on:
   pull_request:
-    types: [ready_for_review]
+    types: [review_requested]
+  pull_request_review:
+    types: [submitted]
 
 jobs:
-  notify:
-    if: github.event.action == 'ready_for_review'
+  notify-review-requested:
+    if: github.event_name == 'pull_request' && github.event.action == 'review_requested'
     runs-on: ubuntu-latest
     steps:
-      - name: Fetch requested reviewers
-        id: reviewers
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const owner = context.repo.owner;
-            const repo = context.repo.repo;
-            const prNumber = context.payload.pull_request.number;
-
-            let reviewerNames = [];
-            try {
-              const { data } = await github.rest.pulls.listRequestedReviewers({
-                owner,
-                repo,
-                pull_number: prNumber,
-              });
-
-              reviewerNames = [
-                ...(data.users || []),
-                ...(data.teams || []),
-              ].map((reviewer) => reviewer.login || reviewer.name || reviewer.slug);
-            } catch (error) {
-              core.warning(`Unable to fetch requested reviewers from GitHub API: ${error.message}`);
-            }
-
-            if (reviewerNames.length === 0) {
-              reviewerNames = (context.payload.pull_request.requested_reviewers || [])
-                .map((reviewer) => reviewer.login)
-                .filter(Boolean);
-            }
-
-            if (reviewerNames.length === 0) {
-              reviewerNames = ["No reviewers found"];
-            }
-
-            core.info(`Extracted reviewers: ${reviewerNames.join(", ")}`);
-            core.setOutput("reviewers", reviewerNames.join(", "));
-
-      - name: Evaluate PR readiness
-        id: readiness
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const owner = context.repo.owner;
-            const repo = context.repo.repo;
-            const prNumber = context.payload.pull_request.number;
-            const headSha = context.payload.pull_request.head.sha;
-
-            let unresolvedCount = 0;
-            try {
-              const query = `
-                query($owner: String!, $repo: String!, $number: Int!, $cursor: String) {
-                  repository(owner: $owner, name: $repo) {
-                    pullRequest(number: $number) {
-                      reviewThreads(first: 100, after: $cursor) {
-                        nodes { isResolved }
-                        pageInfo { hasNextPage endCursor }
-                      }
-                    }
-                  }
-                }
-              `;
-              let cursor = null;
-              while (true) {
-                const res = await github.graphql(query, {
-                  owner,
-                  repo,
-                  number: prNumber,
-                  cursor,
-                });
-                const threads = res.repository.pullRequest.reviewThreads;
-                unresolvedCount += threads.nodes.filter((thread) => !thread.isResolved).length;
-                if (!threads.pageInfo.hasNextPage) break;
-                cursor = threads.pageInfo.endCursor;
-              }
-            } catch (error) {
-              core.warning(`Unable to evaluate unresolved review threads: ${error.message}`);
-            }
-
-            const failingConclusions = new Set([
-              "failure",
-              "timed_out",
-              "cancelled",
-              "action_required",
-              "startup_failure",
-            ]);
-            const testPattern = /(integration tests|unit tests|ci-test|build project|\btest\b)/i;
-            const failingChecks = new Set();
-
-            try {
-              const checkRuns = await github.paginate(github.rest.checks.listForRef, {
-                owner,
-                repo,
-                ref: headSha,
-                per_page: 100,
-              });
-              for (const run of checkRuns) {
-                if (!testPattern.test(run.name || "")) continue;
-                if (run.status !== "completed") continue;
-                if (!failingConclusions.has(run.conclusion)) continue;
-                failingChecks.add(run.name);
-              }
-            } catch (error) {
-              core.warning(`Unable to evaluate check runs: ${error.message}`);
-            }
-
-            try {
-              // Use combined status to avoid false positives from historical statuses.
-              const combined = await github.rest.repos.getCombinedStatusForRef({
-                owner,
-                repo,
-                ref: headSha,
-              });
-              for (const status of combined.data.statuses || []) {
-                if (!testPattern.test(status.context || "")) continue;
-                if (status.state !== "failure" && status.state !== "error") continue;
-                failingChecks.add(status.context);
-              }
-            } catch (error) {
-              core.warning(`Unable to evaluate combined commit status: ${error.message}`);
-            }
-
-            const hasUnresolved = unresolvedCount > 0;
-            const hasFailingTests = failingChecks.size > 0;
-            const warning = hasUnresolved || hasFailingTests;
-
-            core.setOutput("warning", String(warning));
-            core.setOutput("has_unresolved", String(hasUnresolved));
-            core.setOutput("unresolved_count", String(unresolvedCount));
-            core.setOutput("has_failing_tests", String(hasFailingTests));
-            core.setOutput("failing_checks", Array.from(failingChecks).join(", "));
-
-      - name: Build Slack message
+      - name: Build Slack review message
         id: message
-        env:
-          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
-          PR_URL: ${{ github.event.pull_request.html_url }}
-          PR_TITLE: ${{ github.event.pull_request.title }}
-          PR_REVIEWERS: ${{ steps.reviewers.outputs.reviewers }}
-          WARNING: ${{ steps.readiness.outputs.warning }}
-          HAS_UNRESOLVED: ${{ steps.readiness.outputs.has_unresolved }}
-          UNRESOLVED_COUNT: ${{ steps.readiness.outputs.unresolved_count }}
-          HAS_FAILING_TESTS: ${{ steps.readiness.outputs.has_failing_tests }}
-          FAILING_CHECKS: ${{ steps.readiness.outputs.failing_checks }}
-        run: |
-          author="$PR_AUTHOR"
-          pr_url="$PR_URL"
-          pr_title="$PR_TITLE"
-          reviewers="$PR_REVIEWERS"
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const slackUserIdByGithub = JSON.parse(process.env.SLACK_USER_ID_BY_GITHUB);
+            const escapeMrkdwn = (value) => String(value ?? "")
+              .replace(/&/g, "&amp;")
+              .replace(/</g, "&lt;")
+              .replace(/>/g, "&gt;");
+            const mention = (login) => {
+              const slackUserId = slackUserIdByGithub[(login || "").toLowerCase()];
+              return slackUserId ? `<@${slackUserId}>` : `*${escapeMrkdwn(login)}*`;
+            };
 
-          if [ "$WARNING" = "true" ]; then
-            text="🚦 *${author}* marked PR as ready for review: <${pr_url}|${pr_title}>. Reviewers: *${reviewers}*. Please #${author} address all CodeRabbit comments and ensure tests are passing before setting PR in state ready for review."
-            details=""
+            const pr = context.payload.pull_request;
+            const requestedReviewer = context.payload.requested_reviewer?.login;
+            const requestedTeam = context.payload.requested_team;
+            const reviewerText = requestedReviewer
+              ? mention(requestedReviewer)
+              : requestedTeam
+                ? `*${escapeMrkdwn(requestedTeam.name || requestedTeam.slug)}*`
+                : "No reviewers found";
+            const text = `👀 Review requested from ${reviewerText} on PR #${pr.number}: <${pr.html_url}|${escapeMrkdwn(pr.title)}> by *${escapeMrkdwn(pr.user.login)}*.`;
 
-            if [ "$HAS_UNRESOLVED" = "true" ]; then
-              details="Unresolved review threads: $UNRESOLVED_COUNT."
-            fi
-
-            if [ "$HAS_FAILING_TESTS" = "true" ]; then
-              if [ -n "$details" ]; then
-                details="$details "
-              fi
-              details="${details}Failing checks: $FAILING_CHECKS."
-            fi
-
-            if [ -n "$details" ]; then
-              text="$(printf '%s\n%s' "$text" "$details")"
-            fi
-          else
-            text="👀 *${author}* has requested reviews from *${reviewers}* on PR: <${pr_url}|${pr_title}>."
-          fi
-
-          echo "text<<EOF" >> "$GITHUB_OUTPUT"
-          echo "$text" >> "$GITHUB_OUTPUT"
-          echo "EOF" >> "$GITHUB_OUTPUT"
+            core.setOutput("text", text);
 
       - name: Send Slack Notification
         uses: slackapi/slack-github-action@v1.24.0
@@ -206,6 +61,57 @@ jobs:
                   "type": "section",
                   "text": {
                     "type": "mrkdwn", 
+                    "text": ${{ toJson(steps.message.outputs.text) }}
+                  }
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+  notify-review:
+    if: github.event_name == 'pull_request_review' && github.event.action == 'submitted'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Build Slack review message
+        id: message
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const slackUserIdByGithub = JSON.parse(process.env.SLACK_USER_ID_BY_GITHUB);
+            const escapeMrkdwn = (value) => String(value ?? "")
+              .replace(/&/g, "&amp;")
+              .replace(/</g, "&lt;")
+              .replace(/>/g, "&gt;");
+            const mention = (login) => {
+              const slackUserId = slackUserIdByGithub[(login || "").toLowerCase()];
+              return slackUserId ? `<@${slackUserId}>` : `*${escapeMrkdwn(login)}*`;
+            };
+
+            const pr = context.payload.pull_request;
+            const reviewer = context.payload.review.user.login;
+            const author = pr.user.login;
+            const states = {
+              approved: "approved",
+              changes_requested: "changes requested",
+              commented: "commented",
+            };
+            const state = states[context.payload.review.state] || context.payload.review.state || "submitted";
+            const text = `📝 ${mention(author)} *${escapeMrkdwn(reviewer)}* submitted a *${escapeMrkdwn(state)}* review for PR #${pr.number}: <${pr.html_url}|${escapeMrkdwn(pr.title)}>.`;
+
+            core.setOutput("text", text);
+
+      - name: Send Slack Notification
+        uses: slackapi/slack-github-action@v1.24.0
+        with:
+          payload: |
+            {
+              "text": ${{ toJson(steps.message.outputs.text) }},
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
                     "text": ${{ toJson(steps.message.outputs.text) }}
                   }
                 }

@@ -32,8 +32,12 @@ impl HttpDispatcher {
             .iter()
             .zip(self.read_accounts_with_ensure(&pubkeys).await.into_iter())
             .map(|(pubkey, acc)| {
-                acc.map(|a| {
-                    LockedAccount::new(*pubkey, a).ui_encode(encoding, slice)
+                acc.filter(|account| {
+                    !Self::account_should_render_as_null(account)
+                })
+                .map(|account| {
+                    LockedAccount::new(*pubkey, account)
+                        .ui_encode(encoding, slice)
                 })
             })
             .collect::<Vec<_>>();

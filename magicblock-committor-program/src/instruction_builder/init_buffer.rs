@@ -1,8 +1,6 @@
-use solana_program::{
-    instruction::{AccountMeta, Instruction},
-    system_program,
-};
+use solana_program::instruction::{AccountMeta, Instruction};
 use solana_pubkey::Pubkey;
+use solana_sdk_ids::system_program;
 
 use crate::{instruction::CommittorInstruction, pdas};
 

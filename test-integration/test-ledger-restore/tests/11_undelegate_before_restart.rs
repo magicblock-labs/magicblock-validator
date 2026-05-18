@@ -49,16 +49,16 @@ fn test_restore_ledger_with_account_undelegated_before_restart() {
 
     // Original instance delegates and updates account
     let (mut validator, _, payer) = write(&ledger_path);
-    validator.kill().unwrap();
+    test_ledger_restore::kill_validator(&mut validator);
 
     // Undelegate account while validator is down (note we do this by starting
     // another instance, to use the same validator auth)
     let mut validator = update_counter_between_restarts(&payer);
-    validator.kill().unwrap();
+    test_ledger_restore::kill_validator(&mut validator);
 
     // Now we restart the validator pointing at the original ledger path
     let mut validator = read(&ledger_path, &payer);
-    validator.kill().unwrap();
+    test_ledger_restore::kill_validator(&mut validator);
 }
 
 fn write(ledger_path: &Path) -> (Child, u64, Keypair) {
@@ -156,7 +156,7 @@ fn update_counter_between_restarts(payer: &Keypair) -> Child {
     //         payer.pubkey()
     //     );
 
-    let ix = create_add_and_schedule_commit_ix(payer.pubkey(), 3, true);
+    let ix = create_add_and_schedule_commit_ix(payer.pubkey(), 3, true, None);
     let sig = confirm_tx_with_payer_ephem(ix, payer, &ctx, &mut validator);
     debug!("✅ Added 3 and scheduled commit to counter {counter_pda} with undelegation");
 

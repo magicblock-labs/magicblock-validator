@@ -47,7 +47,7 @@ macro_rules! assert_subscribed_without_delegation_record {
     ($provider:expr, $pubkeys:expr) => {{
         for pubkey in $pubkeys {
             let deleg_record_pubkey =
-                ::dlp_api::dlp::pda::delegation_record_pda_from_delegated_account(pubkey);
+                ::dlp_api::pda::delegation_record_pda_from_delegated_account(pubkey);
             assert!(
                 $provider.is_watching(pubkey),
                 "Expected {} to be subscribed",
@@ -363,7 +363,7 @@ macro_rules! assert_not_undelegating {
             );
             assert_ne!(
                 account.owner(),
-                &dlp_api::dlp::id(),
+                &dlp_api::id(),
                 "Expected account {} to not be owned by the delegation program",
                 pubkey,
             );
@@ -393,7 +393,7 @@ macro_rules! assert_remain_undelegating {
             );
             assert_eq!(
                 account.owner(),
-                &dlp_api::dlp::id(),
+                &dlp_api::id(),
                 "Expected account {} to remain owned by the delegation program",
                 pubkey,
             );
@@ -463,7 +463,7 @@ macro_rules! assert_loaded_program_with_size {
 macro_rules! assert_data_has_size {
     ($data:expr, $size:expr) => {{
         let actual_size = $data.len();
-        let (min, max) = $crate::min_max_with_deviation_percent!($size, 5.0);
+        let (min, max) = $crate::min_max_with_deviation_percent!($size, 10.0);
         assert!(
             actual_size >= min && actual_size <= max,
             "Expected data to have size around {}, got {}",

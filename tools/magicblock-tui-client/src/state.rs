@@ -114,6 +114,15 @@ impl LogEntry {
             message,
         }
     }
+
+    fn display_text(&self) -> String {
+        format!(
+            "{} ● {}: {}",
+            self.timestamp.format("%H:%M:%S%.3f"),
+            self.target,
+            sanitize_inline(&self.message),
+        )
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -634,6 +643,41 @@ impl TuiState {
         }
     }
 
+    pub fn scroll_logs_down_for_terminal(
+        &mut self,
+        terminal_width: u16,
+        terminal_height: u16,
+    ) {
+        let max =
+            self.log_scroll_max_for_terminal(terminal_width, terminal_height);
+        self.log_scroll = (self.log_scroll + 1).min(max);
+    }
+
+    pub fn scroll_logs_end_for_terminal(
+        &mut self,
+        terminal_width: u16,
+        terminal_height: u16,
+    ) {
+        self.log_scroll =
+            self.log_scroll_max_for_terminal(terminal_width, terminal_height);
+    }
+
+    fn log_scroll_max_for_terminal(
+        &self,
+        terminal_width: u16,
+        terminal_height: u16,
+    ) -> usize {
+        let content_width = terminal_width.max(1) as usize;
+        let content_height = terminal_height.saturating_sub(7).max(1) as usize;
+        let total_wrapped_height = self
+            .logs
+            .iter()
+            .map(|log| wrapped_text_height(&log.display_text(), content_width))
+            .sum::<usize>();
+
+        total_wrapped_height.saturating_sub(content_height)
+    }
+
     pub fn scroll_transactions_home(&mut self) {
         if let Some(pane) = self.active_transaction_pane_mut() {
             pane.scroll_home();
@@ -742,6 +786,23 @@ impl TuiState {
             TransactionSource::Remote => self.remote_transactions.as_mut(),
         }
     }
+}
+
+fn wrapped_text_height(text: &str, width: usize) -> usize {
+    let width = width.max(1);
+    text.split('\n')
+        .map(|segment| segment.chars().count().max(1).div_ceil(width))
+        .sum()
+}
+
+fn sanitize_inline(value: &str) -> String {
+    value
+        .chars()
+        .map(|ch| match ch {
+            '\r' | '\n' | '\t' => ' ',
+            _ => ch,
+        })
+        .collect()
 }
 
 fn contains_ignore_ascii_case(haystack: &str, needle: &str) -> bool {

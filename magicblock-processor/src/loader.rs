@@ -2,11 +2,10 @@ use std::{error::Error, path::PathBuf};
 
 use magicblock_accounts_db::AccountsDb;
 use solana_account::{AccountSharedData, WritableAccount};
-use solana_program::{
-    bpf_loader_upgradeable::{self, UpgradeableLoaderState},
-    rent::Rent,
-};
+use solana_loader_v3_interface::state::UpgradeableLoaderState;
+use solana_program::rent::Rent;
 use solana_pubkey::Pubkey;
+use solana_sdk_ids::bpf_loader_upgradeable;
 use tracing::debug;
 
 const UPGRADEABLE_LOADER_ID: Pubkey = bpf_loader_upgradeable::ID;
@@ -43,6 +42,7 @@ fn add_program(
         slot: 0,
         upgrade_authority_address: Some(Pubkey::default()),
     })?;
+    data.resize(UpgradeableLoaderState::size_of_programdata_metadata(), 0);
     data.extend_from_slice(elf);
 
     let mut account = AccountSharedData::new(

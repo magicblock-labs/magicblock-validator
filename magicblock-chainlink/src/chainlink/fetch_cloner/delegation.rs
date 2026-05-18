@@ -1,10 +1,6 @@
 use dlp_api::{
-    decrypt::Decrypt,
-    dlp::{
-        args::PostDelegationActions,
-        pda::delegation_record_pda_from_delegated_account,
-        state::DelegationRecord,
-    },
+    args::PostDelegationActions, decrypt::Decrypt,
+    pda::delegation_record_pda_from_delegated_account, state::DelegationRecord,
 };
 use magicblock_accounts_db::traits::AccountsBank;
 use magicblock_core::token_programs::{derive_eata, EATA_PROGRAM_ID};
@@ -16,13 +12,16 @@ use solana_pubkey::Pubkey;
 use solana_signer::Signer;
 use tracing::*;
 
-use super::FetchCloner;
+use super::{
+    subscription::{release_subs, SubscriptionRelease},
+    FetchCloner,
+};
 use crate::{
     chainlink::errors::{ChainlinkError, ChainlinkResult},
     cloner::{Cloner, DelegationActions},
     remote_account_provider::{
         ChainPubsubClient, ChainRpcClient, MatchSlotsConfig,
-        ResolvedAccountSharedData,
+        ResolvedAccountSharedData, SubscriptionReason,
     },
 };
 
@@ -179,9 +178,22 @@ where
 {
     let delegation_record_pubkey =
         delegation_record_pda_from_delegated_account(&account_pubkey);
-    let was_watching_deleg_record = this
-        .remote_account_provider
-        .is_watching(&delegation_record_pubkey);
+
+    let acquired_delegation_record_reason = this
+        .acquire_subscription_reason(
+            &delegation_record_pubkey,
+            SubscriptionReason::DelegationRecord,
+        )
+        .await
+        .map(|_| true)
+        .unwrap_or_else(|err| {
+            warn!(
+                pubkey = %delegation_record_pubkey,
+                error = ?err,
+                "Failed to acquire delegation record subscription reason"
+            );
+            false
+        });
 
     let res = match this
         .remote_account_provider
@@ -213,23 +225,28 @@ where
         Err(_) => None,
     };
 
-    if !was_watching_deleg_record
-        // Handle edge case where it was cloned in the meantime.
-        // The small possiblility of a fetch + clone of this delegation record being in process
-        // still exits, but it's negligible
-        && this
-            .accounts_bank
-            .get_account(&delegation_record_pubkey)
-            .is_none()
+    let mut releases = Vec::new();
+    // Handle edge case where it was cloned in the meantime.
+    // The small possibility of a fetch + clone of this delegation record being in process
+    // still exists, but it's negligible.
+    if this
+        .accounts_bank
+        .get_account(&delegation_record_pubkey)
+        .is_none()
     {
-        // We only subscribed to fetch the delegation record, so unsubscribe now
-        if let Err(err) = this
-            .remote_account_provider
-            .unsubscribe(&delegation_record_pubkey)
-            .await
-        {
-            warn!(pubkey = %delegation_record_pubkey, error = %err, "Failed to unsubscribe from delegation record");
-        }
+        releases.push(SubscriptionRelease::Pubkey {
+            pubkey: delegation_record_pubkey,
+            reason: SubscriptionReason::DirectAccount,
+        });
+    }
+    if acquired_delegation_record_reason {
+        releases.push(SubscriptionRelease::Pubkey {
+            pubkey: delegation_record_pubkey,
+            reason: SubscriptionReason::DelegationRecord,
+        });
+    }
+    if !releases.is_empty() {
+        release_subs(&this.remote_account_provider, releases).await;
     }
 
     res
@@ -237,7 +254,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use dlp_api::dlp::args::{
+    use dlp_api::args::{
         EncryptedBuffer, MaybeEncryptedAccountMeta, MaybeEncryptedInstruction,
         MaybeEncryptedIxData, MaybeEncryptedPubkey, PostDelegationActions,
     };
@@ -287,12 +304,12 @@ mod tests {
                     program_id: 1,
                     accounts: vec![
                         MaybeEncryptedAccountMeta::ClearText(
-                            dlp_api::dlp::compact::AccountMeta::new_readonly(
+                            dlp_api::compact::AccountMeta::new_readonly(
                                 0, true,
                             ),
                         ),
                         MaybeEncryptedAccountMeta::ClearText(
-                            dlp_api::dlp::compact::AccountMeta::new(2, false),
+                            dlp_api::compact::AccountMeta::new(2, false),
                         ),
                     ],
                     data: MaybeEncryptedIxData {
@@ -354,12 +371,12 @@ mod tests {
                     program_id: 2,
                     accounts: vec![
                         MaybeEncryptedAccountMeta::ClearText(
-                            dlp_api::dlp::compact::AccountMeta::new_readonly(
+                            dlp_api::compact::AccountMeta::new_readonly(
                                 0, true,
                             ),
                         ),
                         MaybeEncryptedAccountMeta::ClearText(
-                            dlp_api::dlp::compact::AccountMeta::new(1, false),
+                            dlp_api::compact::AccountMeta::new(1, false),
                         ),
                     ],
                     data: MaybeEncryptedIxData {

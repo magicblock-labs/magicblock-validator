@@ -1,5 +1,4 @@
 #![allow(unused)] // most of these utilities will come in useful later
-use std::cell::RefCell;
 
 use magicblock_magic_program_api::args::ShortAccountMeta;
 use solana_account::{
@@ -10,46 +9,63 @@ use solana_instruction::{error::InstructionError, AccountMeta};
 use solana_log_collector::ic_msg;
 use solana_program_runtime::invoke_context::InvokeContext;
 use solana_pubkey::Pubkey;
-use solana_transaction_context::TransactionContext;
+use solana_transaction_context::{
+    transaction_accounts::{AccountRef, AccountRefMut},
+    TransactionContext,
+};
 
-pub(crate) fn find_tx_index_of_instruction_account(
-    invoke_context: &InvokeContext,
-    transaction_context: &TransactionContext,
-    not_found_msg: &str,
-    pubkey: &Pubkey,
-) -> Result<u16, InstructionError> {
-    let ix_ctx = transaction_context.get_current_instruction_context()?;
-    let idx = {
-        let idx = ix_ctx
-            .find_index_of_instruction_account(transaction_context, pubkey)
-            .ok_or_else(|| {
-                ic_msg!(invoke_context, "{}: {}", not_found_msg, pubkey);
-                InstructionError::MissingAccount
-            })?;
-        ix_ctx.get_index_of_instruction_account_in_transaction(idx)
-    }?;
-    Ok(idx)
+pub(crate) struct InstructionAccount<'a, 'ix_data> {
+    transaction_context: &'a TransactionContext<'ix_data>,
+    instruction_idx: u16,
+    tx_idx: u16,
 }
 
-pub(crate) fn find_instruction_account<'a>(
+impl<'a, 'ix_data> InstructionAccount<'a, 'ix_data> {
+    pub(crate) fn to_account_shared_data(
+        &self,
+    ) -> Result<AccountSharedData, InstructionError> {
+        Ok(self.borrow()?.to_account_shared_data())
+    }
+
+    pub(crate) fn borrow(&self) -> Result<AccountRef<'_>, InstructionError> {
+        self.transaction_context
+            .accounts()
+            .try_borrow(self.tx_idx)
+            .map_err(|_| InstructionError::AccountBorrowFailed)
+    }
+
+    pub(crate) fn borrow_mut(
+        &self,
+    ) -> Result<AccountRefMut<'_>, InstructionError> {
+        self.transaction_context
+            .accounts()
+            .try_borrow_mut(self.tx_idx)
+            .map_err(|_| InstructionError::AccountBorrowFailed)
+    }
+}
+
+pub(crate) fn find_instruction_account<'a, 'ix_data>(
     invoke_context: &'a InvokeContext,
-    transaction_context: &'a TransactionContext,
+    transaction_context: &'a TransactionContext<'ix_data>,
     not_found_msg: &str,
     pubkey: &Pubkey,
-) -> Result<&'a RefCell<AccountSharedData>, InstructionError> {
-    let idx = find_tx_index_of_instruction_account(
-        invoke_context,
+) -> Result<InstructionAccount<'a, 'ix_data>, InstructionError> {
+    let ix_ctx = transaction_context.get_current_instruction_context()?;
+    let Some(tx_idx) = transaction_context.find_index_of_account(pubkey) else {
+        ic_msg!(invoke_context, "{}: {}", not_found_msg, pubkey);
+        return Err(InstructionError::MissingAccount);
+    };
+    let instruction_idx = ix_ctx.get_index_of_account_in_instruction(tx_idx)?;
+    Ok(InstructionAccount {
         transaction_context,
-        not_found_msg,
-        pubkey,
-    )?;
-    let acc = transaction_context.get_account_at_index(idx)?;
-    Ok(acc)
+        instruction_idx,
+        tx_idx,
+    })
 }
 
 pub(crate) fn find_instruction_account_owner<'a>(
     invoke_context: &'a InvokeContext,
-    transaction_context: &'a TransactionContext,
+    transaction_context: &'a TransactionContext<'_>,
     not_found_msg: &str,
     pubkey: &Pubkey,
 ) -> Result<Pubkey, InstructionError> {
@@ -59,42 +75,47 @@ pub(crate) fn find_instruction_account_owner<'a>(
         not_found_msg,
         pubkey,
     )?;
-    Ok(*acc.borrow().owner())
+    Ok(*acc.to_account_shared_data()?.owner())
 }
 
-pub(crate) fn get_instruction_account_with_idx(
-    transaction_context: &TransactionContext,
+pub(crate) fn get_instruction_account_with_idx<'a, 'ix_data>(
+    transaction_context: &'a TransactionContext<'ix_data>,
     idx: u16,
-) -> Result<&RefCell<AccountSharedData>, InstructionError> {
+) -> Result<InstructionAccount<'a, 'ix_data>, InstructionError> {
     let ix_ctx = transaction_context.get_current_instruction_context()?;
     let tx_idx = ix_ctx.get_index_of_instruction_account_in_transaction(idx)?;
-    let acc = transaction_context.get_account_at_index(tx_idx)?;
-    Ok(acc)
+    Ok(InstructionAccount {
+        transaction_context,
+        instruction_idx: idx,
+        tx_idx,
+    })
 }
 
 pub(crate) fn get_instruction_pubkey_and_account_with_idx(
-    transaction_context: &TransactionContext,
+    transaction_context: &TransactionContext<'_>,
     idx: u16,
 ) -> Result<(Pubkey, Account), InstructionError> {
-    let acc_shared =
+    let account_ref =
         get_instruction_account_with_idx(transaction_context, idx)?;
-    let account = Account::from(acc_shared.borrow().clone());
-    let pubkey = transaction_context.get_key_of_account_at_index(idx)?;
+    let account = account_ref.borrow()?;
+    let account = Account::from(account.to_account_shared_data());
+    let pubkey =
+        transaction_context.get_key_of_account_at_index(account_ref.tx_idx)?;
     Ok((*pubkey, account))
 }
 
 pub(crate) fn get_instruction_account_owner_with_idx(
-    transaction_context: &TransactionContext,
+    transaction_context: &TransactionContext<'_>,
     idx: u16,
 ) -> Result<Pubkey, InstructionError> {
     let acc = get_instruction_account_with_idx(transaction_context, idx)?;
-    Ok(*acc.borrow().owner())
+    Ok(*acc.to_account_shared_data()?.owner())
 }
 
-pub(crate) fn get_instruction_pubkey_with_idx(
-    transaction_context: &TransactionContext,
+pub(crate) fn get_instruction_pubkey_with_idx<'a>(
+    transaction_context: &'a TransactionContext<'_>,
     idx: u16,
-) -> Result<&Pubkey, InstructionError> {
+) -> Result<&'a Pubkey, InstructionError> {
     let ix_ctx = transaction_context.get_current_instruction_context()?;
     let tx_idx = ix_ctx.get_index_of_instruction_account_in_transaction(idx)?;
     let pubkey = transaction_context.get_key_of_account_at_index(tx_idx)?;
@@ -102,7 +123,7 @@ pub(crate) fn get_instruction_pubkey_with_idx(
 }
 
 pub(crate) fn get_writable_with_idx(
-    transaction_context: &TransactionContext,
+    transaction_context: &TransactionContext<'_>,
     idx: u16,
 ) -> Result<bool, InstructionError> {
     let ix_ctx = transaction_context.get_current_instruction_context()?;
@@ -111,7 +132,7 @@ pub(crate) fn get_writable_with_idx(
 }
 
 pub(crate) fn get_instruction_account_short_meta_with_idx(
-    transaction_context: &TransactionContext,
+    transaction_context: &TransactionContext<'_>,
     idx: u16,
 ) -> Result<ShortAccountMeta, InstructionError> {
     let ix_ctx = transaction_context.get_current_instruction_context()?;
@@ -126,29 +147,29 @@ pub(crate) fn get_instruction_account_short_meta_with_idx(
 }
 
 pub(crate) fn debit_instruction_account_at_index(
-    transaction_context: &TransactionContext,
+    transaction_context: &TransactionContext<'_>,
     idx: u16,
     amount: u64,
 ) -> Result<(), InstructionError> {
     let account = get_instruction_account_with_idx(transaction_context, idx)?;
-    let current_lamports = account.borrow().lamports();
+    let current_lamports = account.borrow()?.lamports();
     let new_lamports = current_lamports
         .checked_sub(amount)
         .ok_or(InstructionError::InsufficientFunds)?;
-    account.borrow_mut().set_lamports(new_lamports);
+    account.borrow_mut()?.set_lamports(new_lamports);
     Ok(())
 }
 
 pub(crate) fn credit_instruction_account_at_index(
-    transaction_context: &TransactionContext,
+    transaction_context: &TransactionContext<'_>,
     idx: u16,
     amount: u64,
 ) -> Result<(), InstructionError> {
     let account = get_instruction_account_with_idx(transaction_context, idx)?;
-    let current_lamports = account.borrow().lamports();
+    let current_lamports = account.borrow()?.lamports();
     let new_lamports = current_lamports
         .checked_add(amount)
         .ok_or(InstructionError::ArithmeticOverflow)?;
-    account.borrow_mut().set_lamports(new_lamports);
+    account.borrow_mut()?.set_lamports(new_lamports);
     Ok(())
 }

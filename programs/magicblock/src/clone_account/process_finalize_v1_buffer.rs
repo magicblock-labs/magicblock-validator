@@ -60,16 +60,16 @@ pub(crate) fn process_finalize_v1_program_from_buffer(
     validate_authority(signers, invoke_context)?;
 
     let ctx = transaction_context.get_current_instruction_context()?;
-    let auth_acc = transaction_context.get_account_at_index(
+    let mut auth_acc = transaction_context.accounts().try_borrow_mut(
         ctx.get_index_of_instruction_account_in_transaction(0)?,
     )?;
-    let prog_acc = transaction_context.get_account_at_index(
+    let mut prog_acc = transaction_context.accounts().try_borrow_mut(
         ctx.get_index_of_instruction_account_in_transaction(1)?,
     )?;
-    let data_acc = transaction_context.get_account_at_index(
+    let mut data_acc = transaction_context.accounts().try_borrow_mut(
         ctx.get_index_of_instruction_account_in_transaction(2)?,
     )?;
-    let buf_acc = transaction_context.get_account_at_index(
+    let buf_acc = transaction_context.accounts().try_borrow_mut(
         ctx.get_index_of_instruction_account_in_transaction(3)?,
     )?;
 
@@ -77,7 +77,7 @@ pub(crate) fn process_finalize_v1_program_from_buffer(
         ctx.get_index_of_instruction_account_in_transaction(2)?,
     )?;
 
-    let elf_data = buf_acc.borrow().data().to_vec();
+    let elf_data = buf_acc.data().to_vec();
 
     let deploy_slot = get_deploy_slot(invoke_context);
 
@@ -116,38 +116,36 @@ pub(crate) fn process_finalize_v1_program_from_buffer(
     let prog_lamports =
         minimum_balance(invoke_context, program_content.len())?.max(1);
 
-    let prog_current = prog_acc.borrow().lamports();
-    let data_current = data_acc.borrow().lamports();
-    let buf_current = buf_acc.borrow().lamports();
+    let prog_current = prog_acc.lamports();
+    let data_current = data_acc.lamports();
+    let buf_current = buf_acc.lamports();
     let lamports_delta = (prog_lamports as i64 - prog_current as i64)
         + (data_lamports as i64 - data_current as i64)
         - buf_current as i64;
 
     // Set up program_data account
     {
-        let mut acc = data_acc.borrow_mut();
-        acc.set_lamports(data_lamports);
-        acc.set_owner(bpf_loader_upgradeable::id());
-        acc.set_executable(false);
-        acc.set_data_from_slice(&program_data_content);
-        acc.set_remote_slot(remote_slot);
-        acc.set_undelegating(false);
+        data_acc.set_lamports(data_lamports);
+        data_acc.set_owner(bpf_loader_upgradeable::id());
+        data_acc.set_executable(false);
+        data_acc.set_data_from_slice(&program_data_content);
+        data_acc.set_remote_slot(remote_slot);
+        data_acc.set_undelegating(false);
     }
 
     // Set up program account (executable)
     {
-        let mut acc = prog_acc.borrow_mut();
-        acc.set_lamports(prog_lamports);
-        acc.set_owner(bpf_loader_upgradeable::id());
-        acc.set_executable(true);
-        acc.set_data_from_slice(&program_content);
-        acc.set_remote_slot(remote_slot);
-        acc.set_undelegating(false);
+        prog_acc.set_lamports(prog_lamports);
+        prog_acc.set_owner(bpf_loader_upgradeable::id());
+        prog_acc.set_executable(true);
+        prog_acc.set_data_from_slice(&program_content);
+        prog_acc.set_remote_slot(remote_slot);
+        prog_acc.set_undelegating(false);
     }
 
     // Close buffer account
     close_buffer_account(buf_acc);
 
-    adjust_authority_lamports(auth_acc, lamports_delta)?;
+    adjust_authority_lamports(&mut auth_acc, lamports_delta)?;
     Ok(())
 }

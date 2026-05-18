@@ -4,6 +4,7 @@ use std::{str::FromStr, thread::sleep, time::Duration};
 
 use anyhow::{Context, Result};
 use borsh::BorshDeserialize;
+use solana_commitment_config::CommitmentConfig;
 use solana_rpc_client::{
     nonblocking,
     rpc_client::{GetConfirmedSignaturesForAddress2Config, RpcClient},
@@ -17,14 +18,13 @@ use solana_sdk::signer::SeedDerivable;
 use solana_sdk::{
     account::Account,
     clock::Slot,
-    commitment_config::CommitmentConfig,
     hash::Hash,
     instruction::Instruction,
     pubkey::Pubkey,
     rent::Rent,
     signature::{Keypair, Signature},
     signer::Signer,
-    transaction::{Transaction, TransactionError},
+    transaction::Transaction,
 };
 use solana_transaction_status::{
     EncodedConfirmedBlock, EncodedConfirmedTransactionWithStatusMeta,
@@ -55,11 +55,18 @@ fn async_rpc_client(
     )
 }
 
+fn client_error(kind: client_error::ErrorKind) -> client_error::Error {
+    client_error::Error {
+        request: None,
+        kind: Box::new(kind),
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TransactionStatusWithSignature {
     pub signature: String,
     pub slot: Slot,
-    pub err: Option<TransactionError>,
+    pub err: Option<solana_rpc_client_api::response::UiTransactionError>,
 }
 
 impl TransactionStatusWithSignature {
@@ -315,6 +322,101 @@ impl IntegrationTestContext {
         self.try_chain_client().and_then(|chain_client| {
             Self::fetch_account(chain_client, pubkey, self.commitment, "chain")
         })
+    }
+
+    pub fn wait_for_chain_delegation_record(
+        &self,
+        delegated_account: Pubkey,
+    ) -> anyhow::Result<Account> {
+        const MAX_ATTEMPTS: u32 = 100;
+        const RETRY_DELAY_MS: u64 = 100;
+
+        let record_pubkey =
+            dlp_interface::delegation_record_pubkey(&delegated_account);
+        let mut last_err = None;
+        for attempt in 1..=MAX_ATTEMPTS {
+            match self.fetch_chain_account(record_pubkey) {
+                Ok(account) => return Ok(account),
+                Err(err) => {
+                    last_err = Some(err);
+                    if attempt < MAX_ATTEMPTS {
+                        sleep(Duration::from_millis(RETRY_DELAY_MS));
+                    }
+                }
+            }
+        }
+
+        Err(last_err.unwrap_or_else(|| {
+            anyhow::anyhow!(
+                "Delegation record '{}' for '{}' not found on chain",
+                record_pubkey,
+                delegated_account
+            )
+        }))
+    }
+
+    pub fn ensure_magic_fee_vault_delegated_on_chain(
+        &self,
+        validator_identity: &Keypair,
+    ) -> anyhow::Result<Pubkey> {
+        let validator_pubkey = validator_identity.pubkey();
+        let vault_pubkey =
+            dlp_api::pda::magic_fee_vault_pda_from_validator(&validator_pubkey);
+        let record_pubkey =
+            dlp_interface::delegation_record_pubkey(&vault_pubkey);
+
+        if self.fetch_chain_account(vault_pubkey).is_err() {
+            let ix = dlp_api::instruction_builder::init_magic_fee_vault(
+                validator_pubkey,
+                validator_pubkey,
+            );
+            let mut tx =
+                Transaction::new_with_payer(&[ix], Some(&validator_pubkey));
+            let (_, confirmed) = self
+                .send_and_confirm_transaction_chain(
+                    &mut tx,
+                    &[validator_identity],
+                )
+                .with_context(|| {
+                    format!(
+                        "Failed to initialize magic fee vault {}",
+                        vault_pubkey
+                    )
+                })?;
+            anyhow::ensure!(
+                confirmed,
+                "Failed to confirm magic fee vault initialization for {}",
+                vault_pubkey
+            );
+        }
+
+        if self.fetch_chain_account(record_pubkey).is_err() {
+            let ix = dlp_api::instruction_builder::delegate_magic_fee_vault(
+                validator_pubkey,
+                validator_pubkey,
+            );
+            let mut tx =
+                Transaction::new_with_payer(&[ix], Some(&validator_pubkey));
+            let (_, confirmed) = self
+                .send_and_confirm_transaction_chain(
+                    &mut tx,
+                    &[validator_identity],
+                )
+                .with_context(|| {
+                    format!(
+                        "Failed to delegate magic fee vault {}",
+                        vault_pubkey
+                    )
+                })?;
+            anyhow::ensure!(
+                confirmed,
+                "Failed to confirm magic fee vault delegation for {}",
+                vault_pubkey
+            );
+        }
+
+        self.wait_for_chain_delegation_record(vault_pubkey)?;
+        Ok(vault_pubkey)
     }
 
     pub fn fetch_chain_account_struct<T>(&self, pubkey: Pubkey) -> Result<T>
@@ -578,7 +680,7 @@ impl IntegrationTestContext {
         // 2.Delegate the ephem payer
         let delegated_already = self
             .fetch_chain_account_owner(payer_ephem.pubkey())
-            .map(|owner| owner.eq(&dlp_api::dlp::id()))
+            .map(|owner| owner.eq(&dlp_api::id()))
             .unwrap_or(false);
         let deleg_sig = if !delegated_already {
             let (deleg_sig, confirmed) =
@@ -752,10 +854,8 @@ impl IntegrationTestContext {
     fn assert_transaction_error(res: &Result<Signature, ClientError>) {
         assert!(matches!(
             res,
-            Err(ClientError {
-                kind: ClientErrorKind::TransactionError(_),
-                ..
-            })
+            Err(err)
+                if matches!(err.kind(), ClientErrorKind::TransactionError(_))
         ));
     }
 
@@ -767,9 +867,8 @@ impl IntegrationTestContext {
     ) -> Result<bool, client_error::Error> {
         confirm_transaction(
             sig,
-            self.try_chain_client().map_err(|err| client_error::Error {
-                request: None,
-                kind: client_error::ErrorKind::Custom(err.to_string()),
+            self.try_chain_client().map_err(|err| {
+                client_error(client_error::ErrorKind::Custom(err.to_string()))
             })?,
             self.commitment,
             tx,
@@ -784,9 +883,8 @@ impl IntegrationTestContext {
     ) -> Result<bool, client_error::Error> {
         confirm_transaction(
             sig,
-            self.try_ephem_client().map_err(|err| client_error::Error {
-                request: None,
-                kind: client_error::ErrorKind::Custom(err.to_string()),
+            self.try_ephem_client().map_err(|err| {
+                client_error(client_error::ErrorKind::Custom(err.to_string()))
             })?,
             self.commitment,
             tx,
@@ -800,9 +898,8 @@ impl IntegrationTestContext {
         signers: &[&Keypair],
     ) -> Result<Signature, client_error::Error> {
         send_transaction(
-            self.try_ephem_client().map_err(|err| client_error::Error {
-                request: None,
-                kind: client_error::ErrorKind::Custom(err.to_string()),
+            self.try_ephem_client().map_err(|err| {
+                client_error(client_error::ErrorKind::Custom(err.to_string()))
             })?,
             tx,
             signers,
@@ -816,9 +913,8 @@ impl IntegrationTestContext {
         signers: &[&Keypair],
     ) -> Result<Signature, client_error::Error> {
         send_transaction(
-            self.try_ephem_client().map_err(|err| client_error::Error {
-                request: None,
-                kind: client_error::ErrorKind::Custom(err.to_string()),
+            self.try_ephem_client().map_err(|err| {
+                client_error(client_error::ErrorKind::Custom(err.to_string()))
             })?,
             tx,
             signers,
@@ -832,9 +928,8 @@ impl IntegrationTestContext {
         signers: &[&Keypair],
     ) -> Result<Signature, client_error::Error> {
         send_transaction(
-            self.try_chain_client().map_err(|err| client_error::Error {
-                request: None,
-                kind: client_error::ErrorKind::Custom(err.to_string()),
+            self.try_chain_client().map_err(|err| {
+                client_error(client_error::ErrorKind::Custom(err.to_string()))
             })?,
             tx,
             signers,
@@ -848,9 +943,8 @@ impl IntegrationTestContext {
         payer: &Keypair,
     ) -> Result<(Signature, Transaction), client_error::Error> {
         send_instructions_with_payer(
-            self.try_chain_client().map_err(|err| client_error::Error {
-                request: None,
-                kind: client_error::ErrorKind::Custom(err.to_string()),
+            self.try_chain_client().map_err(|err| {
+                client_error(client_error::ErrorKind::Custom(err.to_string()))
             })?,
             ixs,
             payer,

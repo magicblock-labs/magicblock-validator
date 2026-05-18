@@ -13,6 +13,7 @@ use magicblock_metrics::metrics;
 use solana_pubkey::Pubkey;
 use solana_sdk_ids::sysvar::clock;
 use tokio::sync::mpsc;
+use tokio_util::sync::CancellationToken;
 use tracing::*;
 
 use crate::remote_account_provider::{
@@ -145,6 +146,9 @@ where
     /// Number of currently connected clients that activate subscriptions immediately when
     /// requested.
     connected_clients_subscribing_immediately: Arc<AtomicU16>,
+    /// Token cancelled on drop to stop background tasks
+    /// (dedup pruner, debounce flusher).
+    shutdown_token: CancellationToken,
 }
 
 // Parameters for the long-running forwarder loop, grouped to avoid
@@ -244,6 +248,7 @@ where
             connected_clients_subscribing_immediately.clone(),
         );
 
+        let shutdown_token = CancellationToken::new();
         let me = Self {
             clients,
             out_tx,
@@ -256,6 +261,7 @@ where
             never_debounce,
             program_subs,
             connected_clients_subscribing_immediately,
+            shutdown_token,
         };
 
         // Spawn background tasks
@@ -493,12 +499,17 @@ where
     fn spawn_dedup_pruner(&self) {
         let window = self.dedup_window;
         let cache = self.dedup_cache.clone();
+        let shutdown = self.shutdown_token.clone();
         tokio::spawn(async move {
             loop {
-                tokio::time::sleep(window).await;
-                let now = Instant::now();
-                let mut map = cache.lock().unwrap();
-                map.retain(|_, ts| now.duration_since(*ts) <= window);
+                tokio::select! {
+                    _ = tokio::time::sleep(window) => {
+                        let now = Instant::now();
+                        let mut map = cache.lock().unwrap();
+                        map.retain(|_, ts| now.duration_since(*ts) <= window);
+                    }
+                    _ = shutdown.cancelled() => break,
+                }
             }
         });
     }
@@ -519,33 +530,38 @@ where
         let states = self.debounce_states.clone();
         let out_tx = self.out_tx.clone();
         let interval = self.debounce_interval;
+        let shutdown = self.shutdown_token.clone();
         tokio::spawn(async move {
             let tick = cmp::max(Duration::from_millis(10), interval / 4);
             loop {
-                tokio::time::sleep(tick).await;
-                let now = Instant::now();
-                let mut to_forward = vec![];
-                {
-                    let mut map =
-                        states.lock().expect("debounce_states lock poisoned");
-                    for debounce_state in map.values_mut() {
-                        if let DebounceState::Enabled {
-                            next_allowed_forward,
-                            pending,
-                            ..
-                        } = debounce_state
+                tokio::select! {
+                    _ = tokio::time::sleep(tick) => {
+                        let now = Instant::now();
+                        let mut to_forward = vec![];
                         {
-                            if now >= *next_allowed_forward {
-                                if let Some(u) = pending.take() {
-                                    *next_allowed_forward = now + interval;
-                                    to_forward.push(u);
+                            let mut map =
+                                states.lock().expect("debounce_states lock poisoned");
+                            for debounce_state in map.values_mut() {
+                                if let DebounceState::Enabled {
+                                    next_allowed_forward,
+                                    pending,
+                                    ..
+                                } = debounce_state
+                                {
+                                    if now >= *next_allowed_forward {
+                                        if let Some(u) = pending.take() {
+                                            *next_allowed_forward = now + interval;
+                                            to_forward.push(u);
+                                        }
+                                    }
                                 }
                             }
                         }
+                        for update in to_forward {
+                            let _ = out_tx.send(update).await;
+                        }
                     }
-                }
-                for update in to_forward {
-                    let _ = out_tx.send(update).await;
+                    _ = shutdown.cancelled() => break,
                 }
             }
         });
@@ -775,6 +791,15 @@ where
             .lock()
             .expect("debounce_states lock poisoned");
         states.get(&pubkey).cloned()
+    }
+}
+
+impl<T> Drop for SubMuxClient<T>
+where
+    T: ChainPubsubClient + ReconnectableClient,
+{
+    fn drop(&mut self) {
+        self.shutdown_token.cancel();
     }
 }
 
@@ -1706,6 +1731,77 @@ mod tests {
         let up = got.expect("should receive update after retry reconnect");
         assert_eq!(up.pubkey, pk);
         assert!(up.slot >= 100);
+
+        mux.shutdown().await.unwrap();
+    }
+
+    // -----------------
+    // Dedup window expiry edge case
+    // -----------------
+    #[tokio::test]
+    async fn test_dedup_same_slot_after_window_expires() {
+        init_logger();
+
+        let (tx1, rx1) = mpsc::channel(10_000);
+        let (tx2, rx2) = mpsc::channel(10_000);
+        let client1 = Arc::new(ChainPubsubClientMock::new(tx1, rx1));
+        let client2 = Arc::new(ChainPubsubClientMock::new(tx2, rx2));
+
+        // Use a short dedup window (100ms) so we can test expiry
+        let mux: SubMuxClient<ChainPubsubClientMock> = new_submux_client(
+            vec![client1.clone(), client2.clone()],
+            Some(100),
+        );
+        let mut mux_rx = mux.take_updates();
+
+        let pk = Pubkey::new_unique();
+        mux.subscribe(pk, None).await.unwrap();
+
+        // First delivery of (pk, slot=42) from client1
+        client1
+            .send_account_update(pk, 42, &account_with_lamports(100))
+            .await;
+        let first = tokio::time::timeout(
+            std::time::Duration::from_millis(200),
+            mux_rx.recv(),
+        )
+        .await
+        .expect("first update expected")
+        .expect("stream open");
+        assert_eq!(first.pubkey, pk);
+        assert_eq!(first.slot, 42);
+
+        // Second delivery within the dedup window — should be deduped
+        client2
+            .send_account_update(pk, 42, &account_with_lamports(100))
+            .await;
+        let recv = tokio::time::timeout(
+            std::time::Duration::from_millis(200),
+            mux_rx.recv(),
+        )
+        .await;
+        assert!(
+            recv.is_err(),
+            "same-slot update within dedup window should be suppressed"
+        );
+
+        // Wait for the dedup window to expire (100ms + margin)
+        tokio::time::sleep(std::time::Duration::from_millis(120)).await;
+
+        // Third delivery of the same (pk, slot=42) from client2
+        // after the window expired — should be forwarded again
+        client2
+            .send_account_update(pk, 42, &account_with_lamports(100))
+            .await;
+        let after_expiry = tokio::time::timeout(
+            std::time::Duration::from_millis(200),
+            mux_rx.recv(),
+        )
+        .await
+        .expect("update expected after dedup window expiry")
+        .expect("stream open");
+        assert_eq!(after_expiry.pubkey, pk);
+        assert_eq!(after_expiry.slot, 42);
 
         mux.shutdown().await.unwrap();
     }

@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use solana_account::ReadableAccount;
+use solana_account::{ReadableAccount, WritableAccount};
 use solana_instruction::error::InstructionError;
 use solana_log_collector::ic_msg;
 use solana_program_runtime::invoke_context::InvokeContext;
@@ -11,7 +11,7 @@ use crate::{
     utils::accounts::{
         get_instruction_account_with_idx, get_instruction_pubkey_with_idx,
     },
-    validator::validator_authority_id,
+    validator::effective_validator_authority_id,
     MagicContext, TransactionScheduler,
 };
 
@@ -22,7 +22,7 @@ pub fn process_accept_scheduled_commits(
     const VALIDATOR_AUTHORITY_IDX: u16 = 0;
     const MAGIC_CONTEXT_IDX: u16 = VALIDATOR_AUTHORITY_IDX + 1;
 
-    let transaction_context = &invoke_context.transaction_context.clone();
+    let transaction_context = &*invoke_context.transaction_context;
 
     // 1. Read all scheduled commits from the `MagicContext` account
     //    We do this first so we can skip all checks in case there is nothing
@@ -35,16 +35,17 @@ pub fn process_accept_scheduled_commits(
         transaction_context,
         MAGIC_CONTEXT_IDX,
     )?;
-    let mut magic_context =
-        bincode::deserialize::<MagicContext>(magic_context_acc.borrow().data())
-            .map_err(|err| {
-                ic_msg!(
-                    invoke_context,
-                    "Failed to deserialize MagicContext: {}",
-                    err
-                );
-                InstructionError::InvalidAccountData
-            })?;
+    let mut magic_context = MagicContext::deserialize(
+        magic_context_acc.borrow()?.data(),
+    )
+    .map_err(|err| {
+        ic_msg!(
+            invoke_context,
+            "Failed to deserialize MagicContext: {}",
+            err
+        );
+        InstructionError::InvalidAccountData
+    })?;
     if magic_context.scheduled_base_intents.is_empty() {
         ic_msg!(
             invoke_context,
@@ -59,7 +60,7 @@ pub fn process_accept_scheduled_commits(
         transaction_context,
         VALIDATOR_AUTHORITY_IDX,
     )?;
-    let validator_auth = validator_authority_id();
+    let validator_auth = effective_validator_authority_id();
     if !provided_validator_auth.eq(&validator_auth) {
         ic_msg!(
              invoke_context,
@@ -89,24 +90,8 @@ pub fn process_accept_scheduled_commits(
         .accept_scheduled_base_intent(scheduled_commits);
 
     // 4. Serialize and store the updated `MagicContext` account
-    // Zero fill account before updating data
-    // NOTE: this may become expensive, but is a security measure and also prevents
-    // accidentally interpreting old data when deserializing
-    magic_context_acc
-        .borrow_mut()
-        .set_data_from_slice(&MagicContext::ZERO);
-
-    magic_context_acc
-        .borrow_mut()
-        .serialize_data(&magic_context)
-        .map_err(|err| {
-            ic_msg!(
-                invoke_context,
-                "Failed to serialize MagicContext: {}",
-                err
-            );
-            InstructionError::GenericError
-        })?;
+    magic_context
+        .write_to(magic_context_acc.borrow_mut()?.data_as_mut_slice())?;
 
     Ok(())
 }

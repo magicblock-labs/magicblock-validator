@@ -1,19 +1,19 @@
 use std::collections::HashSet;
 
+use magicblock_core::token_programs::{
+    ASSOCIATED_TOKEN_PROGRAM_ID, TOKEN_PROGRAM_ID,
+};
 use magicblock_magic_program_api::{self as magic_program};
 use solana_pubkey::Pubkey;
 use solana_sdk_ids::{
     address_lookup_table, bpf_loader, bpf_loader_deprecated,
     bpf_loader_upgradeable, compute_budget, config, ed25519_program,
-    incinerator, loader_v4, native_loader, secp256k1_program, stake,
-    system_program, vote,
+    incinerator, loader_v4, native_loader, secp256k1_program,
+    secp256r1_program, stake, system_program, sysvar, vote,
+    zk_elgamal_proof_program,
 };
-use solana_sysvar;
 
-pub fn blacklisted_accounts(
-    validator_id: &Pubkey,
-    faucet_id: &Pubkey,
-) -> HashSet<Pubkey> {
+pub fn blacklisted_accounts(validator_id: &Pubkey) -> HashSet<Pubkey> {
     // This is buried in the accounts_db::native_mint module and we don't
     // want to take a dependency on that crate just for this ID which won't change
     const NATIVE_SOL_ID: Pubkey =
@@ -28,28 +28,29 @@ pub fn blacklisted_accounts(
     blacklisted_accounts.insert(NATIVE_SOL_ID);
 
     blacklisted_accounts.insert(magic_program::ID);
+    blacklisted_accounts.insert(magic_program::CRANK_PROGRAM_ID);
+    blacklisted_accounts.insert(magic_program::CALLBACK_PROGRAM_ID);
     blacklisted_accounts.insert(magic_program::MAGIC_CONTEXT_PUBKEY);
     blacklisted_accounts.insert(magic_program::EPHEMERAL_VAULT_PUBKEY);
     blacklisted_accounts.insert(*validator_id);
-    blacklisted_accounts.insert(*faucet_id);
     blacklisted_accounts
 }
 
 pub fn sysvar_accounts() -> HashSet<Pubkey> {
     let mut blacklisted_sysvars = HashSet::new();
-    blacklisted_sysvars.insert(solana_sdk_ids::sysvar::ID);
-    blacklisted_sysvars.insert(solana_sysvar::clock::ID);
-    blacklisted_sysvars.insert(solana_sysvar::epoch_rewards::ID);
-    blacklisted_sysvars.insert(solana_sysvar::epoch_schedule::ID);
-    blacklisted_sysvars.insert(solana_sysvar::fees::ID);
-    blacklisted_sysvars.insert(solana_sdk_ids::sysvar::instructions::ID);
-    blacklisted_sysvars.insert(solana_sysvar::last_restart_slot::ID);
-    blacklisted_sysvars.insert(solana_sysvar::recent_blockhashes::ID);
-    blacklisted_sysvars.insert(solana_sysvar::rent::ID);
-    blacklisted_sysvars.insert(solana_sysvar::rewards::ID);
-    blacklisted_sysvars.insert(solana_sysvar::slot_hashes::ID);
-    blacklisted_sysvars.insert(solana_sysvar::slot_history::ID);
-    blacklisted_sysvars.insert(solana_sysvar::stake_history::ID);
+    blacklisted_sysvars.insert(sysvar::ID);
+    blacklisted_sysvars.insert(sysvar::clock::ID);
+    blacklisted_sysvars.insert(sysvar::epoch_rewards::ID);
+    blacklisted_sysvars.insert(sysvar::epoch_schedule::ID);
+    blacklisted_sysvars.insert(sysvar::instructions::ID);
+    blacklisted_sysvars.insert(sysvar::fees::ID);
+    blacklisted_sysvars.insert(sysvar::last_restart_slot::ID);
+    blacklisted_sysvars.insert(sysvar::recent_blockhashes::ID);
+    blacklisted_sysvars.insert(sysvar::rent::ID);
+    blacklisted_sysvars.insert(sysvar::rewards::ID);
+    blacklisted_sysvars.insert(sysvar::slot_hashes::ID);
+    blacklisted_sysvars.insert(sysvar::slot_history::ID);
+    blacklisted_sysvars.insert(sysvar::stake_history::ID);
     blacklisted_sysvars
 }
 
@@ -66,8 +67,19 @@ pub fn native_program_accounts() -> HashSet<Pubkey> {
     blacklisted_programs.insert(loader_v4::ID);
     blacklisted_programs.insert(native_loader::ID);
     blacklisted_programs.insert(secp256k1_program::ID);
+    blacklisted_programs.insert(secp256r1_program::ID);
     blacklisted_programs.insert(stake::ID);
     blacklisted_programs.insert(system_program::ID);
     blacklisted_programs.insert(vote::ID);
+    blacklisted_programs.insert(zk_elgamal_proof_program::ID);
     blacklisted_programs
+}
+
+/// High-cardinality programs skipped for program-wide subscriptions.
+pub fn programs_not_to_subscribe() -> HashSet<Pubkey> {
+    let mut programs = HashSet::new();
+    programs.insert(TOKEN_PROGRAM_ID);
+    programs.insert(spl_token_2022::id());
+    programs.insert(ASSOCIATED_TOKEN_PROGRAM_ID);
+    programs
 }

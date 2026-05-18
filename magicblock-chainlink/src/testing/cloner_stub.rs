@@ -2,7 +2,11 @@
 use std::{
     collections::HashMap,
     fmt,
-    sync::{Arc, Mutex},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    },
+    time::Duration,
 };
 
 use async_trait::async_trait;
@@ -11,6 +15,7 @@ use solana_instruction::error::InstructionError;
 use solana_loader_v4_interface::state::LoaderV4State;
 use solana_pubkey::Pubkey;
 use solana_signature::Signature;
+use tokio::sync::Notify;
 
 #[cfg(any(test, feature = "dev-context"))]
 use crate::cloner::AccountCloneRequest;
@@ -28,6 +33,11 @@ use crate::{
 pub struct ClonerStub {
     accounts_bank: Arc<AccountsBankStub>,
     cloned_programs: Arc<Mutex<HashMap<Pubkey, LoadedProgram>>>,
+    clone_requests: Arc<Mutex<Vec<AccountCloneRequest>>>,
+    clone_delay: Arc<Mutex<Option<Duration>>>,
+    fail_next_clone: Arc<Mutex<bool>>,
+    block_clone_completion: Arc<AtomicBool>,
+    clone_completion_notify: Arc<Notify>,
 }
 
 #[cfg(any(test, feature = "dev-context"))]
@@ -37,7 +47,29 @@ impl ClonerStub {
             accounts_bank,
             cloned_programs:
                 Arc::<Mutex<HashMap<Pubkey, LoadedProgram>>>::default(),
+            clone_requests: Arc::new(Mutex::new(Vec::new())),
+            clone_delay: Arc::new(Mutex::new(None)),
+            fail_next_clone: Arc::new(Mutex::new(false)),
+            block_clone_completion: Arc::new(AtomicBool::new(false)),
+            clone_completion_notify: Arc::new(Notify::new()),
         }
+    }
+
+    pub fn set_fail_next_clone(&self, fail: bool) {
+        *self.fail_next_clone.lock().unwrap() = fail;
+    }
+
+    pub fn set_clone_delay(&self, delay: Duration) {
+        *self.clone_delay.lock().unwrap() = Some(delay);
+    }
+
+    pub fn block_clone_completion(&self) {
+        self.block_clone_completion.store(true, Ordering::SeqCst);
+    }
+
+    pub fn allow_clone_completion(&self) {
+        self.block_clone_completion.store(false, Ordering::SeqCst);
+        self.clone_completion_notify.notify_waiters();
     }
 
     #[allow(dead_code)]
@@ -66,6 +98,14 @@ impl ClonerStub {
     pub fn dump_account_keys(&self, include_blacklisted: bool) -> String {
         self.accounts_bank.dump_account_keys(include_blacklisted)
     }
+
+    pub fn clone_requests(&self) -> Vec<AccountCloneRequest> {
+        self.clone_requests.lock().unwrap().clone()
+    }
+
+    pub fn clone_request_count(&self) -> usize {
+        self.clone_requests.lock().unwrap().len()
+    }
 }
 
 #[cfg(any(test, feature = "dev-context"))]
@@ -78,8 +118,37 @@ impl Cloner for ClonerStub {
         &self,
         request: AccountCloneRequest,
     ) -> ClonerResult<Signature> {
+        self.clone_requests.lock().unwrap().push(request.clone());
+        let delay = *self.clone_delay.lock().unwrap();
+        if let Some(delay) = delay {
+            tokio::time::sleep(delay).await;
+        }
+        {
+            let mut should_fail = self.fail_next_clone.lock().unwrap();
+            if *should_fail {
+                *should_fail = false;
+                return Err(
+                    crate::cloner::errors::ClonerError::CommittorServiceError(
+                        "Injected test failure".to_string(),
+                    ),
+                );
+            }
+        }
+        loop {
+            let notified = self.clone_completion_notify.notified();
+            if !self.block_clone_completion.load(Ordering::SeqCst) {
+                break;
+            }
+            notified.await;
+        }
         self.accounts_bank.insert(request.pubkey, request.account);
         Ok(Signature::default())
+    }
+
+    async fn evict_account(&self, pubkey: Pubkey) -> ClonerResult<()> {
+        use magicblock_accounts_db::traits::AccountsBank;
+        self.accounts_bank.remove_account(&pubkey);
+        Ok(())
     }
 
     async fn clone_program(

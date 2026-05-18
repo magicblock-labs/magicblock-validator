@@ -12,9 +12,9 @@ use mdp::state::{
     status::ErStatus,
     version::v0::RecordV0,
 };
+use solana_commitment_config::CommitmentConfig;
 use solana_rpc_client::rpc_client::RpcClient;
 use solana_sdk::{
-    commitment_config::CommitmentConfig,
     native_token::LAMPORTS_PER_SOL,
     signature::{Keypair, Signer},
 };
@@ -40,21 +40,23 @@ fn get_validator_info() -> ErRecord {
     })
 }
 
-fn test_registration() {
+async fn test_registration() {
     let validator_info = get_validator_info();
     let domain_manager = DomainRegistryManager::new(DEVNET_URL);
     domain_manager
         .handle_registration(&VALIDATOR_KEYPAIR, validator_info.clone())
+        .await
         .expect("Failed to register");
 
     let actual = domain_manager
         .fetch_validator_info(&validator_info.pda().0)
+        .await
         .expect("Failed to fetch validator info");
 
     assert_eq!(actual, Some(validator_info.clone()));
 }
 
-fn test_sync() {
+async fn test_sync() {
     let mut validator_info = get_validator_info();
     match validator_info {
         ErRecord::V0(ref mut val) => {
@@ -67,31 +69,35 @@ fn test_sync() {
     let domain_manager = DomainRegistryManager::new(DEVNET_URL);
     domain_manager
         .sync(&VALIDATOR_KEYPAIR, &validator_info)
+        .await
         .expect("Failed to sync");
 
     let actual = domain_manager
         .fetch_validator_info(&validator_info.pda().0)
+        .await
         .expect("Failed to fetch validator info");
 
     assert_eq!(actual, Some(validator_info.clone()));
 }
 
-fn test_unregister() {
+async fn test_unregister() {
     let domain_manager = DomainRegistryManager::new(DEVNET_URL);
     domain_manager
         .unregister(&VALIDATOR_KEYPAIR)
+        .await
         .expect("Failed to unregister");
 
     let (pda, _) = DomainRegistryManager::get_pda(&VALIDATOR_KEYPAIR.pubkey());
     let actual = domain_manager
         .fetch_validator_info(&pda)
+        .await
         .expect("Failed to fetch validator info");
 
     assert!(actual.is_none());
 }
 
-#[test]
-fn test_domain_registry() {
+#[tokio::test(flavor = "multi_thread")]
+async fn test_domain_registry() {
     let client = RpcClient::new_with_commitment(
         DEVNET_URL,
         CommitmentConfig::confirmed(),
@@ -104,7 +110,7 @@ fn test_domain_registry() {
     )
     .expect("Airdrop failed");
 
-    test_registration();
-    test_sync();
-    test_unregister();
+    test_registration().await;
+    test_sync().await;
+    test_unregister().await;
 }

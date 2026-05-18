@@ -62,6 +62,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     enrich_config_from_rpc(&mut config).await;
 
-    run_tui(config).await?;
+    run_tui(config, None).await?;
     Ok(())
 }

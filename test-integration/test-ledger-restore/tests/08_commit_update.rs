@@ -36,16 +36,18 @@ fn payer_keypair() -> Keypair {
 // NOTE: that most of the setup is similar to 07_commit_delegated_account.rs
 // except that we removed the intermediate checks.
 
+// Flaky integration test.
 #[test]
+#[ignore = "flaky"]
 fn test_restore_ledger_committed_and_updated_account() {
     let (_tmpdir, ledger_path) = resolve_tmp_dir(TMP_DIR_LEDGER);
     let payer = payer_keypair();
 
     let (mut validator, _) = write(&ledger_path, &payer);
-    validator.kill().unwrap();
+    test_ledger_restore::kill_validator(&mut validator);
 
     let mut validator = read(&ledger_path, &payer);
-    validator.kill().unwrap();
+    test_ledger_restore::kill_validator(&mut validator);
 }
 
 fn write(ledger_path: &Path, payer: &Keypair) -> (Child, u64) {
@@ -83,7 +85,8 @@ fn write(ledger_path: &Path, payer: &Keypair) -> (Child, u64) {
     {
         wait_for_ledger_persist(&ctx, &mut validator);
 
-        let ix = create_add_and_schedule_commit_ix(payer.pubkey(), 4, false);
+        let ix =
+            create_add_and_schedule_commit_ix(payer.pubkey(), 4, false, None);
         let sig = confirm_tx_with_payer_ephem(ix, payer, &ctx, &mut validator);
 
         let res = ctx

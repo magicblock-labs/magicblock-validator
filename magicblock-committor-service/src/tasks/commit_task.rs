@@ -1,6 +1,7 @@
-use dlp_api::dlp::{
+use dlp_api::{
     args::{CommitDiffArgs, CommitStateArgs, CommitStateFromBufferArgs},
-    compute_diff, AccountSizeClass,
+    diff::compute_diff,
+    AccountSizeClass,
 };
 use magicblock_committor_program::Chunks;
 use magicblock_core::intent::CommittedAccount;
@@ -108,6 +109,7 @@ impl CommitTask {
             .to_vec(),
             allow_undelegation: self.allow_undelegation,
         };
+
         dlp_api::instruction_builder::commit_diff(
             *validator,
             self.committed_account.pubkey,
@@ -183,15 +185,13 @@ impl CommitTask {
         self.preparation_stage(diff)
     }
 
-    fn preparation_stage(&self, committed_data: Vec<u8>) -> CommitBufferStage {
-        let chunks = Chunks::from_data_length(
-            committed_data.len(),
-            MAX_WRITE_CHUNK_SIZE,
-        );
+    fn preparation_stage(&self, buffer_data: Vec<u8>) -> CommitBufferStage {
+        let chunks =
+            Chunks::from_data_length(buffer_data.len(), MAX_WRITE_CHUNK_SIZE);
         CommitBufferStage::Preparation(PreparationTask {
             commit_id: self.commit_id,
             pubkey: self.committed_account.pubkey,
-            committed_data,
+            buffer_data,
             chunks,
         })
     }
@@ -229,7 +229,7 @@ impl CommitTask {
 
 impl BaseTask for CommitTask {
     fn program_id(&self) -> Pubkey {
-        dlp_api::dlp::id()
+        dlp_api::id()
     }
 
     fn instruction(&self, validator: &Pubkey) -> Instruction {

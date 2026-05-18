@@ -1,8 +1,8 @@
 use std::{collections::HashSet, path::PathBuf, str::FromStr};
 
+use clap::{Parser, Subcommand};
 use magicblock_accounts_db::AccountsDb;
 use solana_pubkey::Pubkey;
-use structopt::StructOpt;
 
 use crate::utils::open_ledger;
 
@@ -14,115 +14,95 @@ mod transaction_details;
 mod transaction_logs;
 mod utils;
 
-#[derive(Debug, StructOpt)]
+#[derive(Debug, Subcommand)]
 enum Command {
-    #[structopt(name = "count", about = "Counts of items in ledger columns")]
-    Count {
-        #[structopt(parse(from_os_str))]
-        ledger_path: PathBuf,
-    },
-    #[structopt(name = "log", about = "Transaction logs")]
+    #[command(name = "count", about = "Counts of items in ledger columns")]
+    Count { ledger_path: PathBuf },
+    #[command(name = "log", about = "Transaction logs")]
     Log {
-        #[structopt(parse(from_os_str))]
         ledger_path: PathBuf,
-        #[structopt(
+        #[arg(
             long,
-            short = "u",
-            parse(from_flag),
+            short = 'u',
             help = "Show successful transactions, default: false"
         )]
         success: bool,
-        #[structopt(long, short, help = "Start slot")]
+        #[arg(long, short, help = "Start slot")]
         start: Option<u64>,
-        #[structopt(long, short, help = "End slot")]
+        #[arg(long, short, help = "End slot")]
         end: Option<u64>,
 
-        #[structopt(
+        #[arg(
             long,
             short,
-            multiple = true,
-            use_delimiter = true,
+            value_delimiter = ',',
             help = "Accounts in transaction"
         )]
-        accounts: Option<Vec<String>>,
+        accounts: Vec<String>,
     },
-    #[structopt(name = "sig", about = "Transaction details for signature")]
+    #[command(name = "sig", about = "Transaction details for signature")]
     Sig {
-        #[structopt(parse(from_os_str))]
         ledger_path: PathBuf,
-        #[structopt(help = "Signature")]
+        #[arg(help = "Signature")]
         sig: String,
-        #[structopt(
-            long,
-            short,
-            help = "Show instruction ascii data",
-            parse(from_flag)
-        )]
+        #[arg(long, short, help = "Show instruction ascii data")]
         ascii: bool,
     },
-    #[structopt(name = "accounts", about = "Account details")]
+    #[command(name = "accounts", about = "Account details")]
     Accounts {
-        #[structopt(parse(from_os_str))]
         ledger_path: PathBuf,
-        #[structopt(
+        #[arg(
             long,
             short,
-            parse(from_os_str),
+            value_enum,
             help = "Column by which to sort accounts",
-            default_value = "Pubkey"
+            default_value_t = accounts::SortAccounts::Pubkey
         )]
         sort: accounts::SortAccounts,
-        #[structopt(long, short, help = "Filter by account owner")]
+        #[arg(long, short, help = "Filter by account owner")]
         owner: Option<String>,
-        #[structopt(long, short, help = "Show rent epoch", parse(from_flag))]
+        #[arg(long, short, help = "Show rent epoch")]
         rent_epoch: bool,
-        #[structopt(
+        #[arg(
             long,
             short,
             help = "Filter accounts by specified criteria (comma-separated). PDAs are off-curve",
-            possible_values = &["on", "on-curve", "off", "off-curve", "executable", "non-executable"],
-            multiple = true,
-            use_delimiter = true
+            value_enum,
+            value_delimiter = ','
         )]
-        filter: Vec<String>,
-        #[structopt(
-            long,
-            short,
-            help = "Print count instead of account details",
-            parse(from_flag)
-        )]
+        filter: Vec<accounts::FilterAccounts>,
+        #[arg(long, short, help = "Print count instead of account details")]
         count: bool,
     },
-    #[structopt(
+    #[command(
         name = "account",
         about = "Specific Account Details including Data"
     )]
     Account {
-        #[structopt(parse(from_os_str))]
         ledger_path: PathBuf,
-        #[structopt(help = "Pubkey of the account")]
+        #[arg(help = "Pubkey of the account")]
         pubkey: String,
     },
     Blockhash {
-        #[structopt(parse(from_os_str))]
         ledger_path: PathBuf,
-        #[structopt(
+        #[arg(
             long,
             short,
-            help = "Prints the highest slot and blockhash for which a blockhash was recorded"
+            help = "Prints the highest slot and blockhash for which a blockhash was recorded",
+            value_enum
         )]
         query: blockhash::BlockhashQuery,
     },
 }
 
-#[derive(StructOpt)]
+#[derive(Parser)]
 struct Cli {
-    #[structopt(subcommand)]
+    #[command(subcommand)]
     command: Command,
 }
 
 fn main() {
-    let args = Cli::from_args();
+    let args = Cli::parse();
 
     use Command::*;
     match args.command {
@@ -136,7 +116,7 @@ fn main() {
             end,
             accounts,
         } => {
-            let accounts = accounts.map(|accounts| {
+            let accounts = (!accounts.is_empty()).then(|| {
                 accounts
                     .iter()
                     .map(|account| {
@@ -174,13 +154,13 @@ fn main() {
             let owner = owner.map(|owner| {
                 Pubkey::from_str(&owner).expect("Invalid owner filter pubkey")
             });
-            let filters = accounts::FilterAccounts::from_strings(&filter);
+            accounts::FilterAccounts::sanitize(&filter);
             accounts::print_accounts(
                 &AccountsDb::open(&ledger_path)
                     .expect("adb couldn't be opened"),
                 sort,
                 owner,
-                &filters,
+                &filter,
                 rent_epoch,
                 count,
             );

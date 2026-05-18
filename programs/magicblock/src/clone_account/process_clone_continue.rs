@@ -51,8 +51,6 @@ pub(crate) fn process_clone_account_continue(
         "CloneAccountContinue",
         invoke_context,
     )?;
-    let account = transaction_context.get_account_at_index(tx_idx)?;
-
     ic_msg!(
         invoke_context,
         "CloneAccountContinue: '{}' offset={} len={} is_last={}",
@@ -64,7 +62,7 @@ pub(crate) fn process_clone_account_continue(
 
     // Write data at offset
     {
-        let mut acc = account.borrow_mut();
+        let mut acc = transaction_context.accounts().try_borrow_mut(tx_idx)?;
         let account_data = acc.data_as_mut_slice();
         let start = offset as usize;
         let end = start + data.len();

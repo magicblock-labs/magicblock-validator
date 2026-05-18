@@ -59,9 +59,9 @@ lifecycle = "ephemeral"
 # Example format: grpcs://<network>.helius-rpc.com?api-key=<YOUR_API_KEY>
 # See Helius gRPC docs for available network endpoints.
 remotes = [
-  "https://api.devnet.solana.com",
-  "wss://api.devnet.solana.com",
-  "grpcs://laserstream-devnet-ewr.helius-rpc.com?api-key=YOUR_API_KEY",
+    "grpcs://laserstream-devnet-ewr.helius-rpc.com?api-key=YOUR_API_KEY",
+    "https://api.devnet.solana.com",
+    "wss://api.devnet.solana.com"
 ]
 
 # Root directory for application storage (ledger, accountsdb, snapshots).
@@ -121,6 +121,25 @@ basefee = 0
 # Env: MBV_VALIDATOR__KEYPAIR
 keypair = "9Vo7TbA5YfC5a33JhAi9Fb41usA6JwecHNRw3f9MzzHAM8hFnXTzL5DcEHwsAFjuUZ8vNQcJ4XziRFpMc3gTgBQ"
 
+# Replication role for this validator.
+# Default: "standalone"
+# Options:
+# - "standalone": disable replication
+# 
+# - "stand-by": replicate and allow takeover
+# 
+# [validator.replication-mode.stand-by]
+# url = "nats://0.0.0.0:4222"
+# secret = "SUAXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
+# 
+# - "replica-only": replicate without takeover
+#   Requires the primary validator pubkey we are replicating from.
+# 
+# [validator.replication-mode.replica-only]
+# url = "nats://0.0.0.0:4222"
+# secret = "SUAXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
+# authority-override = "L12m1UhkJRfHyvLMcVucJwxXeuD728EqVDDwQDxFMNo"
+
 [aperture]
 # Network address to bind the main JSON RPC service to.
 # Websocket bind address is derived by incrementing the port
@@ -175,11 +194,6 @@ index-size = 16_777_216
 # Env: MBV_ACCOUNTSDB__MAX_SNAPSHOTS
 max-snapshots = 4
 
-# How often (in slots) to take a snapshot of the database.
-# Default: 1024
-# Env: MBV_ACCOUNTSDB__SNAPSHOT_FREQUENCY
-snapshot-frequency = 1024
-
 # If true, wipes the accounts database on every startup.
 # Default: false
 # Env: MBV_ACCOUNTSDB__RESET
@@ -193,6 +207,13 @@ reset = false
 # Default: "400ms"
 # Env: MBV_LEDGER__BLOCK_TIME
 block-time = "400ms"
+
+# The number of slots included in a superblock.
+# accountsdb checksum/snapshot is taken at superblock boundary
+# 
+# Default: 72000
+# Env: MBV_LEDGER__SUPERBLOCK_SIZE
+superblock-size = 72000
 
 # Upper hard threshold for the max size of the ledger (in bytes).
 # Ledger truncation logic kicks in when disk usage approaches this limit.
@@ -210,24 +231,22 @@ verify-keypair = true
 # Env: MBV_LEDGER__RESET
 reset = false
 
+# (Optional) Override the validator authority pubkey during ledger replay.
+# When set, replayed transactions are verified against this key instead of
+# the validator's own identity. The override is automatically unset once
+# replay completes. Useful when replaying a ledger from a different validator.
+# Default: not set (uses the validator's own keypair)
+# Env: MBV_LEDGER__REPLAY_AUTHORITY_OVERRIDE
+# Example: replay-authority-override = "11111111111111111111111111111111"
+
 # ==============================================================================
 # Chainlink (cloning pipeline)
 # ==============================================================================
 [chainlink]
-# If true, creates and initializes Address Lookup Tables for oracle feeds.
-# Default: false
-# Env: MBV_CHAINLINK__PREPARE_LOOKUP_TABLES
-prepare-lookup-tables = false
-
-# Amount of lamports to automatically airdrop to empty feepayer accounts on startup.
-# Default: 0
-# Env: MBV_CHAINLINK__AUTO_AIRDROP_LAMPORTS
-auto-airdrop-lamports = 0
-
 # Maximum number of accounts to monitor for price updates.
-# Default: 0
+# Default: 5000
 # Env: MBV_CHAINLINK__MAX_MONITORED_ACCOUNTS
-max-monitored-accounts = 1000
+max-monitored-accounts = 5000
 
 # When true, confined accounts are removed during accounts bank reset.
 # Default: false

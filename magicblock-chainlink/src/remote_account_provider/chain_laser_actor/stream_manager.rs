@@ -8,7 +8,7 @@ use magicblock_config::config::GrpcConfig;
 use magicblock_metrics::metrics;
 use solana_pubkey::Pubkey;
 use tokio_stream::StreamMap;
-use tracing::warn;
+use tracing::{trace, warn};
 
 use super::{
     write_with_retry, LaserResult, LaserStream, LaserStreamWithHandle,
@@ -126,10 +126,10 @@ pub struct StreamManager<S: StreamHandle, SF: StreamFactory<S>> {
     stream_map: StreamMap<StreamKey, LaserStream>,
 
     /// Optional chain slot tracker for computing `from_slot`
-    /// during optimization. When set, optimized streams will
+    /// during optimization and program subscriptions. When set, streams will
     /// request backfill from a lookback window before the
     /// current chain slot so that no updates are missed while
-    /// the old streams are being replaced.
+    /// the old streams are being replaced or program subscriptions are created.
     /// For [Self::account_subscribe], `from_slot` is provided by
     /// the caller (actor).
     chain_slot: Option<ChainSlot>,
@@ -141,6 +141,12 @@ pub struct StreamManager<S: StreamHandle, SF: StreamFactory<S>> {
     /// Consumed by [Self::take_optimized_flag] so the actor can
     /// reset its time-based optimization interval.
     optimized_since_last_check: bool,
+
+    /// Defensive guard against re-entrant [Self::optimize] calls.
+    /// Today re-entry is impossible (`&mut self` + single
+    /// `tokio::select!` loop), but the flag protects against future
+    /// refactors that might introduce concurrency.
+    optimizing: bool,
 }
 
 #[allow(unused)]
@@ -164,6 +170,7 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
             chain_slot,
             client_id,
             optimized_since_last_check: false,
+            optimizing: false,
         };
         mgr.update_stream_metrics();
         mgr
@@ -181,6 +188,12 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
     /// a fresh one is created. If unoptimized old handles exceed
     /// [StreamManagerConfig::max_old_unoptimized], optimization
     /// is triggered.
+    ///
+    /// Large batches that exceed `max_subs_in_old_optimized` are
+    /// automatically chunked so that no single stream carries
+    /// more accounts than optimization would allow. Each chunk
+    /// goes through the normal subscribe → promote → optimize
+    /// cycle independently.
     pub async fn account_subscribe(
         &mut self,
         pubkeys: &[Pubkey],
@@ -201,13 +214,56 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
             return Ok(());
         }
 
+        // Chunk large batches at the optimized stream limit so
+        // that no single current-new stream exceeds what a single
+        // optimized stream would hold. The first chunk is sized to
+        // account for any existing current_new_subs so the combined
+        // count never exceeds the limit. Subsequent chunks use the
+        // full limit (since promotion clears current_new_subs).
+        let max = self.config.max_subs_in_old_optimized;
+        let remaining_capacity =
+            max.saturating_sub(self.current_new_subs.len());
+
+        if new_pks.len() > remaining_capacity {
+            let (first, rest) = if remaining_capacity > 0 {
+                new_pks.split_at(remaining_capacity)
+            } else {
+                // No remaining capacity — force a promotion by
+                // sending an empty-ish batch that will still
+                // trigger the promote path, then chunk the rest.
+                ([].as_slice(), new_pks.as_slice())
+            };
+            if !first.is_empty() {
+                self.account_subscribe_batch(first, commitment, from_slot)
+                    .await?;
+            }
+            for chunk in rest.chunks(max) {
+                self.account_subscribe_batch(chunk, commitment, from_slot)
+                    .await?;
+            }
+            return Ok(());
+        }
+
+        self.account_subscribe_batch(&new_pks, commitment, from_slot)
+            .await
+    }
+
+    /// Subscribe a single batch of new pubkeys (already filtered
+    /// for duplicates). The batch must not exceed
+    /// `max_subs_in_old_optimized`.
+    async fn account_subscribe_batch(
+        &mut self,
+        new_pks: &[Pubkey],
+        commitment: &CommitmentLevel,
+        from_slot: Option<u64>,
+    ) -> RemoteAccountProviderResult<()> {
         // Update the current-new stream with the full
         // current_new_subs filter (either create new if doesn't
         // exist, or update existing via write).
         // We tentatively add new_pks to current_new_subs so the
         // request includes them, but only persist into subscriptions
         // after the stream update succeeds.
-        for pk in &new_pks {
+        for pk in new_pks {
             self.current_new_subs.insert(*pk);
         }
 
@@ -228,7 +284,7 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
 
         // Revert tentative current_new_subs additions if the stream update failed
         if result.is_err() {
-            for pk in &new_pks {
+            for pk in new_pks {
                 self.current_new_subs.remove(pk);
             }
             result?;
@@ -237,7 +293,7 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
         // Update active subscriptions with new pubkeys only after stream update
         {
             let mut subs = self.subscriptions.write();
-            for pk in &new_pks {
+            for pk in new_pks {
                 subs.insert(*pk);
             }
         }
@@ -305,6 +361,7 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
             self.stream_map.remove(&StreamKey::OptimizedOld(i));
         }
         self.optimized_old_handles.clear();
+        self.optimizing = false;
         self.update_stream_metrics();
     }
 
@@ -348,7 +405,9 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
     /// current chain slot. Returns `None` if no chain slot
     /// tracker is available
     fn compute_from_slot(&self) -> Option<u64> {
-        self.chain_slot.as_ref().map(ChainSlot::compute_from_slot)
+        self.chain_slot
+            .as_ref()
+            .and_then(ChainSlot::compute_from_slot)
     }
 
     /// Emits the current optimized/unoptimized stream counts as
@@ -388,6 +447,25 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
     /// Otherwise streams may end up in an inconsistent state if a subscription attempt
     /// fails.
     pub async fn optimize(
+        &mut self,
+        commitment: &CommitmentLevel,
+    ) -> RemoteAccountProviderResult<()> {
+        if self.optimizing {
+            trace!(
+                client_id = self.client_id,
+                "optimize() called while already optimizing, skipping"
+            );
+            return Ok(());
+        }
+        {
+            self.optimizing = true;
+            let result = self.optimize_inner(commitment).await;
+            self.optimizing = false;
+            result
+        }
+    }
+
+    async fn optimize_inner(
         &mut self,
         commitment: &CommitmentLevel,
     ) -> RemoteAccountProviderResult<()> {
@@ -437,7 +515,8 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
         self.current_new_subs.clear();
         self.current_new_handle = None;
 
-        // Record the spike: new streams + previous streams still alive.
+        // Record the spike: new streams + previous streams still
+        // alive.
         self.update_stream_metrics_with_extra(prev_stream_count);
 
         self.optimized_since_last_check = true;
@@ -571,11 +650,15 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
             return Ok(());
         }
 
+        let from_slot = self.compute_from_slot();
         if let Some((mut subscribed_programs, handle)) = self.program_sub.take()
         {
             subscribed_programs.insert(program_id);
-            let request =
-                Self::build_program_request(&subscribed_programs, commitment);
+            let request = Self::build_program_request(
+                &subscribed_programs,
+                commitment,
+                from_slot,
+            );
             match write_with_retry(&handle, "program_subscribe", request).await
             {
                 Ok(()) => {
@@ -590,7 +673,11 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
             let mut subscribed_programs = HashSet::new();
             subscribed_programs.insert(program_id);
             let LaserStreamWithHandle { stream, handle } = self
-                .create_program_stream(&subscribed_programs, commitment)
+                .create_program_stream(
+                    &subscribed_programs,
+                    commitment,
+                    from_slot,
+                )
                 .await?;
             self.stream_map.insert(StreamKey::Program, stream);
             self.program_sub = Some((subscribed_programs, handle));
@@ -616,6 +703,7 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
     fn build_program_request(
         program_ids: &HashSet<Pubkey>,
         commitment: &CommitmentLevel,
+        from_slot: Option<u64>,
     ) -> SubscribeRequest {
         let mut accounts = HashMap::new();
         accounts.insert(
@@ -629,6 +717,7 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
         SubscribeRequest {
             accounts,
             commitment: Some((*commitment).into()),
+            from_slot,
             ..Default::default()
         }
     }
@@ -638,8 +727,10 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
         &mut self,
         program_ids: &HashSet<Pubkey>,
         commitment: &CommitmentLevel,
+        from_slot: Option<u64>,
     ) -> RemoteAccountProviderResult<LaserStreamWithHandle<S>> {
-        let request = Self::build_program_request(program_ids, commitment);
+        let request =
+            Self::build_program_request(program_ids, commitment, from_slot);
         self.stream_factory.subscribe(request).await
     }
 }
@@ -1532,6 +1623,36 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_program_subscribe_uses_from_slot_with_chain_slot() {
+        use std::sync::{atomic::AtomicU64, Arc};
+
+        let current_slot: u64 = 1000;
+        let chain_slot = ChainSlot::new(Arc::new(AtomicU64::new(current_slot)));
+        let factory = MockStreamFactory::new();
+        let mut mgr = StreamManager::new(
+            test_config(),
+            factory.clone(),
+            Some(chain_slot),
+            "test".to_string(),
+        );
+        let program_id = Pubkey::new_unique();
+
+        mgr.add_program_subscription(program_id, &COMMITMENT)
+            .await
+            .unwrap();
+
+        let expected_from_slot =
+            current_slot - ChainSlot::MAX_SLOTS_SUB_ACTIVATION;
+        let reqs = factory.captured_requests();
+        assert_eq!(reqs.len(), 1);
+        assert_eq!(reqs[0].from_slot, Some(expected_from_slot));
+
+        let handle_reqs = factory.handle_requests();
+        assert_eq!(handle_reqs.len(), 1);
+        assert_eq!(handle_reqs[0].from_slot, Some(expected_from_slot));
+    }
+
+    #[tokio::test]
     async fn test_optimize_sets_from_slot_none_without_chain_slot() {
         let (mut mgr, factory) = create_manager();
         mgr.account_subscribe(&make_pubkeys(5), &COMMITMENT, Some(42))
@@ -1593,6 +1714,43 @@ mod tests {
                 Some(expected_from_slot),
                 "optimized streams should backfill from \
                  chain_slot - MAX_SLOTS_SUB_ACTIVATION",
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_optimize_sets_from_slot_none_when_chain_slot_zero() {
+        use std::sync::{atomic::AtomicU64, Arc};
+
+        use crate::remote_account_provider::chain_slot::ChainSlot;
+
+        let chain_slot = ChainSlot::new(Arc::new(AtomicU64::new(0)));
+        let factory = MockStreamFactory::new();
+        let mut mgr = StreamManager::new(
+            test_config(),
+            factory.clone(),
+            Some(chain_slot),
+            "test".to_string(),
+        );
+
+        mgr.account_subscribe(&make_pubkeys(5), &COMMITMENT, Some(42))
+            .await
+            .unwrap();
+
+        let reqs_before = factory.captured_requests().len();
+        mgr.optimize(&COMMITMENT).await.unwrap();
+
+        let optimize_reqs: Vec<_> = factory
+            .captured_requests()
+            .into_iter()
+            .skip(reqs_before)
+            .collect();
+        assert!(!optimize_reqs.is_empty());
+        for req in &optimize_reqs {
+            assert_eq!(
+                req.from_slot, None,
+                "optimized streams should have from_slot=None \
+                 when chain_slot is still 0",
             );
         }
     }
@@ -1742,6 +1900,125 @@ mod tests {
         assert_eq!(source, StreamUpdateSource::Program);
         assert!(update.is_err());
     }
+
+    // ---------------------------------------------------------
+    // 13. Large Batch Chunking
+    // ---------------------------------------------------------
+
+    #[tokio::test]
+    async fn test_large_batch_chunked_at_max_subs_in_old_optimized() {
+        // max_subs_in_old_optimized = 10, so a batch of 25 is
+        // split into [10, 10, 5].
+        let (mut mgr, _factory) = create_manager();
+        let pks = make_pubkeys(25);
+
+        mgr.account_subscribe(&pks, &COMMITMENT, None)
+            .await
+            .unwrap();
+
+        // All 25 pubkeys are subscribed.
+        assert_subscriptions_eq(&mgr, &pks);
+
+        // The two chunks of 10 each exceed max_subs_in_new (5)
+        // → promoted. The last chunk of 5 stays as current-new
+        // (5 is not > 5).
+        // 2 promotions, max_old_unoptimized = 3, so
+        // optimization is NOT triggered (2 is not > 3).
+        assert_eq!(mgr.unoptimized_old_stream_count(), 2);
+        assert_eq!(mgr.optimized_old_stream_count(), 0);
+        assert_eq!(mgr.current_new_sub_count(), 5);
+    }
+
+    #[tokio::test]
+    async fn test_large_batch_triggers_optimization() {
+        // max_subs_in_old_optimized = 10, max_old_unoptimized = 3.
+        // A batch of 40 → chunks [10, 10, 10, 10].
+        // Each chunk of 10 > max_subs_in_new (5) → promoted.
+        // After 4th promotion (4 > 3) → optimization fires.
+        let (mut mgr, _factory) = create_manager();
+        let pks = make_pubkeys(40);
+
+        mgr.account_subscribe(&pks, &COMMITMENT, None)
+            .await
+            .unwrap();
+
+        assert_subscriptions_eq(&mgr, &pks);
+
+        // After optimization: unoptimized cleared, optimized
+        // rebuilt from all subscriptions.
+        assert_eq!(mgr.unoptimized_old_stream_count(), 0);
+        let total_subs = mgr.subscriptions().read().len();
+        let expected_optimized = total_subs.div_ceil(10);
+        assert_eq!(mgr.optimized_old_stream_count(), expected_optimized,);
+    }
+
+    #[tokio::test]
+    async fn test_batch_within_optimized_limit_not_chunked() {
+        // A batch of 10 (== max_subs_in_old_optimized) should
+        // NOT be chunked — it goes into a single current-new
+        // stream and gets promoted normally.
+        let (mut mgr, _factory) = create_manager();
+        let pks = make_pubkeys(10);
+
+        mgr.account_subscribe(&pks, &COMMITMENT, None)
+            .await
+            .unwrap();
+
+        assert_subscriptions_eq(&mgr, &pks);
+        // 10 > 5 (max_subs_in_new) → promoted to 1 unoptimized.
+        assert_eq!(mgr.unoptimized_old_stream_count(), 1);
+        assert_eq!(mgr.current_new_sub_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_chunking_accounts_for_existing_current_new_subs() {
+        // Seeding current_new_subs with some entries
+        // and then subscribing a larger batch must never produce a
+        // single CurrentNew request that exceeds
+        // max_subs_in_old_optimized (10).
+        let (mut mgr, factory) = create_manager();
+
+        // Seed current_new_subs with 5 pubkeys (below
+        // max_subs_in_new so no promotion yet).
+        let seed = make_pubkeys(5);
+        mgr.account_subscribe(&seed, &COMMITMENT, None)
+            .await
+            .unwrap();
+        assert_eq!(mgr.current_new_sub_count(), 5);
+
+        // Now subscribe 80 more. The first chunk must be
+        // sized at remaining_capacity = 10 - 5 = 5.
+        let batch = make_pubkeys(80);
+        mgr.account_subscribe(&batch, &COMMITMENT, None)
+            .await
+            .unwrap();
+
+        let max = test_config().max_subs_in_old_optimized;
+
+        // Every request sent via subscribe() or handle.write()
+        // must have at most `max` pubkeys.
+        for req in factory.handle_requests() {
+            let n = account_pubkeys_from_request(&req).len();
+            assert!(n <= max, "request has {n} pubkeys, exceeds limit {max}",);
+        }
+        for req in factory.captured_requests() {
+            let n = account_pubkeys_from_request(&req).len();
+            assert!(
+                n <= max,
+                "captured request has {n} pubkeys, exceeds \
+                 limit {max}",
+            );
+        }
+
+        // All 85 pubkeys are subscribed.
+        let all: Vec<Pubkey> =
+            seed.iter().chain(batch.iter()).copied().collect();
+        assert_subscriptions_eq(&mgr, &all);
+    }
+
+    // ---------------------------------------------------------
+    // 14. Stream Updates
+    // ---------------------------------------------------------
 
     #[tokio::test]
     async fn test_stream_closure_propagates_as_stream_end() {

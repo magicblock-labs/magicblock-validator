@@ -78,7 +78,7 @@ pub fn serialize_and_encode_base64(
 mod test {
     use std::collections::HashSet;
 
-    use dlp_api::dlp::args::{CommitStateArgs, CommitStateFromBufferArgs};
+    use dlp_api::args::{CommitStateArgs, CommitStateFromBufferArgs};
     use lazy_static::lazy_static;
     use magicblock_committor_program::instruction_builder::close_buffer::{
         create_close_ix, CreateCloseIxArgs,

@@ -1,4 +1,5 @@
 use std::{
+    collections::HashSet,
     fmt,
     sync::{
         atomic::{AtomicU16, AtomicU64, Ordering},
@@ -34,8 +35,8 @@ use crate::remote_account_provider::{
     chain_rpc_client::{ChainRpcClient, ChainRpcClientImpl},
     chain_slot::ChainSlot,
     pubsub_common::{
-        ChainPubsubActorMessage, MESSAGE_CHANNEL_SIZE,
-        SUBSCRIPTION_UPDATE_CHANNEL_SIZE,
+        is_internal_dlp_account_data, ChainPubsubActorMessage,
+        MESSAGE_CHANNEL_SIZE, SUBSCRIPTION_UPDATE_CHANNEL_SIZE,
     },
     RemoteAccountProviderError, RemoteAccountProviderResult,
     SubscriptionUpdate,
@@ -251,13 +252,6 @@ impl<H: StreamHandle, S: StreamFactory<H>> ChainLaserActor<H, S> {
         )
     }
 
-    #[allow(dead_code)]
-    #[instrument(skip(self), fields(client_id = %self.client_id))]
-    fn shutdown(&mut self) {
-        info!("Shutting down laser actor");
-        Self::clear_subscriptions(&mut self.stream_manager);
-    }
-
     #[instrument(skip(self), fields(client_id = %self.client_id))]
     pub async fn run(mut self) {
         let mut optimization_interval =
@@ -332,6 +326,12 @@ impl<H: StreamHandle, S: StreamFactory<H>> ChainLaserActor<H, S> {
                 pubkey, response, ..
             } => {
                 self.add_sub(pubkey, response).await;
+                false
+            }
+            AccountSubscribeMultiple {
+                pubkeys, response, ..
+            } => {
+                self.add_subs(pubkeys, response).await;
                 false
             }
             AccountUnsubscribe { pubkey, response } => {
@@ -417,6 +417,47 @@ impl<H: StreamHandle, S: StreamFactory<H>> ChainLaserActor<H, S> {
         });
     }
 
+    /// Subscribes to multiple pubkeys at once by forwarding
+    /// to the stream manager. Filters out already-subscribed keys.
+    async fn add_subs(
+        &mut self,
+        pubkeys: HashSet<Pubkey>,
+        sub_response: oneshot::Sender<RemoteAccountProviderResult<()>>,
+    ) {
+        let new_pubkeys: Vec<Pubkey> = pubkeys
+            .into_iter()
+            .filter(|pk| !self.stream_manager.is_subscribed(pk))
+            .collect();
+
+        if new_pubkeys.is_empty() {
+            sub_response.send(Ok(())).unwrap_or_else(|_| {
+                warn!("Failed to send already subscribed response");
+            });
+            return;
+        }
+
+        let from_slot = self.compute_from_slot();
+        let result = self
+            .stream_manager
+            .account_subscribe(&new_pubkeys, &self.commitment, from_slot)
+            .await;
+
+        let response = match result {
+            Ok(()) => Ok(()),
+            Err(e) => {
+                warn!(
+                    count = new_pubkeys.len(),
+                    error = ?e,
+                    "Failed to subscribe to accounts"
+                );
+                Err(e)
+            }
+        };
+        sub_response.send(response).unwrap_or_else(|_| {
+            warn!("Failed to send subscribe_multiple response");
+        });
+    }
+
     /// Removes a subscription and forwards to the stream manager.
     fn remove_sub(
         &mut self,
@@ -447,12 +488,39 @@ impl<H: StreamHandle, S: StreamFactory<H>> ChainLaserActor<H, S> {
 
     /// Computes a `from_slot` for backfilling based on the
     /// current chain slot. Returns `None` if backfilling is not
-    /// supported or the slot is still 0.
+    /// supported or the slot is still `0` (i.e. uninitialized).
+    ///
+    /// Logs the chosen mode so operators can distinguish:
+    /// - "backfill not supported" (endpoint flag)
+    /// - "backfill skipped (chain_slot still 0)" (bootstrap window)
+    /// - "backfill from <slot>" (normal operation)
     fn compute_from_slot(&self) -> Option<u64> {
         if !self.slots.supports_backfill {
+            trace!(
+                client_id = %self.client_id,
+                "compute_from_slot: backfill not supported by endpoint, \
+                 from_slot=None",
+            );
             return None;
         }
-        Some(self.slots.chain_slot.compute_from_slot())
+        match self.slots.chain_slot.compute_from_slot() {
+            None => {
+                debug!(
+                    client_id = %self.client_id,
+                    "compute_from_slot: chain_slot still 0, creating \
+                     subscription without from_slot (degraded backfill)",
+                );
+                None
+            }
+            Some(slot) => {
+                trace!(
+                    client_id = %self.client_id,
+                    from_slot = slot,
+                    "compute_from_slot: using normal backfill",
+                );
+                Some(slot)
+            }
+        }
     }
 
     /// Handles an update from any subscription stream.
@@ -686,7 +754,11 @@ impl<H: StreamHandle, S: StreamFactory<H>> ChainLaserActor<H, S> {
             );
         }
 
-        if !self.stream_manager.is_subscribed(&pubkey) {
+        let should_forward = self.stream_manager.is_subscribed(&pubkey)
+            || matches!(source, AccountUpdateSource::Program)
+                && owner.eq(&dlp_api::id())
+                && !is_internal_dlp_account_data(&account.data);
+        if !should_forward {
             return;
         }
 

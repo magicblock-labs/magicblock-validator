@@ -6,6 +6,7 @@ edition.workspace = true
 [dependencies]
 tracing = { workspace = true }
 solana-sdk = { workspace = true }
+solana-system-interface = { workspace = true }
 solana-pubsub-client = { workspace = true }
 solana-rpc-client = { workspace = true }
 solana-rpc-client-api = { workspace = true }

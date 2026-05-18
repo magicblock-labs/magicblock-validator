@@ -11,6 +11,7 @@ edition.workspace = true
 path = "src/lib.rs"
 
 [dependencies]
+clap = { workspace = true, features = ["derive"] }
 magicblock-accounts-db = { workspace = true }
 magicblock-core = { workspace = true }
 magicblock-ledger = { workspace = true }
@@ -21,6 +22,4 @@ solana-clock = { workspace = true }
 solana-message = { workspace = true }
 solana-pubkey = { workspace = true }
 solana-signature = { workspace = true }
-solana-transaction-status = { workspace = true }
-structopt = "0.3"
-tabular = "0.2"
+solana-transaction-status = { workspace = true, features = ["agave-unstable-api"] }

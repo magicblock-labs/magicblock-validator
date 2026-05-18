@@ -1,6 +1,7 @@
 use magicblock_ledger::Ledger;
 use num_format::{Locale, ToFormattedString};
-use tabular::{Row, Table};
+
+use crate::utils::print_two_col_table;
 
 pub(crate) fn print_counts(ledger: &Ledger) {
     let block_times_count = ledger
@@ -44,62 +45,23 @@ pub(crate) fn print_counts(ledger: &Ledger) {
         .expect("Failed to count perf samples")
         .to_formatted_string(&Locale::en);
 
-    let table = Table::new("{:<}  {:>}")
-        .with_row(Row::new().with_cell("Column").with_cell("Count"))
-        .with_row(
-            Row::new()
-                .with_cell("=========================")
-                .with_cell("=============="),
-        )
-        .with_row(
-            Row::new()
-                .with_cell("Blockhashes")
-                .with_cell(blockhash_count),
-        )
-        .with_row(
-            Row::new()
-                .with_cell("BlockTimes")
-                .with_cell(block_times_count),
-        )
-        .with_row(
-            Row::new()
-                .with_cell("TransactionStatus")
-                .with_cell(transaction_status_count),
-        )
-        .with_row(
-            Row::new()
-                .with_cell("Transactions")
-                .with_cell(transaction_count),
-        )
-        .with_row(
-            Row::new()
-                .with_cell("Successful Transactions")
-                .with_cell(successfull_transaction_status_count),
-        )
-        .with_row(
-            Row::new()
-                .with_cell("Failed Transactions")
-                .with_cell(failed_transaction_status_count),
-        )
-        .with_row(
-            Row::new()
-                .with_cell("SlotSignatures")
-                .with_cell(slot_signatures_count),
-        )
-        .with_row(
-            Row::new()
-                .with_cell("AddressSignatures")
-                .with_cell(address_signatures_count),
-        )
-        .with_row(
-            Row::new()
-                .with_cell("TransactionMemos")
-                .with_cell(transaction_memos_count),
-        )
-        .with_row(
-            Row::new()
-                .with_cell("PerfSamples")
-                .with_cell(perf_samples_count),
-        );
-    println!("{}", table);
+    let rows = vec![
+        ("Blockhashes".to_string(), blockhash_count),
+        ("BlockTimes".to_string(), block_times_count),
+        ("TransactionStatus".to_string(), transaction_status_count),
+        ("Transactions".to_string(), transaction_count),
+        (
+            "Successful Transactions".to_string(),
+            successfull_transaction_status_count,
+        ),
+        (
+            "Failed Transactions".to_string(),
+            failed_transaction_status_count,
+        ),
+        ("SlotSignatures".to_string(), slot_signatures_count),
+        ("AddressSignatures".to_string(), address_signatures_count),
+        ("TransactionMemos".to_string(), transaction_memos_count),
+        ("PerfSamples".to_string(), perf_samples_count),
+    ];
+    print_two_col_table(None, ["Column", "Count"], &rows);
 }

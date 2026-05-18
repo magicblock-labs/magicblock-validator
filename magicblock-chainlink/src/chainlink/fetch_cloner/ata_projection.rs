@@ -1,22 +1,74 @@
 use std::collections::HashSet;
 
-use dlp_api::dlp::state::DelegationRecord;
+use dlp_api::state::DelegationRecord;
 use futures_util::future::join_all;
 use magicblock_accounts_db::traits::AccountsBank;
-use magicblock_core::token_programs::try_derive_eata_address_and_bump;
+use magicblock_core::token_programs::{
+    is_ata, try_derive_ata_address_and_bump, try_derive_eata_address_and_bump,
+    AtaInfo,
+};
 use magicblock_metrics::metrics;
-use solana_account::AccountSharedData;
+use solana_account::{AccountSharedData, ReadableAccount};
 use solana_pubkey::Pubkey;
 use tokio::task::JoinSet;
 use tracing::*;
 
-use super::{delegation, types::AccountWithCompanion, FetchCloner};
+use super::{
+    delegation,
+    subscription::{acquire_subs, release_subs, SubscriptionRelease},
+    types::AccountWithCompanion,
+    FetchCloner,
+};
 use crate::{
     cloner::{AccountCloneRequest, Cloner, DelegationActions},
     remote_account_provider::{
         ChainPubsubClient, ChainRpcClient, ResolvedAccountSharedData,
+        SubscriptionReason,
     },
 };
+
+pub(crate) fn derive_eata_pubkey_from_ata_account(
+    ata_pubkey: &Pubkey,
+    ata_account: &AccountSharedData,
+) -> Option<Pubkey> {
+    derive_eata_pubkey(is_ata(ata_pubkey, ata_account)?)
+}
+
+pub(crate) fn derive_eata_pubkey_from_ata_layout(
+    ata_pubkey: &Pubkey,
+    ata_account: &AccountSharedData,
+) -> Option<Pubkey> {
+    derive_eata_pubkey(ata_info_from_layout(ata_pubkey, ata_account)?)
+}
+
+fn derive_eata_pubkey(ata_info: AtaInfo) -> Option<Pubkey> {
+    let (eata_pubkey, _) =
+        try_derive_eata_address_and_bump(&ata_info.owner, &ata_info.mint)?;
+    Some(eata_pubkey)
+}
+
+fn ata_info_from_layout(
+    ata_pubkey: &Pubkey,
+    ata_account: &AccountSharedData,
+) -> Option<AtaInfo> {
+    let data = ata_account.data();
+    if data.len() < 64 {
+        return None;
+    }
+
+    let mint = Pubkey::new_from_array(data[0..32].try_into().ok()?);
+    let wallet_owner = Pubkey::new_from_array(data[32..64].try_into().ok()?);
+    let (derived_ata, _) =
+        try_derive_ata_address_and_bump(&wallet_owner, &mint)?;
+    if derived_ata != *ata_pubkey {
+        return None;
+    }
+
+    Some(AtaInfo {
+        mint,
+        owner: wallet_owner,
+    })
+}
 
 /// Resolves ATAs with eATA projection.
 /// For each detected ATA, we derive the eATA PDA, subscribe to both,
@@ -95,25 +147,17 @@ where
         .into_iter()
         .collect();
 
-    // Subscribe to all ATA and eATA accounts in parallel
-    let subscription_results = join_all(
-        pubkeys_to_subscribe
-            .iter()
-            .map(|pk| this.subscribe_to_account(pk)),
+    let acquired_projection_subs = acquire_subs(
+        &this.remote_account_provider,
+        pubkeys_to_subscribe.clone(),
+        SubscriptionReason::AtaProjection,
     )
-    .await;
-
-    for (pubkey, result) in
-        pubkeys_to_subscribe.iter().zip(subscription_results)
-    {
-        if let Err(err) = result {
-            warn!(
-                pubkey = %pubkey,
-                err = ?err,
-                "Failed to subscribe to ATA/eATA account"
-            );
-        }
-    }
+    .await
+    .map(|_| true)
+    .unwrap_or_else(|err| {
+        warn!(error = ?err, "Failed to subscribe to ATA/eATA account");
+        false
+    });
 
     let ata_results = ata_join_set.join_all().await;
 
@@ -207,6 +251,24 @@ where
             delegated_to_other,
         });
     }
+
+    let mut releases = pubkeys_to_subscribe
+        .iter()
+        .copied()
+        .map(|pubkey| SubscriptionRelease::Pubkey {
+            pubkey,
+            reason: SubscriptionReason::DirectAccount,
+        })
+        .collect::<Vec<_>>();
+    if acquired_projection_subs {
+        releases.extend(pubkeys_to_subscribe.iter().copied().map(|pubkey| {
+            SubscriptionRelease::Pubkey {
+                pubkey,
+                reason: SubscriptionReason::AtaProjection,
+            }
+        }));
+    }
+    release_subs(&this.remote_account_provider, releases).await;
 
     accounts_to_clone
 }

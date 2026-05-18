@@ -65,6 +65,9 @@ pub enum RemoteAccountProviderError {
     #[error("Failed to resolve accounts to same slot ({0}) to track slots hit limit: {2}")]
     SlotsDidNotMatch(String, Vec<u64>, String),
 
+    #[error("The message {0} is not supported by this actor")]
+    UnsupportedActorMessage(String),
+
     #[error("Accounts matched same slot ({0}), but it's less than min required context slot {2} hit limit: {3}")]
     MatchingSlotsNotSatisfyingMinContextSlot(String, Vec<u64>, u64, String),
 

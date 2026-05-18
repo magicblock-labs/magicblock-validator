@@ -33,7 +33,7 @@ pub(crate) fn process_create_ephemeral_account(
     transfer_rent(transaction_context, rent as i64)?;
 
     // Initialize ephemeral account
-    let mut acc = ephemeral.borrow_mut();
+    let mut acc = ephemeral.borrow_mut()?;
     acc.set_lamports(0);
     acc.set_owner(caller_program_id);
     acc.resize(data_len as usize, 0);

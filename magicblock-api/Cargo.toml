@@ -13,6 +13,7 @@ borsh = "1.5.3"
 fd-lock = { workspace = true }
 tracing = { workspace = true }
 
+magicblock-delegation-program-api = { workspace = true }
 magic-domain-program = { workspace = true }
 magicblock-account-cloner = { workspace = true }
 magicblock-accounts = { workspace = true }
@@ -27,6 +28,8 @@ magicblock-magic-program-api = { workspace = true }
 magicblock-metrics = { workspace = true }
 magicblock-processor = { workspace = true }
 magicblock-program = { workspace = true }
+magicblock-services = { workspace = true }
+magicblock-replicator = { workspace = true }
 magicblock-task-scheduler = { workspace = true }
 magicblock-validator-admin = { workspace = true }
 
@@ -34,16 +37,18 @@ num_cpus = { workspace = true }
 paste = { workspace = true }
 solana-account = { workspace = true }
 solana-clock = { workspace = true }
+solana-cluster-type = { workspace = true }
 solana-commitment-config = { workspace = true }
 solana-feature-set = { workspace = true }
-solana-genesis-config = { workspace = true }
 solana-hash = { workspace = true }
-solana-inline-spl = { workspace = true }
 solana-instruction = { workspace = true }
 solana-keypair = { workspace = true }
 solana-program = { workspace = true }
+solana-program-option = { workspace = true }
+solana-program-pack = { workspace = true }
 solana-pubkey = { workspace = true }
 solana-rpc-client = { workspace = true }
+solana-sdk-ids = { workspace = true }
 solana-sha256-hasher = { workspace = true }
 solana-signature = { workspace = true }
 solana-signer = { workspace = true }
@@ -54,8 +59,10 @@ solana-transaction-error = { workspace = true }
 solana-rent = { workspace = true }
 solana-fee-calculator = { workspace = true }
 solana-feature-gate-interface = { workspace = true }
+solana-genesis-config = { workspace = true }
 solana-message = { workspace = true }
 solana-native-token = { workspace = true }
+spl-token = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }

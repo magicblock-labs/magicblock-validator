@@ -9,7 +9,7 @@ use std::{
 use cleanass::{assert, assert_eq};
 use integration_test_tools::{
     expect,
-    loaded_accounts::LoadedAccounts,
+    loaded_accounts::{LoadedAccounts, DLP_TEST_AUTHORITY_BYTES},
     validator::{
         cleanup, resolve_programs,
         start_magicblock_validator_with_config_struct,
@@ -40,6 +40,7 @@ use solana_sdk::{
     signer::Signer,
     transaction::Transaction,
 };
+use solana_system_interface::instruction as system_instruction;
 use tempfile::TempDir;
 use tracing::*;
 
@@ -58,10 +59,7 @@ pub fn setup_offline_validator(
     reset_ledger: bool,
     skip_keypair_match_check: bool,
 ) -> (TempDir, Child, IntegrationTestContext) {
-    let accountsdb_config = AccountsDbConfig {
-        snapshot_frequency: SNAPSHOT_FREQUENCY,
-        ..Default::default()
-    };
+    let accountsdb_config = AccountsDbConfig::default();
 
     let validator_config = ValidatorConfig::default();
 
@@ -134,7 +132,6 @@ pub fn setup_validator_with_local_remote_and_resume_strategy(
     loaded_accounts: &LoadedAccounts,
 ) -> (TempDir, Child, IntegrationTestContext) {
     let accountsdb_config = AccountsDbConfig {
-        snapshot_frequency: SNAPSHOT_FREQUENCY,
         reset: reset_ledger,
         ..Default::default()
     };
@@ -165,10 +162,22 @@ pub fn setup_validator_with_local_remote_and_resume_strategy(
     {
         let chain_only_ctx =
             IntegrationTestContext::try_new_chain_only().unwrap();
+
         chain_only_ctx
             .airdrop_chain(
                 &loaded_accounts.validator_authority(),
                 20 * LAMPORTS_PER_SOL,
+            )
+            .unwrap();
+
+        // Init fees vault for validator
+        init_validator_fees_vault(
+            &chain_only_ctx,
+            loaded_accounts.validator_authority_keypair(),
+        );
+        chain_only_ctx
+            .ensure_magic_fee_vault_delegated_on_chain(
+                loaded_accounts.validator_authority_keypair(),
             )
             .unwrap();
     }
@@ -184,6 +193,164 @@ pub fn setup_validator_with_local_remote_and_resume_strategy(
         validator
     );
     (default_tmpdir_config, validator, ctx)
+}
+
+/// Like `setup_offline_validator` but uses a new validator authority
+/// and sets `replay_authority_override` for ledger replay.
+pub fn setup_offline_validator_with_authority_override(
+    ledger_path: &Path,
+    programs: Option<Vec<LoadableProgram>>,
+    millis_per_slot: Option<u64>,
+    reset_ledger: bool,
+    replay_authority_override: Pubkey,
+) -> (TempDir, Child, IntegrationTestContext) {
+    let accountsdb_config = AccountsDbConfig::default();
+
+    let validator_config = ValidatorConfig::default();
+    let programs = resolve_programs(programs);
+
+    let config = ValidatorParams {
+        ledger: LedgerConfig {
+            reset: reset_ledger,
+            verify_keypair: false,
+            replay_authority_override: Some(SerdePubkey(
+                replay_authority_override,
+            )),
+            block_time: millis_per_slot
+                .map(Duration::from_millis)
+                .unwrap_or_else(|| {
+                    Duration::from_millis(DEFAULT_LEDGER_BLOCK_TIME_MS)
+                }),
+            ..Default::default()
+        },
+        accountsdb: accountsdb_config.clone(),
+        programs,
+        validator: validator_config,
+        lifecycle: LifecycleMode::Offline,
+        storage: StorageDirectory(ledger_path.to_path_buf()),
+        ..Default::default()
+    };
+    let (default_tmpdir_config, Some(mut validator), port) =
+        start_magicblock_validator_with_config_struct(
+            config,
+            &LoadedAccounts::new_with_new_validator_authority(),
+        )
+    else {
+        panic!("validator should set up correctly");
+    };
+
+    let ctx = expect!(
+        IntegrationTestContext::try_new_with_ephem_port(port),
+        validator
+    );
+    (default_tmpdir_config, validator, ctx)
+}
+
+/// Like `setup_validator_with_local_remote` but uses a new validator
+/// authority and sets `replay_authority_override` for ledger replay.
+pub fn setup_validator_with_local_remote_and_authority_override(
+    ledger_path: &Path,
+    programs: Option<Vec<LoadableProgram>>,
+    reset_ledger: bool,
+    replay_authority_override: Pubkey,
+) -> (TempDir, Child, IntegrationTestContext) {
+    let accountsdb_config = AccountsDbConfig {
+        reset: reset_ledger,
+        ..Default::default()
+    };
+
+    let programs = resolve_programs(programs);
+    let loaded_accounts = LoadedAccounts::new_with_new_validator_authority();
+
+    let config = ValidatorParams {
+        ledger: LedgerConfig {
+            reset: reset_ledger,
+            verify_keypair: false,
+            replay_authority_override: Some(SerdePubkey(
+                replay_authority_override,
+            )),
+            ..Default::default()
+        },
+        accountsdb: accountsdb_config.clone(),
+        programs,
+        task_scheduler: TaskSchedulerConfig {
+            reset: reset_ledger,
+            ..Default::default()
+        },
+        lifecycle: LifecycleMode::Ephemeral,
+        remotes: vec![
+            Remote::from_str(IntegrationTestContext::url_chain()).unwrap(),
+            Remote::from_str(IntegrationTestContext::ws_url_chain()).unwrap(),
+        ],
+        storage: StorageDirectory(ledger_path.to_path_buf()),
+        ..Default::default()
+    };
+    // Fund the NEW validator authority on chain
+    {
+        let chain_only_ctx =
+            IntegrationTestContext::try_new_chain_only().unwrap();
+        chain_only_ctx
+            .airdrop_chain(
+                &loaded_accounts.validator_authority(),
+                20 * LAMPORTS_PER_SOL,
+            )
+            .unwrap();
+
+        init_validator_fees_vault(
+            &chain_only_ctx,
+            loaded_accounts.validator_authority_keypair(),
+        );
+    }
+
+    let (default_tmpdir_config, Some(mut validator), port) =
+        start_magicblock_validator_with_config_struct(config, &loaded_accounts)
+    else {
+        panic!("validator should set up correctly");
+    };
+
+    let ctx = expect!(
+        IntegrationTestContext::try_new_with_ephem_port(port),
+        validator
+    );
+    (default_tmpdir_config, validator, ctx)
+}
+
+/// Init validator fees vault for proper validator setup
+pub fn init_validator_fees_vault(
+    chain_ctx: &IntegrationTestContext,
+    validator_identity: &Keypair,
+) {
+    let vault_pda = dlp_api::pda::validator_fees_vault_pda_from_validator(
+        &validator_identity.pubkey(),
+    );
+    if chain_ctx.fetch_chain_account(vault_pda).is_ok() {
+        // Account exists
+        return;
+    }
+
+    // DLP authority in integration tests
+    let dlp_authority =
+        Keypair::try_from(&DLP_TEST_AUTHORITY_BYTES[..]).unwrap();
+
+    let latest_block_hash = chain_ctx.try_get_latest_blockhash_chain().unwrap();
+    let ix = dlp_api::instruction_builder::init_validator_fees_vault(
+        validator_identity.pubkey(),
+        dlp_authority.pubkey(),
+        validator_identity.pubkey(),
+    );
+    let mut tx = Transaction::new_signed_with_payer(
+        &[ix],
+        Some(&validator_identity.pubkey()),
+        &[validator_identity, &dlp_authority],
+        latest_block_hash,
+    );
+
+    chain_ctx
+        .send_and_confirm_transaction_chain(
+            &mut tx,
+            &[validator_identity, &dlp_authority],
+        )
+        .unwrap();
 }
 
 // -----------------
@@ -224,11 +391,11 @@ pub fn init_and_delegate_counter_and_payer(
         cleanup(validator)
     );
     let owner = fetch_counter_owner_chain(&payer.pubkey(), validator);
-    assert_eq!(owner, dlp_api::dlp::id(), cleanup(validator));
+    assert_eq!(owner, dlp_api::id(), cleanup(validator));
 
     let payer_chain =
         expect!(ctx.fetch_chain_account(payer.pubkey()), validator);
-    assert_eq!(payer_chain.owner, dlp_api::dlp::id(), cleanup(validator));
+    assert_eq!(payer_chain.owner, dlp_api::id(), cleanup(validator));
     assert!(payer_chain.lamports > LAMPORTS_PER_SOL, cleanup(validator));
 
     debug!(
@@ -313,7 +480,7 @@ pub fn transfer_lamports(
     lamports: u64,
 ) -> Signature {
     let transfer_ix =
-        solana_sdk::system_instruction::transfer(&from.pubkey(), to, lamports);
+        system_instruction::transfer(&from.pubkey(), to, lamports);
     let (sig, confirmed) = expect!(
         ctx.send_and_confirm_instructions_with_payer_ephem(
             &[transfer_ix],
@@ -531,6 +698,15 @@ pub fn wait_for_cloned_accounts_hydration() {
     // NOTE: account hydration runs in the background _after_ the validator starts up
     // thus we need to wait for that to complete before we can send this transaction
     sleep(Duration::from_secs(5));
+}
+
+pub fn kill_validator(validator: &mut Child) {
+    let _ = validator.kill().inspect_err(|err| {
+        eprintln!("ERR: Failed to kill validator: {:?}", err);
+    });
+    let _ = validator.wait().inspect_err(|err| {
+        eprintln!("ERR: Failed to reap validator: {:?}", err);
+    });
 }
 
 pub fn wait_for_counter_ephem_state(

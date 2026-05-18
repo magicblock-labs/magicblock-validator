@@ -1,6 +1,6 @@
 use std::{
     fs,
-    net::{SocketAddr, TcpStream},
+    net::{IpAddr, SocketAddr, TcpListener, TcpStream},
     path::{Path, PathBuf},
     process::{self, Child},
     thread::sleep,
@@ -10,13 +10,19 @@ use std::{
 use magicblock_config::{
     config::LoadableProgram, types::BindAddress, ValidatorParams,
 };
-use random_port::{PortPicker, Protocol};
+use rand::{thread_rng, Rng};
+use solana_commitment_config::CommitmentConfig;
+use solana_pubkey::Pubkey;
+use solana_rpc_client::rpc_client::RpcClient;
 use tempfile::TempDir;
 
 use crate::{
     loaded_accounts::LoadedAccounts,
     tmpdir::resolve_tmp_dir,
-    toml_to_args::{config_to_args, rpc_port_from_config, ProgramLoader},
+    toml_to_args::{
+        config_to_args, program_ids_from_config, rpc_port_from_config,
+        ProgramLoader,
+    },
     workspace_paths::path_relative_to_workspace,
 };
 
@@ -32,26 +38,44 @@ pub fn start_magic_block_validator_with_config(
     } = test_runner_paths;
 
     let port = rpc_port_from_config(config_path);
-
-    // First build so that the validator can start fast
-    let mut command = process::Command::new("cargo");
     let keypair_base58 = loaded_chain_accounts.validator_authority_base58();
-    command.arg("build");
-    let build_res = command.current_dir(root_dir.clone()).output();
 
-    if build_res.is_ok_and(|output| !output.status.success()) {
-        eprintln!("Failed to build validator");
-        return None;
-    }
+    // In CI we ship a prebuilt validator binary as an artifact so we never
+    // pay for `cargo build` here. Locally we keep the convenient
+    // `cargo build` + `cargo run` flow so source changes are picked up.
+    let prebuilt =
+        std::env::var("MAGICBLOCK_VALIDATOR_BIN").ok().filter(|p| {
+            let exists = Path::new(p).is_file();
+            if !exists {
+                eprintln!(
+                    "MAGICBLOCK_VALIDATOR_BIN={} does not exist, falling back to cargo run",
+                    p
+                );
+            }
+            exists
+        });
 
-    // Start validator via `cargo run -- <path to config>`
-    let mut command = process::Command::new("cargo");
-    command.arg("run");
+    let mut command = if let Some(bin) = prebuilt.as_deref() {
+        let mut c = process::Command::new(bin);
+        c.arg(config_path);
+        c
+    } else {
+        let mut build_cmd = process::Command::new("cargo");
+        build_cmd.arg("build");
+        let build_res = build_cmd.current_dir(root_dir.clone()).output();
+        if build_res.is_ok_and(|output| !output.status.success()) {
+            eprintln!("Failed to build validator");
+            return None;
+        }
+
+        let mut c = process::Command::new("cargo");
+        c.arg("run").arg("--").arg(config_path);
+        c
+    };
+
     let rust_log_style =
         std::env::var("RUST_LOG_STYLE").unwrap_or(log_suffix.to_string());
     command
-        .arg("--")
-        .arg(config_path)
         .env("RUST_LOG_STYLE", rust_log_style)
         .env("MBV_VALIDATOR__KEYPAIR", keypair_base58.clone())
         .current_dir(root_dir);
@@ -101,6 +125,10 @@ pub fn start_test_validator_with_config(
             "protocol-fees-vault.json".to_string(),
         ),
         (
+            loaded_accounts.magic_fee_vault().to_string(),
+            "magic-fee-vault.json".to_string(),
+        ),
+        (
             "9yXjZTevvMp1XgZSZEaziPRgFiXtAQChpnP2oX9eCpvt".to_string(),
             "non-delegated-cloneable-account1.json".to_string(),
         ),
@@ -119,9 +147,41 @@ pub fn start_test_validator_with_config(
     ];
     let resolved_extra_accounts =
         loaded_accounts.extra_accounts(workspace_dir, &accounts_dir);
-    let accounts = accounts.iter().chain(&resolved_extra_accounts);
+    let readiness_program_pubkeys = program_ids_from_config(config_path)
+        .into_iter()
+        .filter_map(|pubkey| {
+            pubkey.parse::<Pubkey>().map_or_else(
+                |err| {
+                    eprintln!(
+                        "Skipping invalid readiness program pubkey {}: {:?}",
+                        pubkey, err
+                    );
+                    None
+                },
+                Some,
+            )
+        })
+        .collect::<Vec<_>>();
+    let readiness_account_pubkeys = accounts
+        .iter()
+        .chain(&resolved_extra_accounts)
+        .filter_map(|(account, _)| {
+            account.parse::<Pubkey>().map_or_else(
+                |err| {
+                    eprintln!(
+                        "Skipping invalid readiness account pubkey {}: {:?}",
+                        account, err
+                    );
+                    None
+                },
+                Some,
+            )
+        })
+        .collect::<Vec<_>>();
 
     let account_args = accounts
+        .iter()
+        .chain(&resolved_extra_accounts)
         .flat_map(|(account, file)| {
             let account_path = accounts_dir.join(file).canonicalize().unwrap();
             vec![
@@ -150,20 +210,34 @@ pub fn start_test_validator_with_config(
     eprintln!("Starting test validator with {:?}", command);
     eprintln!("{}", script);
     let validator = command.spawn().expect("Failed to start validator");
-    wait_for_validator(validator, port)
+    let mut validator = wait_for_validator(validator, port)?;
+    wait_for_required_accounts(
+        &mut validator,
+        port,
+        &readiness_program_pubkeys,
+        &readiness_account_pubkeys,
+    )
+    .then_some(validator)
 }
 
 pub fn wait_for_validator(mut validator: Child, port: u16) -> Option<Child> {
     const SLEEP_DURATION: Duration = Duration::from_millis(400);
-    let max_retries = if std::env::var("CI").is_ok() {
-        1500
-    } else {
-        800
-    };
+    let max_retries = validator_startup_max_retries();
 
     for _ in 0..max_retries {
         if TcpStream::connect(format!("0.0.0.0:{}", port)).is_ok() {
             return Some(validator);
+        }
+
+        if let Some(status) = validator
+            .try_wait()
+            .expect("Failed to poll validator process")
+        {
+            eprintln!(
+                "Validator RPC on port {} never listened; process exited early with {}",
+                port, status
+            );
+            return None;
         }
 
         sleep(SLEEP_DURATION);
@@ -175,21 +249,120 @@ pub fn wait_for_validator(mut validator: Child, port: u16) -> Option<Child> {
         max_retries as f32 * SLEEP_DURATION.as_secs_f32()
     );
     validator.kill().expect("Failed to kill validator");
+    validator.wait().expect("Failed to reap validator");
     None
+}
+
+fn wait_for_required_accounts(
+    validator: &mut Child,
+    port: u16,
+    program_pubkeys: &[Pubkey],
+    account_pubkeys: &[Pubkey],
+) -> bool {
+    if program_pubkeys.is_empty() && account_pubkeys.is_empty() {
+        return true;
+    }
+
+    const SLEEP_DURATION: Duration = Duration::from_millis(400);
+    let max_retries = validator_startup_max_retries();
+    let rpc_client = RpcClient::new_with_commitment(
+        format!("http://127.0.0.1:{}", port),
+        CommitmentConfig::processed(),
+    );
+    let mut last_rpc_error = None;
+    let pubkeys = program_pubkeys
+        .iter()
+        .chain(account_pubkeys)
+        .copied()
+        .collect::<Vec<_>>();
+
+    for _ in 0..max_retries {
+        match rpc_client.get_multiple_accounts(&pubkeys) {
+            Ok(accounts) => {
+                last_rpc_error = None;
+                let programs_ready =
+                    accounts[..program_pubkeys.len()].iter().all(|account| {
+                        account
+                            .as_ref()
+                            .is_some_and(|account| account.executable)
+                    });
+                let accounts_ready = accounts[program_pubkeys.len()..]
+                    .iter()
+                    .all(Option::is_some);
+                if programs_ready && accounts_ready {
+                    return true;
+                }
+            }
+            Err(err) => last_rpc_error = Some(err.to_string()),
+        }
+
+        if let Some(status) = validator
+            .try_wait()
+            .expect("Failed to poll validator process")
+        {
+            eprintln!(
+                "Validator RPC on port {} listened, but required accounts never became ready; process exited with {}; last RPC error: {:?}",
+                port, status, last_rpc_error
+            );
+            return false;
+        }
+
+        sleep(SLEEP_DURATION);
+    }
+
+    eprintln!(
+        "Required validator accounts on port {} failed to become ready after {:.1} seconds; last RPC error: {:?}",
+        port,
+        max_retries as f32 * SLEEP_DURATION.as_secs_f32(),
+        last_rpc_error
+    );
+    validator.kill().expect("Failed to kill validator");
+    validator.wait().expect("Failed to reap validator");
+    false
+}
+
+fn validator_startup_max_retries() -> usize {
+    if std::env::var("CI").is_ok() {
+        1500
+    } else {
+        800
+    }
 }
 
 pub const TMP_DIR_CONFIG: &str = "TMP_DIR_CONFIG";
 
-fn resolve_port() -> u16 {
+const MIN_RANDOM_PORT: u16 = 1024;
+const MAX_RANDOM_PORT: u16 = u16::MAX;
+const RANDOM_PORT_ATTEMPTS: usize = 128;
+
+fn resolve_port(bind_ip: IpAddr, exclude: &[u16]) -> u16 {
     std::env::var("EPHEM_PORT")
         .ok()
         .and_then(|p| p.parse().ok())
         .unwrap_or_else(|| {
-            PortPicker::new()
-                .random(true)
-                .protocol(Protocol::Tcp)
-                .pick()
-                .unwrap()
+            let mut rng = thread_rng();
+
+            for _ in 0..RANDOM_PORT_ATTEMPTS {
+                let port = rng.gen_range(MIN_RANDOM_PORT..=MAX_RANDOM_PORT);
+                if exclude.contains(&port) {
+                    continue;
+                }
+
+                if TcpListener::bind(SocketAddr::new(bind_ip, port)).is_ok() {
+                    return port;
+                }
+            }
+
+            loop {
+                let port = TcpListener::bind(SocketAddr::new(bind_ip, 0))
+                    .and_then(|listener| listener.local_addr())
+                    .map(|addr| addr.port())
+                    .unwrap();
+
+                if !exclude.contains(&port) {
+                    return port;
+                }
+            }
         })
 }
 
@@ -201,8 +374,8 @@ pub fn start_magicblock_validator_with_config_struct(
     config: ValidatorParams,
     loaded_chain_accounts: &LoadedAccounts,
 ) -> (TempDir, Option<process::Child>, u16) {
-    let rpc_port = resolve_port();
-    let metrics_port = resolve_port();
+    let rpc_port = resolve_port(config.aperture.listen.ip(), &[]);
+    let metrics_port = resolve_port(config.metrics.address.ip(), &[rpc_port]);
 
     let mut config = config.clone();
     config.aperture.listen =
@@ -243,8 +416,8 @@ pub fn start_magicblock_validator_with_config_struct_and_temp_dir(
     default_tmpdir: TempDir,
     temp_dir: PathBuf,
 ) -> (TempDir, Option<process::Child>, u16) {
-    let rpc_port = resolve_port();
-    let metrics_port = resolve_port();
+    let rpc_port = resolve_port(config.aperture.listen.ip(), &[]);
+    let metrics_port = resolve_port(config.metrics.address.ip(), &[rpc_port]);
 
     let mut config = config.clone();
     config.aperture.listen =
@@ -281,6 +454,9 @@ pub fn start_magicblock_validator_with_config_struct_and_temp_dir(
 pub fn cleanup(validator: &mut Child) {
     let _ = validator.kill().inspect_err(|e| {
         eprintln!("ERR: Failed to kill validator: {:?}", e);
+    });
+    let _ = validator.wait().inspect_err(|e| {
+        eprintln!("ERR: Failed to reap validator: {:?}", e);
     });
 }
 

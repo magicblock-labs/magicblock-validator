@@ -9,7 +9,8 @@ use magicblock_magic_program_api::{
         AccountModification, AccountModificationForInstruction,
         MagicBlockInstruction,
     },
-    MAGIC_CONTEXT_PUBKEY,
+    pda::CRANK_SIGNER,
+    CRANK_PROGRAM_ID, MAGIC_CONTEXT_PUBKEY,
 };
 use solana_hash::Hash;
 use solana_instruction::{AccountMeta, Instruction};
@@ -90,6 +91,27 @@ impl InstructionUtils {
         )
     }
 
+    #[cfg(test)]
+    pub(crate) fn schedule_commit_with_delegated_payer_instruction(
+        payer: &Pubkey,
+        pdas: Vec<Pubkey>,
+    ) -> Instruction {
+        let fee_vault = crate::schedule_transactions::magic_fee_vault_pubkey();
+        let mut account_metas = vec![
+            AccountMeta::new(*payer, true),
+            AccountMeta::new(MAGIC_CONTEXT_PUBKEY, false),
+            AccountMeta::new(fee_vault, false),
+        ];
+        for pubkey in &pdas {
+            account_metas.push(AccountMeta::new_readonly(*pubkey, true));
+        }
+        Instruction::new_with_bincode(
+            crate::id(),
+            &MagicBlockInstruction::ScheduleCommit,
+            account_metas,
+        )
+    }
+
     // -----------------
     // Scheduled Commit Sent
     // -----------------
@@ -148,15 +170,6 @@ impl InstructionUtils {
     // -----------------
     // ModifyAccounts
     // -----------------
-    pub fn modify_accounts(
-        account_modifications: Vec<AccountModification>,
-        message: Option<String>,
-        recent_blockhash: Hash,
-    ) -> Transaction {
-        let ix =
-            Self::modify_accounts_instruction(account_modifications, message);
-        Self::into_transaction(&validator_authority(), ix, recent_blockhash)
-    }
 
     pub fn modify_accounts_instruction(
         account_modifications: Vec<AccountModification>,
@@ -173,13 +186,9 @@ impl InstructionUtils {
                 .push(AccountMeta::new(account_modification.pubkey, false));
             let account_mod_for_instruction =
                 AccountModificationForInstruction {
-                    lamports: account_modification.lamports,
                     owner: account_modification.owner,
-                    executable: account_modification.executable,
-                    data: account_modification.data,
                     delegated: account_modification.delegated,
                     confined: account_modification.confined,
-                    remote_slot: account_modification.remote_slot,
                 };
             account_mods.insert(
                 account_modification.pubkey,
@@ -202,23 +211,17 @@ impl InstructionUtils {
     pub fn schedule_task(
         payer: &Keypair,
         args: ScheduleTaskArgs,
-        accounts: &[Pubkey],
         recent_blockhash: Hash,
     ) -> Transaction {
-        let ix =
-            Self::schedule_task_instruction(&payer.pubkey(), args, accounts);
+        let ix = Self::schedule_task_instruction(&payer.pubkey(), args);
         Self::into_transaction(payer, ix, recent_blockhash)
     }
 
     pub fn schedule_task_instruction(
         payer: &Pubkey,
         args: ScheduleTaskArgs,
-        accounts: &[Pubkey],
     ) -> Instruction {
-        let mut account_metas = vec![AccountMeta::new(*payer, true)];
-        for account in accounts {
-            account_metas.push(AccountMeta::new_readonly(*account, false));
-        }
+        let account_metas = vec![AccountMeta::new(*payer, true)];
 
         Instruction::new_with_bincode(
             crate::id(),
@@ -250,6 +253,41 @@ impl InstructionUtils {
             &MagicBlockInstruction::CancelTask { task_id },
             account_metas,
         )
+    }
+
+    // -----------------
+    // Execute Crank
+    // -----------------
+    pub fn execute_task_instruction(
+        instructions: Vec<Instruction>,
+    ) -> Instruction {
+        let mut account_metas = vec![
+            AccountMeta::new_readonly(validator_authority_id(), true),
+            AccountMeta::new_readonly(CRANK_SIGNER, false),
+        ];
+        for instruction in &instructions {
+            account_metas.push(AccountMeta::new(instruction.program_id, false));
+            account_metas.extend(instruction.accounts.iter().map(|account| {
+                AccountMeta {
+                    pubkey: account.pubkey,
+                    is_signer: false,
+                    is_writable: account.is_writable,
+                }
+            }));
+        }
+        Instruction::new_with_bincode(
+            CRANK_PROGRAM_ID,
+            &MagicBlockInstruction::ExecuteCrank { instructions },
+            account_metas,
+        )
+    }
+
+    pub fn execute_task(
+        instructions: Vec<Instruction>,
+        recent_blockhash: Hash,
+    ) -> Transaction {
+        let ix = Self::execute_task_instruction(instructions);
+        Self::into_transaction(&validator_authority(), ix, recent_blockhash)
     }
 
     // -----------------
@@ -287,6 +325,20 @@ impl InstructionUtils {
             crate::id(),
             &MagicBlockInstruction::Noop(data),
             vec![],
+        )
+    }
+
+    // -----------------
+    // EvictAccount
+    // -----------------
+    pub fn evict_account_instruction(pubkey: Pubkey) -> Instruction {
+        Instruction::new_with_bincode(
+            crate::id(),
+            &MagicBlockInstruction::EvictAccount { pubkey },
+            vec![
+                AccountMeta::new(validator_authority_id(), true),
+                AccountMeta::new(pubkey, false),
+            ],
         )
     }
 

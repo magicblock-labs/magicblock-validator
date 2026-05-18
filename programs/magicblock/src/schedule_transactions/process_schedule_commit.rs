@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use magicblock_core::intent::CommittedAccount;
 // no direct token remap helpers needed here; handled in CommittedAccount builder
-use solana_account::{state_traits::StateMut, ReadableAccount};
+use solana_account::{ReadableAccount, WritableAccount};
 use solana_instruction::error::InstructionError;
 use solana_log_collector::ic_msg;
 use solana_program_runtime::invoke_context::InvokeContext;
@@ -10,12 +10,16 @@ use solana_pubkey::Pubkey;
 
 use crate::{
     magic_scheduled_base_intent::{
-        validate_commit_schedule_permissions, CommitAndUndelegate, CommitType,
-        MagicBaseIntent, ScheduledIntentBundle, UndelegateType,
+        calculate_commit_fee, validate_commit_schedule_permissions,
+        CommitAndUndelegate, CommitType, MagicBaseIntent,
+        ScheduledIntentBundle, UndelegateType,
     },
-    schedule_transactions::{self, check_commit_limits},
+    magic_sys::fetch_current_commit_nonces,
+    schedule_transactions::{self, check_commit_limits, try_get_fee_vault},
     utils::{
-        account_actions::mark_account_as_undelegated,
+        account_actions::{
+            charge_delegated_payer, mark_account_as_undelegated,
+        },
         accounts::{
             get_instruction_account_with_idx, get_instruction_pubkey_with_idx,
             get_writable_with_idx,
@@ -43,30 +47,18 @@ pub(crate) fn process_schedule_commit(
         MAGIC_CONTEXT_IDX,
     )?;
 
-    let transaction_context = &invoke_context.transaction_context.clone();
+    let transaction_context = &*invoke_context.transaction_context;
     let ix_ctx = transaction_context.get_current_instruction_context()?;
     let ix_accs_len = ix_ctx.get_number_of_instruction_accounts() as usize;
     const COMMITTEES_START: usize = MAGIC_CONTEXT_IDX as usize + 1;
 
     // Assert MagicBlock program
-    ix_ctx
-        .find_index_of_program_account(transaction_context, &crate::id())
-        .ok_or_else(|| {
-            ic_msg!(
-                invoke_context,
-                "ScheduleCommit ERR: Magic program account not found"
-            );
-            InstructionError::UnsupportedProgramId
-        })?;
-
-    // Assert enough accounts
-    if ix_accs_len <= COMMITTEES_START {
+    if ix_ctx.get_program_key()? != &crate::id() {
         ic_msg!(
             invoke_context,
-            "ScheduleCommit ERR: not enough accounts ({}); expected payer, magic context, and at least one account to commit",
-            ix_accs_len
+            "ScheduleCommit ERR: Magic program account not found"
         );
-        return Err(InstructionError::NotEnoughAccountKeys);
+        return Err(InstructionError::UnsupportedProgramId);
     }
 
     // Assert Payer is signer
@@ -79,6 +71,30 @@ pub(crate) fn process_schedule_commit(
             payer_pubkey
         );
         return Err(InstructionError::MissingRequiredSignature);
+    }
+
+    let payer_account =
+        get_instruction_account_with_idx(transaction_context, PAYER_IDX)?;
+    let magic_fee_vault = try_get_fee_vault(
+        transaction_context,
+        invoke_context,
+        PAYER_IDX,
+        MAGIC_CONTEXT_IDX + 1,
+    )?;
+    let committees_start = if magic_fee_vault.is_some() {
+        COMMITTEES_START + 1
+    } else {
+        COMMITTEES_START
+    };
+
+    // Assert enough accounts
+    if ix_accs_len <= committees_start {
+        ic_msg!(
+            invoke_context,
+            "ScheduleCommit ERR: not enough accounts to schedule commit ({}), need payer, signing program an account for each pubkey to be committed",
+            ix_accs_len
+        );
+        return Err(InstructionError::MissingAccount);
     }
 
     //
@@ -96,9 +112,9 @@ pub(crate) fn process_schedule_commit(
     let first_committee_owner = {
         *get_instruction_account_with_idx(
             transaction_context,
-            COMMITTEES_START as u16,
+            committees_start as u16,
         )?
-        .borrow()
+        .borrow()?
         .owner()
     };
 
@@ -127,13 +143,13 @@ pub(crate) fn process_schedule_commit(
     // Thus we can be `invoke`d unsigned and no seeds need to be provided
     let mut committed_accounts: Vec<CommittedAccount> = Vec::new();
     let mut seen_committed_pubkeys: HashSet<Pubkey> = HashSet::new();
-    for idx in COMMITTEES_START..ix_accs_len {
+    for idx in committees_start..ix_accs_len {
         let acc_pubkey =
             get_instruction_pubkey_with_idx(transaction_context, idx as u16)?;
         let acc =
             get_instruction_account_with_idx(transaction_context, idx as u16)?;
 
-        if acc.borrow().confined() {
+        if acc.to_account_shared_data()?.confined() {
             ic_msg!(
                 invoke_context,
                 "ScheduleCommit ERR: account {} is confined and cannot be committed",
@@ -143,7 +159,7 @@ pub(crate) fn process_schedule_commit(
         }
 
         // Prevent ephemeral accounts from being committed to base chain
-        if acc.borrow().ephemeral() {
+        if acc.to_account_shared_data()?.ephemeral() {
             ic_msg!(
                 invoke_context,
                 "ScheduleCommit ERR: account {} is ephemeral and cannot be committed to base chain",
@@ -153,7 +169,7 @@ pub(crate) fn process_schedule_commit(
         }
 
         {
-            let is_delegated = acc.borrow().delegated();
+            let is_delegated = acc.to_account_shared_data()?.delegated();
 
             if opts.request_undelegation {
                 // Must be writable and delegated to avoid double-undelegation
@@ -177,7 +193,7 @@ pub(crate) fn process_schedule_commit(
             }
 
             // Validate committed account was scheduled by valid authority
-            let acc_owner = *acc.borrow().owner();
+            let acc_owner = *acc.borrow()?.owner();
             validate_commit_schedule_permissions(
                 &invoke_context,
                 &acc_owner,
@@ -186,9 +202,10 @@ pub(crate) fn process_schedule_commit(
                 &signers,
             )?;
 
+            let account = acc.to_account_shared_data()?;
             let committed = CommittedAccount::from_account_shared(
                 *acc_pubkey,
-                &acc.borrow(),
+                &account,
                 parent_program_id.cloned(),
             );
 
@@ -224,7 +241,7 @@ pub(crate) fn process_schedule_commit(
             //
             // We also set the undelegating flag on the account in order to detect
             // undelegations for which we miss updates
-            mark_account_as_undelegated(acc);
+            mark_account_as_undelegated(&acc)?;
             ic_msg!(
                 invoke_context,
                 "ScheduleCommit: Marking account {} as undelegating",
@@ -233,10 +250,13 @@ pub(crate) fn process_schedule_commit(
         }
     }
 
-    // NOTE:
-    // We validate commit nonces only for plain commits
-    // If accounts are undelegated we don't want to fail
-    if !opts.request_undelegation {
+    if let Some(fee_vault) = magic_fee_vault {
+        let nonces = fetch_current_commit_nonces(&committed_accounts)?;
+        let fee = calculate_commit_fee(&committed_accounts, &nonces)?;
+        charge_delegated_payer(&payer_account, &fee_vault, fee)?;
+    } else if !opts.request_undelegation {
+        // We validate commit nonces only for plain commits.
+        // If accounts are undelegated we don't want to fail.
         check_commit_limits(&committed_accounts, invoke_context)?;
     }
 
@@ -247,16 +267,15 @@ pub(crate) fn process_schedule_commit(
         transaction_context,
         MAGIC_CONTEXT_IDX,
     )?;
-    let context_data = &mut context_acc.borrow_mut();
-    let mut context =
-        MagicContext::deserialize(context_data).map_err(|err| {
-            ic_msg!(
-                invoke_context,
-                "Failed to deserialize MagicContext: {}",
-                err
-            );
-            InstructionError::GenericError
-        })?;
+    let mut context = MagicContext::deserialize(context_acc.borrow()?.data())
+        .map_err(|err| {
+        ic_msg!(
+            invoke_context,
+            "Failed to deserialize MagicContext: {}",
+            err
+        );
+        InstructionError::GenericError
+    })?;
 
     // Get next intent id
     let intent_id = context.next_intent_id();
@@ -277,12 +296,14 @@ pub(crate) fn process_schedule_commit(
     let commit_sent_sig = action_sent_transaction.signatures[0];
 
     let base_intent = if opts.request_undelegation {
-        MagicBaseIntent::CommitAndUndelegate(CommitAndUndelegate {
+        MagicBaseIntent::CommitFinalizeAndUndelegate(CommitAndUndelegate {
             commit_action: CommitType::Standalone(committed_accounts),
             undelegate_action: UndelegateType::Standalone,
         })
     } else {
-        MagicBaseIntent::Commit(CommitType::Standalone(committed_accounts))
+        MagicBaseIntent::CommitFinalize(CommitType::Standalone(
+            committed_accounts,
+        ))
     }
     .into();
 
@@ -296,7 +317,7 @@ pub(crate) fn process_schedule_commit(
     };
 
     context.add_scheduled_action(scheduled_base_intent);
-    context_data.set_state(&context)?;
+    context.write_to(context_acc.borrow_mut()?.data_as_mut_slice())?;
 
     ic_msg!(invoke_context, "Scheduled commit with ID: {}", intent_id);
     ic_msg!(

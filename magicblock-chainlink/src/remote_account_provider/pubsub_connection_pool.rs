@@ -51,6 +51,19 @@ pub struct PubSubConnectionPool<T: PubsubConnection> {
     client_id: String,
 }
 
+/// Guard that decrements a subscription count when dropped, ensuring the
+/// pool's capacity accounting stays correct even if the unsubscribe
+/// future is cancelled or timed out.
+struct SubCountGuard(Option<Arc<AtomicUsize>>);
+
+impl Drop for SubCountGuard {
+    fn drop(&mut self) {
+        if let Some(sub_count) = self.0.take() {
+            sub_count.fetch_sub(1, Ordering::SeqCst);
+        }
+    }
+}
+
 impl<T: PubsubConnection> PubSubConnectionPool<T> {
     /// Creates a new pool with a single initial connection.
     pub async fn new(
@@ -261,6 +274,8 @@ impl<T: PubsubConnection> PubSubConnectionPool<T> {
 
     /// Wraps a raw unsubscribe function to also decrement the sub counter for the
     /// connection on which it was made.
+    /// The decrement is guaranteed even if the future is dropped (e.g. by a
+    /// timeout) because it runs in a `Drop` guard.
     fn wrap_unsub(
         &self,
         raw_unsub: UnsubscribeFn,
@@ -268,10 +283,73 @@ impl<T: PubsubConnection> PubSubConnectionPool<T> {
     ) -> UnsubscribeFn {
         Box::new(move || {
             Box::pin(async move {
+                let _guard = SubCountGuard(Some(sub_count));
                 raw_unsub().await;
-                sub_count.fetch_sub(1, Ordering::SeqCst);
             })
         })
+    }
+
+    /// Removes connections with zero active subscriptions, keeping at
+    /// least one connection alive. Returns the number pruned.
+    pub async fn prune_idle(&self) -> usize {
+        // Hold the same mutex used by find_or_create_connection so that
+        // no concurrent reservation/creation can race with the
+        // drain-and-rebuild below.
+        let _guard = self.new_connection_guard.lock().await;
+
+        // 1. Snapshot all connections under EBR guard (clone each)
+        let ebr_guard = Guard::new();
+        let all: Vec<PooledConnection<T>> =
+            self.connections.iter(&ebr_guard).cloned().collect();
+        drop(ebr_guard);
+
+        // 2. Re-check sub_count under the lock to avoid removing a
+        //    connection that was reserved between a prior snapshot and
+        //    acquiring the mutex.
+        let (active, idle): (Vec<_>, Vec<_>) = all
+            .into_iter()
+            .partition(|c| c.sub_count.load(Ordering::SeqCst) > 0);
+
+        // 3. Nothing to prune
+        if idle.is_empty() {
+            return 0;
+        }
+
+        // 4. Drain the queue
+        while self.connections.pop().is_some() {}
+
+        // 5. Re-push active connections (keep at least one idle
+        //    if no active)
+        if active.is_empty() {
+            if let Some(kept) = idle.first() {
+                self.connections.push(kept.clone());
+            }
+        } else {
+            for conn in &active {
+                self.connections.push(conn.clone());
+            }
+        }
+
+        // 6. Compute pruned count and update metrics
+        let pruned = if active.is_empty() {
+            idle.len().saturating_sub(1)
+        } else {
+            idle.len()
+        };
+
+        if pruned > 0 {
+            let remaining = self.connections.len();
+            metrics::set_pubsub_client_connections_count(
+                &self.client_id,
+                remaining,
+            );
+            metrics::inc_pubsub_idle_connections_pruned_count(
+                &self.client_id,
+                pruned as u64,
+            );
+            trace!(pruned, remaining, "Pruned idle pooled connections");
+        }
+        pruned
     }
 }
 

@@ -35,10 +35,10 @@ pub fn test_resume_strategy(reset: bool) {
     let mut kp = Keypair::new();
 
     let (mut validator, slot, signature) = write(&ledger_path, &mut kp);
-    validator.kill().unwrap();
+    test_ledger_restore::kill_validator(&mut validator);
 
     let mut validator = read(&ledger_path, &kp, &signature, slot, reset);
-    validator.kill().unwrap();
+    test_ledger_restore::kill_validator(&mut validator);
 }
 
 pub fn write(ledger_path: &Path, kp: &mut Keypair) -> (Child, u64, Signature) {

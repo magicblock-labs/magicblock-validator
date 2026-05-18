@@ -8,9 +8,8 @@ use std::{
 
 use magicblock_accounts::ScheduledCommitsProcessor;
 use magicblock_accounts_db::{traits::AccountsBank, AccountsDb};
-use magicblock_core::link::{
-    blocks::BlockUpdateTx,
-    transactions::{with_encoded, TransactionSchedulerHandle},
+use magicblock_core::link::transactions::{
+    with_encoded, TransactionSchedulerHandle,
 };
 use magicblock_ledger::{LatestBlock, Ledger};
 use magicblock_magic_program_api as magic_program;
@@ -20,39 +19,19 @@ use solana_account::ReadableAccount;
 use tokio_util::sync::CancellationToken;
 use tracing::*;
 
-use crate::slot::advance_slot_and_update_ledger;
-
 pub fn init_slot_ticker<C: ScheduledCommitsProcessor>(
     accountsdb: Arc<AccountsDb>,
     committor_processor: &Option<Arc<C>>,
-    ledger: Arc<Ledger>,
+    latest_block: LatestBlock,
     tick_duration: Duration,
     transaction_scheduler: TransactionSchedulerHandle,
-    block_updates_tx: BlockUpdateTx,
     exit: Arc<AtomicBool>,
 ) -> tokio::task::JoinHandle<()> {
     let committor_processor = committor_processor.clone();
 
-    let latest_block = ledger.latest_block().clone();
     tokio::task::spawn(async move {
-        let log = tick_duration >= Duration::from_secs(5);
         while !exit.load(Ordering::Relaxed) {
             tokio::time::sleep(tick_duration).await;
-
-            let (update_ledger_result, next_slot) =
-                advance_slot_and_update_ledger(
-                    &accountsdb,
-                    &ledger,
-                    &block_updates_tx,
-                );
-            if let Err(err) = update_ledger_result {
-                error!(error = ?err, "Failed to write block");
-            }
-
-            if log {
-                debug!(slot = next_slot, "Advanced to slot");
-            }
-            metrics::inc_slot();
 
             // Handle intents if such feature enabled
             let Some(committor_processor) = &committor_processor else {
@@ -71,11 +50,7 @@ pub fn init_slot_ticker<C: ScheduledCommitsProcessor>(
                 )
                 .await;
             }
-            if log {
-                debug!(slot = next_slot, "Advanced to slot");
-            }
         }
-        metrics::inc_slot();
     })
 }
 

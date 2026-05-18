@@ -6,10 +6,11 @@ use integration_test_tools::{
     validator::cleanup,
 };
 use solana_sdk::{
-    account::Account, instruction::Instruction, loader_v4,
-    native_token::LAMPORTS_PER_SOL, pubkey::Pubkey, signature::Keypair,
-    signer::Signer, transaction::Transaction,
+    account::Account, instruction::Instruction, native_token::LAMPORTS_PER_SOL,
+    pubkey::Pubkey, signature::Keypair, signer::Signer,
+    transaction::Transaction,
 };
+use solana_sdk_ids::loader_v4;
 use test_ledger_restore::{
     setup_validator_with_local_remote, wait_for_ledger_persist, TMP_DIR_LEDGER,
 };
@@ -29,11 +30,11 @@ fn test_restore_ledger_with_new_validator_authority() {
 
     // Write a transaction that clones the memo program
     let (mut validator, _) = write(&ledger_path);
-    validator.kill().unwrap();
+    test_ledger_restore::kill_validator(&mut validator);
 
     // Read the ledger and verify that the memo program is cloned
     let mut validator = read(&ledger_path);
-    validator.kill().unwrap();
+    test_ledger_restore::kill_validator(&mut validator);
 }
 
 fn write(ledger_path: &Path) -> (Child, u64) {
@@ -79,7 +80,7 @@ fn write(ledger_path: &Path) -> (Child, u64) {
     let Account {
         owner, executable, ..
     } = account;
-    assert_eq!(owner, loader_v4::ID, cleanup(&mut validator));
+    assert_eq!(owner, loader_v4::id(), cleanup(&mut validator));
     assert!(executable, cleanup(&mut validator));
 
     let slot = wait_for_ledger_persist(&ctx, &mut validator);
@@ -109,7 +110,7 @@ fn read(ledger_path: &Path) -> Child {
     let Account {
         owner, executable, ..
     } = account;
-    assert_eq!(owner, loader_v4::ID, cleanup(&mut validator));
+    assert_eq!(owner, loader_v4::id(), cleanup(&mut validator));
     assert!(executable, cleanup(&mut validator));
 
     validator

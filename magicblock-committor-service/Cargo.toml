@@ -15,7 +15,6 @@ async-trait = { workspace = true }
 base64 = { workspace = true }
 bincode = { workspace = true }
 borsh = { workspace = true }
-dyn-clone = { workspace = true }
 futures-util = { workspace = true }
 tracing = { workspace = true }
 lru = { workspace = true }
@@ -23,7 +22,7 @@ magicblock-committor-program = { workspace = true, features = [
   "no-entrypoint",
 ] }
 magicblock-core = { workspace = true }
-dlp-api = { workspace = true }
+magicblock-delegation-program-api = { workspace = true }
 magicblock-metrics = { workspace = true }
 magicblock-program = { workspace = true }
 magicblock-rpc-client = { workspace = true }

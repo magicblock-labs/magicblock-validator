@@ -1,7 +1,7 @@
 use std::{thread::sleep, time::Duration};
 
 use dlp_api::{
-    dlp::args::DelegateArgs,
+    args::DelegateArgs,
     instruction_builder::{
         delegate_with_actions, Encryptable, PostDelegationInstruction,
     },
@@ -10,12 +10,12 @@ use integration_test_tools::{
     loaded_accounts::DLP_TEST_AUTHORITY_BYTES, IntegrationTestContext,
 };
 use solana_sdk::{
-    signature::Keypair, signer::Signer, system_instruction,
+    program_pack::Pack, signature::Keypair, signer::Signer,
     transaction::Transaction,
 };
+use solana_system_interface::instruction as system_instruction;
 use spl_token::{
     instruction as spl_token_ix,
-    solana_program::program_pack::Pack,
     state::{Account as TokenAccount, Mint},
 };
 use test_kit::init_logger;
@@ -163,7 +163,7 @@ fn test_post_delegation_action_executes_spl_token_transfer_100() {
     let post_actions: Vec<PostDelegationInstruction> =
         vec![transfer_100_ix.cleartext()];
 
-    let validator = Keypair::from_bytes(&DLP_TEST_AUTHORITY_BYTES)
+    let validator = Keypair::try_from(&DLP_TEST_AUTHORITY_BYTES[..])
         .unwrap()
         .pubkey();
     let delegate_with_actions_ix = delegate_with_actions(
@@ -178,10 +178,8 @@ fn test_post_delegation_action_executes_spl_token_transfer_100() {
         post_actions,
     );
 
-    let assign_ix = system_instruction::assign(
-        &delegated_account.pubkey(),
-        &dlp_api::dlp::id(),
-    );
+    let assign_ix =
+        system_instruction::assign(&delegated_account.pubkey(), &dlp_api::id());
     let mut assign_tx =
         Transaction::new_with_payer(&[assign_ix], Some(&fee_payer.pubkey()));
     let (_sig, confirmed) = ctx
@@ -210,10 +208,10 @@ fn test_post_delegation_action_executes_spl_token_transfer_100() {
 
     // Poll briefly because clone + action execution is async relative to fetch.
     let mut found = None;
-    for _ in 0..30 {
+    for _ in 0..60 {
         let bx = token_balance_ephem(&ctx, &token_x);
         let by = token_balance_ephem(&ctx, &token_y);
-        if bx == Some(0) && by == Some(100) {
+        if bx == Some(0) && by == Some(300) {
             found = Some((bx, by));
             break;
         }

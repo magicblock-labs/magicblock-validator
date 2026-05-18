@@ -4,6 +4,7 @@ use std::{
     sync::Arc,
 };
 
+use magicblock_core::traits::ActionsCallbackScheduler;
 use magicblock_program::magic_scheduled_base_intent::ScheduledIntentBundle;
 use magicblock_rpc_client::MagicblockRpcClient;
 use magicblock_table_mania::{GarbageCollectorConfig, TableMania};
@@ -20,9 +21,12 @@ use crate::{
     intent_execution_manager::{
         db::DummyDB, BroadcastedIntentExecutionResult, IntentExecutionManager,
     },
-    intent_executor::task_info_fetcher::{
-        CacheTaskInfoFetcher, RpcTaskInfoFetcher, TaskInfoFetcher,
-        TaskInfoFetcherResult,
+    intent_executor::{
+        intent_executor_factory::ExecutorConfig,
+        task_info_fetcher::{
+            CacheTaskInfoFetcher, RpcTaskInfoFetcher, TaskInfoFetcher,
+            TaskInfoFetcherResult,
+        },
     },
     persist::{
         CommitStatusRow, IntentPersister, IntentPersisterImpl,
@@ -40,13 +44,15 @@ pub(crate) struct CommittorProcessor {
 }
 
 impl CommittorProcessor {
-    pub fn try_new<P>(
+    pub fn try_new<P, A>(
         authority: Keypair,
         persist_file: P,
         chain_config: ChainConfig,
+        actions_callback_executor: A,
     ) -> CommittorServiceResult<Self>
     where
         P: AsRef<Path>,
+        A: ActionsCallbackScheduler,
     {
         let rpc_client = RpcClient::new_with_commitment(
             chain_config.rpc_uri.to_string(),
@@ -76,7 +82,13 @@ impl CommittorProcessor {
             task_info_fetcher.clone(),
             Some(persister.clone()),
             table_mania.clone(),
-            chain_config.compute_budget_config.clone(),
+            ExecutorConfig {
+                compute_budget_config: chain_config
+                    .compute_budget_config
+                    .clone(),
+                actions_timeout: chain_config.actions_timeout,
+            },
+            actions_callback_executor,
         );
 
         Ok(Self {
