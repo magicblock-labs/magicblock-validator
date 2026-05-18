@@ -5,7 +5,7 @@ import path from "path";
 import { arch, platform } from "os";
 import { VERSIONS } from "./getVersions";
 
-const PACKAGE_VERSION = `query-filtering-service ${VERSIONS.PRIVATE_EPHEMERAL_VALIDATOR}`;
+const PACKAGE_VERSION = `query-filtering-service ${VERSIONS.QUERY_FILTERING_SERVICE}`;
 
 function getBinaryVersion(location: string): [string | null, string | null] {
   const result = spawnSync(location, ["--version"]);
