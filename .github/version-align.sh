@@ -47,7 +47,7 @@ else
     echo "Warning: Could not fetch latest rpc-router version from NPM"
 fi
 
-if [ -n "$private_validator_latest" ]; then
+if [ -n "$query_filtering_service_latest" ]; then
     echo "Updating query-filtering-service dependencies to version: $query_filtering_service_latest"
     jq --arg version "$query_filtering_service_latest" '.optionalDependencies |= with_entries(if (.key | contains("query-filtering-service")) then .value = $version else . end)' packages/npm-package/package.json > temp.json && mv temp.json packages/npm-package/package.json
 else
