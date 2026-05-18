@@ -170,6 +170,7 @@ impl TaskSchedulerService {
     /// Main loop of the task scheduler.
     async fn run(mut self) -> TaskSchedulerResult<()> {
         let (crank_tx, mut crank_rx) = mpsc::unbounded_channel();
+        let mut inflight_batches = 0_usize;
 
         loop {
             select! {
@@ -191,6 +192,7 @@ impl TaskSchedulerService {
                     let block = self.block.clone();
                     let tx_counter = self.tx_counter.clone();
                     let crank_tx = crank_tx.clone();
+                    inflight_batches += 1;
                     tokio::spawn(async move {
                         let result =
                             Self::send_crank_batch(rpc_client, &block, tx_counter, &batch).await;
@@ -199,6 +201,7 @@ impl TaskSchedulerService {
                 }
                 Some((batch, result)) = crank_rx.recv() => {
                     // The batch has been sent, updates queue and db
+                    inflight_batches = inflight_batches.saturating_sub(1);
                     self.on_crank_batch_completed(batch, result).await?;
                 }
                 Some(task) = self.scheduled_tasks.recv() => {
@@ -222,6 +225,14 @@ impl TaskSchedulerService {
         }
 
         info!("TaskSchedulerService shutdown!");
+        for _ in 0..inflight_batches {
+            let Some((batch, result)) = crank_rx.recv().await else {
+                warn!("Task scheduler batch completion channel closed during shutdown");
+                break;
+            };
+            self.on_crank_batch_completed(batch, result).await?;
+        }
+
         Ok(())
     }
 
