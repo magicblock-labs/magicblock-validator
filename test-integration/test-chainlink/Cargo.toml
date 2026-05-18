@@ -10,7 +10,6 @@ compressed-delegation-client = { workspace = true }
 futures = { workspace = true }
 tracing = { workspace = true }
 light-client = { workspace = true, features = ["v2"] }
-light-compressed-account = { workspace = true }
 light-hasher = { workspace = true }
 light-sdk = { workspace = true, features = ["v2"] }
 magicblock-chainlink = { workspace = true }

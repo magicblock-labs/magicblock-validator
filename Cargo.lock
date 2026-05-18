@@ -1314,7 +1314,6 @@ version = "0.9.0"
 dependencies = [
  "borsh 1.6.1",
  "compressed-delegation-api",
- "light-compressed-account",
  "light-hasher",
  "light-sdk",
  "light-sdk-types",
@@ -4743,7 +4742,6 @@ dependencies = [
  "console-subscriber",
  "flume",
  "light-client",
- "light-compressed-account",
  "light-sdk",
  "magicblock-magic-program-api",
  "serde",

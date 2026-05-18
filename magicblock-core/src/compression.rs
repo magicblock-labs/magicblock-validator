@@ -1,5 +1,4 @@
-use light_compressed_account::address::derive_address;
-use light_sdk::light_hasher::hash_to_field_size::hashv_to_bn254_field_size_be_const_array;
+use light_sdk::address::v2::derive_address;
 use solana_pubkey::Pubkey;
 
 // Light protocol V2 accounts:
@@ -14,14 +13,10 @@ pub const OUTPUT_QUEUE: Pubkey =
 pub fn derive_cda_from_pda(pda: &Pubkey) -> Pubkey {
     // Since the PDA is already unique we use the delegation program's id
     // as a program id.
-    // SAFETY: BN254 hash of PDA must succeed for a 32-byte PDA seed
-    let seed =
-        hashv_to_bn254_field_size_be_const_array::<3>(&[&pda.to_bytes()])
-            .expect("BN254 hash of PDA must succeed for a 32-byte PDA seed");
-    let address = derive_address(
-        &seed,
-        &ADDRESS_TREE.to_bytes(),
-        &compressed_delegation_client::ID.to_bytes(),
+    let (address, _seed) = derive_address(
+        &[pda.as_array()],
+        &ADDRESS_TREE.to_bytes().into(),
+        &compressed_delegation_client::ID.to_bytes().into(),
     );
     Pubkey::new_from_array(address)
 }

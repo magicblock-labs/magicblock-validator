@@ -10,7 +10,6 @@ edition.workspace = true
 [dependencies]
 async-trait = { workspace = true }
 light-client = { workspace = true }
-light-compressed-account = { workspace = true }
 light-sdk = { workspace = true, features = ["v2"] }
 compressed-delegation-client = { workspace = true }
 console-subscriber = { workspace = true, optional = true }
