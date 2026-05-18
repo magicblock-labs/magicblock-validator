@@ -45,7 +45,7 @@ mod cfg {
 
     // Timeouts
     pub const TTL_STREAM: Duration = Duration::from_secs(24 * 60 * 60);
-    pub const TTL_LOCK: Duration = Duration::from_secs(5);
+    pub const TTL_LOCK: Duration = Duration::from_secs(15);
     pub const ACK_WAIT: Duration = Duration::from_secs(30);
     pub const API_TIMEOUT: Duration = Duration::from_secs(2);
     pub const DUP_WINDOW: Duration = Duration::from_secs(30);
