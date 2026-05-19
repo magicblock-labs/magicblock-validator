@@ -2,12 +2,14 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::args::{
-    AddActionCallbackArgs, MagicBaseIntentArgs, MagicIntentBundleArgs,
-    ScheduleTaskArgs,
+use crate::{
+    args::{
+        AddActionCallbackArgs, MagicBaseIntentArgs, MagicIntentBundleArgs,
+        ScheduleTaskArgs,
+    },
+    compat::Instruction,
+    Pubkey,
 };
-use crate::compat::Instruction;
-use crate::Pubkey;
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
 pub enum MagicBlockInstruction {

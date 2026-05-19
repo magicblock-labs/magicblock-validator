@@ -1,7 +1,9 @@
 use serde::{Deserialize, Serialize};
 
-use crate::compat::{AccountInfo, AccountMeta, Instruction};
-use crate::Pubkey;
+use crate::{
+    compat::{AccountInfo, AccountMeta, Instruction},
+    Pubkey,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ActionArgs {
