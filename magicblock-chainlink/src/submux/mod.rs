@@ -3,7 +3,7 @@ use std::{
     collections::{HashMap, HashSet, VecDeque},
     sync::{
         atomic::{AtomicBool, AtomicU16, Ordering},
-        Arc, Mutex,
+        Arc, Mutex, MutexGuard,
     },
     time::{Duration, Instant},
 };
@@ -344,11 +344,11 @@ where
     }
 
     fn clients_snapshot(&self) -> Vec<Arc<T>> {
-        self.clients.lock().expect("clients lock poisoned").clone()
+        self.clients_lock().clone()
     }
 
     fn remove_client(&self, target: &Arc<T>) {
-        let mut clients = self.clients.lock().expect("clients lock poisoned");
+        let mut clients = self.clients_lock();
         if let Some(pos) = clients.iter().position(|c| Arc::ptr_eq(c, target)) {
             clients.swap_remove(pos);
         }
@@ -361,18 +361,12 @@ where
         subscribed_accounts_tracker: Arc<U>,
     ) -> RemoteAccountProviderResult<()> {
         {
-            let mut clients =
-                self.clients.lock().expect("clients lock poisoned");
+            let mut clients = self.clients_lock();
             clients.push(client.clone());
         }
 
-        let programs = self
-            .program_subs
-            .lock()
-            .expect("program_subs lock poisoned")
-            .iter()
-            .copied()
-            .collect::<Vec<_>>();
+        let programs =
+            self.program_subs_lock().iter().copied().collect::<Vec<_>>();
         for program_id in programs {
             if let Err(err) = client.subscribe_program(program_id).await {
                 self.remove_client(&client);
@@ -425,6 +419,20 @@ where
             self.connected_clients_subscribing_immediately.clone(),
         );
         Ok(())
+    }
+
+    fn clients_lock(&self) -> MutexGuard<'_, Vec<Arc<T>>> {
+        // Lock poisoning means a thread panicked while mutating mux state;
+        // treating that as unrecoverable is safer than continuing with it.
+        self.clients.lock().expect("clients lock poisoned")
+    }
+
+    fn program_subs_lock(&self) -> MutexGuard<'_, HashSet<Pubkey>> {
+        // Lock poisoning means a thread panicked while mutating mux state;
+        // treating that as unrecoverable is safer than continuing with it.
+        self.program_subs
+            .lock()
+            .expect("program_subs lock poisoned")
     }
 
     #[instrument(
