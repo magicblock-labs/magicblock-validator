@@ -35,7 +35,7 @@ pub fn get_rocksdb_options(access_type: &AccessType) -> Options {
     }
 
     // Bound open files so DB::Open does not eagerly open every SST file.
-    options.set_max_open_files(1024);
+    options.set_max_open_files(4096);
 
     // Smooth IO
     options.set_bytes_per_sync(1024 * 1024);
