@@ -2,7 +2,7 @@ use std::{
     cmp,
     collections::{HashMap, HashSet, VecDeque},
     sync::{
-        atomic::{AtomicBool, AtomicU16, Ordering},
+        atomic::{AtomicBool, AtomicU16, AtomicUsize, Ordering},
         Arc, Mutex,
     },
     time::{Duration, Instant},
@@ -48,7 +48,6 @@ pub struct DebounceConfig {
     pub detection_window_millis: Option<u64>,
 }
 
-#[derive(Clone)]
 /// SubMuxClient
 ///
 /// Multi-node pub/sub subscription multiplexer that:
@@ -153,6 +152,9 @@ where
     /// Token cancelled on drop to stop background tasks
     /// (dedup pruner, debounce flusher).
     shutdown_token: CancellationToken,
+    /// Counts live SubMuxClient handles. Background tasks hold shutdown_token
+    /// clones, so cancellation must be tied to SubMux handles only.
+    handle_count: Arc<AtomicUsize>,
 }
 
 // Parameters for the long-running forwarder loop, grouped to avoid
@@ -273,6 +275,7 @@ where
             connected_clients_subscribing_immediately,
             forwarders_started: Arc::new(AtomicBool::new(false)),
             shutdown_token,
+            handle_count: Arc::new(AtomicUsize::new(1)),
         };
 
         // Spawn background tasks
@@ -344,12 +347,25 @@ where
         self.clients.lock().expect("clients lock poisoned").clone()
     }
 
+    fn remove_client(&self, target: &Arc<T>) {
+        let mut clients = self.clients.lock().expect("clients lock poisoned");
+        if let Some(pos) = clients.iter().position(|c| Arc::ptr_eq(c, target)) {
+            clients.swap_remove(pos);
+        }
+    }
+
     pub(crate) async fn add_client<U: SubscribedAccountsTracker>(
         &self,
         client: Arc<T>,
         abort_rx: mpsc::Receiver<()>,
         subscribed_accounts_tracker: Arc<U>,
     ) -> RemoteAccountProviderResult<()> {
+        {
+            let mut clients =
+                self.clients.lock().expect("clients lock poisoned");
+            clients.push(client.clone());
+        }
+
         let programs = self
             .program_subs
             .lock()
@@ -358,13 +374,19 @@ where
             .copied()
             .collect::<Vec<_>>();
         for program_id in programs {
-            client.subscribe_program(program_id).await?;
+            if let Err(err) = client.subscribe_program(program_id).await {
+                self.remove_client(&client);
+                return Err(err);
+            }
         }
 
         let mut account_subs =
             subscribed_accounts_tracker.subscribed_accounts();
         account_subs.extend(self.never_debounce.iter().copied());
-        client.resub_multiple(account_subs).await?;
+        if let Err(err) = client.resub_multiple(account_subs).await {
+            self.remove_client(&client);
+            return Err(err);
+        }
 
         if self.forwarders_started.load(Ordering::SeqCst) {
             self.spawn_forwarder_for_client(
@@ -374,12 +396,6 @@ where
                 self.debounce_detection_window,
                 self.allowed_in_debounce_window_count(),
             );
-        }
-
-        {
-            let mut clients =
-                self.clients.lock().expect("clients lock poisoned");
-            clients.push(client.clone());
         }
 
         let connected = self
@@ -874,12 +890,42 @@ where
     }
 }
 
+impl<T> Clone for SubMuxClient<T>
+where
+    T: ChainPubsubClient + ReconnectableClient,
+{
+    fn clone(&self) -> Self {
+        self.handle_count.fetch_add(1, Ordering::SeqCst);
+        Self {
+            clients: self.clients.clone(),
+            out_tx: self.out_tx.clone(),
+            out_rx: self.out_rx.clone(),
+            dedup_cache: self.dedup_cache.clone(),
+            dedup_window: self.dedup_window,
+            debounce_interval: self.debounce_interval,
+            debounce_detection_window: self.debounce_detection_window,
+            debounce_states: self.debounce_states.clone(),
+            never_debounce: self.never_debounce.clone(),
+            program_subs: self.program_subs.clone(),
+            connected_clients: self.connected_clients.clone(),
+            connected_clients_subscribing_immediately: self
+                .connected_clients_subscribing_immediately
+                .clone(),
+            forwarders_started: self.forwarders_started.clone(),
+            shutdown_token: self.shutdown_token.clone(),
+            handle_count: self.handle_count.clone(),
+        }
+    }
+}
+
 impl<T> Drop for SubMuxClient<T>
 where
     T: ChainPubsubClient + ReconnectableClient,
 {
     fn drop(&mut self) {
-        self.shutdown_token.cancel();
+        if self.handle_count.fetch_sub(1, Ordering::SeqCst) == 1 {
+            self.shutdown_token.cancel();
+        }
     }
 }
 
@@ -1183,6 +1229,65 @@ mod tests {
         .expect("stream open");
         assert_eq!(update.pubkey, pk);
         assert_eq!(update.account.unwrap().lamports, 42);
+
+        mux.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_submux_dropping_clone_does_not_cancel_live_tasks() {
+        init_logger();
+
+        let (tx, rx) = mpsc::channel(10_000);
+        let client = Arc::new(ChainPubsubClientMock::new(tx, rx));
+        let mux: SubMuxClient<ChainPubsubClientMock> =
+            new_submux_client(vec![client], None);
+
+        let clone = mux.clone();
+        drop(clone);
+
+        assert!(!mux.shutdown_token.is_cancelled());
+    }
+
+    #[tokio::test]
+    async fn test_submux_add_client_does_not_miss_concurrent_subscribe() {
+        init_logger();
+
+        let existing_pk = Pubkey::new_unique();
+        let new_pk = Pubkey::new_unique();
+        let (tx1, rx1) = mpsc::channel(10_000);
+        let (tx2, rx2) = mpsc::channel(10_000);
+        let client1 = Arc::new(ChainPubsubClientMock::new(tx1, rx1));
+        let client2 = Arc::new(ChainPubsubClientMock::new(tx2, rx2));
+        let (_abort_tx1, abort_rx1) = mpsc::channel(1);
+        let (_abort_tx2, abort_rx2) = mpsc::channel(1);
+        let tracker =
+            Arc::new(MockSubscribedAccountsTracker::new(vec![existing_pk]));
+
+        let mux: SubMuxClient<ChainPubsubClientMock> = SubMuxClient::new(
+            vec![(client1, abort_rx1)],
+            tracker.clone(),
+            None,
+        );
+        client2.block_subscribe();
+
+        let mux_for_add = mux.clone();
+        let client2_for_add = client2.clone();
+        let add_task = tokio::spawn(async move {
+            mux_for_add
+                .add_client(client2_for_add, abort_rx2, tracker)
+                .await
+        });
+
+        client2.wait_for_subscribe_attempts(1).await;
+        mux.subscribe(new_pk, None).await.unwrap();
+        client2.wait_for_subscribe_attempts(2).await;
+
+        client2.release_subscribe();
+        add_task.await.unwrap().unwrap();
+
+        let client2_subs = client2.subscriptions_union();
+        assert!(client2_subs.contains(&existing_pk));
+        assert!(client2_subs.contains(&new_pk));
 
         mux.shutdown().await.unwrap();
     }
