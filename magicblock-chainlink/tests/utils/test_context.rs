@@ -24,6 +24,7 @@ use magicblock_chainlink::{
     AccountFetchOrigin, Chainlink,
 };
 use magicblock_config::config::{ChainLinkConfig, LifecycleMode};
+use magicblock_core::coordination_mode::switch_to_primary_mode;
 use solana_account::{Account, AccountSharedData};
 use solana_keypair::Keypair;
 use solana_program::{clock::Slot, sysvar::clock};
@@ -55,6 +56,8 @@ pub struct TestContext {
 
 impl TestContext {
     pub async fn init(slot: Slot) -> Self {
+        switch_to_primary_mode();
+
         let (rpc_client, pubsub_client) = {
             let rpc_client =
                 ChainRpcClientMockBuilder::new().slot(slot).build();

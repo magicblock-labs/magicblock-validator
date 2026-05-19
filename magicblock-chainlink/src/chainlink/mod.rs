@@ -5,7 +5,6 @@ use errors::ChainlinkResult;
 use fetch_cloner::FetchCloner;
 use magicblock_accounts_db::{traits::AccountsBank, AccountsDbResult};
 use magicblock_config::config::ChainLinkConfig;
-#[cfg(not(any(test, feature = "dev-context")))]
 use magicblock_core::coordination_mode::CoordinationMode;
 use magicblock_metrics::metrics::AccountFetchOrigin;
 use solana_account::{AccountSharedData, ReadableAccount};
@@ -72,14 +71,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
     Chainlink<T, U, V, C>
 {
     fn remote_sync_enabled() -> bool {
-        #[cfg(any(test, feature = "dev-context"))]
-        {
-            true
-        }
-        #[cfg(not(any(test, feature = "dev-context")))]
-        {
-            CoordinationMode::current().needs_onchain_interactions()
-        }
+        CoordinationMode::current().needs_onchain_interactions()
     }
 
     pub fn enable_primary(&self) -> ChainlinkResult<()> {
