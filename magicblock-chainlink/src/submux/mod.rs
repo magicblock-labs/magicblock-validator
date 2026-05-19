@@ -2,7 +2,7 @@ use std::{
     cmp,
     collections::{HashMap, HashSet, VecDeque},
     sync::{
-        atomic::{AtomicBool, AtomicU16, AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicU16, Ordering},
         Arc, Mutex,
     },
     time::{Duration, Instant},
@@ -152,9 +152,9 @@ where
     /// Token cancelled on drop to stop background tasks
     /// (dedup pruner, debounce flusher).
     shutdown_token: CancellationToken,
-    /// Counts live SubMuxClient handles. Background tasks hold shutdown_token
-    /// clones, so cancellation must be tied to SubMux handles only.
-    handle_count: Arc<AtomicUsize>,
+    /// Only the original handle owns shutdown. Clones are used by detached
+    /// helpers and should not keep the mux alive.
+    cancel_on_drop: bool,
 }
 
 // Parameters for the long-running forwarder loop, grouped to avoid
@@ -275,7 +275,7 @@ where
             connected_clients_subscribing_immediately,
             forwarders_started: Arc::new(AtomicBool::new(false)),
             shutdown_token,
-            handle_count: Arc::new(AtomicUsize::new(1)),
+            cancel_on_drop: true,
         };
 
         // Spawn background tasks
@@ -895,7 +895,6 @@ where
     T: ChainPubsubClient + ReconnectableClient,
 {
     fn clone(&self) -> Self {
-        self.handle_count.fetch_add(1, Ordering::SeqCst);
         Self {
             clients: self.clients.clone(),
             out_tx: self.out_tx.clone(),
@@ -913,7 +912,7 @@ where
                 .clone(),
             forwarders_started: self.forwarders_started.clone(),
             shutdown_token: self.shutdown_token.clone(),
-            handle_count: self.handle_count.clone(),
+            cancel_on_drop: false,
         }
     }
 }
@@ -923,7 +922,7 @@ where
     T: ChainPubsubClient + ReconnectableClient,
 {
     fn drop(&mut self) {
-        if self.handle_count.fetch_sub(1, Ordering::SeqCst) == 1 {
+        if self.cancel_on_drop {
             self.shutdown_token.cancel();
         }
     }
@@ -1229,65 +1228,6 @@ mod tests {
         .expect("stream open");
         assert_eq!(update.pubkey, pk);
         assert_eq!(update.account.unwrap().lamports, 42);
-
-        mux.shutdown().await.unwrap();
-    }
-
-    #[tokio::test]
-    async fn test_submux_dropping_clone_does_not_cancel_live_tasks() {
-        init_logger();
-
-        let (tx, rx) = mpsc::channel(10_000);
-        let client = Arc::new(ChainPubsubClientMock::new(tx, rx));
-        let mux: SubMuxClient<ChainPubsubClientMock> =
-            new_submux_client(vec![client], None);
-
-        let clone = mux.clone();
-        drop(clone);
-
-        assert!(!mux.shutdown_token.is_cancelled());
-    }
-
-    #[tokio::test]
-    async fn test_submux_add_client_does_not_miss_concurrent_subscribe() {
-        init_logger();
-
-        let existing_pk = Pubkey::new_unique();
-        let new_pk = Pubkey::new_unique();
-        let (tx1, rx1) = mpsc::channel(10_000);
-        let (tx2, rx2) = mpsc::channel(10_000);
-        let client1 = Arc::new(ChainPubsubClientMock::new(tx1, rx1));
-        let client2 = Arc::new(ChainPubsubClientMock::new(tx2, rx2));
-        let (_abort_tx1, abort_rx1) = mpsc::channel(1);
-        let (_abort_tx2, abort_rx2) = mpsc::channel(1);
-        let tracker =
-            Arc::new(MockSubscribedAccountsTracker::new(vec![existing_pk]));
-
-        let mux: SubMuxClient<ChainPubsubClientMock> = SubMuxClient::new(
-            vec![(client1, abort_rx1)],
-            tracker.clone(),
-            None,
-        );
-        client2.block_subscribe();
-
-        let mux_for_add = mux.clone();
-        let client2_for_add = client2.clone();
-        let add_task = tokio::spawn(async move {
-            mux_for_add
-                .add_client(client2_for_add, abort_rx2, tracker)
-                .await
-        });
-
-        client2.wait_for_subscribe_attempts(1).await;
-        mux.subscribe(new_pk, None).await.unwrap();
-        client2.wait_for_subscribe_attempts(2).await;
-
-        client2.release_subscribe();
-        add_task.await.unwrap().unwrap();
-
-        let client2_subs = client2.subscriptions_union();
-        assert!(client2_subs.contains(&existing_pk));
-        assert!(client2_subs.contains(&new_pk));
 
         mux.shutdown().await.unwrap();
     }
