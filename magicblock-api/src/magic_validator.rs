@@ -537,6 +537,7 @@ impl MagicValidator {
             config.validator.keypair.insecure_clone(),
             chainlink_config,
             &config.chainlink,
+            config.storage.as_path(),
         )
         .await?;
 
