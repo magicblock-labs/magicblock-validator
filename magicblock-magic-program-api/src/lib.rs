@@ -1,9 +1,10 @@
 pub mod args;
+pub mod compat;
 pub mod instruction;
 pub mod pda;
 pub mod response;
 
-pub use solana_program::{declare_id, pubkey, pubkey::Pubkey};
+pub use compat::{declare_id, pubkey, Pubkey};
 
 declare_id!("Magic11111111111111111111111111111111111111");
 
