@@ -40,8 +40,15 @@ pub trait TasksBuilder {
     ) -> TaskBuilderResult<Vec<BaseTaskImpl>>;
 }
 
-/// V1 Task builder
-/// V1: Actions are part of finalize tx
+/// Necessary info for commit stage task creation
+pub struct CommitStageTaskInfo {
+    /// commit nonce for a given address
+    commit_nonces: HashMap<Pubkey, u64>,
+    /// Base account state for diff calculation
+    base_accounts: HashMap<Pubkey, Account>,
+}
+
+/// Task builder
 pub struct TaskBuilderImpl;
 
 // Accounts larger than COMMIT_STATE_SIZE_THRESHOLD use CommitDiff to
@@ -99,12 +106,12 @@ impl TaskBuilderImpl {
 
     async fn fetch_commit_nonces<C: TaskInfoFetcher>(
         task_info_fetcher: &Arc<C>,
-        accounts: &[(bool, bool, CommittedAccount)],
+        accounts: &[CommittedAccount],
         min_context_slot: u64,
     ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>> {
         let committed_pubkeys = accounts
             .iter()
-            .map(|(_, _, account)| account.pubkey)
+            .map(|account| account.pubkey)
             .collect::<Vec<_>>();
 
         task_info_fetcher
@@ -114,20 +121,67 @@ impl TaskBuilderImpl {
 
     async fn fetch_diffable_accounts<C: TaskInfoFetcher>(
         task_info_fetcher: &Arc<C>,
-        accounts: &[(bool, bool, CommittedAccount)],
+        accounts: &[CommittedAccount],
         min_context_slot: u64,
     ) -> TaskInfoFetcherResult<HashMap<Pubkey, Account>> {
         let diffable_pubkeys = accounts
             .iter()
-            .filter(|(_, _, account)| {
+            .filter(|account| {
                 account.account.data.len() > COMMIT_STATE_SIZE_THRESHOLD
             })
-            .map(|(_, _, account)| account.pubkey)
+            .map(|account| account.pubkey)
             .collect::<Vec<_>>();
 
         task_info_fetcher
             .get_base_accounts(&diffable_pubkeys, min_context_slot)
             .await
+    }
+
+    async fn fetch_commit_stage_info<C: TaskInfoFetcher, P: IntentPersister>(
+        intent_bundle: &ScheduledIntentBundle,
+        task_info_fetcher: &Arc<C>,
+        persister: &Option<P>,
+    ) -> TaskBuilderResult<CommitStageTaskInfo> {
+        // Fetch necessary data for BaseTasks creation
+        let all_committed_accounts = intent_bundle.get_all_committed_accounts();
+        // Get commit nonces and base accounts
+        let min_context_slot = all_committed_accounts
+            .iter()
+            .map(|account| account.remote_slot)
+            .max()
+            .unwrap_or(0);
+        let (commit_ids, base_accounts) = tokio::join!(
+            Self::fetch_commit_nonces(
+                task_info_fetcher,
+                &all_committed_accounts,
+                min_context_slot
+            ),
+            Self::fetch_diffable_accounts(
+                task_info_fetcher,
+                &all_committed_accounts,
+                min_context_slot
+            )
+        );
+        let commit_nonces =
+            commit_ids.map_err(TaskBuilderError::CommitTasksBuildError)?;
+        let base_accounts = base_accounts.unwrap_or_else(|err| {
+            tracing::warn!(intent_id = intent_bundle.id, error = ?err, "Failed to fetch base accounts, falling back to CommitState");
+            Default::default()
+        });
+
+        // Persist commit ids for commitees
+        commit_nonces
+            .iter()
+            .for_each(|(pubkey, commit_id) | {
+                if let Err(err) = persister.set_commit_id(intent_bundle.id, pubkey, *commit_id) {
+                    error!(intent_id = intent_bundle.id, pubkey = %pubkey, error = ?err, "Failed to persist commit id");
+                }
+            });
+
+        Ok(CommitStageTaskInfo {
+            commit_nonces,
+            base_accounts,
+        })
     }
 
     pub fn create_commit_finalize_task(
@@ -167,92 +221,119 @@ impl TasksBuilder for TaskBuilderImpl {
         persister: &Option<P>,
     ) -> TaskBuilderResult<Vec<BaseTaskImpl>> {
         let mut tasks = Vec::new();
+        // Add standalone actions first
         tasks.extend(Self::create_action_tasks(
             intent_bundle.standalone_actions().as_slice(),
         ));
 
-        let committed_accounts =
-            intent_bundle.get_commit_intent_accounts().cloned();
-        let undelegated_accounts =
-            intent_bundle.get_undelegate_intent_accounts().cloned();
-        let commit_finalize_accounts =
-            intent_bundle.get_commit_finalize_intent_accounts().cloned();
-        let commit_finalize_and_undelegate_accounts = intent_bundle
-            .get_commit_finalize_and_undelegate_intent_accounts()
-            .cloned();
+        // Fetch data necessary for task creation
+        let CommitStageTaskInfo {
+            mut commit_nonces,
+            mut base_accounts,
+        } = Self::fetch_commit_stage_info(
+            intent_bundle,
+            task_info_fetcher,
+            persister,
+        )
+        .await?;
 
-        let flagged_accounts: Vec<_> = [
-            (false, false, committed_accounts),
-            (true, false, undelegated_accounts),
-            (false, true, commit_finalize_accounts),
-            (true, true, commit_finalize_and_undelegate_accounts),
-        ]
-        .into_iter()
-        .flat_map(|(allow_undelegation, finalize, accounts)| {
-            accounts
-                .into_iter()
-                .flatten()
-                .map(move |account| (allow_undelegation, finalize, account))
-        })
-        .collect();
+        // helper
+        let mut deduce_commit_nonce = |pubkey| -> u64 {
+            commit_nonces.remove(&pubkey).unwrap_or_else(|| {
+                // This shall not ever happen since TaskInfoFetcher
+                // returns commit ids for all pubkeys or throws
+                // If it does occur, it will be patched and retried by IntentExecutor
+                error!(pubkey = %pubkey, "Commit id absent for pubkey");
+                0
+            })
+        };
 
-        // Get commit nonces and base accounts
-        let min_context_slot = flagged_accounts
-            .iter()
-            .map(|(_, _, account)| account.remote_slot)
-            .max()
-            .unwrap_or(0);
-        let (commit_ids, base_accounts) = tokio::join!(
-            Self::fetch_commit_nonces(
-                task_info_fetcher,
-                &flagged_accounts,
-                min_context_slot
-            ),
-            Self::fetch_diffable_accounts(
-                task_info_fetcher,
-                &flagged_accounts,
-                min_context_slot
-            )
-        );
-        let commit_ids =
-            commit_ids.map_err(TaskBuilderError::CommitTasksBuildError)?;
-        let mut base_accounts = base_accounts.unwrap_or_else(|err| {
-            tracing::warn!(intent_id = intent_bundle.id, error = ?err, "Failed to fetch base accounts, falling back to CommitState");
-            Default::default()
-        });
+        // Create tasks per intent type
+        if let Some(ref value) = intent_bundle.intent_bundle.commit {
+            tasks.extend(value.get_committed_accounts().into_iter().map(
+                |account| {
+                    let commit_nonce = deduce_commit_nonce(account.pubkey);
+                    let base_account = base_accounts.remove(&account.pubkey);
+                    Self::create_commit_task(
+                        commit_nonce,
+                        false,
+                        account.clone(),
+                        base_account,
+                    )
+                    .into()
+                },
+            ));
+        }
+        if let Some(ref value) = intent_bundle.intent_bundle.commit_finalize {
+            tasks.extend(value.get_committed_accounts().into_iter().map(
+                |account| {
+                    let commit_nonce = deduce_commit_nonce(account.pubkey);
+                    let base_account = base_accounts.remove(&account.pubkey);
+                    Self::create_commit_finalize_task(
+                        commit_nonce,
+                        false,
+                        account.clone(),
+                        base_account,
+                    )
+                    .into()
+                },
+            ));
 
-        // Persist commit ids for commitees
-        commit_ids
-            .iter()
-            .for_each(|(pubkey, commit_id) | {
-                if let Err(err) = persister.set_commit_id(intent_bundle.id, pubkey, *commit_id) {
-                    error!(intent_id = intent_bundle.id, pubkey = %pubkey, error = ?err, "Failed to persist commit id");
-                }
-            });
+            if let CommitType::WithBaseActions {
+                ref base_actions, ..
+            } = value
+            {
+                tasks.extend(Self::create_action_tasks(base_actions.as_ref()));
+            }
+        }
+        if let Some(value) = intent_bundle
+            .intent_bundle
+            .commit_and_undelegate
+            .as_ref()
+            .and_then(|el| Some(&el.commit_action))
+        {
+            tasks.extend(value.get_committed_accounts().into_iter().map(
+                |account| {
+                    let commit_nonce = deduce_commit_nonce(account.pubkey);
+                    let base_account = base_accounts.remove(&account.pubkey);
+                    Self::create_commit_task(
+                        commit_nonce,
+                        true,
+                        account.clone(),
+                        base_account,
+                    )
+                    .into()
+                },
+            ));
+        }
+        if let Some(ref value) = intent_bundle
+            .intent_bundle
+            .commit_finalize_and_undelegate
+            .as_ref()
+            .and_then(|el| Some(&el.commit_action))
+        {
+            tasks.extend(value.get_committed_accounts().into_iter().map(
+                |account| {
+                    let commit_nonce = deduce_commit_nonce(account.pubkey);
+                    let base_account = base_accounts.remove(&account.pubkey);
+                    Self::create_commit_finalize_task(
+                        commit_nonce,
+                        true,
+                        account.clone(),
+                        base_account,
+                    )
+                    .into()
+                },
+            ));
 
-        // Create commit tasks
-        let commit_tasks_iter = flagged_accounts.into_iter().map(
-            |(allow_undelegation, finalize, account)| {
-                let commit_id = commit_ids
-                    .get(&account.pubkey)
-                    .copied()
-                    .unwrap_or_else(|| {
-                        // This shall not ever happen since TaskInfoFetcher
-                        // returns commit ids for all pubkeys or throws
-                        // If it does occur, it will be patched and retried by IntentExecutor
-                        error!(pubkey = %account.pubkey, "Commit id absent for pubkey");
-                        0
-                    });
-                let base_account = base_accounts.remove(&account.pubkey);
+            if let CommitType::WithBaseActions {
+                ref base_actions, ..
+            } = value
+            {
+                tasks.extend(Self::create_action_tasks(base_actions.as_ref()));
+            }
+        }
 
-                 if finalize {
-                     Self::create_commit_finalize_task(commit_id, allow_undelegation, account.clone(), base_account).into()
-                 } else {
-                     Self::create_commit_task(commit_id, allow_undelegation, account.clone(), base_account).into()
-                 }
-            },
-        );
-        tasks.extend(commit_tasks_iter);
         Ok(tasks)
     }
 
