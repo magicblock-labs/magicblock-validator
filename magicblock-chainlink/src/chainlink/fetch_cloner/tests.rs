@@ -126,6 +126,18 @@ async fn setup<I>(
 where
     I: IntoIterator<Item = (Pubkey, Account)>,
 {
+    setup_with_capacity(accounts, current_slot, validator_keypair, 1000).await
+}
+
+async fn setup_with_capacity<I>(
+    accounts: I,
+    current_slot: u64,
+    validator_keypair: Keypair,
+    lru_capacity: usize,
+) -> FetcherTestCtx
+where
+    I: IntoIterator<Item = (Pubkey, Account)>,
+{
     init_logger();
 
     // Setup mock RPC client with the accounts and clock sysvar
@@ -144,7 +156,7 @@ where
     let rpc_client_clone = rpc_client.clone();
 
     let (forward_tx, forward_rx) = mpsc::channel(1_000);
-    let (subscribed_accounts, config) = create_test_lru_cache(1000);
+    let (subscribed_accounts, config) = create_test_lru_cache(lru_capacity);
     let chain_slot = Arc::<AtomicU64>::default();
 
     let remote_account_provider = Arc::new(
@@ -1323,7 +1335,7 @@ async fn test_undelegation_requested_subscription_behavior() {
 }
 
 #[tokio::test]
-async fn test_delegated_authoritative_skip_releases_direct_subscription_silently(
+async fn test_delegated_discovered_after_direct_subscribe_releases_direct_without_bank_removal(
 ) {
     init_logger();
     let validator_keypair = Keypair::new();
@@ -1431,6 +1443,15 @@ async fn test_delegated_authoritative_skip_releases_direct_subscription_silently
     .expect("timed out waiting for delegated account direct cleanup");
 
     assert_not_subscribed!(remote_account_provider, &[&account_pubkey]);
+    let direct_release_after_cleanup = remote_account_provider
+        .release_subscription_with_mode(
+            &account_pubkey,
+            SubscriptionReason::DirectAccount,
+            SubscriptionReleaseMode::All,
+        )
+        .await
+        .expect("direct release after cleanup should not fail");
+    assert!(!direct_release_after_cleanup);
     assert!(matches!(
         removed_rx.try_recv(),
         Err(tokio::sync::mpsc::error::TryRecvError::Empty)
@@ -1444,6 +1465,172 @@ async fn test_delegated_authoritative_skip_releases_direct_subscription_silently
         CURRENT_SLOT,
         account_owner
     );
+}
+
+#[tokio::test]
+async fn test_delegated_capacity_candidate_skipped_no_unsubscribe_or_removal() {
+    init_logger();
+    let validator_keypair = Keypair::new();
+    const CURRENT_SLOT: u64 = 100;
+
+    let delegated_pubkey = random_pubkey();
+    let evictable_pubkey = random_pubkey();
+    let new_pubkey = random_pubkey();
+    let account_owner = random_pubkey();
+
+    let remote_account = Account {
+        lamports: 1_000_000,
+        data: vec![1, 2, 3, 4],
+        owner: account_owner,
+        executable: false,
+        rent_epoch: 0,
+    };
+
+    let FetcherTestCtx {
+        remote_account_provider,
+        accounts_bank,
+        ..
+    } = setup_with_capacity(
+        [
+            (delegated_pubkey, remote_account.clone()),
+            (evictable_pubkey, remote_account.clone()),
+            (new_pubkey, remote_account),
+        ],
+        CURRENT_SLOT,
+        validator_keypair.insecure_clone(),
+        2,
+    )
+    .await;
+    let mut removed_rx = remote_account_provider
+        .try_get_removed_account_rx()
+        .expect("removed account receiver should be available");
+
+    let mut delegated_bank_account =
+        AccountSharedData::new(1_000_000, 4, &account_owner);
+    delegated_bank_account.set_delegated(true);
+    accounts_bank.insert(delegated_pubkey, delegated_bank_account);
+
+    remote_account_provider
+        .acquire_subscription(
+            &delegated_pubkey,
+            SubscriptionReason::DirectAccount,
+        )
+        .await
+        .expect("failed to subscribe delegated candidate");
+    remote_account_provider
+        .acquire_subscription(
+            &evictable_pubkey,
+            SubscriptionReason::DirectAccount,
+        )
+        .await
+        .expect("failed to subscribe evictable candidate");
+    while removed_rx.try_recv().is_ok() {}
+
+    remote_account_provider
+        .acquire_subscription(&new_pubkey, SubscriptionReason::DirectAccount)
+        .await
+        .expect("capacity eviction should find non-delegated candidate");
+
+    assert!(remote_account_provider.is_watching(&delegated_pubkey));
+    assert!(!remote_account_provider.is_watching(&evictable_pubkey));
+    assert!(remote_account_provider.is_watching(&new_pubkey));
+    assert!(remote_account_provider
+        .pubsub_client()
+        .subscriptions_union()
+        .contains(&delegated_pubkey));
+    assert!(!remote_account_provider
+        .pubsub_client()
+        .subscriptions_union()
+        .contains(&evictable_pubkey));
+
+    let removed_accounts =
+        std::iter::from_fn(|| removed_rx.try_recv().ok()).collect::<Vec<_>>();
+    assert_eq!(removed_accounts, vec![evictable_pubkey]);
+}
+
+#[tokio::test]
+async fn test_undelegation_tracking_window_is_protected_from_capacity_eviction()
+{
+    init_logger();
+    let validator_keypair = Keypair::new();
+    const CURRENT_SLOT: u64 = 100;
+
+    let tracking_pubkey = random_pubkey();
+    let new_pubkey = random_pubkey();
+    let account_owner = random_pubkey();
+
+    let remote_account = Account {
+        lamports: 1_000_000,
+        data: vec![1, 2, 3, 4],
+        owner: account_owner,
+        executable: false,
+        rent_epoch: 0,
+    };
+
+    let FetcherTestCtx {
+        remote_account_provider,
+        accounts_bank,
+        ..
+    } = setup_with_capacity(
+        [
+            (tracking_pubkey, remote_account.clone()),
+            (new_pubkey, remote_account),
+        ],
+        CURRENT_SLOT,
+        validator_keypair.insecure_clone(),
+        1,
+    )
+    .await;
+    let mut removed_rx = remote_account_provider
+        .try_get_removed_account_rx()
+        .expect("removed account receiver should be available");
+
+    let mut tracking_account =
+        AccountSharedData::new(1_000_000, 4, &account_owner);
+    tracking_account.set_delegated(true);
+    tracking_account.set_undelegating(true);
+    accounts_bank.insert(tracking_pubkey, tracking_account);
+
+    remote_account_provider
+        .acquire_subscription(
+            &tracking_pubkey,
+            SubscriptionReason::UndelegationTracking,
+        )
+        .await
+        .expect("failed to acquire undelegation tracking");
+
+    let err = remote_account_provider
+        .acquire_subscription(&new_pubkey, SubscriptionReason::DirectAccount)
+        .await
+        .expect_err("all protected capacity should reject new subscription");
+    assert!(matches!(
+        err,
+        crate::remote_account_provider::RemoteAccountProviderError::NoEvictableSubscriptionCapacity { pubkey }
+            if pubkey == new_pubkey
+    ));
+
+    assert!(remote_account_provider.is_watching(&tracking_pubkey));
+    assert!(!remote_account_provider.is_watching(&new_pubkey));
+    assert!(remote_account_provider
+        .pubsub_client()
+        .subscriptions_union()
+        .contains(&tracking_pubkey));
+    assert!(!remote_account_provider
+        .pubsub_client()
+        .subscriptions_union()
+        .contains(&new_pubkey));
+    assert!(removed_rx.try_recv().is_err());
+
+    let direct_release_after_rejected_capacity = remote_account_provider
+        .release_subscription_with_mode(
+            &tracking_pubkey,
+            SubscriptionReason::DirectAccount,
+            SubscriptionReleaseMode::All,
+        )
+        .await
+        .expect("direct release after rejected capacity should not fail");
+    assert!(!direct_release_after_rejected_capacity);
+    assert!(remote_account_provider.is_watching(&tracking_pubkey));
 }
 
 #[tokio::test]
