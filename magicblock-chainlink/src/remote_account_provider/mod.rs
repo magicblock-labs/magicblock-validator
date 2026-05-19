@@ -245,6 +245,11 @@ impl CapacityEvictionProtection {
     }
 }
 
+type CapacityEvictionProtectionPredicate =
+    dyn Fn(&Pubkey) -> CapacityEvictionProtection + Send + Sync;
+type SharedCapacityEvictionProtectionPredicate =
+    Arc<RwLock<Option<Arc<CapacityEvictionProtectionPredicate>>>>;
+
 pub struct ForwardedSubscriptionUpdate {
     pub pubkey: Pubkey,
     pub account: RemoteAccount,
@@ -306,15 +311,7 @@ pub struct RemoteAccountProvider<T: ChainRpcClient, U: ChainPubsubClient> {
     /// Tracks which accounts are currently subscribed to
     lrucache_subscribed_accounts: Arc<AccountsLruCache>,
 
-    capacity_eviction_protection: Arc<
-        RwLock<
-            Option<
-                Arc<
-                    dyn Fn(&Pubkey) -> CapacityEvictionProtection + Send + Sync,
-                >,
-            >,
-        >,
-    >,
+    capacity_eviction_protection: SharedCapacityEvictionProtectionPredicate,
 
     /// Channel to notify when an account is removed from the cache and thus no
     /// longer being watched
