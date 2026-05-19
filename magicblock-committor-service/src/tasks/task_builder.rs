@@ -250,7 +250,7 @@ impl TasksBuilder for TaskBuilderImpl {
 
         // Create tasks per intent type
         if let Some(ref value) = intent_bundle.intent_bundle.commit {
-            tasks.extend(value.get_committed_accounts().into_iter().map(
+            tasks.extend(value.get_committed_accounts().iter().map(
                 |account| {
                     let commit_nonce = deduce_commit_nonce(account.pubkey);
                     let base_account = base_accounts.remove(&account.pubkey);
@@ -265,7 +265,7 @@ impl TasksBuilder for TaskBuilderImpl {
             ));
         }
         if let Some(ref value) = intent_bundle.intent_bundle.commit_finalize {
-            tasks.extend(value.get_committed_accounts().into_iter().map(
+            tasks.extend(value.get_committed_accounts().iter().map(
                 |account| {
                     let commit_nonce = deduce_commit_nonce(account.pubkey);
                     let base_account = base_accounts.remove(&account.pubkey);
@@ -290,9 +290,9 @@ impl TasksBuilder for TaskBuilderImpl {
             .intent_bundle
             .commit_and_undelegate
             .as_ref()
-            .and_then(|el| Some(&el.commit_action))
+            .map(|el| &el.commit_action)
         {
-            tasks.extend(value.get_committed_accounts().into_iter().map(
+            tasks.extend(value.get_committed_accounts().iter().map(
                 |account| {
                     let commit_nonce = deduce_commit_nonce(account.pubkey);
                     let base_account = base_accounts.remove(&account.pubkey);
@@ -310,9 +310,9 @@ impl TasksBuilder for TaskBuilderImpl {
             .intent_bundle
             .commit_finalize_and_undelegate
             .as_ref()
-            .and_then(|el| Some(&el.commit_action))
+            .map(|el| &el.commit_action)
         {
-            tasks.extend(value.get_committed_accounts().into_iter().map(
+            tasks.extend(value.get_committed_accounts().iter().map(
                 |account| {
                     let commit_nonce = deduce_commit_nonce(account.pubkey);
                     let base_account = base_accounts.remove(&account.pubkey);
