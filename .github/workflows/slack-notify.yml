@@ -21,7 +21,7 @@ on:
 jobs:
   notify-review-requested:
     if: github.event_name == 'pull_request' && github.event.action == 'review_requested'
-    runs-on: ubuntu-latest
+    runs-on: namespace-profile-validator-build
     steps:
       - name: Build Slack review message
         id: message
@@ -71,7 +71,7 @@ jobs:
 
   notify-review:
     if: github.event_name == 'pull_request_review' && github.event.action == 'submitted'
-    runs-on: ubuntu-latest
+    runs-on: namespace-profile-validator-build
     steps:
       - name: Build Slack review message
         id: message

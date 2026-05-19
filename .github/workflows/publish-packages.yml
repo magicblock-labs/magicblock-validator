@@ -27,7 +27,7 @@ jobs:
         build:
           - {
             NAME: linux-x64-glibc,
-            OS: ubuntu-latest,
+            OS: namespace-profile-validator-build,
             TOOLCHAIN: stable,
             TARGET: x86_64-unknown-linux-gnu
           }
@@ -90,7 +90,7 @@ jobs:
           fi
 
       - name: Set up GCC
-        if: matrix.build.OS == 'ubuntu-latest'
+        if: matrix.build.OS == 'namespace-profile-validator-build'
         uses: egor-tensin/setup-gcc@v1.3
         with:
           version: latest

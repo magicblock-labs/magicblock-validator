@@ -30,7 +30,7 @@ on:
 
 jobs:
   run_make_ci_lint:
-    runs-on: ubuntu-latest
+    runs-on: namespace-profile-validator-build
     steps:
       - name: Checkout this magicblock-validator
         uses: actions/checkout@v5

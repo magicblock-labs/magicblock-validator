@@ -12,7 +12,7 @@ on:
 
 jobs:
   run_make_ci_test:
-    runs-on: ubuntu-latest-m
+    runs-on: namespace-profile-validator-build
     steps:
       - name: Checkout this magicblock-validator
         uses: actions/checkout@v5

@@ -56,7 +56,7 @@ jobs:
           compression-level: 0
 
   build_sbf:
-    runs-on: ubuntu-latest-m
+    runs-on: namespace-profile-validator-build
     name: Build SBF Artifacts
     env:
       SOLANA_VERSION: v3.1.5
@@ -353,7 +353,7 @@ jobs:
 
   run_integration_tests:
     needs: [build_validator, build_sbf, build_integration_tests]
-    runs-on: ${{ matrix.runner || 'ubuntu-latest-m' }}
+    runs-on: ${{ matrix.runner || 'namespace-profile-validator-build' }}
     env:
       SOLANA_VERSION: v3.1.5
     strategy:
@@ -375,12 +375,12 @@ jobs:
             test_bins_artifact: "committor-intent-executor"
           - batch_tests: "committor_intent_executor_callbacks"
             test_bins_artifact: "committor-intent-executor"
-            runner: "ubuntu-latest"
+            runner: "namespace-profile-validator-build"
           - batch_tests: "committor_ix_multi"
             test_bins_artifact: "committor-ix"
           - batch_tests: "committor_bundles"
             test_bins_artifact: "committor-ix"
-            runner: "ubuntu-latest"
+            runner: "namespace-profile-validator-build"
           - batch_tests: "table_mania"
             test_bins_artifact: "table_mania"
           - batch_tests: "committor_ix_order"
@@ -399,24 +399,24 @@ jobs:
             needs_build_env: true
           - batch_tests: "task-scheduler"
             test_bins_artifact: "task-scheduler"
-            runner: "ubuntu-latest"
+            runner: "namespace-profile-validator-build"
           - batch_tests: "pubsub"
             test_bins_artifact: "pubsub"
-            runner: "ubuntu-latest"
+            runner: "namespace-profile-validator-build"
           - batch_tests: "magicblock_api"
             test_bins_artifact: "magicblock_api"
-            runner: "ubuntu-latest"
+            runner: "namespace-profile-validator-build"
           - batch_tests: "schedule_intents"
             test_bins_artifact: "schedule_intents"
-            runner: "ubuntu-latest"
+            runner: "namespace-profile-validator-build"
           - batch_tests: "config"
             test_bins_artifact: "config"
-            runner: "ubuntu-latest"
+            runner: "namespace-profile-validator-build"
           - batch_tests: "committor_preparators"
             test_bins_artifact: "committor-preparators"
           - batch_tests: "committor_bundles_8"
             test_bins_artifact: "committor-ix"
-            runner: "ubuntu-latest"
+            runner: "namespace-profile-validator-build"
           - batch_tests: "committor_commitfinalize"
             test_bins_artifact: "committor-ix"
           - batch_tests: "committor_intent_executor"
