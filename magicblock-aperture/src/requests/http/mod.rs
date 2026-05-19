@@ -8,8 +8,9 @@ use hyper::{
     Request, Response,
 };
 use magicblock_accounts_db::traits::AccountsBank;
-use magicblock_core::link::transactions::{
-    SanitizeableTransaction, WithEncoded,
+use magicblock_core::{
+    coordination_mode::CoordinationMode,
+    link::transactions::{SanitizeableTransaction, WithEncoded},
 };
 use magicblock_metrics::metrics::{AccountFetchOrigin, ENSURE_ACCOUNTS_TIME};
 use prelude::JsonBody;
@@ -112,6 +113,20 @@ pub(crate) async fn extract_bytes(
 ///
 /// This block contains common helper methods used by various RPC request handlers.
 impl HttpDispatcher {
+    fn is_primary_mode(&self) -> bool {
+        CoordinationMode::current().needs_onchain_interactions()
+    }
+
+    // TODO: Add integration coverage for non-primary RPC write rejection in the later test step.
+    fn reject_non_primary_write(&self, method: &'static str) -> RpcResult<()> {
+        if self.is_primary_mode() {
+            return Ok(());
+        }
+        Err(RpcError::transaction_verification(format!(
+            "{method} is only available while validator is primary"
+        )))
+    }
+
     // Heuristic to render synthetic empty placeholder accounts as JSON-RPC null.
     fn account_should_render_as_null(account: &AccountSharedData) -> bool {
         account.lamports() == 0
@@ -129,6 +144,10 @@ impl HttpDispatcher {
         &self,
         pubkey: &Pubkey,
     ) -> Option<AccountSharedData> {
+        if !self.is_primary_mode() {
+            return self.accountsdb.get_account(pubkey);
+        }
+
         let mark_empty_if_not_found = [*pubkey];
         let _timer = ENSURE_ACCOUNTS_TIME
             .with_label_values(&["account"])
@@ -157,6 +176,13 @@ impl HttpDispatcher {
         &self,
         pubkeys: &[Pubkey],
     ) -> Vec<Option<AccountSharedData>> {
+        if !self.is_primary_mode() {
+            return pubkeys
+                .iter()
+                .map(|pubkey| self.accountsdb.get_account(pubkey))
+                .collect();
+        }
+
         trace!("Ensuring accounts");
         let _timer = ENSURE_ACCOUNTS_TIME
             .with_label_values(&["multi-account"])
@@ -245,6 +271,10 @@ impl HttpDispatcher {
         &self,
         transaction: &SanitizedTransaction,
     ) -> RpcResult<()> {
+        if !self.is_primary_mode() {
+            return Ok(());
+        }
+
         let _timer = ENSURE_ACCOUNTS_TIME
             .with_label_values(&["transaction"])
             .start_timer();
