@@ -468,6 +468,95 @@ async fn test_release_subscription_reason_unsubscribes_after_final_release() {
 }
 
 #[tokio::test]
+async fn test_delegated_direct_cleanup_removes_final_direct_reason_without_notification(
+) {
+    let pubkey = solana_pubkey::Pubkey::new_unique();
+    let account = Account {
+        lamports: 1_000_000,
+        data: vec![1, 2, 3, 4],
+        owner: solana_pubkey::Pubkey::new_unique(),
+        executable: false,
+        rent_epoch: 0,
+    };
+
+    let ProviderTestCtx {
+        provider,
+        _pubsub_client,
+        _forward_rx,
+        ..
+    } = setup_provider(pubkey, account).await;
+    let mut removed_rx = provider.try_get_removed_account_rx().unwrap();
+
+    provider
+        .acquire_subscription(&pubkey, SubscriptionReason::DirectAccount)
+        .await
+        .unwrap();
+
+    let unsubscribed = provider
+        .release_direct_subscription_for_delegated_account(&pubkey)
+        .await
+        .unwrap();
+
+    assert!(unsubscribed);
+    assert!(!provider.is_watching(&pubkey));
+    assert!(!_pubsub_client.subscriptions_union().contains(&pubkey));
+    assert!(matches!(
+        removed_rx.try_recv(),
+        Err(tokio::sync::mpsc::error::TryRecvError::Empty)
+    ));
+}
+
+#[tokio::test]
+async fn test_delegated_direct_cleanup_keeps_undelegation_tracking() {
+    let pubkey = solana_pubkey::Pubkey::new_unique();
+    let account = Account {
+        lamports: 1_000_000,
+        data: vec![1, 2, 3, 4],
+        owner: solana_pubkey::Pubkey::new_unique(),
+        executable: false,
+        rent_epoch: 0,
+    };
+
+    let ProviderTestCtx {
+        provider,
+        _pubsub_client,
+        _forward_rx,
+        ..
+    } = setup_provider(pubkey, account).await;
+
+    provider
+        .acquire_subscription(&pubkey, SubscriptionReason::DirectAccount)
+        .await
+        .unwrap();
+    provider
+        .acquire_subscription(&pubkey, SubscriptionReason::UndelegationTracking)
+        .await
+        .unwrap();
+
+    let unsubscribed = provider
+        .release_direct_subscription_for_delegated_account(&pubkey)
+        .await
+        .unwrap();
+
+    assert!(!unsubscribed);
+    assert!(provider.is_watching(&pubkey));
+    assert!(_pubsub_client.subscriptions_union().contains(&pubkey));
+
+    let unsubscribed = provider
+        .release_subscription_with_mode(
+            &pubkey,
+            SubscriptionReason::UndelegationTracking,
+            SubscriptionReleaseMode::All,
+        )
+        .await
+        .unwrap();
+
+    assert!(unsubscribed);
+    assert!(!provider.is_watching(&pubkey));
+    assert!(!_pubsub_client.subscriptions_union().contains(&pubkey));
+}
+
+#[tokio::test]
 async fn test_subscription_reasons_do_not_release_each_other() {
     let pubkey = solana_pubkey::Pubkey::new_unique();
     let account = Account {

@@ -1314,6 +1314,86 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         Ok(success)
     }
 
+    #[allow(dead_code)]
+    pub(crate) async fn release_direct_subscription_for_delegated_account(
+        &self,
+        pubkey: &Pubkey,
+    ) -> RemoteAccountProviderResult<bool> {
+        let _transition_guard = self.subscription_transition_lock.lock().await;
+        let subscription_key_lock = self.subscription_key_lock(pubkey).await;
+        let _subscription_guard = subscription_key_lock.lock().await;
+
+        if !self.lrucache_subscribed_accounts.can_evict(pubkey) {
+            return Ok(false);
+        }
+
+        let released_count = {
+            let mut ownership = self.subscription_ownership.lock().await;
+            let (is_empty, released_count) = match ownership.get_mut(pubkey) {
+                Some(existing) => {
+                    let released_count =
+                        existing.release_all(SubscriptionReason::DirectAccount);
+                    (existing.is_empty(), released_count)
+                }
+                None => return Ok(false),
+            };
+
+            if released_count == 0 {
+                return Ok(false);
+            }
+
+            if !is_empty {
+                trace!(
+                    pubkey = %pubkey,
+                    released_count,
+                    "Released DirectAccount ownership for delegated cleanup; \
+                     kept protected/live subscription and LRU entry"
+                );
+                return Ok(false);
+            }
+
+            ownership.remove(pubkey);
+            released_count
+        };
+
+        match self.pubsub_client.unsubscribe(*pubkey).await {
+            Ok(()) => {
+                self.lrucache_subscribed_accounts.remove(pubkey);
+                trace!(
+                    pubkey = %pubkey,
+                    "Removed final DirectAccount ownership and LRU entry \
+                     silently for delegated cleanup; no removal notification \
+                     emitted"
+                );
+                Ok(true)
+            }
+            Err(err) => {
+                let mut ownership = self.subscription_ownership.lock().await;
+                if ownership
+                    .get(pubkey)
+                    .is_none_or(SubscriptionOwnership::is_empty)
+                {
+                    let ownership = ownership.entry(*pubkey).or_default();
+                    for _ in 0..released_count {
+                        ownership.acquire(SubscriptionReason::DirectAccount);
+                    }
+                }
+                drop(ownership);
+
+                if matches!(
+                    err,
+                    RemoteAccountProviderError::AccountSubscriptionDoesNotExist(
+                        _
+                    )
+                ) {
+                    Ok(false)
+                } else {
+                    Err(err)
+                }
+            }
+        }
+    }
+
     /// Subscribe to program account updates
     #[instrument(skip(self))]
     pub async fn subscribe_program(
