@@ -1,4 +1,4 @@
-use solana_program::pubkey::Pubkey;
+use crate::Pubkey;
 
 pub const CRANK_SEED: &[u8] = b"crank-executor";
 const CRANK_SIGNER_PDA: ([u8; 32], u8) =

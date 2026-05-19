@@ -1,10 +1,9 @@
 use serde::{Deserialize, Serialize};
-use solana_program::{
-    account_info::AccountInfo,
-    instruction::{AccountMeta, Instruction},
-};
 
-use crate::Pubkey;
+use crate::{
+    compat::{AccountInfo, AccountMeta, Instruction},
+    Pubkey,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ActionArgs {
