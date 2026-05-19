@@ -85,26 +85,23 @@ impl<D: DB> IntentExecutionManager<D> {
             return Ok(());
         }
 
-        for el in intent_bundles {
-            let err = if let Err(err) = self.intent_sender.try_send(el) {
-                err
-            } else {
-                continue;
-            };
-
-            match err {
-                TrySendError::Closed(_) => {
-                    Err(IntentExecutionManagerError::ChannelClosed)
-                }
-                TrySendError::Full(el) => self
-                    .db
-                    .store_intent_bundle(el)
+        let mut iter = intent_bundles.into_iter();
+        // Treated as regular value not propagated lower
+        #[allow(clippy::result_large_err)]
+        let res = iter.try_for_each(|el| self.intent_sender.try_send(el));
+        match res {
+            Ok(_) => Ok(()),
+            Err(TrySendError::Closed(_)) => {
+                Err(IntentExecutionManagerError::ChannelClosed)
+            }
+            Err(TrySendError::Full(el)) => {
+                let leftovers = std::iter::once(el).chain(iter).collect();
+                self.db
+                    .store_intent_bundles(leftovers)
                     .await
-                    .map_err(IntentExecutionManagerError::from),
-            }?;
+                    .map_err(IntentExecutionManagerError::from)
+            }
         }
-
-        Ok(())
     }
 
     /// Creates a subscription for results of BaseIntent execution
