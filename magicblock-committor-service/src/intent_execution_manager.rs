@@ -86,6 +86,8 @@ impl<D: DB> IntentExecutionManager<D> {
         }
 
         let mut iter = intent_bundles.into_iter();
+        // Treated as regular value not propagated lower
+        #[allow(clippy::result_large_err)]
         let res = iter.try_for_each(|el| self.intent_sender.try_send(el));
         match res {
             Ok(_) => Ok(()),
