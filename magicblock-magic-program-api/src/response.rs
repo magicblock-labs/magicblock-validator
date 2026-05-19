@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
-use solana_signature::Signature;
+
+use crate::compat::Signature;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum MagicResponse {
