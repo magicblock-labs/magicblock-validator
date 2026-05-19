@@ -48,7 +48,7 @@ function runWithForwardedExit(child: ReturnType<typeof spawn>): void {
   });
 }
 
-function runQueryFilteringService(location: string): void {
+function runQueryFilteringService(location: string): Promise<boolean> {
   const args = process.argv.slice(2);
   const env = {
     ...process.env,
@@ -58,13 +58,20 @@ function runQueryFilteringService(location: string): void {
     env,
   });
   runWithForwardedExit(queryFilteringService);
+
+  return new Promise((resolve) => {
+    queryFilteringService.once("spawn", () => resolve(true));
+    queryFilteringService.once("error", (error) => {
+      console.error("Failed to spawn query-filtering-service:", error.message);
+      resolve(false);
+    });
+  });
 }
 
-function tryPackageQueryFilteringService(): boolean {
+async function tryPackageQueryFilteringService(): Promise<boolean> {
   try {
     const resolvedPath = getExePath();
-    runQueryFilteringService(resolvedPath);
-    return true;
+    return await runQueryFilteringService(resolvedPath);
   } catch (e) {
     console.error(
       "Failed to run query-filtering-service from package:",
@@ -105,7 +112,13 @@ function trySystemQueryFilteringService(): void {
     process.exit(1);
   }
 
-  runQueryFilteringService(absoluteBinaryPath);
+  void runQueryFilteringService(absoluteBinaryPath);
 }
 
-tryPackageQueryFilteringService() || trySystemQueryFilteringService();
+async function main(): Promise<void> {
+  if (!(await tryPackageQueryFilteringService())) {
+    trySystemQueryFilteringService();
+  }
+}
+
+void main();
