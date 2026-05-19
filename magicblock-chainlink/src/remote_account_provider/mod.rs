@@ -625,14 +625,26 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
 
         // Build startup pubsub clients and wrap them into a SubMuxClient.
         // gRPC clients are cheap to create and backfill subscriptions, so
-        // when present we let slower WebSocket clients attach after startup.
+        // when present we defer slower WebSocket clients after keeping one
+        // startup WebSocket fallback until gRPC proves subscription readiness.
         let pubsubs = endpoints.pubsubs();
         let has_grpc =
             pubsubs.iter().any(|ep| matches!(ep, Endpoint::Grpc { .. }));
-        let (startup_pubsubs, mut deferred_pubsubs): (Vec<_>, Vec<_>) = pubsubs
-            .into_iter()
-            .cloned()
-            .partition(|ep| !has_grpc || matches!(ep, Endpoint::Grpc { .. }));
+        let mut startup_pubsubs = Vec::new();
+        let mut deferred_pubsubs = Vec::new();
+        let mut has_startup_ws = false;
+        for ep in pubsubs.into_iter().cloned() {
+            let use_at_startup = !has_grpc
+                || matches!(&ep, Endpoint::Grpc { .. })
+                || (!has_startup_ws
+                    && matches!(&ep, Endpoint::WebSocket { .. }));
+            if use_at_startup {
+                has_startup_ws |= matches!(&ep, Endpoint::WebSocket { .. });
+                startup_pubsubs.push(ep);
+            } else {
+                deferred_pubsubs.push(ep);
+            }
+        }
         let resubscription_delay = config.resubscription_delay();
         let pubsub_futs = startup_pubsubs.into_iter().map(|ep| {
             connect_pubsub_client(
