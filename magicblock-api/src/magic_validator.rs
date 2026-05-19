@@ -1066,7 +1066,7 @@ impl MagicValidator {
 
 fn log_timing(phase: &'static str, step: &'static str, start: Instant) {
     let duration_ms = start.elapsed().as_millis() as u64;
-    debug!(phase, step, duration_ms, "Validator timing");
+    info!(phase, step, duration_ms, "Validator timing");
 }
 
 fn programs_to_load(programs: &[LoadableProgram]) -> Vec<(Pubkey, PathBuf)> {
