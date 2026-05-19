@@ -237,101 +237,46 @@ impl TasksBuilder for TaskBuilderImpl {
         )
         .await?;
 
-        // helper
-        let mut deduce_commit_nonce = |pubkey| -> u64 {
-            commit_nonces.remove(&pubkey).unwrap_or_else(|| {
-                // This shall not ever happen since TaskInfoFetcher
-                // returns commit ids for all pubkeys or throws
-                // If it does occur, it will be patched and retried by IntentExecutor
-                error!(pubkey = %pubkey, "Commit id absent for pubkey");
-                0
-            })
-        };
-
         // Create tasks per intent type
         if let Some(ref value) = intent_bundle.intent_bundle.commit {
-            tasks.extend(value.get_committed_accounts().iter().map(
-                |account| {
-                    let commit_nonce = deduce_commit_nonce(account.pubkey);
-                    let base_account = base_accounts.remove(&account.pubkey);
-                    Self::create_commit_task(
-                        commit_nonce,
-                        false,
-                        account.clone(),
-                        base_account,
-                    )
-                    .into()
-                },
-            ));
+            tasks.extend(
+                CommitBuilder {
+                    commit_nonces: &mut commit_nonces,
+                    base_accounts: &mut base_accounts,
+                }
+                .build(value),
+            );
         }
         if let Some(ref value) = intent_bundle.intent_bundle.commit_finalize {
-            tasks.extend(value.get_committed_accounts().iter().map(
-                |account| {
-                    let commit_nonce = deduce_commit_nonce(account.pubkey);
-                    let base_account = base_accounts.remove(&account.pubkey);
-                    Self::create_commit_finalize_task(
-                        commit_nonce,
-                        false,
-                        account.clone(),
-                        base_account,
-                    )
-                    .into()
-                },
-            ));
-
-            if let CommitType::WithBaseActions {
-                ref base_actions, ..
-            } = value
-            {
-                tasks.extend(Self::create_action_tasks(base_actions.as_ref()));
-            }
+            tasks.extend(
+                CommitFinalizeBuilder {
+                    commit_nonces: &mut commit_nonces,
+                    base_accounts: &mut base_accounts,
+                }
+                .build(value),
+            );
         }
-        if let Some(value) = intent_bundle
-            .intent_bundle
-            .commit_and_undelegate
-            .as_ref()
-            .map(|el| &el.commit_action)
+        if let Some(ref value) =
+            intent_bundle.intent_bundle.commit_and_undelegate
         {
-            tasks.extend(value.get_committed_accounts().iter().map(
-                |account| {
-                    let commit_nonce = deduce_commit_nonce(account.pubkey);
-                    let base_account = base_accounts.remove(&account.pubkey);
-                    Self::create_commit_task(
-                        commit_nonce,
-                        true,
-                        account.clone(),
-                        base_account,
-                    )
-                    .into()
-                },
-            ));
+            tasks.extend(
+                CommitAndUndelegateBuilder {
+                    commit_nonces: &mut commit_nonces,
+                    base_accounts: &mut base_accounts,
+                }
+                .build(&value.commit_action),
+            );
         }
-        if let Some(ref value) = intent_bundle
-            .intent_bundle
-            .commit_finalize_and_undelegate
-            .as_ref()
-            .map(|el| &el.commit_action)
+        if let Some(ref value) =
+            intent_bundle.intent_bundle.commit_finalize_and_undelegate
         {
-            tasks.extend(value.get_committed_accounts().iter().map(
-                |account| {
-                    let commit_nonce = deduce_commit_nonce(account.pubkey);
-                    let base_account = base_accounts.remove(&account.pubkey);
-                    Self::create_commit_finalize_task(
-                        commit_nonce,
-                        true,
-                        account.clone(),
-                        base_account,
-                    )
-                    .into()
-                },
-            ));
-
-            if let CommitType::WithBaseActions {
-                ref base_actions, ..
-            } = value
-            {
-                tasks.extend(Self::create_action_tasks(base_actions.as_ref()));
-            }
+            tasks.extend(
+                CommitFinalizeAndUndelegateBuilder {
+                    commit_nonces: &mut commit_nonces,
+                    base_accounts: &mut base_accounts,
+                }
+                .build(&value.commit_action),
+            );
         }
 
         Ok(tasks)
@@ -445,6 +390,137 @@ impl TasksBuilder for TaskBuilderImpl {
 
         Ok(tasks)
     }
+}
+
+struct CommitBuilder<'a> {
+    commit_nonces: &'a mut HashMap<Pubkey, u64>,
+    base_accounts: &'a mut HashMap<Pubkey, Account>,
+}
+
+impl<'a> CommitBuilder<'a> {
+    fn build(&mut self, commit_type: &CommitType) -> Vec<BaseTaskImpl> {
+        commit_type
+            .get_committed_accounts()
+            .iter()
+            .map(|account| {
+                let nonce =
+                    take_commit_nonce(self.commit_nonces, account.pubkey);
+                let base = self.base_accounts.remove(&account.pubkey);
+                TaskBuilderImpl::create_commit_task(
+                    nonce,
+                    false,
+                    account.clone(),
+                    base,
+                )
+                .into()
+            })
+            .collect()
+    }
+}
+
+struct CommitAndUndelegateBuilder<'a> {
+    commit_nonces: &'a mut HashMap<Pubkey, u64>,
+    base_accounts: &'a mut HashMap<Pubkey, Account>,
+}
+
+impl<'a> CommitAndUndelegateBuilder<'a> {
+    fn build(&mut self, commit_type: &CommitType) -> Vec<BaseTaskImpl> {
+        commit_type
+            .get_committed_accounts()
+            .iter()
+            .map(|account| {
+                let nonce =
+                    take_commit_nonce(self.commit_nonces, account.pubkey);
+                let base = self.base_accounts.remove(&account.pubkey);
+                TaskBuilderImpl::create_commit_task(
+                    nonce,
+                    true,
+                    account.clone(),
+                    base,
+                )
+                .into()
+            })
+            .collect()
+    }
+}
+
+struct CommitFinalizeBuilder<'a> {
+    commit_nonces: &'a mut HashMap<Pubkey, u64>,
+    base_accounts: &'a mut HashMap<Pubkey, Account>,
+}
+
+impl<'a> CommitFinalizeBuilder<'a> {
+    fn build(&mut self, commit_type: &CommitType) -> Vec<BaseTaskImpl> {
+        let mut tasks: Vec<BaseTaskImpl> = commit_type
+            .get_committed_accounts()
+            .iter()
+            .map(|account| {
+                let nonce =
+                    take_commit_nonce(self.commit_nonces, account.pubkey);
+                let base = self.base_accounts.remove(&account.pubkey);
+                TaskBuilderImpl::create_commit_finalize_task(
+                    nonce,
+                    false,
+                    account.clone(),
+                    base,
+                )
+                .into()
+            })
+            .collect();
+        if let CommitType::WithBaseActions {
+            ref base_actions, ..
+        } = commit_type
+        {
+            tasks.extend(TaskBuilderImpl::create_action_tasks(base_actions));
+        }
+        tasks
+    }
+}
+
+struct CommitFinalizeAndUndelegateBuilder<'a> {
+    commit_nonces: &'a mut HashMap<Pubkey, u64>,
+    base_accounts: &'a mut HashMap<Pubkey, Account>,
+}
+
+impl<'a> CommitFinalizeAndUndelegateBuilder<'a> {
+    fn build(&mut self, commit_type: &CommitType) -> Vec<BaseTaskImpl> {
+        let mut tasks: Vec<BaseTaskImpl> = commit_type
+            .get_committed_accounts()
+            .iter()
+            .map(|account| {
+                let nonce =
+                    take_commit_nonce(self.commit_nonces, account.pubkey);
+                let base = self.base_accounts.remove(&account.pubkey);
+                TaskBuilderImpl::create_commit_finalize_task(
+                    nonce,
+                    true,
+                    account.clone(),
+                    base,
+                )
+                .into()
+            })
+            .collect();
+        if let CommitType::WithBaseActions {
+            ref base_actions, ..
+        } = commit_type
+        {
+            tasks.extend(TaskBuilderImpl::create_action_tasks(base_actions));
+        }
+        tasks
+    }
+}
+
+fn take_commit_nonce(
+    commit_nonces: &mut HashMap<Pubkey, u64>,
+    pubkey: Pubkey,
+) -> u64 {
+    commit_nonces.remove(&pubkey).unwrap_or_else(|| {
+        // This shall not ever happen since TaskInfoFetcher
+        // returns commit ids for all pubkeys or throws
+        // If it does occur, it will be patched and retried by IntentExecutor
+        error!(pubkey = %pubkey, "Commit id absent for pubkey");
+        0
+    })
 }
 
 #[derive(thiserror::Error, Debug)]
