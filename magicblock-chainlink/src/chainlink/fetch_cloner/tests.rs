@@ -1619,7 +1619,10 @@ async fn test_undelegation_tracking_window_is_protected_from_capacity_eviction()
         .pubsub_client()
         .subscriptions_union()
         .contains(&new_pubkey));
-    assert!(removed_rx.try_recv().is_err());
+    assert!(matches!(
+        removed_rx.try_recv(),
+        Err(tokio::sync::mpsc::error::TryRecvError::Empty)
+    ));
 
     let direct_release_after_rejected_capacity = remote_account_provider
         .release_subscription_with_mode(
