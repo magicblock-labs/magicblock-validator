@@ -2371,7 +2371,15 @@ where
         &self,
         pubkey: &Pubkey,
     ) -> ChainlinkResult<()> {
-        trace!(pubkey = %pubkey, "Subscribing to account");
+        trace!(
+            pubkey = %pubkey,
+            reason = ?SubscriptionReason::UndelegationTracking,
+            "Subscribing to account"
+        );
+        // Acquire undelegation tracking ownership before/with local
+        // undelegating visibility; any LRU entry created for this reason is
+        // protected from capacity eviction by the provider's bank-state
+        // predicate and ownership filter.
         self.acquire_subscription_reason(
             pubkey,
             SubscriptionReason::UndelegationTracking,

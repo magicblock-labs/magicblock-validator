@@ -233,15 +233,18 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
                                 undelegating,
                                 delegated,
                                 owner = %account.owner(),
-                                "Keeping unsubscribed account \
-                                 in bank \
-                                 (delegated/undelegating)"
+                                "Ignoring removal notification because bank \
+                                 state is protected; no EvictAccount \
+                                 transaction will be submitted"
                             );
                         }
                         evict
                     }
                     None => false,
                 };
+                // Skipping a delegated/undelegating LRU candidate is not a
+                // removal event; protected bank state must not be translated
+                // into a downstream bank eviction.
                 if !should_evict {
                     continue;
                 }
