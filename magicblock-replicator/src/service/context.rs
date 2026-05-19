@@ -182,8 +182,10 @@ impl ReplicationContext {
         messages: Receiver<Message>,
     ) -> Result<Primary> {
         let snapshots = self.create_snapshot_watcher()?;
-        // TODO(bmuddha): remove dependency on the chainlink
         let _guard = self.scheduler.wait_for_idle().await;
+        // Account-bank reset is primary-readiness cleanup and is intentionally
+        // skipped during standby/replica startup. Run it only after primary
+        // work is idle and before exposing primary mode.
         self.chainlink.reset_accounts_bank()?;
         self.enter_primary_mode().await;
         Ok(Primary::new(self, producer, messages, snapshots))

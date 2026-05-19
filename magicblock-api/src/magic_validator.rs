@@ -872,20 +872,23 @@ impl MagicValidator {
 
         log_timing("startup", "maybe_process_ledger", step_start);
 
-        // Ledger replay has completed, we can now clean non-delegated accounts
-        // including programs from the bank
-        if !self.config.accountsdb.reset {
-            let step_start = Instant::now();
-            self.chainlink.reset_accounts_bank()?;
-            log_timing("startup", "reset_accounts_bank", step_start);
-        }
-
-        // Notify the scheduler that ledger replay and bank cleanup is complete.
+        // Notify the scheduler that ledger replay is complete.
         // The message carries the target mode so the scheduler transitions to
         // the correct coordination mode:
-        // - Standalone validators transition to Primary mode
-        // - StandBy/ReplicaOnly validators transition to Replica mode
+        // - Standalone validators perform primary-readiness cleanup, then
+        //   transition to Primary mode
+        // - StandBy/ReplicaOnly validators transition to Replica mode and
+        //   intentionally skip account-bank reset during startup
         if self.is_standalone {
+            // Account-bank reset is primary-readiness cleanup: clean
+            // non-delegated accounts, including programs, only when preparing
+            // to become primary.
+            if !self.config.accountsdb.reset {
+                let step_start = Instant::now();
+                self.chainlink.reset_accounts_bank()?;
+                log_timing("startup", "reset_accounts_bank", step_start);
+            }
+
             self.mode_tx
                 .send(SchedulerMode::Primary)
                 .await
