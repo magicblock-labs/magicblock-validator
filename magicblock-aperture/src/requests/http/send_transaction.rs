@@ -27,12 +27,12 @@ impl HttpDispatcher {
         let config = config.unwrap_or_default();
         let encoding = config.encoding.unwrap_or(UiTransactionEncoding::Base58);
 
+        self.reject_non_primary_write("sendTransaction")?;
         let transaction = self
             .prepare_transaction(&transaction_str, encoding, true, false)
             .inspect_err(
                 |err| debug!(error = ?err, "Failed to prepare transaction"),
             )?;
-        self.reject_non_primary_write("sendTransaction")?;
         let signature = *transaction.txn.signature();
 
         // Perform a replay check and reserve the signature in the cache

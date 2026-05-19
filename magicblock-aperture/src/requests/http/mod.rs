@@ -117,7 +117,6 @@ impl HttpDispatcher {
         CoordinationMode::current().needs_onchain_interactions()
     }
 
-    // TODO: Add integration coverage for non-primary RPC write rejection in the later test step.
     fn reject_non_primary_write(&self, method: &'static str) -> RpcResult<()> {
         if self.is_primary_mode() {
             return Ok(());
@@ -385,19 +384,205 @@ pub(crate) mod get_delegation_status;
 
 #[cfg(test)]
 mod tests {
-    use magicblock_core::link::blocks::BlockHash;
+    use std::sync::Arc;
+
+    use base64::{
+        engine::general_purpose::STANDARD as BASE64_STANDARD, Engine,
+    };
+    use magicblock_config::config::ChainLinkConfig;
+    use magicblock_core::{
+        coordination_mode::{switch_to_primary_mode, switch_to_replica_mode},
+        link::{blocks::BlockHash, link},
+    };
+    use solana_account::ReadableAccount;
     use solana_message::{
         compiled_instruction::CompiledInstruction, legacy::Message,
         MessageHeader, VersionedMessage,
     };
     use solana_signature::Signature;
+    use test_kit::{
+        guinea::{self, GuineaInstruction},
+        AccountMeta, ExecutionTestEnv, Instruction,
+    };
 
     use super::*;
+    use crate::{
+        requests::{JsonHttpRequest, JsonRpcHttpMethod},
+        state::{ChainlinkImpl, NodeContext, SharedState},
+    };
+
+    static COORDINATION_MODE_TEST_LOCK: tokio::sync::Mutex<()> =
+        tokio::sync::Mutex::const_new(());
+
+    struct PrimaryModeGuard;
+
+    impl PrimaryModeGuard {
+        fn switch_to_replica() -> Self {
+            switch_to_replica_mode();
+            Self
+        }
+    }
+
+    impl Drop for PrimaryModeGuard {
+        fn drop(&mut self) {
+            switch_to_primary_mode();
+        }
+    }
+
+    fn test_dispatcher(env: &ExecutionTestEnv) -> HttpDispatcher {
+        let chainlink = Arc::new(
+            ChainlinkImpl::try_new(
+                &env.accountsdb,
+                None,
+                Pubkey::new_unique(),
+                &ChainLinkConfig::default(),
+            )
+            .expect("failed to create chainlink"),
+        );
+        let state = SharedState::new(
+            NodeContext {
+                identity: env.get_payer().pubkey,
+                base_fee: ExecutionTestEnv::BASE_FEE,
+                blocktime: 50,
+                ..Default::default()
+            },
+            env.accountsdb.clone(),
+            env.ledger.clone(),
+            chainlink,
+        );
+        let (dispatch, _validator) = link();
+        HttpDispatcher {
+            context: state.context,
+            accountsdb: state.accountsdb,
+            ledger: state.ledger,
+            chainlink: state.chainlink,
+            transactions: state.transactions,
+            blocks: state.blocks,
+            transactions_scheduler: dispatch.transaction_scheduler,
+        }
+    }
+
+    fn encoded_transfer(env: &ExecutionTestEnv) -> (String, Signature) {
+        let from = Pubkey::new_unique();
+        let to = Pubkey::new_unique();
+        env.fund_account_with_owner(from, 10_000_000_000, guinea::ID);
+        env.fund_account_with_owner(to, 10_000_000_000, guinea::ID);
+        let ix = Instruction::new_with_bincode(
+            guinea::ID,
+            &GuineaInstruction::Transfer(1_000),
+            vec![AccountMeta::new(from, false), AccountMeta::new(to, false)],
+        );
+        let tx = env.build_transaction(&[ix]);
+        let signature = tx.signatures[0];
+        let encoded = BASE64_STANDARD.encode(
+            bincode::serialize(&tx).expect("transaction should serialize"),
+        );
+        (encoded, signature)
+    }
+
+    fn request(
+        method: JsonRpcHttpMethod,
+        params: json::Array,
+    ) -> JsonHttpRequest {
+        JsonHttpRequest {
+            id: json::json!(1),
+            method,
+            params: Some(params),
+        }
+    }
 
     const SYSTEM_PROGRAM_ID: Pubkey =
         Pubkey::from_str_const("11111111111111111111111111111111");
     const COMPUTE_BUDGET_ID: Pubkey =
         Pubkey::from_str_const("ComputeBudget111111111111111111111111111111");
+
+    #[tokio::test]
+    async fn send_transaction_in_replica_rejects_before_signature_cache_insert()
+    {
+        let _lock = COORDINATION_MODE_TEST_LOCK.lock().await;
+        let env = ExecutionTestEnv::new_replica_mode(1, false);
+        let _mode = PrimaryModeGuard::switch_to_replica();
+        let dispatcher = test_dispatcher(&env);
+        let (encoded_tx, signature) = encoded_transfer(&env);
+        let mut request = request(
+            JsonRpcHttpMethod::SendTransaction,
+            vec![
+                json::json!(encoded_tx),
+                json::json!({ "encoding": "base64", "skipPreflight": true }),
+            ]
+            .into(),
+        );
+
+        let error = match dispatcher.send_transaction(&mut request).await {
+            Ok(_) => panic!("replica sendTransaction should be rejected"),
+            Err(error) => error,
+        };
+
+        assert!(
+            error.to_string().contains(
+                "sendTransaction is only available while validator is primary"
+            ),
+            "unexpected error: {error}"
+        );
+        assert!(
+            !dispatcher.transactions.contains(&signature),
+            "rejected replica sendTransaction must not reserve signature"
+        );
+    }
+
+    #[tokio::test]
+    async fn read_account_with_ensure_in_replica_returns_local_account() {
+        let _lock = COORDINATION_MODE_TEST_LOCK.lock().await;
+        let env = ExecutionTestEnv::new_replica_mode(1, false);
+        let _mode = PrimaryModeGuard::switch_to_replica();
+        let dispatcher = test_dispatcher(&env);
+        let pubkey = Pubkey::new_unique();
+        env.fund_account(pubkey, 42);
+
+        let account = dispatcher
+            .read_account_with_ensure(&pubkey)
+            .await
+            .expect("local account should be returned in replica mode");
+
+        assert_eq!(account.lamports(), 42);
+    }
+
+    #[tokio::test]
+    async fn simulate_transaction_in_replica_reaches_scheduler() {
+        let _lock = COORDINATION_MODE_TEST_LOCK.lock().await;
+        let env = ExecutionTestEnv::new_replica_mode(1, false);
+        let _mode = PrimaryModeGuard::switch_to_replica();
+        let dispatcher = test_dispatcher(&env);
+        let (encoded_tx, _signature) = encoded_transfer(&env);
+        let mut request = request(
+            JsonRpcHttpMethod::SimulateTransaction,
+            vec![
+                json::json!(encoded_tx),
+                json::json!({ "encoding": "base64", "sigVerify": false }),
+            ]
+            .into(),
+        );
+
+        let error = match dispatcher.simulate_transaction(&mut request).await {
+            Ok(_) => panic!("simulation should reach the local scheduler"),
+            Err(error) => error,
+        };
+
+        assert!(
+            error.to_string().contains("transaction simulation failed")
+                || error.to_string().contains("response channel closed")
+                || error
+                    .to_string()
+                    .contains("Transactions are currently disabled"),
+            "unexpected error: {error}"
+        );
+        assert!(
+            !error.to_string().contains(
+                "simulateTransaction is only available while validator is primary"
+            ),
+            "simulateTransaction must not use the non-primary write gate"
+        );
+    }
 
     #[test]
     fn accepts_program_id_index_within_runtime_limit() {
