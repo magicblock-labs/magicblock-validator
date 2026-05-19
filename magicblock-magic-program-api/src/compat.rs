@@ -1,5 +1,7 @@
+#![allow(unused)]
+
 #[cfg(feature = "backward-compat")]
-mod selected {
+mod backward_compat {
     pub use solana_program_compat::{
         account_info::AccountInfo,
         declare_id,
@@ -10,8 +12,7 @@ mod selected {
     pub use solana_signature_compat::Signature;
 }
 
-#[cfg(not(feature = "backward-compat"))]
-mod selected {
+mod latest {
     pub use solana_program::{
         account_info::AccountInfo,
         declare_id,
@@ -22,4 +23,8 @@ mod selected {
     pub use solana_signature::Signature;
 }
 
-pub use selected::*;
+#[cfg(feature = "backward-compat")]
+pub use backward_compat::*;
+
+#[cfg(not(feature = "backward-compat"))]
+pub use latest::*;
