@@ -493,7 +493,10 @@ async fn test_delegated_direct_cleanup_removes_final_direct_reason_without_notif
         .unwrap();
 
     let unsubscribed = provider
-        .release_direct_subscription_for_delegated_account(&pubkey)
+        .release_subscription_reason_silently_for_delegated_account(
+            &pubkey,
+            SubscriptionReason::DirectAccount,
+        )
         .await
         .unwrap();
 
@@ -534,7 +537,10 @@ async fn test_delegated_direct_cleanup_keeps_undelegation_tracking() {
         .unwrap();
 
     let unsubscribed = provider
-        .release_direct_subscription_for_delegated_account(&pubkey)
+        .release_subscription_reason_silently_for_delegated_account(
+            &pubkey,
+            SubscriptionReason::DirectAccount,
+        )
         .await
         .unwrap();
 

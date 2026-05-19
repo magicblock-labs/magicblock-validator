@@ -1427,17 +1427,14 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         Ok(success)
     }
 
-    pub(crate) async fn release_direct_subscription_for_delegated_account(
+    pub(crate) async fn release_subscription_reason_silently_for_delegated_account(
         &self,
         pubkey: &Pubkey,
+        reason: SubscriptionReason,
     ) -> RemoteAccountProviderResult<bool> {
         let _transition_guard = self.subscription_transition_lock.lock().await;
         let subscription_key_lock = self.subscription_key_lock(pubkey).await;
         let _subscription_guard = subscription_key_lock.lock().await;
-
-        if !self.lrucache_subscribed_accounts.can_evict(pubkey) {
-            return Ok(false);
-        }
 
         let released_count = {
             let release_mode = SubscriptionReleaseMode::All;
@@ -1446,11 +1443,12 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                 Some(existing) => {
                     let released_count = match release_mode {
                         SubscriptionReleaseMode::Single => {
-                            existing.release(SubscriptionReason::DirectAccount);
+                            existing.release(reason);
                             1
                         }
-                        SubscriptionReleaseMode::All => existing
-                            .release_all(SubscriptionReason::DirectAccount),
+                        SubscriptionReleaseMode::All => {
+                            existing.release_all(reason)
+                        }
                     };
                     (existing.is_empty(), released_count)
                 }
@@ -1464,8 +1462,9 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             if !is_empty {
                 trace!(
                     pubkey = %pubkey,
+                    ?reason,
                     released_count,
-                    "Released DirectAccount ownership for delegated cleanup; \
+                    "Released delegated-account subscription ownership; \
                      kept protected/live subscription and LRU entry"
                 );
                 return Ok(false);
@@ -1480,9 +1479,9 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                 self.lrucache_subscribed_accounts.remove(pubkey);
                 trace!(
                     pubkey = %pubkey,
-                    "Removed final DirectAccount ownership and LRU entry \
-                     silently for delegated cleanup; no removal notification \
-                     emitted"
+                    ?reason,
+                    "Removed final delegated-account subscription ownership \
+                     and LRU entry silently; no removal notification emitted"
                 );
                 Ok(true)
             }
@@ -1494,7 +1493,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                 {
                     let ownership = ownership.entry(*pubkey).or_default();
                     for _ in 0..released_count {
-                        ownership.acquire(SubscriptionReason::DirectAccount);
+                        ownership.acquire(reason);
                     }
                 }
                 drop(ownership);
