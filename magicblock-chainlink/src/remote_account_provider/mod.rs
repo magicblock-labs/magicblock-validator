@@ -1242,8 +1242,6 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                 }
             }
             AddAccountOutcome::NoEvictableCandidate => {
-                self.subscription_ownership.lock().await.remove(pubkey);
-                self.lrucache_subscribed_accounts.remove(pubkey);
                 if let Err(err) = self.pubsub_client.unsubscribe(*pubkey).await
                 {
                     debug!(
@@ -1251,7 +1249,10 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                         error = ?err,
                         "Failed to unsubscribe new subscription after all LRU candidates were protected"
                     );
+                    return Err(err);
                 }
+                self.subscription_ownership.lock().await.remove(pubkey);
+                self.lrucache_subscribed_accounts.remove(pubkey);
                 debug!(
                     pubkey = %pubkey,
                     "No evictable subscription capacity available; all LRU candidates are protected"
