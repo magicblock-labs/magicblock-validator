@@ -170,18 +170,17 @@ impl Drop for ClaimedSubscriptionSetupGuard {
 
 /// Internal ownership/refcount key for shared pubsub subscriptions.
 ///
-/// A single pubkey can be watched for multiple independent purposes
-/// (direct account access, delegation records, program data, undelegation
-/// tracking, ATA projection, etc.). Tracking the reason prevents one
-/// subsystem from accidentally unsubscribing an account that another subsystem
-/// still needs. For explicit reason-based releases, the provider only tears
-/// down the actual pubsub subscription once all reasons/counts for that pubkey
-/// have been released.
+/// `DirectAccount` is normal remote-account monitoring and is the only
+/// subscription reason that should participate in normal capacity eviction.
+/// `UndelegationTracking` is protected ownership for delegated accounts that
+/// are being undelegated and must never be treated as normal capacity-evictable
+/// ownership.
 ///
-/// This ownership tracking does not protect the account from LRU capacity
-/// eviction. If the subscribed-accounts LRU evicts a pubkey, that eviction is
-/// treated as a forced full unsubscribe/removal regardless of the reasons still
-/// recorded for that pubkey.
+/// Delegated accounts that are not undelegating are locally authoritative and
+/// should have `DirectAccount` ownership released once delegation is discovered.
+/// LRU membership is bookkeeping for live account subscriptions, but capacity
+/// eviction may only remove entries that are not protected by account state or
+/// ownership.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SubscriptionReason {
     DirectAccount,

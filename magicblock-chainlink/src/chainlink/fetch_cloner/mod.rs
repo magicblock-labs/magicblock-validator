@@ -684,10 +684,10 @@ where
             return;
         }
 
-        // Once we clone an account that is delegated to us we no
-        // longer need to receive updates for it from chain.
-        // The subscription will be turned back on once the committor
-        // service schedules a commit for it that includes undelegation.
+        // Delegated non-undelegating subscription cleanup is the primary
+        // mechanism for removing known delegated accounts from direct
+        // subscription/LRU ownership; undelegation tracking owns protected
+        // subscriptions while undelegation is in progress.
         if account.delegated() {
             self.unsubscribe_from_delegated_account(pubkey).await;
         }

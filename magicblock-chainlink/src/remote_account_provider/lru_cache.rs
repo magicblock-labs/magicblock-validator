@@ -9,12 +9,16 @@ use tracing::*;
 
 use crate::submux::SubscribedAccountsTracker;
 
-/// A simple wrapper around [lru::LruCache].
-/// When an account is evicted from the cache due to a new one being added,
-/// it will return that evicted account's Pubkey as well as sending it via
-/// the [Self::removed_account_rx] channel.
+/// A wrapper around [lru::LruCache] for live account subscriptions.
+///
+/// The LRU is bookkeeping for subscribed accounts and may transiently contain
+/// delegated or undelegating entries. Capacity eviction must skip entries that
+/// are protected by account state or subscription ownership instead of blindly
+/// using the raw [lru::LruCache] eviction result.
 pub struct AccountsLruCache {
-    /// Tracks which accounts are currently subscribed to
+    /// Tracks which accounts are currently subscribed to; entries may include
+    /// delegated or undelegating accounts until protected eviction filtering or
+    /// explicit subscription cleanup removes them.
     subscribed_accounts: Mutex<LruCache<Pubkey, ()>>,
     accounts_to_never_evict: HashSet<Pubkey>,
 }
