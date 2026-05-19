@@ -625,26 +625,84 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
 
         // Build startup pubsub clients and wrap them into a SubMuxClient.
         // gRPC clients are cheap to create and backfill subscriptions, so
-        // when present we defer slower WebSocket clients after keeping one
-        // startup WebSocket fallback until gRPC proves subscription readiness.
+        // when present we let slower WebSocket clients attach after startup.
+        // If gRPC cannot subscribe during startup, retry once with WebSocket
+        // endpoints so mixed configs still have a live fallback.
         let pubsubs = endpoints.pubsubs();
         let has_grpc =
             pubsubs.iter().any(|ep| matches!(ep, Endpoint::Grpc { .. }));
-        let mut startup_pubsubs = Vec::new();
-        let mut deferred_pubsubs = Vec::new();
-        let mut has_startup_ws = false;
-        for ep in pubsubs.into_iter().cloned() {
-            let use_at_startup = !has_grpc
-                || matches!(&ep, Endpoint::Grpc { .. })
-                || (!has_startup_ws
-                    && matches!(&ep, Endpoint::WebSocket { .. }));
-            if use_at_startup {
-                has_startup_ws |= matches!(&ep, Endpoint::WebSocket { .. });
-                startup_pubsubs.push(ep);
-            } else {
-                deferred_pubsubs.push(ep);
+        let (startup_pubsubs, deferred_pubsubs): (Vec<_>, Vec<_>) = pubsubs
+            .into_iter()
+            .cloned()
+            .partition(|ep| !has_grpc || matches!(ep, Endpoint::Grpc { .. }));
+        let fallback_pubsubs = (has_grpc && !deferred_pubsubs.is_empty())
+            .then(|| deferred_pubsubs.clone());
+
+        match Self::try_new_from_pubsubs(
+            startup_pubsubs,
+            deferred_pubsubs,
+            commitment,
+            rpc_client.clone(),
+            chain_slot.clone(),
+            subscription_forwarder.clone(),
+            config,
+        )
+        .await
+        {
+            Ok((provider, deferred_pubsubs)) => {
+                if !deferred_pubsubs.is_empty() {
+                    spawn_deferred_pubsub_clients(
+                        deferred_pubsubs,
+                        commitment,
+                        rpc_client,
+                        chain_slot,
+                        config.resubscription_delay(),
+                        config.grpc().clone(),
+                        provider.pubsub_client.clone(),
+                        provider.lrucache_subscribed_accounts.clone(),
+                        provider.subscription_transition_lock.clone(),
+                    );
+                }
+                Ok(provider)
+            }
+            Err(err) => {
+                let Some(fallback_pubsubs) = fallback_pubsubs else {
+                    return Err(err);
+                };
+                warn!(
+                    error = %err,
+                    "gRPC startup pubsub failed; retrying with WebSocket fallback"
+                );
+                let (provider, _) = Self::try_new_from_pubsubs(
+                    fallback_pubsubs,
+                    Vec::new(),
+                    commitment,
+                    rpc_client,
+                    chain_slot,
+                    subscription_forwarder,
+                    config,
+                )
+                .await?;
+                Ok(provider)
             }
         }
+    }
+
+    async fn try_new_from_pubsubs(
+        startup_pubsubs: Vec<Endpoint>,
+        mut deferred_pubsubs: Vec<Endpoint>,
+        commitment: CommitmentConfig,
+        rpc_client: ChainRpcClientImpl,
+        chain_slot: Arc<AtomicU64>,
+        subscription_forwarder: mpsc::Sender<ForwardedSubscriptionUpdate>,
+        config: &RemoteAccountProviderConfig,
+    ) -> RemoteAccountProviderResult<(
+        RemoteAccountProvider<
+            ChainRpcClientImpl,
+            SubMuxClient<ChainUpdatesClient>,
+        >,
+        Vec<Endpoint>,
+    )> {
         let resubscription_delay = config.resubscription_delay();
         let pubsub_futs = startup_pubsubs.into_iter().map(|ep| {
             connect_pubsub_client(
@@ -692,7 +750,6 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
 
         let submux =
             SubMuxClient::new(pubsubs, subscribed_accounts.clone(), None);
-        let deferred_submux = submux.clone();
 
         if !config.program_subs().is_empty() {
             let count = config.program_subs().len();
@@ -708,28 +765,15 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             ChainRpcClientImpl,
             SubMuxClient<ChainUpdatesClient>,
         >::new(
-            rpc_client.clone(),
+            rpc_client,
             submux,
             subscription_forwarder,
             config,
             subscribed_accounts,
-            ChainSlot::new(chain_slot.clone()),
+            ChainSlot::new(chain_slot),
         )
         .await?;
-        if !deferred_pubsubs.is_empty() {
-            spawn_deferred_pubsub_clients(
-                deferred_pubsubs,
-                commitment,
-                rpc_client,
-                chain_slot,
-                resubscription_delay,
-                config.grpc().clone(),
-                deferred_submux,
-                provider.lrucache_subscribed_accounts.clone(),
-                provider.subscription_transition_lock.clone(),
-            );
-        }
-        Ok(provider)
+        Ok((provider, deferred_pubsubs))
     }
 
     pub(crate) fn promote_accounts(&self, pubkeys: &[&Pubkey]) {
