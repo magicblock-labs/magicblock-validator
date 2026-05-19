@@ -107,58 +107,57 @@ impl AccountsLruCache {
             "Should not evict the same pubkey that we added"
         );
 
-        if is_evictable(&evicted_pubkey) {
-            inc_evicted_accounts_count();
-            trace!(evicted_pubkey = %evicted_pubkey, "Evict candidate");
-            return AddAccountOutcome::Evicted(evicted_pubkey);
+        fn restore_skipped(
+            subs: &mut LruCache<Pubkey, ()>,
+            skipped: Vec<Pubkey>,
+        ) {
+            for skipped_pubkey in skipped {
+                subs.push(skipped_pubkey, ());
+            }
         }
 
-        let mut skipped = vec![evicted_pubkey];
-        // skipping delegated LRU candidate during capacity eviction; assuming transient direct-subscription entry, cleanup expected from delegated-state processing
-        trace!(
-            skipped_pubkey = %evicted_pubkey,
-            "skipping delegated LRU candidate during capacity eviction; assuming transient direct-subscription entry, cleanup expected from delegated-state processing"
-        );
+        fn reject_new_account(
+            subs: &mut LruCache<Pubkey, ()>,
+            skipped: Vec<Pubkey>,
+            pubkey: &Pubkey,
+        ) -> AddAccountOutcome {
+            restore_skipped(subs, skipped);
+            subs.pop(pubkey);
+            trace!(
+                pubkey = %pubkey,
+                "No evictable LRU candidate found; rejected new account"
+            );
+            AddAccountOutcome::NoEvictableCandidate
+        }
 
-        while let Some((candidate, ())) = subs.pop_lru() {
+        let mut skipped = Vec::new();
+        let mut candidate = evicted_pubkey;
+        loop {
             if candidate == pubkey {
-                for skipped_pubkey in skipped {
-                    subs.push(skipped_pubkey, ());
-                }
-                subs.pop(&pubkey);
-                trace!(
-                    pubkey = %pubkey,
-                    "No evictable LRU candidate found; rejected new account"
-                );
-                return AddAccountOutcome::NoEvictableCandidate;
+                return reject_new_account(&mut subs, skipped, &pubkey);
             }
 
             if is_evictable(&candidate) {
-                for skipped_pubkey in skipped {
-                    subs.push(skipped_pubkey, ());
-                }
+                restore_skipped(&mut subs, skipped);
                 inc_evicted_accounts_count();
                 trace!(evicted_pubkey = %candidate, "Evict candidate");
                 return AddAccountOutcome::Evicted(candidate);
             }
 
-            // skipping delegated LRU candidate during capacity eviction; assuming transient direct-subscription entry, cleanup expected from delegated-state processing
+            // Skipping delegated LRU candidate during capacity eviction; for example,
+            // delegated accounts being undelegated, or delegation records kept for
+            // pending clones, are cleaned up by delegated-state processing.
             trace!(
                 skipped_pubkey = %candidate,
                 "skipping delegated LRU candidate during capacity eviction; assuming transient direct-subscription entry, cleanup expected from delegated-state processing"
             );
             skipped.push(candidate);
-        }
 
-        for skipped_pubkey in skipped {
-            subs.push(skipped_pubkey, ());
+            let Some((next_candidate, ())) = subs.pop_lru() else {
+                return reject_new_account(&mut subs, skipped, &pubkey);
+            };
+            candidate = next_candidate;
         }
-        subs.pop(&pubkey);
-        trace!(
-            pubkey = %pubkey,
-            "No evictable LRU candidate found; rejected new account"
-        );
-        AddAccountOutcome::NoEvictableCandidate
     }
 
     pub fn contains(&self, pubkey: &Pubkey) -> bool {

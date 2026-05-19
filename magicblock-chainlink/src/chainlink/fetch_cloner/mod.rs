@@ -706,6 +706,8 @@ where
         // subscription/LRU ownership; undelegation tracking owns protected
         // subscriptions while undelegation is in progress.
         if account.delegated() {
+            self.cleanup_undelegation_tracking_for_redelegated_account(pubkey)
+                .await;
             self.cleanup_direct_subscription_for_delegated_account(pubkey)
                 .await;
         }
@@ -1010,6 +1012,26 @@ where
                 pubkey = %pubkey,
                 error = %err,
                 "Failed to clean up direct subscription for delegated account"
+            );
+        }
+    }
+
+    async fn cleanup_undelegation_tracking_for_redelegated_account(
+        &self,
+        pubkey: Pubkey,
+    ) {
+        if let Err(err) = self
+            .remote_account_provider
+            .release_subscription_reason_silently_for_delegated_account(
+                &pubkey,
+                SubscriptionReason::UndelegationTracking,
+            )
+            .await
+        {
+            warn!(
+                pubkey = %pubkey,
+                error = %err,
+                "Failed to clean up undelegation tracking for redelegated account"
             );
         }
     }
