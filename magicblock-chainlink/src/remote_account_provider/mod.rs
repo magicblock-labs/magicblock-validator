@@ -1213,12 +1213,10 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             AddAccountOutcome::Evicted(evicted) => {
                 trace!(evicted = %evicted, "Evicting account");
 
-                // LRU eviction is a forced full removal. Drop all ownership reasons
-                // before awaiting on pubsub unsubscribe or removal notification so stale
-                // reasons cannot survive a later failure on this cold path.
-                self.subscription_ownership.lock().await.remove(&evicted);
-
-                // 1. Unsubscribe from the account directly (LRU has already removed it)
+                // LRU eviction is a forced full removal, but keep local
+                // ownership intact until pubsub confirms the subscription is
+                // gone so a failed unsubscribe cannot leave ownership state
+                // inconsistent with the active subscription.
                 if let Err(err) = self.pubsub_client.unsubscribe(evicted).await
                 {
                     if matches!(
@@ -1232,11 +1230,14 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                         // Should we retry here?
                         warn!(evicted = %evicted, error = ?err, "Failed to unsubscribe from pubsub for evicted account");
                     }
+                    return Err(err);
                 }
 
-                // 2. Inform upstream so it can remove it from the store. Failure
-                // to notify is non-fatal here because the LRU and pubsub state have
-                // already been updated consistently.
+                self.subscription_ownership.lock().await.remove(&evicted);
+
+                // Inform upstream so it can remove it from the store. Failure
+                // to notify is non-fatal here because the LRU, pubsub, and
+                // ownership state have already been updated consistently.
                 if let Err(err) = self.send_removal_update(evicted).await {
                     warn!(evicted = %evicted, error = ?err, "Failed to send removal update for evicted account");
                 }
