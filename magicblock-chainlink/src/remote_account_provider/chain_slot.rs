@@ -40,17 +40,8 @@ impl ChainSlot {
 
     /// Computes a `from_slot` for backfilling based on the current
     /// chain slot.
-    ///
-    /// Returns `None` while the slot is still `0`, i.e. before any
-    /// real slot update has been observed. In that case the caller
-    /// must treat backfill as temporarily unavailable for this
-    /// subscription instead of sending `from_slot = 0`.
-    pub fn compute_from_slot(&self) -> Option<u64> {
-        let current = self.load();
-        if current == 0 {
-            return None;
-        }
-        Some(current.saturating_sub(Self::MAX_SLOTS_SUB_ACTIVATION))
+    pub fn compute_from_slot(&self) -> u64 {
+        self.load().saturating_sub(Self::MAX_SLOTS_SUB_ACTIVATION)
     }
 }
 
@@ -65,9 +56,9 @@ mod tests {
     }
 
     #[test]
-    fn returns_none_when_slot_is_zero() {
+    fn returns_zero_when_slot_is_zero() {
         let cs = make(0);
-        assert_eq!(cs.compute_from_slot(), None);
+        assert_eq!(cs.compute_from_slot(), 0);
     }
 
     #[test]
@@ -75,13 +66,13 @@ mod tests {
         let cs = make(1000);
         assert_eq!(
             cs.compute_from_slot(),
-            Some(1000 - ChainSlot::MAX_SLOTS_SUB_ACTIVATION),
+            1000 - ChainSlot::MAX_SLOTS_SUB_ACTIVATION,
         );
     }
 
     #[test]
     fn saturates_at_zero_when_slot_below_window() {
         let cs = make(1);
-        assert_eq!(cs.compute_from_slot(), Some(0));
+        assert_eq!(cs.compute_from_slot(), 0);
     }
 }
