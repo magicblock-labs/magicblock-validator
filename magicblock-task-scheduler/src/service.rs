@@ -475,7 +475,7 @@ impl TaskSchedulerService {
 
         Ok(self
             .rpc_client
-            .send_transaction(&tx)
+            .send_and_confirm_transaction(&tx)
             .await
             .map_err(Box::new)?)
     }
