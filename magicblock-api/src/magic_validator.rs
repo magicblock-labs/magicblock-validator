@@ -897,6 +897,7 @@ impl MagicValidator {
                         "Failed to send primary mode to scheduler: {e}"
                     ))
                 })?;
+            self.chainlink.enable_primary()?;
         } else if let Some(replicator) = self.replication_service.take() {
             self.replication_handle.replace(replicator.spawn());
         }

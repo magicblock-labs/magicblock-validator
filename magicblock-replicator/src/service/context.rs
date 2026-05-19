@@ -188,6 +188,7 @@ impl ReplicationContext {
         // work is idle and before exposing primary mode.
         self.chainlink.reset_accounts_bank()?;
         self.enter_primary_mode().await;
+        self.chainlink.enable_primary()?;
         Ok(Primary::new(self, producer, messages, snapshots))
     }
 
@@ -202,6 +203,7 @@ impl ReplicationContext {
         reset: bool,
     ) -> Result<Option<Standby>> {
         self.enter_replica_mode().await;
+        self.chainlink.disable();
         let Some(consumer) = self.create_consumer(reset).await else {
             return Ok(None);
         };

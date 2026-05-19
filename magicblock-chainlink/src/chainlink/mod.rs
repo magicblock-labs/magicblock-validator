@@ -82,6 +82,23 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
         }
     }
 
+    pub fn enable_primary(&self) -> ChainlinkResult<()> {
+        if !Self::remote_sync_enabled() {
+            trace!("Chainlink enable_primary requested before primary mode; remote sync remains gated");
+        } else {
+            info!("Chainlink primary remote sync enabled");
+        }
+        Ok(())
+    }
+
+    pub fn disable(&self) {
+        info!("Chainlink remote sync disabled by lifecycle transition");
+    }
+
+    pub fn is_remote_sync_enabled(&self) -> bool {
+        Self::remote_sync_enabled()
+    }
+
     pub fn try_new(
         accounts_bank: &Arc<V>,
         fetch_cloner: Option<Arc<FetchCloner<T, U, V, C>>>,

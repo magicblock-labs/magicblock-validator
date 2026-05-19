@@ -3,6 +3,7 @@
 use std::fmt::{Debug, Display};
 
 use magicblock_accounts_db::error::AccountsDbError;
+use magicblock_chainlink::errors::ChainlinkError;
 use magicblock_ledger::errors::LedgerError;
 use solana_transaction_error::TransactionError;
 
@@ -28,6 +29,10 @@ pub enum Error {
     /// Ledger access error.
     #[error("ledger access error: {0}")]
     Ledger(#[from] LedgerError),
+
+    /// Chainlink lifecycle error.
+    #[error("chainlink error: {0}")]
+    Chainlink(#[from] ChainlinkError),
 
     /// Transaction execution error.
     #[error("transaction execution error: {0}")]
