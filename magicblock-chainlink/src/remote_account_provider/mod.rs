@@ -3,7 +3,7 @@ use std::{
     num::NonZeroUsize,
     sync::{
         atomic::{AtomicU64, Ordering},
-        Arc, Mutex, Weak,
+        Arc, Mutex, RwLock, Weak,
     },
     time::Duration,
 };
@@ -232,6 +232,19 @@ pub(crate) enum SubscriptionReleaseMode {
     All,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct CapacityEvictionProtection {
+    pub delegated: bool,
+    pub undelegating: bool,
+}
+
+impl CapacityEvictionProtection {
+    #[allow(dead_code)]
+    pub fn is_protected(self) -> bool {
+        self.delegated || self.undelegating
+    }
+}
+
 pub struct ForwardedSubscriptionUpdate {
     pub pubkey: Pubkey,
     pub account: RemoteAccount,
@@ -292,6 +305,16 @@ pub struct RemoteAccountProvider<T: ChainRpcClient, U: ChainPubsubClient> {
 
     /// Tracks which accounts are currently subscribed to
     lrucache_subscribed_accounts: Arc<AccountsLruCache>,
+
+    capacity_eviction_protection: Arc<
+        RwLock<
+            Option<
+                Arc<
+                    dyn Fn(&Pubkey) -> CapacityEvictionProtection + Send + Sync,
+                >,
+            >,
+        >,
+    >,
 
     /// Channel to notify when an account is removed from the cache and thus no
     /// longer being watched
@@ -460,6 +483,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             last_update_slot: Arc::<AtomicU64>::default(),
             received_updates_count: Arc::<AtomicU64>::default(),
             lrucache_subscribed_accounts,
+            capacity_eviction_protection: Arc::new(RwLock::new(None)),
             subscription_forwarder: Arc::new(subscription_forwarder),
             removed_account_tx,
             removed_account_rx: Mutex::new(Some(removed_account_rx)),
@@ -595,6 +619,33 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
 
     pub(crate) fn promote_accounts(&self, pubkeys: &[&Pubkey]) {
         self.lrucache_subscribed_accounts.promote_multi(pubkeys);
+    }
+
+    pub(crate) fn set_capacity_eviction_protection<F>(&self, predicate: F)
+    where
+        F: Fn(&Pubkey) -> CapacityEvictionProtection + Send + Sync + 'static,
+    {
+        *self
+            .capacity_eviction_protection
+            .write()
+            .expect("capacity_eviction_protection lock poisoned") =
+            Some(Arc::new(predicate));
+    }
+
+    #[allow(dead_code)]
+    fn capacity_eviction_protection_for(
+        &self,
+        pubkey: &Pubkey,
+    ) -> CapacityEvictionProtection {
+        self.capacity_eviction_protection
+            .read()
+            .expect("capacity_eviction_protection lock poisoned")
+            .as_ref()
+            .map(|predicate| predicate(pubkey))
+            .unwrap_or(CapacityEvictionProtection {
+                delegated: false,
+                undelegating: false,
+            })
     }
 
     pub fn try_get_removed_account_rx(

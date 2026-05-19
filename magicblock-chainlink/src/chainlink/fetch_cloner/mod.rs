@@ -78,9 +78,10 @@ use crate::{
     },
     remote_account_provider::{
         program_account::get_loaderv3_get_program_data_address,
-        ChainPubsubClient, ChainRpcClient, ForwardedSubscriptionUpdate,
-        MatchSlotsConfig, RemoteAccount, RemoteAccountProvider,
-        ResolvedAccountSharedData, SubscriptionReason, SubscriptionReleaseMode,
+        CapacityEvictionProtection, ChainPubsubClient, ChainRpcClient,
+        ForwardedSubscriptionUpdate, MatchSlotsConfig, RemoteAccount,
+        RemoteAccountProvider, ResolvedAccountSharedData, SubscriptionReason,
+        SubscriptionReleaseMode,
     },
 };
 
@@ -218,6 +219,22 @@ where
                 FETCH_CLONE_OPERATION_TIMEOUT.as_millis() as u64,
             )),
         });
+
+        let accounts_bank_for_eviction = accounts_bank.clone();
+        me.remote_account_provider.set_capacity_eviction_protection(
+            move |pubkey| {
+                accounts_bank_for_eviction
+                    .get_account(pubkey)
+                    .map(|account| CapacityEvictionProtection {
+                        delegated: account.delegated(),
+                        undelegating: account.undelegating(),
+                    })
+                    .unwrap_or(CapacityEvictionProtection {
+                        delegated: false,
+                        undelegating: false,
+                    })
+            },
+        );
 
         me.clone()
             .start_subscription_listener(subscription_updates_rx);
