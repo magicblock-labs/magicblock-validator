@@ -1173,18 +1173,39 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                 *pubkey,
                 |candidate| {
                     if !self.lrucache_subscribed_accounts.can_evict(candidate) {
+                        trace!(
+                            candidate = %candidate,
+                            "Skipping capacity eviction candidate from never-evict set"
+                        );
                         return false;
                     }
-                    if self
-                        .capacity_eviction_protection_for(candidate)
-                        .is_protected()
-                    {
+
+                    let protection =
+                        self.capacity_eviction_protection_for(candidate);
+                    if protection.is_protected() {
+                        trace!(
+                            candidate = %candidate,
+                            delegated = protection.delegated,
+                            undelegating = protection.undelegating,
+                            "Skipping capacity eviction candidate protected by bank state"
+                        );
                         return false;
                     }
-                    !ownership.get(candidate).is_some_and(|ownership| {
-                        ownership
-                            .contains(SubscriptionReason::UndelegationTracking)
-                    })
+
+                    let protected_by_ownership =
+                        ownership.get(candidate).is_some_and(|ownership| {
+                            ownership.contains(
+                                SubscriptionReason::UndelegationTracking,
+                            )
+                        });
+                    if protected_by_ownership {
+                        trace!(
+                            candidate = %candidate,
+                            reason = ?SubscriptionReason::UndelegationTracking,
+                            "Skipping capacity eviction candidate protected by subscription ownership"
+                        );
+                    }
+                    !protected_by_ownership
                 },
             )
         };
