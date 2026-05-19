@@ -1500,6 +1500,15 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                 Ok(true)
             }
             Err(err) => {
+                if matches!(
+                    err,
+                    RemoteAccountProviderError::AccountSubscriptionDoesNotExist(
+                        _
+                    )
+                ) {
+                    return Ok(false);
+                }
+
                 let mut ownership = self.subscription_ownership.lock().await;
                 if ownership
                     .get(pubkey)
@@ -1512,16 +1521,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                 }
                 drop(ownership);
 
-                if matches!(
-                    err,
-                    RemoteAccountProviderError::AccountSubscriptionDoesNotExist(
-                        _
-                    )
-                ) {
-                    Ok(false)
-                } else {
-                    Err(err)
-                }
+                Err(err)
             }
         }
     }
