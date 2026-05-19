@@ -239,7 +239,6 @@ pub(crate) struct CapacityEvictionProtection {
 }
 
 impl CapacityEvictionProtection {
-    #[allow(dead_code)]
     pub fn is_protected(self) -> bool {
         self.delegated || self.undelegating
     }
@@ -629,7 +628,6 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             Some(Arc::new(predicate));
     }
 
-    #[allow(dead_code)]
     fn capacity_eviction_protection_for(
         &self,
         pubkey: &Pubkey,
@@ -1429,7 +1427,6 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         Ok(success)
     }
 
-    #[allow(dead_code)]
     pub(crate) async fn release_direct_subscription_for_delegated_account(
         &self,
         pubkey: &Pubkey,
@@ -1443,11 +1440,18 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         }
 
         let released_count = {
+            let release_mode = SubscriptionReleaseMode::All;
             let mut ownership = self.subscription_ownership.lock().await;
             let (is_empty, released_count) = match ownership.get_mut(pubkey) {
                 Some(existing) => {
-                    let released_count =
-                        existing.release_all(SubscriptionReason::DirectAccount);
+                    let released_count = match release_mode {
+                        SubscriptionReleaseMode::Single => {
+                            existing.release(SubscriptionReason::DirectAccount);
+                            1
+                        }
+                        SubscriptionReleaseMode::All => existing
+                            .release_all(SubscriptionReason::DirectAccount),
+                    };
                     (existing.is_empty(), released_count)
                 }
                 None => return Ok(false),

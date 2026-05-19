@@ -15,7 +15,7 @@ use crate::{
     remote_account_provider::{
         chain_pubsub_client::mock::ChainPubsubClientMock,
         chain_slot::ChainSlot, RemoteAccountProvider,
-        RemoteAccountUpdateSource,
+        RemoteAccountUpdateSource, SubscriptionReleaseMode,
     },
     testing::{
         accounts::{

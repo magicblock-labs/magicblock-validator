@@ -81,7 +81,6 @@ use crate::{
         CapacityEvictionProtection, ChainPubsubClient, ChainRpcClient,
         ForwardedSubscriptionUpdate, MatchSlotsConfig, RemoteAccount,
         RemoteAccountProvider, ResolvedAccountSharedData, SubscriptionReason,
-        SubscriptionReleaseMode,
     },
 };
 
@@ -2345,25 +2344,6 @@ where
             .map_err(|err| {
                 ChainlinkError::FailedToSubscribeToAccount(*pubkey, err)
             })
-    }
-
-    #[allow(dead_code)]
-    pub(crate) async fn release_subscription_reason_all(
-        &self,
-        pubkey: &Pubkey,
-        reason: SubscriptionReason,
-    ) {
-        if let Err(err) = self
-            .remote_account_provider
-            .release_subscription_with_mode(
-                pubkey,
-                reason,
-                SubscriptionReleaseMode::All,
-            )
-            .await
-        {
-            warn!(pubkey = %pubkey, ?reason, error = %err, "Failed to release all subscription reason ownership");
-        }
     }
 
     #[instrument(skip(self))]
