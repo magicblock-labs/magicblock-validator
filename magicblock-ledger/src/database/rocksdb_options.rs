@@ -38,6 +38,9 @@ pub fn get_rocksdb_options(access_type: &AccessType) -> Options {
     // however, this is also explicitly required for a secondary instance.
     // See https://github.com/facebook/rocksdb/wiki/Secondary-instance
     options.set_max_open_files(-1);
+    // Avoid extra DB::Open reads on large ledgers with many SST files.
+    options.set_skip_checking_sst_file_sizes_on_db_open(true);
+    options.set_skip_stats_update_on_db_open(true);
 
     // Smooth IO
     options.set_bytes_per_sync(1024 * 1024);
