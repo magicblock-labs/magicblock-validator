@@ -333,6 +333,51 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    async fn test_lru_cache_skips_protected_candidate_and_evicts_next() {
+        let capacity = NonZeroUsize::new(3).unwrap();
+        let cache = AccountsLruCache::new(capacity);
+
+        let pubkey1 = Pubkey::new_unique();
+        let pubkey2 = Pubkey::new_unique();
+        let pubkey3 = Pubkey::new_unique();
+        let pubkey4 = Pubkey::new_unique();
+
+        cache.add(pubkey1);
+        cache.add(pubkey2);
+        cache.add(pubkey3);
+
+        let outcome = cache.add_with_evict_filter(pubkey4, |pk| *pk != pubkey1);
+
+        assert_eq!(outcome, AddAccountOutcome::Evicted(pubkey2));
+        assert!(cache.contains(&pubkey1));
+        assert!(cache.contains(&pubkey4));
+        assert!(!cache.contains(&pubkey2));
+    }
+
+    #[tokio::test]
+    async fn test_lru_cache_all_candidates_protected_rejects_new_account() {
+        let capacity = NonZeroUsize::new(2).unwrap();
+        let cache = AccountsLruCache::new(capacity);
+
+        let pubkey1 = Pubkey::new_unique();
+        let pubkey2 = Pubkey::new_unique();
+        let pubkey3 = Pubkey::new_unique();
+
+        cache.add(pubkey1);
+        cache.add(pubkey2);
+
+        let outcome = cache.add_with_evict_filter(pubkey3, |pk| {
+            assert_ne!(*pk, pubkey3, "new account must not be evicted");
+            false
+        });
+
+        assert_eq!(outcome, AddAccountOutcome::NoEvictableCandidate);
+        assert!(cache.contains(&pubkey1));
+        assert!(cache.contains(&pubkey2));
+        assert!(!cache.contains(&pubkey3));
+    }
+
     #[test]
     fn test_never_evicted_accounts() {
         let capacity = NonZeroUsize::new(3).unwrap();

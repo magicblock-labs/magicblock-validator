@@ -1271,6 +1271,106 @@ async fn test_multiple_evictions_in_sequence() {
     }
 }
 
+#[tokio::test]
+async fn test_capacity_eviction_skips_undelegation_tracking_reason() {
+    init_logger();
+
+    let pubkey1 = Pubkey::new_unique();
+    let pubkey2 = Pubkey::new_unique();
+    let pubkey3 = Pubkey::new_unique();
+    let pubkeys = &[pubkey1, pubkey2, pubkey3];
+
+    let (provider, _, mut removed_rx) = setup_with_accounts(pubkeys, 2).await;
+
+    provider
+        .acquire_subscription(&pubkey1, SubscriptionReason::DirectAccount)
+        .await
+        .unwrap();
+    provider
+        .acquire_subscription(
+            &pubkey2,
+            SubscriptionReason::UndelegationTracking,
+        )
+        .await
+        .unwrap();
+    provider
+        .acquire_subscription(&pubkey3, SubscriptionReason::DirectAccount)
+        .await
+        .unwrap();
+
+    assert!(!provider.is_watching(&pubkey1));
+    assert!(provider.is_watching(&pubkey2));
+    assert!(provider.is_watching(&pubkey3));
+    assert!(!provider
+        .pubsub_client()
+        .subscriptions_union()
+        .contains(&pubkey1));
+    assert!(provider
+        .pubsub_client()
+        .subscriptions_union()
+        .contains(&pubkey2));
+
+    let removed_accounts = drain_removed_account_rx(&mut removed_rx);
+    assert_eq!(removed_accounts, [pubkey1]);
+}
+
+#[tokio::test]
+async fn test_capacity_eviction_all_protected_returns_error_without_unsubscribing_protected(
+) {
+    init_logger();
+
+    let pubkey1 = Pubkey::new_unique();
+    let pubkey2 = Pubkey::new_unique();
+    let pubkey3 = Pubkey::new_unique();
+    let pubkeys = &[pubkey1, pubkey2, pubkey3];
+
+    let (provider, _, mut removed_rx) = setup_with_accounts(pubkeys, 2).await;
+
+    provider
+        .acquire_subscription(
+            &pubkey1,
+            SubscriptionReason::UndelegationTracking,
+        )
+        .await
+        .unwrap();
+    provider
+        .acquire_subscription(
+            &pubkey2,
+            SubscriptionReason::UndelegationTracking,
+        )
+        .await
+        .unwrap();
+
+    let err = provider
+        .acquire_subscription(&pubkey3, SubscriptionReason::DirectAccount)
+        .await
+        .unwrap_err();
+
+    assert!(matches!(
+        err,
+        RemoteAccountProviderError::NoEvictableSubscriptionCapacity { pubkey }
+            if pubkey == pubkey3
+    ));
+    assert!(provider.is_watching(&pubkey1));
+    assert!(provider.is_watching(&pubkey2));
+    assert!(!provider.is_watching(&pubkey3));
+    assert!(provider
+        .pubsub_client()
+        .subscriptions_union()
+        .contains(&pubkey1));
+    assert!(provider
+        .pubsub_client()
+        .subscriptions_union()
+        .contains(&pubkey2));
+    assert!(!provider
+        .pubsub_client()
+        .subscriptions_union()
+        .contains(&pubkey3));
+
+    let removed_accounts = drain_removed_account_rx(&mut removed_rx);
+    assert!(removed_accounts.is_empty());
+}
+
 #[test]
 fn test_removed_stuck_pubkey_symbols_are_absent_from_production_code() {
     // Audit command kept here for manual spot checks:
