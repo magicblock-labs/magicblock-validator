@@ -45,6 +45,10 @@ pub(crate) fn validate_cranks_instructions(
             }
         }
 
+        if !instruction.program_id.eq(&crate::ID) {
+            continue;
+        }
+
         let Ok(decoded_instruction) =
             bincode::deserialize::<MagicBlockInstruction>(&instruction.data)
         else {
