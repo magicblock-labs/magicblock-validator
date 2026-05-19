@@ -601,7 +601,8 @@ where
 
         if let Some(in_bank) = self.accounts_bank.get_account(&pubkey) {
             if in_bank.delegated() && !in_bank.undelegating() {
-                self.unsubscribe_from_delegated_account(pubkey).await;
+                self.cleanup_direct_subscription_for_delegated_account(pubkey)
+                    .await;
                 return;
             }
 
@@ -689,7 +690,8 @@ where
         // subscription/LRU ownership; undelegation tracking owns protected
         // subscriptions while undelegation is in progress.
         if account.delegated() {
-            self.unsubscribe_from_delegated_account(pubkey).await;
+            self.cleanup_direct_subscription_for_delegated_account(pubkey)
+                .await;
         }
 
         if account.executable() {
@@ -976,17 +978,21 @@ where
             .await;
     }
 
-    async fn unsubscribe_from_delegated_account(&self, pubkey: Pubkey) {
-        self.release_subscription_reason_all(
-            &pubkey,
-            SubscriptionReason::UndelegationTracking,
-        )
-        .await;
-        self.release_subscription_reason_all(
-            &pubkey,
-            SubscriptionReason::DirectAccount,
-        )
-        .await;
+    async fn cleanup_direct_subscription_for_delegated_account(
+        &self,
+        pubkey: Pubkey,
+    ) {
+        if let Err(err) = self
+            .remote_account_provider
+            .release_direct_subscription_for_delegated_account(&pubkey)
+            .await
+        {
+            warn!(
+                pubkey = %pubkey,
+                error = %err,
+                "Failed to clean up direct subscription for delegated account"
+            );
+        }
     }
 
     async fn resolve_account_to_clone_from_forwarded_sub_with_unsubscribe(
@@ -2324,6 +2330,7 @@ where
             })
     }
 
+    #[allow(dead_code)]
     pub(crate) async fn release_subscription_reason_all(
         &self,
         pubkey: &Pubkey,

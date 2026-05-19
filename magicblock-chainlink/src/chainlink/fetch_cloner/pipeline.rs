@@ -364,6 +364,7 @@ where
                         .push((pubkey, account.remote_slot()));
                     (None, None, DelegationActions::default())
                 };
+            let cleanup_direct_subscription = account.delegated();
             accounts_to_clone.push(AccountCloneRequest {
                 pubkey,
                 account: account.into_account_shared_data(),
@@ -371,6 +372,10 @@ where
                 delegation_actions,
                 delegated_to_other,
             });
+            if cleanup_direct_subscription {
+                this.cleanup_direct_subscription_for_delegated_account(pubkey)
+                    .await;
+            }
         }
 
         release_subs(
