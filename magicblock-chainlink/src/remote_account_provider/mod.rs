@@ -142,6 +142,7 @@ fn spawn_deferred_pubsub_clients(
     grpc_cfg: GrpcConfig,
     submux: SubMuxClient<ChainUpdatesClient>,
     subscribed_accounts: Arc<AccountsLruCache>,
+    subscription_transition_lock: Arc<AsyncMutex<()>>,
 ) {
     tokio::spawn(async move {
         let mut pubsub_futs = endpoints
@@ -170,10 +171,14 @@ fn spawn_deferred_pubsub_clients(
                 }
             };
 
-            if let Err(err) = submux
-                .add_client(client, abort_rx, subscribed_accounts.clone())
-                .await
-            {
+            let add_result = {
+                let _transition_guard =
+                    subscription_transition_lock.lock().await;
+                submux
+                    .add_client(client, abort_rx, subscribed_accounts.clone())
+                    .await
+            };
+            if let Err(err) = add_result {
                 warn!(
                     endpoint = %label,
                     error = %err,
@@ -709,6 +714,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                 config.grpc().clone(),
                 deferred_submux,
                 provider.lrucache_subscribed_accounts.clone(),
+                provider.subscription_transition_lock.clone(),
             );
         }
         Ok(provider)
