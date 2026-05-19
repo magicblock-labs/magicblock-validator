@@ -1324,6 +1324,19 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             .await
     }
 
+    #[cfg(test)]
+    pub(crate) async fn has_subscription_reason(
+        &self,
+        pubkey: &Pubkey,
+        reason: SubscriptionReason,
+    ) -> bool {
+        self.subscription_ownership
+            .lock()
+            .await
+            .get(pubkey)
+            .is_some_and(|ownership| ownership.contains(reason))
+    }
+
     async fn acquire_subscription_with_mode(
         &self,
         pubkey: &Pubkey,
