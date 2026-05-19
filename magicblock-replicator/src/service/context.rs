@@ -201,6 +201,7 @@ impl ReplicationContext {
         messages: Receiver<Message>,
         reset: bool,
     ) -> Result<Option<Standby>> {
+        self.enter_replica_mode().await;
         let Some(consumer) = self.create_consumer(reset).await else {
             return Ok(None);
         };
@@ -208,7 +209,6 @@ impl ReplicationContext {
         else {
             return Ok(None);
         };
-        self.enter_replica_mode().await;
         Ok(Some(Standby::new(
             self,
             Box::new(consumer),
