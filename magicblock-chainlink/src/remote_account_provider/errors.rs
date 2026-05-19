@@ -50,6 +50,9 @@ pub enum RemoteAccountProviderError {
     #[error("Invalid pubsub endpoint: {0}")]
     InvalidPubsubEndpoint(String),
 
+    #[error("No evictable subscription capacity available for {pubkey}")]
+    NoEvictableSubscriptionCapacity { pubkey: Pubkey },
+
     #[error("All pubsub clients failed to connect")]
     AllPubsubClientsFailed,
 

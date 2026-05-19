@@ -17,7 +17,7 @@ pub(crate) use errors::{
     RemoteAccountProviderError, RemoteAccountProviderResult,
 };
 use futures_util::future::{join_all, try_join_all};
-pub use lru_cache::AccountsLruCache;
+pub use lru_cache::{AccountsLruCache, AddAccountOutcome};
 pub(crate) use remote_account::RemoteAccount;
 pub use remote_account::RemoteAccountUpdateSource;
 use solana_account::Account;
@@ -1170,36 +1170,82 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         // 2. Add to LRU cache
         // If an account is evicted then we need to unsubscribe from it
         // and then inform upstream that we are no longer tracking it
-        if let Some(evicted) = self.lrucache_subscribed_accounts.add(*pubkey) {
-            trace!(evicted = %evicted, "Evicting account");
+        let add_outcome = {
+            let ownership = self.subscription_ownership.lock().await;
+            self.lrucache_subscribed_accounts.add_with_evict_filter(
+                *pubkey,
+                |candidate| {
+                    if !self.lrucache_subscribed_accounts.can_evict(candidate) {
+                        return false;
+                    }
+                    if self
+                        .capacity_eviction_protection_for(candidate)
+                        .is_protected()
+                    {
+                        return false;
+                    }
+                    !ownership.get(candidate).is_some_and(|ownership| {
+                        ownership
+                            .contains(SubscriptionReason::UndelegationTracking)
+                    })
+                },
+            )
+        };
 
-            // LRU eviction is a forced full removal. Drop all ownership reasons
-            // before awaiting on pubsub unsubscribe or removal notification so stale
-            // reasons cannot survive a later failure on this cold path.
-            self.subscription_ownership.lock().await.remove(&evicted);
+        match add_outcome {
+            AddAccountOutcome::AlreadyPresent | AddAccountOutcome::Added => {}
+            AddAccountOutcome::Evicted(evicted) => {
+                trace!(evicted = %evicted, "Evicting account");
 
-            // 1. Unsubscribe from the account directly (LRU has already removed it)
-            if let Err(err) = self.pubsub_client.unsubscribe(evicted).await {
-                if matches!(
-                    err,
-                    RemoteAccountProviderError::AccountSubscriptionDoesNotExist(
-                        _
-                    )
-                ) {
-                    debug!(evicted = %evicted, error = ?err, "Failed to unsubscribe from pubsub for evicted account");
-                } else {
-                    // Should we retry here?
-                    warn!(evicted = %evicted, error = ?err, "Failed to unsubscribe from pubsub for evicted account");
+                // LRU eviction is a forced full removal. Drop all ownership reasons
+                // before awaiting on pubsub unsubscribe or removal notification so stale
+                // reasons cannot survive a later failure on this cold path.
+                self.subscription_ownership.lock().await.remove(&evicted);
+
+                // 1. Unsubscribe from the account directly (LRU has already removed it)
+                if let Err(err) = self.pubsub_client.unsubscribe(evicted).await
+                {
+                    if matches!(
+                        err,
+                        RemoteAccountProviderError::AccountSubscriptionDoesNotExist(
+                            _
+                        )
+                    ) {
+                        debug!(evicted = %evicted, error = ?err, "Failed to unsubscribe from pubsub for evicted account");
+                    } else {
+                        // Should we retry here?
+                        warn!(evicted = %evicted, error = ?err, "Failed to unsubscribe from pubsub for evicted account");
+                    }
+                }
+
+                // 2. Inform upstream so it can remove it from the store. Failure
+                // to notify is non-fatal here because the LRU and pubsub state have
+                // already been updated consistently.
+                if let Err(err) = self.send_removal_update(evicted).await {
+                    warn!(evicted = %evicted, error = ?err, "Failed to send removal update for evicted account");
                 }
             }
-
-            // 2. Inform upstream so it can remove it from the store. Failure
-            // to notify is non-fatal here because the LRU and pubsub state have
-            // already been updated consistently.
-            if let Err(err) = self.send_removal_update(evicted).await {
-                warn!(evicted = %evicted, error = ?err, "Failed to send removal update for evicted account");
+            AddAccountOutcome::NoEvictableCandidate => {
+                self.subscription_ownership.lock().await.remove(pubkey);
+                self.lrucache_subscribed_accounts.remove(pubkey);
+                if let Err(err) = self.pubsub_client.unsubscribe(*pubkey).await
+                {
+                    debug!(
+                        pubkey = %pubkey,
+                        error = ?err,
+                        "Failed to unsubscribe new subscription after all LRU candidates were protected"
+                    );
+                }
+                debug!(
+                    pubkey = %pubkey,
+                    "No evictable subscription capacity available; all LRU candidates are protected"
+                );
+                return Err(
+                    RemoteAccountProviderError::NoEvictableSubscriptionCapacity {
+                        pubkey: *pubkey,
+                    },
+                );
             }
-            return Ok(());
         }
 
         Ok(())
