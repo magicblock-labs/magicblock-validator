@@ -111,7 +111,7 @@ impl TryFrom<&Remote> for Endpoint {
 /// Previously this was enforced at construction time but now we rely on
 /// the config validation to ensure this.
 /// However in order to allow for future extensions we keep this type.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Endpoints(Vec<Endpoint>);
 
 impl Deref for Endpoints {

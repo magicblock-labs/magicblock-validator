@@ -1,6 +1,6 @@
 use std::{
     collections::HashSet,
-    path::Path,
+    path::{Path, PathBuf},
     sync::{
         atomic::{AtomicU8, Ordering},
         Arc,
@@ -8,7 +8,7 @@ use std::{
 };
 
 use dlp_api::pda::ephemeral_balance_pda_from_payer;
-use errors::ChainlinkResult;
+use errors::{ChainlinkError, ChainlinkResult};
 use fetch_cloner::FetchCloner;
 use magicblock_accounts_db::{traits::AccountsBank, AccountsDbResult};
 use magicblock_aml::RiskService;
@@ -22,7 +22,10 @@ use solana_pubkey::Pubkey;
 use solana_sdk_ids::feature;
 use solana_signer::Signer;
 use solana_transaction::sanitized::SanitizedTransaction;
-use tokio::{sync::mpsc, sync::Mutex as AsyncMutex, task};
+use tokio::{
+    sync::{mpsc, Mutex as AsyncMutex},
+    task,
+};
 use tracing::*;
 
 use crate::{
@@ -89,6 +92,20 @@ where
     removed_accounts_sub: Option<task::JoinHandle<()>>,
 }
 
+#[allow(dead_code)]
+struct ChainlinkRuntimeBuildConfig<C>
+where
+    C: Cloner,
+{
+    endpoints: Endpoints,
+    commitment: CommitmentConfig,
+    cloner: Arc<C>,
+    validator_keypair_bytes: [u8; 64],
+    chainlink_config: ChainLinkConfig,
+    runtime_config: ChainlinkConfig,
+    ledger_path: PathBuf,
+}
+
 pub struct Chainlink<
     T: ChainRpcClient,
     U: ChainPubsubClient,
@@ -98,6 +115,8 @@ pub struct Chainlink<
     accounts_bank: Arc<V>,
     runtime: AsyncMutex<Option<ChainlinkRuntime<T, U, V, C>>>,
     lifecycle_state: AtomicU8,
+    #[allow(dead_code)]
+    runtime_build_config: Option<ChainlinkRuntimeBuildConfig<C>>,
 
     validator_id: Pubkey,
 
@@ -224,6 +243,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
             accounts_bank: accounts_bank.clone(),
             runtime: AsyncMutex::new(runtime),
             lifecycle_state: AtomicU8::new(lifecycle_state as u8),
+            runtime_build_config: None,
             validator_id: validator_pubkey,
             remove_confined_accounts: config.remove_confined_accounts,
         })
@@ -267,6 +287,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
         Chainlink<ChainRpcClientImpl, SubMuxClient<ChainUpdatesClient>, V, C>,
     > {
         let validator_pubkey = validator_keypair.pubkey();
+        let validator_keypair_bytes = validator_keypair.to_bytes();
         // Extract accounts provider and create fetch cloner while connecting
         // the subscription channel
         let (tx, rx) = tokio::sync::mpsc::channel(5_000);
@@ -298,12 +319,31 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
             None
         };
 
-        Chainlink::try_new(
+        let mut chainlink = Chainlink::try_new(
             accounts_bank,
             fetch_cloner,
             validator_pubkey,
             chainlink_config,
-        )
+        )?;
+        chainlink.runtime_build_config = Some(ChainlinkRuntimeBuildConfig {
+            endpoints: endpoints.clone(),
+            commitment,
+            cloner: cloner.clone(),
+            validator_keypair_bytes,
+            chainlink_config: chainlink_config.clone(),
+            runtime_config: config,
+            ledger_path: ledger_path.to_path_buf(),
+        });
+        Ok(chainlink)
+    }
+
+    #[allow(dead_code)]
+    fn validator_keypair_from_bytes(
+        bytes: &[u8; 64],
+    ) -> ChainlinkResult<Keypair> {
+        Keypair::try_from(&bytes[..]).map_err(|err| {
+            ChainlinkError::InvalidValidatorKeypair(err.to_string())
+        })
     }
 
     /// Removes all accounts that aren't delegated to us and not blacklisted from the bank.
@@ -720,6 +760,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
             lifecycle_state: AtomicU8::new(
                 ChainlinkLifecycleState::Disabled as u8,
             ),
+            runtime_build_config: None,
             validator_id: self.validator_id,
             remove_confined_accounts: self.remove_confined_accounts,
         }

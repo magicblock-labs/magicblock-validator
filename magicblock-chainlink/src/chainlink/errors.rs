@@ -66,4 +66,7 @@ pub enum ChainlinkError {
 
     #[error("Failed to perform Range risk check: {0}")]
     RangeRisk(#[from] RiskError),
+
+    #[error("Invalid validator keypair bytes: {0}")]
+    InvalidValidatorKeypair(String),
 }
