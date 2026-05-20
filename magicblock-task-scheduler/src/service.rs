@@ -18,7 +18,11 @@ use solana_message::Message;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_signature::Signature;
 use solana_transaction::Transaction;
-use tokio::{select, task::JoinHandle, time::Duration};
+use tokio::{
+    select,
+    task::JoinHandle,
+    time::{interval, Duration, MissedTickBehavior},
+};
 use tokio_util::{
     sync::CancellationToken,
     time::{delay_queue::Key, DelayQueue},
@@ -55,6 +59,10 @@ pub struct TaskSchedulerService {
     token: CancellationToken,
     /// Minimum interval between task executions
     min_interval: Duration,
+    /// How long failed task and scheduling records are retained.
+    failed_task_retention: Duration,
+    /// How often failed task and scheduling records are cleaned up.
+    failed_task_cleanup_interval: Duration,
     /// Slot interval of the validator
     slot_interval: Duration,
 }
@@ -106,6 +114,8 @@ impl TaskSchedulerService {
             tx_counter: AtomicU64::default(),
             token,
             min_interval: config.min_interval,
+            failed_task_retention: config.failed_task_retention,
+            failed_task_cleanup_interval: config.failed_task_cleanup_interval,
             slot_interval,
         })
     }
@@ -312,6 +322,12 @@ impl TaskSchedulerService {
     }
 
     pub async fn run(mut self) -> TaskSchedulerResult<()> {
+        let mut failed_task_cleanup = interval(
+            self.failed_task_cleanup_interval
+                .max(Duration::from_millis(1)),
+        );
+        failed_task_cleanup.set_missed_tick_behavior(MissedTickBehavior::Delay);
+
         loop {
             select! {
                 Some(task) = self.task_queue.next() => {
@@ -337,6 +353,25 @@ impl TaskSchedulerService {
                             error!("Failed to process request: {}", e);
                             return Err(e);
                         }
+                    }
+                }
+                _ = failed_task_cleanup.tick() => {
+                    let cutoff = chrono::Utc::now().timestamp_millis().saturating_sub(
+                        self.failed_task_retention.as_millis().min(i64::MAX as u128) as i64,
+                    );
+                    let deleted =  match self.db.delete_failed_records_older_than(cutoff).await {
+                        Ok(deleted) => deleted,
+                        Err(e) => {
+                            error!("Failed to cleanup old failed task records: {}", e);
+                            continue;
+                        }
+                    };
+                    if deleted > 0 {
+                        debug!(
+                            deleted,
+                            cutoff_timestamp_millis = cutoff,
+                            "Cleaned up old failed task records"
+                        );
                     }
                 }
                 _ = self.token.cancelled() => {
@@ -466,16 +501,12 @@ mod tests {
 
     use super::*;
 
-    #[tokio::test]
-    async fn test_schedule_invalid_tasks() {
-        magicblock_core::logger::init_for_tests();
-        generate_validator_authority_if_needed();
-
-        let (tx, rx) = mpsc::unbounded_channel();
-        let db = SchedulerDatabase::new(":memory:").unwrap();
-
-        let service = TaskSchedulerService {
-            db: db.clone(),
+    fn test_service(
+        db: SchedulerDatabase,
+        scheduled_tasks: ScheduledTasksRx,
+    ) -> TaskSchedulerService {
+        TaskSchedulerService {
+            db,
             rpc_client: RpcClient::new("http://localhost:8899".to_string()),
             block: LatestBlock::default(),
             task_queue: DelayQueue::new(),
@@ -484,9 +515,22 @@ mod tests {
             tx_counter: AtomicU64::default(),
             token: CancellationToken::new(),
             min_interval: Duration::from_millis(1000),
+            failed_task_retention: Duration::from_secs(60),
+            failed_task_cleanup_interval: Duration::from_secs(60),
             slot_interval: Duration::from_millis(1000),
-            scheduled_tasks: rx,
-        };
+            scheduled_tasks,
+        }
+    }
+
+    #[tokio::test]
+    async fn test_schedule_invalid_tasks() {
+        magicblock_core::logger::init_for_tests();
+        generate_validator_authority_if_needed();
+
+        let (tx, rx) = mpsc::unbounded_channel();
+        let db = SchedulerDatabase::new(":memory:").unwrap();
+
+        let service = test_service(db.clone(), rx);
 
         let handle = service.start().await.unwrap();
 
@@ -556,19 +600,7 @@ mod tests {
         })
         .await
         .unwrap();
-        let service = TaskSchedulerService {
-            db: db.clone(),
-            rpc_client: RpcClient::new("http://localhost:8899".to_string()),
-            block: LatestBlock::default(),
-            task_queue: DelayQueue::new(),
-            task_queue_keys: HashMap::new(),
-            task_execution_retries: HashMap::new(),
-            tx_counter: AtomicU64::default(),
-            token: CancellationToken::new(),
-            min_interval: Duration::from_millis(1000),
-            slot_interval: Duration::from_millis(1000),
-            scheduled_tasks: rx,
-        };
+        let service = test_service(db.clone(), rx);
 
         let handle = service.start().await.unwrap();
 
@@ -615,19 +647,8 @@ mod tests {
         .await
         .unwrap();
 
-        let service = TaskSchedulerService {
-            db: db.clone(),
-            rpc_client: RpcClient::new("http://localhost:8899".to_string()),
-            block: LatestBlock::default(),
-            task_queue: DelayQueue::new(),
-            task_queue_keys: HashMap::new(),
-            task_execution_retries: HashMap::new(),
-            tx_counter: AtomicU64::default(),
-            token: CancellationToken::new(),
-            min_interval: Duration::from_millis(10),
-            slot_interval: Duration::from_millis(1000),
-            scheduled_tasks: rx,
-        };
+        let mut service = test_service(db.clone(), rx);
+        service.min_interval = Duration::from_millis(10);
 
         let handle = service.start().await.unwrap();
 
@@ -638,6 +659,42 @@ mod tests {
                     return Ok::<_, TaskSchedulerError>(());
                 }
                 tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+        })
+        .await
+        .unwrap()
+        .unwrap();
+        handle.abort();
+    }
+
+    #[tokio::test]
+    async fn test_failed_records_are_cleaned_up_periodically() {
+        magicblock_core::logger::init_for_tests();
+
+        let (_tx, rx) = mpsc::unbounded_channel();
+        let db = SchedulerDatabase::new(":memory:").unwrap();
+        db.insert_failed_scheduling(1, "schedule failed".to_string())
+            .await
+            .unwrap();
+        db.insert_failed_task(2, "task failed".to_string())
+            .await
+            .unwrap();
+        tokio::time::sleep(Duration::from_millis(2)).await;
+
+        let mut service = test_service(db.clone(), rx);
+        service.failed_task_retention = Duration::from_millis(1);
+        service.failed_task_cleanup_interval = Duration::from_millis(5);
+
+        let handle = service.start().await.unwrap();
+
+        timeout(Duration::from_secs(1), async move {
+            loop {
+                if db.get_failed_schedulings().await?.is_empty()
+                    && db.get_failed_tasks().await?.is_empty()
+                {
+                    return Ok::<_, TaskSchedulerError>(());
+                }
+                tokio::time::sleep(Duration::from_millis(5)).await;
             }
         })
         .await
