@@ -873,13 +873,10 @@ impl MagicValidator {
 
         log_timing("startup", "maybe_process_ledger", step_start);
 
-        // Notify the scheduler that ledger replay is complete.
-        // The message carries the target mode so the scheduler transitions to
-        // the correct coordination mode:
-        // - Standalone validators perform primary-readiness cleanup and reset
-        //   the account bank before transitioning to Primary mode.
-        // - StandBy/ReplicaOnly validators transition to Replica mode and
-        //   defer account-bank reset until a later promotion.
+        // After ledger replay, standalone validators perform primary-readiness
+        // bank reset, start the Chainlink runtime, then publish global Primary
+        // mode to the scheduler. StandBy/ReplicaOnly validators transition to
+        // Replica mode and defer account-bank reset until a later promotion.
         if self.is_standalone {
             // Account-bank reset is primary-readiness cleanup: clean
             // non-delegated accounts, including programs, only when this
@@ -890,6 +887,7 @@ impl MagicValidator {
                 log_timing("startup", "reset_accounts_bank", step_start);
             }
 
+            self.chainlink.enable_primary().await?;
             self.mode_tx
                 .send(SchedulerMode::Primary)
                 .await
@@ -898,7 +896,6 @@ impl MagicValidator {
                         "Failed to send primary mode to scheduler: {e}"
                     ))
                 })?;
-            self.chainlink.enable_primary().await?;
         } else if let Some(replicator) = self.replication_service.take() {
             self.replication_handle.replace(replicator.spawn());
         }
