@@ -60,7 +60,7 @@ impl HttpDispatcher {
             .transactions_scheduler
             .simulate(transaction.txn)
             .await
-            .map_err(RpcError::transaction_simulation)?;
+            .map_err(RpcError::transaction_simulation_from_scheduler)?;
         let TransactionSimulationResult {
             result,
             logs,

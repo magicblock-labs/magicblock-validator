@@ -2,8 +2,8 @@ use std::{
     cmp,
     collections::{HashMap, HashSet, VecDeque},
     sync::{
-        atomic::{AtomicU16, Ordering},
-        Arc, Mutex,
+        atomic::{AtomicBool, AtomicU16, Ordering},
+        Arc, Mutex, MutexGuard,
     },
     time::{Duration, Instant},
 };
@@ -48,7 +48,6 @@ pub struct DebounceConfig {
     pub detection_window_millis: Option<u64>,
 }
 
-#[derive(Clone)]
 /// SubMuxClient
 ///
 /// Multi-node pub/sub subscription multiplexer that:
@@ -114,7 +113,7 @@ where
     T: ChainPubsubClient + ReconnectableClient,
 {
     /// Underlying pubsub clients this mux controls and forwards to/from.
-    clients: Vec<Arc<T>>,
+    clients: Arc<Mutex<Vec<Arc<T>>>>,
     /// Aggregated outgoing channel used by forwarder tasks to deliver
     /// subscription updates to the consumer of this SubMuxClient.
     out_tx: mpsc::Sender<SubscriptionUpdate>,
@@ -143,12 +142,19 @@ where
     never_debounce: HashSet<Pubkey>,
     /// Map of program account subscriptions we are holding inside the pubsub clients
     program_subs: Arc<Mutex<HashSet<Pubkey>>>,
+    /// Number of currently connected pubsub clients.
+    connected_clients: Arc<AtomicU16>,
     /// Number of currently connected clients that activate subscriptions immediately when
     /// requested.
     connected_clients_subscribing_immediately: Arc<AtomicU16>,
+    /// Whether take_updates() has started the per-client forwarders.
+    forwarders_started: Arc<AtomicBool>,
     /// Token cancelled on drop to stop background tasks
     /// (dedup pruner, debounce flusher).
     shutdown_token: CancellationToken,
+    /// Only the original handle owns shutdown. Clones are used by detached
+    /// helpers and should not keep the mux alive.
+    cancel_on_drop: bool,
 }
 
 // Parameters for the long-running forwarder loop, grouped to avoid
@@ -240,7 +246,12 @@ where
             }
         }
 
-        let clients = Self::spawn_reconnectors(
+        let clients_only = clients
+            .iter()
+            .map(|(client, _)| client.clone())
+            .collect::<Vec<_>>();
+
+        Self::spawn_reconnectors(
             clients,
             subscribed_accounts_tracker,
             program_subs.clone(),
@@ -250,7 +261,7 @@ where
 
         let shutdown_token = CancellationToken::new();
         let me = Self {
-            clients,
+            clients: Arc::new(Mutex::new(clients_only)),
             out_tx,
             out_rx: Arc::new(Mutex::new(Some(out_rx))),
             dedup_cache: dedup_cache.clone(),
@@ -260,8 +271,11 @@ where
             debounce_states: debounce_states.clone(),
             never_debounce,
             program_subs,
+            connected_clients,
             connected_clients_subscribing_immediately,
+            forwarders_started: Arc::new(AtomicBool::new(false)),
             shutdown_token,
+            cancel_on_drop: true,
         };
 
         // Spawn background tasks
@@ -279,10 +293,8 @@ where
         program_subs: Arc<Mutex<HashSet<Pubkey>>>,
         connected_clients: Arc<AtomicU16>,
         connected_clients_subscribing_immediately: Arc<AtomicU16>,
-    ) -> Vec<Arc<T>> {
-        let mut clients_only = Vec::with_capacity(clients.len());
+    ) {
         for (client, mut abort_rx) in clients.into_iter() {
-            clients_only.push(client.clone());
             let subscribed_accounts_tracker =
                 subscribed_accounts_tracker.clone();
             let program_subs = program_subs.clone();
@@ -329,7 +341,98 @@ where
                 }
             });
         }
-        clients_only
+    }
+
+    fn clients_snapshot(&self) -> Vec<Arc<T>> {
+        self.clients_lock().clone()
+    }
+
+    fn remove_client(&self, target: &Arc<T>) {
+        let mut clients = self.clients_lock();
+        if let Some(pos) = clients.iter().position(|c| Arc::ptr_eq(c, target)) {
+            clients.swap_remove(pos);
+        }
+    }
+
+    pub(crate) async fn add_client<U: SubscribedAccountsTracker>(
+        &self,
+        client: Arc<T>,
+        abort_rx: mpsc::Receiver<()>,
+        subscribed_accounts_tracker: Arc<U>,
+    ) -> RemoteAccountProviderResult<()> {
+        {
+            let mut clients = self.clients_lock();
+            clients.push(client.clone());
+        }
+
+        let programs =
+            self.program_subs_lock().iter().copied().collect::<Vec<_>>();
+        for program_id in programs {
+            if let Err(err) = client.subscribe_program(program_id).await {
+                self.remove_client(&client);
+                return Err(err);
+            }
+        }
+
+        let mut account_subs =
+            subscribed_accounts_tracker.subscribed_accounts();
+        account_subs.extend(self.never_debounce.iter().copied());
+        if let Err(err) = client.resub_multiple(account_subs).await {
+            self.remove_client(&client);
+            return Err(err);
+        }
+
+        if self.forwarders_started.load(Ordering::SeqCst) {
+            self.spawn_forwarder_for_client(
+                &client,
+                self.dedup_window,
+                self.debounce_interval,
+                self.debounce_detection_window,
+                self.allowed_in_debounce_window_count(),
+            );
+        }
+
+        let connected = self
+            .connected_clients
+            .fetch_add(1, Ordering::SeqCst)
+            .saturating_add(1);
+        metrics::set_connected_pubsub_clients_count(connected as usize);
+        metrics::set_pubsub_client_uptime(client.id(), true);
+        if let Some(delay_ms) = client.current_resub_delay_ms() {
+            metrics::set_pubsub_client_resubscribe_delay(client.id(), delay_ms);
+        }
+        if client.subs_immediately() {
+            let connected = self
+                .connected_clients_subscribing_immediately
+                .fetch_add(1, Ordering::SeqCst)
+                .saturating_add(1);
+            metrics::set_connected_direct_pubsub_clients_count(
+                connected as usize,
+            );
+        }
+
+        Self::spawn_reconnectors(
+            vec![(client, abort_rx)],
+            subscribed_accounts_tracker,
+            self.program_subs.clone(),
+            self.connected_clients.clone(),
+            self.connected_clients_subscribing_immediately.clone(),
+        );
+        Ok(())
+    }
+
+    fn clients_lock(&self) -> MutexGuard<'_, Vec<Arc<T>>> {
+        // Lock poisoning means a thread panicked while mutating mux state;
+        // treating that as unrecoverable is safer than continuing with it.
+        self.clients.lock().expect("clients lock poisoned")
+    }
+
+    fn program_subs_lock(&self) -> MutexGuard<'_, HashSet<Pubkey>> {
+        // Lock poisoning means a thread panicked while mutating mux state;
+        // treating that as unrecoverable is safer than continuing with it.
+        self.program_subs
+            .lock()
+            .expect("program_subs lock poisoned")
     }
 
     #[instrument(
@@ -573,9 +676,10 @@ where
         let detection_window = self.debounce_detection_window;
         let allowed_count = self.allowed_in_debounce_window_count();
 
-        for client in &self.clients {
+        self.forwarders_started.store(true, Ordering::SeqCst);
+        for client in self.clients_snapshot() {
             self.spawn_forwarder_for_client(
-                client,
+                &client,
                 window,
                 debounce_interval,
                 detection_window,
@@ -794,12 +898,41 @@ where
     }
 }
 
+impl<T> Clone for SubMuxClient<T>
+where
+    T: ChainPubsubClient + ReconnectableClient,
+{
+    fn clone(&self) -> Self {
+        Self {
+            clients: self.clients.clone(),
+            out_tx: self.out_tx.clone(),
+            out_rx: self.out_rx.clone(),
+            dedup_cache: self.dedup_cache.clone(),
+            dedup_window: self.dedup_window,
+            debounce_interval: self.debounce_interval,
+            debounce_detection_window: self.debounce_detection_window,
+            debounce_states: self.debounce_states.clone(),
+            never_debounce: self.never_debounce.clone(),
+            program_subs: self.program_subs.clone(),
+            connected_clients: self.connected_clients.clone(),
+            connected_clients_subscribing_immediately: self
+                .connected_clients_subscribing_immediately
+                .clone(),
+            forwarders_started: self.forwarders_started.clone(),
+            shutdown_token: self.shutdown_token.clone(),
+            cancel_on_drop: false,
+        }
+    }
+}
+
 impl<T> Drop for SubMuxClient<T>
 where
     T: ChainPubsubClient + ReconnectableClient,
 {
     fn drop(&mut self) {
-        self.shutdown_token.cancel();
+        if self.cancel_on_drop {
+            self.shutdown_token.cancel();
+        }
     }
 }
 
@@ -818,7 +951,7 @@ where
             retries,
             self.required_account_subscription_confirmations(),
         )
-        .process(self.clients.clone())
+        .process(self.clients_snapshot())
         .await
     }
 
@@ -841,7 +974,7 @@ where
             program_id,
             self.required_program_subscription_confirmations(),
         )
-        .process(self.clients.clone())
+        .process(self.clients_snapshot())
         .await
     }
 
@@ -850,13 +983,13 @@ where
         pubkey: Pubkey,
     ) -> RemoteAccountProviderResult<()> {
         AccountSubscriptionTask::Unsubscribe(pubkey)
-            .process(self.clients.clone())
+            .process(self.clients_snapshot())
             .await
     }
 
     async fn shutdown(&self) -> RemoteAccountProviderResult<()> {
         AccountSubscriptionTask::Shutdown
-            .process(self.clients.clone())
+            .process(self.clients_snapshot())
             .await
     }
 
@@ -876,7 +1009,7 @@ where
 
     fn subscriptions_union(&self) -> HashSet<Pubkey> {
         let mut union = HashSet::new();
-        for client in &self.clients {
+        for client in self.clients_snapshot() {
             let subs = client.subscriptions_union();
             union.extend(subs);
         }
@@ -885,7 +1018,7 @@ where
 
     fn subscriptions_intersection(&self) -> HashSet<Pubkey> {
         let sets: Vec<HashSet<Pubkey>> = self
-            .clients
+            .clients_snapshot()
             .iter()
             .map(|c| c.subscriptions_intersection())
             .collect();
@@ -909,7 +1042,7 @@ where
 
     /// Returns true if any inner client subscribes immediately
     fn subs_immediately(&self) -> bool {
-        self.clients.iter().any(|c| c.subs_immediately())
+        self.clients_snapshot().iter().any(|c| c.subs_immediately())
     }
 
     fn id(&self) -> &str {
@@ -1061,6 +1194,48 @@ mod tests {
         let mut lams = vec![lamports(&u1), lamports(&u2)];
         lams.sort();
         assert_eq!(lams, vec![10, 20]);
+
+        mux.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_submux_add_client_resubscribes_and_forwards_updates() {
+        init_logger();
+
+        let pk = Pubkey::new_unique();
+        let (tx1, rx1) = mpsc::channel(10_000);
+        let (tx2, rx2) = mpsc::channel(10_000);
+        let client1 = Arc::new(ChainPubsubClientMock::new(tx1, rx1));
+        let client2 = Arc::new(ChainPubsubClientMock::new(tx2, rx2));
+        let (_abort_tx1, abort_rx1) = mpsc::channel(1);
+        let (_abort_tx2, abort_rx2) = mpsc::channel(1);
+        let tracker = Arc::new(MockSubscribedAccountsTracker::new(vec![pk]));
+
+        let mux: SubMuxClient<ChainPubsubClientMock> = SubMuxClient::new(
+            vec![(client1, abort_rx1)],
+            tracker.clone(),
+            None,
+        );
+        let mut mux_rx = mux.take_updates();
+
+        mux.add_client(client2.clone(), abort_rx2, tracker)
+            .await
+            .unwrap();
+
+        assert!(client2.subscriptions_union().contains(&pk));
+        client2
+            .send_account_update(pk, 1, &account_with_lamports(42))
+            .await;
+
+        let update = tokio::time::timeout(
+            std::time::Duration::from_millis(100),
+            mux_rx.recv(),
+        )
+        .await
+        .expect("update expected")
+        .expect("stream open");
+        assert_eq!(update.pubkey, pk);
+        assert_eq!(update.account.unwrap().lamports, 42);
 
         mux.shutdown().await.unwrap();
     }

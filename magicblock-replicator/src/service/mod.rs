@@ -48,7 +48,7 @@ use crate::{nats::Broker, Result};
 // =============================================================================
 
 pub(crate) const LOCK_REFRESH_INTERVAL: Duration = Duration::from_secs(1);
-pub(crate) const LEADER_TIMEOUT: Duration = Duration::from_secs(5);
+pub(crate) const LEADER_TIMEOUT: Duration = Duration::from_secs(15);
 const CONSUMER_RETRY_DELAY: Duration = Duration::from_secs(1);
 
 // =============================================================================
