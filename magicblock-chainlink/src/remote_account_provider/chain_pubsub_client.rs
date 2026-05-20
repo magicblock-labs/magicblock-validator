@@ -520,6 +520,8 @@ pub mod mock {
 
         async fn shutdown(&self) -> RemoteAccountProviderResult<()> {
             self.shutdown_attempts.fetch_add(1, AtomicOrdering::SeqCst);
+            self.subscribed_pubkeys.lock().clear();
+            self.subscribed_programs.lock().clear();
             Ok(())
         }
 
