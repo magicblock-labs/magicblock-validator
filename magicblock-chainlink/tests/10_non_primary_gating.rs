@@ -13,6 +13,7 @@ use magicblock_chainlink::{
     AccountFetchOrigin, Chainlink,
 };
 use magicblock_config::config::{ChainLinkConfig, LifecycleMode};
+use magicblock_core::coordination_mode::switch_to_replica_mode;
 use solana_account::Account;
 use solana_program::clock::Slot;
 use solana_pubkey::Pubkey;
@@ -34,9 +35,19 @@ async fn setup(slot: Slot) -> TestContext {
     TestContext::init(slot).await
 }
 
-async fn new_endpoint_chainlink() -> (EndpointChainlink, Arc<AccountsBankStub>)
-{
+fn lifecycle_mode_for_startup_mode(mode: &str) -> LifecycleMode {
+    match mode {
+        "Replica" | "ReplicaOnly" | "StandBy" => LifecycleMode::Replica,
+        _ => panic!("unexpected non-primary startup mode: {mode}"),
+    }
+}
+
+async fn new_endpoint_chainlink(
+    startup_mode: &str,
+) -> (EndpointChainlink, Arc<AccountsBankStub>) {
     init_logger();
+    switch_to_replica_mode();
+    let lifecycle_mode = lifecycle_mode_for_startup_mode(startup_mode);
     let bank = Arc::<AccountsBankStub>::default();
     let cloner = Arc::new(ClonerStub::new(bank.clone()));
     let endpoints = Endpoints::from(
@@ -63,7 +74,7 @@ async fn new_endpoint_chainlink() -> (EndpointChainlink, Arc<AccountsBankStub>)
         &bank,
         &cloner,
         solana_keypair::Keypair::new(),
-        ChainlinkConfig::default_with_lifecycle_mode(LifecycleMode::Ephemeral),
+        ChainlinkConfig::default_with_lifecycle_mode(lifecycle_mode),
         &ChainLinkConfig::default(),
         Path::new("."),
     )
@@ -129,7 +140,7 @@ async fn assert_public_calls_do_not_start_runtime(
 
 #[tokio::test]
 async fn new_endpoint_chainlink_starts_without_active_runtime() {
-    let (chainlink, _) = new_endpoint_chainlink().await;
+    let (chainlink, _) = new_endpoint_chainlink("Replica").await;
 
     assert_no_runtime_or_remote_work(&chainlink).await;
 }
@@ -137,16 +148,16 @@ async fn new_endpoint_chainlink_starts_without_active_runtime() {
 #[tokio::test]
 async fn non_primary_startup_modes_keep_chainlink_runtime_disabled() {
     // Chainlink is constructed before replicated validators publish Primary
-    // mode. The existing chainlink test utilities model Replica,
-    // ReplicaOnly, and StandBy startup with the same deferred endpoint
-    // construction path: no runtime, no subscriptions, and no streams/tasks
-    // are created until an explicit primary enablement succeeds.
+    // mode. Replica, ReplicaOnly, and StandBy startup all enter Replica
+    // coordination and defer endpoint runtime creation: no runtime, no
+    // subscriptions, and no streams/tasks are created until an explicit
+    // primary enablement succeeds.
     for mode in ["Replica", "ReplicaOnly", "StandBy"] {
-        let (chainlink, bank) = new_endpoint_chainlink().await;
+        let (chainlink, bank) = new_endpoint_chainlink(mode).await;
         assert_no_runtime_or_remote_work(&chainlink).await;
         assert_public_calls_do_not_start_runtime(&chainlink, &bank).await;
         assert_no_runtime_or_remote_work(&chainlink).await;
-        drop((mode, chainlink));
+        drop(chainlink);
     }
 }
 
