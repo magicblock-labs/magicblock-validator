@@ -56,6 +56,13 @@ pub struct TestContext {
 
 impl TestContext {
     pub async fn init(slot: Slot) -> Self {
+        Self::init_with_lru_capacity(slot, None).await
+    }
+
+    pub async fn init_with_lru_capacity(
+        slot: Slot,
+        subscribed_accounts_lru_capacity: Option<usize>,
+    ) -> Self {
         switch_to_primary_mode();
 
         let (rpc_client, pubsub_client) = {
@@ -75,10 +82,15 @@ impl TestContext {
         let faucet_pubkey = Pubkey::new_unique();
         let (fetch_cloner, remote_account_provider) = {
             let (tx, rx) = tokio::sync::mpsc::channel(100);
-            let config =
+            let mut config =
                 RemoteAccountProviderConfig::default_with_lifecycle_mode(
                     lifecycle_mode,
                 );
+            if let Some(capacity) = subscribed_accounts_lru_capacity {
+                config = config
+                    .with_subscribed_accounts_lru_capacity(capacity)
+                    .expect("test LRU capacity should be valid");
+            }
             let subscribed_accounts =
                 create_test_lru_cache_with_config(&config);
 
