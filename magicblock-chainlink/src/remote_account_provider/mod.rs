@@ -1507,6 +1507,12 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                         _
                     )
                 ) {
+                    self.lrucache_subscribed_accounts.remove(pubkey);
+                    trace!(
+                        pubkey = %pubkey,
+                        ?reason,
+                        "Removed stale delegated-account LRU entry for missing subscription"
+                    );
                     return Ok(false);
                 }
 
