@@ -4795,6 +4795,103 @@ async fn test_cancel_all_pending_on_shutdown() {
 }
 
 #[tokio::test]
+async fn test_shutdown_stops_listener_and_fails_pending_waiters() {
+    init_logger();
+    let validator_keypair = Keypair::new();
+    let account_owner = random_pubkey();
+    const CURRENT_SLOT: u64 = 100;
+
+    let account_pubkey = random_pubkey();
+    let account = Account {
+        lamports: 2_000_000,
+        data: vec![5, 6, 7, 8],
+        owner: account_owner,
+        executable: false,
+        rent_epoch: 0,
+    };
+
+    let FetcherTestCtx {
+        accounts_bank,
+        fetch_cloner,
+        ..
+    } = setup(
+        [(account_pubkey, account)],
+        CURRENT_SLOT,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+
+    let blocking_cloner = Arc::new(ClonerStub::new(accounts_bank.clone()));
+    blocking_cloner.block_clone_completion();
+
+    let (_subscription_tx, subscription_rx) = mpsc::channel(100);
+    let fetch_cloner = FetchCloner::new(
+        &fetch_cloner.remote_account_provider.clone(),
+        &accounts_bank,
+        &blocking_cloner,
+        validator_keypair.insecure_clone(),
+        subscription_rx,
+        None,
+        None,
+    );
+
+    let owner_task = {
+        let fetch_cloner = fetch_cloner.clone();
+        tokio::spawn(async move {
+            fetch_cloner
+                .fetch_and_clone_accounts_with_dedup(
+                    &[account_pubkey],
+                    None,
+                    None,
+                    AccountFetchOrigin::GetAccount,
+                    None,
+                )
+                .await
+        })
+    };
+    wait_for_pending_request(&fetch_cloner, account_pubkey).await;
+
+    let waiter_task = {
+        let fetch_cloner = fetch_cloner.clone();
+        tokio::spawn(async move {
+            fetch_cloner
+                .fetch_and_clone_accounts_with_dedup(
+                    &[account_pubkey],
+                    None,
+                    None,
+                    AccountFetchOrigin::GetAccount,
+                    None,
+                )
+                .await
+        })
+    };
+    wait_for_pending_waiter_count(&fetch_cloner, account_pubkey, 2).await;
+
+    fetch_cloner.shutdown().await.unwrap();
+
+    assert_eq!(fetch_cloner.pending_request_count_for_tests(), 0);
+    assert!(fetch_cloner
+        .subscription_listener_handle
+        .lock()
+        .await
+        .is_none());
+
+    let owner_result = tokio::time::timeout(Duration::from_secs(5), owner_task)
+        .await
+        .expect("owner should complete after shutdown")
+        .expect("owner task join should succeed");
+    let waiter_result =
+        tokio::time::timeout(Duration::from_secs(5), waiter_task)
+            .await
+            .expect("waiter should complete after shutdown")
+            .expect("waiter task join should succeed");
+    assert!(owner_result.is_err());
+    assert!(waiter_result.is_err());
+
+    blocking_cloner.allow_clone_completion();
+}
+
+#[tokio::test]
 async fn test_owned_operation_waiters_do_not_refetch_after_owner_success() {
     init_logger();
     let validator_keypair = Keypair::new();

@@ -318,6 +318,7 @@ pub mod mock {
         subscribe_blocked: Arc<Mutex<bool>>,
         subscribe_attempts: Arc<AtomicU64>,
         subscribe_notify: Arc<Notify>,
+        shutdown_attempts: Arc<AtomicU64>,
     }
 
     impl ChainPubsubClientMock {
@@ -337,6 +338,7 @@ pub mod mock {
                 subscribe_blocked: Arc::new(Mutex::new(false)),
                 subscribe_attempts: Arc::new(AtomicU64::new(0)),
                 subscribe_notify: Arc::new(Notify::new()),
+                shutdown_attempts: Arc::new(AtomicU64::new(0)),
             }
         }
 
@@ -434,6 +436,10 @@ pub mod mock {
             self.subscribed_programs.lock().clone()
         }
 
+        pub fn shutdown_attempts(&self) -> u64 {
+            self.shutdown_attempts.load(AtomicOrdering::SeqCst)
+        }
+
         /// Directly insert a subscription without going through subscribe().
         /// Useful for testing reconciliation scenarios.
         pub fn insert_subscription(&self, pubkey: Pubkey) {
@@ -513,6 +519,7 @@ pub mod mock {
         }
 
         async fn shutdown(&self) -> RemoteAccountProviderResult<()> {
+            self.shutdown_attempts.fetch_add(1, AtomicOrdering::SeqCst);
             Ok(())
         }
 

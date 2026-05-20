@@ -6,7 +6,7 @@ use std::{
 
 use solana_account::Account;
 use solana_system_interface::program as system_program;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 
 use super::*;
 use crate::{
@@ -81,6 +81,67 @@ struct TestSlotConfig {
     current_slot: u64,
     account1_slot: u64,
     account2_slot: u64,
+}
+
+#[tokio::test]
+async fn test_shutdown_clears_subscriptions_and_fails_pending_waiters() {
+    init_logger();
+
+    let account_pubkey = solana_pubkey::Pubkey::new_unique();
+    let program_id = solana_pubkey::Pubkey::new_unique();
+    let account = Account {
+        lamports: 1_000_000,
+        data: vec![1, 2, 3, 4],
+        owner: system_program::id(),
+        executable: false,
+        rent_epoch: 0,
+    };
+
+    let ProviderTestCtx {
+        provider,
+        _pubsub_client,
+        ..
+    } = setup_provider(account_pubkey, account).await;
+
+    provider
+        .acquire_subscription(
+            &account_pubkey,
+            SubscriptionReason::DirectAccount,
+        )
+        .await
+        .unwrap();
+    provider.subscribe_program(program_id).await.unwrap();
+
+    let (waiter_tx, waiter_rx) = oneshot::channel();
+    provider
+        .fetching_accounts
+        .lock()
+        .expect("fetching_accounts lock poisoned")
+        .insert(
+            account_pubkey,
+            FetchingAccountState {
+                generation: 1,
+                fetch_start_slot: 100,
+                waiters: vec![waiter_tx],
+            },
+        );
+
+    provider.shutdown().await.unwrap();
+
+    assert_eq!(_pubsub_client.shutdown_attempts(), 1);
+    assert!(provider.subscription_ownership.lock().await.is_empty());
+    assert!(provider
+        .fetching_accounts
+        .lock()
+        .expect("fetching_accounts lock poisoned")
+        .is_empty());
+    assert!(provider.subscription_key_locks.lock().await.is_empty());
+
+    let waiter_result = waiter_rx
+        .await
+        .expect("shutdown should resolve pending waiter");
+    let err = waiter_result.expect_err("pending waiter should fail");
+    assert!(err.to_string().contains("shut down"));
 }
 
 async fn setup_matching_slots(

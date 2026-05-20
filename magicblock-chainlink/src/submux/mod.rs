@@ -404,6 +404,7 @@ where
                 self.debounce_interval,
                 self.debounce_detection_window,
                 self.allowed_in_debounce_window_count(),
+                self.shutdown_token.child_token(),
             );
         }
 
@@ -708,6 +709,7 @@ where
                 debounce_interval,
                 detection_window,
                 allowed_count,
+                self.shutdown_token.child_token(),
             );
         }
     }
@@ -719,6 +721,7 @@ where
         debounce_interval: Duration,
         detection_window: Duration,
         allowed_count: usize,
+        shutdown_token: CancellationToken,
     ) {
         let mut inner_rx = client.take_updates();
         let params = ForwarderParams {
@@ -732,7 +735,13 @@ where
         };
         let never_debounce = self.never_debounce.clone();
         tokio::spawn(async move {
-            Self::forwarder_loop(&mut inner_rx, params, never_debounce).await;
+            Self::forwarder_loop(
+                &mut inner_rx,
+                params,
+                never_debounce,
+                shutdown_token,
+            )
+            .await;
         });
     }
 
@@ -740,8 +749,19 @@ where
         inner_rx: &mut mpsc::Receiver<SubscriptionUpdate>,
         params: ForwarderParams,
         never_debounce: HashSet<Pubkey>,
+        shutdown_token: CancellationToken,
     ) {
-        while let Some(update) = inner_rx.recv().await {
+        loop {
+            let update = tokio::select! {
+                update = inner_rx.recv() => match update {
+                    Some(update) => update,
+                    None => break,
+                },
+                _ = shutdown_token.cancelled() => break,
+            };
+            if shutdown_token.is_cancelled() {
+                break;
+            }
             let now = Instant::now();
             let key = (update.pubkey, update.slot);
             if !Self::should_forward_dedup(
@@ -1251,6 +1271,52 @@ mod tests {
         assert_eq!(lams, vec![10, 20]);
 
         mux.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_submux_shutdown_stops_clients_and_forwarders() {
+        init_logger();
+
+        let (tx1, rx1) = mpsc::channel(10_000);
+        let (tx2, rx2) = mpsc::channel(10_000);
+        let client1 = Arc::new(ChainPubsubClientMock::new(tx1, rx1));
+        let client2 = Arc::new(ChainPubsubClientMock::new(tx2, rx2));
+        let mux: SubMuxClient<ChainPubsubClientMock> =
+            new_submux_client(vec![client1.clone(), client2.clone()], None);
+        let mut mux_rx = mux.take_updates();
+
+        let pk = Pubkey::new_unique();
+        mux.subscribe(pk, None).await.unwrap();
+        client1
+            .send_account_update(pk, 1, &account_with_lamports(10))
+            .await;
+        tokio::time::timeout(
+            std::time::Duration::from_millis(100),
+            mux_rx.recv(),
+        )
+        .await
+        .expect("pre-shutdown update expected")
+        .expect("stream open");
+
+        mux.shutdown().await.unwrap();
+        assert_eq!(client1.shutdown_attempts(), 1);
+        assert_eq!(client2.shutdown_attempts(), 1);
+
+        client1
+            .send_account_update(pk, 2, &account_with_lamports(20))
+            .await;
+        client2
+            .send_account_update(pk, 3, &account_with_lamports(30))
+            .await;
+        let post_shutdown_update = tokio::time::timeout(
+            std::time::Duration::from_millis(50),
+            mux_rx.recv(),
+        )
+        .await;
+        assert!(
+            post_shutdown_update.is_err(),
+            "no update should be forwarded after shutdown"
+        );
     }
 
     #[tokio::test]
