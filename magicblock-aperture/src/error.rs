@@ -24,6 +24,12 @@ pub enum ApertureError {
 pub struct RpcError {
     code: i16,
     message: String,
+    // HTTP status to use when rendering this error. Defaults to 200 (the
+    // JSON-RPC convention). Set to 503 for transient unavailability so that
+    // upstream retry-aware proxies can absorb the failure instead of
+    // forwarding a JSON-RPC error body to the client.
+    #[serde(skip)]
+    http_status: u16,
 }
 
 impl Display for RpcError {
@@ -46,7 +52,19 @@ impl From<json::Error> for RpcError {
 
 impl From<TransactionError> for RpcError {
     fn from(value: TransactionError) -> Self {
-        Self::transaction_verification(value)
+        // ClusterMaintenance is returned when the scheduler channels are
+        // closed during shutdown. Surface it as HTTP 503 so the upstream
+        // retry buffer can absorb the brief restart gap.
+        let http_status =
+            if matches!(value, TransactionError::ClusterMaintenance) {
+                503
+            } else {
+                200
+            };
+        Self {
+            http_status,
+            ..Self::transaction_verification(value)
+        }
     }
 }
 
@@ -78,10 +96,15 @@ macro_rules! some_or_err {
 }
 
 impl RpcError {
+    pub(crate) fn http_status(&self) -> u16 {
+        self.http_status
+    }
+
     pub(crate) fn invalid_params<E: Display>(error: E) -> Self {
         Self {
             code: INVALID_PARAMS,
             message: format!("invalid request params: {error}"),
+            http_status: 200,
         }
     }
 
@@ -89,6 +112,7 @@ impl RpcError {
         Self {
             code: TRANSACTION_SIMULATION,
             message: error.to_string(),
+            http_status: 200,
         }
     }
 
@@ -96,6 +120,7 @@ impl RpcError {
         Self {
             code: TRANSACTION_VERIFICATION,
             message: format!("transaction verification error: {error}"),
+            http_status: 200,
         }
     }
 
@@ -103,6 +128,7 @@ impl RpcError {
         Self {
             code: INVALID_REQUEST,
             message: format!("invalid request: {error}"),
+            http_status: 200,
         }
     }
 
@@ -110,6 +136,7 @@ impl RpcError {
         Self {
             code: PARSE_ERROR,
             message: format!("error parsing request body: {error}"),
+            http_status: 200,
         }
     }
 
@@ -117,6 +144,7 @@ impl RpcError {
         Self {
             code: INTERNAL_ERROR,
             message: format!("internal server error: {error}"),
+            http_status: 200,
         }
     }
 
@@ -124,6 +152,7 @@ impl RpcError {
         Self {
             code,
             message: error.to_string(),
+            http_status: 200,
         }
     }
 }
