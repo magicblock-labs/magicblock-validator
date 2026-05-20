@@ -5,7 +5,6 @@ use std::{
     process::{self, Output},
 };
 
-use dlp_api::pda::delegation_record_pda_from_delegated_account;
 use integration_test_tools::{
     loaded_accounts::LoadedAccounts,
     toml_to_args::ProgramLoader,
@@ -13,10 +12,6 @@ use integration_test_tools::{
         resolve_workspace_dir, start_magic_block_validator_with_config,
         start_test_validator_with_config, TestRunnerPaths,
     },
-};
-use magicblock_core::token_programs::derive_eata;
-use solana_sdk::{
-    signature::{Keypair, Signer},
 };
 use teepee::Teepee;
 use test_runner::{
@@ -719,22 +714,6 @@ fn run_cloning_tests(
     let loaded_chain_accounts = {
         let mut loaded_chain_accounts =
             LoadedAccounts::with_delegation_program_test_authority();
-        let source_authority = Keypair::new_from_array([7; 32]).pubkey();
-        let destination_authority = Keypair::new_from_array([8; 32]).pubkey();
-        let mint = Keypair::new_from_array([9; 32]).pubkey();
-        let source_eata_pubkey = derive_eata(&source_authority, &mint);
-        let destination_eata_pubkey =
-            derive_eata(&destination_authority, &mint);
-        let source_eata = source_eata_pubkey.to_string();
-        let destination_eata = destination_eata_pubkey.to_string();
-        let source_eata_delegation_record =
-            delegation_record_pda_from_delegated_account(&source_eata_pubkey)
-                .to_string();
-        let destination_eata_delegation_record =
-            delegation_record_pda_from_delegated_account(
-                &destination_eata_pubkey,
-            )
-            .to_string();
 
         loaded_chain_accounts.add(&[
             (
@@ -744,22 +723,6 @@ fn run_cloning_tests(
             (
                 "MiniV21111111111111111111111111111111111111",
                 "target/deploy/miniv2/program_mini.json",
-            ),
-            (
-                source_eata.as_str(),
-                "post-delegation-token-transfer-source-eata.json",
-            ),
-            (
-                destination_eata.as_str(),
-                "post-delegation-token-transfer-destination-eata.json",
-            ),
-            (
-                source_eata_delegation_record.as_str(),
-                "post-delegation-token-transfer-source-eata-delegation-record.json",
-            ),
-            (
-                destination_eata_delegation_record.as_str(),
-                "post-delegation-token-transfer-destination-eata-delegation-record.json",
             ),
         ]);
         loaded_chain_accounts

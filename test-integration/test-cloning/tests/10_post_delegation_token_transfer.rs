@@ -5,19 +5,30 @@ use dlp_api::{
     instruction_builder::{
         delegate_with_actions, Encryptable, PostDelegationInstruction,
     },
+    pda::{
+        delegate_buffer_pda_from_delegated_account_and_owner_program,
+        delegation_metadata_pda_from_delegated_account,
+        delegation_record_pda_from_delegated_account,
+    },
 };
 use integration_test_tools::{
     loaded_accounts::DLP_TEST_AUTHORITY_BYTES, IntegrationTestContext,
 };
-use magicblock_core::token_programs::derive_ata;
+use magicblock_core::token_programs::{
+    derive_ata, derive_eata, ASSOCIATED_TOKEN_PROGRAM_ID, EATA_PROGRAM_ID,
+    TOKEN_PROGRAM_ID,
+};
 use solana_sdk::{
+    instruction::{AccountMeta, Instruction},
     program_pack::Pack,
     pubkey::Pubkey,
     signature::Keypair,
     signer::Signer,
     transaction::Transaction,
 };
-use solana_system_interface::instruction as system_instruction;
+use solana_system_interface::{
+    instruction as system_instruction, program as system_program,
+};
 use spl_associated_token_account_interface::instruction::create_associated_token_account_idempotent;
 use spl_token::{instruction as spl_token_ix, state::Mint};
 use test_kit::init_logger;
@@ -26,6 +37,10 @@ const SOURCE_AUTHORITY_SEED: [u8; 32] = [7; 32];
 const SOURCE_EATA_BALANCE: u64 = 200;
 const DESTINATION_EATA_BALANCE: u64 = 100;
 const TRANSFER_AMOUNT: u64 = 100;
+const INITIALIZE_EPHEMERAL_ATA: u8 = 0;
+const INITIALIZE_GLOBAL_VAULT: u8 = 1;
+const DEPOSIT_SPL_TOKENS: u8 = 2;
+const DELEGATE_EPHEMERAL_ATA: u8 = 4;
 
 fn token_balance_chain(ctx: &IntegrationTestContext, account: &Pubkey) -> u64 {
     let balance = ctx
@@ -47,6 +62,113 @@ fn token_balance_ephem(
         .and_then(|balance| balance.amount.parse::<u64>().ok())
 }
 
+fn derive_global_vault(mint: &Pubkey) -> Pubkey {
+    Pubkey::find_program_address(&[mint.as_ref()], &EATA_PROGRAM_ID).0
+}
+
+fn initialize_global_vault_ix(payer: Pubkey, mint: Pubkey) -> Instruction {
+    let vault = derive_global_vault(&mint);
+    let vault_ephemeral_ata = derive_eata(&vault, &mint);
+    let vault_ata = derive_ata(&vault, &mint);
+
+    Instruction {
+        program_id: EATA_PROGRAM_ID,
+        accounts: vec![
+            AccountMeta::new(vault, false),
+            AccountMeta::new(payer, true),
+            AccountMeta::new_readonly(mint, false),
+            AccountMeta::new(vault_ephemeral_ata, false),
+            AccountMeta::new(vault_ata, false),
+            AccountMeta::new_readonly(TOKEN_PROGRAM_ID, false),
+            AccountMeta::new_readonly(ASSOCIATED_TOKEN_PROGRAM_ID, false),
+            AccountMeta::new_readonly(system_program::id(), false),
+        ],
+        data: vec![INITIALIZE_GLOBAL_VAULT],
+    }
+}
+
+fn initialize_eata_ix(
+    payer: Pubkey,
+    user: Pubkey,
+    mint: Pubkey,
+) -> Instruction {
+    Instruction {
+        program_id: EATA_PROGRAM_ID,
+        accounts: vec![
+            AccountMeta::new(derive_eata(&user, &mint), false),
+            AccountMeta::new(payer, true),
+            AccountMeta::new_readonly(user, false),
+            AccountMeta::new_readonly(mint, false),
+            AccountMeta::new_readonly(system_program::id(), false),
+        ],
+        data: vec![INITIALIZE_EPHEMERAL_ATA],
+    }
+}
+
+fn deposit_spl_tokens_ix(
+    authority: Pubkey,
+    user: Pubkey,
+    mint: Pubkey,
+    amount: u64,
+) -> Instruction {
+    let eata = derive_eata(&user, &mint);
+    let vault = derive_global_vault(&mint);
+    let user_source_token_acc = derive_ata(&user, &mint);
+    let vault_token_acc = derive_ata(&vault, &mint);
+    let mut data = Vec::with_capacity(9);
+    data.push(DEPOSIT_SPL_TOKENS);
+    data.extend_from_slice(&amount.to_le_bytes());
+
+    Instruction {
+        program_id: EATA_PROGRAM_ID,
+        accounts: vec![
+            AccountMeta::new(eata, false),
+            AccountMeta::new_readonly(vault, false),
+            AccountMeta::new_readonly(mint, false),
+            AccountMeta::new(user_source_token_acc, false),
+            AccountMeta::new(vault_token_acc, false),
+            AccountMeta::new_readonly(authority, true),
+            AccountMeta::new_readonly(TOKEN_PROGRAM_ID, false),
+        ],
+        data,
+    }
+}
+
+fn delegate_eata_ix(
+    payer: Pubkey,
+    user: Pubkey,
+    mint: Pubkey,
+    validator: Pubkey,
+) -> Instruction {
+    let eata = derive_eata(&user, &mint);
+    let delegation_buffer =
+        delegate_buffer_pda_from_delegated_account_and_owner_program(
+            &eata,
+            &EATA_PROGRAM_ID,
+        );
+    let delegation_record = delegation_record_pda_from_delegated_account(&eata);
+    let delegation_metadata =
+        delegation_metadata_pda_from_delegated_account(&eata);
+    let mut data = Vec::with_capacity(33);
+    data.push(DELEGATE_EPHEMERAL_ATA);
+    data.extend_from_slice(validator.as_ref());
+
+    Instruction {
+        program_id: EATA_PROGRAM_ID,
+        accounts: vec![
+            AccountMeta::new(payer, true),
+            AccountMeta::new(eata, false),
+            AccountMeta::new_readonly(EATA_PROGRAM_ID, false),
+            AccountMeta::new(delegation_buffer, false),
+            AccountMeta::new(delegation_record, false),
+            AccountMeta::new(delegation_metadata, false),
+            AccountMeta::new_readonly(dlp_api::id(), false),
+            AccountMeta::new_readonly(system_program::id(), false),
+        ],
+        data,
+    }
+}
+
 #[test]
 fn test_post_delegation_action_executes_spl_token_transfer_100() {
     init_logger!();
@@ -55,10 +177,14 @@ fn test_post_delegation_action_executes_spl_token_transfer_100() {
     let fee_payer = Keypair::new();
     let delegated_account = Keypair::new();
     let source_authority = Keypair::new_from_array(SOURCE_AUTHORITY_SEED);
-    let destination_authority = Keypair::new_from_array([8; 32]).pubkey();
+    let destination_authority = Keypair::new_from_array([8; 32]);
     let mint = Keypair::new_from_array([9; 32]);
     let source_ata = derive_ata(&source_authority.pubkey(), &mint.pubkey());
-    let destination_ata = derive_ata(&destination_authority, &mint.pubkey());
+    let destination_ata =
+        derive_ata(&destination_authority.pubkey(), &mint.pubkey());
+    let validator = Keypair::try_from(&DLP_TEST_AUTHORITY_BYTES[..])
+        .unwrap()
+        .pubkey();
 
     ctx.airdrop_chain(&fee_payer.pubkey(), 2_000_000_000)
         .unwrap();
@@ -96,21 +222,111 @@ fn test_post_delegation_action_executes_spl_token_transfer_100() {
         ),
         create_associated_token_account_idempotent(
             &fee_payer.pubkey(),
-            &destination_authority,
+            &destination_authority.pubkey(),
             &mint.pubkey(),
             &spl_token::id(),
         ),
+        spl_token_ix::mint_to(
+            &spl_token::id(),
+            &mint.pubkey(),
+            &source_ata,
+            &source_authority.pubkey(),
+            &[],
+            SOURCE_EATA_BALANCE,
+        )
+        .unwrap(),
+        spl_token_ix::mint_to(
+            &spl_token::id(),
+            &mint.pubkey(),
+            &destination_ata,
+            &source_authority.pubkey(),
+            &[],
+            DESTINATION_EATA_BALANCE,
+        )
+        .unwrap(),
     ];
     let mut setup_tx =
         Transaction::new_with_payer(&setup_ixs, Some(&fee_payer.pubkey()));
     let (_sig, confirmed) = ctx
-        .send_and_confirm_transaction_chain(&mut setup_tx, &[&fee_payer, &mint])
+        .send_and_confirm_transaction_chain(
+            &mut setup_tx,
+            &[&fee_payer, &mint, &source_authority],
+        )
         .unwrap();
     assert!(confirmed, "setup transaction failed");
 
-    // The companion eATAs and their delegation records are loaded as delegated
-    // fixtures, so fetching the ATAs projects delegated eATA balances into
-    // ephem.
+    let eata_setup_ixs = vec![
+        initialize_global_vault_ix(fee_payer.pubkey(), mint.pubkey()),
+        initialize_eata_ix(
+            fee_payer.pubkey(),
+            source_authority.pubkey(),
+            mint.pubkey(),
+        ),
+        initialize_eata_ix(
+            fee_payer.pubkey(),
+            destination_authority.pubkey(),
+            mint.pubkey(),
+        ),
+    ];
+    let mut eata_setup_tx =
+        Transaction::new_with_payer(&eata_setup_ixs, Some(&fee_payer.pubkey()));
+    let (_sig, confirmed) = ctx
+        .send_and_confirm_transaction_chain(&mut eata_setup_tx, &[&fee_payer])
+        .unwrap();
+    assert!(confirmed, "eATA setup transaction failed");
+
+    let deposit_ixs = vec![
+        deposit_spl_tokens_ix(
+            source_authority.pubkey(),
+            source_authority.pubkey(),
+            mint.pubkey(),
+            SOURCE_EATA_BALANCE,
+        ),
+        deposit_spl_tokens_ix(
+            destination_authority.pubkey(),
+            destination_authority.pubkey(),
+            mint.pubkey(),
+            DESTINATION_EATA_BALANCE,
+        ),
+    ];
+    let mut deposit_tx =
+        Transaction::new_with_payer(&deposit_ixs, Some(&fee_payer.pubkey()));
+    let (_sig, confirmed) = ctx
+        .send_and_confirm_transaction_chain(
+            &mut deposit_tx,
+            &[&fee_payer, &source_authority, &destination_authority],
+        )
+        .unwrap();
+    assert!(confirmed, "eATA deposit transaction failed");
+
+    let delegate_eata_ixs = vec![
+        delegate_eata_ix(
+            fee_payer.pubkey(),
+            source_authority.pubkey(),
+            mint.pubkey(),
+            validator,
+        ),
+        delegate_eata_ix(
+            fee_payer.pubkey(),
+            destination_authority.pubkey(),
+            mint.pubkey(),
+            validator,
+        ),
+    ];
+    let mut delegate_eata_tx = Transaction::new_with_payer(
+        &delegate_eata_ixs,
+        Some(&fee_payer.pubkey()),
+    );
+    let (_sig, confirmed) = ctx
+        .send_and_confirm_transaction_chain(
+            &mut delegate_eata_tx,
+            &[&fee_payer],
+        )
+        .unwrap();
+    assert!(confirmed, "eATA delegation transaction failed");
+
+    // The eATAs are loaded as delegated accounts, so fetching the ATAs projects
+    // delegated eATA balances into ephem.
     ctx.fetch_ephem_account(source_ata).unwrap();
     ctx.fetch_ephem_account(destination_ata).unwrap();
 
@@ -137,9 +353,6 @@ fn test_post_delegation_action_executes_spl_token_transfer_100() {
     let post_actions: Vec<PostDelegationInstruction> =
         vec![transfer_100_ix.cleartext()];
 
-    let validator = Keypair::try_from(&DLP_TEST_AUTHORITY_BYTES[..])
-        .unwrap()
-        .pubkey();
     let delegate_with_actions_ix = delegate_with_actions(
         fee_payer.pubkey(),
         delegated_account.pubkey(),

@@ -13,7 +13,4 @@ path = "bin/run_tests.rs"
 [dependencies]
 ctrlc = { workspace = true }
 integration-test-tools = { workspace = true }
-magicblock-core = { workspace = true }
-magicblock-delegation-program-api = { workspace = true }
-solana-sdk = { workspace = true }
 teepee = { workspace = true }
