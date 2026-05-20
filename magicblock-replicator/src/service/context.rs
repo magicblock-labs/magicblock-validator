@@ -292,6 +292,8 @@ where
 mod tests {
     use std::sync::{Arc, Mutex};
 
+    use tokio::sync::oneshot;
+
     use super::*;
 
     fn record(events: &Arc<Mutex<Vec<&'static str>>>, event: &'static str) {
@@ -348,6 +350,56 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn primary_readiness_sequence_skips_primary_mode_when_chainlink_fails(
+    ) {
+        let events = Arc::new(Mutex::new(Vec::new()));
+
+        let result = run_primary_readiness_sequence(
+            {
+                let events = Arc::clone(&events);
+                move || async move {
+                    record(&events, "wait_for_idle_started");
+                    record(&events, "wait_for_idle_completed");
+                }
+            },
+            {
+                let events = Arc::clone(&events);
+                move || {
+                    record(&events, "reset_accounts_bank");
+                    Ok(())
+                }
+            },
+            {
+                let events = Arc::clone(&events);
+                move || async move {
+                    record(&events, "enable_primary");
+                    Err(Error::Internal("chainlink failed".to_string()))
+                }
+            },
+            {
+                let events = Arc::clone(&events);
+                move || async move {
+                    record(&events, "enter_primary_mode");
+                }
+            },
+        )
+        .await;
+
+        assert!(
+            matches!(result, Err(Error::Internal(message)) if message == "chainlink failed")
+        );
+        assert_eq!(
+            *events.lock().unwrap(),
+            vec![
+                "wait_for_idle_started",
+                "wait_for_idle_completed",
+                "reset_accounts_bank",
+                "enable_primary",
+            ]
+        );
+    }
+
+    #[tokio::test]
     async fn standby_start_sequence_disables_chainlink_before_consumer_creation(
     ) {
         let events = Arc::new(Mutex::new(Vec::new()));
@@ -383,6 +435,65 @@ mod tests {
             vec![
                 "enter_replica_mode",
                 "disable_chainlink",
+                "create_consumer_started",
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn standby_start_sequence_waits_for_chainlink_disable_to_complete() {
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let (disable_started_tx, disable_started_rx) = oneshot::channel();
+        let (finish_disable_tx, finish_disable_rx) = oneshot::channel();
+
+        let sequence = tokio::spawn({
+            let events = Arc::clone(&events);
+            async move {
+                run_standby_start_sequence(
+                    {
+                        let events = Arc::clone(&events);
+                        move || async move {
+                            record(&events, "enter_replica_mode");
+                        }
+                    },
+                    {
+                        let events = Arc::clone(&events);
+                        move || async move {
+                            record(&events, "disable_chainlink_started");
+                            disable_started_tx.send(()).unwrap();
+                            finish_disable_rx.await.unwrap();
+                            record(&events, "disable_chainlink_completed");
+                            Ok(())
+                        }
+                    },
+                    {
+                        let events = Arc::clone(&events);
+                        move || async move {
+                            record(&events, "create_consumer_started");
+                            Some(())
+                        }
+                    },
+                )
+                .await
+            }
+        });
+
+        disable_started_rx.await.unwrap();
+        assert_eq!(
+            *events.lock().unwrap(),
+            vec!["enter_replica_mode", "disable_chainlink_started"]
+        );
+
+        finish_disable_tx.send(()).unwrap();
+        let consumer = sequence.await.unwrap().unwrap();
+
+        assert_eq!(consumer, Some(()));
+        assert_eq!(
+            *events.lock().unwrap(),
+            vec![
+                "enter_replica_mode",
+                "disable_chainlink_started",
+                "disable_chainlink_completed",
                 "create_consumer_started",
             ]
         );
