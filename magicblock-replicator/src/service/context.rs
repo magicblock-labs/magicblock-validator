@@ -188,10 +188,13 @@ impl ReplicationContext {
     }
 
     /// Runs the standby start sequence.
-    async fn run_standby_start_sequence(&self, reset: bool) -> Option<Consumer> {
+    async fn run_standby_start_sequence(
+        &self,
+        reset: bool,
+    ) -> Result<Option<Consumer>> {
         self.enter_replica_mode().await;
-        self.chainlink.disable();
-        self.create_consumer(reset).await
+        self.chainlink.disable().await?;
+        Ok(self.create_consumer(reset).await)
     }
 
     /// Transitions to primary role with the given producer.
@@ -217,7 +220,8 @@ impl ReplicationContext {
         messages: Receiver<Message>,
         reset: bool,
     ) -> Result<Option<Standby>> {
-        let Some(consumer) = self.run_standby_start_sequence(reset).await else {
+        let Some(consumer) = self.run_standby_start_sequence(reset).await?
+        else {
             return Ok(None);
         };
         let Some(watcher) = LockWatcher::new(&self.broker, &self.cancel).await

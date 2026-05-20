@@ -133,10 +133,42 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
     /// Marks the non-primary lifecycle boundary. Non-primary chainlink calls
     /// intentionally become no-op/local-only while bank reset remains an
     /// explicit primary-readiness operation.
-    pub fn disable(&self) {
+    pub async fn disable(&self) -> ChainlinkResult<()> {
+        self.lifecycle_state
+            .store(ChainlinkLifecycleState::Stopping as u8, Ordering::SeqCst);
+
+        let runtime = self.runtime.lock().await.take();
+        let Some(mut runtime) = runtime else {
+            self.lifecycle_state.store(
+                ChainlinkLifecycleState::Disabled as u8,
+                Ordering::SeqCst,
+            );
+            info!("Chainlink remote sync already disabled by lifecycle transition");
+            return Ok(());
+        };
+
+        if let Some(mut removed_accounts_sub) =
+            runtime.removed_accounts_sub.take()
+        {
+            removed_accounts_sub.abort();
+            if tokio::time::timeout(
+                std::time::Duration::from_secs(2),
+                &mut removed_accounts_sub,
+            )
+            .await
+            .is_err()
+            {
+                warn!("Timed out waiting for Chainlink removed-account subscription to stop");
+            }
+        }
+
+        let result = runtime.fetch_cloner.shutdown().await;
         self.lifecycle_state
             .store(ChainlinkLifecycleState::Disabled as u8, Ordering::SeqCst);
-        info!("Chainlink remote sync disabled by lifecycle transition");
+        if result.is_ok() {
+            info!("Chainlink remote sync disabled by lifecycle transition");
+        }
+        result
     }
 
     pub fn is_remote_sync_enabled(&self) -> bool {
@@ -639,11 +671,14 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
     async fn runtime_fetch_cloner(
         &self,
     ) -> Option<Arc<FetchCloner<T, U, V, C>>> {
-        self.runtime
-            .lock()
-            .await
-            .as_ref()
-            .map(|runtime| runtime.fetch_cloner.clone())
+        let runtime = self.runtime.lock().await;
+        if ChainlinkLifecycleState::from_u8(
+            self.lifecycle_state.load(Ordering::SeqCst),
+        ) != ChainlinkLifecycleState::Enabled
+        {
+            return None;
+        }
+        runtime.as_ref().map(|runtime| runtime.fetch_cloner.clone())
     }
 
     #[cfg(any(test, feature = "dev-context"))]
