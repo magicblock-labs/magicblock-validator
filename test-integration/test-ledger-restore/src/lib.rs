@@ -175,6 +175,11 @@ pub fn setup_validator_with_local_remote_and_resume_strategy(
             &chain_only_ctx,
             loaded_accounts.validator_authority_keypair(),
         );
+        chain_only_ctx
+            .ensure_magic_fee_vault_delegated_on_chain(
+                loaded_accounts.validator_authority_keypair(),
+            )
+            .unwrap();
     }
 
     let (default_tmpdir_config, Some(mut validator), port) =

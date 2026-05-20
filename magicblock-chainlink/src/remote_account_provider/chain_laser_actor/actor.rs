@@ -35,8 +35,8 @@ use crate::remote_account_provider::{
     chain_rpc_client::{ChainRpcClient, ChainRpcClientImpl},
     chain_slot::ChainSlot,
     pubsub_common::{
-        ChainPubsubActorMessage, MESSAGE_CHANNEL_SIZE,
-        SUBSCRIPTION_UPDATE_CHANNEL_SIZE,
+        is_internal_dlp_account_data, ChainPubsubActorMessage,
+        MESSAGE_CHANNEL_SIZE, SUBSCRIPTION_UPDATE_CHANNEL_SIZE,
     },
     RemoteAccountProviderError, RemoteAccountProviderResult,
     SubscriptionUpdate,
@@ -52,8 +52,6 @@ pub struct Slots {
     /// Updated via `update()` when slot updates are received from GRPC.
     /// Metrics are automatically captured on updates.
     pub chain_slot: ChainSlot,
-    /// Whether this GRPC endpoint supports backfilling subscription updates.
-    pub supports_backfill: bool,
 }
 
 // -----------------
@@ -77,8 +75,7 @@ impl fmt::Display for AccountUpdateSource {
 // -----------------
 // ChainLaserActor
 // -----------------
-/// ChainLaserActor manages gRPC subscriptions to Helius Laser
-/// or Triton endpoints.
+/// ChainLaserActor manages subscriptions to gRPC Laser endpoints.
 ///
 /// ## Subscription Lifecycle
 ///
@@ -122,8 +119,6 @@ pub struct ChainLaserActor<H: StreamHandle, S: StreamFactory<H>> {
     /// RPC client for diagnostics (e.g., fetching slot when
     /// falling behind)
     rpc_client: ChainRpcClientImpl,
-    /// Validator identity used for delegated-to-us gating
-    validator_pubkey: Pubkey,
     /// Duration for the time-based optimization interval
     optimization_interval_duration: Duration,
 }
@@ -137,7 +132,6 @@ impl ChainLaserActor<super::StreamHandleImpl, super::StreamFactoryImpl> {
         commitment: SolanaCommitmentLevel,
         abort_sender: mpsc::Sender<()>,
         slots: Slots,
-        validator_pubkey: Pubkey,
         rpc_client: ChainRpcClientImpl,
         grpc_config: &GrpcConfig,
     ) -> (
@@ -165,20 +159,17 @@ impl ChainLaserActor<super::StreamHandleImpl, super::StreamFactoryImpl> {
             commitment,
             abort_sender,
             slots,
-            validator_pubkey,
             rpc_client,
             grpc_config,
         )
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         client_id: &str,
         laser_client_config: LaserstreamConfig,
         commitment: SolanaCommitmentLevel,
         abort_sender: mpsc::Sender<()>,
         slots: Slots,
-        validator_pubkey: Pubkey,
         rpc_client: ChainRpcClientImpl,
         grpc_config: &GrpcConfig,
     ) -> (
@@ -194,7 +185,6 @@ impl ChainLaserActor<super::StreamHandleImpl, super::StreamFactoryImpl> {
             commitment,
             abort_sender,
             slots,
-            validator_pubkey,
             rpc_client,
             grpc_config,
         )
@@ -203,14 +193,12 @@ impl ChainLaserActor<super::StreamHandleImpl, super::StreamFactoryImpl> {
 
 impl<H: StreamHandle, S: StreamFactory<H>> ChainLaserActor<H, S> {
     /// Create actor with a custom stream factory (for testing)
-    #[allow(clippy::too_many_arguments)]
     pub fn with_stream_factory(
         client_id: &str,
         stream_factory: S,
         commitment: SolanaCommitmentLevel,
         abort_sender: mpsc::Sender<()>,
         slots: Slots,
-        validator_pubkey: Pubkey,
         rpc_client: ChainRpcClientImpl,
         grpc_config: &GrpcConfig,
     ) -> (
@@ -225,11 +213,7 @@ impl<H: StreamHandle, S: StreamFactory<H>> ChainLaserActor<H, S> {
             mpsc::channel(MESSAGE_CHANNEL_SIZE);
         let commitment = grpc_commitment_from_solana(commitment);
 
-        let chain_slot = if slots.supports_backfill {
-            Some(slots.chain_slot.clone())
-        } else {
-            None
-        };
+        let chain_slot = slots.chain_slot.clone();
         let stream_manager = StreamManager::new(
             StreamManagerConfig::from(grpc_config),
             stream_factory,
@@ -250,22 +234,15 @@ impl<H: StreamHandle, S: StreamFactory<H>> ChainLaserActor<H, S> {
             slots,
             client_id: client_id.to_string(),
             rpc_client,
-            validator_pubkey,
             optimization_interval_duration,
         };
+
         (
             me,
             messages_sender,
             subscription_updates_receiver,
             shared_subscriptions,
         )
-    }
-
-    #[allow(dead_code)]
-    #[instrument(skip(self), fields(client_id = %self.client_id))]
-    fn shutdown(&mut self) {
-        info!("Shutting down laser actor");
-        Self::clear_subscriptions(&mut self.stream_manager);
     }
 
     #[instrument(skip(self), fields(client_id = %self.client_id))]
@@ -503,40 +480,15 @@ impl<H: StreamHandle, S: StreamFactory<H>> ChainLaserActor<H, S> {
     }
 
     /// Computes a `from_slot` for backfilling based on the
-    /// current chain slot. Returns `None` if backfilling is not
-    /// supported or the slot is still `0` (i.e. uninitialized).
-    ///
-    /// Logs the chosen mode so operators can distinguish:
-    /// - "backfill not supported" (endpoint flag)
-    /// - "backfill skipped (chain_slot still 0)" (bootstrap window)
-    /// - "backfill from <slot>" (normal operation)
-    fn compute_from_slot(&self) -> Option<u64> {
-        if !self.slots.supports_backfill {
-            trace!(
-                client_id = %self.client_id,
-                "compute_from_slot: backfill not supported by endpoint, \
-                 from_slot=None",
-            );
-            return None;
-        }
-        match self.slots.chain_slot.compute_from_slot() {
-            None => {
-                debug!(
-                    client_id = %self.client_id,
-                    "compute_from_slot: chain_slot still 0, creating \
-                     subscription without from_slot (degraded backfill)",
-                );
-                None
-            }
-            Some(slot) => {
-                trace!(
-                    client_id = %self.client_id,
-                    from_slot = slot,
-                    "compute_from_slot: using normal backfill",
-                );
-                Some(slot)
-            }
-        }
+    /// current chain slot.
+    fn compute_from_slot(&self) -> u64 {
+        let from_slot = self.slots.chain_slot.compute_from_slot();
+        trace!(
+            client_id = %self.client_id,
+            from_slot,
+            "compute_from_slot: derived from chain slot",
+        );
+        from_slot
     }
 
     /// Handles an update from any subscription stream.
@@ -770,20 +722,10 @@ impl<H: StreamHandle, S: StreamFactory<H>> ChainLaserActor<H, S> {
             );
         }
 
-        let should_forward = if self.stream_manager.is_subscribed(&pubkey) {
-            true
-        } else {
-            matches!(source, AccountUpdateSource::Program)
-                && crate::delegation_record::should_forward_dlp_program_update(
-                    &self.rpc_client,
-                    &self.validator_pubkey,
-                    pubkey,
-                    &owner,
-                    &account.data,
-                    slot,
-                )
-                .await
-        };
+        let should_forward = self.stream_manager.is_subscribed(&pubkey)
+            || matches!(source, AccountUpdateSource::Program)
+                && owner.eq(&dlp_api::id())
+                && !is_internal_dlp_account_data(&account.data);
         if !should_forward {
             return;
         }

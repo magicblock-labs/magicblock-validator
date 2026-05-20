@@ -28,6 +28,7 @@ solana-address-lookup-table-interface = { workspace = true, features = [
   "bincode",
   "bytemuck",
 ] }
+futures-util = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 

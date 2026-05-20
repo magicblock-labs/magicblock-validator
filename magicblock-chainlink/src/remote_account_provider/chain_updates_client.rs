@@ -28,14 +28,12 @@ pub enum ChainUpdatesClient {
 }
 
 impl ChainUpdatesClient {
-    #[allow(clippy::too_many_arguments)]
     pub async fn try_new_from_endpoint(
         endpoint: &Endpoint,
         commitment: CommitmentConfig,
         abort_sender: mpsc::Sender<()>,
         chain_slot: Arc<AtomicU64>,
         resubscription_delay: std::time::Duration,
-        validator_pubkey: Pubkey,
         rpc_client: ChainRpcClientImpl,
         grpc_config: &GrpcConfig,
     ) -> RemoteAccountProviderResult<Self> {
@@ -56,8 +54,6 @@ impl ChainUpdatesClient {
                         abort_sender,
                         commitment,
                         resubscription_delay,
-                        validator_pubkey,
-                        rpc_client,
                     )
                     .await?,
                 ))
@@ -65,10 +61,9 @@ impl ChainUpdatesClient {
             Grpc {
                 url,
                 label,
-                supports_backfill,
                 api_key,
             } => {
-                debug!(url = %url, "Initializing Helius Laser client for gRPC endpoint");
+                debug!(url = %url, "Initializing gRPC client");
                 let client_id = format!(
                     "grpc:{label}-{}",
                     CLIENT_ID.fetch_add(1, Ordering::SeqCst)
@@ -76,7 +71,6 @@ impl ChainUpdatesClient {
 
                 let slots = Slots {
                     chain_slot: ChainSlot::new(chain_slot),
-                    supports_backfill: *supports_backfill,
                 };
                 Ok(ChainUpdatesClient::Laser(
                     ChainLaserClientImpl::new_from_url(
@@ -86,7 +80,6 @@ impl ChainUpdatesClient {
                         commitment.commitment,
                         abort_sender,
                         slots,
-                        validator_pubkey,
                         rpc_client,
                         grpc_config,
                     ),

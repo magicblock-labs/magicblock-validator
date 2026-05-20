@@ -1,11 +1,14 @@
 use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
-use solana_program::{instruction::Instruction, pubkey::Pubkey};
 
-use crate::args::{
-    AddActionCallbackArgs, MagicBaseIntentArgs, MagicIntentBundleArgs,
-    ScheduleTaskArgs,
+use crate::{
+    args::{
+        AddActionCallbackArgs, MagicBaseIntentArgs, MagicIntentBundleArgs,
+        ScheduleTaskArgs,
+    },
+    compat::Instruction,
+    Pubkey,
 };
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
@@ -21,7 +24,8 @@ pub enum MagicBlockInstruction {
         message: Option<String>,
     },
 
-    /// Schedules the accounts provided at end of accounts Vec to be committed.
+    /// Schedules the accounts provided at end of accounts Vec to be committed
+    /// and finalized in a single DLP instruction.
     /// It should be invoked from the program whose PDA accounts are to be
     /// committed.
     ///
@@ -37,8 +41,8 @@ pub enum MagicBlockInstruction {
     ScheduleCommit,
 
     /// This is the exact same instruction as [MagicBlockInstruction::ScheduleCommit] except
-    /// that the [ScheduledCommit] is flagged such that when accounts are committed, a request
-    /// to undelegate them is included with the same transaction.
+    /// that the scheduled intent is flagged such that when accounts are committed and finalized,
+    /// a request to undelegate them is included with the same transaction.
     /// Additionally the validator will refuse anymore transactions for the specific account
     /// since they are no longer considered delegated to it.
     ///
@@ -180,21 +184,13 @@ pub enum MagicBlockInstruction {
     /// - **2.** `[WRITE]` Vault account (source of rent refund)
     CloseEphemeralAccount,
 
-    /// Schedules the accounts provided at end of accounts Vec to be committed and finalized in a
-    /// single DLP instruction.
-    /// It should be invoked from the program whose PDA accounts are to be
-    /// committed.
-    ///
-    /// This is the first part of scheduling a commit.
-    /// A second transaction [MagicBlockInstruction::AcceptScheduleCommits] has to run in order
-    /// to finish scheduling the commit.
-    ///
-    /// # Account references
-    /// - **0.**   `[WRITE, SIGNER]` Payer requesting the commit to be scheduled
-    /// - **1.**   `[WRITE]`         Magic Context Account containing to which we store
-    ///   the scheduled commits
-    /// - **2..n** `[]`              Accounts to be committed
-    ScheduleCommitFinalize { request_undelegation: bool },
+    /// Unsed instruction slot.
+    /// -- can be repurposed --
+    /// This variant was originally used for `ScheduleCommitFinalize`, but that
+    /// instruction was removed. It is intentionally left unused so the wire
+    /// discriminant can be repurposed in a future protocol update.
+    Unused,
+
     /// Clone a single account that fits in one transaction (<63KB data).
     ///
     /// # Account references

@@ -112,7 +112,6 @@ impl IxtestContext {
                     &endpoints,
                     commitment,
                     tx,
-                    validator_kp.pubkey(),
                     &config.remote_account_provider,
                 )
                 .await;
@@ -128,6 +127,7 @@ impl IxtestContext {
                             &cloner,
                             validator_kp.insecure_clone(),
                             rx,
+                            None,
                             None,
                         )),
                         Some(provider),

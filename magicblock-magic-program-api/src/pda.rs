@@ -1,4 +1,4 @@
-use solana_program::pubkey::Pubkey;
+use crate::Pubkey;
 
 pub const CRANK_SEED: &[u8] = b"crank-executor";
 pub fn crank_signer_pda(authority: &Pubkey) -> Pubkey {

@@ -39,6 +39,7 @@ use magicblock_config::{
     ValidatorParams,
 };
 use magicblock_core::{
+    coordination_mode::CoordinationMode,
     link::{
         link,
         transactions::{SchedulerMode, TransactionSchedulerHandle},
@@ -536,6 +537,7 @@ impl MagicValidator {
             config.validator.keypair.insecure_clone(),
             chainlink_config,
             &config.chainlink,
+            config.storage.as_path(),
         )
         .await?;
 
@@ -630,18 +632,20 @@ impl MagicValidator {
         Ok(())
     }
 
-    #[instrument(skip(self), fields(identity = %self.identity))]
+    #[instrument(skip(config))]
     async fn register_validator_on_chain(
-        &self,
+        rpc_url: &str,
         config: &ChainOperationConfig,
+        block_time_ms: u64,
+        base_fee: u64,
     ) -> ApiResult<()> {
         let country_code = CountryCode::from(config.country_code.alpha3());
         let validator_keypair = validator_authority();
         let validator_info = ErRecord::V0(RecordV0 {
             identity: validator_keypair.pubkey(),
             status: ErStatus::Active,
-            block_time_ms: self.config.ledger.block_time_ms() as u16,
-            base_fee: self.config.validator.basefee as u16,
+            block_time_ms: block_time_ms as u16,
+            base_fee: base_fee as u16,
             features: FeaturesSet::default(),
             load_average: 0,
             country_code,
@@ -649,21 +653,23 @@ impl MagicValidator {
         });
 
         DomainRegistryManager::handle_registration_static(
-            self.config.rpc_url(),
+            rpc_url,
             &validator_keypair,
             validator_info,
         )
+        .await
         .map_err(|err| {
             ApiError::FailedToRegisterValidatorOnChain(err.to_string())
         })
     }
 
-    fn unregister_validator_on_chain(&self) -> ApiResult<()> {
+    async fn unregister_validator_on_chain(&self) -> ApiResult<()> {
         let validator_keypair = validator_authority();
         DomainRegistryManager::handle_unregistration_static(
             self.config.rpc_url(),
             &validator_keypair,
         )
+        .await
         .map_err(|err| {
             ApiError::FailedToUnregisterValidatorOnChain(err.to_string())
         })
@@ -792,9 +798,14 @@ impl MagicValidator {
 
     #[instrument(skip(self))]
     pub async fn start(&mut self) -> ApiResult<()> {
-        if matches!(self.config.lifecycle, LifecycleMode::Ephemeral) {
+        if matches!(self.config.lifecycle, LifecycleMode::Ephemeral)
+            && CoordinationMode::current().needs_onchain_interactions()
+        {
             let rpc_url = self.config.rpc_url().to_owned();
             let identity = self.identity;
+            let chain_operation_config = self.config.chain_operation.clone();
+            let block_time_ms = self.config.ledger.block_time_ms();
+            let base_fee = self.config.validator.basefee;
             // Ephemeral mode does a non-blocking startup balance check.
             // Intentionally fire-and-forget: the task itself exits the process on failure,
             tokio::spawn(async move {
@@ -816,9 +827,10 @@ impl MagicValidator {
                 }
 
                 let step_start = Instant::now();
-                let result =
-                    MagicValidator::ensure_magic_fee_vault_on_chain(rpc_url)
-                        .await;
+                let result = MagicValidator::ensure_magic_fee_vault_on_chain(
+                    rpc_url.clone(),
+                )
+                .await;
                 log_timing(
                     "startup_background",
                     "ensure_magic_fee_vault_on_chain",
@@ -832,16 +844,27 @@ impl MagicValidator {
                     error!("Exiting process");
                     std::process::exit(1);
                 }
+                if let Some(ref config) = chain_operation_config {
+                    let step_start = Instant::now();
+                    if let Err(error) =
+                        MagicValidator::register_validator_on_chain(
+                            &rpc_url,
+                            config,
+                            block_time_ms,
+                            base_fee,
+                        )
+                        .await
+                    {
+                        error!(%error, "Validator registration failed, exitting");
+                        std::process::exit(1);
+                    }
+                    log_timing(
+                        "startup_background",
+                        "register_validator_on_chain",
+                        step_start,
+                    );
+                }
             });
-            if let Some(ref config) = self.config.chain_operation {
-                let step_start = Instant::now();
-                self.register_validator_on_chain(config).await?;
-                log_timing(
-                    "startup",
-                    "register_validator_on_chain",
-                    step_start,
-                );
-            }
         }
 
         // Ledger processing needs to happen before anything of the below
@@ -881,6 +904,9 @@ impl MagicValidator {
             .config
             .chain_operation
             .as_ref()
+            .filter(|_| {
+                CoordinationMode::current().needs_onchain_interactions()
+            })
             .filter(|co| !co.claim_fees_frequency.is_zero())
             .map(|co| co.claim_fees_frequency)
         {
@@ -975,9 +1001,10 @@ impl MagicValidator {
 
         if self.config.chain_operation.is_some()
             && matches!(self.config.lifecycle, LifecycleMode::Ephemeral)
+            && CoordinationMode::current().needs_onchain_interactions()
         {
             let step_start = Instant::now();
-            if let Err(err) = self.unregister_validator_on_chain() {
+            if let Err(err) = self.unregister_validator_on_chain().await {
                 error!(error = ?err, "Failed to unregister");
             }
             log_timing("shutdown", "unregister_validator_on_chain", step_start);
@@ -1040,7 +1067,7 @@ impl MagicValidator {
 
 fn log_timing(phase: &'static str, step: &'static str, start: Instant) {
     let duration_ms = start.elapsed().as_millis() as u64;
-    debug!(phase, step, duration_ms, "Validator timing");
+    info!(phase, step, duration_ms, "Validator timing");
 }
 
 fn programs_to_load(programs: &[LoadableProgram]) -> Vec<(Pubkey, PathBuf)> {

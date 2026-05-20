@@ -25,8 +25,7 @@ use crate::{
     schedule_transactions::{
         process_accept_scheduled_commits, process_add_action_callback,
         process_execute_callback, process_schedule_commit,
-        process_schedule_commit_finalize, process_schedule_intent_bundle,
-        ProcessScheduleCommitOptions,
+        process_schedule_intent_bundle, ProcessScheduleCommitOptions,
     },
 };
 
@@ -84,15 +83,13 @@ declare_process_instruction!(
                     request_undelegation: true,
                 },
             ),
-            ScheduleCommitFinalize {
-                request_undelegation,
-            } => process_schedule_commit_finalize(
-                signers,
-                invoke_context,
-                ProcessScheduleCommitOptions {
-                    request_undelegation,
-                },
-            ),
+            Unused => {
+                solana_log_collector::ic_msg!(
+                    invoke_context,
+                    "MagicBlockInstruction ERR: Unused instruction slot"
+                );
+                Err(InstructionError::InvalidInstructionData)
+            }
             AcceptScheduleCommits => {
                 process_accept_scheduled_commits(signers, invoke_context)
             }

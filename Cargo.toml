@@ -8,6 +8,7 @@ members = [
     "magicblock-account-cloner",
     "magicblock-accounts",
     "magicblock-accounts-db",
+    "magicblock-aml",
     "magicblock-aperture",
     "magicblock-api",
     "magicblock-chainlink",
@@ -33,7 +34,7 @@ members = [
     "tools/genx",
     "tools/keypair-base58",
     "tools/ledger-stats",
-    "tools/magicblock-tui-client"
+    "tools/magicblock-tui-client",
 ]
 
 # This prevents a Travis CI error when building for Windows.
@@ -46,7 +47,7 @@ edition = "2021"
 homepage = "https://www.magicblock.xyz"
 license = "Business Source License 1.1"
 repository = "https://github.com/magicblock-labs/ephemeral-validator"
-version = "0.10.0"
+version = "0.11.1"
 
 [workspace.dependencies]
 agave-geyser-plugin-interface = { version = "3.1" }
@@ -95,13 +96,16 @@ log = { version = "0.4.20" }
 lru = "0.16.0"
 magic-domain-program = { git = "https://github.com/magicblock-labs/magic-domain-program.git", rev = "335a22", default-features = false }
 magicblock-account-cloner = { path = "./magicblock-account-cloner" }
+magicblock-aml = { path = "./magicblock-aml" }
 magicblock-accounts = { path = "./magicblock-accounts" }
 magicblock-accounts-db = { path = "./magicblock-accounts-db" }
 magicblock-aperture = { path = "./magicblock-aperture" }
 magicblock-api = { path = "./magicblock-api" }
-magicblock-chainlink = { path = "./magicblock-chainlink", features = ["dev-context"] }
+magicblock-chainlink = { path = "./magicblock-chainlink", features = [
+    "dev-context",
+] }
 magicblock-committor-program = { path = "./magicblock-committor-program", features = [
-    "no-entrypoint"
+    "no-entrypoint",
 ] }
 magicblock-committor-service = { path = "./magicblock-committor-service" }
 magicblock-config = { path = "./magicblock-config" }
@@ -202,7 +206,7 @@ solana-sysvar = { version = "3.0" }
 solana-timings = { package = "solana-svm-timings", version = "3.1" }
 solana-transaction = { version = "3.0" }
 solana-transaction-context = { git = "https://github.com/magicblock-labs/magicblock-svm.git", branch = "v3", features = [
-    "dev-context-only-utils"
+    "dev-context-only-utils",
 ] }
 solana-transaction-error = { version = "3.0" }
 solana-transaction-status = { version = "=3.1.12" }
@@ -221,7 +225,10 @@ tonic-prost-build = "0.14"
 tracing = "0.1"
 tracing-log = { version = "0.2", features = ["log-tracer"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
-twox-hash = { version = "2.1", default-features = false, features = ["alloc", "xxhash3_64"] }
+twox-hash = { version = "2.1", default-features = false, features = [
+    "alloc",
+    "xxhash3_64",
+] }
 url = "2.5.0"
 
 # SPL Token crates used across the workspace
