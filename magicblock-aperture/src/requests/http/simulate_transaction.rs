@@ -35,6 +35,8 @@ impl HttpDispatcher {
         let config = config.unwrap_or_default();
         let encoding = config.encoding.unwrap_or(UiTransactionEncoding::Base58);
 
+        self.reject_non_primary_write("simulateTransaction")?;
+
         // Prepare the transaction, applying simulation-specific options.
         let transaction = self
             .prepare_transaction(

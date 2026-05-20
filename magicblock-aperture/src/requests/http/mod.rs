@@ -548,7 +548,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn simulate_transaction_in_replica_reaches_scheduler() {
+    async fn simulate_transaction_in_replica_rejects_before_scheduler() {
         let _lock = COORDINATION_MODE_TEST_LOCK.lock().await;
         let env = ExecutionTestEnv::new_replica_mode(1, false);
         let _mode = PrimaryModeGuard::switch_to_replica();
@@ -564,23 +564,15 @@ mod tests {
         );
 
         let error = match dispatcher.simulate_transaction(&mut request).await {
-            Ok(_) => panic!("simulation should reach the local scheduler"),
+            Ok(_) => panic!("replica simulateTransaction should be rejected"),
             Err(error) => error,
         };
 
         assert!(
-            error.to_string().contains("transaction simulation failed")
-                || error.to_string().contains("response channel closed")
-                || error
-                    .to_string()
-                    .contains("Transactions are currently disabled"),
-            "unexpected error: {error}"
-        );
-        assert!(
-            !error.to_string().contains(
+            error.to_string().contains(
                 "simulateTransaction is only available while validator is primary"
             ),
-            "simulateTransaction must not use the non-primary write gate"
+            "unexpected error: {error}"
         );
     }
 
