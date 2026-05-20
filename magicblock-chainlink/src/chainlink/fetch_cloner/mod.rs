@@ -29,10 +29,11 @@ use solana_sdk_ids::system_program;
 use solana_signature::Signature;
 use solana_signer::Signer;
 use tokio::{
-    sync::{mpsc, oneshot},
+    sync::{mpsc, oneshot, Mutex as AsyncMutex},
     task,
     task::JoinSet,
 };
+use tokio_util::sync::CancellationToken;
 use tracing::*;
 
 pub(crate) const FETCH_CLONE_OPERATION_TIMEOUT: Duration =
@@ -136,6 +137,9 @@ where
 
     pending_operation_timeout_ms: Arc<AtomicU64>,
 
+    shutdown_token: CancellationToken,
+    subscription_listener_handle: Arc<AsyncMutex<Option<task::JoinHandle<()>>>>,
+
     /// Risk checker for post-delegation action addresses.
     risk_service: Option<Arc<RiskService>>,
 }
@@ -175,6 +179,10 @@ where
             pending_clones: self.pending_clones.clone(),
             pending_operation_timeout_ms: self
                 .pending_operation_timeout_ms
+                .clone(),
+            shutdown_token: self.shutdown_token.clone(),
+            subscription_listener_handle: self
+                .subscription_listener_handle
                 .clone(),
             risk_service: self.risk_service.clone(),
         }
@@ -224,6 +232,8 @@ where
             pending_operation_timeout_ms: Arc::new(AtomicU64::new(
                 FETCH_CLONE_OPERATION_TIMEOUT.as_millis() as u64,
             )),
+            shutdown_token: CancellationToken::new(),
+            subscription_listener_handle: Arc::new(AsyncMutex::new(None)),
             risk_service,
         });
 
@@ -276,6 +286,81 @@ where
     pub fn cancel_all_pending(&self) {
         self.pending_requests
             .scan(|_pubkey, pending| pending.cancel.notify_one());
+    }
+
+    fn fail_all_pending_requests(&self) {
+        let mut pending = Vec::new();
+        self.pending_requests.scan(|pubkey, state| {
+            pending.push((*pubkey, state.generation));
+        });
+        for (pubkey, generation) in pending {
+            finish_pending(
+                &self.pending_requests,
+                pubkey,
+                generation,
+                PendingTerminal::Failed(PendingFailure::OwnerFailed(
+                    "fetch cloner shut down".to_string(),
+                )),
+            );
+        }
+    }
+
+    fn fail_all_pending_clones(&self) {
+        let pending = {
+            let mut map = self
+                .pending_clones
+                .lock()
+                .expect("pending_clones mutex poisoned");
+            std::mem::take(&mut *map)
+        };
+        for waiters in pending.into_values() {
+            for tx in waiters {
+                let _ = tx.send(CloneCompletion::Failed);
+            }
+        }
+    }
+
+    pub async fn shutdown(&self) -> ChainlinkResult<()> {
+        self.shutdown_token.cancel();
+        self.cancel_all_pending();
+        self.fail_all_pending_requests();
+        self.fail_all_pending_clones();
+
+        let listener_handle = {
+            let mut slot = self.subscription_listener_handle.lock().await;
+            slot.take()
+        };
+        if let Some(mut handle) = listener_handle {
+            if tokio::time::timeout(Duration::from_secs(2), &mut handle)
+                .await
+                .is_err()
+            {
+                handle.abort();
+                if let Err(err) = handle.await {
+                    if !err.is_cancelled() {
+                        warn!(error = ?err, "FetchCloner listener task failed after abort");
+                    }
+                }
+            }
+        }
+
+        self.remote_account_provider.shutdown().await?;
+        Ok(())
+    }
+
+    #[cfg(any(test, feature = "dev-context"))]
+    pub fn pending_request_count_for_tests(&self) -> usize {
+        let mut count = 0;
+        self.pending_requests.scan(|_, _| count += 1);
+        count
+    }
+
+    #[cfg(any(test, feature = "dev-context"))]
+    pub fn pending_clone_count_for_tests(&self) -> usize {
+        self.pending_clones
+            .lock()
+            .expect("pending_clones mutex poisoned")
+            .len()
     }
 
     /// Check if a program is allowed to be cloned.
@@ -468,10 +553,16 @@ where
         self: Arc<Self>,
         mut subscription_updates: mpsc::Receiver<ForwardedSubscriptionUpdate>,
     ) {
-        tokio::spawn(async move {
+        let listener_handle = self.subscription_listener_handle.clone();
+        let shutdown_token = self.shutdown_token.clone();
+        let handle = tokio::spawn(async move {
             let mut pending_tasks: JoinSet<()> = JoinSet::new();
 
             loop {
+                if shutdown_token.is_cancelled() {
+                    break;
+                }
+
                 match subscription_updates.try_recv() {
                     Ok(update) => {
                         let pubkey = update.pubkey;
@@ -499,6 +590,9 @@ where
                     }
                     Err(mpsc::error::TryRecvError::Empty) => {
                         tokio::select! {
+                            _ = shutdown_token.cancelled() => {
+                                break;
+                            }
                             maybe_update =
                                 subscription_updates.recv() =>
                             {
@@ -537,7 +631,23 @@ where
                     }
                 }
             }
+
+            let drain =
+                async { while pending_tasks.join_next().await.is_some() {} };
+            if tokio::time::timeout(Duration::from_secs(2), drain)
+                .await
+                .is_err()
+            {
+                pending_tasks.abort_all();
+                while pending_tasks.join_next().await.is_some() {}
+            }
         });
+        if let Ok(mut slot) = listener_handle.try_lock() {
+            *slot = Some(handle);
+        } else {
+            warn!("Failed to store FetchCloner subscription listener handle");
+            handle.abort();
+        };
     }
 
     async fn process_subscription_update(
