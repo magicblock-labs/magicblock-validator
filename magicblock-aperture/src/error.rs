@@ -116,6 +116,27 @@ impl RpcError {
         }
     }
 
+    /// Maps a scheduler simulation error to an `RpcError`, preserving the
+    /// `TRANSACTION_SIMULATION` JSON-RPC code while surfacing the transient
+    /// shutdown case (`ClusterMaintenance`) as HTTP 503 so upstream retry
+    /// proxies can absorb the validator restart gap. Mirrors the behavior of
+    /// `From<TransactionError> for RpcError`, which routes scheduler errors
+    /// from `send_transaction` / `execute` through HTTP 503 the same way.
+    pub(crate) fn transaction_simulation_from_scheduler(
+        error: TransactionError,
+    ) -> Self {
+        let http_status =
+            if matches!(error, TransactionError::ClusterMaintenance) {
+                503
+            } else {
+                200
+            };
+        Self {
+            http_status,
+            ..Self::transaction_simulation(error)
+        }
+    }
+
     pub(crate) fn transaction_verification<E: Display>(error: E) -> Self {
         Self {
             code: TRANSACTION_VERIFICATION,
