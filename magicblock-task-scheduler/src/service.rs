@@ -6,7 +6,9 @@ use std::{
 
 use futures_util::StreamExt;
 use magicblock_config::config::TaskSchedulerConfig;
-use magicblock_core::link::transactions::ScheduledTasksRx;
+use magicblock_core::{
+    coordination_mode::CoordinationMode, link::transactions::ScheduledTasksRx,
+};
 use magicblock_ledger::LatestBlock;
 use magicblock_program::{
     args::{CancelTaskRequest, TaskRequest},
@@ -123,6 +125,20 @@ impl TaskSchedulerService {
     pub async fn start(
         mut self,
     ) -> TaskSchedulerResult<JoinHandle<TaskSchedulerResult<()>>> {
+        if self.is_primary_mode().await {
+            self.load_persisted_tasks().await?;
+            Ok(tokio::spawn(self.run()))
+        } else {
+            debug!("Task scheduler on standby mode does not start");
+            Ok(tokio::spawn(async move { Ok(()) }))
+        }
+    }
+
+    async fn load_persisted_tasks(&mut self) -> TaskSchedulerResult<()> {
+        self.task_queue.clear();
+        self.task_queue_keys.clear();
+        self.task_execution_retries.clear();
+
         // Reschedule all tasks that are due
         let tasks = self.db.get_tasks().await?;
         let now = chrono::Utc::now().timestamp_millis();
@@ -159,7 +175,7 @@ impl TaskSchedulerService {
             self.task_queue_keys.insert(task_id, key);
         }
 
-        Ok(tokio::spawn(self.run()))
+        Ok(())
     }
 
     async fn process_request(
@@ -478,6 +494,17 @@ impl TaskSchedulerService {
             .send_transaction(&tx)
             .await
             .map_err(Box::new)?)
+    }
+
+    /// Waits until the coordination mode is not StartingUp.
+    /// Should be fast because task scheduler is started after the ledger replay completes.
+    async fn is_primary_mode(&self) -> bool {
+        let mut mode = CoordinationMode::current();
+        while mode == CoordinationMode::StartingUp {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            mode = CoordinationMode::current();
+        }
+        mode == CoordinationMode::Primary
     }
 }
 
