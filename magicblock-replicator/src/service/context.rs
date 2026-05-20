@@ -1,6 +1,6 @@
 //! Shared context for primary and standby roles.
 
-use std::sync::Arc;
+use std::{future::Future, sync::Arc};
 
 use machineid_rs::IdBuilder;
 use magicblock_accounts_db::AccountsDb;
@@ -175,38 +175,25 @@ impl ReplicationContext {
         }
     }
 
-    /// Runs the primary readiness sequence.
-    /// Ordering: wait for scheduler idle, reset bank, switch to Primary mode,
-    /// then enable the chainlink lifecycle. Reset is primary-readiness cleanup
-    /// and is intentionally skipped during standby/replica startup.
-    async fn run_primary_readiness_sequence(&self) -> Result<()> {
-        let _guard = self.scheduler.wait_for_idle().await;
-        self.chainlink.reset_accounts_bank()?;
-        self.enter_primary_mode().await;
-        self.chainlink.enable_primary().await?;
-        Ok(())
-    }
-
-    /// Runs the standby start sequence.
-    async fn run_standby_start_sequence(
-        &self,
-        reset: bool,
-    ) -> Result<Option<Consumer>> {
-        self.enter_replica_mode().await;
-        self.chainlink.disable().await?;
-        Ok(self.create_consumer(reset).await)
-    }
-
     /// Transitions to primary role with the given producer.
-    /// Ordering: wait for scheduler idle, reset bank, switch to Primary mode,
-    /// then enable the chainlink lifecycle.
+    /// Ordering: wait for scheduler idle, reset bank, enable the chainlink
+    /// lifecycle, then switch to Primary mode. Reset is primary-readiness
+    /// cleanup and is intentionally skipped during standby/replica startup.
     pub async fn into_primary(
         self,
         producer: Producer,
         messages: Receiver<Message>,
     ) -> Result<Primary> {
         let snapshots = self.create_snapshot_watcher()?;
-        self.run_primary_readiness_sequence().await?;
+        run_primary_readiness_sequence(
+            || self.scheduler.wait_for_idle(),
+            || self.chainlink.reset_accounts_bank().map_err(Into::into),
+            || async {
+                self.chainlink.enable_primary().await.map_err(Into::into)
+            },
+            || self.enter_primary_mode(),
+        )
+        .await?;
         Ok(Primary::new(self, producer, messages, snapshots))
     }
 
@@ -220,7 +207,12 @@ impl ReplicationContext {
         messages: Receiver<Message>,
         reset: bool,
     ) -> Result<Option<Standby>> {
-        let Some(consumer) = self.run_standby_start_sequence(reset).await?
+        let Some(consumer) = run_standby_start_sequence(
+            || self.enter_replica_mode(),
+            || async { self.chainlink.disable().await.map_err(Into::into) },
+            || self.create_consumer(reset),
+        )
+        .await?
         else {
             return Ok(None);
         };
@@ -234,5 +226,165 @@ impl ReplicationContext {
             messages,
             watcher,
         )))
+    }
+}
+
+/// Runs the primary readiness sequence.
+async fn run_primary_readiness_sequence<
+    WaitForIdle,
+    WaitForIdleFuture,
+    IdleGuard,
+    ResetBank,
+    EnablePrimary,
+    EnablePrimaryFuture,
+    EnterPrimary,
+    EnterPrimaryFuture,
+>(
+    wait_for_idle: WaitForIdle,
+    reset_bank: ResetBank,
+    enable_primary: EnablePrimary,
+    enter_primary: EnterPrimary,
+) -> Result<()>
+where
+    WaitForIdle: FnOnce() -> WaitForIdleFuture,
+    WaitForIdleFuture: Future<Output = IdleGuard>,
+    ResetBank: FnOnce() -> Result<()>,
+    EnablePrimary: FnOnce() -> EnablePrimaryFuture,
+    EnablePrimaryFuture: Future<Output = Result<()>>,
+    EnterPrimary: FnOnce() -> EnterPrimaryFuture,
+    EnterPrimaryFuture: Future<Output = ()>,
+{
+    let _guard = wait_for_idle().await;
+    reset_bank()?;
+    enable_primary().await?;
+    enter_primary().await;
+    Ok(())
+}
+
+/// Runs the standby start sequence.
+async fn run_standby_start_sequence<
+    Consumer,
+    EnterReplica,
+    EnterReplicaFuture,
+    DisableChainlink,
+    DisableChainlinkFuture,
+    CreateConsumer,
+    CreateConsumerFuture,
+>(
+    enter_replica: EnterReplica,
+    disable_chainlink: DisableChainlink,
+    create_consumer: CreateConsumer,
+) -> Result<Option<Consumer>>
+where
+    EnterReplica: FnOnce() -> EnterReplicaFuture,
+    EnterReplicaFuture: Future<Output = ()>,
+    DisableChainlink: FnOnce() -> DisableChainlinkFuture,
+    DisableChainlinkFuture: Future<Output = Result<()>>,
+    CreateConsumer: FnOnce() -> CreateConsumerFuture,
+    CreateConsumerFuture: Future<Output = Option<Consumer>>,
+{
+    enter_replica().await;
+    disable_chainlink().await?;
+    Ok(create_consumer().await)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::{Arc, Mutex};
+
+    use super::*;
+
+    fn record(events: &Arc<Mutex<Vec<&'static str>>>, event: &'static str) {
+        events.lock().unwrap().push(event);
+    }
+
+    #[tokio::test]
+    async fn primary_readiness_sequence_orders_async_chainlink_before_primary_mode(
+    ) {
+        let events = Arc::new(Mutex::new(Vec::new()));
+
+        run_primary_readiness_sequence(
+            {
+                let events = Arc::clone(&events);
+                move || async move {
+                    record(&events, "wait_for_idle_started");
+                    record(&events, "wait_for_idle_completed");
+                }
+            },
+            {
+                let events = Arc::clone(&events);
+                move || {
+                    record(&events, "reset_accounts_bank");
+                    Ok(())
+                }
+            },
+            {
+                let events = Arc::clone(&events);
+                move || async move {
+                    record(&events, "enable_primary");
+                    Ok(())
+                }
+            },
+            {
+                let events = Arc::clone(&events);
+                move || async move {
+                    record(&events, "enter_primary_mode");
+                }
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            *events.lock().unwrap(),
+            vec![
+                "wait_for_idle_started",
+                "wait_for_idle_completed",
+                "reset_accounts_bank",
+                "enable_primary",
+                "enter_primary_mode",
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn standby_start_sequence_disables_chainlink_before_consumer_creation(
+    ) {
+        let events = Arc::new(Mutex::new(Vec::new()));
+
+        let consumer = run_standby_start_sequence(
+            {
+                let events = Arc::clone(&events);
+                move || async move {
+                    record(&events, "enter_replica_mode");
+                }
+            },
+            {
+                let events = Arc::clone(&events);
+                move || async move {
+                    record(&events, "disable_chainlink");
+                    Ok(())
+                }
+            },
+            {
+                let events = Arc::clone(&events);
+                move || async move {
+                    record(&events, "create_consumer_started");
+                    Some(())
+                }
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(consumer, Some(()));
+        assert_eq!(
+            *events.lock().unwrap(),
+            vec![
+                "enter_replica_mode",
+                "disable_chainlink",
+                "create_consumer_started",
+            ]
+        );
     }
 }
