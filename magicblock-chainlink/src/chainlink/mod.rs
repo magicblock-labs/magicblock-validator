@@ -610,6 +610,13 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
     async fn runtime_fetch_cloner(
         &self,
     ) -> Option<Arc<FetchCloner<T, U, V, C>>> {
+        if ChainlinkLifecycleState::from_u8(
+            self.lifecycle_state.load(Ordering::SeqCst),
+        ) != ChainlinkLifecycleState::Enabled
+        {
+            return None;
+        }
+
         let runtime = self.runtime.lock().await;
         if ChainlinkLifecycleState::from_u8(
             self.lifecycle_state.load(Ordering::SeqCst),
