@@ -34,10 +34,8 @@ pub fn get_rocksdb_options(access_type: &AccessType) -> Options {
         options.set_disable_auto_compactions(true);
     }
 
-    // Allow Rocks to open/keep open as many files as it needs for performance;
-    // however, this is also explicitly required for a secondary instance.
-    // See https://github.com/facebook/rocksdb/wiki/Secondary-instance
-    options.set_max_open_files(-1);
+    // Bound open files so DB::Open does not eagerly open every SST file.
+    options.set_max_open_files(4096);
 
     // Smooth IO
     options.set_bytes_per_sync(1024 * 1024);

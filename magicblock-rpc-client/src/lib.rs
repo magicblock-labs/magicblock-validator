@@ -7,6 +7,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use futures_util::future::try_join_all;
 use solana_account::Account;
 use solana_account_decoder_client_types::UiAccountEncoding;
 use solana_address_lookup_table_interface::state::{
@@ -32,7 +33,7 @@ use solana_transaction_error::{TransactionError, TransactionResult};
 use solana_transaction_status_client_types::{
     EncodedConfirmedTransactionWithStatusMeta, UiTransactionEncoding,
 };
-use tokio::{task::JoinSet, time::sleep};
+use tokio::time::sleep;
 use tracing::*;
 
 /// The encoding to use when sending transactions
@@ -323,27 +324,17 @@ impl MagicblockRpcClient {
         max_per_fetch: Option<usize>,
     ) -> MagicBlockRpcClientResult<Vec<Option<Account>>> {
         let max_per_fetch = max_per_fetch.unwrap_or(MAX_MULTIPLE_ACCOUNTS);
-
-        let mut join_set = JoinSet::new();
-        for pubkey_chunk in pubkeys.chunks(max_per_fetch) {
-            let client = self.client.clone();
-            let pubkeys = pubkey_chunk.to_vec();
+        let futs = pubkeys.chunks(max_per_fetch).map(|pubkey_chunk| {
             let config = config.clone();
-            join_set.spawn(async move {
-                client
-                    .get_multiple_accounts_with_config(&pubkeys, config)
+            async move {
+                self.client
+                    .get_multiple_accounts_with_config(pubkey_chunk, config)
                     .await
-            });
-        }
-        let chunked_results = join_set.join_all().await;
-        let mut results = Vec::new();
-        for result in chunked_results {
-            match result {
-                Ok(accs) => results.extend(accs.value),
-                Err(err) => return Err(err.into()),
+                    .map(|r| r.value)
+                    .map_err(MagicBlockRpcClientError::from)
             }
-        }
-        Ok(results)
+        });
+        Ok(try_join_all(futs).await?.into_iter().flatten().collect())
     }
 
     pub async fn get_lookup_table_meta(

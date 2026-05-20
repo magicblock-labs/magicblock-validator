@@ -250,6 +250,7 @@ fn init_fetch_cloner(
         validator_keypair,
         subscription_rx,
         None,
+        None,
     );
     (fetch_cloner, subscription_tx)
 }
@@ -1972,6 +1973,7 @@ async fn test_allowed_programs_filters_programs() {
         validator_keypair.insecure_clone(),
         subscription_rx,
         allowed_programs,
+        None,
     );
 
     // Fetch and clone both programs
@@ -2044,6 +2046,7 @@ async fn test_allowed_programs_none_allows_all() {
         validator_keypair.insecure_clone(),
         subscription_rx,
         None, // No restriction
+        None,
     );
 
     // Fetch and clone both programs
@@ -2115,6 +2118,7 @@ async fn test_allowed_programs_empty_allows_all() {
         validator_keypair.insecure_clone(),
         subscription_rx,
         allowed_programs,
+        None,
     );
 
     // Fetch and clone both programs
@@ -3443,6 +3447,7 @@ async fn test_fetch_subscription_race_duplicate_clone() {
         validator_keypair.insecure_clone(),
         subscription_rx,
         None,
+        None,
     );
 
     // Send subscription update (this will become the owner).
@@ -3564,6 +3569,7 @@ async fn test_delegated_account_fetch_subscription_race() {
         validator_keypair.insecure_clone(),
         subscription_rx,
         None,
+        None,
     );
 
     // Send subscription update.
@@ -3670,6 +3676,7 @@ async fn test_clone_ownership_failure_propagates_to_waiters() {
         &cloner_stub,
         validator_keypair.insecure_clone(),
         subscription_rx,
+        None,
         None,
     );
 
@@ -4478,6 +4485,7 @@ async fn test_owned_operation_owner_timeout_cleans_up_pending() {
         validator_keypair.insecure_clone(),
         subscription_rx,
         None,
+        None,
     );
     fetch_cloner.set_pending_operation_timeout(TEST_PENDING_REQUEST_TIMEOUT);
 
@@ -4583,6 +4591,7 @@ async fn test_cancel_pending_terminates_owner_and_all_waiters() {
         &blocking_cloner,
         validator_keypair.insecure_clone(),
         subscription_rx,
+        None,
         None,
     );
 
@@ -4706,6 +4715,7 @@ async fn test_cancel_all_pending_on_shutdown() {
         &blocking_cloner,
         validator_keypair.insecure_clone(),
         subscription_rx,
+        None,
         None,
     );
 

@@ -105,6 +105,7 @@ impl TestContext {
                             validator_keypair.insecure_clone(),
                             rx,
                             None,
+                            None,
                         )),
                         Some(provider),
                     )

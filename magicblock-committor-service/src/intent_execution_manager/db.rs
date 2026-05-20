@@ -18,7 +18,7 @@ pub trait DB: Send + Sync + 'static {
         intent_bundles: Vec<ScheduledIntentBundle>,
     ) -> DBResult<()>;
 
-    /// Returns intent with smallest id
+    /// Returns the oldest (first stored) intent bundle
     async fn pop_intent_bundle(
         &self,
     ) -> DBResult<Option<ScheduledIntentBundle>>;
