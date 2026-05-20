@@ -274,53 +274,25 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
     > {
         let validator_pubkey = validator_keypair.pubkey();
         let validator_keypair_bytes = validator_keypair.to_bytes();
-        // Extract accounts provider and create fetch cloner while connecting
-        // the subscription channel
-        let (tx, rx) = tokio::sync::mpsc::channel(5_000);
-        let account_provider = RemoteAccountProvider::try_from_urls_and_config(
-            endpoints,
-            commitment,
-            tx,
-            &config.remote_account_provider,
-        )
-        .await?;
-        let fetch_cloner = if let Some(provider) = account_provider {
-            let provider = Arc::new(provider);
-            let risk_service = RiskService::try_from_config(
-                &chainlink_config.risk,
-                ledger_path,
-            )?
-            .map(Arc::new);
-            let fetch_cloner = FetchCloner::new(
-                &provider,
-                accounts_bank,
-                cloner,
-                validator_keypair,
-                rx,
-                chainlink_config.allowed_programs.clone(),
-                risk_service,
-            );
-            Some(fetch_cloner)
-        } else {
-            None
-        };
 
-        let mut chainlink = Chainlink::try_new(
-            accounts_bank,
-            fetch_cloner,
-            validator_pubkey,
-            chainlink_config,
-        )?;
-        chainlink.runtime_build_config = Some(ChainlinkRuntimeBuildConfig {
-            endpoints: endpoints.clone(),
-            commitment,
-            cloner: cloner.clone(),
-            validator_keypair_bytes,
-            chainlink_config: chainlink_config.clone(),
-            runtime_config: config,
-            ledger_path: ledger_path.to_path_buf(),
-        });
-        Ok(chainlink)
+        Ok(Chainlink {
+            accounts_bank: accounts_bank.clone(),
+            runtime: AsyncMutex::new(None),
+            lifecycle_state: AtomicU8::new(
+                ChainlinkLifecycleState::Disabled as u8,
+            ),
+            runtime_build_config: Some(ChainlinkRuntimeBuildConfig {
+                endpoints: endpoints.clone(),
+                commitment,
+                cloner: cloner.clone(),
+                validator_keypair_bytes,
+                chainlink_config: chainlink_config.clone(),
+                runtime_config: config,
+                ledger_path: ledger_path.to_path_buf(),
+            }),
+            validator_id: validator_pubkey,
+            remove_confined_accounts: chainlink_config.remove_confined_accounts,
+        })
     }
 
     #[allow(dead_code)]

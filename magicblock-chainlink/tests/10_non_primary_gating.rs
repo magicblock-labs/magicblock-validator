@@ -1,4 +1,17 @@
-use magicblock_chainlink::{testing::init_logger, AccountFetchOrigin};
+use std::{path::Path, sync::Arc};
+
+use magicblock_chainlink::{
+    accounts_bank::mock::AccountsBankStub,
+    chainlink::config::ChainlinkConfig,
+    remote_account_provider::{
+        chain_rpc_client::ChainRpcClientImpl,
+        chain_updates_client::ChainUpdatesClient, Endpoint, Endpoints,
+    },
+    submux::SubMuxClient,
+    testing::{cloner_stub::ClonerStub, init_logger},
+    AccountFetchOrigin, Chainlink,
+};
+use magicblock_config::config::{ChainLinkConfig, LifecycleMode};
 use magicblock_core::coordination_mode::{
     switch_to_primary_mode, switch_to_replica_mode,
 };
@@ -29,6 +42,51 @@ impl Drop for PrimaryModeGuard {
 async fn setup(slot: Slot) -> TestContext {
     init_logger();
     TestContext::init(slot).await
+}
+
+#[tokio::test]
+async fn new_endpoint_chainlink_starts_without_active_runtime() {
+    init_logger();
+    let bank = Arc::<AccountsBankStub>::default();
+    let cloner = Arc::new(ClonerStub::new(bank.clone()));
+    let endpoints = Endpoints::from(
+        [
+            Endpoint::Rpc {
+                url: "http://127.0.0.1:8899".to_string(),
+                label: "local-rpc".to_string(),
+            },
+            Endpoint::WebSocket {
+                url: "ws://127.0.0.1:8900".to_string(),
+                label: "local-ws".to_string(),
+            },
+        ]
+        .as_slice(),
+    );
+    let chainlink: Chainlink<
+        ChainRpcClientImpl,
+        SubMuxClient<ChainUpdatesClient>,
+        AccountsBankStub,
+        ClonerStub,
+    > = Chainlink::<
+        ChainRpcClientImpl,
+        SubMuxClient<ChainUpdatesClient>,
+        AccountsBankStub,
+        ClonerStub,
+    >::try_new_from_endpoints(
+        &endpoints,
+        Default::default(),
+        &bank,
+        &cloner,
+        solana_keypair::Keypair::new(),
+        ChainlinkConfig::default_with_lifecycle_mode(LifecycleMode::Ephemeral),
+        &ChainLinkConfig::default(),
+        Path::new("."),
+    )
+    .await
+    .unwrap();
+
+    assert!(!chainlink.is_runtime_active().await);
+    assert_eq!(chainlink.lifecycle_state_for_tests(), "disabled");
 }
 
 #[tokio::test]
