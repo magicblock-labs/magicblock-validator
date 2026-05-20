@@ -621,26 +621,27 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
     where
         F: Fn(&Pubkey) -> CapacityEvictionProtection + Send + Sync + 'static,
     {
-        *self
+        let mut guard = self
             .capacity_eviction_protection
             .write()
-            .expect("capacity_eviction_protection lock poisoned") =
-            Some(Arc::new(predicate));
+            .unwrap_or_else(|poison| poison.into_inner());
+        *guard = Some(Arc::new(predicate));
     }
 
     fn capacity_eviction_protection_for(
         &self,
         pubkey: &Pubkey,
     ) -> CapacityEvictionProtection {
-        self.capacity_eviction_protection
+        let guard = self
+            .capacity_eviction_protection
             .read()
-            .expect("capacity_eviction_protection lock poisoned")
-            .as_ref()
-            .map(|predicate| predicate(pubkey))
-            .unwrap_or(CapacityEvictionProtection {
+            .unwrap_or_else(|poison| poison.into_inner());
+        guard.as_ref().map(|predicate| predicate(pubkey)).unwrap_or(
+            CapacityEvictionProtection {
                 delegated: false,
                 undelegating: false,
-            })
+            },
+        )
     }
 
     pub fn try_get_removed_account_rx(
