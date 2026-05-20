@@ -40,6 +40,7 @@ use tokio::{
     sync::{mpsc, oneshot, Mutex as AsyncMutex},
     task, time,
 };
+use tokio_util::sync::CancellationToken;
 use tracing::*;
 
 pub mod chain_slot;
@@ -410,8 +411,10 @@ pub struct RemoteAccountProvider<T: ChainRpcClient, U: ChainPubsubClient> {
 
     subscription_forwarder: Arc<mpsc::Sender<ForwardedSubscriptionUpdate>>,
 
+    shutdown_token: CancellationToken,
+    account_updates_task_handle: AsyncMutex<Option<task::JoinHandle<()>>>,
     /// Task that periodically updates the active subscriptions gauge
-    _active_subscriptions_task_handle: Option<task::JoinHandle<()>>,
+    active_subscriptions_task_handle: AsyncMutex<Option<task::JoinHandle<()>>>,
 }
 
 // -----------------
@@ -507,6 +510,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         subscribed_accounts: Arc<AccountsLruCache>,
         pubsub_client: Arc<PubsubClient>,
         removed_account_tx: mpsc::Sender<Pubkey>,
+        shutdown_token: CancellationToken,
     ) -> task::JoinHandle<()> {
         task::spawn(async move {
             let mut interval = time::interval(Duration::from_millis(
@@ -515,18 +519,25 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             let never_evicted = subscribed_accounts.never_evicted_accounts();
 
             loop {
-                interval.tick().await;
-                let pubsub_total =
-                    subscription_reconciler::reconcile_subscriptions(
-                        &subscribed_accounts,
-                        pubsub_client.as_ref(),
-                        &never_evicted,
-                        &removed_account_tx,
-                    )
-                    .await;
+                tokio::select! {
+                    _ = interval.tick() => {
+                        let pubsub_total =
+                            subscription_reconciler::reconcile_subscriptions(
+                                &subscribed_accounts,
+                                pubsub_client.as_ref(),
+                                &never_evicted,
+                                &removed_account_tx,
+                            )
+                            .await;
 
-                debug!(count = pubsub_total, "Updating active subscriptions");
-                set_monitored_accounts_count(pubsub_total);
+                        debug!(count = pubsub_total, "Updating active subscriptions");
+                        set_monitored_accounts_count(pubsub_total);
+                    }
+                    _ = shutdown_token.cancelled() => {
+                        debug!("Stopping active subscriptions updater");
+                        break;
+                    }
+                }
             }
         })
     }
@@ -544,6 +555,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
     ) -> RemoteAccountProviderResult<Self> {
         let (removed_account_tx, removed_account_rx) =
             tokio::sync::mpsc::channel(100);
+        let shutdown_token = CancellationToken::new();
 
         let active_subscriptions_updater =
             if config.enable_subscription_metrics() {
@@ -551,6 +563,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                     lrucache_subscribed_accounts.clone(),
                     Arc::new(pubsub_client.clone()),
                     removed_account_tx.clone(),
+                    shutdown_token.child_token(),
                 ))
             } else {
                 None
@@ -571,11 +584,15 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             subscription_forwarder: Arc::new(subscription_forwarder),
             removed_account_tx,
             removed_account_rx: Mutex::new(Some(removed_account_rx)),
-            _active_subscriptions_task_handle: active_subscriptions_updater,
+            shutdown_token,
+            account_updates_task_handle: AsyncMutex::new(None),
+            active_subscriptions_task_handle: AsyncMutex::new(
+                active_subscriptions_updater,
+            ),
         };
 
         let updates = me.pubsub_client.take_updates();
-        me.listen_for_account_updates(updates)?;
+        me.listen_for_account_updates(updates).await?;
         let clock_remote_account = me
             .try_get(clock::ID, AccountFetchOrigin::GetAccount)
             .await?;
@@ -804,7 +821,85 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         self.received_updates_count.load(Ordering::Relaxed)
     }
 
-    fn listen_for_account_updates(
+    pub async fn shutdown(&self) -> RemoteAccountProviderResult<()> {
+        self.shutdown_token.cancel();
+
+        let shutdown_result = match self.pubsub_client.shutdown().await {
+            Ok(()) => Ok(()),
+            Err(err) => {
+                warn!(error = %err, "Remote account pubsub shutdown failed");
+                Err(err)
+            }
+        };
+
+        if let Some(mut handle) =
+            self.account_updates_task_handle.lock().await.take()
+        {
+            match time::timeout(Duration::from_secs(2), &mut handle).await {
+                Ok(Ok(())) => {}
+                Ok(Err(err)) => {
+                    warn!(error = %err, "Account updates task failed during shutdown");
+                }
+                Err(_) => {
+                    warn!(
+                        "Account updates task did not stop in time; aborting"
+                    );
+                    handle.abort();
+                    let _ = handle.await;
+                }
+            }
+        }
+
+        if let Some(mut handle) =
+            self.active_subscriptions_task_handle.lock().await.take()
+        {
+            match time::timeout(Duration::from_secs(2), &mut handle).await {
+                Ok(Ok(())) => {}
+                Ok(Err(err)) => {
+                    warn!(error = %err, "Active subscriptions task failed during shutdown");
+                }
+                Err(_) => {
+                    warn!(
+                        "Active subscriptions task did not stop in time; aborting"
+                    );
+                    handle.abort();
+                    let _ = handle.await;
+                }
+            }
+        }
+
+        if let Some(mut removed_account_rx) = self
+            .removed_account_rx
+            .lock()
+            .expect("removed_account_rx lock poisoned")
+            .take()
+        {
+            while removed_account_rx.try_recv().is_ok() {}
+        }
+
+        {
+            let mut fetching = self
+                .fetching_accounts
+                .lock()
+                .expect("fetching_accounts lock poisoned");
+            for (_, state) in fetching.drain() {
+                for waiter in state.waiters {
+                    let _ = waiter.send(Err(
+                        RemoteAccountProviderError::AccountSubscriptionsTaskFailed(
+                            "remote account provider shut down".to_string(),
+                        ),
+                    ));
+                }
+            }
+        }
+
+        self.subscription_ownership.lock().await.clear();
+        self.subscription_key_locks.lock().await.clear();
+
+        shutdown_result
+    }
+
+    async fn listen_for_account_updates(
         &self,
         mut updates: mpsc::Receiver<SubscriptionUpdate>,
     ) -> RemoteAccountProviderResult<()> {
@@ -813,8 +908,16 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         let received_updates_count = self.received_updates_count.clone();
         let last_update_slot = self.last_update_slot.clone();
         let subscription_forwarder = self.subscription_forwarder.clone();
-        task::spawn(async move {
-            while let Some(update) = updates.recv().await {
+        let shutdown_token = self.shutdown_token.child_token();
+        let handle = task::spawn(async move {
+            loop {
+                let update = tokio::select! {
+                    update = updates.recv() => match update {
+                        Some(update) => update,
+                        None => break,
+                    },
+                    _ = shutdown_token.cancelled() => break,
+                };
                 let slot = update.slot;
 
                 received_updates_count.fetch_add(1, Ordering::Relaxed);
@@ -906,6 +1009,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                 }
             }
         });
+        *self.account_updates_task_handle.lock().await = Some(handle);
         Ok(())
     }
 
