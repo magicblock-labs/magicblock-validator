@@ -71,10 +71,17 @@ pub struct Chainlink<
 impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
     Chainlink<T, U, V, C>
 {
+    // Remote sync is allowed only while the validator is in Primary mode.
+    // Non-primary ensure/fetch/subscription/eviction calls are intentionally
+    // no-op or local-only; explicit bank reset remains separate
+    // primary-readiness cleanup and is not controlled by these generic gates.
     fn remote_sync_enabled() -> bool {
         CoordinationMode::current().needs_onchain_interactions()
     }
 
+    /// Marks the primary lifecycle boundary for chainlink remote sync.
+    /// The CoordinationMode gate remains authoritative: if this is called
+    /// before Primary mode is visible, remote work stays gated.
     pub fn enable_primary(&self) -> ChainlinkResult<()> {
         if !Self::remote_sync_enabled() {
             trace!("Chainlink enable_primary requested before primary mode; remote sync remains gated");
@@ -84,6 +91,9 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
         Ok(())
     }
 
+    /// Marks the non-primary lifecycle boundary. Non-primary chainlink calls
+    /// intentionally become no-op/local-only while bank reset remains an
+    /// explicit primary-readiness operation.
     pub fn disable(&self) {
         info!("Chainlink remote sync disabled by lifecycle transition");
     }
@@ -179,10 +189,11 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
         )
     }
 
-    /// Removes all accounts that aren't delegated to us and not blacklisted from the bank
-    /// This should only be called _before_ the validator starts up, i.e.
-    /// when resuming an existing ledger to guarantee that we don't hold
-    /// accounts that might be stale.
+    /// Removes all accounts that aren't delegated to us and not blacklisted from the bank.
+    /// This is explicit primary-readiness cleanup: standalone validators run it
+    /// before entering Primary mode, and replicated validators run it during
+    /// promotion. It is intentionally not controlled by the generic remote sync
+    /// gates used by ensure/fetch calls.
     pub fn reset_accounts_bank(&self) -> AccountsDbResult<()> {
         let blacklisted_accounts = blacklisted_accounts(&self.validator_id);
 

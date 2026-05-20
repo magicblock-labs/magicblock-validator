@@ -49,10 +49,11 @@ where
     EnterPrimaryFuture: Future<Output = ()>,
     EnablePrimary: FnOnce() -> Result<()>,
 {
+    // Primary readiness order is intentional: first wait for the scheduler to
+    // become idle, then reset the account bank, then expose Primary mode, and
+    // finally enable the chainlink lifecycle. Reset is primary-readiness cleanup
+    // and is intentionally skipped during standby/replica startup.
     let _guard = wait_for_idle().await;
-    // Account-bank reset is primary-readiness cleanup and is intentionally
-    // skipped during standby/replica startup. Run it only after primary work is
-    // idle and before exposing primary mode or enabling the chainlink lifecycle.
     reset_bank()?;
     enter_primary().await;
     enable_primary()?;
@@ -232,6 +233,8 @@ impl ReplicationContext {
     }
 
     /// Transitions to primary role with the given producer.
+    /// Ordering: wait for scheduler idle, reset bank, switch to Primary mode,
+    /// then enable the chainlink lifecycle.
     pub async fn into_primary(
         self,
         producer: Producer,
