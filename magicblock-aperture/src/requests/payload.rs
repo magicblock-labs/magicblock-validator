@@ -1,4 +1,4 @@
-use hyper::{body::Bytes, header::CONTENT_TYPE, Response};
+use hyper::{body::Bytes, header::CONTENT_TYPE, Response, StatusCode};
 use json::{Serialize, Value};
 use magicblock_core::Slot;
 
@@ -106,12 +106,19 @@ impl<'id> ResponseErrorPayload<'id> {
         id: Option<&'id Value>,
         error: RpcError,
     ) -> Response<JsonBody> {
+        let http_status = error.http_status();
         let payload = Self {
             jsonrpc: "2.0",
             error,
             id,
         };
-        build_json_response(payload)
+        let mut response = build_json_response(payload);
+        if http_status != 200 {
+            if let Ok(status) = StatusCode::from_u16(http_status) {
+                *response.status_mut() = status;
+            }
+        }
+        response
     }
 }
 
