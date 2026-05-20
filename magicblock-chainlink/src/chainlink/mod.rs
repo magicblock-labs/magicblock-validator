@@ -13,7 +13,6 @@ use fetch_cloner::FetchCloner;
 use magicblock_accounts_db::{traits::AccountsBank, AccountsDbResult};
 use magicblock_aml::RiskService;
 use magicblock_config::config::ChainLinkConfig;
-use magicblock_core::coordination_mode::CoordinationMode;
 use magicblock_metrics::metrics::AccountFetchOrigin;
 use solana_account::{AccountSharedData, ReadableAccount};
 use solana_commitment_config::CommitmentConfig;
@@ -127,14 +126,6 @@ pub struct Chainlink<
 impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
     Chainlink<T, U, V, C>
 {
-    // Remote sync is allowed only while the validator is in Primary mode.
-    // Non-primary ensure/fetch/subscription/eviction calls are intentionally
-    // no-op or local-only; explicit bank reset remains separate
-    // primary-readiness cleanup and is not controlled by these generic gates.
-    fn remote_sync_enabled() -> bool {
-        CoordinationMode::current().needs_onchain_interactions()
-    }
-
     /// Marks the non-primary lifecycle boundary. Non-primary chainlink calls
     /// intentionally become no-op/local-only while bank reset remains an
     /// explicit primary-readiness operation.
@@ -174,13 +165,6 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
             info!("Chainlink remote sync disabled by lifecycle transition");
         }
         result
-    }
-
-    pub fn is_remote_sync_enabled(&self) -> bool {
-        let _ = ChainlinkLifecycleState::from_u8(
-            self.lifecycle_state.load(Ordering::SeqCst),
-        );
-        Self::remote_sync_enabled()
     }
 
     #[cfg(any(test, feature = "dev-context"))]
@@ -375,14 +359,6 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
 
         task::spawn(async move {
             while let Some(pubkey) = removed_accounts_rx.recv().await {
-                if !Self::remote_sync_enabled() {
-                    trace!(
-                        pubkey = %pubkey,
-                        "Skipping account eviction while chainlink remote sync is disabled"
-                    );
-                    continue;
-                }
-
                 // Pre-flight check: skip if delegated/undelegating
                 // (the processor enforces this too, but this avoids
                 // the overhead of building and submitting a doomed tx)
@@ -458,14 +434,6 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
             return Ok(Default::default());
         }
 
-        if !Self::remote_sync_enabled() {
-            trace!(
-                tx_sig = %tx.signature(),
-                "Skipping transaction account ensure while chainlink remote sync is disabled"
-            );
-            return Ok(Default::default());
-        }
-
         let mut pubkeys = tx
             .message()
             .account_keys()
@@ -520,14 +488,6 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
         fetch_origin: AccountFetchOrigin,
         program_ids: Option<&[Pubkey]>,
     ) -> ChainlinkResult<FetchAndCloneResult> {
-        if !Self::remote_sync_enabled() {
-            trace!(
-                count = pubkeys.len(),
-                "Skipping account ensure while chainlink remote sync is disabled"
-            );
-            return Ok(FetchAndCloneResult::default());
-        }
-
         let Some(fetch_cloner) = self.runtime_fetch_cloner().await else {
             return Ok(FetchAndCloneResult::default());
         };
@@ -552,17 +512,6 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
         fetch_origin: AccountFetchOrigin,
         program_ids: Option<&[Pubkey]>,
     ) -> ChainlinkResult<Vec<Option<AccountSharedData>>> {
-        if !Self::remote_sync_enabled() {
-            trace!(
-                count = pubkeys.len(),
-                "Reading local accounts while chainlink remote sync is disabled"
-            );
-            return Ok(pubkeys
-                .iter()
-                .map(|pubkey| self.accounts_bank.get_account(pubkey))
-                .collect());
-        }
-
         if tracing::enabled!(tracing::Level::TRACE) {
             let count = pubkeys.len();
             trace!(count, "Fetching accounts");
@@ -643,14 +592,6 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
         debug!(pubkey = %pubkey, "Undelegation requested");
 
         magicblock_metrics::metrics::inc_undelegation_requested();
-
-        if !Self::remote_sync_enabled() {
-            debug!(
-                pubkey = %pubkey,
-                "Skipping undelegation subscription while chainlink remote sync is disabled"
-            );
-            return Ok(());
-        }
 
         let Some(fetch_cloner) = self.runtime_fetch_cloner().await else {
             return Ok(());
@@ -742,11 +683,7 @@ impl<V: AccountsBank>
             );
         }
 
-        if !Self::remote_sync_enabled() {
-            trace!("Chainlink enable_primary requested before primary mode; remote sync remains gated");
-        } else {
-            info!("Chainlink primary remote sync enabled");
-        }
+        info!("Chainlink primary remote sync enabled");
         Ok(())
     }
 }
@@ -859,11 +796,7 @@ impl<V: AccountsBank, C: Cloner>
     }
 
     fn log_primary_enabled() {
-        if !Self::remote_sync_enabled() {
-            trace!("Chainlink enable_primary requested before primary mode; remote sync remains gated");
-        } else {
-            info!("Chainlink primary remote sync enabled");
-        }
+        info!("Chainlink primary remote sync enabled");
     }
 }
 
