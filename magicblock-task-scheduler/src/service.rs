@@ -519,6 +519,7 @@ fn is_retryable_task_execution_error(error: &TaskSchedulerError) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use magicblock_core::coordination_mode::switch_to_replica_mode;
     use magicblock_program::{
         args::ScheduleTaskRequest,
         validator::generate_validator_authority_if_needed,
@@ -728,5 +729,23 @@ mod tests {
         .unwrap()
         .unwrap();
         handle.abort();
+    }
+
+    #[tokio::test]
+    async fn test_task_scheduler_does_not_start_on_standby_mode() {
+        magicblock_core::logger::init_for_tests();
+        switch_to_replica_mode();
+
+        let (_tx, rx) = mpsc::unbounded_channel();
+        let db = SchedulerDatabase::new(":memory:").unwrap();
+        let service = test_service(db.clone(), rx);
+        let handle = service.start().await.unwrap();
+
+        // Handle should join immediately because it's in standby mode
+        timeout(Duration::from_secs(1), async move { handle.await })
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
     }
 }
