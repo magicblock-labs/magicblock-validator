@@ -146,6 +146,32 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
         Self::remote_sync_enabled()
     }
 
+    #[cfg(any(test, feature = "dev-context"))]
+    pub fn lifecycle_state_for_tests(&self) -> &'static str {
+        match ChainlinkLifecycleState::from_u8(
+            self.lifecycle_state.load(Ordering::SeqCst),
+        ) {
+            ChainlinkLifecycleState::Disabled => "disabled",
+            ChainlinkLifecycleState::Starting => "starting",
+            ChainlinkLifecycleState::Enabled => "enabled",
+            ChainlinkLifecycleState::Stopping => "stopping",
+        }
+    }
+
+    #[cfg(any(test, feature = "dev-context"))]
+    pub async fn is_runtime_active(&self) -> bool {
+        self.runtime.lock().await.is_some()
+    }
+
+    #[cfg(any(test, feature = "dev-context"))]
+    pub async fn active_fetch_count_for_tests(&self) -> Option<u64> {
+        self.runtime
+            .lock()
+            .await
+            .as_ref()
+            .map(|runtime| runtime.fetch_cloner.fetch_count())
+    }
+
     pub fn try_new(
         accounts_bank: &Arc<V>,
         fetch_cloner: Option<Arc<FetchCloner<T, U, V, C>>>,
