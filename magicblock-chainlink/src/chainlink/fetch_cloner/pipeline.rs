@@ -364,7 +364,11 @@ where
                         .push((pubkey, account.remote_slot()));
                     (None, None, DelegationActions::default())
                 };
-            let cleanup_direct_subscription = account.delegated();
+            let cleanup_delegated_subscription = account.delegated();
+            let cleanup_undelegation_tracking = cleanup_delegated_subscription
+                && this.accounts_bank.get_account(&pubkey).is_some_and(
+                    |in_bank| in_bank.undelegating() || !in_bank.delegated(),
+                );
             accounts_to_clone.push(AccountCloneRequest {
                 pubkey,
                 account: account.into_account_shared_data(),
@@ -372,7 +376,13 @@ where
                 delegation_actions,
                 delegated_to_other,
             });
-            if cleanup_direct_subscription {
+            if cleanup_delegated_subscription {
+                if cleanup_undelegation_tracking {
+                    this.cleanup_undelegation_tracking_for_redelegated_account(
+                        pubkey,
+                    )
+                    .await;
+                }
                 this.cleanup_direct_subscription_for_delegated_account(pubkey)
                     .await;
             }

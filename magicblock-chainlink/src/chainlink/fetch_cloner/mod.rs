@@ -623,6 +623,7 @@ where
             return;
         }
 
+        let mut undelegation_completed_on_chain = false;
         if let Some(in_bank) = self.accounts_bank.get_account(&pubkey) {
             if in_bank.delegated() && !in_bank.undelegating() {
                 self.cleanup_direct_subscription_for_delegated_account(pubkey)
@@ -675,6 +676,9 @@ where
                 ) {
                     return;
                 }
+                undelegation_completed_on_chain = true;
+            } else if !in_bank.delegated() && account.delegated() {
+                undelegation_completed_on_chain = true;
             } else if in_bank.owner().eq(&dlp_api::id()) {
                 debug!(
                     pubkey = %pubkey,
@@ -709,13 +713,16 @@ where
             return;
         }
 
-        // Delegated non-undelegating subscription cleanup is the primary
-        // mechanism for removing known delegated accounts from direct
-        // subscription/LRU ownership; undelegation tracking owns protected
-        // subscriptions while undelegation is in progress.
+        // Delegated subscription cleanup is limited to direct subscription/LRU
+        // ownership here; undelegation tracking owns protected subscriptions
+        // until undelegation is explicitly complete.
         if account.delegated() {
-            self.cleanup_undelegation_tracking_for_redelegated_account(pubkey)
+            if undelegation_completed_on_chain {
+                self.cleanup_undelegation_tracking_for_redelegated_account(
+                    pubkey,
+                )
                 .await;
+            }
             self.cleanup_direct_subscription_for_delegated_account(pubkey)
                 .await;
         }
