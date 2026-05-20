@@ -125,17 +125,14 @@ keypair = "9Vo7TbA5YfC5a33JhAi9Fb41usA6JwecHNRw3f9MzzHAM8hFnXTzL5DcEHwsAFjuUZ8vN
 # Default: "standalone"
 # Options:
 # - "standalone": disable replication
+# - "primary": replicate the state transitions
+# - "replica": replay the state transitions from primary
 # 
-# - "stand-by": replicate and allow takeover
-# 
-# [validator.replication-mode.stand-by]
+# [validator.replication-mode.primary]
 # url = "nats://0.0.0.0:4222"
 # secret = "SUAXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
 # 
-# - "replica-only": replicate without takeover
-#   Requires the primary validator pubkey we are replicating from.
-# 
-# [validator.replication-mode.replica-only]
+# [validator.replication-mode.replica]
 # url = "nats://0.0.0.0:4222"
 # secret = "SUAXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
 # authority-override = "L12m1UhkJRfHyvLMcVucJwxXeuD728EqVDDwQDxFMNo"

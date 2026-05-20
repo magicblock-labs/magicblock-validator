@@ -4,7 +4,7 @@
 //!
 //! - [`Broker`]: Connection manager with stream/bucket initialization
 //! - [`Producer`]: Event publisher with distributed leader lock
-//! - [`Consumer`]: Event subscriber for standby replay
+//! - [`Consumer`]: Event subscriber for replay
 //! - [`Snapshot`]: AccountsDb snapshot with positioning metadata
 //! - [`LockWatcher`]: Watcher for leader lock expiration
 

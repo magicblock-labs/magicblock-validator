@@ -7,7 +7,6 @@ use tracing::{error, info, instrument, warn};
 use super::{ReplicationContext, LOCK_REFRESH_INTERVAL};
 use crate::{
     nats::{Producer, Subjects},
-    service::Standby,
     watcher::SnapshotWatcher,
     Result,
 };
@@ -36,35 +35,42 @@ impl Primary {
         }
     }
 
-    /// Runs until leadership lost or shutdown.
-    /// Returns `Some(Standby)` on demotion, `None` on shutdown.
+    /// Runs the state replication until shutdown.
     #[instrument(skip(self))]
-    pub async fn run(mut self) -> Result<Option<Standby>> {
+    pub async fn run(mut self) {
         info!("entering primary replication mode");
         let mut lock_tick = tokio::time::interval(LOCK_REFRESH_INTERVAL);
 
         loop {
             tokio::select! {
                 biased;
+                _ = self.ctx.cancel.cancelled() => {
+                    info!("shutdown received, terminating primary mode");
+                    if let Err(error) = self.producer.release().await {
+                        warn!(%error, "failed to release the lock");
+                    }
+                    return;
+                }
                 _ = lock_tick.tick() => {
-                    let held = match self.producer.refresh().await {
-                        Ok(h) => h,
-                        Err(e) => {
-                            warn!(%e, "lock refresh failed");
-                            false
+                    loop {
+                        match self.producer.refresh().await {
+                            Ok(locked) if locked => {
+                                break;
+                            },
+                            Ok(_) => {
+                                warn!("lock lost, should never happen, trying to renew");
+                            }
+                            Err(e) => {
+                                warn!(%e, "lock refresh failed");
+                            }
                         }
-                    };
-                    if !held {
-                        info!("lost leadership, demoting");
-                        return self.ctx.into_standby(self.messages, true).await;
                     }
                 }
                 Some(msg) = self.messages.recv() => {
-                    if let Err(error) = self.publish(msg).await {
+                    while let Err(error) = self.publish(&msg).await {
                         // publish should not easily fail, if that happens, it means
                         // the message broker has become unrecoverably unreacheable
                         warn!(%error, "failed to publish the message");
-                        return self.ctx.into_standby(self.messages, true).await;
                     }
                 }
                 Some((file, slot)) = self.snapshots.recv() => {
@@ -72,23 +78,19 @@ impl Primary {
                         warn!(%e, "snapshot upload failed");
                     }
                 }
-                _ = self.ctx.cancel.cancelled() => {
-                    info!("shutdown received, terminating primary mode");
-                    return Ok(None);
-                }
             }
         }
     }
 
-    async fn publish(&mut self, msg: Message) -> Result<()> {
-        let payload = match bincode::serialize(&msg) {
+    async fn publish(&mut self, msg: &Message) -> Result<()> {
+        let payload = match bincode::serialize(msg) {
             Ok(p) => p,
             Err(error) => {
                 error!(%error, "serialization failed, should never happen");
                 return Ok(());
             }
         };
-        let subject = Subjects::from_message(&msg);
+        let subject = Subjects::from_message(msg);
         let (slot, index) = msg.slot_and_index();
         let ack = matches!(msg, Message::SuperBlock(_));
 

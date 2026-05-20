@@ -129,8 +129,7 @@ pub struct MagicValidator {
     claim_fees_task: ClaimFeesTask,
     task_scheduler: Option<TaskSchedulerService>,
     transaction_execution: thread::JoinHandle<()>,
-    replication_handle:
-        Option<thread::JoinHandle<magicblock_replicator::Result<()>>>,
+    replication_handle: Option<thread::JoinHandle<()>>,
     mode_tx: Sender<SchedulerMode>,
     is_standalone: bool,
 }
@@ -246,11 +245,6 @@ impl MagicValidator {
                 let messages_rx = dispatch.replication_messages.take().expect(
                     "replication channel should always exist after init",
                 );
-                // ReplicaOnly mode cannot promote to primary
-                let can_promote = matches!(
-                    config.validator.replication_mode,
-                    ReplicationMode::StandBy(_)
-                );
                 ReplicationService::new(
                     broker,
                     mode_tx.clone(),
@@ -261,7 +255,7 @@ impl MagicValidator {
                     messages_rx,
                     token.clone(),
                     is_fresh_start,
-                    can_promote,
+                    &config.validator.replication_mode,
                 )
                 .await?
             } else {
@@ -882,10 +876,6 @@ impl MagicValidator {
         }
 
         // Notify the scheduler that ledger replay and bank cleanup is complete.
-        // The message carries the target mode so the scheduler transitions to
-        // the correct coordination mode:
-        // - Standalone validators transition to Primary mode
-        // - StandBy/ReplicaOnly validators transition to Replica mode
         if self.is_standalone {
             self.mode_tx
                 .send(SchedulerMode::Primary)
@@ -1036,9 +1026,7 @@ impl MagicValidator {
         let step_start = Instant::now();
         let _ = self.transaction_execution.join();
         if let Some(handle) = self.replication_handle {
-            if let Ok(Err(error)) = handle.join() {
-                error!(%error, "replication service experienced catastrophic failure");
-            }
+            let _ = handle.join();
         }
         log_timing("shutdown", "transaction_execution_join", step_start);
 

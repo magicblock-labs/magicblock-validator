@@ -1,4 +1,4 @@
-//! Standby node: consumes events and watches for leader failure.
+//! Replica node: consumes events and watches for leader failure.
 
 use std::time::{Duration, Instant};
 
@@ -9,75 +9,44 @@ use magicblock_core::link::{
     transactions::{ReplayPosition, WithEncoded},
 };
 use solana_transaction::versioned::VersionedTransaction;
-use tokio::sync::mpsc::Receiver;
 use tracing::{error, info, warn};
 
 use super::{ReplicationContext, LEADER_TIMEOUT};
-use crate::{
-    nats::{Consumer, LockWatcher},
-    service::Primary,
-    Result,
-};
+use crate::{nats::Consumer, Result};
 
-/// Standby node: consumes events and watches for leader failure.
-pub struct Standby {
+/// replica node: consumes events and watches for leader failure.
+pub struct Replica {
     pub(crate) ctx: ReplicationContext,
     consumer: Box<Consumer>,
-    messages: Receiver<Message>,
-    watcher: LockWatcher,
     last_activity: Instant,
-    can_promote: bool,
 }
 
-impl Standby {
-    /// Creates a new standby instance.
-    pub fn new(
-        ctx: ReplicationContext,
-        consumer: Box<Consumer>,
-        messages: Receiver<Message>,
-        watcher: LockWatcher,
-    ) -> Self {
-        let can_promote = ctx.can_promote;
+impl Replica {
+    /// Creates a new replica instance.
+    pub fn new(ctx: ReplicationContext, consumer: Box<Consumer>) -> Self {
         Self {
             ctx,
             consumer,
-            messages,
-            watcher,
             last_activity: Instant::now(),
-            can_promote,
         }
     }
 
     /// Runs until leadership acquired or shutdown.
     /// Returns `Some(Primary)` on promotion, `None` on shutdown.
-    pub async fn run(mut self) -> Result<Option<Primary>> {
-        info!("entering standby replication mode");
+    pub async fn run(mut self) {
+        info!("entering replica replication mode");
         let mut timeout_check = tokio::time::interval(Duration::from_secs(1));
         let Some(mut stream) = self.consumer.messages(&self.ctx.cancel).await
         else {
-            return Ok(None);
+            return;
         };
 
         loop {
             tokio::select! {
                 biased;
                 _ = self.ctx.cancel.cancelled() => {
-                    info!("shutdown received, terminating standby mode");
-                    return Ok(None);
-                }
-                _ = self.watcher.wait_for_expiry() => {
-                    if self.has_pending().await {
-                        continue;
-                    }
-                    if !self.can_promote {
-                        warn!("leader lock expired, but takeover disabled (ReplicaOnly mode)");
-                        continue
-                    }
-                    info!("leader lock expired, attempting takeover");
-                    if let Ok(Some(producer)) = self.ctx.try_acquire_producer().await {
-                        info!("acquired leadership, promoting");
-                        return self.ctx.into_primary(producer, self.messages).await.map(Some);
-                    }
+                    info!("shutdown received, terminating replica mode");
+                    return;
                 }
                 result = stream.next() => {
                     let Some(result) = result else {
@@ -85,7 +54,7 @@ impl Standby {
                             stream = s;
                             continue;
                         } else {
-                            return Ok(None);
+                            return;
                         };
                     };
                     match result {
@@ -97,17 +66,11 @@ impl Standby {
                     }
                 }
                 _ = timeout_check.tick() => {
-                     if self.last_activity.elapsed() < LEADER_TIMEOUT {
-                         continue;
-                     }
-                     if !self.can_promote {
-                        warn!("leader timeout reached, but takeover disabled (ReplicaOnly mode)");
+                    if self.last_activity.elapsed() < LEADER_TIMEOUT {
                         continue;
                     }
-                    if let Ok(Some(producer)) = self.ctx.try_acquire_producer().await {
-                        info!("acquired leadership via timeout, promoting");
-                        return self.ctx.into_primary(producer, self.messages).await.map(Some);
-                    }
+                    self.last_activity = Instant::now();
+                    warn!("no leader activity for too long");
                 }
             }
         }
@@ -155,15 +118,6 @@ impl Standby {
             return;
         }
         self.ctx.update_position(slot, index);
-    }
-
-    /// Check whether consumer has any undelivered messages in the stream
-    async fn has_pending(&mut self) -> bool {
-        self.consumer
-            .pending(&self.ctx.cancel)
-            .await
-            .map(|pending| pending != 0)
-            .unwrap_or_default()
     }
 
     async fn replay_tx(&self, msg: Transaction) -> Result<()> {

@@ -10,7 +10,7 @@ use crate::nats::Broker;
 
 /// Watches the leader lock for expiration/deletion.
 ///
-/// Used by standby nodes to detect when the primary's lock expires,
+/// Used by replica nodes to detect when the primary's lock expires,
 /// enabling faster takeover than waiting for the activity timeout.
 pub struct LockWatcher {
     watch: Box<Watch>,
@@ -18,6 +18,7 @@ pub struct LockWatcher {
 
 impl LockWatcher {
     /// Creates a new lock watcher.
+    #[allow(unused)]
     pub(crate) async fn new(
         broker: &Broker,
         cancel: &CancellationToken,
