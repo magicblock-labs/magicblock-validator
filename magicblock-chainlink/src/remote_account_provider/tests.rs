@@ -144,6 +144,42 @@ async fn test_shutdown_clears_subscriptions_and_fails_pending_waiters() {
     assert!(err.to_string().contains("shut down"));
 }
 
+#[tokio::test]
+async fn test_shutdown_stops_deferred_pubsub_task() {
+    init_logger();
+
+    let account_pubkey = solana_pubkey::Pubkey::new_unique();
+    let account = Account {
+        lamports: 1_000_000,
+        data: vec![1, 2, 3, 4],
+        owner: system_program::id(),
+        executable: false,
+        rent_epoch: 0,
+    };
+
+    let ProviderTestCtx {
+        provider,
+        _pubsub_client,
+        ..
+    } = setup_provider(account_pubkey, account).await;
+
+    let task_shutdown_token = provider.shutdown_token.child_token();
+    let (started_tx, started_rx) = oneshot::channel();
+    let handle = tokio::spawn(async move {
+        let _ = started_tx.send(());
+        task_shutdown_token.cancelled().await;
+    });
+
+    *provider.deferred_pubsub_task_handle.lock().await = Some(handle);
+    started_rx.await.expect("deferred pubsub task should start");
+
+    provider.shutdown().await.unwrap();
+
+    assert_eq!(_pubsub_client.shutdown_attempts(), 1);
+    assert!(provider.shutdown_token.is_cancelled());
+    assert!(provider.deferred_pubsub_task_handle.lock().await.is_none());
+}
+
 async fn setup_matching_slots(
     config: TestSlotConfig,
     pubkey1: Pubkey,
