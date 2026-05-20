@@ -144,7 +144,8 @@ fn spawn_deferred_pubsub_clients(
     submux: SubMuxClient<ChainUpdatesClient>,
     subscribed_accounts: Arc<AccountsLruCache>,
     subscription_transition_lock: Arc<AsyncMutex<()>>,
-) {
+    shutdown_token: CancellationToken,
+) -> task::JoinHandle<()> {
     tokio::spawn(async move {
         let mut pubsub_futs = endpoints
             .into_iter()
@@ -159,7 +160,14 @@ fn spawn_deferred_pubsub_clients(
                 )
             })
             .collect::<FuturesUnordered<_>>();
-        while let Some((label, result)) = pubsub_futs.next().await {
+        loop {
+            let next = tokio::select! {
+                _ = shutdown_token.cancelled() => break,
+                next = pubsub_futs.next() => next,
+            };
+            let Some((label, result)) = next else {
+                break;
+            };
             let (client, abort_rx) = match result {
                 Ok(client) => client,
                 Err(err) => {
@@ -172,13 +180,26 @@ fn spawn_deferred_pubsub_clients(
                 }
             };
 
-            let add_result = {
-                let _transition_guard =
-                    subscription_transition_lock.lock().await;
-                submux
-                    .add_client(client, abort_rx, subscribed_accounts.clone())
-                    .await
+            if shutdown_token.is_cancelled() {
+                break;
+            }
+
+            let add_result = tokio::select! {
+                _ = shutdown_token.cancelled() => break,
+                add_result = async {
+                    let _transition_guard =
+                        subscription_transition_lock.lock().await;
+                    if shutdown_token.is_cancelled() {
+                        return Ok(());
+                    }
+                    submux
+                        .add_client(client, abort_rx, subscribed_accounts.clone())
+                        .await
+                } => add_result,
             };
+            if shutdown_token.is_cancelled() {
+                break;
+            }
             if let Err(err) = add_result {
                 warn!(
                     endpoint = %label,
@@ -189,7 +210,7 @@ fn spawn_deferred_pubsub_clients(
             }
             debug!(endpoint = %label, "Attached deferred pubsub client");
         }
-    });
+    })
 }
 
 // Maps pubkey -> (fetch_start_slot, requests_waiting)
@@ -413,6 +434,7 @@ pub struct RemoteAccountProvider<T: ChainRpcClient, U: ChainPubsubClient> {
 
     shutdown_token: CancellationToken,
     account_updates_task_handle: AsyncMutex<Option<task::JoinHandle<()>>>,
+    deferred_pubsub_task_handle: AsyncMutex<Option<task::JoinHandle<()>>>,
     /// Task that periodically updates the active subscriptions gauge
     active_subscriptions_task_handle: AsyncMutex<Option<task::JoinHandle<()>>>,
 }
@@ -586,6 +608,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             removed_account_rx: Mutex::new(Some(removed_account_rx)),
             shutdown_token,
             account_updates_task_handle: AsyncMutex::new(None),
+            deferred_pubsub_task_handle: AsyncMutex::new(None),
             active_subscriptions_task_handle: AsyncMutex::new(
                 active_subscriptions_updater,
             ),
@@ -668,7 +691,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         {
             Ok((provider, deferred_pubsubs)) => {
                 if !deferred_pubsubs.is_empty() {
-                    spawn_deferred_pubsub_clients(
+                    let handle = spawn_deferred_pubsub_clients(
                         deferred_pubsubs,
                         commitment,
                         rpc_client,
@@ -678,7 +701,10 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                         provider.pubsub_client.clone(),
                         provider.lrucache_subscribed_accounts.clone(),
                         provider.subscription_transition_lock.clone(),
+                        provider.shutdown_token.child_token(),
                     );
+                    *provider.deferred_pubsub_task_handle.lock().await =
+                        Some(handle);
                 }
                 Ok(provider)
             }
@@ -831,6 +857,24 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                 Err(err)
             }
         };
+
+        if let Some(mut handle) =
+            self.deferred_pubsub_task_handle.lock().await.take()
+        {
+            match time::timeout(Duration::from_secs(2), &mut handle).await {
+                Ok(Ok(())) => {}
+                Ok(Err(err)) => {
+                    warn!(error = %err, "Deferred pubsub task failed during shutdown");
+                }
+                Err(_) => {
+                    warn!(
+                        "Deferred pubsub task did not stop in time; aborting"
+                    );
+                    handle.abort();
+                    let _ = handle.await;
+                }
+            }
+        }
 
         if let Some(mut handle) =
             self.account_updates_task_handle.lock().await.take()
