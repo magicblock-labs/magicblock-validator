@@ -11221,12 +11221,14 @@ name = "test-cloning"
 version = "0.0.0"
 dependencies = [
  "integration-test-tools",
+ "magicblock-core",
  "magicblock-delegation-program-api 0.3.0 (git+https://github.com/magicblock-labs/delegation-program.git?rev=25386a7c1d406d06b8d07a4d5b0fd37d5e74213b)",
  "program-flexi-counter",
  "program-mini",
  "solana-loader-v4-interface",
  "solana-sdk",
  "solana-system-interface 3.2.0",
+ "spl-associated-token-account-interface",
  "spl-memo-interface",
  "spl-token-interface",
  "test-chainlink",
@@ -11348,6 +11350,9 @@ version = "0.0.0"
 dependencies = [
  "ctrlc",
  "integration-test-tools",
+ "magicblock-core",
+ "magicblock-delegation-program-api 0.3.0 (git+https://github.com/magicblock-labs/delegation-program.git?rev=25386a7c1d406d06b8d07a4d5b0fd37d5e74213b)",
+ "solana-sdk",
  "teepee",
 ]
 
