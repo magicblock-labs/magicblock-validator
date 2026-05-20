@@ -69,4 +69,7 @@ pub enum ChainlinkError {
 
     #[error("Invalid validator keypair bytes: {0}")]
     InvalidValidatorKeypair(String),
+
+    #[error("remote account provider is required by lifecycle config but was not created")]
+    MissingRemoteAccountProvider,
 }

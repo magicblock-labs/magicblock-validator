@@ -183,7 +183,7 @@ impl ReplicationContext {
         let _guard = self.scheduler.wait_for_idle().await;
         self.chainlink.reset_accounts_bank()?;
         self.enter_primary_mode().await;
-        self.chainlink.enable_primary()?;
+        self.chainlink.enable_primary().await?;
         Ok(())
     }
 

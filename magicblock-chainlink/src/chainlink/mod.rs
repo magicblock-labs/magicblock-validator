@@ -135,20 +135,6 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
         CoordinationMode::current().needs_onchain_interactions()
     }
 
-    /// Marks the primary lifecycle boundary for chainlink remote sync.
-    /// The CoordinationMode gate remains authoritative: if this is called
-    /// before Primary mode is visible, remote work stays gated.
-    pub fn enable_primary(&self) -> ChainlinkResult<()> {
-        self.lifecycle_state
-            .store(ChainlinkLifecycleState::Enabled as u8, Ordering::SeqCst);
-        if !Self::remote_sync_enabled() {
-            trace!("Chainlink enable_primary requested before primary mode; remote sync remains gated");
-        } else {
-            info!("Chainlink primary remote sync enabled");
-        }
-        Ok(())
-    }
-
     /// Marks the non-primary lifecycle boundary. Non-primary chainlink calls
     /// intentionally become no-op/local-only while bank reset remains an
     /// explicit primary-readiness operation.
@@ -763,6 +749,148 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
             runtime_build_config: None,
             validator_id: self.validator_id,
             remove_confined_accounts: self.remove_confined_accounts,
+        }
+    }
+}
+
+impl<V: AccountsBank>
+    Chainlink<ChainRpcClientMock, ChainPubsubClientMock, V, ClonerStub>
+{
+    /// Marks the primary lifecycle boundary for stubbed chainlink remote sync.
+    pub async fn enable_primary(&self) -> ChainlinkResult<()> {
+        if self.runtime.lock().await.is_some() {
+            self.lifecycle_state.store(
+                ChainlinkLifecycleState::Enabled as u8,
+                Ordering::SeqCst,
+            );
+        } else {
+            self.lifecycle_state.store(
+                ChainlinkLifecycleState::Disabled as u8,
+                Ordering::SeqCst,
+            );
+        }
+
+        if !Self::remote_sync_enabled() {
+            trace!("Chainlink enable_primary requested before primary mode; remote sync remains gated");
+        } else {
+            info!("Chainlink primary remote sync enabled");
+        }
+        Ok(())
+    }
+}
+
+impl<V: AccountsBank, C: Cloner>
+    Chainlink<ChainRpcClientImpl, SubMuxClient<ChainUpdatesClient>, V, C>
+{
+    /// Marks the primary lifecycle boundary for chainlink remote sync and
+    /// creates the runtime from stored production configuration when needed.
+    pub async fn enable_primary(&self) -> ChainlinkResult<()> {
+        let mut runtime = self.runtime.lock().await;
+        if runtime.is_some() {
+            self.lifecycle_state.store(
+                ChainlinkLifecycleState::Enabled as u8,
+                Ordering::SeqCst,
+            );
+            Self::log_primary_enabled();
+            return Ok(());
+        }
+
+        self.lifecycle_state
+            .store(ChainlinkLifecycleState::Starting as u8, Ordering::SeqCst);
+
+        let Some(build) = self.runtime_build_config.as_ref() else {
+            self.lifecycle_state.store(
+                ChainlinkLifecycleState::Disabled as u8,
+                Ordering::SeqCst,
+            );
+            Self::log_primary_enabled();
+            return Ok(());
+        };
+
+        if !build
+            .runtime_config
+            .remote_account_provider
+            .lifecycle_mode()
+            .needs_remote_account_provider()
+        {
+            self.lifecycle_state.store(
+                ChainlinkLifecycleState::Disabled as u8,
+                Ordering::SeqCst,
+            );
+            Self::log_primary_enabled();
+            return Ok(());
+        }
+
+        match self.create_runtime_from_build_config(build).await {
+            Ok(new_runtime) => {
+                *runtime = Some(new_runtime);
+                self.lifecycle_state.store(
+                    ChainlinkLifecycleState::Enabled as u8,
+                    Ordering::SeqCst,
+                );
+                Self::log_primary_enabled();
+                Ok(())
+            }
+            Err(err) => {
+                *runtime = None;
+                self.lifecycle_state.store(
+                    ChainlinkLifecycleState::Disabled as u8,
+                    Ordering::SeqCst,
+                );
+                Err(err)
+            }
+        }
+    }
+
+    async fn create_runtime_from_build_config(
+        &self,
+        build: &ChainlinkRuntimeBuildConfig<C>,
+    ) -> ChainlinkResult<
+        ChainlinkRuntime<
+            ChainRpcClientImpl,
+            SubMuxClient<ChainUpdatesClient>,
+            V,
+            C,
+        >,
+    > {
+        let validator_keypair =
+            Self::validator_keypair_from_bytes(&build.validator_keypair_bytes)?;
+        let (tx, rx) = tokio::sync::mpsc::channel(5_000);
+        let account_provider = RemoteAccountProvider::try_from_urls_and_config(
+            &build.endpoints,
+            build.commitment,
+            tx,
+            &build.runtime_config.remote_account_provider,
+        )
+        .await?;
+
+        let Some(provider) = account_provider else {
+            return Err(ChainlinkError::MissingRemoteAccountProvider);
+        };
+
+        let provider = Arc::new(provider);
+        let risk_service = RiskService::try_from_config(
+            &build.chainlink_config.risk,
+            &build.ledger_path,
+        )?
+        .map(Arc::new);
+        let fetch_cloner = FetchCloner::new(
+            &provider,
+            &self.accounts_bank,
+            &build.cloner,
+            validator_keypair,
+            rx,
+            build.chainlink_config.allowed_programs.clone(),
+            risk_service,
+        );
+        Self::build_runtime(&self.accounts_bank, fetch_cloner)
+    }
+
+    fn log_primary_enabled() {
+        if !Self::remote_sync_enabled() {
+            trace!("Chainlink enable_primary requested before primary mode; remote sync remains gated");
+        } else {
+            info!("Chainlink primary remote sync enabled");
         }
     }
 }
