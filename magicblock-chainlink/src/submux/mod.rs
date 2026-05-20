@@ -251,15 +251,16 @@ where
             .map(|(client, _)| client.clone())
             .collect::<Vec<_>>();
 
+        let shutdown_token = CancellationToken::new();
         Self::spawn_reconnectors(
             clients,
             subscribed_accounts_tracker,
             program_subs.clone(),
             connected_clients.clone(),
             connected_clients_subscribing_immediately.clone(),
+            shutdown_token.child_token(),
         );
 
-        let shutdown_token = CancellationToken::new();
         let me = Self {
             clients: Arc::new(Mutex::new(clients_only)),
             out_tx,
@@ -293,6 +294,7 @@ where
         program_subs: Arc<Mutex<HashSet<Pubkey>>>,
         connected_clients: Arc<AtomicU16>,
         connected_clients_subscribing_immediately: Arc<AtomicU16>,
+        shutdown_token: CancellationToken,
     ) {
         for (client, mut abort_rx) in clients.into_iter() {
             let subscribed_accounts_tracker =
@@ -301,8 +303,20 @@ where
             let connected_clients = connected_clients.clone();
             let connected_clients_subscribing_immediately =
                 connected_clients_subscribing_immediately.clone();
+            let shutdown_token = shutdown_token.child_token();
             tokio::spawn(async move {
-                while (abort_rx.recv().await).is_some() {
+                loop {
+                    tokio::select! {
+                        abort = abort_rx.recv() => {
+                            if abort.is_none() {
+                                break;
+                            }
+                        }
+                        _ = shutdown_token.cancelled() => break,
+                    }
+                    if shutdown_token.is_cancelled() {
+                        break;
+                    }
                     // Drain any duplicate abort signals to coalesce reconnect attempts
                     while abort_rx.try_recv().is_ok() {}
 
@@ -336,6 +350,7 @@ where
                         program_subs.clone(),
                         connected_clients.clone(),
                         connected_clients_subscribing_immediately.clone(),
+                        shutdown_token.child_token(),
                     )
                     .await;
                 }
@@ -417,6 +432,7 @@ where
             self.program_subs.clone(),
             self.connected_clients.clone(),
             self.connected_clients_subscribing_immediately.clone(),
+            self.shutdown_token.child_token(),
         );
         Ok(())
     }
@@ -441,7 +457,8 @@ where
             accounts_tracker,
             program_subs,
             connected_clients,
-            connected_clients_subscribing_immediately
+            connected_clients_subscribing_immediately,
+            shutdown_token
         ),
         fields(client_id = %client.id())
     )]
@@ -451,6 +468,7 @@ where
         program_subs: Arc<Mutex<HashSet<Pubkey>>>,
         connected_clients: Arc<AtomicU16>,
         connected_clients_subscribing_immediately: Arc<AtomicU16>,
+        shutdown_token: CancellationToken,
     ) {
         fn fib_with_max_secs(n: u64) -> u64 {
             let (mut a, mut b) = (0u64, 1u64);
@@ -464,6 +482,9 @@ where
         const WARN_EVERY_ATTEMPTS: u64 = 10;
         let mut attempt = 0;
         loop {
+            if shutdown_token.is_cancelled() {
+                break;
+            }
             attempt += 1;
             // Track the current resubscription delay for this client
             if let Some(delay_ms) = client.current_resub_delay_ms() {
@@ -520,7 +541,10 @@ where
                         "Failed to reconnect client, will retry after backoff"
                     );
                 }
-                tokio::time::sleep(wait_duration).await;
+                tokio::select! {
+                    _ = tokio::time::sleep(wait_duration) => {}
+                    _ = shutdown_token.cancelled() => break,
+                }
                 debug!(
                     client_id = %client.id(),
                     attempt,
@@ -888,6 +912,39 @@ where
             / self.debounce_interval.as_millis()) as usize
     }
 
+    #[cfg(any(test, feature = "dev-context"))]
+    pub fn connected_client_count_for_tests(&self) -> u16 {
+        self.connected_clients.load(Ordering::SeqCst)
+    }
+
+    #[cfg(any(test, feature = "dev-context"))]
+    pub fn program_subscription_count_for_tests(&self) -> usize {
+        self.program_subs
+            .lock()
+            .expect("program_subs lock poisoned")
+            .len()
+    }
+
+    pub async fn shutdown(&self) -> RemoteAccountProviderResult<()> {
+        self.shutdown_token.cancel();
+        let result = AccountSubscriptionTask::Shutdown
+            .process(self.clients_snapshot())
+            .await;
+        self.program_subs
+            .lock()
+            .expect("program_subs lock poisoned")
+            .clear();
+        self.dedup_cache
+            .lock()
+            .expect("dedup_cache lock poisoned")
+            .clear();
+        self.debounce_states
+            .lock()
+            .expect("debounce_states lock poisoned")
+            .clear();
+        result
+    }
+
     #[cfg(test)]
     fn get_debounce_state(&self, pubkey: Pubkey) -> Option<DebounceState> {
         let states = self
@@ -988,9 +1045,7 @@ where
     }
 
     async fn shutdown(&self) -> RemoteAccountProviderResult<()> {
-        AccountSubscriptionTask::Shutdown
-            .process(self.clients_snapshot())
-            .await
+        SubMuxClient::shutdown(self).await
     }
 
     fn take_updates(&self) -> mpsc::Receiver<SubscriptionUpdate> {

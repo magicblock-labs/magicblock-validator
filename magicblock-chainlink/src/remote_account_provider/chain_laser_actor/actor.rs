@@ -355,7 +355,7 @@ impl<H: StreamHandle, S: StreamFactory<H>> ChainLaserActor<H, S> {
             }
             Shutdown { response } => {
                 info!(client_id = self.client_id, "Received Shutdown message");
-                Self::clear_subscriptions(&mut self.stream_manager);
+                self.stream_manager.shutdown();
                 let _ = response.send(Ok(())).inspect_err(|_| {
                     warn!(
                         client_id = self.client_id,
@@ -607,8 +607,7 @@ impl<H: StreamHandle, S: StreamFactory<H>> ChainLaserActor<H, S> {
     }
 
     fn clear_subscriptions(stream_manager: &mut StreamManager<H, S>) {
-        stream_manager.clear_account_subscriptions();
-        stream_manager.clear_program_subscriptions();
+        stream_manager.shutdown();
     }
 
     /// Signals a connection issue by clearing all subscriptions

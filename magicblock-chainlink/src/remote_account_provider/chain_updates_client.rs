@@ -92,6 +92,14 @@ impl ChainUpdatesClient {
             }
         }
     }
+
+    pub async fn shutdown(&self) -> RemoteAccountProviderResult<()> {
+        use ChainUpdatesClient::*;
+        match self {
+            WebSocket(client) => client.shutdown().await,
+            Laser(client) => client.shutdown().await,
+        }
+    }
 }
 
 #[async_trait]
@@ -131,11 +139,7 @@ impl ChainPubsubClient for ChainUpdatesClient {
     }
 
     async fn shutdown(&self) -> RemoteAccountProviderResult<()> {
-        use ChainUpdatesClient::*;
-        match self {
-            WebSocket(client) => client.shutdown().await,
-            Laser(client) => client.shutdown().await,
-        }
+        ChainUpdatesClient::shutdown(self).await
     }
 
     fn take_updates(&self) -> mpsc::Receiver<SubscriptionUpdate> {

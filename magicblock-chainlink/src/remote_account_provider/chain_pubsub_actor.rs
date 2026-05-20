@@ -383,6 +383,16 @@ impl ChainPubsubActor {
                 .await;
             }
             ChainPubsubActorMessage::Reconnect { response } => {
+                if shutdown_token.is_cancelled() {
+                    let _ = response.send(Err(
+                        RemoteAccountProviderError::AccountSubscriptionsTaskFailed(
+                            format!(
+                                "Client {client_id} is shutting down; reconnect skipped"
+                            ),
+                        ),
+                    ));
+                    return;
+                }
                 let result = Self::try_reconnect(
                     pubsub_connection,
                     pubsub_client_config,

@@ -387,6 +387,17 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
         !self.stream_map.is_empty()
     }
 
+    /// Clears all account, program, slot-filter, and stream state.
+    pub fn shutdown(&mut self) {
+        self.clear_account_subscriptions();
+        self.clear_program_subscriptions();
+    }
+
+    #[cfg(any(test, feature = "dev-context"))]
+    pub fn active_stream_count_for_tests(&self) -> usize {
+        self.stream_map.len()
+    }
+
     /// Returns `true` if there are unoptimized old streams.
     pub fn has_unoptimized_streams(&self) -> bool {
         !self.unoptimized_old_handles.is_empty()
