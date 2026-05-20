@@ -501,7 +501,10 @@ impl TaskSchedulerService {
     async fn is_primary_mode(&self) -> bool {
         let mut mode = CoordinationMode::current();
         while mode == CoordinationMode::StartingUp {
-            tokio::time::sleep(Duration::from_millis(100)).await;
+            tokio::select! {
+                _ = self.token.cancelled() => return false,
+                _ = tokio::time::sleep(Duration::from_millis(100)) => {}
+            }
             mode = CoordinationMode::current();
         }
         mode == CoordinationMode::Primary
