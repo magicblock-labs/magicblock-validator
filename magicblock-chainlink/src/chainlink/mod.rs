@@ -1,4 +1,11 @@
-use std::{collections::HashSet, path::Path, sync::Arc};
+use std::{
+    collections::HashSet,
+    path::Path,
+    sync::{
+        atomic::{AtomicU8, Ordering},
+        Arc,
+    },
+};
 
 use dlp_api::pda::ephemeral_balance_pda_from_payer;
 use errors::ChainlinkResult;
@@ -15,7 +22,7 @@ use solana_pubkey::Pubkey;
 use solana_sdk_ids::feature;
 use solana_signer::Signer;
 use solana_transaction::sanitized::SanitizedTransaction;
-use tokio::{sync::mpsc, task};
+use tokio::{sync::mpsc, sync::Mutex as AsyncMutex, task};
 use tracing::*;
 
 use crate::{
@@ -47,6 +54,41 @@ pub type StubbedChainlink<V> =
 // -----------------
 // Chainlink
 // -----------------
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ChainlinkLifecycleState {
+    Disabled = 0,
+    Starting = 1,
+    Enabled = 2,
+    Stopping = 3,
+}
+
+impl ChainlinkLifecycleState {
+    fn from_u8(value: u8) -> Self {
+        match value {
+            1 => Self::Starting,
+            2 => Self::Enabled,
+            3 => Self::Stopping,
+            _ => Self::Disabled,
+        }
+    }
+}
+
+struct ChainlinkRuntime<T, U, V, C>
+where
+    T: ChainRpcClient,
+    U: ChainPubsubClient,
+    V: AccountsBank,
+    C: Cloner,
+{
+    fetch_cloner: Arc<FetchCloner<T, U, V, C>>,
+    /// The subscription to events for each account that is removed from
+    /// the accounts tracked by the provider.
+    /// In that case we also remove it from the bank since it is no longer
+    /// synchronized.
+    #[allow(unused)] // needed to cleanup chainlink
+    removed_accounts_sub: Option<task::JoinHandle<()>>,
+}
+
 pub struct Chainlink<
     T: ChainRpcClient,
     U: ChainPubsubClient,
@@ -54,13 +96,8 @@ pub struct Chainlink<
     C: Cloner,
 > {
     accounts_bank: Arc<V>,
-    fetch_cloner: Option<Arc<FetchCloner<T, U, V, C>>>,
-    /// The subscription to events for each account that is removed from
-    /// the accounts tracked by the provider.
-    /// In that case we also remove it from the bank since it is no longer
-    /// synchronized.
-    #[allow(unused)] // needed to cleanup chainlink
-    removed_accounts_sub: Option<task::JoinHandle<()>>,
+    runtime: AsyncMutex<Option<ChainlinkRuntime<T, U, V, C>>>,
+    lifecycle_state: AtomicU8,
 
     validator_id: Pubkey,
 
@@ -83,6 +120,8 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
     /// The CoordinationMode gate remains authoritative: if this is called
     /// before Primary mode is visible, remote work stays gated.
     pub fn enable_primary(&self) -> ChainlinkResult<()> {
+        self.lifecycle_state
+            .store(ChainlinkLifecycleState::Enabled as u8, Ordering::SeqCst);
         if !Self::remote_sync_enabled() {
             trace!("Chainlink enable_primary requested before primary mode; remote sync remains gated");
         } else {
@@ -95,10 +134,15 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
     /// intentionally become no-op/local-only while bank reset remains an
     /// explicit primary-readiness operation.
     pub fn disable(&self) {
+        self.lifecycle_state
+            .store(ChainlinkLifecycleState::Disabled as u8, Ordering::SeqCst);
         info!("Chainlink remote sync disabled by lifecycle transition");
     }
 
     pub fn is_remote_sync_enabled(&self) -> bool {
+        let _ = ChainlinkLifecycleState::from_u8(
+            self.lifecycle_state.load(Ordering::SeqCst),
+        );
         Self::remote_sync_enabled()
     }
 
@@ -108,24 +152,39 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
         validator_pubkey: Pubkey,
         config: &ChainLinkConfig,
     ) -> ChainlinkResult<Self> {
-        let removed_accounts_sub = if let Some(fetch_cloner) = &fetch_cloner {
-            let removed_accounts_rx =
-                fetch_cloner.try_get_removed_account_rx()?;
-            let cloner = fetch_cloner.cloner();
-            Some(Self::subscribe_account_removals(
-                accounts_bank,
-                cloner,
-                removed_accounts_rx,
-            ))
+        let runtime = if let Some(fetch_cloner) = fetch_cloner {
+            Some(Self::build_runtime(accounts_bank, fetch_cloner)?)
         } else {
             None
         };
+        let lifecycle_state = if runtime.is_some() {
+            ChainlinkLifecycleState::Enabled
+        } else {
+            ChainlinkLifecycleState::Disabled
+        };
         Ok(Self {
             accounts_bank: accounts_bank.clone(),
-            fetch_cloner,
-            removed_accounts_sub,
+            runtime: AsyncMutex::new(runtime),
+            lifecycle_state: AtomicU8::new(lifecycle_state as u8),
             validator_id: validator_pubkey,
             remove_confined_accounts: config.remove_confined_accounts,
+        })
+    }
+
+    fn build_runtime(
+        accounts_bank: &Arc<V>,
+        fetch_cloner: Arc<FetchCloner<T, U, V, C>>,
+    ) -> ChainlinkResult<ChainlinkRuntime<T, U, V, C>> {
+        let removed_accounts_rx = fetch_cloner.try_get_removed_account_rx()?;
+        let cloner = fetch_cloner.cloner();
+        let removed_accounts_sub = Some(Self::subscribe_account_removals(
+            accounts_bank,
+            cloner,
+            removed_accounts_rx,
+        ));
+        Ok(ChainlinkRuntime {
+            fetch_cloner,
+            removed_accounts_sub,
         })
     }
 
@@ -413,11 +472,11 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
             return Ok(FetchAndCloneResult::default());
         }
 
-        let Some(fetch_cloner) = self.fetch_cloner() else {
+        let Some(fetch_cloner) = self.runtime_fetch_cloner().await else {
             return Ok(FetchAndCloneResult::default());
         };
         self.fetch_accounts_common(
-            fetch_cloner,
+            fetch_cloner.as_ref(),
             pubkeys,
             mark_empty_if_not_found,
             fetch_origin,
@@ -452,7 +511,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
             let count = pubkeys.len();
             trace!(count, "Fetching accounts");
         }
-        let Some(fetch_cloner) = self.fetch_cloner() else {
+        let Some(fetch_cloner) = self.runtime_fetch_cloner().await else {
             // If we're offline and not syncing accounts then we just get them from the bank
             return Ok(pubkeys
                 .iter()
@@ -461,7 +520,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
         };
         let _ = self
             .fetch_accounts_common(
-                fetch_cloner,
+                fetch_cloner.as_ref(),
                 pubkeys,
                 None,
                 fetch_origin,
@@ -537,7 +596,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
             return Ok(());
         }
 
-        let Some(fetch_cloner) = self.fetch_cloner() else {
+        let Some(fetch_cloner) = self.runtime_fetch_cloner().await else {
             return Ok(());
         };
 
@@ -551,17 +610,40 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
         Ok(())
     }
 
-    pub fn fetch_cloner(&self) -> Option<&Arc<FetchCloner<T, U, V, C>>> {
-        self.fetch_cloner.as_ref()
+    async fn runtime_fetch_cloner(
+        &self,
+    ) -> Option<Arc<FetchCloner<T, U, V, C>>> {
+        self.runtime
+            .lock()
+            .await
+            .as_ref()
+            .map(|runtime| runtime.fetch_cloner.clone())
+    }
+
+    #[cfg(any(test, feature = "dev-context"))]
+    pub async fn fetch_cloner_for_tests(
+        &self,
+    ) -> Option<Arc<FetchCloner<T, U, V, C>>> {
+        self.runtime_fetch_cloner().await
     }
 
     pub fn fetch_count(&self) -> Option<u64> {
-        self.fetch_cloner().map(|provider| provider.fetch_count())
+        self.runtime.try_lock().ok().and_then(|runtime| {
+            runtime
+                .as_ref()
+                .map(|runtime| runtime.fetch_cloner.fetch_count())
+        })
     }
 
     pub fn is_watching(&self, pubkey: &Pubkey) -> bool {
-        self.fetch_cloner()
-            .map(|provider| provider.is_watching(pubkey))
+        self.runtime
+            .try_lock()
+            .ok()
+            .and_then(|runtime| {
+                runtime
+                    .as_ref()
+                    .map(|runtime| runtime.fetch_cloner.is_watching(pubkey))
+            })
             .unwrap_or(false)
     }
 
@@ -573,8 +655,10 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
     pub fn stub(&self) -> StubbedChainlink<V> {
         Chainlink {
             accounts_bank: self.accounts_bank.clone(),
-            fetch_cloner: None,
-            removed_accounts_sub: None,
+            runtime: AsyncMutex::new(None),
+            lifecycle_state: AtomicU8::new(
+                ChainlinkLifecycleState::Disabled as u8,
+            ),
             validator_id: self.validator_id,
             remove_confined_accounts: self.remove_confined_accounts,
         }

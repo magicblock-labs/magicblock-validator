@@ -24,7 +24,8 @@ async fn wait_for_registered_waiters(
     expected_waiters: usize,
 ) {
     let fetch_cloner = chainlink
-        .fetch_cloner()
+        .fetch_cloner_for_tests()
+        .await
         .expect("fetch cloner should be configured");
     let waiter_registration_start = tokio::time::Instant::now();
     let waiter_registration_timeout = tokio::time::Duration::from_secs(2);

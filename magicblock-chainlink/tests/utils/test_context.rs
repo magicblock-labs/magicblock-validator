@@ -143,7 +143,9 @@ impl TestContext {
         let timeout = timeout_millis
             .map(Duration::from_millis)
             .unwrap_or_else(|| Duration::from_secs(1));
-        if let Some(fetch_cloner) = self.chainlink.fetch_cloner() {
+        if let Some(fetch_cloner) =
+            self.chainlink.fetch_cloner_for_tests().await
+        {
             let target_count = fetch_cloner.received_updates_count() + count;
             trace!(
                 "Waiting for {} account updates, current count: {}",
