@@ -39,6 +39,10 @@ id = "DmnRGfyyftzacFb1XadYhWF6vWqXwtQk5tbr6XgR3BA1"
 path = "../schedulecommit/elfs/mdp.so"
 
 [[programs]]
+id = "SPLxh1LVZzEkX99H6rqYizhytLWPZVV296zyYDPagv2"
+path = "../programs/ephemeral-token/ephemeral_token_program.so"
+
+[[programs]]
 id = "MiniV31111111111111111111111111111111111111"
 path = "../target/deploy/miniv3/program_mini.so"
 auth = "MiniV3AUTH111111111111111111111111111111111"
