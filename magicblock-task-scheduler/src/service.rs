@@ -742,7 +742,7 @@ mod tests {
         let handle = service.start().await.unwrap();
 
         // Handle should join immediately because it's in standby mode
-        timeout(Duration::from_secs(1), async move { handle.await })
+        timeout(Duration::from_secs(1), handle)
             .await
             .unwrap()
             .unwrap()
