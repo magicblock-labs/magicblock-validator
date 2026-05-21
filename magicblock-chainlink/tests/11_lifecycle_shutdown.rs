@@ -1,7 +1,7 @@
 use magicblock_accounts_db::traits::AccountsBank;
 use magicblock_chainlink::{
     testing::{deleg::add_delegation_record_for, init_logger},
-    AccountFetchOrigin, ChainlinkPrimaryEnablement,
+    AccountFetchOrigin, PrimaryEnableOutcome, PrimaryRuntimeReadiness,
 };
 use solana_account::{Account, ReadableAccount};
 use solana_pubkey::Pubkey;
@@ -34,10 +34,13 @@ async fn chainlink_runtime_is_active_after_primary_enable() {
     let ctx = setup(1).await;
 
     assert!(ctx.chainlink.is_runtime_active().await);
-    assert_eq!(ctx.chainlink.lifecycle_state_for_tests(), "enabled");
+    assert_eq!(
+        ctx.chainlink.primary_runtime_readiness().await,
+        PrimaryRuntimeReadiness::Ready
+    );
     assert_eq!(
         ctx.chainlink.enable_primary().await.unwrap(),
-        ChainlinkPrimaryEnablement::Active
+        PrimaryEnableOutcome::RuntimeActive
     );
     assert!(ctx.chainlink.is_runtime_active().await);
 }
@@ -49,7 +52,10 @@ async fn disable_after_enable_stops_runtime_and_is_idempotent() {
 
     ctx.chainlink.disable().await.unwrap();
     assert!(!ctx.chainlink.is_runtime_active().await);
-    assert_eq!(ctx.chainlink.lifecycle_state_for_tests(), "disabled");
+    assert_eq!(
+        ctx.chainlink.primary_runtime_readiness().await,
+        PrimaryRuntimeReadiness::DisabledByConfig
+    );
 
     ctx.chainlink.disable().await.unwrap();
     assert!(!ctx.chainlink.is_runtime_active().await);

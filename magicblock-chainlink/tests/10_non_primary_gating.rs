@@ -10,7 +10,8 @@ use magicblock_chainlink::{
     },
     submux::SubMuxClient,
     testing::{cloner_stub::ClonerStub, init_logger},
-    AccountFetchOrigin, Chainlink, ChainlinkPrimaryEnablement,
+    AccountFetchOrigin, Chainlink, PrimaryEnableOutcome,
+    PrimaryRuntimeReadiness,
 };
 use magicblock_config::config::{ChainLinkConfig, LifecycleMode};
 use magicblock_core::coordination_mode::switch_to_replica_mode;
@@ -94,7 +95,10 @@ async fn new_endpoint_chainlink_with_lifecycle_mode(
 
 async fn assert_no_runtime_or_remote_work(chainlink: &EndpointChainlink) {
     assert!(!chainlink.is_runtime_active().await);
-    assert_eq!(chainlink.lifecycle_state_for_tests(), "disabled");
+    assert_eq!(
+        chainlink.primary_runtime_readiness().await,
+        PrimaryRuntimeReadiness::NotReady
+    );
     assert_eq!(chainlink.active_fetch_count_for_tests().await, None);
 }
 
@@ -175,7 +179,7 @@ async fn repeated_enable_disable_leaves_no_runtime_or_mock_subscriptions() {
 
     assert_eq!(
         ctx.chainlink.enable_primary().await.unwrap(),
-        ChainlinkPrimaryEnablement::Active
+        PrimaryEnableOutcome::RuntimeActive
     );
     assert!(ctx.chainlink.is_runtime_active().await);
 
@@ -184,12 +188,15 @@ async fn repeated_enable_disable_leaves_no_runtime_or_mock_subscriptions() {
 
     assert_eq!(
         ctx.chainlink.enable_primary().await.unwrap(),
-        ChainlinkPrimaryEnablement::DisabledByConfig
+        PrimaryEnableOutcome::DisabledByConfig
     );
     ctx.chainlink.disable().await.unwrap();
 
     assert!(!ctx.chainlink.is_runtime_active().await);
-    assert_eq!(ctx.chainlink.lifecycle_state_for_tests(), "disabled");
+    assert_eq!(
+        ctx.chainlink.primary_runtime_readiness().await,
+        PrimaryRuntimeReadiness::DisabledByConfig
+    );
     assert_eq!(ctx.chainlink.active_fetch_count_for_tests().await, None);
     assert!(ctx.pubsub_client.subscriptions_union().is_empty());
     assert!(ctx.pubsub_client.subscribed_program_ids().is_empty());
@@ -203,10 +210,13 @@ async fn offline_primary_enable_reports_disabled_by_config() {
 
     assert_eq!(
         chainlink.enable_primary().await.unwrap(),
-        ChainlinkPrimaryEnablement::DisabledByConfig
+        PrimaryEnableOutcome::DisabledByConfig
     );
     assert!(!chainlink.is_runtime_active().await);
-    assert_eq!(chainlink.lifecycle_state_for_tests(), "disabled");
+    assert_eq!(
+        chainlink.primary_runtime_readiness().await,
+        PrimaryRuntimeReadiness::DisabledByConfig
+    );
 }
 
 #[tokio::test]
