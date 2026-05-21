@@ -560,6 +560,7 @@ mod tests {
     #[tokio::test]
     async fn test_schedule_invalid_tasks() {
         magicblock_core::logger::init_for_tests();
+        switch_to_primary_mode();
         generate_validator_authority_if_needed();
 
         let (tx, rx) = mpsc::unbounded_channel();
@@ -611,6 +612,7 @@ mod tests {
     #[tokio::test]
     async fn test_remove_invalid_tasks_on_startup() {
         magicblock_core::logger::init_for_tests();
+        switch_to_primary_mode();
 
         let (_tx, rx) = mpsc::unbounded_channel();
         let db = SchedulerDatabase::new(":memory:").unwrap();
@@ -660,6 +662,7 @@ mod tests {
     #[tokio::test]
     async fn test_completed_tasks_are_removed_on_startup() {
         magicblock_core::logger::init_for_tests();
+        switch_to_primary_mode();
 
         let (_tx, rx) = mpsc::unbounded_channel();
         let db = SchedulerDatabase::new(":memory:").unwrap();
@@ -708,6 +711,7 @@ mod tests {
     #[tokio::test]
     async fn test_failed_records_are_cleaned_up_periodically() {
         magicblock_core::logger::init_for_tests();
+        switch_to_primary_mode();
 
         let (_tx, rx) = mpsc::unbounded_channel();
         let db = SchedulerDatabase::new(":memory:").unwrap();
