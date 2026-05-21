@@ -772,7 +772,9 @@ mod tests {
     ) -> TaskSchedulerService {
         TaskSchedulerService {
             db,
-            rpc_client: RpcClient::new("http://localhost:8899".to_string()),
+            rpc_client: Arc::new(RpcClient::new(
+                "http://localhost:8899".to_string(),
+            )),
             block: LatestBlock::default(),
             task_queue: DelayQueue::new(),
             task_queue_keys: HashMap::new(),
