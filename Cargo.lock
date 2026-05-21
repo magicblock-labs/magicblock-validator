@@ -3913,6 +3913,7 @@ dependencies = [
  "solana-transaction-error 3.2.0",
  "spl-token-2022-interface",
  "spl-token-interface",
+ "tempfile",
  "thiserror 2.0.18",
  "tokio",
  "tokio-stream",

@@ -86,6 +86,29 @@ pub trait ChainlinkPrimaryLifecycle: Send + Sync {
 // Chainlink
 // -----------------
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChainlinkPrimaryReadiness {
+    Ready,
+    ReadyWithoutRemoteProvider,
+    NotReady,
+}
+
+impl ChainlinkPrimaryReadiness {
+    pub fn allows_aperture_ensure(self) -> bool {
+        matches!(self, Self::Ready | Self::ReadyWithoutRemoteProvider)
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Ready => "ready",
+            Self::ReadyWithoutRemoteProvider => {
+                "ready_without_remote_provider"
+            }
+            Self::NotReady => "not_ready",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ChainlinkLifecycleState {
     Disabled = 0,
     Starting = 1,
@@ -155,6 +178,39 @@ pub struct Chainlink<
 impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
     Chainlink<T, U, V, C>
 {
+    pub async fn primary_readiness(&self) -> ChainlinkPrimaryReadiness {
+        match ChainlinkLifecycleState::from_u8(
+            self.lifecycle_state.load(Ordering::SeqCst),
+        ) {
+            ChainlinkLifecycleState::Enabled => {
+                if self.runtime.lock().await.is_some() {
+                    ChainlinkPrimaryReadiness::Ready
+                } else {
+                    ChainlinkPrimaryReadiness::NotReady
+                }
+            }
+            ChainlinkLifecycleState::Starting
+            | ChainlinkLifecycleState::Stopping => {
+                ChainlinkPrimaryReadiness::NotReady
+            }
+            ChainlinkLifecycleState::Disabled => {
+                let Some(build) = self.runtime_build_config.as_ref() else {
+                    return ChainlinkPrimaryReadiness::ReadyWithoutRemoteProvider;
+                };
+                if !build
+                    .runtime_config
+                    .remote_account_provider
+                    .lifecycle_mode()
+                    .needs_remote_account_provider()
+                {
+                    ChainlinkPrimaryReadiness::ReadyWithoutRemoteProvider
+                } else {
+                    ChainlinkPrimaryReadiness::NotReady
+                }
+            }
+        }
+    }
+
     /// Marks the non-primary lifecycle boundary. Non-primary chainlink calls
     /// intentionally become no-op/local-only while bank reset remains an
     /// explicit primary-readiness operation.
@@ -878,4 +934,54 @@ fn extract_program_ids_from_transaction(
         .map(|(program_id, _)| *program_id)
         .collect::<HashSet<_>>();
     program_ids.into_iter().collect()
+}
+
+#[cfg(test)]
+mod readiness_tests {
+    use std::sync::Arc;
+
+    use magicblock_accounts_db::AccountsDb;
+    use magicblock_config::config::ChainLinkConfig;
+    use solana_pubkey::Pubkey;
+
+    use super::{
+        ChainlinkPrimaryReadiness, StubbedChainlink,
+    };
+
+    #[tokio::test]
+    async fn try_new_without_fetch_cloner_is_ready_without_remote_provider(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let tempdir = tempfile::tempdir()?;
+        let accounts_db = Arc::new(AccountsDb::open(tempdir.path())?);
+        let chainlink = StubbedChainlink::try_new(
+            &accounts_db,
+            None,
+            Pubkey::new_unique(),
+            &ChainLinkConfig::default(),
+        )?;
+
+        assert_eq!(
+            chainlink.primary_readiness().await,
+            ChainlinkPrimaryReadiness::ReadyWithoutRemoteProvider
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn label_matches_expected_metric_values() {
+        assert_eq!(ChainlinkPrimaryReadiness::Ready.label(), "ready");
+        assert_eq!(
+            ChainlinkPrimaryReadiness::ReadyWithoutRemoteProvider.label(),
+            "ready_without_remote_provider"
+        );
+        assert_eq!(ChainlinkPrimaryReadiness::NotReady.label(), "not_ready");
+    }
+
+    #[test]
+    fn allows_aperture_ensure_only_for_ready_variants() {
+        assert!(ChainlinkPrimaryReadiness::Ready.allows_aperture_ensure());
+        assert!(ChainlinkPrimaryReadiness::ReadyWithoutRemoteProvider
+            .allows_aperture_ensure());
+        assert!(!ChainlinkPrimaryReadiness::NotReady.allows_aperture_ensure());
+    }
 }
