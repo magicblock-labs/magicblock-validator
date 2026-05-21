@@ -1,4 +1,4 @@
-//! Replica node: consumes events and watches for leader failure.
+//! Replica node: consumes and applies replicated events.
 
 use std::time::{Duration, Instant};
 
@@ -14,7 +14,7 @@ use tracing::{error, info, warn};
 use super::{ReplicationContext, LEADER_TIMEOUT};
 use crate::{nats::Consumer, Result};
 
-/// replica node: consumes events and watches for leader failure.
+/// Replica node: consumes and applies replicated events.
 pub struct Replica {
     pub(crate) ctx: ReplicationContext,
     consumer: Box<Consumer>,
@@ -31,8 +31,7 @@ impl Replica {
         }
     }
 
-    /// Runs until leadership acquired or shutdown.
-    /// Returns `Some(Primary)` on promotion, `None` on shutdown.
+    /// Runs the replica loop until shutdown or the message stream exits.
     pub async fn run(mut self) {
         info!("entering replica replication mode");
         let mut timeout_check = tokio::time::interval(Duration::from_secs(1));

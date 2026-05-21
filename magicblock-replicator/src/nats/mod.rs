@@ -6,7 +6,7 @@
 //! - [`Producer`]: Event publisher with distributed leader lock
 //! - [`Consumer`]: Event subscriber for replay
 //! - [`Snapshot`]: AccountsDb snapshot with positioning metadata
-//! - [`LockWatcher`]: Watcher for leader lock expiration
+//! - [`LockWatcher`]: Watcher for producer lock state changes
 
 mod broker;
 mod consumer;

@@ -40,16 +40,14 @@ impl Primary {
     pub async fn run(mut self) {
         info!("entering primary replication mode");
         let mut lock_tick = tokio::time::interval(LOCK_REFRESH_INTERVAL);
+        let mut draining = self.ctx.cancel.is_cancelled();
 
         loop {
             tokio::select! {
                 biased;
-                _ = self.ctx.cancel.cancelled() => {
-                    info!("shutdown received, terminating primary mode");
-                    if let Err(error) = self.producer.release().await {
-                        warn!(%error, "failed to release the lock");
-                    }
-                    return;
+                _ = self.ctx.cancel.cancelled(), if !draining => {
+                    draining = true;
+                    info!("shutdown received, draining replication messages");
                 }
                 _ = lock_tick.tick() => {
                     loop {
@@ -58,7 +56,7 @@ impl Primary {
                                 break;
                             },
                             Ok(_) => {
-                                warn!("lock lost, should never happen, trying to renew");
+                                warn!("primary lock lost, should never happen, trying to renew");
                             }
                             Err(e) => {
                                 warn!(%e, "lock refresh failed");
@@ -66,16 +64,24 @@ impl Primary {
                         }
                     }
                 }
-                Some(msg) = self.messages.recv() => {
+                msg = self.messages.recv() => {
+                    let Some(msg) = msg else {
+                        if let Err(error) = self.producer.release().await {
+                            warn!(%error, "failed to release the lock");
+                        }
+                        return;
+                    };
                     while let Err(error) = self.publish(&msg).await {
                         // publish should not easily fail, if that happens, it means
                         // the message broker has become unrecoverably unreacheable
                         warn!(%error, "failed to publish the message");
                     }
                 }
-                Some((file, slot)) = self.snapshots.recv() => {
-                    if let Err(e) = self.ctx.upload_snapshot(file, slot).await {
-                        warn!(%e, "snapshot upload failed");
+                snapshot = self.snapshots.recv(), if !draining => {
+                    if let Some((file, slot)) = snapshot {
+                        if let Err(e) = self.ctx.upload_snapshot(file, slot).await {
+                            warn!(%e, "snapshot upload failed");
+                        }
                     }
                 }
             }

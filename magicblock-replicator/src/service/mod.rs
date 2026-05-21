@@ -42,7 +42,7 @@ use tokio::{
 };
 use tokio_util::sync::CancellationToken;
 
-use crate::{nats::Broker, Error};
+use crate::{nats::Broker, Error, Result};
 
 // =============================================================================
 // Constants
@@ -56,7 +56,7 @@ const CONSUMER_RETRY_DELAY: Duration = Duration::from_secs(1);
 // Service
 // =============================================================================
 
-/// Replication service with automatic role transitions.
+/// Replication service for the selected replication role.
 pub enum Service {
     Primary(Primary),
     Replica(Replica),
@@ -105,7 +105,7 @@ impl Service {
         }
     }
 
-    /// Runs service with automatic role transitions.
+    /// Runs the configured replication role until it exits.
     pub async fn run(self) {
         match self {
             Service::Primary(p) => p.run().await,
@@ -115,16 +115,17 @@ impl Service {
 
     /// Spawns the service in a dedicated OS thread with a single-threaded runtime.
     ///
-    /// Returns a `JoinHandle` that can be used to wait for the service to complete.
-    pub fn spawn(self) -> JoinHandle<()> {
+    /// Returns a `JoinHandle` that yields startup/runtime errors from the
+    /// service thread.
+    pub fn spawn(self) -> JoinHandle<Result<()>> {
         std::thread::spawn(move || {
             let runtime = Builder::new_current_thread()
                 .enable_all()
                 .thread_name("replication-service")
-                .build()
-                .expect("Failed to build replication service runtime");
+                .build()?;
 
-            runtime.block_on(tokio::task::unconstrained(self.run()))
+            runtime.block_on(tokio::task::unconstrained(self.run()));
+            Ok(())
         })
     }
 }
