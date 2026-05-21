@@ -4233,6 +4233,7 @@ name = "magicblock-replicator"
 version = "0.11.1"
 dependencies = [
  "async-nats",
+ "async-trait",
  "bincode",
  "bytes",
  "futures",
