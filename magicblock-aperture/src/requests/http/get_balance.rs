@@ -14,8 +14,8 @@ impl HttpDispatcher {
         let pubkey = some_or_err!(pubkey_bytes);
 
         let balance = self
-            .read_account_with_ensure(&pubkey)
-            .await
+            .read_account_with_ensure("getBalance", &pubkey)
+            .await?
             .map(|a| a.lamports())
             .unwrap_or_default(); // Default to 0 if account not found
 

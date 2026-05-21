@@ -28,9 +28,12 @@ impl HttpDispatcher {
         let encoding = config.encoding.unwrap_or(UiAccountEncoding::Base58);
         let slice = config.data_slice;
 
+        let ensured_accounts = self
+            .read_accounts_with_ensure("getMultipleAccounts", &pubkeys)
+            .await?;
         let accounts = pubkeys
             .iter()
-            .zip(self.read_accounts_with_ensure(&pubkeys).await.into_iter())
+            .zip(ensured_accounts.into_iter())
             .map(|(pubkey, acc)| {
                 acc.filter(|account| {
                     !Self::account_should_render_as_null(account)

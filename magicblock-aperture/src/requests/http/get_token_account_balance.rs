@@ -26,7 +26,8 @@ impl HttpDispatcher {
 
         // Fetch the target token account.
         let token_account: AccountSharedData = some_or_err!(
-            self.read_account_with_ensure(&pubkey).await,
+            self.read_account_with_ensure("getTokenAccountBalance", &pubkey)
+                .await?,
             "token account not found or is not a token account"
         );
 
@@ -42,7 +43,11 @@ impl HttpDispatcher {
 
         // Fetch the mint account to get the token's decimals.
         let mint_account: AccountSharedData = some_or_err!(
-            self.read_account_with_ensure(&mint_pubkey).await,
+            self.read_account_with_ensure(
+                "getTokenAccountBalance",
+                &mint_pubkey
+            )
+            .await?,
             "mint account not found"
         );
         let decimals =

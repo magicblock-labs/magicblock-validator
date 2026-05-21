@@ -102,8 +102,9 @@ impl HttpDispatcher {
                             .map_err(RpcError::invalid_params)
                     })
                     .collect::<Result<Vec<_>, _>>()?;
-                let current_accounts =
-                    self.read_accounts_with_ensure(&pubkeys).await;
+                let current_accounts = self
+                    .read_accounts_with_ensure("simulateTransaction", &pubkeys)
+                    .await?;
                 let post_simulation_accounts = post_simulation_accounts
                     .into_iter()
                     .collect::<HashMap<_, _>>();

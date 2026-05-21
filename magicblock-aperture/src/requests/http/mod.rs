@@ -196,31 +196,40 @@ impl HttpDispatcher {
     #[instrument(skip_all)]
     async fn read_account_with_ensure(
         &self,
+        method: &'static str,
         pubkey: &Pubkey,
-    ) -> Option<AccountSharedData> {
-        if !self.is_primary_mode() {
-            return self.accountsdb.get_account(pubkey);
+    ) -> RpcResult<Option<AccountSharedData>> {
+        match self.aperture_routing_decision(method).await {
+            ApertureRoutingDecision::NonPrimary => {
+                Ok(self.accountsdb.get_account(pubkey))
+            }
+            ApertureRoutingDecision::PrimaryReady(_) => {
+                let mark_empty_if_not_found = [*pubkey];
+                let _timer = ENSURE_ACCOUNTS_TIME
+                    .with_label_values(&["account"])
+                    .start_timer();
+                let _ = self
+                    .chainlink
+                    .ensure_accounts(
+                        &[*pubkey],
+                        Some(&mark_empty_if_not_found),
+                        AccountFetchOrigin::GetAccount,
+                        None,
+                    )
+                    .await
+                    .inspect_err(|e| {
+                        // There is nothing we can do if fetching the account fails
+                        // Log the error and return whatever is in the accounts db
+                        debug!(error = ?e, "Failed to ensure account");
+                    });
+                Ok(self.accountsdb.get_account(pubkey))
+            }
+            ApertureRoutingDecision::PrimaryNotReady => {
+                Err(RpcError::temporarily_unavailable(format!(
+                    "{method} requires Chainlink primary readiness"
+                )))
+            }
         }
-
-        let mark_empty_if_not_found = [*pubkey];
-        let _timer = ENSURE_ACCOUNTS_TIME
-            .with_label_values(&["account"])
-            .start_timer();
-        let _ = self
-            .chainlink
-            .ensure_accounts(
-                &[*pubkey],
-                Some(&mark_empty_if_not_found),
-                AccountFetchOrigin::GetAccount,
-                None,
-            )
-            .await
-            .inspect_err(|e| {
-                // There is nothing we can do if fetching the account fails
-                // Log the error and return whatever is in the accounts db
-                debug!(error = ?e, "Failed to ensure account");
-            });
-        self.accountsdb.get_account(pubkey)
     }
 
     /// Fetches multiple account's data from the `AccountsDb` filling them in from chain
@@ -228,37 +237,44 @@ impl HttpDispatcher {
     #[instrument(skip(self, pubkeys), fields(pubkey_count = pubkeys.len()))]
     async fn read_accounts_with_ensure(
         &self,
+        method: &'static str,
         pubkeys: &[Pubkey],
-    ) -> Vec<Option<AccountSharedData>> {
-        if !self.is_primary_mode() {
-            return pubkeys
+    ) -> RpcResult<Vec<Option<AccountSharedData>>> {
+        match self.aperture_routing_decision(method).await {
+            ApertureRoutingDecision::NonPrimary => Ok(pubkeys
                 .iter()
                 .map(|pubkey| self.accountsdb.get_account(pubkey))
-                .collect();
+                .collect()),
+            ApertureRoutingDecision::PrimaryReady(_) => {
+                trace!("Ensuring accounts");
+                let _timer = ENSURE_ACCOUNTS_TIME
+                    .with_label_values(&["multi-account"])
+                    .start_timer();
+                let _ = self
+                    .chainlink
+                    .ensure_accounts(
+                        pubkeys,
+                        Some(pubkeys),
+                        AccountFetchOrigin::GetMultipleAccounts,
+                        None,
+                    )
+                    .await
+                    .inspect_err(|e| {
+                        // There is nothing we can do if fetching the accounts fails
+                        // Log the error and return whatever is in the accounts db
+                        warn!(error = ?e, "Failed to ensure accounts");
+                    });
+                Ok(pubkeys
+                    .iter()
+                    .map(|pubkey| self.accountsdb.get_account(pubkey))
+                    .collect())
+            }
+            ApertureRoutingDecision::PrimaryNotReady => {
+                Err(RpcError::temporarily_unavailable(format!(
+                    "{method} requires Chainlink primary readiness"
+                )))
+            }
         }
-
-        trace!("Ensuring accounts");
-        let _timer = ENSURE_ACCOUNTS_TIME
-            .with_label_values(&["multi-account"])
-            .start_timer();
-        let _ = self
-            .chainlink
-            .ensure_accounts(
-                pubkeys,
-                Some(pubkeys),
-                AccountFetchOrigin::GetMultipleAccounts,
-                None,
-            )
-            .await
-            .inspect_err(|e| {
-                // There is nothing we can do if fetching the accounts fails
-                // Log the error and return whatever is in the accounts db
-                warn!(error = ?e, "Failed to ensure accounts");
-            });
-        pubkeys
-            .iter()
-            .map(|pubkey| self.accountsdb.get_account(pubkey))
-            .collect()
     }
 
     /// Decodes, validates, and sanitizes a transaction from its string representation.
@@ -444,12 +460,19 @@ mod tests {
     use base64::{
         engine::general_purpose::STANDARD as BASE64_STANDARD, Engine,
     };
+    use magicblock_account_cloner::ChainlinkCloner;
+    use magicblock_chainlink::{
+        chainlink::config::ChainlinkConfig,
+        remote_account_provider::{Endpoint, Endpoints},
+    };
     use magicblock_config::config::ChainLinkConfig;
     use magicblock_core::{
         coordination_mode::{switch_to_primary_mode, switch_to_replica_mode},
         link::{blocks::BlockHash, link},
     };
     use solana_account::ReadableAccount;
+    use solana_commitment_config::CommitmentConfig;
+    use solana_keypair::Keypair;
     use solana_message::{
         compiled_instruction::CompiledInstruction, legacy::Message,
         MessageHeader, VersionedMessage,
@@ -484,16 +507,10 @@ mod tests {
         }
     }
 
-    fn test_dispatcher(env: &ExecutionTestEnv) -> HttpDispatcher {
-        let chainlink = Arc::new(
-            ChainlinkImpl::try_new(
-                &env.accountsdb,
-                None,
-                Pubkey::new_unique(),
-                &ChainLinkConfig::default(),
-            )
-            .expect("failed to create chainlink"),
-        );
+    fn dispatcher_from_chainlink(
+        env: &ExecutionTestEnv,
+        chainlink: Arc<ChainlinkImpl>,
+    ) -> HttpDispatcher {
         let state = SharedState::new(
             NodeContext {
                 identity: env.get_payer().pubkey,
@@ -506,6 +523,80 @@ mod tests {
             chainlink,
         );
         let (dispatch, _validator) = link();
+        HttpDispatcher {
+            context: state.context,
+            accountsdb: state.accountsdb,
+            ledger: state.ledger,
+            chainlink: state.chainlink,
+            transactions: state.transactions,
+            blocks: state.blocks,
+            transactions_scheduler: dispatch.transaction_scheduler,
+        }
+    }
+
+    fn test_dispatcher(env: &ExecutionTestEnv) -> HttpDispatcher {
+        let chainlink = Arc::new(
+            ChainlinkImpl::try_new(
+                &env.accountsdb,
+                None,
+                Pubkey::new_unique(),
+                &ChainLinkConfig::default(),
+            )
+            .expect("failed to create chainlink"),
+        );
+        dispatcher_from_chainlink(env, chainlink)
+    }
+
+    async fn primary_not_ready_dispatcher(
+        env: &ExecutionTestEnv,
+    ) -> HttpDispatcher {
+        let (dispatch, _validator) = link();
+        let cloner = Arc::new(ChainlinkCloner::new(
+            dispatch.transaction_scheduler.clone(),
+            env.ledger.latest_block().clone(),
+        ));
+        let endpoints = Endpoints::from(
+            &[
+                Endpoint::Rpc {
+                    url: "http://127.0.0.1:1".to_string(),
+                    label: "unreachable-rpc".to_string(),
+                },
+                Endpoint::WebSocket {
+                    url: "ws://127.0.0.1:1".to_string(),
+                    label: "unreachable-ws".to_string(),
+                },
+            ][..],
+        );
+        let ledger_path = std::env::temp_dir().join(format!(
+            "mb-aperture-primary-not-ready-{}",
+            Pubkey::new_unique()
+        ));
+        let chainlink = Arc::new(
+            ChainlinkImpl::try_new_from_endpoints(
+                &endpoints,
+                CommitmentConfig::confirmed(),
+                &env.accountsdb,
+                &cloner,
+                Keypair::new(),
+                ChainlinkConfig::default(),
+                &ChainLinkConfig::default(),
+                &ledger_path,
+            )
+            .await
+            .expect("failed to create endpoint-backed chainlink"),
+        );
+
+        let state = SharedState::new(
+            NodeContext {
+                identity: env.get_payer().pubkey,
+                base_fee: ExecutionTestEnv::BASE_FEE,
+                blocktime: 50,
+                ..Default::default()
+            },
+            env.accountsdb.clone(),
+            env.ledger.clone(),
+            chainlink,
+        );
         HttpDispatcher {
             context: state.context,
             accountsdb: state.accountsdb,
@@ -595,11 +686,70 @@ mod tests {
         env.fund_account(pubkey, 42);
 
         let account = dispatcher
-            .read_account_with_ensure(&pubkey)
+            .read_account_with_ensure("getAccountInfo", &pubkey)
             .await
+            .expect("replica read should not fail")
             .expect("local account should be returned in replica mode");
 
         assert_eq!(account.lamports(), 42);
+    }
+
+    #[tokio::test]
+    async fn get_account_info_in_primary_without_chainlink_readiness_returns_503(
+    ) {
+        let _lock = COORDINATION_MODE_TEST_LOCK.lock().await;
+        let env = ExecutionTestEnv::new_replica_mode(1, false);
+        switch_to_primary_mode();
+        let dispatcher = primary_not_ready_dispatcher(&env).await;
+        let pubkey = Pubkey::new_unique();
+        let mut request = request(
+            JsonRpcHttpMethod::GetAccountInfo,
+            vec![json::json!(pubkey.to_string())].into(),
+        );
+
+        let error = match dispatcher.get_account_info(&mut request).await {
+            Ok(_) => {
+                panic!("primary-not-ready getAccountInfo should be rejected")
+            }
+            Err(error) => error,
+        };
+
+        assert_eq!(error.http_status(), 503);
+        assert!(
+            error.to_string().contains(
+                "getAccountInfo requires Chainlink primary readiness"
+            ),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[tokio::test]
+    async fn get_multiple_accounts_in_primary_without_chainlink_readiness_returns_503(
+    ) {
+        let _lock = COORDINATION_MODE_TEST_LOCK.lock().await;
+        let env = ExecutionTestEnv::new_replica_mode(1, false);
+        switch_to_primary_mode();
+        let dispatcher = primary_not_ready_dispatcher(&env).await;
+        let pubkey = Pubkey::new_unique();
+        let mut request = request(
+            JsonRpcHttpMethod::GetMultipleAccounts,
+            vec![json::json!([pubkey.to_string()])].into(),
+        );
+
+        let error = match dispatcher.get_multiple_accounts(&mut request).await {
+            Ok(_) => panic!(
+                "primary-not-ready getMultipleAccounts should be rejected"
+            ),
+            Err(error) => error,
+        };
+
+        assert_eq!(error.http_status(), 503);
+        assert!(
+            error.to_string().contains(
+                "getMultipleAccounts requires Chainlink primary readiness"
+            ),
+            "unexpected error: {error}"
+        );
     }
 
     #[tokio::test]

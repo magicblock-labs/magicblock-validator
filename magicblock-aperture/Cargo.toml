@@ -41,6 +41,7 @@ magicblock-version = { workspace = true }
 agave-geyser-plugin-interface = { workspace = true }
 solana-account = { workspace = true }
 solana-account-decoder = { workspace = true }
+solana-commitment-config = { workspace = true }
 solana-feature-set = { workspace = true }
 solana-fee-structure = { workspace = true }
 solana-keypair = { workspace = true }

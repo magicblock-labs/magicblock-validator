@@ -20,7 +20,9 @@ impl HttpDispatcher {
 
         // Ensure the account is present in the local AccountsDb, cloning it
         // from the reference cluster if necessary.
-        let account = self.read_account_with_ensure(&pubkey).await;
+        let account = self
+            .read_account_with_ensure("getDelegationStatus", &pubkey)
+            .await?;
 
         let is_delegated =
             account.as_ref().map(|acc| acc.delegated()).unwrap_or(false);

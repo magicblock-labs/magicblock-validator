@@ -3782,6 +3782,7 @@ dependencies = [
  "serde",
  "solana-account 3.4.0",
  "solana-account-decoder",
+ "solana-commitment-config",
  "solana-fee-structure",
  "solana-keypair",
  "solana-message 3.1.0",

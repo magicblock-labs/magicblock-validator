@@ -31,8 +31,8 @@ impl HttpDispatcher {
 
         // `read_account_with_ensure` guarantees the account is clone from chain if not in database.
         let account = self
-            .read_account_with_ensure(&pubkey)
-            .await
+            .read_account_with_ensure("getAccountInfo", &pubkey)
+            .await?
             .filter(|acc| !Self::account_should_render_as_null(acc))
             // `LockedAccount` provides a race-free read of the account data before encoding.
             .map(|acc| {
