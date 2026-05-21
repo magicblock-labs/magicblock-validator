@@ -1,10 +1,9 @@
 //! Shared context for primary and standby roles.
 
-use std::{future::Future, sync::Arc};
+use std::{future::Future, pin::Pin, sync::Arc};
 
 use machineid_rs::IdBuilder;
 use magicblock_accounts_db::AccountsDb;
-use magicblock_chainlink::{AccountsBankReset, ChainlinkPrimaryLifecycle};
 use magicblock_core::{
     link::{
         replication::{Block, Message, SuperBlock},
@@ -18,7 +17,7 @@ use tokio::{
     sync::mpsc::{Receiver, Sender},
 };
 use tokio_util::sync::CancellationToken;
-use tracing::{error, info};
+use tracing::info;
 
 use super::{Primary, Standby, CONSUMER_RETRY_DELAY};
 use crate::{
@@ -26,6 +25,78 @@ use crate::{
     watcher::SnapshotWatcher,
     Error, Result,
 };
+
+/// Narrow Chainlink lifecycle surface needed by replication.
+pub trait PrimaryChainlink: Send + Sync {
+    fn reset_accounts_bank(
+        &self,
+    ) -> magicblock_accounts_db::AccountsDbResult<()>;
+
+    fn enable_primary<'a>(
+        &'a self,
+    ) -> Pin<
+        Box<
+            dyn Future<
+                    Output = magicblock_chainlink::errors::ChainlinkResult<()>,
+                > + Send
+                + 'a,
+        >,
+    >;
+
+    fn disable<'a>(
+        &'a self,
+    ) -> Pin<
+        Box<
+            dyn Future<
+                    Output = magicblock_chainlink::errors::ChainlinkResult<()>,
+                > + Send
+                + 'a,
+        >,
+    >;
+}
+
+impl<C> PrimaryChainlink
+    for magicblock_chainlink::Chainlink<
+        magicblock_chainlink::remote_account_provider::chain_rpc_client::ChainRpcClientImpl,
+        magicblock_chainlink::submux::SubMuxClient<
+            magicblock_chainlink::remote_account_provider::chain_updates_client::ChainUpdatesClient,
+        >,
+        AccountsDb,
+        C,
+    >
+where
+    C: magicblock_chainlink::cloner::Cloner + Send + Sync + 'static,
+{
+    fn reset_accounts_bank(&self) -> magicblock_accounts_db::AccountsDbResult<()> {
+        self.reset_accounts_bank()
+    }
+
+    fn enable_primary<'a>(
+        &'a self,
+    ) -> Pin<
+        Box<
+            dyn Future<Output = magicblock_chainlink::errors::ChainlinkResult<()>>
+                + Send
+                + 'a,
+        >,
+    > {
+        Box::pin(async move {
+            self.enable_primary().await.map(|_| ())
+        })
+    }
+
+    fn disable<'a>(
+        &'a self,
+    ) -> Pin<
+        Box<
+            dyn Future<Output = magicblock_chainlink::errors::ChainlinkResult<()>>
+                + Send
+                + 'a,
+        >,
+    > {
+        Box::pin(self.disable())
+    }
+}
 
 /// Shared state for both primary and standby roles.
 pub struct ReplicationContext {
@@ -39,10 +110,8 @@ pub struct ReplicationContext {
     pub mode_tx: Sender<SchedulerMode>,
     /// Accounts database.
     pub accountsdb: Arc<AccountsDb>,
-    /// Reset-only Chainlink cleanup handle for accounts bank readiness.
-    pub accounts_bank_reset: Arc<dyn AccountsBankReset>,
-    /// Real Chainlink primary lifecycle handle for promotable contexts.
-    pub primary_chainlink: Option<Arc<dyn ChainlinkPrimaryLifecycle>>,
+    /// Real RPC-facing Chainlink primary-readiness handle.
+    pub chainlink: Arc<dyn PrimaryChainlink>,
     /// Transaction ledger.
     pub ledger: Arc<Ledger>,
     /// Transaction scheduler.
@@ -63,8 +132,7 @@ impl ReplicationContext {
         mode_tx: Sender<SchedulerMode>,
         accountsdb: Arc<AccountsDb>,
         ledger: Arc<Ledger>,
-        accounts_bank_reset: Arc<dyn AccountsBankReset>,
-        primary_chainlink: Option<Arc<dyn ChainlinkPrimaryLifecycle>>,
+        chainlink: Arc<dyn PrimaryChainlink>,
         scheduler: TransactionSchedulerHandle,
         cancel: CancellationToken,
         can_promote: bool,
@@ -73,12 +141,6 @@ impl ReplicationContext {
             .add_component(machineid_rs::HWIDComponent::SystemID)
             .build("magicblock")
             .map_err(|e| Error::Internal(e.to_string()))?;
-
-        if can_promote && primary_chainlink.is_none() {
-            return Err(Error::Internal(
-                "promotable replication context requires a primary Chainlink lifecycle handle".to_string(),
-            ));
-        }
 
         let slot = accountsdb.slot();
         let index = ledger
@@ -92,8 +154,7 @@ impl ReplicationContext {
             cancel,
             mode_tx,
             accountsdb,
-            accounts_bank_reset,
-            primary_chainlink,
+            chainlink,
             ledger,
             scheduler,
             slot,
@@ -238,56 +299,10 @@ impl ReplicationContext {
 async fn run_primary_readiness_sequence(
     ctx: &ReplicationContext,
 ) -> Result<()> {
-    run_primary_readiness_sequence_with_hooks(
-        || ctx.scheduler.wait_for_idle(),
-        ctx.accounts_bank_reset.as_ref(),
-        ctx.primary_chainlink.as_deref(),
-        || ctx.enter_primary_mode(),
-    )
-    .await
-}
-
-async fn run_primary_readiness_sequence_with_hooks<
-    WaitForIdle,
-    WaitFut,
-    IdleGuard,
-    EnterPrimary,
-    EnterPrimaryFut,
->(
-    wait_for_idle: WaitForIdle,
-    accounts_bank_reset: &dyn AccountsBankReset,
-    primary_chainlink: Option<&dyn ChainlinkPrimaryLifecycle>,
-    enter_primary: EnterPrimary,
-) -> Result<()>
-where
-    WaitForIdle: FnOnce() -> WaitFut,
-    WaitFut: Future<Output = IdleGuard>,
-    EnterPrimary: FnOnce() -> EnterPrimaryFut,
-    EnterPrimaryFut: Future<Output = Result<()>>,
-{
-    let _guard = wait_for_idle().await;
-    accounts_bank_reset
-        .reset_accounts_bank()
-        .map_err(Error::from)?;
-    let primary_chainlink = primary_chainlink.ok_or_else(|| {
-        Error::Internal(
-            "primary Chainlink lifecycle handle is unavailable".to_string(),
-        )
-    })?;
-    primary_chainlink
-        .enable_primary()
-        .await
-        .map_err(Error::from)?;
-    if let Err(scheduler_mode_error) = enter_primary().await {
-        if let Err(rollback_error) = primary_chainlink.disable().await {
-            error!(
-                %rollback_error,
-                "Failed to roll back Chainlink primary enable after scheduler primary mode failed"
-            );
-        }
-        return Err(scheduler_mode_error);
-    }
-    Ok(())
+    let _guard = ctx.scheduler.wait_for_idle().await;
+    ctx.chainlink.reset_accounts_bank().map_err(Error::from)?;
+    ctx.chainlink.enable_primary().await.map_err(Error::from)?;
+    ctx.enter_primary_mode().await
 }
 
 /// Runs the standby start sequence.
@@ -295,267 +310,7 @@ async fn run_standby_start_sequence(
     ctx: &ReplicationContext,
     reset: bool,
 ) -> Result<Option<Consumer>> {
-    run_standby_lifecycle_sequence_with_hooks(
-        ctx.primary_chainlink.as_deref(),
-        || ctx.enter_replica_mode(),
-    )
-    .await?;
+    ctx.enter_replica_mode().await?;
+    ctx.chainlink.disable().await.map_err(Error::from)?;
     Ok(ctx.create_consumer(reset).await)
-}
-
-async fn run_standby_lifecycle_sequence_with_hooks<
-    EnterReplica,
-    EnterReplicaFut,
->(
-    primary_chainlink: Option<&dyn ChainlinkPrimaryLifecycle>,
-    enter_replica: EnterReplica,
-) -> Result<()>
-where
-    EnterReplica: FnOnce() -> EnterReplicaFut,
-    EnterReplicaFut: Future<Output = Result<()>>,
-{
-    enter_replica().await?;
-    if let Some(primary_chainlink) = primary_chainlink {
-        primary_chainlink.disable().await.map_err(Error::from)?;
-    }
-    Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use std::sync::{Arc, Mutex};
-
-    use magicblock_accounts_db::AccountsDbResult;
-    use magicblock_chainlink::{
-        errors::{ChainlinkError, ChainlinkResult},
-        ChainlinkPrimaryEnablement,
-    };
-
-    use super::*;
-
-    #[derive(Clone)]
-    struct RecordingReset {
-        events: Arc<Mutex<Vec<&'static str>>>,
-    }
-
-    impl AccountsBankReset for RecordingReset {
-        fn reset_accounts_bank(&self) -> AccountsDbResult<()> {
-            self.events.lock().unwrap().push("reset");
-            Ok(())
-        }
-    }
-
-    struct RecordingPrimaryChainlink {
-        events: Arc<Mutex<Vec<&'static str>>>,
-        enable_error: bool,
-    }
-
-    #[async_trait::async_trait]
-    impl ChainlinkPrimaryLifecycle for RecordingPrimaryChainlink {
-        async fn enable_primary(
-            &self,
-        ) -> ChainlinkResult<ChainlinkPrimaryEnablement> {
-            self.events.lock().unwrap().push("enable");
-            if self.enable_error {
-                Err(ChainlinkError::MissingPrimaryRuntimeBuildConfig)
-            } else {
-                Ok(ChainlinkPrimaryEnablement::Active)
-            }
-        }
-
-        async fn disable(&self) -> ChainlinkResult<()> {
-            self.events.lock().unwrap().push("disable");
-            Ok(())
-        }
-    }
-
-    fn events() -> Arc<Mutex<Vec<&'static str>>> {
-        Arc::new(Mutex::new(Vec::new()))
-    }
-
-    fn reset(events: Arc<Mutex<Vec<&'static str>>>) -> RecordingReset {
-        RecordingReset { events }
-    }
-
-    fn chainlink(
-        events: Arc<Mutex<Vec<&'static str>>>,
-    ) -> RecordingPrimaryChainlink {
-        RecordingPrimaryChainlink {
-            events,
-            enable_error: false,
-        }
-    }
-
-    fn failing_chainlink(
-        events: Arc<Mutex<Vec<&'static str>>>,
-    ) -> RecordingPrimaryChainlink {
-        RecordingPrimaryChainlink {
-            events,
-            enable_error: true,
-        }
-    }
-
-    fn recorded_events(
-        events: &Arc<Mutex<Vec<&'static str>>>,
-    ) -> Vec<&'static str> {
-        events.lock().unwrap().clone()
-    }
-
-    #[tokio::test]
-    async fn primary_readiness_waits_resets_enables_then_publishes_primary() {
-        let events = events();
-        let reset = reset(events.clone());
-        let chainlink = chainlink(events.clone());
-
-        run_primary_readiness_sequence_with_hooks(
-            || {
-                let events = events.clone();
-                async move {
-                    events.lock().unwrap().push("idle");
-                }
-            },
-            &reset,
-            Some(&chainlink),
-            || {
-                let events = events.clone();
-                async move {
-                    events.lock().unwrap().push("primary");
-                    Ok(())
-                }
-            },
-        )
-        .await
-        .unwrap();
-
-        assert_eq!(
-            recorded_events(&events),
-            vec!["idle", "reset", "enable", "primary"]
-        );
-    }
-
-    #[tokio::test]
-    async fn primary_readiness_enable_failure_does_not_publish_primary() {
-        let events = events();
-        let reset = reset(events.clone());
-        let chainlink = failing_chainlink(events.clone());
-
-        let result = run_primary_readiness_sequence_with_hooks(
-            || {
-                let events = events.clone();
-                async move {
-                    events.lock().unwrap().push("idle");
-                }
-            },
-            &reset,
-            Some(&chainlink),
-            || {
-                let events = events.clone();
-                async move {
-                    events.lock().unwrap().push("primary");
-                    Ok(())
-                }
-            },
-        )
-        .await;
-
-        assert!(matches!(result, Err(Error::Chainlink(_))));
-        assert_eq!(recorded_events(&events), vec!["idle", "reset", "enable"]);
-    }
-
-    #[tokio::test]
-    async fn primary_readiness_missing_lifecycle_handle_does_not_publish_primary(
-    ) {
-        let events = events();
-        let reset = reset(events.clone());
-
-        let result = run_primary_readiness_sequence_with_hooks(
-            || {
-                let events = events.clone();
-                async move {
-                    events.lock().unwrap().push("idle");
-                }
-            },
-            &reset,
-            None,
-            || {
-                let events = events.clone();
-                async move {
-                    events.lock().unwrap().push("primary");
-                    Ok(())
-                }
-            },
-        )
-        .await;
-
-        assert!(matches!(result, Err(Error::Internal(_))));
-        assert_eq!(recorded_events(&events), vec!["idle", "reset"]);
-    }
-
-    #[tokio::test]
-    async fn primary_readiness_rolls_back_chainlink_when_primary_publish_fails()
-    {
-        let events = events();
-        let reset = reset(events.clone());
-        let chainlink = chainlink(events.clone());
-
-        let result = run_primary_readiness_sequence_with_hooks(
-            || {
-                let events = events.clone();
-                async move {
-                    events.lock().unwrap().push("idle");
-                }
-            },
-            &reset,
-            Some(&chainlink),
-            || {
-                let events = events.clone();
-                async move {
-                    events.lock().unwrap().push("primary");
-                    Err(Error::Internal("publish failed".to_string()))
-                }
-            },
-        )
-        .await;
-
-        assert!(matches!(result, Err(Error::Internal(_))));
-        assert_eq!(
-            recorded_events(&events),
-            vec!["idle", "reset", "enable", "primary", "disable"]
-        );
-    }
-
-    #[tokio::test]
-    async fn standby_lifecycle_enters_replica_before_disabling_chainlink() {
-        let events = events();
-        let chainlink = chainlink(events.clone());
-
-        run_standby_lifecycle_sequence_with_hooks(Some(&chainlink), || {
-            let events = events.clone();
-            async move {
-                events.lock().unwrap().push("replica");
-                Ok(())
-            }
-        })
-        .await
-        .unwrap();
-
-        assert_eq!(recorded_events(&events), vec!["replica", "disable"]);
-    }
-
-    #[tokio::test]
-    async fn standby_lifecycle_replica_only_skips_real_chainlink_disable() {
-        let events = events();
-
-        run_standby_lifecycle_sequence_with_hooks(None, || {
-            let events = events.clone();
-            async move {
-                events.lock().unwrap().push("replica");
-                Ok(())
-            }
-        })
-        .await
-        .unwrap();
-
-        assert_eq!(recorded_events(&events), vec!["replica"]);
-    }
 }
