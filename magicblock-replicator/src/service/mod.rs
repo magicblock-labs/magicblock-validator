@@ -27,7 +27,7 @@ use std::{sync::Arc, thread::JoinHandle, time::Duration};
 
 pub use context::ReplicationContext;
 use magicblock_accounts_db::AccountsDb;
-use magicblock_chainlink::StubbedChainlink;
+use magicblock_chainlink::{AccountsBankReset, ChainlinkPrimaryLifecycle};
 use magicblock_core::link::{
     replication::Message,
     transactions::{SchedulerMode, TransactionSchedulerHandle},
@@ -78,15 +78,18 @@ fn initial_role_path(can_promote: bool) -> InitialRolePath {
 impl Service {
     /// Creates service, attempting primary role first if allowed.
     ///
-    /// When `can_promote` is false (ReplicaOnly mode), skips lock acquisition
-    /// and goes directly to standby mode.
+    /// Accounts bank reset cleanup is provided separately from the real
+    /// Chainlink primary lifecycle handle. When `can_promote` is false
+    /// (ReplicaOnly mode), skips lock acquisition, receives no primary
+    /// lifecycle handle, and goes directly to standby mode.
     #[allow(clippy::too_many_arguments)]
     pub async fn new(
         broker: Broker,
         mode_tx: Sender<SchedulerMode>,
         accountsdb: Arc<AccountsDb>,
         ledger: Arc<Ledger>,
-        chainlink: StubbedChainlink<AccountsDb>,
+        accounts_bank_reset: Arc<dyn AccountsBankReset>,
+        primary_chainlink: Option<Arc<dyn ChainlinkPrimaryLifecycle>>,
         scheduler: TransactionSchedulerHandle,
         messages: Receiver<Message>,
         cancel: CancellationToken,
@@ -98,7 +101,8 @@ impl Service {
             mode_tx,
             accountsdb,
             ledger,
-            chainlink,
+            accounts_bank_reset,
+            primary_chainlink,
             scheduler,
             cancel,
             can_promote,

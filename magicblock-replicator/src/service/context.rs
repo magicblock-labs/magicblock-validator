@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use machineid_rs::IdBuilder;
 use magicblock_accounts_db::AccountsDb;
-use magicblock_chainlink::StubbedChainlink;
+use magicblock_chainlink::{AccountsBankReset, ChainlinkPrimaryLifecycle};
 use magicblock_core::{
     link::{
         replication::{Block, Message, SuperBlock},
@@ -18,7 +18,7 @@ use tokio::{
     sync::mpsc::{Receiver, Sender},
 };
 use tokio_util::sync::CancellationToken;
-use tracing::info;
+use tracing::{error, info};
 
 use super::{Primary, Standby, CONSUMER_RETRY_DELAY};
 use crate::{
@@ -39,10 +39,10 @@ pub struct ReplicationContext {
     pub mode_tx: Sender<SchedulerMode>,
     /// Accounts database.
     pub accountsdb: Arc<AccountsDb>,
-    /// Mocked chainlink to reset accountsdb
-    /// TODO(bmuddha): this is a temporary hack, which will be removed
-    /// once the accounts management is moved to the accountsdb
-    pub chainlink: StubbedChainlink<AccountsDb>,
+    /// Reset-only Chainlink cleanup handle for accounts bank readiness.
+    pub accounts_bank_reset: Arc<dyn AccountsBankReset>,
+    /// Real Chainlink primary lifecycle handle for promotable contexts.
+    pub primary_chainlink: Option<Arc<dyn ChainlinkPrimaryLifecycle>>,
     /// Transaction ledger.
     pub ledger: Arc<Ledger>,
     /// Transaction scheduler.
@@ -63,7 +63,8 @@ impl ReplicationContext {
         mode_tx: Sender<SchedulerMode>,
         accountsdb: Arc<AccountsDb>,
         ledger: Arc<Ledger>,
-        chainlink: StubbedChainlink<AccountsDb>,
+        accounts_bank_reset: Arc<dyn AccountsBankReset>,
+        primary_chainlink: Option<Arc<dyn ChainlinkPrimaryLifecycle>>,
         scheduler: TransactionSchedulerHandle,
         cancel: CancellationToken,
         can_promote: bool,
@@ -72,6 +73,12 @@ impl ReplicationContext {
             .add_component(machineid_rs::HWIDComponent::SystemID)
             .build("magicblock")
             .map_err(|e| Error::Internal(e.to_string()))?;
+
+        if can_promote && primary_chainlink.is_none() {
+            return Err(Error::Internal(
+                "promotable replication context requires a primary Chainlink lifecycle handle".to_string(),
+            ));
+        }
 
         let slot = accountsdb.slot();
         let index = ledger
@@ -85,7 +92,8 @@ impl ReplicationContext {
             cancel,
             mode_tx,
             accountsdb,
-            chainlink,
+            accounts_bank_reset,
+            primary_chainlink,
             ledger,
             scheduler,
             slot,
@@ -231,9 +239,29 @@ async fn run_primary_readiness_sequence(
     ctx: &ReplicationContext,
 ) -> Result<()> {
     let _guard = ctx.scheduler.wait_for_idle().await;
-    ctx.chainlink.reset_accounts_bank().map_err(Error::from)?;
-    ctx.chainlink.enable_primary().await.map_err(Error::from)?;
-    ctx.enter_primary_mode().await
+    ctx.accounts_bank_reset
+        .reset_accounts_bank()
+        .map_err(Error::from)?;
+    let primary_chainlink =
+        ctx.primary_chainlink.as_ref().ok_or_else(|| {
+            Error::Internal(
+                "primary Chainlink lifecycle handle is unavailable".to_string(),
+            )
+        })?;
+    primary_chainlink
+        .enable_primary()
+        .await
+        .map_err(Error::from)?;
+    if let Err(scheduler_mode_error) = ctx.enter_primary_mode().await {
+        if let Err(rollback_error) = primary_chainlink.disable().await {
+            error!(
+                %rollback_error,
+                "Failed to roll back Chainlink primary enable after scheduler primary mode failed"
+            );
+        }
+        return Err(scheduler_mode_error);
+    }
+    Ok(())
 }
 
 /// Runs the standby start sequence.
@@ -242,6 +270,8 @@ async fn run_standby_start_sequence(
     reset: bool,
 ) -> Result<Option<Consumer>> {
     ctx.enter_replica_mode().await?;
-    ctx.chainlink.disable().await.map_err(Error::from)?;
+    if let Some(primary_chainlink) = &ctx.primary_chainlink {
+        primary_chainlink.disable().await.map_err(Error::from)?;
+    }
     Ok(ctx.create_consumer(reset).await)
 }

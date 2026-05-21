@@ -25,7 +25,7 @@ use magicblock_chainlink::{
         chain_updates_client::ChainUpdatesClient, Endpoints,
     },
     submux::SubMuxClient,
-    Chainlink,
+    AccountsBankReset, Chainlink, ChainlinkPrimaryLifecycle,
 };
 use magicblock_committor_service::{
     config::ChainConfig, BaseIntentCommittor, CommittorService,
@@ -281,12 +281,25 @@ impl MagicValidator {
                     config.validator.replication_mode,
                     ReplicationMode::StandBy(_)
                 );
+                // Replication uses a reset-only cleanup handle in all modes.
+                // Only promotable StandBy contexts receive the real RPC-facing
+                // Chainlink primary lifecycle handle.
+                let accounts_bank_reset: Arc<dyn AccountsBankReset> =
+                    chainlink.clone();
+                let primary_chainlink = if can_promote {
+                    let handle: Arc<dyn ChainlinkPrimaryLifecycle> =
+                        chainlink.clone();
+                    Some(handle)
+                } else {
+                    None
+                };
                 ReplicationService::new(
                     broker,
                     mode_tx.clone(),
                     accountsdb.clone(),
                     ledger.clone(),
-                    chainlink.stub(),
+                    accounts_bank_reset,
+                    primary_chainlink,
                     dispatch.transaction_scheduler.clone(),
                     messages_rx,
                     token.clone(),

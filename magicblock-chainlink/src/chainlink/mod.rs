@@ -71,7 +71,9 @@ pub trait AccountsBankReset: Send + Sync {
 
 #[async_trait::async_trait]
 pub trait ChainlinkPrimaryLifecycle: Send + Sync {
-    async fn enable_primary(&self) -> ChainlinkResult<ChainlinkPrimaryEnablement>;
+    async fn enable_primary(
+        &self,
+    ) -> ChainlinkResult<ChainlinkPrimaryEnablement>;
 
     async fn disable(&self) -> ChainlinkResult<()>;
 }
