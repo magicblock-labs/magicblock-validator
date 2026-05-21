@@ -2,7 +2,9 @@ mod process_cancel_task;
 mod process_execute_task;
 mod process_schedule_task;
 
-use magicblock_magic_program_api::pda::crank_signer_pda;
+use magicblock_magic_program_api::{
+  instruction::MagicBlockInstruction, pda::crank_signer_pda
+};
 pub(crate) use process_cancel_task::*;
 pub(crate) use process_execute_task::*;
 pub(crate) use process_schedule_task::*;
@@ -15,6 +17,7 @@ use crate::validator::validator_authority_id;
 
 // Assert that the task instructions do not have signers aside from the crank signer
 // Assert they don't use the validator either
+// Assert they are not a privileged instruction
 pub(crate) fn validate_cranks_instructions(
     invoke_context: &mut InvokeContext,
     authority: &Pubkey,
@@ -43,6 +46,38 @@ pub(crate) fn validate_cranks_instructions(
                 );
                 return Err(InstructionError::IncorrectAuthority);
             }
+        }
+
+        if !instruction.program_id.eq(&crate::ID) {
+            continue;
+        }
+
+        let Ok(decoded_instruction) =
+            bincode::deserialize::<MagicBlockInstruction>(&instruction.data)
+        else {
+            // Not a MagicBlock instruction, skip
+            continue;
+        };
+
+        use MagicBlockInstruction::*;
+        match decoded_instruction {
+            ModifyAccounts { .. }
+            | CloneAccount { .. }
+            | CloneAccountInit { .. }
+            | CloneAccountContinue { .. }
+            | SetProgramAuthority { .. }
+            | DisableExecutableCheck
+            | EnableExecutableCheck
+            | FinalizeProgramFromBuffer { .. }
+            | FinalizeV1ProgramFromBuffer { .. }
+            | CleanupPartialClone { .. } => {
+                ic_msg!(
+                    invoke_context,
+                    "Crank ERR: privileged instruction is not allowed in cranks",
+                );
+                return Err(InstructionError::InvalidInstructionData);
+            }
+            _ => continue,
         }
     }
     Ok(())
