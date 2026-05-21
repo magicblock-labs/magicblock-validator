@@ -1,7 +1,7 @@
 use magicblock_accounts_db::traits::AccountsBank;
 use magicblock_chainlink::{
     testing::{deleg::add_delegation_record_for, init_logger},
-    AccountFetchOrigin,
+    AccountFetchOrigin, ChainlinkPrimaryEnablement,
 };
 use solana_account::{Account, ReadableAccount};
 use solana_pubkey::Pubkey;
@@ -35,7 +35,10 @@ async fn chainlink_runtime_is_active_after_primary_enable() {
 
     assert!(ctx.chainlink.is_runtime_active().await);
     assert_eq!(ctx.chainlink.lifecycle_state_for_tests(), "enabled");
-    ctx.chainlink.enable_primary().await.unwrap();
+    assert_eq!(
+        ctx.chainlink.enable_primary().await.unwrap(),
+        ChainlinkPrimaryEnablement::Active
+    );
     assert!(ctx.chainlink.is_runtime_active().await);
 }
 

@@ -107,6 +107,10 @@ type ChainlinkImpl = Chainlink<
     ChainlinkCloner,
 >;
 
+fn replication_mode_can_promote(replication_mode: &ReplicationMode) -> bool {
+    matches!(replication_mode, ReplicationMode::StandBy(_))
+}
+
 async fn run_standalone_primary_start_sequence(
     validator: &MagicValidator,
     should_reset_accounts_bank: bool,
@@ -277,9 +281,8 @@ impl MagicValidator {
                     "replication channel should always exist after init",
                 );
                 // ReplicaOnly mode cannot promote to primary
-                let can_promote = matches!(
-                    config.validator.replication_mode,
-                    ReplicationMode::StandBy(_)
+                let can_promote = replication_mode_can_promote(
+                    &config.validator.replication_mode,
                 );
                 // Replication uses a reset-only cleanup handle in all modes.
                 // Only promotable StandBy contexts receive the real RPC-facing
@@ -1109,4 +1112,41 @@ fn programs_to_load(programs: &[LoadableProgram]) -> Vec<(Pubkey, PathBuf)> {
         .iter()
         .map(|program| (program.id.0, program.path.clone()))
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use magicblock_config::{
+        config::validator::ReplicationConfig, types::SerdePubkey,
+    };
+
+    fn replication_config() -> ReplicationConfig {
+        ReplicationConfig {
+            url: "nats://127.0.0.1:4222".parse().unwrap(),
+            secret: "dummy-secret".to_string(),
+        }
+    }
+
+    #[test]
+    fn standby_replication_mode_can_promote() {
+        let mode = ReplicationMode::StandBy(replication_config());
+
+        assert!(replication_mode_can_promote(&mode));
+    }
+
+    #[test]
+    fn replica_only_replication_mode_cannot_promote() {
+        let mode = ReplicationMode::ReplicaOnly {
+            config: replication_config(),
+            authority_override: SerdePubkey(Pubkey::new_unique()),
+        };
+
+        assert!(!replication_mode_can_promote(&mode));
+    }
+
+    #[test]
+    fn standalone_replication_mode_cannot_promote() {
+        assert!(!replication_mode_can_promote(&ReplicationMode::Standalone));
+    }
 }

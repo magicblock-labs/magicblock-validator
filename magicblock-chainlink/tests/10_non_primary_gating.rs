@@ -10,7 +10,7 @@ use magicblock_chainlink::{
     },
     submux::SubMuxClient,
     testing::{cloner_stub::ClonerStub, init_logger},
-    AccountFetchOrigin, Chainlink,
+    AccountFetchOrigin, Chainlink, ChainlinkPrimaryEnablement,
 };
 use magicblock_config::config::{ChainLinkConfig, LifecycleMode};
 use magicblock_core::coordination_mode::switch_to_replica_mode;
@@ -45,9 +45,17 @@ fn lifecycle_mode_for_startup_mode(mode: &str) -> LifecycleMode {
 async fn new_endpoint_chainlink(
     startup_mode: &str,
 ) -> (EndpointChainlink, Arc<AccountsBankStub>) {
+    new_endpoint_chainlink_with_lifecycle_mode(lifecycle_mode_for_startup_mode(
+        startup_mode,
+    ))
+    .await
+}
+
+async fn new_endpoint_chainlink_with_lifecycle_mode(
+    lifecycle_mode: LifecycleMode,
+) -> (EndpointChainlink, Arc<AccountsBankStub>) {
     init_logger();
     switch_to_replica_mode();
-    let lifecycle_mode = lifecycle_mode_for_startup_mode(startup_mode);
     let bank = Arc::<AccountsBankStub>::default();
     let cloner = Arc::new(ClonerStub::new(bank.clone()));
     let endpoints = Endpoints::from(
@@ -165,13 +173,19 @@ async fn non_primary_startup_modes_keep_chainlink_runtime_disabled() {
 async fn repeated_enable_disable_leaves_no_runtime_or_mock_subscriptions() {
     let ctx = setup(21).await;
 
-    ctx.chainlink.enable_primary().await.unwrap();
+    assert_eq!(
+        ctx.chainlink.enable_primary().await.unwrap(),
+        ChainlinkPrimaryEnablement::Active
+    );
     assert!(ctx.chainlink.is_runtime_active().await);
 
     ctx.chainlink.disable().await.unwrap();
     assert!(!ctx.chainlink.is_runtime_active().await);
 
-    ctx.chainlink.enable_primary().await.unwrap();
+    assert_eq!(
+        ctx.chainlink.enable_primary().await.unwrap(),
+        ChainlinkPrimaryEnablement::DisabledByConfig
+    );
     ctx.chainlink.disable().await.unwrap();
 
     assert!(!ctx.chainlink.is_runtime_active().await);
@@ -179,6 +193,20 @@ async fn repeated_enable_disable_leaves_no_runtime_or_mock_subscriptions() {
     assert_eq!(ctx.chainlink.active_fetch_count_for_tests().await, None);
     assert!(ctx.pubsub_client.subscriptions_union().is_empty());
     assert!(ctx.pubsub_client.subscribed_program_ids().is_empty());
+}
+
+#[tokio::test]
+async fn offline_primary_enable_reports_disabled_by_config() {
+    let (chainlink, _) =
+        new_endpoint_chainlink_with_lifecycle_mode(LifecycleMode::Offline)
+            .await;
+
+    assert_eq!(
+        chainlink.enable_primary().await.unwrap(),
+        ChainlinkPrimaryEnablement::DisabledByConfig
+    );
+    assert!(!chainlink.is_runtime_active().await);
+    assert_eq!(chainlink.lifecycle_state_for_tests(), "disabled");
 }
 
 #[tokio::test]
