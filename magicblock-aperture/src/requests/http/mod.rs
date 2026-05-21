@@ -8,14 +8,13 @@ use hyper::{
     Request, Response,
 };
 use magicblock_accounts_db::traits::AccountsBank;
-use magicblock_chainlink::ChainlinkPrimaryReadiness;
+use magicblock_chainlink::PrimaryRuntimeReadiness;
 use magicblock_core::{
     coordination_mode::CoordinationMode,
     link::transactions::{SanitizeableTransaction, WithEncoded},
 };
 use magicblock_metrics::metrics::{
-    AccountFetchOrigin, ENSURE_ACCOUNTS_TIME,
-    RPC_APERTURE_ROUTING_DECISIONS_COUNT,
+    AccountFetchOrigin, APERTURE_ENSURE_ROUTING_COUNT, ENSURE_ACCOUNTS_TIME,
 };
 use prelude::JsonBody;
 use solana_account::{AccountSharedData, ReadableAccount};
@@ -41,10 +40,20 @@ const SYSTEM_PROGRAM_ID: Pubkey =
     Pubkey::from_str_const("11111111111111111111111111111111");
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ApertureRoutingDecision {
+enum EnsureRoutingDecision {
     NonPrimary,
-    PrimaryReady(ChainlinkPrimaryReadiness),
+    PrimaryReady,
     PrimaryNotReady,
+}
+
+impl EnsureRoutingDecision {
+    fn as_label(self) -> &'static str {
+        match self {
+            Self::NonPrimary => "non_primary",
+            Self::PrimaryReady => "primary_ready",
+            Self::PrimaryNotReady => "primary_not_ready",
+        }
+    }
 }
 
 /// An enum to efficiently represent a request body, avoiding allocation
@@ -123,68 +132,55 @@ pub(crate) async fn extract_bytes(
 /// # HTTP Dispatcher Helpers
 ///
 /// This block contains common helper methods used by various RPC request handlers.
-/// Aperture routing has three states:
+/// Aperture ensure routing has three states:
 /// - `NonPrimary`: local-only reads are allowed, writes/simulations are rejected.
 /// - `PrimaryReady`: Chainlink ensure paths are used.
-/// - `PrimaryNotReady`: ensure-dependent reads, writes, and simulations fail
-///   with HTTP 503 and JSON-RPC `TEMPORARILY_UNAVAILABLE`.
+/// - `PrimaryNotReady`: reads fall back to local-only data, and writes/simulations are rejected.
 impl HttpDispatcher {
-    async fn aperture_routing_decision(
+    async fn ensure_routing_decision(
         &self,
         method: &'static str,
-    ) -> ApertureRoutingDecision {
-        if !CoordinationMode::current().needs_onchain_interactions() {
-            RPC_APERTURE_ROUTING_DECISIONS_COUNT
-                .with_label_values(&[
-                    method,
-                    "non_primary_local",
-                    "not_applicable",
-                ])
-                .inc();
-            return ApertureRoutingDecision::NonPrimary;
-        }
+    ) -> EnsureRoutingDecision {
+        let decision = if !CoordinationMode::current()
+            .needs_onchain_interactions()
+        {
+            EnsureRoutingDecision::NonPrimary
+        } else {
+            match self.chainlink.primary_runtime_readiness().await {
+                PrimaryRuntimeReadiness::Ready
+                | PrimaryRuntimeReadiness::DisabledByConfig => {
+                    EnsureRoutingDecision::PrimaryReady
+                }
+                PrimaryRuntimeReadiness::NotReady => {
+                    warn!(
+                        method,
+                        "Aperture observed primary mode before Chainlink runtime readiness"
+                    );
+                    EnsureRoutingDecision::PrimaryNotReady
+                }
+            }
+        };
 
-        let readiness = self.chainlink.primary_readiness().await;
-        if readiness.allows_aperture_ensure() {
-            RPC_APERTURE_ROUTING_DECISIONS_COUNT
-                .with_label_values(&[
-                    method,
-                    "primary_ready_ensure",
-                    readiness.label(),
-                ])
-                .inc();
-            return ApertureRoutingDecision::PrimaryReady(readiness);
-        }
-
-        warn!(
-            method,
-            chainlink_readiness = readiness.label(),
-            "RPC aperture observed primary mode before Chainlink readiness"
-        );
-        RPC_APERTURE_ROUTING_DECISIONS_COUNT
-            .with_label_values(&[
-                method,
-                "primary_not_ready_reject",
-                readiness.label(),
-            ])
+        APERTURE_ENSURE_ROUTING_COUNT
+            .with_label_values(&[method, decision.as_label()])
             .inc();
-        ApertureRoutingDecision::PrimaryNotReady
+        decision
     }
 
-    async fn ensure_primary_write_ready(
+    async fn require_primary_ready_write(
         &self,
         method: &'static str,
     ) -> RpcResult<()> {
-        match self.aperture_routing_decision(method).await {
-            ApertureRoutingDecision::NonPrimary => {
+        match self.ensure_routing_decision(method).await {
+            EnsureRoutingDecision::NonPrimary => {
                 Err(RpcError::transaction_verification(format!(
                     "{method} is only available while validator is primary"
                 )))
             }
-            ApertureRoutingDecision::PrimaryReady(_) => Ok(()),
-            ApertureRoutingDecision::PrimaryNotReady => {
-                Err(RpcError::temporarily_unavailable(format!(
-                    "{method} requires Chainlink primary readiness"
+            EnsureRoutingDecision::PrimaryReady => Ok(()),
+            EnsureRoutingDecision::PrimaryNotReady => {
+                Err(RpcError::transaction_verification(format!(
+                    "{method} requires primary Chainlink runtime readiness"
                 )))
             }
         }
@@ -203,19 +199,19 @@ impl HttpDispatcher {
     /// Fetches an account's data from the `AccountsDb`.
     ///
     /// `NonPrimary` allows local-only reads, `PrimaryReady` fills from
-    /// Chainlink ensure paths, and `PrimaryNotReady` fails ensure-dependent
-    /// reads with HTTP 503 and JSON-RPC `TEMPORARILY_UNAVAILABLE`.
+    /// Chainlink ensure paths, and `PrimaryNotReady` falls back to local-only
+    /// data without calling Chainlink ensure.
     #[instrument(skip_all)]
     async fn read_account_with_ensure(
         &self,
-        method: &'static str,
+        _method: &'static str,
         pubkey: &Pubkey,
     ) -> RpcResult<Option<AccountSharedData>> {
-        match self.aperture_routing_decision(method).await {
-            ApertureRoutingDecision::NonPrimary => {
+        match self.ensure_routing_decision("read_account").await {
+            EnsureRoutingDecision::NonPrimary => {
                 Ok(self.accountsdb.get_account(pubkey))
             }
-            ApertureRoutingDecision::PrimaryReady(_) => {
+            EnsureRoutingDecision::PrimaryReady => {
                 let mark_empty_if_not_found = [*pubkey];
                 let _timer = ENSURE_ACCOUNTS_TIME
                     .with_label_values(&["account"])
@@ -236,10 +232,8 @@ impl HttpDispatcher {
                     });
                 Ok(self.accountsdb.get_account(pubkey))
             }
-            ApertureRoutingDecision::PrimaryNotReady => {
-                Err(RpcError::temporarily_unavailable(format!(
-                    "{method} requires Chainlink primary readiness"
-                )))
+            EnsureRoutingDecision::PrimaryNotReady => {
+                Ok(self.accountsdb.get_account(pubkey))
             }
         }
     }
@@ -247,20 +241,20 @@ impl HttpDispatcher {
     /// Fetches multiple accounts' data from the `AccountsDb`.
     ///
     /// `NonPrimary` allows local-only reads, `PrimaryReady` fills from
-    /// Chainlink ensure paths, and `PrimaryNotReady` fails ensure-dependent
-    /// reads with HTTP 503 and JSON-RPC `TEMPORARILY_UNAVAILABLE`.
+    /// Chainlink ensure paths, and `PrimaryNotReady` falls back to local-only
+    /// data without calling Chainlink ensure.
     #[instrument(skip(self, pubkeys), fields(pubkey_count = pubkeys.len()))]
     async fn read_accounts_with_ensure(
         &self,
-        method: &'static str,
+        _method: &'static str,
         pubkeys: &[Pubkey],
     ) -> RpcResult<Vec<Option<AccountSharedData>>> {
-        match self.aperture_routing_decision(method).await {
-            ApertureRoutingDecision::NonPrimary => Ok(pubkeys
+        match self.ensure_routing_decision("read_accounts").await {
+            EnsureRoutingDecision::NonPrimary => Ok(pubkeys
                 .iter()
                 .map(|pubkey| self.accountsdb.get_account(pubkey))
                 .collect()),
-            ApertureRoutingDecision::PrimaryReady(_) => {
+            EnsureRoutingDecision::PrimaryReady => {
                 trace!("Ensuring accounts");
                 let _timer = ENSURE_ACCOUNTS_TIME
                     .with_label_values(&["multi-account"])
@@ -284,11 +278,10 @@ impl HttpDispatcher {
                     .map(|pubkey| self.accountsdb.get_account(pubkey))
                     .collect())
             }
-            ApertureRoutingDecision::PrimaryNotReady => {
-                Err(RpcError::temporarily_unavailable(format!(
-                    "{method} requires Chainlink primary readiness"
-                )))
-            }
+            EnsureRoutingDecision::PrimaryNotReady => Ok(pubkeys
+                .iter()
+                .map(|pubkey| self.accountsdb.get_account(pubkey))
+                .collect()),
         }
     }
 
@@ -354,17 +347,16 @@ impl HttpDispatcher {
     ///
     /// `NonPrimary` is a defensive no-op because writes/simulations are
     /// rejected before this helper, `PrimaryReady` uses Chainlink ensure paths,
-    /// and `PrimaryNotReady` fails with HTTP 503 and JSON-RPC
-    /// `TEMPORARILY_UNAVAILABLE`.
+    /// and `PrimaryNotReady` rejects without calling Chainlink ensure.
     #[instrument(skip_all)]
     async fn ensure_transaction_accounts(
         &self,
-        method: &'static str,
+        _method: &'static str,
         transaction: &SanitizedTransaction,
     ) -> RpcResult<()> {
-        match self.aperture_routing_decision(method).await {
-            ApertureRoutingDecision::NonPrimary => Ok(()),
-            ApertureRoutingDecision::PrimaryReady(_) => {
+        match self.ensure_routing_decision("transaction").await {
+            EnsureRoutingDecision::NonPrimary => Ok(()),
+            EnsureRoutingDecision::PrimaryReady => {
                 let _timer = ENSURE_ACCOUNTS_TIME
                     .with_label_values(&["transaction"])
                     .start_timer();
@@ -388,10 +380,10 @@ impl HttpDispatcher {
                     }
                 }
             }
-            ApertureRoutingDecision::PrimaryNotReady => {
-                Err(RpcError::temporarily_unavailable(format!(
-                    "{method} requires Chainlink primary readiness"
-                )))
+            EnsureRoutingDecision::PrimaryNotReady => {
+                Err(RpcError::transaction_verification(
+                    "transaction requires primary Chainlink runtime readiness",
+                ))
             }
         }
     }

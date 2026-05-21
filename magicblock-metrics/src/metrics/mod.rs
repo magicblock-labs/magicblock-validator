@@ -213,6 +213,14 @@ lazy_static::lazy_static! {
         &["kind"]
     ).unwrap();
 
+    pub static ref APERTURE_ENSURE_ROUTING_COUNT: IntCounterVec = IntCounterVec::new(
+        Opts::new(
+            "aperture_ensure_routing_count",
+            "Number of aperture ensure-routing decisions by method and decision",
+        ),
+        &["method", "decision"],
+    ).unwrap();
+
     pub static ref TRANSACTION_PROCESSING_TIME: Histogram = Histogram::with_opts(
         HistogramOpts::new("transaction_processing_time", "Total time spent in transaction processing")
             .buckets(
@@ -607,6 +615,7 @@ pub(crate) fn register() {
         register!(COMMITTOR_INTENT_ALT_PREPARATION_TIME);
         register!(COMMITTOR_FETCH_COMMIT_NONCES_WAIT_TIME);
         register!(ENSURE_ACCOUNTS_TIME);
+        register!(APERTURE_ENSURE_ROUTING_COUNT);
         register!(RPC_REQUEST_HANDLING_TIME);
         register!(TRANSACTION_PROCESSING_TIME);
         register!(TRANSACTION_SKIP_PREFLIGHT);

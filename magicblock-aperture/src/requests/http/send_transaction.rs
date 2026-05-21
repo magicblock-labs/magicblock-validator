@@ -27,7 +27,7 @@ impl HttpDispatcher {
         let config = config.unwrap_or_default();
         let encoding = config.encoding.unwrap_or(UiTransactionEncoding::Base58);
 
-        self.ensure_primary_write_ready("sendTransaction").await?;
+        self.require_primary_ready_write("sendTransaction").await?;
         let transaction = self
             .prepare_transaction(&transaction_str, encoding, true, false)
             .inspect_err(
