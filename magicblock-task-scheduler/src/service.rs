@@ -394,6 +394,7 @@ impl TaskSchedulerService {
                         tx_counter.fetch_add(1, Ordering::Relaxed),
                     ),
                     InstructionUtils::execute_task_instruction(
+                        task.authority,
                         task.instructions.clone(),
                     ),
                 ];
