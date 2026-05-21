@@ -81,7 +81,7 @@ async function tryPackageQueryFilteringService(): Promise<boolean> {
   }
 }
 
-function trySystemQueryFilteringService(): void {
+async function trySystemQueryFilteringService(): Promise<void> {
   const absolutePath = process.env.PATH?.split(path.delimiter)
     .filter((dir) => dir !== path.dirname(process.argv[1]))
     .find((dir) => {
@@ -113,11 +113,16 @@ function trySystemQueryFilteringService(): void {
   }
 
   void runQueryFilteringService(absoluteBinaryPath);
+  const success = await runQueryFilteringService(absoluteBinaryPath);
+  if (!success) {
+    console.error("Failed to spawn query-filtering-service from system PATH.");
+    process.exit(1);
+  }
 }
 
 async function main(): Promise<void> {
   if (!(await tryPackageQueryFilteringService())) {
-    trySystemQueryFilteringService();
+    await trySystemQueryFilteringService();
   }
 }
 
