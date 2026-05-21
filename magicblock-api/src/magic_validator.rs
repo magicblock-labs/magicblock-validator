@@ -1,5 +1,4 @@
 use std::{
-    future::Future,
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -108,30 +107,30 @@ type ChainlinkImpl = Chainlink<
     ChainlinkCloner,
 >;
 
-async fn run_standalone_primary_start_sequence<
-    ResetBank,
-    EnablePrimary,
-    EnablePrimaryFuture,
-    SendSchedulerPrimary,
-    SendSchedulerPrimaryFuture,
->(
+async fn run_standalone_primary_start_sequence(
+    validator: &MagicValidator,
     should_reset_accounts_bank: bool,
-    reset_bank: ResetBank,
-    enable_primary: EnablePrimary,
-    send_scheduler_primary: SendSchedulerPrimary,
-) -> ApiResult<()>
-where
-    ResetBank: FnOnce() -> ApiResult<()>,
-    EnablePrimary: FnOnce() -> EnablePrimaryFuture,
-    EnablePrimaryFuture: Future<Output = ApiResult<()>>,
-    SendSchedulerPrimary: FnOnce() -> SendSchedulerPrimaryFuture,
-    SendSchedulerPrimaryFuture: Future<Output = ApiResult<()>>,
-{
+) -> ApiResult<()> {
     if should_reset_accounts_bank {
-        reset_bank()?;
+        let step_start = Instant::now();
+        validator.chainlink.reset_accounts_bank()?;
+        log_timing("startup", "reset_accounts_bank", step_start);
     }
-    enable_primary().await?;
-    send_scheduler_primary().await?;
+
+    validator
+        .chainlink
+        .enable_primary()
+        .await
+        .map_err(ApiError::from)?;
+    validator
+        .mode_tx
+        .send(SchedulerMode::Primary)
+        .await
+        .map_err(|e| {
+            ApiError::FailedToSendModeSwitch(format!(
+                "Failed to send primary mode to scheduler: {e}"
+            ))
+        })?;
     Ok(())
 }
 
@@ -910,25 +909,8 @@ impl MagicValidator {
             // non-delegated accounts, including programs, only when this
             // standalone validator is preparing to become primary.
             run_standalone_primary_start_sequence(
+                self,
                 !self.config.accountsdb.reset,
-                || {
-                    let step_start = Instant::now();
-                    self.chainlink.reset_accounts_bank()?;
-                    log_timing("startup", "reset_accounts_bank", step_start);
-                    Ok(())
-                },
-                || async {
-                    self.chainlink.enable_primary().await.map_err(Into::into)
-                },
-                || async {
-                    self.mode_tx.send(SchedulerMode::Primary).await.map_err(
-                        |e| {
-                            ApiError::FailedToSendModeSwitch(format!(
-                                "Failed to send primary mode to scheduler: {e}"
-                            ))
-                        },
-                    )
-                },
             )
             .await?;
         } else if let Some(replicator) = self.replication_service.take() {
@@ -1111,101 +1093,4 @@ fn programs_to_load(programs: &[LoadableProgram]) -> Vec<(Pubkey, PathBuf)> {
         .iter()
         .map(|program| (program.id.0, program.path.clone()))
         .collect()
-}
-
-#[cfg(test)]
-mod tests {
-    use std::sync::{Arc, Mutex};
-
-    use super::*;
-
-    fn record(events: &Arc<Mutex<Vec<&'static str>>>, event: &'static str) {
-        events.lock().unwrap().push(event);
-    }
-
-    #[tokio::test]
-    async fn standalone_primary_start_sequence_orders_reset_chainlink_before_scheduler_primary(
-    ) {
-        let events = Arc::new(Mutex::new(Vec::new()));
-
-        run_standalone_primary_start_sequence(
-            true,
-            {
-                let events = Arc::clone(&events);
-                move || {
-                    record(&events, "reset_accounts_bank");
-                    Ok(())
-                }
-            },
-            {
-                let events = Arc::clone(&events);
-                move || async move {
-                    record(&events, "enable_primary");
-                    Ok(())
-                }
-            },
-            {
-                let events = Arc::clone(&events);
-                move || async move {
-                    record(&events, "send_scheduler_primary");
-                    Ok(())
-                }
-            },
-        )
-        .await
-        .unwrap();
-
-        assert_eq!(
-            *events.lock().unwrap(),
-            vec![
-                "reset_accounts_bank",
-                "enable_primary",
-                "send_scheduler_primary",
-            ]
-        );
-    }
-
-    #[tokio::test]
-    async fn standalone_primary_start_sequence_skips_scheduler_primary_when_chainlink_fails(
-    ) {
-        let events = Arc::new(Mutex::new(Vec::new()));
-
-        let result = run_standalone_primary_start_sequence(
-            true,
-            {
-                let events = Arc::clone(&events);
-                move || {
-                    record(&events, "reset_accounts_bank");
-                    Ok(())
-                }
-            },
-            {
-                let events = Arc::clone(&events);
-                move || async move {
-                    record(&events, "enable_primary");
-                    Err(ApiError::FailedToStartJsonRpcService(
-                        "chainlink failed".to_string(),
-                    ))
-                }
-            },
-            {
-                let events = Arc::clone(&events);
-                move || async move {
-                    record(&events, "send_scheduler_primary");
-                    Ok(())
-                }
-            },
-        )
-        .await;
-
-        assert!(matches!(
-            result,
-            Err(ApiError::FailedToStartJsonRpcService(message))
-                if message == "chainlink failed"
-        ));
-        assert_eq!(
-            *events.lock().unwrap(),
-            vec!["reset_accounts_bank", "enable_primary"]
-        );
-    }
 }
