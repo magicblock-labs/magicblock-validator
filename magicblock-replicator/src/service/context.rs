@@ -139,13 +139,23 @@ impl ReplicationContext {
     }
 
     /// Switches to replica mode.
-    pub async fn enter_replica_mode(&self) {
-        let _ = self.mode_tx.send(SchedulerMode::Replica).await;
+    pub async fn enter_replica_mode(&self) -> Result<()> {
+        self.mode_tx
+            .send(SchedulerMode::Replica)
+            .await
+            .map_err(|e| {
+                Error::Internal(format!("failed to enter replica mode: {e}"))
+            })
     }
 
     /// Switches to primary mode.
-    pub async fn enter_primary_mode(&self) {
-        let _ = self.mode_tx.send(SchedulerMode::Primary).await;
+    pub async fn enter_primary_mode(&self) -> Result<()> {
+        self.mode_tx
+            .send(SchedulerMode::Primary)
+            .await
+            .map_err(|e| {
+                Error::Internal(format!("failed to enter primary mode: {e}"))
+            })
     }
 
     /// Uploads snapshot.
@@ -252,13 +262,12 @@ where
     EnablePrimary: FnOnce() -> EnablePrimaryFuture,
     EnablePrimaryFuture: Future<Output = Result<()>>,
     EnterPrimary: FnOnce() -> EnterPrimaryFuture,
-    EnterPrimaryFuture: Future<Output = ()>,
+    EnterPrimaryFuture: Future<Output = Result<()>>,
 {
     let _guard = wait_for_idle().await;
     reset_bank()?;
     enable_primary().await?;
-    enter_primary().await;
-    Ok(())
+    enter_primary().await
 }
 
 /// Runs the standby start sequence.
@@ -277,13 +286,13 @@ async fn run_standby_start_sequence<
 ) -> Result<Option<Consumer>>
 where
     EnterReplica: FnOnce() -> EnterReplicaFuture,
-    EnterReplicaFuture: Future<Output = ()>,
+    EnterReplicaFuture: Future<Output = Result<()>>,
     DisableChainlink: FnOnce() -> DisableChainlinkFuture,
     DisableChainlinkFuture: Future<Output = Result<()>>,
     CreateConsumer: FnOnce() -> CreateConsumerFuture,
     CreateConsumerFuture: Future<Output = Option<Consumer>>,
 {
-    enter_replica().await;
+    enter_replica().await?;
     disable_chainlink().await?;
     Ok(create_consumer().await)
 }
@@ -331,6 +340,7 @@ mod tests {
                 let events = Arc::clone(&events);
                 move || async move {
                     record(&events, "enter_primary_mode");
+                    Ok(())
                 }
             },
         )
@@ -380,6 +390,7 @@ mod tests {
                 let events = Arc::clone(&events);
                 move || async move {
                     record(&events, "enter_primary_mode");
+                    Ok(())
                 }
             },
         )
@@ -400,6 +411,44 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn primary_readiness_sequence_propagates_primary_mode_failure() {
+        let result = run_primary_readiness_sequence(
+            || async {},
+            || Ok(()),
+            || async { Ok(()) },
+            || async { Err(Error::Internal("mode send failed".to_string())) },
+        )
+        .await;
+
+        assert!(
+            matches!(result, Err(Error::Internal(message)) if message == "mode send failed")
+        );
+    }
+
+    #[tokio::test]
+    async fn standby_start_sequence_propagates_replica_mode_failure() {
+        let events = Arc::new(Mutex::new(Vec::new()));
+
+        let result = run_standby_start_sequence(
+            || async { Err(Error::Internal("mode send failed".to_string())) },
+            {
+                let events = Arc::clone(&events);
+                move || async move {
+                    record(&events, "disable_chainlink");
+                    Ok(())
+                }
+            },
+            || async { Some(()) },
+        )
+        .await;
+
+        assert!(
+            matches!(result, Err(Error::Internal(message)) if message == "mode send failed")
+        );
+        assert!(events.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
     async fn standby_start_sequence_disables_chainlink_before_consumer_creation(
     ) {
         let events = Arc::new(Mutex::new(Vec::new()));
@@ -409,6 +458,7 @@ mod tests {
                 let events = Arc::clone(&events);
                 move || async move {
                     record(&events, "enter_replica_mode");
+                    Ok(())
                 }
             },
             {
@@ -454,6 +504,7 @@ mod tests {
                         let events = Arc::clone(&events);
                         move || async move {
                             record(&events, "enter_replica_mode");
+                            Ok(())
                         }
                     },
                     {
