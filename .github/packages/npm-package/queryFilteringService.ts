@@ -112,7 +112,6 @@ async function trySystemQueryFilteringService(): Promise<void> {
     process.exit(1);
   }
 
-  void runQueryFilteringService(absoluteBinaryPath);
   const success = await runQueryFilteringService(absoluteBinaryPath);
   if (!success) {
     console.error("Failed to spawn query-filtering-service from system PATH.");
