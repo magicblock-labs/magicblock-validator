@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use connection::ConnectionHandler;
 use fastwebsockets::upgrade::upgrade;
 use http_body_util::Empty;
@@ -10,14 +8,10 @@ use hyper::{
     Request, Response,
 };
 use hyper_util::rt::TokioIo;
-use tokio::{
-    net::{TcpListener, TcpStream},
-    sync::oneshot::Receiver,
-};
+use tokio::net::{TcpListener, TcpStream};
 use tokio_util::sync::CancellationToken;
 use tracing::{info, instrument, warn};
 
-use super::Shutdown;
 use crate::{
     error::RpcError,
     state::{
@@ -31,15 +25,13 @@ use crate::{
 ///
 /// This server listens for TCP connections and manages the HTTP Upgrade handshake
 /// to establish persistent WebSocket connections for real-time event subscriptions.
-/// It supports graceful shutdown to ensure all client connections are terminated cleanly.
+/// On shutdown, it stops accepting new connections without waiting for active
+/// WebSocket tasks to drain.
 pub struct WebsocketServer {
     /// The TCP listener that accepts new client connections.
     socket: TcpListener,
     /// The shared state required by each individual connection handler.
     state: ConnectionState,
-    /// The receiving end of the shutdown signal, used to wait for all
-    /// active connections to terminate before the server fully exits.
-    shutdown: Receiver<()>,
 }
 
 /// A container for shared state that is cloned for each new WebSocket connection.
@@ -54,8 +46,6 @@ struct ConnectionState {
     transactions: TransactionsCache,
     /// The global cancellation token for shutting down the server.
     cancel: CancellationToken,
-    /// An RAII guard for tracking outstanding connections to enable graceful shutdown.
-    shutdown: Arc<Shutdown>,
 }
 
 impl WebsocketServer {
@@ -66,26 +56,19 @@ impl WebsocketServer {
         state: &SharedState,
         cancel: CancellationToken,
     ) -> RpcResult<Self> {
-        let (shutdown, rx) = Shutdown::new();
         let state = ConnectionState {
             subscriptions: state.subscriptions.clone(),
             transactions: state.transactions.clone(),
             cancel,
-            shutdown,
         };
-        Ok(Self {
-            socket,
-            state,
-            shutdown: rx,
-        })
+        Ok(Self { socket, state })
     }
 
     /// Starts the main server loop to accept and handle incoming connections.
     ///
-    /// ## Graceful Shutdown
-    /// When the server's `cancel` token is triggered, the loop stops accepting new
-    /// connections. It then waits for all active connections to complete their work
-    /// and drop their `Shutdown` handles before the method returns and the server exits.
+    /// When the server's `cancel` token is triggered, the loop stops accepting
+    /// new connections and returns immediately so validator restart time is not
+    /// blocked by active WebSocket connections.
     #[instrument(skip(self))]
     pub(crate) async fn run(mut self) {
         loop {
@@ -101,10 +84,9 @@ impl WebsocketServer {
                 }
             }
         }
-        // Drop the main `ConnectionState` which holds the original `Shutdown` handle.
+        // Drop shared state before returning; active connection tasks are
+        // dropped with the RPC runtime.
         drop(self.state);
-        // Wait for all spawned connection tasks to finish.
-        let _ = self.shutdown.await;
         info!("WebSocket server shutdown");
     }
 
@@ -112,8 +94,7 @@ impl WebsocketServer {
     ///
     /// This function sets up a Hyper service to perform the initial HTTP Upgrade handshake.
     fn handle(&mut self, stream: TcpStream) {
-        // Clone the state for the new connection. This includes cloning the Arc<Shutdown>
-        // handle, incrementing the in-flight connection count.
+        // Clone the state for the new connection.
         let state = self.state.clone();
 
         let io = TokioIo::new(stream);
