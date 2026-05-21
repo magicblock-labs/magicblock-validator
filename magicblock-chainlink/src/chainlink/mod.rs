@@ -33,11 +33,14 @@ use crate::{
     fetch_cloner::FetchAndCloneResult,
     filters::is_noop_system_transfer,
     remote_account_provider::{
-        chain_pubsub_client::mock::ChainPubsubClientMock,
         chain_updates_client::ChainUpdatesClient, ChainPubsubClient,
         ChainRpcClient, ChainRpcClientImpl, Endpoints, RemoteAccountProvider,
     },
     submux::SubMuxClient,
+};
+#[cfg(any(test, feature = "dev-context"))]
+use crate::{
+    remote_account_provider::chain_pubsub_client::mock::ChainPubsubClientMock,
     testing::{cloner_stub::ClonerStub, rpc_client_mock::ChainRpcClientMock},
 };
 
@@ -50,6 +53,7 @@ pub mod fetch_cloner;
 pub use blacklisted_accounts::*;
 
 /// A type alias for chainlink with only accountsdb being real impl
+#[cfg(any(test, feature = "dev-context"))]
 pub type StubbedChainlink<V> =
     Chainlink<ChainRpcClientMock, ChainPubsubClientMock, V, ClonerStub>;
 
@@ -684,6 +688,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
     ///
     /// TODO(bmuddha):
     /// remove all accountsdb management from chainlink, after accountsdb refactoring
+    #[cfg(any(test, feature = "dev-context"))]
     pub fn stub(&self) -> StubbedChainlink<V> {
         Chainlink {
             accounts_bank: self.accounts_bank.clone(),
@@ -706,25 +711,28 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
     }
 }
 
+#[cfg(any(test, feature = "dev-context"))]
 impl<V: AccountsBank>
     Chainlink<ChainRpcClientMock, ChainPubsubClientMock, V, ClonerStub>
 {
     /// Marks the primary lifecycle boundary for stubbed chainlink remote sync.
-    pub async fn enable_primary(&self) -> ChainlinkResult<()> {
+    pub async fn enable_primary(
+        &self,
+    ) -> ChainlinkResult<ChainlinkPrimaryEnablement> {
         if self.runtime.lock().await.is_some() {
             self.lifecycle_state.store(
                 ChainlinkLifecycleState::Enabled as u8,
                 Ordering::SeqCst,
             );
+            info!("Test Chainlink primary lifecycle marked active");
+            Ok(ChainlinkPrimaryEnablement::Active)
         } else {
             self.lifecycle_state.store(
                 ChainlinkLifecycleState::Disabled as u8,
                 Ordering::SeqCst,
             );
+            Ok(ChainlinkPrimaryEnablement::DisabledByConfig)
         }
-
-        info!("Chainlink primary remote sync enabled");
-        Ok(())
     }
 }
 
