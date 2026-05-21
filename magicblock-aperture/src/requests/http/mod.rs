@@ -8,11 +8,15 @@ use hyper::{
     Request, Response,
 };
 use magicblock_accounts_db::traits::AccountsBank;
+use magicblock_chainlink::ChainlinkPrimaryReadiness;
 use magicblock_core::{
     coordination_mode::CoordinationMode,
     link::transactions::{SanitizeableTransaction, WithEncoded},
 };
-use magicblock_metrics::metrics::{AccountFetchOrigin, ENSURE_ACCOUNTS_TIME};
+use magicblock_metrics::metrics::{
+    AccountFetchOrigin, ENSURE_ACCOUNTS_TIME,
+    RPC_APERTURE_ROUTING_DECISIONS_COUNT,
+};
 use prelude::JsonBody;
 use solana_account::{AccountSharedData, ReadableAccount};
 use solana_pubkey::Pubkey;
@@ -35,6 +39,14 @@ const MAX_RUNTIME_PROGRAM_ID_INDEX_EXCLUSIVE: usize =
     1232 / size_of::<Pubkey>();
 const SYSTEM_PROGRAM_ID: Pubkey =
     Pubkey::from_str_const("11111111111111111111111111111111");
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ApertureRoutingDecision {
+    NonPrimary,
+    PrimaryReady(ChainlinkPrimaryReadiness),
+    PrimaryNotReady,
+}
 
 /// An enum to efficiently represent a request body, avoiding allocation
 /// for single-chunk bodies (which are almost always the case)
@@ -115,6 +127,49 @@ pub(crate) async fn extract_bytes(
 impl HttpDispatcher {
     fn is_primary_mode(&self) -> bool {
         CoordinationMode::current().needs_onchain_interactions()
+    }
+
+    #[allow(dead_code)]
+    async fn aperture_routing_decision(
+        &self,
+        method: &'static str,
+    ) -> ApertureRoutingDecision {
+        if !CoordinationMode::current().needs_onchain_interactions() {
+            RPC_APERTURE_ROUTING_DECISIONS_COUNT
+                .with_label_values(&[
+                    method,
+                    "non_primary_local",
+                    "not_applicable",
+                ])
+                .inc();
+            return ApertureRoutingDecision::NonPrimary;
+        }
+
+        let readiness = self.chainlink.primary_readiness().await;
+        if readiness.allows_aperture_ensure() {
+            RPC_APERTURE_ROUTING_DECISIONS_COUNT
+                .with_label_values(&[
+                    method,
+                    "primary_ready_ensure",
+                    readiness.label(),
+                ])
+                .inc();
+            return ApertureRoutingDecision::PrimaryReady(readiness);
+        }
+
+        warn!(
+            method,
+            chainlink_readiness = readiness.label(),
+            "RPC aperture observed primary mode before Chainlink readiness"
+        );
+        RPC_APERTURE_ROUTING_DECISIONS_COUNT
+            .with_label_values(&[
+                method,
+                "primary_not_ready_reject",
+                readiness.label(),
+            ])
+            .inc();
+        ApertureRoutingDecision::PrimaryNotReady
     }
 
     fn reject_non_primary_write(&self, method: &'static str) -> RpcResult<()> {

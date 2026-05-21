@@ -6,6 +6,8 @@ use solana_transaction_error::TransactionError;
 
 pub(crate) const TRANSACTION_SIMULATION: i16 = -32002;
 pub(crate) const TRANSACTION_VERIFICATION: i16 = -32003;
+#[allow(dead_code)]
+pub(crate) const TEMPORARILY_UNAVAILABLE: i16 = -32004;
 pub(crate) const BLOCK_NOT_FOUND: i16 = -32009;
 pub(crate) const INVALID_REQUEST: i16 = -32600;
 pub(crate) const INVALID_PARAMS: i16 = -32602;
@@ -142,6 +144,15 @@ impl RpcError {
             code: TRANSACTION_VERIFICATION,
             message: format!("transaction verification error: {error}"),
             http_status: 200,
+        }
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn temporarily_unavailable<E: Display>(error: E) -> Self {
+        Self {
+            code: TEMPORARILY_UNAVAILABLE,
+            message: format!("temporarily unavailable: {error}"),
+            http_status: 503,
         }
     }
 

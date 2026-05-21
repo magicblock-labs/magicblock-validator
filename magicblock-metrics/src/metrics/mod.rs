@@ -246,6 +246,15 @@ lazy_static::lazy_static! {
         &["name"],
     ).unwrap();
 
+    pub static ref RPC_APERTURE_ROUTING_DECISIONS_COUNT: IntCounterVec = IntCounterVec::new(
+        Opts::new(
+            "rpc_aperture_routing_decisions_count",
+            "Count of RPC aperture routing decisions by method, decision, and Chainlink readiness",
+        ),
+        &["method", "decision", "chainlink_readiness"],
+    )
+    .unwrap();
+
     pub static ref RPC_WS_SUBSCRIPTIONS_COUNT: IntGaugeVec = IntGaugeVec::new(
         Opts::new("rpc_ws_subscriptions_count", "Count of active rpc websocket subscriptions"),
         &["name"],
@@ -602,6 +611,7 @@ pub(crate) fn register() {
         register!(TRANSACTION_PROCESSING_TIME);
         register!(TRANSACTION_SKIP_PREFLIGHT);
         register!(RPC_REQUESTS_COUNT);
+        register!(RPC_APERTURE_ROUTING_DECISIONS_COUNT);
         register!(RPC_WS_SUBSCRIPTIONS_COUNT);
         register!(ACCOUNT_FETCHES_SUCCESS_COUNT);
         register!(ACCOUNT_FETCHES_FAILED_COUNT);
