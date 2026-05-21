@@ -3,7 +3,7 @@ mod process_execute_task;
 mod process_schedule_task;
 
 use magicblock_magic_program_api::{
-  instruction::MagicBlockInstruction, pda::crank_signer_pda
+    instruction::MagicBlockInstruction, pda::crank_signer_pda,
 };
 pub(crate) use process_cancel_task::*;
 pub(crate) use process_execute_task::*;
