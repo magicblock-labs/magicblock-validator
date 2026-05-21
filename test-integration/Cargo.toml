@@ -70,7 +70,7 @@ rkyv = "0.7.45"
 schedulecommit-client = { path = "schedulecommit/client" }
 serde = "1.0.217"
 serial_test = "3.2.0"
-solana-account = { git = "https://github.com/magicblock-labs/magicblock-svm.git", branch = "bmuddha/fix/tighten-privileged-access-v3" }
+solana-account = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "2bbd342" }
 solana-address-lookup-table-interface = "3.1"
 solana-commitment-config = "3.1.1"
 solana-compute-budget-interface = "3.0"
@@ -110,9 +110,9 @@ url = "2.5.0"
 solana-storage-proto = { path = "../storage-proto" }
 # same reason as above
 rocksdb = { git = "https://github.com/magicblock-labs/rust-rocksdb.git", rev = "6d975197" }
-solana-account = { git = "https://github.com/magicblock-labs/magicblock-svm.git", branch = "bmuddha/fix/tighten-privileged-access-v3" }
-solana-program-runtime = { git = "https://github.com/magicblock-labs/magicblock-svm.git", branch = "bmuddha/fix/tighten-privileged-access-v3" }
-solana-svm = { git = "https://github.com/magicblock-labs/magicblock-svm.git", branch = "bmuddha/fix/tighten-privileged-access-v3" }
-solana-transaction-context = { git = "https://github.com/magicblock-labs/magicblock-svm.git", branch = "bmuddha/fix/tighten-privileged-access-v3" }
+solana-account = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "2bbd342" }
+solana-program-runtime = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "2bbd342" }
+solana-svm = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "2bbd342" }
+solana-transaction-context = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "2bbd342" }
 # Fix libsodium for ARM builds - upstream crates.io version breaks Linux ARM binaries
 libsodium-rs = { git = "https://github.com/jedisct1/libsodium-rs.git", rev = "0397a6c5785233f9f2ac91f3eedc3cceb74e0060" }
