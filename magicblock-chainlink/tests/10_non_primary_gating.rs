@@ -174,22 +174,14 @@ async fn non_primary_startup_modes_keep_chainlink_runtime_disabled() {
 }
 
 #[tokio::test]
-async fn repeated_enable_disable_leaves_no_runtime_or_mock_subscriptions() {
+async fn repeated_disable_leaves_no_runtime_or_mock_subscriptions() {
     let ctx = setup(21).await;
 
-    assert_eq!(
-        ctx.chainlink.enable_primary().await.unwrap(),
-        PrimaryEnableOutcome::RuntimeActive
-    );
     assert!(ctx.chainlink.is_runtime_active().await);
 
     ctx.chainlink.disable().await.unwrap();
     assert!(!ctx.chainlink.is_runtime_active().await);
 
-    assert_eq!(
-        ctx.chainlink.enable_primary().await.unwrap(),
-        PrimaryEnableOutcome::DisabledByConfig
-    );
     ctx.chainlink.disable().await.unwrap();
 
     assert!(!ctx.chainlink.is_runtime_active().await);

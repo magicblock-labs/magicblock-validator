@@ -1,9 +1,10 @@
 //! Shared context for primary and standby roles.
 
-use std::{future::Future, pin::Pin, sync::Arc};
+use std::sync::Arc;
 
 use machineid_rs::IdBuilder;
 use magicblock_accounts_db::AccountsDb;
+use magicblock_chainlink::PrimaryChainlink;
 use magicblock_core::{
     link::{
         replication::{Block, Message, SuperBlock},
@@ -25,78 +26,6 @@ use crate::{
     watcher::SnapshotWatcher,
     Error, Result,
 };
-
-/// Narrow Chainlink lifecycle surface needed by replication.
-pub trait PrimaryChainlink: Send + Sync {
-    fn reset_accounts_bank(
-        &self,
-    ) -> magicblock_accounts_db::AccountsDbResult<()>;
-
-    fn enable_primary<'a>(
-        &'a self,
-    ) -> Pin<
-        Box<
-            dyn Future<
-                    Output = magicblock_chainlink::errors::ChainlinkResult<()>,
-                > + Send
-                + 'a,
-        >,
-    >;
-
-    fn disable<'a>(
-        &'a self,
-    ) -> Pin<
-        Box<
-            dyn Future<
-                    Output = magicblock_chainlink::errors::ChainlinkResult<()>,
-                > + Send
-                + 'a,
-        >,
-    >;
-}
-
-impl<C> PrimaryChainlink
-    for magicblock_chainlink::Chainlink<
-        magicblock_chainlink::remote_account_provider::chain_rpc_client::ChainRpcClientImpl,
-        magicblock_chainlink::submux::SubMuxClient<
-            magicblock_chainlink::remote_account_provider::chain_updates_client::ChainUpdatesClient,
-        >,
-        AccountsDb,
-        C,
-    >
-where
-    C: magicblock_chainlink::cloner::Cloner + Send + Sync + 'static,
-{
-    fn reset_accounts_bank(&self) -> magicblock_accounts_db::AccountsDbResult<()> {
-        self.reset_accounts_bank()
-    }
-
-    fn enable_primary<'a>(
-        &'a self,
-    ) -> Pin<
-        Box<
-            dyn Future<Output = magicblock_chainlink::errors::ChainlinkResult<()>>
-                + Send
-                + 'a,
-        >,
-    > {
-        Box::pin(async move {
-            self.enable_primary().await.map(|_| ())
-        })
-    }
-
-    fn disable<'a>(
-        &'a self,
-    ) -> Pin<
-        Box<
-            dyn Future<Output = magicblock_chainlink::errors::ChainlinkResult<()>>
-                + Send
-                + 'a,
-        >,
-    > {
-        Box::pin(self.disable())
-    }
-}
 
 /// Shared state for both primary and standby roles.
 pub struct ReplicationContext {
@@ -314,7 +243,13 @@ async fn run_primary_readiness_sequence_with(
 ) -> Result<()> {
     let _guard = scheduler.wait_for_idle().await;
     chainlink.reset_accounts_bank().map_err(Error::from)?;
-    chainlink.enable_primary().await.map_err(Error::from)?;
+    let outcome = chainlink.enable_primary().await.map_err(Error::from)?;
+    let readiness = chainlink.primary_runtime_readiness().await;
+    if !readiness.allows_primary_ensure() {
+        return Err(Error::Internal(format!(
+            "chainlink primary runtime not ready after enable: outcome={outcome:?}, readiness={readiness:?}"
+        )));
+    }
     mode_tx.send(SchedulerMode::Primary).await.map_err(|e| {
         Error::Internal(format!("failed to enter primary mode: {e}"))
     })
@@ -344,26 +279,44 @@ async fn run_standby_start_sequence_with(
 mod tests {
     use std::sync::{Arc, Mutex};
 
-    use magicblock_chainlink::errors::{ChainlinkError, ChainlinkResult};
+    use magicblock_chainlink::{
+        errors::ChainlinkResult, PrimaryChainlink, PrimaryEnableOutcome,
+        PrimaryRuntimeReadiness,
+    };
     use magicblock_core::link::{link, transactions::SchedulerMode};
     use tokio::sync::mpsc;
 
     use super::{
         run_primary_readiness_sequence_with, run_standby_start_sequence_with,
-        PrimaryChainlink,
     };
 
-    #[derive(Default)]
     struct RecordingPrimaryChainlink {
         calls: Arc<Mutex<Vec<&'static str>>>,
-        enable_primary_result: Mutex<Option<ChainlinkResult<()>>>,
+        enable_primary_result:
+            Mutex<Option<ChainlinkResult<PrimaryEnableOutcome>>>,
+        readiness: Mutex<PrimaryRuntimeReadiness>,
+    }
+
+    impl Default for RecordingPrimaryChainlink {
+        fn default() -> Self {
+            Self {
+                calls: Arc::default(),
+                enable_primary_result: Mutex::new(Some(Ok(
+                    PrimaryEnableOutcome::RuntimeActive,
+                ))),
+                readiness: Mutex::new(PrimaryRuntimeReadiness::Ready),
+            }
+        }
     }
 
     impl RecordingPrimaryChainlink {
-        fn with_enable_primary_result(result: ChainlinkResult<()>) -> Self {
+        fn with_readiness(readiness: PrimaryRuntimeReadiness) -> Self {
             Self {
                 calls: Arc::default(),
-                enable_primary_result: Mutex::new(Some(result)),
+                enable_primary_result: Mutex::new(Some(Ok(
+                    PrimaryEnableOutcome::RuntimeActive,
+                ))),
+                readiness: Mutex::new(readiness),
             }
         }
 
@@ -372,6 +325,7 @@ mod tests {
         }
     }
 
+    #[async_trait::async_trait]
     impl PrimaryChainlink for RecordingPrimaryChainlink {
         fn reset_accounts_bank(
             &self,
@@ -383,53 +337,51 @@ mod tests {
             Ok(())
         }
 
-        fn enable_primary<'a>(
-            &'a self,
-        ) -> std::pin::Pin<
-            Box<
-                dyn std::future::Future<Output = ChainlinkResult<()>>
-                    + Send
-                    + 'a,
-            >,
-        > {
-            Box::pin(async move {
-                self.calls
-                    .lock()
-                    .expect("calls lock poisoned")
-                    .push("enable_primary");
-                self.enable_primary_result
-                    .lock()
-                    .expect("enable_primary_result lock poisoned")
-                    .take()
-                    .unwrap_or(Ok(()))
-            })
+        async fn enable_primary(
+            &self,
+        ) -> ChainlinkResult<PrimaryEnableOutcome> {
+            self.calls
+                .lock()
+                .expect("calls lock poisoned")
+                .push("enable_primary");
+            self.enable_primary_result
+                .lock()
+                .expect("enable_primary_result lock poisoned")
+                .take()
+                .unwrap_or(Ok(PrimaryEnableOutcome::RuntimeActive))
         }
 
-        fn disable<'a>(
-            &'a self,
-        ) -> std::pin::Pin<
-            Box<
-                dyn std::future::Future<Output = ChainlinkResult<()>>
-                    + Send
-                    + 'a,
-            >,
-        > {
-            Box::pin(async move {
-                self.calls
-                    .lock()
-                    .expect("calls lock poisoned")
-                    .push("disable");
-                Ok(())
-            })
+        async fn disable(&self) -> ChainlinkResult<()> {
+            self.calls
+                .lock()
+                .expect("calls lock poisoned")
+                .push("disable");
+            Ok(())
+        }
+
+        async fn primary_runtime_readiness(&self) -> PrimaryRuntimeReadiness {
+            self.calls
+                .lock()
+                .expect("calls lock poisoned")
+                .push("primary_runtime_readiness");
+            *self.readiness.lock().expect("readiness lock poisoned")
         }
     }
 
     #[tokio::test]
-    async fn run_primary_readiness_sequence_enables_chainlink_before_primary_mode(
-    ) {
+    async fn primary_readiness_sequence_resets_and_enables_before_primary_mode()
+    {
         let (dispatch, _validator) = link();
         let (mode_tx, mut mode_rx) = mpsc::channel(1);
         let chainlink = RecordingPrimaryChainlink::default();
+        let calls = chainlink.calls.clone();
+        let mode_recorder = tokio::spawn(async move {
+            assert_eq!(mode_rx.recv().await, Some(SchedulerMode::Primary));
+            calls
+                .lock()
+                .expect("calls lock poisoned")
+                .push("primary_mode");
+        });
 
         run_primary_readiness_sequence_with(
             &chainlink,
@@ -439,16 +391,21 @@ mod tests {
         .await
         .expect("primary readiness sequence should succeed");
 
+        mode_recorder.await.expect("mode recorder should finish");
+
         assert_eq!(
             chainlink.recorded_calls(),
-            vec!["reset_accounts_bank", "enable_primary"]
+            vec![
+                "reset_accounts_bank",
+                "enable_primary",
+                "primary_runtime_readiness",
+                "primary_mode"
+            ]
         );
-        assert_eq!(mode_rx.try_recv(), Ok(SchedulerMode::Primary));
     }
 
     #[tokio::test]
-    async fn run_standby_start_sequence_disables_chainlink_after_replica_mode()
-    {
+    async fn standby_start_sequence_enters_replica_then_disables_chainlink() {
         let (mode_tx, mut mode_rx) = mpsc::channel(1);
         let chainlink = RecordingPrimaryChainlink::default();
 
@@ -461,12 +418,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn run_primary_readiness_sequence_does_not_publish_primary_when_chainlink_enable_fails(
+    async fn primary_readiness_sequence_does_not_publish_primary_when_chainlink_not_ready(
     ) {
         let (dispatch, _validator) = link();
         let (mode_tx, mut mode_rx) = mpsc::channel(1);
-        let chainlink = RecordingPrimaryChainlink::with_enable_primary_result(
-            Err(ChainlinkError::MissingPrimaryRuntimeBuildConfig),
+        let chainlink = RecordingPrimaryChainlink::with_readiness(
+            PrimaryRuntimeReadiness::NotReady,
         );
 
         let err = run_primary_readiness_sequence_with(
@@ -477,10 +434,14 @@ mod tests {
         .await
         .expect_err("primary readiness sequence should fail");
 
-        assert!(matches!(err, crate::Error::Chainlink(_)));
+        assert!(matches!(err, crate::Error::Internal(_)));
         assert_eq!(
             chainlink.recorded_calls(),
-            vec!["reset_accounts_bank", "enable_primary"]
+            vec![
+                "reset_accounts_bank",
+                "enable_primary",
+                "primary_runtime_readiness"
+            ]
         );
         assert!(mode_rx.try_recv().is_err());
     }

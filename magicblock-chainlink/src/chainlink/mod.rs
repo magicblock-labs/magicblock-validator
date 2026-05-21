@@ -38,11 +38,6 @@ use crate::{
     },
     submux::SubMuxClient,
 };
-#[cfg(any(test, feature = "dev-context"))]
-use crate::{
-    remote_account_provider::chain_pubsub_client::mock::ChainPubsubClientMock,
-    testing::{cloner_stub::ClonerStub, rpc_client_mock::ChainRpcClientMock},
-};
 
 mod account_still_undelegating_on_chain;
 mod blacklisted_accounts;
@@ -51,11 +46,6 @@ pub mod errors;
 pub mod fetch_cloner;
 
 pub use blacklisted_accounts::*;
-
-/// A type alias for chainlink with only accountsdb being real impl
-#[cfg(any(test, feature = "dev-context"))]
-pub type StubbedChainlink<V> =
-    Chainlink<ChainRpcClientMock, ChainPubsubClientMock, V, ClonerStub>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PrimaryEnableOutcome {
@@ -72,15 +62,12 @@ impl PrimaryEnableOutcome {
 #[deprecated(note = "use PrimaryEnableOutcome")]
 pub type ChainlinkPrimaryEnablement = PrimaryEnableOutcome;
 
-pub trait AccountsBankReset: Send + Sync {
-    fn reset_accounts_bank(&self) -> AccountsDbResult<()>;
-}
-
 #[async_trait::async_trait]
-pub trait ChainlinkPrimaryLifecycle: Send + Sync {
+pub trait PrimaryChainlink: Send + Sync {
+    fn reset_accounts_bank(&self) -> AccountsDbResult<()>;
     async fn enable_primary(&self) -> ChainlinkResult<PrimaryEnableOutcome>;
-
     async fn disable(&self) -> ChainlinkResult<()>;
+    async fn primary_runtime_readiness(&self) -> PrimaryRuntimeReadiness;
 }
 
 // -----------------
@@ -776,58 +763,6 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
             })
             .unwrap_or(false)
     }
-
-    /// A temporary hacky method to clone chainlink with accountsdb only,
-    /// for it's used by the replication service to clean up accountsdb
-    ///
-    /// TODO(bmuddha):
-    /// remove all accountsdb management from chainlink, after accountsdb refactoring
-    #[cfg(any(test, feature = "dev-context"))]
-    pub fn stub(&self) -> StubbedChainlink<V> {
-        Chainlink {
-            accounts_bank: self.accounts_bank.clone(),
-            runtime: AsyncMutex::new(None),
-            lifecycle_state: AtomicU8::new(
-                ChainlinkLifecycleState::Disabled as u8,
-            ),
-            runtime_build_config: None,
-            validator_id: self.validator_id,
-            remove_confined_accounts: self.remove_confined_accounts,
-        }
-    }
-}
-
-impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
-    AccountsBankReset for Chainlink<T, U, V, C>
-{
-    fn reset_accounts_bank(&self) -> AccountsDbResult<()> {
-        Chainlink::reset_accounts_bank(self)
-    }
-}
-
-#[cfg(any(test, feature = "dev-context"))]
-impl<V: AccountsBank>
-    Chainlink<ChainRpcClientMock, ChainPubsubClientMock, V, ClonerStub>
-{
-    /// Marks the primary lifecycle boundary for stubbed chainlink remote sync.
-    pub async fn enable_primary(
-        &self,
-    ) -> ChainlinkResult<PrimaryEnableOutcome> {
-        if self.runtime.lock().await.is_some() {
-            self.lifecycle_state.store(
-                ChainlinkLifecycleState::Enabled as u8,
-                Ordering::SeqCst,
-            );
-            info!("Test Chainlink primary lifecycle marked active");
-            Ok(PrimaryEnableOutcome::RuntimeActive)
-        } else {
-            self.lifecycle_state.store(
-                ChainlinkLifecycleState::Disabled as u8,
-                Ordering::SeqCst,
-            );
-            Ok(PrimaryEnableOutcome::DisabledByConfig)
-        }
-    }
 }
 
 impl<V: AccountsBank, C: Cloner>
@@ -949,15 +884,26 @@ impl<V: AccountsBank, C: Cloner>
 }
 
 #[async_trait::async_trait]
-impl<V: AccountsBank, C: Cloner> ChainlinkPrimaryLifecycle
+impl<V, C> PrimaryChainlink
     for Chainlink<ChainRpcClientImpl, SubMuxClient<ChainUpdatesClient>, V, C>
+where
+    V: AccountsBank + Send + Sync + 'static,
+    C: Cloner + Send + Sync + 'static,
 {
+    fn reset_accounts_bank(&self) -> AccountsDbResult<()> {
+        Chainlink::reset_accounts_bank(self)
+    }
+
     async fn enable_primary(&self) -> ChainlinkResult<PrimaryEnableOutcome> {
-        <Chainlink<ChainRpcClientImpl, SubMuxClient<ChainUpdatesClient>, V, C>>::enable_primary(self).await
+        Chainlink::enable_primary(self).await
     }
 
     async fn disable(&self) -> ChainlinkResult<()> {
         Chainlink::disable(self).await
+    }
+
+    async fn primary_runtime_readiness(&self) -> PrimaryRuntimeReadiness {
+        Chainlink::primary_runtime_readiness(self).await
     }
 }
 
@@ -985,14 +931,26 @@ mod readiness_tests {
     use magicblock_config::config::ChainLinkConfig;
     use solana_pubkey::Pubkey;
 
-    use super::{ChainlinkPrimaryReadiness, StubbedChainlink};
+    use crate::{
+        remote_account_provider::chain_pubsub_client::mock::ChainPubsubClientMock,
+        testing::{
+            cloner_stub::ClonerStub, rpc_client_mock::ChainRpcClientMock,
+        },
+    };
+
+    use super::{Chainlink, ChainlinkPrimaryReadiness};
 
     #[tokio::test]
     async fn try_new_without_fetch_cloner_is_ready_without_remote_provider(
     ) -> Result<(), Box<dyn std::error::Error>> {
         let tempdir = tempfile::tempdir()?;
         let accounts_db = Arc::new(AccountsDb::open(tempdir.path())?);
-        let chainlink = StubbedChainlink::try_new(
+        let chainlink = Chainlink::<
+            ChainRpcClientMock,
+            ChainPubsubClientMock,
+            AccountsDb,
+            ClonerStub,
+        >::try_new(
             &accounts_db,
             None,
             Pubkey::new_unique(),

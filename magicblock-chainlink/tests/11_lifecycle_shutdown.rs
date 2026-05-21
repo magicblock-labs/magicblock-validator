@@ -1,7 +1,7 @@
 use magicblock_accounts_db::traits::AccountsBank;
 use magicblock_chainlink::{
     testing::{deleg::add_delegation_record_for, init_logger},
-    AccountFetchOrigin, PrimaryEnableOutcome, PrimaryRuntimeReadiness,
+    AccountFetchOrigin, PrimaryRuntimeReadiness,
 };
 use solana_account::{Account, ReadableAccount};
 use solana_pubkey::Pubkey;
@@ -30,7 +30,7 @@ fn account_with_lamports(lamports: u64, owner: Pubkey, slot: u64) -> Account {
 }
 
 #[tokio::test]
-async fn chainlink_runtime_is_active_after_primary_enable() {
+async fn chainlink_runtime_is_active_after_startup() {
     let ctx = setup(1).await;
 
     assert!(ctx.chainlink.is_runtime_active().await);
@@ -38,11 +38,6 @@ async fn chainlink_runtime_is_active_after_primary_enable() {
         ctx.chainlink.primary_runtime_readiness().await,
         PrimaryRuntimeReadiness::Ready
     );
-    assert_eq!(
-        ctx.chainlink.enable_primary().await.unwrap(),
-        PrimaryEnableOutcome::RuntimeActive
-    );
-    assert!(ctx.chainlink.is_runtime_active().await);
 }
 
 #[tokio::test]

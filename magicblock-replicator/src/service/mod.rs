@@ -25,8 +25,9 @@ mod standby;
 
 use std::{sync::Arc, thread::JoinHandle, time::Duration};
 
-pub use context::{PrimaryChainlink, ReplicationContext};
+pub use context::ReplicationContext;
 use magicblock_accounts_db::AccountsDb;
+use magicblock_chainlink::PrimaryChainlink;
 use magicblock_core::link::{
     replication::Message,
     transactions::{SchedulerMode, TransactionSchedulerHandle},
@@ -58,20 +59,6 @@ const CONSUMER_RETRY_DELAY: Duration = Duration::from_secs(1);
 pub enum Service {
     Primary(Primary),
     Standby(Standby),
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum InitialRolePath {
-    TryPrimary,
-    StandbyOnly,
-}
-
-fn initial_role_path(can_promote: bool) -> InitialRolePath {
-    if can_promote {
-        InitialRolePath::TryPrimary
-    } else {
-        InitialRolePath::StandbyOnly
-    }
 }
 
 impl Service {
@@ -106,7 +93,7 @@ impl Service {
         .await?;
 
         // Try to become primary only if promotion is allowed.
-        if initial_role_path(can_promote) == InitialRolePath::TryPrimary {
+        if can_promote {
             match ctx.try_acquire_producer().await? {
                 Some(producer) => Ok(Some(Self::Primary(
                     ctx.into_primary(producer, messages).await?,
@@ -160,20 +147,5 @@ impl Service {
 
             runtime.block_on(tokio::task::unconstrained(self.run()))
         })
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn replica_only_initial_role_never_attempts_primary() {
-        assert_eq!(initial_role_path(false), InitialRolePath::StandbyOnly);
-    }
-
-    #[test]
-    fn promotable_initial_role_attempts_primary_first() {
-        assert_eq!(initial_role_path(true), InitialRolePath::TryPrimary);
     }
 }
