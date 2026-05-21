@@ -14,6 +14,14 @@ pub struct TaskSchedulerConfig {
     /// Supports humantime (e.g. "10ms", "1s").
     #[serde(with = "humantime")]
     pub min_interval: Duration,
+    /// How long failed task and scheduling records are retained.
+    /// Supports humantime (e.g. "1h", "7d").
+    #[serde(with = "humantime")]
+    pub failed_task_retention: Duration,
+    /// How often failed task and scheduling records are cleaned up.
+    /// Supports humantime (e.g. "1m", "1h").
+    #[serde(with = "humantime")]
+    pub failed_task_cleanup_interval: Duration,
 }
 
 impl Default for TaskSchedulerConfig {
@@ -22,6 +30,12 @@ impl Default for TaskSchedulerConfig {
             reset: false,
             min_interval: Duration::from_millis(
                 consts::DEFAULT_TASK_SCHEDULER_MIN_INTERVAL_MILLIS,
+            ),
+            failed_task_retention: Duration::from_secs(
+                consts::DEFAULT_TASK_SCHEDULER_FAILED_TASK_RETENTION_SECS,
+            ),
+            failed_task_cleanup_interval: Duration::from_secs(
+                consts::DEFAULT_TASK_SCHEDULER_FAILED_TASK_CLEANUP_INTERVAL_SECS,
             ),
         }
     }

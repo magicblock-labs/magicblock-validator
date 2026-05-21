@@ -128,6 +128,7 @@ impl IxtestContext {
                             validator_kp.insecure_clone(),
                             rx,
                             None,
+                            None,
                         )),
                         Some(provider),
                     )

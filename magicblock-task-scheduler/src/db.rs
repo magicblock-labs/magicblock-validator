@@ -564,4 +564,23 @@ impl SchedulerDatabase {
         tx.commit()?;
         Ok(completion)
     }
+
+    pub async fn delete_failed_records_older_than(
+        &self,
+        cutoff_timestamp_millis: i64,
+    ) -> TaskSchedulerResult<usize> {
+        let mut conn = self.conn.lock().await;
+        let tx = conn.transaction()?;
+        let failed_scheduling_deleted = tx.execute(
+            "DELETE FROM failed_scheduling WHERE timestamp < ?",
+            [cutoff_timestamp_millis],
+        )?;
+        let failed_tasks_deleted = tx.execute(
+            "DELETE FROM failed_tasks WHERE timestamp < ?",
+            [cutoff_timestamp_millis],
+        )?;
+        tx.commit()?;
+
+        Ok(failed_scheduling_deleted + failed_tasks_deleted)
+    }
 }

@@ -23,10 +23,15 @@
 The task scheduler can be configured via the validator configuration:
 
 ```toml
-[task_scheduler]
+[task-scheduler]
 reset = false
 min-interval = "10ms"
+failed-task-retention = "7d"
+failed-task-cleanup-interval = "1h"
 ```
+
+Failed task execution records and failed scheduling records older than
+`failed-task-retention` are deleted every `failed-task-cleanup-interval`.
 
 ## Security Considerations
 
