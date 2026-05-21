@@ -11,6 +11,7 @@ function getBinaryVersion(location: string): [string | null, string | null] {
   const result = spawnSync(location, ["--version"]);
   const error: string | null =
     (result.error && result.error.toString()) ||
+    (result.status !== 0 && `Process exited with code ${result.status}`) ||
     (result.stderr.length > 0 && result.stderr.toString().trim()) ||
     null;
   return [error, result.stdout && result.stdout.toString().trim()];
