@@ -522,11 +522,14 @@ fn is_retryable_task_execution_error(error: &TaskSchedulerError) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use magicblock_core::coordination_mode::switch_to_replica_mode;
+    use magicblock_core::coordination_mode::{
+        switch_to_primary_mode, switch_to_replica_mode,
+    };
     use magicblock_program::{
         args::ScheduleTaskRequest,
         validator::generate_validator_authority_if_needed,
     };
+    use serial_test::serial;
     use solana_pubkey::Pubkey;
     use tokio::{sync::mpsc, time::timeout};
 
@@ -553,6 +556,7 @@ mod tests {
         }
     }
 
+    #[serial]
     #[tokio::test]
     async fn test_schedule_invalid_tasks() {
         magicblock_core::logger::init_for_tests();
@@ -603,6 +607,7 @@ mod tests {
         handle.abort();
     }
 
+    #[serial]
     #[tokio::test]
     async fn test_remove_invalid_tasks_on_startup() {
         magicblock_core::logger::init_for_tests();
@@ -651,6 +656,7 @@ mod tests {
         handle.abort();
     }
 
+    #[serial]
     #[tokio::test]
     async fn test_completed_tasks_are_removed_on_startup() {
         magicblock_core::logger::init_for_tests();
@@ -698,6 +704,7 @@ mod tests {
         handle.abort();
     }
 
+    #[serial]
     #[tokio::test]
     async fn test_failed_records_are_cleaned_up_periodically() {
         magicblock_core::logger::init_for_tests();
@@ -734,6 +741,7 @@ mod tests {
         handle.abort();
     }
 
+    #[serial]
     #[tokio::test]
     async fn test_task_scheduler_does_not_start_on_standby_mode() {
         magicblock_core::logger::init_for_tests();
@@ -743,6 +751,8 @@ mod tests {
         let db = SchedulerDatabase::new(":memory:").unwrap();
         let service = test_service(db.clone(), rx);
         let handle = service.start().await.unwrap();
+
+        switch_to_primary_mode();
 
         // Handle should join immediately because it's in standby mode
         timeout(Duration::from_secs(1), handle)
