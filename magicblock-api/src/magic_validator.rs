@@ -122,15 +122,18 @@ async fn run_standalone_primary_start_sequence(
         .enable_primary()
         .await
         .map_err(ApiError::from)?;
-    validator
-        .mode_tx
-        .send(SchedulerMode::Primary)
-        .await
-        .map_err(|e| {
-            ApiError::FailedToSendModeSwitch(format!(
-                "Failed to send primary mode to scheduler: {e}"
-            ))
-        })?;
+    if let Err(e) = validator.mode_tx.send(SchedulerMode::Primary).await {
+        let send_error = ApiError::FailedToSendModeSwitch(format!(
+            "Failed to send primary mode to scheduler: {e}"
+        ));
+        if let Err(rollback_error) = validator.chainlink.disable().await {
+            error!(
+                %rollback_error,
+                "Failed to roll back Chainlink primary enable after scheduler primary startup failed"
+            );
+        }
+        return Err(send_error);
+    }
     Ok(())
 }
 
