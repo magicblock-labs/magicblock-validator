@@ -125,6 +125,7 @@ pub(crate) async fn extract_bytes(
 ///
 /// This block contains common helper methods used by various RPC request handlers.
 impl HttpDispatcher {
+    #[allow(dead_code)]
     fn is_primary_mode(&self) -> bool {
         CoordinationMode::current().needs_onchain_interactions()
     }
@@ -172,13 +173,23 @@ impl HttpDispatcher {
         ApertureRoutingDecision::PrimaryNotReady
     }
 
-    fn reject_non_primary_write(&self, method: &'static str) -> RpcResult<()> {
-        if self.is_primary_mode() {
-            return Ok(());
+    async fn ensure_primary_write_ready(
+        &self,
+        method: &'static str,
+    ) -> RpcResult<()> {
+        match self.aperture_routing_decision(method).await {
+            ApertureRoutingDecision::NonPrimary => {
+                Err(RpcError::transaction_verification(format!(
+                    "{method} is only available while validator is primary"
+                )))
+            }
+            ApertureRoutingDecision::PrimaryReady(_) => Ok(()),
+            ApertureRoutingDecision::PrimaryNotReady => {
+                Err(RpcError::temporarily_unavailable(format!(
+                    "{method} requires Chainlink primary readiness"
+                )))
+            }
         }
-        Err(RpcError::transaction_verification(format!(
-            "{method} is only available while validator is primary"
-        )))
     }
 
     // Heuristic to render synthetic empty placeholder accounts as JSON-RPC null.
@@ -339,32 +350,39 @@ impl HttpDispatcher {
     #[instrument(skip_all)]
     async fn ensure_transaction_accounts(
         &self,
+        method: &'static str,
         transaction: &SanitizedTransaction,
     ) -> RpcResult<()> {
-        if !self.is_primary_mode() {
-            return Ok(());
-        }
-
-        let _timer = ENSURE_ACCOUNTS_TIME
-            .with_label_values(&["transaction"])
-            .start_timer();
-        match self
-            .chainlink
-            .ensure_transaction_accounts(transaction)
-            .await
-        {
-            Ok(res) if res.is_ok() => Ok(()),
-            Ok(res) => {
-                debug!(%res, "Transaction account resolution encountered issues");
-                Ok(())
+        match self.aperture_routing_decision(method).await {
+            ApertureRoutingDecision::NonPrimary => Ok(()),
+            ApertureRoutingDecision::PrimaryReady(_) => {
+                let _timer = ENSURE_ACCOUNTS_TIME
+                    .with_label_values(&["transaction"])
+                    .start_timer();
+                match self
+                    .chainlink
+                    .ensure_transaction_accounts(transaction)
+                    .await
+                {
+                    Ok(res) if res.is_ok() => Ok(()),
+                    Ok(res) => {
+                        debug!(%res, "Transaction account resolution encountered issues");
+                        Ok(())
+                    }
+                    Err(err) => {
+                        // Non-OK result indicates a general failure to guarantee
+                        // all accounts, i.e. we may be disconnected, weren't able to
+                        // setup a subscription, etc.
+                        // In that case we don't even want to run the transaction.
+                        warn!(error = ?err, "Failed to ensure transaction accounts");
+                        Err(RpcError::transaction_verification(err))
+                    }
+                }
             }
-            Err(err) => {
-                // Non-OK result indicates a general failure to guarantee
-                // all accounts, i.e. we may be disconnected, weren't able to
-                // setup a subscription, etc.
-                // In that case we don't even want to run the transaction.
-                warn!(error = ?err, "Failed to ensure transaction accounts");
-                Err(RpcError::transaction_verification(err))
+            ApertureRoutingDecision::PrimaryNotReady => {
+                Err(RpcError::temporarily_unavailable(format!(
+                    "{method} requires Chainlink primary readiness"
+                )))
             }
         }
     }
@@ -776,6 +794,76 @@ mod tests {
         assert!(
             error.to_string().contains(
                 "simulateTransaction is only available while validator is primary"
+            ),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[tokio::test]
+    async fn send_transaction_in_primary_without_chainlink_readiness_returns_503_and_does_not_cache_signature(
+    ) {
+        let _lock = COORDINATION_MODE_TEST_LOCK.lock().await;
+        let env = ExecutionTestEnv::new_replica_mode(1, false);
+        switch_to_primary_mode();
+        let dispatcher = primary_not_ready_dispatcher(&env).await;
+        let (encoded_tx, signature) = encoded_transfer(&env);
+        let mut request = request(
+            JsonRpcHttpMethod::SendTransaction,
+            vec![
+                json::json!(encoded_tx),
+                json::json!({ "encoding": "base64", "skipPreflight": true }),
+            ]
+            .into(),
+        );
+
+        let error = match dispatcher.send_transaction(&mut request).await {
+            Ok(_) => {
+                panic!("primary-not-ready sendTransaction should be rejected")
+            }
+            Err(error) => error,
+        };
+
+        assert_eq!(error.http_status(), 503);
+        assert!(
+            error.to_string().contains(
+                "sendTransaction requires Chainlink primary readiness"
+            ),
+            "unexpected error: {error}"
+        );
+        assert!(
+            !dispatcher.transactions.contains(&signature),
+            "primary-not-ready sendTransaction must not reserve signature"
+        );
+    }
+
+    #[tokio::test]
+    async fn simulate_transaction_in_primary_without_chainlink_readiness_returns_503(
+    ) {
+        let _lock = COORDINATION_MODE_TEST_LOCK.lock().await;
+        let env = ExecutionTestEnv::new_replica_mode(1, false);
+        switch_to_primary_mode();
+        let dispatcher = primary_not_ready_dispatcher(&env).await;
+        let (encoded_tx, _signature) = encoded_transfer(&env);
+        let mut request = request(
+            JsonRpcHttpMethod::SimulateTransaction,
+            vec![
+                json::json!(encoded_tx),
+                json::json!({ "encoding": "base64", "sigVerify": false }),
+            ]
+            .into(),
+        );
+
+        let error = match dispatcher.simulate_transaction(&mut request).await {
+            Ok(_) => panic!(
+                "primary-not-ready simulateTransaction should be rejected"
+            ),
+            Err(error) => error,
+        };
+
+        assert_eq!(error.http_status(), 503);
+        assert!(
+            error.to_string().contains(
+                "simulateTransaction requires Chainlink primary readiness"
             ),
             "unexpected error: {error}"
         );

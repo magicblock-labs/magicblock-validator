@@ -35,7 +35,8 @@ impl HttpDispatcher {
         let config = config.unwrap_or_default();
         let encoding = config.encoding.unwrap_or(UiTransactionEncoding::Base58);
 
-        self.reject_non_primary_write("simulateTransaction")?;
+        self.ensure_primary_write_ready("simulateTransaction")
+            .await?;
 
         // Prepare the transaction, applying simulation-specific options.
         let transaction = self
@@ -48,7 +49,11 @@ impl HttpDispatcher {
             .inspect_err(|err| {
                 debug!(error = ?err, "Failed to prepare transaction to simulate")
             })?;
-        self.ensure_transaction_accounts(&transaction.txn).await?;
+        self.ensure_transaction_accounts(
+            "simulateTransaction",
+            &transaction.txn,
+        )
+        .await?;
         let number_of_accounts = transaction.txn.message().account_keys().len();
 
         let replacement_blockhash = config

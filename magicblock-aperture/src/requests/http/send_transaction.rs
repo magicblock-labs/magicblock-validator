@@ -27,7 +27,7 @@ impl HttpDispatcher {
         let config = config.unwrap_or_default();
         let encoding = config.encoding.unwrap_or(UiTransactionEncoding::Base58);
 
-        self.reject_non_primary_write("sendTransaction")?;
+        self.ensure_primary_write_ready("sendTransaction").await?;
         let transaction = self
             .prepare_transaction(&transaction_str, encoding, true, false)
             .inspect_err(
@@ -42,7 +42,8 @@ impl HttpDispatcher {
             return Err(TransactionError::AlreadyProcessed.into());
         }
 
-        self.ensure_transaction_accounts(&transaction.txn).await?;
+        self.ensure_transaction_accounts("sendTransaction", &transaction.txn)
+            .await?;
 
         // Based on the preflight flag, either execute and await the result,
         // or schedule (fire-and-forget) for background processing.
