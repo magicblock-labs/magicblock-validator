@@ -742,6 +742,20 @@ impl TaskSchedulerService {
             .unwrap_or(TASK_EXECUTION_RETRY_MAX_DELAY)
             .min(TASK_EXECUTION_RETRY_MAX_DELAY)
     }
+
+    /// Waits until the coordination mode is not StartingUp.
+    /// Should be fast because task scheduler is started after the ledger replay completes.
+    async fn is_primary_mode(&self) -> bool {
+        let mut mode = CoordinationMode::current();
+        while mode == CoordinationMode::StartingUp {
+            tokio::select! {
+                _ = self.token.cancelled() => return false,
+                _ = tokio::time::sleep(Duration::from_millis(100)) => {}
+            }
+            mode = CoordinationMode::current();
+        }
+        mode == CoordinationMode::Primary
+    }
 }
 
 fn is_valid_task_interval(interval: i64) -> bool {
@@ -757,20 +771,6 @@ fn next_execution_millis(
         now
     } else {
         last_execution_millis + execution_interval_millis
-    }
-
-    /// Waits until the coordination mode is not StartingUp.
-    /// Should be fast because task scheduler is started after the ledger replay completes.
-    async fn is_primary_mode(&self) -> bool {
-        let mut mode = CoordinationMode::current();
-        while mode == CoordinationMode::StartingUp {
-            tokio::select! {
-                _ = self.token.cancelled() => return false,
-                _ = tokio::time::sleep(Duration::from_millis(100)) => {}
-            }
-            mode = CoordinationMode::current();
-        }
-        mode == CoordinationMode::Primary
     }
 }
 
@@ -1007,65 +1007,6 @@ mod tests {
 
         let (_tx, rx) = mpsc::unbounded_channel();
         let db = SchedulerDatabase::new(":memory:").unwrap();
-
-        db.insert_failed_scheduling(1, "schedule failed".to_string())
-            .await
-            .unwrap();
-        db.insert_failed_task(2, "task failed".to_string())
-            .await
-            .unwrap();
-        tokio::time::sleep(Duration::from_millis(2)).await;
-
-        let mut service = test_service(db.clone(), rx);
-        service.failed_task_retention = Duration::from_millis(1);
-        service.failed_task_cleanup_interval = Duration::from_millis(5);
-
-        let handle = service.start().await.unwrap();
-
-        timeout(Duration::from_secs(1), async move {
-            loop {
-                if db.get_failed_schedulings().await?.is_empty()
-                    && db.get_failed_tasks().await?.is_empty()
-                {
-                    return Ok::<_, TaskSchedulerError>(());
-                }
-                tokio::time::sleep(Duration::from_millis(5)).await;
-            }
-        })
-        .await
-        .unwrap()
-        .unwrap();
-        handle.abort();
-    }
-
-    #[serial]
-    #[tokio::test]
-    async fn test_task_scheduler_does_not_start_on_standby_mode() {
-        magicblock_core::logger::init_for_tests();
-        switch_to_replica_mode();
-
-        let (_tx, rx) = mpsc::unbounded_channel();
-        let db = SchedulerDatabase::new(":memory:").unwrap();
-        let service = test_service(db.clone(), rx);
-        let handle = service.start().await.unwrap();
-
-        switch_to_primary_mode();
-
-        // Handle should join immediately because it's in standby mode
-        timeout(Duration::from_secs(1), handle)
-            .await
-            .unwrap()
-            .unwrap()
-            .unwrap();
-    }
-  
-    #[serial]
-    #[tokio::test]
-    async fn test_failed_records_are_cleaned_up_periodically() {
-        magicblock_core::logger::init_for_tests();
-
-        let (_tx, rx) = mpsc::unbounded_channel();
-        let db = SchedulerDatabase::new(":memory:").unwrap();
         let authority = Pubkey::new_unique();
         let mut old_task = DbTask {
             id: 1,
@@ -1109,5 +1050,65 @@ mod tests {
         let queued = service.task_queue.remove(&key).into_inner();
         assert_eq!(queued.updated_at, replacement.updated_at);
         assert_eq!(queued.executions_left, replacement.executions_left);
+    }
+
+    #[serial]
+    #[tokio::test]
+    async fn test_task_scheduler_does_not_start_on_standby_mode() {
+        magicblock_core::logger::init_for_tests();
+        switch_to_replica_mode();
+
+        let (_tx, rx) = mpsc::unbounded_channel();
+        let db = SchedulerDatabase::new(":memory:").unwrap();
+        let service = test_service(db.clone(), rx);
+        let handle = service.start().await.unwrap();
+
+        switch_to_primary_mode();
+
+        // Handle should join immediately because it's in standby mode
+        timeout(Duration::from_secs(1), handle)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+    }
+
+    #[serial]
+    #[tokio::test]
+    async fn test_failed_records_are_cleaned_up_periodically() {
+        magicblock_core::logger::init_for_tests();
+        switch_to_primary_mode();
+
+        let (_tx, rx) = mpsc::unbounded_channel();
+        let db = SchedulerDatabase::new(":memory:").unwrap();
+
+        db.insert_failed_scheduling(1, "schedule failed".to_string())
+            .await
+            .unwrap();
+        db.insert_failed_task(2, "task failed".to_string())
+            .await
+            .unwrap();
+        tokio::time::sleep(Duration::from_millis(2)).await;
+
+        let mut service = test_service(db.clone(), rx);
+        service.failed_task_retention = Duration::from_millis(1);
+        service.failed_task_cleanup_interval = Duration::from_millis(5);
+
+        let handle = service.start().await.unwrap();
+
+        timeout(Duration::from_secs(1), async move {
+            loop {
+                if db.get_failed_schedulings().await?.is_empty()
+                    && db.get_failed_tasks().await?.is_empty()
+                {
+                    return Ok::<_, TaskSchedulerError>(());
+                }
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .unwrap()
+        .unwrap();
+        handle.abort();
     }
 }
