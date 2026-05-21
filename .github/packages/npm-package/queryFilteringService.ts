@@ -45,7 +45,6 @@ function runWithForwardedExit(child: ReturnType<typeof spawn>): void {
 
   process.on("SIGINT", () => {
     child.kill("SIGINT");
-    child.kill("SIGTERM");
   });
 }
 
