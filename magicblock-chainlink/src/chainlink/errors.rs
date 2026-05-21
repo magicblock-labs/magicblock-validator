@@ -72,4 +72,7 @@ pub enum ChainlinkError {
 
     #[error("remote account provider is required by lifecycle config but was not created")]
     MissingRemoteAccountProvider,
+
+    #[error("chainlink primary runtime build config is missing")]
+    MissingPrimaryRuntimeBuildConfig,
 }

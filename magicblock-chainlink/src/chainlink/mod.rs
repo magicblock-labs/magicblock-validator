@@ -53,6 +53,29 @@ pub use blacklisted_accounts::*;
 pub type StubbedChainlink<V> =
     Chainlink<ChainRpcClientMock, ChainPubsubClientMock, V, ClonerStub>;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChainlinkPrimaryEnablement {
+    Active,
+    DisabledByConfig,
+}
+
+impl ChainlinkPrimaryEnablement {
+    pub fn is_active(self) -> bool {
+        matches!(self, Self::Active)
+    }
+}
+
+pub trait AccountsBankReset: Send + Sync {
+    fn reset_accounts_bank(&self) -> AccountsDbResult<()>;
+}
+
+#[async_trait::async_trait]
+pub trait ChainlinkPrimaryLifecycle: Send + Sync {
+    async fn enable_primary(&self) -> ChainlinkResult<ChainlinkPrimaryEnablement>;
+
+    async fn disable(&self) -> ChainlinkResult<()>;
+}
+
 // -----------------
 // Chainlink
 // -----------------
@@ -673,6 +696,14 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
     }
 }
 
+impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
+    AccountsBankReset for Chainlink<T, U, V, C>
+{
+    fn reset_accounts_bank(&self) -> AccountsDbResult<()> {
+        Chainlink::reset_accounts_bank(self)
+    }
+}
+
 impl<V: AccountsBank>
     Chainlink<ChainRpcClientMock, ChainPubsubClientMock, V, ClonerStub>
 {
@@ -700,7 +731,9 @@ impl<V: AccountsBank, C: Cloner>
 {
     /// Marks the primary lifecycle boundary for chainlink remote sync and
     /// creates the runtime from stored production configuration when needed.
-    pub async fn enable_primary(&self) -> ChainlinkResult<()> {
+    pub async fn enable_primary(
+        &self,
+    ) -> ChainlinkResult<ChainlinkPrimaryEnablement> {
         let mut runtime = self.runtime.lock().await;
         if runtime.is_some() {
             self.lifecycle_state.store(
@@ -708,7 +741,7 @@ impl<V: AccountsBank, C: Cloner>
                 Ordering::SeqCst,
             );
             Self::log_primary_enabled();
-            return Ok(());
+            return Ok(ChainlinkPrimaryEnablement::Active);
         }
 
         self.lifecycle_state
@@ -719,8 +752,7 @@ impl<V: AccountsBank, C: Cloner>
                 ChainlinkLifecycleState::Disabled as u8,
                 Ordering::SeqCst,
             );
-            Self::log_primary_enabled();
-            return Ok(());
+            return Err(ChainlinkError::MissingPrimaryRuntimeBuildConfig);
         };
 
         if !build
@@ -733,8 +765,8 @@ impl<V: AccountsBank, C: Cloner>
                 ChainlinkLifecycleState::Disabled as u8,
                 Ordering::SeqCst,
             );
-            Self::log_primary_enabled();
-            return Ok(());
+            info!("Chainlink primary remote sync disabled by config");
+            return Ok(ChainlinkPrimaryEnablement::DisabledByConfig);
         }
 
         match self.create_runtime_from_build_config(build).await {
@@ -745,7 +777,7 @@ impl<V: AccountsBank, C: Cloner>
                     Ordering::SeqCst,
                 );
                 Self::log_primary_enabled();
-                Ok(())
+                Ok(ChainlinkPrimaryEnablement::Active)
             }
             Err(err) => {
                 *runtime = None;
@@ -804,6 +836,21 @@ impl<V: AccountsBank, C: Cloner>
 
     fn log_primary_enabled() {
         info!("Chainlink primary remote sync enabled");
+    }
+}
+
+#[async_trait::async_trait]
+impl<V: AccountsBank, C: Cloner> ChainlinkPrimaryLifecycle
+    for Chainlink<ChainRpcClientImpl, SubMuxClient<ChainUpdatesClient>, V, C>
+{
+    async fn enable_primary(
+        &self,
+    ) -> ChainlinkResult<ChainlinkPrimaryEnablement> {
+        <Chainlink<ChainRpcClientImpl, SubMuxClient<ChainUpdatesClient>, V, C>>::enable_primary(self).await
+    }
+
+    async fn disable(&self) -> ChainlinkResult<()> {
+        Chainlink::disable(self).await
     }
 }
 
