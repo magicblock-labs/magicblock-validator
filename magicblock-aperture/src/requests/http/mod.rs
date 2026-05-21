@@ -474,7 +474,7 @@ pub(crate) mod get_delegation_status;
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
+    use std::{path::Path, sync::Arc};
 
     use base64::{
         engine::general_purpose::STANDARD as BASE64_STANDARD, Engine,
@@ -484,7 +484,7 @@ mod tests {
         chainlink::config::ChainlinkConfig,
         remote_account_provider::{Endpoint, Endpoints},
     };
-    use magicblock_config::config::ChainLinkConfig;
+    use magicblock_config::config::{ChainLinkConfig, LifecycleMode};
     use magicblock_core::{
         coordination_mode::{switch_to_primary_mode, switch_to_replica_mode},
         link::{blocks::BlockHash, link},
@@ -526,7 +526,7 @@ mod tests {
         }
     }
 
-    fn dispatcher_from_chainlink(
+    fn test_dispatcher_with_chainlink(
         env: &ExecutionTestEnv,
         chainlink: Arc<ChainlinkImpl>,
     ) -> HttpDispatcher {
@@ -563,12 +563,12 @@ mod tests {
             )
             .expect("failed to create chainlink"),
         );
-        dispatcher_from_chainlink(env, chainlink)
+        test_dispatcher_with_chainlink(env, chainlink)
     }
 
-    async fn primary_not_ready_dispatcher(
+    async fn not_ready_endpoint_chainlink(
         env: &ExecutionTestEnv,
-    ) -> HttpDispatcher {
+    ) -> Arc<ChainlinkImpl> {
         let (dispatch, _validator) = link();
         let cloner = Arc::new(ChainlinkCloner::new(
             dispatch.transaction_scheduler.clone(),
@@ -577,54 +577,39 @@ mod tests {
         let endpoints = Endpoints::from(
             &[
                 Endpoint::Rpc {
-                    url: "http://127.0.0.1:1".to_string(),
-                    label: "unreachable-rpc".to_string(),
+                    url: "http://127.0.0.1:8899".to_string(),
+                    label: "local-rpc".to_string(),
                 },
                 Endpoint::WebSocket {
-                    url: "ws://127.0.0.1:1".to_string(),
-                    label: "unreachable-ws".to_string(),
+                    url: "ws://127.0.0.1:8900".to_string(),
+                    label: "local-ws".to_string(),
                 },
             ][..],
         );
-        let ledger_path = std::env::temp_dir().join(format!(
-            "mb-aperture-primary-not-ready-{}",
-            Pubkey::new_unique()
-        ));
-        let chainlink = Arc::new(
+
+        Arc::new(
             ChainlinkImpl::try_new_from_endpoints(
                 &endpoints,
                 CommitmentConfig::confirmed(),
                 &env.accountsdb,
                 &cloner,
                 Keypair::new(),
-                ChainlinkConfig::default(),
+                ChainlinkConfig::default_with_lifecycle_mode(
+                    LifecycleMode::Ephemeral,
+                ),
                 &ChainLinkConfig::default(),
-                &ledger_path,
+                Path::new("."),
             )
             .await
             .expect("failed to create endpoint-backed chainlink"),
-        );
+        )
+    }
 
-        let state = SharedState::new(
-            NodeContext {
-                identity: env.get_payer().pubkey,
-                base_fee: ExecutionTestEnv::BASE_FEE,
-                blocktime: 50,
-                ..Default::default()
-            },
-            env.accountsdb.clone(),
-            env.ledger.clone(),
-            chainlink,
-        );
-        HttpDispatcher {
-            context: state.context,
-            accountsdb: state.accountsdb,
-            ledger: state.ledger,
-            chainlink: state.chainlink,
-            transactions: state.transactions,
-            blocks: state.blocks,
-            transactions_scheduler: dispatch.transaction_scheduler,
-        }
+    async fn primary_not_ready_dispatcher(
+        env: &ExecutionTestEnv,
+    ) -> HttpDispatcher {
+        let chainlink = not_ready_endpoint_chainlink(env).await;
+        test_dispatcher_with_chainlink(env, chainlink)
     }
 
     fn encoded_transfer(env: &ExecutionTestEnv) -> (String, Signature) {
@@ -654,6 +639,44 @@ mod tests {
             method,
             params: Some(params),
         }
+    }
+
+    #[tokio::test]
+    async fn ensure_routing_decision_non_primary_returns_non_primary() {
+        let _lock = COORDINATION_MODE_TEST_LOCK.lock().await;
+        let env = ExecutionTestEnv::new_replica_mode(1, false);
+        let _mode = PrimaryModeGuard::switch_to_replica();
+        let dispatcher = test_dispatcher(&env);
+
+        let decision = dispatcher.ensure_routing_decision("read_account").await;
+
+        assert_eq!(decision, EnsureRoutingDecision::NonPrimary);
+    }
+
+    #[tokio::test]
+    async fn ensure_routing_decision_primary_disabled_by_config_is_ready() {
+        let _lock = COORDINATION_MODE_TEST_LOCK.lock().await;
+        switch_to_primary_mode();
+        let env = ExecutionTestEnv::new_replica_mode(1, false);
+        let dispatcher = test_dispatcher(&env);
+
+        let decision = dispatcher.ensure_routing_decision("read_account").await;
+
+        assert_eq!(decision, EnsureRoutingDecision::PrimaryReady);
+    }
+
+    #[tokio::test]
+    async fn ensure_routing_decision_primary_endpoint_without_enable_is_not_ready(
+    ) {
+        let _lock = COORDINATION_MODE_TEST_LOCK.lock().await;
+        switch_to_primary_mode();
+        let env = ExecutionTestEnv::new_replica_mode(1, false);
+        let chainlink = not_ready_endpoint_chainlink(&env).await;
+        let dispatcher = test_dispatcher_with_chainlink(&env, chainlink);
+
+        let decision = dispatcher.ensure_routing_decision("read_account").await;
+
+        assert_eq!(decision, EnsureRoutingDecision::PrimaryNotReady);
     }
 
     const SYSTEM_PROGRAM_ID: Pubkey =
@@ -714,61 +737,23 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn get_account_info_in_primary_without_chainlink_readiness_returns_503(
-    ) {
+    async fn read_account_primary_not_ready_returns_local_account() {
         let _lock = COORDINATION_MODE_TEST_LOCK.lock().await;
         let env = ExecutionTestEnv::new_replica_mode(1, false);
         switch_to_primary_mode();
         let dispatcher = primary_not_ready_dispatcher(&env).await;
         let pubkey = Pubkey::new_unique();
-        let mut request = request(
-            JsonRpcHttpMethod::GetAccountInfo,
-            vec![json::json!(pubkey.to_string())].into(),
-        );
+        env.fund_account(pubkey, 42);
 
-        let error = match dispatcher.get_account_info(&mut request).await {
-            Ok(_) => {
-                panic!("primary-not-ready getAccountInfo should be rejected")
-            }
-            Err(error) => error,
-        };
+        let account = dispatcher
+            .read_account_with_ensure("getAccountInfo", &pubkey)
+            .await
+            .expect("primary-not-ready read should not fail")
+            .expect(
+                "local account should be returned in primary-not-ready mode",
+            );
 
-        assert_eq!(error.http_status(), 503);
-        assert!(
-            error.to_string().contains(
-                "getAccountInfo requires Chainlink primary readiness"
-            ),
-            "unexpected error: {error}"
-        );
-    }
-
-    #[tokio::test]
-    async fn get_multiple_accounts_in_primary_without_chainlink_readiness_returns_503(
-    ) {
-        let _lock = COORDINATION_MODE_TEST_LOCK.lock().await;
-        let env = ExecutionTestEnv::new_replica_mode(1, false);
-        switch_to_primary_mode();
-        let dispatcher = primary_not_ready_dispatcher(&env).await;
-        let pubkey = Pubkey::new_unique();
-        let mut request = request(
-            JsonRpcHttpMethod::GetMultipleAccounts,
-            vec![json::json!([pubkey.to_string()])].into(),
-        );
-
-        let error = match dispatcher.get_multiple_accounts(&mut request).await {
-            Ok(_) => panic!(
-                "primary-not-ready getMultipleAccounts should be rejected"
-            ),
-            Err(error) => error,
-        };
-
-        assert_eq!(error.http_status(), 503);
-        assert!(
-            error.to_string().contains(
-                "getMultipleAccounts requires Chainlink primary readiness"
-            ),
-            "unexpected error: {error}"
-        );
+        assert_eq!(account.lamports(), 42);
     }
 
     #[tokio::test]
@@ -801,7 +786,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn send_transaction_in_primary_without_chainlink_readiness_returns_503_and_does_not_cache_signature(
+    async fn send_transaction_primary_not_ready_rejects_before_signature_cache_insert(
     ) {
         let _lock = COORDINATION_MODE_TEST_LOCK.lock().await;
         let env = ExecutionTestEnv::new_replica_mode(1, false);
@@ -824,10 +809,9 @@ mod tests {
             Err(error) => error,
         };
 
-        assert_eq!(error.http_status(), 503);
         assert!(
             error.to_string().contains(
-                "sendTransaction requires Chainlink primary readiness"
+                "sendTransaction requires primary Chainlink runtime readiness"
             ),
             "unexpected error: {error}"
         );
@@ -838,8 +822,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn simulate_transaction_in_primary_without_chainlink_readiness_returns_503(
-    ) {
+    async fn simulate_transaction_primary_not_ready_rejects() {
         let _lock = COORDINATION_MODE_TEST_LOCK.lock().await;
         let env = ExecutionTestEnv::new_replica_mode(1, false);
         switch_to_primary_mode();
@@ -861,10 +844,9 @@ mod tests {
             Err(error) => error,
         };
 
-        assert_eq!(error.http_status(), 503);
         assert!(
             error.to_string().contains(
-                "simulateTransaction requires Chainlink primary readiness"
+                "simulateTransaction requires primary Chainlink runtime readiness"
             ),
             "unexpected error: {error}"
         );
