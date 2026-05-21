@@ -18,4 +18,7 @@ pub enum TaskSchedulerError {
 
     #[error("Task {0} already exists and is owned by {1}, not {2}")]
     UnauthorizedReplacing(i64, String, String),
+
+    #[error("Batch size mismatch: expected {0}, got {1}")]
+    SizeMismatch(usize, usize),
 }
