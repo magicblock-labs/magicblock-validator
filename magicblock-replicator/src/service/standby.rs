@@ -61,6 +61,10 @@ impl Standby {
         loop {
             tokio::select! {
                 biased;
+                _ = self.ctx.cancel.cancelled() => {
+                    info!("shutdown received, terminating standby mode");
+                    return Ok(None);
+                }
                 _ = self.watcher.wait_for_expiry() => {
                     if self.has_pending().await {
                         continue;
@@ -105,10 +109,6 @@ impl Standby {
                         return self.ctx.into_primary(producer, self.messages).await.map(Some);
                     }
                 }
-                _ = self.ctx.cancel.cancelled() => {
-                    info!("shutdown received, terminating standby mode");
-                    return Ok(None);
-                }
             }
         }
     }
@@ -140,8 +140,10 @@ impl Standby {
                 // NOTE:
                 // for performance reasons we batch messages from NATS and ack the
                 // entire batch on slot boudaries, instead of on every message
-                if let Err(error) = msg.ack().await {
-                    warn!(%error, "failed to ack nats message");
+                if result.is_ok() {
+                    if let Err(error) = msg.ack().await {
+                        warn!(%error, "failed to ack nats message");
+                    }
                 }
                 result
             }

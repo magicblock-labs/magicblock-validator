@@ -266,7 +266,8 @@ impl InstructionUtils {
             AccountMeta::new_readonly(CRANK_SIGNER, false),
         ];
         for instruction in &instructions {
-            account_metas.push(AccountMeta::new(instruction.program_id, false));
+            account_metas
+                .push(AccountMeta::new_readonly(instruction.program_id, false));
             account_metas.extend(instruction.accounts.iter().map(|account| {
                 AccountMeta {
                     pubkey: account.pubkey,
