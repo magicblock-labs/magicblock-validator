@@ -40,7 +40,6 @@ const MAX_RUNTIME_PROGRAM_ID_INDEX_EXCLUSIVE: usize =
 const SYSTEM_PROGRAM_ID: Pubkey =
     Pubkey::from_str_const("11111111111111111111111111111111");
 
-#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ApertureRoutingDecision {
     NonPrimary,
@@ -124,13 +123,12 @@ pub(crate) async fn extract_bytes(
 /// # HTTP Dispatcher Helpers
 ///
 /// This block contains common helper methods used by various RPC request handlers.
+/// Aperture routing has three states:
+/// - `NonPrimary`: local-only reads are allowed, writes/simulations are rejected.
+/// - `PrimaryReady`: Chainlink ensure paths are used.
+/// - `PrimaryNotReady`: ensure-dependent reads, writes, and simulations fail
+///   with HTTP 503 and JSON-RPC `TEMPORARILY_UNAVAILABLE`.
 impl HttpDispatcher {
-    #[allow(dead_code)]
-    fn is_primary_mode(&self) -> bool {
-        CoordinationMode::current().needs_onchain_interactions()
-    }
-
-    #[allow(dead_code)]
     async fn aperture_routing_decision(
         &self,
         method: &'static str,
@@ -202,8 +200,11 @@ impl HttpDispatcher {
             && account.owner() == &SYSTEM_PROGRAM_ID
     }
 
-    /// Fetches an account's data from the `AccountsDb` filling it in from chain
-    /// as needed.
+    /// Fetches an account's data from the `AccountsDb`.
+    ///
+    /// `NonPrimary` allows local-only reads, `PrimaryReady` fills from
+    /// Chainlink ensure paths, and `PrimaryNotReady` fails ensure-dependent
+    /// reads with HTTP 503 and JSON-RPC `TEMPORARILY_UNAVAILABLE`.
     #[instrument(skip_all)]
     async fn read_account_with_ensure(
         &self,
@@ -243,8 +244,11 @@ impl HttpDispatcher {
         }
     }
 
-    /// Fetches multiple account's data from the `AccountsDb` filling them in from chain
-    /// as needed.
+    /// Fetches multiple accounts' data from the `AccountsDb`.
+    ///
+    /// `NonPrimary` allows local-only reads, `PrimaryReady` fills from
+    /// Chainlink ensure paths, and `PrimaryNotReady` fails ensure-dependent
+    /// reads with HTTP 503 and JSON-RPC `TEMPORARILY_UNAVAILABLE`.
     #[instrument(skip(self, pubkeys), fields(pubkey_count = pubkeys.len()))]
     async fn read_accounts_with_ensure(
         &self,
@@ -347,6 +351,11 @@ impl HttpDispatcher {
     }
 
     /// Ensures all accounts required for a transaction are present in the `AccountsDb`.
+    ///
+    /// `NonPrimary` is a defensive no-op because writes/simulations are
+    /// rejected before this helper, `PrimaryReady` uses Chainlink ensure paths,
+    /// and `PrimaryNotReady` fails with HTTP 503 and JSON-RPC
+    /// `TEMPORARILY_UNAVAILABLE`.
     #[instrument(skip_all)]
     async fn ensure_transaction_accounts(
         &self,

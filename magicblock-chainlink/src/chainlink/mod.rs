@@ -87,8 +87,14 @@ pub trait ChainlinkPrimaryLifecycle: Send + Sync {
 // -----------------
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ChainlinkPrimaryReadiness {
+    /// Runtime is enabled and available for primary Chainlink ensure paths.
     Ready,
+    /// Local-only readiness: Chainlink is disabled because this instance has
+    /// no remote provider configured or remote-account-provider lifecycle is
+    /// disabled by config, so aperture ensure gates may proceed without a
+    /// runtime.
     ReadyWithoutRemoteProvider,
+    /// Primary Chainlink ensure paths must not run yet.
     NotReady,
 }
 
