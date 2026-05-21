@@ -100,9 +100,7 @@ impl ChainlinkPrimaryReadiness {
     pub fn label(self) -> &'static str {
         match self {
             Self::Ready => "ready",
-            Self::ReadyWithoutRemoteProvider => {
-                "ready_without_remote_provider"
-            }
+            Self::ReadyWithoutRemoteProvider => "ready_without_remote_provider",
             Self::NotReady => "not_ready",
         }
     }
@@ -944,9 +942,7 @@ mod readiness_tests {
     use magicblock_config::config::ChainLinkConfig;
     use solana_pubkey::Pubkey;
 
-    use super::{
-        ChainlinkPrimaryReadiness, StubbedChainlink,
-    };
+    use super::{ChainlinkPrimaryReadiness, StubbedChainlink};
 
     #[tokio::test]
     async fn try_new_without_fetch_cloner_is_ready_without_remote_provider(
