@@ -32,6 +32,7 @@ impl HttpDispatcher {
             .inspect_err(
                 |err| debug!(error = ?err, "Failed to prepare transaction"),
             )?;
+        self.require_primary_rpc_method("sendTransaction")?;
         let signature = *transaction.txn.signature();
 
         // Perform a replay check and reserve the signature in the cache

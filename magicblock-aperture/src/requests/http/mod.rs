@@ -8,8 +8,9 @@ use hyper::{
     Request, Response,
 };
 use magicblock_accounts_db::traits::AccountsBank;
-use magicblock_core::link::transactions::{
-    SanitizeableTransaction, WithEncoded,
+use magicblock_core::{
+    coordination_mode::CoordinationMode,
+    link::transactions::{SanitizeableTransaction, WithEncoded},
 };
 use magicblock_metrics::metrics::{AccountFetchOrigin, ENSURE_ACCOUNTS_TIME};
 use prelude::JsonBody;
@@ -122,6 +123,23 @@ impl HttpDispatcher {
             && account.owner() == &SYSTEM_PROGRAM_ID
     }
 
+    fn needs_onchain_interactions(&self) -> bool {
+        CoordinationMode::current().needs_onchain_interactions()
+    }
+
+    fn require_primary_rpc_method(
+        &self,
+        method: &'static str,
+    ) -> RpcResult<()> {
+        if self.needs_onchain_interactions() {
+            Ok(())
+        } else {
+            Err(RpcError::transaction_verification(format!(
+                "{method} is only available while validator is primary"
+            )))
+        }
+    }
+
     /// Fetches an account's data from the `AccountsDb` filling it in from chain
     /// as needed.
     #[instrument(skip_all)]
@@ -129,6 +147,10 @@ impl HttpDispatcher {
         &self,
         pubkey: &Pubkey,
     ) -> Option<AccountSharedData> {
+        if !self.needs_onchain_interactions() {
+            return self.accountsdb.get_account(pubkey);
+        }
+
         let mark_empty_if_not_found = [*pubkey];
         let _timer = ENSURE_ACCOUNTS_TIME
             .with_label_values(&["account"])
@@ -157,6 +179,13 @@ impl HttpDispatcher {
         &self,
         pubkeys: &[Pubkey],
     ) -> Vec<Option<AccountSharedData>> {
+        if !self.needs_onchain_interactions() {
+            return pubkeys
+                .iter()
+                .map(|pubkey| self.accountsdb.get_account(pubkey))
+                .collect();
+        }
+
         trace!("Ensuring accounts");
         let _timer = ENSURE_ACCOUNTS_TIME
             .with_label_values(&["multi-account"])
@@ -245,6 +274,8 @@ impl HttpDispatcher {
         &self,
         transaction: &SanitizedTransaction,
     ) -> RpcResult<()> {
+        self.require_primary_rpc_method("transaction")?;
+
         let _timer = ENSURE_ACCOUNTS_TIME
             .with_label_values(&["transaction"])
             .start_timer();
