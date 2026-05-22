@@ -4,14 +4,14 @@ use blocks::{BlocksCache, LastCachedBlock};
 use cache::ExpiringCache;
 use magicblock_account_cloner::ChainlinkCloner;
 use magicblock_accounts_db::AccountsDb;
-use magicblock_chainlink::{DefaultModeAwareChainlink, DefaultRealChainlink};
+use magicblock_chainlink::{DefaultModeAwareChainlink, ProdInnerChainlink};
 use magicblock_ledger::Ledger;
 use solana_feature_set::FeatureSet;
 use solana_pubkey::Pubkey;
 use subscriptions::SubscriptionsDb;
 use transactions::TransactionsCache;
 
-pub type RealChainlinkImpl = DefaultRealChainlink<ChainlinkCloner>;
+pub type RealChainlinkImpl = ProdInnerChainlink<ChainlinkCloner>;
 
 pub type ChainlinkImpl = DefaultModeAwareChainlink<ChainlinkCloner>;
 

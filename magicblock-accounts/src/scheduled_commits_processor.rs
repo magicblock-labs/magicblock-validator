@@ -5,7 +5,7 @@ use std::{
 
 use async_trait::async_trait;
 use magicblock_account_cloner::ChainlinkCloner;
-use magicblock_chainlink::{DefaultModeAwareChainlink, DefaultRealChainlink};
+use magicblock_chainlink::{DefaultModeAwareChainlink, ProdInnerChainlink};
 use magicblock_committor_service::{
     intent_execution_manager::BroadcastedIntentExecutionResult,
     intent_executor::ExecutionOutput, BaseIntentCommittor, CommittorService,
@@ -35,7 +35,7 @@ use crate::{
 const POISONED_MUTEX_MSG: &str =
     "Mutex of RemoteScheduledCommitsProcessor.intents_meta_map is poisoned";
 
-pub type RealChainlinkImpl = DefaultRealChainlink<ChainlinkCloner>;
+pub type RealChainlinkImpl = ProdInnerChainlink<ChainlinkCloner>;
 
 pub type ChainlinkImpl = DefaultModeAwareChainlink<ChainlinkCloner>;
 

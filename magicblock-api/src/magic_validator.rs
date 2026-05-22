@@ -20,7 +20,7 @@ use magicblock_aperture::{
 };
 use magicblock_chainlink::{
     config::ChainlinkConfig, remote_account_provider::Endpoints,
-    DefaultModeAwareChainlink, DefaultRealChainlink,
+    DefaultModeAwareChainlink, ProdInnerChainlink,
 };
 use magicblock_committor_service::{
     config::ChainConfig, BaseIntentCommittor, CommittorService,
@@ -95,7 +95,7 @@ use crate::{
     tickers::{init_slot_ticker, init_system_metrics_ticker},
 };
 
-type RealChainlinkImpl = DefaultRealChainlink<ChainlinkCloner>;
+type RealChainlinkImpl = ProdInnerChainlink<ChainlinkCloner>;
 
 type ChainlinkImpl = DefaultModeAwareChainlink<ChainlinkCloner>;
 

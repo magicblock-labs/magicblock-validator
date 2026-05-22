@@ -40,7 +40,7 @@ pub mod fetch_cloner;
 pub use blacklisted_accounts::*;
 
 /// Production Chainlink stack with configurable cloner implementation.
-pub type DefaultRealChainlink<C> = InnerChainlink<
+pub type ProdInnerChainlink<C> = InnerChainlink<
     ChainRpcClientImpl,
     SubMuxClient<ChainUpdatesClient>,
     AccountsDb,
