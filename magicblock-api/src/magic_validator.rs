@@ -20,7 +20,7 @@ use magicblock_aperture::{
 };
 use magicblock_chainlink::{
     config::ChainlinkConfig, remote_account_provider::Endpoints,
-    DefaultModeAwareChainlink, DefaultRealChainlink,
+    AccountsBankResetter, DefaultModeAwareChainlink, DefaultRealChainlink,
 };
 use magicblock_committor_service::{
     config::ChainConfig, BaseIntentCommittor, CommittorService,
@@ -238,12 +238,14 @@ impl MagicValidator {
                 let messages_rx = dispatch.replication_messages.take().expect(
                     "replication channel should always exist after init",
                 );
+                let account_bank_resetter: Arc<dyn AccountsBankResetter> =
+                    chainlink.clone();
                 ReplicationService::new(
                     broker,
                     mode_tx.clone(),
                     accountsdb.clone(),
                     ledger.clone(),
-                    chainlink.stub(),
+                    account_bank_resetter,
                     dispatch.transaction_scheduler.clone(),
                     messages_rx,
                     token.clone(),
