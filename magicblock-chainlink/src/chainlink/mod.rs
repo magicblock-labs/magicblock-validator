@@ -25,12 +25,10 @@ use crate::{
     fetch_cloner::FetchAndCloneResult,
     filters::is_noop_system_transfer,
     remote_account_provider::{
-        chain_pubsub_client::mock::ChainPubsubClientMock,
         chain_updates_client::ChainUpdatesClient, ChainPubsubClient,
         ChainRpcClient, ChainRpcClientImpl, Endpoints, RemoteAccountProvider,
     },
     submux::SubMuxClient,
-    testing::{cloner_stub::ClonerStub, rpc_client_mock::ChainRpcClientMock},
 };
 
 mod account_still_undelegating_on_chain;
@@ -40,10 +38,6 @@ pub mod errors;
 pub mod fetch_cloner;
 
 pub use blacklisted_accounts::*;
-
-/// A type alias for chainlink with only accountsdb being real impl
-pub type StubbedChainlink<V> =
-    Chainlink<ChainRpcClientMock, ChainPubsubClientMock, V, ClonerStub>;
 
 /// Production Chainlink stack with configurable cloner implementation.
 pub type DefaultRealChainlink<C> = Chainlink<
@@ -98,7 +92,7 @@ pub enum ModeAwareChainlink<
     C: Cloner,
 > {
     Enabled(Chainlink<T, U, V, C>),
-    Disabled(StubbedChainlink<V>),
+    Disabled,
 }
 
 impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
@@ -109,23 +103,17 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
     }
 
     pub fn disabled(
-        accounts_bank: &Arc<V>,
-        validator_pubkey: Pubkey,
-        config: &ChainLinkConfig,
+        _accounts_bank: &Arc<V>,
+        _validator_pubkey: Pubkey,
+        _config: &ChainLinkConfig,
     ) -> ChainlinkResult<Self> {
-        let chainlink = StubbedChainlink::try_new(
-            accounts_bank,
-            None,
-            validator_pubkey,
-            config,
-        )?;
-        Ok(Self::Disabled(chainlink))
+        Ok(Self::Disabled)
     }
 
     pub fn reset_accounts_bank(&self) -> AccountsDbResult<()> {
         match self {
             Self::Enabled(chainlink) => chainlink.reset_accounts_bank(),
-            Self::Disabled(chainlink) => chainlink.reset_accounts_bank(),
+            Self::Disabled => Ok(()),
         }
     }
 
@@ -147,16 +135,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
                     )
                     .await
             }
-            Self::Disabled(chainlink) => {
-                chainlink
-                    .ensure_accounts(
-                        pubkeys,
-                        mark_empty_if_not_found,
-                        fetch_origin,
-                        program_ids,
-                    )
-                    .await
-            }
+            Self::Disabled => Ok(Default::default()),
         }
     }
 
@@ -168,7 +147,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
             Self::Enabled(chainlink) => {
                 chainlink.ensure_transaction_accounts(tx).await
             }
-            Self::Disabled(_) => Err(ChainlinkError::DisabledForNonPrimaryMode),
+            Self::Disabled => Err(ChainlinkError::DisabledForNonPrimaryMode),
         }
     }
 
@@ -184,11 +163,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
                     .fetch_accounts(pubkeys, fetch_origin, program_ids)
                     .await
             }
-            Self::Disabled(chainlink) => {
-                chainlink
-                    .fetch_accounts(pubkeys, fetch_origin, program_ids)
-                    .await
-            }
+            Self::Disabled => Ok(vec![None; pubkeys.len()]),
         }
     }
 
@@ -200,33 +175,21 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
             Self::Enabled(chainlink) => {
                 chainlink.undelegation_requested(pubkey).await
             }
-            Self::Disabled(_) => Ok(()),
+            Self::Disabled => Ok(()),
         }
     }
 
     pub fn fetch_count(&self) -> Option<u64> {
         match self {
             Self::Enabled(chainlink) => chainlink.fetch_count(),
-            Self::Disabled(chainlink) => chainlink.fetch_count(),
+            Self::Disabled => None,
         }
     }
 
     pub fn is_watching(&self, pubkey: &Pubkey) -> bool {
         match self {
             Self::Enabled(chainlink) => chainlink.is_watching(pubkey),
-            Self::Disabled(chainlink) => chainlink.is_watching(pubkey),
-        }
-    }
-
-    /// This exists only for the replication service to get a Chainlink-shaped
-    /// handle for reset_accounts_bank(). It must not be used for RPC fetching,
-    /// subscriptions, or remote Chainlink work. This is temporary and should be
-    /// removed once account-bank cleanup is moved out of Chainlink and into
-    /// AccountsDb/account-cleanup code.
-    pub fn stub(&self) -> StubbedChainlink<V> {
-        match self {
-            Self::Enabled(chainlink) => chainlink.stub(),
-            Self::Disabled(chainlink) => chainlink.stub(),
+            Self::Disabled => false,
         }
     }
 }
@@ -660,21 +623,6 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
             .map(|provider| provider.is_watching(pubkey))
             .unwrap_or(false)
     }
-
-    /// A temporary hacky method to clone chainlink with accountsdb only,
-    /// for it's used by the replication service to clean up accountsdb
-    ///
-    /// TODO(bmuddha):
-    /// remove all accountsdb management from chainlink, after accountsdb refactoring
-    pub fn stub(&self) -> StubbedChainlink<V> {
-        Chainlink {
-            accounts_bank: self.accounts_bank.clone(),
-            fetch_cloner: None,
-            removed_accounts_sub: None,
-            validator_id: self.validator_id,
-            remove_confined_accounts: self.remove_confined_accounts,
-        }
-    }
 }
 
 // -----------------
@@ -751,6 +699,24 @@ mod mode_aware_tests {
         assert!(accounts_bank.get_account(&pubkey).is_none());
         assert_eq!(chainlink.fetch_count(), None);
         assert!(!chainlink.is_watching(&pubkey));
+    }
+
+    #[tokio::test]
+    async fn disabled_mode_fetch_accounts_returns_none_values() {
+        let (_accounts_bank, chainlink) = disabled_chainlink();
+        let pubkeys = vec![Pubkey::new_unique(), Pubkey::new_unique()];
+
+        let result = chainlink
+            .fetch_accounts(
+                &pubkeys,
+                AccountFetchOrigin::GetMultipleAccounts,
+                None,
+            )
+            .await;
+
+        let accounts = result.expect("disabled fetch_accounts should succeed");
+        assert_eq!(accounts.len(), 2);
+        assert!(accounts.iter().all(Option::is_none));
     }
 
     #[tokio::test]

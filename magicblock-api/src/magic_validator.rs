@@ -1089,10 +1089,11 @@ fn programs_to_load(programs: &[LoadableProgram]) -> Vec<(Pubkey, PathBuf)> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use magicblock_config::{
         config::validator::ReplicationConfig, types::SerdePubkey,
     };
+
+    use super::*;
 
     fn replication_config() -> ReplicationConfig {
         ReplicationConfig {
