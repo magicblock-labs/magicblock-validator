@@ -1,5 +1,6 @@
 //! Primary node: publishes events and holds leader lock.
 
+use magicblock_chainlink::AccountsBankResetter;
 use magicblock_core::link::replication::Message;
 use tokio::sync::mpsc::Receiver;
 use tracing::{error, info, instrument, warn};
@@ -12,17 +13,23 @@ use crate::{
 };
 
 /// Primary node: publishes events and holds leader lock.
-pub struct Primary {
-    pub(crate) ctx: ReplicationContext,
+pub struct Primary<R>
+where
+    R: AccountsBankResetter,
+{
+    pub(crate) ctx: ReplicationContext<R>,
     producer: Producer,
     messages: Receiver<Message>,
     snapshots: SnapshotWatcher,
 }
 
-impl Primary {
+impl<R> Primary<R>
+where
+    R: AccountsBankResetter,
+{
     /// Creates a new primary instance.
     pub fn new(
-        ctx: ReplicationContext,
+        ctx: ReplicationContext<R>,
         producer: Producer,
         messages: Receiver<Message>,
         snapshots: SnapshotWatcher,

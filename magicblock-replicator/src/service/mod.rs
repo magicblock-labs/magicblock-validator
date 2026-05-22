@@ -57,12 +57,18 @@ const CONSUMER_RETRY_DELAY: Duration = Duration::from_secs(1);
 // =============================================================================
 
 /// Replication service for the selected replication role.
-pub enum Service {
-    Primary(Primary),
-    Replica(Replica),
+pub enum Service<R>
+where
+    R: AccountsBankResetter,
+{
+    Primary(Primary<R>),
+    Replica(Replica<R>),
 }
 
-impl Service {
+impl<R> Service<R>
+where
+    R: AccountsBankResetter + 'static,
+{
     /// Creates service, attempting primary role first if allowed.
     ///
     /// When `can_promote` is false (ReplicaOnly mode), skips lock acquisition
@@ -73,7 +79,7 @@ impl Service {
         mode_tx: Sender<SchedulerMode>,
         accountsdb: Arc<AccountsDb>,
         ledger: Arc<Ledger>,
-        account_bank_resetter: Arc<dyn AccountsBankResetter>,
+        account_bank_resetter: Arc<R>,
         scheduler: TransactionSchedulerHandle,
         messages: Receiver<Message>,
         cancel: CancellationToken,

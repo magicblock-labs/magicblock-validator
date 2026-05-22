@@ -20,7 +20,7 @@ use magicblock_aperture::{
 };
 use magicblock_chainlink::{
     config::ChainlinkConfig, remote_account_provider::Endpoints,
-    AccountsBankResetter, DefaultModeAwareChainlink, DefaultRealChainlink,
+    DefaultModeAwareChainlink, DefaultRealChainlink,
 };
 use magicblock_committor_service::{
     config::ChainConfig, BaseIntentCommittor, CommittorService,
@@ -111,7 +111,7 @@ pub struct MagicValidator {
     ledger_truncator: LedgerTruncator,
     slot_ticker: Option<tokio::task::JoinHandle<()>>,
     committor_service: Option<Arc<CommittorService>>,
-    replication_service: Option<ReplicationService>,
+    replication_service: Option<ReplicationService<ChainlinkImpl>>,
     scheduled_commits_processor: Option<Arc<ScheduledCommitsProcessorImpl>>,
     chainlink: Arc<ChainlinkImpl>,
     rpc_handle: thread::JoinHandle<()>,
@@ -238,14 +238,12 @@ impl MagicValidator {
                 let messages_rx = dispatch.replication_messages.take().expect(
                     "replication channel should always exist after init",
                 );
-                let account_bank_resetter: Arc<dyn AccountsBankResetter> =
-                    chainlink.clone();
                 ReplicationService::new(
                     broker,
                     mode_tx.clone(),
                     accountsdb.clone(),
                     ledger.clone(),
-                    account_bank_resetter,
+                    chainlink.clone(),
                     dispatch.transaction_scheduler.clone(),
                     messages_rx,
                     token.clone(),

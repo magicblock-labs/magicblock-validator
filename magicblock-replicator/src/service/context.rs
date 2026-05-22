@@ -28,7 +28,10 @@ use crate::{
 };
 
 /// Shared state for both primary and replica roles.
-pub struct ReplicationContext {
+pub struct ReplicationContext<R>
+where
+    R: AccountsBankResetter,
+{
     /// Node identifier for leader election.
     pub id: String,
     /// NATS broker.
@@ -41,7 +44,7 @@ pub struct ReplicationContext {
     pub accountsdb: Arc<AccountsDb>,
     /// Reset-only bridge for account-bank cleanup.
     /// TODO(bmuddha): remove this once accounts management is moved to AccountsDb.
-    pub account_bank_resetter: Arc<dyn AccountsBankResetter>,
+    pub account_bank_resetter: Arc<R>,
     /// Transaction ledger.
     pub ledger: Arc<Ledger>,
     /// Transaction scheduler.
@@ -52,7 +55,10 @@ pub struct ReplicationContext {
     pub index: TransactionIndex,
 }
 
-impl ReplicationContext {
+impl<R> ReplicationContext<R>
+where
+    R: AccountsBankResetter,
+{
     /// Creates context from ledger state.
     #[allow(clippy::too_many_arguments)]
     pub async fn new(
@@ -60,7 +66,7 @@ impl ReplicationContext {
         mode_tx: Sender<SchedulerMode>,
         accountsdb: Arc<AccountsDb>,
         ledger: Arc<Ledger>,
-        account_bank_resetter: Arc<dyn AccountsBankResetter>,
+        account_bank_resetter: Arc<R>,
         scheduler: TransactionSchedulerHandle,
         cancel: CancellationToken,
     ) -> Result<Self> {
@@ -175,7 +181,7 @@ impl ReplicationContext {
         self,
         producer: Producer,
         messages: Receiver<Message>,
-    ) -> Result<Primary> {
+    ) -> Result<Primary<R>> {
         let snapshots = self.create_snapshot_watcher()?;
         let _guard = self.scheduler.wait_for_idle().await;
         self.account_bank_resetter.reset_accounts_bank()?;
@@ -188,7 +194,7 @@ impl ReplicationContext {
     /// reset parameter controls where in the stream the consumption starts:
     /// true - the last known position that we know
     /// false - the last known position that message broker tracks for us
-    pub async fn into_replica(self, reset: bool) -> Result<Option<Replica>> {
+    pub async fn into_replica(self, reset: bool) -> Result<Option<Replica<R>>> {
         let Some(consumer) = self.create_consumer(reset).await else {
             return Ok(None);
         };
