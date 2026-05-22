@@ -178,101 +178,159 @@ pub struct ExternalUndelegateArgs {
     pub delegation_record: CompressedDelegationRecord,
 }
 
-/// Reimplementations of the types from light-sdk for borsh compatibility
+// ------------------------------------------------------------------------------------------------
+// Reimplementations of the types from light-sdk for borsh compatibility
+// ------------------------------------------------------------------------------------------------
 
+/// Reimplements [ValidityProof] compatible with borsh 1.
+/// It is a wrapper around a [CompressedProof] [Option] that is compatible with borsh 1.
 #[derive(
     BorshSerialize, BorshDeserialize, Clone, Copy, Debug, Default, PartialEq,
 )]
-pub struct CdpValidityProof(pub Option<[u8; 128]>);
+pub struct CdpValidityProof(pub Option<CdpCompressedProof>);
+
+#[derive(BorshSerialize, BorshDeserialize, Clone, Copy, Debug, PartialEq)]
+pub struct CdpCompressedProof {
+    pub a: [u8; 32],
+    pub b: [u8; 64],
+    pub c: [u8; 32],
+}
+
+impl From<CdpCompressedProof> for CompressedProof {
+    fn from(cp: CdpCompressedProof) -> Self {
+        Self {
+            a: cp.a,
+            b: cp.b,
+            c: cp.c,
+        }
+    }
+}
+
+impl From<CompressedProof> for CdpCompressedProof {
+    fn from(cp: CompressedProof) -> Self {
+        Self {
+            a: cp.a,
+            b: cp.b,
+            c: cp.c,
+        }
+    }
+}
 
 impl TryFrom<CdpValidityProof> for ValidityProof {
     type Error = light_compressed_account::CompressedAccountError;
     fn try_from(
         cdp_validity_proof: CdpValidityProof,
     ) -> Result<Self, Self::Error> {
-        let Some(bytes) = cdp_validity_proof.0 else {
+        let Some(proof) = cdp_validity_proof.0 else {
             return Ok(Self(None));
         };
-        let proof = CompressedProof::try_from(&bytes[..])?;
+        let proof = CompressedProof::from(proof);
         Ok(Self(Some(proof)))
     }
 }
 
 impl From<ValidityProof> for CdpValidityProof {
     fn from(vp: ValidityProof) -> Self {
-        Self(vp.0.map(|proof| proof.to_array()))
+        Self(vp.0.map(CdpCompressedProof::from))
     }
 }
 
-#[derive(BorshSerialize, BorshDeserialize, Clone, Copy, Debug, PartialEq)]
-pub struct CdpCompressedAccountMeta(pub [u8; 42]);
+/// Reimplements [CompressedAccountMeta] compatible with borsh 1.
+/// It is a wrapper around a [CompressedAccountMeta] that is compatible with borsh 1.
+#[derive(
+    BorshSerialize, BorshDeserialize, Clone, Copy, Debug, PartialEq, Default,
+)]
+pub struct CdpCompressedAccountMeta {
+    pub tree_info: CdpPackedStateTreeInfo,
+    pub address: [u8; 32],
+    pub output_state_tree_index: u8,
+}
 
 impl From<CompressedAccountMeta> for CdpCompressedAccountMeta {
     fn from(cam: CompressedAccountMeta) -> Self {
-        let mut bytes = [0u8; 42];
-        bytes[0..2].copy_from_slice(&cam.tree_info.root_index.to_le_bytes());
-        bytes[2] = cam.tree_info.prove_by_index as u8;
-        bytes[3] = cam.tree_info.merkle_tree_pubkey_index;
-        bytes[4] = cam.tree_info.queue_pubkey_index;
-        bytes[5..9].copy_from_slice(&cam.tree_info.leaf_index.to_le_bytes());
-        bytes[9..41].copy_from_slice(&cam.address);
-        bytes[41] = cam.output_state_tree_index;
-        Self(bytes)
+        Self {
+            tree_info: cam.tree_info.into(),
+            address: cam.address,
+            output_state_tree_index: cam.output_state_tree_index,
+        }
     }
 }
 
-impl TryFrom<CdpCompressedAccountMeta> for CompressedAccountMeta {
-    type Error = core::array::TryFromSliceError;
-    fn try_from(cam: CdpCompressedAccountMeta) -> Result<Self, Self::Error> {
-        Ok(Self {
-            tree_info: PackedStateTreeInfo {
-                root_index: u16::from_le_bytes(cam.0[0..2].try_into()?),
-                prove_by_index: cam.0[2] != 0,
-                merkle_tree_pubkey_index: cam.0[3],
-                queue_pubkey_index: cam.0[4],
-                leaf_index: u32::from_le_bytes(cam.0[5..9].try_into()?),
-            },
-            address: cam.0[9..41].try_into()?,
-            output_state_tree_index: cam.0[41],
-        })
-    }
-}
-
-impl Default for CdpCompressedAccountMeta {
-    fn default() -> Self {
-        Self([0u8; 42])
+impl From<CdpCompressedAccountMeta> for CompressedAccountMeta {
+    fn from(cam: CdpCompressedAccountMeta) -> Self {
+        Self {
+            tree_info: cam.tree_info.into(),
+            address: cam.address,
+            output_state_tree_index: cam.output_state_tree_index,
+        }
     }
 }
 
 #[derive(
-    BorshSerialize, BorshDeserialize, Clone, Copy, Debug, Default, PartialEq,
+    BorshSerialize, BorshDeserialize, Clone, Copy, Debug, PartialEq, Default,
 )]
-pub struct CdpPackedAddressTreeInfo(pub [u8; 4]);
+pub struct CdpPackedStateTreeInfo {
+    pub root_index: u16,
+    pub prove_by_index: bool,
+    pub merkle_tree_pubkey_index: u8,
+    pub queue_pubkey_index: u8,
+    pub leaf_index: u32,
+}
 
-impl From<PackedAddressTreeInfo> for CdpPackedAddressTreeInfo {
-    fn from(pati: PackedAddressTreeInfo) -> Self {
-        let mut bytes = [0u8; 4];
-        bytes[0..1].copy_from_slice(
-            &pati.address_merkle_tree_pubkey_index.to_le_bytes(),
-        );
-        bytes[1..2]
-            .copy_from_slice(&pati.address_queue_pubkey_index.to_le_bytes());
-        bytes[2..4].copy_from_slice(&pati.root_index.to_le_bytes());
-        Self(bytes)
+impl From<PackedStateTreeInfo> for CdpPackedStateTreeInfo {
+    fn from(psti: PackedStateTreeInfo) -> Self {
+        Self {
+            root_index: psti.root_index,
+            prove_by_index: psti.prove_by_index,
+            merkle_tree_pubkey_index: psti.merkle_tree_pubkey_index,
+            queue_pubkey_index: psti.queue_pubkey_index,
+            leaf_index: psti.leaf_index,
+        }
     }
 }
 
-impl TryFrom<CdpPackedAddressTreeInfo> for PackedAddressTreeInfo {
-    type Error = core::array::TryFromSliceError;
-    fn try_from(
-        cdp_packed_address_tree_info: CdpPackedAddressTreeInfo,
-    ) -> Result<Self, Self::Error> {
-        Ok(Self {
-            address_merkle_tree_pubkey_index: cdp_packed_address_tree_info.0[0],
-            address_queue_pubkey_index: cdp_packed_address_tree_info.0[1],
-            root_index: u16::from_le_bytes(
-                cdp_packed_address_tree_info.0[2..4].try_into()?,
-            ),
-        })
+impl From<CdpPackedStateTreeInfo> for PackedStateTreeInfo {
+    fn from(psti: CdpPackedStateTreeInfo) -> Self {
+        Self {
+            root_index: psti.root_index,
+            prove_by_index: psti.prove_by_index,
+            merkle_tree_pubkey_index: psti.merkle_tree_pubkey_index,
+            queue_pubkey_index: psti.queue_pubkey_index,
+            leaf_index: psti.leaf_index,
+        }
+    }
+}
+
+/// Reimplements [PackedAddressTreeInfo] compatible with borsh 1.
+/// It is a wrapper around a [PackedAddressTreeInfo] that is compatible with borsh 1.
+#[derive(
+    BorshSerialize, BorshDeserialize, Clone, Copy, Debug, Default, PartialEq,
+)]
+pub struct CdpPackedAddressTreeInfo {
+    pub address_merkle_tree_pubkey_index: u8,
+    pub address_queue_pubkey_index: u8,
+    pub root_index: u16,
+}
+
+impl From<PackedAddressTreeInfo> for CdpPackedAddressTreeInfo {
+    fn from(pati: PackedAddressTreeInfo) -> Self {
+        Self {
+            address_merkle_tree_pubkey_index: pati
+                .address_merkle_tree_pubkey_index,
+            address_queue_pubkey_index: pati.address_queue_pubkey_index,
+            root_index: pati.root_index,
+        }
+    }
+}
+
+impl From<CdpPackedAddressTreeInfo> for PackedAddressTreeInfo {
+    fn from(cdp_packed_address_tree_info: CdpPackedAddressTreeInfo) -> Self {
+        Self {
+            address_merkle_tree_pubkey_index: cdp_packed_address_tree_info
+                .address_merkle_tree_pubkey_index,
+            address_queue_pubkey_index: cdp_packed_address_tree_info
+                .address_queue_pubkey_index,
+            root_index: cdp_packed_address_tree_info.root_index,
+        }
     }
 }
