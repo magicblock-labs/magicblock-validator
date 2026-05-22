@@ -15,7 +15,7 @@ use std::{
 use magicblock_accounts_db::{traits::AccountsBank, AccountsDb};
 use magicblock_aperture::{
     initialize_aperture,
-    state::{ChainlinkImpl, NodeContext, RealChainlinkImpl, SharedState},
+    state::{ChainlinkImpl, InnerChainlinkImpl, NodeContext, SharedState},
     JsonRpcServer,
 };
 use magicblock_config::{
@@ -59,7 +59,7 @@ pub struct RpcTestEnv {
 }
 
 fn chainlink(accounts_db: &Arc<AccountsDb>) -> Arc<ChainlinkImpl> {
-    let real = RealChainlinkImpl::try_new(
+    let real = InnerChainlinkImpl::try_new(
         accounts_db,
         None,
         Pubkey::new_unique(),

@@ -24,7 +24,7 @@ use tokio_util::sync::CancellationToken;
 use crate::{
     encoder::{AccountEncoder, ProgramAccountEncoder, TransactionLogsEncoder},
     server::websocket::dispatch::WsConnectionChannel,
-    state::{ChainlinkImpl, RealChainlinkImpl, SharedState},
+    state::{ChainlinkImpl, InnerChainlinkImpl, SharedState},
     utils::ProgramFilters,
     EventProcessor,
 };
@@ -42,7 +42,7 @@ fn ws_channel() -> (WsConnectionChannel, Receiver<Bytes>) {
 
 fn chainlink(accounts_db: &Arc<AccountsDb>) -> ChainlinkImpl {
     let cfg = ChainLinkConfig::default();
-    let real = RealChainlinkImpl::try_new(
+    let real = InnerChainlinkImpl::try_new(
         accounts_db,
         None,
         Pubkey::new_unique(),

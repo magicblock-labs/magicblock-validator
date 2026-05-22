@@ -95,7 +95,7 @@ use crate::{
     tickers::{init_slot_ticker, init_system_metrics_ticker},
 };
 
-type RealChainlinkImpl = ProdInnerChainlink<ChainlinkCloner>;
+type InnerChainlinkImpl = ProdInnerChainlink<ChainlinkCloner>;
 
 type ChainlinkImpl = ProdChainlink<ChainlinkCloner>;
 
@@ -527,7 +527,7 @@ impl MagicValidator {
             let level = CommitmentLevel::Confirmed;
             CommitmentConfig { commitment: level }
         };
-        let chainlink = RealChainlinkImpl::try_new_from_endpoints(
+        let chainlink = InnerChainlinkImpl::try_new_from_endpoints(
             &endpoints,
             commitment_config,
             &accounts_bank,

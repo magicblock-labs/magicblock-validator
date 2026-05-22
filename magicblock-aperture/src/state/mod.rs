@@ -11,7 +11,7 @@ use solana_pubkey::Pubkey;
 use subscriptions::SubscriptionsDb;
 use transactions::TransactionsCache;
 
-pub type RealChainlinkImpl = ProdInnerChainlink<ChainlinkCloner>;
+pub type InnerChainlinkImpl = ProdInnerChainlink<ChainlinkCloner>;
 
 pub type ChainlinkImpl = ProdChainlink<ChainlinkCloner>;
 

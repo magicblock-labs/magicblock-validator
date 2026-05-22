@@ -35,7 +35,7 @@ use crate::{
 const POISONED_MUTEX_MSG: &str =
     "Mutex of RemoteScheduledCommitsProcessor.intents_meta_map is poisoned";
 
-pub type RealChainlinkImpl = ProdInnerChainlink<ChainlinkCloner>;
+pub type InnerChainlinkImpl = ProdInnerChainlink<ChainlinkCloner>;
 
 pub type ChainlinkImpl = ProdChainlink<ChainlinkCloner>;
 

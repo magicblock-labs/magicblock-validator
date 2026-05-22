@@ -402,13 +402,13 @@ mod tests {
 
     use super::*;
     use crate::state::{
-        ChainlinkImpl, NodeContext, RealChainlinkImpl, SharedState,
+        ChainlinkImpl, InnerChainlinkImpl, NodeContext, SharedState,
     };
 
     static COORDINATION_MODE_TEST_LOCK: Mutex<()> = Mutex::new(());
 
     fn chainlink(env: &ExecutionTestEnv) -> ChainlinkImpl {
-        let real = RealChainlinkImpl::try_new(
+        let real = InnerChainlinkImpl::try_new(
             &env.accountsdb,
             None,
             Pubkey::new_unique(),
