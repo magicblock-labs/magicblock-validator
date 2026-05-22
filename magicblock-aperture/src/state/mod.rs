@@ -10,7 +10,7 @@ use magicblock_chainlink::{
         chain_updates_client::ChainUpdatesClient,
     },
     submux::SubMuxClient,
-    Chainlink,
+    Chainlink, ModeAwareChainlink,
 };
 use magicblock_ledger::Ledger;
 use solana_feature_set::FeatureSet;
@@ -18,7 +18,14 @@ use solana_pubkey::Pubkey;
 use subscriptions::SubscriptionsDb;
 use transactions::TransactionsCache;
 
-pub type ChainlinkImpl = Chainlink<
+pub type RealChainlinkImpl = Chainlink<
+    ChainRpcClientImpl,
+    SubMuxClient<ChainUpdatesClient>,
+    AccountsDb,
+    ChainlinkCloner,
+>;
+
+pub type ChainlinkImpl = ModeAwareChainlink<
     ChainRpcClientImpl,
     SubMuxClient<ChainUpdatesClient>,
     AccountsDb,

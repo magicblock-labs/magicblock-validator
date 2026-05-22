@@ -12,7 +12,7 @@ use magicblock_chainlink::{
         chain_updates_client::ChainUpdatesClient,
     },
     submux::SubMuxClient,
-    Chainlink,
+    Chainlink, ModeAwareChainlink,
 };
 use magicblock_committor_service::{
     intent_execution_manager::BroadcastedIntentExecutionResult,
@@ -43,7 +43,14 @@ use crate::{
 const POISONED_MUTEX_MSG: &str =
     "Mutex of RemoteScheduledCommitsProcessor.intents_meta_map is poisoned";
 
-pub type ChainlinkImpl = Chainlink<
+pub type RealChainlinkImpl = Chainlink<
+    ChainRpcClientImpl,
+    SubMuxClient<ChainUpdatesClient>,
+    AccountsDb,
+    ChainlinkCloner,
+>;
+
+pub type ChainlinkImpl = ModeAwareChainlink<
     ChainRpcClientImpl,
     SubMuxClient<ChainUpdatesClient>,
     AccountsDb,

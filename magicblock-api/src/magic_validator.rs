@@ -25,7 +25,7 @@ use magicblock_chainlink::{
         chain_updates_client::ChainUpdatesClient, Endpoints,
     },
     submux::SubMuxClient,
-    Chainlink,
+    Chainlink, ModeAwareChainlink,
 };
 use magicblock_committor_service::{
     config::ChainConfig, BaseIntentCommittor, CommittorService,
@@ -100,7 +100,14 @@ use crate::{
     tickers::{init_slot_ticker, init_system_metrics_ticker},
 };
 
-type ChainlinkImpl = Chainlink<
+type RealChainlinkImpl = Chainlink<
+    ChainRpcClientImpl,
+    SubMuxClient<ChainUpdatesClient>,
+    AccountsDb,
+    ChainlinkCloner,
+>;
+
+type ChainlinkImpl = ModeAwareChainlink<
     ChainRpcClientImpl,
     SubMuxClient<ChainUpdatesClient>,
     AccountsDb,
@@ -524,7 +531,7 @@ impl MagicValidator {
             let level = CommitmentLevel::Confirmed;
             CommitmentConfig { commitment: level }
         };
-        let chainlink = ChainlinkImpl::try_new_from_endpoints(
+        let chainlink = RealChainlinkImpl::try_new_from_endpoints(
             &endpoints,
             commitment_config,
             &accounts_bank,
@@ -536,7 +543,7 @@ impl MagicValidator {
         )
         .await?;
 
-        Ok(chainlink)
+        Ok(ChainlinkImpl::enabled(chainlink))
     }
 
     fn init_ledger(
