@@ -5,15 +5,7 @@ use std::{
 
 use async_trait::async_trait;
 use magicblock_account_cloner::ChainlinkCloner;
-use magicblock_accounts_db::AccountsDb;
-use magicblock_chainlink::{
-    remote_account_provider::{
-        chain_rpc_client::ChainRpcClientImpl,
-        chain_updates_client::ChainUpdatesClient,
-    },
-    submux::SubMuxClient,
-    Chainlink, ModeAwareChainlink,
-};
+use magicblock_chainlink::{DefaultModeAwareChainlink, DefaultRealChainlink};
 use magicblock_committor_service::{
     intent_execution_manager::BroadcastedIntentExecutionResult,
     intent_executor::ExecutionOutput, BaseIntentCommittor, CommittorService,
@@ -43,19 +35,9 @@ use crate::{
 const POISONED_MUTEX_MSG: &str =
     "Mutex of RemoteScheduledCommitsProcessor.intents_meta_map is poisoned";
 
-pub type RealChainlinkImpl = Chainlink<
-    ChainRpcClientImpl,
-    SubMuxClient<ChainUpdatesClient>,
-    AccountsDb,
-    ChainlinkCloner,
->;
+pub type RealChainlinkImpl = DefaultRealChainlink<ChainlinkCloner>;
 
-pub type ChainlinkImpl = ModeAwareChainlink<
-    ChainRpcClientImpl,
-    SubMuxClient<ChainUpdatesClient>,
-    AccountsDb,
-    ChainlinkCloner,
->;
+pub type ChainlinkImpl = DefaultModeAwareChainlink<ChainlinkCloner>;
 
 pub struct ScheduledCommitsProcessorImpl {
     committor: Arc<CommittorService>,

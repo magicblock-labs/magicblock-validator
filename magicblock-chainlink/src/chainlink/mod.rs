@@ -3,7 +3,9 @@ use std::{collections::HashSet, path::Path, sync::Arc};
 use dlp_api::pda::ephemeral_balance_pda_from_payer;
 use errors::{ChainlinkError, ChainlinkResult};
 use fetch_cloner::FetchCloner;
-use magicblock_accounts_db::{traits::AccountsBank, AccountsDbResult};
+use magicblock_accounts_db::{
+    traits::AccountsBank, AccountsDb, AccountsDbResult,
+};
 use magicblock_aml::RiskService;
 use magicblock_config::config::ChainLinkConfig;
 use magicblock_metrics::metrics::AccountFetchOrigin;
@@ -42,6 +44,22 @@ pub use blacklisted_accounts::*;
 /// A type alias for chainlink with only accountsdb being real impl
 pub type StubbedChainlink<V> =
     Chainlink<ChainRpcClientMock, ChainPubsubClientMock, V, ClonerStub>;
+
+/// Production Chainlink stack with configurable cloner implementation.
+pub type DefaultRealChainlink<C> = Chainlink<
+    ChainRpcClientImpl,
+    SubMuxClient<ChainUpdatesClient>,
+    AccountsDb,
+    C,
+>;
+
+/// Production mode-aware Chainlink stack with configurable cloner implementation.
+pub type DefaultModeAwareChainlink<C> = ModeAwareChainlink<
+    ChainRpcClientImpl,
+    SubMuxClient<ChainUpdatesClient>,
+    AccountsDb,
+    C,
+>;
 
 // -----------------
 // Chainlink

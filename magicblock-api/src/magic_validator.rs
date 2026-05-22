@@ -19,13 +19,8 @@ use magicblock_aperture::{
     state::{NodeContext, SharedState},
 };
 use magicblock_chainlink::{
-    config::ChainlinkConfig,
-    remote_account_provider::{
-        chain_rpc_client::ChainRpcClientImpl,
-        chain_updates_client::ChainUpdatesClient, Endpoints,
-    },
-    submux::SubMuxClient,
-    Chainlink, ModeAwareChainlink,
+    config::ChainlinkConfig, remote_account_provider::Endpoints,
+    DefaultModeAwareChainlink, DefaultRealChainlink,
 };
 use magicblock_committor_service::{
     config::ChainConfig, BaseIntentCommittor, CommittorService,
@@ -100,19 +95,9 @@ use crate::{
     tickers::{init_slot_ticker, init_system_metrics_ticker},
 };
 
-type RealChainlinkImpl = Chainlink<
-    ChainRpcClientImpl,
-    SubMuxClient<ChainUpdatesClient>,
-    AccountsDb,
-    ChainlinkCloner,
->;
+type RealChainlinkImpl = DefaultRealChainlink<ChainlinkCloner>;
 
-type ChainlinkImpl = ModeAwareChainlink<
-    ChainRpcClientImpl,
-    SubMuxClient<ChainUpdatesClient>,
-    AccountsDb,
-    ChainlinkCloner,
->;
+type ChainlinkImpl = DefaultModeAwareChainlink<ChainlinkCloner>;
 
 // -----------------
 // MagicValidator
