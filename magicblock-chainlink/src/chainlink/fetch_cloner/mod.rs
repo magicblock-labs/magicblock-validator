@@ -2058,9 +2058,9 @@ where
                 if !pending.contains(pubkey) {
                     continue;
                 }
-                if self.accounts_bank.get_account(pubkey).is_some_and(|in_bank| {
-                    !in_bank.delegated() && !in_bank.compressed()
-                }) {
+                if self.accounts_bank.get_account(pubkey).is_some_and(
+                    |in_bank| !in_bank.delegated() && !in_bank.compressed(),
+                ) {
                     pending.remove(pubkey);
                 }
             }
