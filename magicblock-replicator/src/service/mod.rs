@@ -63,10 +63,10 @@ pub enum Service {
 }
 
 impl Service {
-    /// Creates the replication service for the configured startup role.
+    /// Creates service, attempting primary role first if allowed.
     ///
-    /// Primary mode acquires the producer lock; replica mode skips lock
-    /// acquisition and starts consuming from JetStream.
+    /// When `can_promote` is false (ReplicaOnly mode), skips lock acquisition
+    /// and goes directly to Replica mode.
     #[allow(clippy::too_many_arguments)]
     pub async fn new(
         broker: Broker,
@@ -86,7 +86,7 @@ impl Service {
         .await?;
 
         if let ReplicationMode::Primary(_) = mode {
-            // Primary startup requires the producer lock.
+            // Try to become primary
             match ctx.try_acquire_producer().await? {
                 Some(producer) => Ok(Some(Self::Primary(
                     ctx.into_primary(producer, messages).await?,
@@ -96,7 +96,7 @@ impl Service {
                 )),
             }
         } else {
-            // Replica startup skips producer lock acquisition.
+            // Replica mode: skip lock acquisition, go directly to Replica
             let Some(replica) = ctx.into_replica(reset).await? else {
                 // Shutdown during consumer creation
                 return Ok(None);

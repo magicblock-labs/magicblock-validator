@@ -26,6 +26,8 @@ impl HttpDispatcher {
         &self,
         request: &mut JsonRequest,
     ) -> HandlerResult {
+        self.require_primary_rpc_method("simulateTransaction")?;
+
         let (transaction_str, config) = parse_params!(
             request.params()?,
             String,
@@ -46,7 +48,6 @@ impl HttpDispatcher {
             .inspect_err(|err| {
                 debug!(error = ?err, "Failed to prepare transaction to simulate")
             })?;
-        self.require_primary_rpc_method("simulateTransaction")?;
         self.ensure_transaction_accounts(&transaction.txn).await?;
         let number_of_accounts = transaction.txn.message().account_keys().len();
 
