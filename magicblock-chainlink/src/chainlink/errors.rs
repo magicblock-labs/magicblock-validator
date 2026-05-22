@@ -66,4 +66,7 @@ pub enum ChainlinkError {
 
     #[error("Failed to perform Range risk check: {0}")]
     RangeRisk(#[from] RiskError),
+
+    #[error("Chainlink is disabled for non-primary mode")]
+    DisabledForNonPrimaryMode,
 }

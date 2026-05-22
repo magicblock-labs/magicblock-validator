@@ -1,7 +1,7 @@
 use std::{collections::HashSet, path::Path, sync::Arc};
 
 use dlp_api::pda::ephemeral_balance_pda_from_payer;
-use errors::ChainlinkResult;
+use errors::{ChainlinkError, ChainlinkResult};
 use fetch_cloner::FetchCloner;
 use magicblock_accounts_db::{traits::AccountsBank, AccountsDbResult};
 use magicblock_aml::RiskService;
@@ -65,6 +65,146 @@ pub struct Chainlink<
 
     /// If true, remove confined accounts during bank reset
     remove_confined_accounts: bool,
+}
+
+pub enum ModeAwareChainlink<
+    T: ChainRpcClient,
+    U: ChainPubsubClient,
+    V: AccountsBank,
+    C: Cloner,
+> {
+    Enabled(Chainlink<T, U, V, C>),
+    Disabled(StubbedChainlink<V>),
+}
+
+impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
+    ModeAwareChainlink<T, U, V, C>
+{
+    pub fn enabled(chainlink: Chainlink<T, U, V, C>) -> Self {
+        Self::Enabled(chainlink)
+    }
+
+    pub fn disabled(
+        accounts_bank: &Arc<V>,
+        validator_pubkey: Pubkey,
+        config: &ChainLinkConfig,
+    ) -> ChainlinkResult<Self> {
+        let chainlink = StubbedChainlink::try_new(
+            accounts_bank,
+            None,
+            validator_pubkey,
+            config,
+        )?;
+        Ok(Self::Disabled(chainlink))
+    }
+
+    pub fn reset_accounts_bank(&self) -> AccountsDbResult<()> {
+        match self {
+            Self::Enabled(chainlink) => chainlink.reset_accounts_bank(),
+            Self::Disabled(chainlink) => chainlink.reset_accounts_bank(),
+        }
+    }
+
+    pub async fn ensure_accounts(
+        &self,
+        pubkeys: &[Pubkey],
+        mark_empty_if_not_found: Option<&[Pubkey]>,
+        fetch_origin: AccountFetchOrigin,
+        program_ids: Option<&[Pubkey]>,
+    ) -> ChainlinkResult<FetchAndCloneResult> {
+        match self {
+            Self::Enabled(chainlink) => {
+                chainlink
+                    .ensure_accounts(
+                        pubkeys,
+                        mark_empty_if_not_found,
+                        fetch_origin,
+                        program_ids,
+                    )
+                    .await
+            }
+            Self::Disabled(chainlink) => {
+                chainlink
+                    .ensure_accounts(
+                        pubkeys,
+                        mark_empty_if_not_found,
+                        fetch_origin,
+                        program_ids,
+                    )
+                    .await
+            }
+        }
+    }
+
+    pub async fn ensure_transaction_accounts(
+        &self,
+        tx: &SanitizedTransaction,
+    ) -> ChainlinkResult<FetchAndCloneResult> {
+        match self {
+            Self::Enabled(chainlink) => {
+                chainlink.ensure_transaction_accounts(tx).await
+            }
+            Self::Disabled(_) => Err(ChainlinkError::DisabledForNonPrimaryMode),
+        }
+    }
+
+    pub async fn fetch_accounts(
+        &self,
+        pubkeys: &[Pubkey],
+        fetch_origin: AccountFetchOrigin,
+        program_ids: Option<&[Pubkey]>,
+    ) -> ChainlinkResult<Vec<Option<AccountSharedData>>> {
+        match self {
+            Self::Enabled(chainlink) => {
+                chainlink
+                    .fetch_accounts(pubkeys, fetch_origin, program_ids)
+                    .await
+            }
+            Self::Disabled(chainlink) => {
+                chainlink
+                    .fetch_accounts(pubkeys, fetch_origin, program_ids)
+                    .await
+            }
+        }
+    }
+
+    pub async fn undelegation_requested(
+        &self,
+        pubkey: Pubkey,
+    ) -> ChainlinkResult<()> {
+        match self {
+            Self::Enabled(chainlink) => {
+                chainlink.undelegation_requested(pubkey).await
+            }
+            Self::Disabled(_) => Ok(()),
+        }
+    }
+
+    pub fn fetch_count(&self) -> Option<u64> {
+        match self {
+            Self::Enabled(chainlink) => chainlink.fetch_count(),
+            Self::Disabled(chainlink) => chainlink.fetch_count(),
+        }
+    }
+
+    pub fn is_watching(&self, pubkey: &Pubkey) -> bool {
+        match self {
+            Self::Enabled(chainlink) => chainlink.is_watching(pubkey),
+            Self::Disabled(chainlink) => chainlink.is_watching(pubkey),
+        }
+    }
+
+    /// This exists only for the replication service to get a Chainlink-shaped
+    /// handle for reset_accounts_bank(). It must not be used for RPC fetching,
+    /// subscriptions, or remote Chainlink work. This is temporary and should be
+    /// removed once account-bank cleanup is moved out of Chainlink and into
+    /// AccountsDb/account-cleanup code.
+    pub fn stub(&self) -> StubbedChainlink<V> {
+        match self {
+            Self::Enabled(chainlink) => chainlink.stub(),
+            Self::Disabled(chainlink) => chainlink.stub(),
+        }
+    }
 }
 
 impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
