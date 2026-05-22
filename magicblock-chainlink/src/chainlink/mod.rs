@@ -698,16 +698,17 @@ mod mode_aware_tests {
         },
     };
 
-    type TestModeAwareChainlink = ReplicationModeAwareChainlink<
+    type TestReplicationModeAwareChainlink = ReplicationModeAwareChainlink<
         ChainRpcClientMock,
         ChainPubsubClientMock,
         AccountsBankStub,
         ClonerStub,
     >;
 
-    fn disabled_chainlink() -> (Arc<AccountsBankStub>, TestModeAwareChainlink) {
+    fn disabled_chainlink(
+    ) -> (Arc<AccountsBankStub>, TestReplicationModeAwareChainlink) {
         let accounts_bank = Arc::new(AccountsBankStub::default());
-        let chainlink = TestModeAwareChainlink::disabled(
+        let chainlink = TestReplicationModeAwareChainlink::disabled(
             &accounts_bank,
             Pubkey::new_unique(),
             &ChainLinkConfig::default(),
@@ -770,7 +771,7 @@ mod mode_aware_tests {
         accounts_bank.insert(kept_feature_pubkey, kept_feature_account);
         accounts_bank.insert(validator_id, blacklisted_validator_account);
 
-        let chainlink = TestModeAwareChainlink::disabled(
+        let chainlink = TestReplicationModeAwareChainlink::disabled(
             &accounts_bank,
             validator_id,
             &ChainLinkConfig::default(),
