@@ -134,12 +134,12 @@ impl ReplicationContext {
             .map(|acquired| acquired.then_some(producer))
     }
 
-    /// Switches to replica mode.
+    /// Notifies the scheduler to use replica mode.
     pub async fn enter_replica_mode(&self) {
         let _ = self.mode_tx.send(SchedulerMode::Replica).await;
     }
 
-    /// Switches to primary mode.
+    /// Notifies the scheduler to use primary mode.
     pub async fn enter_primary_mode(&self) {
         let _ = self.mode_tx.send(SchedulerMode::Primary).await;
     }
@@ -171,7 +171,7 @@ impl ReplicationContext {
         }
     }
 
-    /// Transitions to primary role with the given producer.
+    /// Builds the primary service role with the given producer.
     pub async fn into_primary(
         self,
         producer: Producer,
@@ -185,7 +185,7 @@ impl ReplicationContext {
         Ok(Primary::new(self, producer, messages, snapshots))
     }
 
-    /// Transitions to replica role.
+    /// Builds the replica service role.
     /// Returns `None` if shutdown is triggered during consumer creation.
     /// reset parameter controls where in the stream the consumption starts:
     /// true - the last known position that we know
