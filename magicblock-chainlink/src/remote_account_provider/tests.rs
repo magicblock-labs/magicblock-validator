@@ -15,6 +15,7 @@ use crate::{
     },
     testing::{
         init_logger,
+        photon_client_mock::PhotonClientMock,
         rpc_client_mock::{
             AccountAtSlot, ChainRpcClientMock, ChainRpcClientMockBuilder,
         },
@@ -23,8 +24,13 @@ use crate::{
 };
 
 struct ProviderTestCtx {
-    provider:
-        Arc<RemoteAccountProvider<ChainRpcClientMock, ChainPubsubClientMock>>,
+    provider: Arc<
+        RemoteAccountProvider<
+            ChainRpcClientMock,
+            ChainPubsubClientMock,
+            PhotonClientMock,
+        >,
+    >,
     rpc_client: ChainRpcClientMock,
     _pubsub_client: ChainPubsubClientMock,
     _forward_rx: mpsc::Receiver<ForwardedSubscriptionUpdate>,
@@ -60,6 +66,7 @@ async fn setup_provider_with_lru_capacity(
         RemoteAccountProvider::new(
             rpc_client.clone(),
             pubsub_client.clone(),
+            None,
             forward_tx,
             &config,
             subscribed_accounts,
@@ -88,7 +95,11 @@ async fn setup_matching_slots(
     pubkey1: Pubkey,
     pubkey2: Pubkey,
 ) -> (
-    RemoteAccountProvider<ChainRpcClientMock, ChainPubsubClientMock>,
+    RemoteAccountProvider<
+        ChainRpcClientMock,
+        ChainPubsubClientMock,
+        PhotonClientMock,
+    >,
     mpsc::Receiver<ForwardedSubscriptionUpdate>,
 ) {
     init_logger();
@@ -129,6 +140,7 @@ async fn setup_matching_slots(
         RemoteAccountProvider::new(
             rpc_client,
             pubsub_client,
+            None,
             forward_tx,
             &config,
             subscribed_accounts,
@@ -765,6 +777,7 @@ async fn test_get_non_existing_account() {
         RemoteAccountProvider::new(
             rpc_client,
             pubsub_client,
+            None::<PhotonClientMock>,
             fwd_tx,
             &config,
             subscribed_accounts,
@@ -816,6 +829,7 @@ async fn test_get_existing_account_for_valid_slot() {
                 RemoteAccountProvider::new(
                     rpc_client.clone(),
                     pubsub_client,
+                    None::<PhotonClientMock>,
                     fwd_tx,
                     &config,
                     subscribed_accounts,
@@ -1008,7 +1022,11 @@ async fn setup_with_accounts(
     pubkeys: &[Pubkey],
     accounts_capacity: usize,
 ) -> (
-    RemoteAccountProvider<ChainRpcClientMock, ChainPubsubClientMock>,
+    RemoteAccountProvider<
+        ChainRpcClientMock,
+        ChainPubsubClientMock,
+        PhotonClientMock,
+    >,
     mpsc::Receiver<ForwardedSubscriptionUpdate>,
     mpsc::Receiver<Pubkey>,
 ) {
@@ -1040,6 +1058,7 @@ async fn setup_with_accounts(
     let provider = RemoteAccountProvider::new(
         rpc_client,
         pubsub_client,
+        None,
         forward_tx,
         &config,
         subscribed_accounts,

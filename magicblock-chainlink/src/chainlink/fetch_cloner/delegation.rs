@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use dlp_api::{
     args::PostDelegationActions, decrypt::Decrypt,
     pda::delegation_record_pda_from_delegated_account, state::DelegationRecord,
@@ -186,12 +184,6 @@ where
 {
     let delegation_record_pubkey =
         delegation_record_pda_from_delegated_account(&account_pubkey);
-    let was_watching_deleg_record = this
-        .remote_account_provider
-        .is_watching(&delegation_record_pubkey);
-    let deleg_record_generation = this
-        .remote_account_provider
-        .subscription_generation(&delegation_record_pubkey);
 
     let acquired_delegation_record_reason = this
         .acquire_subscription_reason(
@@ -238,22 +230,6 @@ where
         }
         Err(_) => None,
     };
-
-    if !was_watching_deleg_record {
-        // We only subscribed to fetch the delegation record, so unsubscribe now.
-        // Use the shared cancellation path so a concurrent explicit fetch can keep
-        // the subscription while its request is still pending.
-        cancel_subs(
-            &this.remote_account_provider,
-            CancelStrategy::OnlyIfUnchanged {
-                pubkeys: HashMap::from([(
-                    delegation_record_pubkey,
-                    deleg_record_generation,
-                )]),
-            },
-        )
-        .await;
-    }
 
     let mut releases = Vec::new();
     // Handle edge case where it was cloned in the meantime.

@@ -32,7 +32,6 @@ use crate::{
 #[derive(Default)]
 pub(crate) struct ProcessScheduleCommitOptions {
     pub request_undelegation: bool,
-    pub compressed: bool,
 }
 
 pub(crate) fn process_schedule_commit(
@@ -40,11 +39,6 @@ pub(crate) fn process_schedule_commit(
     invoke_context: &mut InvokeContext,
     opts: ProcessScheduleCommitOptions,
 ) -> Result<(), InstructionError> {
-    if opts.compressed {
-        ic_msg!(invoke_context, "ScheduleCommit: compressed accounts are not supported for regular commits");
-        return Err(InstructionError::InvalidInstructionData);
-    }
-
     const PAYER_IDX: u16 = 0;
     const MAGIC_CONTEXT_IDX: u16 = PAYER_IDX + 1;
 
@@ -257,18 +251,13 @@ pub(crate) fn process_schedule_commit(
     }
 
     if let Some(fee_vault) = magic_fee_vault {
-        let nonces =
-            fetch_current_commit_nonces(&committed_accounts, opts.compressed)?;
+        let nonces = fetch_current_commit_nonces(&committed_accounts, false)?;
         let fee = calculate_commit_fee(&committed_accounts, &nonces)?;
         charge_delegated_payer(&payer_account, &fee_vault, fee)?;
     } else if !opts.request_undelegation {
         // We validate commit nonces only for plain commits.
         // If accounts are undelegated we don't want to fail.
-        check_commit_limits(
-            &committed_accounts,
-            opts.compressed,
-            invoke_context,
-        )?;
+        check_commit_limits(&committed_accounts, false, invoke_context)?;
     }
 
     // NOTE: this is only protected by all the above checks however if the

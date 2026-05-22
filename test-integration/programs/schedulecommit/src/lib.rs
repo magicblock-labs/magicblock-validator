@@ -6,10 +6,7 @@ use ephemeral_rollups_sdk::{
     cpi::{
         delegate_account, undelegate_account, DelegateAccounts, DelegateConfig,
     },
-    ephem::{
-        commit_accounts, commit_and_undelegate_accounts, CallHandler,
-        FoldableIntentBuilder, MagicIntentBundleBuilder,
-    },
+    ephem::{commit_accounts, commit_and_undelegate_accounts},
 };
 use magicblock_magic_program_api::{
     args::{
@@ -213,10 +210,6 @@ pub enum ScheduleCommitInstruction {
 pub enum ScheduleCommitType {
     Commit,
     CommitAndUndelegate,
-    CommitFinalize,
-    CommitFinalizeAndUndelegate,
-    CommitFinalizeCompressed,
-    CommitFinalizeCompressedAndUndelegate,
 }
 
 impl ScheduleCommitType {
@@ -244,42 +237,6 @@ impl ScheduleCommitType {
                     magic_program,
                     magic_fee_vault,
                 )
-            }
-            ScheduleCommitType::CommitFinalize => commit_finalize_accounts(
-                payer,
-                accounts,
-                magic_context,
-                magic_program,
-            ),
-            ScheduleCommitType::CommitFinalizeAndUndelegate => {
-                commit_finalize_and_undelegate_accounts(
-                    payer,
-                    accounts,
-                    magic_context,
-                    magic_program,
-                )
-            }
-            ScheduleCommitType::CommitFinalizeCompressed => {
-                MagicIntentBundleBuilder::new(
-                    payer.clone(),
-                    magic_context.clone(),
-                    magic_program.clone(),
-                )
-                .commit(&accounts.into_iter().cloned().collect::<Vec<_>>())
-                .compressed()
-                .build_and_invoke()
-            }
-            ScheduleCommitType::CommitFinalizeCompressedAndUndelegate => {
-                MagicIntentBundleBuilder::new(
-                    payer.clone(),
-                    magic_context.clone(),
-                    magic_program.clone(),
-                )
-                .commit_and_undelegate(
-                    &accounts.into_iter().cloned().collect::<Vec<_>>(),
-                )
-                .compressed()
-                .build_and_invoke()
             }
         }
     }

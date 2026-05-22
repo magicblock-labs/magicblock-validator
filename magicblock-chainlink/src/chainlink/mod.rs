@@ -30,7 +30,10 @@ use crate::{
         ChainRpcClientImpl, Endpoints, RemoteAccountProvider,
     },
     submux::SubMuxClient,
-    testing::{cloner_stub::ClonerStub, rpc_client_mock::ChainRpcClientMock},
+    testing::{
+        cloner_stub::ClonerStub, photon_client_mock::PhotonClientMock,
+        rpc_client_mock::ChainRpcClientMock,
+    },
 };
 
 mod account_still_undelegating_on_chain;
@@ -42,8 +45,18 @@ pub mod fetch_cloner;
 pub use blacklisted_accounts::*;
 
 /// A type alias for chainlink with only accountsdb being real impl
-pub type StubbedChainlink<V> =
-    Chainlink<ChainRpcClientMock, ChainPubsubClientMock, V, ClonerStub>;
+pub type StubbedChainlink<V> = Chainlink<
+    ChainRpcClientMock,
+    ChainPubsubClientMock,
+    V,
+    ClonerStub,
+    PhotonClientMock,
+>;
+
+type OptionalFetchCloner<T, U, V, C, P> =
+    Option<Arc<FetchCloner<T, U, V, C, P>>>;
+type OptionalFetchClonerRef<'a, T, U, V, C, P> =
+    Option<&'a Arc<FetchCloner<T, U, V, C, P>>>;
 
 // -----------------
 // Chainlink

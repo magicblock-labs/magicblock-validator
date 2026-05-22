@@ -65,9 +65,8 @@ use self::{
     },
     subscription::{release_subs, SubscriptionRelease},
     types::{
-        AccountWithCompanion, ClassifiedAccounts, ExistingSubs,
-        PartitionedNotFound, RefreshDecision, ResolvedDelegatedAccounts,
-        ResolvedPrograms,
+        AccountWithCompanion, ClassifiedAccounts, PartitionedNotFound,
+        RefreshDecision, ResolvedDelegatedAccounts, ResolvedPrograms,
     },
 };
 use super::errors::{ChainlinkError, ChainlinkResult};
@@ -88,12 +87,6 @@ use crate::{
         MatchSlotsConfig, RemoteAccount, RemoteAccountProvider,
         ResolvedAccountSharedData, SubscriptionReason, SubscriptionReleaseMode,
     },
-};
-
-type RemoteAccountRequests = Vec<oneshot::Sender<()>>;
-
-use self::pending_clone_guard::{
-    CloneClaim, CloneCompletion, CloneKey, PendingCloneGuard,
 };
 
 pub struct FetchCloner<T, U, V, C, P>
@@ -294,6 +287,13 @@ where
             .lock()
             .expect("post_undelegation_photon_merge_pending lock poisoned")
             .insert(pubkey);
+    }
+
+    fn clear_post_undelegation_photon_merge_pending(&self, pubkey: Pubkey) {
+        self.post_undelegation_photon_merge_pending
+            .lock()
+            .expect("post_undelegation_photon_merge_pending lock poisoned")
+            .remove(&pubkey);
     }
 
     pub fn cloner(&self) -> &Arc<C> {
@@ -1081,6 +1081,7 @@ where
     }
 
     async fn unsubscribe_from_delegated_account(&self, pubkey: Pubkey) {
+        self.clear_post_undelegation_photon_merge_pending(pubkey);
         self.release_subscription_reason_all(
             &pubkey,
             SubscriptionReason::UndelegationTracking,
@@ -2030,6 +2031,11 @@ where
             record_subs,
             program_data_subs,
         );
+        let delegated_cloned_pubkeys = accounts_to_clone
+            .iter()
+            .filter(|request| request.account.delegated())
+            .map(|request| request.pubkey)
+            .collect::<Vec<_>>();
 
         pipeline::clone_accounts_and_programs(
             self,
@@ -2039,6 +2045,26 @@ where
         .await?;
 
         release_subs(&self.remote_account_provider, releases).await;
+        for pubkey in delegated_cloned_pubkeys {
+            self.unsubscribe_from_delegated_account(pubkey).await;
+        }
+
+        {
+            let mut pending = self
+                .post_undelegation_photon_merge_pending
+                .lock()
+                .expect("post_undelegation_photon_merge_pending lock poisoned");
+            for pubkey in pubkeys {
+                if !pending.contains(pubkey) {
+                    continue;
+                }
+                if self.accounts_bank.get_account(pubkey).is_some_and(|in_bank| {
+                    !in_bank.delegated() && !in_bank.compressed()
+                }) {
+                    pending.remove(pubkey);
+                }
+            }
+        }
 
         Ok(FetchAndCloneResult {
             not_found_on_chain: not_found,
@@ -2614,6 +2640,7 @@ where
         pubkey: &Pubkey,
     ) -> ChainlinkResult<()> {
         trace!(pubkey = %pubkey, "Subscribing to account");
+        self.mark_post_undelegation_photon_merge_pending(*pubkey);
         self.acquire_subscription_reason(
             pubkey,
             SubscriptionReason::UndelegationTracking,

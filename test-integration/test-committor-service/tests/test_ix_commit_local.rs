@@ -68,6 +68,8 @@ enum CommitIntentKind {
     CommitAndUndelegate,
     CommitFinalize,
     CommitFinalizeAndUndelegate,
+    CommitFinalizeCompressed,
+    CommitFinalizeCompressedAndUndelegate,
 }
 
 fn expect_strategies(
@@ -264,8 +266,8 @@ async fn commit_single_account(
 
     let counter_auth = Keypair::new();
     let (pubkey, mut account) = match commit_type {
-        ScheduleCommitType::CommitFinalizeCompressed
-        | ScheduleCommitType::CommitFinalizeCompressedAndUndelegate => {
+        CommitIntentKind::CommitFinalizeCompressed
+        | CommitIntentKind::CommitFinalizeCompressedAndUndelegate => {
             let (pubkey, _address, account) =
                 init_and_delegate_compressed_record_on_chain(&counter_auth)
                     .await;
@@ -317,12 +319,12 @@ async fn commit_single_account(
                 undelegate_action: UndelegateType::Standalone,
             })
         }
-        ScheduleCommitType::CommitFinalizeCompressed => {
+        CommitIntentKind::CommitFinalizeCompressed => {
             MagicBaseIntent::CommitFinalizeCompressed(CommitType::Standalone(
                 vec![account],
             ))
         }
-        ScheduleCommitType::CommitFinalizeCompressedAndUndelegate => {
+        CommitIntentKind::CommitFinalizeCompressedAndUndelegate => {
             MagicBaseIntent::CommitFinalizeAndUndelegateCompressed(
                 CommitAndUndelegate {
                     commit_action: CommitType::Standalone(vec![account]),
@@ -410,8 +412,8 @@ async fn commit_book_order_account(
                 undelegate_action: UndelegateType::Standalone,
             })
         }
-        ScheduleCommitType::CommitFinalizeCompressed
-        | ScheduleCommitType::CommitFinalizeCompressedAndUndelegate => {
+        CommitIntentKind::CommitFinalizeCompressed
+        | CommitIntentKind::CommitFinalizeCompressedAndUndelegate => {
             unimplemented!("Order book compressed delegation not yet supported")
         }
     };
@@ -754,7 +756,7 @@ async fn test_ix_commit_single_compressed_account_100_bytes() {
     commit_n_accounts_x_bytes::<1, 100>(
         1,
         expect_strategies(&[(CommitStrategy::StateArgs, 1)]),
-        ScheduleCommitType::CommitFinalizeCompressed,
+        CommitIntentKind::CommitFinalizeCompressed,
     )
     .await;
 }
@@ -764,7 +766,7 @@ async fn test_ix_commit_single_compressed_account_100_bytes_and_undelegate() {
     commit_n_accounts_x_bytes::<1, 100>(
         1,
         expect_strategies(&[(CommitStrategy::StateArgs, 1)]),
-        ScheduleCommitType::CommitFinalizeCompressedAndUndelegate,
+        CommitIntentKind::CommitFinalizeCompressedAndUndelegate,
     )
     .await;
 }
@@ -774,7 +776,7 @@ async fn test_ix_commit_single_compressed_account_500_bytes() {
     commit_n_accounts_x_bytes::<1, 500>(
         1,
         expect_strategies(&[(CommitStrategy::StateArgs, 1)]),
-        ScheduleCommitType::CommitFinalizeCompressed,
+        CommitIntentKind::CommitFinalizeCompressed,
     )
     .await;
 }
@@ -784,7 +786,7 @@ async fn test_ix_commit_single_compressed_account_500_bytes_and_undelegate() {
     commit_n_accounts_x_bytes::<1, 500>(
         1,
         expect_strategies(&[(CommitStrategy::StateArgs, 1)]),
-        ScheduleCommitType::CommitFinalizeCompressedAndUndelegate,
+        CommitIntentKind::CommitFinalizeCompressedAndUndelegate,
     )
     .await;
 }
@@ -794,7 +796,7 @@ async fn test_ix_commit_two_compressed_accounts_512_bytes() {
     commit_n_accounts_x_bytes::<2, 512>(
         1,
         expect_strategies(&[(CommitStrategy::StateArgs, 2)]),
-        ScheduleCommitType::CommitFinalizeCompressed,
+        CommitIntentKind::CommitFinalizeCompressed,
     )
     .await;
 }
@@ -804,7 +806,7 @@ async fn test_ix_commit_three_compressed_accounts_512_bytes() {
     commit_n_accounts_x_bytes::<3, 512>(
         1,
         expect_strategies(&[(CommitStrategy::StateArgs, 3)]),
-        ScheduleCommitType::CommitFinalizeCompressed,
+        CommitIntentKind::CommitFinalizeCompressed,
     )
     .await;
 }
@@ -814,7 +816,7 @@ async fn test_ix_commit_six_compressed_accounts_512_bytes() {
     commit_n_accounts_x_bytes::<6, 512>(
         1,
         expect_strategies(&[(CommitStrategy::StateArgs, 6)]),
-        ScheduleCommitType::CommitFinalizeCompressed,
+        CommitIntentKind::CommitFinalizeCompressed,
     )
     .await;
 }
@@ -824,7 +826,7 @@ async fn test_commit_20_compressed_accounts_100bytes_bundle_size_2() {
     commit_n_accounts_x_bytes::<20, 100>(
         2,
         expect_strategies(&[(CommitStrategy::StateArgs, 20)]),
-        ScheduleCommitType::CommitFinalizeCompressed,
+        CommitIntentKind::CommitFinalizeCompressed,
     )
     .await;
 }
@@ -835,7 +837,7 @@ async fn test_commit_5_compressed_accounts_100bytes_bundle_size_2_undelegate_all
     commit_n_accounts_x_bytes::<5, 100>(
         2,
         expect_strategies(&[(CommitStrategy::StateArgs, 5)]),
-        ScheduleCommitType::CommitFinalizeCompressedAndUndelegate,
+        CommitIntentKind::CommitFinalizeCompressedAndUndelegate,
     )
     .await;
 }
@@ -885,7 +887,7 @@ async fn commit_n_accounts_x_bytes<
 >(
     bundle_size: usize,
     expected_strategies: ExpectedStrategies,
-    commit_type: ScheduleCommitType,
+    commit_type: CommitIntentKind,
 ) {
     init_logger!();
     let accs = (0..ACCOUNTS).map(|_| BYTES).collect::<Vec<_>>();
@@ -972,8 +974,8 @@ async fn commit_multiple_accounts(
         bytess,
         matches!(
             commit_type,
-            ScheduleCommitType::CommitFinalizeCompressed
-                | ScheduleCommitType::CommitFinalizeCompressedAndUndelegate
+            CommitIntentKind::CommitFinalizeCompressed
+                | CommitIntentKind::CommitFinalizeCompressedAndUndelegate
         ),
     )
     .await;
@@ -1003,12 +1005,12 @@ async fn commit_multiple_accounts(
                     },
                 )
             }
-            ScheduleCommitType::CommitFinalizeCompressed => {
+            CommitIntentKind::CommitFinalizeCompressed => {
                 MagicBaseIntent::CommitFinalizeCompressed(
                     CommitType::Standalone(committees),
                 )
             }
-            ScheduleCommitType::CommitFinalizeCompressedAndUndelegate => {
+            CommitIntentKind::CommitFinalizeCompressedAndUndelegate => {
                 MagicBaseIntent::CommitFinalizeAndUndelegateCompressed(
                     CommitAndUndelegate {
                         commit_action: CommitType::Standalone(committees),

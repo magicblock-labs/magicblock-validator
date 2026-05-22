@@ -678,6 +678,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
             deferred_pubsubs,
             commitment,
             rpc_client.clone(),
+            photon_client.clone(),
             chain_slot.clone(),
             subscription_forwarder.clone(),
             config,
@@ -713,6 +714,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
                     Vec::new(),
                     commitment,
                     rpc_client,
+                    photon_client,
                     chain_slot,
                     subscription_forwarder,
                     config,
@@ -723,11 +725,13 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn try_new_from_pubsubs(
         startup_pubsubs: Vec<Endpoint>,
         mut deferred_pubsubs: Vec<Endpoint>,
         commitment: CommitmentConfig,
         rpc_client: ChainRpcClientImpl,
+        photon_client: Option<PhotonClientImpl>,
         chain_slot: Arc<AtomicU64>,
         subscription_forwarder: mpsc::Sender<ForwardedSubscriptionUpdate>,
         config: &RemoteAccountProviderConfig,
@@ -735,6 +739,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
         RemoteAccountProvider<
             ChainRpcClientImpl,
             SubMuxClient<ChainUpdatesClient>,
+            PhotonClientImpl,
         >,
         Vec<Endpoint>,
     )> {
@@ -1391,34 +1396,6 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
         self.lrucache_subscribed_accounts.contains(pubkey)
     }
 
-    /// Returns the current explicit-watcher generation for `pubkey`.
-    ///
-    /// Callers that create temporary fetch subscriptions can snapshot this
-    /// value and later cancel only if it is unchanged, preserving any explicit
-    /// watcher that subscribed concurrently.
-    pub(crate) fn subscription_generation(&self, pubkey: &Pubkey) -> u64 {
-        self.subscription_generations
-            .lock()
-            .expect("subscription_generations lock poisoned")
-            .get(pubkey)
-            .copied()
-            .unwrap_or_default()
-    }
-
-    /// Marks that an explicit watcher subscribed or renewed interest in
-    /// `pubkey`.
-    ///
-    /// This is deliberately separate from fetch-owned subscriptions: fetches may
-    /// subscribe only to resolve an account and should not prevent their own
-    /// cleanup from removing that temporary subscription.
-    fn bump_subscription_generation(&self, pubkey: &Pubkey) {
-        let mut generations = self
-            .subscription_generations
-            .lock()
-            .expect("subscription_generations lock poisoned");
-        *generations.entry(*pubkey).or_default() += 1;
-    }
-
     /// Check if an account is currently pending (being fetched)
     pub fn is_pending(&self, pubkey: &Pubkey) -> bool {
         let fetching = self.fetching_accounts.lock().unwrap();
@@ -1475,7 +1452,6 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
                 existing.acquire(reason);
             }
             self.lrucache_subscribed_accounts.add(*pubkey);
-            self.bump_subscription_generation(pubkey);
             return Ok(());
         }
         drop(ownership);
@@ -1709,7 +1685,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
                         {
                             for sender in state.waiters {
                                 let error = RemoteAccountProviderError::AccountResolutionsFailed(
-                                    format!("{}: {}", pubkey, error_msg)
+                                    format!("{}: {}", pubkey, msg)
                                 );
                                 let _ = sender.send(Err(error));
                             }
@@ -1744,7 +1720,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
                                 generation,
                             )
                         {
-                            for request in waiters {
+                            for request in state.waiters {
                                 let _ = request.send(Err(
                                                 RemoteAccountProviderError::AccountResolutionsFailed(msg.clone())
                                             ));

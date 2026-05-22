@@ -1,4 +1,7 @@
-use std::sync::OnceLock;
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    OnceLock,
+};
 
 use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;

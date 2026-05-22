@@ -276,6 +276,7 @@ async fn wait_for_pending_request(
             ChainPubsubClientMock,
             AccountsBankStub,
             ClonerStub,
+            PhotonClientMock,
         >,
     >,
     pubkey: Pubkey,
@@ -300,6 +301,7 @@ async fn wait_for_pending_waiter_count(
             ChainPubsubClientMock,
             AccountsBankStub,
             ClonerStub,
+            PhotonClientMock,
         >,
     >,
     pubkey: Pubkey,
@@ -551,7 +553,12 @@ async fn test_get_account_releases_delegation_record_direct_ref_when_already_wat
         .await
         .unwrap();
 
-    let (resolved_account, delegation_record, _actions) = fetch_cloner
+    let (
+        resolved_account,
+        delegation_record,
+        _actions,
+        _compressed_delegation_slot,
+    ) = fetch_cloner
         .resolve_account_to_clone_from_forwarded_sub_with_unsubscribe(
             ForwardedSubscriptionUpdate {
                 pubkey: account_pubkey,
@@ -1368,7 +1375,7 @@ async fn test_post_undelegation_plain_refresh_clears_photon_merge_marker() {
     accounts_bank
         .insert(account_pubkey, AccountSharedData::from(account.clone()));
     fetch_cloner
-        .subscribe_to_account(&account_pubkey)
+        .subscribe_to_account_to_track_undelegation(&account_pubkey)
         .await
         .expect("failed to subscribe to account");
     assert_subscribed!(remote_account_provider, &[&account_pubkey]);
@@ -1471,92 +1478,6 @@ async fn test_empty_compressed_subscription_update_skips_when_refetch_cannot_dec
         Some(expected_bank_account),
         "empty compressed shell should be skipped when refetch cannot decompress"
     );
-}
-
-#[tokio::test]
-async fn test_only_if_unchanged_cancellation_preserves_newer_subscription() {
-    init_logger();
-    let validator_keypair = Keypair::new();
-    const CURRENT_SLOT: u64 = 100;
-
-    let FetcherTestCtx {
-        remote_account_provider,
-        ..
-    } = setup(
-        Vec::<(Pubkey, Account)>::new(),
-        CURRENT_SLOT,
-        validator_keypair.insecure_clone(),
-    )
-    .await;
-
-    use super::subscription::{cancel_subs, CancelStrategy};
-
-    let pubkey = random_pubkey();
-    let generation_before_temporary_subscription =
-        remote_account_provider.subscription_generation(&pubkey);
-
-    remote_account_provider
-        .subscribe_for_fetch(&pubkey)
-        .await
-        .expect("temporary subscription should succeed");
-    remote_account_provider
-        .subscribe(&pubkey)
-        .await
-        .expect("newer subscription should succeed");
-
-    cancel_subs(
-        &remote_account_provider,
-        CancelStrategy::OnlyIfUnchanged {
-            pubkeys: HashMap::from([(
-                pubkey,
-                generation_before_temporary_subscription,
-            )]),
-        },
-    )
-    .await;
-
-    assert_subscribed!(remote_account_provider, &[&pubkey]);
-}
-
-#[tokio::test]
-async fn test_only_if_unchanged_cancellation_removes_temporary_subscription() {
-    init_logger();
-    let validator_keypair = Keypair::new();
-    const CURRENT_SLOT: u64 = 100;
-
-    let FetcherTestCtx {
-        remote_account_provider,
-        ..
-    } = setup(
-        Vec::<(Pubkey, Account)>::new(),
-        CURRENT_SLOT,
-        validator_keypair.insecure_clone(),
-    )
-    .await;
-
-    use super::subscription::{cancel_subs, CancelStrategy};
-
-    let pubkey = random_pubkey();
-    let generation_before_temporary_subscription =
-        remote_account_provider.subscription_generation(&pubkey);
-
-    remote_account_provider
-        .subscribe_for_fetch(&pubkey)
-        .await
-        .expect("temporary subscription should succeed");
-
-    cancel_subs(
-        &remote_account_provider,
-        CancelStrategy::OnlyIfUnchanged {
-            pubkeys: HashMap::from([(
-                pubkey,
-                generation_before_temporary_subscription,
-            )]),
-        },
-    )
-    .await;
-
-    assert_not_subscribed!(remote_account_provider, &[&pubkey]);
 }
 
 #[tokio::test]

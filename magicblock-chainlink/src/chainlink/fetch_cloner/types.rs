@@ -1,7 +1,4 @@
-use std::{
-    collections::{HashMap, HashSet},
-    fmt,
-};
+use std::{collections::HashSet, fmt};
 
 use solana_account::AccountSharedData;
 use solana_pubkey::Pubkey;

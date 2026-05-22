@@ -74,7 +74,6 @@ declare_process_instruction!(
                 invoke_context,
                 ProcessScheduleCommitOptions {
                     request_undelegation: false,
-                    compressed: false,
                 },
             ),
             ScheduleCommitAndUndelegate => process_schedule_commit(
@@ -82,7 +81,6 @@ declare_process_instruction!(
                 invoke_context,
                 ProcessScheduleCommitOptions {
                     request_undelegation: true,
-                    compressed: false,
                 },
             ),
             Unused => {
@@ -234,24 +232,6 @@ declare_process_instruction!(
                 &authority,
                 instructions,
             ),
-            ScheduleCommitCompressed => process_schedule_commit_finalize(
-                signers,
-                invoke_context,
-                ProcessScheduleCommitOptions {
-                    request_undelegation: false,
-                    compressed: true,
-                },
-            ),
-            ScheduleCommitAndUndelegateCompressed => {
-                process_schedule_commit_finalize(
-                    signers,
-                    invoke_context,
-                    ProcessScheduleCommitOptions {
-                        request_undelegation: true,
-                        compressed: true,
-                    },
-                )
-            }
         }
     }
 );
@@ -305,12 +285,14 @@ mod test {
     use magicblock_magic_program_api::args::ScheduleTaskArgs;
     use solana_instruction::AccountMeta;
     use solana_program_runtime::invoke_context::mock_process_instruction;
+    use solana_pubkey::Pubkey;
 
     use super::*;
 
     #[test]
     fn crank_entrypoint_decodes_execute_crank_before_account_validation() {
         let data = bincode::serialize(&MagicBlockInstruction::ExecuteCrank {
+            authority: Pubkey::new_unique(),
             instructions: vec![],
         })
         .unwrap();
