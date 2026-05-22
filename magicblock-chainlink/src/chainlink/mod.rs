@@ -48,7 +48,7 @@ pub type DefaultRealChainlink<C> = InnerChainlink<
 >;
 
 /// Production mode-aware Chainlink stack with configurable cloner implementation.
-pub type DefaultModeAwareChainlink<C> = ModeAwareChainlink<
+pub type DefaultModeAwareChainlink<C> = ReplicationModeAwareChainlink<
     ChainRpcClientImpl,
     SubMuxClient<ChainUpdatesClient>,
     AccountsDb,
@@ -85,7 +85,7 @@ pub struct InnerChainlink<
     remove_confined_accounts: bool,
 }
 
-pub enum ModeAwareChainlink<
+pub enum ReplicationModeAwareChainlink<
     T: ChainRpcClient,
     U: ChainPubsubClient,
     V: AccountsBank,
@@ -100,7 +100,7 @@ pub enum ModeAwareChainlink<
 }
 
 impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
-    ModeAwareChainlink<T, U, V, C>
+    ReplicationModeAwareChainlink<T, U, V, C>
 {
     pub fn enabled(chainlink: InnerChainlink<T, U, V, C>) -> Self {
         Self::Enabled(chainlink)
@@ -213,10 +213,10 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
 }
 
 impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
-    AccountsBankResetter for ModeAwareChainlink<T, U, V, C>
+    AccountsBankResetter for ReplicationModeAwareChainlink<T, U, V, C>
 {
     fn reset_accounts_bank(&self) -> AccountsDbResult<()> {
-        ModeAwareChainlink::reset_accounts_bank(self)
+        ReplicationModeAwareChainlink::reset_accounts_bank(self)
     }
 }
 
@@ -689,7 +689,7 @@ mod mode_aware_tests {
     use solana_sdk_ids::feature;
     use solana_transaction::{sanitized::SanitizedTransaction, Transaction};
 
-    use super::{errors::ChainlinkError, ModeAwareChainlink};
+    use super::{errors::ChainlinkError, ReplicationModeAwareChainlink};
     use crate::{
         accounts_bank::mock::AccountsBankStub,
         remote_account_provider::chain_pubsub_client::mock::ChainPubsubClientMock,
@@ -698,7 +698,7 @@ mod mode_aware_tests {
         },
     };
 
-    type TestModeAwareChainlink = ModeAwareChainlink<
+    type TestModeAwareChainlink = ReplicationModeAwareChainlink<
         ChainRpcClientMock,
         ChainPubsubClientMock,
         AccountsBankStub,
