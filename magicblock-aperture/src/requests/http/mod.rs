@@ -459,7 +459,6 @@ mod tests {
 
         let result = dispatcher.require_primary_rpc_method("sendTransaction");
 
-        switch_to_primary_mode();
         assert!(result.is_ok());
     }
 

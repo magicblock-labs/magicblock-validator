@@ -40,7 +40,7 @@ pub mod fetch_cloner;
 pub use blacklisted_accounts::*;
 
 /// Production Chainlink stack with configurable cloner implementation.
-pub type DefaultRealChainlink<C> = Chainlink<
+pub type DefaultRealChainlink<C> = InnerChainlink<
     ChainRpcClientImpl,
     SubMuxClient<ChainUpdatesClient>,
     AccountsDb,
@@ -64,7 +64,7 @@ pub trait AccountsBankResetter: Send + Sync {
 // -----------------
 // Chainlink
 // -----------------
-pub struct Chainlink<
+pub struct InnerChainlink<
     T: ChainRpcClient,
     U: ChainPubsubClient,
     V: AccountsBank,
@@ -91,7 +91,7 @@ pub enum ModeAwareChainlink<
     V: AccountsBank,
     C: Cloner,
 > {
-    Enabled(Chainlink<T, U, V, C>),
+    Enabled(InnerChainlink<T, U, V, C>),
     Disabled {
         accounts_bank: Arc<V>,
         validator_id: Pubkey,
@@ -102,7 +102,7 @@ pub enum ModeAwareChainlink<
 impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
     ModeAwareChainlink<T, U, V, C>
 {
-    pub fn enabled(chainlink: Chainlink<T, U, V, C>) -> Self {
+    pub fn enabled(chainlink: InnerChainlink<T, U, V, C>) -> Self {
         Self::Enabled(chainlink)
     }
 
@@ -281,7 +281,7 @@ fn reset_accounts_bank_with<V: AccountsBank>(
 }
 
 impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
-    Chainlink<T, U, V, C>
+    InnerChainlink<T, U, V, C>
 {
     pub fn try_new(
         accounts_bank: &Arc<V>,
@@ -328,7 +328,12 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
         chainlink_config: &ChainLinkConfig,
         ledger_path: &Path,
     ) -> ChainlinkResult<
-        Chainlink<ChainRpcClientImpl, SubMuxClient<ChainUpdatesClient>, V, C>,
+        InnerChainlink<
+            ChainRpcClientImpl,
+            SubMuxClient<ChainUpdatesClient>,
+            V,
+            C,
+        >,
     > {
         let validator_pubkey = validator_keypair.pubkey();
         // Extract accounts provider and create fetch cloner while connecting
@@ -362,7 +367,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
             None
         };
 
-        Chainlink::try_new(
+        InnerChainlink::try_new(
             accounts_bank,
             fetch_cloner,
             validator_pubkey,
