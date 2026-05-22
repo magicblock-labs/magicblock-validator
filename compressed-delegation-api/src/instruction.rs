@@ -19,14 +19,18 @@ pub enum CompressedDelegationInstructionDiscriminator {
     Undelegate = 3,
 }
 
-impl CompressedDelegationInstructionDiscriminator {
-    pub fn from_u64(value: u64) -> Option<Self> {
+impl TryFrom<u64> for CompressedDelegationInstructionDiscriminator {
+    type Error = std::io::Error;
+    fn try_from(value: u64) -> Result<Self, Self::Error> {
         match value {
-            0 => Some(Self::InitDelegationRecord),
-            1 => Some(Self::Delegate),
-            2 => Some(Self::CommitAndFinalize),
-            3 => Some(Self::Undelegate),
-            _ => None,
+            0 => Ok(Self::InitDelegationRecord),
+            1 => Ok(Self::Delegate),
+            2 => Ok(Self::CommitAndFinalize),
+            3 => Ok(Self::Undelegate),
+            _ => Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "Invalid CompressedDelegationInstructionDiscriminator value",
+            )),
         }
     }
 }
@@ -77,13 +81,7 @@ impl BorshSerialize for CompressedDelegationProgramInstruction {
 impl BorshDeserialize for CompressedDelegationProgramInstruction {
     fn deserialize_reader<R: Read>(reader: &mut R) -> std::io::Result<Self> {
         let raw = u64::deserialize_reader(reader)?;
-        let disc = CompressedDelegationInstructionDiscriminator::from_u64(raw)
-            .ok_or_else(|| {
-                std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "Invalid CompressedDelegationProgramInstruction discriminant",
-            )
-            })?;
+        let disc = CompressedDelegationInstructionDiscriminator::try_from(raw)?;
         Ok(match disc {
             CompressedDelegationInstructionDiscriminator::InitDelegationRecord => {
                 Self::InitDelegationRecord {
