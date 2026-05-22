@@ -14,7 +14,7 @@ use magicblock_chainlink::{
     },
     submux::SubMuxClient,
     testing::cloner_stub::ClonerStub,
-    InnerChainlink,
+    InnerChainlink, ReplicationModeAwareChainlink,
 };
 use magicblock_config::config::{ChainLinkConfig, LifecycleMode};
 use program_flexi_counter::state::FlexiCounter;
@@ -33,7 +33,7 @@ use tracing::*;
 
 use crate::sleep_ms;
 
-pub type IxtestChainlink = InnerChainlink<
+pub type IxtestChainlink = ReplicationModeAwareChainlink<
     ChainRpcClientImpl,
     SubMuxClient<ChainUpdatesClient>,
     AccountsBankStub,
@@ -145,6 +145,7 @@ impl IxtestContext {
             validator_kp.pubkey(),
             &ChainLinkConfig::default(),
         )
+        .map(ReplicationModeAwareChainlink::enabled)
         .unwrap();
 
         let rpc_client = IxtestContext::get_rpc_client(commitment);
