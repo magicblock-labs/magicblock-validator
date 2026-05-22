@@ -7,7 +7,6 @@ use std::{
 use magicblock_chainlink::{
     remote_account_provider::{
         chain_pubsub_client::{ChainPubsubClient, ChainPubsubClientImpl},
-        chain_rpc_client::ChainRpcClientImpl,
         pubsub_common::SubscriptionUpdate,
     },
     testing::{
@@ -31,11 +30,6 @@ async fn setup() -> (ChainPubsubClientImpl, mpsc::Receiver<SubscriptionUpdate>)
         tx,
         CommitmentConfig::confirmed(),
         Duration::from_millis(200),
-        Pubkey::new_unique(),
-        ChainRpcClientImpl::new_from_url(
-            RPC_URL,
-            CommitmentConfig::confirmed(),
-        ),
     )
     .await
     .unwrap();

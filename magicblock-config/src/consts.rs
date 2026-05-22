@@ -47,15 +47,15 @@ pub const DEFAULT_ACCOUNTS_INDEX_SIZE: usize = 16 * 1024 * 1024;
 /// Maximum number of account snapshots to retain
 pub const DEFAULT_ACCOUNTS_MAX_SNAPSHOTS: u16 = 4;
 
-/// Frequency of account snapshots (every N slots)
-pub const DEFAULT_ACCOUNTS_SNAPSHOT_FREQUENCY: u64 = 1024;
-
 /// Ledger Defaults
 /// Default block time in milliseconds
 pub const DEFAULT_LEDGER_BLOCK_TIME_MS: u64 = 50;
 
 /// Default ledger size (100 GB)
 pub const DEFAULT_LEDGER_SIZE: u64 = 100 * 1024 * 1024 * 1024;
+
+/// Default superblock size (72K ~ 1 hour with 50ms block time)
+pub const DEFAULT_SUPERBLOCK_SIZE: u64 = 3600 * 20;
 
 /// Metrics Defaults
 /// Default address for the metrics endpoint (Prometheus format)
@@ -66,6 +66,10 @@ pub const DEFAULT_METRICS_COLLECT_FREQUENCY_SEC: u64 = 30;
 
 // Task Scheduler Defaults
 pub const DEFAULT_TASK_SCHEDULER_MIN_INTERVAL_MILLIS: u64 = 10;
+pub const DEFAULT_TASK_SCHEDULER_FAILED_TASK_RETENTION_SECS: u64 =
+    14 * 24 * 60 * 60; // 14 days
+pub const DEFAULT_TASK_SCHEDULER_FAILED_TASK_CLEANUP_INTERVAL_SECS: u64 =
+    60 * 60; // 1 hour
 
 // ChainLink Defaults
 /// Default delay in milliseconds between resubscribing to accounts after a pubsub reconnection
@@ -73,3 +77,15 @@ pub const DEFAULT_RESUBSCRIPTION_DELAY_MS: u64 = 50;
 
 /// Default capacity for the LRU cache of subscribed accounts
 pub const DEFAULT_MAX_MONITORED_ACCOUNTS: usize = 5_000;
+
+/// Default base URL for Range risk service
+pub const DEFAULT_RISK_BASE_URL: &str = "https://api.range.org/v1";
+
+/// Default cache TTL for Range risk service
+pub const DEFAULT_RISK_CACHE_TTL_SEC: u64 = 60 * 60 * 24 * 30;
+
+/// Default request timeout for Range risk service
+pub const DEFAULT_RISK_REQUEST_TIMEOUT_SEC: u64 = 5;
+
+/// Default risk score threshold for Range risk service
+pub const DEFAULT_RISK_SCORE_THRESHOLD: u64 = 5;

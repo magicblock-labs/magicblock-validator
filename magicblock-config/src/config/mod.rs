@@ -16,6 +16,7 @@ pub use accounts::{AccountsDbConfig, BlockSize};
 pub use aperture::ApertureConfig;
 pub use chain::{
     AllowedProgram, ChainLinkConfig, ChainOperationConfig, CommittorConfig,
+    RiskConfig,
 };
 pub use compression::CompressionConfig;
 pub use grpc::GrpcConfig;

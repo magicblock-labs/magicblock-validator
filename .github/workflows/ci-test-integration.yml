@@ -16,7 +16,7 @@ jobs:
   # Rust builds on extra-large runners because the slowest producer gates the
   # whole matrix.
   build_validator:
-    runs-on: extra-large
+    runs-on: blacksmith-32vcpu-ubuntu-2404
     name: Build Validator Artifact
     env:
       HOST_CARGO_JOBS: "8"
@@ -56,7 +56,7 @@ jobs:
           compression-level: 0
 
   build_sbf:
-    runs-on: ubuntu-latest-m
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     name: Build SBF Artifacts
     env:
       SOLANA_VERSION: v3.1.5
@@ -109,7 +109,7 @@ jobs:
           if-no-files-found: error
 
   build_integration_tests:
-    runs-on: extra-large
+    runs-on: blacksmith-32vcpu-ubuntu-2404
     name: Build Integration Test Artifacts
     env:
       HOST_CARGO_JOBS: "8"
@@ -353,7 +353,7 @@ jobs:
 
   run_integration_tests:
     needs: [build_validator, build_sbf, build_integration_tests]
-    runs-on: ${{ matrix.runner || 'ubuntu-latest-m' }}
+    runs-on: ${{ matrix.runner || 'blacksmith-8vcpu-ubuntu-2404' }}
     env:
       SOLANA_VERSION: v3.1.5
       NEEDS_COMPRESSION_TOOLS: ${{ contains(fromJSON('["schedulecommit","chainlink","table_mania"]'), matrix.batch_tests) || startsWith(matrix.batch_tests, 'committor') }}
@@ -376,12 +376,12 @@ jobs:
             test_bins_artifact: "committor-intent-executor"
           - batch_tests: "committor_intent_executor_callbacks"
             test_bins_artifact: "committor-intent-executor"
-            runner: "ubuntu-latest"
+            runner: "blacksmith-8vcpu-ubuntu-2404"
           - batch_tests: "committor_ix_multi"
             test_bins_artifact: "committor-ix"
           - batch_tests: "committor_bundles"
             test_bins_artifact: "committor-ix"
-            runner: "ubuntu-latest"
+            runner: "blacksmith-8vcpu-ubuntu-2404"
           - batch_tests: "table_mania"
             test_bins_artifact: "table_mania"
           - batch_tests: "committor_ix_order"
@@ -400,24 +400,24 @@ jobs:
             needs_build_env: true
           - batch_tests: "task-scheduler"
             test_bins_artifact: "task-scheduler"
-            runner: "ubuntu-latest"
+            runner: "blacksmith-8vcpu-ubuntu-2404"
           - batch_tests: "pubsub"
             test_bins_artifact: "pubsub"
-            runner: "ubuntu-latest"
+            runner: "blacksmith-8vcpu-ubuntu-2404"
           - batch_tests: "magicblock_api"
             test_bins_artifact: "magicblock_api"
-            runner: "ubuntu-latest"
+            runner: "blacksmith-8vcpu-ubuntu-2404"
           - batch_tests: "schedule_intents"
             test_bins_artifact: "schedule_intents"
-            runner: "ubuntu-latest"
+            runner: "blacksmith-8vcpu-ubuntu-2404"
           - batch_tests: "config"
             test_bins_artifact: "config"
-            runner: "ubuntu-latest"
+            runner: "blacksmith-8vcpu-ubuntu-2404"
           - batch_tests: "committor_preparators"
             test_bins_artifact: "committor-preparators"
           - batch_tests: "committor_bundles_8"
             test_bins_artifact: "committor-ix"
-            runner: "ubuntu-latest"
+            runner: "blacksmith-8vcpu-ubuntu-2404"
           - batch_tests: "committor_commitfinalize"
             test_bins_artifact: "committor-ix"
           - batch_tests: "committor_intent_executor"

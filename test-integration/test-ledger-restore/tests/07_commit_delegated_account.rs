@@ -100,6 +100,11 @@ fn write(ledger_path: &Path) -> (Child, u64, Keypair) {
         let magic_fee_vault = dlp_api::pda::magic_fee_vault_pda_from_validator(
             &validator_identity,
         );
+        expect!(
+            ctx.wait_for_chain_delegation_record(magic_fee_vault),
+            validator
+        );
+        expect!(ctx.fetch_ephem_account(magic_fee_vault), validator);
         let ix = create_add_and_schedule_commit_ix(
             payer.pubkey(),
             4,

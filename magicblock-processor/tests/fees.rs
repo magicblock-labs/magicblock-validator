@@ -106,6 +106,7 @@ async fn test_non_delegated_payer_rejection() {
 #[tokio::test]
 async fn test_fee_charged_for_failed_transaction() {
     let env = ExecutionTestEnv::new();
+    env.wait_for_scheduler_ready().await;
     let initial_bal = env.get_payer().lamports();
 
     // Create invalid instruction (writing to empty data)

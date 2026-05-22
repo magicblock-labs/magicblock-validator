@@ -1,4 +1,6 @@
 pub type Slot = u64;
+/// Ordinal position of a transaction within a slot.
+pub type TransactionIndex = u32;
 
 /// A macro that panics when running a debug build and logs the panic message
 /// instead when running in release mode.

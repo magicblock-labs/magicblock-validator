@@ -25,7 +25,6 @@ use magicblock_program::magic_scheduled_base_intent::{
 };
 use magicblock_rpc_client::MagicblockRpcClient;
 use program_flexi_counter::state::FlexiCounter;
-use program_schedulecommit::ScheduleCommitType;
 use solana_account::{Account, ReadableAccount};
 use solana_commitment_config::CommitmentConfig;
 use solana_pubkey::Pubkey;
@@ -57,6 +56,20 @@ mod utils;
 // -----------------
 type ExpectedStrategies = HashMap<CommitStrategy, u8>;
 
+///
+/// Unlike ScheduleCommitType which always implies Finalize (because that
+/// simulates "user-facing" schedule commit intent), CommitIntentKind simulates
+/// the explicit committor intent and therefore its members do NOT imply
+/// Finalize by default.
+///
+#[derive(Clone, Copy, Debug)]
+enum CommitIntentKind {
+    Commit,
+    CommitAndUndelegate,
+    CommitFinalize,
+    CommitFinalizeAndUndelegate,
+}
+
 fn expect_strategies(
     strategies: &[(CommitStrategy, u8)],
 ) -> ExpectedStrategies {
@@ -80,7 +93,7 @@ async fn test_ix_commit_single_account_100_bytes() {
     commit_single_account(
         100,
         CommitStrategy::StateArgs,
-        ScheduleCommitType::Commit,
+        CommitIntentKind::Commit,
     )
     .await;
 }
@@ -90,7 +103,7 @@ async fn test_ix_commit_single_account_100_bytes_and_undelegate() {
     commit_single_account(
         100,
         CommitStrategy::StateArgs,
-        ScheduleCommitType::CommitAndUndelegate,
+        CommitIntentKind::CommitAndUndelegate,
     )
     .await;
 }
@@ -100,7 +113,7 @@ async fn test_ix_commit_single_account_256_bytes() {
     commit_single_account(
         256,
         CommitStrategy::StateArgs,
-        ScheduleCommitType::Commit,
+        CommitIntentKind::Commit,
     )
     .await;
 }
@@ -110,7 +123,7 @@ async fn test_ix_commit_single_account_257_bytes() {
     commit_single_account(
         257,
         CommitStrategy::DiffArgs,
-        ScheduleCommitType::Commit,
+        CommitIntentKind::Commit,
     )
     .await;
 }
@@ -120,7 +133,7 @@ async fn test_ix_commit_single_account_256_bytes_and_undelegate() {
     commit_single_account(
         256,
         CommitStrategy::StateArgs,
-        ScheduleCommitType::CommitAndUndelegate,
+        CommitIntentKind::CommitAndUndelegate,
     )
     .await;
 }
@@ -130,7 +143,7 @@ async fn test_ix_commit_single_account_257_bytes_and_undelegate() {
     commit_single_account(
         257,
         CommitStrategy::DiffArgs,
-        ScheduleCommitType::CommitAndUndelegate,
+        CommitIntentKind::CommitAndUndelegate,
     )
     .await;
 }
@@ -140,7 +153,7 @@ async fn test_ix_commit_single_account_800_bytes() {
     commit_single_account(
         800,
         CommitStrategy::DiffArgs,
-        ScheduleCommitType::Commit,
+        CommitIntentKind::Commit,
     )
     .await;
 }
@@ -150,7 +163,7 @@ async fn test_ix_commit_single_account_800_bytes_and_undelegate() {
     commit_single_account(
         800,
         CommitStrategy::DiffArgs,
-        ScheduleCommitType::CommitAndUndelegate,
+        CommitIntentKind::CommitAndUndelegate,
     )
     .await;
 }
@@ -160,7 +173,7 @@ async fn test_ix_commit_single_account_one_kb() {
     commit_single_account(
         1024,
         CommitStrategy::DiffArgs,
-        ScheduleCommitType::Commit,
+        CommitIntentKind::Commit,
     )
     .await;
 }
@@ -170,7 +183,7 @@ async fn test_ix_commit_single_account_ten_kb() {
     commit_single_account(
         10 * 1024,
         CommitStrategy::DiffArgs,
-        ScheduleCommitType::Commit,
+        CommitIntentKind::Commit,
     )
     .await;
 }
@@ -180,7 +193,7 @@ async fn test_ix_commit_order_book_change_100_bytes() {
     commit_book_order_account(
         100,
         CommitStrategy::DiffArgs,
-        ScheduleCommitType::Commit,
+        CommitIntentKind::Commit,
     )
     .await;
 }
@@ -190,7 +203,7 @@ async fn test_ix_commit_order_book_change_671_bytes() {
     commit_book_order_account(
         671,
         CommitStrategy::DiffArgs,
-        ScheduleCommitType::Commit,
+        CommitIntentKind::Commit,
     )
     .await;
 }
@@ -204,7 +217,7 @@ async fn test_ix_commit_order_book_change_681_bytes() {
     commit_book_order_account(
         681,
         CommitStrategy::DiffBuffer,
-        ScheduleCommitType::Commit,
+        CommitIntentKind::Commit,
     )
     .await;
 }
@@ -214,7 +227,7 @@ async fn test_ix_commit_order_book_change_10k_bytes() {
     commit_book_order_account(
         10 * 1024,
         CommitStrategy::DiffBuffer,
-        ScheduleCommitType::CommitAndUndelegate,
+        CommitIntentKind::CommitAndUndelegate,
     )
     .await;
 }
@@ -224,7 +237,7 @@ async fn test_ix_commit_finalize_order_book_change_10k_bytes() {
     commit_book_order_account(
         10 * 1024,
         CommitStrategy::DiffBuffer,
-        ScheduleCommitType::CommitFinalize,
+        CommitIntentKind::CommitFinalize,
     )
     .await;
 }
@@ -232,7 +245,7 @@ async fn test_ix_commit_finalize_order_book_change_10k_bytes() {
 async fn commit_single_account(
     bytes: usize,
     expected_strategy: CommitStrategy,
-    commit_type: ScheduleCommitType,
+    commit_type: CommitIntentKind,
 ) {
     init_logger!();
 
@@ -284,21 +297,21 @@ async fn commit_single_account(
         remote_slot: Default::default(),
     };
     let base_intent = match commit_type {
-        ScheduleCommitType::Commit => {
+        CommitIntentKind::Commit => {
             MagicBaseIntent::Commit(CommitType::Standalone(vec![account]))
         }
-        ScheduleCommitType::CommitAndUndelegate => {
+        CommitIntentKind::CommitAndUndelegate => {
             MagicBaseIntent::CommitAndUndelegate(CommitAndUndelegate {
                 commit_action: CommitType::Standalone(vec![account]),
                 undelegate_action: UndelegateType::Standalone,
             })
         }
-        ScheduleCommitType::CommitFinalize => {
+        CommitIntentKind::CommitFinalize => {
             MagicBaseIntent::CommitFinalize(CommitType::Standalone(vec![
                 account,
             ]))
         }
-        ScheduleCommitType::CommitFinalizeAndUndelegate => {
+        CommitIntentKind::CommitFinalizeAndUndelegate => {
             MagicBaseIntent::CommitFinalizeAndUndelegate(CommitAndUndelegate {
                 commit_action: CommitType::Standalone(vec![account]),
                 undelegate_action: UndelegateType::Standalone,
@@ -341,7 +354,7 @@ async fn commit_single_account(
 async fn commit_book_order_account(
     changed_len: usize,
     expected_strategy: CommitStrategy,
-    commit_type: ScheduleCommitType,
+    commit_type: CommitIntentKind,
 ) {
     init_logger!();
 
@@ -377,21 +390,21 @@ async fn commit_book_order_account(
         remote_slot: Default::default(),
     };
     let base_intent = match commit_type {
-        ScheduleCommitType::Commit => {
+        CommitIntentKind::Commit => {
             MagicBaseIntent::Commit(CommitType::Standalone(vec![account]))
         }
-        ScheduleCommitType::CommitAndUndelegate => {
+        CommitIntentKind::CommitAndUndelegate => {
             MagicBaseIntent::CommitAndUndelegate(CommitAndUndelegate {
                 commit_action: CommitType::Standalone(vec![account]),
                 undelegate_action: UndelegateType::Standalone,
             })
         }
-        ScheduleCommitType::CommitFinalize => {
+        CommitIntentKind::CommitFinalize => {
             MagicBaseIntent::CommitFinalize(CommitType::Standalone(vec![
                 account,
             ]))
         }
-        ScheduleCommitType::CommitFinalizeAndUndelegate => {
+        CommitIntentKind::CommitFinalizeAndUndelegate => {
             MagicBaseIntent::CommitFinalizeAndUndelegate(CommitAndUndelegate {
                 commit_action: CommitType::Standalone(vec![account]),
                 undelegate_action: UndelegateType::Standalone,
@@ -434,7 +447,7 @@ async fn test_ix_commit_two_accounts_1kb_2kb() {
     commit_multiple_accounts(
         &[1024, 2048],
         1,
-        ScheduleCommitType::Commit,
+        CommitIntentKind::Commit,
         expect_strategies(&[(CommitStrategy::DiffArgs, 2)]),
     )
     .await;
@@ -446,7 +459,7 @@ async fn test_ix_commit_two_accounts_512kb() {
     commit_multiple_accounts(
         &[512, 512],
         1,
-        ScheduleCommitType::Commit,
+        CommitIntentKind::Commit,
         expect_strategies(&[(CommitStrategy::DiffArgs, 2)]),
     )
     .await;
@@ -458,7 +471,7 @@ async fn test_ix_commit_three_accounts_512kb() {
     commit_multiple_accounts(
         &[512, 512, 512],
         1,
-        ScheduleCommitType::Commit,
+        CommitIntentKind::Commit,
         expect_strategies(&[(CommitStrategy::DiffArgs, 3)]),
     )
     .await;
@@ -470,7 +483,7 @@ async fn test_ix_commit_six_accounts_512kb() {
     commit_multiple_accounts(
         &[512, 512, 512, 512, 512, 512],
         1,
-        ScheduleCommitType::Commit,
+        CommitIntentKind::Commit,
         expect_strategies(&[(CommitStrategy::DiffArgs, 6)]),
     )
     .await;
@@ -482,7 +495,7 @@ async fn test_ix_commit_four_accounts_1kb_2kb_5kb_10kb_single_bundle() {
     commit_multiple_accounts(
         &[1024, 2 * 1024, 5 * 1024, 10 * 1024],
         1,
-        ScheduleCommitType::Commit,
+        CommitIntentKind::Commit,
         expect_strategies(&[(CommitStrategy::DiffArgs, 4)]),
     )
     .await;
@@ -493,7 +506,7 @@ async fn test_commit_20_accounts_1kb_bundle_size_2() {
     commit_20_accounts_1kb(
         2,
         expect_strategies(&[(CommitStrategy::DiffArgs, 20)]),
-        ScheduleCommitType::Commit,
+        CommitIntentKind::Commit,
     )
     .await;
 }
@@ -503,7 +516,7 @@ async fn test_commit_5_accounts_1kb_bundle_size_3() {
     commit_5_accounts_1kb(
         3,
         expect_strategies(&[(CommitStrategy::DiffArgs, 5)]),
-        ScheduleCommitType::Commit,
+        CommitIntentKind::Commit,
     )
     .await;
 }
@@ -516,7 +529,7 @@ async fn test_commit_5_accounts_1kb_bundle_size_3_undelegate_all() {
             // Intent fits in 1 TX only with ALT, see IntentExecutorImpl::try_unite_tasks
             (CommitStrategy::DiffArgs, 5),
         ]),
-        ScheduleCommitType::CommitAndUndelegate,
+        CommitIntentKind::CommitAndUndelegate,
     )
     .await;
 }
@@ -529,7 +542,7 @@ async fn test_commit_5_accounts_1kb_bundle_size_4() {
             (CommitStrategy::DiffArgs, 1),
             (CommitStrategy::DiffBufferWithLookupTable, 4),
         ]),
-        ScheduleCommitType::Commit,
+        CommitIntentKind::Commit,
     )
     .await;
 }
@@ -542,7 +555,7 @@ async fn test_commit_5_accounts_1kb_bundle_size_4_undelegate_all() {
             (CommitStrategy::DiffArgs, 1),
             (CommitStrategy::DiffBufferWithLookupTable, 4),
         ]),
-        ScheduleCommitType::CommitAndUndelegate,
+        CommitIntentKind::CommitAndUndelegate,
     )
     .await;
 }
@@ -552,7 +565,7 @@ async fn test_commit_5_accounts_1kb_bundle_size_5_undelegate_all() {
     commit_5_accounts_1kb(
         5,
         expect_strategies(&[(CommitStrategy::DiffBufferWithLookupTable, 5)]),
-        ScheduleCommitType::CommitAndUndelegate,
+        CommitIntentKind::CommitAndUndelegate,
     )
     .await;
 }
@@ -562,7 +575,7 @@ async fn test_commit_20_accounts_1kb_bundle_size_3() {
     commit_20_accounts_1kb(
         3,
         expect_strategies(&[(CommitStrategy::DiffArgs, 20)]),
-        ScheduleCommitType::Commit,
+        CommitIntentKind::Commit,
     )
     .await;
 }
@@ -572,7 +585,7 @@ async fn test_commit_20_accounts_1kb_bundle_size_4() {
     commit_20_accounts_1kb(
         4,
         expect_strategies(&[(CommitStrategy::DiffBufferWithLookupTable, 20)]),
-        ScheduleCommitType::Commit,
+        CommitIntentKind::Commit,
     )
     .await;
 }
@@ -586,7 +599,7 @@ async fn test_commit_20_accounts_1kb_bundle_size_6() {
             // Two accounts don't make it into the bundles of size 6
             (CommitStrategy::DiffArgs, 2),
         ]),
-        ScheduleCommitType::Commit,
+        CommitIntentKind::Commit,
     )
     .await;
 }
@@ -596,7 +609,7 @@ async fn test_commit_20_accounts_1kb_bundle_size_20() {
     commit_20_accounts_1kb(
         20,
         expect_strategies(&[(CommitStrategy::DiffBufferWithLookupTable, 20)]),
-        ScheduleCommitType::Commit,
+        CommitIntentKind::Commit,
     )
     .await;
 }
@@ -610,7 +623,7 @@ async fn test_commit_8_accounts_1kb_bundle_size_8() {
             // that bundle also needs lookup tables
             (CommitStrategy::DiffBufferWithLookupTable, 8),
         ]),
-        ScheduleCommitType::Commit,
+        CommitIntentKind::Commit,
     )
     .await;
 }
@@ -624,7 +637,7 @@ async fn test_commitfinalize_8_accounts_1kb_bundle_size_8() {
             // that bundle also needs lookup tables
             (CommitStrategy::DiffBufferWithLookupTable, 8),
         ]),
-        ScheduleCommitType::CommitFinalize,
+        CommitIntentKind::CommitFinalize,
     )
     .await;
 }
@@ -638,7 +651,7 @@ async fn test_commit_20_accounts_1kb_bundle_size_8() {
             // that bundle also needs lookup tables
             (CommitStrategy::DiffBufferWithLookupTable, 20),
         ]),
-        ScheduleCommitType::Commit,
+        CommitIntentKind::Commit,
     )
     .await;
 }
@@ -652,7 +665,7 @@ async fn test_commitfinalize_and_undelefate_20_accounts_1kb_bundle_size_11() {
             // that bundle also needs lookup tables
             (CommitStrategy::DiffBufferWithLookupTable, 20),
         ]),
-        ScheduleCommitType::CommitFinalizeAndUndelegate,
+        CommitIntentKind::CommitFinalizeAndUndelegate,
     )
     .await;
 }
@@ -666,7 +679,7 @@ async fn test_commitfinalize_20_accounts_1kb_bundle_size_11() {
             // that bundle also needs lookup tables
             (CommitStrategy::DiffBufferWithLookupTable, 20),
         ]),
-        ScheduleCommitType::CommitFinalize,
+        CommitIntentKind::CommitFinalize,
     )
     .await;
 }
@@ -830,7 +843,7 @@ async fn test_commit_5_compressed_accounts_100bytes_bundle_size_2_undelegate_all
 async fn commit_5_accounts_1kb(
     bundle_size: usize,
     expected_strategies: ExpectedStrategies,
-    commit_type: ScheduleCommitType,
+    commit_type: CommitIntentKind,
 ) {
     commit_n_accounts_x_bytes::<5, 1024>(
         bundle_size,
@@ -843,7 +856,7 @@ async fn commit_5_accounts_1kb(
 async fn commit_8_accounts_1kb(
     bundle_size: usize,
     expected_strategies: ExpectedStrategies,
-    commit_type: ScheduleCommitType,
+    commit_type: CommitIntentKind,
 ) {
     commit_n_accounts_x_bytes::<8, 1024>(
         bundle_size,
@@ -856,7 +869,7 @@ async fn commit_8_accounts_1kb(
 async fn commit_20_accounts_1kb(
     bundle_size: usize,
     expected_strategies: ExpectedStrategies,
-    commit_type: ScheduleCommitType,
+    commit_type: CommitIntentKind,
 ) {
     commit_n_accounts_x_bytes::<20, 1024>(
         bundle_size,
@@ -936,7 +949,7 @@ async fn create_bundles(
 async fn commit_multiple_accounts(
     bytess: &[usize],
     bundle_size: usize,
-    commit_type: ScheduleCommitType,
+    commit_type: CommitIntentKind,
     expected_strategies: ExpectedStrategies,
 ) {
     init_logger!();
@@ -968,21 +981,21 @@ async fn commit_multiple_accounts(
     let intents = bundles_of_committees
         .into_iter()
         .map(|committees| match commit_type {
-            ScheduleCommitType::Commit => {
+            CommitIntentKind::Commit => {
                 MagicBaseIntent::Commit(CommitType::Standalone(committees))
             }
-            ScheduleCommitType::CommitAndUndelegate => {
+            CommitIntentKind::CommitAndUndelegate => {
                 MagicBaseIntent::CommitAndUndelegate(CommitAndUndelegate {
                     commit_action: CommitType::Standalone(committees),
                     undelegate_action: UndelegateType::Standalone,
                 })
             }
-            ScheduleCommitType::CommitFinalize => {
+            CommitIntentKind::CommitFinalize => {
                 MagicBaseIntent::CommitFinalize(CommitType::Standalone(
                     committees,
                 ))
             }
-            ScheduleCommitType::CommitFinalizeAndUndelegate => {
+            CommitIntentKind::CommitFinalizeAndUndelegate => {
                 MagicBaseIntent::CommitFinalizeAndUndelegate(
                     CommitAndUndelegate {
                         commit_action: CommitType::Standalone(committees),

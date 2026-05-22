@@ -77,7 +77,6 @@ impl TestContext {
         let cloner = Arc::new(ClonerStub::new(bank.clone()));
         let validator_keypair = Keypair::new();
         let validator_pubkey = validator_keypair.pubkey();
-        let faucet_pubkey = Pubkey::new_unique();
         let chain_slot = Arc::new(AtomicU64::new(slot));
         let (fetch_cloner, remote_account_provider) = {
             let (tx, rx) = tokio::sync::mpsc::channel(100);
@@ -112,8 +111,8 @@ impl TestContext {
                             &bank,
                             &cloner,
                             validator_keypair.insecure_clone(),
-                            faucet_pubkey,
                             rx,
+                            None,
                             None,
                         )),
                         Some(provider),
@@ -129,7 +128,6 @@ impl TestContext {
             &bank,
             fetch_cloner,
             validator_pubkey,
-            faucet_pubkey,
             &ChainLinkConfig::default(),
         )
         .unwrap();

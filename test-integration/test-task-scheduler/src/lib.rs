@@ -169,35 +169,41 @@ pub fn wait_for_committed_count(
     validator: &mut Child,
 ) {
     let now = Instant::now();
-    let mut last_count = None;
-    let mut last_error = None;
+    let mut last_status: Option<String> = None;
     while now.elapsed() < max_timeout {
-        let state = ctx
-            .try_chain_client()
-            .and_then(|client| {
-                client.get_account(committee).map_err(|e| {
-                    anyhow::anyhow!("Failed to get chain account: {}", e)
-                })
-            })
-            .and_then(|account| {
-                MainAccount::try_decode(&account.data).map_err(|e| {
-                    anyhow::anyhow!(
-                        "Failed to decode chain account ({} bytes): {}",
-                        account.data.len(),
-                        e
-                    )
-                })
-            });
-        match state {
+        let account = expect!(
+            ctx.try_chain_client().and_then(|client| client
+                .get_account(committee)
+                .map_err(|e| anyhow::anyhow!(
+                    "Failed to get chain account: {}",
+                    e
+                ))),
+            validator
+        );
+        match MainAccount::try_decode(&account.data) {
             Ok(state) => {
-                last_count = Some(state.count);
-                last_error = None;
                 if state.count == expected_count {
                     return;
                 }
+                last_status = Some(format!(
+                    "committee={} observed_count={} expected_count={}",
+                    committee, state.count, expected_count
+                ));
             }
             Err(err) => {
-                last_error = Some(err.to_string());
+                eprintln!(
+                    "Failed to decode committed account for committee {}: {} (data_len={})",
+                    committee,
+                    err,
+                    account.data.len()
+                );
+                last_status = Some(format!(
+                    "committee={} decode_error={} data_len={} expected_count={}",
+                    committee,
+                    err,
+                    account.data.len(),
+                    expected_count
+                ));
             }
         }
         expect!(ctx.wait_for_next_slot_ephem(), validator);
@@ -205,10 +211,11 @@ pub fn wait_for_committed_count(
     assert!(
         false,
         cleanup(validator),
-        "Timed out waiting for committed count {} on {}; last_count: {:?}, last_error: {:?}",
+        "Timed out waiting to observe committed count {} for committee {} before timeout; last observed status: {}",
         expected_count,
         committee,
-        last_count,
-        last_error
+        last_status
+            .as_deref()
+            .unwrap_or("no successful poll result recorded")
     );
 }

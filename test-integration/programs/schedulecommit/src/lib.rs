@@ -7,8 +7,7 @@ use ephemeral_rollups_sdk::{
         delegate_account, undelegate_account, DelegateAccounts, DelegateConfig,
     },
     ephem::{
-        commit_accounts, commit_and_undelegate_accounts,
-        commit_finalize_accounts, commit_finalize_and_undelegate_accounts,
+        commit_accounts, commit_and_undelegate_accounts, CallHandler,
         FoldableIntentBuilder, MagicIntentBundleBuilder,
     },
 };
@@ -206,6 +205,10 @@ pub enum ScheduleCommitInstruction {
     ScheduleCommitForOrderBook(ScheduleCommitType),
 }
 
+///
+/// ScheduleCommitType members always imply Finalize, as it simulates
+/// "user-facing" schedule commit intent.
+///
 #[derive(BorshSerialize, BorshDeserialize, Debug, Clone, Copy)]
 pub enum ScheduleCommitType {
     Commit,

@@ -77,7 +77,7 @@ async fn run() {
     let mut api = match MagicValidator::try_from_config(config).await {
         Ok(api) => api,
         Err(error) => {
-            eprintln!("Failed to create validator runtime: {error}");
+            tracing::error!(%error, "Failed to create validator runtime");
             std::process::exit(1);
         }
     };

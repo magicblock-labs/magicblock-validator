@@ -18,7 +18,7 @@ use solana_signer::Signer;
 use tracing::*;
 
 use super::{
-    subscription::{cancel_subs, CancelStrategy},
+    subscription::{release_subs, SubscriptionRelease},
     FetchCloner,
 };
 use crate::{
@@ -26,7 +26,7 @@ use crate::{
     cloner::{Cloner, DelegationActions},
     remote_account_provider::{
         ChainPubsubClient, ChainRpcClient, MatchSlotsConfig,
-        ResolvedAccountSharedData,
+        ResolvedAccountSharedData, SubscriptionReason,
     },
 };
 
@@ -112,10 +112,7 @@ where
 {
     let is_confined = delegation_record.authority.eq(&Pubkey::default());
     let is_delegated_to_us =
-        crate::delegation_record::is_delegated_to_validator_or_confined(
-            &delegation_record.authority,
-            &this.validator_pubkey,
-        );
+        delegation_record.authority.eq(&this.validator_pubkey) || is_confined;
     let is_raw_eata = parse_raw_eata_pda(
         &account_pubkey,
         account.data(),
@@ -167,10 +164,8 @@ where
     P: PhotonClient,
 {
     let is_delegated_to_us =
-        crate::delegation_record::is_delegated_to_validator_or_confined(
-            &delegation_record.authority,
-            &this.validator_pubkey,
-        );
+        delegation_record.authority.eq(&this.validator_pubkey)
+            || delegation_record.authority.eq(&Pubkey::default());
 
     (!is_delegated_to_us).then_some(delegation_record.authority)
 }
@@ -197,6 +192,22 @@ where
     let deleg_record_generation = this
         .remote_account_provider
         .subscription_generation(&delegation_record_pubkey);
+
+    let acquired_delegation_record_reason = this
+        .acquire_subscription_reason(
+            &delegation_record_pubkey,
+            SubscriptionReason::DelegationRecord,
+        )
+        .await
+        .map(|_| true)
+        .unwrap_or_else(|err| {
+            warn!(
+                pubkey = %delegation_record_pubkey,
+                error = ?err,
+                "Failed to acquire delegation record subscription reason"
+            );
+            false
+        });
 
     let res = match this
         .remote_account_provider
@@ -242,6 +253,30 @@ where
             },
         )
         .await;
+    }
+
+    let mut releases = Vec::new();
+    // Handle edge case where it was cloned in the meantime.
+    // The small possibility of a fetch + clone of this delegation record being in process
+    // still exists, but it's negligible.
+    if this
+        .accounts_bank
+        .get_account(&delegation_record_pubkey)
+        .is_none()
+    {
+        releases.push(SubscriptionRelease::Pubkey {
+            pubkey: delegation_record_pubkey,
+            reason: SubscriptionReason::DirectAccount,
+        });
+    }
+    if acquired_delegation_record_reason {
+        releases.push(SubscriptionRelease::Pubkey {
+            pubkey: delegation_record_pubkey,
+            reason: SubscriptionReason::DelegationRecord,
+        });
+    }
+    if !releases.is_empty() {
+        release_subs(&this.remote_account_provider, releases).await;
     }
 
     res

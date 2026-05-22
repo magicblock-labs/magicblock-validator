@@ -6,7 +6,7 @@ use solana_keypair::Keypair;
 use tempfile::TempDir;
 
 use crate::{
-    config::{BlockSize, LifecycleMode},
+    config::{validator::ReplicationConfig, BlockSize, LifecycleMode},
     consts::{self, DEFAULT_VALIDATOR_KEYPAIR},
     types::network::{BindAddress, Remote},
     ValidatorParams,
@@ -266,20 +266,39 @@ fn test_chainlink_config() {
     let (_dir, config_path) = create_temp_config(
         r#"
         [chainlink]
-        prepare-lookup-tables = true
         max-monitored-accounts = 5000
         resubscription-delay = "50ms"
+
+        [chainlink.risk]
+        enabled = true
+        api-key = "test-token"
+        cache-ttl = "20m"
+        request-timeout = "2s"
+        risk-score-threshold = 8
         "#,
     );
 
     let config = run_cli(vec![config_path.to_str().unwrap()]);
 
-    assert!(config.chainlink.prepare_lookup_tables);
     assert_eq!(config.chainlink.max_monitored_accounts, 5000);
     assert_eq!(
         config.chainlink.resubscription_delay,
         std::time::Duration::from_millis(50)
     );
+    assert!(config.chainlink.risk.enabled);
+    assert_eq!(
+        config.chainlink.risk.api_key,
+        Some("test-token".to_string())
+    );
+    assert_eq!(
+        config.chainlink.risk.cache_ttl,
+        std::time::Duration::from_secs(20 * 60)
+    );
+    assert_eq!(
+        config.chainlink.risk.request_timeout,
+        std::time::Duration::from_secs(2)
+    );
+    assert_eq!(config.chainlink.risk.risk_score_threshold, 8);
 }
 
 #[test]
@@ -406,9 +425,20 @@ fn test_example_config_full_coverage() {
     // 3. Core & Network
     // ========================================================================
     assert_eq!(config.lifecycle, LifecycleMode::Ephemeral);
-    // Example config has 3 remotes: devnet HTTP, devnet WebSocket, and Helius gRPC
+    // Example config has 3 remotes: Helius gRPC, devnet HTTP, and devnet WebSocket.
     assert_eq!(config.remotes.len(), 3);
-    assert_eq!(config.remotes[0].url_str(), consts::DEVNET_URL);
+    assert!(config.remotes.iter().any(|r| {
+        matches!(r, Remote::Grpc(_))
+            && r.url_str()
+                == "https://laserstream-devnet-ewr.helius-rpc.com/?api-key=YOUR_API_KEY"
+    }));
+    assert!(config.remotes.iter().any(|r| {
+        matches!(r, Remote::Http(_)) && r.url_str() == consts::DEVNET_URL
+    }));
+    assert!(config.remotes.iter().any(|r| {
+        matches!(r, Remote::Websocket(_))
+            && r.url_str() == "wss://api.devnet.solana.com/"
+    }));
     assert_eq!(config.aperture.listen.0.port(), 8899);
     // Check that storage path is set (contains the expected folder name)
     assert!(config
@@ -431,6 +461,10 @@ fn test_example_config_full_coverage() {
         config.validator.keypair.0.to_base58_string(),
         DEFAULT_VALIDATOR_KEYPAIR
     );
+    assert!(matches!(
+        config.validator.replication_mode,
+        crate::config::validator::ReplicationMode::Standalone
+    ));
 
     // ========================================================================
     // 6. Chain Commitment
@@ -444,7 +478,6 @@ fn test_example_config_full_coverage() {
     assert!(matches!(config.accountsdb.block_size, BlockSize::Block256));
     assert_eq!(config.accountsdb.index_size, 16_777_216);
     assert_eq!(config.accountsdb.max_snapshots, 4);
-    assert_eq!(config.accountsdb.snapshot_frequency, 1024);
     assert!(!config.accountsdb.reset);
 
     // ========================================================================
@@ -459,8 +492,8 @@ fn test_example_config_full_coverage() {
     // ========================================================================
     // 9. Chainlink (Cloning)
     // ========================================================================
-    assert!(!config.chainlink.prepare_lookup_tables);
     assert_eq!(config.chainlink.max_monitored_accounts, 5000);
+    assert!(!config.chainlink.risk.enabled);
 
     // ========================================================================
     // 10. Aperture
@@ -476,6 +509,14 @@ fn test_example_config_full_coverage() {
     assert_eq!(
         config.task_scheduler.min_interval,
         Duration::from_millis(10)
+    );
+    assert_eq!(
+        config.task_scheduler.failed_task_retention,
+        Duration::from_secs(14 * 24 * 60 * 60)
+    );
+    assert_eq!(
+        config.task_scheduler.failed_task_cleanup_interval,
+        Duration::from_secs(60 * 60)
     );
 
     // Compression config is present
@@ -538,7 +579,6 @@ fn test_env_vars_full_coverage() {
         EnvVarGuard::new("MBV_ACCOUNTSDB__BLOCK_SIZE", "block512"),
         EnvVarGuard::new("MBV_ACCOUNTSDB__INDEX_SIZE", "2048"),
         EnvVarGuard::new("MBV_ACCOUNTSDB__MAX_SNAPSHOTS", "10"),
-        EnvVarGuard::new("MBV_ACCOUNTSDB__SNAPSHOT_FREQUENCY", "500"),
         EnvVarGuard::new("MBV_ACCOUNTSDB__RESET", "true"),
         // --- Ledger ---
         EnvVarGuard::new("MBV_LEDGER__BLOCK_TIME", "200ms"),
@@ -546,12 +586,21 @@ fn test_env_vars_full_coverage() {
         EnvVarGuard::new("MBV_LEDGER__VERIFY_KEYPAIR", "false"),
         EnvVarGuard::new("MBV_LEDGER__RESET", "true"),
         // --- Chainlink ---
-        EnvVarGuard::new("MBV_CHAINLINK__PREPARE_LOOKUP_TABLES", "true"),
         EnvVarGuard::new("MBV_CHAINLINK__MAX_MONITORED_ACCOUNTS", "123"),
         EnvVarGuard::new("MBV_CHAINLINK__RESUBSCRIPTION_DELAY", "150ms"),
+        EnvVarGuard::new("MBV_CHAINLINK__RISK__ENABLED", "true"),
+        EnvVarGuard::new("MBV_CHAINLINK__RISK__API_KEY", "env-range-token"),
+        EnvVarGuard::new("MBV_CHAINLINK__RISK__CACHE_TTL", "45m"),
+        EnvVarGuard::new("MBV_CHAINLINK__RISK__REQUEST_TIMEOUT", "3s"),
+        EnvVarGuard::new("MBV_CHAINLINK__RISK__RISK_SCORE_THRESHOLD", "8"),
         // --- Task Scheduler ---
         EnvVarGuard::new("MBV_TASK_SCHEDULER__RESET", "true"),
         EnvVarGuard::new("MBV_TASK_SCHEDULER__MIN_INTERVAL", "99ms"),
+        EnvVarGuard::new("MBV_TASK_SCHEDULER__FAILED_TASK_RETENTION", "2h"),
+        EnvVarGuard::new(
+            "MBV_TASK_SCHEDULER__FAILED_TASK_CLEANUP_INTERVAL",
+            "3m",
+        ),
         // --- Chain Operation (Optional Section) ---
         // Figment can instantiate optional structs if their fields are present
         EnvVarGuard::new("MBV_CHAIN_OPERATION__COUNTRY_CODE", "DE"),
@@ -599,7 +648,6 @@ fn test_env_vars_full_coverage() {
     assert!(matches!(config.accountsdb.block_size, BlockSize::Block512));
     assert_eq!(config.accountsdb.index_size, 2048);
     assert_eq!(config.accountsdb.max_snapshots, 10);
-    assert_eq!(config.accountsdb.snapshot_frequency, 500);
     assert!(config.accountsdb.reset);
 
     // Ledger
@@ -609,18 +657,39 @@ fn test_env_vars_full_coverage() {
     assert!(config.ledger.reset);
 
     // Chainlink
-    assert!(config.chainlink.prepare_lookup_tables);
     assert_eq!(config.chainlink.max_monitored_accounts, 123);
     assert_eq!(
         config.chainlink.resubscription_delay,
         Duration::from_millis(150)
     );
+    assert!(config.chainlink.risk.enabled);
+    assert_eq!(
+        config.chainlink.risk.api_key,
+        Some("env-range-token".to_string())
+    );
+    assert_eq!(
+        config.chainlink.risk.cache_ttl,
+        Duration::from_secs(45 * 60)
+    );
+    assert_eq!(
+        config.chainlink.risk.request_timeout,
+        Duration::from_secs(3)
+    );
+    assert_eq!(config.chainlink.risk.risk_score_threshold, 8);
 
     // Task Scheduler
     assert!(config.task_scheduler.reset);
     assert_eq!(
         config.task_scheduler.min_interval,
         Duration::from_millis(99)
+    );
+    assert_eq!(
+        config.task_scheduler.failed_task_retention,
+        Duration::from_secs(2 * 60 * 60)
+    );
+    assert_eq!(
+        config.task_scheduler.failed_task_cleanup_interval,
+        Duration::from_secs(3 * 60)
     );
 
     // Chain Operation
@@ -742,4 +811,17 @@ fn test_bind_address_toml_deserialize_port_out_of_range_errors() {
         "unexpected error: {}",
         msg
     );
+}
+
+#[test]
+#[parallel]
+fn test_replication_config_debug_redacts_secret() {
+    let cfg = ReplicationConfig {
+        url: "nats://0.0.0.0:4222".parse().unwrap(),
+        secret: "SUASECRET".into(),
+    };
+
+    let dbg = format!("{cfg:?}");
+    assert!(dbg.contains("<redacted>"));
+    assert!(!dbg.contains("SUASECRET"));
 }

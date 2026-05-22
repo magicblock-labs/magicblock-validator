@@ -13,7 +13,7 @@ use solana_commitment_config::CommitmentConfig;
 use solana_instruction::{AccountMeta, Instruction};
 use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
-use solana_rpc_client::rpc_client::RpcClient;
+use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_sdk_ids::system_program;
 use solana_signer::Signer;
 use solana_transaction::Transaction;
@@ -33,7 +33,7 @@ impl DomainRegistryManager {
         }
     }
 
-    pub fn fetch_validator_info(
+    pub async fn fetch_validator_info(
         &self,
         account_pubkey: &Pubkey,
     ) -> Result<Option<ErRecord>, Error> {
@@ -43,6 +43,7 @@ impl DomainRegistryManager {
                 account_pubkey,
                 CommitmentConfig::confirmed(),
             )
+            .await
             .context(format!(
                 "Failed to get account: {} from server: {}",
                 account_pubkey,
@@ -58,7 +59,7 @@ impl DomainRegistryManager {
             .transpose()
     }
 
-    fn register(
+    async fn register(
         &self,
         payer: &Keypair,
         validator_info: ErRecord,
@@ -69,12 +70,13 @@ impl DomainRegistryManager {
             pda,
             mdp::instructions::Instruction::Register(validator_info),
         )
+        .await
         .context("Failed to send register tx")?;
 
         Ok(())
     }
 
-    pub fn sync(
+    pub async fn sync(
         &self,
         payer: &Keypair,
         validator_info: &ErRecord,
@@ -98,6 +100,7 @@ impl DomainRegistryManager {
                 sync_info,
             )),
         )
+        .await
         .context("Could not send sync transaction")?;
 
         Ok(())
@@ -108,55 +111,57 @@ impl DomainRegistryManager {
         Pubkey::find_program_address(&seeds, &ID)
     }
 
-    pub fn unregister(&self, payer: &Keypair) -> Result<(), Error> {
+    pub async fn unregister(&self, payer: &Keypair) -> Result<(), Error> {
         let (pda, _) = Self::get_pda(&payer.pubkey());
 
         // Verify existence to avoid failed tx costs
         let _ = self
-            .fetch_validator_info(&pda)?
+            .fetch_validator_info(&pda)
+            .await?
             .ok_or(Error::NoRegisteredValidatorError)?;
         self.send_instruction(
             payer,
             pda,
             mdp::instructions::Instruction::Unregister(payer.pubkey()),
         )
+        .await
         .context("Failed to unregister")?;
 
         Ok(())
     }
 
-    pub fn handle_registration(
+    pub async fn handle_registration(
         &self,
         payer: &Keypair,
         validator_info: ErRecord,
     ) -> Result<(), Error> {
-        match self.fetch_validator_info(&validator_info.pda().0)? {
+        match self.fetch_validator_info(&validator_info.pda().0).await? {
             Some(current_validator_info) => {
                 if current_validator_info == validator_info {
                     info!("Domain registry record up to date");
                     Ok(())
                 } else {
                     info!("Domain registry record requires update");
-                    self.sync(payer, &validator_info)
+                    self.sync(payer, &validator_info).await
                 }
             }
             None => {
                 info!("Domain registry record absent, registering");
-                self.register(payer, validator_info)
+                self.register(payer, validator_info).await
             }
         }
     }
 
-    pub fn handle_registration_static(
+    pub async fn handle_registration_static(
         url: impl ToString,
         payer: &Keypair,
         validator_info: ErRecord,
     ) -> Result<(), Error> {
         let manager = DomainRegistryManager::new(url);
-        manager.handle_registration(payer, validator_info)
+        manager.handle_registration(payer, validator_info).await
     }
 
-    fn send_instruction<T: borsh::BorshSerialize>(
+    async fn send_instruction<T: borsh::BorshSerialize>(
         &self,
         payer: &Keypair,
         pda: Pubkey,
@@ -173,6 +178,7 @@ impl DomainRegistryManager {
         let recent_blockhash = self
             .client
             .get_latest_blockhash()
+            .await
             .context("Failed to get latest blockhash")?;
         let transaction = Transaction::new_signed_with_payer(
             &[instruction],
@@ -183,17 +189,18 @@ impl DomainRegistryManager {
 
         self.client
             .send_and_confirm_transaction(&transaction)
+            .await
             .context("Failed to send and confirm transaction")?;
         Ok(())
     }
 
-    pub fn handle_unregistration_static(
+    pub async fn handle_unregistration_static(
         url: impl ToString,
         payer: &Keypair,
     ) -> Result<(), Error> {
         info!("Unregistering validator from domain registry");
         let manager = DomainRegistryManager::new(url);
-        manager.unregister(payer)
+        manager.unregister(payer).await
     }
 }
 

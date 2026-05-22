@@ -21,8 +21,6 @@ block-size = "block256" # possible values block128 | block256 | block512
 index-size = 20485760
 # max number of snapshots to keep around
 max-snapshots = 7
-# how frequently (slot-wise) we should take snapshots
-snapshot-frequency = 1024
 
 [ledger]
 reset = true
@@ -39,6 +37,10 @@ path = "../schedulecommit/elfs/dlp.so"
 [[programs]]
 id = "DmnRGfyyftzacFb1XadYhWF6vWqXwtQk5tbr6XgR3BA1"
 path = "../schedulecommit/elfs/mdp.so"
+
+[[programs]]
+id = "SPLxh1LVZzEkX99H6rqYizhytLWPZVV296zyYDPagv2"
+path = "../programs/ephemeral-token/ephemeral_token_program.so"
 
 [[programs]]
 id = "MiniV31111111111111111111111111111111111111"

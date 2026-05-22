@@ -263,8 +263,11 @@ impl TransactionStrategyExecutionError {
                 };
 
                 match (task, instruction_err) {
-                    (BaseTaskImpl::Commit(_), instruction_err) => match instruction_err
-                    {
+                    (
+                        BaseTaskImpl::Commit(_)
+                        | BaseTaskImpl::CommitFinalize(_),
+                        instruction_err,
+                    ) => match instruction_err {
                         InstructionError::Custom(NONCE_OUT_OF_ORDER) => Ok(
                             TransactionStrategyExecutionError::CommitIDError(
                                 tx_err_helper(InstructionError::Custom(

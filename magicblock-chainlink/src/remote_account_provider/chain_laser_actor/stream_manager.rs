@@ -125,14 +125,13 @@ pub struct StreamManager<S: StreamHandle, SF: StreamFactory<S>> {
     /// Updated only when stream topology changes.
     stream_map: StreamMap<StreamKey, LaserStream>,
 
-    /// Optional chain slot tracker for computing `from_slot`
-    /// during optimization. When set, optimized streams will
-    /// request backfill from a lookback window before the
-    /// current chain slot so that no updates are missed while
-    /// the old streams are being replaced.
-    /// For [Self::account_subscribe], `from_slot` is provided by
-    /// the caller (actor).
-    chain_slot: Option<ChainSlot>,
+    /// Chain slot tracker for computing `from_slot` during optimization
+    /// and program subscriptions. The chain slot is always present and
+    /// provides a lookback window before the current chain slot so no
+    /// updates are missed while old streams are being replaced or program
+    /// subscriptions are created. For [Self::account_subscribe],
+    /// `from_slot` is provided by the caller (actor).
+    chain_slot: ChainSlot,
 
     /// Client identifier used as a label for stream metrics.
     client_id: String,
@@ -154,7 +153,7 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
     pub fn new(
         config: StreamManagerConfig,
         stream_factory: SF,
-        chain_slot: Option<ChainSlot>,
+        chain_slot: ChainSlot,
         client_id: String,
     ) -> Self {
         let mgr = Self {
@@ -198,7 +197,7 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
         &mut self,
         pubkeys: &[Pubkey],
         commitment: &CommitmentLevel,
-        from_slot: Option<u64>,
+        from_slot: u64,
     ) -> RemoteAccountProviderResult<()> {
         // Filter out pubkeys already in subscriptions.
         let new_pks: Vec<Pubkey> = {
@@ -255,7 +254,7 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
         &mut self,
         new_pks: &[Pubkey],
         commitment: &CommitmentLevel,
-        from_slot: Option<u64>,
+        from_slot: u64,
     ) -> RemoteAccountProviderResult<()> {
         // Update the current-new stream with the full
         // current_new_subs filter (either create new if doesn't
@@ -402,12 +401,9 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
     }
 
     /// Computes a `from_slot` for backfilling based on the
-    /// current chain slot. Returns `None` if no chain slot
-    /// tracker is available
-    fn compute_from_slot(&self) -> Option<u64> {
-        self.chain_slot
-            .as_ref()
-            .and_then(ChainSlot::compute_from_slot)
+    /// current chain slot.
+    fn compute_from_slot(&self) -> u64 {
+        self.chain_slot.compute_from_slot()
     }
 
     /// Emits the current optimized/unoptimized stream counts as
@@ -588,7 +584,7 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
     fn build_account_request(
         pubkeys: &[&Pubkey],
         commitment: &CommitmentLevel,
-        from_slot: Option<u64>,
+        from_slot: u64,
     ) -> SubscribeRequest {
         let mut accounts = HashMap::new();
         accounts.insert(
@@ -612,7 +608,7 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
             accounts,
             slots,
             commitment: Some((*commitment).into()),
-            from_slot,
+            from_slot: Some(from_slot),
             ..Default::default()
         }
     }
@@ -623,7 +619,7 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
         &mut self,
         pubkeys: &[&Pubkey],
         commitment: &CommitmentLevel,
-        from_slot: Option<u64>,
+        from_slot: u64,
     ) -> RemoteAccountProviderResult<()> {
         let request =
             Self::build_account_request(pubkeys, commitment, from_slot);
@@ -650,11 +646,15 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
             return Ok(());
         }
 
+        let from_slot = self.compute_from_slot();
         if let Some((mut subscribed_programs, handle)) = self.program_sub.take()
         {
             subscribed_programs.insert(program_id);
-            let request =
-                Self::build_program_request(&subscribed_programs, commitment);
+            let request = Self::build_program_request(
+                &subscribed_programs,
+                commitment,
+                from_slot,
+            );
             match write_with_retry(&handle, "program_subscribe", request).await
             {
                 Ok(()) => {
@@ -669,7 +669,11 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
             let mut subscribed_programs = HashSet::new();
             subscribed_programs.insert(program_id);
             let LaserStreamWithHandle { stream, handle } = self
-                .create_program_stream(&subscribed_programs, commitment)
+                .create_program_stream(
+                    &subscribed_programs,
+                    commitment,
+                    from_slot,
+                )
                 .await?;
             self.stream_map.insert(StreamKey::Program, stream);
             self.program_sub = Some((subscribed_programs, handle));
@@ -695,6 +699,7 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
     fn build_program_request(
         program_ids: &HashSet<Pubkey>,
         commitment: &CommitmentLevel,
+        from_slot: u64,
     ) -> SubscribeRequest {
         let mut accounts = HashMap::new();
         accounts.insert(
@@ -708,6 +713,7 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
         SubscribeRequest {
             accounts,
             commitment: Some((*commitment).into()),
+            from_slot: Some(from_slot),
             ..Default::default()
         }
     }
@@ -717,14 +723,18 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
         &mut self,
         program_ids: &HashSet<Pubkey>,
         commitment: &CommitmentLevel,
+        from_slot: u64,
     ) -> RemoteAccountProviderResult<LaserStreamWithHandle<S>> {
-        let request = Self::build_program_request(program_ids, commitment);
+        let request =
+            Self::build_program_request(program_ids, commitment, from_slot);
         self.stream_factory.subscribe(request).await
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::sync::{atomic::AtomicU64, Arc};
+
     use helius_laserstream::grpc::CommitmentLevel;
     use solana_pubkey::Pubkey;
 
@@ -752,7 +762,7 @@ mod tests {
         let manager = StreamManager::new(
             test_config(),
             factory.clone(),
-            None,
+            ChainSlot::new(Arc::new(AtomicU64::new(100))),
             "test".to_string(),
         );
         (manager, factory)
@@ -825,9 +835,7 @@ mod tests {
         n: usize,
     ) -> Vec<Pubkey> {
         let pks = make_pubkeys(n);
-        mgr.account_subscribe(&pks, &COMMITMENT, None)
-            .await
-            .unwrap();
+        mgr.account_subscribe(&pks, &COMMITMENT, 0).await.unwrap();
         pks
     }
 
@@ -843,9 +851,7 @@ mod tests {
         while remaining > 0 {
             let n = remaining.min(batch);
             let pks = make_pubkeys(n);
-            mgr.account_subscribe(&pks, &COMMITMENT, None)
-                .await
-                .unwrap();
+            mgr.account_subscribe(&pks, &COMMITMENT, 0).await.unwrap();
             all.extend(pks);
             remaining -= n;
         }
@@ -875,9 +881,7 @@ mod tests {
         let (mut mgr, factory) = create_manager();
         let pk = Pubkey::new_unique();
 
-        mgr.account_subscribe(&[pk], &COMMITMENT, None)
-            .await
-            .unwrap();
+        mgr.account_subscribe(&[pk], &COMMITMENT, 0).await.unwrap();
 
         assert_subscriptions_eq(&mgr, &[pk]);
 
@@ -892,9 +896,7 @@ mod tests {
         let (mut mgr, factory) = create_manager();
         let pks = make_pubkeys(5);
 
-        mgr.account_subscribe(&pks, &COMMITMENT, None)
-            .await
-            .unwrap();
+        mgr.account_subscribe(&pks, &COMMITMENT, 0).await.unwrap();
 
         assert_subscriptions_eq(&mgr, &pks);
 
@@ -909,14 +911,10 @@ mod tests {
         let (mut mgr, factory) = create_manager();
         let pk = Pubkey::new_unique();
 
-        mgr.account_subscribe(&[pk], &COMMITMENT, None)
-            .await
-            .unwrap();
+        mgr.account_subscribe(&[pk], &COMMITMENT, 0).await.unwrap();
         let calls_after_first = factory.captured_requests().len();
 
-        mgr.account_subscribe(&[pk], &COMMITMENT, None)
-            .await
-            .unwrap();
+        mgr.account_subscribe(&[pk], &COMMITMENT, 0).await.unwrap();
 
         assert_subscriptions_eq(&mgr, &[pk]);
         assert_eq!(factory.captured_requests().len(), calls_after_first);
@@ -927,13 +925,13 @@ mod tests {
         let (mut mgr, factory) = create_manager();
         let pks = make_pubkeys(3);
 
-        mgr.account_subscribe(&[pks[0]], &COMMITMENT, None)
+        mgr.account_subscribe(&[pks[0]], &COMMITMENT, 0)
             .await
             .unwrap();
-        mgr.account_subscribe(&[pks[1]], &COMMITMENT, None)
+        mgr.account_subscribe(&[pks[1]], &COMMITMENT, 0)
             .await
             .unwrap();
-        mgr.account_subscribe(&[pks[2]], &COMMITMENT, None)
+        mgr.account_subscribe(&[pks[2]], &COMMITMENT, 0)
             .await
             .unwrap();
 
@@ -978,14 +976,14 @@ mod tests {
         let (mut mgr, factory) = create_manager();
         // Subscribe MAX_NEW (5) pubkeys first.
         let first_five = make_pubkeys(5);
-        mgr.account_subscribe(&first_five, &COMMITMENT, None)
+        mgr.account_subscribe(&first_five, &COMMITMENT, 0)
             .await
             .unwrap();
         assert_eq!(mgr.unoptimized_old_stream_count(), 0);
 
         // Subscribe the 6th pubkey → triggers promotion.
         let sixth = Pubkey::new_unique();
-        mgr.account_subscribe(&[sixth], &COMMITMENT, None)
+        mgr.account_subscribe(&[sixth], &COMMITMENT, 0)
             .await
             .unwrap();
 
@@ -1173,7 +1171,7 @@ mod tests {
 
         // Subscribe a new pubkey after optimization.
         let new_pk = Pubkey::new_unique();
-        mgr.account_subscribe(&[new_pk], &COMMITMENT, None)
+        mgr.account_subscribe(&[new_pk], &COMMITMENT, 0)
             .await
             .unwrap();
 
@@ -1212,9 +1210,7 @@ mod tests {
     async fn test_unsubscribe_removes_from_subscriptions_set() {
         let (mut mgr, _factory) = create_manager();
         let pks = make_pubkeys(3);
-        mgr.account_subscribe(&pks, &COMMITMENT, None)
-            .await
-            .unwrap();
+        mgr.account_subscribe(&pks, &COMMITMENT, 0).await.unwrap();
 
         mgr.account_unsubscribe(&[pks[1]]);
 
@@ -1235,9 +1231,7 @@ mod tests {
     async fn test_unsubscribe_already_unsubscribed_pubkey() {
         let (mut mgr, _factory) = create_manager();
         let pk = Pubkey::new_unique();
-        mgr.account_subscribe(&[pk], &COMMITMENT, None)
-            .await
-            .unwrap();
+        mgr.account_subscribe(&[pk], &COMMITMENT, 0).await.unwrap();
 
         mgr.account_unsubscribe(&[pk]);
         mgr.account_unsubscribe(&[pk]);
@@ -1249,9 +1243,7 @@ mod tests {
     async fn test_unsubscribe_does_not_modify_streams() {
         let (mut mgr, factory) = create_manager();
         let pks = make_pubkeys(4);
-        mgr.account_subscribe(&pks, &COMMITMENT, None)
-            .await
-            .unwrap();
+        mgr.account_subscribe(&pks, &COMMITMENT, 0).await.unwrap();
         let calls_before = factory.captured_requests().len();
 
         mgr.account_unsubscribe(&pks[0..2]);
@@ -1281,9 +1273,7 @@ mod tests {
     async fn test_unsubscribe_batch() {
         let (mut mgr, factory) = create_manager();
         let pks = make_pubkeys(5);
-        mgr.account_subscribe(&pks, &COMMITMENT, None)
-            .await
-            .unwrap();
+        mgr.account_subscribe(&pks, &COMMITMENT, 0).await.unwrap();
         let calls_before = factory.captured_requests().len();
 
         mgr.account_unsubscribe(&[pks[0], pks[2], pks[4]]);
@@ -1300,9 +1290,7 @@ mod tests {
     async fn test_is_subscribed_returns_true_for_active() {
         let (mut mgr, _factory) = create_manager();
         let pk = Pubkey::new_unique();
-        mgr.account_subscribe(&[pk], &COMMITMENT, None)
-            .await
-            .unwrap();
+        mgr.account_subscribe(&[pk], &COMMITMENT, 0).await.unwrap();
 
         assert!(mgr.is_subscribed(&pk));
     }
@@ -1311,9 +1299,7 @@ mod tests {
     async fn test_is_subscribed_returns_false_after_unsubscribe() {
         let (mut mgr, _factory) = create_manager();
         let pk = Pubkey::new_unique();
-        mgr.account_subscribe(&[pk], &COMMITMENT, None)
-            .await
-            .unwrap();
+        mgr.account_subscribe(&[pk], &COMMITMENT, 0).await.unwrap();
         mgr.account_unsubscribe(&[pk]);
 
         assert!(!mgr.is_subscribed(&pk));
@@ -1472,13 +1458,9 @@ mod tests {
         let (mut mgr, _factory) = create_manager();
         let pk = Pubkey::new_unique();
 
-        mgr.account_subscribe(&[pk], &COMMITMENT, None)
-            .await
-            .unwrap();
+        mgr.account_subscribe(&[pk], &COMMITMENT, 0).await.unwrap();
         mgr.account_unsubscribe(&[pk]);
-        mgr.account_subscribe(&[pk], &COMMITMENT, None)
-            .await
-            .unwrap();
+        mgr.account_subscribe(&[pk], &COMMITMENT, 0).await.unwrap();
 
         assert!(mgr.subscriptions().read().contains(&pk));
         assert!(mgr.current_new_subs().contains(&pk));
@@ -1494,9 +1476,7 @@ mod tests {
         let commitment = CommitmentLevel::Finalized;
         let pk = Pubkey::new_unique();
 
-        mgr.account_subscribe(&[pk], &commitment, None)
-            .await
-            .unwrap();
+        mgr.account_subscribe(&[pk], &commitment, 0).await.unwrap();
 
         // The subscribe call writes the actual request via the handle
         let handle_reqs = factory.handle_requests();
@@ -1563,28 +1543,12 @@ mod tests {
         let (mut mgr, factory) = create_manager();
         let pk = Pubkey::new_unique();
 
-        mgr.account_subscribe(&[pk], &COMMITMENT, Some(42))
-            .await
-            .unwrap();
+        mgr.account_subscribe(&[pk], &COMMITMENT, 42).await.unwrap();
 
         // The subscribe call writes the actual request via the handle
         let handle_reqs = factory.handle_requests();
         assert_eq!(handle_reqs.len(), 1);
         assert_eq!(handle_reqs[0].from_slot, Some(42));
-    }
-
-    #[tokio::test]
-    async fn test_from_slot_none_when_not_provided() {
-        let (mut mgr, factory) = create_manager();
-        let pk = Pubkey::new_unique();
-
-        mgr.account_subscribe(&[pk], &COMMITMENT, None)
-            .await
-            .unwrap();
-
-        let reqs = factory.captured_requests();
-        assert_eq!(reqs.len(), 1);
-        assert_eq!(reqs[0].from_slot, None);
     }
 
     #[tokio::test]
@@ -1594,11 +1558,11 @@ mod tests {
 
         // First call creates the stream via subscribe (writes via
         // handle internally).
-        mgr.account_subscribe(&[pks[0]], &COMMITMENT, Some(100))
+        mgr.account_subscribe(&[pks[0]], &COMMITMENT, 100)
             .await
             .unwrap();
         // Second call updates via handle.write().
-        mgr.account_subscribe(&[pks[1]], &COMMITMENT, Some(200))
+        mgr.account_subscribe(&[pks[1]], &COMMITMENT, 200)
             .await
             .unwrap();
 
@@ -1611,28 +1575,33 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_optimize_sets_from_slot_none_without_chain_slot() {
-        let (mut mgr, factory) = create_manager();
-        mgr.account_subscribe(&make_pubkeys(5), &COMMITMENT, Some(42))
+    async fn test_program_subscribe_uses_from_slot_with_chain_slot() {
+        use std::sync::{atomic::AtomicU64, Arc};
+
+        let current_slot: u64 = 1000;
+        let chain_slot = ChainSlot::new(Arc::new(AtomicU64::new(current_slot)));
+        let factory = MockStreamFactory::new();
+        let mut mgr = StreamManager::new(
+            test_config(),
+            factory.clone(),
+            chain_slot,
+            "test".to_string(),
+        );
+        let program_id = Pubkey::new_unique();
+
+        mgr.add_program_subscription(program_id, &COMMITMENT)
             .await
             .unwrap();
 
-        let reqs_before = factory.captured_requests().len();
-        mgr.optimize(&COMMITMENT).await.unwrap();
+        let expected_from_slot =
+            current_slot - ChainSlot::MAX_SLOTS_SUB_ACTIVATION;
+        let reqs = factory.captured_requests();
+        assert_eq!(reqs.len(), 1);
+        assert_eq!(reqs[0].from_slot, Some(expected_from_slot));
 
-        let optimize_reqs: Vec<_> = factory
-            .captured_requests()
-            .into_iter()
-            .skip(reqs_before)
-            .collect();
-        assert!(!optimize_reqs.is_empty());
-        for req in &optimize_reqs {
-            assert_eq!(
-                req.from_slot, None,
-                "optimized streams should have from_slot=None \
-                 when no chain_slot is set",
-            );
-        }
+        let handle_reqs = factory.handle_requests();
+        assert_eq!(handle_reqs.len(), 1);
+        assert_eq!(handle_reqs[0].from_slot, Some(expected_from_slot));
     }
 
     #[tokio::test]
@@ -1647,11 +1616,11 @@ mod tests {
         let mut mgr = StreamManager::new(
             test_config(),
             factory.clone(),
-            Some(chain_slot),
+            chain_slot,
             "test".to_string(),
         );
 
-        mgr.account_subscribe(&make_pubkeys(5), &COMMITMENT, Some(42))
+        mgr.account_subscribe(&make_pubkeys(5), &COMMITMENT, 42)
             .await
             .unwrap();
 
@@ -1677,7 +1646,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_optimize_sets_from_slot_none_when_chain_slot_zero() {
+    async fn test_optimize_sets_from_slot_zero_when_chain_slot_zero() {
         use std::sync::{atomic::AtomicU64, Arc};
 
         use crate::remote_account_provider::chain_slot::ChainSlot;
@@ -1687,11 +1656,11 @@ mod tests {
         let mut mgr = StreamManager::new(
             test_config(),
             factory.clone(),
-            Some(chain_slot),
+            chain_slot,
             "test".to_string(),
         );
 
-        mgr.account_subscribe(&make_pubkeys(5), &COMMITMENT, Some(42))
+        mgr.account_subscribe(&make_pubkeys(5), &COMMITMENT, 42)
             .await
             .unwrap();
 
@@ -1706,8 +1675,9 @@ mod tests {
         assert!(!optimize_reqs.is_empty());
         for req in &optimize_reqs {
             assert_eq!(
-                req.from_slot, None,
-                "optimized streams should have from_slot=None \
+                req.from_slot,
+                Some(0),
+                "optimized streams should use saturated from_slot=0 \
                  when chain_slot is still 0",
             );
         }
@@ -1870,9 +1840,7 @@ mod tests {
         let (mut mgr, _factory) = create_manager();
         let pks = make_pubkeys(25);
 
-        mgr.account_subscribe(&pks, &COMMITMENT, None)
-            .await
-            .unwrap();
+        mgr.account_subscribe(&pks, &COMMITMENT, 0).await.unwrap();
 
         // All 25 pubkeys are subscribed.
         assert_subscriptions_eq(&mgr, &pks);
@@ -1896,9 +1864,7 @@ mod tests {
         let (mut mgr, _factory) = create_manager();
         let pks = make_pubkeys(40);
 
-        mgr.account_subscribe(&pks, &COMMITMENT, None)
-            .await
-            .unwrap();
+        mgr.account_subscribe(&pks, &COMMITMENT, 0).await.unwrap();
 
         assert_subscriptions_eq(&mgr, &pks);
 
@@ -1918,9 +1884,7 @@ mod tests {
         let (mut mgr, _factory) = create_manager();
         let pks = make_pubkeys(10);
 
-        mgr.account_subscribe(&pks, &COMMITMENT, None)
-            .await
-            .unwrap();
+        mgr.account_subscribe(&pks, &COMMITMENT, 0).await.unwrap();
 
         assert_subscriptions_eq(&mgr, &pks);
         // 10 > 5 (max_subs_in_new) → promoted to 1 unoptimized.
@@ -1939,17 +1903,13 @@ mod tests {
         // Seed current_new_subs with 5 pubkeys (below
         // max_subs_in_new so no promotion yet).
         let seed = make_pubkeys(5);
-        mgr.account_subscribe(&seed, &COMMITMENT, None)
-            .await
-            .unwrap();
+        mgr.account_subscribe(&seed, &COMMITMENT, 0).await.unwrap();
         assert_eq!(mgr.current_new_sub_count(), 5);
 
         // Now subscribe 80 more. The first chunk must be
         // sized at remaining_capacity = 10 - 5 = 5.
         let batch = make_pubkeys(80);
-        mgr.account_subscribe(&batch, &COMMITMENT, None)
-            .await
-            .unwrap();
+        mgr.account_subscribe(&batch, &COMMITMENT, 0).await.unwrap();
 
         let max = test_config().max_subs_in_old_optimized;
 

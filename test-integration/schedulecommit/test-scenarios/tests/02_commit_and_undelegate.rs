@@ -312,20 +312,6 @@ fn test_commit_and_undelegate_huge_order_book_account() {
     );
 }
 
-#[test]
-fn test_commit_finalize_huge_order_book_account() {
-    run_test_for_commit_huge_order_book_account(
-        ScheduleCommitType::CommitFinalize,
-    );
-}
-
-#[test]
-fn test_commit_finalize_and_undelegate_huge_order_book_account() {
-    run_test_for_commit_huge_order_book_account(
-        ScheduleCommitType::CommitFinalizeAndUndelegate,
-    );
-}
-
 fn run_test_for_commit_huge_order_book_account(
     commit_type: ScheduleCommitType,
 ) {

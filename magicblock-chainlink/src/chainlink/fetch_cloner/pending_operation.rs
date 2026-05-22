@@ -1,0 +1,257 @@
+use std::{collections::HashMap as StdHashMap, sync::Arc, time::Duration};
+
+use scc::HashMap;
+use solana_pubkey::Pubkey;
+use tokio::{
+    sync::{oneshot, Notify},
+    time::Instant,
+};
+
+use super::{super::errors::ChainlinkError, types::FetchAndCloneResult};
+
+pub(super) type PendingGeneration = u64;
+pub(super) type WaiterId = u64;
+
+pub(super) struct Pending {
+    pub generation: PendingGeneration,
+    pub deadline: Instant,
+    pub waiters: StdHashMap<WaiterId, oneshot::Sender<PendingTerminal>>,
+    pub cancel: Arc<Notify>,
+}
+
+#[derive(Debug, Clone)]
+pub(super) enum PendingTerminal {
+    Success(FetchAndCloneResult),
+    Failed(PendingFailure),
+}
+
+#[derive(Debug, Clone)]
+pub(super) enum PendingFailure {
+    OwnerFailed(String),
+    TimedOut,
+    Cancelled,
+}
+
+impl PendingFailure {
+    pub(super) fn into_chainlink_error(self, pubkey: Pubkey) -> ChainlinkError {
+        match self {
+            Self::OwnerFailed(msg) => {
+                ChainlinkError::PendingRequestOwnerFailed(pubkey, msg)
+            }
+            Self::TimedOut => ChainlinkError::PendingRequestTimeout(pubkey),
+            Self::Cancelled => ChainlinkError::PendingRequestCancelled(pubkey),
+        }
+    }
+}
+
+pub(super) struct PendingWaiter {
+    pending: Arc<HashMap<Pubkey, Pending>>,
+    pubkey: Pubkey,
+    generation: PendingGeneration,
+    waiter_id: WaiterId,
+    receiver: oneshot::Receiver<PendingTerminal>,
+    completed: bool,
+}
+
+impl PendingWaiter {
+    fn new(
+        pending: Arc<HashMap<Pubkey, Pending>>,
+        pubkey: Pubkey,
+        generation: PendingGeneration,
+        waiter_id: WaiterId,
+        receiver: oneshot::Receiver<PendingTerminal>,
+    ) -> Self {
+        Self {
+            pending,
+            pubkey,
+            generation,
+            waiter_id,
+            receiver,
+            completed: false,
+        }
+    }
+
+    pub(super) fn pubkey(&self) -> Pubkey {
+        self.pubkey
+    }
+
+    pub(super) fn generation(&self) -> PendingGeneration {
+        self.generation
+    }
+
+    pub(super) async fn wait(
+        mut self,
+    ) -> Result<PendingTerminal, ChainlinkError> {
+        let receiver =
+            std::mem::replace(&mut self.receiver, oneshot::channel().1);
+        match receiver.await {
+            Ok(terminal) => {
+                self.completed = true;
+                Ok(terminal)
+            }
+            Err(err) => {
+                self.completed = true;
+                Err(ChainlinkError::PendingRequestOwnerDisappeared(
+                    self.pubkey,
+                    err.to_string(),
+                ))
+            }
+        }
+    }
+}
+
+impl Drop for PendingWaiter {
+    fn drop(&mut self) {
+        if self.completed {
+            return;
+        }
+
+        self.pending.update(&self.pubkey, |_, pending| {
+            if pending.generation == self.generation {
+                pending.waiters.remove(&self.waiter_id);
+            }
+        });
+    }
+}
+
+pub(super) struct PendingOwner {
+    pending: Arc<HashMap<Pubkey, Pending>>,
+    pubkey: Pubkey,
+    generation: PendingGeneration,
+    completed: bool,
+}
+
+impl PendingOwner {
+    fn new(
+        pending: Arc<HashMap<Pubkey, Pending>>,
+        pubkey: Pubkey,
+        generation: PendingGeneration,
+    ) -> Self {
+        Self {
+            pending,
+            pubkey,
+            generation,
+            completed: false,
+        }
+    }
+
+    pub(super) fn dismiss(&mut self) {
+        self.completed = true;
+    }
+}
+
+impl Drop for PendingOwner {
+    fn drop(&mut self) {
+        if self.completed {
+            return;
+        }
+
+        let _ = finish_pending_cleanup(
+            &self.pending,
+            self.pubkey,
+            self.generation,
+            None,
+        );
+    }
+}
+
+pub(super) struct PendingHandles {
+    pub waiter: PendingWaiter,
+    pub deadline: Instant,
+    pub cancel: Arc<Notify>,
+    pub owner: Option<PendingOwner>,
+}
+
+pub(super) enum PendingClaim {
+    Created(PendingHandles),
+    Joined(PendingHandles),
+}
+
+pub(super) fn claim_or_join_pending(
+    pending: Arc<HashMap<Pubkey, Pending>>,
+    pubkey: Pubkey,
+    generation: PendingGeneration,
+    waiter_id: WaiterId,
+    total_budget: Duration,
+) -> PendingClaim {
+    let (tx, rx) = oneshot::channel();
+
+    let claim = match pending.entry(pubkey) {
+        scc::hash_map::Entry::Vacant(entry) => {
+            let deadline = Instant::now() + total_budget;
+            let cancel = Arc::new(Notify::new());
+            entry.insert_entry(Pending {
+                generation,
+                deadline,
+                waiters: StdHashMap::from([(waiter_id, tx)]),
+                cancel: Arc::clone(&cancel),
+            });
+            PendingClaim::Created(PendingHandles {
+                waiter: PendingWaiter::new(
+                    pending.clone(),
+                    pubkey,
+                    generation,
+                    waiter_id,
+                    rx,
+                ),
+                deadline,
+                cancel,
+                owner: Some(PendingOwner::new(
+                    pending.clone(),
+                    pubkey,
+                    generation,
+                )),
+            })
+        }
+        scc::hash_map::Entry::Occupied(mut entry) => {
+            let generation = entry.get().generation;
+            let deadline = entry.get().deadline;
+            let cancel = Arc::clone(&entry.get().cancel);
+            entry.get_mut().waiters.insert(waiter_id, tx);
+            PendingClaim::Joined(PendingHandles {
+                waiter: PendingWaiter::new(
+                    pending.clone(),
+                    pubkey,
+                    generation,
+                    waiter_id,
+                    rx,
+                ),
+                deadline,
+                cancel,
+                owner: None,
+            })
+        }
+    };
+
+    claim
+}
+
+fn finish_pending_cleanup(
+    pending: &Arc<HashMap<Pubkey, Pending>>,
+    pubkey: Pubkey,
+    generation: PendingGeneration,
+    terminal: Option<PendingTerminal>,
+) -> usize {
+    if let Some((_, pending)) =
+        pending.remove_if(&pubkey, |pending| pending.generation == generation)
+    {
+        let waiter_count = pending.waiters.len();
+        if let Some(terminal) = terminal {
+            for (_, waiter) in pending.waiters {
+                let _ = waiter.send(terminal.clone());
+            }
+        }
+        waiter_count
+    } else {
+        0
+    }
+}
+
+pub(super) fn finish_pending(
+    pending: &Arc<HashMap<Pubkey, Pending>>,
+    pubkey: Pubkey,
+    generation: PendingGeneration,
+    terminal: PendingTerminal,
+) -> usize {
+    finish_pending_cleanup(pending, pubkey, generation, Some(terminal))
+}

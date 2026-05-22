@@ -23,10 +23,15 @@
 The task scheduler can be configured via the validator configuration:
 
 ```toml
-[task_scheduler]
+[task-scheduler]
 reset = false
-millis_per_tick = 100
+min-interval = "10ms"
+failed-task-retention = "7d"
+failed-task-cleanup-interval = "1h"
 ```
+
+Failed task execution records and failed scheduling records older than
+`failed-task-retention` are deleted every `failed-task-cleanup-interval`.
 
 ## Security Considerations
 
@@ -35,7 +40,8 @@ millis_per_tick = 100
 
 ## Performance Considerations
 
-- Database is indexed for efficient task retrieval
-- Tasks are executed in batches to minimize overhead
-- Failed task executions are logged but don't block other tasks
-- Database operations are optimized for high-frequency access 
+- SQLite uses WAL mode, `synchronous = NORMAL`, and a busy timeout to reduce lock contention.
+- When multiple tasks expire on the same timer tick, the service drains the delay queue and processes them in one batch pass.
+- Instruction payloads are stored behind `Arc` to avoid cloning large instruction lists on every fire.
+- For lower latency than loopback RPC, a deployment can construct `TaskSchedulerService::with_submitter` with a custom `CrankTransactionSubmitter` (for example wiring into the validator transaction pipeline).
+- Failed task executions are retried (with backoff) or moved to a failed table; they do not block the scheduler loop indefinitely.

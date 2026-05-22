@@ -1,3 +1,4 @@
+use magicblock_aml::RiskError;
 use solana_program::program_error::ProgramError;
 use solana_pubkey::Pubkey;
 use thiserror::Error;
@@ -50,4 +51,22 @@ pub enum ChainlinkError {
 
     #[error("Photon client error: {0}")]
     PhotonClientError(#[from] magicblock_core::traits::PhotonClientError),
+
+    #[error("timeout waiting for pending request for {0}")]
+    PendingRequestTimeout(Pubkey),
+
+    #[error("pending request cancelled for {0}")]
+    PendingRequestCancelled(Pubkey),
+
+    #[error("pending request owner disappeared for {0}: {1}")]
+    PendingRequestOwnerDisappeared(Pubkey, String),
+
+    #[error("missing pending request owner for {0}")]
+    MissingPendingRequestOwner(Pubkey),
+
+    #[error("pending request owner failed for {0}: {1}")]
+    PendingRequestOwnerFailed(Pubkey, String),
+
+    #[error("Failed to perform Range risk check: {0}")]
+    RangeRisk(#[from] RiskError),
 }

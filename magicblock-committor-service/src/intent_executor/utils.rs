@@ -135,15 +135,53 @@ pub(in crate::intent_executor) async fn handle_commit_id_error<
     // Broken tasks are prepared incorrectly so they have to be cleaned up
     let mut to_cleanup = Vec::new();
     for task in &mut strategy.optimized_tasks {
-        if let Some(commit_id) = task
-            .committed_account()
-            .and_then(|ca| commit_ids.get(&ca.pubkey))
-        {
-            if task.commit_id().is_some_and(|id| commit_id == &id) {
-                continue;
+        match task {
+            BaseTaskImpl::Commit(task) => {
+                let Some(commit_id) =
+                    commit_ids.get(&task.committed_account.pubkey)
+                else {
+                    continue;
+                };
+                if commit_id == &task.commit_id {
+                    continue;
+                }
+
+                // Handle invalid tasks
+                to_cleanup.push(BaseTaskImpl::Commit(task.clone()));
+                task.reset_commit_id(*commit_id);
             }
-            to_cleanup.push(task.clone());
-            task.reset_commit_id(*commit_id);
+            BaseTaskImpl::CommitFinalize(task) => {
+                let Some(commit_id) =
+                    commit_ids.get(&task.committed_account.pubkey)
+                else {
+                    continue;
+                };
+                if commit_id == &task.commit_id {
+                    continue;
+                }
+
+                // Handle invalid tasks
+                to_cleanup.push(BaseTaskImpl::CommitFinalize(task.clone()));
+                task.reset_commit_id(*commit_id);
+            }
+            BaseTaskImpl::CommitFinalizeCompressed(task) => {
+                let Some(commit_id) =
+                    commit_ids.get(&task.committed_account.pubkey)
+                else {
+                    continue;
+                };
+                if commit_id == &task.commit_id {
+                    continue;
+                }
+
+                // Handle invalid tasks
+                to_cleanup
+                    .push(BaseTaskImpl::CommitFinalizeCompressed(task.clone()));
+                task.reset_commit_id(*commit_id);
+            }
+            BaseTaskImpl::BaseAction(_)
+            | BaseTaskImpl::Finalize(_)
+            | BaseTaskImpl::Undelegate(_) => {}
         }
     }
 

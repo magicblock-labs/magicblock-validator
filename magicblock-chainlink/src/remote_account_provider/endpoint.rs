@@ -18,7 +18,6 @@ pub enum Endpoint {
     Grpc {
         url: String,
         label: String,
-        supports_backfill: bool,
         api_key: String,
     },
     Compression {
@@ -105,13 +104,6 @@ impl TryFrom<&Remote> for Endpoint {
             Remote::Grpc(url) => {
                 let label = extract_label(url);
                 let (url, api_key) = parse_url_api_key(url);
-                if !is_known_grpc_url(&url) {
-                    return Err(
-                        RemoteAccountProviderError::UnsupportedGrpcEndpoint(
-                            url,
-                        ),
-                    );
-                }
                 let api_key = api_key.ok_or_else(|| {
                     RemoteAccountProviderError::MissingApiKey(format!(
                         "gRPC endpoint requires api_key: {}",
@@ -119,12 +111,9 @@ impl TryFrom<&Remote> for Endpoint {
                     ))
                 })?;
 
-                let supports_backfill =
-                    is_helius_laser_url(&url) || is_triton_url(&url);
                 Ok(Endpoint::Grpc {
                     url,
                     label,
-                    supports_backfill,
                     api_key,
                 })
             }
@@ -231,19 +220,6 @@ fn extract_label(url: &Url) -> String {
         .unwrap_or_else(|| "unknown".to_string())
 }
 
-pub fn is_known_grpc_url(url: &str) -> bool {
-    is_helius_laser_url(url) || is_triton_url(url)
-}
-
-fn is_helius_laser_url(url: &str) -> bool {
-    // Example: https://laserstream-devnet-ewr.helius-rpc.com
-    url.contains("laserstream") && url.contains("helius-rpc.com")
-}
-
-fn is_triton_url(url: &str) -> bool {
-    // Example: https://magicblo-dev<redacted>.devnet.rpcpool.com
-    url.contains("rpcpool")
-}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -358,5 +334,27 @@ mod tests {
     fn test_extract_label_grpc_protocol() {
         let url = Url::parse("grpc://solana.example.com:50051").unwrap();
         assert_eq!(extract_label(&url), "example");
+    }
+
+    #[test]
+    fn test_generic_grpc_endpoint_with_api_key_is_accepted() {
+        let remote: Remote = "grpcs://generic.example.com/path?api-key=secret"
+            .parse()
+            .unwrap();
+
+        let endpoint = Endpoint::try_from(&remote).unwrap();
+
+        match endpoint {
+            Endpoint::Grpc {
+                url,
+                label,
+                api_key,
+            } => {
+                assert_eq!(url, "https://generic.example.com/path");
+                assert_eq!(label, "example");
+                assert_eq!(api_key, "secret");
+            }
+            other => panic!("expected gRPC endpoint, got {other:?}"),
+        }
     }
 }

@@ -3,10 +3,7 @@ use std::fmt::Debug;
 use hyper::body::Bytes;
 use json::Serialize;
 use magicblock_core::{
-    link::{
-        accounts::LockedAccount,
-        transactions::{TransactionResult, TransactionStatus},
-    },
+    link::{accounts::LockedAccount, transactions::TransactionStatus},
     Slot,
 };
 use solana_account::ReadableAccount;
@@ -14,7 +11,7 @@ use solana_account_decoder::{
     encode_ui_account, UiAccountEncoding, UiDataSliceConfig,
 };
 use solana_pubkey::Pubkey;
-use solana_transaction_error::TransactionError;
+use solana_transaction_error::{TransactionError, TransactionResult};
 
 use crate::{
     requests::{params::SerdeSignature, payload::NotificationPayload},
@@ -110,7 +107,7 @@ impl Encoder for ProgramAccountEncoder {
 pub(crate) struct TransactionResultEncoder;
 
 impl Encoder for TransactionResultEncoder {
-    type Data = TransactionResult;
+    type Data = TransactionResult<()>;
 
     fn encode(
         &self,

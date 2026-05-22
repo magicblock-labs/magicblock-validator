@@ -1,7 +1,9 @@
 use std::{fmt, ops::Deref};
 
-use anyhow::{Context, Result};
-use integration_test_tools::IntegrationTestContext;
+use anyhow::{ensure, Context, Result};
+use integration_test_tools::{
+    loaded_accounts::DLP_TEST_AUTHORITY_BYTES, IntegrationTestContext,
+};
 use program_schedulecommit::api::{
     delegate_account_cpi_instruction, init_account_instruction,
     init_order_book_instruction, init_payer_escrow, UserSeeds,
@@ -149,6 +151,26 @@ impl ScheduleCommitTestContext {
             payer_ephem_on_chain.lamports
         );
         assert_eq!(payer_ephem_on_ephem.owner, system_program::id());
+
+        let validator_identity = ictx
+            .ephem_validator_identity
+            .context("Ephemeral validator identity missing")?;
+        let validator_keypair =
+            Keypair::try_from(&DLP_TEST_AUTHORITY_BYTES[..])
+                .context("Failed to create validator authority keypair")?;
+        ensure!(
+            validator_keypair.pubkey() == validator_identity,
+            "Unexpected validator identity {}",
+            validator_identity
+        );
+        let magic_fee_vault =
+            ictx.ensure_magic_fee_vault_delegated_on_chain(&validator_keypair)?;
+        ictx.fetch_ephem_account(magic_fee_vault).with_context(|| {
+            format!(
+                "Failed to fetch magic fee vault account {}",
+                magic_fee_vault
+            )
+        })?;
 
         Ok(Self {
             payer_chain,

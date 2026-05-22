@@ -74,12 +74,12 @@ pub(crate) fn process_schedule_task(
 
     // Enforce valid interval
     if args.execution_interval_millis <= 0
-        || args.execution_interval_millis > u32::MAX as i64
+        || args.execution_interval_millis >= u32::MAX as i64
     {
         ic_msg!(
             invoke_context,
             "ScheduleTask ERR: execution interval must be between 1 and {} milliseconds",
-            u32::MAX
+            u32::MAX - 1
         );
         return Err(InstructionError::InvalidInstructionData);
     }
@@ -93,7 +93,11 @@ pub(crate) fn process_schedule_task(
         return Err(InstructionError::InvalidInstructionData);
     }
 
-    validate_cranks_instructions(invoke_context, &args.instructions)?;
+    validate_cranks_instructions(
+        invoke_context,
+        &payer_pubkey,
+        &args.instructions,
+    )?;
 
     let schedule_request = ScheduleTaskRequest {
         id: args.task_id,

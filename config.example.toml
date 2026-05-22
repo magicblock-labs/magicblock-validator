@@ -59,9 +59,9 @@ lifecycle = "ephemeral"
 # Example format: grpcs://<network>.helius-rpc.com?api-key=<YOUR_API_KEY>
 # See Helius gRPC docs for available network endpoints.
 remotes = [
-  "https://api.devnet.solana.com",
-  "wss://api.devnet.solana.com",
-  "grpcs://laserstream-devnet-ewr.helius-rpc.com?api-key=YOUR_API_KEY",
+    "grpcs://laserstream-devnet-ewr.helius-rpc.com?api-key=YOUR_API_KEY",
+    "https://api.devnet.solana.com",
+    "wss://api.devnet.solana.com",
 ]
 
 # Root directory for application storage (ledger, accountsdb, snapshots).
@@ -121,6 +121,25 @@ basefee = 0
 # Env: MBV_VALIDATOR__KEYPAIR
 keypair = "9Vo7TbA5YfC5a33JhAi9Fb41usA6JwecHNRw3f9MzzHAM8hFnXTzL5DcEHwsAFjuUZ8vNQcJ4XziRFpMc3gTgBQ"
 
+# Replication role for this validator.
+# Default: "standalone"
+# Options:
+# - "standalone": disable replication
+# 
+# - "stand-by": replicate and allow takeover
+# 
+# [validator.replication-mode.stand-by]
+# url = "nats://0.0.0.0:4222"
+# secret = "SUAXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
+# 
+# - "replica-only": replicate without takeover
+#   Requires the primary validator pubkey we are replicating from.
+# 
+# [validator.replication-mode.replica-only]
+# url = "nats://0.0.0.0:4222"
+# secret = "SUAXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
+# authority-override = "L12m1UhkJRfHyvLMcVucJwxXeuD728EqVDDwQDxFMNo"
+
 [aperture]
 # Network address to bind the main JSON RPC service to.
 # Websocket bind address is derived by incrementing the port
@@ -175,11 +194,6 @@ index-size = 16_777_216
 # Env: MBV_ACCOUNTSDB__MAX_SNAPSHOTS
 max-snapshots = 4
 
-# How often (in slots) to take a snapshot of the database.
-# Default: 1024
-# Env: MBV_ACCOUNTSDB__SNAPSHOT_FREQUENCY
-snapshot-frequency = 1024
-
 # If true, wipes the accounts database on every startup.
 # Default: false
 # Env: MBV_ACCOUNTSDB__RESET
@@ -193,6 +207,13 @@ reset = false
 # Default: "400ms"
 # Env: MBV_LEDGER__BLOCK_TIME
 block-time = "400ms"
+
+# The number of slots included in a superblock.
+# accountsdb checksum/snapshot is taken at superblock boundary
+# 
+# Default: 72000
+# Env: MBV_LEDGER__SUPERBLOCK_SIZE
+superblock-size = 72000
 
 # Upper hard threshold for the max size of the ledger (in bytes).
 # Ledger truncation logic kicks in when disk usage approaches this limit.
@@ -222,11 +243,6 @@ reset = false
 # Chainlink (cloning pipeline)
 # ==============================================================================
 [chainlink]
-# If true, creates and initializes Address Lookup Tables for oracle feeds.
-# Default: false
-# Env: MBV_CHAINLINK__PREPARE_LOOKUP_TABLES
-prepare-lookup-tables = false
-
 # Maximum number of accounts to monitor for price updates.
 # Default: 5000
 # Env: MBV_CHAINLINK__MAX_MONITORED_ACCOUNTS
@@ -244,6 +260,42 @@ remove-confined-accounts = false
 # Default: "50ms"
 # Env: MBV_CHAINLINK__RESUBSCRIPTION_DELAY
 # resubscription-delay = "50ms"
+
+# ------------------------------------------------------------------------------
+# Optional: Range Risk API validation for post-delegation actions signers
+# ------------------------------------------------------------------------------
+# When enabled, all signers referenced by post-delegation actions are checked
+# against Range API before actions are allowed to execute.
+[chainlink.risk]
+# Enables/disables Range risk checks.
+# Default: false
+# Env: MBV_CHAINLINK__RISK__ENABLED
+enabled = false
+
+# Range API base URL.
+# Default: "https://api.range.org/v1"
+# Env: MBV_CHAINLINK__RISK__BASE_URL
+base-url = "https://api.range.org/v1"
+
+# Range API bearer token.
+# Default: None
+# Env: MBV_CHAINLINK__RISK__API_KEY
+api-key = "your-api-key"
+
+# Cache TTL.
+# Default: "30 days"
+# Env: MBV_CHAINLINK__RISK__CACHE_TTL
+cache-ttl = "30 days"
+
+# HTTP timeout for Range API calls.
+# Default: "5s"
+# Env: MBV_CHAINLINK__RISK__REQUEST_TIMEOUT
+request-timeout = "5s"
+
+# Risk score threshold to consider an address high risk, on scale of 0-10.
+# Default: 5
+# Env: MBV_CHAINLINK__RISK__RISK_SCORE_THRESHOLD
+# risk-score-threshold = 5
 
 # ==============================================================================
 # On-Chain Registration (Optional)
@@ -278,6 +330,18 @@ reset = false
 # Default: "10ms"
 # Env: MBV_TASK_SCHEDULER__MIN_INTERVAL
 min-interval = "10ms"
+
+# How long failed task executions and failed scheduling records are retained.
+# Supports humantime (e.g. "1h", "7d").
+# Default: "14d"
+# Env: MBV_TASK_SCHEDULER__FAILED_TASK_RETENTION
+failed-task-retention = "14d"
+
+# How often old failed task executions and failed scheduling records are deleted.
+# Supports humantime (e.g. "1m", "1h").
+# Default: "1h"
+# Env: MBV_TASK_SCHEDULER__FAILED_TASK_CLEANUP_INTERVAL
+failed-task-cleanup-interval = "1h"
 
 # ==============================================================================
 # Compression

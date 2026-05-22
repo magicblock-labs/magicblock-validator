@@ -51,7 +51,6 @@ async fn init_remote_account_provider() -> RemoteAccountProvider<
         &endpoints,
         CommitmentConfig::confirmed(),
         fwd_tx,
-        random_pubkey(),
         &RemoteAccountProviderConfig::default_with_lifecycle_mode(
             LifecycleMode::Ephemeral,
         ),

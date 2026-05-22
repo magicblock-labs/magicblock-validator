@@ -2,7 +2,7 @@
 use std::{
     collections::HashMap,
     sync::{
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
         Arc, Mutex,
     },
 };
@@ -24,6 +24,7 @@ use solana_rpc_client_api::{
     response::{Response, RpcResponseContext, RpcResult},
 };
 #[cfg(any(test, feature = "dev-context"))]
+use tokio::sync::Notify;
 use tracing::*;
 
 #[cfg(any(test, feature = "dev-context"))]
@@ -116,6 +117,8 @@ impl ChainRpcClientMockBuilder {
             current_slot: Arc::new(AtomicU64::new(self.current_slot)),
             single_account_fetches: Arc::<AtomicU64>::default(),
             multi_account_fetches: Arc::<AtomicU64>::default(),
+            block_fetches: Arc::new(AtomicBool::new(false)),
+            fetch_block_notify: Arc::new(Notify::new()),
         };
         if let Some(clock_sysvar) = self.clock_sysvar {
             mock.set_clock_sysvar(clock_sysvar);
@@ -139,6 +142,8 @@ pub struct ChainRpcClientMock {
     current_slot: Arc<AtomicU64>,
     single_account_fetches: Arc<AtomicU64>,
     multi_account_fetches: Arc<AtomicU64>,
+    block_fetches: Arc<AtomicBool>,
+    fetch_block_notify: Arc<Notify>,
 }
 
 #[cfg(any(test, feature = "dev-context"))]
@@ -150,6 +155,8 @@ impl ChainRpcClientMock {
             current_slot: Arc::<AtomicU64>::default(),
             single_account_fetches: Arc::<AtomicU64>::default(),
             multi_account_fetches: Arc::<AtomicU64>::default(),
+            block_fetches: Arc::new(AtomicBool::new(false)),
+            fetch_block_notify: Arc::new(Notify::new()),
         }
     }
 
@@ -260,6 +267,25 @@ impl ChainRpcClientMock {
     pub fn multi_account_fetches(&self) -> u64 {
         self.multi_account_fetches.load(Ordering::Relaxed)
     }
+
+    pub fn block_fetches(&self) {
+        self.block_fetches.store(true, Ordering::SeqCst);
+    }
+
+    pub fn allow_fetches(&self) {
+        self.block_fetches.store(false, Ordering::SeqCst);
+        self.fetch_block_notify.notify_waiters();
+    }
+
+    async fn wait_if_fetches_blocked(&self) {
+        loop {
+            let notified = self.fetch_block_notify.notified();
+            if !self.block_fetches.load(Ordering::SeqCst) {
+                break;
+            }
+            notified.await;
+        }
+    }
 }
 
 #[cfg(any(test, feature = "dev-context"))]
@@ -286,6 +312,8 @@ impl ChainRpcClient for ChainRpcClientMock {
         config: RpcAccountInfoConfig,
     ) -> RpcResult<Option<Account>> {
         self.single_account_fetches.fetch_add(1, Ordering::Relaxed);
+        self.wait_if_fetches_blocked().await;
+
         let current_slot = self.current_slot.load(Ordering::Relaxed);
         if let Some(min_context_slot) = config.min_context_slot {
             if current_slot < min_context_slot {
@@ -296,34 +324,26 @@ impl ChainRpcClient for ChainRpcClientMock {
             }
         }
 
-        let Some(AccountAtSlot { account, slot }) =
+        let res = if let Some(AccountAtSlot { account, slot }) =
             self.get_account_at_slot(pubkey)
-        else {
-            return Ok(Response {
+        {
+            Response {
+                context: RpcResponseContext {
+                    slot,
+                    api_version: None,
+                },
+                value: Some(account),
+            }
+        } else {
+            Response {
                 context: RpcResponseContext {
                     slot: current_slot,
                     api_version: None,
                 },
                 value: None,
-            });
-        };
-
-        if let Some(min_context_slot) = config.min_context_slot {
-            if slot < min_context_slot {
-                return Err(client_error::ErrorKind::Custom(
-                    "minimum context slot not reached".to_string(),
-                )
-                .into());
             }
-        }
-
-        Ok(Response {
-            context: RpcResponseContext {
-                slot,
-                api_version: None,
-            },
-            value: Some(account),
-        })
+        };
+        Ok(res)
     }
 
     async fn get_multiple_accounts_with_config(
@@ -332,6 +352,7 @@ impl ChainRpcClient for ChainRpcClientMock {
         config: RpcAccountInfoConfig,
     ) -> RpcResult<Vec<Option<Account>>> {
         self.multi_account_fetches.fetch_add(1, Ordering::Relaxed);
+        self.wait_if_fetches_blocked().await;
         if tracing::enabled!(tracing::Level::TRACE) {
             let pubkeys = pubkeys
                 .iter()
