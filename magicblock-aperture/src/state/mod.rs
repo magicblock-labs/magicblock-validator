@@ -4,7 +4,7 @@ use blocks::{BlocksCache, LastCachedBlock};
 use cache::ExpiringCache;
 use magicblock_account_cloner::ChainlinkCloner;
 use magicblock_accounts_db::AccountsDb;
-use magicblock_chainlink::{DefaultModeAwareChainlink, ProdInnerChainlink};
+use magicblock_chainlink::{ProdChainlink, ProdInnerChainlink};
 use magicblock_ledger::Ledger;
 use solana_feature_set::FeatureSet;
 use solana_pubkey::Pubkey;
@@ -13,7 +13,7 @@ use transactions::TransactionsCache;
 
 pub type RealChainlinkImpl = ProdInnerChainlink<ChainlinkCloner>;
 
-pub type ChainlinkImpl = DefaultModeAwareChainlink<ChainlinkCloner>;
+pub type ChainlinkImpl = ProdChainlink<ChainlinkCloner>;
 
 /// A container for the shared, global state of the RPC service.
 ///

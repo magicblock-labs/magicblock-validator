@@ -19,8 +19,8 @@ use magicblock_aperture::{
     state::{NodeContext, SharedState},
 };
 use magicblock_chainlink::{
-    config::ChainlinkConfig, remote_account_provider::Endpoints,
-    DefaultModeAwareChainlink, ProdInnerChainlink,
+    config::ChainlinkConfig, remote_account_provider::Endpoints, ProdChainlink,
+    ProdInnerChainlink,
 };
 use magicblock_committor_service::{
     config::ChainConfig, BaseIntentCommittor, CommittorService,
@@ -97,7 +97,7 @@ use crate::{
 
 type RealChainlinkImpl = ProdInnerChainlink<ChainlinkCloner>;
 
-type ChainlinkImpl = DefaultModeAwareChainlink<ChainlinkCloner>;
+type ChainlinkImpl = ProdChainlink<ChainlinkCloner>;
 
 // -----------------
 // MagicValidator

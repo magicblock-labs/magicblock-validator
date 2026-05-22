@@ -47,8 +47,8 @@ pub type ProdInnerChainlink<C> = InnerChainlink<
     C,
 >;
 
-/// Production mode-aware Chainlink stack with configurable cloner implementation.
-pub type DefaultModeAwareChainlink<C> = ReplicationModeAwareChainlink<
+/// Production `ProdChainlink` stack with configurable cloner implementation.
+pub type ProdChainlink<C> = ReplicationModeAwareChainlink<
     ChainRpcClientImpl,
     SubMuxClient<ChainUpdatesClient>,
     AccountsDb,

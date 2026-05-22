@@ -5,7 +5,7 @@ use std::{
 
 use async_trait::async_trait;
 use magicblock_account_cloner::ChainlinkCloner;
-use magicblock_chainlink::{DefaultModeAwareChainlink, ProdInnerChainlink};
+use magicblock_chainlink::{ProdChainlink, ProdInnerChainlink};
 use magicblock_committor_service::{
     intent_execution_manager::BroadcastedIntentExecutionResult,
     intent_executor::ExecutionOutput, BaseIntentCommittor, CommittorService,
@@ -37,7 +37,7 @@ const POISONED_MUTEX_MSG: &str =
 
 pub type RealChainlinkImpl = ProdInnerChainlink<ChainlinkCloner>;
 
-pub type ChainlinkImpl = DefaultModeAwareChainlink<ChainlinkCloner>;
+pub type ChainlinkImpl = ProdChainlink<ChainlinkCloner>;
 
 pub struct ScheduledCommitsProcessorImpl {
     committor: Arc<CommittorService>,
