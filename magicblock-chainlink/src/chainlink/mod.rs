@@ -660,3 +660,80 @@ fn extract_program_ids_from_transaction(
         .collect::<HashSet<_>>();
     program_ids.into_iter().collect()
 }
+
+#[cfg(test)]
+mod mode_aware_tests {
+    use std::sync::Arc;
+
+    use magicblock_accounts_db::traits::AccountsBank;
+    use magicblock_config::config::ChainLinkConfig;
+    use magicblock_metrics::metrics::AccountFetchOrigin;
+    use solana_message::legacy::Message;
+    use solana_pubkey::Pubkey;
+    use solana_transaction::{sanitized::SanitizedTransaction, Transaction};
+
+    use super::{errors::ChainlinkError, ModeAwareChainlink};
+    use crate::{
+        accounts_bank::mock::AccountsBankStub,
+        remote_account_provider::chain_pubsub_client::mock::ChainPubsubClientMock,
+        testing::{
+            cloner_stub::ClonerStub, rpc_client_mock::ChainRpcClientMock,
+        },
+    };
+
+    type TestModeAwareChainlink = ModeAwareChainlink<
+        ChainRpcClientMock,
+        ChainPubsubClientMock,
+        AccountsBankStub,
+        ClonerStub,
+    >;
+
+    fn disabled_chainlink() -> (Arc<AccountsBankStub>, TestModeAwareChainlink) {
+        let accounts_bank = Arc::new(AccountsBankStub::default());
+        let chainlink = TestModeAwareChainlink::disabled(
+            &accounts_bank,
+            Pubkey::new_unique(),
+            &ChainLinkConfig::default(),
+        )
+        .expect("disabled Chainlink should be constructed");
+        (accounts_bank, chainlink)
+    }
+
+    #[tokio::test]
+    async fn disabled_mode_ensure_accounts_is_noop() {
+        let (accounts_bank, chainlink) = disabled_chainlink();
+        let pubkey = Pubkey::new_unique();
+
+        let result = chainlink
+            .ensure_accounts(
+                &[pubkey],
+                None,
+                AccountFetchOrigin::GetAccount,
+                None,
+            )
+            .await;
+
+        assert!(result
+            .expect("disabled ensure_accounts should succeed")
+            .is_ok());
+        assert!(accounts_bank.get_account(&pubkey).is_none());
+        assert_eq!(chainlink.fetch_count(), None);
+        assert!(!chainlink.is_watching(&pubkey));
+    }
+
+    #[tokio::test]
+    async fn disabled_mode_rejects_transaction_ensure() {
+        let (_accounts_bank, chainlink) = disabled_chainlink();
+        let payer = Pubkey::new_unique();
+        let message = Message::new(&[], Some(&payer));
+        let tx = Transaction::new_unsigned(message);
+        let sanitized_tx = SanitizedTransaction::from_transaction_for_tests(tx);
+
+        let error = chainlink
+            .ensure_transaction_accounts(&sanitized_tx)
+            .await
+            .expect_err("disabled transaction ensure should be rejected");
+
+        assert!(matches!(error, ChainlinkError::DisabledForNonPrimaryMode));
+    }
+}

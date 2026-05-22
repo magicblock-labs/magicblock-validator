@@ -386,19 +386,105 @@ pub(crate) mod get_delegation_status;
 
 #[cfg(test)]
 mod tests {
-    use magicblock_core::link::blocks::BlockHash;
+    use std::sync::{Arc, Mutex};
+
+    use magicblock_config::config::ChainLinkConfig;
+    use magicblock_core::{
+        coordination_mode::{switch_to_primary_mode, switch_to_replica_mode},
+        link::blocks::BlockHash,
+    };
     use solana_message::{
         compiled_instruction::CompiledInstruction, legacy::Message,
         MessageHeader, VersionedMessage,
     };
     use solana_signature::Signature;
+    use test_kit::ExecutionTestEnv;
 
     use super::*;
+    use crate::state::{
+        ChainlinkImpl, NodeContext, RealChainlinkImpl, SharedState,
+    };
+
+    static COORDINATION_MODE_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+    fn chainlink(env: &ExecutionTestEnv) -> ChainlinkImpl {
+        let real = RealChainlinkImpl::try_new(
+            &env.accountsdb,
+            None,
+            Pubkey::new_unique(),
+            &ChainLinkConfig::default(),
+        )
+        .expect("failed to create Chainlink");
+        ChainlinkImpl::enabled(real)
+    }
+
+    fn dispatcher(env: &ExecutionTestEnv) -> HttpDispatcher {
+        let context = NodeContext {
+            identity: env.get_payer().pubkey,
+            blocktime: 50,
+            ..Default::default()
+        };
+        let state = SharedState::new(
+            context,
+            env.accountsdb.clone(),
+            env.ledger.clone(),
+            Arc::new(chainlink(env)),
+        );
+
+        HttpDispatcher {
+            context: state.context,
+            accountsdb: state.accountsdb.clone(),
+            ledger: state.ledger.clone(),
+            chainlink: state.chainlink,
+            transactions: state.transactions.clone(),
+            blocks: state.blocks.clone(),
+            transactions_scheduler: env.dispatch.transaction_scheduler.clone(),
+        }
+    }
 
     const SYSTEM_PROGRAM_ID: Pubkey =
         Pubkey::from_str_const("11111111111111111111111111111111");
     const COMPUTE_BUDGET_ID: Pubkey =
         Pubkey::from_str_const("ComputeBudget111111111111111111111111111111");
+
+    #[tokio::test]
+    async fn require_primary_rpc_method_allows_send_transaction_in_primary_mode(
+    ) {
+        let _guard = COORDINATION_MODE_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let env = ExecutionTestEnv::new();
+        let dispatcher = dispatcher(&env);
+        switch_to_primary_mode();
+
+        let result = dispatcher.require_primary_rpc_method("sendTransaction");
+
+        switch_to_primary_mode();
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn require_primary_rpc_method_rejects_send_transaction_in_replica_mode(
+    ) {
+        let _guard = COORDINATION_MODE_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let env = ExecutionTestEnv::new();
+        let dispatcher = dispatcher(&env);
+        switch_to_replica_mode();
+
+        let error = dispatcher
+            .require_primary_rpc_method("sendTransaction")
+            .expect_err("replica mode should reject primary-only RPC methods");
+
+        switch_to_primary_mode();
+        assert!(
+            error.to_string().contains(
+                "sendTransaction is only available while validator is primary"
+            ),
+            "unexpected error: {error}"
+        );
+    }
 
     #[test]
     fn accepts_program_id_index_within_runtime_limit() {
