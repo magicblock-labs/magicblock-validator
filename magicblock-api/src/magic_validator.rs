@@ -493,6 +493,17 @@ impl MagicValidator {
         latest_block: &LatestBlock,
         accountsdb: &Arc<AccountsDb>,
     ) -> ApiResult<ChainlinkImpl> {
+        if Self::replication_mode_uses_disabled_chainlink(
+            &config.validator.replication_mode,
+        ) {
+            return ChainlinkImpl::disabled(
+                accountsdb,
+                config.validator.keypair.pubkey(),
+                &config.chainlink,
+            )
+            .map_err(ApiError::from);
+        }
+
         let endpoints = Endpoints::try_from(config.remotes.as_slice())
             .map_err(|e| {
                 ApiError::from(
@@ -544,6 +555,12 @@ impl MagicValidator {
         .await?;
 
         Ok(ChainlinkImpl::enabled(chainlink))
+    }
+
+    fn replication_mode_uses_disabled_chainlink(
+        replication_mode: &ReplicationMode,
+    ) -> bool {
+        matches!(replication_mode, ReplicationMode::Replica { .. })
     }
 
     fn init_ledger(
@@ -1081,4 +1098,43 @@ fn programs_to_load(programs: &[LoadableProgram]) -> Vec<(Pubkey, PathBuf)> {
         .iter()
         .map(|program| (program.id.0, program.path.clone()))
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use magicblock_config::{
+        config::validator::ReplicationConfig, types::SerdePubkey,
+    };
+
+    fn replication_config() -> ReplicationConfig {
+        ReplicationConfig {
+            url: "nats://127.0.0.1:4222".parse().unwrap(),
+            secret: "secret".to_string(),
+        }
+    }
+
+    #[test]
+    fn standalone_replication_mode_uses_enabled_chainlink() {
+        assert!(!MagicValidator::replication_mode_uses_disabled_chainlink(
+            &ReplicationMode::Standalone,
+        ));
+    }
+
+    #[test]
+    fn primary_replication_mode_uses_enabled_chainlink() {
+        assert!(!MagicValidator::replication_mode_uses_disabled_chainlink(
+            &ReplicationMode::Primary(replication_config()),
+        ));
+    }
+
+    #[test]
+    fn replica_replication_mode_uses_disabled_chainlink() {
+        assert!(MagicValidator::replication_mode_uses_disabled_chainlink(
+            &ReplicationMode::Replica {
+                config: replication_config(),
+                authority_override: SerdePubkey(Pubkey::new_unique()),
+            },
+        ));
+    }
 }
