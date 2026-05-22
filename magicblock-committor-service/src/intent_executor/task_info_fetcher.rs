@@ -15,7 +15,7 @@ use compressed_delegation_api::{
 use dlp_api::{
     delegation_metadata_seeds_from_delegated_account, state::DelegationMetadata,
 };
-use futures_util::future::try_join_all;
+use futures_util::{future::try_join_all, TryFutureExt};
 use light_client::indexer::{
     photon_indexer::PhotonIndexer, Indexer, IndexerRpcConfig, RetryConfig,
 };
@@ -127,7 +127,7 @@ impl RpcTaskInfoFetcher {
     fn photon_client(&self) -> TaskInfoFetcherResult<&PhotonIndexer> {
         self.photon_client
             .as_deref()
-            .ok_or(TaskInfoFetcherError::CompressionNotConfigured)
+            .ok_or(PhotonFetcherError::CompressionNotConfigured.into())
     }
 
     /// Fetches [`DelegationMetadata`]s with some num of retries
@@ -218,31 +218,7 @@ impl RpcTaskInfoFetcher {
                 TaskInfoFetcherError::MagicBlockRpcClientError(ref err) => {
                     warn!(error = ?err, attempt = i, "Fetch account error");
                 }
-                TaskInfoFetcherError::IndexerError(_) => {
-                    break Err(err);
-                }
-                TaskInfoFetcherError::CompressionNotConfigured => {
-                    break Err(err);
-                }
-                TaskInfoFetcherError::CompressedAccountNotFound(_) => {
-                    break Err(err);
-                }
-                TaskInfoFetcherError::EmptyCompressedAccount => {
-                    break Err(err);
-                }
-                TaskInfoFetcherError::MissingStateTrees => {
-                    break Err(err);
-                }
-                TaskInfoFetcherError::MissingAddress => {
-                    break Err(err);
-                }
-                TaskInfoFetcherError::MissingCompressedData => {
-                    break Err(err);
-                }
-                TaskInfoFetcherError::LightSdkError(_) => {
-                    break Err(err);
-                }
-                TaskInfoFetcherError::PhotonItemsMismatch(_, _) => {
+                TaskInfoFetcherError::PhotonFetcherError(_) => {
                     break Err(err);
                 }
             }
@@ -341,15 +317,17 @@ impl TaskInfoFetcher for RpcTaskInfoFetcher {
                     None,
                     Some(IndexerRpcConfig::new(min_context_slot)),
                 )
+                .map_err(PhotonFetcherError::from)
                 .await?
                 .value
                 .items;
 
             if items.len() != pubkeys.len() {
-                return Err(TaskInfoFetcherError::PhotonItemsMismatch(
+                return Err(PhotonFetcherError::PhotonItemsMismatch(
                     items.len(),
                     pubkeys.len(),
-                ));
+                )
+                .into());
             }
 
             let mut result = HashMap::with_capacity(pubkeys.len());
@@ -361,7 +339,7 @@ impl TaskInfoFetcher for RpcTaskInfoFetcher {
                             .ok()
                     })
                     .map(|record| record.last_update_nonce + 1)
-                    .ok_or(TaskInfoFetcherError::CompressedAccountNotFound(
+                    .ok_or(PhotonFetcherError::CompressedAccountNotFound(
                         *pubkey,
                     ))?;
                 result.insert(*pubkey, nonce);
@@ -403,15 +381,17 @@ impl TaskInfoFetcher for RpcTaskInfoFetcher {
                     None,
                     Some(IndexerRpcConfig::new(min_context_slot)),
                 )
+                .map_err(PhotonFetcherError::from)
                 .await?
                 .value
                 .items;
 
             if items.len() != pubkeys.len() {
-                return Err(TaskInfoFetcherError::PhotonItemsMismatch(
+                return Err(PhotonFetcherError::PhotonItemsMismatch(
                     items.len(),
                     pubkeys.len(),
-                ));
+                )
+                .into());
             }
 
             let mut result = HashMap::with_capacity(pubkeys.len());
@@ -423,7 +403,7 @@ impl TaskInfoFetcher for RpcTaskInfoFetcher {
                             .ok()
                     })
                     .map(|record| record.last_update_nonce)
-                    .ok_or(TaskInfoFetcherError::CompressedAccountNotFound(
+                    .ok_or(PhotonFetcherError::CompressedAccountNotFound(
                         *pubkey,
                     ))?;
                 result.insert(*pubkey, nonce);
@@ -479,9 +459,10 @@ impl TaskInfoFetcher for RpcTaskInfoFetcher {
                     retry_config: RetryConfig::default(),
                 }),
             )
+            .map_err(PhotonFetcherError::from)
             .await?
             .value
-            .ok_or(TaskInfoFetcherError::EmptyCompressedAccount)?;
+            .ok_or(PhotonFetcherError::EmptyCompressedAccount)?;
         let proof_result = self
             .photon_client()?
             .get_validity_proof(
@@ -492,6 +473,7 @@ impl TaskInfoFetcher for RpcTaskInfoFetcher {
                     retry_config: RetryConfig::default(),
                 }),
             )
+            .map_err(PhotonFetcherError::from)
             .await?
             .value;
 
@@ -501,32 +483,30 @@ impl TaskInfoFetcher for RpcTaskInfoFetcher {
         let mut remaining_accounts = PackedAccounts::default();
         remaining_accounts
             .add_system_accounts_v2(system_account_meta_config)
-            .map_err(|err| {
-                TaskInfoFetcherError::LightSdkError(Box::new(err))
-            })?;
+            .map_err(|err| PhotonFetcherError::LightSdkError(Box::new(err)))?;
         let packed_tree_accounts = proof_result
             .pack_tree_infos(&mut remaining_accounts)
             .state_trees
-            .ok_or(TaskInfoFetcherError::MissingStateTrees)?;
+            .ok_or(PhotonFetcherError::MissingStateTrees)?;
 
         let tree_info = packed_tree_accounts
             .packed_tree_infos
             .first()
             .copied()
-            .ok_or(TaskInfoFetcherError::MissingStateTrees)?;
+            .ok_or(PhotonFetcherError::MissingStateTrees)?;
 
         let account_meta = CompressedAccountMeta {
             tree_info,
             address: compressed_delegation_record
                 .address
-                .ok_or(TaskInfoFetcherError::MissingAddress)?,
+                .ok_or(PhotonFetcherError::MissingAddress)?,
             output_state_tree_index: packed_tree_accounts.output_tree_index,
         }
         .into();
 
         let compressed_delegation_record_bytes = compressed_delegation_record
             .data
-            .ok_or(TaskInfoFetcherError::MissingCompressedData)?
+            .ok_or(PhotonFetcherError::MissingCompressedData)?
             .data;
         CompressedDelegationRecord::try_from_slice(
             &compressed_delegation_record_bytes,
@@ -923,6 +903,12 @@ pub enum TaskInfoFetcherError {
     MinContextSlotNotReachedError(u64, Box<MagicBlockRpcClientError>),
     #[error("MagicBlockRpcClientError: {0}")]
     MagicBlockRpcClientError(Box<MagicBlockRpcClientError>),
+    #[error("Photon fetcher error: {0}")]
+    PhotonFetcherError(#[from] PhotonFetcherError),
+}
+
+#[derive(thiserror::Error, Debug)]
+pub enum PhotonFetcherError {
     #[error("Indexer error: {0}")]
     IndexerError(#[from] light_client::indexer::IndexerError),
     #[error("Compression is not configured")]
@@ -991,15 +977,7 @@ impl TaskInfoFetcherError {
             Self::InvalidAccountDataError(_) => None,
             Self::MinContextSlotNotReachedError(_, err) => err.signature(),
             Self::MagicBlockRpcClientError(err) => err.signature(),
-            Self::IndexerError(_) => None,
-            Self::CompressionNotConfigured => None,
-            Self::CompressedAccountNotFound(_) => None,
-            Self::EmptyCompressedAccount => None,
-            Self::LightSdkError(_) => None,
-            Self::MissingStateTrees => None,
-            Self::MissingAddress => None,
-            Self::MissingCompressedData => None,
-            Self::PhotonItemsMismatch(_, _) => None,
+            Self::PhotonFetcherError(_) => None,
         }
     }
 }

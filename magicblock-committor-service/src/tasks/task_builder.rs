@@ -14,8 +14,8 @@ use tracing::error;
 
 use crate::{
     intent_executor::task_info_fetcher::{
-        CompressedData, TaskInfoFetcher, TaskInfoFetcherError,
-        TaskInfoFetcherResult,
+        CompressedData, PhotonFetcherError, TaskInfoFetcher,
+        TaskInfoFetcherError, TaskInfoFetcherResult,
     },
     persist::IntentPersister,
     tasks::{
@@ -644,7 +644,7 @@ impl<'a> CommitFinalizeCompressedBuilder<'a> {
                     .remove(&account.pubkey)
                     .ok_or(
                         TaskBuilderError::CommitFinalizeCompressedTasksBuildError(
-                            TaskInfoFetcherError::MissingCompressedData,
+                            PhotonFetcherError::MissingCompressedData.into(),
                         ),
                     )??;
                 Ok(
@@ -693,7 +693,7 @@ impl<'a> CommitFinalizeAndUndelegateCompressedBuilder<'a> {
                     .remove(&account.pubkey)
                     .ok_or(
                         TaskBuilderError::CommitFinalizeCompressedTasksBuildError(
-                            TaskInfoFetcherError::MissingCompressedData,
+                            PhotonFetcherError::MissingCompressedData.into(),
                         ),
                     )??;
                 Ok(
