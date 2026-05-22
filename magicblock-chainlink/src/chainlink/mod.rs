@@ -204,6 +204,13 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
         }
     }
 
+    pub fn fetch_cloner(&self) -> Option<&Arc<FetchCloner<T, U, V, C>>> {
+        match self {
+            Self::Enabled(chainlink) => chainlink.fetch_cloner(),
+            Self::Disabled { .. } => None,
+        }
+    }
+
     pub fn is_watching(&self, pubkey: &Pubkey) -> bool {
         match self {
             Self::Enabled(chainlink) => chainlink.is_watching(pubkey),
