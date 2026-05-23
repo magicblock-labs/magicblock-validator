@@ -3091,6 +3091,112 @@ async fn test_delegated_eata_subscription_update_clones_raw_eata_and_projects_at
 }
 
 #[tokio::test]
+async fn test_ata_subscription_update_projects_eata_when_chain_slot_lags() {
+    init_logger();
+    let validator_keypair = Keypair::new();
+    let validator_pubkey = validator_keypair.pubkey();
+    let wallet_owner = random_pubkey();
+    let mint = random_pubkey();
+    const EATA_SLOT: u64 = 100;
+    const ATA_SLOT: u64 = EATA_SLOT + 3;
+    const EATA_AMOUNT: u64 = 777;
+    const BASE_ATA_AMOUNT: u64 = 999;
+
+    let eata_pubkey = derive_eata(&wallet_owner, &mint);
+    let ata_pubkey = derive_ata(&wallet_owner, &mint);
+    let eata_account =
+        create_eata_account(&wallet_owner, &mint, EATA_AMOUNT, true);
+    let mut ata_account = create_ata_account(&wallet_owner, &mint);
+    ata_account.data[64..72].copy_from_slice(&BASE_ATA_AMOUNT.to_le_bytes());
+
+    let FetcherTestCtx {
+        accounts_bank,
+        rpc_client,
+        subscription_tx,
+        ..
+    } = setup(
+        [(eata_pubkey, eata_account)],
+        EATA_SLOT,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+
+    add_delegation_record_with_slot_for(
+        &rpc_client,
+        eata_pubkey,
+        validator_pubkey,
+        EATA_PROGRAM_ID,
+        EATA_SLOT,
+    );
+
+    let rpc_to_advance = rpc_client.clone();
+    let advance_handle = tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(800)).await;
+        rpc_to_advance.set_slot(ATA_SLOT);
+    });
+
+    use crate::remote_account_provider::{
+        RemoteAccount, RemoteAccountUpdateSource,
+    };
+
+    subscription_tx
+        .send(ForwardedSubscriptionUpdate {
+            pubkey: ata_pubkey,
+            account: RemoteAccount::from_fresh_account(
+                ata_account,
+                ATA_SLOT,
+                RemoteAccountUpdateSource::Subscription,
+            ),
+        })
+        .await
+        .unwrap();
+
+    const POLL_INTERVAL: std::time::Duration = Duration::from_millis(10);
+    const TIMEOUT: std::time::Duration = Duration::from_secs(3);
+    tokio::time::timeout(TIMEOUT, async {
+        loop {
+            if let Some(account) = accounts_bank.get_account(&ata_pubkey) {
+                let amount = u64::from_le_bytes(
+                    account.data()[64..72].try_into().unwrap(),
+                );
+                assert_ne!(
+                    amount, BASE_ATA_AMOUNT,
+                    "ATA was cloned from base account before eATA projection"
+                );
+                if amount == EATA_AMOUNT {
+                    break;
+                }
+            }
+            tokio::time::sleep(POLL_INTERVAL).await;
+        }
+    })
+    .await
+    .expect("timed out waiting for projected ATA from lagging eATA refetch");
+    advance_handle.await.unwrap();
+
+    let projected_ata = accounts_bank
+        .get_account(&ata_pubkey)
+        .expect("ATA should be projected from delegated eATA");
+    assert!(projected_ata.delegated());
+    assert_eq!(projected_ata.remote_slot(), ATA_SLOT);
+
+    let ata_data = projected_ata.data();
+    assert!(
+        ata_data.len() >= 72,
+        "Projected ATA data must contain mint/owner/amount"
+    );
+    let projected_mint =
+        Pubkey::new_from_array(ata_data[0..32].try_into().unwrap());
+    let projected_owner =
+        Pubkey::new_from_array(ata_data[32..64].try_into().unwrap());
+    let projected_amount =
+        u64::from_le_bytes(ata_data[64..72].try_into().unwrap());
+    assert_eq!(projected_mint, mint);
+    assert_eq!(projected_owner, wallet_owner);
+    assert_eq!(projected_amount, EATA_AMOUNT);
+}
+
+#[tokio::test]
 async fn test_delegated_eata_subscription_update_clones_action_dependencies() {
     init_logger();
     let validator_keypair = Keypair::new();
