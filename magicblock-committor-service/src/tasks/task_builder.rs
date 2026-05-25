@@ -646,7 +646,8 @@ impl<'a> CommitFinalizeCompressedBuilder<'a> {
                         TaskBuilderError::CommitFinalizeCompressedTasksBuildError(
                             PhotonFetcherError::MissingCompressedData.into(),
                         ),
-                    )??;
+                    )?
+                    .map_err(TaskBuilderError::CommitFinalizeCompressedTasksBuildError)?;
                 Ok(
                     TaskBuilderImpl::create_commit_finalize_compressed_task(
                         nonce,
@@ -695,7 +696,8 @@ impl<'a> CommitFinalizeAndUndelegateCompressedBuilder<'a> {
                         TaskBuilderError::CommitFinalizeCompressedTasksBuildError(
                             PhotonFetcherError::MissingCompressedData.into(),
                         ),
-                    )??;
+                    )?
+                    .map_err(TaskBuilderError::CommitFinalizeCompressedTasksBuildError)?;
                 Ok(
                     TaskBuilderImpl::create_commit_finalize_compressed_task(
                         nonce,
@@ -737,7 +739,7 @@ pub enum TaskBuilderError {
     #[error("FinalizedTasksBuildError: {0}")]
     FinalizedTasksBuildError(#[source] TaskInfoFetcherError),
     #[error("CommitFinalizeCompressedTasksBuildError: {0}")]
-    CommitFinalizeCompressedTasksBuildError(#[from] TaskInfoFetcherError),
+    CommitFinalizeCompressedTasksBuildError(#[source] TaskInfoFetcherError),
 }
 
 impl TaskBuilderError {
