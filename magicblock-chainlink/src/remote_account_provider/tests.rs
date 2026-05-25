@@ -883,6 +883,117 @@ async fn test_get_accounts_until_slots_match_finding_matching_slot() {
 }
 
 #[tokio::test]
+async fn test_get_accounts_until_slots_match_refetches_mixed_sources_as_rpc_batch(
+) {
+    const CURRENT_SLOT: u64 = 42;
+    let pubkey1 = random_pubkey();
+    let pubkey2 = random_pubkey();
+    let account1 = Account {
+        lamports: 555,
+        data: vec![],
+        owner: system_program::id(),
+        executable: false,
+        rent_epoch: 0,
+    };
+    let account2 = Account {
+        lamports: 666,
+        data: vec![],
+        owner: system_program::id(),
+        executable: false,
+        rent_epoch: 0,
+    };
+    let subscription_account = Account {
+        lamports: 777,
+        ..account1.clone()
+    };
+    let rpc_client = ChainRpcClientMockBuilder::new()
+        .slot(CURRENT_SLOT)
+        .account(pubkey1, account1)
+        .account(pubkey2, account2)
+        .build();
+    let (updates_tx, updates_rx) = mpsc::channel(100);
+    let pubsub_client = ChainPubsubClientMock::new(updates_tx, updates_rx);
+    let (forward_tx, _forward_rx) = mpsc::channel(100);
+    let (subscribed_accounts, config) = create_test_lru_cache(1000);
+    let provider = Arc::new(
+        RemoteAccountProvider::new(
+            rpc_client.clone(),
+            pubsub_client.clone(),
+            forward_tx,
+            &config,
+            subscribed_accounts,
+            ChainSlot::new(Arc::<AtomicU64>::default()),
+        )
+        .await
+        .unwrap(),
+    );
+
+    rpc_client.block_fetches();
+    let task_handle = tokio::spawn({
+        let provider = provider.clone();
+        async move {
+            provider
+                .try_get_multi_until_slots_match(
+                    &[pubkey1, pubkey2],
+                    Some(MatchSlotsConfig {
+                        max_retries: 3,
+                        retry_interval_ms: 10,
+                        min_context_slot: None,
+                    }),
+                    AccountFetchOrigin::GetAccount,
+                )
+                .await
+        }
+    });
+
+    let start = tokio::time::Instant::now();
+    loop {
+        let subscriptions = pubsub_client.subscriptions_union();
+        if subscriptions.contains(&pubkey1) && subscriptions.contains(&pubkey2)
+        {
+            break;
+        }
+        assert!(start.elapsed() < Duration::from_secs(2));
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+
+    pubsub_client
+        .send_account_update(pubkey1, CURRENT_SLOT + 1, &subscription_account)
+        .await;
+    let start = tokio::time::Instant::now();
+    loop {
+        if !provider.is_pending(&pubkey1) && provider.is_pending(&pubkey2) {
+            break;
+        }
+        assert!(start.elapsed() < Duration::from_secs(2));
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    rpc_client.allow_fetches();
+
+    let remote_accounts =
+        tokio::time::timeout(Duration::from_secs(2), task_handle)
+            .await
+            .expect("slot-match task should complete")
+            .expect("slot-match task should not panic")
+            .expect("slot-match fetch should succeed");
+
+    assert_eq!(remote_accounts.len(), 2);
+    assert_eq!(
+        remote_accounts[0].source(),
+        Some(RemoteAccountUpdateSource::Fetch)
+    );
+    assert_eq!(
+        remote_accounts[1].source(),
+        Some(RemoteAccountUpdateSource::Fetch)
+    );
+    assert_eq!(remote_accounts[0].slot(), CURRENT_SLOT);
+    assert_eq!(remote_accounts[1].slot(), CURRENT_SLOT);
+    assert_eq!(remote_accounts[0].fresh_lamports(), Some(555));
+    assert_eq!(remote_accounts[1].fresh_lamports(), Some(666));
+    assert_eq!(rpc_client.multi_account_fetches(), 2);
+}
+
+#[tokio::test]
 async fn test_get_accounts_until_slots_match_not_finding_matching_slot() {
     const CURRENT_SLOT: u64 = 42;
     let pubkey1 = random_pubkey();
