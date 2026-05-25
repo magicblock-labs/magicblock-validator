@@ -19,9 +19,13 @@ use magicblock_committor_service::{
 use magicblock_core::{
     compression::derive_cda_from_pda, intent::CommittedAccount,
 };
-use magicblock_program::magic_scheduled_base_intent::{
-    CommitAndUndelegate, CommitType, MagicBaseIntent, MagicIntentBundle,
-    ScheduledIntentBundle, UndelegateType,
+use magicblock_program::{
+    init_magic_sys,
+    magic_scheduled_base_intent::{
+        CommitAndUndelegate, CommitType, MagicBaseIntent, MagicIntentBundle,
+        ScheduledIntentBundle, UndelegateType,
+    },
+    test_utils::MagicSysStub,
 };
 use magicblock_rpc_client::MagicblockRpcClient;
 use program_flexi_counter::state::FlexiCounter;
@@ -80,6 +84,11 @@ fn expect_strategies(
         *expected_strategies.entry(*strategy).or_insert(0) += count;
     }
     expected_strategies
+}
+
+fn setup_test() {
+    init_logger!();
+    init_magic_sys(Arc::new(MagicSysStub::default()));
 }
 
 // -----------------
@@ -249,7 +258,7 @@ async fn commit_single_account(
     expected_strategy: CommitStrategy,
     commit_type: CommitIntentKind,
 ) {
-    init_logger!();
+    setup_test();
 
     let validator_auth = ensure_validator_authority();
     fund_validator_auth_and_ensure_validator_fees_vault(&validator_auth).await;
@@ -358,7 +367,7 @@ async fn commit_book_order_account(
     expected_strategy: CommitStrategy,
     commit_type: CommitIntentKind,
 ) {
-    init_logger!();
+    setup_test();
 
     let validator_auth = ensure_validator_authority();
     fund_validator_auth_and_ensure_validator_fees_vault(&validator_auth).await;
@@ -445,7 +454,6 @@ async fn commit_book_order_account(
 
 #[tokio::test]
 async fn test_ix_commit_two_accounts_1kb_2kb() {
-    init_logger!();
     commit_multiple_accounts(
         &[1024, 2048],
         1,
@@ -457,7 +465,6 @@ async fn test_ix_commit_two_accounts_1kb_2kb() {
 
 #[tokio::test]
 async fn test_ix_commit_two_accounts_512kb() {
-    init_logger!();
     commit_multiple_accounts(
         &[512, 512],
         1,
@@ -469,7 +476,6 @@ async fn test_ix_commit_two_accounts_512kb() {
 
 #[tokio::test]
 async fn test_ix_commit_three_accounts_512kb() {
-    init_logger!();
     commit_multiple_accounts(
         &[512, 512, 512],
         1,
@@ -481,7 +487,6 @@ async fn test_ix_commit_three_accounts_512kb() {
 
 #[tokio::test]
 async fn test_ix_commit_six_accounts_512kb() {
-    init_logger!();
     commit_multiple_accounts(
         &[512, 512, 512, 512, 512, 512],
         1,
@@ -493,7 +498,6 @@ async fn test_ix_commit_six_accounts_512kb() {
 
 #[tokio::test]
 async fn test_ix_commit_four_accounts_1kb_2kb_5kb_10kb_single_bundle() {
-    init_logger!();
     commit_multiple_accounts(
         &[1024, 2 * 1024, 5 * 1024, 10 * 1024],
         1,
@@ -953,7 +957,7 @@ async fn commit_multiple_accounts(
     commit_type: CommitIntentKind,
     expected_strategies: ExpectedStrategies,
 ) {
-    init_logger!();
+    setup_test();
 
     let validator_auth = ensure_validator_authority();
     fund_validator_auth_and_ensure_validator_fees_vault(&validator_auth).await;
@@ -1045,7 +1049,7 @@ async fn execute_intent_bundle(
     expected_strategies: ExpectedStrategies,
     compressed: bool,
 ) {
-    init_logger!();
+    setup_test();
 
     let validator_auth = ensure_validator_authority();
     fund_validator_auth_and_ensure_validator_fees_vault(&validator_auth).await;

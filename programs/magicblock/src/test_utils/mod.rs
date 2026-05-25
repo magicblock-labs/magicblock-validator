@@ -163,6 +163,6 @@ impl MagicSys for MagicSysStub {
     }
 
     fn is_compression_enabled(&self) -> bool {
-        false
+        true
     }
 }
