@@ -323,9 +323,9 @@ where
 
                     // Update connection related metrics
                     let was_connected = {
-                        let mut connected_ids = connected_client_ids
-                            .lock()
-                            .expect("connected_client_ids lock poisoned");
+                        let mut connected_ids = Self::connected_client_ids_lock(
+                            &connected_client_ids,
+                        );
                         connected_ids.remove(&Self::client_key(&client))
                     };
                     if was_connected {
@@ -373,12 +373,19 @@ where
         Arc::as_ptr(client) as usize
     }
 
+    fn connected_client_ids_lock(
+        connected_client_ids: &Arc<Mutex<HashSet<usize>>>,
+    ) -> MutexGuard<'_, HashSet<usize>> {
+        match connected_client_ids.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        }
+    }
+
     fn connected_clients_snapshot(&self) -> Vec<Arc<T>> {
         let clients = self.clients_snapshot();
-        let connected_ids = self
-            .connected_client_ids
-            .lock()
-            .expect("connected_client_ids lock poisoned");
+        let connected_ids =
+            Self::connected_client_ids_lock(&self.connected_client_ids);
         clients
             .into_iter()
             .filter(|client| connected_ids.contains(&Self::client_key(client)))
@@ -394,9 +401,7 @@ where
                 clients.swap_remove(pos);
             }
         }
-        self.connected_client_ids
-            .lock()
-            .expect("connected_client_ids lock poisoned")
+        Self::connected_client_ids_lock(&self.connected_client_ids)
             .remove(&Self::client_key(target));
     }
 
@@ -438,9 +443,7 @@ where
             );
         }
 
-        self.connected_client_ids
-            .lock()
-            .expect("connected_client_ids lock poisoned")
+        Self::connected_client_ids_lock(&self.connected_client_ids)
             .insert(Self::client_key(&client));
 
         let connected = self
@@ -644,9 +647,8 @@ where
 
         // Update connection related metrics to signal successful reconnect
         let was_disconnected = {
-            let mut connected_ids = connected_client_ids
-                .lock()
-                .expect("connected_client_ids lock poisoned");
+            let mut connected_ids =
+                Self::connected_client_ids_lock(&connected_client_ids);
             connected_ids.insert(Self::client_key(&client))
         };
         if was_disconnected {
@@ -2012,6 +2014,27 @@ mod tests {
         assert_eq!(client1.subscribe_attempts(), client1_attempts);
         assert!(!client1.subscriptions_union().contains(&pk2));
         assert!(client2.subscriptions_union().contains(&pk2));
+
+        mux.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_connected_client_ids_lock_recovers_from_poison() {
+        init_logger();
+
+        let (tx, rx) = mpsc::channel(10_000);
+        let client = Arc::new(ChainPubsubClientMock::new(tx, rx));
+        let mux: SubMuxClient<ChainPubsubClientMock> =
+            new_submux_client(vec![client], Some(100));
+
+        let connected_client_ids = mux.connected_client_ids.clone();
+        let _ = std::thread::spawn(move || {
+            let _guard = connected_client_ids.lock().unwrap();
+            panic!("poison connected_client_ids");
+        })
+        .join();
+
+        assert_eq!(mux.connected_clients_snapshot().len(), 1);
 
         mux.shutdown().await.unwrap();
     }
