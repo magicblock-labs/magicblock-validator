@@ -1,4 +1,5 @@
 use solana_instruction::{AccountMeta, Instruction};
+use solana_program_error::ProgramError;
 use solana_pubkey::Pubkey;
 
 use crate::{DelegationProgramDiscriminator, InitDelegationRecordArgs};
@@ -18,7 +19,7 @@ pub struct InitDelegationRecordBuilder {
 }
 
 impl InitDelegationRecordBuilder {
-    pub fn instruction(&self) -> Result<Instruction, borsh::io::Error> {
+    pub fn instruction(&self) -> Result<Instruction, ProgramError> {
         Ok(Instruction {
             program_id: crate::COMPRESSED_DELEGATION_ID,
             accounts: [
@@ -32,7 +33,9 @@ impl InitDelegationRecordBuilder {
             data: [
                 &(DelegationProgramDiscriminator::InitDelegationRecord as u64)
                     .to_le_bytes(),
-                borsh::to_vec(&self.args)?.as_slice(),
+                borsh::to_vec(&self.args)
+                    .map_err(|_| ProgramError::BorshIoError)?
+                    .as_slice(),
             ]
             .concat(),
         })
