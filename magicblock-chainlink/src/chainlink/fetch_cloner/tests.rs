@@ -28,8 +28,10 @@ use crate::{
             add_invalid_delegation_record_for, delegation_record_to_vec,
         },
         eatas::{
-            create_ata_account, create_eata_account, derive_ata, derive_eata,
-            EATA_PROGRAM_ID,
+            create_ata_account, create_eata_account,
+            create_token_2022_ata_account, derive_ata,
+            derive_ata_with_token_program, derive_eata, EATA_PROGRAM_ID,
+            TOKEN_2022_PROGRAM_ID,
         },
         init_logger,
         rpc_client_mock::{ChainRpcClientMock, ChainRpcClientMockBuilder},
@@ -4281,6 +4283,78 @@ async fn test_ata_projection_releases_ata_direct_ref_after_fetch() {
         !remote_account_provider.is_watching(&eata_pubkey),
         "eATA direct/projection subscriptions must be released after projection fetch"
     );
+}
+
+#[tokio::test]
+async fn test_token_2022_ata_projection_preserves_token_program_and_layout() {
+    init_logger();
+    let validator_keypair = Keypair::new();
+    let validator_pubkey = validator_keypair.pubkey();
+    let wallet_owner = random_pubkey();
+    let mint = random_pubkey();
+    const CURRENT_SLOT: u64 = 100;
+    const AMOUNT: u64 = 777;
+
+    let ata_pubkey = derive_ata_with_token_program(
+        &wallet_owner,
+        &mint,
+        &TOKEN_2022_PROGRAM_ID,
+    );
+    let eata_pubkey = derive_eata(&wallet_owner, &mint);
+    let ata_account = create_token_2022_ata_account(&wallet_owner, &mint);
+    let eata_account = create_eata_account(&wallet_owner, &mint, AMOUNT, true);
+    let expected_len = ata_account.data.len();
+
+    let FetcherTestCtx {
+        accounts_bank,
+        fetch_cloner,
+        rpc_client,
+        ..
+    } = setup(
+        [(ata_pubkey, ata_account), (eata_pubkey, eata_account)],
+        CURRENT_SLOT,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+
+    add_delegation_record_with_slot_for(
+        &rpc_client,
+        eata_pubkey,
+        validator_pubkey,
+        EATA_PROGRAM_ID,
+        CURRENT_SLOT + 1,
+    );
+
+    let result = fetch_cloner
+        .fetch_and_clone_accounts_with_dedup(
+            &[ata_pubkey],
+            None,
+            None,
+            AccountFetchOrigin::GetAccount,
+            None,
+        )
+        .await
+        .expect("Token-2022 ATA projection fetch should not fail");
+    assert!(result.is_ok(), "Token-2022 ATA projection should succeed");
+
+    let projected_ata = accounts_bank
+        .get_account(&ata_pubkey)
+        .expect("Token-2022 ATA should be projected");
+    assert!(projected_ata.delegated());
+    assert_eq!(*projected_ata.owner(), TOKEN_2022_PROGRAM_ID);
+    assert_eq!(projected_ata.data().len(), expected_len);
+    assert_eq!(projected_ata.remote_slot(), CURRENT_SLOT);
+
+    let ata_data = projected_ata.data();
+    let projected_mint =
+        Pubkey::new_from_array(ata_data[0..32].try_into().unwrap());
+    let projected_owner =
+        Pubkey::new_from_array(ata_data[32..64].try_into().unwrap());
+    let projected_amount =
+        u64::from_le_bytes(ata_data[64..72].try_into().unwrap());
+    assert_eq!(projected_mint, mint);
+    assert_eq!(projected_owner, wallet_owner);
+    assert_eq!(projected_amount, AMOUNT);
 }
 
 #[tokio::test]

@@ -4,8 +4,9 @@ use dlp_api::state::DelegationRecord;
 use futures_util::future::join_all;
 use magicblock_accounts_db::traits::AccountsBank;
 use magicblock_core::token_programs::{
-    is_ata, try_derive_ata_address_and_bump, try_derive_eata_address_and_bump,
-    AtaInfo,
+    is_ata, try_derive_ata_address_and_bump_with_token_program,
+    try_derive_eata_address_and_bump, AtaInfo, TOKEN_2022_PROGRAM_ID,
+    TOKEN_PROGRAM_ID,
 };
 use magicblock_metrics::metrics;
 use solana_account::{AccountSharedData, ReadableAccount};
@@ -58,16 +59,22 @@ fn ata_info_from_layout(
 
     let mint = Pubkey::new_from_array(data[0..32].try_into().ok()?);
     let wallet_owner = Pubkey::new_from_array(data[32..64].try_into().ok()?);
-    let (derived_ata, _) =
-        try_derive_ata_address_and_bump(&wallet_owner, &mint)?;
-    if derived_ata != *ata_pubkey {
-        return None;
+    for token_program in [TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID] {
+        if try_derive_ata_address_and_bump_with_token_program(
+            &wallet_owner,
+            &mint,
+            &token_program,
+        )
+        .is_some_and(|(derived_ata, _)| derived_ata == *ata_pubkey)
+        {
+            return Some(AtaInfo {
+                mint,
+                owner: wallet_owner,
+            });
+        }
     }
 
-    Some(AtaInfo {
-        mint,
-        owner: wallet_owner,
-    })
+    None
 }
 
 /// Resolves ATAs with eATA projection.

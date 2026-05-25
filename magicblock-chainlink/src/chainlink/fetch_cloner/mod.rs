@@ -17,7 +17,7 @@ use magicblock_aml::RiskService;
 use magicblock_config::config::AllowedProgram;
 use magicblock_core::token_programs::{
     is_ata, try_derive_ata_address_and_bump, try_derive_eata_address_and_bump,
-    MaybeIntoAta, EATA_PROGRAM_ID,
+    EphemeralAta, MaybeIntoAta, EATA_PROGRAM_ID,
 };
 use magicblock_metrics::metrics::{self, AccountFetchOrigin};
 use parking_lot::Mutex as PlMutex;
@@ -1498,13 +1498,21 @@ where
             return None;
         }
 
-        let mut projected_ata =
-            match eata_account.maybe_into_ata(deleg_record.owner) {
-                Some(projected_ata) => projected_ata,
-                None => {
-                    return None;
-                }
-            };
+        let projected_from_base_ata = if deleg_record.owner == EATA_PROGRAM_ID {
+            EphemeralAta::try_from_account_data(eata_account.data())
+                .and_then(|eata| eata.project_into_ata_account(ata_account))
+        } else {
+            None
+        };
+
+        let mut projected_ata = match projected_from_base_ata
+            .or_else(|| eata_account.maybe_into_ata(deleg_record.owner))
+        {
+            Some(projected_ata) => projected_ata,
+            None => {
+                return None;
+            }
+        };
         let projected_slot =
             ata_account.remote_slot().max(eata_account.remote_slot());
         projected_ata.set_remote_slot(projected_slot);
