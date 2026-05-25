@@ -99,7 +99,7 @@ jobs:
             const reviewer = context.payload.review.user.login;
             const author = pr.user.login;
             const currentState = String(context.payload.review.state || "").toLowerCase();
-            const debounceSeconds = Number(process.env.REVIEW_NOTIFICATION_DEBOUNCE_SECONDS || 90);
+            const debounceSeconds = Number(process.env.REVIEW_NOTIFICATION_DEBOUNCE_SECONDS || 120);
             const submittedAt = new Date(context.payload.review.submitted_at || Date.now());
             const debounceWindowStart = new Date(submittedAt.getTime() - debounceSeconds * 1000);
             const reviews = await github.paginate(github.rest.pulls.listReviews, {
