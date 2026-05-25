@@ -111,15 +111,6 @@ impl CommittorProcessor {
         })
     }
 
-    fn requires_compression(intent_bundle: &ScheduledIntentBundle) -> bool {
-        intent_bundle
-            .get_commit_finalize_compressed_intent_accounts()
-            .is_some()
-            || intent_bundle
-                .get_commit_finalize_compressed_and_undelegate_intent_accounts()
-                .is_some()
-    }
-
     pub async fn active_lookup_tables(&self) -> Vec<Pubkey> {
         self.table_mania.active_table_addresses().await
     }
@@ -172,7 +163,9 @@ impl CommittorProcessor {
         intent_bundles: Vec<ScheduledIntentBundle>,
     ) -> CommittorServiceResult<()> {
         if !self.compression_enabled
-            && intent_bundles.iter().any(Self::requires_compression)
+            && intent_bundles
+                .iter()
+                .any(ScheduledIntentBundle::has_compressed_intent)
         {
             return Err(CommittorServiceError::CompressionNotConfigured);
         }

@@ -220,6 +220,10 @@ impl ScheduledIntentBundle {
         self.intent_bundle.has_callbacks()
     }
 
+    pub fn has_compressed_intent(&self) -> bool {
+        self.intent_bundle.has_compressed_intent()
+    }
+
     pub fn is_empty(&self) -> bool {
         self.intent_bundle.is_empty()
     }
@@ -751,6 +755,11 @@ impl MagicIntentBundle {
             .any(|el| el.callback.is_some());
 
         x || y || z
+    }
+
+    pub fn has_compressed_intent(&self) -> bool {
+        self.commit_finalize_compressed.is_some()
+            || self.commit_finalize_compressed_and_undelegate.is_some()
     }
 
     pub fn get_action_mut(&mut self, index: usize) -> Option<&mut BaseAction> {
