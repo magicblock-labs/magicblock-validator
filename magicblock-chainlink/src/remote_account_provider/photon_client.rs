@@ -12,6 +12,10 @@ use solana_pubkey::Pubkey;
 use thiserror::Error;
 use tracing::*;
 
+fn install_default_rustls_crypto_provider() {
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+}
+
 #[derive(Debug, Clone, Error)]
 pub enum PhotonClientError {
     #[error("Indexer error: {0}")]
@@ -47,6 +51,7 @@ impl Deref for PhotonClientImpl {
 
 impl PhotonClientImpl {
     pub fn new(photon_indexer: Arc<PhotonIndexer>) -> Self {
+        install_default_rustls_crypto_provider();
         Self(photon_indexer)
     }
     pub fn new_from_url(url: String) -> Self {
