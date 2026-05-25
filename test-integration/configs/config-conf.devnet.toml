@@ -29,7 +29,6 @@ block-time = "50ms"
 [[programs]]
 id = "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh"
 path = "../schedulecommit/elfs/dlp.so"
-loader = "bpf"
 
 [[programs]]
 id = "ComtrB2KEaWgXsW1dhr1xYL4Ht4Bjj3gXnnL6KMdABq"

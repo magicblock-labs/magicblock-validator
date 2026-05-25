@@ -25,14 +25,6 @@ struct Program {
     id: String,
     path: String,
     auth: Option<String>,
-    loader: Option<ProgramLoaderConfig>,
-}
-
-#[derive(Clone, Copy, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "kebab-case")]
-enum ProgramLoaderConfig {
-    Upgradeable,
-    Bpf,
 }
 
 fn parse_config(config_path: &PathBuf) -> Config {
@@ -58,10 +50,6 @@ pub fn config_to_args(
 ) -> Vec<String> {
     let config = parse_config(config_path);
     let program_loader = program_loader.unwrap_or_default();
-    let default_loader = match program_loader {
-        ProgramLoader::UpgradeableProgram => ProgramLoaderConfig::Upgradeable,
-        ProgramLoader::BpfProgram => ProgramLoaderConfig::Bpf,
-    };
 
     let listen = config
         .aperture
@@ -84,8 +72,7 @@ pub fn config_to_args(
         .expect("Failed to get parent directory of config file");
 
     for program in config.programs {
-        let loader = program.loader.unwrap_or(default_loader);
-        if loader == ProgramLoaderConfig::Upgradeable {
+        if program_loader == ProgramLoader::UpgradeableProgram {
             args.push("--upgradeable-program".to_string());
         } else {
             args.push("--bpf-program".to_string());
@@ -96,7 +83,7 @@ pub fn config_to_args(
         let resolved_full_config_path =
             config_dir.join(&program.path).canonicalize().unwrap();
         args.push(resolved_full_config_path.to_str().unwrap().to_string());
-        if loader == ProgramLoaderConfig::Upgradeable {
+        if program_loader == ProgramLoader::UpgradeableProgram {
             if let Some(auth) = program.auth {
                 args.push(auth);
             } else {
