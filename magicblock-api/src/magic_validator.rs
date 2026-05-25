@@ -796,77 +796,75 @@ impl MagicValidator {
         Ok(())
     }
 
+    fn spawn_primary_onchain_setup(&self) {
+        let rpc_url = self.config.rpc_url().to_owned();
+        let identity = self.identity;
+        let chain_operation_config = self.config.chain_operation.clone();
+        let block_time_ms = self.config.ledger.block_time_ms();
+        let base_fee = self.config.validator.basefee;
+
+        // Ephemeral mode does a non-blocking startup balance check.
+        // Intentionally fire-and-forget: the task itself exits the process on failure.
+        tokio::spawn(async move {
+            let step_start = Instant::now();
+            let result = MagicValidator::ensure_validator_funded_on_chain(
+                rpc_url.clone(),
+                identity,
+            )
+            .await;
+            log_timing(
+                "startup_background",
+                "ensure_funded_on_chain",
+                step_start,
+            );
+            if let Err(err) = result {
+                error!(error = ?err, "Validator balance check failed");
+                error!("Exiting process");
+                std::process::exit(1);
+            }
+
+            let step_start = Instant::now();
+            let result = MagicValidator::ensure_magic_fee_vault_on_chain(
+                rpc_url.clone(),
+            )
+            .await;
+            log_timing(
+                "startup_background",
+                "ensure_magic_fee_vault_on_chain",
+                step_start,
+            );
+
+            // Without magic fee vault being properly set up
+            // transactions scheduling commits will fail
+            if let Err(err) = result {
+                error!(error = ?err, "Magic fee vault setup failed");
+                error!("Exiting process");
+                std::process::exit(1);
+            }
+            if let Some(ref config) = chain_operation_config {
+                let step_start = Instant::now();
+                if let Err(error) = MagicValidator::register_validator_on_chain(
+                    &rpc_url,
+                    config,
+                    block_time_ms,
+                    base_fee,
+                )
+                .await
+                {
+                    error!(%error, "Validator registration failed, exitting");
+                    std::process::exit(1);
+                }
+                log_timing(
+                    "startup_background",
+                    "register_validator_on_chain",
+                    step_start,
+                );
+            }
+        });
+    }
+
     #[instrument(skip(self))]
     pub async fn start(&mut self) -> ApiResult<()> {
-        if matches!(self.config.lifecycle, LifecycleMode::Ephemeral)
-            && CoordinationMode::current().needs_onchain_interactions()
-        {
-            let rpc_url = self.config.rpc_url().to_owned();
-            let identity = self.identity;
-            let chain_operation_config = self.config.chain_operation.clone();
-            let block_time_ms = self.config.ledger.block_time_ms();
-            let base_fee = self.config.validator.basefee;
-            // Ephemeral mode does a non-blocking startup balance check.
-            // Intentionally fire-and-forget: the task itself exits the process on failure,
-            tokio::spawn(async move {
-                let step_start = Instant::now();
-                let result = MagicValidator::ensure_validator_funded_on_chain(
-                    rpc_url.clone(),
-                    identity,
-                )
-                .await;
-                log_timing(
-                    "startup_background",
-                    "ensure_funded_on_chain",
-                    step_start,
-                );
-                if let Err(err) = result {
-                    error!(error = ?err, "Validator balance check failed");
-                    error!("Exiting process");
-                    std::process::exit(1);
-                }
-
-                let step_start = Instant::now();
-                let result = MagicValidator::ensure_magic_fee_vault_on_chain(
-                    rpc_url.clone(),
-                )
-                .await;
-                log_timing(
-                    "startup_background",
-                    "ensure_magic_fee_vault_on_chain",
-                    step_start,
-                );
-
-                // Without magic fee vault being properly set up
-                // transactions scheduling commits will fail
-                if let Err(err) = result {
-                    error!(error = ?err, "Magic fee vault setup failed");
-                    error!("Exiting process");
-                    std::process::exit(1);
-                }
-                if let Some(ref config) = chain_operation_config {
-                    let step_start = Instant::now();
-                    if let Err(error) =
-                        MagicValidator::register_validator_on_chain(
-                            &rpc_url,
-                            config,
-                            block_time_ms,
-                            base_fee,
-                        )
-                        .await
-                    {
-                        error!(%error, "Validator registration failed, exitting");
-                        std::process::exit(1);
-                    }
-                    log_timing(
-                        "startup_background",
-                        "register_validator_on_chain",
-                        step_start,
-                    );
-                }
-            });
-        }
-
         // Ledger processing needs to happen before anything of the below
         let step_start = Instant::now();
         self.maybe_process_ledger().await?;
@@ -895,6 +893,9 @@ impl MagicValidator {
                         "Failed to send primary mode to scheduler: {e}"
                     ))
                 })?;
+            if matches!(self.config.lifecycle, LifecycleMode::Ephemeral) {
+                self.spawn_primary_onchain_setup();
+            }
         } else if let Some(replicator) = self.replication_service.take() {
             self.replication_handle.replace(replicator.spawn());
         }
