@@ -907,6 +907,25 @@ impl CommitType {
         context: &ConstructionContext<'_, '_, '_>,
     ) -> Result<(), InstructionError> {
         accounts.iter().try_for_each(|(pubkey, account)| {
+            if account.to_account_shared_data()?.confined() {
+                ic_msg!(
+                    context.invoke_context,
+                    "ScheduleCommit ERR: account {} is confined and cannot be committed",
+                    pubkey
+                );
+                return Err(InstructionError::InvalidAccountData);
+            }
+
+            // Prevent ephemeral accounts from being committed to base chain
+            if account.to_account_shared_data()?.ephemeral() {
+                ic_msg!(
+                    context.invoke_context,
+                    "ScheduleCommit ERR: account {} is ephemeral and cannot be committed to base chain",
+                    pubkey
+                );
+                return Err(InstructionError::InvalidAccountData);
+            }
+
             if !account.borrow()?.delegated() {
                 ic_msg!(
                     context.invoke_context,
