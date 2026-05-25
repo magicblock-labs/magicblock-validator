@@ -424,6 +424,10 @@ pub mod mock {
             }
         }
 
+        pub fn subscribe_attempts(&self) -> u64 {
+            self.subscribe_attempts.load(AtomicOrdering::SeqCst)
+        }
+
         pub fn is_connected_and_resubscribed(&self) -> bool {
             *self.connected.lock()
                 && self.subscribed_pubkeys.lock().len()
