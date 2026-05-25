@@ -235,8 +235,9 @@ impl TaskBuilderImpl {
             tracing::warn!(intent_id = intent_bundle.id, error = ?err, "Failed to fetch base accounts, falling back to CommitState");
             Default::default()
         });
-        let compressed_data =
-            compressed_data.map_err(TaskBuilderError::CommitTasksBuildError)?;
+        let compressed_data = compressed_data.map_err(
+            TaskBuilderError::CommitFinalizeCompressedTasksBuildError,
+        )?;
 
         // Persist commit ids for commitees
         commit_nonces
