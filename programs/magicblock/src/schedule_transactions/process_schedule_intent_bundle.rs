@@ -34,10 +34,9 @@ pub(crate) fn process_schedule_intent_bundle(
     args: MagicIntentBundleArgs,
     secure: bool,
 ) -> Result<(), InstructionError> {
-    if !is_compression_enabled()
-        && (args.commit_finalize_compressed.is_some()
-            || args.commit_finalize_compressed_and_undelegate.is_some())
-    {
+    let contains_compressed_commits = args.commit_finalize_compressed.is_some()
+        || args.commit_finalize_compressed_and_undelegate.is_some();
+    if !is_compression_enabled() && contains_compressed_commits {
         ic_msg!(
             invoke_context,
             "ScheduleIntentBundle: compression is not enabled"
@@ -45,27 +44,40 @@ pub(crate) fn process_schedule_intent_bundle(
         return Err(InstructionError::InvalidInstructionData);
     }
 
-    // User may be trying to do compressed commits for uncompressed accounts.
-    let mut compressed_account_indices = Vec::<u8>::new();
-    if let Some(ref args_cau) = args.commit_finalize_compressed_and_undelegate {
-        compressed_account_indices
-            .extend(args_cau.committed_accounts_indices());
-    }
-    if let Some(ref args_cc) = args.commit_finalize_compressed {
-        compressed_account_indices.extend(args_cc.committed_accounts_indices());
-    }
-    if !compressed_account_indices.is_empty() {
-        for idx in compressed_account_indices {
-            let account = get_instruction_account_with_idx(
-                invoke_context.transaction_context,
-                idx as u16,
-            )?;
-            if !account.borrow()?.compressed() {
-                ic_msg!(
+    if contains_compressed_commits {
+        let mut compressed_account_indices = Vec::<u8>::new();
+        if let Some(ref args_cau) =
+            args.commit_finalize_compressed_and_undelegate
+        {
+            compressed_account_indices
+                .extend(args_cau.committed_accounts_indices());
+        }
+        if let Some(ref args_cc) = args.commit_finalize_compressed {
+            compressed_account_indices
+                .extend(args_cc.committed_accounts_indices());
+        }
+        if !compressed_account_indices.is_empty() {
+            for idx in compressed_account_indices {
+                let account = get_instruction_account_with_idx(
+                    invoke_context.transaction_context,
+                    idx as u16,
+                )?;
+                let account = account.borrow()?;
+                if !account.compressed() {
+                    ic_msg!(
                     invoke_context,
                     "ScheduleIntentBundle: compressed commits are not supported for uncompressed accounts"
                 );
-                return Err(InstructionError::InvalidInstructionData);
+                    return Err(InstructionError::InvalidInstructionData);
+                }
+
+                if account.lamports() != 0 {
+                    ic_msg!(
+                        invoke_context,
+                        "ScheduleIntentBundle: compressed commits are not supported for accounts with non-zero lamports"
+                    );
+                    return Err(InstructionError::InvalidInstructionData);
+                }
             }
         }
     }
