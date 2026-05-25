@@ -1,14 +1,13 @@
 use std::sync::Arc;
 
-use magicblock_core::traits::PhotonClient;
 use solana_pubkey::Pubkey;
 use tracing::*;
 
 use crate::{
     chainlink::errors::{ChainlinkError, ChainlinkResult},
     remote_account_provider::{
-        ChainPubsubClient, ChainRpcClient, RemoteAccountProvider,
-        SubscriptionReason,
+        photon_client::PhotonClient, ChainPubsubClient, ChainRpcClient,
+        RemoteAccountProvider, SubscriptionReason,
     },
 };
 

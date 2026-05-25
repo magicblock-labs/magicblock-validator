@@ -1,5 +1,4 @@
 use magicblock_accounts_db::traits::AccountsBank;
-use magicblock_core::traits::PhotonClient;
 use magicblock_metrics::metrics::AccountFetchOrigin;
 use solana_account::{AccountSharedData, ReadableAccount};
 use solana_pubkey::Pubkey;
@@ -9,6 +8,7 @@ use super::{subscription::release_program_data_subs, FetchCloner};
 use crate::{
     cloner::Cloner,
     remote_account_provider::{
+        photon_client::PhotonClient,
         program_account::{
             get_loaderv3_get_program_data_address, ProgramAccountResolver,
             LOADER_V1, LOADER_V3,

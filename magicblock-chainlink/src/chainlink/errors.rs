@@ -50,7 +50,10 @@ pub enum ChainlinkError {
     MissingDelegationActionAccounts(Vec<Pubkey>),
 
     #[error("Photon client error: {0}")]
-    PhotonClientError(#[from] magicblock_core::traits::PhotonClientError),
+    PhotonClientError(
+        #[from]
+        crate::remote_account_provider::photon_client::PhotonClientError,
+    ),
 
     #[error("timeout waiting for pending request for {0}")]
     PendingRequestTimeout(Pubkey),

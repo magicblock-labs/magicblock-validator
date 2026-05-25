@@ -12,6 +12,7 @@ use magicblock_chainlink::{
     remote_account_provider::{
         chain_pubsub_client::{mock::ChainPubsubClientMock, ChainPubsubClient},
         config::RemoteAccountProviderConfig,
+        photon_client::PhotonClient,
         RemoteAccountProvider,
     },
     testing::{
@@ -25,7 +26,6 @@ use magicblock_chainlink::{
     AccountFetchOrigin, Chainlink,
 };
 use magicblock_config::config::{ChainLinkConfig, LifecycleMode};
-use magicblock_core::traits::PhotonClient;
 use solana_account::{Account, AccountSharedData};
 use solana_keypair::Keypair;
 use solana_program::{clock::Slot, sysvar::clock};

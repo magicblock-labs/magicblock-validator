@@ -3,10 +3,7 @@ use dlp_api::{
     pda::delegation_record_pda_from_delegated_account, state::DelegationRecord,
 };
 use magicblock_accounts_db::traits::AccountsBank;
-use magicblock_core::{
-    token_programs::{derive_eata, EATA_PROGRAM_ID},
-    traits::PhotonClient,
-};
+use magicblock_core::token_programs::{derive_eata, EATA_PROGRAM_ID};
 use magicblock_metrics::metrics;
 use solana_account::ReadableAccount;
 use solana_keypair::Keypair;
@@ -23,8 +20,8 @@ use crate::{
     chainlink::errors::{ChainlinkError, ChainlinkResult},
     cloner::{Cloner, DelegationActions},
     remote_account_provider::{
-        ChainPubsubClient, ChainRpcClient, MatchSlotsConfig,
-        ResolvedAccountSharedData, SubscriptionReason,
+        photon_client::PhotonClient, ChainPubsubClient, ChainRpcClient,
+        MatchSlotsConfig, ResolvedAccountSharedData, SubscriptionReason,
     },
 };
 

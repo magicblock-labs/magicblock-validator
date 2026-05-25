@@ -736,7 +736,7 @@ fn process_schedule_commit_compressed(
         magic_program.clone(),
     )
     .magic_fee_vault(magic_fee_vault.clone())
-    .commit(&[counter.clone()])
+    .commit(core::slice::from_ref(counter))
     .compressed()
     .build_and_invoke()?;
 

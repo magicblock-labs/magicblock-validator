@@ -2,7 +2,7 @@ use std::{collections::HashSet, sync::atomic::Ordering};
 
 use dlp_api::pda::delegation_record_pda_from_delegated_account;
 use magicblock_accounts_db::traits::AccountsBank;
-use magicblock_core::{token_programs::is_ata, traits::PhotonClient};
+use magicblock_core::token_programs::is_ata;
 use magicblock_metrics::metrics::AccountFetchOrigin;
 use solana_account::{AccountSharedData, ReadableAccount};
 use solana_pubkey::Pubkey;
@@ -23,6 +23,7 @@ use crate::{
         errors::ClonerResult, AccountCloneRequest, Cloner, DelegationActions,
     },
     remote_account_provider::{
+        photon_client::PhotonClient,
         program_account::{
             get_loaderv3_get_program_data_address, ProgramAccountResolver,
             LOADER_V3,

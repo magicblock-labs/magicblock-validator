@@ -5474,7 +5474,6 @@ dependencies = [
 name = "magicblock-core"
 version = "0.11.1"
 dependencies = [
- "async-trait",
  "bincode",
  "bytes",
  "compressed-delegation-client",
@@ -5497,7 +5496,6 @@ dependencies = [
  "solana-transaction-status-client-types 3.1.12",
  "spl-token-2022-interface 2.1.0",
  "spl-token-interface",
- "thiserror 2.0.18",
  "tokio",
  "tracing",
  "tracing-log",

@@ -1,14 +1,11 @@
 use std::{collections::HashMap, fmt};
 
-use async_trait::async_trait;
-use solana_account::Account;
 use solana_clock::Clock;
 use solana_hash::Hash;
 use solana_program::instruction::InstructionError;
 use solana_pubkey::Pubkey;
 use solana_signature::Signature;
 use solana_transaction_error::TransactionError;
-use thiserror::Error;
 
 use crate::{
     intent::{BaseActionCallback, CommittedAccount},
@@ -108,26 +105,3 @@ impl std::error::Error for ActionError {
 }
 
 pub type ActionResult = Result<(), ActionError>;
-
-#[derive(Debug, Clone, Error)]
-pub enum PhotonClientError {
-    #[error("Indexer error: {0}")]
-    IndexerError(#[from] light_client::indexer::IndexerError),
-}
-
-pub type PhotonClientResult<T> = Result<T, PhotonClientError>;
-
-#[async_trait]
-pub trait PhotonClient: Send + Sync + Clone + 'static {
-    async fn get_account(
-        &self,
-        pubkey: &Pubkey,
-        min_context_slot: Option<Slot>,
-    ) -> PhotonClientResult<Option<(Account, Slot)>>;
-
-    async fn get_multiple_accounts(
-        &self,
-        pubkeys: &[Pubkey],
-        min_context_slot: Option<Slot>,
-    ) -> PhotonClientResult<(Vec<Option<Account>>, Slot)>;
-}

@@ -5,14 +5,35 @@ use light_client::indexer::{
     photon_indexer::PhotonIndexer, CompressedAccount, Context, Indexer,
     IndexerRpcConfig, Response,
 };
-use magicblock_core::{
-    compression::derive_cda_from_pda,
-    traits::{PhotonClient, PhotonClientResult},
-};
+use magicblock_core::compression::derive_cda_from_pda;
 use solana_account::Account;
 use solana_clock::Slot;
 use solana_pubkey::Pubkey;
+use thiserror::Error;
 use tracing::*;
+
+#[derive(Debug, Clone, Error)]
+pub enum PhotonClientError {
+    #[error("Indexer error: {0}")]
+    IndexerError(#[from] light_client::indexer::IndexerError),
+}
+
+pub type PhotonClientResult<T> = Result<T, PhotonClientError>;
+
+#[async_trait]
+pub trait PhotonClient: Send + Sync + Clone + 'static {
+    async fn get_account(
+        &self,
+        pubkey: &Pubkey,
+        min_context_slot: Option<Slot>,
+    ) -> PhotonClientResult<Option<(Account, Slot)>>;
+
+    async fn get_multiple_accounts(
+        &self,
+        pubkeys: &[Pubkey],
+        min_context_slot: Option<Slot>,
+    ) -> PhotonClientResult<(Vec<Option<Account>>, Slot)>;
+}
 
 #[derive(Clone)]
 pub struct PhotonClientImpl(Arc<PhotonIndexer>);

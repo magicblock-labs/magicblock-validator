@@ -1,7 +1,6 @@
 use borsh::BorshDeserialize;
 use compressed_delegation_client::CompressedDelegationRecord;
 use magicblock_accounts_db::traits::AccountsBank;
-use magicblock_core::traits::PhotonClient;
 use solana_account::{AccountSharedData, ReadableAccount};
 use solana_pubkey::Pubkey;
 use tracing::*;
@@ -9,7 +8,9 @@ use tracing::*;
 use super::FetchCloner;
 use crate::{
     cloner::{AccountCloneRequest, Cloner, DelegationActions},
-    remote_account_provider::{ChainPubsubClient, ChainRpcClient},
+    remote_account_provider::{
+        photon_client::PhotonClient, ChainPubsubClient, ChainRpcClient,
+    },
 };
 
 /// Expand a [`CompressedDelegationRecord`] from `data` into the logical owner, payload, and

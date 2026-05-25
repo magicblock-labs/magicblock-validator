@@ -3,12 +3,9 @@ use std::collections::HashSet;
 use dlp_api::state::DelegationRecord;
 use futures_util::future::join_all;
 use magicblock_accounts_db::traits::AccountsBank;
-use magicblock_core::{
-    token_programs::{
-        is_ata, try_derive_ata_address_and_bump,
-        try_derive_eata_address_and_bump, AtaInfo,
-    },
-    traits::PhotonClient,
+use magicblock_core::token_programs::{
+    is_ata, try_derive_ata_address_and_bump, try_derive_eata_address_and_bump,
+    AtaInfo,
 };
 use magicblock_metrics::metrics;
 use solana_account::{AccountSharedData, ReadableAccount};
@@ -25,8 +22,8 @@ use super::{
 use crate::{
     cloner::{AccountCloneRequest, Cloner, DelegationActions},
     remote_account_provider::{
-        ChainPubsubClient, ChainRpcClient, ResolvedAccountSharedData,
-        SubscriptionReason,
+        photon_client::PhotonClient, ChainPubsubClient, ChainRpcClient,
+        ResolvedAccountSharedData, SubscriptionReason,
     },
 };
 

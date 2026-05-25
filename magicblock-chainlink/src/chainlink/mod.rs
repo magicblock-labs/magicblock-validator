@@ -6,7 +6,6 @@ use fetch_cloner::FetchCloner;
 use magicblock_accounts_db::{traits::AccountsBank, AccountsDbResult};
 use magicblock_aml::RiskService;
 use magicblock_config::config::ChainLinkConfig;
-use magicblock_core::traits::PhotonClient;
 use magicblock_metrics::metrics::AccountFetchOrigin;
 use solana_account::{AccountSharedData, ReadableAccount};
 use solana_commitment_config::CommitmentConfig;
@@ -26,8 +25,9 @@ use crate::{
     remote_account_provider::{
         chain_pubsub_client::mock::ChainPubsubClientMock,
         chain_updates_client::ChainUpdatesClient,
-        photon_client::PhotonClientImpl, ChainPubsubClient, ChainRpcClient,
-        ChainRpcClientImpl, Endpoints, RemoteAccountProvider,
+        photon_client::{PhotonClient, PhotonClientImpl},
+        ChainPubsubClient, ChainRpcClient, ChainRpcClientImpl, Endpoints,
+        RemoteAccountProvider,
     },
     submux::SubMuxClient,
     testing::{

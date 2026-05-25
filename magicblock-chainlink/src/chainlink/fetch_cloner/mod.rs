@@ -15,12 +15,9 @@ use lru::LruCache;
 use magicblock_accounts_db::traits::AccountsBank;
 use magicblock_aml::RiskService;
 use magicblock_config::config::AllowedProgram;
-use magicblock_core::{
-    token_programs::{
-        is_ata, try_derive_ata_address_and_bump,
-        try_derive_eata_address_and_bump, MaybeIntoAta, EATA_PROGRAM_ID,
-    },
-    traits::PhotonClient,
+use magicblock_core::token_programs::{
+    is_ata, try_derive_ata_address_and_bump, try_derive_eata_address_and_bump,
+    MaybeIntoAta, EATA_PROGRAM_ID,
 };
 use magicblock_metrics::metrics::{self, AccountFetchOrigin};
 use parking_lot::Mutex as PlMutex;
@@ -82,6 +79,7 @@ use crate::{
         AccountCloneRequest, Cloner, DelegationActions,
     },
     remote_account_provider::{
+        photon_client::PhotonClient,
         program_account::get_loaderv3_get_program_data_address,
         ChainPubsubClient, ChainRpcClient, ForwardedSubscriptionUpdate,
         MatchSlotsConfig, RemoteAccount, RemoteAccountProvider,

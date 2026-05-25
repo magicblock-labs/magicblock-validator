@@ -1,14 +1,14 @@
 use std::{collections::HashMap, sync::Arc};
 
-use magicblock_core::{
-    compression::derive_cda_from_pda,
-    traits::{PhotonClient, PhotonClientResult},
-    Slot,
-};
+use magicblock_core::{compression::derive_cda_from_pda, Slot};
 use parking_lot::Mutex;
 use solana_account::Account;
 use solana_pubkey::Pubkey;
 use tonic::async_trait;
+
+use crate::remote_account_provider::photon_client::{
+    PhotonClient, PhotonClientResult,
+};
 
 #[derive(Clone, Default)]
 pub struct PhotonClientMock {

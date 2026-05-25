@@ -22,7 +22,6 @@ use futures_util::{
 };
 pub use lru_cache::AccountsLruCache;
 use magicblock_config::config::GrpcConfig;
-use magicblock_core::traits::PhotonClient;
 pub(crate) use remote_account::RemoteAccount;
 pub use remote_account::RemoteAccountUpdateSource;
 use solana_account::Account;
@@ -85,7 +84,8 @@ use crate::{
     errors::ChainlinkResult,
     remote_account_provider::{
         chain_updates_client::ChainUpdatesClient,
-        photon_client::PhotonClientImpl, pubsub_common::SubscriptionUpdate,
+        photon_client::{PhotonClient, PhotonClientImpl},
+        pubsub_common::SubscriptionUpdate,
         remote_account::FetchedRemoteAccounts,
     },
     submux::SubMuxClient,
@@ -2312,15 +2312,17 @@ fn pubkeys_str(pubkeys: &[Pubkey]) -> String {
 #[cfg(test)]
 mod test {
     use light_client::indexer::IndexerError;
-    use magicblock_core::{
-        traits::{PhotonClientError, PhotonClientResult},
-        Slot,
-    };
+    use magicblock_core::Slot;
     use solana_system_interface::program as system_program;
 
     use super::*;
     use crate::{
-        remote_account_provider::chain_pubsub_client::mock::ChainPubsubClientMock,
+        remote_account_provider::{
+            chain_pubsub_client::mock::ChainPubsubClientMock,
+            photon_client::{
+                PhotonClient, PhotonClientError, PhotonClientResult,
+            },
+        },
         testing::{
             init_logger,
             photon_client_mock::PhotonClientMock,

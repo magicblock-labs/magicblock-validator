@@ -67,8 +67,8 @@ async fn test_schedule_compressed_commit() {
 
     let (counter_pda, compressed_record_address) =
         init_and_delegate_compressed_counter(
-            &chain_client,
-            &photon_indexer,
+            chain_client,
+            photon_indexer,
             &counter_auth,
             validator_identity,
         )
@@ -79,7 +79,7 @@ async fn test_schedule_compressed_commit() {
     assert!(confirmed, "failed to delegate ephemeral fee payer");
 
     let schedule_sig = ephem_client
-        .send_and_confirm_transaction(&mut Transaction::new_signed_with_payer(
+        .send_and_confirm_transaction(&Transaction::new_signed_with_payer(
             &[create_schedule_commit_compressed_ix(
                 &counter_auth.pubkey(),
                 &validator_identity,
@@ -153,7 +153,7 @@ async fn init_and_delegate_compressed_counter(
     .await;
 
     send_chain_ixs(
-        &chain_client,
+        chain_client,
         counter_auth,
         &[
             ComputeBudgetInstruction::set_compute_unit_limit(300_000),
@@ -166,12 +166,12 @@ async fn init_and_delegate_compressed_counter(
     let delegate_ix = create_delegate_compressed_counter_ix(
         counter_auth.pubkey(),
         compressed_record_address,
-        &photon_indexer,
+        photon_indexer,
         validator_identity,
     )
     .await;
     send_chain_ixs(
-        &chain_client,
+        chain_client,
         counter_auth,
         &[
             ComputeBudgetInstruction::set_compute_unit_limit(300_000),
