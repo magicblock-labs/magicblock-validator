@@ -3,6 +3,7 @@ name: Notify PR Reviews on Slack
 env:
   SLACK_USER_ID_BY_GITHUB: >-
     {"gabrielepicco":"U05KBBGBNR2","bmuddha":"U07UA8EMWUB","thlorenz":"U07JZ8TNDCM","taco-paco":"U08EV480NBD","snawaz":"U09F31XPU9H","lucacillario":"U08P8EL2SUU","crypto-vincent":"U08NN43TV6Y","kuldotha":"U087F2UMJC9","sporicle":"U08UP615N9X","dodecahedr0x":"U08LDC1L81Z","jonasxchen":"U08L7DK6UAJ"}
+  REVIEW_NOTIFICATION_DEBOUNCE_SECONDS: 120
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}-${{ github.event.review.id || github.event.requested_reviewer.login || github.event.requested_team.slug || github.run_id }}
@@ -71,8 +72,14 @@ jobs:
 
   notify-review:
     if: github.event_name == 'pull_request_review' && github.event.action == 'submitted'
+    concurrency:
+      group: ${{ github.workflow }}-review-${{ github.event.pull_request.number }}-${{ github.event.review.user.login }}
+      cancel-in-progress: true
     runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
+      - name: Wait for additional review events
+        run: sleep "$REVIEW_NOTIFICATION_DEBOUNCE_SECONDS"
+
       - name: Build Slack review message
         id: message
         uses: actions/github-script@v7
@@ -91,13 +98,35 @@ jobs:
             const pr = context.payload.pull_request;
             const reviewer = context.payload.review.user.login;
             const author = pr.user.login;
-            const states = {
-              approved: "approved",
-              changes_requested: "changes requested",
-              commented: "commented",
+            const currentState = String(context.payload.review.state || "").toLowerCase();
+            const debounceSeconds = Number(process.env.REVIEW_NOTIFICATION_DEBOUNCE_SECONDS || 90);
+            const submittedAt = new Date(context.payload.review.submitted_at || Date.now());
+            const debounceWindowStart = new Date(submittedAt.getTime() - debounceSeconds * 1000);
+            const reviews = await github.paginate(github.rest.pulls.listReviews, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: pr.number,
+              per_page: 100,
+            });
+            const aggregatedCount = reviews.filter((review) => {
+              if (review.user?.login !== reviewer || !review.submitted_at) {
+                return false;
+              }
+
+              const reviewSubmittedAt = new Date(review.submitted_at);
+              return String(review.state || "").toLowerCase() === currentState
+                && reviewSubmittedAt >= debounceWindowStart
+                && reviewSubmittedAt <= submittedAt;
+            }).length;
+            const prLink = `<${pr.html_url}|PR #${pr.number}: ${escapeMrkdwn(pr.title)}>`;
+            const commentCount = Math.max(aggregatedCount, 1);
+            const actions = {
+              approved: `approved ${prLink}`,
+              changes_requested: `requested changes for ${prLink}`,
+              commented: `sent ${commentCount} ${commentCount === 1 ? "comment" : "comments"} for ${prLink}`,
             };
-            const state = states[context.payload.review.state] || context.payload.review.state || "submitted";
-            const text = `📝 ${mention(author)} *${escapeMrkdwn(reviewer)}* submitted a *${escapeMrkdwn(state)}* review for PR #${pr.number}: <${pr.html_url}|${escapeMrkdwn(pr.title)}>.`;
+            const action = actions[currentState] || `submitted a review for ${prLink}`;
+            const text = `📝 ${mention(author)} *${escapeMrkdwn(reviewer)}* ${action}.`;
 
             core.setOutput("text", text);
 
