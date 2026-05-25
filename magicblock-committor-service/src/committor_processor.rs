@@ -18,7 +18,7 @@ use tracing::{error, instrument};
 
 use crate::{
     config::ChainConfig,
-    error::{CommittorServiceError, CommittorServiceResult},
+    error::CommittorServiceResult,
     intent_execution_manager::{
         db::DummyDB, BroadcastedIntentExecutionResult, IntentExecutionManager,
     },
@@ -42,7 +42,7 @@ pub(crate) struct CommittorProcessor {
     persister: IntentPersisterImpl,
     commits_scheduler: IntentExecutionManager<DummyDB>,
     task_info_fetcher: Arc<CacheTaskInfoFetcher<RpcTaskInfoFetcher>>,
-    compression_enabled: bool,
+    is_compression_enabled: bool,
 }
 
 impl CommittorProcessor {
@@ -66,7 +66,7 @@ impl CommittorProcessor {
             .photon_uri
             .as_ref()
             .map(|uri| Arc::new(PhotonIndexer::new(uri.to_string())));
-        let compression_enabled = photon_client.is_some();
+        let is_compression_enabled = photon_client.is_some();
 
         // Create TableMania
         let gc_config = GarbageCollectorConfig::default();
@@ -107,7 +107,7 @@ impl CommittorProcessor {
             commits_scheduler,
             persister,
             task_info_fetcher,
-            compression_enabled,
+            is_compression_enabled,
         })
     }
 
@@ -162,15 +162,20 @@ impl CommittorProcessor {
         &self,
         intent_bundles: Vec<ScheduledIntentBundle>,
     ) -> CommittorServiceResult<()> {
-        if !self.compression_enabled
-            && intent_bundles
-                .iter()
-                .any(ScheduledIntentBundle::has_compressed_intent)
-        {
-            return Err(CommittorServiceError::CompressionNotConfigured);
+        let (invalid_bundles, valid_bundles): (Vec<_>, Vec<_>) =
+            intent_bundles.into_iter().partition(|bundle| {
+                !self.is_compression_enabled && bundle.has_compressed_intent()
+            });
+        if !invalid_bundles.is_empty() {
+            for bundle in invalid_bundles {
+                error!(
+                    bundle_id = bundle.id,
+                    "Intent bundle contains compressed intent but compression is not enabled"
+                );
+            }
         }
 
-        if let Err(err) = self.persister.start_base_intents(&intent_bundles) {
+        if let Err(err) = self.persister.start_base_intents(&valid_bundles) {
             // We will still try to perform the commits, but the fact that we cannot
             // persist the intent is very serious and we should probably restart the
             // valiator
@@ -178,7 +183,7 @@ impl CommittorProcessor {
         };
 
         self.commits_scheduler
-            .schedule(intent_bundles)
+            .schedule(valid_bundles)
             .await
             .inspect_err(|err| {
                 error!(error = ?err, "Failed to schedule intent");
