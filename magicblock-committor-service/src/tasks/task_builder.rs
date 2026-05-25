@@ -125,19 +125,21 @@ impl TaskBuilderImpl {
             .map(|(account, _)| account.pubkey)
             .collect::<Vec<_>>();
 
-        let regular_nonces = task_info_fetcher
-            .fetch_next_commit_nonces(&regular_pubkeys, false, min_context_slot)
-            .await?;
-        let compressed_nonces = task_info_fetcher
-            .fetch_next_commit_nonces(
+        let (regular_nonces, compressed_nonces) = tokio::join!(
+            task_info_fetcher.fetch_next_commit_nonces(
+                &regular_pubkeys,
+                false,
+                min_context_slot
+            ),
+            task_info_fetcher.fetch_next_commit_nonces(
                 &compressed_pubkeys,
                 true,
                 min_context_slot,
             )
-            .await?;
-        Ok(regular_nonces
+        );
+        Ok(regular_nonces?
             .into_iter()
-            .chain(compressed_nonces.into_iter())
+            .chain(compressed_nonces?.into_iter())
             .collect::<HashMap<Pubkey, u64>>())
     }
 

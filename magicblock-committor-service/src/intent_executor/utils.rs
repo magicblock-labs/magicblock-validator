@@ -113,21 +113,26 @@ pub(in crate::intent_executor) async fn handle_commit_id_error<
     // We re-fetch them to fix out of sync tasks
     task_info_fetcher.reset(ResetType::Specific(committed_pubkeys));
     let commit_ids = {
-        let regular_nonces = task_info_fetcher
-            .fetch_next_commit_nonces(&regular_pubkeys, false, min_context_slot)
-            .await
-            .map_err(TaskBuilderError::CommitTasksBuildError)?;
-        let compressed_nonces = task_info_fetcher
-            .fetch_next_commit_nonces(
+        let (regular_nonces, compressed_nonces) = tokio::join!(
+            task_info_fetcher.fetch_next_commit_nonces(
+                &regular_pubkeys,
+                false,
+                min_context_slot
+            ),
+            task_info_fetcher.fetch_next_commit_nonces(
                 &compressed_pubkeys,
                 true,
                 min_context_slot,
             )
-            .await
-            .map_err(TaskBuilderError::CommitTasksBuildError)?;
+        );
         regular_nonces
+            .map_err(TaskBuilderError::CommitTasksBuildError)?
             .into_iter()
-            .chain(compressed_nonces.into_iter())
+            .chain(
+                compressed_nonces
+                    .map_err(TaskBuilderError::CommitFinalizeCompressedTasksBuildError)?
+                    .into_iter(),
+            )
             .collect::<HashMap<Pubkey, u64>>()
     };
 
