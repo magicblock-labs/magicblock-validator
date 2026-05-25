@@ -15,7 +15,10 @@ use ephemeral_rollups_sdk::{
     cpi::{
         delegate_account, undelegate_account, DelegateAccounts, DelegateConfig,
     },
-    ephem::{commit_accounts, commit_and_undelegate_accounts},
+    ephem::{
+        commit_accounts, commit_and_undelegate_accounts, FoldableIntentBuilder,
+        MagicIntentBundleBuilder,
+    },
 };
 use magicblock_magic_program_api::{
     args::ScheduleTaskArgs, instruction::MagicBlockInstruction,
@@ -709,7 +712,9 @@ fn process_schedule_commit_compressed(
 ) -> ProgramResult {
     msg!("ScheduleCommitCompressed");
 
-    let [payer, counter, magic_context, magic_program] = accounts else {
+    let [payer, counter, magic_context, magic_program, magic_fee_vault] =
+        accounts
+    else {
         return Err(ProgramError::NotEnoughAccountKeys);
     };
 
@@ -725,31 +730,15 @@ fn process_schedule_commit_compressed(
         format!("Invalid counter PDA {}, should be {}", counter.key, pda)
     })?;
 
-    let instruction_data = MagicBlockInstruction::ScheduleCommitAndUndelegate
-        .try_to_vec()
-        .map_err(|_| ProgramError::BorshIoError)?;
-
-    let account_metas = vec![
-        AccountMeta::new(*payer.key, true),
-        AccountMeta::new(*magic_context.key, false),
-        AccountMeta::new(*counter.key, false),
-        AccountMeta::new_readonly(*magic_program.key, false),
-    ];
-
-    let account_refs = vec![
+    MagicIntentBundleBuilder::new(
         payer.clone(),
         magic_context.clone(),
-        counter.clone(),
         magic_program.clone(),
-    ];
-
-    let ix = Instruction {
-        program_id: *magic_program.key,
-        data: instruction_data,
-        accounts: account_metas,
-    };
-
-    invoke(&ix, &account_refs)?;
+    )
+    .magic_fee_vault(magic_fee_vault.clone())
+    .commit(&[counter.clone()])
+    .compressed()
+    .build_and_invoke()?;
 
     Ok(())
 }

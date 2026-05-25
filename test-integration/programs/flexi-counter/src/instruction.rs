@@ -776,14 +776,21 @@ pub fn create_delegate_compressed_ix(
     )
 }
 
-pub fn create_schedule_commit_compressed_ix(payer: Pubkey) -> Instruction {
+pub fn create_schedule_commit_compressed_ix(
+    payer: &Pubkey,
+    validator: &Pubkey,
+) -> Instruction {
     let program_id = &crate::id();
-    let (pda, _) = FlexiCounter::pda(&payer);
+    let (pda, _) = FlexiCounter::pda(payer);
     let accounts = vec![
-        AccountMeta::new(payer, true),
+        AccountMeta::new(*payer, true),
         AccountMeta::new(pda, false),
         AccountMeta::new(MAGIC_CONTEXT_ID, false),
         AccountMeta::new_readonly(MAGIC_PROGRAM_ID, false),
+        AccountMeta::new(
+            dlp_api::pda::magic_fee_vault_pda_from_validator(validator),
+            false,
+        ),
     ];
     Instruction::new_with_borsh(
         *program_id,

@@ -252,7 +252,7 @@ pub(crate) fn process_schedule_commit(
 
     if let Some(fee_vault) = magic_fee_vault {
         let nonces = fetch_current_commit_nonces(&committed_accounts, false)?;
-        let fee = calculate_commit_fee(&committed_accounts, &nonces)?;
+        let fee = calculate_commit_fee(&committed_accounts, &nonces, false)?;
         charge_delegated_payer(&payer_account, &fee_vault, fee)?;
     } else if !opts.request_undelegation {
         // We validate commit nonces only for plain commits.

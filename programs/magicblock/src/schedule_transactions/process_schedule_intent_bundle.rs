@@ -11,7 +11,7 @@ use crate::{
     magic_scheduled_base_intent::{
         CommitType, ConstructionContext, ScheduledIntentBundle,
     },
-    magic_sys::fetch_current_commit_nonces,
+    magic_sys::{fetch_current_commit_nonces, COMMIT_LIMIT_ERR},
     schedule_transactions::{
         check_commit_limits, check_magic_context_id, get_clock,
         get_parent_program_id, try_get_fee_vault, MAGIC_CONTEXT_IDX, PAYER_IDX,
@@ -171,10 +171,18 @@ pub(crate) fn process_schedule_intent_bundle(
     } else if let Some(commit_accounts) =
         scheduled_intent.get_commit_intent_accounts()
     {
-        // TODO(dode): Add commit limits for compressed commits
-        // Cost for compressed commits is small (~5000 lamports)
-        // but since compressed accounts have 0 lamports, we never take fees for them
         check_commit_limits(commit_accounts, false, invoke_context)?;
+    } else if scheduled_intent
+        .get_commit_finalize_compressed_intent_accounts()
+        .is_some()
+    {
+        // Compressed accounts are free to delegate and don't have rents.
+        // Committing them must be paid for.
+        ic_msg!(
+            invoke_context,
+            "ScheduleCommit ERR: compressed accounts need to be paid for",
+        );
+        return Err(InstructionError::Custom(COMMIT_LIMIT_ERR));
     }
 
     let action_sent_signature = scheduled_intent.sent_transaction.signatures[0];

@@ -15,7 +15,7 @@ light-sdk-types = { workspace = true, features = ["v2"] }
 magicblock-magic-program-api = { workspace = true }
 serde = { workspace = true }
 solana-program = { workspace = true }
-solana-system-interface = { workspace = true }
+solana-system-interface = { workspace = true, features = ["bincode"] }
 
 [lib]
 crate-type = ["cdylib", "lib"]

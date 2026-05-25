@@ -13,6 +13,7 @@ rayon = { workspace = true }
 serde = { workspace = true }
 ureq = { workspace = true }
 url = { workspace = true }
+light-client = { workspace = true, features = ["v2"] }
 magicblock-config = { workspace = true }
 magicblock-delegation-program-api = { workspace = true, features = [
     "instruction",

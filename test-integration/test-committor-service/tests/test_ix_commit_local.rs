@@ -889,7 +889,6 @@ async fn commit_n_accounts_x_bytes<
     expected_strategies: ExpectedStrategies,
     commit_type: CommitIntentKind,
 ) {
-    init_logger!();
     let accs = (0..ACCOUNTS).map(|_| BYTES).collect::<Vec<_>>();
     commit_multiple_accounts(
         &accs,

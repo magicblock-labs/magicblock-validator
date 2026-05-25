@@ -36,6 +36,9 @@ pub const ACTUAL_COMMIT_LIMIT: u64 = 25;
 /// Fixed fee per commit.
 /// https://github.com/magicblock-labs/delegation-program/blob/main/src/consts.rs#L11
 pub const COMMIT_FEE_LAMPORTS: u64 = 100_000;
+/// Fixed fee per compressed commit.
+/// Cost = 2 * (tx cost(5k) + light protocol fee(5k)) = 20k
+pub const COMPRESSED_COMMIT_FEE_LAMPORTS: u64 = 20_000;
 /// Price per compute unit for a BaseAction executed on Solana base chain,
 /// denominated in micro-lamports per CU (mirrors Solana's priority fee model).
 pub const COMPUTE_UNIT_PRICE_MICRO_LAMPORTS: u64 = 50_000;
@@ -441,16 +444,16 @@ impl MagicIntentBundle {
     ) -> Result<u64, InstructionError> {
         let mut fee = 0;
         if let Some(ref commit) = self.commit {
-            fee += commit.calculate_fee(commit_nonces)?;
+            fee += commit.calculate_fee(commit_nonces, false)?;
         }
         if let Some(ref cau) = self.commit_and_undelegate {
-            fee += cau.calculate_fee(commit_nonces)?;
+            fee += cau.calculate_fee(commit_nonces, false)?;
         }
         if let Some(ref commit) = self.commit_finalize_compressed {
-            fee += commit.calculate_fee(commit_nonces)?;
+            fee += commit.calculate_fee(commit_nonces, true)?;
         }
         if let Some(ref cau) = self.commit_finalize_compressed_and_undelegate {
-            fee += cau.calculate_fee(commit_nonces)?;
+            fee += cau.calculate_fee(commit_nonces, true)?;
         }
         fee += calculate_actions_fee(&self.standalone_actions);
         Ok(fee)
@@ -969,9 +972,12 @@ impl CommitAndUndelegate {
     pub fn calculate_fee(
         &self,
         commit_nonces: &HashMap<Pubkey, u64>,
+        compressed: bool,
     ) -> Result<u64, InstructionError> {
         let mut fee = 0;
-        fee += self.commit_action.calculate_fee(commit_nonces)?;
+        fee += self
+            .commit_action
+            .calculate_fee(commit_nonces, compressed)?;
         fee += self.undelegate_action.calculate_fee(commit_nonces)?;
         Ok(fee)
     }
@@ -1236,17 +1242,26 @@ impl CommitType {
     pub fn calculate_fee(
         &self,
         commit_nonces: &HashMap<Pubkey, u64>,
+        compressed: bool,
     ) -> Result<u64, InstructionError> {
         let mut fee = 0;
         match self {
             CommitType::Standalone(ref committed_accounts) => {
-                fee += calculate_commit_fee(committed_accounts, commit_nonces)?;
+                fee += calculate_commit_fee(
+                    committed_accounts,
+                    commit_nonces,
+                    compressed,
+                )?;
             }
             CommitType::WithBaseActions {
                 committed_accounts,
                 base_actions,
             } => {
-                fee += calculate_commit_fee(committed_accounts, commit_nonces)?;
+                fee += calculate_commit_fee(
+                    committed_accounts,
+                    commit_nonces,
+                    compressed,
+                )?;
                 fee += calculate_actions_fee(base_actions);
             }
         }
@@ -1423,10 +1438,13 @@ pub(crate) fn validate_commit_schedule_permissions(
 pub(crate) fn calculate_commit_fee(
     accounts: &[CommittedAccount],
     commit_nonces: &HashMap<Pubkey, u64>,
+    compressed: bool,
 ) -> Result<u64, InstructionError> {
     accounts.iter().try_fold(0u64, |fee, account| {
         if let Some(nonce) = commit_nonces.get(&account.pubkey) {
-            if nonce >= &ACTUAL_COMMIT_LIMIT {
+            if compressed {
+                Ok(fee + COMPRESSED_COMMIT_FEE_LAMPORTS)
+            } else if nonce >= &ACTUAL_COMMIT_LIMIT {
                 Ok(fee + COMMIT_FEE_LAMPORTS)
             } else {
                 Ok(fee)
@@ -1490,8 +1508,9 @@ mod tests {
         // nonce is commits done so far; nonce+1 is the next commit number.
         // ACTUAL_COMMIT_LIMIT - 1 means the next commit is exactly at the limit → free.
         let nonces = HashMap::from([(pk, ACTUAL_COMMIT_LIMIT - 1)]);
-        let fee = calculate_commit_fee(&[make_committed_account(pk)], &nonces)
-            .unwrap();
+        let fee =
+            calculate_commit_fee(&[make_committed_account(pk)], &nonces, false)
+                .unwrap();
         assert_eq!(fee, 0);
     }
 
@@ -1506,6 +1525,7 @@ mod tests {
         let fee = calculate_commit_fee(
             &[make_committed_account(pk1), make_committed_account(pk2)],
             &nonces,
+            false,
         )
         .unwrap();
         assert_eq!(fee, COMMIT_FEE_LAMPORTS * 2);
@@ -1525,6 +1545,7 @@ mod tests {
                 make_committed_account(pk_above),
             ],
             &nonces,
+            false,
         )
         .unwrap();
         assert_eq!(fee, COMMIT_FEE_LAMPORTS);
@@ -1536,6 +1557,7 @@ mod tests {
         let err = calculate_commit_fee(
             &[make_committed_account(pk)],
             &HashMap::new(),
+            false,
         )
         .unwrap_err();
         assert_eq!(err, InstructionError::Custom(MISSING_COMMIT_NONCE_ERR));
