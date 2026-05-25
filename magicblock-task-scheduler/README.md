@@ -40,7 +40,6 @@ Failed task execution records and failed scheduling records older than
 
 ## Performance Considerations
 
-- Database is indexed for efficient task retrieval
-- Tasks are executed in batches to minimize overhead
-- Failed task executions are logged but don't block other tasks
-- Database operations are optimized for high-frequency access
+- Same-tick delay-queue draining; crank sends parallelize `send_transaction` (consider bounding concurrency under heavy load).
+- `Arc` for stored instructions; configurable `RpcSendTransactionConfig` for crank sends.
+- SQLite: WAL journal, `NORMAL` synchronous mode, enlarged page cache; after each crank RPC batch completes, success/failure persistence uses one transaction (`apply_crank_batch_completion`) instead of one commit per task.

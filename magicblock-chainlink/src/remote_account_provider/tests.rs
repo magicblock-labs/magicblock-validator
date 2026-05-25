@@ -1015,7 +1015,7 @@ async fn test_get_accounts_until_slots_match_not_finding_matching_slot() {
 }
 
 #[tokio::test]
-async fn test_get_accounts_until_slots_match_finding_matching_slot_but_chain_slot_smaller_than_min_context_slot(
+async fn test_get_accounts_until_slots_match_waits_when_chain_slot_smaller_than_min_context_slot(
 ) {
     const CURRENT_SLOT: u64 = 42;
     let pubkey1 = random_pubkey();
@@ -1031,7 +1031,13 @@ async fn test_get_accounts_until_slots_match_finding_matching_slot_but_chain_slo
     )
     .await;
 
-    let res = remote_account_provider
+    let rpc_to_advance = remote_account_provider.rpc_client.clone();
+    let advance_handle = tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(800)).await;
+        rpc_to_advance.set_slot(CURRENT_SLOT + 1);
+    });
+
+    let remote_accounts = remote_account_provider
         .try_get_multi_until_slots_match(
             &[pubkey1, pubkey2],
             Some(MatchSlotsConfig {
@@ -1041,20 +1047,16 @@ async fn test_get_accounts_until_slots_match_finding_matching_slot_but_chain_slo
             }),
             AccountFetchOrigin::GetAccount,
         )
-        .await;
+        .await
+        .unwrap();
 
-    debug!(result = ?res, "Result");
+    advance_handle.await.unwrap();
 
-    assert!(res.is_err());
-    assert!(matches!(
-        res.unwrap_err(),
-        RemoteAccountProviderError::MatchingSlotsNotSatisfyingMinContextSlot(
-            _pubkeys,
-            _slots,
-            slot,
-            _
-        ) if slot == CURRENT_SLOT + 1
-    ));
+    assert_eq!(remote_accounts.len(), 2);
+    assert!(remote_accounts[0].is_found());
+    assert!(remote_accounts[1].is_found());
+    assert_eq!(remote_accounts[0].slot(), CURRENT_SLOT + 1);
+    assert_eq!(remote_accounts[1].slot(), CURRENT_SLOT + 1);
 }
 
 #[tokio::test]
