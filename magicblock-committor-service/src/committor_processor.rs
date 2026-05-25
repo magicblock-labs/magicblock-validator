@@ -6,7 +6,10 @@ use std::{
 
 use light_client::indexer::photon_indexer::PhotonIndexer;
 use magicblock_core::traits::ActionsCallbackScheduler;
-use magicblock_program::magic_scheduled_base_intent::ScheduledIntentBundle;
+use magicblock_program::{
+    magic_scheduled_base_intent::ScheduledIntentBundle,
+    magic_sys::is_compression_enabled,
+};
 use magicblock_rpc_client::MagicblockRpcClient;
 use magicblock_table_mania::{GarbageCollectorConfig, TableMania};
 use solana_keypair::Keypair;
@@ -18,7 +21,7 @@ use tracing::{error, instrument};
 
 use crate::{
     config::ChainConfig,
-    error::CommittorServiceResult,
+    error::{CommittorServiceError, CommittorServiceResult},
     intent_execution_manager::{
         db::DummyDB, BroadcastedIntentExecutionResult, IntentExecutionManager,
     },
@@ -42,7 +45,6 @@ pub(crate) struct CommittorProcessor {
     persister: IntentPersisterImpl,
     commits_scheduler: IntentExecutionManager<DummyDB>,
     task_info_fetcher: Arc<CacheTaskInfoFetcher<RpcTaskInfoFetcher>>,
-    is_compression_enabled: bool,
 }
 
 impl CommittorProcessor {
@@ -66,7 +68,6 @@ impl CommittorProcessor {
             .photon_uri
             .as_ref()
             .map(|uri| Arc::new(PhotonIndexer::new(uri.to_string())));
-        let is_compression_enabled = photon_client.is_some();
 
         // Create TableMania
         let gc_config = GarbageCollectorConfig::default();
@@ -107,7 +108,6 @@ impl CommittorProcessor {
             commits_scheduler,
             persister,
             task_info_fetcher,
-            is_compression_enabled,
         })
     }
 
@@ -162,9 +162,11 @@ impl CommittorProcessor {
         &self,
         intent_bundles: Vec<ScheduledIntentBundle>,
     ) -> CommittorServiceResult<()> {
+        let is_compression_enabled = is_compression_enabled()
+            .map_err(|_| CommittorServiceError::CompressionNotConfigured)?;
         let (invalid_bundles, valid_bundles): (Vec<_>, Vec<_>) =
             intent_bundles.into_iter().partition(|bundle| {
-                !self.is_compression_enabled && bundle.has_compressed_intent()
+                !is_compression_enabled && bundle.has_compressed_intent()
             });
         if !invalid_bundles.is_empty() {
             for bundle in invalid_bundles {
