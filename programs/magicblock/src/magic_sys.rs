@@ -40,3 +40,12 @@ pub(crate) fn fetch_current_commit_nonces(
         .ok_or(InstructionError::UninitializedAccount)?
         .fetch_current_commit_nonces(commits, compressed)
 }
+
+pub fn is_compression_enabled() -> Result<bool, InstructionError> {
+    Ok(MAGIC_SYS
+        .read()
+        .expect(MAGIC_SYS_POISONED_MSG)
+        .as_ref()
+        .ok_or(InstructionError::UninitializedAccount)?
+        .is_compression_enabled())
+}

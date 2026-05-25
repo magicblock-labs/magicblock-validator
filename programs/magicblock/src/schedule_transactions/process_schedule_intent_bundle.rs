@@ -11,7 +11,9 @@ use crate::{
     magic_scheduled_base_intent::{
         CommitType, ConstructionContext, ScheduledIntentBundle,
     },
-    magic_sys::{fetch_current_commit_nonces, COMMIT_LIMIT_ERR},
+    magic_sys::{
+        fetch_current_commit_nonces, is_compression_enabled, COMMIT_LIMIT_ERR,
+    },
     schedule_transactions::{
         check_commit_limits, check_magic_context_id, get_clock,
         get_parent_program_id, try_get_fee_vault, MAGIC_CONTEXT_IDX, PAYER_IDX,
@@ -24,7 +26,6 @@ use crate::{
             get_instruction_account_with_idx, get_instruction_pubkey_with_idx,
         },
     },
-    validator::is_compression_enabled,
     MagicContext,
 };
 
@@ -36,7 +37,7 @@ pub(crate) fn process_schedule_intent_bundle(
 ) -> Result<(), InstructionError> {
     let contains_compressed_commits = args.commit_finalize_compressed.is_some()
         || args.commit_finalize_compressed_and_undelegate.is_some();
-    if !is_compression_enabled() && contains_compressed_commits {
+    if !is_compression_enabled()? && contains_compressed_commits {
         ic_msg!(
             invoke_context,
             "ScheduleIntentBundle: compression is not enabled"

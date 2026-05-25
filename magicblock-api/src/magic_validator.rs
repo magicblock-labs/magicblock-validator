@@ -226,9 +226,14 @@ impl MagicValidator {
         let committor_service =
             Self::init_committor_service(&config, ledger.latest_block())
                 .await?;
+        let is_compression_enabled = config
+            .compression
+            .as_ref()
+            .is_some_and(|compression| compression.photon_url.is_some());
         log_timing("startup", "committor_service_init", step_start);
         init_magic_sys(Arc::new(MagicSysAdapter::new(
             committor_service.clone(),
+            is_compression_enabled,
         )));
 
         let step_start = Instant::now();
@@ -330,12 +335,6 @@ impl MagicValidator {
             validator::set_validator_authority_override(pk);
         }
         let base_fee = config.validator.basefee;
-
-        let compression_enabled = config
-            .compression
-            .as_ref()
-            .is_some_and(|compression| compression.photon_url.is_some());
-        validator::set_compression_enabled(compression_enabled);
 
         let svm_env = build_svm_env(&accountsdb, latest_block.blockhash, 0);
         let feature_set = svm_env.feature_set.clone();

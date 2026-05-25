@@ -1,7 +1,4 @@
-use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    OnceLock,
-};
+use std::sync::OnceLock;
 
 use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
@@ -9,7 +6,6 @@ use solana_signer::Signer;
 
 static VALIDATOR_AUTHORITY: OnceLock<Keypair> = OnceLock::new();
 static VALIDATOR_AUTHORITY_OVERRIDE: OnceLock<Pubkey> = OnceLock::new();
-static IS_COMPRESSION_ENABLED: AtomicBool = AtomicBool::new(false);
 
 pub fn validator_authority() -> Keypair {
     VALIDATOR_AUTHORITY.wait().insecure_clone()
@@ -37,12 +33,4 @@ pub fn effective_validator_authority_id() -> Pubkey {
 
 pub fn generate_validator_authority_if_needed() {
     VALIDATOR_AUTHORITY.get_or_init(Keypair::new);
-}
-
-pub fn set_compression_enabled(enabled: bool) {
-    IS_COMPRESSION_ENABLED.store(enabled, Ordering::Relaxed);
-}
-
-pub fn is_compression_enabled() -> bool {
-    IS_COMPRESSION_ENABLED.load(Ordering::Relaxed)
 }

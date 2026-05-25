@@ -20,6 +20,8 @@ pub trait MagicSys: Sync + Send + 'static {
         commits: &[CommittedAccount],
         compressed: bool,
     ) -> Result<HashMap<Pubkey, u64>, InstructionError>;
+
+    fn is_compression_enabled(&self) -> bool;
 }
 
 /// Provides read access to the latest confirmed block's metadata.

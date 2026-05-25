@@ -161,4 +161,8 @@ impl MagicSys for MagicSysStub {
                 .collect(),
         }
     }
+
+    fn is_compression_enabled(&self) -> bool {
+        false
+    }
 }
