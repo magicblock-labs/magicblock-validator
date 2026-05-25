@@ -45,6 +45,31 @@ pub(crate) fn process_schedule_intent_bundle(
         return Err(InstructionError::InvalidInstructionData);
     }
 
+    // User may be trying to do compressed commits for uncompressed accounts.
+    let mut compressed_account_indices = Vec::<u8>::new();
+    if let Some(ref args_cau) = args.commit_finalize_compressed_and_undelegate {
+        compressed_account_indices
+            .extend(args_cau.committed_accounts_indices());
+    }
+    if let Some(ref args_cc) = args.commit_finalize_compressed {
+        compressed_account_indices.extend(args_cc.committed_accounts_indices());
+    }
+    if !compressed_account_indices.is_empty() {
+        for idx in compressed_account_indices {
+            let account = get_instruction_account_with_idx(
+                invoke_context.transaction_context,
+                idx as u16,
+            )?;
+            if !account.borrow()?.compressed() {
+                ic_msg!(
+                    invoke_context,
+                    "ScheduleIntentBundle: compressed commits are not supported for uncompressed accounts"
+                );
+                return Err(InstructionError::InvalidInstructionData);
+            }
+        }
+    }
+
     check_magic_context_id(invoke_context, MAGIC_CONTEXT_IDX)?;
 
     let parent_program_id = get_parent_program_id(invoke_context)?;
