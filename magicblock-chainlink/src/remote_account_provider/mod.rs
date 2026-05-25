@@ -980,6 +980,14 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
         }
 
         let config = config.unwrap_or_default();
+        // Capture the fetch start slot once and reuse it across retries. When a
+        // caller provides a stricter min_context_slot, the forced refetch must
+        // start from that slot rather than the provider's possibly lagging
+        // chain slot.
+        let fetch_start_slot = self
+            .chain_slot
+            .load()
+            .max(config.min_context_slot.unwrap_or_default());
         // 2. Force a re-fetch unless all the accounts are already pending which
         //    means someone else already requested a re-fetch for all of them
         let refetch = {
@@ -991,14 +999,14 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
                 trace!(
                     "Triggering re-fetch for accounts [{}] at slot {}",
                     pubkeys_str(pubkeys),
-                    self.chain_slot()
+                    fetch_start_slot
                 );
             }
             self.fetch(
                 pubkeys.to_vec(),
                 HashMap::new(),
                 None,
-                self.chain_slot(),
+                fetch_start_slot,
                 fetch_origin,
                 None,
             );
@@ -1006,10 +1014,6 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
 
         // 3. Wait for the slots to match
         const MAX_TOTAL_TIME: Duration = Duration::from_secs(10);
-        // NOTE: we capture the fetch start slot here and reuse it across retries as otherwise
-        // we never get a valid result if the RPC node we fetch from is just slightly behind and
-        // cannot serve us any data with the absolute latest min context slot
-        let fetch_start_slot = self.chain_slot.load();
         let start = std::time::Instant::now();
         let mut retries = 0;
         loop {
@@ -1943,6 +1947,15 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, P: PhotonClient>
                                     ).into());
                                  }
                             }
+                    }
+                    ErrorKind::Custom(message)
+                        if message
+                            .to_ascii_lowercase()
+                            .contains("minimum context slot") =>
+                    {
+                        retry!(
+                            "Minimum context slot {min_context_slot} not reached for {commitment:?}: {message}"
+                        );
                     }
                     _ => {
                         let err_msg = format!(
