@@ -236,8 +236,7 @@ impl AccountsStorage {
 
         // Check for overflow (Database Full).
         if end_index > capacity {
-            // Note: We don't roll back the atomic here. The space is technically "leaked"
-            // at the end of the file, but since the DB is full/unusable anyway, this is acceptable.
+            header.write_cursor.store(start_index, Ordering::Relaxed);
             return Err(AccountsDbError::Internal(format!(
                 "Database full: required {} blocks, available {}",
                 blocks_needed,

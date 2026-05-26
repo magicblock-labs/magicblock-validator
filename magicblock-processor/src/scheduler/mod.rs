@@ -379,10 +379,10 @@ impl TransactionScheduler {
         let block =
             LatestBlockInner::new(block.slot, block.hash, block.timestamp);
         self.verify_block_as_replica(&block);
-        self.accountsdb.set_slot(block.slot);
         self.ledger
             .write_block(block.clone())
             .map_err(|error| error.to_string())?;
+        self.accountsdb.set_slot(block.slot);
         self.update_sysvars(&block);
         self.notify_executors_of_block(block).await
     }
@@ -588,12 +588,13 @@ impl TransactionScheduler {
 
     /// Finalizes the block: persists to ledger and updates accountsdb slot.
     async fn finalize_block(&self, block: LatestBlockInner) {
-        self.accountsdb.set_slot(block.slot);
+        let slot = block.slot;
         if self.coordinator.is_primary() {
             let _ = self.ledger.write_block(block).inspect_err(
-                |error| error!(%error, "failed to write block to the ledger"),
+                |error| error!(%error, %slot, "failed to write block to the ledger"),
             );
         }
+        self.accountsdb.set_slot(slot);
     }
 
     /// Updates sysvars and program cache for the new slot.
