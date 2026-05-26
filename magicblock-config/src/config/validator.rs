@@ -30,10 +30,10 @@ pub struct ValidatorConfig {
 pub enum ReplicationMode {
     // Validator which doesn't participate in replication
     Standalone,
-    /// Validator which participates in replication: acting as either a primary or replicator
-    StandBy(ReplicationConfig),
-    /// Validator which participates in replication only as replicator (no takeover)
-    ReplicaOnly {
+    /// Validator which participates in replication: acting as a primary source of events
+    Primary(ReplicationConfig),
+    /// Validator which participates in replication as consumer of state transitions
+    Replica {
         #[serde(flatten)]
         config: ReplicationConfig,
         #[serde(rename = "authority-override")]
@@ -95,13 +95,13 @@ impl ReplicationMode {
     pub fn config(&self) -> Option<ReplicationConfig> {
         match self {
             Self::Standalone => None,
-            Self::StandBy(c) => Some(c.clone()),
-            Self::ReplicaOnly { config, .. } => Some(config.clone()),
+            Self::Primary(c) => Some(c.clone()),
+            Self::Replica { config, .. } => Some(config.clone()),
         }
     }
 
     pub fn authority_override(&self) -> Option<Pubkey> {
-        if let Self::ReplicaOnly {
+        if let Self::Replica {
             authority_override, ..
         } = self
         {

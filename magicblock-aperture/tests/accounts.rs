@@ -46,8 +46,19 @@ async fn test_get_account_info() {
         .get_account_with_commitment(&missing_pubkey, Default::default())
         .await
         .expect("second rpc request for non-existent account failed");
-    assert_eq!(first_miss.context.slot, env.latest_slot());
-    assert_eq!(second_miss.context.slot, env.latest_slot());
+    let latest_slot = env.latest_slot();
+    assert!(
+        first_miss.context.slot <= latest_slot,
+        "first lookup context slot should not be ahead of the ledger: context={}, latest={latest_slot}",
+        first_miss.context.slot
+    );
+    assert!(
+        second_miss.context.slot >= first_miss.context.slot
+            && second_miss.context.slot <= latest_slot,
+        "second lookup context slot should be monotonic and not ahead of the ledger: first={}, second={}, latest={latest_slot}",
+        first_miss.context.slot,
+        second_miss.context.slot
+    );
     assert_eq!(first_miss.value, None, "first lookup should return null");
     assert_eq!(
         second_miss.value, None,

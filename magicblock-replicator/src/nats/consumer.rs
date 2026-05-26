@@ -83,25 +83,4 @@ impl Consumer {
             }
         }
     }
-
-    pub(crate) async fn pending(
-        &self,
-        cancel: &CancellationToken,
-    ) -> Option<u64> {
-        loop {
-            tokio::select! {
-                result = self.inner.get_info() => {
-                    match result {
-                        Ok(i) => break Some(i.num_pending),
-                        Err(error) => {
-                            warn!(%error, "failed to query consumer info")
-                        }
-                    }
-                }
-                _ = cancel.cancelled() => {
-                    break None;
-                }
-            }
-        }
-    }
 }

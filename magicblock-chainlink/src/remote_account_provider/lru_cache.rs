@@ -9,12 +9,24 @@ use tracing::*;
 
 use crate::submux::SubscribedAccountsTracker;
 
-/// A simple wrapper around [lru::LruCache].
-/// When an account is evicted from the cache due to a new one being added,
-/// it will return that evicted account's Pubkey as well as sending it via
-/// the [Self::removed_account_rx] channel.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AddAccountOutcome {
+    AlreadyPresent,
+    Added,
+    Evicted(Pubkey),
+    NoEvictableCandidate,
+}
+
+/// A wrapper around [lru::LruCache] for live account subscriptions.
+///
+/// The LRU is bookkeeping for subscribed accounts and may transiently contain
+/// delegated or undelegating entries. Capacity eviction must skip entries that
+/// are protected by account state or subscription ownership instead of blindly
+/// using the raw [lru::LruCache] eviction result.
 pub struct AccountsLruCache {
-    /// Tracks which accounts are currently subscribed to
+    /// Tracks which accounts are currently subscribed to; entries may include
+    /// delegated or undelegating accounts until protected eviction filtering or
+    /// explicit subscription cleanup removes them.
     subscribed_accounts: Mutex<LruCache<Pubkey, ()>>,
     accounts_to_never_evict: HashSet<Pubkey>,
 }
@@ -54,38 +66,98 @@ impl AccountsLruCache {
     }
 
     pub fn add(&self, pubkey: Pubkey) -> Option<Pubkey> {
+        match self.add_with_evict_filter(pubkey, |_| true) {
+            AddAccountOutcome::Evicted(evicted) => Some(evicted),
+            AddAccountOutcome::AlreadyPresent
+            | AddAccountOutcome::Added
+            | AddAccountOutcome::NoEvictableCandidate => None,
+        }
+    }
+
+    pub fn add_with_evict_filter<F>(
+        &self,
+        pubkey: Pubkey,
+        is_evictable: F,
+    ) -> AddAccountOutcome
+    where
+        F: Fn(&Pubkey) -> bool,
+    {
         // The cloning pipeline itself depends on some accounts that should
         // never be evicted.
         // Thus we ignore them here in order to never cause a removal/unsubscribe.
         if self.accounts_to_never_evict.contains(&pubkey) {
             trace!(pubkey = %pubkey, "Account is in the never-evict set, skipping");
-            return None;
+            return AddAccountOutcome::Added;
         }
 
         let mut subs = self.subscribed_accounts.lock();
         // If the pubkey is already in the cache, we just promote it
         if subs.promote(&pubkey) {
             trace!(pubkey = %pubkey, "Account promoted");
-            return None;
+            return AddAccountOutcome::AlreadyPresent;
         }
         trace!(pubkey = %pubkey, "Adding new account");
 
-        // Otherwise we add it new and possibly deal with an eviction
-        // on the caller side
-        let evicted = subs
-            .push(pubkey, ())
-            .map(|(evicted_pubkey, _)| evicted_pubkey);
+        let Some((evicted_pubkey, _)) = subs.push(pubkey, ()) else {
+            return AddAccountOutcome::Added;
+        };
 
-        if let Some(evicted_pubkey) = evicted {
-            inc_evicted_accounts_count();
-            debug_assert_ne!(
-                evicted_pubkey, pubkey,
-                "Should not evict the same pubkey that we added"
-            );
-            trace!(evicted_pubkey = %evicted_pubkey, "Evict candidate");
+        debug_assert_ne!(
+            evicted_pubkey, pubkey,
+            "Should not evict the same pubkey that we added"
+        );
+
+        fn restore_skipped(
+            subs: &mut LruCache<Pubkey, ()>,
+            skipped: Vec<Pubkey>,
+        ) {
+            for skipped_pubkey in skipped {
+                subs.push(skipped_pubkey, ());
+            }
         }
 
-        evicted
+        fn reject_new_account(
+            subs: &mut LruCache<Pubkey, ()>,
+            skipped: Vec<Pubkey>,
+            pubkey: &Pubkey,
+        ) -> AddAccountOutcome {
+            restore_skipped(subs, skipped);
+            subs.pop(pubkey);
+            trace!(
+                pubkey = %pubkey,
+                "No evictable LRU candidate found; rejected new account"
+            );
+            AddAccountOutcome::NoEvictableCandidate
+        }
+
+        let mut skipped = Vec::new();
+        let mut candidate = evicted_pubkey;
+        loop {
+            if candidate == pubkey {
+                return reject_new_account(&mut subs, skipped, &pubkey);
+            }
+
+            if is_evictable(&candidate) {
+                restore_skipped(&mut subs, skipped);
+                inc_evicted_accounts_count();
+                trace!(evicted_pubkey = %candidate, "Evict candidate");
+                return AddAccountOutcome::Evicted(candidate);
+            }
+
+            // Skipping delegated LRU candidate during capacity eviction; for example,
+            // delegated accounts being undelegated, or delegation records kept for
+            // pending clones, are cleaned up by delegated-state processing.
+            trace!(
+                skipped_pubkey = %candidate,
+                "skipping delegated LRU candidate during capacity eviction; assuming transient direct-subscription entry, cleanup expected from delegated-state processing"
+            );
+            skipped.push(candidate);
+
+            let Some((next_candidate, ())) = subs.pop_lru() else {
+                return reject_new_account(&mut subs, skipped, &pubkey);
+            };
+            candidate = next_candidate;
+        }
     }
 
     pub fn contains(&self, pubkey: &Pubkey) -> bool {
@@ -258,6 +330,51 @@ mod tests {
 
             assert_eq!(evicted, Some(expected_evicted));
         }
+    }
+
+    #[tokio::test]
+    async fn test_lru_cache_skips_protected_candidate_and_evicts_next() {
+        let capacity = NonZeroUsize::new(3).unwrap();
+        let cache = AccountsLruCache::new(capacity);
+
+        let pubkey1 = Pubkey::new_unique();
+        let pubkey2 = Pubkey::new_unique();
+        let pubkey3 = Pubkey::new_unique();
+        let pubkey4 = Pubkey::new_unique();
+
+        cache.add(pubkey1);
+        cache.add(pubkey2);
+        cache.add(pubkey3);
+
+        let outcome = cache.add_with_evict_filter(pubkey4, |pk| *pk != pubkey1);
+
+        assert_eq!(outcome, AddAccountOutcome::Evicted(pubkey2));
+        assert!(cache.contains(&pubkey1));
+        assert!(cache.contains(&pubkey4));
+        assert!(!cache.contains(&pubkey2));
+    }
+
+    #[tokio::test]
+    async fn test_lru_cache_all_candidates_protected_rejects_new_account() {
+        let capacity = NonZeroUsize::new(2).unwrap();
+        let cache = AccountsLruCache::new(capacity);
+
+        let pubkey1 = Pubkey::new_unique();
+        let pubkey2 = Pubkey::new_unique();
+        let pubkey3 = Pubkey::new_unique();
+
+        cache.add(pubkey1);
+        cache.add(pubkey2);
+
+        let outcome = cache.add_with_evict_filter(pubkey3, |pk| {
+            assert_ne!(*pk, pubkey3, "new account must not be evicted");
+            false
+        });
+
+        assert_eq!(outcome, AddAccountOutcome::NoEvictableCandidate);
+        assert!(cache.contains(&pubkey1));
+        assert!(cache.contains(&pubkey2));
+        assert!(!cache.contains(&pubkey3));
     }
 
     #[test]

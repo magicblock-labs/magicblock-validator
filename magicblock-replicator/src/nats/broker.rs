@@ -150,7 +150,7 @@ impl Broker {
     /// Uploads a snapshot in the background.
     ///
     /// The snapshot is tagged with the current stream sequence number,
-    /// allowing standbys to resume replay from the correct position.
+    /// allowing replica to resume replay from the correct position.
     #[instrument(skip(self, file))]
     pub async fn put_snapshot(&self, slot: Slot, mut file: File) -> Result<()> {
         let store = self.ctx.get_object_store(cfg::SNAPSHOTS).await?;
