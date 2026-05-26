@@ -4,7 +4,6 @@ use std::sync::Arc;
 
 use machineid_rs::IdBuilder;
 use magicblock_accounts_db::AccountsDb;
-use magicblock_chainlink::StubbedChainlink;
 use magicblock_core::{
     link::{
         replication::{Block, Message, SuperBlock},
@@ -39,10 +38,6 @@ pub struct ReplicationContext {
     pub mode_tx: Sender<SchedulerMode>,
     /// Accounts database.
     pub accountsdb: Arc<AccountsDb>,
-    /// Mocked chainlink to reset accountsdb
-    /// TODO(bmuddha): this is a temporary hack, which will be removed
-    /// once the accounts management is moved to the accountsdb
-    pub chainlink: StubbedChainlink<AccountsDb>,
     /// Transaction ledger.
     pub ledger: Arc<Ledger>,
     /// Transaction scheduler.
@@ -61,7 +56,6 @@ impl ReplicationContext {
         mode_tx: Sender<SchedulerMode>,
         accountsdb: Arc<AccountsDb>,
         ledger: Arc<Ledger>,
-        chainlink: StubbedChainlink<AccountsDb>,
         scheduler: TransactionSchedulerHandle,
         cancel: CancellationToken,
     ) -> Result<Self> {
@@ -82,7 +76,6 @@ impl ReplicationContext {
             cancel,
             mode_tx,
             accountsdb,
-            chainlink,
             ledger,
             scheduler,
             slot,
@@ -178,9 +171,6 @@ impl ReplicationContext {
         messages: Receiver<Message>,
     ) -> Result<Primary> {
         let snapshots = self.create_snapshot_watcher()?;
-        // TODO(bmuddha): remove dependency on the chainlink
-        let _guard = self.scheduler.wait_for_idle().await;
-        self.chainlink.reset_accounts_bank()?;
         self.enter_primary_mode().await;
         Ok(Primary::new(self, producer, messages, snapshots))
     }

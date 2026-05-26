@@ -251,7 +251,6 @@ impl MagicValidator {
                     mode_tx.clone(),
                     accountsdb.clone(),
                     ledger.clone(),
-                    chainlink.stub(),
                     dispatch.transaction_scheduler.clone(),
                     messages_rx,
                     token.clone(),
