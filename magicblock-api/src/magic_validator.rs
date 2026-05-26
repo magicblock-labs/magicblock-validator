@@ -1015,6 +1015,19 @@ impl MagicValidator {
         }
         log_timing("shutdown", "ledger_truncator_join", step_start);
         let step_start = Instant::now();
+        if let Some(handle) = self.replication_handle {
+            match handle.join() {
+                Ok(Ok(())) => {}
+                Ok(Err(err)) => {
+                    error!(error = ?err, "Replication service exited with error");
+                }
+                Err(err) => {
+                    error!(panic = ?err, "Replication service thread panicked");
+                }
+            }
+        }
+        log_timing("shutdown", "replication_service_join", step_start);
+        let step_start = Instant::now();
         let _ = self.transaction_execution.join();
         log_timing("shutdown", "transaction_execution_join", step_start);
 
@@ -1035,19 +1048,6 @@ impl MagicValidator {
             error!(error = ?err, "Failed to shutdown ledger");
         }
         log_timing("shutdown", "ledger_shutdown", step_start);
-        let step_start = Instant::now();
-        if let Some(handle) = self.replication_handle {
-            match handle.join() {
-                Ok(Ok(())) => {}
-                Ok(Err(err)) => {
-                    error!(error = ?err, "Replication service exited with error");
-                }
-                Err(err) => {
-                    error!(panic = ?err, "Replication service thread panicked");
-                }
-            }
-        }
-        log_timing("shutdown", "replication_service_join", step_start);
 
         log_timing("shutdown", "stop_total", stop_start);
         info!("MagicValidator shutdown");

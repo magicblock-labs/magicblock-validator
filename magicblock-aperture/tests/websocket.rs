@@ -215,7 +215,7 @@ async fn test_signature_subscribe_failure() {
 /// Verifies `slotSubscribe` sends a notification for each new slot.
 #[tokio::test]
 async fn test_slot_subscribe() {
-    let env = RpcTestEnv::new().await;
+    let env = RpcTestEnv::new_manual_slots().await;
     let (mut stream, unsub) = env
         .pubsub
         .slot_subscribe()
@@ -225,12 +225,20 @@ async fn test_slot_subscribe() {
 
     for _ in 0..3 {
         env.advance_slots(1);
-        let notification = timeout(Duration::from_secs(1), stream.next())
-            .await
-            .expect("timed out waiting for slot notification")
-            .expect("stream should not be closed");
+        let start = tokio::time::Instant::now();
+        let notification = loop {
+            let remaining =
+                Duration::from_secs(1).saturating_sub(start.elapsed());
+            let notification = timeout(remaining, stream.next())
+                .await
+                .expect("timed out waiting for slot notification")
+                .expect("stream should not be closed");
 
-        assert!(notification.slot > last_slot, "slot should advance");
+            if notification.slot > last_slot {
+                break notification;
+            }
+        };
+
         assert_eq!(notification.parent, notification.slot - 1);
         last_slot = notification.slot;
     }

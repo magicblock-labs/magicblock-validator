@@ -600,12 +600,15 @@ impl TransactionScheduler {
     /// Finalizes the block: persists to ledger and updates accountsdb slot.
     async fn finalize_block(&self, block: LatestBlockInner) {
         let slot = block.slot;
+        let mut block_written = true;
         if self.coordinator.is_primary() {
-            let _ = self.ledger.write_block(block).inspect_err(
+            block_written = self.ledger.write_block(block).inspect_err(
                 |error| error!(%error, %slot, "failed to write block to the ledger"),
-            );
+            ).is_ok();
         }
-        self.accountsdb.set_slot(slot);
+        if block_written {
+            self.accountsdb.set_slot(slot);
+        }
     }
 
     /// Updates sysvars and program cache for the new slot.

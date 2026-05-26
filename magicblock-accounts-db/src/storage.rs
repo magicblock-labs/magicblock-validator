@@ -236,7 +236,12 @@ impl AccountsStorage {
 
         // Check for overflow (Database Full).
         if end_index > capacity {
-            header.write_cursor.store(start_index, Ordering::Relaxed);
+            let _ = header.write_cursor.compare_exchange(
+                end_index as u64,
+                start_index,
+                Ordering::Release,
+                Ordering::Acquire,
+            );
             return Err(AccountsDbError::Internal(format!(
                 "Database full: required {} blocks, available {}",
                 blocks_needed,
