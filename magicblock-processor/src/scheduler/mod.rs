@@ -327,13 +327,14 @@ impl TransactionScheduler {
         }
     }
 
-    async fn handle_superblock(&self, slot: Slot) {
+    async fn handle_superblock(&mut self, slot: Slot) {
         if !slot.is_multiple_of(self.superblock_size) {
             return;
         }
 
-        // Make sure all executors are idle (no state transitions are happening)
-        let _guard = self.coordinator.wait_for_idle().await;
+        // Wait until the scheduler has no assigned or executing work left,
+        // then freeze executor starts while snapshotting.
+        let _guard = self.pause_executors_for_snapshot().await;
         // SAFETY:
         // we have made sure that no state transitions are in progress via _guard
         let Ok(checksum) = (unsafe { self.accountsdb.take_snapshot(slot) })
@@ -343,6 +344,16 @@ impl TransactionScheduler {
         };
         let msg = Message::SuperBlock(SuperBlock { slot, checksum });
         self.send_replication(msg).await;
+    }
+
+    async fn pause_executors_for_snapshot(&mut self) -> OwnedSemaphorePermit {
+        while !self.coordinator.is_idle() {
+            if let Some(executor) = self.ready_rx.recv().await {
+                self.handle_ready_executor(executor).await;
+            }
+        }
+
+        self.coordinator.wait_for_idle().await
     }
 
     async fn handle_ready_executor(&mut self, executor: ExecutorId) {
