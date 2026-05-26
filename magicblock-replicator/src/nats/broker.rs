@@ -3,13 +3,13 @@
 use std::time::Duration;
 
 use async_nats::{
+    header::NATS_MESSAGE_ID,
     jetstream::{
         kv,
         object_store::{self, GetErrorKind, ObjectMetadata},
         stream::{self, Compression},
         Context, ContextBuilder,
     },
-    header::NATS_MESSAGE_ID,
     ConnectOptions, Event, HeaderMap, ServerAddr, Subject,
 };
 use bytes::Bytes;
@@ -122,7 +122,9 @@ impl Broker {
         let f = if let Some(msg_id) = msg_id {
             let mut headers = HeaderMap::new();
             headers.insert(NATS_MESSAGE_ID, msg_id);
-            self.ctx.publish_with_headers(subject, headers, payload).await?
+            self.ctx
+                .publish_with_headers(subject, headers, payload)
+                .await?
         } else {
             self.ctx.publish(subject, payload).await?
         };
