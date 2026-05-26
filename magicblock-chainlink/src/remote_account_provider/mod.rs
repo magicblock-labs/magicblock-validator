@@ -455,8 +455,17 @@ fn next_match_slots_retry(
     Ok(match_slots_retry_delay(config))
 }
 
+fn next_match_slots_rpc_error_retry(
+    retries: &mut u64,
+    start: std::time::Instant,
+    config: &MatchSlotsConfig,
+) -> Result<Duration, String> {
+    next_match_slots_retry(retries, start, config)
+        .map(|delay| delay.max(RPC_FETCH_RETRY_DELAY))
+}
+
 fn match_slots_retry_delay(config: &MatchSlotsConfig) -> Duration {
-    Duration::from_millis(config.retry_interval_ms).max(RPC_FETCH_RETRY_DELAY)
+    Duration::from_millis(config.retry_interval_ms)
 }
 
 impl
@@ -1005,8 +1014,11 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             {
                 Ok(remote_accounts) => remote_accounts,
                 Err(err) => {
-                    let retry =
-                        next_match_slots_retry(&mut retries, start, &config);
+                    let retry = next_match_slots_rpc_error_retry(
+                        &mut retries,
+                        start,
+                        &config,
+                    );
                     warn!(
                         pubkeys = %pubkeys_str(pubkeys),
                         min_context_slot = ?config.min_context_slot,

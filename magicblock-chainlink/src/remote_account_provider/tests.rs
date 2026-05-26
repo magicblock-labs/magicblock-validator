@@ -1114,6 +1114,17 @@ async fn test_get_accounts_until_slots_match_finding_matching_slot_but_one_accou
     assert!(!accs[1].is_found());
 }
 
+#[test]
+fn test_match_slots_retry_delay_honors_configured_interval() {
+    let config = MatchSlotsConfig {
+        max_retries: 10,
+        retry_interval_ms: 50,
+        min_context_slot: None,
+    };
+
+    assert_eq!(match_slots_retry_delay(&config), Duration::from_millis(50));
+}
+
 // -----------------
 // LRU Cache/Eviction/Removal
 // -----------------
