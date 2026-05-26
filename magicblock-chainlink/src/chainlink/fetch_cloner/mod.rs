@@ -716,13 +716,15 @@ where
         // Delegated subscription cleanup is limited to direct subscription/LRU
         // ownership here; undelegation tracking owns protected subscriptions
         // until undelegation is explicitly complete.
-        if account.delegated() {
-            if undelegation_completed_on_chain {
-                self.cleanup_undelegation_tracking_for_redelegated_account(
-                    pubkey,
-                )
-                .await;
+        if undelegation_completed_on_chain {
+            if !account.delegated() {
+                self.ensure_direct_subscription_for_completed_account(pubkey)
+                    .await;
             }
+            self.cleanup_undelegation_tracking_for_completed_account(pubkey)
+                .await;
+        }
+        if account.delegated() {
             self.cleanup_direct_subscription_for_delegated_account(pubkey)
                 .await;
         }
@@ -1063,7 +1065,24 @@ where
         }
     }
 
-    async fn cleanup_undelegation_tracking_for_redelegated_account(
+    async fn ensure_direct_subscription_for_completed_account(
+        &self,
+        pubkey: Pubkey,
+    ) {
+        if let Err(err) = self
+            .remote_account_provider
+            .ensure_subscription(&pubkey, SubscriptionReason::DirectAccount)
+            .await
+        {
+            warn!(
+                pubkey = %pubkey,
+                error = %err,
+                "Failed to retain direct subscription for completed account"
+            );
+        }
+    }
+
+    async fn cleanup_undelegation_tracking_for_completed_account(
         &self,
         pubkey: Pubkey,
     ) {
@@ -1078,7 +1097,7 @@ where
             warn!(
                 pubkey = %pubkey,
                 error = %err,
-                "Failed to clean up undelegation tracking for redelegated account"
+                "Failed to clean up undelegation tracking for completed account"
             );
         }
     }

@@ -378,7 +378,7 @@ where
             });
             if cleanup_delegated_subscription {
                 if cleanup_undelegation_tracking {
-                    this.cleanup_undelegation_tracking_for_redelegated_account(
+                    this.cleanup_undelegation_tracking_for_completed_account(
                         pubkey,
                     )
                     .await;
