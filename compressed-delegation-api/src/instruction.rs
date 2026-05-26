@@ -133,12 +133,12 @@ pub struct DelegateArgs {
     pub owner_program_id: Pubkey,
     /// Validator
     pub validator: Pubkey,
+    /// Bump
+    pub bump: u8,
     /// Account data before delegation
     pub account_data: Vec<u8>,
     /// PDA seeds
     pub pda_seeds: Vec<Vec<u8>>,
-    /// Bump
-    pub bump: u8,
 }
 
 #[repr(C)]
