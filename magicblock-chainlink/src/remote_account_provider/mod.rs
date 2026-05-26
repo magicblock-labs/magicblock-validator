@@ -1345,6 +1345,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
     async fn register_subscription(
         &self,
         pubkey: &Pubkey,
+        reason: SubscriptionReason,
     ) -> RemoteAccountProviderResult<()> {
         // 1. First realize subscription
         self.pubsub_client.subscribe(*pubkey, None).await?;
@@ -1417,6 +1418,12 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                         // Should we retry here?
                         warn!(evicted = %evicted, error = ?err, "Failed to unsubscribe from pubsub for evicted account");
                     }
+                    self.subscription_ownership
+                        .lock()
+                        .await
+                        .entry(*pubkey)
+                        .or_default()
+                        .acquire(reason);
                     return Err(err);
                 }
 
@@ -1546,7 +1553,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         }
         drop(ownership);
 
-        self.register_subscription(pubkey).await?;
+        self.register_subscription(pubkey, reason).await?;
 
         let mut ownership = self.subscription_ownership.lock().await;
         ownership.entry(*pubkey).or_default().acquire(reason);

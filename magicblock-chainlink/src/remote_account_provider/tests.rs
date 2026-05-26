@@ -1323,6 +1323,49 @@ async fn test_capacity_eviction_skips_undelegation_tracking_reason() {
 }
 
 #[tokio::test]
+async fn test_capacity_eviction_unsubscribe_failure_records_new_owner() {
+    init_logger();
+
+    let pubkey1 = Pubkey::new_unique();
+    let pubkey2 = Pubkey::new_unique();
+    let pubkeys = &[pubkey1, pubkey2];
+
+    let (provider, _, mut removed_rx) = setup_with_accounts(pubkeys, 1).await;
+
+    provider
+        .acquire_subscription(&pubkey1, SubscriptionReason::DirectAccount)
+        .await
+        .unwrap();
+    provider.pubsub_client().fail_next_unsubscriptions(1);
+
+    let err = provider
+        .acquire_subscription(&pubkey2, SubscriptionReason::DirectAccount)
+        .await
+        .unwrap_err();
+
+    assert!(matches!(
+        err,
+        RemoteAccountProviderError::AccountSubscriptionsTaskFailed(_)
+    ));
+    assert!(provider.is_watching(&pubkey2));
+    assert!(
+        provider
+            .has_subscription_reason(
+                &pubkey2,
+                SubscriptionReason::DirectAccount
+            )
+            .await
+    );
+    assert!(provider
+        .pubsub_client()
+        .subscriptions_union()
+        .contains(&pubkey2));
+
+    let removed_accounts = drain_removed_account_rx(&mut removed_rx);
+    assert!(removed_accounts.is_empty());
+}
+
+#[tokio::test]
 async fn test_capacity_eviction_all_protected_returns_error_without_unsubscribing_protected(
 ) {
     init_logger();
