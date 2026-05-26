@@ -353,6 +353,7 @@ const HELIUS_CONTEXT_SLOT_NOT_REACHED: i64 = -32603;
 const RPC_FETCH_MAX_RETRIES: u64 = 3;
 const RPC_FETCH_RETRY_DELAY: Duration = Duration::from_millis(400);
 const RPC_FETCH_TIMEOUT: Duration = Duration::from_secs(5);
+const MATCH_SLOTS_MAX_TOTAL_TIME: Duration = Duration::from_secs(10);
 pub struct RemoteAccountProvider<T: ChainRpcClient, U: ChainPubsubClient> {
     /// The RPC client to fetch accounts from chain the first time we receive
     /// a request for them
@@ -434,6 +435,28 @@ impl Default for MatchSlotsConfig {
             min_context_slot: None,
         }
     }
+}
+
+fn next_match_slots_retry(
+    retries: &mut u64,
+    start: std::time::Instant,
+    config: &MatchSlotsConfig,
+) -> Result<Duration, String> {
+    *retries += 1;
+    if *retries == config.max_retries {
+        return Err(format!("max retries {}", config.max_retries));
+    }
+    if start.elapsed() > MATCH_SLOTS_MAX_TOTAL_TIME {
+        return Err(format!(
+            "max total time of {} seconds",
+            MATCH_SLOTS_MAX_TOTAL_TIME.as_secs()
+        ));
+    }
+    Ok(match_slots_retry_delay(config))
+}
+
+fn match_slots_retry_delay(config: &MatchSlotsConfig) -> Duration {
+    Duration::from_millis(config.retry_interval_ms).max(RPC_FETCH_RETRY_DELAY)
 }
 
 impl
@@ -959,7 +982,6 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             .max(config.min_context_slot.unwrap_or_default());
         // 2. Wait for the slots to match. Once the fast path mixed slots,
         // retry with an RPC-only batch so all accounts share one response slot.
-        const MAX_TOTAL_TIME: Duration = Duration::from_secs(10);
         let start = std::time::Instant::now();
         let mut retries = 0;
         loop {
@@ -983,9 +1005,8 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             {
                 Ok(remote_accounts) => remote_accounts,
                 Err(err) => {
-                    retries += 1;
-                    let hit_max_retry_limit = retries == config.max_retries;
-                    let hit_time_limit = start.elapsed() > MAX_TOTAL_TIME;
+                    let retry =
+                        next_match_slots_retry(&mut retries, start, &config);
                     warn!(
                         pubkeys = %pubkeys_str(pubkeys),
                         min_context_slot = ?config.min_context_slot,
@@ -994,15 +1015,13 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                         error = %err,
                         "RPC-only account fetch failed while resolving accounts to compatible slots"
                     );
-                    if hit_max_retry_limit || hit_time_limit {
-                        return Err(err);
+                    match retry {
+                        Ok(retry_delay) => {
+                            tokio::time::sleep(retry_delay).await;
+                            continue;
+                        }
+                        Err(_) => return Err(err),
                     }
-                    let retry_delay = tokio::time::Duration::from_millis(
-                        config.retry_interval_ms,
-                    )
-                    .max(RPC_FETCH_RETRY_DELAY);
-                    tokio::time::sleep(retry_delay).await;
-                    continue;
                 }
             };
             let slots_match_result = slots_match_and_meet_min_context(
@@ -1013,62 +1032,51 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                 return Ok(remote_accounts);
             }
 
-            retries += 1;
-            let hit_max_retry_limit = retries == config.max_retries;
-            if hit_max_retry_limit || start.elapsed() > MAX_TOTAL_TIME {
-                let remote_account_slots = account_slots(&remote_accounts);
-                let remote_account_sources = remote_accounts
-                    .iter()
-                    .map(|account| account.source())
-                    .collect::<Vec<_>>();
-                let limit = if hit_max_retry_limit {
-                    format!("max retries {}", config.max_retries)
-                } else {
-                    format!(
-                        "max total time of {} seconds",
-                        MAX_TOTAL_TIME.as_secs()
-                    )
-                };
-                warn!(
-                    pubkeys = %pubkeys_str(pubkeys),
-                    slots = ?remote_account_slots,
-                    sources = ?remote_account_sources,
-                    min_context_slot = ?config.min_context_slot,
-                    retries = retries,
-                    elapsed_ms = start.elapsed().as_millis() as u64,
-                    limit = %limit,
-                    "Failed to resolve accounts to compatible slots"
-                );
-                match slots_match_result {
-                    // SAFETY: Match case is already handled and returns
-                    Match => unreachable!("we would have returned above"),
-                    Mismatch => {
-                        return Err(
-                            RemoteAccountProviderError::SlotsDidNotMatch(
-                                pubkeys_str(pubkeys),
-                                remote_account_slots,
-                                limit,
-                            ),
-                        );
-                    }
-                    MatchButBelowMinContextSlot(slot) => {
-                        return Err(
-                            RemoteAccountProviderError::MatchingSlotsNotSatisfyingMinContextSlot(
+            match next_match_slots_retry(&mut retries, start, &config) {
+                Ok(retry_delay) => {
+                    // If the slots don't match then wait for a bit and retry
+                    tokio::time::sleep(retry_delay).await;
+                    continue;
+                }
+                Err(limit) => {
+                    let remote_account_slots = account_slots(&remote_accounts);
+                    let remote_account_sources = remote_accounts
+                        .iter()
+                        .map(|account| account.source())
+                        .collect::<Vec<_>>();
+                    warn!(
+                        pubkeys = %pubkeys_str(pubkeys),
+                        slots = ?remote_account_slots,
+                        sources = ?remote_account_sources,
+                        min_context_slot = ?config.min_context_slot,
+                        retries = retries,
+                        elapsed_ms = start.elapsed().as_millis() as u64,
+                        limit = %limit,
+                        "Failed to resolve accounts to compatible slots"
+                    );
+                    match slots_match_result {
+                        // SAFETY: Match case is already handled and returns
+                        Match => unreachable!("we would have returned above"),
+                        Mismatch => {
+                            return Err(
+                                RemoteAccountProviderError::SlotsDidNotMatch(
+                                    pubkeys_str(pubkeys),
+                                    remote_account_slots,
+                                    limit,
+                                ),
+                            );
+                        }
+                        MatchButBelowMinContextSlot(slot) => {
+                            return Err(RemoteAccountProviderError::MatchingSlotsNotSatisfyingMinContextSlot(
                                 pubkeys_str(pubkeys),
                                 remote_account_slots,
                                 slot,
-                                limit
-                            )
-                        );
+                                limit,
+                            ));
+                        }
                     }
                 }
             }
-
-            // If the slots don't match then wait for a bit and retry
-            tokio::time::sleep(tokio::time::Duration::from_millis(
-                config.retry_interval_ms,
-            ))
-            .await;
         }
     }
 
@@ -1657,11 +1665,6 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         let mark_empty_if_not_found =
             mark_empty_if_not_found.unwrap_or(&[]).to_vec();
         let program_ids = program_ids.map(|ids| ids.to_vec());
-        let method = if pubkeys.len() == 1 {
-            "get_account"
-        } else {
-            "get_multiple_accounts"
-        };
         tokio::spawn(async move {
             use RemoteAccount::*;
 
@@ -1670,7 +1673,6 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             let notify_error = |error_msg: &str| {
                 let mut fetching = fetching_accounts.lock().unwrap();
                 warn!(
-                    method = method,
                     pubkey_count = pubkeys.len(),
                     pubkeys = %pubkeys_str(&pubkeys),
                     min_context_slot = min_context_slot,
@@ -1839,7 +1841,6 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                         let attempt =
                             RPC_FETCH_MAX_RETRIES - remaining_retries + 1;
                         warn!(
-                            method = method,
                             pubkey_count = pubkeys.len(),
                             pubkeys = %pubkeys_str(&pubkeys),
                             attempt = attempt,
