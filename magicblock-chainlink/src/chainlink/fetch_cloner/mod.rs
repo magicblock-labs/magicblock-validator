@@ -1347,23 +1347,18 @@ where
         let (ata_pubkey, _) =
             try_derive_ata_address_and_bump(&wallet_owner, &mint)?;
 
-        let projected_ata = self.maybe_project_delegated_ata_from_eata(
-            // Intentional: in this subscription-update path there is no separate ATA, so
-            // maybe_project_delegated_ata_from_eata uses eata_account as ata_account; with deleg_record,
-            // ata_account only affects projected slot via max(), so passing eata_account twice is correct.
-            eata_account,
-            eata_account,
-            deleg_record,
-        )?;
-
-        if let Some(in_bank_ata) = self.accounts_bank.get_account(&ata_pubkey) {
+        let in_bank_ata = self.accounts_bank.get_account(&ata_pubkey);
+        if let Some(in_bank_ata) = &in_bank_ata {
             if in_bank_ata.delegated() || in_bank_ata.undelegating() {
                 return None;
             }
-            if in_bank_ata.remote_slot() >= projected_ata.remote_slot() {
-                return None;
-            }
         }
+        let ata_account = in_bank_ata.as_ref().unwrap_or(eata_account);
+        let projected_ata = self.maybe_project_delegated_ata_from_eata(
+            ata_account,
+            eata_account,
+            deleg_record,
+        )?;
         Some(AccountCloneRequest {
             pubkey: ata_pubkey,
             account: projected_ata,
