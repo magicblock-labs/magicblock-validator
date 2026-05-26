@@ -341,14 +341,14 @@ impl AccountsDbIndex {
         program: &Pubkey,
     ) -> AccountsDbResult<OffsetPubkeyIter<'_>> {
         let txn = self.env.begin_ro_txn()?;
-        OffsetPubkeyIter::new(&self.programs, txn, Some(program))
+        OffsetPubkeyIter::new_programs(&self.programs, txn, Some(program))
     }
 
     pub(crate) fn get_all_accounts(
         &self,
     ) -> AccountsDbResult<OffsetPubkeyIter<'_>> {
         let txn = self.env.begin_ro_txn()?;
-        OffsetPubkeyIter::new(&self.programs, txn, None)
+        OffsetPubkeyIter::new_accounts(&self.accounts, txn)
     }
 
     pub(crate) fn offset_finder(

@@ -18,13 +18,21 @@ pub struct OffsetPubkeyIter<'env> {
     /// The read-only transaction.
     /// Kept alive to maintain the validity of the cursor.
     _txn: RoTransaction<'env>,
+    layout: Layout,
+}
+
+#[derive(Clone, Copy)]
+enum Layout {
+    ProgramValue,
+    AccountKey,
 }
 
 impl<'env> OffsetPubkeyIter<'env> {
-    pub(super) fn new(
+    fn new(
         table: &Table,
         txn: RoTransaction<'env>,
         pubkey: Option<&Pubkey>,
+        layout: Layout,
     ) -> AccountsDbResult<Self> {
         let cursor = table.cursor_ro(&txn)?;
 
@@ -59,7 +67,23 @@ impl<'env> OffsetPubkeyIter<'env> {
             iter,
             _cursor: cursor,
             _txn: txn,
+            layout,
         })
+    }
+
+    pub(super) fn new_programs(
+        table: &Table,
+        txn: RoTransaction<'env>,
+        pubkey: Option<&Pubkey>,
+    ) -> AccountsDbResult<Self> {
+        Self::new(table, txn, pubkey, Layout::ProgramValue)
+    }
+
+    pub(super) fn new_accounts(
+        table: &Table,
+        txn: RoTransaction<'env>,
+    ) -> AccountsDbResult<Self> {
+        Self::new(table, txn, None, Layout::AccountKey)
     }
 }
 
@@ -69,10 +93,21 @@ impl Iterator for OffsetPubkeyIter<'_> {
     fn next(&mut self) -> Option<Self::Item> {
         // Retrieve the next record from the LMDB iterator.
         // The iterator returns `(&[u8], &[u8])` representing (key, value).
-        let (_, value_bytes) = self.iter.next()?.ok()?;
+        let (key_bytes, value_bytes) = self.iter.next()?.ok()?;
 
-        // Unpack the value which contains the Offset and Pubkey.
-        // Usage matches the `programs` index layout: [Offset (4 bytes) | Pubkey (32 bytes)]
-        Some(bytes!(#unpack, value_bytes, Offset, Pubkey))
+        match self.layout {
+            Layout::ProgramValue => {
+                // `programs` values are `[offset | pubkey]`.
+                Some(bytes!(#unpack, value_bytes, Offset, Pubkey))
+            }
+            Layout::AccountKey => {
+                // `accounts` keys are the pubkey; values are `[offset | blocks]`.
+                let pubkey = Pubkey::try_from(key_bytes).ok()?;
+                let offset = unsafe {
+                    (value_bytes.as_ptr() as *const Offset).read_unaligned()
+                };
+                Some((offset, pubkey))
+            }
+        }
     }
 }
