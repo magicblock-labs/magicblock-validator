@@ -1,4 +1,4 @@
-//! Lock watcher for detecting leader expiration.
+//! Lock watcher for observing producer lock expiration.
 
 use async_nats::jetstream::kv::{Operation, Watch};
 use futures::StreamExt;
@@ -8,16 +8,17 @@ use tracing::warn;
 use super::cfg;
 use crate::nats::Broker;
 
-/// Watches the leader lock for expiration/deletion.
+/// Watches the producer lock for expiration or deletion.
 ///
-/// Used by standby nodes to detect when the primary's lock expires,
-/// enabling faster takeover than waiting for the activity timeout.
+/// This is useful for observability or operator-driven workflows that need to
+/// notice lock loss. It does not trigger runtime failover on its own.
 pub struct LockWatcher {
     watch: Box<Watch>,
 }
 
 impl LockWatcher {
     /// Creates a new lock watcher.
+    #[allow(unused)]
     pub(crate) async fn new(
         broker: &Broker,
         cancel: &CancellationToken,
@@ -48,7 +49,6 @@ impl LockWatcher {
     /// Waits for the lock to be deleted or expire.
     ///
     /// Returns when the lock key is deleted or purged (TTL expiry).
-    /// This signals that a takeover attempt should be made.
     pub async fn wait_for_expiry(&mut self) {
         while let Some(result) = self.watch.next().await {
             let operation = match result {

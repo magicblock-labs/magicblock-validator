@@ -1,4 +1,4 @@
-//! Shared context for primary and standby roles.
+//! Shared context for primary and replica roles.
 
 use std::sync::Arc;
 
@@ -20,14 +20,14 @@ use tokio::{
 use tokio_util::sync::CancellationToken;
 use tracing::info;
 
-use super::{Primary, Standby, CONSUMER_RETRY_DELAY};
+use super::{Primary, Replica, CONSUMER_RETRY_DELAY};
 use crate::{
-    nats::{Broker, Consumer, LockWatcher, Producer},
+    nats::{Broker, Consumer, Producer},
     watcher::SnapshotWatcher,
     Error, Result,
 };
 
-/// Shared state for both primary and standby roles.
+/// Shared state for both primary and replica roles.
 pub struct ReplicationContext {
     /// Node identifier for leader election.
     pub id: String,
@@ -51,8 +51,6 @@ pub struct ReplicationContext {
     pub slot: Slot,
     /// Position of the last transaction within slot
     pub index: TransactionIndex,
-    /// Whether this node can promote from standby to primary.
-    pub can_promote: bool,
 }
 
 impl ReplicationContext {
@@ -66,7 +64,6 @@ impl ReplicationContext {
         chainlink: StubbedChainlink<AccountsDb>,
         scheduler: TransactionSchedulerHandle,
         cancel: CancellationToken,
-        can_promote: bool,
     ) -> Result<Self> {
         let id = IdBuilder::new(machineid_rs::Encryption::SHA256)
             .add_component(machineid_rs::HWIDComponent::SystemID)
@@ -78,7 +75,7 @@ impl ReplicationContext {
             .get_highest_transaction_index_for_slot(slot)?
             .unwrap_or_default();
 
-        info!(%id, slot, can_promote, "context initialized");
+        info!(%id, slot, "context initialized");
         Ok(Self {
             id,
             broker,
@@ -90,7 +87,6 @@ impl ReplicationContext {
             scheduler,
             slot,
             index,
-            can_promote,
         })
     }
 
@@ -189,29 +185,16 @@ impl ReplicationContext {
         Ok(Primary::new(self, producer, messages, snapshots))
     }
 
-    /// Transitions to standby role.
+    /// Transitions to replica role.
     /// Returns `None` if shutdown is triggered during consumer creation.
     /// reset parameter controls where in the stream the consumption starts:
     /// true - the last known position that we know
     /// false - the last known position that message broker tracks for us
-    pub async fn into_standby(
-        self,
-        messages: Receiver<Message>,
-        reset: bool,
-    ) -> Result<Option<Standby>> {
+    pub async fn into_replica(self, reset: bool) -> Result<Option<Replica>> {
         let Some(consumer) = self.create_consumer(reset).await else {
             return Ok(None);
         };
-        let Some(watcher) = LockWatcher::new(&self.broker, &self.cancel).await
-        else {
-            return Ok(None);
-        };
         self.enter_replica_mode().await;
-        Ok(Some(Standby::new(
-            self,
-            Box::new(consumer),
-            messages,
-            watcher,
-        )))
+        Ok(Some(Replica::new(self, Box::new(consumer))))
     }
 }
