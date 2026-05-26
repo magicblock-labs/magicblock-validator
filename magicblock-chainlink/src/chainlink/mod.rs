@@ -268,15 +268,18 @@ impl<
                                 undelegating,
                                 delegated,
                                 owner = %account.owner(),
-                                "Keeping unsubscribed account \
-                                 in bank \
-                                 (delegated/undelegating)"
+                                "Ignoring removal notification because bank \
+                                 state is protected; no EvictAccount \
+                                 transaction will be submitted"
                             );
                         }
                         evict
                     }
                     None => false,
                 };
+                // Skipping a delegated/undelegating LRU candidate is not a
+                // removal event; protected bank state must not be translated
+                // into a downstream bank eviction.
                 if !should_evict {
                     continue;
                 }
@@ -548,4 +551,79 @@ fn extract_program_ids_from_transaction(
         .map(|(program_id, _)| *program_id)
         .collect::<HashSet<_>>();
     program_ids.into_iter().collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{sync::Arc, time::Duration};
+
+    use magicblock_accounts_db::traits::AccountsBank;
+    use solana_account::AccountSharedData;
+    use tokio::sync::mpsc;
+
+    use super::*;
+    use crate::{
+        accounts_bank::mock::AccountsBankStub,
+        testing::{cloner_stub::ClonerStub, init_logger},
+    };
+
+    #[tokio::test]
+    async fn test_subscribe_account_removals_skips_delegated_or_undelegating_and_evicts_normal(
+    ) {
+        init_logger();
+
+        let accounts_bank = Arc::new(AccountsBankStub::default());
+        let cloner = Arc::new(ClonerStub::new(accounts_bank.clone()));
+        let (removed_tx, removed_rx) = mpsc::channel(8);
+
+        let delegated_pubkey = Pubkey::new_unique();
+        let undelegating_pubkey = Pubkey::new_unique();
+        let normal_pubkey = Pubkey::new_unique();
+        let owner = Pubkey::new_unique();
+
+        let mut delegated_account =
+            AccountSharedData::new(1_000_000, 0, &owner);
+        delegated_account.set_delegated(true);
+        accounts_bank.insert(delegated_pubkey, delegated_account);
+
+        let mut undelegating_account =
+            AccountSharedData::new(1_000_000, 0, &owner);
+        undelegating_account.set_undelegating(true);
+        accounts_bank.insert(undelegating_pubkey, undelegating_account);
+
+        let normal_account = AccountSharedData::new(1_000_000, 0, &owner);
+        accounts_bank.insert(normal_pubkey, normal_account);
+
+        let handle = Chainlink::<
+            ChainRpcClientMock,
+            ChainPubsubClientMock,
+            AccountsBankStub,
+            ClonerStub,
+            PhotonClientMock,
+        >::subscribe_account_removals(
+            &accounts_bank, &cloner, removed_rx
+        );
+
+        removed_tx.send(delegated_pubkey).await.unwrap();
+        removed_tx.send(undelegating_pubkey).await.unwrap();
+        removed_tx.send(normal_pubkey).await.unwrap();
+
+        tokio::time::timeout(Duration::from_secs(1), async {
+            loop {
+                if accounts_bank.get_account(&normal_pubkey).is_none() {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("normal removal notification should submit eviction");
+
+        assert!(accounts_bank.get_account(&delegated_pubkey).is_some());
+        assert!(accounts_bank.get_account(&undelegating_pubkey).is_some());
+        assert!(accounts_bank.get_account(&normal_pubkey).is_none());
+
+        drop(removed_tx);
+        handle.await.unwrap();
+    }
 }
