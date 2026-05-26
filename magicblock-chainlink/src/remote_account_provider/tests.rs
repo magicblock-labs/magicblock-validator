@@ -468,6 +468,101 @@ async fn test_release_subscription_reason_unsubscribes_after_final_release() {
 }
 
 #[tokio::test]
+async fn test_delegated_direct_cleanup_removes_final_direct_reason_without_notification(
+) {
+    let pubkey = solana_pubkey::Pubkey::new_unique();
+    let account = Account {
+        lamports: 1_000_000,
+        data: vec![1, 2, 3, 4],
+        owner: solana_pubkey::Pubkey::new_unique(),
+        executable: false,
+        rent_epoch: 0,
+    };
+
+    let ProviderTestCtx {
+        provider,
+        _pubsub_client,
+        _forward_rx,
+        ..
+    } = setup_provider(pubkey, account).await;
+    let mut removed_rx = provider.try_get_removed_account_rx().unwrap();
+
+    provider
+        .acquire_subscription(&pubkey, SubscriptionReason::DirectAccount)
+        .await
+        .unwrap();
+
+    let unsubscribed = provider
+        .release_subscription_reason_silently_for_delegated_account(
+            &pubkey,
+            SubscriptionReason::DirectAccount,
+        )
+        .await
+        .unwrap();
+
+    assert!(unsubscribed);
+    assert!(!provider.is_watching(&pubkey));
+    assert!(!_pubsub_client.subscriptions_union().contains(&pubkey));
+    assert!(matches!(
+        removed_rx.try_recv(),
+        Err(tokio::sync::mpsc::error::TryRecvError::Empty)
+    ));
+}
+
+#[tokio::test]
+async fn test_delegated_direct_cleanup_keeps_undelegation_tracking() {
+    let pubkey = solana_pubkey::Pubkey::new_unique();
+    let account = Account {
+        lamports: 1_000_000,
+        data: vec![1, 2, 3, 4],
+        owner: solana_pubkey::Pubkey::new_unique(),
+        executable: false,
+        rent_epoch: 0,
+    };
+
+    let ProviderTestCtx {
+        provider,
+        _pubsub_client,
+        _forward_rx,
+        ..
+    } = setup_provider(pubkey, account).await;
+
+    provider
+        .acquire_subscription(&pubkey, SubscriptionReason::DirectAccount)
+        .await
+        .unwrap();
+    provider
+        .acquire_subscription(&pubkey, SubscriptionReason::UndelegationTracking)
+        .await
+        .unwrap();
+
+    let unsubscribed = provider
+        .release_subscription_reason_silently_for_delegated_account(
+            &pubkey,
+            SubscriptionReason::DirectAccount,
+        )
+        .await
+        .unwrap();
+
+    assert!(!unsubscribed);
+    assert!(provider.is_watching(&pubkey));
+    assert!(_pubsub_client.subscriptions_union().contains(&pubkey));
+
+    let unsubscribed = provider
+        .release_subscription_with_mode(
+            &pubkey,
+            SubscriptionReason::UndelegationTracking,
+            SubscriptionReleaseMode::All,
+        )
+        .await
+        .unwrap();
+
+    assert!(unsubscribed);
+    assert!(!provider.is_watching(&pubkey));
+    assert!(!_pubsub_client.subscriptions_union().contains(&pubkey));
+}
+
+#[tokio::test]
 async fn test_subscription_reasons_do_not_release_each_other() {
     let pubkey = solana_pubkey::Pubkey::new_unique();
     let account = Account {
@@ -1304,6 +1399,149 @@ async fn test_multiple_evictions_in_sequence() {
         let removed_accounts = drain_removed_account_rx(&mut removed_rx);
         assert_eq!(removed_accounts, vec![expected_evicted]);
     }
+}
+
+#[tokio::test]
+async fn test_capacity_eviction_skips_undelegation_tracking_reason() {
+    init_logger();
+
+    let pubkey1 = Pubkey::new_unique();
+    let pubkey2 = Pubkey::new_unique();
+    let pubkey3 = Pubkey::new_unique();
+    let pubkeys = &[pubkey1, pubkey2, pubkey3];
+
+    let (provider, _, mut removed_rx) = setup_with_accounts(pubkeys, 2).await;
+
+    provider
+        .acquire_subscription(&pubkey1, SubscriptionReason::DirectAccount)
+        .await
+        .unwrap();
+    provider
+        .acquire_subscription(
+            &pubkey2,
+            SubscriptionReason::UndelegationTracking,
+        )
+        .await
+        .unwrap();
+    provider
+        .acquire_subscription(&pubkey3, SubscriptionReason::DirectAccount)
+        .await
+        .unwrap();
+
+    assert!(!provider.is_watching(&pubkey1));
+    assert!(provider.is_watching(&pubkey2));
+    assert!(provider.is_watching(&pubkey3));
+    assert!(!provider
+        .pubsub_client()
+        .subscriptions_union()
+        .contains(&pubkey1));
+    assert!(provider
+        .pubsub_client()
+        .subscriptions_union()
+        .contains(&pubkey2));
+
+    let removed_accounts = drain_removed_account_rx(&mut removed_rx);
+    assert_eq!(removed_accounts, [pubkey1]);
+}
+
+#[tokio::test]
+async fn test_capacity_eviction_unsubscribe_failure_records_new_owner() {
+    init_logger();
+
+    let pubkey1 = Pubkey::new_unique();
+    let pubkey2 = Pubkey::new_unique();
+    let pubkeys = &[pubkey1, pubkey2];
+
+    let (provider, _, mut removed_rx) = setup_with_accounts(pubkeys, 1).await;
+
+    provider
+        .acquire_subscription(&pubkey1, SubscriptionReason::DirectAccount)
+        .await
+        .unwrap();
+    provider.pubsub_client().fail_next_unsubscriptions(1);
+
+    let err = provider
+        .acquire_subscription(&pubkey2, SubscriptionReason::DirectAccount)
+        .await
+        .unwrap_err();
+
+    assert!(matches!(
+        err,
+        RemoteAccountProviderError::AccountSubscriptionsTaskFailed(_)
+    ));
+    assert!(provider.is_watching(&pubkey2));
+    assert!(
+        provider
+            .has_subscription_reason(
+                &pubkey2,
+                SubscriptionReason::DirectAccount
+            )
+            .await
+    );
+    assert!(provider
+        .pubsub_client()
+        .subscriptions_union()
+        .contains(&pubkey2));
+
+    let removed_accounts = drain_removed_account_rx(&mut removed_rx);
+    assert!(removed_accounts.is_empty());
+}
+
+#[tokio::test]
+async fn test_capacity_eviction_all_protected_returns_error_without_unsubscribing_protected(
+) {
+    init_logger();
+
+    let pubkey1 = Pubkey::new_unique();
+    let pubkey2 = Pubkey::new_unique();
+    let pubkey3 = Pubkey::new_unique();
+    let pubkeys = &[pubkey1, pubkey2, pubkey3];
+
+    let (provider, _, mut removed_rx) = setup_with_accounts(pubkeys, 2).await;
+
+    provider
+        .acquire_subscription(
+            &pubkey1,
+            SubscriptionReason::UndelegationTracking,
+        )
+        .await
+        .unwrap();
+    provider
+        .acquire_subscription(
+            &pubkey2,
+            SubscriptionReason::UndelegationTracking,
+        )
+        .await
+        .unwrap();
+
+    let err = provider
+        .acquire_subscription(&pubkey3, SubscriptionReason::DirectAccount)
+        .await
+        .unwrap_err();
+
+    assert!(matches!(
+        err,
+        RemoteAccountProviderError::NoEvictableSubscriptionCapacity { pubkey }
+            if pubkey == pubkey3
+    ));
+    assert!(provider.is_watching(&pubkey1));
+    assert!(provider.is_watching(&pubkey2));
+    assert!(!provider.is_watching(&pubkey3));
+    assert!(provider
+        .pubsub_client()
+        .subscriptions_union()
+        .contains(&pubkey1));
+    assert!(provider
+        .pubsub_client()
+        .subscriptions_union()
+        .contains(&pubkey2));
+    assert!(!provider
+        .pubsub_client()
+        .subscriptions_union()
+        .contains(&pubkey3));
+
+    let removed_accounts = drain_removed_account_rx(&mut removed_rx);
+    assert!(removed_accounts.is_empty());
 }
 
 #[test]

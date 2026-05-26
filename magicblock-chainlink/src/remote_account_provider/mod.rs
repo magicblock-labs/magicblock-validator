@@ -3,7 +3,7 @@ use std::{
     num::NonZeroUsize,
     sync::{
         atomic::{AtomicU64, Ordering},
-        Arc, Mutex, Weak,
+        Arc, Mutex, RwLock, Weak,
     },
     time::Duration,
 };
@@ -20,7 +20,7 @@ use futures_util::{
     future::{join_all, try_join_all},
     stream::{FuturesUnordered, StreamExt},
 };
-pub use lru_cache::AccountsLruCache;
+pub use lru_cache::{AccountsLruCache, AddAccountOutcome};
 use magicblock_config::config::GrpcConfig;
 pub(crate) use remote_account::RemoteAccount;
 pub use remote_account::RemoteAccountUpdateSource;
@@ -277,18 +277,17 @@ impl Drop for ClaimedSubscriptionSetupGuard {
 
 /// Internal ownership/refcount key for shared pubsub subscriptions.
 ///
-/// A single pubkey can be watched for multiple independent purposes
-/// (direct account access, delegation records, program data, undelegation
-/// tracking, ATA projection, etc.). Tracking the reason prevents one
-/// subsystem from accidentally unsubscribing an account that another subsystem
-/// still needs. For explicit reason-based releases, the provider only tears
-/// down the actual pubsub subscription once all reasons/counts for that pubkey
-/// have been released.
+/// `DirectAccount` is normal remote-account monitoring and is the only
+/// subscription reason that should participate in normal capacity eviction.
+/// `UndelegationTracking` is protected ownership for delegated accounts that
+/// are being undelegated and must never be treated as normal capacity-evictable
+/// ownership.
 ///
-/// This ownership tracking does not protect the account from LRU capacity
-/// eviction. If the subscribed-accounts LRU evicts a pubkey, that eviction is
-/// treated as a forced full unsubscribe/removal regardless of the reasons still
-/// recorded for that pubkey.
+/// Delegated accounts that are not undelegating are locally authoritative and
+/// should have `DirectAccount` ownership released once delegation is discovered.
+/// LRU membership is bookkeeping for live account subscriptions, but capacity
+/// eviction may only remove entries that are not protected by account state or
+/// ownership.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SubscriptionReason {
     DirectAccount,
@@ -339,6 +338,23 @@ pub(crate) enum SubscriptionReleaseMode {
     Single,
     All,
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct CapacityEvictionProtection {
+    pub delegated: bool,
+    pub undelegating: bool,
+}
+
+impl CapacityEvictionProtection {
+    pub fn is_protected(self) -> bool {
+        self.delegated || self.undelegating
+    }
+}
+
+type CapacityEvictionProtectionPredicate =
+    dyn Fn(&Pubkey) -> CapacityEvictionProtection + Send + Sync;
+type SharedCapacityEvictionProtectionPredicate =
+    Arc<RwLock<Option<Arc<CapacityEvictionProtectionPredicate>>>>;
 
 pub struct ForwardedSubscriptionUpdate {
     pub pubkey: Pubkey,
@@ -404,6 +420,8 @@ pub struct RemoteAccountProvider<T: ChainRpcClient, U: ChainPubsubClient> {
 
     /// Tracks which accounts are currently subscribed to
     lrucache_subscribed_accounts: Arc<AccountsLruCache>,
+
+    capacity_eviction_protection: SharedCapacityEvictionProtectionPredicate,
 
     /// Channel to notify when an account is removed from the cache and thus no
     /// longer being watched
@@ -603,6 +621,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             last_update_slot: Arc::<AtomicU64>::default(),
             received_updates_count: Arc::<AtomicU64>::default(),
             lrucache_subscribed_accounts,
+            capacity_eviction_protection: Arc::new(RwLock::new(None)),
             subscription_forwarder: Arc::new(subscription_forwarder),
             removed_account_tx,
             removed_account_rx: Mutex::new(Some(removed_account_rx)),
@@ -813,6 +832,33 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
 
     pub(crate) fn promote_accounts(&self, pubkeys: &[&Pubkey]) {
         self.lrucache_subscribed_accounts.promote_multi(pubkeys);
+    }
+
+    pub(crate) fn set_capacity_eviction_protection<F>(&self, predicate: F)
+    where
+        F: Fn(&Pubkey) -> CapacityEvictionProtection + Send + Sync + 'static,
+    {
+        let mut guard = self
+            .capacity_eviction_protection
+            .write()
+            .unwrap_or_else(|poison| poison.into_inner());
+        *guard = Some(Arc::new(predicate));
+    }
+
+    fn capacity_eviction_protection_for(
+        &self,
+        pubkey: &Pubkey,
+    ) -> CapacityEvictionProtection {
+        let guard = self
+            .capacity_eviction_protection
+            .read()
+            .unwrap_or_else(|poison| poison.into_inner());
+        guard.as_ref().map(|predicate| predicate(pubkey)).unwrap_or(
+            CapacityEvictionProtection {
+                delegated: false,
+                undelegating: false,
+            },
+        )
     }
 
     pub fn try_get_removed_account_rx(
@@ -1403,6 +1449,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
     async fn register_subscription(
         &self,
         pubkey: &Pubkey,
+        reason: SubscriptionReason,
     ) -> RemoteAccountProviderResult<()> {
         // 1. First realize subscription
         self.pubsub_client.subscribe(*pubkey, None).await?;
@@ -1410,36 +1457,111 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         // 2. Add to LRU cache
         // If an account is evicted then we need to unsubscribe from it
         // and then inform upstream that we are no longer tracking it
-        if let Some(evicted) = self.lrucache_subscribed_accounts.add(*pubkey) {
-            trace!(evicted = %evicted, "Evicting account");
+        let add_outcome = {
+            let ownership = self.subscription_ownership.lock().await;
+            self.lrucache_subscribed_accounts.add_with_evict_filter(
+                *pubkey,
+                |candidate| {
+                    if !self.lrucache_subscribed_accounts.can_evict(candidate) {
+                        trace!(
+                            candidate = %candidate,
+                            "Skipping capacity eviction candidate from never-evict set"
+                        );
+                        return false;
+                    }
 
-            // LRU eviction is a forced full removal. Drop all ownership reasons
-            // before awaiting on pubsub unsubscribe or removal notification so stale
-            // reasons cannot survive a later failure on this cold path.
-            self.subscription_ownership.lock().await.remove(&evicted);
+                    let protection =
+                        self.capacity_eviction_protection_for(candidate);
+                    if protection.is_protected() {
+                        trace!(
+                            candidate = %candidate,
+                            delegated = protection.delegated,
+                            undelegating = protection.undelegating,
+                            "Skipping capacity eviction candidate protected by bank state"
+                        );
+                        return false;
+                    }
 
-            // 1. Unsubscribe from the account directly (LRU has already removed it)
-            if let Err(err) = self.pubsub_client.unsubscribe(evicted).await {
-                if matches!(
-                    err,
-                    RemoteAccountProviderError::AccountSubscriptionDoesNotExist(
-                        _
-                    )
-                ) {
-                    debug!(evicted = %evicted, error = ?err, "Failed to unsubscribe from pubsub for evicted account");
-                } else {
-                    // Should we retry here?
-                    warn!(evicted = %evicted, error = ?err, "Failed to unsubscribe from pubsub for evicted account");
+                    let protected_by_ownership =
+                        ownership.get(candidate).is_some_and(|ownership| {
+                            ownership.contains(
+                                SubscriptionReason::UndelegationTracking,
+                            )
+                        });
+                    if protected_by_ownership {
+                        trace!(
+                            candidate = %candidate,
+                            reason = ?SubscriptionReason::UndelegationTracking,
+                            "Skipping capacity eviction candidate protected by subscription ownership"
+                        );
+                    }
+                    !protected_by_ownership
+                },
+            )
+        };
+
+        match add_outcome {
+            AddAccountOutcome::AlreadyPresent | AddAccountOutcome::Added => {}
+            AddAccountOutcome::Evicted(evicted) => {
+                trace!(evicted = %evicted, "Evicting account");
+
+                // LRU eviction is a forced full removal, but keep local
+                // ownership intact until pubsub confirms the subscription is
+                // gone so a failed unsubscribe cannot leave ownership state
+                // inconsistent with the active subscription.
+                if let Err(err) = self.pubsub_client.unsubscribe(evicted).await
+                {
+                    if matches!(
+                        err,
+                        RemoteAccountProviderError::AccountSubscriptionDoesNotExist(
+                            _
+                        )
+                    ) {
+                        debug!(evicted = %evicted, error = ?err, "Failed to unsubscribe from pubsub for evicted account");
+                    } else {
+                        // Should we retry here?
+                        warn!(evicted = %evicted, error = ?err, "Failed to unsubscribe from pubsub for evicted account");
+                    }
+                    self.subscription_ownership
+                        .lock()
+                        .await
+                        .entry(*pubkey)
+                        .or_default()
+                        .acquire(reason);
+                    return Err(err);
+                }
+
+                self.subscription_ownership.lock().await.remove(&evicted);
+
+                // Inform upstream so it can remove it from the store. Failure
+                // to notify is non-fatal here because the LRU, pubsub, and
+                // ownership state have already been updated consistently.
+                if let Err(err) = self.send_removal_update(evicted).await {
+                    warn!(evicted = %evicted, error = ?err, "Failed to send removal update for evicted account");
                 }
             }
-
-            // 2. Inform upstream so it can remove it from the store. Failure
-            // to notify is non-fatal here because the LRU and pubsub state have
-            // already been updated consistently.
-            if let Err(err) = self.send_removal_update(evicted).await {
-                warn!(evicted = %evicted, error = ?err, "Failed to send removal update for evicted account");
+            AddAccountOutcome::NoEvictableCandidate => {
+                if let Err(err) = self.pubsub_client.unsubscribe(*pubkey).await
+                {
+                    debug!(
+                        pubkey = %pubkey,
+                        error = ?err,
+                        "Failed to unsubscribe new subscription after all LRU candidates were protected"
+                    );
+                    return Err(err);
+                }
+                self.subscription_ownership.lock().await.remove(pubkey);
+                self.lrucache_subscribed_accounts.remove(pubkey);
+                debug!(
+                    pubkey = %pubkey,
+                    "No evictable subscription capacity available; all LRU candidates are protected"
+                );
+                return Err(
+                    RemoteAccountProviderError::NoEvictableSubscriptionCapacity {
+                        pubkey: *pubkey,
+                    },
+                );
             }
-            return Ok(());
         }
 
         Ok(())
@@ -1502,6 +1624,19 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             .await
     }
 
+    #[cfg(test)]
+    pub(crate) async fn has_subscription_reason(
+        &self,
+        pubkey: &Pubkey,
+        reason: SubscriptionReason,
+    ) -> bool {
+        self.subscription_ownership
+            .lock()
+            .await
+            .get(pubkey)
+            .is_some_and(|ownership| ownership.contains(reason))
+    }
+
     async fn acquire_subscription_with_mode(
         &self,
         pubkey: &Pubkey,
@@ -1522,7 +1657,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         }
         drop(ownership);
 
-        self.register_subscription(pubkey).await?;
+        self.register_subscription(pubkey, reason).await?;
 
         let mut ownership = self.subscription_ownership.lock().await;
         ownership.entry(*pubkey).or_default().acquire(reason);
@@ -1603,6 +1738,97 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         }
 
         Ok(success)
+    }
+
+    pub(crate) async fn release_subscription_reason_silently_for_delegated_account(
+        &self,
+        pubkey: &Pubkey,
+        reason: SubscriptionReason,
+    ) -> RemoteAccountProviderResult<bool> {
+        let _transition_guard = self.subscription_transition_lock.lock().await;
+        let subscription_key_lock = self.subscription_key_lock(pubkey).await;
+        let _subscription_guard = subscription_key_lock.lock().await;
+
+        let released_count = {
+            let release_mode = SubscriptionReleaseMode::All;
+            let mut ownership = self.subscription_ownership.lock().await;
+            let (is_empty, released_count) = match ownership.get_mut(pubkey) {
+                Some(existing) => {
+                    let released_count = match release_mode {
+                        SubscriptionReleaseMode::Single => {
+                            existing.release(reason);
+                            1
+                        }
+                        SubscriptionReleaseMode::All => {
+                            existing.release_all(reason)
+                        }
+                    };
+                    (existing.is_empty(), released_count)
+                }
+                None => return Ok(false),
+            };
+
+            if released_count == 0 {
+                return Ok(false);
+            }
+
+            if !is_empty {
+                trace!(
+                    pubkey = %pubkey,
+                    ?reason,
+                    released_count,
+                    "Released delegated-account subscription ownership; \
+                     kept protected/live subscription and LRU entry"
+                );
+                return Ok(false);
+            }
+
+            ownership.remove(pubkey);
+            released_count
+        };
+
+        match self.pubsub_client.unsubscribe(*pubkey).await {
+            Ok(()) => {
+                self.lrucache_subscribed_accounts.remove(pubkey);
+                trace!(
+                    pubkey = %pubkey,
+                    ?reason,
+                    "Removed final delegated-account subscription ownership \
+                     and LRU entry silently; no removal notification emitted"
+                );
+                Ok(true)
+            }
+            Err(err) => {
+                if matches!(
+                    err,
+                    RemoteAccountProviderError::AccountSubscriptionDoesNotExist(
+                        _
+                    )
+                ) {
+                    self.lrucache_subscribed_accounts.remove(pubkey);
+                    trace!(
+                        pubkey = %pubkey,
+                        ?reason,
+                        "Removed stale delegated-account LRU entry for missing subscription"
+                    );
+                    return Ok(false);
+                }
+
+                let mut ownership = self.subscription_ownership.lock().await;
+                if ownership
+                    .get(pubkey)
+                    .is_none_or(SubscriptionOwnership::is_empty)
+                {
+                    let ownership = ownership.entry(*pubkey).or_default();
+                    for _ in 0..released_count {
+                        ownership.acquire(reason);
+                    }
+                }
+                drop(ownership);
+
+                Err(err)
+            }
+        }
     }
 
     /// Subscribe to program account updates
