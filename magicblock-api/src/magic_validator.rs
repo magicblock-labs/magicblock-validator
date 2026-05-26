@@ -256,6 +256,7 @@ impl MagicValidator {
                     token.clone(),
                     is_fresh_start,
                     &config.validator.replication_mode,
+                    validator_pubkey,
                 )
                 .await?
             } else {
