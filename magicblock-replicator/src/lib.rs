@@ -2,11 +2,11 @@
 //!
 //! # Architecture
 //!
-//! The replicator enables primary-standby state replication using NATS JetStream:
+//! The replicator enables primary-replica state replication using NATS JetStream:
 //!
 //! - **Producer**: Primary node publishes transactions, blocks, and superblocks
-//! - **Consumer**: Standby nodes consume events to maintain synchronized state
-//! - **Snapshots**: Periodic AccountsDb snapshots enable fast standby recovery
+//! - **Consumer**: replica nodes consume events to maintain synchronized state
+//! - **Snapshots**: Periodic AccountsDb snapshots enable fast replica recovery
 //!
 //! # Wire Format
 //!

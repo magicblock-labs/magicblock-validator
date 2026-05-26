@@ -562,7 +562,7 @@ pub fn resolve_programs(
 // Utilities
 // -----------------
 
-fn devnet_accounts(loaded_accounts: &LoadedAccounts) -> [(String, String); 8] {
+fn devnet_accounts(loaded_accounts: &LoadedAccounts) -> [(String, String); 9] {
     [
         (
             loaded_accounts.validator_authority().to_string(),
