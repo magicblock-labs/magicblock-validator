@@ -4238,7 +4238,6 @@ dependencies = [
  "futures",
  "machineid-rs",
  "magicblock-accounts-db",
- "magicblock-chainlink",
  "magicblock-config",
  "magicblock-core",
  "magicblock-ledger",

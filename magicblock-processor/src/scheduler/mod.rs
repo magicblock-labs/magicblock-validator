@@ -164,7 +164,9 @@ impl TransactionScheduler {
         let mut hasher = Hasher::new();
         let slot_ticker = interval(state.block_time);
         let latest_block = state.ledger.latest_block().clone();
-        hasher.update(latest_block.load().blockhash.as_ref());
+        hasher.update(
+            Self::initial_blockhash(&state.accountsdb, &latest_block).as_ref(),
+        );
         let slot = state.accountsdb.slot() + 1;
 
         Self {
@@ -186,6 +188,30 @@ impl TransactionScheduler {
             slot,
             index: 0,
         }
+    }
+
+    fn initial_blockhash(
+        accountsdb: &AccountsDb,
+        latest_block: &LatestBlock,
+    ) -> Hash {
+        let ledger_hash = latest_block.load().blockhash;
+        if ledger_hash != Hash::default() {
+            return ledger_hash;
+        }
+
+        let snapshot_hash = accountsdb
+            .get_account(&slot_hashes::ID)
+            .and_then(|account| from_account::<SlotHashes, _>(&account))
+            .and_then(|hashes| {
+                hashes.slot_hashes().first().map(|(_, hash)| *hash)
+            });
+        if let Some(hash) = snapshot_hash {
+            return hash;
+        }
+
+        warn!("initial blockhash was not found, starting with an empty one");
+
+        Hash::default()
     }
 
     /// Spawns the scheduler's event loop in a dedicated OS thread.
