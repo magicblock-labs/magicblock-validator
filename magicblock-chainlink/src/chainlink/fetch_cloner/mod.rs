@@ -16,8 +16,10 @@ use magicblock_accounts_db::traits::AccountsBank;
 use magicblock_aml::RiskService;
 use magicblock_config::config::AllowedProgram;
 use magicblock_core::token_programs::{
-    is_ata, try_derive_ata_address_and_bump, try_derive_eata_address_and_bump,
-    EphemeralAta, MaybeIntoAta, EATA_PROGRAM_ID,
+    is_ata, try_derive_ata_address_and_bump,
+    try_derive_ata_address_and_bump_with_token_program,
+    try_derive_eata_address_and_bump, EphemeralAta, MaybeIntoAta,
+    EATA_PROGRAM_ID, TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID,
 };
 use magicblock_metrics::metrics::{self, AccountFetchOrigin};
 use parking_lot::Mutex as PlMutex;
@@ -1344,10 +1346,32 @@ where
             eata_account.data(),
             deleg_record.owner,
         )?;
-        let (ata_pubkey, _) =
-            try_derive_ata_address_and_bump(&wallet_owner, &mint)?;
+        let legacy_ata_pubkey =
+            try_derive_ata_address_and_bump_with_token_program(
+                &wallet_owner,
+                &mint,
+                &TOKEN_PROGRAM_ID,
+            )?
+            .0;
+        let token_2022_ata_pubkey =
+            try_derive_ata_address_and_bump_with_token_program(
+                &wallet_owner,
+                &mint,
+                &TOKEN_2022_PROGRAM_ID,
+            )?
+            .0;
 
-        let in_bank_ata = self.accounts_bank.get_account(&ata_pubkey);
+        let mut ata_pubkey = legacy_ata_pubkey;
+        let mut in_bank_ata = None;
+        for candidate_pubkey in [token_2022_ata_pubkey, legacy_ata_pubkey] {
+            if let Some(candidate_account) =
+                self.accounts_bank.get_account(&candidate_pubkey)
+            {
+                ata_pubkey = candidate_pubkey;
+                in_bank_ata = Some(candidate_account);
+                break;
+            }
+        }
         if let Some(in_bank_ata) = &in_bank_ata {
             if in_bank_ata.delegated() || in_bank_ata.undelegating() {
                 return None;
