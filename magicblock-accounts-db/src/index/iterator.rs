@@ -103,6 +103,12 @@ impl Iterator for OffsetPubkeyIter<'_> {
             Layout::AccountKey => {
                 // `accounts` keys are the pubkey; values are `[offset | blocks]`.
                 let pubkey = Pubkey::try_from(key_bytes).ok()?;
+                // SAFETY: In the `Layout::AccountKey` path, `value_bytes` comes
+                // from the `accounts` index, whose values are always encoded as
+                // `[Offset | Blocks]`. That guarantees `value_bytes` has at least
+                // `size_of::<Offset>()` bytes, and `read_unaligned` does not
+                // require aligned input. The first bytes therefore represent a
+                // valid `Offset` for the `Pubkey::try_from(key_bytes)` entry.
                 let offset = unsafe {
                     (value_bytes.as_ptr() as *const Offset).read_unaligned()
                 };

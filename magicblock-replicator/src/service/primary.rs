@@ -14,6 +14,9 @@ use crate::{
 };
 
 const LOCK_RETRY_WARN_INTERVAL: Duration = Duration::from_secs(5);
+const PUBLISH_RETRY_BASE_DELAY: Duration = Duration::from_millis(50);
+const PUBLISH_RETRY_MAX_DELAY: Duration = Duration::from_secs(1);
+const PUBLISH_RETRY_LIMIT: usize = 5;
 
 /// Primary node: publishes events and holds leader lock.
 pub struct Primary {
@@ -95,11 +98,10 @@ impl Primary {
                 }
                 _ = async {}, if lock_state.can_publish() && pending.is_some() => {
                     if let Some(msg) = pending.as_ref() {
-                        while let Err(error) = self.publish(msg).await {
-                            warn!(%error, "failed to publish the message");
+                        if self.publish_with_retry(msg).await {
+                            pending = None;
                         }
                     }
-                    pending = None;
                 }
                 _ = lock_tick.tick() => {
                     match lock_state {
@@ -142,10 +144,8 @@ impl Primary {
                         return;
                     };
                     if lock_state.can_publish() {
-                        while let Err(error) = self.publish(&msg).await {
-                            // publish should not easily fail, if that happens, it means
-                            // the message broker has become unrecoverably unreacheable
-                            warn!(%error, "failed to publish the message");
+                        if !self.publish_with_retry(&msg).await {
+                            pending = Some(msg);
                         }
                     } else {
                         pending = Some(msg);
@@ -181,6 +181,37 @@ impl Primary {
             .await?;
         self.ctx.update_position(slot, index);
         Ok(())
+    }
+
+    async fn publish_with_retry(&mut self, msg: &Message) -> bool {
+        let mut delay = PUBLISH_RETRY_BASE_DELAY;
+
+        for attempt in 0..PUBLISH_RETRY_LIMIT {
+            if self.ctx.cancel.is_cancelled() {
+                return false;
+            }
+
+            match self.publish(msg).await {
+                Ok(()) => return true,
+                Err(error) => {
+                    warn!(
+                        %error,
+                        attempt = attempt + 1,
+                        max_attempts = PUBLISH_RETRY_LIMIT,
+                        "failed to publish the message"
+                    );
+                }
+            }
+
+            if attempt + 1 == PUBLISH_RETRY_LIMIT {
+                break;
+            }
+
+            tokio::time::sleep(delay).await;
+            delay = (delay * 2).min(PUBLISH_RETRY_MAX_DELAY);
+        }
+
+        false
     }
 }
 
