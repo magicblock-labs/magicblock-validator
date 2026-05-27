@@ -327,13 +327,14 @@ impl TransactionScheduler {
         }
     }
 
-    async fn handle_superblock(&self, slot: Slot) {
+    async fn handle_superblock(&mut self, slot: Slot) {
         if !slot.is_multiple_of(self.superblock_size) {
             return;
         }
 
-        // Make sure all executors are idle (no state transitions are happening)
-        let _guard = self.coordinator.wait_for_idle().await;
+        // Wait until the scheduler has no assigned or executing work left,
+        // then freeze executor starts while snapshotting.
+        let _guard = self.pause_executors_for_snapshot().await;
         // SAFETY:
         // we have made sure that no state transitions are in progress via _guard
         let Ok(checksum) = (unsafe { self.accountsdb.take_snapshot(slot) })
@@ -343,6 +344,16 @@ impl TransactionScheduler {
         };
         let msg = Message::SuperBlock(SuperBlock { slot, checksum });
         self.send_replication(msg).await;
+    }
+
+    async fn pause_executors_for_snapshot(&mut self) -> OwnedSemaphorePermit {
+        while !self.coordinator.is_idle() {
+            if let Some(executor) = self.ready_rx.recv().await {
+                self.handle_ready_executor(executor).await;
+            }
+        }
+
+        self.coordinator.wait_for_idle().await
     }
 
     async fn handle_ready_executor(&mut self, executor: ExecutorId) {
@@ -379,10 +390,10 @@ impl TransactionScheduler {
         let block =
             LatestBlockInner::new(block.slot, block.hash, block.timestamp);
         self.verify_block_as_replica(&block);
-        self.accountsdb.set_slot(block.slot);
         self.ledger
             .write_block(block.clone())
             .map_err(|error| error.to_string())?;
+        self.accountsdb.set_slot(block.slot);
         self.update_sysvars(&block);
         self.notify_executors_of_block(block).await
     }
@@ -588,11 +599,15 @@ impl TransactionScheduler {
 
     /// Finalizes the block: persists to ledger and updates accountsdb slot.
     async fn finalize_block(&self, block: LatestBlockInner) {
-        self.accountsdb.set_slot(block.slot);
+        let slot = block.slot;
+        let mut block_written = true;
         if self.coordinator.is_primary() {
-            let _ = self.ledger.write_block(block).inspect_err(
-                |error| error!(%error, "failed to write block to the ledger"),
-            );
+            block_written = self.ledger.write_block(block).inspect_err(
+                |error| error!(%error, %slot, "failed to write block to the ledger"),
+            ).is_ok();
+        }
+        if block_written {
+            self.accountsdb.set_slot(slot);
         }
     }
 
