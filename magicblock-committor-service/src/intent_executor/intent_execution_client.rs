@@ -119,7 +119,6 @@ impl IntentExecutionClient {
 
         let transaction =
             VersionedTransaction::try_new(prepared_message, &[&authority])?;
-        self.rpc_client.simulate_transaction(&transaction).await?;
         let result = self
             .rpc_client
             .send_transaction(

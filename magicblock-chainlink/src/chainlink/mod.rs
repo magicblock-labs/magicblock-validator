@@ -1,7 +1,7 @@
 use std::{collections::HashSet, path::Path, sync::Arc};
 
 use dlp_api::pda::ephemeral_balance_pda_from_payer;
-use errors::ChainlinkResult;
+use errors::{ChainlinkError, ChainlinkResult};
 use fetch_cloner::FetchCloner;
 use magicblock_accounts_db::{traits::AccountsBank, AccountsDbResult};
 use magicblock_aml::RiskService;
@@ -423,6 +423,13 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
         let remote_accounts = fetch_cloner
             .fetch_remote_accounts(pubkeys, fetch_origin)
             .await?;
+        if remote_accounts.len() != pubkeys.len() {
+            return Err(ChainlinkError::UnexpectedAccountCount(format!(
+                "expected {} remote accounts, got {}",
+                pubkeys.len(),
+                remote_accounts.len()
+            )));
+        }
 
         Ok(pubkeys
             .iter()

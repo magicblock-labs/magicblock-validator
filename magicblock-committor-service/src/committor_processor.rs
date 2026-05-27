@@ -180,7 +180,7 @@ impl CommittorProcessor {
             info!(
                 intent_count = bundles.len(),
                 accounts_count,
-                "Recovered pending commit intents from persistence"
+                "Loaded pending commit intents from persistence for recovery"
             );
         }
 
@@ -271,19 +271,28 @@ fn pending_rows_to_scheduled_intent_bundles(
             let first = rows.first()?;
             let slot = first.slot;
             let blockhash = first.ephemeral_blockhash;
+            if rows.iter().any(|r| {
+                r.slot != slot || r.ephemeral_blockhash != blockhash
+            }) {
+                warn!(
+                    intent_id = message_id,
+                    "Skipping pending commit intent: rows disagree on slot or ephemeral_blockhash"
+                );
+                return None;
+            }
             let mut commit_finalize_accounts = Vec::new();
             let mut commit_finalize_and_undelegate_accounts = Vec::new();
 
             for row in rows {
-                let Some(account) =
+                let Some((account, undelegate)) =
                     committed_account_from_pending_row(row, recovery_base_slot)
                 else {
                     continue;
                 };
-                if account.1 {
-                    commit_finalize_and_undelegate_accounts.push(account.0);
+                if undelegate {
+                    commit_finalize_and_undelegate_accounts.push(account);
                 } else {
-                    commit_finalize_accounts.push(account.0);
+                    commit_finalize_accounts.push(account);
                 }
             }
 

@@ -8,10 +8,8 @@ use magicblock_program::magic_scheduled_base_intent::ScheduledIntentBundle;
 use solana_pubkey::Pubkey;
 
 use super::{
-    db::CommitStatusRow,
-    error::CommitPersistResult,
-    utils::now,
-    CommitStatus, CommitStrategy, CommitType, CommittsDb, MessageSignatures,
+    db::CommitStatusRow, error::CommitPersistResult, utils::now, CommitStatus,
+    CommitStrategy, CommitType, CommittsDb, MessageSignatures,
 };
 use crate::{
     intent_executor::ExecutionOutput, persist::db::BundleSignatureRow,

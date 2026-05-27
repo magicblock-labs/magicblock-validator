@@ -77,11 +77,6 @@ impl ScheduledCommitsProcessorImpl {
             internal_transaction_scheduler.clone(),
             latest_block,
         ));
-        tokio::spawn(Self::recover_pending_intents(
-            committor.clone(),
-            chainlink.clone(),
-            intents_meta_map.clone(),
-        ));
 
         Self {
             committor,
@@ -92,13 +87,10 @@ impl ScheduledCommitsProcessorImpl {
         }
     }
 
-    async fn process_undelegation_requests(
-        chainlink: Arc<ChainlinkImpl>,
-        pubkeys: Vec<Pubkey>,
-    ) {
+    async fn process_undelegation_requests(&self, pubkeys: Vec<Pubkey>) {
         let mut join_set = task::JoinSet::new();
         for pubkey in pubkeys.into_iter() {
-            let chainlink = chainlink.clone();
+            let chainlink = self.chainlink.clone();
             join_set.spawn(async move {
                 (pubkey, chainlink.undelegation_requested(pubkey).await)
             });
@@ -130,13 +122,20 @@ impl ScheduledCommitsProcessorImpl {
         }
     }
 
-    #[instrument(skip(committor, chainlink, intents_meta_map))]
-    async fn recover_pending_intents(
-        committor: Arc<CommittorService>,
-        chainlink: Arc<ChainlinkImpl>,
-        intents_meta_map: Arc<Mutex<HashMap<u64, ScheduledBaseIntentMeta>>>,
-    ) {
-        let intent_bundles = match committor.get_pending_intent_bundles().await
+    /// Spawn the one-shot recovery pass for persisted pending commit intents.
+    /// Must be invoked only after ledger replay completes, so the local accounts
+    /// bank reflects the delegated state checked by `recover_pending_intents`.
+    pub fn spawn_pending_intents_recovery(self: &Arc<Self>) {
+        let this = self.clone();
+        tokio::spawn(async move { this.recover_pending_intents().await });
+    }
+
+    #[instrument(skip(self))]
+    async fn recover_pending_intents(&self) {
+        let intent_bundles = match self
+            .committor
+            .get_pending_intent_bundles()
+            .await
         {
             Ok(Ok(intent_bundles)) => intent_bundles,
             Ok(Err(err)) => {
@@ -151,17 +150,14 @@ impl ScheduledCommitsProcessorImpl {
         if intent_bundles.is_empty() {
             return;
         }
-        let intent_bundles = Self::recoverable_intent_bundles(
-            chainlink.as_ref(),
-            intent_bundles,
-        )
-        .await;
+        let intent_bundles =
+            self.recoverable_intent_bundles(intent_bundles).await;
         if intent_bundles.is_empty() {
             return;
         }
 
         let pubkeys_being_undelegated = {
-            let mut intent_metas = match intents_meta_map.lock() {
+            let mut intent_metas = match self.intents_meta_map.lock() {
                 Ok(intent_metas) => intent_metas,
                 Err(err) => {
                     error!(
@@ -172,64 +168,61 @@ impl ScheduledCommitsProcessorImpl {
                 }
             };
             let mut pubkeys_being_undelegated = HashSet::<Pubkey>::new();
-
-            intent_bundles.iter().for_each(|intent| {
+            for intent in &intent_bundles {
                 intent_metas
                     .insert(intent.id, ScheduledBaseIntentMeta::new(intent));
                 if let Some(undelegate) = intent.get_undelegate_intent_pubkeys()
                 {
                     pubkeys_being_undelegated.extend(undelegate);
                 }
-            });
-
+            }
             pubkeys_being_undelegated.into_iter().collect::<Vec<_>>()
         };
 
-        Self::process_undelegation_requests(
-            chainlink,
-            pubkeys_being_undelegated,
-        )
-        .await;
+        self.process_undelegation_requests(pubkeys_being_undelegated)
+            .await;
 
         let intent_ids: Vec<u64> =
             intent_bundles.iter().map(|b| b.id).collect();
-        let total_count = intent_ids.len();
-        match committor
+        let intent_count = intent_ids.len();
+        match self
+            .committor
             .schedule_recovered_intent_bundles(intent_bundles)
             .await
         {
             Ok(Ok(())) => {
                 info!(
-                    intent_count = total_count,
+                    intent_count,
                     "Scheduled recovered pending commit intents"
                 );
             }
             Ok(Err(err)) => {
-                Self::remove_intent_metas(&intents_meta_map, &intent_ids);
-                error!(intent_count = total_count, error = ?err, "Failed to schedule recovered pending commit intents");
+                self.remove_intent_metas(&intent_ids);
+                error!(intent_count, error = ?err, "Failed to schedule recovered pending commit intents");
             }
             Err(err) => {
-                Self::remove_intent_metas(&intents_meta_map, &intent_ids);
-                error!(intent_count = total_count, error = ?err, "Failed to receive recovered pending commit intent schedule result");
+                self.remove_intent_metas(&intent_ids);
+                error!(intent_count, error = ?err, "Failed to receive recovered pending commit intent schedule result");
             }
         }
     }
 
     async fn recoverable_intent_bundles(
-        chainlink: &ChainlinkImpl,
+        &self,
         intent_bundles: Vec<ScheduledIntentBundle>,
     ) -> Vec<ScheduledIntentBundle> {
-        let mut recoverable_intent_bundles = Vec::new();
+        let mut recoverable = Vec::new();
         for intent_bundle in intent_bundles {
             let pubkeys = intent_bundle.get_all_committed_pubkeys();
-            let accounts_delegated = match chainlink
+            let delegated = match self
+                .chainlink
                 .accounts_delegated_on_base_and_er(
                     &pubkeys,
                     AccountFetchOrigin::GetAccount,
                 )
                 .await
             {
-                Ok(accounts_delegated) => accounts_delegated,
+                Ok(delegated) => delegated,
                 Err(err) => {
                     error!(
                         intent_id = intent_bundle.id,
@@ -239,8 +232,8 @@ impl ScheduledCommitsProcessorImpl {
                     continue;
                 }
             };
-            if accounts_delegated.into_iter().all(|delegated| delegated) {
-                recoverable_intent_bundles.push(intent_bundle);
+            if delegated.into_iter().all(|d| d) {
+                recoverable.push(intent_bundle);
             } else {
                 warn!(
                     intent_id = intent_bundle.id,
@@ -248,14 +241,11 @@ impl ScheduledCommitsProcessorImpl {
                 );
             }
         }
-        recoverable_intent_bundles
+        recoverable
     }
 
-    fn remove_intent_metas(
-        intents_meta_map: &Arc<Mutex<HashMap<u64, ScheduledBaseIntentMeta>>>,
-        intent_ids: &[u64],
-    ) {
-        let mut intent_metas = match intents_meta_map.lock() {
+    fn remove_intent_metas(&self, intent_ids: &[u64]) {
+        let mut intent_metas = match self.intents_meta_map.lock() {
             Ok(intent_metas) => intent_metas,
             Err(err) => {
                 error!(
@@ -482,11 +472,8 @@ impl ScheduledCommitsProcessor for ScheduledCommitsProcessorImpl {
             pubkeys_being_undelegated.into_iter().collect::<Vec<_>>()
         };
 
-        Self::process_undelegation_requests(
-            self.chainlink.clone(),
-            pubkeys_being_undelegated,
-        )
-        .await;
+        self.process_undelegation_requests(pubkeys_being_undelegated)
+            .await;
         self.committor
             .schedule_intent_bundles(intent_bundles)
             .await??;
