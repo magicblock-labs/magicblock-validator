@@ -335,6 +335,7 @@ mod tests {
     use solana_hash::Hash;
 
     use super::*;
+    use crate::persist::CommitStatus;
 
     fn pending_row(
         message_id: u64,
