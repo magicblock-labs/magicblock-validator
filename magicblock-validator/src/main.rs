@@ -4,7 +4,6 @@ use std::time::Instant;
 
 use magicblock_api::{ledger, magic_validator::MagicValidator};
 use magicblock_config::ValidatorParams;
-#[cfg(feature = "tui")]
 use magicblock_tui_client::{
     enrich_config_from_rpc, init_embedded_logger, run_tui, TuiConfig,
 };
@@ -131,76 +130,29 @@ async fn run() {
                 error!(error = ?err, "TUI error");
             }
         } else {
-            let version = magicblock_version::Version::default();
-            print_info("");
-            print_info("🧙 Magicblock Validator is running! 🪄✦");
-            print_info(format!(
-                "🏷️ Validator version: {} (Git: {})",
-                version, version.git_version
-            ));
-            print_info("-----------------------------------");
-            print_info(format!("📡 RPC endpoint:       {}", rpc_url));
-            print_info(format!("🔌 WebSocket endpoint: {}", ws_url));
-            print_info(format!("🌐 Remote RPC:         {}", remote_rpc_url));
-            print_info(format!(
-                "🖥️ Validator identity: {}",
-                validator_identity
-            ));
-            print_info(format!(
-                "🗄️ Ledger location:    {}",
-                api.ledger().ledger_path().to_str().unwrap_or("")
-            ));
-            print_info("-----------------------------------");
-            print_info("Ready for connections!");
-            print_info("");
-            debug!(
-                duration_ms = overall_start.elapsed().as_millis() as u64,
-                "Validator ready"
-            );
-            let shutdown_wait = Instant::now();
-            if let Err(err) = Shutdown::wait().await {
-                error!(error = ?err, "Failed to gracefully shutdown");
-            }
-            debug!(
-                duration_ms = shutdown_wait.elapsed().as_millis() as u64,
-                "Shutdown signal received"
-            );
+            run_no_tui(
+                &rpc_url,
+                &ws_url,
+                &remote_rpc_url,
+                &validator_identity.to_string(),
+                &api,
+                overall_start,
+            )
+            .await;
         }
     }
 
     #[cfg(not(feature = "tui"))]
     {
-        let version = magicblock_version::Version::default();
-        print_info("");
-        print_info("🧙 Magicblock Validator is running! 🪄✦");
-        print_info(format!(
-            "🏷️ Validator version: {} (Git: {})",
-            version, version.git_version
-        ));
-        print_info("-----------------------------------");
-        print_info(format!("📡 RPC endpoint:       {}", rpc_url));
-        print_info(format!("🔌 WebSocket endpoint: {}", ws_url));
-        print_info(format!("🌐 Remote RPC:         {}", remote_rpc_url));
-        print_info(format!("🖥️ Validator identity: {}", validator_identity));
-        print_info(format!(
-            "🗄️ Ledger location:    {}",
-            api.ledger().ledger_path().to_str().unwrap_or("")
-        ));
-        print_info("-----------------------------------");
-        print_info("Ready for connections!");
-        print_info("");
-        debug!(
-            duration_ms = overall_start.elapsed().as_millis() as u64,
-            "Validator ready"
-        );
-        let shutdown_wait = Instant::now();
-        if let Err(err) = Shutdown::wait().await {
-            error!(error = ?err, "Failed to gracefully shutdown");
-        }
-        debug!(
-            duration_ms = shutdown_wait.elapsed().as_millis() as u64,
-            "Shutdown signal received"
-        );
+        run_no_tui(
+            &rpc_url,
+            &ws_url,
+            &remote_rpc_url,
+            &validator_identity.to_string(),
+            &api,
+            overall_start,
+        )
+        .await;
     }
 
     api.prepare_ledger_for_shutdown();
@@ -209,6 +161,47 @@ async fn run() {
     debug!(
         duration_ms = stop_step.elapsed().as_millis() as u64,
         "Validator stop completed"
+    );
+}
+
+pub async fn run_no_tui(
+    rpc_url: &str,
+    ws_url: &str,
+    remote_rpc_url: &str,
+    validator_identity: &str,
+    api: &MagicValidator,
+    overall_start: Instant,
+) {
+    let version = magicblock_version::Version::default();
+    print_info("");
+    print_info("🧙 Magicblock Validator is running! 🪄✦");
+    print_info(format!(
+        "🏷️ Validator version: {} (Git: {})",
+        version, version.git_version
+    ));
+    print_info("-----------------------------------");
+    print_info(format!("📡 RPC endpoint:       {}", rpc_url));
+    print_info(format!("🔌 WebSocket endpoint: {}", ws_url));
+    print_info(format!("🌐 Remote RPC:         {}", remote_rpc_url));
+    print_info(format!("🖥️ Validator identity: {}", validator_identity));
+    print_info(format!(
+        "🗄️ Ledger location:    {}",
+        api.ledger().ledger_path().to_str().unwrap_or("")
+    ));
+    print_info("-----------------------------------");
+    print_info("Ready for connections!");
+    print_info("");
+    debug!(
+        duration_ms = overall_start.elapsed().as_millis() as u64,
+        "Validator ready"
+    );
+    let shutdown_wait = Instant::now();
+    if let Err(err) = Shutdown::wait().await {
+        error!(error = ?err, "Failed to gracefully shutdown");
+    }
+    debug!(
+        duration_ms = shutdown_wait.elapsed().as_millis() as u64,
+        "Shutdown signal received"
     );
 }
 
