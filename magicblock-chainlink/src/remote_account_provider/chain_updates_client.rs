@@ -1,7 +1,7 @@
 use std::{
     collections::HashSet,
     sync::{
-        atomic::{AtomicU16, AtomicU64, Ordering},
+        atomic::{AtomicU64, Ordering},
         Arc,
     },
 };
@@ -38,7 +38,7 @@ impl ChainUpdatesClient {
         grpc_config: &GrpcConfig,
     ) -> RemoteAccountProviderResult<Self> {
         use Endpoint::*;
-        static CLIENT_ID: AtomicU16 = AtomicU16::new(0);
+        static CLIENT_ID: AtomicU64 = AtomicU64::new(0);
 
         match endpoint {
             WebSocket { url, label } => {

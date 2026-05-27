@@ -143,7 +143,7 @@ where
     /// Map of program account subscriptions we are holding inside the pubsub clients
     program_subs: Arc<Mutex<HashSet<Pubkey>>>,
     /// Client handles currently considered connected by the mux.
-    connected_client_ids: Arc<Mutex<HashSet<usize>>>,
+    connected_client_ids: Arc<Mutex<HashSet<String>>>,
     /// Number of currently connected pubsub clients.
     connected_clients: Arc<AtomicU16>,
     /// Number of currently connected clients that activate subscriptions immediately when
@@ -221,11 +221,11 @@ where
             vec![clock::ID].into_iter().collect();
 
         let program_subs: Arc<Mutex<HashSet<Pubkey>>> = Default::default();
-        let connected_client_ids: Arc<Mutex<HashSet<usize>>> =
+        let connected_client_ids: Arc<Mutex<HashSet<String>>> =
             Arc::new(Mutex::new(
                 clients
                     .iter()
-                    .map(|(client, _)| Self::client_key(client))
+                    .map(|(client, _)| client.id().to_string())
                     .collect(),
             ));
 
@@ -302,7 +302,7 @@ where
         clients: Vec<(Arc<T>, mpsc::Receiver<()>)>,
         subscribed_accounts_tracker: Arc<U>,
         program_subs: Arc<Mutex<HashSet<Pubkey>>>,
-        connected_client_ids: Arc<Mutex<HashSet<usize>>>,
+        connected_client_ids: Arc<Mutex<HashSet<String>>>,
         connected_clients: Arc<AtomicU16>,
         connected_clients_subscribing_immediately: Arc<AtomicU16>,
     ) {
@@ -326,7 +326,7 @@ where
                         let mut connected_ids = Self::connected_client_ids_lock(
                             &connected_client_ids,
                         );
-                        connected_ids.remove(&Self::client_key(&client))
+                        connected_ids.remove(client.id())
                     };
                     if was_connected {
                         connected_clients.fetch_sub(1, Ordering::SeqCst);
@@ -369,13 +369,9 @@ where
         self.clients_lock().clone()
     }
 
-    fn client_key(client: &Arc<T>) -> usize {
-        Arc::as_ptr(client) as usize
-    }
-
     fn connected_client_ids_lock(
-        connected_client_ids: &Arc<Mutex<HashSet<usize>>>,
-    ) -> MutexGuard<'_, HashSet<usize>> {
+        connected_client_ids: &Arc<Mutex<HashSet<String>>>,
+    ) -> MutexGuard<'_, HashSet<String>> {
         match connected_client_ids.lock() {
             Ok(guard) => guard,
             Err(poisoned) => poisoned.into_inner(),
@@ -388,7 +384,7 @@ where
             Self::connected_client_ids_lock(&self.connected_client_ids);
         clients
             .into_iter()
-            .filter(|client| connected_ids.contains(&Self::client_key(client)))
+            .filter(|client| connected_ids.contains(client.id()))
             .collect()
     }
 
@@ -402,7 +398,7 @@ where
             }
         }
         Self::connected_client_ids_lock(&self.connected_client_ids)
-            .remove(&Self::client_key(target));
+            .remove(target.id());
     }
 
     pub(crate) async fn add_client<U: SubscribedAccountsTracker>(
@@ -444,7 +440,7 @@ where
         }
 
         Self::connected_client_ids_lock(&self.connected_client_ids)
-            .insert(Self::client_key(&client));
+            .insert(client.id().to_string());
 
         let connected = self
             .connected_clients
@@ -505,7 +501,7 @@ where
         client: Arc<T>,
         accounts_tracker: Arc<U>,
         program_subs: Arc<Mutex<HashSet<Pubkey>>>,
-        connected_client_ids: Arc<Mutex<HashSet<usize>>>,
+        connected_client_ids: Arc<Mutex<HashSet<String>>>,
         connected_clients: Arc<AtomicU16>,
         connected_clients_subscribing_immediately: Arc<AtomicU16>,
     ) {
@@ -602,7 +598,7 @@ where
         client: Arc<T>,
         accounts_tracker: &Arc<U>,
         program_subs: &Arc<Mutex<HashSet<Pubkey>>>,
-        connected_client_ids: Arc<Mutex<HashSet<usize>>>,
+        connected_client_ids: Arc<Mutex<HashSet<String>>>,
         connected_clients: Arc<AtomicU16>,
         connected_clients_subscribing_immediately: Arc<AtomicU16>,
     ) -> RemoteAccountProviderResult<()> {
@@ -649,7 +645,7 @@ where
         let was_disconnected = {
             let mut connected_ids =
                 Self::connected_client_ids_lock(&connected_client_ids);
-            connected_ids.insert(Self::client_key(&client))
+            connected_ids.insert(client.id().to_string())
         };
         if was_disconnected {
             connected_clients.fetch_add(1, Ordering::SeqCst);

@@ -319,6 +319,7 @@ pub mod mock {
         subscribe_blocked: Arc<Mutex<bool>>,
         subscribe_attempts: Arc<AtomicU64>,
         subscribe_notify: Arc<Notify>,
+        client_id: String,
     }
 
     impl ChainPubsubClientMock {
@@ -326,6 +327,8 @@ pub mod mock {
             updates_sndr: mpsc::Sender<SubscriptionUpdate>,
             updates_rcvr: mpsc::Receiver<SubscriptionUpdate>,
         ) -> Self {
+            static CLIENT_ID: AtomicU64 = AtomicU64::new(0);
+
             Self {
                 updates_sndr,
                 updates_rcvr: Arc::new(Mutex::new(Some(updates_rcvr))),
@@ -339,6 +342,10 @@ pub mod mock {
                 subscribe_blocked: Arc::new(Mutex::new(false)),
                 subscribe_attempts: Arc::new(AtomicU64::new(0)),
                 subscribe_notify: Arc::new(Notify::new()),
+                client_id: format!(
+                    "mock:{}",
+                    CLIENT_ID.fetch_add(1, AtomicOrdering::SeqCst)
+                ),
             }
         }
 
@@ -548,7 +555,7 @@ pub mod mock {
         }
 
         fn id(&self) -> &str {
-            "ChainPubsubClientMock"
+            &self.client_id
         }
     }
 
