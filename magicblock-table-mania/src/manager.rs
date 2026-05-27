@@ -60,6 +60,12 @@ pub struct TableMania {
     compute_budgets: TableManiaComputeBudgets,
 }
 
+#[derive(Debug, Clone, Copy)]
+enum ExistingPubkeyAction {
+    Reserve,
+    LeaveUnreserved,
+}
+
 impl TableMania {
     pub fn new(
         rpc_client: MagicblockRpcClient,
@@ -157,7 +163,12 @@ impl TableMania {
         }
 
         // 2. Add new reservations for pubkeys that are not in any table
-        self.reserve_new_pubkeys(authority, &remaining).await
+        self.reserve_new_pubkeys(
+            authority,
+            &remaining,
+            ExistingPubkeyAction::Reserve,
+        )
+        .await
     }
 
     /// Ensures that pubkeys exist in any active table without increasing reference counts.
@@ -195,7 +206,12 @@ impl TableMania {
 
         // 2. If any pubkeys dont exist, create tables for them
         if !remaining.is_empty() {
-            self.reserve_new_pubkeys(authority, &remaining).await?;
+            self.reserve_new_pubkeys(
+                authority,
+                &remaining,
+                ExistingPubkeyAction::LeaveUnreserved,
+            )
+            .await?;
         }
 
         Ok(())
@@ -226,6 +242,7 @@ impl TableMania {
         &self,
         authority: &Keypair,
         pubkeys: &HashSet<Pubkey>,
+        existing_pubkey_action: ExistingPubkeyAction,
     ) -> TableManiaResult<()> {
         self.check_authority(authority)?;
 
@@ -247,9 +264,10 @@ impl TableMania {
                 // Try to use the last table if it's not full
                 if let Some(table) = active_tables_write_lock.last() {
                     table.reconcile_with_chain(&self.rpc_client).await?;
-                    Self::reserve_pubkeys_present_in_table(
+                    Self::filter_pubkeys_present_in_table(
                         table,
                         &mut remaining,
+                        existing_pubkey_action,
                     );
                     if remaining.is_empty() {
                         stored_in_existing = true;
@@ -290,9 +308,10 @@ impl TableMania {
                 // Double-check if a new table was created while we were waiting for the lock
                 if let Some(table) = active_tables_write_lock.last() {
                     table.reconcile_with_chain(&self.rpc_client).await?;
-                    Self::reserve_pubkeys_present_in_table(
+                    Self::filter_pubkeys_present_in_table(
                         table,
                         &mut remaining,
+                        existing_pubkey_action,
                     );
                     if remaining.is_empty() {
                         continue;
@@ -323,11 +342,15 @@ impl TableMania {
         Ok(())
     }
 
-    fn reserve_pubkeys_present_in_table(
+    fn filter_pubkeys_present_in_table(
         table: &LookupTableRc,
         remaining: &mut Vec<Pubkey>,
+        existing_pubkey_action: ExistingPubkeyAction,
     ) {
-        remaining.retain(|pk| !table.reserve_pubkey(pk));
+        remaining.retain(|pk| match existing_pubkey_action {
+            ExistingPubkeyAction::Reserve => !table.reserve_pubkey(pk),
+            ExistingPubkeyAction::LeaveUnreserved => !table.contains_key(pk),
+        });
     }
 
     /// Extends the table to store as many of the provided pubkeys as possile.
