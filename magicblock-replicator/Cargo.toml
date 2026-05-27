@@ -12,15 +12,14 @@ async-nats = { workspace = true }
 bincode = { workspace = true }
 bytes = { workspace = true }
 futures = { workspace = true }
-machineid-rs = { workspace = true }
 magicblock-accounts-db = { workspace = true }
-magicblock-chainlink = { workspace = true }
 magicblock-config = { workspace = true }
 magicblock-core = { workspace = true }
 magicblock-ledger = { workspace = true }
 notify = { version = "8.0", features = ["macos_kqueue"] }
 serde = { workspace = true, features = ["derive"] }
 solana-hash = { workspace = true, features = ["serde"] }
+solana-pubkey = { workspace = true }
 solana-transaction = { workspace = true, features = ["serde"] }
 solana-transaction-error = { workspace = true }
 thiserror = { workspace = true }

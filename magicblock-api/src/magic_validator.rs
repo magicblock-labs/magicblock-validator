@@ -251,12 +251,12 @@ impl MagicValidator {
                     mode_tx.clone(),
                     accountsdb.clone(),
                     ledger.clone(),
-                    chainlink.stub(),
                     dispatch.transaction_scheduler.clone(),
                     messages_rx,
                     token.clone(),
                     is_fresh_start,
                     &config.validator.replication_mode,
+                    validator_pubkey,
                 )
                 .await?
             } else {
@@ -1001,17 +1001,6 @@ impl MagicValidator {
             }
             log_timing("shutdown", "unregister_validator_on_chain", step_start);
         }
-        // we have two memory mapped databases,
-        // flush them to disk before exitting
-        let step_start = Instant::now();
-        self.accountsdb.flush();
-        log_timing("shutdown", "accountsdb_flush", step_start);
-
-        let step_start = Instant::now();
-        if let Err(err) = self.ledger.shutdown(true) {
-            error!(error = ?err, "Failed to shutdown ledger");
-        }
-        log_timing("shutdown", "ledger_shutdown", step_start);
         let step_start = Instant::now();
         let _ = self.rpc_handle.join();
         log_timing("shutdown", "rpc_thread_join", step_start);
@@ -1026,9 +1015,6 @@ impl MagicValidator {
         }
         log_timing("shutdown", "ledger_truncator_join", step_start);
         let step_start = Instant::now();
-        let _ = self.transaction_execution.join();
-        log_timing("shutdown", "transaction_execution_join", step_start);
-        let step_start = Instant::now();
         if let Some(handle) = self.replication_handle {
             match handle.join() {
                 Ok(Ok(())) => {}
@@ -1041,6 +1027,27 @@ impl MagicValidator {
             }
         }
         log_timing("shutdown", "replication_service_join", step_start);
+        let step_start = Instant::now();
+        let _ = self.transaction_execution.join();
+        log_timing("shutdown", "transaction_execution_join", step_start);
+
+        // Flush durable state only after every worker that can still admit,
+        // commit, or truncate state has stopped.
+        let step_start = Instant::now();
+        self.accountsdb.flush();
+        log_timing("shutdown", "accountsdb_flush", step_start);
+
+        let step_start = Instant::now();
+        if let Err(err) = self.ledger.flush() {
+            error!(error = ?err, "Failed to flush ledger");
+        }
+        log_timing("shutdown", "ledger_flush", step_start);
+
+        let step_start = Instant::now();
+        if let Err(err) = self.ledger.shutdown(true) {
+            error!(error = ?err, "Failed to shutdown ledger");
+        }
+        log_timing("shutdown", "ledger_shutdown", step_start);
 
         log_timing("shutdown", "stop_total", stop_start);
         info!("MagicValidator shutdown");
