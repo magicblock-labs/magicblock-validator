@@ -649,12 +649,33 @@ where
         }
 
         // Update connection related metrics to signal successful reconnect
+        let client_key = Self::client_key(&client);
         let was_disconnected = {
             let mut connected_ids =
                 Self::connected_client_ids_lock(&connected_client_ids);
-            connected_ids.insert(Self::client_key(&client))
+            connected_ids.insert(client_key)
         };
         if was_disconnected {
+            // Catch subscriptions added while this client was reconnecting.
+            let programs: HashSet<Pubkey> =
+                program_subs.lock().unwrap().iter().copied().collect();
+            for program_id in programs {
+                if let Err(err) = client.subscribe_program(program_id).await {
+                    Self::connected_client_ids_lock(&connected_client_ids)
+                        .remove(&client_key);
+                    return Err(err);
+                }
+            }
+
+            if let Err(err) = client
+                .resub_multiple(accounts_tracker.subscribed_accounts())
+                .await
+            {
+                Self::connected_client_ids_lock(&connected_client_ids)
+                    .remove(&client_key);
+                return Err(err);
+            }
+
             connected_clients.fetch_add(1, Ordering::SeqCst);
             metrics::set_connected_pubsub_clients_count(
                 connected_clients.load(Ordering::SeqCst) as usize,
