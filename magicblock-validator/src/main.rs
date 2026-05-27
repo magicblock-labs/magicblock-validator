@@ -1,4 +1,3 @@
-#[cfg(not(feature = "tui"))]
 mod shutdown;
 
 use std::time::Instant;
@@ -11,14 +10,10 @@ use magicblock_tui_client::{
 };
 use solana_signer::Signer;
 use tokio::runtime::Builder;
-#[cfg(not(feature = "tui"))]
-use tracing::info;
-use tracing::{debug, error, instrument};
+use tracing::{debug, error, info, instrument};
 
-#[cfg(not(feature = "tui"))]
 use crate::shutdown::Shutdown;
 
-#[cfg(not(feature = "tui"))]
 fn init_logger() {
     use magicblock_core::logger::{init_with_config, LogStyle, LoggingConfig};
     let config = LoggingConfig {
@@ -41,18 +36,12 @@ fn main() {
     runtime.block_on(run());
     drop(runtime);
 
-    #[cfg(not(feature = "tui"))]
     info!("main runtime shutdown!");
 }
 
 #[instrument(skip_all)]
 async fn run() {
-    #[cfg(not(feature = "tui"))]
     let overall_start = Instant::now();
-    #[cfg(not(feature = "tui"))]
-    init_logger();
-    #[cfg(feature = "tui")]
-    let validator_log_rx = init_embedded_logger();
     let args = std::env::args_os();
     let config = match ValidatorParams::try_new(args) {
         Ok(c) => c,
@@ -61,7 +50,24 @@ async fn run() {
             std::process::exit(1);
         }
     };
+    let no_tui = config.no_tui;
+
+    // Initialize the appropriate logger based on runtime configuration.
+    #[cfg(feature = "tui")]
+    let validator_log_rx = if no_tui {
+        init_logger();
+        None
+    } else {
+        Some(init_embedded_logger())
+    };
+
     #[cfg(not(feature = "tui"))]
+    {
+        // Silence unused variable warnings in headless-only builds.
+        let _ = no_tui;
+        init_logger();
+    }
+
     info!(config = %format!("{config:#?}"), "Starting validator");
     let rpc_url = config.aperture.listen.http();
     let ws_url = config.aperture.listen.websocket();
@@ -94,33 +100,71 @@ async fn run() {
         duration_ms = start_step.elapsed().as_millis() as u64,
         "Validator start completed"
     );
+
     #[cfg(feature = "tui")]
     {
-        let ledger_path = api
-            .ledger()
-            .ledger_path()
-            .to_str()
-            .unwrap_or("")
-            .to_string();
-        let version = magicblock_version::Version::default();
+        if !no_tui {
+            let ledger_path = api
+                .ledger()
+                .ledger_path()
+                .to_str()
+                .unwrap_or("")
+                .to_string();
+            let version = magicblock_version::Version::default();
 
-        let mut tui_config = TuiConfig {
-            rpc_url: rpc_url.clone(),
-            ws_url: ws_url.clone(),
-            remote_rpc_url,
-            validator_identity: validator_identity.to_string(),
-            ledger_path,
-            block_time_ms,
-            lifecycle_mode,
-            base_fee,
-            help_url: "https://docs.magicblock.xyz".to_string(),
-            version: version.to_string(),
-            git_version: version.git_version.to_string(),
-        };
-        enrich_config_from_rpc(&mut tui_config).await;
+            let mut tui_config = TuiConfig {
+                rpc_url: rpc_url.clone(),
+                ws_url: ws_url.clone(),
+                remote_rpc_url: remote_rpc_url.clone(),
+                validator_identity: validator_identity.to_string(),
+                ledger_path,
+                block_time_ms,
+                lifecycle_mode,
+                base_fee,
+                help_url: "https://docs.magicblock.xyz".to_string(),
+                version: version.to_string(),
+                git_version: version.git_version.to_string(),
+            };
+            enrich_config_from_rpc(&mut tui_config).await;
 
-        if let Err(err) = run_tui(tui_config, Some(validator_log_rx)).await {
-            error!(error = ?err, "TUI error");
+            if let Err(err) = run_tui(tui_config, validator_log_rx).await {
+                error!(error = ?err, "TUI error");
+            }
+        } else {
+            let version = magicblock_version::Version::default();
+            print_info("");
+            print_info("🧙 Magicblock Validator is running! 🪄✦");
+            print_info(format!(
+                "🏷️ Validator version: {} (Git: {})",
+                version, version.git_version
+            ));
+            print_info("-----------------------------------");
+            print_info(format!("📡 RPC endpoint:       {}", rpc_url));
+            print_info(format!("🔌 WebSocket endpoint: {}", ws_url));
+            print_info(format!("🌐 Remote RPC:         {}", remote_rpc_url));
+            print_info(format!(
+                "🖥️ Validator identity: {}",
+                validator_identity
+            ));
+            print_info(format!(
+                "🗄️ Ledger location:    {}",
+                api.ledger().ledger_path().to_str().unwrap_or("")
+            ));
+            print_info("-----------------------------------");
+            print_info("Ready for connections!");
+            print_info("");
+            debug!(
+                duration_ms = overall_start.elapsed().as_millis() as u64,
+                "Validator ready"
+            );
+            let shutdown_wait = Instant::now();
+            if let Err(err) = Shutdown::wait().await {
+                error!(error = ?err, "Failed to gracefully shutdown");
+            }
+            debug!(
+                duration_ms = shutdown_wait.elapsed().as_millis() as u64,
+                "Shutdown signal received"
+            );
         }
     }
 
@@ -172,7 +216,6 @@ async fn run() {
 /// - If `RUST_LOG` is not set or is set to "quiet", prints to stdout using `println!()`.
 /// - Otherwise, emits an `info!` log so operators can control visibility
 ///   (e.g., by setting `RUST_LOG=warn` to hide it).
-#[cfg(not(feature = "tui"))]
 fn print_info<S: std::fmt::Display>(msg: S) {
     let rust_log = std::env::var("RUST_LOG").unwrap_or_default();
     let rust_log_trimmed = rust_log.trim().to_ascii_lowercase();

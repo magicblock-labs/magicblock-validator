@@ -43,6 +43,14 @@ pub struct CliParams {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub storage: Option<PathBuf>,
 
+    /// Disable the terminal UI (TUI). When set, validator runs headless.
+    ///
+    /// This is only relevant when the `magicblock-validator` binary is built
+    /// with TUI support enabled.
+    #[arg(long = "no-tui", default_value_t = false)]
+    #[serde(skip_serializing_if = "is_false", rename = "no-tui")]
+    pub no_tui: bool,
+
     /// Listen address for the metrics endpoint.
     #[arg(long, short)]
     #[serde(skip_serializing_if = "Option::is_none")]
