@@ -520,21 +520,6 @@ impl<
             .map(|provider| provider.is_watching(pubkey))
             .unwrap_or(false)
     }
-
-    /// A temporary hacky method to clone chainlink with accountsdb only,
-    /// for it's used by the replication service to clean up accountsdb
-    ///
-    /// TODO(bmuddha):
-    /// remove all accountsdb management from chainlink, after accountsdb refactoring
-    pub fn stub(&self) -> StubbedChainlink<V> {
-        Chainlink {
-            accounts_bank: self.accounts_bank.clone(),
-            fetch_cloner: None,
-            removed_accounts_sub: None,
-            validator_id: self.validator_id,
-            remove_confined_accounts: self.remove_confined_accounts,
-        }
-    }
 }
 
 // -----------------
