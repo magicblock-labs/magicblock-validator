@@ -383,11 +383,7 @@ impl TableMania {
                 // landed but its outcome was lost). Reconcile so the next
                 // outer iteration sees accurate fullness, and reserve any of
                 // `storing` that turned out to already be on chain.
-                if table
-                    .reconcile_with_chain(&self.rpc_client)
-                    .await
-                    .is_ok()
-                {
+                if table.reconcile_with_chain(&self.rpc_client).await.is_ok() {
                     Self::filter_pubkeys_present_in_table(
                         table,
                         remaining,
