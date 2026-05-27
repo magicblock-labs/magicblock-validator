@@ -365,8 +365,7 @@ impl ChainRpcClient for ChainRpcClientMock {
         for pubkey in pubkeys {
             let val = self
                 .get_account_with_config(pubkey, config.clone())
-                .await
-                .unwrap()
+                .await?
                 .value;
             accounts.push(val);
         }

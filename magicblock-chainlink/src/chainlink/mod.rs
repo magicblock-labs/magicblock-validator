@@ -418,15 +418,18 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
                                 undelegating,
                                 delegated,
                                 owner = %account.owner(),
-                                "Keeping unsubscribed account \
-                                 in bank \
-                                 (delegated/undelegating)"
+                                "Ignoring removal notification because bank \
+                                 state is protected; no EvictAccount \
+                                 transaction will be submitted"
                             );
                         }
                         evict
                     }
                     None => false,
                 };
+                // Skipping a delegated/undelegating LRU candidate is not a
+                // removal event; protected bank state must not be translated
+                // into a downstream bank eviction.
                 if !should_evict {
                     continue;
                 }
@@ -684,8 +687,8 @@ fn extract_program_ids_from_transaction(
 }
 
 #[cfg(test)]
-mod mode_aware_tests {
-    use std::sync::Arc;
+mod tests {
+    use std::{sync::Arc, time::Duration};
 
     use magicblock_accounts_db::traits::AccountsBank;
     use magicblock_config::config::ChainLinkConfig;
@@ -695,13 +698,17 @@ mod mode_aware_tests {
     use solana_pubkey::Pubkey;
     use solana_sdk_ids::feature;
     use solana_transaction::{sanitized::SanitizedTransaction, Transaction};
+    use tokio::sync::mpsc;
 
-    use super::{errors::ChainlinkError, ReplicationModeAwareChainlink};
+    use super::{
+        errors::ChainlinkError, InnerChainlink, ReplicationModeAwareChainlink,
+    };
     use crate::{
         accounts_bank::mock::AccountsBankStub,
         remote_account_provider::chain_pubsub_client::mock::ChainPubsubClientMock,
         testing::{
-            cloner_stub::ClonerStub, rpc_client_mock::ChainRpcClientMock,
+            cloner_stub::ClonerStub, init_logger,
+            rpc_client_mock::ChainRpcClientMock,
         },
     };
 
@@ -808,5 +815,64 @@ mod mode_aware_tests {
             .expect_err("disabled transaction ensure should be rejected");
 
         assert!(matches!(error, ChainlinkError::DisabledForNonPrimaryMode));
+    }
+
+    #[tokio::test]
+    async fn test_subscribe_account_removals_skips_delegated_or_undelegating_and_evicts_normal(
+    ) {
+        init_logger();
+
+        let accounts_bank = Arc::new(AccountsBankStub::default());
+        let cloner = Arc::new(ClonerStub::new(accounts_bank.clone()));
+        let (removed_tx, removed_rx) = mpsc::channel(8);
+
+        let delegated_pubkey = Pubkey::new_unique();
+        let undelegating_pubkey = Pubkey::new_unique();
+        let normal_pubkey = Pubkey::new_unique();
+        let owner = Pubkey::new_unique();
+
+        let mut delegated_account =
+            AccountSharedData::new(1_000_000, 0, &owner);
+        delegated_account.set_delegated(true);
+        accounts_bank.insert(delegated_pubkey, delegated_account);
+
+        let mut undelegating_account =
+            AccountSharedData::new(1_000_000, 0, &owner);
+        undelegating_account.set_undelegating(true);
+        accounts_bank.insert(undelegating_pubkey, undelegating_account);
+
+        let normal_account = AccountSharedData::new(1_000_000, 0, &owner);
+        accounts_bank.insert(normal_pubkey, normal_account);
+
+        let handle = InnerChainlink::<
+            ChainRpcClientMock,
+            ChainPubsubClientMock,
+            AccountsBankStub,
+            ClonerStub,
+        >::subscribe_account_removals(
+            &accounts_bank, &cloner, removed_rx
+        );
+
+        removed_tx.send(delegated_pubkey).await.unwrap();
+        removed_tx.send(undelegating_pubkey).await.unwrap();
+        removed_tx.send(normal_pubkey).await.unwrap();
+
+        tokio::time::timeout(Duration::from_secs(1), async {
+            loop {
+                if accounts_bank.get_account(&normal_pubkey).is_none() {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("normal removal notification should submit eviction");
+
+        assert!(accounts_bank.get_account(&delegated_pubkey).is_some());
+        assert!(accounts_bank.get_account(&undelegating_pubkey).is_some());
+        assert!(accounts_bank.get_account(&normal_pubkey).is_none());
+
+        drop(removed_tx);
+        handle.await.unwrap();
     }
 }

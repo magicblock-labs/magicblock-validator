@@ -314,6 +314,7 @@ pub mod mock {
         subscription_count_at_disconnect: Arc<Mutex<usize>>,
         connected: Arc<Mutex<bool>>,
         pending_resubscribe_failures: Arc<Mutex<usize>>,
+        pending_unsubscribe_failures: Arc<Mutex<usize>>,
         reconnectable: Arc<Mutex<bool>>,
         subscribe_blocked: Arc<Mutex<bool>>,
         subscribe_attempts: Arc<AtomicU64>,
@@ -333,6 +334,7 @@ pub mod mock {
                 subscription_count_at_disconnect: Arc::new(Mutex::new(0)),
                 connected: Arc::new(Mutex::new(true)),
                 pending_resubscribe_failures: Arc::new(Mutex::new(0)),
+                pending_unsubscribe_failures: Arc::new(Mutex::new(0)),
                 reconnectable: Arc::new(Mutex::new(true)),
                 subscribe_blocked: Arc::new(Mutex::new(false)),
                 subscribe_attempts: Arc::new(AtomicU64::new(0)),
@@ -351,6 +353,10 @@ pub mod mock {
         /// Fail the next N resubscription attempts in resub_multiple().
         pub fn fail_next_resubscriptions(&self, n: usize) {
             *self.pending_resubscribe_failures.lock() = n;
+        }
+
+        pub fn fail_next_unsubscriptions(&self, n: usize) {
+            *self.pending_unsubscribe_failures.lock() = n;
         }
 
         async fn send(&self, update: SubscriptionUpdate) {
@@ -507,6 +513,18 @@ pub mod mock {
             &self,
             pubkey: Pubkey,
         ) -> RemoteAccountProviderResult<()> {
+            {
+                let mut to_fail = self.pending_unsubscribe_failures.lock();
+                if *to_fail > 0 {
+                    *to_fail -= 1;
+                    return Err(
+                        RemoteAccountProviderError::AccountSubscriptionsTaskFailed(
+                            "mock: forced unsubscribe failure".to_string(),
+                        ),
+                    );
+                }
+            }
+
             let mut subscribed_pubkeys = self.subscribed_pubkeys.lock();
             subscribed_pubkeys.remove(&pubkey);
             Ok(())

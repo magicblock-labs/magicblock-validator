@@ -173,6 +173,7 @@ pub fn adjust_authority_lamports(
 /// The account will be removed from accountsdb due to the ephemeral flag.
 pub fn close_buffer_account(mut acc: AccountRefMut<'_>) {
     acc.set_lamports(0);
+    acc.set_owner(Pubkey::default());
     acc.resize(0, 0);
     // Setting ephemeral flag on empty account, forces
     // accountsdb to remove it, thus reclaiming space

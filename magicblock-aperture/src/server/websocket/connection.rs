@@ -1,8 +1,5 @@
 use std::{
-    sync::{
-        atomic::{AtomicU32, Ordering},
-        Arc,
-    },
+    sync::atomic::{AtomicU32, Ordering},
     time::Duration,
 };
 
@@ -26,7 +23,7 @@ use super::{
 use crate::{
     error::RpcError,
     requests::payload::{ResponseErrorPayload, ResponsePayload},
-    server::{websocket::dispatch::WsConnectionChannel, Shutdown},
+    server::websocket::dispatch::WsConnectionChannel,
 };
 
 /// A type alias for the underlying WebSocket stream provided by `fastwebsockets`.
@@ -41,9 +38,9 @@ pub(crate) type ConnectionID = u32;
 /// - Dispatching requests to the `WsDispatcher` for processing.
 /// - Receiving subscription notifications from various events and pushing them to the client.
 /// - Handling keep-alive pings and detecting inactive connections.
-/// - Participating in the server's graceful shutdown mechanism.
+/// - Observing the server's shutdown token between connection events.
 pub(super) struct ConnectionHandler {
-    /// The server's global cancellation token for graceful shutdown.
+    /// The server's global cancellation token.
     cancel: CancellationToken,
     /// The underlying WebSocket stream for reading and writing frames.
     ws: WebsocketStream,
@@ -53,9 +50,6 @@ pub(super) struct ConnectionHandler {
     /// A channel for receiving subscription updates (e.g., account changes, slot updates)
     /// from the server's background `EventProcessor`s.
     updates_rx: Receiver<Bytes>,
-    /// A clone of the server's `Shutdown` handle. Its presence in this struct ensures
-    /// that the server will not fully shut down until this connection is terminated.
-    _sd: Arc<Shutdown>,
 }
 
 impl ConnectionHandler {
@@ -79,7 +73,6 @@ impl ConnectionHandler {
             cancel: state.cancel,
             ws,
             updates_rx,
-            _sd: state.shutdown,
         }
     }
 

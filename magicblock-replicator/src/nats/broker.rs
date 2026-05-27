@@ -3,13 +3,14 @@
 use std::time::Duration;
 
 use async_nats::{
+    header::NATS_MESSAGE_ID,
     jetstream::{
         kv,
         object_store::{self, GetErrorKind, ObjectMetadata},
         stream::{self, Compression},
         Context, ContextBuilder,
     },
-    ConnectOptions, Event, ServerAddr, Subject,
+    ConnectOptions, Event, HeaderMap, ServerAddr, Subject,
 };
 use bytes::Bytes;
 use magicblock_core::Slot;
@@ -115,9 +116,18 @@ impl Broker {
         &mut self,
         subject: Subject,
         payload: Bytes,
+        msg_id: Option<&str>,
         ack: bool,
     ) -> Result<()> {
-        let f = self.ctx.publish(subject, payload).await?;
+        let f = if let Some(msg_id) = msg_id {
+            let mut headers = HeaderMap::new();
+            headers.insert(NATS_MESSAGE_ID, msg_id);
+            self.ctx
+                .publish_with_headers(subject, headers, payload)
+                .await?
+        } else {
+            self.ctx.publish(subject, payload).await?
+        };
         if ack {
             self.sequence = f.await?.sequence;
         }
