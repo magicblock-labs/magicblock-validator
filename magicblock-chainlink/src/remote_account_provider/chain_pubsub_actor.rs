@@ -211,6 +211,11 @@ impl ChainPubsubActor {
         }
     }
 
+    // Reconnect-only safety gate: callers that may drop or replace pooled
+    // PubsubClient instances must drain subscription maps and wait here before
+    // calling PubSubConnectionPool::reconnect(). Explicit unsubscribe may cancel
+    // listeners without waiting because it does not drop pooled clients and leaves
+    // the map entry visible until listener cleanup completes.
     async fn drain_and_wait_for_listener_completion(
         client_id: &str,
         subscriptions: Arc<Mutex<HashMap<Pubkey, AccountSubscription>>>,
@@ -1118,5 +1123,53 @@ mod tests {
             .expect("subscriptions lock poisoned")
             .is_empty());
         assert!(cancellation_token.is_cancelled());
+    }
+
+    #[tokio::test]
+    async fn explicit_unsubscribe_style_cancellation_leaves_entry_for_reconnect_drain(
+    ) {
+        let subscriptions = Arc::new(Mutex::new(HashMap::new()));
+        let program_subs = Arc::new(Mutex::new(HashMap::new()));
+        let pubkey = Pubkey::new_unique();
+        let cancellation_token = CancellationToken::new();
+        let completion_token = CancellationToken::new();
+
+        subscriptions
+            .lock()
+            .expect("subscriptions lock poisoned")
+            .insert(
+                pubkey,
+                AccountSubscription {
+                    cancellation_token: cancellation_token.clone(),
+                    completion_token: completion_token.clone(),
+                },
+            );
+
+        let cancellation_token_to_cancel = subscriptions
+            .lock()
+            .expect("subscriptions lock poisoned")
+            .get(&pubkey)
+            .map(|sub| sub.cancellation_token.clone());
+        cancellation_token_to_cancel.unwrap().cancel();
+
+        assert!(cancellation_token.is_cancelled());
+        assert!(subscriptions
+            .lock()
+            .expect("subscriptions lock poisoned")
+            .contains_key(&pubkey));
+
+        completion_token.cancel();
+        ChainPubsubActor::drain_and_wait_for_listener_completion(
+            "test_client",
+            subscriptions.clone(),
+            program_subs,
+        )
+        .await
+        .unwrap();
+
+        assert!(subscriptions
+            .lock()
+            .expect("subscriptions lock poisoned")
+            .is_empty());
     }
 }

@@ -167,8 +167,9 @@ impl<T: PubsubConnection> PubSubConnectionPool<T> {
     ///
     /// Caller precondition: every account/program listener task that may hold a
     /// stream created from an existing pooled client must have completed before
-    /// this method is called. If listener completion cannot be proven, callers
-    /// must not call this method.
+    /// this method is called. Reconnect callers must enforce this by draining
+    /// subscription maps and waiting for listener completion; explicit unsubscribe
+    /// alone is not proof that the listener has finished.
     pub async fn reconnect(&self) -> PubsubClientResult<()> {
         while self.connections.pop().is_some() {}
         // We cannot reconnect an existing connection due to the lockless queue
