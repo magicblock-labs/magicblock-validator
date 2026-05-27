@@ -165,18 +165,24 @@ impl ChainPubsubActor {
         shutdown_token: CancellationToken,
     ) {
         info!(client_id = client_id, "Shutting down pubsub actor");
-        let result =
-            Self::unsubscribe_all(client_id, subscriptions, program_subs).await;
+        let result = Self::drain_and_wait_for_listener_completion(
+            client_id,
+            subscriptions,
+            program_subs,
+        )
+        .await;
         if let Err(err) = result {
             warn!(error = ?err, client_id, "Timed out while shutting down pubsub subscriptions");
         }
         shutdown_token.cancel();
     }
 
-    // Reconnect must not drop pooled PubsubClient instances until all listener
-    // tasks have stopped polling, explicitly dropped their subscription streams,
-    // and run or timed out unsubscribe cleanup.
-    async fn cancel_and_wait_subscription(
+    // Reconnect must not drop pooled PubsubClient instances until all
+    // listener tasks have stopped polling and dropped their subscription streams.
+    // This helper cancels one listener and waits for its completion signal, which
+    // listener tasks emit only after dropping update_stream and running best-effort
+    // unsubscribe cleanup.
+    async fn cancel_and_wait_for_stream_drop(
         client_id: &str,
         kind: &'static str,
         pubkey: Pubkey,
@@ -205,7 +211,7 @@ impl ChainPubsubActor {
         }
     }
 
-    async fn unsubscribe_all(
+    async fn drain_and_wait_for_listener_completion(
         client_id: &str,
         subscriptions: Arc<Mutex<HashMap<Pubkey, AccountSubscription>>>,
         program_subs: Arc<Mutex<HashMap<Pubkey, AccountSubscription>>>,
@@ -223,7 +229,7 @@ impl ChainPubsubActor {
 
         let mut first_error = None;
         for (pubkey, sub) in account_subs {
-            if let Err(err) = Self::cancel_and_wait_subscription(
+            if let Err(err) = Self::cancel_and_wait_for_stream_drop(
                 client_id, "account", pubkey, sub,
             )
             .await
@@ -232,7 +238,7 @@ impl ChainPubsubActor {
             }
         }
         for (pubkey, sub) in program_subs {
-            if let Err(err) = Self::cancel_and_wait_subscription(
+            if let Err(err) = Self::cancel_and_wait_for_stream_drop(
                 client_id, "program", pubkey, sub,
             )
             .await
@@ -409,7 +415,7 @@ impl ChainPubsubActor {
                     .expect("subcriptions lock poisoned")
                     .remove(&pubkey);
                 if let Some(sub) = sub {
-                    match Self::cancel_and_wait_subscription(
+                    match Self::cancel_and_wait_for_stream_drop(
                         client_id, "account", pubkey, sub,
                     )
                     .await
@@ -895,8 +901,13 @@ impl ChainPubsubActor {
         client_id: &str,
         is_connected: Arc<AtomicBool>,
     ) -> RemoteAccountProviderResult<()> {
-        // 1. Ensure we cleaned all existing subscriptions
-        Self::unsubscribe_all(client_id, subs, program_subs).await?;
+        // 1. Drain subscriptions and wait until borrowed pubsub streams are dropped.
+        Self::drain_and_wait_for_listener_completion(
+            client_id,
+            subs,
+            program_subs,
+        )
+        .await?;
 
         // 2. Try to reconnect the pubsub connection
         pubsub_connection.reconnect().await?;
@@ -1005,7 +1016,8 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn unsubscribe_all_waits_for_account_and_program_completion() {
+    async fn drain_and_wait_for_listener_completion_waits_for_account_and_program_completion(
+    ) {
         let subscriptions = Arc::new(Mutex::new(HashMap::new()));
         let program_subs = Arc::new(Mutex::new(HashMap::new()));
         let account_pubkey = Pubkey::new_unique();
@@ -1056,7 +1068,7 @@ mod tests {
         });
 
         let started = Instant::now();
-        ChainPubsubActor::unsubscribe_all(
+        ChainPubsubActor::drain_and_wait_for_listener_completion(
             "test_client",
             subscriptions.clone(),
             program_subs.clone(),
@@ -1080,7 +1092,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn unsubscribe_all_returns_error_when_completion_times_out() {
+    async fn drain_and_wait_for_listener_completion_returns_error_when_completion_times_out(
+    ) {
         let subscriptions = Arc::new(Mutex::new(HashMap::new()));
         let program_subs = Arc::new(Mutex::new(HashMap::new()));
         let account_pubkey = Pubkey::new_unique();
@@ -1098,7 +1111,7 @@ mod tests {
                 },
             );
 
-        let result = ChainPubsubActor::unsubscribe_all(
+        let result = ChainPubsubActor::drain_and_wait_for_listener_completion(
             "test_client",
             subscriptions.clone(),
             program_subs,
