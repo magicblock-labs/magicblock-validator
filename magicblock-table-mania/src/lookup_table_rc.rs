@@ -70,6 +70,19 @@ impl RefcountedPubkeys {
         }
     }
 
+    /// Adds pubkeys already present on chain without creating local
+    /// reservations for them.
+    fn insert_unreserved_many(&mut self, pubkeys: &[Pubkey]) -> usize {
+        let mut inserted = 0;
+        for pubkey in pubkeys {
+            if !self.pubkeys.contains_key(pubkey) {
+                self.pubkeys.insert(*pubkey, AtomicUsize::new(0));
+                inserted += 1;
+            }
+        }
+        inserted
+    }
+
     /// Add a reservation to the pubkey if it is part of this table
     /// - *pubkey* to reserve
     /// - *returns* `true` if the pubkey could be reserved
@@ -331,6 +344,49 @@ impl LookupTableRc {
     pub fn get_refcount(&self, pubkey: &Pubkey) -> Option<usize> {
         self.pubkeys()?.get_refcount(pubkey)
     }
+
+    /// Reconciles local capacity tracking with the on-chain lookup table.
+    ///
+    /// Remote-only keys are added with refcount 0 so existing reservations are
+    /// preserved while local fullness reflects chain state.
+    pub async fn reconcile_with_chain(
+        &self,
+        rpc_client: &MagicblockRpcClient,
+    ) -> TableManiaResult<()> {
+        if self.is_deactivated() {
+            return Err(TableManiaError::CannotExtendDeactivatedTable(
+                *self.table_address(),
+            ));
+        }
+
+        let Some(chain_pubkeys) = self.get_chain_pubkeys(rpc_client).await?
+        else {
+            debug!(
+                table_address = %self.table_address(),
+                "Skipping lookup table reconciliation; remote table missing"
+            );
+            return Ok(());
+        };
+
+        let Some(mut local_pubkeys) = self.pubkeys_mut() else {
+            return Err(TableManiaError::CannotExtendDeactivatedTable(
+                *self.table_address(),
+            ));
+        };
+        let inserted = local_pubkeys.insert_unreserved_many(&chain_pubkeys);
+        if inserted > 0 {
+            debug!(
+                table_address = %self.table_address(),
+                inserted,
+                remote_count = chain_pubkeys.len(),
+                local_count = local_pubkeys.len(),
+                "Reconciled lookup table pubkeys from chain"
+            );
+        }
+
+        Ok(())
+    }
+
     /// Returns `true` if the we requested to deactivate this table.
     /// NOTE: this doesn't mean that the deactivation period passed, thus
     ///       the table could still be considered _deactivating_ on chain.
@@ -757,23 +813,41 @@ impl LookupTableRc {
             latest_blockhash,
         );
 
-        let outcome = rpc_client
+        let send_result = rpc_client
             .send_transaction(
                 &tx,
                 &Self::get_send_transaction_config(rpc_client),
             )
-            .await?;
+            .await;
 
-        let (signature, error) = outcome.into_signature_and_error();
-        if let Some(error) = &error {
-            debug!(
-                error = ?error,
-                signature = %signature,
-                "Error closing lookup table - may need longer deactivation time"
-            );
-        }
+        let signature = match send_result {
+            Ok(outcome) => {
+                let (sig, error) = outcome.into_signature_and_error();
+                if let Some(error) = &error {
+                    debug!(
+                        error = ?error,
+                        signature = %sig,
+                        "Error closing lookup table - may need longer deactivation time"
+                    );
+                }
+                Some(sig)
+            }
+            Err(err) => {
+                // The ALT program returns InvalidAccountOwner when the table
+                // account no longer exists (e.g. a prior close attempt landed
+                // on chain but its outcome was lost, or it was closed out of
+                // band). Without this salvage the GC would re-issue the close
+                // every cycle indefinitely.
+                let sig = err.signature();
+                if self.is_closed(rpc_client).await.unwrap_or(false) {
+                    return Ok((true, sig));
+                }
+                return Err(err.into());
+            }
+        };
+
         let is_closed = self.is_closed(rpc_client).await?;
-        Ok((is_closed, Some(signature)))
+        Ok((is_closed, signature))
     }
 
     pub async fn get_meta(
