@@ -84,11 +84,27 @@ impl RpcTestEnv {
     /// 3.  Starts a live `JsonRpcServer` (HTTP and WebSocket) in a background task.
     /// 4.  Connects an `RpcClient` and `PubsubClient` to the running server.
     pub async fn new() -> Self {
+        Self::new_internal(false).await
+    }
+
+    /// Creates a new RPC test environment without a running scheduler.
+    ///
+    /// Use this for tests that manually advance slots and do not need transaction
+    /// execution, to avoid racing the scheduler's own slot ticker.
+    pub async fn new_manual_slots() -> Self {
+        Self::new_internal(true).await
+    }
+
+    async fn new_internal(defer_scheduler: bool) -> Self {
         // Use a short block time so the scheduler auto-advances slots.
         // Tests should use `wait_for_slot_progress()` to wait for slot progression.
         const BLOCK_TIME_MS: u64 = 50;
 
-        let execution = ExecutionTestEnv::new();
+        let execution = if defer_scheduler {
+            ExecutionTestEnv::new_with_config(Self::BASE_FEE, 1, true)
+        } else {
+            ExecutionTestEnv::new()
+        };
         execution.advance_slot();
 
         let faucet = Keypair::new();
