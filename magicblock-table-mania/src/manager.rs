@@ -246,6 +246,7 @@ impl TableMania {
 
                 // Try to use the last table if it's not full
                 if let Some(table) = active_tables_write_lock.last() {
+                    table.reconcile_with_chain(&self.rpc_client).await?;
                     if !table.is_full() {
                         if let Err(err) = self
                             .extend_table(
@@ -282,6 +283,7 @@ impl TableMania {
 
                 // Double-check if a new table was created while we were waiting for the lock
                 if let Some(table) = active_tables_write_lock.last() {
+                    table.reconcile_with_chain(&self.rpc_client).await?;
                     if !table.is_full() {
                         // Another task created a table we can use, so drop the write lock
                         // and try again with the read lock

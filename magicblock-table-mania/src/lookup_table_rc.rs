@@ -70,6 +70,19 @@ impl RefcountedPubkeys {
         }
     }
 
+    /// Adds pubkeys already present on chain without creating local
+    /// reservations for them.
+    fn insert_unreserved_many(&mut self, pubkeys: &[Pubkey]) -> usize {
+        let mut inserted = 0;
+        for pubkey in pubkeys {
+            if !self.pubkeys.contains_key(pubkey) {
+                self.pubkeys.insert(*pubkey, AtomicUsize::new(0));
+                inserted += 1;
+            }
+        }
+        inserted
+    }
+
     /// Add a reservation to the pubkey if it is part of this table
     /// - *pubkey* to reserve
     /// - *returns* `true` if the pubkey could be reserved
@@ -331,6 +344,49 @@ impl LookupTableRc {
     pub fn get_refcount(&self, pubkey: &Pubkey) -> Option<usize> {
         self.pubkeys()?.get_refcount(pubkey)
     }
+
+    /// Reconciles local capacity tracking with the on-chain lookup table.
+    ///
+    /// Remote-only keys are added with refcount 0 so existing reservations are
+    /// preserved while local fullness reflects chain state.
+    pub async fn reconcile_with_chain(
+        &self,
+        rpc_client: &MagicblockRpcClient,
+    ) -> TableManiaResult<()> {
+        if self.is_deactivated() {
+            return Err(TableManiaError::CannotExtendDeactivatedTable(
+                *self.table_address(),
+            ));
+        }
+
+        let Some(chain_pubkeys) = self.get_chain_pubkeys(rpc_client).await?
+        else {
+            debug!(
+                table_address = %self.table_address(),
+                "Skipping lookup table reconciliation; remote table missing"
+            );
+            return Ok(());
+        };
+
+        let Some(mut local_pubkeys) = self.pubkeys_mut() else {
+            return Err(TableManiaError::CannotExtendDeactivatedTable(
+                *self.table_address(),
+            ));
+        };
+        let inserted = local_pubkeys.insert_unreserved_many(&chain_pubkeys);
+        if inserted > 0 {
+            debug!(
+                table_address = %self.table_address(),
+                inserted,
+                remote_count = chain_pubkeys.len(),
+                local_count = local_pubkeys.len(),
+                "Reconciled lookup table pubkeys from chain"
+            );
+        }
+
+        Ok(())
+    }
+
     /// Returns `true` if the we requested to deactivate this table.
     /// NOTE: this doesn't mean that the deactivation period passed, thus
     ///       the table could still be considered _deactivating_ on chain.
