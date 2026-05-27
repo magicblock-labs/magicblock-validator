@@ -8,8 +8,10 @@ use magicblock_program::magic_scheduled_base_intent::ScheduledIntentBundle;
 use solana_pubkey::Pubkey;
 
 use super::{
-    db::CommitStatusRow, error::CommitPersistResult, utils::now, CommitStatus,
-    CommitStrategy, CommitType, CommittsDb, MessageSignatures,
+    db::CommitStatusRow,
+    error::{CommitPersistError, CommitPersistResult},
+    utils::now,
+    CommitStatus, CommitStrategy, CommitType, CommittsDb, MessageSignatures,
 };
 use crate::{
     intent_executor::ExecutionOutput, persist::db::BundleSignatureRow,
@@ -56,6 +58,9 @@ pub trait IntentPersister: Send + Sync + Clone + 'static {
     fn get_commit_statuses_by_message(
         &self,
         message_id: u64,
+    ) -> CommitPersistResult<Vec<CommitStatusRow>>;
+    fn get_pending_commit_statuses(
+        &self,
     ) -> CommitPersistResult<Vec<CommitStatusRow>>;
     fn get_commit_status_by_message(
         &self,
@@ -243,6 +248,15 @@ impl IntentPersister for IntentPersisterImpl {
             .get_commit_statuses_by_id(message_id)
     }
 
+    fn get_pending_commit_statuses(
+        &self,
+    ) -> CommitPersistResult<Vec<CommitStatusRow>> {
+        self.commits_db
+            .lock()
+            .map_err(|err| CommitPersistError::MutexPoisoned(err.to_string()))?
+            .get_pending_commit_statuses()
+    }
+
     fn get_commit_status_by_message(
         &self,
         message_id: u64,
@@ -385,6 +399,15 @@ impl<T: IntentPersister> IntentPersister for Option<T> {
             Some(persister) => {
                 persister.get_commit_statuses_by_message(message_id)
             }
+            None => Ok(Vec::new()),
+        }
+    }
+
+    fn get_pending_commit_statuses(
+        &self,
+    ) -> CommitPersistResult<Vec<CommitStatusRow>> {
+        match self {
+            Some(persister) => persister.get_pending_commit_statuses(),
             None => Ok(Vec::new()),
         }
     }

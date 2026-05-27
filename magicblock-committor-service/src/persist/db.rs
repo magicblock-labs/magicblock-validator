@@ -557,6 +557,18 @@ impl CommittsDb {
         extract_committor_rows(&mut rows)
     }
 
+    pub(crate) fn get_pending_commit_statuses(
+        &self,
+    ) -> CommitPersistResult<Vec<CommitStatusRow>> {
+        let query = format!(
+            "{SELECT_ALL_COMMIT_STATUS_COLUMNS} WHERE commit_status = ?1 ORDER BY message_id, created_at, pubkey"
+        );
+        let stmt = &mut self.conn.prepare(&query)?;
+        let mut rows = stmt.query(params![CommitStatus::Pending.as_str()])?;
+
+        extract_committor_rows(&mut rows)
+    }
+
     pub(crate) fn get_commit_status(
         &self,
         message_id: u64,
@@ -826,6 +838,24 @@ mod tests {
         // Retrieve individual row
         let retrieved = db.get_commit_status(1, &row1.pubkey).unwrap().unwrap();
         assert_eq!(retrieved, row1);
+    }
+
+    #[test]
+    fn test_get_pending_commit_statuses() {
+        let (mut db, _file) = setup_test_db();
+        let pending = create_test_row(1, 0);
+        let mut succeeded = create_test_row(2, 0);
+        succeeded.commit_status =
+            CommitStatus::Succeeded(CommitStatusSignatures {
+                commit_stage_signature: Signature::new_unique(),
+                finalize_stage_signature: Some(Signature::new_unique()),
+            });
+
+        db.insert_commit_status_rows(&[pending.clone(), succeeded])
+            .unwrap();
+
+        let rows = db.get_pending_commit_statuses().unwrap();
+        assert_eq!(rows, vec![pending]);
     }
 
     #[test]
