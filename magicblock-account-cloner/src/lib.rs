@@ -72,10 +72,8 @@ use tracing::*;
 /// Max data that fits in a single transaction (~63KB)
 pub const MAX_INLINE_DATA_SIZE: usize = 63 * 1024;
 
-mod account_cloner;
 mod util;
 
-pub use account_cloner::*;
 pub use util::derive_buffer_pubkey;
 
 /// Keep only a bounded history of sent action tx signatures to avoid
