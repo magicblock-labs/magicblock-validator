@@ -15,6 +15,7 @@ use magicblock_core::{
 use magicblock_metrics::metrics::{AccountFetchOrigin, ENSURE_ACCOUNTS_TIME};
 use prelude::JsonBody;
 use solana_account::{AccountSharedData, ReadableAccount};
+use solana_message::VersionedMessage;
 use solana_pubkey::Pubkey;
 use solana_transaction::{
     sanitized::SanitizedTransaction, versioned::VersionedTransaction,
@@ -246,7 +247,7 @@ impl HttpDispatcher {
         let mut transaction: VersionedTransaction =
             bincode::deserialize(&encoded).map_err(RpcError::invalid_params)?;
 
-        validate_runtime_program_id_indexes(&transaction)?;
+        validate_supported_transaction_shape(&transaction)?;
 
         if replace_blockhash {
             transaction
@@ -301,9 +302,17 @@ impl HttpDispatcher {
     }
 }
 
-fn validate_runtime_program_id_indexes(
+fn validate_supported_transaction_shape(
     transaction: &VersionedTransaction,
 ) -> RpcResult<()> {
+    if let VersionedMessage::V0(message) = &transaction.message {
+        if !message.address_table_lookups.is_empty() {
+            return Err(RpcError::transaction_verification(
+                "v0 transactions with address lookup tables are not supported",
+            ));
+        }
+    }
+
     for instruction in transaction.message.instructions() {
         let program_id_index = usize::from(instruction.program_id_index);
         if program_id_index >= MAX_RUNTIME_PROGRAM_ID_INDEX_EXCLUSIVE {
@@ -510,7 +519,7 @@ mod tests {
             }),
         };
 
-        validate_runtime_program_id_indexes(&transaction).unwrap();
+        validate_supported_transaction_shape(&transaction).unwrap();
     }
 
     #[test]
@@ -539,7 +548,7 @@ mod tests {
         };
 
         let error =
-            validate_runtime_program_id_indexes(&transaction).unwrap_err();
+            validate_supported_transaction_shape(&transaction).unwrap_err();
         assert!(
             error
                 .to_string()

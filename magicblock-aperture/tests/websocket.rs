@@ -215,41 +215,33 @@ async fn test_signature_subscribe_failure() {
 /// Verifies `slotSubscribe` sends a notification for each new slot.
 #[tokio::test]
 async fn test_slot_subscribe() {
-    let env = RpcTestEnv::new().await;
+    let env = RpcTestEnv::new_manual_slots().await;
     let (mut stream, unsub) = env
         .pubsub
         .slot_subscribe()
         .await
         .expect("failed to subscribe to slots");
-    let initial_slot = env.latest_slot();
+    let mut last_slot = env.latest_slot();
 
-    // Wait for at least 3 slot notifications from auto-advancement
-    // Initialize last_slot to allow the first notification to be >= initial_slot
-    let mut last_slot = initial_slot.saturating_sub(1);
-    let mut notifications_received = 0;
-    for _ in 0..10 {
-        let result = timeout(Duration::from_millis(200), stream.next()).await;
-        let Ok(Some(notification)) = result else {
-            // Timed out or stream closed - continue to try more
-            continue;
+    for _ in 0..3 {
+        env.advance_slots(1);
+        let start = tokio::time::Instant::now();
+        let notification = loop {
+            let remaining =
+                Duration::from_secs(1).saturating_sub(start.elapsed());
+            let notification = timeout(remaining, stream.next())
+                .await
+                .expect("timed out waiting for slot notification")
+                .expect("stream should not be closed");
+
+            if notification.slot > last_slot {
+                break notification;
+            }
         };
 
-        // Verify slot is advancing (not necessarily sequential due to auto-advancement)
-        assert!(notification.slot > last_slot, "slot should advance");
         assert_eq!(notification.parent, notification.slot - 1);
         last_slot = notification.slot;
-        notifications_received += 1;
-
-        if notifications_received >= 3 {
-            break;
-        }
     }
-
-    // Verify we received at least 3 notifications
-    assert!(
-        notifications_received >= 3,
-        "should have received at least 3 slot notifications, got {notifications_received}"
-    );
 
     unsub().await;
     // Drain any buffered notifications that were sent before unsubscription completed

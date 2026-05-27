@@ -36,6 +36,7 @@ use magicblock_core::link::{
 use magicblock_ledger::Ledger;
 pub use primary::Primary;
 pub use replica::Replica;
+use solana_pubkey::Pubkey;
 use tokio::{
     runtime::Builder,
     sync::mpsc::{Receiver, Sender},
@@ -85,6 +86,7 @@ where
         cancel: CancellationToken,
         reset: bool,
         mode: &ReplicationMode,
+        validator_identity: Pubkey,
     ) -> crate::Result<Option<Self>> {
         let ctx = ReplicationContext::new(
             broker,
@@ -94,6 +96,7 @@ where
             account_bank_resetter,
             scheduler,
             cancel,
+            validator_identity,
         )
         .await?;
 

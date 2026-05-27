@@ -2,7 +2,6 @@
 
 use std::sync::Arc;
 
-use machineid_rs::IdBuilder;
 use magicblock_accounts_db::AccountsDb;
 use magicblock_chainlink::AccountsBankResetter;
 use magicblock_core::{
@@ -13,6 +12,7 @@ use magicblock_core::{
     Slot, TransactionIndex,
 };
 use magicblock_ledger::Ledger;
+use solana_pubkey::Pubkey;
 use tokio::{
     fs::File,
     sync::mpsc::{Receiver, Sender},
@@ -32,8 +32,10 @@ pub struct ReplicationContext<R>
 where
     R: AccountsBankResetter,
 {
-    /// Node identifier for leader election.
-    pub id: String,
+    /// Producer lock owner identifier.
+    pub producer_id: String,
+    /// Durable consumer identifier.
+    pub consumer_id: String,
     /// NATS broker.
     pub broker: Broker,
     /// Global shutdown signal
@@ -69,20 +71,21 @@ where
         account_bank_resetter: Arc<R>,
         scheduler: TransactionSchedulerHandle,
         cancel: CancellationToken,
+        validator_identity: Pubkey,
     ) -> Result<Self> {
-        let id = IdBuilder::new(machineid_rs::Encryption::SHA256)
-            .add_component(machineid_rs::HWIDComponent::SystemID)
-            .build("magicblock")
-            .map_err(|e| Error::Internal(e.to_string()))?;
+        let node_id = validator_identity.to_string();
+        let producer_id = format!("{node_id}-producer");
+        let consumer_id = format!("{node_id}-consumer");
 
         let slot = accountsdb.slot();
         let index = ledger
             .get_highest_transaction_index_for_slot(slot)?
             .unwrap_or_default();
 
-        info!(%id, slot, "context initialized");
+        info!(%node_id, %producer_id, %consumer_id, slot, "context initialized");
         Ok(Self {
-            id,
+            producer_id,
+            consumer_id,
             broker,
             cancel,
             mode_tx,
@@ -132,7 +135,8 @@ where
 
     /// Attempts to acquire producer lock for primary role.
     pub async fn try_acquire_producer(&self) -> Result<Option<Producer>> {
-        let mut producer = self.broker.create_producer(&self.id).await?;
+        let mut producer =
+            self.broker.create_producer(&self.producer_id).await?;
         producer
             .acquire()
             .await
@@ -159,7 +163,7 @@ where
     pub async fn create_consumer(&self, reset: bool) -> Option<Consumer> {
         loop {
             tokio::select! {
-                result = self.broker.create_consumer(&self.id, reset) => {
+                result = self.broker.create_consumer(&self.consumer_id, reset) => {
                     match result {
                         Ok(c) => return Some(c),
                         Err(e) => {

@@ -67,14 +67,14 @@ pub struct ValidatorChannelEndpoints {
 /// 1.  `DispatchEndpoints` for the "client" side (e.g., RPC servers).
 /// 2.  `ValidatorChannelEndpoints` for the "server" side (e.g., the transaction executor).
 pub fn link() -> (DispatchEndpoints, ValidatorChannelEndpoints) {
-    // Unbounded channels for high-throughput multicast where backpressure is not desired.
-    let (transaction_status_tx, transaction_status_rx) = flume::unbounded();
-    let (account_update_tx, account_update_rx) = flume::unbounded();
     let (tasks_tx, tasks_rx) = mpsc::unbounded_channel();
 
     // Bounded channels for command queues where applying backpressure is important.
     let (txn_to_process_tx, txn_to_process_rx) = mpsc::channel(LINK_CAPACITY);
+    let (account_update_tx, account_update_rx) = flume::bounded(LINK_CAPACITY);
     let (replication_tx, replication_rx) = mpsc::channel(LINK_CAPACITY);
+    let (transaction_status_tx, transaction_status_rx) =
+        flume::bounded(LINK_CAPACITY);
     // Semaphore(1) coordinates exclusive access: scheduler holds permit during
     // active scheduling, releases when idle; external callers acquire to pause.
     let pause_permit = Arc::new(Semaphore::new(1));
