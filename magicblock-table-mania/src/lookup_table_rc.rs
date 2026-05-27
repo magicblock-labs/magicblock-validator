@@ -813,23 +813,41 @@ impl LookupTableRc {
             latest_blockhash,
         );
 
-        let outcome = rpc_client
+        let send_result = rpc_client
             .send_transaction(
                 &tx,
                 &Self::get_send_transaction_config(rpc_client),
             )
-            .await?;
+            .await;
 
-        let (signature, error) = outcome.into_signature_and_error();
-        if let Some(error) = &error {
-            debug!(
-                error = ?error,
-                signature = %signature,
-                "Error closing lookup table - may need longer deactivation time"
-            );
-        }
+        let signature = match send_result {
+            Ok(outcome) => {
+                let (sig, error) = outcome.into_signature_and_error();
+                if let Some(error) = &error {
+                    debug!(
+                        error = ?error,
+                        signature = %sig,
+                        "Error closing lookup table - may need longer deactivation time"
+                    );
+                }
+                Some(sig)
+            }
+            Err(err) => {
+                // The ALT program returns InvalidAccountOwner when the table
+                // account no longer exists (e.g. a prior close attempt landed
+                // on chain but its outcome was lost, or it was closed out of
+                // band). Without this salvage the GC would re-issue the close
+                // every cycle indefinitely.
+                let sig = err.signature();
+                if self.is_closed(rpc_client).await.unwrap_or(false) {
+                    return Ok((true, sig));
+                }
+                return Err(err.into());
+            }
+        };
+
         let is_closed = self.is_closed(rpc_client).await?;
-        Ok((is_closed, Some(signature)))
+        Ok((is_closed, signature))
     }
 
     pub async fn get_meta(
